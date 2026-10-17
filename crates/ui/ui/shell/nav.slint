@@ -312,16 +312,20 @@ export component NavPane inherits Rectangle {
             min-height: Tokens.control-min-height + Tokens.nav-brand-margin.top + Tokens.nav-brand-margin.bottom;
             alignment: root.rail ? center : space-between;
 
-            if !root.rail: Text {
-                text: "Eterra's Gift";
-                font-family: Tokens.display-font;
-                font-weight: Tokens.display-weight;
-                letter-spacing: Tokens.tracking-title;
-                font-size: Tokens.font-size-section;
-                color: Tokens.label-brush;
-                vertical-alignment: center;
-                overflow: elide;
+            if !root.rail: HorizontalLayout {
+                padding-left: Tokens.nav-brand-text-margin.left;
                 horizontal-stretch: 1;
+
+                Text {
+                    text: "Eterra's Gift";
+                    font-family: Tokens.display-font;
+                    font-weight: Tokens.display-weight;
+                    letter-spacing: Tokens.tracking-title;
+                    font-size: Tokens.font-size-section;
+                    color: Tokens.label-brush;
+                    vertical-alignment: center;
+                    overflow: elide;
+                }
             }
 
             Button {
