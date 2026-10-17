@@ -138,13 +138,16 @@ The detailed current verdict is in [trainer-validation.md](trainer-validation.md
 .NET 6 loading, selected large-index cases, exact-game static corroboration, generated invoker execution and a causal
 NeoHook unwind diagnosis have been completed. Their limits remain explicit; they do not imply unrestricted adoption.
 
-1. Controlled actual IL2CPP invocation/GC and production Rust ownership now pass on 6000.2.9f1. Extend evidence to
-   the authorized matching 6000.4.8f1 installation and a controlled Unity player loop. Simple virtual/interface resolution
-   now passes; enabled incremental-GC configuration passes positive full-collection cases, with phase-interleaved writes separate.
+1. Controlled IL2CPP invocation/GC and production Rust ownership now pass on matching 6000.4.8f1 as well as 6000.2.9f1.
+   The actual 6000.4.8 IL2CPP player also validates UnitySynchronizationContext callback thread/order. Simple virtual/interface
+   resolution passes; enabled incremental-GC configuration passes positive full-collection cases, with phase-interleaved writes separate.
 2. The hook corpus now covers register saves, frame pointers and explicit unsupported handler rejection. Complementary
    conditional transfers pass per-PC unwind and execution checks. Establish a defensible supported-target/lifetime
    policy before game use; these isolated candidate patches are not shipping dependencies. Focused CFG/CET compatibility
    tests pass with enforcement controls; strict/dynamic-region CET and mitigated suspended-thread probes remain separate.
+   The [bounded adoption policy](../tools/trainer-eval/hook-eval/supported-policy.md) recommends the near-entry conditional
+   candidate with permanent ownership and explicit rejection checks. Its next test combines the native hook and production
+   Rust dispatcher in the authored 6000.4 player; the managed scheduling result alone does not establish that adapter.
 3. Decide how to handle the real CoreModule's malformed orphan nested types. Dotscope preserves more payload than
    the current Cecil repair; experimental normalization changes public identity and is not shipping policy. Causal
    diagnostic edits now isolate both remaining baseline loader defects; making classes abstract is not behavior restoration.

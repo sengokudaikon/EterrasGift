@@ -12,9 +12,9 @@ controlled fixtures while the remaining acceptance gates stay explicit.
 
 | Area | Ready to implement or already implemented | Gate before game use |
 |---|---|---|
-| Runtime calls | Export resolution exists. Real 6000.2 IL2CPP invocation passes the tested scalar/reference/ref-out, value receiver and exception cases. Add narrowly typed argument construction and exception results. | Matching 6000.4 runtime; generic/interface/virtual dispatch and unsupported signatures must be explicit. |
-| Thread/GC ownership | Production thread-affine attachment leases and strong roots pass against actual 6000.2 IL2CPP. Native reference field/array edges survive collection. | Matching version, incremental collection and game shutdown ordering. Attachment does not establish Unity main-thread authority. |
-| Main-thread commands | Owned-command dispatcher, cancellation and uncertain completion exist and pass tests. | Verified Unity callback, patch/unwind correctness and code lifetime. Neither evaluated hook engine is adopted. |
+| Runtime calls | Export resolution exists. Real 6000.4.8 invocation passes the tested scalar/reference/ref-out, value receiver, exception and simple virtual/interface cases. Add narrowly typed argument construction and exception results. | Closed generics, broader dispatch and unsupported signatures must be explicit. Validate each actual game operation separately. |
+| Thread/GC ownership | Production thread-affine attachment leases and strong roots pass against actual 6000.4.8. Native reference field/array edges survive collection with incremental mode disabled/enabled. | Incremental phase interleaving and game shutdown ordering. Attachment does not establish Unity main-thread authority. |
+| Main-thread commands | Owned dispatcher tests pass. An actual 6000.4.8 IL2CPP player validates worker posts through UnitySynchronizationContext and main-thread callback order. | A native hook/Rust dispatcher adapter in the player, patch acceptance and retained code lifetime. Neither stock hook engine is adopted. |
 | Managed files | Dotscope can implement offline transforms with independent before/after validation. | Decide malformed-type policy explicitly; broader format features remain separate requirements. |
 
 Unsafe code belongs at export calls, pointer/receiver construction, object ownership transitions and eventually the
@@ -22,10 +22,11 @@ hook boundary. A typed Rust wrapper cannot establish an arbitrary game's metadat
 Use `runtime_invoke` for the first verified signatures; do not expose a generic safe `call<T>` over arbitrary pointers.
 Nightly is available, but the established foundation does not need nightly-only language features.
 
-Continue with matching-version runtime and player-loop execution before starting protocol/session and trainer operations,
-as requested. The broader hook corpus now passes the experimental retained-owner policy described below. A fake GUI
-is unnecessary: the disposable process host covers the boundary and existing UI captures
-already use fake sessions. No live game validation has occurred.
+The matching-version runtime and managed player-loop experiments now pass. The hook investigation supplies a bounded
+candidate and explicit acceptance conditions; the assembly investigation distinguishes writer preservation from missing
+input semantics. These findings support implementing the typed invocation layer and a controlled native main-thread
+adapter next. Protocol/session and trainer operations remain deferred in this investigation. A fake GUI is unnecessary:
+the disposable process host covers the boundary and existing UI captures use fake sessions. No live game validation has occurred.
 
 ## Evidence standard and scope
 
@@ -85,16 +86,12 @@ array, then detach/join before the main thread collects and first reads them. No
 Both children survive; explicit reference clearing passes. Array addresses use runtime-reported header/element sizes
 and bounds, with the exported reference barrier. Incremental GC and strict barrier checking both report disabled.
 
-Remaining: incremental collection/barriers, virtual/generic dispatch and exact-game runtime validation. This fixture
-uses installed 6000.2.9f1, not the game's 6000.4.8f1, and has no Unity player loop. Its official Baselib prerequisite was
+The initial fixture used installed 6000.2.9f1 and had no Unity player loop. Its official Baselib prerequisite was
 [extracted as data](../tools/trainer-eval/unity-support/README.md) into a verified TEMP distribution copy. The user has
-now authorized installing matching editor 6000.4.8f1 plus Windows IL2CPP support. Both official downloads passed size,
-MD5 and Authenticode verification. Windows administrator consent was cancelled before the editor installer started;
-the module was not launched. See the [installation record](../tools/trainer-eval/unity-support/install-6000.4.md).
-The [controlled player fixture](../tools/trainer-eval/unity-player/README.md) is prepared and its C# sources compile
-against the existing editor references with warnings as errors. Actual matching-version build/execution is pending.
-It will record the captured UnitySynchronizationContext, worker posts, callback thread/FIFO order and Update/LateUpdate
-events. This preparation is not player-loop evidence. The game remains untouched.
+subsequently installed matching editor 6000.4.8f1 plus Windows IL2CPP support after the first automated consent prompt
+was cancelled. Version, changeset and file hashes are verified in the
+[installation record](../tools/trainer-eval/unity-support/install-6000.4.md). The matching-version results below supersede
+the former adjacent-version limitation for these controlled cases. The game remains untouched.
 
 The virtual/interface extension adds eight checks (34 total), also passing through the production Rust host on nightly
 release (`unity-rust-901a6c6769dc46b29f34b5649cc1be02`). Invoking a base MethodInfo on a derived receiver calls the base
@@ -106,6 +103,19 @@ An additional build with `--incremental-g-c-time-slice=3` passes the same 34 nat
 checks (`unity-rust-481f6075692242368d8eb59511e6d91c`). Runtime observations are `incremental=1`, `strict_barriers=0`.
 This establishes positive collection/root/reference-write cases with incremental mode enabled, not deterministic
 interleaving between collection phases or strict barrier validation.
+
+On 2026-10-18 the unchanged 34-case native fixture and production Rust ownership layer pass on **6000.4.8f1** with
+incremental GC disabled and enabled at 3 ms. Nightly release passes both; stable 1.99.1 debug also passes the enabled
+build. Runtime builds are `unity-codegen-20261017-222835-30d01d5c` and `unity-codegen-20261017-222911-1ce987ff`;
+Rust runs are `unity-rust-2fd3a9d28ee34932a20637d3815c6ce8`, `unity-rust-5b5b58c3f7094c3888910d72c11ae4f6`
+and `unity-rust-1740b6e5560b4cae82e02803c3f846dc`. Identities and limits are in the
+[Rust-host report](../tools/trainer-eval/unity-rust-host/README.md).
+
+The [controlled player](../tools/trainer-eval/unity-player/report.json) also builds and executes successfully with
+6000.4.8f1's actual Windows IL2CPP backend. Awake captures UnitySynchronizationContext on thread 1; thread 5 posts two
+payload callbacks after the first Update. Both run on thread 1 in FIFO order in frame 2, after Update and before
+LateUpdate. Payloads match, the worker joins and the process exits zero. This is an observed managed scheduling trace,
+not a native hook or injected Rust adapter test, and exact frame timing is not a promised scheduling contract.
 
 ## 2. Hook unwinding, patching and teardown
 
