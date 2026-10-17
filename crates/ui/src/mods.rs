@@ -89,8 +89,8 @@ struct View {
     watch_pending: Cell<bool>,
     watch_generation: Cell<u64>,
     follow: Cell<u8>,
-    adopted: Cell<usize>,
-    deleted: Cell<usize>,
+    adopted: RefCell<Vec<String>>,
+    deleted: RefCell<Vec<String>>,
     close_error: Cell<bool>,
     closing: Cell<bool>,
     watch: RefCell<Instant>,
@@ -130,8 +130,8 @@ pub(crate) fn bind(window: &MainWindow, page: ModsPage, shell: &ShellHandle) -> 
         watch_pending: Cell::new(false),
         watch_generation: Cell::new(0),
         follow: Cell::new(0),
-        adopted: Cell::new(0),
-        deleted: Cell::new(0),
+        adopted: RefCell::new(Vec::new()),
+        deleted: RefCell::new(Vec::new()),
         watch: RefCell::new(Instant::now()),
         timer: slint::Timer::default(),
     });
@@ -195,11 +195,10 @@ impl View {
             self.launching.get() || self.services.launcher.is_starting(),
             jiff::Timestamp::now(),
         );
-        state.set_readiness(if self.read.get() { readiness.text.into() } else { "Reading mods…".into() });
+        state.set_readiness(if self.read.get() { readiness.text.into() } else { "Reading the mods…".into() });
         state.set_readiness_tone(if readiness.warning { MessageTone::Warning } else { MessageTone::Info });
         state.set_can_play(self.read.get() && readiness.can_play && !self.closing.get());
         state.set_is_read(self.read.get());
-        state.set_has_read_error(inventory.error.is_some());
         state.set_can_open_folder(inventory.mods_folder.is_some());
         state.set_can_open_log(inventory.loader_log.is_some());
         let folder_tip = if inventory.mods_folder.is_some() {
@@ -275,6 +274,7 @@ impl View {
                 .iter()
                 .map(|project| SourceRow {
                     name: project.name.as_str().into(),
+                    project: project.project_file.display().to_string().into(),
                     caption: folder.as_deref().map(|folder| project.caption(folder)).unwrap_or_default().into(),
                     busy: building.as_ref().is_some_and(|file| file.eq_ignore_ascii_case(&project.file())),
                 })
@@ -282,8 +282,17 @@ impl View {
         );
         let selected = inventory.mods.get(self.selection.get());
         state.set_selected_name(selected.map(|item| item.name.as_str()).unwrap_or_default().into());
-        state.set_selected_version(selected.and_then(|item| item.version.as_deref()).unwrap_or("No version").into());
-        state.set_selected_author(selected.and_then(|item| item.author.as_deref()).unwrap_or_default().into());
+        // The pane's line under the name; the DLL's file name has a line of its own.
+        state.set_selected_detail(
+            selected
+                .map(|item| {
+                    let version = item.version.as_ref().map_or_else(|| "No version".to_owned(), |version| format!("Version {version}"));
+                    let author = item.author.as_ref().map(|author| format!(" by {author}")).unwrap_or_default();
+                    version + &author
+                })
+                .unwrap_or_default()
+                .into(),
+        );
         state.set_selected_file(selected.map(|item| item.installed.file.as_str()).unwrap_or_default().into());
         state.set_selected_description(selected.and_then(|item| item.description.as_deref()).unwrap_or_default().into());
         state.set_selected_problem(
@@ -304,13 +313,14 @@ impl View {
         state.set_selected_enabled(selected.is_some_and(|item| item.installed.enabled));
         state.set_previous_build(selected.is_some_and(|item| item.log_from_other_build));
         let build = selected.and_then(|item| sources.builds.get(&item.installed.file.to_lowercase()));
+        // Its project now has a newer <Version> than the installed DLL was built with: Update builds and installs it.
+        let update = build
+            .zip(selected)
+            .is_some_and(|(build, item)| build.project.update_available(item.project_version.as_deref()));
         state.set_rebuild_text(
             if selected.is_some_and(|item| building.as_ref().is_some_and(|file| file.eq_ignore_ascii_case(&item.installed.file))) {
                 "Building…"
-            } else if build
-                .zip(selected)
-                .is_some_and(|(build, item)| build.project.update_available(item.project_version.as_deref()))
-            {
+            } else if update {
                 "Update"
             } else {
                 "Rebuild"
@@ -333,31 +343,45 @@ impl View {
                 .into(),
         );
         state.set_selected_source_path(build.map(|build| build.project.project_file.display().to_string()).unwrap_or_default().into());
-        state.set_can_rebuild(build.is_some() && building.is_none());
+        state.set_selected_has_sources(build.is_some());
+        state.set_rebuild_tip(
+            if update {
+                "Build its newer version from its project and install it; it loads the next time you play with mods"
+            } else {
+                "Build it from its project and install the build; it loads the next time you play with mods"
+            }
+            .into(),
+        );
         state.set_can_install_build(
             build
                 .zip(selected)
-                .is_some_and(|(build, item)| build.can_install(&item.installed.hash, item.project_version.as_deref()))
-                && building.is_none(),
+                .is_some_and(|(build, item)| build.can_install(&item.installed.hash, item.project_version.as_deref())),
         );
         state.set_selected_build_status(
             build
                 .zip(selected)
                 .map(|(build, item)| {
-                    if build.project.update_available(item.project_version.as_deref()) {
-                        "Update available."
+                    if update {
+                        "Update available.".to_owned()
                     } else if !build.is_built() {
-                        "Not built yet."
+                        "Not built yet.".to_owned()
                     } else if !build.is_installed(&item.installed.hash) {
-                        if build.changed_since_build {
-                            "Its latest build is not installed, and its sources changed since that build."
+                        let version = build
+                            .version
+                            .as_ref()
+                            .filter(|version| Some(version.as_str()) != item.version.as_deref())
+                            .map(|version| format!(", {version},"))
+                            .unwrap_or_default();
+                        let changed = if build.changed_since_build {
+                            ", and its sources changed since that build."
                         } else {
-                            "Its latest build is not installed."
-                        }
+                            "."
+                        };
+                        format!("Its latest build{version} is not installed{changed}")
                     } else if build.changed_since_build {
-                        "Its sources changed since this build."
+                        "Its sources changed since this build.".to_owned()
                     } else {
-                        ""
+                        String::new()
                     }
                 })
                 .unwrap_or_default()
@@ -564,8 +588,9 @@ impl View {
                     refresh = true;
                 }
                 Ok(observation) => {
-                    self.adopted.set(self.adopted.get() + observation.inventory.changes.adopted.len());
-                    self.deleted.set(self.deleted.get() + observation.inventory.changes.removed.len());
+                    // What any read found changed in the Mods folder is said once, by the read that is shown.
+                    self.adopted.borrow_mut().extend(observation.inventory.changes.adopted.iter().cloned());
+                    self.deleted.borrow_mut().extend(observation.inventory.changes.removed.iter().cloned());
                     // A later read invalidates an old snapshot, not the action's receipt or its Undo offer.
                     if revision >= self.action_revision.get() {
                         if let Some(message) = observation.change.message {
@@ -619,13 +644,12 @@ impl View {
                             .and_then(|file| inventory.mods.iter().position(|item| item.installed.file.eq_ignore_ascii_case(&file)))
                             .unwrap_or(0),
                     );
-                    if let Some(problem) = &inventory.settings_problem {
+                    let adopted = std::mem::take(&mut *self.adopted.borrow_mut());
+                    let deleted = std::mem::take(&mut *self.deleted.borrow_mut());
+                    if let Some(changed) = by_hand(&adopted, &deleted) {
+                        self.say(changed, false);
+                    } else if let Some(problem) = &inventory.settings_problem {
                         self.say(problem, true);
-                    }
-                    let adopted = self.adopted.replace(0);
-                    let deleted = self.deleted.replace(0);
-                    if adopted > 0 || deleted > 0 {
-                        self.say(format!("{adopted} added from the Mods folder; {deleted} removed after their DLLs were deleted."), false);
                     }
                     *self.inventory.borrow_mut() = inventory;
                     *self.version.borrow_mut() = observation.version;
@@ -883,10 +907,11 @@ impl View {
             move || {
                 let removed = view.removed.borrow_mut().take();
                 if let Some((item, index)) = removed {
+                    // Put back and selected again; the removal's message goes with its Undo.
+                    view.message.borrow_mut().take();
                     view.enqueue(move |library| {
                         library.restore(&item, index)?;
                         Ok(ChangeResult {
-                            message: Some(format!("Put {} back.", item.file)),
                             select: Some(item.file),
                             ..Default::default()
                         })
@@ -970,6 +995,17 @@ impl View {
         else {
             return;
         };
+        // The selection stays where the removed row was: on the next mod, or on the one before at the end of the list.
+        let next = {
+            let inventory = self.inventory.borrow();
+            let index = index as usize;
+            inventory
+                .mods
+                .get(index + 1)
+                .or_else(|| index.checked_sub(1).and_then(|before| inventory.mods.get(before)))
+                .map(|item| item.installed.file.clone())
+        };
+        *self.preferred_selection.borrow_mut() = next;
         self.enqueue(move |library| {
             Ok(ChangeResult {
                 removed: library.remove(&file)?,
@@ -984,8 +1020,12 @@ impl View {
         self.commit_settings();
         self.enqueue(move |library| {
             let item = library.add(&path, false)?;
+            let name = eg_companion::mods::assembly::MelonAssembly::read(&library.path_of(&item))
+                .ok()
+                .flatten()
+                .map_or_else(|| item.file.clone(), |assembly| assembly.name);
             Ok(ChangeResult {
-                message: Some(format!("Added {}. It loads the next time you play with mods.", item.file)),
+                message: Some(format!("Added {name}. It loads the next time you play with mods.")),
                 select: Some(item.file),
                 ..Default::default()
             })
@@ -1143,6 +1183,24 @@ impl View {
     }
 }
 
+/// DLLs put in or deleted from the Mods folder by hand since the last read, in one or two sentences; None when none were.
+fn by_hand(adopted: &[String], deleted: &[String]) -> Option<String> {
+    let added = match adopted {
+        [] => None,
+        [file] => Some(format!("{file} was found in the Mods folder and added, on.")),
+        _ => Some(format!("{} DLLs were found in the Mods folder and added, on.", adopted.len())),
+    };
+    let removed = match deleted {
+        [] => None,
+        [file] => Some(format!("{file} was deleted from the Mods folder, so it is removed.")),
+        _ => Some(format!("{} DLLs were deleted from the Mods folder, so they are removed.", deleted.len())),
+    };
+    match (added, removed) {
+        (Some(added), Some(removed)) => Some(format!("{added} {removed}")),
+        (added, removed) => added.or(removed),
+    }
+}
+
 fn installed_message(name: &str, version: Option<&str>, unchanged: bool, enabled: bool) -> String {
     let version = version.map(|version| format!(" {version}")).unwrap_or_default();
     if unchanged {
@@ -1209,6 +1267,19 @@ mod tests {
         assert_eq!(follow_preparation(true, true, true, false, false, remaining), (false, 0));
         assert_eq!(follow_preparation(true, false, false, false, true, 3), (true, 0));
         assert_eq!(follow_preparation(false, true, false, true, false, 0), (false, 0));
+    }
+
+    #[test]
+    fn files_changed_by_hand_are_said_by_name_or_count() {
+        let one = ["Loom.dll".to_owned()];
+        let two = ["A.dll".to_owned(), "B.dll".to_owned()];
+        assert_eq!(by_hand(&[], &[]), None);
+        assert_eq!(by_hand(&one, &[]).unwrap(), "Loom.dll was found in the Mods folder and added, on.");
+        assert_eq!(by_hand(&[], &two).unwrap(), "2 DLLs were deleted from the Mods folder, so they are removed.");
+        assert_eq!(
+            by_hand(&two, &one).unwrap(),
+            "2 DLLs were found in the Mods folder and added, on. Loom.dll was deleted from the Mods folder, so it is removed."
+        );
     }
 
     #[test]

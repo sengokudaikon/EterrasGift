@@ -1,0 +1,9 @@
+{
+  "schemaVersion": 1,
+  "categories": [ { "name": "AbilityRanges", "settings": [
+    { "key": "Show", "label": "Rings for", "group": "Rings", "description": "Which searches get a ring.",
+      "choices": [ { "value": "all", "label": "Every search" }, { "value": "player", "label": "Your abilities" }, { "value": "enemies", "label": "Enemies" } ] },
+    { "key": "Duration", "label": "Ring duration", "group": "Rings", "unit": "s", "min": 0.1, "max": 10 },
+    { "key": "Enabled" }
+  ] } ]
+}
