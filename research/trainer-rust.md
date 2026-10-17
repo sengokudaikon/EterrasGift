@@ -8,6 +8,11 @@ The trainer can be ported to Rust, including the in-process helper. Existing lib
 binding work, but none evaluated in this research establishes audited compatibility with the exact target runtime.
 Thread ownership, GC roots, ABI validation and dispatch remain responsibilities of the port.
 
+Follow-up through 2026-10-18: [trainer-validation.md](trainer-validation.md) records actual 6000.4.8 runtime execution,
+production Rust ownership, and the native ExecuteTasks/Rust dispatcher adapter in an authored IL2CPP player. Normal
+execution, managed-exception cleanup/recovery and quiescent disable pass. The original project survey below remains
+the library comparison; these newer results establish our bounded implementation path and its remaining game-use gates.
+
 ## Decisions and constraints
 
 - Prefer a Rust helper and Rust hook dependencies; retain the C++ implementation as a behavioural reference.

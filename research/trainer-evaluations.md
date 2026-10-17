@@ -146,8 +146,9 @@ NeoHook unwind diagnosis have been completed. Their limits remain explicit; they
    policy before game use; these isolated candidate patches are not shipping dependencies. Focused CFG/CET compatibility
    tests pass with enforcement controls; strict/dynamic-region CET and mitigated suspended-thread probes remain separate.
    The [bounded adoption policy](../tools/trainer-eval/hook-eval/supported-policy.md) recommends the near-entry conditional
-   candidate with permanent ownership and explicit rejection checks. Its next test combines the native hook and production
-   Rust dispatcher in the authored 6000.4 player; the managed scheduling result alone does not establish that adapter.
+   candidate with permanent ownership and explicit rejection checks. The [combined native-player probe](../tools/trainer-eval/unity-hook-player/report.json)
+   now passes original-first production dispatch, a managed exception crossing the Rust hook with cleanup/recovery,
+   and quiescent disable without replay. Production lifecycle/admission and actual-game validation remain separate.
 3. Decide how to handle the real CoreModule's malformed orphan nested types. Dotscope preserves more payload than
    the current Cecil repair; experimental normalization changes public identity and is not shipping policy. Causal
    diagnostic edits now isolate both remaining baseline loader defects; making classes abstract is not behavior restoration.

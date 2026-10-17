@@ -14,7 +14,7 @@ controlled fixtures while the remaining acceptance gates stay explicit.
 |---|---|---|
 | Runtime calls | Export resolution exists. Real 6000.4.8 invocation passes the tested scalar/reference/ref-out, value receiver, exception and simple virtual/interface cases. Add narrowly typed argument construction and exception results. | Closed generics, broader dispatch and unsupported signatures must be explicit. Validate each actual game operation separately. |
 | Thread/GC ownership | Production thread-affine attachment leases and strong roots pass against actual 6000.4.8. Native reference field/array edges survive collection with incremental mode disabled/enabled. | Incremental phase interleaving and game shutdown ordering. Attachment does not establish Unity main-thread authority. |
-| Main-thread commands | Owned dispatcher tests pass. An actual 6000.4.8 IL2CPP player validates worker posts through UnitySynchronizationContext and main-thread callback order. | A native hook/Rust dispatcher adapter in the player, patch acceptance and retained code lifetime. Neither stock hook engine is adopted. |
+| Main-thread commands | Actual 6000.4.8 player invokes the native hook, original-first Rust dispatcher and managed-exception cleanup/recovery. Quiescent disable restores scheduling without replay. | Production admission/failure paths, actual game installation/quiescence, process policy and retained helper lifetime. Neither stock hook engine is adopted. |
 | Managed files | Dotscope can implement offline transforms with independent before/after validation. | Decide malformed-type policy explicitly; broader format features remain separate requirements. |
 
 Unsafe code belongs at export calls, pointer/receiver construction, object ownership transitions and eventually the
@@ -24,8 +24,10 @@ Nightly is available, but the established foundation does not need nightly-only 
 
 The matching-version runtime and managed player-loop experiments now pass. The hook investigation supplies a bounded
 candidate and explicit acceptance conditions; the assembly investigation distinguishes writer preservation from missing
-input semantics. These findings support implementing the typed invocation layer and a controlled native main-thread
-adapter next. Protocol/session and trainer operations remain deferred in this investigation. A fake GUI is unnecessary:
+input semantics. The controlled native main-thread adapter also passes, including a managed exception crossing its
+Rust frame and subsequent engine recovery. These findings support implementing the typed invocation layer and promoting
+that bounded adapter behind production admission checks. Protocol/session and trainer operations remain deferred in
+this investigation. A fake GUI is unnecessary:
 the disposable process host covers the boundary and existing UI captures use fake sessions. No live game validation has occurred.
 
 ## Evidence standard and scope
@@ -173,9 +175,26 @@ call and the corpus's GPR case; the remaining five cases were not queried indivi
 dynamically marking generated code as CET-compatible remain outside that evidence; compatibility-mode success is not
 their substitute. The earlier suspended-thread PC probes were not rerun with context-IP validation enabled.
 
-Remaining: a complete supported transfer/unwind strategy and explicit unsupported-target policy. The actual dispatcher
-prefix changes RSP, so it fails a conservative leaf-prefix-only policy. Passing finite concurrent/draining experiments
-is evidence for those scenarios, not a proof of race freedom or safe helper unloading.
+The [bounded target policy](../tools/trainer-eval/hook-eval/supported-policy.md) defines a specific conditional-transfer
+strategy, near-entry requirement and rejection conditions. The actual dispatcher changes RSP and therefore needs the
+tested dynamic unwind metadata; a leaf-prefix-only engine remains unsuitable.
+
+The [combined player probe](../tools/trainer-eval/unity-hook-player/report.json) now invokes the real 6000.4.8
+ExecuteTasks through that native Rust adapter. The worker posts marker 7 and queues owned value 42 before a bounded
+join in Update. Unity's original method runs its managed callback before the Rust dispatcher executes once on the
+captured main thread. Later quiescent disable restores entry bytes and leaves Unity delivering marker 9, with no Rust
+replay across three more Updates. All native code/table/module owners remain retained.
+
+The optional exception run posts a genuinely throwing managed callback. Its exception crosses the original method
+and the `C-unwind` Rust hook to Unity's invoker; the Rust original-call destructor runs once. Three hook entries,
+two normal returns and one exceptional cleanup are recorded. Unity logs the expected InvalidOperationException,
+delivers recovery marker 8 and continues after disable. The scalar command remains executed exactly once. Both final
+normal/exception runs exit zero on the same hashed player with the release Rust plugin.
+
+This integration's actual policy is DEP enabled/permanent, dynamic-code prohibition off, CFG off, shadow stacks off
+(`0x100`). It does not transfer the independent mitigation fixture's enabled-profile results to the combined player.
+Remaining before game use: production rejection/cleanup paths, real installation quiescence and exclusive ownership,
+and actual-game opt-in validation. Passing finite concurrency experiments is not a proof of race freedom or safe helper unloading.
 Microsoft's [x64 exception handling](https://learn.microsoft.com/en-us/cpp/build/exception-handling-x64?view=msvc-170)
 and [epilogue rules](https://learn.microsoft.com/en-us/cpp/build/prolog-and-epilog?view=msvc-170) explain why dynamically
 generated nonleaf code needs accurate unwind information and why instruction bytes affect epilogue recognition.
