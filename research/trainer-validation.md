@@ -12,8 +12,8 @@ controlled fixtures while the remaining acceptance gates stay explicit.
 
 | Area | Ready to implement or already implemented | Gate before game use |
 |---|---|---|
-| Runtime calls | Export resolution exists. Add narrowly typed scalar/reference/ref-out argument construction, explicit receiver handling and managed-exception results. | Actual runtime execution; generic/interface/virtual dispatch and unsupported signatures must be explicit. |
-| Thread/GC ownership | Thread-affine attachment leases and strong-root ownership exist and pass mock tests. | Real collector, reference replacement/barriers, and shutdown ordering. Attachment does not establish Unity main-thread authority. |
+| Runtime calls | Export resolution exists. Real 6000.2 IL2CPP invocation passes the tested scalar/reference/ref-out, value receiver and exception cases. Add narrowly typed argument construction and exception results. | Matching 6000.4 runtime; generic/interface/virtual dispatch and unsupported signatures must be explicit. |
+| Thread/GC ownership | Production thread-affine attachment leases and strong roots pass against actual 6000.2 IL2CPP. Native reference field/array edges survive collection. | Matching version, incremental collection and game shutdown ordering. Attachment does not establish Unity main-thread authority. |
 | Main-thread commands | Owned-command dispatcher, cancellation and uncertain completion exist and pass tests. | Verified Unity callback, patch/unwind correctness and code lifetime. Neither evaluated hook engine is adopted. |
 | Managed files | Dotscope can implement offline transforms with independent before/after validation. | Decide malformed-type policy explicitly; broader format features remain separate requirements. |
 
@@ -22,8 +22,9 @@ hook boundary. A typed Rust wrapper cannot establish an arbitrary game's metadat
 Use `runtime_invoke` for the first verified signatures; do not expose a generic safe `call<T>` over arbitrary pointers.
 Nightly is available, but the established foundation does not need nightly-only language features.
 
-Continue the actual-runtime fixture and broader hook corpus before starting protocol/session and trainer operations,
-as requested. A fake GUI is unnecessary: the disposable process host covers the boundary and existing UI captures
+Continue with matching-version runtime and player-loop execution before starting protocol/session and trainer operations,
+as requested. The broader hook corpus now passes the experimental retained-owner policy described below. A fake GUI
+is unnecessary: the disposable process host covers the boundary and existing UI captures
 already use fake sessions. No live game validation has occurred.
 
 ## Evidence standard and scope
@@ -65,15 +66,35 @@ Current evidence:
   direct references, out-reference slots, trailing MethodInfo, an unboxed receiver and return storage. This executes
   generated invokers, not the collector, allocation, managed exception handling or runtime_invoke implementation.
 
-Remaining: execute the contracts and collector in a controlled IL2CPP fixture, then separate exact-game validation.
-The installed editor is 6000.2.9f1, not 6000.4.8f1. A bounded build probe confirms its Windows IL2CPP player backend is
-not installed; its Mono backend is not a substitute. Standalone conversion succeeds. A constrained reader extracted
-the matching official Baselib DLL/import library into TEMP without running the module installer; see
-[extraction provenance](../tools/trainer-eval/unity-support/README.md). A verified copy of the installed distribution
-now resolves Baselib, but standalone native compilation still requires absent `Libil2cppLackey/DllMain.cpp`.
-Omitting `--libil2cpp-static` did not remove that dependency. The module's file inventory contains no Lackey source.
-The native entrypoint probe compiles against installed headers; it has not linked or run. A complete supported build
-configuration/distribution remains a prerequisite. Neither the editor installation nor the game has been modified.
+Controlled actual runtime execution now passes. The installed builder selects native DLL versus executable output from
+the output extension. Using `.dll` excludes executable-only `Libil2cppLackey` and builds successfully from unchanged
+runtime/generated sources plus our native probe. Fifteen native checks pass: attachment, rooting after worker exit,
+collection, invocation/boxed return, unboxed receiver mutation, managed exception capture/rooting and reference-field
+set/clear. Shutdown and the disposable native host's unload also return normally. This resolves the former build gate;
+omitting `--libil2cpp-static` alone was insufficient and remains recorded as a failed experiment.
+
+The [Rust runtime host](../tools/trainer-eval/unity-rust-host/README.md) now exercises the production export resolver,
+attachment leases and strong roots against that actual runtime on stable debug and nightly release. Borrowed entry-thread
+attachment remains intact after nested lease/root cleanup. A new Rust worker attaches, invokes, roots, collects, reads,
+releases roots before its final lease, verifies detachment and joins before native shutdown. The Rust host retains the
+DLL until process exit and makes no active-helper unload claim.
+
+The expanded fixture passes 26 native checks, also through the Rust host on nightly release. Ordinary null reference
+and scalar ref/out cases pass. Separate workers create children and store them only through a rooted parent or rooted
+array, then detach/join before the main thread collects and first reads them. No separate child handle is retained.
+Both children survive; explicit reference clearing passes. Array addresses use runtime-reported header/element sizes
+and bounds, with the exported reference barrier. Incremental GC and strict barrier checking both report disabled.
+
+Remaining: incremental collection/barriers, virtual/generic dispatch and exact-game runtime validation. This fixture
+uses installed 6000.2.9f1, not the game's 6000.4.8f1, and has no Unity player loop. Its official Baselib prerequisite was
+[extracted as data](../tools/trainer-eval/unity-support/README.md) into a verified TEMP distribution copy. The user has
+now authorized installing matching editor 6000.4.8f1 plus Windows IL2CPP support. Both official downloads passed size,
+MD5 and Authenticode verification. Windows administrator consent was cancelled before the editor installer started;
+the module was not launched. See the [installation record](../tools/trainer-eval/unity-support/install-6000.4.md).
+The [controlled player fixture](../tools/trainer-eval/unity-player/README.md) is prepared and its C# sources compile
+against the existing editor references with warnings as errors. Actual matching-version build/execution is pending.
+It will record the captured UnitySynchronizationContext, worker posts, callback thread/FIFO order and Update/LateUpdate
+events. This preparation is not player-loop evidence. The game remains untouched.
 
 ## 2. Hook unwinding, patching and teardown
 
@@ -102,6 +123,20 @@ Current evidence:
 - The harness rejects a real language-handler target and a chained-unwind target before installation. The pinned
   upstream library accepts those targets while dropping handler flags or generating no unwind entry. A shipping
   acceptance gate must therefore inspect metadata itself; successful library installation does not establish support.
+- A further transfer experiment replaces the jump-back with complementary `JE rel32; JNE rel32` branches, preserving
+  registers, stack and flags. Both branch PCs unwind correctly for both ZF states across the register/frame corpus on
+  stable debug/release and nightly debug. The relocated-call fixture executes each branch normally and passes foreign
+  throw/Rust cleanup. Emitted instructions are decoded and alternate encodings rejected. Conditional branches are
+  outside the documented epilogue grammar, giving this candidate a stronger rationale than the prefix workaround.
+  Eight deterministic worker cases now pass stable debug/release and nightly debug: both branch PCs, both ZF values,
+  and either quiescent disable/enable or supported transactional detach/fresh attach. Owner retention keeps code and
+  metadata live; no reverse PC mapping is needed because suspended threads remain in the retained trampoline. The
+  architecturally unreachable second-PC/ZF=1 state is inspected, then normalized before resuming. This is not adoption.
+- Retention must keep the actual hook owners alive. Dropping an owner enters library quarantine; later reclamation
+  unregisters unwind tables before suspending threads. That path is outside the validated policy. The worker harness
+  also needed explicit 16-byte alignment for Windows CONTEXT; plain windows-sys 0.61.2 CONTEXT has 8-byte Rust alignment.
+  Its release failure is reproduced and fixed in the harness. NeoHook's plain context locals are a source-level concern,
+  not a separately demonstrated engine failure.
 - Detour still lacks unwind metadata for its relocated stack-changing prefix. A successful body exception does not
   establish asynchronous unwind correctness at every trampoline instruction.
 - Four known concurrent callers pass 100 transactional enable/disable pairs, then stop and join before trampoline
@@ -147,6 +182,12 @@ and renames two duplicates, retaining 3,195 TypeDefs and 16,217 fields. It loads
 remaining failures as the installed file (which loads 3,185). Repeated normalization preserves the tested payload.
 This demonstrates transform capability and baseline parity, not recovered parent semantics or approval to change public
 type identity in production. No deletion-based repair has been adopted. Full type loading outside MelonLoader still fails.
+
+[Loader diagnostics](../tools/trainer-eval/loader-diagnostics.md) identify both remaining failures as pre-existing
+metadata defects. The comparer has an incorrect framework scope and no abstract-method overrides; StringBuilderStream
+uses incompatible IL2CPP types in managed Stream override signatures. Its Seek method has a body. Independent framework
+metadata and actual .NET 6 resolution distinguish these failures from missing loader dependencies. No additional repair
+has been applied.
 
 ## Tooling provenance
 

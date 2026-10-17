@@ -10,7 +10,8 @@ and bridge evaluations have run: dotscope passes after explicit repair; dotnetdl
 
 The follow-up investigation is tracked in [trainer-validation.md](trainer-validation.md). It adds exact-game static
 inspection, compiled header/source contracts, deterministic hook-unwind diagnosis, actual .NET 6 loading and real
-CoreModule preservation checks. The first-pass fixture results below remain valid within their stated scope; they are
+CoreModule preservation checks. It now also executes a real IL2CPP runtime DLL and the production Rust ownership layer;
+see [the runtime host](../tools/trainer-eval/unity-rust-host/README.md). The first-pass fixture results below remain valid within their stated scope; they are
 not a verdict that the real CoreModule or a native hook is ready to ship.
 
 ## Toolchains
@@ -137,10 +138,11 @@ The detailed current verdict is in [trainer-validation.md](trainer-validation.md
 .NET 6 loading, selected large-index cases, exact-game static corroboration, generated invoker execution and a causal
 NeoHook unwind diagnosis have been completed. Their limits remain explicit; they do not imply unrestricted adoption.
 
-1. Execute a controlled actual IL2CPP runtime/collector fixture. Generated invokers establish argument conventions,
-   not collector correctness, managed exception catching or Unity main-thread semantics.
-2. Extend the hook repair candidate across register saves, frame pointers and unsupported unwind/handler cases;
-   establish a defensible supported-target and lifetime policy before any game hook.
+1. Controlled actual IL2CPP invocation/GC and production Rust ownership now pass on 6000.2.9f1. Extend evidence to
+   the authorized matching 6000.4.8f1 installation and a controlled Unity player loop; incremental collection remains separate.
+2. The hook corpus now covers register saves, frame pointers and explicit unsupported handler rejection. Complementary
+   conditional transfers pass per-PC unwind and execution checks. Establish a defensible supported-target/lifetime
+   policy before game use; these isolated candidate patches are not shipping dependencies.
 3. Decide how to handle the real CoreModule's malformed orphan nested types. Dotscope preserves more payload than
    the current Cecil repair; experimental normalization changes public identity and is not shipping policy.
 4. Add the verified invocation/exception and reference-write layer, then the helper adapter and protocol 21 transport
