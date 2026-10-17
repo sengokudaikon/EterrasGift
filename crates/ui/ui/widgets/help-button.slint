@@ -1,0 +1,85 @@
+// A (?) beside a label (Theme.axaml "Button.help"): a muted 14px icon whose tip explains the label. The tip opens on
+// hover, on keyboard focus, or on a press (pressing again closes it), and hangs under the button. Its frame is the compact
+// icon button's; callers outdent it so the line keeps the bare icon's room.
+
+import { Tokens } from "../tokens.slint";
+import { KeyboardFocus, Tip, TipPlacement } from "../globals.slint";
+import { FocusRing, TipTrigger } from "focus.slint";
+
+export component HelpButton inherits Rectangle {
+    // What the tip says.
+    in property <string> help;
+    // Its accessible name ("About …").
+    in property <string> label;
+
+    width: Tokens.icon-size-small + Tokens.compact-icon-button-padding.left + Tokens.compact-icon-button-padding.right;
+    height: Tokens.icon-size-small + Tokens.compact-icon-button-padding.top + Tokens.compact-icon-button-padding.bottom;
+    border-radius: Tokens.control-radius;
+
+    accessible-role: button;
+    accessible-label: root.label;
+    accessible-description: root.help;
+    accessible-action-default => { root.toggle(); }
+
+    function toggle() {
+        if (Tip.open && Tip.text == root.help) {
+            Tip.open = false;
+        } else {
+            Tip.text = root.help;
+            Tip.anchor-x = root.absolute-position.x;
+            Tip.anchor-y = root.absolute-position.y;
+            Tip.anchor-width = root.width;
+            Tip.anchor-height = root.height;
+            Tip.placement = TipPlacement.below;
+            Tip.open = true;
+        }
+    }
+
+    Image {
+        x: (parent.width - self.width) / 2;
+        y: (parent.height - self.height) / 2;
+        width: Tokens.icon-size-small;
+        height: Tokens.icon-size-small;
+        image-fit: contain;
+        source: Tokens.icon-help;
+        colorize: touch.has-hover || touch.pressed ? Tokens.text-secondary-brush : Tokens.text-muted-brush;
+    }
+
+    focus := FocusScope {
+        focus-gained(reason) => {
+            if (reason == FocusReason.tab-navigation) {
+                KeyboardFocus.visible = true;
+            }
+        }
+        key-pressed(event) => {
+            if (event.text == Key.Return || event.text == " ") {
+                root.toggle();
+                return accept;
+            }
+            reject
+        }
+
+        touch := TouchArea {
+            mouse-cursor: MouseCursor.help;
+            pointer-event(event) => {
+                if (event.kind == PointerEventKind.down) {
+                    KeyboardFocus.visible = false;
+                }
+            }
+            clicked => {
+                focus.focus();
+                root.toggle();
+            }
+        }
+    }
+
+    TipTrigger {
+        text: root.help;
+        hovered: touch.has-hover;
+        focused: focus.has-focus;
+    }
+
+    FocusRing {
+        focused: focus.has-focus;
+    }
+}

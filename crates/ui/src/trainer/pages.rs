@@ -1,0 +1,808 @@
+//! The trainer's pages as plain Rust: the C# app's page view models (`TrainerPages`, `TrainerPageViewModel`,
+//! `HookSwitchViewModel`, `FeatureValueViewModel`, `FieldEditorViewModel`, `HeldItemsViewModel`,
+//! `PlannedFeatureViewModel`) and `RowColumnsPanel`'s split, without any view. `view.rs` shows them.
+
+use super::catalog::{self, Area, Feature, FeatureField, FeatureKind, FeatureValue};
+use super::session::{FieldError, FieldWrite, GameField, TrainerSession};
+
+/// One trainer page: its sections along the top and the chosen one beneath.
+pub struct PageModel {
+    pub area: Area,
+    pub title: &'static str,
+    pub sections: Vec<Section>,
+    pub selected: usize,
+}
+
+impl PageModel {
+    /// A page with one section has no strip: there is nothing to choose.
+    pub fn has_section_strip(&self) -> bool {
+        self.sections.len() > 1
+    }
+
+    pub fn section(&mut self) -> &mut Section {
+        &mut self.sections[self.selected]
+    }
+}
+
+pub struct Section {
+    pub title: String,
+    pub content: Content,
+}
+
+pub enum Content {
+    /// A whole feature's own page: the Item Forge. TODO(trainer): the Item Forge is ported on its own.
+    ItemForge,
+    Rows(Vec<Row>),
+}
+
+pub enum Row {
+    /// A section's heading on a page that stacks its sections.
+    Heading(String),
+    Hook(HookRow),
+    Editor(EditorRow),
+    Planned(Feature),
+}
+
+/// Builds a page from the catalog. Every ported feature has a row; a feature that is not ported is listed as a placeholder
+/// when `planned` (a source checkout). Returns None when the page would have nothing on it.
+pub fn build(area: Area, features: &[Feature], planned: bool, session: &dyn TrainerSession) -> Option<PageModel> {
+    let page = catalog::page(area);
+    let mut sections = Vec::new();
+    for &section in page.sections {
+        let in_section: Vec<&Feature> = features.iter().filter(|f| f.area == area && f.section == section).collect();
+        if in_section.iter().any(|f| f.fills_section && f.ported) {
+            sections.push(Section {
+                title: section.to_owned(),
+                content: Content::ItemForge,
+            });
+            continue;
+        }
+        let rows: Vec<Row> = in_section
+            .into_iter()
+            .filter_map(|&feature| match feature {
+                _ if feature.ported => Some(match feature.kind {
+                    FeatureKind::Editor => Row::Editor(EditorRow::new(feature, false, session)),
+                    FeatureKind::HeldItems => Row::Editor(EditorRow::new(feature, true, session)),
+                    FeatureKind::Switch | FeatureKind::SwitchWithValues => Row::Hook(HookRow::new(feature, session)),
+                }),
+                _ if planned => Some(Row::Planned(feature)),
+                _ => None,
+            })
+            .collect();
+        if !rows.is_empty() {
+            sections.push(Section {
+                title: section.to_owned(),
+                content: Content::Rows(rows),
+            });
+        }
+    }
+    if sections.is_empty() {
+        return None;
+    }
+    // A stacked page is one list: each section's heading, then its rows.
+    if page.stacked {
+        let mut rows = Vec::new();
+        for section in sections {
+            if let Content::Rows(list) = section.content {
+                rows.push(Row::Heading(section.title));
+                rows.extend(list);
+            }
+        }
+        sections = vec![Section {
+            title: page.title.to_owned(),
+            content: Content::Rows(rows),
+        }];
+    }
+    Some(PageModel {
+        area,
+        title: page.title,
+        sections,
+        selected: 0,
+    })
+}
+
+/// A planned row's details: its values and their starting points, or the fields it edits.
+pub fn planned_details(feature: &Feature) -> String {
+    if !feature.values.is_empty() {
+        feature.values.iter().map(|v| format!("{}: {}", v.label, v.default)).collect::<Vec<_>>().join(" · ")
+    } else {
+        feature.fields.iter().map(|f| f.label).collect::<Vec<_>>().join(" · ")
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Tone {
+    None,
+    Confirmed,
+    Error,
+}
+
+/// A game hook's row: a switch, its values, and where it stands in the game. It starts off with every run; the session
+/// puts it on once an offline character is connected. A change to its values reaches the game at once.
+pub struct HookRow {
+    pub feature: Feature,
+    /// What the helper is sent: a number, or a choice's index.
+    pub values: Vec<f64>,
+}
+
+impl HookRow {
+    pub fn new(feature: Feature, session: &dyn TrainerSession) -> HookRow {
+        let saved = session.hook_values(feature.id);
+        let fits = saved.len() == feature.values.len();
+        let values: Vec<f64> = feature
+            .values
+            .iter()
+            .enumerate()
+            .map(|(i, value)| if fits { fit(value, saved[i]) } else { start(value) })
+            .collect();
+        let row = HookRow { feature, values };
+        // A remembered value the catalog no longer allows reaches the helper as the box shows it.
+        if fits && saved != row.values {
+            row.send(session);
+        }
+        row
+    }
+
+    fn send(&self, session: &dyn TrainerSession) {
+        session.set_hook_values(self.feature.id, &self.values);
+    }
+
+    pub fn is_on(&self, session: &dyn TrainerSession) -> bool {
+        session.is_hook_wanted(self.feature.id)
+    }
+
+    pub fn set_on(&self, session: &dyn TrainerSession, on: bool) {
+        // A feature first turned on starts from its defaults, which the helper needs.
+        if on && session.hook_values(self.feature.id).len() != self.values.len() {
+            self.send(session);
+        }
+        session.set_hook(self.feature.id, on);
+    }
+
+    /// A number box's value; an emptied box keeps the last number.
+    pub fn set_amount(&mut self, session: &dyn TrainerSession, index: usize, amount: Option<f64>) {
+        let (Some(value), Some(amount)) = (self.feature.values.get(index), amount) else {
+            return;
+        };
+        self.set_number(session, index, amount.clamp(value.min, value.max));
+    }
+
+    /// Up and Down: the box's step either way, within its range.
+    pub fn step(&mut self, session: &dyn TrainerSession, index: usize, direction: i32) {
+        if let Some(value) = self.feature.values.get(index) {
+            let amount = self.values[index] + value.step * f64::from(direction.signum());
+            self.set_amount(session, index, Some(amount));
+        }
+    }
+
+    pub fn choose(&mut self, session: &dyn TrainerSession, index: usize, choice: usize) {
+        if let Some(value) = self.feature.values.get(index)
+            && choice < value.choices.len()
+        {
+            self.set_number(session, index, choice as f64);
+        }
+    }
+
+    #[allow(clippy::float_cmp)]
+    fn set_number(&mut self, session: &dyn TrainerSession, index: usize, number: f64) {
+        if self.values[index] != number {
+            self.values[index] = number;
+            self.send(session);
+        }
+    }
+
+    /// Where it stands in the game while it is on; empty while it is off.
+    pub fn status(&self, session: &dyn TrainerSession) -> (String, Tone) {
+        if !self.is_on(session) {
+            return (String::new(), Tone::None);
+        }
+        let state = session.hook_state(self.feature.id);
+        let in_place = state.as_ref().is_some_and(|state| state.on);
+        let connected = session.is_connected();
+        let failure = if !in_place && connected { state.and_then(|state| state.failure) } else { None };
+        match failure {
+            _ if in_place => ("On in the game.".to_owned(), Tone::Confirmed),
+            _ if !connected => ("Turns on once an offline character is connected.".to_owned(), Tone::None),
+            Some(failure) => (format!("Could not turn on: {failure}"), Tone::Error),
+            None => ("Turning on in the game…".to_owned(), Tone::None),
+        }
+    }
+}
+
+/// A remembered number as the value takes it now: within its range, or a choice it still lists (else its default). The
+/// catalog may have changed since it was saved.
+pub fn fit(value: &FeatureValue, saved: f64) -> f64 {
+    if !value.choices.is_empty() {
+        if saved.fract() == 0.0 && saved >= 0.0 && saved < value.choices.len() as f64 {
+            saved
+        } else {
+            start(value)
+        }
+    } else if saved.is_finite() {
+        saved.clamp(value.min, value.max)
+    } else {
+        start(value)
+    }
+}
+
+/// Where a value starts: its default number, or its default choice's index.
+pub fn start(value: &FeatureValue) -> f64 {
+    if value.choices.is_empty() {
+        value.default.parse().unwrap_or(0.0)
+    } else {
+        value.choices.iter().position(|choice| *choice == value.default).unwrap_or(0) as f64
+    }
+}
+
+/// One field of an editor: what the game holds, and a draft until Apply.
+pub struct FieldModel {
+    pub definition: FieldShape,
+    /// It heads its group, which shows the group's name above it.
+    pub starts_group: bool,
+    pub first: bool,
+    pub game: Option<f64>,
+    draft: Option<f64>,
+}
+
+/// A field's name and range: the catalog's, or for a listed editor its one field named by the game.
+#[derive(Clone, Debug, PartialEq)]
+pub struct FieldShape {
+    pub label: String,
+    pub group: Option<&'static str>,
+    pub min: f64,
+    pub max: f64,
+    pub step: f64,
+}
+
+impl FieldShape {
+    fn of(field: &FeatureField, label: &str) -> FieldShape {
+        FieldShape {
+            label: label.to_owned(),
+            group: field.group,
+            min: field.min,
+            max: field.max,
+            step: field.step,
+        }
+    }
+}
+
+impl FieldModel {
+    fn new(definition: FieldShape) -> FieldModel {
+        FieldModel {
+            definition,
+            starts_group: false,
+            first: false,
+            game: None,
+            draft: None,
+        }
+    }
+
+    pub fn label(&self) -> &str {
+        &self.definition.label
+    }
+
+    /// What a screen reader says for its box: its group and label.
+    pub fn accessible_name(&self) -> String {
+        match self.definition.group {
+            Some(group) => format!("{group} {}", self.definition.label),
+            None => self.definition.label.clone(),
+        }
+    }
+
+    /// The box: the draft while there is one, else the game's value.
+    pub fn amount(&self) -> Option<f64> {
+        self.draft.or(self.game)
+    }
+
+    pub fn is_drafted(&self) -> bool {
+        self.draft.is_some()
+    }
+
+    fn set_game(&mut self, value: f64) {
+        // A read replaces what the box shows unless the user is mid-change to something else.
+        if let Some(draft) = self.draft
+            && holds(Some(value), draft)
+        {
+            self.draft = None;
+        }
+        self.game = Some(value);
+    }
+
+    /// An emptied box drops its draft; a number is a draft unless the game holds it.
+    pub fn set_amount(&mut self, amount: Option<f64>) {
+        self.draft = match amount {
+            Some(amount) if !holds(self.game, amount) => Some(amount.clamp(self.definition.min, self.definition.max)),
+            _ => None,
+        };
+    }
+
+    pub fn step(&mut self, direction: i32) {
+        if let Some(amount) = self.amount() {
+            self.set_amount(Some(amount + self.definition.step * f64::from(direction.signum())));
+        }
+    }
+
+    fn discard(&mut self) {
+        self.draft = None;
+    }
+
+    /// The game answered a write of this value: the draft goes, unless the user has typed another since.
+    fn acknowledge(&mut self, sent: f64) {
+        if self.draft.is_some_and(|draft| holds(Some(sent), draft)) {
+            self.draft = None;
+        }
+    }
+
+    fn wanted(&self) -> f64 {
+        self.draft.or(self.game).unwrap_or(0.0)
+    }
+
+    pub fn game_text(&self) -> String {
+        match self.game {
+            None => "Not read yet".to_owned(),
+            Some(value) => format!("In game: {}", grouped(value)),
+        }
+    }
+}
+
+/// Whether the game holds the number a box asked for; false while nothing is read. Exact: the game hands back the double
+/// it was sent, and any other number is a change.
+#[allow(clippy::float_cmp)]
+fn holds(held: Option<f64>, wanted: f64) -> bool {
+    held == Some(wanted)
+}
+
+/// An editor's row: fields read from the game, typed as drafts, applied through the game's own methods and read back. It
+/// reads when the game connects and on Read again; nothing is written until Apply. A listed editor's fields are what the
+/// game lists (what the character holds), named by the game and shaped by the catalog's one field.
+pub struct EditorRow {
+    pub feature: Feature,
+    pub listed: bool,
+    pub fields: Vec<FieldModel>,
+    /// A read has answered since the row was made.
+    pub has_read: bool,
+    pub status: String,
+    pub tone: Tone,
+    was_connected: bool,
+}
+
+impl EditorRow {
+    pub fn new(feature: Feature, listed: bool, session: &dyn TrainerSession) -> EditorRow {
+        let defined = feature.fields;
+        let fields = if listed {
+            Vec::new()
+        } else {
+            defined
+                .iter()
+                .enumerate()
+                .map(|(i, field)| FieldModel {
+                    starts_group: field.group.is_some() && (i == 0 || defined[i - 1].group != field.group),
+                    first: i == 0,
+                    ..FieldModel::new(FieldShape::of(field, field.label))
+                })
+                .collect()
+        };
+        let mut row = EditorRow {
+            feature,
+            listed,
+            fields,
+            has_read: false,
+            status: String::new(),
+            tone: Tone::None,
+            was_connected: false,
+        };
+        row.follow(session);
+        row
+    }
+
+    /// Reads when the session becomes connected (and when made while connected); not on any other state change.
+    /// TODO(trainer): driven by the session's state changes once it has them; until then, on each look at the page.
+    pub fn follow(&mut self, session: &dyn TrainerSession) {
+        let connected = session.is_connected();
+        if connected && !self.was_connected {
+            self.read(session);
+        }
+        self.was_connected = connected;
+    }
+
+    /// Fields can be read and written only while an offline character is connected.
+    pub fn can_use(&self, session: &dyn TrainerSession) -> bool {
+        session.is_connected()
+    }
+
+    pub fn has_drafts(&self) -> bool {
+        self.fields.iter().any(FieldModel::is_drafted)
+    }
+
+    pub fn can_apply(&self, session: &dyn TrainerSession) -> bool {
+        self.can_use(session) && self.has_read && self.has_drafts()
+    }
+
+    pub fn apply_text(&self) -> String {
+        match self.fields.iter().filter(|f| f.is_drafted()).count() {
+            drafts if drafts > 1 => format!("Apply {drafts} changes"),
+            _ => "Apply".to_owned(),
+        }
+    }
+
+    /// A held-items row: the game answered and holds none of them.
+    pub fn is_empty(&self) -> bool {
+        self.has_read && self.fields.is_empty()
+    }
+
+    fn say(&mut self, status: impl Into<String>, tone: Tone) {
+        self.status = status.into();
+        self.tone = tone;
+    }
+
+    pub fn read(&mut self, session: &dyn TrainerSession) {
+        if !self.can_use(session) {
+            return;
+        }
+        match session.read_fields(self.feature.id) {
+            Ok(read) if self.fits(&read) => {
+                self.show(&read);
+                self.say("", Tone::None);
+            }
+            result => {
+                let details = result.err().map_or_else(|| "it answered with other fields.".to_owned(), |error| error.details);
+                self.say(format!("Could not read from the game: {details}"), Tone::Error);
+            }
+        }
+    }
+
+    pub fn apply(&mut self, session: &dyn TrainerSession) {
+        if !self.can_apply(session) {
+            return;
+        }
+        // A listed field is picked by the name it was read with; a fixed one by its place, named for the game's messages.
+        let sent: Vec<FieldWrite> = self
+            .fields
+            .iter()
+            .map(|f| FieldWrite {
+                read: f.game.unwrap_or_else(|| f.wanted()),
+                wanted: f.wanted(),
+                label: if self.listed { f.label().to_owned() } else { f.accessible_name() },
+            })
+            .collect();
+        let labels: Vec<String> = self.fields.iter().map(|f| f.label().to_owned()).collect();
+        match session.write_fields(self.feature.id, &sent) {
+            Ok(read) if self.fits(&read) => {
+                // The game has answered for each change, so its draft goes; a row changed again meanwhile keeps its own.
+                // A fixed field keeps its place; a listed one is found by its name, which is its item's own.
+                self.show(&read);
+                for (i, write) in sent.iter().enumerate() {
+                    let field = if self.listed {
+                        self.fields.iter_mut().find(|f| f.label() == labels[i])
+                    } else {
+                        self.fields.get_mut(i)
+                    };
+                    if write.changes()
+                        && let Some(field) = field
+                    {
+                        field.acknowledge(write.wanted);
+                    }
+                }
+                // Only the changed fields are the game's to keep; a listed field written to 0 is no longer held.
+                let kept: Vec<String> = sent
+                    .iter()
+                    .enumerate()
+                    .filter_map(|(i, write)| {
+                        let held = if self.listed { held(&read, &write.label) } else { read[i].value };
+                        (write.changes() && !holds(Some(held), write.wanted)).then(|| format!("{} {}", labels[i], grouped(held)))
+                    })
+                    .collect();
+                if kept.is_empty() {
+                    self.say("Confirmed by readback.", Tone::Confirmed);
+                } else {
+                    self.say(format!("The game kept {}.", kept.join(", ")), Tone::Error);
+                }
+            }
+            Err(FieldError { details, nothing_sent: true }) => {
+                // Nothing reached the game; the drafts stay.
+                self.say(format!("Not changed: {details}"), Tone::Error);
+            }
+            result => {
+                let details = result.err().map_or_else(|| "The game answered with other fields.".to_owned(), |error| error.details);
+                self.say(format!("{details} Read again to see what the game holds."), Tone::Error);
+            }
+        }
+    }
+
+    /// Puts every box back to what the game holds; nothing is written.
+    pub fn discard(&mut self) {
+        self.fields.iter_mut().for_each(FieldModel::discard);
+    }
+
+    /// A fixed set answers with its catalog's fields, unnamed; a listed one with any number, each named once.
+    fn fits(&self, read: &[GameField]) -> bool {
+        if self.listed {
+            let mut names: Vec<&str> = read.iter().map(|f| f.label.as_str()).collect();
+            names.sort_unstable();
+            names.dedup();
+            read.iter().all(|f| !f.label.is_empty()) && names.len() == read.len()
+        } else {
+            read.len() == self.fields.len() && read.iter().all(|f| f.label.is_empty())
+        }
+    }
+
+    fn show(&mut self, read: &[GameField]) {
+        if self.listed && !read.iter().map(|f| f.label.as_str()).eq(self.fields.iter().map(FieldModel::label)) {
+            // What the game holds changed: its rows follow, and a row still held keeps its draft.
+            let shape = match self.feature.fields {
+                [only] => *only,
+                _ => FeatureField {
+                    label: "",
+                    min: 0.0,
+                    max: i32::MAX as f64,
+                    step: 1.0,
+                    group: None,
+                },
+            };
+            let mut rows = std::mem::take(&mut self.fields);
+            for field in read {
+                let row = match rows.iter().position(|row| row.label() == field.label) {
+                    Some(at) => rows.remove(at),
+                    None => FieldModel::new(FieldShape::of(&shape, &field.label)),
+                };
+                self.fields.push(row);
+            }
+        }
+        for (field, answer) in self.fields.iter_mut().zip(read) {
+            field.set_game(answer.value);
+        }
+        self.has_read = true;
+    }
+}
+
+fn held(read: &[GameField], label: &str) -> f64 {
+    read.iter().find(|f| f.label == label).map_or(0.0, |f| f.value)
+}
+
+/// "0.##": at most two decimals, none when whole.
+pub fn plain(value: f64) -> String {
+    let rounded = round2(value);
+    let text = format!("{rounded:.2}");
+    let text = text.trim_end_matches('0').trim_end_matches('.');
+    if text == "-0" { "0".to_owned() } else { text.to_owned() }
+}
+
+/// "#,0.##": thousands grouped, at most two decimals.
+pub fn grouped(value: f64) -> String {
+    let text = plain(value);
+    let (sign, digits) = text.strip_prefix('-').map_or(("", text.as_str()), |rest| ("-", rest));
+    let (whole, fraction) = digits.split_once('.').map_or((digits, None), |(w, f)| (w, Some(f)));
+    let mut out = String::new();
+    for (i, digit) in whole.chars().enumerate() {
+        if i > 0 && (whole.len() - i) % 3 == 0 {
+            out.push(',');
+        }
+        out.push(digit);
+    }
+    match fraction {
+        Some(fraction) => format!("{sign}{out}.{fraction}"),
+        None => format!("{sign}{out}"),
+    }
+}
+
+/// Midpoints round away from zero, as .NET's number formatting does.
+fn round2(value: f64) -> f64 {
+    (value * 100.0).round() / 100.0
+}
+
+/// What a box's text says as a number: grouping commas and spaces are ignored; anything else is no number.
+pub fn parse(text: &str) -> Option<f64> {
+    let cleaned: String = text.chars().filter(|c| *c != ',' && !c.is_whitespace()).collect();
+    cleaned.parse::<f64>().ok().filter(|value| value.is_finite())
+}
+
+/// A step as its tip says it ("Up and Down change it by 0.5").
+pub fn step_text(step: f64) -> String {
+    format!("Up and Down change it by {step}")
+}
+
+/// Where each column starts: the split whose tallest column is shortest, at headings when there are any
+/// (`RowColumnsPanel.Split`). A heading has `section_spacing` above it unless it starts a column.
+pub fn split(heights: &[f32], headings: &[bool], columns: usize, section_spacing: f32) -> Vec<usize> {
+    let count = heights.len();
+    if columns <= 1 || count < 2 {
+        return vec![0];
+    }
+    let column_height = |start: usize, end: usize| -> f32 { (start..end).map(|i| heights[i] + if i > start && headings[i] { section_spacing } else { 0.0 }).sum() };
+    let sectioned = headings.iter().any(|&heading| heading);
+    let mut best = vec![vec![f32::INFINITY; count + 1]; columns + 1];
+    let mut from = vec![vec![0usize; count + 1]; columns + 1];
+    best[0][0] = 0.0;
+    for c in 1..=columns {
+        for i in 1..=count {
+            for start in (c - 1)..i {
+                if start > 0 && (if sectioned { !headings[start] } else { headings[start - 1] }) {
+                    continue;
+                }
+                let tallest = best[c - 1][start].max(column_height(start, i));
+                if tallest < best[c][i] {
+                    best[c][i] = tallest;
+                    from[c][i] = start;
+                }
+            }
+        }
+    }
+    if best[columns][count].is_infinite() {
+        return vec![0];
+    }
+    let mut starts = vec![0; columns];
+    let mut i = count;
+    for c in (1..=columns).rev() {
+        starts[c - 1] = from[c][i];
+        i = from[c][i];
+    }
+    starts
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::trainer::session::{HookState, Unconnected};
+    use std::cell::RefCell;
+    use std::collections::BTreeMap;
+
+    #[test]
+    fn numbers_format_as_the_csharp_strings() {
+        assert_eq!(plain(2.0), "2");
+        assert_eq!(plain(0.1), "0.1");
+        assert_eq!(plain(-30.0), "-30");
+        assert_eq!(plain(0.125), "0.13");
+        assert_eq!(grouped(12400.0), "12,400");
+        assert_eq!(grouped(1234567.5), "1,234,567.5");
+        assert_eq!(grouped(-1.0), "-1");
+        assert_eq!(grouped(999.0), "999");
+        assert_eq!(parse(" 12,400 "), Some(12400.0));
+        assert_eq!(parse(""), None);
+        assert_eq!(parse("abc"), None);
+        assert_eq!(step_text(0.5), "Up and Down change it by 0.5");
+        assert_eq!(step_text(1.0), "Up and Down change it by 1");
+        assert_eq!(step_text(0.05), "Up and Down change it by 0.05");
+    }
+
+    #[test]
+    fn pages_follow_the_catalog() {
+        let session = Unconnected::default();
+        let character = build(Area::Character, catalog::FEATURES, false, &session).unwrap();
+        assert!(!character.has_section_strip());
+        let Content::Rows(rows) = &character.sections[0].content else { panic!("rows") };
+        assert!(matches!(&rows[0], Row::Heading(title) if title == "Progression"));
+        assert_eq!(rows.iter().filter(|row| matches!(row, Row::Heading(_))).count(), 3);
+        let forge = build(Area::Forge, catalog::FEATURES, false, &session).unwrap();
+        assert_eq!(forge.sections.iter().map(|s| s.title.as_str()).collect::<Vec<_>>(), ["Item", "Crafting rules"]);
+        assert!(matches!(forge.sections[0].content, Content::ItemForge));
+        // A feature that is not ported shows only in a source checkout.
+        let mut features = catalog::FEATURES.to_vec();
+        features.iter_mut().filter(|f| f.area == Area::Loot).for_each(|f| f.ported = false);
+        assert!(build(Area::Loot, &features, false, &session).is_none());
+        let loot = build(Area::Loot, &features, true, &session).unwrap();
+        let Content::Rows(rows) = &loot.sections[0].content else { panic!("rows") };
+        assert!(matches!(rows[0], Row::Planned(_)));
+        assert_eq!(
+            planned_details(catalog::feature("drop-rates").unwrap()),
+            "Item drop chance: 0.1 · Item drop multiplier: 1 · Gold drop chance: 0.1 · Gold drop multiplier: 2"
+        );
+        assert_eq!(planned_details(catalog::feature("currency").unwrap()), "Gold · Soul embers · Ancient bones");
+    }
+
+    #[test]
+    fn a_hook_says_where_it_stands() {
+        let session = Unconnected::default();
+        let mut row = HookRow::new(*catalog::feature("damage-dealt").unwrap(), &session);
+        assert_eq!(row.values, [2.0]);
+        assert_eq!(row.status(&session), (String::new(), Tone::None));
+        row.set_on(&session, true);
+        assert_eq!(session.hook_values("damage-dealt"), [2.0]);
+        assert_eq!(row.status(&session).0, "Turns on once an offline character is connected.");
+        row.set_amount(&session, 0, Some(500.0));
+        assert_eq!(row.values, [100.0]);
+        row.set_amount(&session, 0, None);
+        assert_eq!(row.values, [100.0]);
+        row.step(&session, 0, -1);
+        assert_eq!(session.hook_values("damage-dealt"), [99.5]);
+        let mut rarity = HookRow::new(*catalog::feature("force-rarity").unwrap(), &session);
+        assert_eq!(rarity.values, [3.0]);
+        rarity.choose(&session, 0, 9);
+        assert_eq!(rarity.values, [3.0]);
+    }
+
+    /// A connected game holding fixed fields, for the editor's flow.
+    #[derive(Default)]
+    struct Game {
+        fields: RefCell<BTreeMap<&'static str, Vec<GameField>>>,
+        keep: RefCell<Option<f64>>,
+    }
+
+    impl TrainerSession for Game {
+        fn is_connected(&self) -> bool {
+            true
+        }
+        fn is_hook_wanted(&self, _: &str) -> bool {
+            true
+        }
+        fn set_hook(&self, _: &str, _: bool) {}
+        fn hook_values(&self, _: &str) -> Vec<f64> {
+            Vec::new()
+        }
+        fn set_hook_values(&self, _: &str, _: &[f64]) {}
+        fn hook_state(&self, _: &str) -> Option<HookState> {
+            Some(HookState {
+                on: false,
+                failure: Some("the helper is older than the app".into()),
+            })
+        }
+        fn read_fields(&self, id: &str) -> Result<Vec<GameField>, FieldError> {
+            Ok(self.fields.borrow().get(id).cloned().unwrap_or_default())
+        }
+        fn write_fields(&self, id: &str, writes: &[FieldWrite]) -> Result<Vec<GameField>, FieldError> {
+            let mut fields = self.fields.borrow_mut();
+            let list = fields.get_mut(id).unwrap();
+            for (field, write) in list.iter_mut().zip(writes) {
+                field.value = self.keep.borrow().unwrap_or(write.wanted);
+            }
+            Ok(list.clone())
+        }
+    }
+
+    #[test]
+    fn an_editor_reads_drafts_and_applies() {
+        let game = Game::default();
+        game.fields.borrow_mut().insert("points-earned", vec![GameField::new("", 48.0), GameField::new("", 30.0)]);
+        let mut row = EditorRow::new(*catalog::feature("points-earned").unwrap(), false, &game);
+        assert!(row.has_read);
+        assert_eq!(row.fields[0].game_text(), "In game: 48");
+        row.fields[0].set_amount(Some(50.0));
+        row.fields[1].set_amount(Some(99999.0));
+        assert_eq!(row.fields[1].amount(), Some(65535.0));
+        assert_eq!(row.apply_text(), "Apply 2 changes");
+        row.apply(&game);
+        assert_eq!((row.status.as_str(), row.tone), ("Confirmed by readback.", Tone::Confirmed));
+        assert!(!row.has_drafts());
+        row.fields[0].set_amount(Some(60.0));
+        *game.keep.borrow_mut() = Some(40.0);
+        row.apply(&game);
+        assert_eq!(row.status, "The game kept Passive points 40.");
+        assert_eq!(
+            HookRow::new(*catalog::feature("god-mode").unwrap(), &game).status(&game).0,
+            "Could not turn on: the helper is older than the app"
+        );
+    }
+
+    #[test]
+    fn held_items_follow_what_the_game_lists() {
+        let game = Game::default();
+        game.fields
+            .borrow_mut()
+            .insert("keys", vec![GameField::new("Arena Key", 3.0), GameField::new("Black Market Token", 12.0)]);
+        let mut row = EditorRow::new(*catalog::feature("keys").unwrap(), true, &game);
+        assert_eq!(row.fields.iter().map(FieldModel::label).collect::<Vec<_>>(), ["Arena Key", "Black Market Token"]);
+        row.fields[1].set_amount(Some(20.0));
+        game.fields.borrow_mut().insert("keys", vec![GameField::new("Black Market Token", 12.0)]);
+        row.read(&game);
+        assert_eq!(row.fields.len(), 1);
+        assert!(row.fields[0].is_drafted());
+        game.fields.borrow_mut().insert("keys", Vec::new());
+        row.read(&game);
+        assert!(row.is_empty());
+    }
+
+    #[test]
+    fn columns_start_at_headings_and_balance() {
+        assert_eq!(split(&[10.0, 10.0, 10.0, 10.0], &[false; 4], 2, 24.0), [0, 2]);
+        assert_eq!(split(&[10.0], &[false], 2, 24.0), [0]);
+        // Headings: Progression (3 rows), Trees (6), Equipment rules (4).
+        let mut heights = Vec::new();
+        let mut headings = Vec::new();
+        for rows in [&[130.0, 53.0, 53.0][..], &[210.0, 53.0, 53.0, 53.0, 53.0, 53.0], &[53.0; 4]] {
+            heights.push(20.0);
+            headings.push(true);
+            heights.extend_from_slice(rows);
+            headings.extend(std::iter::repeat_n(false, rows.len()));
+        }
+        assert_eq!(split(&heights, &headings, 2, 24.0), [0, 4]);
+    }
+}
