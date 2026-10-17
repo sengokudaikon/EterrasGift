@@ -9,7 +9,7 @@ use eg_companion::host::LaunchMode;
 use eg_companion::launcher::GameLauncher;
 use eg_core::bloom::BloomPhase;
 use slint::{ComponentHandle, Timer, TimerMode, Weak};
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::sync::Arc;
 
@@ -17,6 +17,8 @@ struct Home {
     launcher: Arc<GameLauncher>,
     model: RefCell<HomeModel>,
     window: Weak<MainWindow>,
+    visible: Cell<bool>,
+    watch_timer: Timer,
 }
 
 /// `launcher` is None in a run that has none (tests): Home then shows the companion's own title.
@@ -30,6 +32,8 @@ pub fn bind(window: &MainWindow, launcher: Option<Arc<GameLauncher>>, shell: &Sh
         launcher,
         model: RefCell::new(HomeModel::default()),
         window: window.as_weak(),
+        visible: Cell::new(shell.current() == Page::Home),
+        watch_timer: Timer::default(),
     });
     state.on_start({
         let home = home.clone();
@@ -41,26 +45,23 @@ pub fn bind(window: &MainWindow, launcher: Option<Arc<GameLauncher>>, shell: &Sh
     shell.on_page_entered({
         let home = home.clone();
         move |page| {
+            home.visible.set(page == Page::Home);
             if page == Page::Home {
                 home.refresh();
             }
         }
     });
-    let watch = Timer::default();
-    watch.start(TimerMode::Repeated, GameLauncher::WATCH_INTERVAL, {
+    home.watch_timer.start(TimerMode::Repeated, GameLauncher::WATCH_INTERVAL, {
         // The window's start callback keeps Home; the timer only looks in while it is there.
         let home = Rc::downgrade(&home);
-        let shell = shell.clone();
         move || {
             if let Some(home) = home.upgrade()
-                && shell.current() == Page::Home
+                && home.visible.get()
             {
                 home.watch();
             }
         }
     });
-    // Dropping the timer would stop it; it runs for the process's life, idle once its window is gone.
-    std::mem::forget(watch);
 }
 
 impl Home {

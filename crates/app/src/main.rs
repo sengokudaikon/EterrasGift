@@ -7,36 +7,15 @@ use eg_companion::launcher::GameLauncher;
 use eg_companion::{dotnet, folders};
 use eg_core::fault::FaultLog;
 use eg_core::paths;
-use eg_core::settings::{LegacyModuleSettings, SettingsStore};
-use eg_ui::settings::{ModuleChoice, SettingsPage};
+use eg_core::settings::SettingsStore;
+use eg_core::settings_service::{SaveOutcome, SettingsService};
+use eg_ui::settings::SettingsPage;
 use eg_ui::shell::Page;
+use eg_ui::trainer_settings;
 use eg_ui::{App, MainWindow};
 use slint::ComponentHandle;
-use std::cell::RefCell;
 use std::path::PathBuf;
-use std::rc::Rc;
 use std::sync::Arc;
-
-// TODO(trainer): the trainer's descriptor moves into its own crate once it exists; the composition then lists it.
-const TRAINER_ID: &str = "trainer";
-/// Where the trainer's settings stood in a settings file from before modules had their own: at the top level.
-const TRAINER_LEGACY: LegacyModuleSettings = LegacyModuleSettings {
-    module_id: TRAINER_ID,
-    enabled_key: Some("trainerEnabled"),
-    keys: &["autoConnect", "iKnowWhatImDoing", "hookValues"],
-};
-
-fn trainer(development: bool) -> ModuleChoice {
-    ModuleChoice {
-        id: TRAINER_ID,
-        title: "Trainer",
-        description: "Edits items in the running game for offline characters. It loads a helper into Last Epoch, which stays there until the game restarts. Online characters are always refused.",
-        name: "the trainer",
-        // Off by default in a release, on in a source checkout.
-        default_on: development,
-        problem: None,
-    }
-}
 
 /// The app's command line (`spec/shell-and-settings.md` §1).
 #[derive(Debug, Default)]
@@ -80,11 +59,12 @@ fn main() -> Result<(), slint::PlatformError> {
         early_faults.write("Panic", Some(&report), None, None);
     }));
 
-    let store = SettingsStore::open(&root, &SettingsStore::default_file(), &[TRAINER_LEGACY]);
+    let store = SettingsStore::open(&root, &SettingsStore::default_file(), &[trainer_settings::LEGACY]);
     let development = store.paths().is_source_checkout;
-    let trainer = trainer(development);
+    let mut trainer = trainer_settings::descriptor(development);
+    trainer.problem = trainer.validate(store.saved()).err();
     // This run has the modules as their choices stood when it started.
-    let trainer_on = store.startup_modules().get(TRAINER_ID).copied().unwrap_or(trainer.default_on);
+    let trainer_on = store.startup_modules().get(trainer_settings::ID).copied().unwrap_or(trainer.default_on) && trainer.problem.is_none();
 
     // Finds and starts the game from its files and Steam's; the game process itself is never touched. MelonLoader runs
     // from the game folder unless Settings chose another (read once: a new choice waits for a restart).
@@ -94,15 +74,15 @@ fn main() -> Result<(), slint::PlatformError> {
     launcher.settle_mod_loader();
 
     // A startup error opens Settings, which says why.
-    let start = if arguments.settings || store.startup_error().is_some() {
+    let start = if arguments.settings || store.startup_error().is_some() || trainer.problem.is_some() {
         Page::Settings
     } else {
         Page::Home
     };
     let found_game = launcher.find_install().map(|install| install.executable);
-    let store = Rc::new(RefCell::new(store));
+    let service = SettingsService::new(store);
     // TODO(launcher): Restart now needs a launcher that starts the app again on exit code 42.
-    let settings = SettingsPage::new(store, vec![trainer], found_game, dotnet::found_directory(), false);
+    let settings = SettingsPage::new(service.clone(), vec![trainer], found_game, dotnet::found_directory(), false);
 
     let window = MainWindow::new()?;
     eg_ui::install(
@@ -114,8 +94,14 @@ fn main() -> Result<(), slint::PlatformError> {
             start,
         },
     );
-    window.run()?;
+    let result = window.run();
+    launcher.cancel();
+    let background_fault = eg_ui::background::shutdown();
+    let settings = service.close();
     // Stops a start with mods that still waits for MelonLoader, so its proxy is set aside before the app exits.
     launcher.stop();
-    Ok(())
+    if background_fault || matches!(settings.outcome, SaveOutcome::Faulted(_)) {
+        std::process::exit(1);
+    }
+    result
 }

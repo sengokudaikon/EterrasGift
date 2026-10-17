@@ -15,13 +15,13 @@ use eg_companion::loader::ModLoaderState;
 use eg_companion::process::RunningGame;
 use eg_core::game_log::{GameLogState, GameReadiness};
 use eg_core::settings::SettingsStore;
-use eg_ui::settings::{ModuleChoice, SettingsPage};
+use eg_core::settings_service::SettingsService;
+use eg_ui::settings::SettingsPage;
 use eg_ui::shell::Page;
 use eg_ui::{App, HomeState, LaunchMode as ViewMode, MainWindow, Nav, SettingsState, Tokens};
 use slint::platform::software_renderer::{MinimalSoftwareWindow, RepaintBufferType};
 use slint::platform::{Key, Platform, PointerEventButton, WindowAdapter, WindowEvent};
 use slint::{ComponentHandle, LogicalPosition, PhysicalSize, SharedString};
-use std::cell::RefCell;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::{Arc, Mutex};
@@ -100,17 +100,6 @@ impl GameHost for FakeGameHost {
     }
 }
 
-fn trainer() -> ModuleChoice {
-    ModuleChoice {
-        id: "trainer",
-        title: "Trainer",
-        description: "",
-        name: "the trainer",
-        default_on: true,
-        problem: None,
-    }
-}
-
 struct CapturePlatform {
     window: Rc<MinimalSoftwareWindow>,
 }
@@ -141,12 +130,31 @@ impl Session {
         self.open_on(self.host(), trainer, width, height)
     }
 
+    fn open_settings(&self, service: SettingsService) -> MainWindow {
+        let ui = MainWindow::new().expect("create MainWindow");
+        eg_ui::install(
+            &ui,
+            App {
+                launcher: None,
+                settings: SettingsPage::new(service, vec![eg_ui::trainer_settings::descriptor(true)], None, None, false),
+                trainer: true,
+                start: Page::Settings,
+            },
+        );
+        ui.global::<Tokens>().set_motion(false);
+        ui.global::<Tokens>().set_high_contrast(false);
+        self.window.set_size(PhysicalSize::new(1100, 700));
+        ui.show().expect("show settings");
+        settle();
+        ui
+    }
+
     /// A window on `host`, with a settings file of its own.
     fn open_on(&self, host: Arc<FakeGameHost>, trainer_on: bool, width: u32, height: u32) -> MainWindow {
         let folder = self.folder();
         let store = SettingsStore::open(&folder.join("app"), &folder.join("settings.json"), &[]);
         let found = host.find_install().map(|install| install.executable);
-        let settings = SettingsPage::new(Rc::new(RefCell::new(store)), vec![trainer()], found, None, true);
+        let settings = SettingsPage::new(SettingsService::inline(store), vec![eg_ui::trainer_settings::descriptor(trainer_on)], found, None, true);
         let ui = MainWindow::new().expect("create MainWindow");
         let app = App {
             launcher: Some(Arc::new(GameLauncher::new(host))),
@@ -323,8 +331,7 @@ fn main() {
     let ui = session.open(true, 1100, 700);
     ui.global::<Nav>().invoke_navigate("settings".into());
     settle();
-    ui.global::<SettingsState>().set_trainer_enabled(false);
-    ui.global::<SettingsState>().invoke_trainer_toggled(false);
+    ui.global::<SettingsState>().invoke_module_toggled(0, false);
     settle();
     session.capture(&ui, "settings-restart");
     for _ in 0..10 {
@@ -342,4 +349,51 @@ fn main() {
     ui.global::<Tokens>().set_high_contrast(true);
     settle();
     session.capture(&ui, "settings-high-contrast");
+
+    // A blocked worker never blocks pointer input or navigation. The real toggle queues behind it.
+    let folder = session.folder();
+    let file = folder.join("settings.json");
+    let service = SettingsService::new(SettingsStore::open(&folder.join("app"), &file, &[]));
+    let ui = session.open_settings(service.clone());
+    let (release, waiting) = std::sync::mpsc::channel();
+    service
+        .module("fixture")
+        .update(move |_| {
+            waiting.recv_timeout(std::time::Duration::from_secs(10)).unwrap();
+            Ok(())
+        })
+        .unwrap();
+    session.click(744.0, 98.0);
+    assert_eq!(service.snapshot().submitted, 2);
+    assert!(ui.global::<SettingsState>().get_saving());
+    session.capture(&ui, "settings-saving");
+    session.click(RAIL_X, 80.0);
+    assert_eq!(ui.global::<Nav>().get_current_page(), "home");
+    ui.global::<Nav>().invoke_navigate("settings".into());
+    release.send(()).unwrap();
+    wait_for_save(&ui);
+    assert!(!service.snapshot().store.saved().modules["trainer"]);
+
+    // The file becomes unwritable after startup. Failure retains intent and exposes a real retry button.
+    std::fs::remove_file(&file).unwrap();
+    std::fs::create_dir(&file).unwrap();
+    session.click(744.0, 98.0);
+    wait_for_save(&ui);
+    assert!(ui.global::<SettingsState>().get_can_retry());
+    session.capture(&ui, "settings-save-failed");
+    std::fs::remove_dir(&file).unwrap();
+    session.click(900.0, 672.0);
+    wait_for_save(&ui);
+    assert!(!ui.global::<SettingsState>().get_can_retry());
+    assert!(!service.snapshot().store.has_pending_write());
+    session.capture(&ui, "settings-save-retried");
+}
+
+fn wait_for_save(ui: &MainWindow) {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    while ui.global::<SettingsState>().get_saving() {
+        assert!(std::time::Instant::now() < deadline, "settings worker must finish");
+        std::thread::sleep(std::time::Duration::from_millis(1));
+        settle();
+    }
 }

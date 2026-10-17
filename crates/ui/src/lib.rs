@@ -10,6 +10,7 @@ pub mod settings;
 pub mod shell;
 pub mod stubs;
 pub mod system;
+pub mod trainer_settings;
 
 use eg_companion::launcher::GameLauncher;
 use settings::SettingsPage;
@@ -36,7 +37,7 @@ pub fn install(window: &MainWindow, app: App) {
     navigation.navigate(app.start);
     let shell = shell::bind(window, navigation);
     home::bind(window, app.launcher, &shell);
-    settings::bind(window, app.settings, app.trainer);
+    settings::bind(window, app.settings);
     stubs::install(window, app.trainer);
     apply_system_settings(window);
 }

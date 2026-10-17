@@ -1,13 +1,12 @@
 //! Stand-ins for the functionality behind the pages that is not ported yet, so the UI can be driven and judged.
 //! Each callback says what it will do once ported (TODO) and keeps just enough local state for the view to react.
 
-use crate::{Connection, MainWindow, ModsState, SettingsState, TrainerState};
+use crate::{Connection, MainWindow, ModsState, TrainerState};
 use slint::ComponentHandle;
 
 pub fn install(window: &MainWindow, trainer: bool) {
     mods(window);
     connection(window, trainer);
-    trainer_settings(window);
 }
 
 fn not_ported(what: &str) {
@@ -35,13 +34,4 @@ fn connection(window: &MainWindow, trainer: bool) {
     let trainer = window.global::<TrainerState>();
     trainer.set_empty_title("Not connected".into());
     trainer.set_empty_detail("Connect, then place an item in the forge.".into());
-}
-
-fn trainer_settings(window: &MainWindow) {
-    let settings = window.global::<SettingsState>();
-    // TODO(trainer): the trainer's own settings slice (autoConnect, iKnowWhatImDoing), saved through the page's queue,
-    // and the game-data cache it describes (spec/shell-and-settings.md §10.2).
-    settings.on_auto_connect_toggled(|on| not_ported(&format!("Saving the connection switch ({on})")));
-    settings.on_expert_toggled(|on| not_ported(&format!("Saving \"I know what I'm doing\" ({on})")));
-    settings.on_refresh_definitions(|| not_ported("Refresh from game"));
 }

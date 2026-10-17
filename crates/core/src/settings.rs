@@ -16,6 +16,8 @@ pub const CURRENT_SCHEMA: i64 = 2;
 
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct AppSettings {
+    /// Unrecognized top-level fields survive a save by an older app.
+    pub extra: Map<String, Value>,
     /// None finds the game by itself. Takes effect after a restart.
     pub game_executable: Option<PathBuf>,
     /// None is the default user-data folder. Takes effect after a restart, which copies the old folder there.
@@ -77,7 +79,7 @@ impl AppSettings {
         }
     }
 
-    /// Reads the settings from the file's object, matching keys whatever their case. Unknown keys are ignored.
+    /// Reads the settings from the file's object, matching known keys whatever their case.
     pub fn from_json(document: &Map<String, Value>) -> Result<AppSettings, String> {
         let mut settings = AppSettings::default();
         for (key, value) in document {
@@ -104,6 +106,8 @@ impl AppSettings {
                     Value::Object(slices) => settings.module_settings = slices.clone(),
                     _ => return Err("moduleSettings must be an object.".into()),
                 }
+            } else if !key.eq_ignore_ascii_case("schemaVersion") {
+                settings.extra.insert(key.clone(), value.clone());
             }
         }
         Ok(settings)
@@ -111,7 +115,7 @@ impl AppSettings {
 
     /// The file's object, always as the current version; absent values are left out.
     pub fn to_json(&self) -> Map<String, Value> {
-        let mut document = Map::new();
+        let mut document = self.extra.clone();
         document.insert("schemaVersion".into(), CURRENT_SCHEMA.into());
         for (index, name) in LOCATIONS.iter().enumerate() {
             if let Some(path) = self.location(index) {
@@ -153,10 +157,14 @@ pub struct Locations {
 
 /// The app's settings as saved, and the saves Settings and the modules make. Saves are made one at a time by whoever
 /// holds the store, each applying its change over what the save before it left (`spec/shell-and-settings.md` §10.3).
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct SettingsStore {
     file_path: PathBuf,
     saved: AppSettings,
+    /// Validated intent retained after an IO failure; it is never reported as saved.
+    pending: Option<AppSettings>,
+    planning: bool,
+    pending_explicit: bool,
     paths: AppPaths,
     active_game_executable: Option<PathBuf>,
     active_melon_loader_directory: Option<PathBuf>,
@@ -197,6 +205,9 @@ impl SettingsStore {
             unreadable: error.is_some(),
             startup_error: error,
             saved: settings,
+            pending: None,
+            planning: false,
+            pending_explicit: false,
         };
         if upgraded {
             // Read as upgraded all the same when this fails; the next save writes the new shape.
@@ -219,7 +230,12 @@ impl SettingsStore {
             let destination = self.paths.with(user_data.as_deref(), None).user_data_directory;
             match migrate(&self.paths.user_data_directory, &destination).and_then(|()| self.write(|saved| saved.migration_source = None, false)) {
                 Ok(()) => self.paths = self.paths.with(user_data.as_deref(), library_source.as_deref().or(library.as_deref())),
-                Err(error) => self.startup_error = Some(format!("Data migration failed; the previous folder remains active. {error}")),
+                Err(error) => {
+                    // Failed migration bookkeeping is not user intent. Keep the marker until a later startup
+                    // copies the source again, including anything this run still writes there.
+                    self.pending = None;
+                    self.startup_error = Some(format!("Data migration failed; the previous folder remains active. {error}"));
+                }
             }
         }
         // Saved alone, never with a user-data move, so the library's new folder does not depend on one.
@@ -228,7 +244,10 @@ impl SettingsStore {
             match migrate(&self.paths.mod_library_directory, &destination.mod_library_directory).and_then(|()| self.write(|saved| saved.mod_library_migration_source = None, false))
             {
                 Ok(()) => self.paths = destination,
-                Err(error) => self.startup_error = Some(format!("The mod library could not be moved; its previous folder remains active. {error}")),
+                Err(error) => {
+                    self.pending = None;
+                    self.startup_error = Some(format!("The mod library could not be moved; its previous folder remains active. {error}"));
+                }
             }
         }
     }
@@ -239,6 +258,41 @@ impl SettingsStore {
 
     pub fn saved(&self) -> &AppSettings {
         &self.saved
+    }
+
+    pub fn desired(&self) -> &AppSettings {
+        self.pending.as_ref().unwrap_or(&self.saved)
+    }
+
+    /// None means the file could not be read and the current settings are only in memory.
+    pub fn persisted(&self) -> Option<&AppSettings> {
+        (!self.unreadable).then_some(&self.saved)
+    }
+
+    pub fn has_pending_write(&self) -> bool {
+        self.pending.is_some()
+    }
+
+    /// Retries local settings persistence only. This is never a game-write retry.
+    pub fn retry(&mut self) -> io::Result<()> {
+        self.write(|_| {}, false)
+    }
+
+    /// Computes and validates a command on a private copy. Used only by the serialized writer.
+    pub(crate) fn plan(&self, change: impl FnOnce(&mut Self) -> Result<(), String>) -> Result<AppSettings, String> {
+        let mut candidate = self.clone();
+        candidate.planning = true;
+        change(&mut candidate)?;
+        Ok(candidate.desired().clone())
+    }
+
+    pub(crate) fn stage(&mut self, desired: AppSettings, explicit: bool) {
+        self.pending = Some(desired);
+        self.pending_explicit |= explicit;
+    }
+
+    pub(crate) fn persist(&mut self, replace_unreadable: bool) -> io::Result<()> {
+        self.write(|_| {}, replace_unreadable)
     }
 
     pub fn paths(&self) -> &AppPaths {
@@ -304,7 +358,7 @@ impl SettingsStore {
         {
             return Err("Choose an existing game executable (.exe), or use automatic detection.".into());
         }
-        let sources = keep_or(&self.saved.mod_sources_directory, &locations.mod_sources_directory, "mod sources folder")?;
+        let sources = keep_or(&self.desired().mod_sources_directory, &locations.mod_sources_directory, "mod sources folder")?;
         if let Some(sources) = &sources
             && !sources.is_dir()
         {
@@ -315,20 +369,20 @@ impl SettingsStore {
             }
             .into());
         }
-        let dotnet = keep_or(&self.saved.dotnet_directory, &locations.dotnet_directory, ".NET SDK folder")?;
+        let dotnet = keep_or(&self.desired().dotnet_directory, &locations.dotnet_directory, ".NET SDK folder")?;
         if let Some(dotnet) = &dotnet
             && !dotnet.join("dotnet.exe").is_file()
         {
             return Err("Choose the folder that holds dotnet.exe, or leave it empty to find the .NET SDK automatically.".into());
         }
-        let loader = keep_or(&self.saved.melon_loader_directory, &locations.melon_loader_directory, "MelonLoader folder")?;
+        let loader = keep_or(&self.desired().melon_loader_directory, &locations.melon_loader_directory, "MelonLoader folder")?;
         if let Some(loader) = &loader
             && !loader.join("MelonLoader").is_dir()
         {
             return Err("Choose a folder with MelonLoader in it (a copy of the game's MelonLoader folder), or leave it empty for the game folder.".into());
         }
         let directory = normalize(&locations.user_data_directory, "user-data folder")?;
-        let library = keep_or(&self.saved.mod_library_directory, &locations.mod_library_directory, "mod library folder")?;
+        let library = keep_or(&self.desired().mod_library_directory, &locations.mod_library_directory, "mod library folder")?;
         let destination = self.paths.with(directory.as_deref(), library.as_deref());
         let changed = !paths::same_folder(&self.paths.user_data_directory, &destination.user_data_directory);
         // The library's default folder is in the user data, so it follows a user-data move; a folder of its own moves alone.
@@ -376,15 +430,29 @@ impl SettingsStore {
     /// `change` applies to the settings as the saves before it left them, so two saves of different fields both keep
     /// their change. `replace_unreadable` is the explicit save, which may replace a file that could not be read.
     fn write(&mut self, change: impl FnOnce(&mut AppSettings), replace_unreadable: bool) -> io::Result<()> {
-        let mut settings = self.saved.clone();
+        let replace_unreadable = replace_unreadable || self.pending_explicit;
+        let mut settings = self.desired().clone();
         change(&mut settings);
+        if self.planning {
+            self.pending = Some(settings);
+            self.pending_explicit = replace_unreadable;
+            return Ok(());
+        }
         if self.unreadable && !replace_unreadable {
             self.saved = settings;
+            self.pending = None;
+            self.pending_explicit = false;
             return Ok(());
         }
         let text = serde_json::to_string_pretty(&Value::Object(settings.to_json())).map_err(io::Error::other)?;
-        atomic::write(&self.file_path, text.as_bytes())?;
+        if let Err(error) = atomic::write(&self.file_path, text.as_bytes()) {
+            self.pending = Some(settings);
+            self.pending_explicit = replace_unreadable;
+            return Err(error);
+        }
         self.saved = settings;
+        self.pending = None;
+        self.pending_explicit = false;
         self.unreadable = false;
         Ok(())
     }
@@ -623,7 +691,8 @@ mod tests {
             serde_json::json!({
                 "schemaVersion": 2,
                 "gameExecutable": game.to_string_lossy(),
-                "moduleSettings": { "trainer": { "autoConnect": false } }
+                "moduleSettings": { "trainer": { "autoConnect": false } },
+                "somethingNewer": 1
             })
         );
         // The run keeps the modules it started with.

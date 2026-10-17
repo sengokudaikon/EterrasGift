@@ -72,14 +72,24 @@ impl GameLauncher {
     pub fn play(&self, mode: LaunchMode) -> LaunchReport {
         {
             let mut starting = self.starting.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+            if self.lifetime.is_cancelled() {
+                return refused("The app is closing.");
+            }
             if *starting {
                 return refused("Last Epoch is starting already.");
             }
             *starting = true;
         }
+        // Reset and wake shutdown even when the host panics; the operation owner reports the fault.
+        struct Finished<'a>(&'a GameLauncher);
+        impl Drop for Finished<'_> {
+            fn drop(&mut self) {
+                *self.0.starting.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = false;
+                self.0.finished.notify_all();
+            }
+        }
+        let _finished = Finished(self);
         let outcome = self.host.launch(mode, self.host.find_install().as_ref(), &self.lifetime);
-        *self.starting.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = false;
-        self.finished.notify_all();
         match outcome {
             Ok(outcome) => LaunchReport {
                 started: true,
@@ -94,9 +104,13 @@ impl GameLauncher {
 
     /// Stops waiting for MelonLoader and waits for a start under way to set the proxy aside; for the app's close.
     pub fn stop(&self) {
-        self.lifetime.cancel();
+        self.cancel();
         let starting = self.starting.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
         drop(self.finished.wait_while(starting, |starting| *starting));
+    }
+
+    pub fn cancel(&self) {
+        self.lifetime.cancel();
     }
 }
 

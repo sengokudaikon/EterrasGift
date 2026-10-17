@@ -17,31 +17,29 @@ export struct LocationSetting {
     browse-label: string,
 }
 
-export global SettingsState {
-    // Module switches (one module today: the trainer).
-    in-out property <bool> trainer-enabled;
-    in property <string> trainer-problem;
-    // The trainer's own groups show only in a run that has the trainer.
-    in property <bool> trainer-running;
-    in-out property <bool> auto-connect: true;
-    in-out property <bool> expert;
-    in property <string> definitions: "No game-data cache loaded";
-    in property <bool> can-refresh-definitions;
+export struct ModuleRow { title: string, description: string, problem: string, enabled: bool }
+export struct SettingsSectionRow {
+    module-index: int, section-index: int, title: string, description: string, note: string,
+    toggle: bool, checked: bool, on-text: string, off-text: string,
+    status: string, action: string, unavailable: string,
+}
 
+export global SettingsState {
+    in property <[ModuleRow]> modules;
+    in property <[SettingsSectionRow]> sections;
     in property <[LocationSetting]> locations;
     in property <bool> locations-changed;
-
+    in property <bool> saving;
+    in property <bool> can-retry;
     in property <string> message;
     in property <MessageTone> message-tone;
     in property <bool> can-restart;
-
-    callback trainer-toggled(bool);
-    callback auto-connect-toggled(bool);
-    callback expert-toggled(bool);
-    callback refresh-definitions();
+    callback module-toggled(int, bool);
+    callback setting-toggled(int, int, bool);
     callback location-edited(int, string);
     callback browse(int);
     callback save-locations();
+    callback retry();
     callback restart();
 }
 
@@ -74,106 +72,55 @@ export component SettingsPage inherits Rectangle {
                     height: Tokens.settings-title-margin.bottom;
                 }
 
-                SettingGroup {
+                for module[i] in SettingsState.modules: SettingGroup {
                     SwitchSetting {
-                        title: "Trainer";
-                        description: "Edits items in the running game for offline characters. It loads a helper into Last Epoch, which stays there until the game restarts. Online characters are always refused.";
+                        title: module.title;
+                        description: module.description;
                         note: "Takes effect after restarting Eterra's Gift.";
-                        problem: SettingsState.trainer-problem;
-
+                        problem: module.problem;
                         ToggleSwitch {
-                            label: "Trainer";
-                            checked <=> SettingsState.trainer-enabled;
-                            toggled(on) => {
-                                SettingsState.trainer-toggled(on);
-                            }
+                            label: module.title;
+                            checked: module.enabled;
+                            toggled(on) => { SettingsState.module-toggled(i, on); }
                         }
                     }
                 }
 
-                if SettingsState.trainer-running: SettingGroup {
-                    SwitchSetting {
-                        title: "Connection";
-                        description: "Find Last Epoch and connect once an offline character is loaded. Online characters are always refused.";
-
+                for section in SettingsState.sections: SettingGroup {
+                    if section.toggle: SwitchSetting {
+                        title: section.title;
+                        description: section.description;
+                        note: section.note;
                         ToggleSwitch {
-                            label: "Connection";
-                            on-text: "Automatic";
-                            off-text: "Manual";
-                            checked <=> SettingsState.auto-connect;
-                            toggled(on) => {
-                                SettingsState.auto-connect-toggled(on);
-                            }
+                            label: section.title;
+                            checked: section.checked;
+                            on-text: section.on-text;
+                            off-text: section.off-text;
+                            toggled(on) => { SettingsState.setting-toggled(section.module-index, section.section-index, on); }
                         }
                     }
-                }
-
-                if SettingsState.trainer-running: SettingGroup {
-                    SwitchSetting {
-                        title: "I know what I'm doing";
-                        description: "Writes edits the game would not make itself: Weaver, enchantment and corrupted affixes wherever the slot fits, incompatible affixes and bases, another idol size, Weaver's Will on any unique and Weaver's Touch on any idol. With this off, incompatible affixes can still be listed but not written.";
-                        note: "Use expendable items. The game may drop or rearrange what it does not support.";
-
-                        ToggleSwitch {
-                            label: "I know what I'm doing";
-                            checked <=> SettingsState.expert;
-                            toggled(on) => {
-                                SettingsState.expert-toggled(on);
-                            }
-                        }
-                    }
-                }
-
-                if SettingsState.trainer-running: SettingGroup {
-                    VerticalLayout {
+                    if !section.toggle: VerticalLayout {
                         spacing: Tokens.space-12;
-
-                        SectionText {
-                            text: "Game definitions";
-                        }
-
-                        SecondaryText {
-                            text: "Affix and unique definitions captured from the game on first connection, keyed by game build and language.";
-                        }
-
+                        SectionText { text: section.title; }
+                        SecondaryText { text: section.description; }
                         Rectangle {
                             background: Tokens.surface-brush;
-                            border-width: 1px;
+                            border-width: Tokens.border-all.left;
                             border-color: Tokens.hairline-brush;
                             border-radius: Tokens.control-radius;
-
                             HorizontalLayout {
                                 padding-left: Tokens.notice-padding.left;
                                 padding-right: Tokens.notice-padding.right;
                                 padding-top: Tokens.notice-padding.top;
                                 padding-bottom: Tokens.notice-padding.bottom;
-
-                                Text {
-                                    text: SettingsState.definitions;
-                                    color: Tokens.text-brush;
-                                    wrap: word-wrap;
-                                }
+                                Text { text: section.status; color: Tokens.text-brush; wrap: word-wrap; }
                             }
                         }
-
                         HorizontalLayout {
                             spacing: Tokens.space-12;
                             alignment: start;
-
-                            Button {
-                                text: "Refresh from game";
-                                icon: Tokens.icon-refresh;
-                                enabled: SettingsState.can-refresh-definitions;
-                                clicked => {
-                                    SettingsState.refresh-definitions();
-                                }
-                            }
-
-                            if !SettingsState.can-refresh-definitions: CaptionText {
-                                text: "Available once an offline character is connected.";
-                                vertical-alignment: center;
-                                horizontal-stretch: 1;
-                            }
+                            Button { text: section.action; icon: Tokens.icon-refresh; enabled: false; }
+                            CaptionText { text: section.unavailable; vertical-alignment: center; horizontal-stretch: 1; }
                         }
                     }
                 }
@@ -244,10 +191,16 @@ export component SettingsPage inherits Rectangle {
                 }
             }
 
+            if SettingsState.can-retry: Button {
+                text: "Retry save";
+                tip: "Write the pending settings again";
+                clicked => { SettingsState.retry(); }
+            }
+
             Button {
                 text: "Save locations";
                 kind: ButtonKind.primary;
-                enabled: SettingsState.locations-changed;
+                enabled: SettingsState.locations-changed && !SettingsState.saving;
                 tip: "Save the locations. The game executable, user-data, mod library and MelonLoader folders take effect after a restart; the mod sources and .NET SDK folders at once.";
                 clicked => {
                     SettingsState.save-locations();
