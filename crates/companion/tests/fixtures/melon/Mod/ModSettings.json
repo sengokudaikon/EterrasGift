@@ -1,0 +1,11 @@
+{
+  "schemaVersion": 1,
+  "categories": [{
+    "name": "FixtureCategory",
+    "settings": [
+      {"key":"Enabled", "label":"Enabled", "group":"Behavior"},
+      {"key":"Count", "label":"Count", "description":"How many nearby objects to mark.", "group":"Behavior", "min":1, "max":20},
+      {"key":"Label", "label":"Label", "choices":[{"value":"Default","label":"Default label"},{"value":"Focused","label":"Focused label"}]}
+    ]
+  }]
+}

@@ -7,6 +7,7 @@ slint::include_modules!();
 pub mod background;
 pub mod decorations;
 pub mod home;
+pub mod mods;
 pub mod preparation;
 pub mod settings;
 pub mod shell;
@@ -25,6 +26,7 @@ pub struct App {
     /// Starts the game from Home; None in a run without one (tests), and then Home shows the companion's own title.
     pub launcher: Option<Arc<GameLauncher>>,
     pub settings: SettingsPage,
+    pub mods: Option<mods::ModsPage>,
     /// This run has the trainer: its pages, its connection block and its Settings groups.
     pub trainer: bool,
     /// Home, or Settings when the settings file or a module has something to say.
@@ -34,13 +36,13 @@ pub struct App {
 /// Wires a new window: navigation, the pages and the Windows settings.
 pub fn install(window: &MainWindow, app: App) {
     let trainer_pages = if app.trainer { Page::TRAINER.to_vec() } else { Vec::new() };
-    // TODO(mods): Mods is listed only when the launcher and the mod library exist.
-    let mut navigation = Navigation::new(true, trainer_pages);
+    let mut navigation = Navigation::new(app.mods.is_some(), trainer_pages);
     navigation.navigate(app.start);
     let shell = shell::bind(window, navigation);
     let decorations = decorations::Decorations::install(window);
     home::bind(window, app.launcher, &shell, decorations);
-    settings::bind(window, app.settings);
+    let before_close = app.mods.map(|page| mods::bind(window, page, &shell));
+    settings::bind_with_close(window, app.settings, before_close);
     stubs::install(window, app.trainer);
     apply_system_settings(window);
 }

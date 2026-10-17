@@ -4,6 +4,11 @@
 
 use eg_companion::host::FileGameHost;
 use eg_companion::launcher::GameLauncher;
+use eg_companion::mods::{
+    library::ModLibrary,
+    sources::{ModSources, SystemProcessRunner},
+    worker::ModWorker,
+};
 use eg_companion::{dotnet, folders};
 use eg_core::fault::FaultLog;
 use eg_core::paths;
@@ -68,7 +73,9 @@ fn main() -> Result<(), slint::PlatformError> {
 
     // Finds and starts the game from its files and Steam's; the game process itself is never touched. MelonLoader runs
     // from the game folder unless Settings chose another (read once: a new choice waits for a restart).
-    let host = FileGameHost::new(store.active_game_executable(), &folders::player_log(), store.active_melon_loader_directory());
+    let mods = ModWorker::new(ModLibrary::new(store.paths().mod_library_directory.clone()));
+    let sources = Arc::new(ModSources::new(Arc::new(SystemProcessRunner)));
+    let host = FileGameHost::new(store.active_game_executable(), &folders::player_log(), store.active_melon_loader_directory()).with_mod_worker(mods.clone());
     let launcher = Arc::new(GameLauncher::new(Arc::new(host)));
     // Mods never load online: a proxy a start with mods left in place (the app closed while it waited) goes aside now.
     launcher.settle_mod_loader();
@@ -90,6 +97,12 @@ fn main() -> Result<(), slint::PlatformError> {
         App {
             launcher: Some(launcher.clone()),
             settings,
+            mods: Some(eg_ui::mods::ModsPage {
+                worker: mods.clone(),
+                launcher: launcher.clone(),
+                settings: service.clone(),
+                sources: sources.clone(),
+            }),
             trainer: trainer_on,
             start,
         },
@@ -97,11 +110,15 @@ fn main() -> Result<(), slint::PlatformError> {
     eg_ui::follow_system_settings(&window);
     let result = window.run();
     launcher.cancel();
+    eg_ui::mods::cancel_work(&window);
+    mods.cancellation().cancel();
+    sources.close();
     let background_fault = eg_ui::background::shutdown();
+    mods.close();
     let settings = service.close();
     // Stops a start with mods that still waits for MelonLoader, so its proxy is set aside before the app exits.
     launcher.stop();
-    if background_fault || matches!(settings.outcome, SaveOutcome::Faulted(_)) {
+    if background_fault || mods.faulted() || matches!(settings.outcome, SaveOutcome::Faulted(_)) {
         std::process::exit(1);
     }
     result

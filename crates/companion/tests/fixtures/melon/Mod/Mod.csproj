@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <AssemblyName>FixtureMod</AssemblyName>
+    <Version>2.3.4</Version>
+    <InformationalVersion>2.3.4+fixture</InformationalVersion>
+    <Description>A metadata-only fixture.</Description>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../Loader/Loader.csproj" />
+    <EmbeddedResource Include="ModSettings.json" LogicalName="ModSettings.json" />
+  </ItemGroup>
+</Project>

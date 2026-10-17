@@ -11,6 +11,7 @@ pub mod install;
 pub mod key_values;
 pub mod launcher;
 pub mod loader;
+pub mod mods;
 pub mod process;
 pub mod shell;
 

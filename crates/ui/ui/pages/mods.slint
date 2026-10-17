@@ -1,178 +1,536 @@
-// Mods: the mod library (spec/companion.md §6.8). `[content | pane]` over an action bar.
-// TODO(mods): the list rows, the selected mod's pane, "Not installed" sources, row keyboard and menu, the maximized log.
-
+// The companion mod library. Disk work belongs to the serialized Rust service.
+import { ScrollView } from "std-widgets.slint";
 import { Tokens } from "../tokens.slint";
-import { TitleText, SecondaryText, SubheadingText, LabelText, CaptionText } from "../widgets/text.slint";
+import { KeyboardFocus } from "../globals.slint";
+import { TitleText, SectionText, SecondaryText, SubheadingText, LabelText, CaptionText } from "../widgets/text.slint";
 import { Button, ButtonKind } from "../widgets/button.slint";
-import { ActionBar, MessageTone } from "common.slint";
+import { ToggleSwitch } from "../widgets/toggle.slint";
+import { FocusRing, TipTrigger } from "../widgets/focus.slint";
+import { MessageTone } from "common.slint";
 import { AshField } from "../decorations.slint";
 
+export struct ModRow {
+    file: string, name: string, version: string, author: string, caption: string,
+    enabled: bool, drafted: bool, problem: string, problem-label: string,
+}
+export struct SourceRow { name: string, caption: string, busy: bool }
+export struct SettingChoiceRow { value: string, label: string }
+export struct ModSettingRow {
+    category: string, key: string, name: string, description: string, group: string,
+    kind: string, value: string, is-on: bool, unit: string, drafted: bool,
+    was: string, error: string, choices: [SettingChoiceRow], choice-label: string, choice-index: int,
+}
+export struct ModLogRow { time: string, text: string, error: bool, count: int, count-tip: string }
+
 export global ModsState {
+    in property <[ModRow]> mods;
+    in property <[SourceRow]> sources;
+    in property <[ModSettingRow]> settings;
+    in property <[ModLogRow]> log-lines;
+    in property <int> selected-index: -1;
     in property <int> installed-count;
     in property <int> enabled-count;
+    in property <bool> is-read;
+    in property <bool> has-read-error;
+    in property <bool> can-open-folder: true;
     in property <bool> can-open-log;
+    in property <string> open-folder-tip: "Open the Mods folder";
+    in property <string> open-log-tip: "Not available: MelonLoader writes its log the first time you play with mods.";
     in property <string> readiness: "MelonLoader is not in the game folder, so no mod can load. Play offline with mods needs it.";
     in property <MessageTone> readiness-tone: MessageTone.warning;
     in property <bool> can-play;
-
+    in property <bool> busy;
+    in property <string> selected-name;
+    in property <string> selected-version;
+    in property <string> selected-author;
+    in property <string> selected-file;
+    in property <string> selected-source;
+    in property <string> selected-source-path;
+    in property <string> selected-build-status;
+    in property <string> selected-description;
+    in property <string> selected-problem;
+    in property <string> selected-state;
+    in property <bool> selected-enabled;
+    in property <bool> can-rebuild;
+    in property <bool> can-install-build;
+    in property <bool> building;
+    in property <string> rebuild-text: "Rebuild";
+    in property <string> install-build-text: "Install build";
+    in property <bool> previous-build;
+    in property <string> change-message;
+    in property <bool> change-is-draft;
+    in property <MessageTone> change-tone: MessageTone.info;
+    in property <bool> can-undo;
+    in property <int> draft-count;
+    callback select-mod(int);
+    callback toggle-mod(int);
+    callback remove-mod(int);
+    callback reveal-mod(int);
+    callback rebuild(int);
+    callback install-build(int);
+    callback build-source(int);
+    callback setting-edited(int, string);
+    callback setting-toggled(int, bool);
+    callback setting-choice(int, string);
+    callback commit-settings();
+    callback undo-remove();
+    callback revert-drafts();
+    callback refresh();
     callback add-mod();
     callback open-folder();
     callback open-log();
     callback play();
+    callback stop-work();
 }
 
-export component ModsPage inherits Rectangle {
-    in property <bool> compact;
-    in property <bool> wide;
-
-    // Compact and narrow windows keep the toolbar as icons with tips.
-    property <bool> icon-toolbar: root.compact;
-
-    // A still, cold dusting of ash over a library with nothing in it and nothing being waited on.
-    if ModsState.installed-count == 0: AshField {
-        x: 0;
-        y: 0;
-        width: pane.x;
-        height: bar.y;
-        still: true;
+// Native editing keeps its undo stack. Enter and focus loss commit the draft.
+component ModsField inherits Rectangle {
+    in-out property <string> text;
+    in property <string> label;
+    in property <string> unit;
+    in property <bool> enabled: true;
+    in property <bool> invalid;
+    callback edited(string);
+    callback committed();
+    property <bool> input-focused: input.has-focus;
+    changed input-focused => { if (!root.input-focused) { root.committed(); } }
+    height: Tokens.control-min-height;
+    border-radius: Tokens.control-radius;
+    border-width: Tokens.space-1;
+    border-color: root.invalid ? Tokens.error-brush : input.has-focus ? Tokens.accent-brush : Tokens.strong-line-brush;
+    background: input.has-focus ? Tokens.ground-brush : touch.has-hover ? Tokens.hover-brush : Tokens.surface-brush;
+    accessible-role: text-input;
+    accessible-label: root.label;
+    accessible-value: root.text;
+    forward-focus: input;
+    touch := TouchArea {
+        enabled: root.enabled;
+        pointer-event(event) => { if (event.kind == PointerEventKind.down) { KeyboardFocus.visible = false; } }
+        clicked => { input.focus(); }
     }
+    HorizontalLayout {
+        padding-left: Tokens.space-8;
+        padding-right: Tokens.mod-setting-unit-margin.right;
+        spacing: Tokens.space-4;
+        input := TextInput {
+            text <=> root.text;
+            enabled: root.enabled;
+            single-line: true;
+            color: root.enabled ? Tokens.text-brush : Tokens.text-disabled-brush;
+            selection-background-color: Tokens.accent-pressed-color;
+            selection-foreground-color: Tokens.on-accent-color;
+            horizontal-alignment: right;
+            vertical-alignment: center;
+            edited => { root.edited(self.text); }
+            accepted => { root.committed(); }
+        }
+        if root.unit != "": CaptionText { text: root.unit; vertical-alignment: center; }
+    }
+    FocusRing { focused: input.has-focus; }
+}
 
-    VerticalLayout {
-        HorizontalLayout {
-            vertical-stretch: 1;
-
-            VerticalLayout {
-                horizontal-stretch: 1;
-                padding-left: root.compact ? Tokens.page-gutter-compact.left : Tokens.page-gutter.left;
-                padding-right: root.compact ? Tokens.page-gutter-compact.right : Tokens.page-gutter.right;
-                padding-top: Tokens.header-padding.top;
-                spacing: Tokens.space-8;
-                alignment: start;
-
-                TitleText {
-                    text: "Mods";
+// One keyboard stop opens a bounded scrolling choice popup.
+component ModsChoice inherits Rectangle {
+    in property <[SettingChoiceRow]> choices;
+    in property <string> value;
+    in property <string> choice-label;
+    in property <int> choice-index;
+    in property <string> label;
+    in property <bool> enabled: true;
+    callback chosen(string);
+    property <int> highlighted;
+    function open() { root.highlighted = Math.max(0, root.choice-index); popup.show(); }
+    height: Tokens.control-min-height;
+    border-radius: Tokens.control-radius;
+    border-width: Tokens.space-1;
+    border-color: focus.has-focus ? Tokens.accent-brush : Tokens.strong-line-brush;
+    background: touch.has-hover ? Tokens.hover-brush : Tokens.surface-brush;
+    accessible-role: combobox;
+    accessible-label: root.label;
+    accessible-value: root.choice-label;
+    HorizontalLayout {
+        padding-left: Tokens.space-8;
+        padding-right: Tokens.space-8;
+        spacing: Tokens.space-4;
+        Text { text: root.choice-label; color: Tokens.text-brush; vertical-alignment: center; overflow: elide; horizontal-stretch: 1; }
+        Image { source: Tokens.icon-chevron-down; colorize: Tokens.text-muted-brush; width: Tokens.icon-size-tiny; height: Tokens.icon-size-tiny; y: (parent.height - self.height) / 2; }
+    }
+    focus := FocusScope {
+        enabled: root.enabled;
+        focus-gained(reason) => { if (reason == FocusReason.tab-navigation) { KeyboardFocus.visible = true; } }
+        key-pressed(event) => {
+            if (event.text == Key.Return || event.text == " " || event.text == Key.DownArrow || event.text == Key.UpArrow) { root.open(); return accept; }
+            reject
+        }
+        touch := TouchArea {
+            enabled: root.enabled;
+            pointer-event(event) => { if (event.kind == PointerEventKind.down) { KeyboardFocus.visible = false; } }
+            clicked => { focus.focus(); root.open(); }
+        }
+    }
+    TipTrigger { text: root.choice-label; hovered: touch.has-hover; focused: focus.has-focus; }
+    FocusRing { focused: focus.has-focus; }
+    popup := PopupWindow {
+        x: 0;
+        y: root.height + Tokens.space-2;
+        width: Math.max(root.width, Tokens.value-flyout-width);
+        height: Math.min(root.choices.length, 8) * Tokens.control-min-height + Tokens.space-8;
+        close-policy: PopupClosePolicy.close-on-click-outside;
+        Rectangle {
+            background: Tokens.raised-brush;
+            border-width: Tokens.space-1;
+            border-color: Tokens.strong-line-brush;
+            border-radius: Tokens.control-radius;
+            FocusScope {
+                init => { self.focus(); }
+                key-pressed(event) => {
+                    if (event.text == Key.Escape) { popup.close(); return accept; }
+                    if (event.text == Key.UpArrow) { root.highlighted = Math.max(0, root.highlighted - 1); return accept; }
+                    if (event.text == Key.DownArrow) { root.highlighted = Math.min(root.choices.length - 1, root.highlighted + 1); return accept; }
+                    if (event.text == Key.Home) { root.highlighted = 0; return accept; }
+                    if (event.text == Key.End) { root.highlighted = root.choices.length - 1; return accept; }
+                    if (event.text == Key.Return || event.text == " ") { root.chosen(root.choices[root.highlighted].value); popup.close(); return accept; }
+                    reject
                 }
-
-                SecondaryText {
-                    text: "Mods load only when you play offline with mods. Playing online or plain offline never loads them.";
-                }
-
-                HorizontalLayout {
-                    padding-top: Tokens.space-6;
-                    spacing: Tokens.space-8;
-                    alignment: start;
-
-                    Button {
-                        text: root.icon-toolbar ? "" : "Add mod";
-                        icon: Tokens.icon-add;
-                        tip: root.icon-toolbar ? "Add mod" : "";
-                        clicked => {
-                            ModsState.add-mod();
-                        }
-                    }
-
-                    Button {
-                        text: root.icon-toolbar ? "" : "Open folder";
-                        icon: Tokens.icon-folder;
-                        tip: root.icon-toolbar ? "Open folder" : "";
-                        clicked => {
-                            ModsState.open-folder();
-                        }
-                    }
-
-                    Button {
-                        text: root.icon-toolbar ? "" : "Open log";
-                        icon: Tokens.icon-log;
-                        tip: root.icon-toolbar ? "Open log" : "";
-                        enabled: ModsState.can-open-log;
-                        clicked => {
-                            ModsState.open-log();
-                        }
-                    }
-                }
-
-                VerticalLayout {
-                    padding-left: Tokens.mods-empty-margin.left;
-                    padding-right: Tokens.mods-empty-margin.right;
-                    padding-top: Tokens.mods-empty-margin.top;
-                    spacing: Tokens.space-8;
-
-                    HorizontalLayout {
-                        spacing: Tokens.space-8;
-
-                        LabelText {
-                            text: "Installed";
-                        }
-
-                        if ModsState.installed-count > 0: CaptionText {
-                            text: "\{ModsState.enabled-count} of \{ModsState.installed-count} on";
-                            vertical-alignment: center;
-                        }
-                    }
-
-                    if ModsState.installed-count == 0: VerticalLayout {
-                        spacing: Tokens.space-8;
-                        padding-top: Tokens.space-6;
-
-                        SubheadingText {
-                            text: "No mods yet";
-                        }
-
-                        CaptionText {
-                            text: "Add a mod's DLL, or put it in the Mods folder yourself. MelonLoader loads it the next time you play offline with mods.";
-                        }
-
-                        HorizontalLayout {
-                            alignment: start;
-                            padding-top: Tokens.space-4;
-
-                            Button {
-                                text: "Add mod";
-                                clicked => {
-                                    ModsState.add-mod();
-                                }
+                ScrollView {
+                    x: Tokens.space-4;
+                    y: Tokens.space-4;
+                    width: parent.width - Tokens.space-8;
+                    height: parent.height - Tokens.space-8;
+                    content-width: self.visible-width;
+                    content-height: root.choices.length * Tokens.control-min-height;
+                    content-y: -Math.max(0px, root.highlighted * Tokens.control-min-height - self.visible-height + Tokens.control-min-height);
+                    VerticalLayout {
+                        for choice[index] in root.choices: Rectangle {
+                            height: Tokens.control-min-height;
+                            background: root.highlighted == index ? Tokens.selected-brush : transparent;
+                            Text { x: Tokens.space-8; width: parent.width - Tokens.space-16; text: choice.label; color: Tokens.text-brush; vertical-alignment: center; overflow: elide; }
+                            TouchArea {
+                                moved => { root.highlighted = index; }
+                                clicked => { root.chosen(choice.value); popup.close(); }
                             }
                         }
                     }
                 }
             }
+        }
+    }
+}
 
-            // The selected mod's pane.
-            pane := Rectangle {
-                width: root.wide ? Tokens.changes-pane-wide-width : root.compact ? Tokens.changes-pane-compact-width : Tokens.changes-pane-width;
-                background: Tokens.surface-brush;
-
-                Rectangle {
-                    x: 0;
-                    width: 1px;
-                    background: Tokens.hairline-brush;
+component SettingItem inherits Rectangle {
+    in property <ModSettingRow> item;
+    in property <int> index;
+    height: layout.preferred-height;
+    layout := VerticalLayout {
+        padding-top: Tokens.setting-row-margin.top;
+        padding-bottom: Tokens.setting-row-margin.bottom;
+        spacing: Tokens.space-4;
+        if root.item.group != "": LabelText {
+            text: root.item.group;
+            min-height: self.preferred-height + (root.index == 0 ? Tokens.mod-setting-first-group-margin.top : Tokens.mod-setting-group-margin.top) + Tokens.mod-setting-group-margin.bottom;
+            vertical-alignment: center;
+        }
+        HorizontalLayout {
+            spacing: Tokens.space-12;
+            Text { text: root.item.name; color: root.item.drafted ? Tokens.draft-brush : Tokens.text-brush; wrap: word-wrap; vertical-alignment: center; horizontal-stretch: 1; }
+            Rectangle {
+                width: Tokens.mod-setting-field-width;
+                height: Tokens.control-min-height;
+                if root.item.kind == "switch": ToggleSwitch {
+                    checked: root.item.is-on; label: root.item.name; enabled: !ModsState.busy;
+                    toggled(value) => { ModsState.setting-toggled(root.index, value); }
                 }
+                if root.item.kind == "choice": ModsChoice {
+                    choices: root.item.choices; value: root.item.value; label: root.item.name; enabled: !ModsState.busy;
+                    choice-label: root.item.choice-label; choice-index: root.item.choice-index;
+                    chosen(value) => { ModsState.setting-choice(root.index, value); }
+                }
+                if root.item.kind != "switch" && root.item.kind != "choice": ModsField {
+                    text: root.item.value; label: root.item.name; unit: root.item.unit;
+                    invalid: root.item.error != "";
+                    enabled: !ModsState.busy;
+                    edited(value) => { ModsState.setting-edited(root.index, value); }
+                    committed => { ModsState.commit-settings(); }
+                }
+            }
+        }
+        if root.item.description != "": CaptionText { text: root.item.description; }
+        if root.item.drafted && root.item.was != "": CaptionText { text: root.item.was; color: Tokens.draft-brush; }
+        if root.item.error != "": CaptionText { text: root.item.error; color: Tokens.error-brush; }
+    }
+}
 
-                VerticalLayout {
-                    padding-left: Tokens.pane-content-margin.left;
-                    padding-right: Tokens.pane-content-margin.right;
-                    padding-top: Tokens.pane-content-margin.top;
-                    alignment: start;
+component StatusLine inherits Rectangle {
+    in property <string> message;
+    in property <MessageTone> tone;
+    in property <bool> draft;
+    height: message-text.preferred-height;
+    property <brush> ink: root.tone == MessageTone.error ? Tokens.error-brush : root.tone == MessageTone.warning ? Tokens.warning-brush : root.draft ? Tokens.draft-brush : Tokens.text-muted-brush;
+    Image {
+        x: 0; y: Tokens.space-2; width: Tokens.icon-size-small; height: Tokens.icon-size-small;
+        source: root.tone == MessageTone.error ? Tokens.icon-error : root.tone == MessageTone.warning ? Tokens.icon-warning : root.draft ? Tokens.icon-draft : Tokens.icon-info;
+        colorize: root.ink;
+    }
+    message-text := CaptionText { x: Tokens.icon-size-small + Tokens.space-8; y: 0; width: parent.width - self.x; height: self.preferred-height; text: root.message; color: root.ink; }
+}
 
-                    CaptionText {
-                        text: "A mod's details and settings show here once you add one.";
+export component ModsPage inherits Rectangle {
+    in property <bool> compact;
+    in property <bool> wide;
+    property <length> gutter: root.compact ? Tokens.preview-page-compact-margin.left : Tokens.preview-page-margin.left;
+    property <length> pane-width: root.wide ? Tokens.changes-pane-wide-width : root.compact ? Tokens.changes-pane-compact-width : Tokens.changes-pane-width;
+    property <length> content-width: Math.max(0px, Math.min(Tokens.mods-content-max-width, pane.x) - 2 * root.gutter);
+    property <int> active-index: ModsState.selected-index;
+    property <int> visible-count: ModsState.mods.length;
+    property <bool> had-rows;
+    init => { root.had-rows = ModsState.mods.length > 0; }
+    changed visible-count => {
+        // Removing the final row destroys its focus scope. Keep page shortcuts, particularly Undo, alive.
+        if (root.visible-count == 0 && root.had-rows) { page-keys.focus(); }
+        root.had-rows = root.visible-count > 0;
+    }
+    changed active-index => {
+        if (root.active-index >= 0) {
+            let top = root.active-index * (Tokens.row-min-height + Tokens.row-gap.bottom);
+            if (top < -library-scroll.content-y) { library-scroll.content-y = -top; }
+            else if (top + Tokens.row-min-height > -library-scroll.content-y + library-scroll.visible-height) {
+                library-scroll.content-y = Math.min(0px, library-scroll.visible-height - top - Tokens.row-min-height);
+            }
+        }
+    }
+
+    if ModsState.is-read && !ModsState.has-read-error && ModsState.installed-count == 0 && ModsState.sources.length == 0: AshField { width: pane.x; height: bar.y; still: true; }
+    page-keys := FocusScope {
+        key-pressed(event) => {
+            if (event.modifiers.control && (event.text == "z" || event.text == "Z") && ModsState.can-undo) { ModsState.undo-remove(); return accept; }
+            if (event.text == Key.F5) { ModsState.refresh(); return accept; }
+            reject
+        }
+        header := VerticalLayout {
+            x: root.gutter; y: Tokens.preview-page-margin.top;
+            width: root.content-width; height: self.preferred-height;
+            spacing: Tokens.space-12;
+            TitleText { text: "Mods"; }
+            SecondaryText { text: "Mods load only when you play offline with mods. Playing online or plain offline never loads them."; }
+            HorizontalLayout {
+                spacing: Tokens.space-8; alignment: start;
+                Button { text: root.compact ? "" : "Add mod"; icon: Tokens.icon-add; enabled: !ModsState.busy; tip: "Add a mod from its DLL file; take it out of a downloaded zip first"; clicked => { ModsState.add-mod(); } }
+                Button { text: root.compact ? "" : "Open folder"; icon: Tokens.icon-folder; enabled: ModsState.can-open-folder; tip: ModsState.open-folder-tip; clicked => { ModsState.open-folder(); } }
+                Button { text: root.compact ? "" : "Open log"; icon: Tokens.icon-log; enabled: ModsState.can-open-log; tip: ModsState.open-log-tip; clicked => { ModsState.open-log(); } }
+            }
+        }
+        installed-header := HorizontalLayout {
+            x: root.gutter + Tokens.table-header-inset.left;
+            y: header.y + header.height + Tokens.preview-header-margin.bottom;
+            width: root.content-width - Tokens.table-header-inset.left - Tokens.table-header-inset.right;
+            height: self.preferred-height;
+            spacing: Tokens.space-12;
+            LabelText { text: "Installed"; }
+            CaptionText { text: ModsState.installed-count > 0 ? "\{ModsState.enabled-count} of \{ModsState.installed-count} on" : ""; horizontal-stretch: 1; vertical-alignment: center; }
+            if root.wide: LabelText { text: "Version"; width: Tokens.affix-value-column-width; }
+        }
+        library-scroll := ScrollView {
+            x: root.gutter;
+            y: installed-header.y + installed-header.height + Tokens.mod-list-margin.top;
+            width: root.content-width;
+            height: bar.y - self.y - Tokens.space-12;
+            content-width: self.visible-width;
+            content-height: library-content.preferred-height;
+            library-content := VerticalLayout {
+                height: self.preferred-height;
+                alignment: start;
+                if ModsState.mods.length > 0: list-menu := ContextMenuArea {
+                    height: ModsState.mods.length * (Tokens.row-min-height + Tokens.row-gap.bottom);
+                    Menu {
+                        MenuItem { title: ModsState.selected-enabled ? "Turn off" : "Turn on"; enabled: ModsState.selected-index >= 0 && !ModsState.busy; activated => { ModsState.toggle-mod(ModsState.selected-index); } }
+                        MenuItem { title: "Show in folder"; enabled: ModsState.selected-index >= 0; activated => { ModsState.reveal-mod(ModsState.selected-index); } }
+                        MenuSeparator { }
+                        MenuItem { title: "Remove"; enabled: ModsState.selected-index >= 0 && !ModsState.busy; activated => { ModsState.remove-mod(ModsState.selected-index); } }
+                    }
+                    list-focus := FocusScope {
+                        focus-gained(reason) => { if (reason == FocusReason.tab-navigation) { KeyboardFocus.visible = true; } if (ModsState.selected-index < 0) { ModsState.select-mod(0); } }
+                        key-pressed(event) => {
+                            if (event.text == Key.Menu || (event.text == Key.F10 && event.modifiers.shift)) {
+                                list-menu.show({x: Tokens.row-padding.left, y: Math.max(0, ModsState.selected-index) * (Tokens.row-min-height + Tokens.row-gap.bottom) + Tokens.row-min-height});
+                                return accept;
+                            }
+                            if (event.text == Key.DownArrow) { ModsState.select-mod(Math.min(ModsState.mods.length - 1, ModsState.selected-index + 1)); return accept; }
+                            if (event.text == Key.UpArrow) { ModsState.select-mod(Math.max(0, ModsState.selected-index - 1)); return accept; }
+                            if (event.text == Key.Home) { ModsState.select-mod(0); return accept; }
+                            if (event.text == Key.End) { ModsState.select-mod(ModsState.mods.length - 1); return accept; }
+                            if (event.text == " " && !ModsState.busy) { ModsState.toggle-mod(ModsState.selected-index); return accept; }
+                            if (event.text == Key.Delete && !ModsState.busy) { ModsState.remove-mod(ModsState.selected-index); return accept; }
+                            reject
+                        }
+                        VerticalLayout {
+                            spacing: Tokens.row-gap.bottom;
+                            for item[index] in ModsState.mods: Rectangle {
+                                height: Tokens.row-min-height;
+                                border-radius: Tokens.control-radius; border-width: Tokens.space-1;
+                                border-color: ModsState.selected-index == index ? Tokens.accent-brush : transparent;
+                                background: ModsState.selected-index == index ? Tokens.selected-brush : row-touch.has-hover ? Tokens.hover-brush : transparent;
+                                accessible-role: list-item; accessible-label: item.name;
+                                accessible-checkable: true; accessible-checked: item.enabled;
+                                accessible-action-default => { ModsState.select-mod(index); }
+                                HorizontalLayout {
+                                    padding-left: Tokens.row-padding.left; padding-right: Tokens.row-padding.right; spacing: Tokens.space-12;
+                                    Rectangle {
+                                        width: Tokens.icon-size-nav; height: Tokens.icon-size-nav; y: (parent.height - self.height) / 2;
+                                        border-radius: Tokens.control-radius; border-width: Tokens.space-1;
+                                        border-color: item.enabled ? Tokens.accent-brush : Tokens.strong-line-brush;
+                                        background: item.enabled ? Tokens.accent-brush : Tokens.ground-brush;
+                                        if item.enabled: Path {
+                                            x: Tokens.space-4; y: Tokens.space-4;
+                                            width: Tokens.space-12; height: Tokens.space-12;
+                                            stroke: Tokens.on-accent-brush; stroke-width: Tokens.space-2;
+                                            MoveTo { x: 0; y: Tokens.space-6 / 1px; }
+                                            LineTo { x: Tokens.space-4 / 1px; y: Tokens.space-10 / 1px; }
+                                            LineTo { x: Tokens.space-12 / 1px; y: Tokens.space-2 / 1px; }
+                                        }
+                                    }
+                                    VerticalLayout {
+                                        alignment: center; horizontal-stretch: 1; spacing: Tokens.space-2;
+                                        Text { text: item.name; font-size: Tokens.font-size-value; color: item.enabled ? Tokens.text-brush : Tokens.text-muted-brush; overflow: elide; }
+                                        CaptionText { text: root.wide ? item.author : item.caption; wrap: no-wrap; overflow: elide; }
+                                    }
+                                    if item.problem != "": Image { width: Tokens.icon-size-small; height: Tokens.icon-size-small; y: (parent.height - self.height) / 2; source: Tokens.icon-error; colorize: Tokens.error-brush; }
+                                    if item.problem != "": CaptionText { text: item.problem-label; color: Tokens.error-brush; wrap: no-wrap; vertical-alignment: center; }
+                                    if item.drafted: Image { width: Tokens.icon-size-small; height: Tokens.icon-size-small; y: (parent.height - self.height) / 2; source: Tokens.icon-draft; colorize: Tokens.draft-brush; }
+                                    if root.wide: CaptionText { text: item.version; width: Tokens.affix-value-column-width; vertical-alignment: center; }
+                                }
+                                row-touch := TouchArea {
+                                    pointer-event(event) => { if (event.kind == PointerEventKind.down) { KeyboardFocus.visible = false; ModsState.select-mod(index); list-focus.focus(); } }
+                                    clicked => { if (self.mouse-x <= Tokens.row-padding.left + Tokens.icon-size-nav + Tokens.space-6 && !ModsState.busy) { ModsState.toggle-mod(index); } }
+                                }
+                                TipTrigger { text: item.problem; hovered: row-touch.has-hover; focused: list-focus.has-focus && ModsState.selected-index == index; }
+                                FocusRing { focused: list-focus.has-focus && ModsState.selected-index == index; }
+                            }
+                        }
+                    }
+                }
+                if !ModsState.is-read: CaptionText { text: "Reading mods…"; }
+                if ModsState.is-read && ModsState.has-read-error && ModsState.mods.length == 0: VerticalLayout {
+                    padding-left: Tokens.mods-empty-margin.left; padding-right: Tokens.mods-empty-margin.right; padding-top: Tokens.mods-empty-margin.top;
+                    spacing: Tokens.space-8;
+                    SubheadingText { text: "Couldn't read your mods"; }
+                    CaptionText { text: "Fix the problem shown below, then refresh the library."; }
+                    HorizontalLayout { alignment: start; Button { text: "Refresh"; icon: Tokens.icon-refresh; enabled: !ModsState.busy; clicked => { ModsState.refresh(); } } }
+                }
+                if ModsState.is-read && !ModsState.has-read-error && ModsState.mods.length == 0: VerticalLayout {
+                    padding-left: Tokens.mods-empty-margin.left; padding-right: Tokens.mods-empty-margin.right; padding-top: Tokens.mods-empty-margin.top;
+                    spacing: Tokens.space-8;
+                    SubheadingText { text: "No mods yet"; }
+                    CaptionText { text: "Add a mod's DLL, or put it in the Mods folder yourself. MelonLoader loads it the next time you play offline with mods."; }
+                    HorizontalLayout { alignment: start; padding-top: Tokens.space-4; Button { text: "Add mod"; enabled: !ModsState.busy; clicked => { ModsState.add-mod(); } } }
+                }
+                if ModsState.sources.length > 0: VerticalLayout {
+                    padding-top: Tokens.mod-sources-margin.top; spacing: Tokens.space-4;
+                    HorizontalLayout {
+                        padding-left: Tokens.table-header-inset.left; spacing: Tokens.space-12;
+                        LabelText { text: "Not installed"; }
+                        CaptionText { text: "\{ModsState.sources.length} from sources"; vertical-alignment: center; horizontal-stretch: 1; }
+                    }
+                    for source[index] in ModsState.sources: HorizontalLayout {
+                        min-height: Tokens.row-min-height; padding-left: Tokens.mod-source-row-padding.left; padding-right: Tokens.mod-source-row-padding.right; spacing: Tokens.space-12;
+                        Rectangle { width: Tokens.icon-size-nav; height: Tokens.icon-size-nav; y: (parent.height - self.height) / 2; border-width: Tokens.space-1; border-color: Tokens.strong-line-brush; border-radius: Tokens.control-radius; }
+                        VerticalLayout {
+                            alignment: center; spacing: Tokens.space-2; horizontal-stretch: 1;
+                            Text { text: source.name; font-size: Tokens.font-size-value; color: Tokens.text-brush; overflow: elide; }
+                            CaptionText { text: source.caption; wrap: no-wrap; overflow: elide; }
+                        }
+                        Button { text: source.busy ? "Building…" : "Build and install"; height: Tokens.control-min-height; y: (parent.height - self.height) / 2; horizontal-stretch: 0; enabled: !source.busy && !ModsState.busy && !ModsState.building; clicked => { ModsState.build-source(index); } }
                     }
                 }
             }
         }
-
-        bar := ActionBar {
-            message: ModsState.readiness;
-            tone: ModsState.readiness-tone;
-
-            Button {
-                text: "Play offline with mods";
-                icon: Tokens.icon-play;
-                kind: ButtonKind.primary;
-                enabled: ModsState.can-play;
-                clicked => {
-                    ModsState.play();
+        // Explicit sibling bounds keep breakpoint widths outside the parent layout solver.
+        pane := Rectangle {
+            x: root.width - root.pane-width; y: 0; width: root.pane-width; height: bar.y;
+            background: Tokens.raised-brush;
+            Rectangle { x: 0; y: 0; width: Tokens.space-1; background: Tokens.hairline-brush; }
+            ScrollView {
+                content-width: self.visible-width;
+                content-height: detail.y + detail.preferred-height + Tokens.pane-content-margin.bottom;
+                detail := VerticalLayout {
+                    x: Tokens.pane-content-margin.left; y: Tokens.pane-content-margin.top;
+                    width: parent.width - Tokens.pane-content-margin.left - Tokens.pane-content-margin.right;
+                    height: self.preferred-height; spacing: Tokens.space-18; alignment: start;
+                    if ModsState.selected-index < 0: CaptionText { text: "A mod's details and settings show here once you add one."; }
+                    if ModsState.selected-index >= 0: VerticalLayout {
+                        spacing: Tokens.space-4;
+                        SectionText { text: ModsState.selected-name; max-lines: 2; }
+                        CaptionText { text: "Version " + ModsState.selected-version + (ModsState.selected-author == "" ? "" : " by " + ModsState.selected-author); }
+                        CaptionText { text: ModsState.selected-file; wrap: no-wrap; overflow: elide; }
+                        if ModsState.selected-source != "": CaptionText { text: ModsState.selected-source; wrap: no-wrap; overflow: elide; source-tip := TouchArea { } TipTrigger { text: ModsState.selected-source-path; hovered: source-tip.has-hover; } }
+                        if ModsState.selected-build-status != "": CaptionText { text: ModsState.selected-build-status; }
+                        if ModsState.selected-state != "": CaptionText { text: ModsState.selected-state; color: Tokens.draft-brush; }
+                    }
+                    if ModsState.selected-problem != "" && ModsState.selected-enabled: CaptionText { text: ModsState.selected-problem; color: Tokens.error-brush; }
+                    if ModsState.selected-index >= 0: HorizontalLayout {
+                        spacing: Tokens.space-8;
+                        Button { text: ModsState.selected-enabled ? "Turn off" : "Turn on"; enabled: !ModsState.busy; clicked => { ModsState.toggle-mod(ModsState.selected-index); } }
+                        Button { icon: Tokens.icon-folder; tip: "Show this mod's DLL in its folder."; clicked => { ModsState.reveal-mod(ModsState.selected-index); } }
+                        Rectangle { horizontal-stretch: 1; }
+                        Button { text: "Remove"; icon: Tokens.icon-delete; kind: ButtonKind.subtle; enabled: !ModsState.busy; clicked => { ModsState.remove-mod(ModsState.selected-index); } }
+                    }
+                    if ModsState.can-install-build || ModsState.can-rebuild || ModsState.building: HorizontalLayout {
+                        alignment: start; spacing: Tokens.space-8;
+                        if ModsState.can-install-build: Button { text: ModsState.install-build-text; enabled: !ModsState.busy && !ModsState.building; clicked => { ModsState.install-build(ModsState.selected-index); } }
+                        if ModsState.can-rebuild || ModsState.building: Button { text: ModsState.building ? "Building…" : ModsState.rebuild-text; enabled: !ModsState.building && !ModsState.busy; clicked => { ModsState.rebuild(ModsState.selected-index); } }
+                    }
+                    if ModsState.selected-description != "": SecondaryText { text: ModsState.selected-description; }
+                    if ModsState.settings.length > 0: VerticalLayout {
+                        if ModsState.settings[0].group == "": LabelText { text: "Settings"; }
+                        for item[index] in ModsState.settings: SettingItem { item: item; index: index; }
+                    }
+                    if root.wide && ModsState.selected-index >= 0: VerticalLayout {
+                        spacing: Tokens.space-8;
+                        LabelText { text: "Last game with mods"; }
+                        if ModsState.previous-build: CaptionText { text: "From a previous build of this mod."; }
+                        if ModsState.log-lines.length == 0: CaptionText { text: "Nothing from it in the last game with mods."; }
+                        for line in ModsState.log-lines: HorizontalLayout {
+                            padding-top: Tokens.detail-row-margin.top; padding-bottom: Tokens.detail-row-margin.bottom; spacing: Tokens.space-6;
+                            CaptionText { text: line.time; wrap: no-wrap; }
+                            Rectangle { width: Tokens.icon-size-small; if line.error: Image { source: Tokens.icon-error; colorize: Tokens.error-brush; width: Tokens.icon-size-small; height: Tokens.icon-size-small; } }
+                            CaptionText { text: line.text; color: line.error ? Tokens.error-brush : Tokens.text-muted-brush; horizontal-stretch: 1; }
+                            if line.count > 1: CaptionText {
+                                text: "×\{line.count}"; wrap: no-wrap;
+                                count-touch := TouchArea { }
+                                TipTrigger { text: line.count-tip; hovered: count-touch.has-hover; }
+                            }
+                        }
+                    }
                 }
+            }
+        }
+        bar := Rectangle {
+            x: 0; y: root.height - self.height; width: root.width;
+            height: Math.max(Tokens.action-bar-status-min-height, statuses.height) + Tokens.action-bar-padding.top + Tokens.action-bar-padding.bottom;
+            background: Tokens.surface-brush;
+            Rectangle { x: 0; y: 0; height: Tokens.space-1; background: Tokens.hairline-brush; }
+            // Width-aware text heights avoid preferred-height undercounting conditional wrapped captions.
+            statuses := Rectangle {
+                x: Tokens.action-bar-padding.left;
+                y: (parent.height - self.height) / 2;
+                width: Math.min(Tokens.status-message-max-width, actions.x - self.x - Tokens.space-12);
+                height: readiness-line.height + (ModsState.change-message == "" ? 0px : Tokens.space-2 + change-line.height);
+                readiness-line := StatusLine { x: 0; y: 0; width: parent.width; message: ModsState.readiness; tone: ModsState.readiness-tone; }
+                change-line := StatusLine {
+                    x: 0; y: readiness-line.height + Tokens.space-2; width: parent.width;
+                    visible: ModsState.change-message != "";
+                    message: ModsState.change-message; tone: ModsState.change-tone;
+                    draft: ModsState.change-is-draft;
+                }
+            }
+            actions := HorizontalLayout {
+                x: parent.width - self.width - Tokens.action-bar-padding.right;
+                y: (parent.height - self.height) / 2;
+                width: self.preferred-width;
+                height: Tokens.control-min-height;
+                spacing: Tokens.space-12;
+                if ModsState.can-undo: Button { text: "Undo"; icon: Tokens.icon-undo; kind: ButtonKind.subtle; horizontal-stretch: 0; height: Tokens.control-min-height; y: (parent.height - self.height) / 2; enabled: !ModsState.busy; tip: "Undo the last removed mod (Ctrl+Z)."; clicked => { ModsState.undo-remove(); } }
+                if ModsState.draft-count > 0: Button { text: ModsState.draft-count == 1 ? "Revert 1 change" : "Revert \{ModsState.draft-count} changes"; kind: ButtonKind.subtle; horizontal-stretch: 0; height: Tokens.control-min-height; y: (parent.height - self.height) / 2; enabled: !ModsState.busy; clicked => { ModsState.revert-drafts(); } }
+                Button { text: "Play offline with mods"; icon: Tokens.icon-play; kind: ButtonKind.primary; horizontal-stretch: 0; height: Tokens.control-min-height; y: (parent.height - self.height) / 2; enabled: ModsState.can-play; clicked => { ModsState.commit-settings(); ModsState.play(); } }
             }
         }
     }
