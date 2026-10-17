@@ -1,0 +1,59 @@
+// A read-only, wrapping text box: text that can be read in full, selected and copied, scrolling once it outgrows the box.
+
+import { ScrollView } from "std-widgets.slint";
+import { Tokens } from "../tokens.slint";
+import { KeyboardFocus } from "../globals.slint";
+import { FocusRing } from "focus.slint";
+
+export component ReadOnlyTextBox inherits Rectangle {
+    in property <string> text;
+    in property <string> label;
+
+    accessible-role: text-input;
+    accessible-label: root.label;
+    accessible-value: root.text;
+    accessible-read-only: true;
+
+    border-radius: Tokens.control-radius;
+    border-width: 1px;
+    background: input.has-focus ? Tokens.ground-brush : Tokens.surface-brush;
+    border-color: input.has-focus ? Tokens.accent-brush : Tokens.strong-line-brush;
+    forward-focus: input;
+
+    TouchArea {
+        pointer-event(event) => {
+            if (event.kind == PointerEventKind.down) {
+                KeyboardFocus.visible = false;
+            }
+        }
+        clicked => {
+            input.focus();
+        }
+    }
+
+    ScrollView {
+        x: 1px;
+        y: 1px;
+        width: root.width - 2px;
+        height: root.height - 2px;
+        content-width: self.visible-width;
+        content-height: input.preferred-height + Tokens.space-4 * 2;
+
+        input := TextInput {
+            x: Tokens.space-6;
+            y: Tokens.space-4;
+            width: parent.width - Tokens.space-6 * 2;
+            text: root.text;
+            read-only: true;
+            single-line: false;
+            wrap: word-wrap;
+            color: Tokens.text-brush;
+            selection-background-color: Tokens.accent-pressed-color;
+            selection-foreground-color: Tokens.on-accent-color;
+        }
+    }
+
+    FocusRing {
+        focused: input.has-focus;
+    }
+}

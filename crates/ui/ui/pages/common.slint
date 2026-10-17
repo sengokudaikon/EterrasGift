@@ -1,4 +1,4 @@
-// Page furniture shared by several pages: the empty state, the action bar, settings-like groups, Eterra's band.
+// Page furniture shared by several pages: the empty state, the action bar, settings-like groups.
 
 import { Tokens } from "../tokens.slint";
 import { TitleText, SecondaryText, CaptionText, CaptionTone } from "../widgets/text.slint";
@@ -153,32 +153,5 @@ export component SwitchSetting inherits HorizontalLayout {
         alignment: start;
 
         @children
-    }
-}
-
-// Eterra's band crowning a page: the painted wood cut by the page's top edge, scaled to the page but never hanging deeper
-// than EterraBandMaxDepth, centred on the carved eye (spec/shell-and-settings.md §8).
-// TODO(decorations): bloom phases (cross-fade from the eye), side feather, the ash field and the computed content margin.
-export component EterraBand inherits Rectangle {
-    in property <image> source: @image-url("../../../../design/eterra/band-1-wilted.png");
-
-    property <float> cut: Tokens.eterra-band-cut / 1px;
-    property <float> scale: Math.min(root.width / 1px / self.source.width,
-        Tokens.eterra-band-max-depth / 1px / (self.source.height - root.cut));
-
-    // The band's depth below the page's top edge, so content can start under it.
-    out property <length> depth: (self.source.height - root.cut) * root.scale * 1px;
-
-    height: root.depth;
-    clip: true;
-
-    Image {
-        image-fit: contain;
-        source: root.source;
-        width: root.source.width * root.scale * 1px;
-        height: root.source.height * root.scale * 1px;
-        // The carved eye sits at image pixel (783, 120); keep it on the page's axis.
-        x: parent.width / 2 - 783 * root.scale * 1px;
-        y: -root.cut * root.scale * 1px;
     }
 }

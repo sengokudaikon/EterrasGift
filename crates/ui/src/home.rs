@@ -1,7 +1,9 @@
 //! Home in the window: `HomeModel` (eg-companion) behind the `HomeState` global. Home follows the game only while it
-//! shows, every `GameLauncher::WATCH_INTERVAL`; another page costs nothing.
+//! shows, every `GameLauncher::WATCH_INTERVAL`; another page costs nothing. Eterra's tree follows the game's phase, and
+//! ash drifts while the game is on its way in.
 
 use crate::background;
+use crate::decorations::{Ash, Decorations};
 use crate::shell::{Page, ShellHandle};
 use crate::{BloomPhase as ViewPhase, HomeState, LaunchMode as ViewMode, MainWindow};
 use eg_companion::home::HomeModel;
@@ -19,10 +21,13 @@ struct Home {
     window: Weak<MainWindow>,
     visible: Cell<bool>,
     watch_timer: Timer,
+    decorations: Rc<Decorations<MainWindow>>,
+    /// Home is coming into view: the tree is shown where it is, without blooming there.
+    entering: Cell<bool>,
 }
 
 /// `launcher` is None in a run that has none (tests): Home then shows the companion's own title.
-pub fn bind(window: &MainWindow, launcher: Option<Arc<GameLauncher>>, shell: &ShellHandle) {
+pub fn bind(window: &MainWindow, launcher: Option<Arc<GameLauncher>>, shell: &ShellHandle, decorations: Rc<Decorations<MainWindow>>) {
     let state = window.global::<HomeState>();
     state.set_has_launcher(launcher.is_some());
     let Some(launcher) = launcher else {
@@ -34,6 +39,8 @@ pub fn bind(window: &MainWindow, launcher: Option<Arc<GameLauncher>>, shell: &Sh
         window: window.as_weak(),
         visible: Cell::new(shell.current() == Page::Home),
         watch_timer: Timer::default(),
+        decorations,
+        entering: Cell::new(true),
     });
     state.on_start({
         let home = home.clone();
@@ -47,6 +54,7 @@ pub fn bind(window: &MainWindow, launcher: Option<Arc<GameLauncher>>, shell: &Sh
         move |page| {
             home.visible.set(page == Page::Home);
             if page == Page::Home {
+                home.entering.set(true);
                 home.refresh();
             }
         }
@@ -106,7 +114,14 @@ impl Home {
             return;
         };
         let model = self.model.borrow();
+        let ash = if model.is_game_starting() { Ash::Drifting } else { Ash::Hidden };
+        if self.entering.replace(false) {
+            self.decorations.enter(model.phase(), ash);
+        } else {
+            self.decorations.follow(model.phase(), ash);
+        }
         let state = window.global::<HomeState>();
+        state.set_game_starting(model.is_game_starting());
         state.set_phase(match model.phase() {
             BloomPhase::Wilted => ViewPhase::Wilted,
             BloomPhase::Budding => ViewPhase::Budding,

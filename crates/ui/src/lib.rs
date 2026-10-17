@@ -1,11 +1,13 @@
 //! The Slint UI: the `.slint` sources under `ui/`, compiled by `build.rs`, and the Rust that puts the app's state
-//! behind them: navigation, Home, Settings, and the Windows settings the design reacts to. What is not ported yet is
+//! behind them: navigation, Home, Settings, Eterra's decorations, and the Windows settings the design reacts to. What is not ported yet is
 //! stubbed (`stubs`).
 
 slint::include_modules!();
 
 pub mod background;
+pub mod decorations;
 pub mod home;
+pub mod preparation;
 pub mod settings;
 pub mod shell;
 pub mod stubs;
@@ -36,16 +38,44 @@ pub fn install(window: &MainWindow, app: App) {
     let mut navigation = Navigation::new(true, trainer_pages);
     navigation.navigate(app.start);
     let shell = shell::bind(window, navigation);
-    home::bind(window, app.launcher, &shell);
+    let decorations = decorations::Decorations::install(window);
+    home::bind(window, app.launcher, &shell, decorations);
     settings::bind(window, app.settings);
     stubs::install(window, app.trainer);
     apply_system_settings(window);
 }
 
+/// Windows says nothing when "Animation effects" or high contrast changes, and Slint surfaces no window activation to
+/// read them again on (the C# app's moment), so they are read again every few seconds: two cheap system calls. Captures
+/// hold their own settings, so the app starts this and they do not.
+pub fn follow_system_settings(window: &MainWindow) {
+    let timer = slint::Timer::default();
+    timer.start(slint::TimerMode::Repeated, std::time::Duration::from_secs(2), {
+        let window = window.as_weak();
+        move || {
+            if let Some(window) = window.upgrade() {
+                apply_system_settings(&window);
+            }
+        }
+    });
+    // Dropping the timer would stop it; it runs for the process's life, idle once its window is gone.
+    std::mem::forget(timer);
+}
+
 /// Pushes the Windows settings the design depends on into the `Tokens` global. Windows sends no event when
-/// "Animation effects" changes, so call this again whenever the window is activated (spec/shell-and-settings.md).
-pub fn apply_system_settings(window: &MainWindow) {
+/// "Animation effects" changes, so it is read again while the window lives (spec/shell-and-settings.md §5).
+pub fn apply_system_settings<C>(window: &C)
+where
+    C: ComponentHandle,
+    for<'a> Tokens<'a>: slint::Global<'a, C>,
+{
     let tokens = window.global::<Tokens>();
-    tokens.set_high_contrast(system::high_contrast());
-    tokens.set_motion(system::animations_enabled());
+    // Set only on a change, so an unchanged reading wakes no binding.
+    let (high_contrast, motion) = (system::high_contrast(), system::animations_enabled());
+    if tokens.get_high_contrast() != high_contrast {
+        tokens.set_high_contrast(high_contrast);
+    }
+    if tokens.get_motion() != motion {
+        tokens.set_motion(motion);
+    }
 }

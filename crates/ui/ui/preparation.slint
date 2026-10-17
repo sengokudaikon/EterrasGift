@@ -1,0 +1,122 @@
+// The launcher's preparation window (spec/shell-and-settings.md §11): Eterra's tree following the preparation, ash drifting
+// while it works, and the state in words beneath. When it stops: the reason in full and the two ways on.
+
+import { Tokens } from "tokens.slint";
+import { KeyboardFocus, Tip } from "globals.slint";
+import { TitleText, SecondaryText, CaptionText } from "widgets/text.slint";
+import { Button, ButtonKind } from "widgets/button.slint";
+import { TipBubble } from "widgets/focus.slint";
+import { ReadOnlyTextBox } from "widgets/text-box.slint";
+import { EterraBand, AshField, EterraFrames } from "decorations.slint";
+
+export global PreparationState {
+    // Where preparation is, in words.
+    in property <string> message;
+    // The latest line of build or tool output, while it works.
+    in property <string> detail;
+    // Preparation stopped: the tree wilts, the ash goes, and the reason shows with Retry and Open Settings.
+    in property <bool> stopped;
+    in property <string> reason;
+
+    callback retry();
+    callback open-settings();
+}
+
+export component PreparationWindow inherits Window {
+    title: "Eterra's Gift · preparation";
+    // Fixed: tall enough for the tree, the words and a stopped reason with its buttons.
+    width: Tokens.preparation-window-width;
+    height: Tokens.preparation-window-height;
+    background: Tokens.ground-brush;
+    default-font-family: Tokens.body-font;
+    default-font-size: Tokens.font-size-body;
+
+    // Focus visuals show once a navigation key is pressed; widgets hide them again on a pointer press.
+    FocusScope {
+        focus-on-click: false;
+        focus-on-tab-navigation: false;
+        capture-key-pressed(event) => {
+            if (event.text == Key.Tab || event.text == Key.Backtab || event.text == Key.LeftArrow || event.text == Key.RightArrow) {
+                KeyboardFocus.visible = true;
+            }
+            reject
+        }
+
+        band := EterraBand {
+            x: 0;
+            y: 0;
+            width: root.width;
+        }
+
+        if !PreparationState.stopped: AshField {
+            x: 0;
+            y: 0;
+            width: root.width;
+            height: root.height;
+        }
+
+        EterraFrames { }
+
+        // The state in words under the eye.
+        VerticalLayout {
+            x: (root.width - self.width) / 2;
+            y: band.content-top;
+            width: Math.min(Tokens.reading-max-width, root.width - Tokens.empty-state-margin.left - Tokens.empty-state-margin.right);
+            height: root.height - self.y;
+            alignment: start;
+            spacing: Tokens.space-8;
+
+            TitleText {
+                text: "Preparing Eterra's Gift";
+                horizontal-alignment: center;
+            }
+
+            SecondaryText {
+                text: PreparationState.message;
+                horizontal-alignment: center;
+            }
+
+            if !PreparationState.stopped: CaptionText {
+                text: PreparationState.detail;
+                horizontal-alignment: center;
+                wrap: no-wrap;
+                overflow: elide;
+            }
+
+            // The reason in full, where it can be read and copied.
+            if PreparationState.stopped: ReadOnlyTextBox {
+                text: PreparationState.reason;
+                label: "Why preparation stopped";
+                height: Tokens.preparation-reason-height;
+            }
+
+            if PreparationState.stopped: HorizontalLayout {
+                alignment: center;
+                padding-top: Tokens.empty-action-margin.top;
+                spacing: Tokens.space-8;
+
+                Button {
+                    text: "Retry";
+                    kind: ButtonKind.primary;
+                    tip: "Check and build again";
+                    clicked => {
+                        PreparationState.retry();
+                    }
+                }
+
+                Button {
+                    text: "Open Settings";
+                    tip: "Open the app's Settings from its last build, if there is one";
+                    clicked => {
+                        PreparationState.open-settings();
+                    }
+                }
+            }
+        }
+
+        if Tip.open: TipBubble {
+            window-width: root.width;
+            window-height: root.height;
+        }
+    }
+}

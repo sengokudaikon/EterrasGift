@@ -1,0 +1,137 @@
+// Eterra's decorations (spec/shell-and-settings.md §8): her band crowning a page, and ash drifting up from its foot while
+// the page waits for something real. Decoration only: nothing here takes input or carries data. Rust owns the bloom clock
+// and computes every frame (crates/ui/src/decorations.rs); these elements only place what it hands them.
+
+import { Tokens } from "tokens.slint";
+
+// One circle of the ash field. An ember's glow is a circle of its own, listed before the ember. `x` and `y` are fractions
+// of the field's size; `sway` and `radius` are pixels.
+export struct Mote {
+    // The mote's number: the field draws only as many motes as its area allows.
+    index: int,
+    x: float,
+    y: float,
+    sway: length,
+    radius: length,
+    opacity: float,
+    ember: bool,
+}
+
+export global Eterra {
+    // The painted keyframes in bloom order. Rust reads their pixels for the reveal and for how far their twigs hang.
+    out property <[image]> keyframes: [
+        @image-url("../../../design/eterra/band-1-wilted.png"),
+        @image-url("../../../design/eterra/band-2-budding.png"),
+        @image-url("../../../design/eterra/band-3-opening.png"),
+        @image-url("../../../design/eterra/band-4-bloom.png"),
+    ];
+    // Image rows: the lowest twig in any keyframe, and `reach[c]`, the lowest within c columns either side of the eye.
+    in property <int> deepest;
+    in property <[int]> reach;
+
+    // The frame, each image the keyframe's rows below the cut with its ends dissolved: the keyframe behind and its
+    // opacity, and the later keyframe spreading out from the eye (no image while none spreads).
+    in property <image> behind;
+    in property <float> behind-opacity: 1;
+    in property <image> spread;
+    // The ash on its way up while a page waits, and the cold dusting of a page with nothing on it.
+    in property <[Mote]> motes;
+    in property <[Mote]> still-motes;
+    // Whether anything still moves: the bloom on its way somewhere, or ash drifting.
+    in property <bool> moving;
+
+    // The band's scale, written by the band; the reveal's soft edge is measured on screen.
+    in-out property <float> band-scale: 1;
+
+    callback frame();
+}
+
+// Asks for Eterra's next frame at a low rate while something still moves, never with Windows animation effects off.
+// One per window, beside whichever decorations it shows.
+export component EterraFrames {
+    property <bool> motion: Tokens.motion;
+
+    // Animation effects turning off settle the bloom at once.
+    changed motion => {
+        Eterra.frame();
+    }
+
+    Timer {
+        interval: 1s / Tokens.ash-frames-per-second;
+        running: Tokens.motion && Eterra.moving;
+        triggered => {
+            Eterra.frame();
+        }
+    }
+}
+
+// Eterra's band crowning a page: the painted wood cut by the page's top edge, scaled to the page but never hanging deeper
+// than EterraBandMaxDepth, centred on the carved eye. Its cut ends dissolve into the ground (Rust cuts the frames).
+export component EterraBand inherits Rectangle {
+    property <image> art: Eterra.keyframes[0];
+    // The carved eye's column in the keyframes (image pixels), kept on the page's axis.
+    property <float> eye: 783;
+    property <float> cut: Tokens.eterra-band-cut / 1px;
+    property <float> scale: Math.min(root.width / 1px / Math.max(root.art.width, 1),
+        Tokens.eterra-band-max-depth / 1px / Math.max(Eterra.deepest - root.cut, 1));
+    property <length> left: root.width / 2 - root.eye * root.scale * 1px;
+    property <length> art-width: root.art.width * root.scale * 1px;
+
+    // The page body's top margin: below the lowest twig over the centred reading column, across every keyframe, so the
+    // text never moves as the band blooms.
+    property <length> column: Math.min(Tokens.reading-max-width,
+        Math.max(0px, root.width - Tokens.empty-state-margin.left - Tokens.empty-state-margin.right));
+    property <int> reach: Eterra.reach[Math.min(Math.ceil(root.column / 1px / 2 / root.scale), Eterra.reach.length - 1)];
+    out property <length> content-top: Math.max(Tokens.empty-state-margin.top,
+        (root.reach - root.cut) * root.scale * 1px + Tokens.eterra-band-gap);
+
+    height: (root.art.height - root.cut) * root.scale * 1px;
+    clip: true;
+
+    // The frames are cut at the band's scale: a new one redraws them.
+    init => {
+        Eterra.band-scale = root.scale;
+        Eterra.frame();
+    }
+    changed scale => {
+        Eterra.band-scale = root.scale;
+        Eterra.frame();
+    }
+
+    Image {
+        source: Eterra.behind;
+        opacity: Eterra.behind-opacity;
+        x: root.left;
+        y: 0;
+        width: root.art-width;
+        height: root.height;
+    }
+
+    Image {
+        source: Eterra.spread;
+        x: root.left;
+        y: 0;
+        width: root.art-width;
+        height: root.height;
+    }
+}
+
+// Ash and a few embers rising from the foot of the area it fills; `still` is the cold dusting with no embers and no
+// motion, for a page with nothing on it and nothing being waited on.
+export component AshField inherits Rectangle {
+    in property <bool> still;
+
+    // One mote per AshMoteArea square pixels, capped.
+    property <int> count: Math.min(Tokens.ash-mote-limit, Math.floor(root.width / 1px * (root.height / 1px) / Tokens.ash-mote-area));
+
+    for mote in root.still ? Eterra.still-motes : Eterra.motes: Rectangle {
+        visible: mote.index < root.count;
+        x: root.width * mote.x + mote.sway - mote.radius;
+        // Motes start just below the foot, so none pops into view.
+        y: root.height * mote.y + 4px - mote.radius;
+        width: mote.radius * 2;
+        height: mote.radius * 2;
+        border-radius: mote.radius;
+        background: (mote.ember ? Tokens.ember-color : Tokens.ash-color).with-alpha(mote.opacity);
+    }
+}

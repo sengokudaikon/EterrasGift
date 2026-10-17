@@ -16,15 +16,18 @@ use eg_companion::process::RunningGame;
 use eg_core::game_log::{GameLogState, GameReadiness};
 use eg_core::settings::SettingsStore;
 use eg_core::settings_service::SettingsService;
+use eg_ui::decorations::freeze_clock;
+use eg_ui::preparation::{PreparationView, Stage};
 use eg_ui::settings::SettingsPage;
 use eg_ui::shell::Page;
-use eg_ui::{App, HomeState, LaunchMode as ViewMode, MainWindow, Nav, SettingsState, Tokens};
+use eg_ui::{App, Eterra, HomeState, LaunchMode as ViewMode, MainWindow, Nav, PreparationWindow, SettingsState, Tokens};
 use slint::platform::software_renderer::{MinimalSoftwareWindow, RepaintBufferType};
 use slint::platform::{Key, Platform, PointerEventButton, WindowAdapter, WindowEvent};
 use slint::{ComponentHandle, LogicalPosition, PhysicalSize, SharedString};
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 
 /// A game host that records starts instead of making them, so no capture ever starts the real game.
 struct FakeGameHost {
@@ -209,7 +212,7 @@ impl Session {
         settle();
     }
 
-    fn capture(&self, ui: &MainWindow, name: &str) {
+    fn capture(&self, ui: &impl ComponentHandle, name: &str) {
         let frame = ui.window().take_snapshot().expect("take_snapshot");
         let path = self.out.join(format!("{name}.png"));
         image::save_buffer(&path, frame.as_bytes(), frame.width(), frame.height(), image::ColorType::Rgba8).expect("write PNG");
@@ -219,6 +222,13 @@ impl Session {
 
 fn settle() {
     slint::platform::update_timers_and_animations();
+}
+
+fn running() -> Option<RunningGame> {
+    Some(RunningGame {
+        process_id: 1,
+        start_time: jiff::Timestamp::now(),
+    })
 }
 
 fn revisit_home(ui: &MainWindow) {
@@ -304,10 +314,7 @@ fn main() {
     assert_eq!(host.state.lock().unwrap().launched, [LaunchMode::Offline]);
     session.capture(&ui, "home-started");
     host.with(|game| {
-        game.running = Some(RunningGame {
-            process_id: 1,
-            start_time: jiff::Timestamp::now(),
-        });
+        game.running = running();
         game.readiness = GameReadiness::NoCharacter;
     });
     // Home looks again each time it comes to show.
@@ -316,6 +323,30 @@ fn main() {
     host.with(|game| game.readiness = GameReadiness::Offline);
     revisit_home(&ui);
     session.capture(&ui, "home-bloom");
+    // The game found, its log not yet at the login: the tree buds and ash drifts up the page.
+    let host = session.host();
+    host.with(|game| game.running = running());
+    let ui = session.open_on(host, true, 1100, 700);
+    session.capture(&ui, "home-starting");
+
+    // A start the game answers: the tree blooms out from the eye, caught partway (the C# suite's `bloom-reveal`).
+    let host = session.host();
+    let ui = session.open_on(host.clone(), true, 1100, 700);
+    let start = Instant::now();
+    freeze_clock(Some(start));
+    ui.global::<Tokens>().set_motion(true);
+    host.with(|game| {
+        game.running = running();
+        game.readiness = GameReadiness::Offline;
+    });
+    ui.global::<HomeState>().invoke_start(ViewMode::Online);
+    freeze_clock(Some(start + Duration::from_millis(1700)));
+    ui.global::<Eterra>().invoke_frame();
+    settle();
+    session.capture(&ui, "home-bloom-reveal");
+    ui.global::<Tokens>().set_motion(false);
+    freeze_clock(None);
+
     let host = session.host();
     host.with(|game| game.install = None);
     let ui = session.open_on(host, true, 1100, 700);
@@ -342,6 +373,23 @@ fn main() {
     ui.global::<SettingsState>().invoke_save_locations();
     settle();
     session.capture(&ui, "settings-location-refused");
+
+    // The launcher's preparation window while it builds, and once it has stopped.
+    let preparation = PreparationView::new(PreparationWindow::new().expect("create PreparationWindow"));
+    preparation.window().global::<Tokens>().set_motion(false);
+    session.window.set_size(PhysicalSize::new(580, 460));
+    preparation.window().show().expect("show PreparationWindow");
+    preparation.start("Checking application components…");
+    preparation.report(Stage::Building, "Building application and native helper");
+    preparation.show_detail(r"EterrasGift.Desktop -> C:\Users\player\AppData\Local\EterrasGift\runtime\.stage-1a2b3c4d\EterrasGift.Desktop.dll");
+    settle();
+    session.capture(preparation.window(), "preparation-building");
+    preparation.stop(
+        "dotnet publish exited with code 1: error CS1002: ; expected (src/Hosts/EterrasGift.Desktop/Program.cs, line 12)",
+        Some("Preparation stopped. Resolve the problem below, then Retry."),
+    );
+    settle();
+    session.capture(preparation.window(), "preparation-stopped");
 
     // Windows high contrast swaps the line and muted-text roles.
     let ui = session.open(true, 1100, 700);

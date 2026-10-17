@@ -5,6 +5,7 @@ import { Tokens } from "../tokens.slint";
 import { TitleText, SecondaryText, SubheadingText, LabelText, CaptionText } from "../widgets/text.slint";
 import { Button, ButtonKind } from "../widgets/button.slint";
 import { ActionBar, MessageTone } from "common.slint";
+import { AshField } from "../decorations.slint";
 
 export global ModsState {
     in property <int> installed-count;
@@ -26,6 +27,15 @@ export component ModsPage inherits Rectangle {
 
     // Compact and narrow windows keep the toolbar as icons with tips.
     property <bool> icon-toolbar: root.compact;
+
+    // A still, cold dusting of ash over a library with nothing in it and nothing being waited on.
+    if ModsState.installed-count == 0: AshField {
+        x: 0;
+        y: 0;
+        width: pane.x;
+        height: bar.y;
+        still: true;
+    }
 
     VerticalLayout {
         HorizontalLayout {
@@ -128,7 +138,7 @@ export component ModsPage inherits Rectangle {
             }
 
             // The selected mod's pane.
-            Rectangle {
+            pane := Rectangle {
                 width: root.wide ? Tokens.changes-pane-wide-width : root.compact ? Tokens.changes-pane-compact-width : Tokens.changes-pane-width;
                 background: Tokens.surface-brush;
 
@@ -151,7 +161,7 @@ export component ModsPage inherits Rectangle {
             }
         }
 
-        ActionBar {
+        bar := ActionBar {
             message: ModsState.readiness;
             tone: ModsState.readiness-tone;
 

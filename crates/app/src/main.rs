@@ -94,6 +94,7 @@ fn main() -> Result<(), slint::PlatformError> {
             start,
         },
     );
+    eg_ui::follow_system_settings(&window);
     let result = window.run();
     launcher.cancel();
     let background_fault = eg_ui::background::shutdown();
