@@ -446,7 +446,7 @@ impl SettingsPage {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum CloseDecision {
+pub(crate) enum CloseDecision {
     Wait,
     ShowFailure,
     Close,
@@ -466,6 +466,10 @@ fn location_text(saved: &AppSettings) -> [String; 6] {
 
 /// Puts the page and module-supplied sections behind the window's `SettingsState`.
 pub fn bind(window: &MainWindow, page: SettingsPage) {
+    bind_with_close(window, page, None);
+}
+
+pub(crate) fn bind_with_close(window: &MainWindow, page: SettingsPage, before_close: Option<Rc<dyn Fn() -> CloseDecision>>) {
     let page = Rc::new(RefCell::new(page));
     let state = window.global::<SettingsState>();
 
@@ -479,6 +483,7 @@ pub fn bind(window: &MainWindow, page: SettingsPage) {
         sections: Rc::new(VecModel::default()),
         watch: slint::Timer::default(),
         closing: Cell::new(false),
+        before_close,
     });
     state.set_modules(ModelRc::from(view.modules.clone()));
     state.set_sections(ModelRc::from(view.sections.clone()));
@@ -489,14 +494,11 @@ pub fn bind(window: &MainWindow, page: SettingsPage) {
             if let Some(view) = view.upgrade() {
                 let observed = view.page.borrow().snapshot.completed;
                 if view.closing.get() {
-                    let decision = view.page.borrow_mut().close_decision();
+                    let decision = view.close_decision();
                     match decision {
                         CloseDecision::Wait => {}
                         CloseDecision::ShowFailure => {
                             view.closing.set(false);
-                            if let Some(window) = view.window.upgrade() {
-                                window.global::<crate::Nav>().invoke_navigate("settings".into());
-                            }
                         }
                         CloseDecision::Close => {
                             view.closing.set(false);
@@ -521,7 +523,7 @@ pub fn bind(window: &MainWindow, page: SettingsPage) {
     window.window().on_close_requested({
         let view = view.clone();
         move || {
-            let decision = view.page.borrow_mut().close_decision();
+            let decision = view.close_decision();
             match decision {
                 CloseDecision::Close => slint::CloseRequestResponse::HideWindow,
                 CloseDecision::Wait => {
@@ -529,9 +531,6 @@ pub fn bind(window: &MainWindow, page: SettingsPage) {
                     slint::CloseRequestResponse::KeepWindowShown
                 }
                 CloseDecision::ShowFailure => {
-                    if let Some(window) = view.window.upgrade() {
-                        window.global::<crate::Nav>().invoke_navigate("settings".into());
-                    }
                     view.show_all();
                     slint::CloseRequestResponse::KeepWindowShown
                 }
@@ -591,6 +590,7 @@ pub fn bind(window: &MainWindow, page: SettingsPage) {
 }
 
 struct View {
+    before_close: Option<Rc<dyn Fn() -> CloseDecision>>,
     page: Rc<RefCell<SettingsPage>>,
     locations: Rc<VecModel<LocationSetting>>,
     window: Weak<MainWindow>,
@@ -601,6 +601,21 @@ struct View {
 }
 
 impl View {
+    fn close_decision(&self) -> CloseDecision {
+        if let Some(before_close) = &self.before_close {
+            let decision = before_close();
+            if decision != CloseDecision::Close {
+                return decision;
+            }
+        }
+        let decision = self.page.borrow_mut().close_decision();
+        if decision == CloseDecision::ShowFailure
+            && let Some(window) = self.window.upgrade()
+        {
+            window.global::<crate::Nav>().invoke_navigate("settings".into());
+        }
+        decision
+    }
     fn row(&self, location: Location) -> LocationSetting {
         let page = self.page.borrow();
         LocationSetting {

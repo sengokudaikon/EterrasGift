@@ -1,0 +1,9 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <AssemblyName>MelonLoader</AssemblyName>
+    <Version>0.7.3</Version>
+    <InformationalVersion>0.7.3+fixture</InformationalVersion>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+</Project>

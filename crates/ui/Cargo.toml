@@ -9,10 +9,11 @@ publish.workspace = true
 eg-core.workspace = true
 eg-companion.workspace = true
 rfd.workspace = true
+jiff.workspace = true
 slint = { workspace = true, features = ["raw-window-handle-06"] }
 
 [target.'cfg(windows)'.dependencies]
-windows-sys = { workspace = true, features = ["Win32_UI_WindowsAndMessaging", "Win32_UI_Accessibility"] }
+windows-sys = { workspace = true, features = ["Win32_UI_WindowsAndMessaging", "Win32_UI_Accessibility", "Win32_UI_Shell"] }
 
 [build-dependencies]
 slint-build.workspace = true

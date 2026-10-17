@@ -4,6 +4,10 @@
 use crate::Lifetime;
 use crate::install::{self, GameInstall};
 use crate::loader::{self, ModLoaderState, ModLoaderSwitch};
+use crate::mods::assembly::LoaderVersion;
+use crate::mods::library::preferences_path;
+use crate::mods::loader_state::{self, LoaderInstall};
+use crate::mods::worker::ModWorker;
 use crate::process::{self, RunningGame};
 use eg_core::game_log::{GameLogReader, GameLogState};
 use std::path::{Path, PathBuf};
@@ -72,6 +76,7 @@ pub struct FileGameHost {
     player_log: PathBuf,
     log: Mutex<GameLogReader>,
     loader_directory: Option<PathBuf>,
+    mods: Option<ModWorker>,
 }
 
 impl FileGameHost {
@@ -83,7 +88,14 @@ impl FileGameHost {
             player_log: player_log.to_path_buf(),
             log: Mutex::new(GameLogReader::new(player_log)),
             loader_directory: loader_directory.map(Path::to_path_buf),
+            mods: None,
         }
+    }
+
+    /// Shares the Mods page's admission queue so accepted edits finish before preparation reads the library.
+    pub fn with_mod_worker(mut self, mods: ModWorker) -> Self {
+        self.mods = Some(mods);
+        self
     }
 
     fn process_name(&self) -> String {
@@ -129,12 +141,40 @@ impl FileGameHost {
 
     /// Makes Mods\ match the library and writes waiting setting changes, before MelonLoader can read either, and
     /// repairs the UnityEngine.CoreModule.dll MelonLoader generated for this game build if it would stop every mod.
-    fn prepare_mods(&self, _install: &GameInstall) -> Result<(), LaunchError> {
-        // TODO(mods): ModLibrary.Prepare (spec/companion.md §6.3), the MelonLoader version check for a staged folder
-        // and the CoreModule repair (§7). Until they are ported, a start with mods is refused before anything changes.
-        Err(LaunchError::Refused(
-            "Playing with mods is not ported yet: the mod library has to make the Mods folder ready first. Use the C# app to play with mods.".into(),
-        ))
+    fn prepare_mods(&self, install: &GameInstall) -> Result<(), LaunchError> {
+        let Some(mods) = &self.mods else {
+            return Err(LaunchError::Refused("The mod library is not available, so the game cannot be started with mods.".into()));
+        };
+        let root = self.loader_root(install);
+        if self.staged(install) {
+            let staged = LoaderInstall::find(&root);
+            let minimum = LoaderVersion::new(0, 6, 6);
+            if staged.as_ref().is_none_or(|loader| loader.version < minimum) {
+                let version = staged.map_or_else(|| "version unknown".into(), |loader| loader.version.to_string());
+                return Err(LaunchError::Refused(format!(
+                    "The MelonLoader in {} ({version}) can't run from a folder outside the game; that needs MelonLoader {minimum} or later. Update it there, or clear the MelonLoader folder in Settings.",
+                    root.display()
+                )));
+            }
+        }
+        mods.call(move |library| {
+            library.prepare(&root, &preferences_path(&root))?;
+            if loader_state::needs_repair(&root) {
+                loader_state::repair_core_module(&root)?;
+            }
+            Ok(())
+        })
+        .map_err(|error| LaunchError::Refused(format!("The mods could not be made ready, so the game was not started: {error}")))
+    }
+
+    /// A note that cannot be written does not undo a successful game start.
+    fn launched(&self, install: &GameInstall, started: SystemTime) {
+        if let Some(mods) = &self.mods
+            && let Ok(when) = jiff::Timestamp::try_from(started)
+        {
+            let root = self.loader_root(install);
+            let _ = mods.call(move |library| library.launched(&root, when));
+        }
     }
 }
 
@@ -196,7 +236,7 @@ impl GameHost for FileGameHost {
             if !with_mods {
                 return LaunchOutcome::Started;
             }
-            // TODO(mods): record the launch time in placed.json (best effort) for the Mods page.
+            self.launched(install, started);
             if loader.wait_for_loader(started, loader::LOADER_TIMEOUT, Duration::from_millis(500), lifetime) {
                 LaunchOutcome::LoaderStarted
             } else {
@@ -226,6 +266,7 @@ impl GameHost for FileGameHost {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::mods::library::ModLibrary;
     use std::fs;
 
     fn game(temp: &Path) -> GameInstall {
@@ -300,5 +341,67 @@ mod tests {
         let arguments: Vec<_> = command.get_args().map(|argument| argument.to_string_lossy().into_owned()).collect();
         assert_eq!(arguments, ["--offline".to_owned(), format!("--melonloader.basedir={}", staged.display())]);
         assert_eq!(host.command(LaunchMode::Offline, &install).get_args().count(), 1);
+    }
+
+    #[test]
+    fn preparation_waits_for_accepted_edits_and_launch_timestamp_is_best_effort() {
+        let temp = tempfile::tempdir().unwrap();
+        let install = game(temp.path());
+        let library = ModLibrary::new(temp.path().join("Library"));
+        let dll = temp.path().join("Fixture.dll");
+        fs::write(&dll, include_bytes!("../tests/fixtures/melon/clean.bin")).unwrap();
+        library.add(&dll, false).unwrap();
+        let mods = ModWorker::new(library);
+        let edited = mods.enqueue(|library| library.set_enabled("Fixture.dll", false)).unwrap();
+        let host = host(temp.path(), &install).with_mod_worker(mods.clone());
+        host.prepare_mods(&install).unwrap();
+        edited.recv().unwrap().unwrap();
+        assert!(!install.directory().join("Mods/Fixture.dll").exists());
+        let started = SystemTime::UNIX_EPOCH + Duration::from_secs(1000);
+        host.launched(&install, started);
+        let root = install.directory().to_path_buf();
+        assert_eq!(
+            mods.call(move |library| Ok(library.placed(&root)?.last_launch)).unwrap(),
+            Some(jiff::Timestamp::try_from(started).unwrap())
+        );
+        mods.close();
+        // Closing admission cannot turn a successful game start into a failure to record its timestamp.
+        host.launched(&install, started);
+    }
+
+    #[test]
+    fn staged_loader_is_checked_before_library_or_preferences_change() {
+        let temp = tempfile::tempdir().unwrap();
+        let install = game(temp.path());
+        let staged = temp.path().join("Staged");
+        let library = ModLibrary::new(temp.path().join("Library"));
+        let mods = ModWorker::new(library);
+        let host = FileGameHost::new(Some(&install.executable), &temp.path().join("Player.log"), Some(&staged)).with_mod_worker(mods.clone());
+        assert!(matches!(host.prepare_mods(&install), Err(LaunchError::Refused(reason)) if reason.contains("needs MelonLoader 0.6.6 or later")));
+        assert!(!staged.exists());
+        assert!(!temp.path().join("Library").exists());
+        fs::create_dir_all(staged.join("MelonLoader/net6")).unwrap();
+        fs::write(staged.join("MelonLoader/net6/MelonLoader.dll"), include_bytes!("../tests/fixtures/melon/loader.bin")).unwrap();
+        host.prepare_mods(&install).unwrap();
+        assert!(staged.join("Mods").is_dir());
+        assert!(temp.path().join("Library/placed.json").is_file());
+        mods.close();
+    }
+
+    #[test]
+    fn preparation_failure_keeps_proxy_aside_and_does_not_record_a_launch() {
+        let temp = tempfile::tempdir().unwrap();
+        let install = game(temp.path());
+        fs::write(install.directory().join(loader::SET_ASIDE_NAME), b"proxy").unwrap();
+        let directory = temp.path().join("Library");
+        fs::create_dir(&directory).unwrap();
+        fs::write(directory.join("profile.json"), "damaged").unwrap();
+        let mods = ModWorker::new(ModLibrary::new(directory.clone()));
+        let host = host(temp.path(), &install).with_mod_worker(mods.clone());
+        let result = host.launch(LaunchMode::OfflineWithMods, Some(&install), &Lifetime::default());
+        assert!(matches!(result, Err(LaunchError::Refused(reason)) if reason.starts_with("The mods could not be made ready, so the game was not started:")));
+        assert_eq!(host.read_mod_loader(Some(&install)), ModLoaderState::SetAside);
+        assert!(!directory.join("placed.json").exists());
+        mods.close();
     }
 }

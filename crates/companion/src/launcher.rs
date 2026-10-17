@@ -8,6 +8,7 @@ use crate::install::GameInstall;
 use crate::loader::{self, ModLoaderState};
 use crate::process::RunningGame;
 use eg_core::game_log::GameLogState;
+use std::path::PathBuf;
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::Duration;
 
@@ -52,6 +53,14 @@ impl GameLauncher {
 
     pub fn find_running(&self) -> Option<RunningGame> {
         self.host.find_running()
+    }
+
+    pub fn loader_root(&self, install: &GameInstall) -> PathBuf {
+        self.host.loader_root(install)
+    }
+
+    pub fn read_game_version(&self, install: &GameInstall) -> Option<String> {
+        self.host.read_game_version(install)
     }
 
     pub fn read_log(&self, game: &RunningGame) -> GameLogState {
