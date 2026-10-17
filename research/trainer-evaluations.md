@@ -34,6 +34,9 @@ pin should accompany the first actual nightly requirement; the installed `nightl
 | dotnetdll 0.3.0 | All four baseline cases fail, including clean input | Nested-parent relationships change. Registry source `resolution/write.rs:659` writes zero-based `enc.0` as a one-based enclosing-type RID. No hidden upstream patch applied. |
 | dotscope 0.9.1 | Clean baseline passes; three damaged baselines fail; explicit repair passes all four | Raw NestedClass sorting and scoped duplicate renaming preserve inventory, executable references, result 42, and repeated repair. |
 | il2cpp-bridge-rs 0.1.4 | Compiles on stable/nightly; thread-affinity acceptance rejects both | Exact package declares Send/Sync attachment guards and uint32 handles. Additional source findings are recorded in `tools/trainer-eval/bridge/audit.json`. Not suitable unchanged. |
+| Fake host + mock runtime DLL | 4 process tests pass on stable debug and nightly release | Real DLL/export resolution integrates the production queue and ownership types; fixture mutation, cancellation, worker/offline rejection, root collection, quiescent unload, child failure and hang containment. |
+| detour 0.10.0 | Controlled forwarding/restoration and body-exception tests pass | Relocated-call trampoline has no unwind metadata. Candidate remains restricted, not adopted. |
+| neohook 0.16.0 | Unwind registration and instrumented tests pass; minimal debug hook fails on stable/nightly | Foreign exception skips Rust destructor in hooked path; direct-call control passes. Optimization/instrumentation changes the outcome, not the adoption decision. |
 
 The first recorded assembly run is
 `artifacts/trainer-eval/run-f73510d577584ce19844669b4bce91af/results.json` (git-ignored generated output).
@@ -62,6 +65,8 @@ cargo fetch --manifest-path tools/trainer-eval/bridge/Cargo.toml
 ./tools/trainer-eval/Run-Assemblies.ps1 -RepairOnly
 cargo check --manifest-path tools/trainer-eval/bridge/Cargo.toml
 cargo test --manifest-path tools/trainer-eval/bridge/Cargo.toml
+./tools/trainer-eval/Run-FakeHost.ps1
+./tools/trainer-eval/Run-FakeHost.ps1 -Toolchain nightly -Release
 ```
 
 The bridge test requires a non-Send/non-Sync Thread guard and intentionally rejects this exact package. Its non-initializing
@@ -91,8 +96,16 @@ times out. Commands and results are destroyed outside the state lock. The future
 main-thread callback; the queue itself does not. Rust panics can produce an abandoned result but foreign exceptions and
 access violations are not translated by the queue.
 
-The C++ ABI fixture is an evaluation oracle only, not a dependency of the shipped Rust crates. The actual game, a real
-collector, generated Unity signatures and executable detours are not covered by these tests.
+The C++ ABI fixture is an evaluation oracle only, not a dependency of the shipped Rust crates. Hook-engine probes now
+exercise executable detours in their own disposable processes; commands, source identities and exact limits are in
+[hook-eval/README.md](../tools/trainer-eval/hook-eval/README.md). Neither engine clears adoption. Concurrent patching,
+hook coexistence, active-call drain and trampoline reclamation are untested.
+
+The separate fake host loads only an explicitly supplied mock DLL. It uses the real ownership and dispatcher layers
+but simulates frame execution, offline policy and explicit collection of boxed integers. Owned commands contain no
+managed addresses; targets resolve on the simulated engine thread under a retained root. Its collector is not Boehm
+and it has no metadata, write barriers or Unity objects. It tests quiescent unload after joined workers, not live helper
+unloading. The actual game and generated Unity signatures remain outside these tests.
 
 ## Workspace validation
 
@@ -107,17 +120,20 @@ collector, generated Unity signatures and executable detours are not covered by 
 - Both .NET evaluation projects build with zero warnings/errors. The complete local Cecil comparison run passes.
 - Both Rust writer adapters build and pass isolated Clippy. Bridge library/example checks pass; its negative acceptance
   test rejects the upstream guard as intended. These isolated workspaces are not covered by root workspace checks.
+- Fake-host isolated Clippy passes; all four process tests pass on stable debug and nightly release. The hook packages
+  pass isolated formatting/Clippy, with their intentionally failing acceptance case preserved.
 
 ## Next acceptance gates
 
 1. Extend the passing dotscope repair evaluation to actual .NET 6 and larger metadata-index fixtures before adoption.
-2. Add a disposable fake host that loads a mock runtime DLL and integrates export lookup, frame dispatch, roots and shutdown.
+2. Extend the disposable fake host as invocation, reference writes and protocol transport are implemented. No GUI clone
+   is needed now; the existing Slint captures already exercise UI fake sessions.
 3. Independently validate matching 6000.4 headers/generated-code fixtures. Exact archived 6000.4.8f1 headers now provide
    pointer-handle evidence (see bridge audit); they are third-party extractions, not independently checked game artifacts.
    Validate handle ABI, exported signatures,
    value-type receivers, virtual calls and generic sharing. The current raw declarations are experimental until then.
-4. Evaluate a Rust hook engine in a disposable local test process: relocation, unwind metadata, concurrent execution,
-   disable/drain behaviour, and retention of trampolines while calls remain active.
+4. Diagnose the preserved NeoHook debug unwind failure and address Detour's missing trampoline unwind metadata.
+   Then test concurrent execution, disable/drain behaviour and retention of trampolines while calls remain active.
 5. Add the verified invocation/exception and reference-write layer, then the helper adapter and protocol 21 transport.
    Wire trainer UI only after fake-session operation tests cover the relevant semantics.
 6. Live game validation remains opt-in and has not been performed.

@@ -24,7 +24,7 @@ Thread ownership, GC roots, ABI validation and dispatch remain responsibilities 
 
 | Project | Evidence | Evaluation decision |
 |---|---|---|
-| [il2cpp-bridge-rs](https://github.com/Batchhh/il2cpp-bridge-rs) | Runtime export resolution, metadata cache, invocation and object access; Windows MSVC x64 listed. Published 0.1.4 in 2026. MIT. | Most relevant candidate for selective reuse, subject to source and target-runtime checks. |
+| [il2cpp-bridge-rs](https://github.com/Batchhh/il2cpp-bridge-rs) | Runtime export resolution, metadata cache, invocation and object access; Windows MSVC x64 listed. Published 0.1.4 in 2026. MIT. | Exact-package audit rejects unchanged adoption: thread affinity, handle width, callback attachment and reference writes. Useful discovery reference. |
 | [il2cpp_rs](https://github.com/ElCapor/il2cpp_rs) | Windows-oriented bindings; documentation calls it development-stage. GPL-3.0. | Reference; exact Unity 6 coverage not established. |
 | [quest-hook-rs](https://github.com/StackDoubleFlow/quest-hook-rs) | Practical Rust modding wrappers and hooks; nightly; documented Unity 2018/2019 support. | Nightly is acceptable, but current runtime layouts still require work. |
 | [il2cpp_utils 0.2.0](https://docs.rs/crate/il2cpp_utils/0.2.0) | Released 2026-09-30; macros, mirrors and hooks over il2cpp-bridge-rs. Android-focused; optional Dobby; Windows examples disable the default hook engine. | Study bindings and snapshots. Panics on missing bindings and native hook dependencies need adaptation. |
@@ -32,7 +32,7 @@ Thread ownership, GC roots, ABI validation and dispatch remain responsibilities 
 
 No maintained repository under the exact name `unity-il2cpp-rs` was established by this search.
 
-Two concrete audit points in retrieved il2cpp-bridge-rs main-branch source:
+Two concrete audit points, now confirmed in restored il2cpp-bridge-rs 0.1.4:
 
 - [Thread guard](https://github.com/Batchhh/il2cpp-bridge-rs/blob/main/src/api/core/runtime/thread.rs) implements
   `Send` and `Sync`, although destruction can detach an owned thread. Our guard must remain on its creating OS thread.
@@ -40,8 +40,10 @@ Two concrete audit points in retrieved il2cpp-bridge-rs main-branch source:
   completion callbacks onto additional threads without attachment in those paths. Cached Rust-data access and arbitrary
   runtime calls have different requirements. Initialization completion must not imply thread attachment.
 
-These observations concern retrieved source, not a reproduced failure of a pinned package. Compare the downloaded
-package before deciding whether to fork, wrap, contribute a fix, or retain our narrow implementation.
+The pinned package compiles on stable/nightly, but the non-Send/non-Sync acceptance assertion rejects it on both.
+Its GC APIs also declare uint32 handles where exact-version archived headers declare pointers. Source identities,
+raw invocation and write-barrier findings are recorded in [the package audit](../tools/trainer-eval/bridge/audit.json).
+No runtime initialization was performed. Keep our narrow ownership boundary rather than integrating this version unchanged.
 
 ## Discovery and generation
 
@@ -105,6 +107,12 @@ can cross Rust frames. C-unwind permits propagation; it does not translate C++ e
 not generally catch foreign exceptions or access violations. Contain our own panic paths separately. Validate trampoline
 unwind behaviour as well as function declarations before enabling native hooks.
 
+The isolated [hook evaluations](../tools/trainer-eval/hook-eval/README.md) now exercise all-Rust `detour 0.10.0` and
+`neohook 0.16.0`. Detour passes controlled forwarding/restoration and body-exception cases but has no unwind metadata
+for a relocated-call trampoline. NeoHook registers relocated unwind metadata; a minimal debug hook nevertheless skips
+a Rust destructor during foreign unwinding, while a direct-call control passes. Instrumentation and optimization change
+the result. Neither clears adoption; release-only success does not resolve the preserved failing reproducer.
+
 ## Thread and GC contracts
 
 An attachment guard checks the current runtime thread, attaches only when needed, owns only the attachment it created,
@@ -120,7 +128,11 @@ helper already creates non-pinned strong roots. Pinning, rooting and Rust Pin ar
 
 A [Unity 6000.3.5f2 report](https://github.com/Jadis0x/Il2CppInspectorPro/issues/22) documents pointer-valued GC handles
 where older code assumed uint32. The first Rust experiment models the pointer-handle ABI explicitly; it must not be
-silently applied to historical runtimes. Matching 6000.4 headers and runtime behaviour remain an acceptance gate.
+silently applied to historical runtimes. Exact archived
+[6000.4.8f1 types](https://raw.githubusercontent.com/nneonneo/Il2CppVersions/8a51ff05ea28a33fda2804197f3c2f1afff6f0c8/headers/6000.4.8f1.h)
+and [API declarations](https://raw.githubusercontent.com/nneonneo/Il2CppVersions/8a51ff05ea28a33fda2804197f3c2f1afff6f0c8/api/6000.4.8f1.h)
+now corroborate `typedef void* Il2CppGCHandle`. These are third-party extracted Unity headers; independent validation
+against the installed editor/game and runtime behaviour remains an acceptance gate.
 
 Rooting a UnityEngine.Object wrapper does not keep its native object alive. Check native validity separately. Avoid
 Deref/DerefMut to live game layouts, since game aliases remain. Reference writes must use verified setters/barriers;
@@ -136,7 +148,10 @@ dummy managed assembly does not change compiled game code or add a CIL interpret
 | [dotnetdll](https://docs.rs/crate/dotnetdll/latest) | 0.3.0, 2026-06-24; GPL-3.0-or-later | Resolution::parse and Resolution::write emit managed PE bytes. | Typed construction and controlled rewrites. |
 | [dotscope](https://docs.rs/crate/dotscope/latest) | 0.9.1, 2026-09-05; Apache-2.0 | CilAssembly emits to file or memory. | First candidate for existing-assembly edits. |
 
-Both are genuine writers. Neither has yet established Cecil-equivalent round-trip preservation on our fixtures.
+Both are genuine writers. The pinned dotscope package now passes our generated fixture repair/preservation matrix with
+an explicit transformation. Dotnetdll changes nested parents even on clean input; a zero-based enclosing-type index
+written as a one-based metadata RID is visible in its source. Results and reproduction are in
+[trainer-evaluations.md](trainer-evaluations.md). Neither result establishes general Cecil-equivalent preservation.
 dotscope's [changelog](https://github.com/ATRAPSLLC/dotscope/blob/main/CHANGELOG.md) includes recent fixes to metadata
 tables, index widths, PE layout and exception handling. Test the exact pinned package. PDBs, strong names and mixed-mode
 assemblies need separate capability checks when required.
@@ -147,9 +162,10 @@ sorted; genuine remaining duplicates are renamed without deleting referenced typ
 replacement validated. A writer that merely preserves the broken table does not pass.
 
 The current C# test fixture creates genuine duplicate top-level types; it does not reproduce the unsorted NestedClass
-case. The Rust evaluation therefore needs both cases, plus a clean assembly for preservation checks. Compare with an
-independent System.Reflection.Metadata reader and executable semantic checks. Test idempotence, nested generics,
-attributes, resources, exception handlers and index-width thresholds before broad adoption.
+case. The Rust evaluation now covers both cases, their combination and a clean assembly, using an independent
+System.Reflection.Metadata reader and executable checks. Repeated repair, generics, attributes, resources, exception
+handlers and calls through renamed types pass in the dotscope adapter. Real CoreModule, .NET 6 loading, nested generic
+edge cases and index-width thresholds remain gates before broad adoption.
 
 ## Evaluation sequence
 
