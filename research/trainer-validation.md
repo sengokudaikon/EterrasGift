@@ -96,6 +96,17 @@ against the existing editor references with warnings as errors. Actual matching-
 It will record the captured UnitySynchronizationContext, worker posts, callback thread/FIFO order and Update/LateUpdate
 events. This preparation is not player-loop evidence. The game remains untouched.
 
+The virtual/interface extension adds eight checks (34 total), also passing through the production Rust host on nightly
+release (`unity-rust-901a6c6769dc46b29f34b5649cc1be02`). Invoking a base MethodInfo on a derived receiver calls the base
+body (103); `il2cpp_object_get_virtual_method` resolves the derived override and both virtual/interface invocations
+return 203. Thus runtime invocation alone does not establish virtual dispatch. This covers a simple inheritance and
+interface fixture; closed generic MethodInfo construction and broader dispatch shapes remain unvalidated.
+
+An additional build with `--incremental-g-c-time-slice=3` passes the same 34 native checks and production Rust ownership
+checks (`unity-rust-481f6075692242368d8eb59511e6d91c`). Runtime observations are `incremental=1`, `strict_barriers=0`.
+This establishes positive collection/root/reference-write cases with incremental mode enabled, not deterministic
+interleaving between collection phases or strict barrier validation.
+
 ## 2. Hook unwinding, patching and teardown
 
 Required evidence:
@@ -143,6 +154,14 @@ Current evidence:
   release. This validates a controlled caller set. Callback counts alone miss callers in a relay/copied prefix;
   retaining executable storage until process exit remains the conservative game-helper lifetime policy.
 
+The focused [mitigation audit](../tools/trainer-eval/hook-eval/mitigation-audit/README.md) also runs the conditional
+candidate with CFG and CET compatibility enabled. Private negative controls distinguish real enforcement from PE
+flags: invalid CFG targets and a static return-address mismatch terminate only in the mitigated control. The relocated
+call and six-case unwind corpus pass with the explicit build flags. Process policy is directly queried for the relocated
+call and the corpus's GPR case; the remaining five cases were not queried individually. Strict shadow-stack mode and
+dynamically marking generated code as CET-compatible remain outside that evidence; compatibility-mode success is not
+their substitute. The earlier suspended-thread PC probes were not rerun with context-IP validation enabled.
+
 Remaining: a complete supported transfer/unwind strategy and explicit unsupported-target policy. The actual dispatcher
 prefix changes RSP, so it fails a conservative leaf-prefix-only policy. Passing finite concurrent/draining experiments
 is evidence for those scenarios, not a proof of race freedom or safe helper unloading.
@@ -186,8 +205,16 @@ type identity in production. No deletion-based repair has been adopted. Full typ
 [Loader diagnostics](../tools/trainer-eval/loader-diagnostics.md) identify both remaining failures as pre-existing
 metadata defects. The comparer has an incorrect framework scope and no abstract-method overrides; StringBuilderStream
 uses incompatible IL2CPP types in managed Stream override signatures. Its Seek method has a body. Independent framework
-metadata and actual .NET 6 resolution distinguish these failures from missing loader dependencies. No additional repair
-has been applied.
+metadata and actual .NET 6 resolution distinguish these failures from missing loader dependencies.
+
+Disposable causal interventions (`loader-interventions-6d7ea882c9104f11b96af5369de6b933`) now confirm the diagnosis.
+An unchanged Cecil roundtrip of the normalized input retains the same two failures with no canonical payload changes.
+Correcting only the comparer scope changes its error to the missing `Equals` implementation. Correcting that scope and
+making the comparer abstract removes its failure; making the stream abstract and nonsealed independently removes the
+stream failure. The combined diagnostic output loads all 3,194 reflected types on .NET 6.0.36. All variants retain
+3,195 TypeDefs, 16,217 fields and 21,111 methods, with only the planned scope/reference/flag changes in the canonical
+comparison. These interventions change instantiability; they do not restore missing methods or correct stream behavior.
+They are causal tests, not a production repair policy, and no target methods were invoked.
 
 ## Tooling provenance
 
