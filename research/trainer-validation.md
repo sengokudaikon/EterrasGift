@@ -156,8 +156,9 @@ Current evidence:
 - Retention must keep the actual hook owners alive. Dropping an owner enters library quarantine; later reclamation
   unregisters unwind tables before suspending threads. That path is outside the validated policy. The worker harness
   also needed explicit 16-byte alignment for Windows CONTEXT; plain windows-sys 0.61.2 CONTEXT has 8-byte Rust alignment.
-  Its release failure is reproduced and fixed in the harness. NeoHook's plain context locals are a source-level concern,
-  not a separately demonstrated engine failure.
+  Its release failure is reproduced and fixed in the harness. A subsequent archive/snapshot audit corrects the earlier
+  library concern: published NeoHook 0.16.0 already wraps both context buffers in 16-byte-aligned storage. The harness
+  failure is not a NeoHook defect; see [source provenance](../tools/trainer-eval/hook-eval/source-provenance.md).
 - Detour still lacks unwind metadata for its relocated stack-changing prefix. A successful body exception does not
   establish asynchronous unwind correctness at every trampoline instruction.
 - Four known concurrent callers pass 100 transactional enable/disable pairs, then stop and join before trampoline
