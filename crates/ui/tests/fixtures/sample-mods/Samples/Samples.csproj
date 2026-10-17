@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- One stand-in mod per build: pass -p:Sample=<NAME> (see ../README.md). Every attribute is in Samples.cs. -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <AssemblyName>$(Sample)</AssemblyName>
+    <DefineConstants>$(Sample)</DefineConstants>
+    <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../../../../../companion/tests/fixtures/melon/Loader/Loader.csproj" />
+    <EmbeddedResource Include="AbilityRanges.json" LogicalName="ModSettings.json" Condition="'$(Sample)' == 'ABILITY_RANGES'" />
+  </ItemGroup>
+</Project>

@@ -1,8 +1,9 @@
-// The companion mod library. Disk work belongs to the serialized Rust service.
+// The Mods page (ModsView.axaml): [list | the selected mod's pane] over the action bar, as on Item Forge. Rust
+// (`crates/ui/src/mods.rs`) puts the mod library behind it; disk work belongs to its ordered worker.
 import { ScrollView } from "std-widgets.slint";
 import { Tokens } from "../tokens.slint";
 import { KeyboardFocus } from "../globals.slint";
-import { TitleText, SectionText, SecondaryText, SubheadingText, LabelText, CaptionText } from "../widgets/text.slint";
+import { TitleText, SectionText, SecondaryText, BodyText, LabelText, CaptionText, CaptionTone } from "../widgets/text.slint";
 import { Button, ButtonKind } from "../widgets/button.slint";
 import { ToggleSwitch } from "../widgets/toggle.slint";
 import { FocusRing, TipTrigger } from "../widgets/focus.slint";
@@ -13,7 +14,7 @@ export struct ModRow {
     file: string, name: string, version: string, author: string, caption: string,
     enabled: bool, drafted: bool, problem: string, problem-label: string,
 }
-export struct SourceRow { name: string, caption: string, busy: bool }
+export struct SourceRow { name: string, caption: string, project: string, busy: bool }
 export struct SettingChoiceRow { value: string, label: string }
 export struct ModSettingRow {
     category: string, key: string, name: string, description: string, group: string,
@@ -30,20 +31,20 @@ export global ModsState {
     in property <int> selected-index: -1;
     in property <int> installed-count;
     in property <int> enabled-count;
+    // Until the mods are read once the page says nothing about them, not even that there are none.
     in property <bool> is-read;
-    in property <bool> has-read-error;
     in property <bool> can-open-folder: true;
     in property <bool> can-open-log;
     // What Open folder and Open log do, or why they can't yet (shown on the disabled buttons too).
     in property <string> open-folder-tip: "Open the Mods folder";
     in property <string> open-log-tip: "Not available: MelonLoader writes its log the first time you play with mods.";
-    in property <string> readiness: "MelonLoader is not in the game folder, so no mod can load. Play offline with mods needs it.";
-    in property <MessageTone> readiness-tone: MessageTone.warning;
+    in property <string> readiness: "Reading the mods…";
+    in property <MessageTone> readiness-tone: MessageTone.info;
     in property <bool> can-play;
     in property <bool> busy;
     in property <string> selected-name;
-    in property <string> selected-version;
-    in property <string> selected-author;
+    // "Version 0.12.1 by sengokudaikon"; the DLL's file name has a line of its own.
+    in property <string> selected-detail;
     in property <string> selected-file;
     in property <string> selected-source;
     in property <string> selected-source-path;
@@ -52,10 +53,11 @@ export global ModsState {
     in property <string> selected-problem;
     in property <string> selected-state;
     in property <bool> selected-enabled;
-    in property <bool> can-rebuild;
+    in property <bool> selected-has-sources;
     in property <bool> can-install-build;
     in property <bool> building;
     in property <string> rebuild-text: "Rebuild";
+    in property <string> rebuild-tip;
     in property <string> install-build-text: "Install build";
     in property <bool> previous-build;
     in property <string> change-message;
@@ -84,21 +86,64 @@ export global ModsState {
     callback stop-work();
 }
 
+// A row's check box, retinted as Fluent's: brass when on. It is no tab stop of its own; Space on the row does the same.
+component ModCheck inherits Rectangle {
+    in property <bool> checked;
+    in property <bool> enabled: true;
+    in property <bool> hovered;
+    width: Tokens.icon-size-nav;
+    height: Tokens.icon-size-nav;
+    border-radius: Tokens.control-radius;
+    border-width: 1px;
+    border-color: !root.enabled ? Tokens.text-disabled-brush : root.checked ? Tokens.accent-brush : root.hovered ? Tokens.text-brush : Tokens.text-secondary-brush;
+    background: root.checked ? Tokens.accent-brush : Tokens.ground-brush;
+    if root.checked: Path {
+        x: Tokens.space-4;
+        y: Tokens.space-4;
+        width: Tokens.space-12;
+        height: Tokens.space-12;
+        stroke: Tokens.on-accent-brush;
+        stroke-width: 1.5px;
+        MoveTo { x: 1; y: 6; }
+        LineTo { x: 4.5; y: 9.5; }
+        LineTo { x: 11; y: 2.5; }
+    }
+}
+
+// A part of a row with a tooltip of its own. Pressing it selects the row, as pressing the rest of the row does. A
+// TouchArea takes the right button too, before the ContextMenuArea around it sees it, so it asks for the menu itself.
+component RowSpot inherits TouchArea {
+    in property <string> tip;
+    callback pressed-down();
+    // Where the right button went down, in window coordinates.
+    callback menu-requested(length, length);
+    pointer-event(event) => {
+        if (event.kind == PointerEventKind.down) {
+            KeyboardFocus.visible = false;
+            root.pressed-down();
+            if (event.button == PointerEventButton.right) {
+                root.menu-requested(self.absolute-position.x + self.mouse-x, self.absolute-position.y + self.mouse-y);
+            }
+        }
+    }
+    TipTrigger { text: root.tip; hovered: root.has-hover; }
+}
+
 // Native editing keeps its undo stack. Enter and focus loss commit the draft.
 component ModsField inherits Rectangle {
     in-out property <string> text;
     in property <string> label;
     in property <string> unit;
     in property <bool> enabled: true;
-    in property <bool> invalid;
     callback edited(string);
     callback committed();
     property <bool> input-focused: input.has-focus;
     changed input-focused => { if (!root.input-focused) { root.committed(); } }
     height: Tokens.control-min-height;
     border-radius: Tokens.control-radius;
-    border-width: Tokens.space-1;
-    border-color: root.invalid ? Tokens.error-brush : input.has-focus ? Tokens.accent-brush : Tokens.strong-line-brush;
+    border-width: 1px;
+    // A number the cfg can't hold is said under the setting's name; the box keeps its ordinary frame, as in the C# view.
+    border-color: input.has-focus ? Tokens.accent-brush : Tokens.strong-line-brush;
     background: input.has-focus ? Tokens.ground-brush : touch.has-hover ? Tokens.hover-brush : Tokens.surface-brush;
     accessible-role: text-input;
     accessible-label: root.label;
@@ -111,7 +156,7 @@ component ModsField inherits Rectangle {
     }
     HorizontalLayout {
         padding-left: Tokens.space-8;
-        padding-right: Tokens.mod-setting-unit-margin.right;
+        padding-right: root.unit != "" ? Tokens.mod-setting-unit-margin.right : Tokens.space-6;
         spacing: Tokens.space-4;
         input := TextInput {
             text <=> root.text;
@@ -125,7 +170,7 @@ component ModsField inherits Rectangle {
             edited => { root.edited(self.text); }
             accepted => { root.committed(); }
         }
-        if root.unit != "": CaptionText { text: root.unit; vertical-alignment: center; }
+        if root.unit != "": Text { text: root.unit; color: Tokens.text-muted-brush; vertical-alignment: center; }
     }
     FocusRing { focused: input.has-focus; }
 }
@@ -143,7 +188,7 @@ component ModsChoice inherits Rectangle {
     function open() { root.highlighted = Math.max(0, root.choice-index); popup.show(); }
     height: Tokens.control-min-height;
     border-radius: Tokens.control-radius;
-    border-width: Tokens.space-1;
+    border-width: 1px;
     border-color: focus.has-focus ? Tokens.accent-brush : Tokens.strong-line-brush;
     background: touch.has-hover ? Tokens.hover-brush : Tokens.surface-brush;
     accessible-role: combobox;
@@ -152,9 +197,9 @@ component ModsChoice inherits Rectangle {
     HorizontalLayout {
         padding-left: Tokens.space-8;
         padding-right: Tokens.space-8;
-        spacing: Tokens.space-4;
+        spacing: Tokens.space-8;
         Text { text: root.choice-label; color: Tokens.text-brush; vertical-alignment: center; overflow: elide; horizontal-stretch: 1; }
-        Image { source: Tokens.icon-chevron-down; colorize: Tokens.text-muted-brush; width: Tokens.icon-size-tiny; height: Tokens.icon-size-tiny; y: (parent.height - self.height) / 2; }
+        Image { source: Tokens.icon-chevron-down; image-fit: contain; colorize: Tokens.text-muted-brush; width: Tokens.icon-size-tiny; height: Tokens.icon-size-tiny; y: (parent.height - self.height) / 2; }
     }
     focus := FocusScope {
         enabled: root.enabled;
@@ -169,7 +214,6 @@ component ModsChoice inherits Rectangle {
             clicked => { focus.focus(); root.open(); }
         }
     }
-    TipTrigger { text: root.choice-label; hovered: touch.has-hover; focused: focus.has-focus; }
     FocusRing { focused: focus.has-focus; }
     popup := PopupWindow {
         x: 0;
@@ -179,7 +223,7 @@ component ModsChoice inherits Rectangle {
         close-policy: PopupClosePolicy.close-on-click-outside;
         Rectangle {
             background: Tokens.raised-brush;
-            border-width: Tokens.space-1;
+            border-width: 1px;
             border-color: Tokens.strong-line-brush;
             border-radius: Tokens.control-radius;
             FocusScope {
@@ -218,61 +262,92 @@ component ModsChoice inherits Rectangle {
     }
 }
 
+// [name | control] over the description, which takes the pane's whole width, so a narrow pane keeps it readable.
 component SettingItem inherits Rectangle {
     in property <ModSettingRow> item;
     in property <int> index;
     height: layout.preferred-height;
     layout := VerticalLayout {
-        padding-top: Tokens.setting-row-margin.top;
-        padding-bottom: Tokens.setting-row-margin.bottom;
-        spacing: Tokens.space-4;
-        if root.item.group != "": LabelText {
-            text: root.item.group;
-            min-height: self.preferred-height + (root.index == 0 ? Tokens.mod-setting-first-group-margin.top : Tokens.mod-setting-group-margin.top) + Tokens.mod-setting-group-margin.bottom;
-            vertical-alignment: center;
+        // The mod's own group, from its settings description: a section label like "Settings", a step from the group before.
+        if root.item.group != "": VerticalLayout {
+            padding-top: root.index == 0 ? Tokens.mod-setting-first-group-margin.top : Tokens.mod-setting-group-margin.top;
+            padding-bottom: Tokens.mod-setting-group-margin.bottom;
+            LabelText { text: root.item.group; }
         }
-        HorizontalLayout {
-            spacing: Tokens.space-12;
-            Text { text: root.item.name; color: root.item.drafted ? Tokens.draft-brush : Tokens.text-brush; wrap: word-wrap; vertical-alignment: center; horizontal-stretch: 1; }
-            Rectangle {
-                width: Tokens.mod-setting-field-width;
-                height: Tokens.control-min-height;
-                if root.item.kind == "switch": ToggleSwitch {
-                    checked: root.item.is-on; label: root.item.name; enabled: !ModsState.busy;
-                    toggled(value) => { ModsState.setting-toggled(root.index, value); }
+        VerticalLayout {
+            padding-top: Tokens.setting-row-margin.top;
+            padding-bottom: Tokens.setting-row-margin.bottom;
+            spacing: Tokens.space-2;
+            HorizontalLayout {
+                spacing: Tokens.space-12;
+                BodyText { text: root.item.name; color: root.item.drafted ? Tokens.draft-brush : Tokens.text-brush; vertical-alignment: center; horizontal-stretch: 1; }
+                // Switches, choices and boxes keep to the column's right edge, so they line up whatever their content.
+                Rectangle {
+                    horizontal-stretch: 0;
+                    width: root.item.kind == "choice" ? Math.max(Tokens.mod-setting-field-width, choice-probe.preferred-width) : Tokens.mod-setting-field-width;
+                    height: Tokens.control-min-height;
+                    // The choice box is as wide as the label it shows, and never narrower than a number box.
+                    choice-probe := HorizontalLayout {
+                        visible: false;
+                        padding-left: Tokens.space-8;
+                        padding-right: Tokens.space-8;
+                        spacing: Tokens.space-8;
+                        Text { text: root.item.choice-label; }
+                        Rectangle { width: Tokens.icon-size-tiny; }
+                    }
+                    if root.item.kind == "switch": ToggleSwitch {
+                        x: parent.width - self.preferred-width;
+                        width: self.preferred-width;
+                        checked: root.item.is-on; label: root.item.name; enabled: !ModsState.busy;
+                        toggled(value) => { ModsState.setting-toggled(root.index, value); }
+                    }
+                    if root.item.kind == "choice": ModsChoice {
+                        choices: root.item.choices; value: root.item.value; label: root.item.name; enabled: !ModsState.busy;
+                        choice-label: root.item.choice-label; choice-index: root.item.choice-index;
+                        chosen(value) => { ModsState.setting-choice(root.index, value); }
+                    }
+                    if root.item.kind != "switch" && root.item.kind != "choice": ModsField {
+                        text: root.item.value; label: root.item.name; unit: root.item.unit;
+                        enabled: !ModsState.busy;
+                        edited(value) => { ModsState.setting-edited(root.index, value); }
+                        committed => { ModsState.commit-settings(); }
+                    }
                 }
-                if root.item.kind == "choice": ModsChoice {
-                    choices: root.item.choices; value: root.item.value; label: root.item.name; enabled: !ModsState.busy;
-                    choice-label: root.item.choice-label; choice-index: root.item.choice-index;
-                    chosen(value) => { ModsState.setting-choice(root.index, value); }
-                }
-                if root.item.kind != "switch" && root.item.kind != "choice": ModsField {
-                    text: root.item.value; label: root.item.name; unit: root.item.unit;
-                    invalid: root.item.error != "";
-                    enabled: !ModsState.busy;
-                    edited(value) => { ModsState.setting-edited(root.index, value); }
-                    committed => { ModsState.commit-settings(); }
+            }
+            VerticalLayout {
+                spacing: Tokens.space-1;
+                if root.item.description != "": CaptionText { text: root.item.description; }
+                if root.item.drafted: CaptionText { text: root.item.was; }
+                // A number the cfg can't hold is said under its name; the box keeps what was typed.
+                if root.item.error != "": HorizontalLayout {
+                    spacing: Tokens.space-6;
+                    Rectangle {
+                        width: Tokens.icon-size-small;
+                        Image { y: Tokens.icon-baseline-nudge.top; width: Tokens.icon-size-small; height: Tokens.icon-size-small; image-fit: contain; source: Tokens.icon-error; colorize: Tokens.error-brush; }
+                    }
+                    CaptionText { text: root.item.error; tone: CaptionTone.error; horizontal-stretch: 1; }
                 }
             }
         }
-        if root.item.description != "": CaptionText { text: root.item.description; }
-        if root.item.drafted && root.item.was != "": CaptionText { text: root.item.was; color: Tokens.draft-brush; }
-        if root.item.error != "": CaptionText { text: root.item.error; color: Tokens.error-brush; }
     }
 }
 
+// One line of the action bar's status: the icon says what kind of line it is, and the text wraps beside it.
 component StatusLine inherits Rectangle {
     in property <string> message;
-    in property <MessageTone> tone;
-    in property <bool> draft;
+    in property <image> icon;
+    in property <brush> icon-ink;
+    in property <brush> ink;
     height: message-text.preferred-height;
-    property <brush> ink: root.tone == MessageTone.error ? Tokens.error-brush : root.tone == MessageTone.warning ? Tokens.warning-brush : root.draft ? Tokens.draft-brush : Tokens.text-muted-brush;
     Image {
         x: 0; y: Tokens.space-2; width: Tokens.icon-size-small; height: Tokens.icon-size-small;
-        source: root.tone == MessageTone.error ? Tokens.icon-error : root.tone == MessageTone.warning ? Tokens.icon-warning : root.draft ? Tokens.icon-draft : Tokens.icon-info;
-        colorize: root.ink;
+        image-fit: contain; source: root.icon; colorize: root.icon-ink;
     }
-    message-text := CaptionText { x: Tokens.icon-size-small + Tokens.space-8; y: 0; width: parent.width - self.x; height: self.preferred-height; text: root.message; color: root.ink; }
+    message-text := CaptionText {
+        x: Tokens.icon-size-small + Tokens.space-6; y: 0; width: parent.width - self.x; height: self.preferred-height;
+        text: root.message; color: root.ink;
+        accessible-role: text;
+    }
 }
 
 export component ModsPage inherits Rectangle {
@@ -280,7 +355,12 @@ export component ModsPage inherits Rectangle {
     in property <bool> wide;
     property <length> gutter: root.compact ? Tokens.preview-page-compact-margin.left : Tokens.preview-page-margin.left;
     property <length> pane-width: root.wide ? Tokens.changes-pane-wide-width : root.compact ? Tokens.changes-pane-compact-width : Tokens.changes-pane-width;
+    // The content column fills up to its cap and stays left.
     property <length> content-width: Math.max(0px, Math.min(Tokens.mods-content-max-width, pane.x) - 2 * root.gutter);
+    property <length> row-step: Tokens.row-min-height + Tokens.row-gap.bottom;
+    // Column heads share the rows' columns, as the C# grid's shared sizes do: [name] [version, maximized only] [state].
+    property <length> version-width: root.wide ? version-probe.preferred-width : 0px;
+    property <length> state-width: state-probe.preferred-width;
     property <int> active-index: ModsState.selected-index;
     property <int> visible-count: ModsState.mods.length;
     property <bool> had-rows;
@@ -292,7 +372,7 @@ export component ModsPage inherits Rectangle {
     }
     changed active-index => {
         if (root.active-index >= 0) {
-            let top = root.active-index * (Tokens.row-min-height + Tokens.row-gap.bottom);
+            let top = root.active-index * root.row-step;
             if (top < -library-scroll.content-y) { library-scroll.content-y = -top; }
             else if (top + Tokens.row-min-height > -library-scroll.content-y + library-scroll.visible-height) {
                 library-scroll.content-y = Math.min(0px, library-scroll.visible-height - top - Tokens.row-min-height);
@@ -300,21 +380,47 @@ export component ModsPage inherits Rectangle {
         }
     }
 
-    if ModsState.is-read && !ModsState.has-read-error && ModsState.installed-count == 0 && ModsState.sources.length == 0: AshField { width: pane.x; height: bar.y; still: true; }
+    version-probe := VerticalLayout {
+        visible: false;
+        LabelText { text: "Version"; wrap: no-wrap; }
+        for item in ModsState.mods: CaptionText { text: item.version; wrap: no-wrap; }
+    }
+    state-probe := VerticalLayout {
+        visible: false;
+        for item in ModsState.mods: HorizontalLayout {
+            spacing: Tokens.space-12;
+            if item.problem != "": HorizontalLayout {
+                spacing: Tokens.space-6;
+                Rectangle { width: Tokens.icon-size-small; }
+                CaptionText { text: item.problem-label; wrap: no-wrap; }
+            }
+            if item.drafted: Rectangle { width: Tokens.icon-size-small; }
+        }
+    }
+
+    // With no mods and none to build the content column has a still dusting of ash: nothing here, and nothing waited on.
+    if ModsState.is-read && ModsState.installed-count == 0 && ModsState.sources.length == 0: AshField { width: pane.x; height: bar.y; still: true; }
     page-keys := FocusScope {
         key-pressed(event) => {
+            // Ctrl+Z puts back a mod just removed, as the action bar's Undo does; a text box keeps Ctrl+Z for its own text.
             if (event.modifiers.control && (event.text == "z" || event.text == "Z") && ModsState.can-undo) { ModsState.undo-remove(); return accept; }
-            if (event.text == Key.F5) { ModsState.refresh(); return accept; }
             reject
         }
+        // Nothing above the list appears or disappears, so the list's top edge never moves under the pointer.
         header := VerticalLayout {
             x: root.gutter; y: Tokens.preview-page-margin.top;
             width: root.content-width; height: self.preferred-height;
-            spacing: Tokens.space-12;
-            TitleText { text: "Mods"; }
-            SecondaryText { text: "Mods load only when you play offline with mods. Playing online or plain offline never loads them."; }
+            VerticalLayout {
+                spacing: Tokens.space-8;
+                padding-bottom: Tokens.preview-header-margin.bottom;
+                // The title's line height, as Theme.axaml gives it; "Mods" never wraps.
+                TitleText { text: "Mods"; height: Tokens.line-height-title; vertical-alignment: center; }
+                SecondaryText { text: "Mods load only when you play offline with mods. Playing online or plain offline never loads them."; }
+            }
+            // The list's tools: the folder it comes from and the log of the last game. Below the standard class, icons with tips.
             HorizontalLayout {
                 spacing: Tokens.space-8; alignment: start;
+                padding-bottom: Tokens.preview-header-margin.bottom;
                 Button { text: root.compact ? "" : "Add mod"; icon: Tokens.icon-add; enabled: !ModsState.busy; tip: "Add a mod from its DLL file; take it out of a downloaded zip first"; clicked => { ModsState.add-mod(); } }
                 Button { text: root.compact ? "" : "Open folder"; icon: Tokens.icon-folder; enabled: ModsState.can-open-folder; tip: ModsState.open-folder-tip; clicked => { ModsState.open-folder(); } }
                 Button { text: root.compact ? "" : "Open log"; icon: Tokens.icon-log; enabled: ModsState.can-open-log; tip: ModsState.open-log-tip; clicked => { ModsState.open-log(); } }
@@ -322,216 +428,407 @@ export component ModsPage inherits Rectangle {
         }
         installed-header := HorizontalLayout {
             x: root.gutter + Tokens.table-header-inset.left;
-            y: header.y + header.height + Tokens.preview-header-margin.bottom;
+            y: header.y + header.height;
             width: root.content-width - Tokens.table-header-inset.left - Tokens.table-header-inset.right;
             height: self.preferred-height;
             spacing: Tokens.space-12;
-            LabelText { text: "Installed"; }
-            CaptionText { text: ModsState.installed-count > 0 ? "\{ModsState.enabled-count} of \{ModsState.installed-count} on" : ""; horizontal-stretch: 1; vertical-alignment: center; }
-            if root.wide: LabelText { text: "Version"; width: Tokens.affix-value-column-width; }
+            HorizontalLayout {
+                spacing: Tokens.space-8;
+                horizontal-stretch: 1;
+                LabelText { text: "Installed"; horizontal-stretch: 0; vertical-alignment: center; }
+                CaptionText { text: ModsState.installed-count > 0 ? "\{ModsState.enabled-count} of \{ModsState.installed-count} on" : ""; horizontal-stretch: 1; vertical-alignment: center; }
+            }
+            if root.wide: LabelText { text: "Version"; width: root.version-width; wrap: no-wrap; }
+            Rectangle { width: root.state-width; }
         }
+        // The installed list over the mod projects not installed yet: sized to its rows, it scrolls in what the projects leave it.
         library-scroll := ScrollView {
             x: root.gutter;
             y: installed-header.y + installed-header.height + Tokens.mod-list-margin.top;
             width: root.content-width;
-            height: bar.y - self.y - Tokens.space-12;
+            height: ModsState.mods.length == 0 ? 0px : Math.max(0px, Math.min(ModsState.mods.length * root.row-step, bar.y - self.y - not-installed.height));
             content-width: self.visible-width;
-            content-height: library-content.preferred-height;
-            library-content := VerticalLayout {
-                height: self.preferred-height;
-                alignment: start;
-                if ModsState.mods.length > 0: list-menu := ContextMenuArea {
-                    height: ModsState.mods.length * (Tokens.row-min-height + Tokens.row-gap.bottom);
-                    Menu {
-                        MenuItem { title: ModsState.selected-enabled ? "Turn off" : "Turn on"; enabled: ModsState.selected-index >= 0 && !ModsState.busy; activated => { ModsState.toggle-mod(ModsState.selected-index); } }
-                        MenuItem { title: "Show in folder"; enabled: ModsState.selected-index >= 0; activated => { ModsState.reveal-mod(ModsState.selected-index); } }
-                        MenuSeparator { }
-                        MenuItem { title: "Remove"; enabled: ModsState.selected-index >= 0 && !ModsState.busy; activated => { ModsState.remove-mod(ModsState.selected-index); } }
-                    }
-                    list-focus := FocusScope {
-                        focus-gained(reason) => { if (reason == FocusReason.tab-navigation) { KeyboardFocus.visible = true; } if (ModsState.selected-index < 0) { ModsState.select-mod(0); } }
-                        key-pressed(event) => {
-                            if (event.text == Key.Menu || (event.text == Key.F10 && event.modifiers.shift)) {
-                                list-menu.show({x: Tokens.row-padding.left, y: Math.max(0, ModsState.selected-index) * (Tokens.row-min-height + Tokens.row-gap.bottom) + Tokens.row-min-height});
-                                return accept;
-                            }
-                            if (event.text == Key.DownArrow) { ModsState.select-mod(Math.min(ModsState.mods.length - 1, ModsState.selected-index + 1)); return accept; }
-                            if (event.text == Key.UpArrow) { ModsState.select-mod(Math.max(0, ModsState.selected-index - 1)); return accept; }
-                            if (event.text == Key.Home) { ModsState.select-mod(0); return accept; }
-                            if (event.text == Key.End) { ModsState.select-mod(ModsState.mods.length - 1); return accept; }
-                            if (event.text == " " && !ModsState.busy) { ModsState.toggle-mod(ModsState.selected-index); return accept; }
-                            if (event.text == Key.Delete && !ModsState.busy) { ModsState.remove-mod(ModsState.selected-index); return accept; }
-                            reject
+            content-height: ModsState.mods.length * root.row-step;
+            // One tab stop: arrows move, Space turns the selected mod on or off, Del removes it, the menu key or Shift+F10 opens its menu.
+            if ModsState.mods.length > 0: list-menu := ContextMenuArea {
+                height: ModsState.mods.length * root.row-step;
+                Menu {
+                    MenuItem { title: ModsState.selected-enabled ? "Turn off" : "Turn on"; enabled: ModsState.selected-index >= 0 && !ModsState.busy; activated => { ModsState.toggle-mod(ModsState.selected-index); } }
+                    MenuItem { title: "Show in folder"; enabled: ModsState.selected-index >= 0; activated => { ModsState.reveal-mod(ModsState.selected-index); } }
+                    MenuSeparator { }
+                    MenuItem { title: "Remove"; enabled: ModsState.selected-index >= 0 && !ModsState.busy; activated => { ModsState.remove-mod(ModsState.selected-index); } }
+                }
+                list-focus := FocusScope {
+                    accessible-role: list;
+                    accessible-label: "Installed mods";
+                    focus-gained(reason) => { if (reason == FocusReason.tab-navigation) { KeyboardFocus.visible = true; } if (ModsState.selected-index < 0) { ModsState.select-mod(0); } }
+                    key-pressed(event) => {
+                        // The keyboard opens the menu under the row; a right-click opens it at the pointer.
+                        if (event.text == Key.Menu || (event.text == Key.F10 && event.modifiers.shift)) {
+                            list-menu.show({x: Tokens.row-padding.left, y: Math.max(0, ModsState.selected-index) * root.row-step + Tokens.row-min-height});
+                            return accept;
                         }
-                        VerticalLayout {
-                            spacing: Tokens.row-gap.bottom;
-                            for item[index] in ModsState.mods: Rectangle {
-                                height: Tokens.row-min-height;
-                                border-radius: Tokens.control-radius; border-width: Tokens.space-1;
-                                border-color: ModsState.selected-index == index ? Tokens.accent-brush : transparent;
-                                background: ModsState.selected-index == index ? Tokens.selected-brush : row-touch.has-hover ? Tokens.hover-brush : transparent;
-                                accessible-role: list-item; accessible-label: item.name;
-                                accessible-checkable: true; accessible-checked: item.enabled;
-                                accessible-action-default => { ModsState.select-mod(index); }
-                                HorizontalLayout {
-                                    padding-left: Tokens.row-padding.left; padding-right: Tokens.row-padding.right; spacing: Tokens.space-12;
-                                    Rectangle {
-                                        width: Tokens.icon-size-nav; height: Tokens.icon-size-nav; y: (parent.height - self.height) / 2;
-                                        border-radius: Tokens.control-radius; border-width: Tokens.space-1;
-                                        border-color: item.enabled ? Tokens.accent-brush : Tokens.strong-line-brush;
-                                        background: item.enabled ? Tokens.accent-brush : Tokens.ground-brush;
-                                        if item.enabled: Path {
-                                            x: Tokens.space-4; y: Tokens.space-4;
-                                            width: Tokens.space-12; height: Tokens.space-12;
-                                            stroke: Tokens.on-accent-brush; stroke-width: Tokens.space-2;
-                                            MoveTo { x: 0; y: Tokens.space-6 / 1px; }
-                                            LineTo { x: Tokens.space-4 / 1px; y: Tokens.space-10 / 1px; }
-                                            LineTo { x: Tokens.space-12 / 1px; y: Tokens.space-2 / 1px; }
+                        if (event.modifiers.control || event.modifiers.alt) { return reject; }
+                        if (event.text == Key.DownArrow) { ModsState.select-mod(Math.min(ModsState.mods.length - 1, ModsState.selected-index + 1)); return accept; }
+                        if (event.text == Key.UpArrow) { ModsState.select-mod(Math.max(0, ModsState.selected-index - 1)); return accept; }
+                        if (event.text == Key.Home) { ModsState.select-mod(0); return accept; }
+                        if (event.text == Key.End) { ModsState.select-mod(ModsState.mods.length - 1); return accept; }
+                        if (event.text == " " && !ModsState.busy) { ModsState.toggle-mod(ModsState.selected-index); return accept; }
+                        if (event.text == Key.Delete && !ModsState.busy) { ModsState.remove-mod(ModsState.selected-index); return accept; }
+                        reject
+                    }
+                    VerticalLayout {
+                        spacing: Tokens.row-gap.bottom;
+                        alignment: start;
+                        for item[index] in ModsState.mods: mod-row := Rectangle {
+                            // Hovered parts with tooltips of their own count as the row being hovered.
+                            property <int> spots;
+                            property <bool> selected: ModsState.selected-index == index;
+                            property <bool> hovered: row-touch.has-hover || self.spots > 0;
+                            function pick() { ModsState.select-mod(index); list-focus.focus(); }
+                            // A right-click opens the row's menu at the pointer.
+                            function menu-at(x: length, y: length) { list-menu.show({x: x - list-menu.absolute-position.x, y: y - list-menu.absolute-position.y}); }
+                            height: Tokens.row-min-height;
+                            border-radius: Tokens.control-radius;
+                            border-width: 1px;
+                            border-color: self.selected ? Tokens.accent-brush : transparent;
+                            background: self.selected ? Tokens.selected-brush : self.hovered ? Tokens.hover-brush : transparent;
+                            accessible-role: list-item;
+                            accessible-label: item.name;
+                            accessible-description: item.caption;
+                            accessible-checkable: true;
+                            accessible-checked: item.enabled;
+                            accessible-item-selectable: true;
+                            accessible-item-selected: self.selected;
+                            accessible-action-default => { ModsState.select-mod(index); }
+                            row-touch := RowSpot {
+                                pressed-down => { mod-row.pick(); }
+                                menu-requested(x, y) => { mod-row.menu-at(x, y); }
+                            }
+                            HorizontalLayout {
+                                padding-left: Tokens.row-padding.left; padding-right: Tokens.row-padding.right; spacing: Tokens.space-12;
+                                Rectangle {
+                                    width: Tokens.icon-size-nav;
+                                    ModCheck {
+                                        y: (parent.height - self.height) / 2;
+                                        checked: item.enabled;
+                                        hovered: check-spot.has-hover;
+                                        check-spot := RowSpot {
+                                            tip: "Load this mod when you play with mods (Space)";
+                                            changed has-hover => { mod-row.spots += self.has-hover ? 1 : -1; }
+                                            pressed-down => { mod-row.pick(); }
+                                            menu-requested(x, y) => { mod-row.menu-at(x, y); }
+                                            clicked => { if (!ModsState.busy) { ModsState.toggle-mod(index); } }
                                         }
                                     }
-                                    VerticalLayout {
-                                        alignment: center; horizontal-stretch: 1; spacing: Tokens.space-2;
-                                        Text { text: item.name; font-size: Tokens.font-size-value; color: item.enabled ? Tokens.text-brush : Tokens.text-muted-brush; overflow: elide; }
-                                        CaptionText { text: root.wide ? item.author : item.caption; wrap: no-wrap; overflow: elide; }
+                                }
+                                VerticalLayout {
+                                    alignment: center; horizontal-stretch: 1; spacing: Tokens.space-1;
+                                    Text {
+                                        text: item.name; font-size: Tokens.font-size-value; color: item.enabled ? Tokens.text-brush : Tokens.text-muted-brush; overflow: elide;
+                                        RowSpot {
+                                            tip: item.name;
+                                            changed has-hover => { mod-row.spots += self.has-hover ? 1 : -1; }
+                                            pressed-down => { mod-row.pick(); }
+                                            menu-requested(x, y) => { mod-row.menu-at(x, y); }
+                                        }
                                     }
-                                    if item.problem != "": Image { width: Tokens.icon-size-small; height: Tokens.icon-size-small; y: (parent.height - self.height) / 2; source: Tokens.icon-error; colorize: Tokens.error-brush; }
-                                    if item.problem != "": CaptionText { text: item.problem-label; color: Tokens.error-brush; wrap: no-wrap; vertical-alignment: center; }
-                                    if item.drafted: Image { width: Tokens.icon-size-small; height: Tokens.icon-size-small; y: (parent.height - self.height) / 2; source: Tokens.icon-draft; colorize: Tokens.draft-brush; }
-                                    if root.wide: CaptionText { text: item.version; width: Tokens.affix-value-column-width; vertical-alignment: center; }
+                                    // Maximized, the list gains a Version column and the caption keeps only the author.
+                                    CaptionText {
+                                        text: root.wide ? item.author : item.caption; wrap: no-wrap; overflow: elide;
+                                        RowSpot {
+                                            tip: root.wide ? item.author : item.caption;
+                                            changed has-hover => { mod-row.spots += self.has-hover ? 1 : -1; }
+                                            pressed-down => { mod-row.pick(); }
+                                            menu-requested(x, y) => { mod-row.menu-at(x, y); }
+                                        }
+                                    }
                                 }
-                                row-touch := TouchArea {
-                                    pointer-event(event) => { if (event.kind == PointerEventKind.down) { KeyboardFocus.visible = false; ModsState.select-mod(index); list-focus.focus(); } }
-                                    clicked => { if (self.mouse-x <= Tokens.row-padding.left + Tokens.icon-size-nav + Tokens.space-6 && !ModsState.busy) { ModsState.toggle-mod(index); } }
+                                if root.wide: CaptionText { text: item.version; tone: CaptionTone.secondary; width: root.version-width; wrap: no-wrap; vertical-alignment: center; }
+                                // Only what needs attention shows in the row: a load problem, and the draft pencil while it differs from the last game.
+                                HorizontalLayout {
+                                    width: root.state-width;
+                                    spacing: Tokens.space-12;
+                                    alignment: end;
+                                    if item.problem != "": HorizontalLayout {
+                                        spacing: Tokens.space-6;
+                                        Image { width: Tokens.icon-size-small; height: Tokens.icon-size-small; y: (parent.height - self.height) / 2; image-fit: contain; source: Tokens.icon-error; colorize: Tokens.error-brush; }
+                                        CaptionText { text: item.problem-label; tone: CaptionTone.error; wrap: no-wrap; vertical-alignment: center; }
+                                    }
+                                    if item.drafted: Rectangle {
+                                        width: Tokens.icon-size-small;
+                                        accessible-role: image;
+                                        accessible-label: "Changed since the last game with mods";
+                                        Image { width: Tokens.icon-size-small; height: Tokens.icon-size-small; y: (parent.height - self.height) / 2; image-fit: contain; source: Tokens.icon-draft; colorize: Tokens.draft-brush; }
+                                        RowSpot {
+                                            tip: "Changed since the last game with mods";
+                                            changed has-hover => { mod-row.spots += self.has-hover ? 1 : -1; }
+                                            pressed-down => { mod-row.pick(); }
+                                            menu-requested(x, y) => { mod-row.menu-at(x, y); }
+                                        }
+                                    }
                                 }
-                                TipTrigger { text: item.problem; hovered: row-touch.has-hover; focused: list-focus.has-focus && ModsState.selected-index == index; }
-                                FocusRing { focused: list-focus.has-focus && ModsState.selected-index == index; }
                             }
+                            FocusRing { focused: list-focus.has-focus && mod-row.selected; }
                         }
-                    }
-                }
-                if !ModsState.is-read: CaptionText { text: "Reading mods…"; }
-                if ModsState.is-read && ModsState.has-read-error && ModsState.mods.length == 0: VerticalLayout {
-                    padding-left: Tokens.mods-empty-margin.left; padding-right: Tokens.mods-empty-margin.right; padding-top: Tokens.mods-empty-margin.top;
-                    spacing: Tokens.space-8;
-                    SubheadingText { text: "Couldn't read your mods"; }
-                    CaptionText { text: "Fix the problem shown below, then refresh the library."; }
-                    HorizontalLayout { alignment: start; Button { text: "Refresh"; icon: Tokens.icon-refresh; enabled: !ModsState.busy; clicked => { ModsState.refresh(); } } }
-                }
-                if ModsState.is-read && !ModsState.has-read-error && ModsState.mods.length == 0: VerticalLayout {
-                    padding-left: Tokens.mods-empty-margin.left; padding-right: Tokens.mods-empty-margin.right; padding-top: Tokens.mods-empty-margin.top;
-                    spacing: Tokens.space-8;
-                    SubheadingText { text: "No mods yet"; }
-                    CaptionText { text: "Add a mod's DLL, or put it in the Mods folder yourself. MelonLoader loads it the next time you play offline with mods."; }
-                    HorizontalLayout { alignment: start; padding-top: Tokens.space-4; Button { text: "Add mod"; enabled: !ModsState.busy; clicked => { ModsState.add-mod(); } } }
-                }
-                if ModsState.sources.length > 0: VerticalLayout {
-                    padding-top: Tokens.mod-sources-margin.top; spacing: Tokens.space-4;
-                    HorizontalLayout {
-                        padding-left: Tokens.table-header-inset.left; spacing: Tokens.space-12;
-                        LabelText { text: "Not installed"; }
-                        CaptionText { text: "\{ModsState.sources.length} from sources"; vertical-alignment: center; horizontal-stretch: 1; }
-                    }
-                    for source[index] in ModsState.sources: HorizontalLayout {
-                        min-height: Tokens.row-min-height; padding-left: Tokens.mod-source-row-padding.left; padding-right: Tokens.mod-source-row-padding.right; spacing: Tokens.space-12;
-                        Rectangle { width: Tokens.icon-size-nav; height: Tokens.icon-size-nav; y: (parent.height - self.height) / 2; border-width: Tokens.space-1; border-color: Tokens.strong-line-brush; border-radius: Tokens.control-radius; }
-                        VerticalLayout {
-                            alignment: center; spacing: Tokens.space-2; horizontal-stretch: 1;
-                            Text { text: source.name; font-size: Tokens.font-size-value; color: Tokens.text-brush; overflow: elide; }
-                            CaptionText { text: source.caption; wrap: no-wrap; overflow: elide; }
-                        }
-                        Button { text: source.busy ? "Building…" : "Build and install"; height: Tokens.control-min-height; y: (parent.height - self.height) / 2; horizontal-stretch: 0; enabled: !source.busy && !ModsState.busy && !ModsState.building; clicked => { ModsState.build-source(index); } }
                     }
                 }
             }
         }
+        // No mods yet: the two ways one arrives, the first one a button. Its texts sit outside `if`, so its height is right.
+        no-mods := VerticalLayout {
+            visible: ModsState.is-read && ModsState.mods.length == 0;
+            x: root.gutter + Tokens.mods-empty-margin.left;
+            y: installed-header.y + installed-header.height + Tokens.mods-empty-margin.top;
+            width: root.content-width - Tokens.mods-empty-margin.left - Tokens.mods-empty-margin.right;
+            height: self.visible ? self.preferred-height : 0px;
+            spacing: Tokens.space-4;
+            Text { text: "No mods yet"; font-size: Tokens.font-size-value; color: Tokens.text-brush; }
+            CaptionText { text: "Add a mod's DLL, or put it in the Mods folder yourself. MelonLoader loads it the next time you play offline with mods."; }
+            if ModsState.is-read && ModsState.mods.length == 0: HorizontalLayout {
+                alignment: start;
+                padding-top: Tokens.empty-action-margin.top;
+                Button { text: "Add mod"; enabled: !ModsState.busy; tip: "Add a mod from its DLL file; take it out of a downloaded zip first"; clicked => { ModsState.add-mod(); } }
+            }
+        }
+        // Mod projects in the sources folder that no installed mod builds: not loaded (the box is off and can't be ticked) until built and installed.
+        not-installed := VerticalLayout {
+            x: root.gutter;
+            y: ModsState.mods.length > 0 ? library-scroll.y + library-scroll.height : no-mods.y + no-mods.height;
+            width: root.content-width;
+            height: ModsState.sources.length == 0 ? 0px : self.preferred-height;
+            visible: ModsState.sources.length > 0;
+            accessible-role: list;
+            accessible-label: "Mods from sources, not installed";
+            if ModsState.sources.length > 0: VerticalLayout {
+                padding-top: Tokens.mod-sources-margin.top;
+                HorizontalLayout {
+                    padding-left: Tokens.table-header-inset.left;
+                    padding-right: Tokens.table-header-inset.right;
+                    spacing: Tokens.space-8;
+                    LabelText { text: "Not installed"; horizontal-stretch: 0; vertical-alignment: center; }
+                    CaptionText { text: "\{ModsState.sources.length} from sources"; vertical-alignment: center; horizontal-stretch: 1; }
+                }
+                VerticalLayout {
+                    padding-top: Tokens.mod-list-margin.top;
+                    spacing: Tokens.row-gap.bottom;
+                    for source[index] in ModsState.sources: HorizontalLayout {
+                        min-height: Tokens.row-min-height;
+                        padding-left: Tokens.mod-source-row-padding.left; padding-right: Tokens.mod-source-row-padding.right;
+                        spacing: Tokens.space-12;
+                        Rectangle {
+                            width: Tokens.icon-size-nav;
+                            ModCheck {
+                                y: (parent.height - self.height) / 2;
+                                checked: false; enabled: false;
+                                accessible-role: checkbox;
+                                accessible-label: "Load " + source.name;
+                                accessible-enabled: false;
+                                check-tip := TouchArea { }
+                                TipTrigger { text: "Build and install it to load it"; hovered: check-tip.has-hover; }
+                            }
+                        }
+                        VerticalLayout {
+                            alignment: center; spacing: Tokens.space-1; horizontal-stretch: 1;
+                            Text {
+                                text: source.name; font-size: Tokens.font-size-value; color: Tokens.text-muted-brush; overflow: elide;
+                                source-name-tip := TouchArea { }
+                                TipTrigger { text: source.name; hovered: source-name-tip.has-hover; }
+                            }
+                            CaptionText {
+                                text: source.caption; wrap: no-wrap; overflow: elide;
+                                caption-tip := TouchArea { }
+                                TipTrigger { text: source.project; hovered: caption-tip.has-hover; }
+                            }
+                        }
+                        Button {
+                            text: source.busy ? "Building…" : "Build and install";
+                            height: Tokens.control-min-height; y: (parent.height - self.height) / 2; horizontal-stretch: 0;
+                            enabled: !ModsState.busy && !ModsState.building;
+                            tip: "Build it from its project against the game's MelonLoader and install it, on; it loads the next time you play with mods";
+                            clicked => { ModsState.build-source(index); }
+                        }
+                    }
+                }
+            }
+        }
+        // The selected mod: what it is, whether it loaded, what can be done to it, and its settings.
         // Explicit sibling bounds keep breakpoint widths outside the parent layout solver.
         pane := Rectangle {
             x: root.width - root.pane-width; y: 0; width: root.pane-width; height: bar.y;
             background: Tokens.raised-brush;
-            Rectangle { x: 0; y: 0; width: Tokens.space-1; background: Tokens.hairline-brush; }
-            ScrollView {
+            Rectangle { x: 0; y: 0; width: 1px; background: Tokens.hairline-brush; }
+            if ModsState.selected-index < 0: CaptionText {
+                x: Tokens.pane-content-margin.left; y: Tokens.pane-content-margin.top;
+                width: parent.width - Tokens.pane-content-margin.left - Tokens.pane-content-margin.right;
+                height: self.preferred-height;
+                text: ModsState.installed-count > 0 ? "Select a mod to see what it is, whether it loaded, and its settings." : "A mod's details and settings show here once you add one.";
+            }
+            if ModsState.selected-index >= 0: ScrollView {
+                x: 1px;
+                width: parent.width - 1px;
                 content-width: self.visible-width;
-                content-height: detail.y + detail.preferred-height + Tokens.pane-content-margin.bottom;
+                // Measured from where the details really end (research/slint.md: wrapped text in `if` and `for`).
+                content-height: detail.y + detail-end.y + Tokens.pane-content-margin.bottom;
                 detail := VerticalLayout {
-                    x: Tokens.pane-content-margin.left; y: Tokens.pane-content-margin.top;
-                    width: parent.width - Tokens.pane-content-margin.left - Tokens.pane-content-margin.right;
+                    x: Tokens.pane-content-margin.left - 1px; y: Tokens.pane-content-margin.top;
+                    width: parent.width - Tokens.pane-content-margin.left - Tokens.pane-content-margin.right + 1px;
                     height: self.preferred-height; spacing: Tokens.space-18; alignment: start;
-                    if ModsState.selected-index < 0: CaptionText { text: "A mod's details and settings show here once you add one."; }
-                    if ModsState.selected-index >= 0: VerticalLayout {
+                    VerticalLayout {
                         spacing: Tokens.space-4;
-                        SectionText { text: ModsState.selected-name; max-lines: 2; }
-                        CaptionText { text: "Version " + ModsState.selected-version + (ModsState.selected-author == "" ? "" : " by " + ModsState.selected-author); }
-                        CaptionText { text: ModsState.selected-file; wrap: no-wrap; overflow: elide; }
-                        if ModsState.selected-source != "": CaptionText { text: ModsState.selected-source; wrap: no-wrap; overflow: elide; source-tip := TouchArea { } TipTrigger { text: ModsState.selected-source-path; hovered: source-tip.has-hover; } }
-                        if ModsState.selected-build-status != "": CaptionText { text: ModsState.selected-build-status; }
+                        SectionText {
+                            text: ModsState.selected-name; max-lines: Tokens.title-max-lines; overflow: elide;
+                            name-tip := TouchArea { }
+                            TipTrigger { text: ModsState.selected-name; hovered: name-tip.has-hover; }
+                        }
+                        CaptionText { text: ModsState.selected-detail; }
+                        CaptionText {
+                            text: ModsState.selected-file; wrap: no-wrap; overflow: elide;
+                            file-tip := TouchArea { }
+                            TipTrigger { text: ModsState.selected-file; hovered: file-tip.has-hover; }
+                        }
+                        // A mod built here: where its project is, and how its latest build stands to the installed one.
+                        if ModsState.selected-has-sources: CaptionText {
+                            text: ModsState.selected-source; wrap: no-wrap; overflow: elide;
+                            source-tip := TouchArea { }
+                            TipTrigger { text: ModsState.selected-source-path; hovered: source-tip.has-hover; }
+                        }
+                        if ModsState.selected-build-status != "": CaptionText { text: ModsState.selected-build-status; tone: CaptionTone.secondary; }
+                        // Only a change waiting for the next game with mods: on or off itself shows in the row and on the button.
                         if ModsState.selected-state != "": CaptionText { text: ModsState.selected-state; color: Tokens.draft-brush; }
                     }
-                    if ModsState.selected-problem != "" && ModsState.selected-enabled: CaptionText { text: ModsState.selected-problem; color: Tokens.error-brush; }
-                    if ModsState.selected-index >= 0: HorizontalLayout {
+                    // The reason it did not load sits right above the ways out of it.
+                    if ModsState.selected-problem != "" && ModsState.selected-enabled: HorizontalLayout {
+                        spacing: Tokens.space-6;
+                        Rectangle {
+                            width: Tokens.icon-size-small;
+                            Image { y: Tokens.icon-baseline-nudge.top; width: Tokens.icon-size-small; height: Tokens.icon-size-small; image-fit: contain; source: Tokens.icon-error; colorize: Tokens.error-brush; }
+                        }
+                        CaptionText { text: ModsState.selected-problem; tone: CaptionTone.error; horizontal-stretch: 1; }
+                    }
+                    VerticalLayout {
                         spacing: Tokens.space-8;
-                        Button { text: ModsState.selected-enabled ? "Turn off" : "Turn on"; enabled: !ModsState.busy; clicked => { ModsState.toggle-mod(ModsState.selected-index); } }
-                        Button { icon: Tokens.icon-folder; tip: "Show this mod's DLL in its folder."; clicked => { ModsState.reveal-mod(ModsState.selected-index); } }
-                        Rectangle { horizontal-stretch: 1; }
-                        Button { text: "Remove"; icon: Tokens.icon-delete; kind: ButtonKind.subtle; enabled: !ModsState.busy; clicked => { ModsState.remove-mod(ModsState.selected-index); } }
-                    }
-                    if ModsState.can-install-build || ModsState.can-rebuild || ModsState.building: HorizontalLayout {
-                        alignment: start; spacing: Tokens.space-8;
-                        if ModsState.can-install-build: Button { text: ModsState.install-build-text; enabled: !ModsState.busy && !ModsState.building; clicked => { ModsState.install-build(ModsState.selected-index); } }
-                        if ModsState.can-rebuild || ModsState.building: Button { text: ModsState.building ? "Building…" : ModsState.rebuild-text; enabled: !ModsState.building && !ModsState.busy; clicked => { ModsState.rebuild(ModsState.selected-index); } }
-                    }
-                    if ModsState.selected-description != "": SecondaryText { text: ModsState.selected-description; }
-                    if ModsState.settings.length > 0: VerticalLayout {
-                        if ModsState.settings[0].group == "": LabelText { text: "Settings"; }
-                        for item[index] in ModsState.settings: SettingItem { item: item; index: index; }
-                    }
-                    if root.wide && ModsState.selected-index >= 0: VerticalLayout {
-                        spacing: Tokens.space-8;
-                        LabelText { text: "Last game with mods"; }
-                        if ModsState.previous-build: CaptionText { text: "From a previous build of this mod."; }
-                        if ModsState.log-lines.length == 0: CaptionText { text: "Nothing from it in the last game with mods."; }
-                        for line in ModsState.log-lines: HorizontalLayout {
-                            padding-top: Tokens.detail-row-margin.top; padding-bottom: Tokens.detail-row-margin.bottom; spacing: Tokens.space-6;
-                            CaptionText { text: line.time; wrap: no-wrap; }
-                            Rectangle { width: Tokens.icon-size-small; if line.error: Image { source: Tokens.icon-error; colorize: Tokens.error-brush; width: Tokens.icon-size-small; height: Tokens.icon-size-small; } }
-                            CaptionText { text: line.text; color: line.error ? Tokens.error-brush : Tokens.text-muted-brush; horizontal-stretch: 1; }
-                            if line.count > 1: CaptionText {
-                                text: "×\{line.count}"; wrap: no-wrap;
-                                count-touch := TouchArea { }
-                                TipTrigger { text: line.count-tip; hovered: count-touch.has-hover; }
+                        // Everything that can be done to this mod, as in its row menu; Remove keeps to the far side, apart from the rest.
+                        HorizontalLayout {
+                            spacing: Tokens.space-8;
+                            Button {
+                                text: ModsState.selected-enabled ? "Turn off" : "Turn on"; enabled: !ModsState.busy; horizontal-stretch: 0;
+                                tip: "Whether the next game with mods loads it; it stays installed either way";
+                                clicked => { ModsState.toggle-mod(ModsState.selected-index); }
+                            }
+                            Button { icon: Tokens.icon-folder; horizontal-stretch: 0; tip: "Show its DLL in File Explorer"; clicked => { ModsState.reveal-mod(ModsState.selected-index); } }
+                            Rectangle { horizontal-stretch: 1; }
+                            Button {
+                                text: "Remove"; icon: Tokens.icon-delete; kind: ButtonKind.subtle; enabled: !ModsState.busy; horizontal-stretch: 0;
+                                tip: "Take it off the list (Del). Its DLL leaves the Mods folder the next time you play with mods; its settings stay in MelonPreferences.cfg.";
+                                clicked => { ModsState.remove-mod(ModsState.selected-index); }
+                            }
+                        }
+                        // A mod built here: its build, installed as Add mod would, kept apart from what is done to the installed mod.
+                        if ModsState.selected-has-sources: HorizontalLayout {
+                            alignment: start; spacing: Tokens.space-8;
+                            if ModsState.can-install-build: Button {
+                                text: ModsState.install-build-text; enabled: !ModsState.busy && !ModsState.building;
+                                tip: "Install the build its project last made; it loads the next time you play with mods";
+                                clicked => { ModsState.install-build(ModsState.selected-index); }
+                            }
+                            Button {
+                                text: ModsState.rebuild-text; enabled: !ModsState.building && !ModsState.busy; tip: ModsState.rebuild-tip;
+                                clicked => { ModsState.rebuild(ModsState.selected-index); }
                             }
                         }
                     }
+                    if ModsState.selected-description != "": BodyText { text: ModsState.selected-description; }
+                    if ModsState.settings.length > 0: VerticalLayout {
+                        spacing: Tokens.space-6;
+                        // "Settings" heads the list unless the mod's own groups do.
+                        if ModsState.settings[0].group == "": LabelText { text: "Settings"; }
+                        VerticalLayout {
+                            for item[index] in ModsState.settings: SettingItem { item: item; index: index; }
+                        }
+                    }
+                    // Maximized only: what MelonLoader wrote about this mod, after its settings: what can be changed comes before what happened.
+                    if root.wide: VerticalLayout {
+                        spacing: Tokens.space-6;
+                        LabelText { text: "Last game with mods"; }
+                        if ModsState.previous-build: CaptionText { text: "That game had an earlier build of it; these lines are from that build."; }
+                        if ModsState.log-lines.length == 0: CaptionText { text: "Nothing from it in the last game with mods."; }
+                        if ModsState.log-lines.length > 0: VerticalLayout {
+                            // [time] [error mark, its slot kept on every line so the text column aligns] [text] [×N for a line written N times in a row]
+                            for line in ModsState.log-lines: HorizontalLayout {
+                                padding-top: Tokens.detail-row-margin.top; padding-bottom: Tokens.detail-row-margin.bottom; spacing: Tokens.space-6;
+                                CaptionText { text: line.time; wrap: no-wrap; vertical-alignment: top; }
+                                Rectangle {
+                                    width: Tokens.icon-size-small;
+                                    if line.error: Image { y: Tokens.icon-baseline-nudge.top; source: Tokens.icon-error; image-fit: contain; colorize: Tokens.error-brush; width: Tokens.icon-size-small; height: Tokens.icon-size-small; }
+                                }
+                                CaptionText { text: line.text; tone: line.error ? CaptionTone.error : CaptionTone.secondary; horizontal-stretch: 1; }
+                                if line.count > 1: CaptionText {
+                                    text: "×\{line.count}"; wrap: no-wrap; vertical-alignment: top;
+                                    count-touch := TouchArea { }
+                                    TipTrigger { text: line.count-tip; hovered: count-touch.has-hover; }
+                                }
+                            }
+                        }
+                    }
+                    // Where the details really end; see `content-height`.
+                    detail-end := Rectangle { height: 0px; }
                 }
             }
         }
+        // Action bar: whether the next game with mods can go well and the latest change on the left; Undo, Revert and Play on the right.
         bar := Rectangle {
             x: 0; y: root.height - self.height; width: root.width;
             height: Math.max(Tokens.action-bar-status-min-height, statuses.height) + Tokens.action-bar-padding.top + Tokens.action-bar-padding.bottom;
             background: Tokens.surface-brush;
-            Rectangle { x: 0; y: 0; height: Tokens.space-1; background: Tokens.hairline-brush; }
+            Rectangle { x: 0; y: 0; height: 1px; background: Tokens.hairline-brush; }
+            // The status keeps its height as lines come and go, and centres whatever it holds on the buttons.
             // Width-aware text heights avoid preferred-height undercounting conditional wrapped captions.
             statuses := Rectangle {
                 x: Tokens.action-bar-padding.left;
                 y: (parent.height - self.height) / 2;
-                width: Math.min(Tokens.status-message-max-width, actions.x - self.x - Tokens.space-12);
-                height: readiness-line.height + (ModsState.change-message == "" ? 0px : Tokens.space-2 + change-line.height);
-                readiness-line := StatusLine { x: 0; y: 0; width: parent.width; message: ModsState.readiness; tone: ModsState.readiness-tone; }
+                width: Math.min(Tokens.status-message-max-width, actions.x - self.x - Tokens.space-20);
+                height: readiness-line.height + (ModsState.change-message == "" ? 0px : Tokens.space-4 + change-line.height);
+                property <bool> warning: ModsState.readiness-tone == MessageTone.warning;
+                // What will run is a note, not a confirmation: the check is for what the game has read back.
+                readiness-line := StatusLine {
+                    x: 0; y: 0; width: parent.width;
+                    message: ModsState.readiness;
+                    icon: parent.warning ? Tokens.icon-warning : Tokens.icon-info;
+                    icon-ink: parent.warning ? Tokens.warning-brush : Tokens.text-muted-brush;
+                    ink: parent.warning ? Tokens.warning-brush : Tokens.text-secondary-brush;
+                }
                 change-line := StatusLine {
-                    x: 0; y: readiness-line.height + Tokens.space-2; width: parent.width;
+                    x: 0; y: readiness-line.height + Tokens.space-4; width: parent.width;
                     visible: ModsState.change-message != "";
-                    message: ModsState.change-message; tone: ModsState.change-tone;
-                    draft: ModsState.change-is-draft;
+                    message: ModsState.change-message;
+                    icon: ModsState.change-tone == MessageTone.error ? Tokens.icon-error : ModsState.change-is-draft ? Tokens.icon-draft : Tokens.icon-info;
+                    icon-ink: ModsState.change-tone == MessageTone.error ? Tokens.error-brush : ModsState.change-is-draft ? Tokens.draft-brush : Tokens.text-muted-brush;
+                    ink: ModsState.change-tone == MessageTone.error ? Tokens.error-brush : ModsState.change-is-draft ? Tokens.draft-brush : Tokens.text-secondary-brush;
                 }
             }
+            // Right-aligned, so a button appearing to the left of Play never moves it.
             actions := HorizontalLayout {
                 x: parent.width - self.width - Tokens.action-bar-padding.right;
                 y: (parent.height - self.height) / 2;
                 width: self.preferred-width;
                 height: Tokens.control-min-height;
-                spacing: Tokens.space-12;
-                if ModsState.can-undo: Button { text: "Undo"; icon: Tokens.icon-undo; kind: ButtonKind.subtle; horizontal-stretch: 0; height: Tokens.control-min-height; y: (parent.height - self.height) / 2; enabled: !ModsState.busy; tip: "Undo the last removed mod (Ctrl+Z)."; clicked => { ModsState.undo-remove(); } }
-                if ModsState.draft-count > 0: Button { text: ModsState.draft-count == 1 ? "Revert 1 change" : "Revert \{ModsState.draft-count} changes"; kind: ButtonKind.subtle; horizontal-stretch: 0; height: Tokens.control-min-height; y: (parent.height - self.height) / 2; enabled: !ModsState.busy; clicked => { ModsState.revert-drafts(); } }
-                Button { text: "Play offline with mods"; icon: Tokens.icon-play; kind: ButtonKind.primary; horizontal-stretch: 0; height: Tokens.control-min-height; y: (parent.height - self.height) / 2; enabled: ModsState.can-play; clicked => { ModsState.commit-settings(); ModsState.play(); } }
+                spacing: Tokens.space-8;
+                if ModsState.can-undo: Button {
+                    text: "Undo"; icon: Tokens.icon-undo; horizontal-stretch: 0; enabled: !ModsState.busy;
+                    tip: "Put the removed mod back, with its settings (Ctrl+Z)";
+                    clicked => { ModsState.undo-remove(); }
+                }
+                if ModsState.draft-count > 0: Button {
+                    text: ModsState.draft-count == 1 ? "Revert 1 change" : "Revert \{ModsState.draft-count} changes"; kind: ButtonKind.subtle; horizontal-stretch: 0; enabled: !ModsState.busy;
+                    tip: "Put back what the last game with mods used";
+                    clicked => { ModsState.revert-drafts(); }
+                }
+                Button {
+                    text: "Play offline with mods"; icon: Tokens.icon-play; kind: ButtonKind.primary; horizontal-stretch: 0; enabled: ModsState.can-play;
+                    tip: "Start Last Epoch offline with MelonLoader and the mods that are on";
+                    clicked => { ModsState.commit-settings(); ModsState.play(); }
+                }
             }
         }
     }
