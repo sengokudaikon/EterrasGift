@@ -1123,6 +1123,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "eg-game-access"
+version = "0.1.0"
+dependencies = [
+ "static_assertions",
+]
+
+[[package]]
+name = "eg-trainer"
+version = "0.1.0"
+
+[[package]]
 name = "eg-ui"
 version = "0.1.0"
 dependencies = [

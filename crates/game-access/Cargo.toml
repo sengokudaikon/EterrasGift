@@ -1,0 +1,13 @@
+[package]
+name = "eg-game-access"
+description = "The trainer's game boundary: explicit IL2CPP ABI and thread-owned runtime access."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dev-dependencies]
+static_assertions = "1.1.0"
+
+[lints]
+workspace = true

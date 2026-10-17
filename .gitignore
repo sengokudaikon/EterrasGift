@@ -3,5 +3,7 @@
 /data/
 /.claude/
 /.impeccable/
-/research/
+/research/*
+!/research/trainer-rust.md
+!/research/trainer-evaluations.md
 /spec/
