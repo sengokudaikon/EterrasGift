@@ -169,9 +169,12 @@ enum NumberKind {
 
 /// `numbers` mixes lengths with counts and ratios; the token name says which.
 fn number_kind(name: &str) -> NumberKind {
-    if ["MaxLines", "Limit", "FramesPerSecond"].iter().any(|s| name.ends_with(s)) {
+    if ["MaxLines", "Limit", "FramesPerSecond", "MaxColumns"].iter().any(|s| name.ends_with(s)) {
         NumberKind::Int
-    } else if ["Opacity", "Share", "Scale", "Level", "Factor", "Step", "Seconds", "Area"].iter().any(|s| name.contains(s)) {
+    } else if ["Opacity", "Share", "Scale", "Level", "Factor", "Step", "Seconds", "Area", "Climb", "ClearBand", "Handover"]
+        .iter()
+        .any(|s| name.contains(s))
+    {
         NumberKind::Float
     } else {
         NumberKind::Length

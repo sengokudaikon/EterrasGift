@@ -128,7 +128,7 @@ export component AshField inherits Rectangle {
         visible: mote.index < root.count;
         x: root.width * mote.x + mote.sway - mote.radius;
         // Motes start just below the foot, so none pops into view.
-        y: root.height * mote.y + 4px - mote.radius;
+        y: root.height * mote.y + Tokens.ash-start-below - mote.radius;
         width: mote.radius * 2;
         height: mote.radius * 2;
         border-radius: mote.radius;

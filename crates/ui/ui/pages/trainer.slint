@@ -13,12 +13,14 @@ export global TrainerState {
     in property <string> empty-detail: "Connect, then place an item in the forge.";
 }
 
-// A page's section tabs, underlined in crimson like the game's active tab.
+// A page's section tabs, underlined in crimson like the game's active tab. One tab stop, as a Windows tab strip: Left and
+// Right (Home and End) move between sections, and the section follows the keyboard.
 component SectionBar inherits Rectangle {
     in property <[string]> sections;
     in-out property <int> current;
     in property <bool> compact;
 
+    accessible-role: tab-list;
     height: layout.preferred-height;
 
     Rectangle {
@@ -27,46 +29,64 @@ component SectionBar inherits Rectangle {
         background: Tokens.hairline-brush;
     }
 
-    layout := HorizontalLayout {
-        padding-left: root.compact ? Tokens.section-bar-compact-padding.left : Tokens.section-bar-padding.left;
-        padding-top: Tokens.section-bar-padding.top;
-        spacing: Tokens.space-24;
-        alignment: start;
-
-        for section[i] in root.sections: Rectangle {
-            width: label.preferred-width;
-            height: tab-layout.preferred-height;
-
-            tab-layout := VerticalLayout {
-                padding-top: Tokens.section-tab-padding.top;
-                padding-bottom: Tokens.section-tab-padding.bottom;
-
-                label := Text {
-                    text: section;
-                    font-size: Tokens.font-size-value;
-                    font-weight: root.current == i ? Tokens.emphasis-weight : 400;
-                    color: root.current == i ? Tokens.text-brush : touch.has-hover ? Tokens.text-brush : Tokens.text-secondary-brush;
-                }
+    strip := FocusScope {
+        focus-gained(reason) => {
+            if (reason == FocusReason.tab-navigation) {
+                KeyboardFocus.visible = true;
             }
-
-            Rectangle {
-                y: parent.height - self.height;
-                height: Tokens.section-tab-indicator.bottom;
-                background: root.current == i ? Tokens.primary-hover-brush : transparent;
+        }
+        key-pressed(event) => {
+            if (event.modifiers.alt || event.modifiers.control || event.modifiers.meta) {
+                return reject;
             }
+            if (event.text == Key.LeftArrow && root.current > 0) {
+                root.current -= 1;
+                return accept;
+            }
+            if (event.text == Key.RightArrow && root.current < root.sections.length - 1) {
+                root.current += 1;
+                return accept;
+            }
+            if (event.text == Key.Home) {
+                root.current = 0;
+                return accept;
+            }
+            if (event.text == Key.End) {
+                root.current = root.sections.length - 1;
+                return accept;
+            }
+            reject
+        }
 
-            focus := FocusScope {
-                focus-gained(reason) => {
-                    if (reason == FocusReason.tab-navigation) {
-                        KeyboardFocus.visible = true;
+        layout := HorizontalLayout {
+            padding-left: root.compact ? Tokens.section-bar-compact-padding.left : Tokens.section-bar-padding.left;
+            padding-top: Tokens.section-bar-padding.top;
+            spacing: Tokens.space-24;
+            alignment: start;
+
+            for section[i] in root.sections: Rectangle {
+                width: label.preferred-width;
+                height: tab-layout.preferred-height;
+                accessible-role: tab;
+                accessible-label: section;
+                accessible-item-selected: root.current == i;
+
+                tab-layout := VerticalLayout {
+                    padding-top: Tokens.section-tab-padding.top;
+                    padding-bottom: Tokens.section-tab-padding.bottom;
+
+                    label := Text {
+                        text: section;
+                        font-size: Tokens.font-size-value;
+                        font-weight: root.current == i ? Tokens.emphasis-weight : 400;
+                        color: root.current == i ? Tokens.text-brush : touch.has-hover ? Tokens.text-brush : Tokens.text-secondary-brush;
                     }
                 }
-                key-pressed(event) => {
-                    if (event.text == " " || event.text == Key.Return) {
-                        root.current = i;
-                        return accept;
-                    }
-                    reject
+
+                Rectangle {
+                    y: parent.height - self.height;
+                    height: Tokens.section-tab-indicator.bottom;
+                    background: root.current == i ? Tokens.primary-hover-brush : transparent;
                 }
 
                 touch := TouchArea {
@@ -77,12 +97,19 @@ component SectionBar inherits Rectangle {
                     }
                     clicked => {
                         root.current = i;
+                        strip.focus();
                     }
                 }
-            }
 
-            FocusRing {
-                focused: focus.has-focus;
+                // The ring marks the current section while the keyboard is on the strip, with room beside the words.
+                Rectangle {
+                    x: -Tokens.space-6;
+                    width: parent.width + Tokens.space-6 * 2;
+
+                    FocusRing {
+                        focused: strip.has-focus && root.current == i;
+                    }
+                }
             }
         }
     }

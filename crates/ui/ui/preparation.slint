@@ -71,9 +71,36 @@ export component PreparationWindow inherits Window {
                 horizontal-alignment: center;
             }
 
-            SecondaryText {
-                text: PreparationState.message;
-                horizontal-alignment: center;
+            // Stopped, the line is a failure: the error mark and Coral Red words. The mark's gap travels with it, so
+            // the words stay centred while it is away.
+            HorizontalLayout {
+                alignment: center;
+
+                if PreparationState.stopped: HorizontalLayout {
+                    padding-top: Tokens.leading-mark-baseline-margin.top;
+                    padding-right: Tokens.leading-mark-baseline-margin.right;
+                    alignment: start;
+
+                    VerticalLayout {
+                        alignment: start;
+
+                        Image {
+                            image-fit: contain;
+                            source: Tokens.icon-error;
+                            width: Tokens.icon-size;
+                            height: Tokens.icon-size;
+                            colorize: Tokens.error-brush;
+                            accessible-role: image;
+                            accessible-label: "Error";
+                        }
+                    }
+                }
+
+                SecondaryText {
+                    text: PreparationState.message;
+                    color: PreparationState.stopped ? Tokens.error-brush : Tokens.text-secondary-brush;
+                    horizontal-alignment: center;
+                }
             }
 
             if !PreparationState.stopped: CaptionText {
@@ -96,19 +123,20 @@ export component PreparationWindow inherits Window {
                 spacing: Tokens.space-8;
 
                 Button {
+                    text: "Open Settings";
+                    tip: "Open the app's Settings from its last build, if there is one";
+                    clicked => {
+                        PreparationState.open-settings();
+                    }
+                }
+
+                // The primary comes last, as in every action row.
+                Button {
                     text: "Retry";
                     kind: ButtonKind.primary;
                     tip: "Check and build again";
                     clicked => {
                         PreparationState.retry();
-                    }
-                }
-
-                Button {
-                    text: "Open Settings";
-                    tip: "Open the app's Settings from its last build, if there is one";
-                    clicked => {
-                        PreparationState.open-settings();
                     }
                 }
             }

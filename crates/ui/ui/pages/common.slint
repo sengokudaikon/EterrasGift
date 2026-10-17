@@ -35,7 +35,9 @@ export component EmptyState inherits VerticalLayout {
 }
 
 // The bar at the foot of a page: a message on the left, the page's actions on the right.
-export enum MessageTone { none, info, warning, error, confirmed }
+// `info` is a notice in amber (a restart waits); `note` is a plain remark with the muted mark (saved); the check of
+// `confirmed` is for what the game has read back.
+export enum MessageTone { none, info, note, warning, error, confirmed }
 
 export component ActionBar inherits Rectangle {
     in property <string> message;
@@ -72,7 +74,8 @@ export component ActionBar inherits Rectangle {
                 height: Tokens.icon-size;
                 y: (parent.height - self.height) / 2;
                 colorize: root.tone == MessageTone.error ? Tokens.error-brush
-                    : root.tone == MessageTone.confirmed ? Tokens.confirmed-brush : Tokens.warning-brush;
+                    : root.tone == MessageTone.confirmed ? Tokens.confirmed-brush
+                    : root.tone == MessageTone.note ? Tokens.text-muted-brush : Tokens.warning-brush;
             }
 
             if root.message != "": Text {

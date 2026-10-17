@@ -726,7 +726,8 @@ impl View {
         state.set_message(page.message().into());
         state.set_message_tone(match page.kind() {
             _ if page.message().is_empty() => MessageTone::None,
-            MessageKind::Saved => MessageTone::Confirmed,
+            // Saving is a note, not a confirmation: the check is for what the game has read back.
+            MessageKind::Saved => MessageTone::Note,
             MessageKind::RestartRequired | MessageKind::Saving | MessageKind::MemoryOnly => MessageTone::Info,
             MessageKind::Error => MessageTone::Error,
         });

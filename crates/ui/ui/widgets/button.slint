@@ -11,10 +11,11 @@ export component Button inherits Rectangle {
     in property <image> icon;
     in property <ButtonKind> kind: ButtonKind.standard;
     in property <bool> enabled: true;
-    // Icon-only buttons need a tip (and an accessible label); it names what the button does.
+    // Icon-only buttons need a tip (and an accessible label); it names what the button does. A disabled button takes no
+    // focus, but a waiting one keeps its tip for the pointer, saying why (DESIGN.md, Buttons › Focus); the page says the
+    // reason too, except on Home's Play buttons.
     in property <string> tip;
     in property <TipPlacement> tip-placement: TipPlacement.below;
-    // Keyboard tips open for disabled buttons too, so a disabled button can say why.
     callback clicked();
 
     property <bool> has-icon: root.icon.width > 0;
@@ -86,16 +87,19 @@ export component Button inherits Rectangle {
             reject
         }
 
+        // Live on a disabled button with a tip too, so hovering it still says why; only an enabled button acts.
         touch := TouchArea {
-            enabled: root.enabled;
+            enabled: root.enabled || root.tip != "";
             pointer-event(event) => {
                 if (event.kind == PointerEventKind.down) {
                     KeyboardFocus.visible = false;
                 }
             }
             clicked => {
-                focus.focus();
-                root.clicked();
+                if (root.enabled) {
+                    focus.focus();
+                    root.clicked();
+                }
             }
         }
     }

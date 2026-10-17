@@ -386,6 +386,9 @@ const RAIL_X: f32 = 28.0;
 const TRAINER_ROW_Y: f32 = 60.0 + 42.0 + 20.0;
 // Settings scrolled to its end at 1100×700: the first location box (Game executable).
 const LOCATION_BOX_X: f32 = 300.0;
+// Home at 1100×700 with the rail: Play online.
+const PLAY_ONLINE_X: f32 = 444.0;
+const PLAY_Y: f32 = 240.0;
 const FIRST_LOCATION_BOX_Y: f32 = 58.0;
 
 fn main() {
@@ -430,6 +433,27 @@ fn main() {
     session.key(Key::Tab);
     session.key(Key::DownArrow);
     session.capture(&ui, "keyboard-rows");
+
+    // A disabled Play takes no focus but keeps its tip for the pointer, saying why (the game runs); a click does nothing.
+    let host = session.host();
+    host.with(|game| game.running = running());
+    let ui = session.open_on(host.clone(), false, 1100, 700);
+    session.click(PLAY_ONLINE_X, PLAY_Y);
+    assert!(host.state.lock().unwrap().launched.is_empty(), "a disabled Play starts nothing");
+    // The hover tip opens after its delay, which runs on the real clock.
+    std::thread::sleep(Duration::from_millis(600));
+    settle();
+    session.capture(&ui, "home-running-tip");
+
+    // The forge's section strip is one tab stop; Right moves to the next section.
+    let ui = session.open(false, 1100, 700);
+    ui.global::<Nav>().invoke_navigate("forge".into());
+    settle();
+    for _ in 0..3 {
+        session.key(Key::Tab);
+    }
+    session.key(Key::RightArrow);
+    session.capture(&ui, "keyboard-sections");
 
     // A run without the trainer: no Trainer item, no connection block.
     let ui = session.open(false, 1100, 700);

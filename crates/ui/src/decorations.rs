@@ -12,10 +12,6 @@ use std::time::{Duration, Instant};
 
 /// The carved eye in the keyframes (image pixels): the reveal spreads from it and the band keeps it on the page's axis.
 const EYE: (f64, f64) = (783.0, 120.0);
-/// Starting mid-drift keeps the first frame (and every capture) from showing an empty field.
-const WARM_UP: f64 = 40.0;
-/// How much of the bloom range a mote takes to fade out once its threshold is passed.
-const CLEAR_BAND: f64 = 0.12;
 
 thread_local! {
     static FROZEN: Cell<Option<Instant>> = const { Cell::new(None) };
@@ -121,6 +117,31 @@ pub struct AshLook {
     pub glow_scale: f64,
     pub glow_opacity: f64,
     pub still_level: f64,
+    /// How far into its drift a field starts, so the first frame (and every capture) is already full (seconds).
+    pub warm_up: f64,
+    /// Each mote's constants: how long one rise takes (seconds), how much of the height it climbs, how far (pixels) and
+    /// how slowly (seconds) it sways, and its radius (pixels), embers and ash apart.
+    pub rise: Spread,
+    pub climb: Spread,
+    pub sway: Spread,
+    pub sway_period: Spread,
+    pub ember_radius: Spread,
+    pub ash_radius: Spread,
+    /// How much of the bloom range a mote takes to fade out once its threshold is passed.
+    pub clear_band: f64,
+}
+
+/// A mote's constant: the base plus its own share of the spread.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Spread {
+    pub base: f64,
+    pub range: f64,
+}
+
+impl Spread {
+    fn at(self, share: f64) -> f64 {
+        self.base + self.range * share
+    }
 }
 
 /// The ash at `time` seconds into its drift, thinned for the bloom `level`; `still` is the cold dusting (no embers).
@@ -129,7 +150,7 @@ pub fn motes(time: f64, level: f64, still: bool, look: &AshLook) -> Vec<Mote> {
     let mut motes = Vec::new();
     for i in 0..look.limit as u32 {
         // Per-mote constants: how long one rise takes, how far it climbs, how it sways and how large it is.
-        let period = 9.0 + 9.0 * noise(i, 1);
+        let period = look.rise.at(noise(i, 1));
         let phase = time / period + noise(i, 2);
         let cycle = phase.floor();
         let progress = phase - cycle;
@@ -138,16 +159,17 @@ pub fn motes(time: f64, level: f64, still: bool, look: &AshLook) -> Vec<Mote> {
             continue;
         }
         // The bloom clears the ash mote by mote: each goes once the level passes its own threshold.
-        let keep = ((noise(i, 10) * (1.0 - CLEAR_BAND) + CLEAR_BAND - level) / CLEAR_BAND).clamp(0.0, 1.0);
+        let band = look.clear_band;
+        let keep = ((noise(i, 10) * (1.0 - band) + band - level) / band).clamp(0.0, 1.0);
         if keep <= 0.0 {
             continue;
         }
-        let rise = 0.35 + 0.4 * noise(i, 4);
-        let sway = (4.0 + 10.0 * noise(i, 5)) * (std::f64::consts::TAU * (time / (5.0 + 4.0 * noise(i, 6)) + noise(i, 7))).sin();
+        let rise = look.climb.at(noise(i, 4));
+        let sway = look.sway.at(noise(i, 5)) * (std::f64::consts::TAU * (time / look.sway_period.at(noise(i, 6)) + noise(i, 7))).sin();
         // Each rise starts from a fresh spot, so the field never settles into fixed columns.
         let x = noise(i, (100 + cycle as i64) as u32);
         let y = 1.0 - rise * progress;
-        let radius = if ember { 1.0 + 0.8 * noise(i, 8) } else { 0.7 + 1.2 * noise(i, 9) };
+        let radius = if ember { look.ember_radius.at(noise(i, 8)) } else { look.ash_radius.at(noise(i, 9)) };
         let opacity = keep * if ember { look.ember_opacity } else { look.ash_opacity } * (std::f64::consts::PI * progress).sin().powf(1.5);
         let mote = |radius: f64, opacity: f64| Mote {
             index: i as i32,
@@ -164,6 +186,13 @@ pub fn motes(time: f64, level: f64, still: bool, look: &AshLook) -> Vec<Mote> {
         motes.push(mote(radius, opacity));
     }
     motes
+}
+
+fn spread(base: f32, range: f32) -> Spread {
+    Spread {
+        base: f64::from(base),
+        range: f64::from(range),
+    }
 }
 
 /// A stable value in [0, 1) for a mote and channel, so every frame agrees on each mote's constants.
@@ -330,8 +359,16 @@ where
             glow_scale: f64::from(tokens.get_ember_glow_scale()),
             glow_opacity: f64::from(tokens.get_ember_glow_opacity()),
             still_level: f64::from(tokens.get_ash_still_level()),
+            warm_up: f64::from(tokens.get_ash_warm_up_seconds()),
+            rise: spread(tokens.get_ash_rise_seconds(), tokens.get_ash_rise_seconds_spread()),
+            climb: spread(tokens.get_ash_climb(), tokens.get_ash_climb_spread()),
+            sway: spread(tokens.get_ash_sway(), tokens.get_ash_sway_spread()),
+            sway_period: spread(tokens.get_ash_sway_seconds(), tokens.get_ash_sway_seconds_spread()),
+            ember_radius: spread(tokens.get_ember_radius(), tokens.get_ember_radius_spread()),
+            ash_radius: spread(tokens.get_ash_radius(), tokens.get_ash_radius_spread()),
+            clear_band: f64::from(tokens.get_ash_clear_band()),
         };
-        eterra.set_still_motes(ModelRc::new(VecModel::from(motes(WARM_UP, look.still_level, true, &look))));
+        eterra.set_still_motes(ModelRc::new(VecModel::from(motes(look.warm_up, look.still_level, true, &look))));
         let levels = [
             tokens.get_bloom_level_wilted(),
             tokens.get_bloom_level_budding(),
@@ -435,12 +472,13 @@ where
             eterra.set_spread(spread);
         }
         // The earlier keyframe holds until the later one has nearly spread across, then fades out under it.
-        eterra.set_behind_opacity((1.0 - smoothstep((reveal - 0.7) / 0.3)) as f32);
+        let handover = f64::from(tokens.get_eterra_band_handover());
+        eterra.set_behind_opacity((1.0 - smoothstep((reveal - handover) / (1.0 - handover))) as f32);
 
         let ash = match state.ash {
             Ash::Hidden => Vec::new(),
             Ash::Drifting => {
-                let time = WARM_UP + state.started.map_or(Duration::ZERO, |started| now - started).as_secs_f64();
+                let time = state.look.warm_up + state.started.map_or(Duration::ZERO, |started| now - started).as_secs_f64();
                 motes(time, level, false, &state.look)
             }
         };
@@ -464,6 +502,14 @@ mod tests {
             glow_scale: 3.5,
             glow_opacity: 0.18,
             still_level: 0.4,
+            warm_up: 40.0,
+            rise: Spread { base: 9.0, range: 9.0 },
+            climb: Spread { base: 0.35, range: 0.4 },
+            sway: Spread { base: 4.0, range: 10.0 },
+            sway_period: Spread { base: 5.0, range: 4.0 },
+            ember_radius: Spread { base: 1.0, range: 0.8 },
+            ash_radius: Spread { base: 0.7, range: 1.2 },
+            clear_band: 0.12,
         }
     }
 
@@ -521,12 +567,12 @@ mod tests {
     #[test]
     fn the_bloom_clears_the_ash_and_still_ash_has_no_embers() {
         let look = look();
-        let wilted = motes(WARM_UP, 0.0, false, &look);
-        let opening = motes(WARM_UP, 0.6, false, &look);
+        let wilted = motes(look.warm_up, 0.0, false, &look);
+        let opening = motes(look.warm_up, 0.6, false, &look);
         assert!(wilted.iter().any(|mote| mote.ember));
         assert!(opening.len() < wilted.len());
-        assert!(motes(WARM_UP, 1.0, false, &look).is_empty());
-        let still = motes(WARM_UP, look.still_level, true, &look);
+        assert!(motes(look.warm_up, 1.0, false, &look).is_empty());
+        let still = motes(look.warm_up, look.still_level, true, &look);
         assert!(!still.is_empty());
         assert!(still.iter().all(|mote| !mote.ember));
     }
