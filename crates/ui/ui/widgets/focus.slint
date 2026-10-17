@@ -1,0 +1,96 @@
+// Keyboard focus visual and tooltip trigger, shared by every interactive widget.
+
+import { Tokens } from "../tokens.slint";
+import { KeyboardFocus, Tip, TipPlacement } from "../globals.slint";
+
+// Fluent's focus visual, retinted: a FocusBrush ring outside the control, drawn only while the keyboard drives.
+// Place it last inside the control so it draws on top.
+export component FocusRing inherits Rectangle {
+    in property <bool> focused;
+    in property <length> radius: Tokens.control-radius;
+
+    Rectangle {
+        x: -2px;
+        y: -2px;
+        width: parent.width + 4px;
+        height: parent.height + 4px;
+        border-radius: root.radius + 2px;
+        border-width: root.focused && KeyboardFocus.visible ? 2px : 0px;
+        border-color: Tokens.focus-brush;
+    }
+}
+
+// Opens the shared tooltip for its parent: after a hover delay, or at once when keyboard focus lands on it
+// (spec/shell-and-settings.md §6). Fill the control with it; it takes no input.
+export component TipTrigger inherits Rectangle {
+    in property <string> text;
+    in property <bool> hovered;
+    in property <bool> focused;
+    in property <TipPlacement> hover-placement: TipPlacement.below;
+    in property <TipPlacement> keyboard-placement: TipPlacement.below;
+
+    property <bool> hover-ready;
+    property <bool> keyboard: root.focused && KeyboardFocus.visible;
+    property <bool> wanted: root.text != "" && (root.hover-ready || root.keyboard);
+
+    changed hovered => {
+        if (!root.hovered) {
+            root.hover-ready = false;
+        }
+    }
+    changed wanted => {
+        if (root.wanted) {
+            Tip.text = root.text;
+            Tip.anchor-x = root.absolute-position.x;
+            Tip.anchor-y = root.absolute-position.y;
+            Tip.anchor-width = root.width;
+            Tip.anchor-height = root.height;
+            Tip.placement = root.keyboard ? root.keyboard-placement : root.hover-placement;
+            Tip.open = true;
+        } else if (Tip.text == root.text) {
+            Tip.open = false;
+        }
+    }
+
+    Timer {
+        interval: 500ms;
+        running: root.hovered && !root.hover-ready && root.text != "";
+        triggered => {
+            root.hover-ready = true;
+        }
+    }
+}
+
+// The tooltip itself, placed by MainWindow from the `Tip` global and kept inside the window.
+export component TipBubble inherits Rectangle {
+    in property <length> window-width;
+    in property <length> window-height;
+
+    property <length> gap: Tokens.keyboard-tip-offset;
+    width: Math.min(layout.preferred-width, Tokens.reading-max-width * 0.6);
+    height: layout.preferred-height;
+    x: Math.max(Tokens.space-4, Math.min(root.window-width - self.width - Tokens.space-4, Tip.placement == TipPlacement.right
+        ? Tip.anchor-x + Tip.anchor-width + root.gap
+        : Tip.anchor-x));
+    y: Math.max(Tokens.space-4, Math.min(root.window-height - self.height - Tokens.space-4, Tip.placement == TipPlacement.right
+        ? Tip.anchor-y + (Tip.anchor-height - self.height) / 2
+        : Tip.anchor-y + Tip.anchor-height + root.gap));
+    background: Tokens.raised-brush;
+    border-width: 1px;
+    border-color: Tokens.strong-line-brush;
+    border-radius: Tokens.control-radius;
+
+    layout := HorizontalLayout {
+        padding-left: Tokens.space-8;
+        padding-right: Tokens.space-8;
+        padding-top: Tokens.space-6;
+        padding-bottom: Tokens.space-6;
+
+        Text {
+            text: Tip.text;
+            font-size: Tokens.font-size-caption;
+            color: Tokens.text-brush;
+            wrap: word-wrap;
+        }
+    }
+}

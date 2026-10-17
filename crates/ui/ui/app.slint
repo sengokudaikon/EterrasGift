@@ -1,0 +1,116 @@
+// The main window: navigation beside the page host (spec/shell-and-settings.md §2, §5).
+
+import { Tokens } from "tokens.slint";
+import { Nav, NavRow, NavOutcome, Connection, KeyboardFocus, Tip } from "globals.slint";
+import { TipBubble } from "widgets/focus.slint";
+import { NavPane } from "shell/nav.slint";
+import { HomePage, HomeState, LaunchMode, BloomPhase } from "pages/home.slint";
+import { ModsPage, ModsState } from "pages/mods.slint";
+import { SettingsPage, SettingsState, LocationSetting } from "pages/settings.slint";
+import { TrainerPage, TrainerState } from "pages/trainer.slint";
+import { MessageTone } from "pages/common.slint";
+
+export { Tokens, Nav, NavRow, NavOutcome, Connection, HomeState, LaunchMode, BloomPhase, ModsState, SettingsState, LocationSetting,
+    TrainerState, MessageTone }
+
+export component MainWindow inherits Window {
+    title: "Eterra's Gift";
+    preferred-width: Tokens.window-default-width;
+    preferred-height: Tokens.window-default-height;
+    min-width: Tokens.window-min-width;
+    min-height: Tokens.window-min-height;
+    background: Tokens.ground-brush;
+    default-font-family: Tokens.body-font;
+    default-font-size: Tokens.font-size-body;
+
+    // Size classes, recomputed with the window's width; narrow implies compact.
+    out property <bool> narrow: root.width < Tokens.narrow-window-width;
+    out property <bool> compact: root.width < Tokens.compact-window-width;
+    out property <bool> wide: root.width >= Tokens.wide-window-width;
+
+    // Crossing the wide threshold expands or collapses the pane; the user's toggle holds in between.
+    changed wide => {
+        Nav.wide-changed(root.wide);
+    }
+
+    // A tip belongs to the control under it; a new page or a different pane leaves none behind.
+    property <string> page: Nav.current-page;
+    property <bool> pane-open: Nav.pane-open;
+    changed page => {
+        Tip.open = false;
+        host.enter();
+    }
+    changed pane-open => {
+        Tip.open = false;
+    }
+
+    // Focus visuals show once a navigation key is pressed; widgets hide them again on a pointer press.
+    FocusScope {
+        focus-on-click: false;
+        focus-on-tab-navigation: false;
+        capture-key-pressed(event) => {
+            if (event.text == Key.Tab || event.text == Key.Backtab || event.text == Key.UpArrow || event.text == Key.DownArrow
+                || event.text == Key.LeftArrow || event.text == Key.RightArrow || event.text == Key.Home || event.text == Key.End
+                || event.text == Key.PageUp || event.text == Key.PageDown || event.text == Key.F6) {
+                KeyboardFocus.visible = true;
+            }
+            reject
+        }
+
+        nav := NavPane {
+            x: 0;
+            y: 0;
+            height: root.height;
+        }
+
+        // Pages swap in place: the old one goes at once, the new one fades in (none for the first page, and none with
+        // Windows animation effects off).
+        host := Rectangle {
+            x: nav.width;
+            y: 0;
+            width: root.width - nav.width;
+            height: root.height;
+
+            property <bool> entering;
+            property <duration> entered-at;
+            property <float> progress: Math.clamp((animation-tick() - self.entered-at) / Tokens.page-transition-duration, 0, 1);
+
+            public function enter() {
+                if (Tokens.motion) {
+                    self.entered-at = animation-tick();
+                    self.entering = true;
+                }
+            }
+
+            // Cubic ease-out; reading animation-tick() only while entering keeps the window idle otherwise.
+            opacity: self.entering ? 1 - (1 - self.progress) * (1 - self.progress) * (1 - self.progress) : 1;
+
+            Timer {
+                interval: Tokens.page-transition-duration;
+                running: host.entering;
+                triggered => {
+                    host.entering = false;
+                }
+            }
+
+            if root.page == "home": HomePage { }
+            if root.page == "mods": ModsPage {
+                compact: root.compact;
+                wide: root.wide;
+            }
+            if root.page == "settings": SettingsPage {
+                compact: root.compact;
+            }
+            if root.page != "home" && root.page != "mods" && root.page != "settings": TrainerPage {
+                page-id: root.page;
+                page-title: Nav.current-title;
+                compact: root.compact;
+            }
+        }
+
+        if Tip.open: TipBubble {
+            window-width: root.width;
+            window-height: root.height;
+        }
+    }
+}

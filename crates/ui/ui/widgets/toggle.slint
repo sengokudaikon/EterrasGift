@@ -1,0 +1,95 @@
+// Windows' toggle switch with its on/off words beside it, retinted: the bronze-gold accent when on.
+
+import { Tokens } from "../tokens.slint";
+import { KeyboardFocus } from "../globals.slint";
+import { FocusRing } from "focus.slint";
+
+export component ToggleSwitch inherits Rectangle {
+    in-out property <bool> checked;
+    in property <string> on-text: "On";
+    in property <string> off-text: "Off";
+    in property <string> label;
+    in property <bool> enabled: true;
+    callback toggled(bool);
+
+    accessible-role: switch;
+    accessible-label: root.label;
+    accessible-checkable: true;
+    accessible-checked: root.checked;
+    accessible-action-default => { root.flip(); }
+
+    function flip() {
+        if (root.enabled) {
+            root.checked = !root.checked;
+            root.toggled(root.checked);
+        }
+    }
+
+    min-height: Tokens.control-min-height;
+
+    HorizontalLayout {
+        spacing: Tokens.space-12;
+        alignment: start;
+
+        track := Rectangle {
+            width: 40px;
+            height: 20px;
+            y: (parent.height - self.height) / 2;
+            border-radius: self.height / 2;
+            border-width: root.checked ? 0px : 1px;
+            border-color: !root.enabled ? Tokens.text-disabled-brush : touch.has-hover ? Tokens.text-brush : Tokens.text-secondary-brush;
+            background: root.checked ? (root.enabled ? (touch.has-hover ? Tokens.accent-brush : Tokens.accent-pressed-brush) : Tokens.text-disabled-brush)
+                : (touch.has-hover ? Tokens.hover-brush : Tokens.ground-brush);
+
+            Rectangle {
+                width: touch.pressed ? 14px : 12px;
+                height: 12px;
+                y: (parent.height - self.height) / 2;
+                x: root.checked ? parent.width - self.width - 4px : 4px;
+                border-radius: self.height / 2;
+                background: root.checked ? Tokens.on-accent-brush : !root.enabled ? Tokens.text-disabled-brush : Tokens.text-secondary-brush;
+                animate x { duration: 120ms; easing: ease-out; enabled: Tokens.motion; }
+            }
+
+            FocusRing {
+                focused: focus.has-focus;
+                radius: parent.height / 2;
+            }
+        }
+
+        Text {
+            text: root.checked ? root.on-text : root.off-text;
+            color: root.enabled ? Tokens.text-brush : Tokens.text-disabled-brush;
+            vertical-alignment: center;
+        }
+    }
+
+    focus := FocusScope {
+        focus-gained(reason) => {
+            if (reason == FocusReason.tab-navigation) {
+                KeyboardFocus.visible = true;
+            }
+        }
+        enabled: root.enabled;
+        key-pressed(event) => {
+            if (event.text == " " || event.text == Key.Return) {
+                root.flip();
+                return accept;
+            }
+            reject
+        }
+
+        touch := TouchArea {
+            enabled: root.enabled;
+            pointer-event(event) => {
+                if (event.kind == PointerEventKind.down) {
+                    KeyboardFocus.visible = false;
+                }
+            }
+            clicked => {
+                focus.focus();
+                root.flip();
+            }
+        }
+    }
+}

@@ -1,0 +1,378 @@
+// The navigation pane: an expanded pane with labels, or an icon rail (spec/shell-and-settings.md §3, §4).
+// Rust (crates/ui/src/shell.rs) owns the rows and decides what each click and key does; these views draw them and
+// report back.
+
+import { Tokens } from "../tokens.slint";
+import { Nav, NavRow, NavOutcome, Connection, KeyboardFocus, TipPlacement } from "../globals.slint";
+import { FocusRing, TipTrigger } from "../widgets/focus.slint";
+import { Button, ButtonKind } from "../widgets/button.slint";
+
+// The Trainer item's pages on the rail, as a menu beside the item. The current page carries the radio mark.
+component TrainerFlyout inherits Rectangle {
+    callback chosen(string);
+    callback dismissed();
+
+    property <int> highlighted: 0;
+
+    background: Tokens.raised-brush;
+    border-width: 1px;
+    border-color: Tokens.strong-line-brush;
+    border-radius: Tokens.control-radius;
+
+    keys := FocusScope {
+        init => {
+            self.focus();
+        }
+        key-pressed(event) => {
+            if (event.text == Key.UpArrow) {
+                root.highlighted = Math.max(0, root.highlighted - 1);
+            } else if (event.text == Key.DownArrow) {
+                root.highlighted = Math.min(Nav.flyout-pages.length - 1, root.highlighted + 1);
+            } else if (event.text == Key.Home) {
+                root.highlighted = 0;
+            } else if (event.text == Key.End) {
+                root.highlighted = Nav.flyout-pages.length - 1;
+            } else if (event.text == Key.Return || event.text == " ") {
+                root.chosen(Nav.flyout-pages[root.highlighted].id);
+            } else if (event.text == Key.Escape || event.text == Key.LeftArrow) {
+                root.dismissed();
+            } else {
+                return reject;
+            }
+            accept
+        }
+    }
+
+    list := VerticalLayout {
+        padding: Tokens.space-4;
+
+        for page[i] in Nav.flyout-pages: Rectangle {
+            height: Tokens.nav-item-min-height;
+            border-radius: Tokens.control-radius;
+            background: item-touch.has-hover || (root.highlighted == i && KeyboardFocus.visible) ? Tokens.hover-brush : transparent;
+
+            item-touch := TouchArea {
+                clicked => {
+                    root.chosen(page.id);
+                }
+            }
+
+            HorizontalLayout {
+                padding-left: Tokens.space-8;
+                padding-right: Tokens.space-12;
+                spacing: Tokens.space-12;
+
+                // The radio mark: the page now shown
+                Rectangle {
+                    width: Tokens.icon-size-tiny;
+                    Rectangle {
+                        width: 6px;
+                        height: 6px;
+                        border-radius: 3px;
+                        background: page.selected ? Tokens.text-brush : transparent;
+                    }
+                }
+
+                Image {
+                    image-fit: contain;
+                    source: page.icon;
+                    width: Tokens.icon-size;
+                    height: Tokens.icon-size;
+                    y: (parent.height - self.height) / 2;
+                    colorize: Tokens.text-brush;
+                }
+
+                Text {
+                    text: page.title;
+                    color: Tokens.text-brush;
+                    font-size: Tokens.font-size-value;
+                    vertical-alignment: center;
+                    horizontal-stretch: 1;
+                }
+            }
+        }
+    }
+}
+
+component NavRowView inherits Rectangle {
+    in property <NavRow> item;
+    in property <int> index;
+    in property <bool> rail;
+
+    accessible-role: tab;
+    accessible-label: root.item.title;
+    accessible-item-selected: root.item.selected;
+
+    // Rust's focus request for this row, taken once and cleared.
+    property <int> focus-ticket: Nav.focus-row == root.index ? Nav.focus-serial : -1;
+    changed focus-ticket => {
+        if (root.focus-ticket >= 0) {
+            Nav.focus-row = -1;
+            focus.focus();
+        }
+    }
+
+    function act(outcome: NavOutcome) -> bool {
+        if (outcome == NavOutcome.open-flyout) {
+            flyout.show();
+        }
+        outcome != NavOutcome.ignored
+    }
+
+    height: Tokens.nav-item-min-height;
+    border-radius: Tokens.control-radius;
+    border-width: 1px;
+    border-color: root.item.selected ? Tokens.accent-trim-brush : transparent;
+    background: root.item.selected ? (touch.has-hover ? Tokens.primary-hover-brush : Tokens.primary-brush)
+        : touch.has-hover ? Tokens.hover-brush : transparent;
+
+    property <brush> foreground: root.item.selected ? Tokens.on-primary-brush : Tokens.text-brush;
+
+    HorizontalLayout {
+        padding-left: (root.item.child && !root.rail ? Tokens.nav-child-indent.left : 0px) + Tokens.nav-item-padding.left;
+        padding-right: Tokens.nav-item-padding.right;
+        spacing: Tokens.space-12;
+
+        Image {
+            image-fit: contain;
+            source: root.item.icon;
+            width: Tokens.icon-size-nav;
+            height: Tokens.icon-size-nav;
+            y: (parent.height - self.height) / 2;
+            colorize: root.foreground;
+        }
+
+        if !root.rail: Text {
+            text: root.item.title;
+            color: root.foreground;
+            font-size: Tokens.font-size-value;
+            vertical-alignment: center;
+            overflow: elide;
+            horizontal-stretch: 1;
+        }
+
+        if !root.rail && root.item.parent: Image {
+            image-fit: contain;
+            source: root.item.expanded ? Tokens.icon-chevron-up : Tokens.icon-chevron-down;
+            width: Tokens.icon-size-small;
+            height: Tokens.icon-size-small;
+            y: (parent.height - self.height) / 2;
+            colorize: root.foreground;
+        }
+    }
+
+    focus := FocusScope {
+        focus-gained(reason) => {
+            if (reason == FocusReason.tab-navigation) {
+                KeyboardFocus.visible = true;
+            }
+        }
+        // One tab stop for the rows and the foot (spec §3 "Keyboard").
+        focus-on-tab-navigation: Nav.tab-row == root.index;
+        key-pressed(event) => {
+            if (root.act(Nav.row-key(root.index, event.text, event.modifiers.alt || event.modifiers.control || event.modifiers.shift || event.modifiers.meta))) {
+                return accept;
+            }
+            reject
+        }
+
+        touch := TouchArea {
+            pointer-event(event) => {
+                if (event.kind == PointerEventKind.down) {
+                    KeyboardFocus.visible = false;
+                }
+            }
+            clicked => {
+                focus.focus();
+                root.act(Nav.row-clicked(root.index));
+            }
+        }
+    }
+
+    // On the rail each icon is named in a tip beside it, for hover and keyboard focus alike.
+    TipTrigger {
+        text: root.rail ? root.item.title : "";
+        hovered: touch.has-hover;
+        focused: focus.has-focus;
+        hover-placement: TipPlacement.right;
+        keyboard-placement: TipPlacement.right;
+    }
+
+    FocusRing {
+        focused: focus.has-focus;
+    }
+
+    // A popup needs its own size: elements inside it can't be read from out here (Slint #4438).
+    flyout := PopupWindow {
+        x: root.width + Tokens.space-4;
+        y: 0;
+        width: Tokens.menu-flyout-width;
+        height: Nav.flyout-pages.length * Tokens.nav-item-min-height + 2 * Tokens.space-4;
+        close-policy: PopupClosePolicy.close-on-click-outside;
+
+        TrainerFlyout {
+            width: parent.width;
+            height: parent.height;
+            chosen(id) => {
+                flyout.close();
+                Nav.navigate(id);
+            }
+            dismissed => {
+                flyout.close();
+            }
+        }
+    }
+}
+
+// The trainer's connection, fixed at the foot of the navigation above a hairline: icon and words, never colour alone.
+component ConnectionBlock inherits Rectangle {
+    in property <bool> rail;
+
+    height: layout.preferred-height;
+
+    Rectangle {
+        y: 0;
+        height: 1px;
+        background: Tokens.hairline-brush;
+    }
+
+    layout := VerticalLayout {
+        padding-left: root.rail ? Tokens.nav-status-collapsed-padding.left : Tokens.nav-status-padding.left;
+        padding-right: root.rail ? Tokens.nav-status-collapsed-padding.right : Tokens.nav-status-padding.right;
+        padding-top: Tokens.nav-status-padding.top;
+        padding-bottom: Tokens.nav-status-padding.bottom;
+        spacing: Tokens.space-10;
+
+        status := HorizontalLayout {
+            spacing: Tokens.space-10;
+            padding-left: root.rail ? Tokens.nav-status-icon-collapsed-margin.left : 0px;
+
+            Image {
+                image-fit: contain;
+                source: Connection.connected ? Tokens.icon-connected : Tokens.icon-disconnected;
+                width: Tokens.icon-size;
+                height: Tokens.icon-size;
+                colorize: Connection.connected ? Tokens.confirmed-brush : Connection.blocked ? Tokens.warning-brush : Tokens.text-muted-brush;
+            }
+
+            if !root.rail: Text {
+                text: Connection.text;
+                font-size: Tokens.font-size-caption;
+                color: Tokens.text-secondary-brush;
+                wrap: word-wrap;
+                overflow: elide;
+                max-height: Tokens.connection-text-max-height;
+                horizontal-stretch: 1;
+            }
+        }
+
+        if Connection.show-action: Button {
+            text: root.rail ? "" : Connection.action-text;
+            icon: Tokens.icon-refresh;
+            tip: Connection.action-text;
+            tip-placement: root.rail ? TipPlacement.right : TipPlacement.below;
+            clicked => {
+                Connection.connect();
+            }
+        }
+    }
+
+    // The rail shows the words as a tip on the status icon.
+    status-touch := TouchArea {
+        x: status.x;
+        y: status.y;
+        width: status.width;
+        height: status.height;
+    }
+
+    TipTrigger {
+        x: status.x;
+        y: status.y;
+        width: status.width;
+        height: status.height;
+        text: root.rail ? Connection.text : "";
+        hovered: status-touch.has-hover;
+        hover-placement: TipPlacement.right;
+    }
+}
+
+export component NavPane inherits Rectangle {
+    property <bool> rail: !Nav.pane-open;
+
+    width: root.rail ? Tokens.nav-rail-width : Tokens.nav-pane-width;
+    background: Tokens.surface-brush;
+
+    VerticalLayout {
+        // Brand row: the wordmark and the toggle; the rail keeps only the toggle.
+        HorizontalLayout {
+            padding-left: root.rail ? Tokens.nav-brand-collapsed-margin.left : Tokens.nav-brand-margin.left;
+            padding-right: root.rail ? Tokens.nav-brand-collapsed-margin.right : Tokens.nav-brand-margin.right;
+            padding-top: Tokens.nav-brand-margin.top;
+            padding-bottom: Tokens.nav-brand-margin.bottom;
+            min-height: Tokens.control-min-height + Tokens.nav-brand-margin.top + Tokens.nav-brand-margin.bottom;
+            alignment: root.rail ? center : space-between;
+
+            if !root.rail: Text {
+                text: "Eterra's Gift";
+                font-family: Tokens.display-font;
+                font-weight: Tokens.display-weight;
+                letter-spacing: Tokens.tracking-title;
+                font-size: Tokens.font-size-section;
+                color: Tokens.label-brush;
+                vertical-alignment: center;
+                overflow: elide;
+                horizontal-stretch: 1;
+            }
+
+            Button {
+                kind: ButtonKind.subtle;
+                icon: root.rail ? Tokens.icon-pane-expand : Tokens.icon-pane-collapse;
+                tip: root.rail ? "Expand navigation" : "Collapse navigation";
+                tip-placement: root.rail ? TipPlacement.right : TipPlacement.below;
+                clicked => {
+                    Nav.toggle-pane();
+                }
+            }
+        }
+
+        // The rows; Settings at the foot, as Windows apps keep it.
+        VerticalLayout {
+            padding-left: Tokens.nav-list-margin.left;
+            padding-right: Tokens.nav-list-margin.right;
+            spacing: Tokens.row-gap.bottom;
+            alignment: start;
+            vertical-stretch: 1;
+
+            for row[i] in Nav.rows: NavRowView {
+                item: row;
+                index: i;
+                rail: root.rail;
+            }
+        }
+
+        VerticalLayout {
+            padding-left: Tokens.nav-footer-margin.left;
+            padding-right: Tokens.nav-footer-margin.right;
+            padding-top: Tokens.nav-footer-margin.top;
+            padding-bottom: Tokens.nav-footer-margin.bottom;
+            spacing: Tokens.row-gap.bottom;
+
+            for row[i] in Nav.footer: NavRowView {
+                item: row;
+                index: Nav.rows.length + i;
+                rail: root.rail;
+            }
+        }
+
+        if Connection.present: ConnectionBlock {
+            rail: root.rail;
+        }
+    }
+
+    // Hairline on the right edge.
+    Rectangle {
+        x: parent.width - 1px;
+        width: 1px;
+        background: Tokens.hairline-brush;
+    }
+}

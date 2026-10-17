@@ -1,0 +1,68 @@
+// State shared between the views and Rust. Rust owns the truth (crates/ui/src); these globals carry it to the views and
+// carry the user's actions back as callbacks.
+
+// One row of the navigation pane. `parent` marks the Trainer item, which holds pages but is never a page itself.
+export struct NavRow {
+    id: string,
+    title: string,
+    icon: image,
+    child: bool,
+    parent: bool,
+    expanded: bool,
+    selected: bool,
+}
+
+// What a navigation key or click asks the view to do. Rust decides; the view only shows the rail flyout.
+export enum NavOutcome { ignored, handled, open-flyout }
+
+export global Nav {
+    // Rows of the pane and of its foot (Settings). The keyboard treats them as one list: foot index = rows.length + i.
+    in property <[NavRow]> rows;
+    in property <[NavRow]> footer;
+    // The Trainer item's pages, listed by the rail's flyout.
+    in property <[NavRow]> flyout-pages;
+    in property <string> current-page: "home";
+    in property <string> current-title: "Home";
+    in property <bool> pane-open;
+    // Rust asks a row to take keyboard focus by setting these; the row clears `focus-row` once it has focus.
+    in-out property <int> focus-row: -1;
+    in property <int> focus-serial;
+    // The row that takes the navigation's single tab stop.
+    in property <int> tab-row;
+
+    callback row-clicked(int) -> NavOutcome;
+    callback row-key(int, string, bool) -> NavOutcome;
+    callback toggle-pane();
+    callback navigate(string);
+    callback wide-changed(bool);
+}
+
+// The trainer's connection, shown at the foot of the navigation (spec/shell-and-settings.md §4).
+export global Connection {
+    in property <bool> present;
+    in property <bool> connected;
+    in property <bool> blocked;
+    in property <string> text: "Not connected";
+    in property <bool> show-action;
+    in property <string> action-text: "Connect";
+
+    callback connect();
+}
+
+// Focus visuals show only while the keyboard is driving (Windows convention); a pointer press hides them again.
+export global KeyboardFocus {
+    in-out property <bool> visible;
+}
+
+// The one tooltip on screen, drawn by MainWindow above everything so no pane clips it.
+export enum TipPlacement { below, right }
+
+export global Tip {
+    in-out property <bool> open;
+    in-out property <string> text;
+    in-out property <length> anchor-x;
+    in-out property <length> anchor-y;
+    in-out property <length> anchor-width;
+    in-out property <length> anchor-height;
+    in-out property <TipPlacement> placement;
+}

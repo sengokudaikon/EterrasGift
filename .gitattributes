@@ -1,0 +1,7 @@
+# Text is checked out with CRLF everywhere (matches .editorconfig); the repository stores LF. Same as ../EterrasGift.
+* text=auto eol=crlf
+
+*.png binary
+*.ttf binary
+*.ico binary
+*.exe binary

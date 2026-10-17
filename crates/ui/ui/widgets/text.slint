@@ -1,0 +1,57 @@
+// Text roles, the counterparts of Theme.axaml's TextBlock classes. Views pick a role, never a size or colour.
+
+import { Tokens } from "../tokens.slint";
+
+// Cinzel capitals for the large text that says little.
+export component TitleText inherits Text {
+    font-family: Tokens.display-font;
+    font-size: Tokens.font-size-title;
+    font-weight: Tokens.display-weight;
+    letter-spacing: Tokens.tracking-title;
+    color: Tokens.text-brush;
+    wrap: word-wrap;
+    max-lines: Tokens.title-max-lines;
+    overflow: elide;
+}
+
+export component SectionText inherits Text {
+    font-size: Tokens.font-size-section;
+    font-weight: Tokens.emphasis-weight;
+    color: Tokens.text-brush;
+    wrap: word-wrap;
+}
+
+export component SubheadingText inherits Text {
+    font-size: Tokens.font-size-subheading;
+    font-weight: Tokens.emphasis-weight;
+    color: Tokens.text-brush;
+    wrap: word-wrap;
+}
+
+export component BodyText inherits Text {
+    font-size: Tokens.font-size-body;
+    color: Tokens.text-brush;
+    wrap: word-wrap;
+}
+
+export component SecondaryText inherits BodyText {
+    color: Tokens.text-secondary-brush;
+}
+
+// A field's name above it.
+export component LabelText inherits BodyText {
+    color: Tokens.text-muted-brush;
+}
+
+export enum CaptionTone { muted, secondary, error, warning, confirmed }
+
+export component CaptionText inherits Text {
+    in property <CaptionTone> tone: CaptionTone.muted;
+    font-size: Tokens.font-size-caption;
+    wrap: word-wrap;
+    color: tone == CaptionTone.secondary ? Tokens.text-secondary-brush
+        : tone == CaptionTone.error ? Tokens.error-brush
+        : tone == CaptionTone.warning ? Tokens.warning-brush
+        : tone == CaptionTone.confirmed ? Tokens.confirmed-brush
+        : Tokens.text-muted-brush;
+}

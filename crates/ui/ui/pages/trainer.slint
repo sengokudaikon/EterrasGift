@@ -1,0 +1,119 @@
+// Trainer pages. Until the trainer is ported each page shows its section bar (when it has one) and the connection's
+// empty state (spec/trainer.md §3.10). TODO(trainer): the feature lists, the stash, and the Item Forge.
+
+import { Tokens } from "../tokens.slint";
+import { Connection, KeyboardFocus } from "../globals.slint";
+import { Button, ButtonKind } from "../widgets/button.slint";
+import { FocusRing } from "../widgets/focus.slint";
+import { EmptyState } from "common.slint";
+
+export global TrainerState {
+    // The forge's empty state for the current connection state.
+    in property <string> empty-title: "Not connected";
+    in property <string> empty-detail: "Connect, then place an item in the forge.";
+}
+
+// A page's section tabs, underlined in crimson like the game's active tab.
+component SectionBar inherits Rectangle {
+    in property <[string]> sections;
+    in-out property <int> current;
+    in property <bool> compact;
+
+    height: layout.preferred-height;
+
+    Rectangle {
+        y: parent.height - 1px;
+        height: 1px;
+        background: Tokens.hairline-brush;
+    }
+
+    layout := HorizontalLayout {
+        padding-left: root.compact ? Tokens.section-bar-compact-padding.left : Tokens.section-bar-padding.left;
+        padding-top: Tokens.section-bar-padding.top;
+        spacing: Tokens.space-24;
+        alignment: start;
+
+        for section[i] in root.sections: Rectangle {
+            width: label.preferred-width;
+            height: tab-layout.preferred-height;
+
+            tab-layout := VerticalLayout {
+                padding-top: Tokens.section-tab-padding.top;
+                padding-bottom: Tokens.section-tab-padding.bottom;
+
+                label := Text {
+                    text: section;
+                    font-size: Tokens.font-size-value;
+                    font-weight: root.current == i ? Tokens.emphasis-weight : 400;
+                    color: root.current == i ? Tokens.text-brush : touch.has-hover ? Tokens.text-brush : Tokens.text-secondary-brush;
+                }
+            }
+
+            Rectangle {
+                y: parent.height - self.height;
+                height: Tokens.section-tab-indicator.bottom;
+                background: root.current == i ? Tokens.primary-hover-brush : transparent;
+            }
+
+            focus := FocusScope {
+                focus-gained(reason) => {
+                    if (reason == FocusReason.tab-navigation) {
+                        KeyboardFocus.visible = true;
+                    }
+                }
+                key-pressed(event) => {
+                    if (event.text == " " || event.text == Key.Return) {
+                        root.current = i;
+                        return accept;
+                    }
+                    reject
+                }
+
+                touch := TouchArea {
+                    pointer-event(event) => {
+                        if (event.kind == PointerEventKind.down) {
+                            KeyboardFocus.visible = false;
+                        }
+                    }
+                    clicked => {
+                        root.current = i;
+                    }
+                }
+            }
+
+            FocusRing {
+                focused: focus.has-focus;
+            }
+        }
+    }
+}
+
+export component TrainerPage inherits Rectangle {
+    in property <string> page-id;
+    in property <string> page-title;
+    in property <bool> compact;
+
+    property <bool> forge: root.page-id == "forge";
+    property <[string]> sections: root.forge ? ["Item", "Crafting rules"] : [];
+
+    VerticalLayout {
+        if root.sections.length > 0: SectionBar {
+            sections: root.sections;
+            compact: root.compact;
+        }
+
+        EmptyState {
+            vertical-stretch: 1;
+            title: root.forge ? TrainerState.empty-title : root.page-title;
+            detail: root.forge ? TrainerState.empty-detail : "Not ported yet.";
+
+            if root.forge && Connection.show-action: Button {
+                text: Connection.action-text;
+                kind: ButtonKind.primary;
+                clicked => {
+                    Connection.connect();
+                }
+            }
+        }
+    }
+}

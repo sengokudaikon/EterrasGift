@@ -1,0 +1,117 @@
+// Home: starting the game (spec/companion.md §5).
+
+import { Tokens } from "../tokens.slint";
+import { TitleText, SecondaryText, CaptionText, CaptionTone } from "../widgets/text.slint";
+import { Button } from "../widgets/button.slint";
+import { EterraBand } from "common.slint";
+
+export enum LaunchMode { online, offline, with-mods }
+
+// Eterra's tree in its four keyframes; Home follows the game: none running, found, a character loading, in game.
+export enum BloomPhase { wilted, budding, opening, bloom }
+
+export global HomeState {
+    // False only in a run without the launcher (tests): Home then shows the companion's own title.
+    in property <bool> has-launcher: true;
+    in property <BloomPhase> phase: BloomPhase.wilted;
+    in property <bool> can-start: true;
+    in property <bool> can-start-with-mods: true;
+    // Why the buttons are disabled, or what each does (the tooltips, shown on disabled buttons too).
+    in property <string> online-tip: "Start the game through Steam. MelonLoader is set aside first, so no mod loads online";
+    in property <string> offline-tip: "Start the game in offline mode. MelonLoader is set aside first, so no mod loads";
+    in property <string> with-mods-tip: "Start the game in offline mode with MelonLoader and the mods that are on; needs MelonLoader in the game folder";
+    // The last start's message, about this one game.
+    in property <string> message;
+    in property <bool> message-is-error;
+
+    callback start(LaunchMode);
+}
+
+export component HomePage inherits Rectangle {
+    band := EterraBand {
+        // TODO(decorations): the reveal from the eye between keyframes and the ash while the game starts; until then
+        // the band jumps to the phase's keyframe, as it does with Windows animation effects off.
+        source: HomeState.phase == BloomPhase.bloom ? @image-url("../../../../design/eterra/band-4-bloom.png")
+            : HomeState.phase == BloomPhase.opening ? @image-url("../../../../design/eterra/band-3-opening.png")
+            : HomeState.phase == BloomPhase.budding ? @image-url("../../../../design/eterra/band-2-budding.png")
+            : @image-url("../../../../design/eterra/band-1-wilted.png");
+        x: 0;
+        y: 0;
+        width: root.width;
+        visible: HomeState.has-launcher;
+    }
+
+    VerticalLayout {
+        x: 0;
+        y: 0;
+        width: root.width;
+        height: root.height;
+        padding-top: HomeState.has-launcher ? band.depth + Tokens.eterra-band-gap : Tokens.header-padding.top + Tokens.space-24;
+        padding-left: Tokens.page-gutter.left;
+        padding-right: Tokens.page-gutter.right;
+        alignment: start;
+        spacing: Tokens.space-12;
+
+        TitleText {
+            text: HomeState.has-launcher ? "Last Epoch" : "Home";
+            horizontal-alignment: center;
+        }
+
+        if !HomeState.has-launcher: SecondaryText {
+            text: "Companion tools for Last Epoch. New ones appear here as they are added.";
+            horizontal-alignment: center;
+        }
+
+        if HomeState.has-launcher: HorizontalLayout {
+            alignment: center;
+            spacing: Tokens.space-8;
+
+            Button {
+                text: "Play online";
+                enabled: HomeState.can-start;
+                tip: HomeState.online-tip;
+                clicked => {
+                    HomeState.start(LaunchMode.online);
+                }
+            }
+
+            Button {
+                text: "Play offline";
+                enabled: HomeState.can-start;
+                tip: HomeState.offline-tip;
+                clicked => {
+                    HomeState.start(LaunchMode.offline);
+                }
+            }
+
+            Button {
+                text: "Play offline with mods";
+                enabled: HomeState.can-start && HomeState.can-start-with-mods;
+                tip: HomeState.with-mods-tip;
+                clicked => {
+                    HomeState.start(LaunchMode.with-mods);
+                }
+            }
+        }
+
+        if HomeState.has-launcher && HomeState.message != "": HorizontalLayout {
+            alignment: center;
+            spacing: Tokens.space-6;
+
+            Image {
+                image-fit: contain;
+                source: HomeState.message-is-error ? Tokens.icon-error : Tokens.icon-info;
+                width: Tokens.icon-size-small;
+                height: Tokens.icon-size-small;
+                y: (parent.height - self.height) / 2;
+                colorize: HomeState.message-is-error ? Tokens.error-brush : Tokens.text-secondary-brush;
+            }
+
+            CaptionText {
+                text: HomeState.message;
+                tone: HomeState.message-is-error ? CaptionTone.error : CaptionTone.secondary;
+                max-width: Tokens.reading-max-width;
+            }
+        }
+    }
+}

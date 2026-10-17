@@ -1,0 +1,31 @@
+[package]
+name = "eg-ui"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+eg-core.workspace = true
+eg-companion.workspace = true
+rfd.workspace = true
+slint = { workspace = true, features = ["raw-window-handle-06"] }
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { workspace = true, features = ["Win32_UI_WindowsAndMessaging", "Win32_UI_Accessibility"] }
+
+[build-dependencies]
+slint-build.workspace = true
+
+[dev-dependencies]
+image.workspace = true
+jiff.workspace = true
+serde_json.workspace = true
+tempfile.workspace = true
+
+[[test]]
+name = "captures"
+harness = false
+
+[lints]
+workspace = true

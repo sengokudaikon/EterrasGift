@@ -1,0 +1,169 @@
+// Mods: the mod library (spec/companion.md §6.8). `[content | pane]` over an action bar.
+// TODO(mods): the list rows, the selected mod's pane, "Not installed" sources, row keyboard and menu, the maximized log.
+
+import { Tokens } from "../tokens.slint";
+import { TitleText, SecondaryText, SubheadingText, LabelText, CaptionText } from "../widgets/text.slint";
+import { Button, ButtonKind } from "../widgets/button.slint";
+import { ActionBar, MessageTone } from "common.slint";
+
+export global ModsState {
+    in property <int> installed-count;
+    in property <int> enabled-count;
+    in property <bool> can-open-log;
+    in property <string> readiness: "MelonLoader is not in the game folder, so no mod can load. Play offline with mods needs it.";
+    in property <MessageTone> readiness-tone: MessageTone.warning;
+    in property <bool> can-play;
+
+    callback add-mod();
+    callback open-folder();
+    callback open-log();
+    callback play();
+}
+
+export component ModsPage inherits Rectangle {
+    in property <bool> compact;
+    in property <bool> wide;
+
+    // Compact and narrow windows keep the toolbar as icons with tips.
+    property <bool> icon-toolbar: root.compact;
+
+    VerticalLayout {
+        HorizontalLayout {
+            vertical-stretch: 1;
+
+            VerticalLayout {
+                horizontal-stretch: 1;
+                padding-left: root.compact ? Tokens.page-gutter-compact.left : Tokens.page-gutter.left;
+                padding-right: root.compact ? Tokens.page-gutter-compact.right : Tokens.page-gutter.right;
+                padding-top: Tokens.header-padding.top;
+                spacing: Tokens.space-8;
+                alignment: start;
+
+                TitleText {
+                    text: "Mods";
+                }
+
+                SecondaryText {
+                    text: "Mods load only when you play offline with mods. Playing online or plain offline never loads them.";
+                }
+
+                HorizontalLayout {
+                    padding-top: Tokens.space-6;
+                    spacing: Tokens.space-8;
+                    alignment: start;
+
+                    Button {
+                        text: root.icon-toolbar ? "" : "Add mod";
+                        icon: Tokens.icon-add;
+                        tip: root.icon-toolbar ? "Add mod" : "";
+                        clicked => {
+                            ModsState.add-mod();
+                        }
+                    }
+
+                    Button {
+                        text: root.icon-toolbar ? "" : "Open folder";
+                        icon: Tokens.icon-folder;
+                        tip: root.icon-toolbar ? "Open folder" : "";
+                        clicked => {
+                            ModsState.open-folder();
+                        }
+                    }
+
+                    Button {
+                        text: root.icon-toolbar ? "" : "Open log";
+                        icon: Tokens.icon-log;
+                        tip: root.icon-toolbar ? "Open log" : "";
+                        enabled: ModsState.can-open-log;
+                        clicked => {
+                            ModsState.open-log();
+                        }
+                    }
+                }
+
+                VerticalLayout {
+                    padding-left: Tokens.mods-empty-margin.left;
+                    padding-right: Tokens.mods-empty-margin.right;
+                    padding-top: Tokens.mods-empty-margin.top;
+                    spacing: Tokens.space-8;
+
+                    HorizontalLayout {
+                        spacing: Tokens.space-8;
+
+                        LabelText {
+                            text: "Installed";
+                        }
+
+                        if ModsState.installed-count > 0: CaptionText {
+                            text: "\{ModsState.enabled-count} of \{ModsState.installed-count} on";
+                            vertical-alignment: center;
+                        }
+                    }
+
+                    if ModsState.installed-count == 0: VerticalLayout {
+                        spacing: Tokens.space-8;
+                        padding-top: Tokens.space-6;
+
+                        SubheadingText {
+                            text: "No mods yet";
+                        }
+
+                        CaptionText {
+                            text: "Add a mod's DLL, or put it in the Mods folder yourself. MelonLoader loads it the next time you play offline with mods.";
+                        }
+
+                        HorizontalLayout {
+                            alignment: start;
+                            padding-top: Tokens.space-4;
+
+                            Button {
+                                text: "Add mod";
+                                clicked => {
+                                    ModsState.add-mod();
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // The selected mod's pane.
+            Rectangle {
+                width: root.wide ? Tokens.changes-pane-wide-width : root.compact ? Tokens.changes-pane-compact-width : Tokens.changes-pane-width;
+                background: Tokens.surface-brush;
+
+                Rectangle {
+                    x: 0;
+                    width: 1px;
+                    background: Tokens.hairline-brush;
+                }
+
+                VerticalLayout {
+                    padding-left: Tokens.pane-content-margin.left;
+                    padding-right: Tokens.pane-content-margin.right;
+                    padding-top: Tokens.pane-content-margin.top;
+                    alignment: start;
+
+                    CaptionText {
+                        text: "A mod's details and settings show here once you add one.";
+                    }
+                }
+            }
+        }
+
+        ActionBar {
+            message: ModsState.readiness;
+            tone: ModsState.readiness-tone;
+
+            Button {
+                text: "Play offline with mods";
+                icon: Tokens.icon-play;
+                kind: ButtonKind.primary;
+                enabled: ModsState.can-play;
+                clicked => {
+                    ModsState.play();
+                }
+            }
+        }
+    }
+}

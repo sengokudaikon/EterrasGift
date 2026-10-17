@@ -1,0 +1,114 @@
+// Buttons: quiet frames by default, one crimson primary per surface, subtle ones for chrome (Theme.axaml "Buttons").
+
+import { Tokens } from "../tokens.slint";
+import { KeyboardFocus, TipPlacement } from "../globals.slint";
+import { FocusRing, TipTrigger } from "focus.slint";
+
+export enum ButtonKind { standard, primary, subtle }
+
+export component Button inherits Rectangle {
+    in property <string> text;
+    in property <image> icon;
+    in property <ButtonKind> kind: ButtonKind.standard;
+    in property <bool> enabled: true;
+    // Icon-only buttons need a tip (and an accessible label); it names what the button does.
+    in property <string> tip;
+    in property <TipPlacement> tip-placement: TipPlacement.below;
+    // Keyboard tips open for disabled buttons too, so a disabled button can say why.
+    callback clicked();
+
+    property <bool> has-icon: root.icon.width > 0;
+    property <bool> icon-only: root.has-icon && root.text == "";
+    property <bool> hovered: touch.has-hover && root.enabled;
+    property <bool> pressed: touch.pressed && root.enabled;
+
+    accessible-role: button;
+    accessible-label: root.text != "" ? root.text : root.tip;
+    accessible-enabled: root.enabled;
+    accessible-action-default => { root.clicked(); }
+
+    min-height: Tokens.control-min-height;
+    min-width: root.icon-only ? Tokens.icon-button-size : 0px;
+    border-radius: Tokens.control-radius;
+    border-width: 1px;
+    background: !root.enabled ? (root.kind == ButtonKind.subtle ? transparent : Tokens.ground-brush)
+        : root.kind == ButtonKind.primary ? (root.pressed ? Tokens.primary-pressed-brush : root.hovered ? Tokens.primary-hover-brush : Tokens.primary-brush)
+        : root.kind == ButtonKind.subtle ? (root.pressed ? Tokens.selected-brush : root.hovered ? Tokens.hover-brush : transparent)
+        : (root.pressed ? Tokens.selected-brush : root.hovered ? Tokens.hover-brush : Tokens.surface-brush);
+    border-color: !root.enabled ? (root.kind == ButtonKind.subtle ? transparent : Tokens.hairline-brush)
+        : root.kind == ButtonKind.primary ? (root.hovered ? Tokens.accent-brush : Tokens.accent-trim-brush)
+        : root.kind == ButtonKind.subtle ? transparent
+        : (root.hovered ? Tokens.accent-trim-brush : Tokens.strong-line-brush);
+
+    property <brush> foreground: !root.enabled ? Tokens.text-disabled-brush
+        : root.kind == ButtonKind.primary ? Tokens.on-primary-brush
+        : root.kind == ButtonKind.subtle ? (root.hovered ? Tokens.text-brush : Tokens.text-secondary-brush)
+        : Tokens.label-brush;
+
+    HorizontalLayout {
+        padding-left: root.icon-only ? Tokens.icon-button-padding.left
+            : root.kind == ButtonKind.primary ? Tokens.primary-button-padding.left : Tokens.button-padding.left;
+        padding-right: root.icon-only ? Tokens.icon-button-padding.right
+            : root.kind == ButtonKind.primary ? Tokens.primary-button-padding.right : Tokens.button-padding.right;
+        padding-top: root.icon-only ? Tokens.icon-button-padding.top : Tokens.button-padding.top;
+        padding-bottom: root.icon-only ? Tokens.icon-button-padding.bottom : Tokens.button-padding.bottom;
+        spacing: Tokens.space-8;
+        alignment: center;
+
+        if root.has-icon: Image {
+            image-fit: contain;
+            source: root.icon;
+            width: Tokens.icon-size;
+            height: Tokens.icon-size;
+            y: (parent.height - self.height) / 2;
+            colorize: root.foreground;
+        }
+        if root.text != "": Text {
+            text: root.text;
+            color: root.foreground;
+            vertical-alignment: center;
+            overflow: elide;
+        }
+    }
+
+    focus := FocusScope {
+        focus-gained(reason) => {
+            if (reason == FocusReason.tab-navigation) {
+                KeyboardFocus.visible = true;
+            }
+        }
+        enabled: root.enabled;
+        key-pressed(event) => {
+            if (event.text == Key.Return || event.text == " ") {
+                root.clicked();
+                return accept;
+            }
+            reject
+        }
+
+        touch := TouchArea {
+            enabled: root.enabled;
+            pointer-event(event) => {
+                if (event.kind == PointerEventKind.down) {
+                    KeyboardFocus.visible = false;
+                }
+            }
+            clicked => {
+                focus.focus();
+                root.clicked();
+            }
+        }
+    }
+
+    TipTrigger {
+        text: root.tip;
+        hovered: touch.has-hover;
+        focused: focus.has-focus;
+        hover-placement: root.tip-placement;
+        keyboard-placement: root.tip-placement;
+    }
+
+    FocusRing {
+        focused: focus.has-focus;
+    }
+}

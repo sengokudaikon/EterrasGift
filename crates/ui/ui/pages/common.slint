@@ -1,0 +1,184 @@
+// Page furniture shared by several pages: the empty state, the action bar, settings-like groups, Eterra's band.
+
+import { Tokens } from "../tokens.slint";
+import { TitleText, SecondaryText, CaptionText, CaptionTone } from "../widgets/text.slint";
+
+// A centred title and sentence for a page with nothing to show yet; the caller adds actions as children.
+export component EmptyState inherits VerticalLayout {
+    in property <string> title;
+    in property <string> detail;
+
+    alignment: center;
+    spacing: Tokens.space-12;
+    padding-left: Tokens.empty-state-margin.left;
+    padding-right: Tokens.empty-state-margin.right;
+    padding-top: Tokens.empty-state-margin.top;
+    padding-bottom: Tokens.empty-state-margin.bottom;
+
+    TitleText {
+        text: root.title;
+        horizontal-alignment: center;
+    }
+
+    SecondaryText {
+        text: root.detail;
+        horizontal-alignment: center;
+    }
+
+    HorizontalLayout {
+        alignment: center;
+        padding-top: Tokens.empty-action-margin.top;
+        spacing: Tokens.space-8;
+
+        @children
+    }
+}
+
+// The bar at the foot of a page: a message on the left, the page's actions on the right.
+export enum MessageTone { none, info, warning, error, confirmed }
+
+export component ActionBar inherits Rectangle {
+    in property <string> message;
+    in property <MessageTone> tone: MessageTone.none;
+
+    background: Tokens.surface-brush;
+    height: layout.preferred-height;
+
+    Rectangle {
+        y: 0;
+        height: 1px;
+        background: Tokens.hairline-brush;
+    }
+
+    layout := HorizontalLayout {
+        padding-left: Tokens.action-bar-padding.left;
+        padding-right: Tokens.action-bar-padding.right;
+        padding-top: Tokens.action-bar-padding.top;
+        padding-bottom: Tokens.action-bar-padding.bottom;
+        spacing: Tokens.space-20;
+
+        // A message that wraps in the room the buttons leave it, with exactly one icon.
+        HorizontalLayout {
+            horizontal-stretch: 1;
+            spacing: Tokens.space-10;
+            alignment: start;
+
+            if root.message != "" && root.tone != MessageTone.none: Image {
+                image-fit: contain;
+                source: root.tone == MessageTone.error ? Tokens.icon-error
+                    : root.tone == MessageTone.confirmed ? Tokens.icon-confirmed
+                    : root.tone == MessageTone.warning ? Tokens.icon-warning : Tokens.icon-info;
+                width: Tokens.icon-size;
+                height: Tokens.icon-size;
+                y: (parent.height - self.height) / 2;
+                colorize: root.tone == MessageTone.error ? Tokens.error-brush
+                    : root.tone == MessageTone.confirmed ? Tokens.confirmed-brush : Tokens.warning-brush;
+            }
+
+            if root.message != "": Text {
+                text: root.message;
+                color: root.tone == MessageTone.error ? Tokens.error-brush
+                    : root.tone == MessageTone.warning ? Tokens.warning-brush : Tokens.text-brush;
+                wrap: word-wrap;
+                vertical-alignment: center;
+                max-width: Tokens.reading-max-width;
+                horizontal-stretch: 1;
+            }
+        }
+
+        @children
+    }
+}
+
+// One setting or feature: hairline-divided from the next; the last group has no rule beneath.
+export component SettingGroup inherits VerticalLayout {
+    in property <bool> last;
+
+    spacing: 0px;
+
+    VerticalLayout {
+        @children
+    }
+
+    // The group's bottom padding, its hairline, then the margin before the next group.
+    if !root.last: Rectangle {
+        height: Tokens.setting-group-padding.bottom + 1px + Tokens.setting-group-margin.bottom;
+
+        Rectangle {
+            y: Tokens.setting-group-padding.bottom;
+            height: 1px;
+            background: Tokens.hairline-brush;
+        }
+    }
+}
+
+// A switch-style setting: title, description and captions on the left; the control in the shared right-hand column.
+export component SwitchSetting inherits HorizontalLayout {
+    in property <string> title;
+    in property <string> description;
+    in property <string> note;
+    in property <string> problem;
+
+    spacing: Tokens.space-24;
+
+    VerticalLayout {
+        spacing: Tokens.space-4;
+        horizontal-stretch: 1;
+
+        Text {
+            text: root.title;
+            font-size: Tokens.font-size-section;
+            font-weight: Tokens.emphasis-weight;
+            color: Tokens.text-brush;
+            wrap: word-wrap;
+        }
+
+        SecondaryText {
+            text: root.description;
+        }
+
+        if root.note != "": CaptionText {
+            text: root.note;
+        }
+
+        if root.problem != "": CaptionText {
+            text: root.problem;
+            tone: CaptionTone.error;
+        }
+    }
+
+    // One control column for every group, so the switches line up whatever their words ("Off", "Automatic").
+    VerticalLayout {
+        width: 116px;
+        alignment: start;
+
+        @children
+    }
+}
+
+// Eterra's band crowning a page: the painted wood cut by the page's top edge, scaled to the page but never hanging deeper
+// than EterraBandMaxDepth, centred on the carved eye (spec/shell-and-settings.md §8).
+// TODO(decorations): bloom phases (cross-fade from the eye), side feather, the ash field and the computed content margin.
+export component EterraBand inherits Rectangle {
+    in property <image> source: @image-url("../../../../design/eterra/band-1-wilted.png");
+
+    property <float> cut: Tokens.eterra-band-cut / 1px;
+    property <float> scale: Math.min(root.width / 1px / self.source.width,
+        Tokens.eterra-band-max-depth / 1px / (self.source.height - root.cut));
+
+    // The band's depth below the page's top edge, so content can start under it.
+    out property <length> depth: (self.source.height - root.cut) * root.scale * 1px;
+
+    height: root.depth;
+    clip: true;
+
+    Image {
+        image-fit: contain;
+        source: root.source;
+        width: root.source.width * root.scale * 1px;
+        height: root.source.height * root.scale * 1px;
+        // The carved eye sits at image pixel (783, 120); keep it on the page's axis.
+        x: parent.width / 2 - 783 * root.scale * 1px;
+        y: -root.cut * root.scale * 1px;
+    }
+}
