@@ -63,3 +63,8 @@ continue and the latest setting reaches disk; queued Delete followed by Refresh 
 The bounded Impeccable pass compared the original captures with populated, narrow, wide, high-contrast, and error
 states. It corrected local divider/icon placement, wrapping in the footer, checkbox geometry, and keyboard focus
 after the final row is removed. Generated design tokens and unrelated pages were not changed by this port.
+
+Integrated as `451d174` through merge `e633a93`, retaining the concurrent UI edits in the main checkout.
+`mise run verify` passed again there, including the combined capture/input suite; the final standard, narrow,
+and high-contrast Mods renders were inspected. The main checkout's local README and AGENTS inventory now reflect
+the completed Mods slice.
