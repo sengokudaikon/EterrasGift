@@ -6,4 +6,5 @@
 /research/*
 !/research/trainer-rust.md
 !/research/trainer-evaluations.md
+!/research/trainer-validation.md
 /spec/

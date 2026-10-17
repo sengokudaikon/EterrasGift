@@ -8,12 +8,18 @@ fixture supports the proposed Windows ABI and unwind approach. Managed fixtures 
 the Cecil baseline repairs them. Registry access now works with network-enabled permissions. The pinned Rust writer
 and bridge evaluations have run: dotscope passes after explicit repair; dotnetdll and the bridge fail acceptance gates.
 
+The follow-up investigation is tracked in [trainer-validation.md](trainer-validation.md). It adds exact-game static
+inspection, compiled header/source contracts, deterministic hook-unwind diagnosis, actual .NET 6 loading and real
+CoreModule preservation checks. The first-pass fixture results below remain valid within their stated scope; they are
+not a verdict that the real CoreModule or a native hook is ready to ship.
+
 ## Toolchains
 
 - Workspace pin: Rust 1.99.1. Initial runtime and dispatcher tests use this toolchain.
 - User-installed nightly: Rust 1.101.0-nightly, `5d8fec0669a64607db9ccbf663e7c23125bf4748`, commit date 2026-10-16.
   The runtime/dispatcher tests, lifetime compile-fail test and optimized native ABI experiment also pass with this compiler.
-- .NET SDK 10.0.402; fixture and oracle target net10.0. The actual MelonLoader .NET 6 loader remains a separate gate.
+- .NET SDK 10.0.402; the initial fixture and oracle target net10.0. The follow-up uses a separate net6.0 fixture and
+  actual .NET 6.0.36 loading; see [the extended report](../tools/trainer-eval/assembly-validation.md).
 - Native ABI fixture: Windows x64 MSVC, cc 1.8.0, C++ exception handling enabled with /EHsc.
 
 No nightly-only language features are required by the first layers. The workspace pin has not changed. A dated nightly
@@ -98,14 +104,16 @@ access violations are not translated by the queue.
 
 The C++ ABI fixture is an evaluation oracle only, not a dependency of the shipped Rust crates. Hook-engine probes now
 exercise executable detours in their own disposable processes; commands, source identities and exact limits are in
-[hook-eval/README.md](../tools/trainer-eval/hook-eval/README.md). Neither engine clears adoption. Concurrent patching,
-hook coexistence, active-call drain and trampoline reclamation are untested.
+[hook-eval/README.md](../tools/trainer-eval/hook-eval/README.md). Neither engine clears adoption. The follow-up now
+tests transactional patching with four known callers and joins them before reclaiming storage. Hook coexistence and
+uncontrolled game-thread draining/reclamation remain unvalidated.
 
 The separate fake host loads only an explicitly supplied mock DLL. It uses the real ownership and dispatcher layers
 but simulates frame execution, offline policy and explicit collection of boxed integers. Owned commands contain no
 managed addresses; targets resolve on the simulated engine thread under a retained root. Its collector is not Boehm
 and it has no metadata, write barriers or Unity objects. It tests quiescent unload after joined workers, not live helper
-unloading. The actual game and generated Unity signatures remain outside these tests.
+unloading. Actual-game execution remains outside these tests. A separate generated-invoker probe now executes
+unchanged Unity-emitted invoker definitions; see [its report](../tools/trainer-eval/unity-fixture/report.json).
 
 ## Workspace validation
 
@@ -123,17 +131,18 @@ unloading. The actual game and generated Unity signatures remain outside these t
 - Fake-host isolated Clippy passes; all four process tests pass on stable debug and nightly release. The hook packages
   pass isolated formatting/Clippy, with their intentionally failing acceptance case preserved.
 
-## Next acceptance gates
+## Current acceptance gates
 
-1. Extend the passing dotscope repair evaluation to actual .NET 6 and larger metadata-index fixtures before adoption.
-2. Extend the disposable fake host as invocation, reference writes and protocol transport are implemented. No GUI clone
-   is needed now; the existing Slint captures already exercise UI fake sessions.
-3. Independently validate matching 6000.4 headers/generated-code fixtures. Exact archived 6000.4.8f1 headers now provide
-   pointer-handle evidence (see bridge audit); they are third-party extractions, not independently checked game artifacts.
-   Validate handle ABI, exported signatures,
-   value-type receivers, virtual calls and generic sharing. The current raw declarations are experimental until then.
-4. Diagnose the preserved NeoHook debug unwind failure and address Detour's missing trampoline unwind metadata.
-   Then test concurrent execution, disable/drain behaviour and retention of trampolines while calls remain active.
-5. Add the verified invocation/exception and reference-write layer, then the helper adapter and protocol 21 transport.
-   Wire trainer UI only after fake-session operation tests cover the relevant semantics.
-6. Live game validation remains opt-in and has not been performed.
+The detailed current verdict is in [trainer-validation.md](trainer-validation.md). Since the first checkpoint, actual
+.NET 6 loading, selected large-index cases, exact-game static corroboration, generated invoker execution and a causal
+NeoHook unwind diagnosis have been completed. Their limits remain explicit; they do not imply unrestricted adoption.
+
+1. Execute a controlled actual IL2CPP runtime/collector fixture. Generated invokers establish argument conventions,
+   not collector correctness, managed exception catching or Unity main-thread semantics.
+2. Extend the hook repair candidate across register saves, frame pointers and unsupported unwind/handler cases;
+   establish a defensible supported-target and lifetime policy before any game hook.
+3. Decide how to handle the real CoreModule's malformed orphan nested types. Dotscope preserves more payload than
+   the current Cecil repair; experimental normalization changes public identity and is not shipping policy.
+4. Add the verified invocation/exception and reference-write layer, then the helper adapter and protocol 21 transport
+   after the requested investigation. Extend disposable-host operation tests before wiring trainer UI.
+5. Live game validation remains opt-in and has not been performed. No additional fake GUI is needed now.
