@@ -1,0 +1,387 @@
+// The affix picker (DESIGN.md "Menus and Affix Picker"; spec/item-forge.md §8): replaces a row's affix as a draft, or adds
+// one, which is written at once. The title and caption, the search, All / Prefixes / Suffixes, the incompatible toggle
+// with its caption, the list, the status, then Cancel and the primary in equal halves.
+
+import { ScrollView } from "std-widgets.slint";
+import { Tokens } from "../../tokens.slint";
+import { KeyboardFocus } from "../../globals.slint";
+import { Button, ButtonKind } from "../../widgets/button.slint";
+import { FocusRing } from "../../widgets/focus.slint";
+import { ForgeState } from "state.slint";
+import { CheckBox, RadioButton } from "cells.slint";
+
+export global PickerMetrics {
+    // A list row: the name over its kind, 7px above and below.
+    out property <length> row: Tokens.catalog-entry-margin.top + Tokens.catalog-entry-margin.bottom + Tokens.font-size-body * 4 / 3
+        + Tokens.space-1 + Tokens.font-size-caption * 4 / 3 + Tokens.row-padding.top + 2px;
+    out property <length> caption-line: Tokens.font-size-caption * 4 / 3;
+
+    public pure function list-height(rows: int) -> length {
+        return rows == 0 ? Tokens.font-size-body * 4 / 3 + Tokens.empty-list-margin.top + Tokens.empty-list-margin.bottom
+            : Math.min(Tokens.replace-list-max-height, rows * self.row + Math.max(0, rows - 1) * Tokens.space-2);
+    }
+
+    // The whole flyout for a list of `rows`.
+    public pure function height(rows: int) -> length {
+        return Tokens.flyout-padding.top + Tokens.flyout-padding.bottom
+            + Tokens.font-size-section * 4 / 3 + Tokens.space-2 + self.caption-line
+            + Tokens.control-min-height
+            + Tokens.control-min-height + Tokens.space-4 + Tokens.control-min-height + Tokens.space-2 + self.caption-line * 2
+            + self.list-height(rows)
+            + self.caption-line
+            + Tokens.control-min-height
+            + Tokens.space-10 * 5;
+    }
+}
+
+// The search box: a muted search icon inside its left edge and a placeholder naming what it searches.
+export component SearchBox inherits Rectangle {
+    in property <string> text;
+    in property <string> placeholder;
+    in property <string> label;
+    callback edited(string);
+    callback down();
+    callback accepted();
+
+    public function focus-input() {
+        input.focus();
+    }
+
+    accessible-role: text-input;
+    accessible-label: root.label;
+    accessible-value: root.text;
+
+    height: Tokens.control-min-height;
+    border-radius: Tokens.control-radius;
+    border-width: 1px;
+    background: input.has-focus ? Tokens.ground-brush : Tokens.surface-brush;
+    border-color: input.has-focus ? Tokens.accent-brush : Tokens.strong-line-brush;
+
+    Image {
+        x: Tokens.search-icon-margin.left;
+        y: (parent.height - self.height) / 2;
+        width: Tokens.icon-size;
+        height: Tokens.icon-size;
+        image-fit: contain;
+        source: Tokens.icon-search;
+        colorize: Tokens.text-muted-brush;
+    }
+
+    Rectangle {
+        x: Tokens.search-icon-margin.left + Tokens.icon-size + Tokens.search-icon-margin.right + Tokens.space-4;
+        width: parent.width - self.x - Tokens.space-10;
+        clip: true;
+
+        if root.text == "": Text {
+            x: 0;
+            width: parent.width;
+            text: root.placeholder;
+            color: Tokens.text-muted-brush;
+            vertical-alignment: center;
+            overflow: elide;
+        }
+
+        FocusScope {
+            capture-key-pressed(event) => {
+                if (event.text == Key.DownArrow) {
+                    root.down();
+                    return accept;
+                }
+                reject
+            }
+
+            input := TextInput {
+                text: root.text;
+                single-line: true;
+                color: Tokens.text-brush;
+                selection-background-color: Tokens.accent-pressed-color;
+                selection-foreground-color: Tokens.on-accent-color;
+                vertical-alignment: center;
+                edited => {
+                    root.edited(self.text);
+                }
+                accepted => {
+                    root.accepted();
+                }
+            }
+        }
+    }
+
+    FocusRing {
+        focused: input.has-focus;
+    }
+}
+
+export component AffixPickerPanel inherits Rectangle {
+    // The picker closed itself (used, cancelled or dismissed with Escape).
+    callback done();
+
+    function cancel() {
+        ForgeState.cancel-picker();
+        root.done();
+    }
+
+    function use-entry() {
+        if (ForgeState.can-use-picker) {
+            ForgeState.use-picker();
+            root.done();
+        }
+    }
+
+    background: Tokens.hover-brush;
+    border-radius: Tokens.control-radius;
+
+    keys := FocusScope {
+        capture-key-pressed(event) => {
+            if (event.text == Key.Escape) {
+                root.cancel();
+                return accept;
+            }
+            reject
+        }
+
+        VerticalLayout {
+            padding-left: Tokens.flyout-padding.left;
+            padding-right: Tokens.flyout-padding.right;
+            padding-top: Tokens.flyout-padding.top;
+            padding-bottom: Tokens.flyout-padding.bottom;
+            spacing: Tokens.space-10;
+            alignment: start;
+
+            VerticalLayout {
+                spacing: Tokens.space-2;
+
+                Text {
+                    text: ForgeState.picker-title;
+                    font-size: Tokens.font-size-section;
+                    font-weight: Tokens.emphasis-weight;
+                    color: Tokens.text-brush;
+                }
+
+                Text {
+                    text: ForgeState.picker-subtitle;
+                    font-size: Tokens.font-size-caption;
+                    color: Tokens.text-muted-brush;
+                    overflow: elide;
+                }
+            }
+
+            search := SearchBox {
+                text: ForgeState.picker-search;
+                placeholder: "Name, category or ID";
+                label: "Search affixes";
+                init => {
+                    self.focus-input();
+                }
+                edited(text) => {
+                    ForgeState.picker-search-edited(text);
+                }
+                down => {
+                    if (ForgeState.picker-rows.length > 0) {
+                        if (ForgeState.picker-selected < 0) {
+                            ForgeState.picker-select(0);
+                        }
+                        KeyboardFocus.visible = true;
+                        list-focus.focus();
+                    }
+                }
+                accepted => {
+                    root.use-entry();
+                }
+            }
+
+            VerticalLayout {
+                spacing: Tokens.space-4;
+
+                HorizontalLayout {
+                    spacing: Tokens.space-12;
+                    alignment: start;
+
+                    RadioButton {
+                        text: "All";
+                        checked: ForgeState.picker-filter == 0;
+                        chosen => {
+                            ForgeState.picker-filter-changed(0);
+                        }
+                    }
+
+                    RadioButton {
+                        text: "Prefixes";
+                        checked: ForgeState.picker-filter == 1;
+                        chosen => {
+                            ForgeState.picker-filter-changed(1);
+                        }
+                    }
+
+                    RadioButton {
+                        text: "Suffixes";
+                        checked: ForgeState.picker-filter == 2;
+                        chosen => {
+                            ForgeState.picker-filter-changed(2);
+                        }
+                    }
+                }
+
+                VerticalLayout {
+                    spacing: Tokens.space-2;
+
+                    CheckBox {
+                        text: "Allow incompatible affixes";
+                        checked: ForgeState.picker-allow;
+                        enabled: ForgeState.picker-allow-enabled;
+                        toggled(on) => {
+                            ForgeState.picker-allow-changed(on);
+                        }
+                    }
+
+                    HorizontalLayout {
+                        padding-left: Tokens.check-box-caption-margin.left;
+
+                        Text {
+                            text: "Also lists affixes this item or slot can't normally roll. Writing one needs \"I know what I'm doing\" in Settings.";
+                            font-size: Tokens.font-size-caption;
+                            color: Tokens.text-muted-brush;
+                            wrap: word-wrap;
+                            height: PickerMetrics.caption-line * 2;
+                        }
+                    }
+                }
+            }
+
+            Rectangle {
+                height: PickerMetrics.list-height(ForgeState.picker-rows.length);
+
+                if ForgeState.picker-rows.length == 0: Text {
+                    x: Tokens.empty-list-margin.left;
+                    y: Tokens.empty-list-margin.top;
+                    width: parent.width - Tokens.empty-list-margin.left - Tokens.empty-list-margin.right;
+                    text: "No affixes match this search.";
+                    color: Tokens.text-muted-brush;
+                    wrap: word-wrap;
+                }
+
+                list-focus := FocusScope {
+                    focus-gained(reason) => {
+                        if (reason == FocusReason.tab-navigation) {
+                            KeyboardFocus.visible = true;
+                        }
+                    }
+                    key-pressed(event) => {
+                        if (event.text == Key.DownArrow) {
+                            ForgeState.picker-select(Math.min(ForgeState.picker-rows.length - 1, ForgeState.picker-selected + 1));
+                            return accept;
+                        }
+                        if (event.text == Key.UpArrow) {
+                            if (ForgeState.picker-selected <= 0) {
+                                search.focus-input();
+                            } else {
+                                ForgeState.picker-select(ForgeState.picker-selected - 1);
+                            }
+                            return accept;
+                        }
+                        if (event.text == Key.Return) {
+                            root.use-entry();
+                            return accept;
+                        }
+                        reject
+                    }
+
+                    ScrollView {
+                        content-width: self.visible-width;
+                        content-height: ForgeState.picker-rows.length * (PickerMetrics.row + Tokens.space-2) - Tokens.space-2;
+                        content-y: -Math.max(0px, Math.min(self.content-height - self.visible-height,
+                            ForgeState.picker-selected * (PickerMetrics.row + Tokens.space-2) + PickerMetrics.row - self.visible-height));
+
+                        VerticalLayout {
+                            spacing: Tokens.space-2;
+                            alignment: start;
+
+                            for entry[index] in ForgeState.picker-rows: Rectangle {
+                                height: PickerMetrics.row;
+                                border-radius: Tokens.control-radius;
+                                border-width: 1px;
+                                border-color: ForgeState.picker-selected == index ? Tokens.accent-brush : transparent;
+                                background: ForgeState.picker-selected == index ? Tokens.selected-brush : entry-touch.has-hover ? Tokens.hover-brush : transparent;
+                                accessible-role: list-item;
+                                accessible-label: entry.name;
+                                accessible-item-selected: ForgeState.picker-selected == index;
+
+                                VerticalLayout {
+                                    padding-left: Tokens.row-padding.left;
+                                    padding-right: Tokens.row-padding.right;
+                                    padding-top: Tokens.catalog-entry-margin.top;
+                                    padding-bottom: Tokens.catalog-entry-margin.bottom;
+                                    spacing: Tokens.space-1;
+
+                                    Text {
+                                        text: entry.name;
+                                        color: Tokens.text-brush;
+                                        overflow: elide;
+                                    }
+
+                                    Text {
+                                        text: entry.detail;
+                                        font-size: Tokens.font-size-caption;
+                                        color: entry.reforged ? Tokens.reforged-affix-brush : Tokens.text-muted-brush;
+                                        overflow: elide;
+                                    }
+                                }
+
+                                entry-touch := TouchArea {
+                                    pointer-event(event) => {
+                                        if (event.kind == PointerEventKind.down) {
+                                            KeyboardFocus.visible = false;
+                                        }
+                                    }
+                                    clicked => {
+                                        ForgeState.picker-select(index);
+                                        list-focus.focus();
+                                    }
+                                    double-clicked => {
+                                        ForgeState.picker-select(index);
+                                        root.use-entry();
+                                    }
+                                }
+
+                                FocusRing {
+                                    focused: list-focus.has-focus && ForgeState.picker-selected == index;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            Text {
+                text: ForgeState.picker-status;
+                font-size: Tokens.font-size-caption;
+                color: Tokens.text-secondary-brush;
+                overflow: elide;
+                height: PickerMetrics.caption-line;
+            }
+
+            HorizontalLayout {
+                spacing: Tokens.space-8;
+
+                Button {
+                    text: "Cancel";
+                    tip: "Keep the current draft (Esc)";
+                    horizontal-stretch: 1;
+                    clicked => {
+                        root.cancel();
+                    }
+                }
+
+                Button {
+                    text: ForgeState.picker-action;
+                    kind: ButtonKind.primary;
+                    enabled: ForgeState.can-use-picker;
+                    horizontal-stretch: 1;
+                    clicked => {
+                        root.use-entry();
+                    }
+                }
+            }
+        }
+    }
+}

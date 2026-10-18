@@ -1,0 +1,293 @@
+// The changes pane (DESIGN.md "Changes Pane"; spec/item-forge.md §10): what will change and what did, on Lifted Umber
+// beside the table. A record only: Apply never depends on it.
+
+import { ScrollView } from "std-widgets.slint";
+import { Tokens } from "../../tokens.slint";
+import { KeyboardFocus } from "../../globals.slint";
+import { FocusRing, TipTrigger } from "../../widgets/focus.slint";
+import { ForgeState } from "state.slint";
+
+// A 24px subtle icon button (the compact icon button), with its tip and accessible name.
+export component CompactIconButton inherits Rectangle {
+    in property <image> icon;
+    in property <string> tip;
+    callback clicked();
+
+    accessible-role: button;
+    accessible-label: root.tip;
+    accessible-action-default => { root.clicked(); }
+
+    width: Tokens.compact-icon-button-size;
+    height: Tokens.compact-icon-button-size;
+    border-radius: Tokens.control-radius;
+    background: touch.pressed ? Tokens.selected-brush : touch.has-hover ? Tokens.hover-brush : transparent;
+
+    Image {
+        width: Tokens.icon-size-small;
+        height: Tokens.icon-size-small;
+        image-fit: contain;
+        source: root.icon;
+        colorize: touch.has-hover ? Tokens.text-brush : Tokens.text-secondary-brush;
+    }
+
+    focus := FocusScope {
+        focus-gained(reason) => {
+            if (reason == FocusReason.tab-navigation) {
+                KeyboardFocus.visible = true;
+            }
+        }
+        key-pressed(event) => {
+            if (event.text == Key.Return || event.text == " ") {
+                root.clicked();
+                return accept;
+            }
+            reject
+        }
+
+        touch := TouchArea {
+            pointer-event(event) => {
+                if (event.kind == PointerEventKind.down) {
+                    KeyboardFocus.visible = false;
+                }
+            }
+            clicked => {
+                root.clicked();
+            }
+        }
+    }
+
+    TipTrigger {
+        text: root.tip;
+        hovered: touch.has-hover;
+        focused: focus.has-focus;
+    }
+
+    FocusRing {
+        focused: focus.has-focus;
+    }
+}
+
+export component ChangesPane inherits Rectangle {
+    background: Tokens.raised-brush;
+
+    Rectangle {
+        x: 0;
+        y: 0;
+        width: 1px;
+        height: parent.height;
+        background: Tokens.hairline-brush;
+    }
+
+    scroll := ScrollView {
+        x: 1px;
+        width: parent.width - 1px;
+        content-width: self.visible-width;
+        content-height: content.preferred-height;
+
+        content := VerticalLayout {
+            width: scroll.visible-width;
+            padding-left: Tokens.pane-content-margin.left;
+            padding-right: Tokens.pane-content-margin.right;
+            padding-top: Tokens.pane-content-margin.top;
+            padding-bottom: Tokens.pane-content-margin.bottom;
+            spacing: Tokens.space-18;
+            alignment: start;
+
+            VerticalLayout {
+                spacing: Tokens.space-6;
+
+                // Teal with the pencil only while there are drafts; "No drafts" is a muted note.
+                HorizontalLayout {
+                    spacing: Tokens.space-8;
+                    alignment: start;
+
+                    if ForgeState.drafts.length > 0: Image {
+                        width: Tokens.icon-size;
+                        height: Tokens.icon-size;
+                        y: (parent.height - self.height) / 2;
+                        image-fit: contain;
+                        source: Tokens.icon-draft;
+                        colorize: Tokens.draft-brush;
+                    }
+
+                    Text {
+                        text: ForgeState.draft-count-text;
+                        font-size: Tokens.font-size-subheading;
+                        font-weight: Tokens.emphasis-weight;
+                        color: ForgeState.drafts.length > 0 ? Tokens.draft-brush : Tokens.text-muted-brush;
+                    }
+                }
+
+                for entry[index] in ForgeState.drafts: Rectangle {
+                    height: entry-layout.preferred-height;
+                    border-radius: Tokens.control-radius;
+                    background: entry-touch.has-hover ? Tokens.draft-hover-brush : transparent;
+                    accessible-role: button;
+                    accessible-label: "Show draft for " + entry.name;
+
+                    entry-touch := TouchArea {
+                        pointer-event(event) => {
+                            if (event.kind == PointerEventKind.down) {
+                                KeyboardFocus.visible = false;
+                            }
+                        }
+                        clicked => {
+                            ForgeState.show-draft(index);
+                        }
+                    }
+
+                    TipTrigger {
+                        text: "Show this draft";
+                        hovered: entry-touch.has-hover;
+                    }
+
+                    entry-layout := HorizontalLayout {
+                        padding-left: Tokens.ledger-entry-padding.left;
+                        padding-right: Tokens.ledger-entry-padding.right;
+                        padding-top: Tokens.ledger-entry-padding.top;
+                        padding-bottom: Tokens.ledger-entry-padding.bottom;
+                        spacing: Tokens.space-8;
+
+                        VerticalLayout {
+                            spacing: Tokens.space-2;
+                            horizontal-stretch: 1;
+
+                            Text {
+                                text: entry.name;
+                                font-weight: Tokens.emphasis-weight;
+                                color: Tokens.text-brush;
+                                overflow: elide;
+                            }
+
+                            Text {
+                                text: entry.summary;
+                                color: Tokens.draft-brush;
+                                wrap: word-wrap;
+                            }
+
+                            if entry.effect != "": Text {
+                                text: entry.effect;
+                                font-size: Tokens.font-size-caption;
+                                color: Tokens.text-secondary-brush;
+                                wrap: word-wrap;
+                            }
+
+                            if entry.stale: HorizontalLayout {
+                                spacing: Tokens.space-6;
+                                alignment: start;
+
+                                Image {
+                                    width: Tokens.icon-size-small;
+                                    height: Tokens.icon-size-small;
+                                    y: (parent.height - self.height) / 2;
+                                    image-fit: contain;
+                                    source: Tokens.icon-warning;
+                                    colorize: Tokens.warning-brush;
+                                }
+
+                                Text {
+                                    text: "Changed in game — discard and redo";
+                                    font-size: Tokens.font-size-caption;
+                                    color: Tokens.warning-brush;
+                                    vertical-alignment: center;
+                                }
+                            }
+                        }
+
+                        VerticalLayout {
+                            alignment: start;
+
+                            CompactIconButton {
+                                icon: Tokens.icon-close;
+                                tip: "Discard the draft for " + entry.name;
+                                clicked => {
+                                    ForgeState.discard-entry(index);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            VerticalLayout {
+                spacing: Tokens.space-6;
+
+                Text {
+                    text: "Applied";
+                    color: Tokens.text-muted-brush;
+                }
+
+                if ForgeState.history.length == 0: Text {
+                    text: "Nothing applied to this item yet.";
+                    font-size: Tokens.font-size-caption;
+                    color: Tokens.text-muted-brush;
+                    wrap: word-wrap;
+                }
+
+                for entry in ForgeState.history: HorizontalLayout {
+                    padding-top: Tokens.catalog-entry-margin.top;
+                    padding-bottom: Tokens.catalog-entry-margin.bottom;
+                    spacing: Tokens.space-8;
+
+                    VerticalLayout {
+                        padding-top: Tokens.icon-baseline-nudge.top + Tokens.space-2;
+                        alignment: start;
+
+                        Image {
+                            width: Tokens.icon-size-small;
+                            height: Tokens.icon-size-small;
+                            image-fit: contain;
+                            source: Tokens.icon-confirmed;
+                            colorize: Tokens.confirmed-brush;
+                        }
+                    }
+
+                    VerticalLayout {
+                        spacing: Tokens.space-2;
+                        horizontal-stretch: 1;
+
+                        HorizontalLayout {
+                            spacing: Tokens.space-6;
+                            alignment: start;
+
+                            Text {
+                                text: entry.name;
+                                font-weight: Tokens.emphasis-weight;
+                                color: Tokens.text-brush;
+                                overflow: elide;
+                                horizontal-stretch: 0;
+                            }
+
+                            Text {
+                                text: "·  " + entry.time;
+                                font-size: Tokens.font-size-caption;
+                                color: Tokens.text-muted-brush;
+                                vertical-alignment: center;
+                            }
+                        }
+
+                        Text {
+                            text: entry.summary;
+                            font-size: Tokens.font-size-caption;
+                            color: Tokens.text-secondary-brush;
+                            wrap: word-wrap;
+                        }
+
+                        if entry.effect != "": Text {
+                            text: entry.effect;
+                            font-size: Tokens.font-size-caption;
+                            color: Tokens.text-secondary-brush;
+                            wrap: word-wrap;
+                        }
+
+                        Text {
+                            text: entry.outcome;
+                            font-size: Tokens.font-size-caption;
+                            color: Tokens.confirmed-brush;
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

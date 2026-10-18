@@ -1,0 +1,1164 @@
+// The Item Forge, the Forge page's Item section (DESIGN.md "Item Forge", spec/item-forge.md): the item header, the
+// implicits, the affix table, the unique modifiers, the changes pane and the action bar. Window classes restructure it:
+// narrow lays the pane over the table, wide adds the Range column and caps the table at 1000px, and from 1180px of lists
+// the column beside the table holds the unique modifiers or the selected affix's tier ladder.
+
+import { ScrollView } from "std-widgets.slint";
+import { Tokens } from "../../tokens.slint";
+import { KeyboardFocus } from "../../globals.slint";
+import { TipTrigger } from "../../widgets/focus.slint";
+import { Button, ButtonKind } from "../../widgets/button.slint";
+import { FocusRing } from "../../widgets/focus.slint";
+import { MessageTone } from "../common.slint";
+import { ForgeState, ItemRarity, CellKind } from "state.slint";
+import { ValueScrubber } from "scrubber.slint";
+import {
+    CellButton,
+    FlagToggle,
+    MenuRow,
+    CheckBox,
+    HelpButton,
+} from "cells.slint";
+import {
+    AffixRowItem,
+    ModifierRowItem,
+    TierList,
+    MenuMetrics,
+} from "table.slint";
+import { AffixPickerPanel, PickerMetrics, SearchBox } from "picker.slint";
+import { ChangesPane } from "pane.slint";
+
+// The game-owned colour of a rarity's names (EpochColor), for item names only.
+global RarityInk {
+    public pure function of(rarity: ItemRarity) -> brush {
+        return rarity == ItemRarity.legendary ? Tokens.rarity-legendary-brush
+            : rarity == ItemRarity.set ? Tokens.rarity-set-brush
+            : rarity == ItemRarity.unique ? Tokens.rarity-unique-brush
+            : rarity == ItemRarity.exalted ? Tokens.rarity-exalted-brush
+            : rarity == ItemRarity.rare ? Tokens.rarity-rare-brush
+            : rarity == ItemRarity.magic ? Tokens.rarity-magic-brush : Tokens.rarity-normal-brush;
+    }
+}
+
+// A cell in the facts line: plain text that answers like a cell where it can change, outdented so hovering never moves it.
+component InlineCell inherits Rectangle {
+    in property <string> text;
+    in property <bool> emphasis;
+    in property <bool> drafted;
+    in property <bool> changeable;
+    in property <string> tip;
+    in property <string> label;
+    callback clicked();
+
+    width: words.preferred-width;
+    height: words.preferred-height;
+
+    words := Text {
+        text: root.text;
+        font-weight: root.emphasis ? Tokens.emphasis-weight : 400;
+        color: root.drafted ? Tokens.draft-brush : Tokens.text-secondary-brush;
+        visible: false;
+    }
+
+    CellButton {
+        x: Tokens.inline-cell-outdent.left;
+        y: Tokens.inline-cell-outdent.top;
+        width: root.width - Tokens.inline-cell-outdent.left - Tokens.inline-cell-outdent.right;
+        height: root.height - Tokens.inline-cell-outdent.top - Tokens.inline-cell-outdent.bottom;
+        changeable: root.changeable;
+        tip: root.tip;
+        label: root.label;
+        clicked => {
+            root.clicked();
+        }
+
+        Text {
+            text: root.text;
+            font-weight: root.emphasis ? Tokens.emphasis-weight : 400;
+            color: root.drafted ? Tokens.draft-brush : Tokens.text-secondary-brush;
+            vertical-alignment: center;
+        }
+    }
+}
+
+// The Changes toggle: transparent at rest, checked on Wine-Stained Brown in Dark Brass while the pane is open.
+component ChangesToggle inherits Rectangle {
+    in property <string> text;
+    in-out property <bool> checked;
+
+    accessible-role: button;
+    accessible-label: root.text;
+    accessible-checkable: true;
+    accessible-checked: root.checked;
+    accessible-action-default => { root.checked = !root.checked; }
+
+    min-height: Tokens.control-min-height;
+    width: words.preferred-width + Tokens.button-padding.left + Tokens.button-padding.right;
+    border-radius: Tokens.control-radius;
+    border-width: 1px;
+    background: root.checked ? Tokens.selected-brush : touch.has-hover ? Tokens.hover-brush : transparent;
+    border-color: root.checked ? Tokens.accent-trim-brush : transparent;
+
+    words := Text {
+        text: root.text;
+        color: root.checked ? Tokens.label-brush : touch.has-hover ? Tokens.text-brush : Tokens.text-secondary-brush;
+        vertical-alignment: center;
+    }
+
+    focus := FocusScope {
+        focus-gained(reason) => {
+            if (reason == FocusReason.tab-navigation) {
+                KeyboardFocus.visible = true;
+            }
+        }
+        key-pressed(event) => {
+            if (event.text == Key.Return || event.text == " ") {
+                root.checked = !root.checked;
+                return accept;
+            }
+            reject
+        }
+
+        touch := TouchArea {
+            pointer-event(event) => {
+                if (event.kind == PointerEventKind.down) {
+                    KeyboardFocus.visible = false;
+                }
+            }
+            clicked => {
+                focus.focus();
+                root.checked = !root.checked;
+            }
+        }
+    }
+
+    TipTrigger {
+        text: "Show or hide pending drafts and applied changes";
+        hovered: touch.has-hover;
+        focused: focus.has-focus;
+    }
+
+    FocusRing {
+        focused: focus.has-focus;
+    }
+}
+
+export component ItemForge inherits Rectangle {
+    in property <bool> compact;
+    in property <bool> narrow;
+    in property <bool> wide;
+
+    // The C# view sets the compact gutter by style under a local margin, so the forge keeps the 24px gutter at every
+    // class (spec/item-forge.md §2 says 16px at compact; the code wins).
+    property <length> gutter: Tokens.page-gutter.left;
+    property <length> pane-width: root.wide ? Tokens.changes-pane-wide-width : root.compact ? Tokens.changes-pane-compact-width : Tokens.changes-pane-width;
+    // A narrow window has no column for the pane: the table takes the whole width and the pane lies over it.
+    property <length> lists-column: root.narrow ? root.width : root.width - root.pane-width;
+    property <length> lists-width: Math.max(0px, root.lists-column - 2 * root.gutter);
+    property <bool> roomy: root.lists-width >= Tokens.side-by-side-body-width;
+    property <bool> unique-beside: root.roomy && ForgeState.has-unique;
+    property <bool> ladder: root.roomy && !ForgeState.has-unique;
+    property <length> table-width: root.ladder ? Math.min(Tokens.affix-table-max-width, root.lists-width - Tokens.tier-ladder-width)
+        : root.unique-beside ? root.lists-width / 2
+        : root.wide ? Math.min(Tokens.affix-table-max-width, root.lists-width) : root.lists-width;
+    property <length> range-width: range-measure.preferred-width;
+    property <int> selected: ForgeState.selected-affix;
+    // An identity entry: the name over its caption in the menu row's padding.
+    property <length> identity-row: Tokens.font-size-body * 4 / 3 + Tokens.font-size-caption * 4 / 3 + Tokens.cell-padding.top + Tokens.cell-padding.bottom + 2px;
+    property <int> rarity-highlight;
+    property <int> base-highlight;
+
+    // The pane starts closed in a narrow window, closes on the way into narrow and opens again on the way out.
+    init => {
+        if (root.narrow) {
+            ForgeState.pane-open = false;
+        }
+    }
+    changed narrow => {
+        ForgeState.pane-open = !root.narrow;
+    }
+
+    // Hidden measures, in a box of no size so their sizes never reach the page's own layout.
+    Rectangle {
+        width: 0;
+        height: 0;
+        visible: false;
+
+        // The status strip on one line, measured: the wrapping layout reports the height of more lines than it lays out.
+        strip-measure := HorizontalLayout {
+            spacing: Tokens.space-24;
+
+            for field in ForgeState.fields: Rectangle {
+                preferred-width: field.numeric ? Tokens.status-cell-width
+                    : Math.max(measured-off.preferred-width, measured-on.preferred-width) + Tokens.flag-padding.left + Tokens.flag-padding.right + 2px;
+                preferred-height: field.numeric
+                    ? measured-label.preferred-height + Tokens.space-2 + measured-number.preferred-height + Tokens.space-4 + Tokens.range-bar-height
+                    : measured-on.preferred-height + Tokens.flag-padding.top + Tokens.flag-padding.bottom + 2px;
+
+                measured-label := Text {
+                    text: field.name;
+                }
+
+                measured-number := Text {
+                    text: field.value.display;
+                    font-size: Tokens.font-size-value;
+                }
+
+                measured-off := Text {
+                    text: field.off-name;
+                }
+
+                measured-on := Text {
+                    text: field.on-name;
+                }
+            }
+        }
+
+        // The Range column takes the widest range of the rows, as a shared size group does.
+        range-measure := VerticalLayout {
+
+            Text {
+                text: "Range";
+            }
+
+            for affix in ForgeState.affixes: Text {
+                text: affix.range;
+                font-size: Tokens.font-size-caption;
+            }
+        }
+    }
+
+    property <bool> strip-one-line: strip-measure.preferred-width <= root.width - 2 * root.gutter;
+
+    page-keys := FocusScope {
+        focus-on-click: false;
+        focus-on-tab-navigation: false;
+        key-pressed(event) => {
+            if (event.modifiers.control && (event.text == "z" || event.text == "Z")) {
+                ForgeState.undo-draft();
+                return accept;
+            }
+            if (event.modifiers.control && (event.text == "s" || event.text == "S")) {
+                ForgeState.apply();
+                return accept;
+            }
+            reject
+        }
+
+        // The header: the name in its rarity colour, the facts line, then the status strip.
+        header := VerticalLayout {
+            x: root.gutter;
+            y: 0;
+            width: root.width - 2 * root.gutter;
+            height: self.preferred-height;
+            padding-top: Tokens.header-padding.top;
+            padding-bottom: Tokens.header-padding.bottom;
+            spacing: Tokens.space-4;
+
+            // On a unique, set or legendary item the name is a cell that opens the identity picker; a drafted unique shows
+            // its name in teal.
+            Rectangle {
+                height: title.preferred-height;
+
+                if ForgeState.has-identity: CellButton {
+                    x: Tokens.inline-cell-outdent.left;
+                    y: Tokens.inline-cell-outdent.top;
+                    width: Math.min(title.preferred-width, parent.width) - Tokens.inline-cell-outdent.left - Tokens.inline-cell-outdent.right;
+                    height: parent.height - Tokens.inline-cell-outdent.top - Tokens.inline-cell-outdent.bottom;
+                    changeable: ForgeState.can-change-identity;
+                    tip: ForgeState.identity-tip;
+                    label: "Item: " + ForgeState.item-name;
+                    clicked => {
+                        if (ForgeState.can-change-identity) {
+                            ForgeState.identity-search-edited("");
+                            identity-popup.show();
+                        }
+                    }
+                }
+
+                title := Text {
+                    x: 0;
+                    width: parent.width;
+                    text: ForgeState.item-name;
+                    font-family: Tokens.display-font;
+                    font-size: Tokens.font-size-title;
+                    font-weight: Tokens.display-weight;
+                    letter-spacing: Tokens.tracking-title;
+                    wrap: word-wrap;
+                    max-lines: Tokens.title-max-lines;
+                    overflow: elide;
+                    min-height: Tokens.line-height-title;
+                    vertical-alignment: center;
+                    color: ForgeState.identity-drafted ? Tokens.draft-brush : RarityInk.of(ForgeState.name-rarity);
+                    accessible-label: "Item: " + ForgeState.item-name;
+                }
+
+                identity-popup := PopupWindow {
+                    x: Tokens.inline-cell-outdent.left;
+                    y: parent.height - Tokens.inline-cell-outdent.bottom + Tokens.space-4;
+                    width: Tokens.base-menu-width + Tokens.flyout-padding.left + Tokens.flyout-padding.right;
+                    height: Tokens.flyout-padding.top + Tokens.flyout-padding.bottom + Tokens.control-min-height + Tokens.space-8 * 2
+                        + Math.min(Tokens.replace-list-max-height, Math.max(1, ForgeState.identity-options.length) * (root.identity-row + Tokens.space-2))
+                        + PickerMetrics.caption-line * 3;
+                    close-policy: PopupClosePolicy.close-on-click-outside;
+
+                    Rectangle {
+                        background: Tokens.hover-brush;
+                        border-radius: Tokens.control-radius;
+
+                        FocusScope {
+                            capture-key-pressed(event) => {
+                                if (event.text == Key.Escape) {
+                                    identity-popup.close();
+                                    return accept;
+                                }
+                                reject
+                            }
+
+                            VerticalLayout {
+                                padding-left: Tokens.flyout-padding.left;
+                                padding-right: Tokens.flyout-padding.right;
+                                padding-top: Tokens.flyout-padding.top;
+                                padding-bottom: Tokens.flyout-padding.bottom;
+                                spacing: Tokens.space-8;
+                                alignment: start;
+
+                                SearchBox {
+                                    text: ForgeState.identity-search;
+                                    placeholder: "Name or ID";
+                                    label: "Search uniques and set items";
+                                    init => {
+                                        self.focus-input();
+                                    }
+                                    edited(text) => {
+                                        ForgeState.identity-search-edited(text);
+                                    }
+                                }
+
+                                Rectangle {
+                                    height: Math.min(Tokens.replace-list-max-height, Math.max(1, ForgeState.identity-options.length) * (root.identity-row + Tokens.space-2));
+
+                                    if ForgeState.identity-options.length == 0: Text {
+                                        x: Tokens.empty-list-margin.left;
+                                        y: Tokens.empty-list-margin.top;
+                                        width: parent.width - Tokens.empty-list-margin.left - Tokens.empty-list-margin.right;
+                                        text: "No unique or set item matches this search.";
+                                        color: Tokens.text-muted-brush;
+                                        wrap: word-wrap;
+                                    }
+
+                                    ScrollView {
+                                        content-width: self.visible-width;
+                                        content-height: ForgeState.identity-options.length * (root.identity-row + Tokens.space-2);
+
+                                        VerticalLayout {
+                                            spacing: Tokens.space-2;
+                                            alignment: start;
+
+                                            for option[index] in ForgeState.identity-options: MenuRow {
+                                                held: option.current;
+                                                enabled: option.available;
+                                                picked => {
+                                                    ForgeState.pick-identity(index);
+                                                    identity-popup.close();
+                                                }
+
+                                                VerticalLayout {
+                                                    horizontal-stretch: 1;
+
+                                                    HorizontalLayout {
+                                                        // Each name in the colour of the rarity the item would end with; one it can't become is dimmed.
+                                                        Text {
+                                                            text: option.name;
+                                                            color: option.available ? RarityInk.of(option.rarity) : Tokens.text-disabled-brush;
+                                                            overflow: elide;
+                                                            horizontal-stretch: 1;
+                                                        }
+
+                                                        if option.in-game: Text {
+                                                            text: "in game";
+                                                            font-size: Tokens.font-size-caption;
+                                                            color: Tokens.text-secondary-brush;
+                                                            vertical-alignment: center;
+                                                        }
+                                                    }
+
+                                                    Text {
+                                                        text: option.detail;
+                                                        font-size: Tokens.font-size-caption;
+                                                        color: Tokens.text-muted-brush;
+                                                        overflow: elide;
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+
+                                Text {
+                                    text: "The rarity follows the game: a unique with affixes is legendary, and a set item holds none. Rolls, legendary potential and Weaver's Will carry over.";
+                                    font-size: Tokens.font-size-caption;
+                                    color: Tokens.text-muted-brush;
+                                    wrap: word-wrap;
+                                    height: PickerMetrics.caption-line * 3;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            HorizontalLayout {
+                spacing: Tokens.space-6;
+                alignment: start;
+
+                Rectangle {
+                    width: rarity-cell.width;
+                    height: rarity-cell.height;
+
+                    rarity-cell := InlineCell {
+                        text: ForgeState.rarity-text;
+                        emphasis: true;
+                        drafted: ForgeState.rarity-drafted;
+                        changeable: ForgeState.can-change-rarity;
+                        tip: ForgeState.rarity-tip;
+                        label: "Rarity: " + ForgeState.rarity-text;
+                        clicked => {
+                            if (ForgeState.can-change-rarity) {
+                                root.rarity-highlight = 0;
+                                rarity-popup.show();
+                            }
+                        }
+                    }
+
+                    rarity-popup := PopupWindow {
+                        x: Tokens.inline-cell-outdent.left;
+                        y: parent.height - Tokens.inline-cell-outdent.bottom + Tokens.space-4;
+                        width: Tokens.base-menu-width + Tokens.flyout-padding.left + Tokens.flyout-padding.right;
+                        height: MenuMetrics.height(ForgeState.rarity-options.length) + ForgeState.rarity-caption-lines * PickerMetrics.caption-line;
+                        close-policy: PopupClosePolicy.close-on-click-outside;
+
+                        Rectangle {
+                            background: Tokens.hover-brush;
+                            border-radius: Tokens.control-radius;
+
+                            FocusScope {
+                                init => {
+                                    self.focus();
+                                }
+                                key-pressed(event) => {
+                                    if (event.text == Key.Escape) {
+                                        rarity-popup.close();
+                                        return accept;
+                                    }
+                                    if (event.text == Key.UpArrow || event.text == Key.DownArrow) {
+                                        KeyboardFocus.visible = true;
+                                        root.rarity-highlight = event.text == Key.UpArrow ? 0 : 1;
+                                        return accept;
+                                    }
+                                    if (event.text == Key.Return) {
+                                        ForgeState.pick-rarity(root.rarity-highlight);
+                                        rarity-popup.close();
+                                        return accept;
+                                    }
+                                    reject
+                                }
+
+                                VerticalLayout {
+                                    padding-left: Tokens.flyout-padding.left;
+                                    padding-right: Tokens.flyout-padding.right;
+                                    padding-top: Tokens.flyout-padding.top;
+                                    padding-bottom: Tokens.flyout-padding.bottom;
+                                    spacing: Tokens.space-2;
+                                    alignment: start;
+
+                                    for option[index] in ForgeState.rarity-options: MenuRow {
+                                        held: option.current;
+                                        highlighted: root.rarity-highlight == index;
+                                        enabled: option.available;
+                                        picked => {
+                                            ForgeState.pick-rarity(index);
+                                            rarity-popup.close();
+                                        }
+
+                                        VerticalLayout {
+                                            horizontal-stretch: 1;
+
+                                            HorizontalLayout {
+                                                Text {
+                                                    text: option.name;
+                                                    color: option.available ? Tokens.text-brush : Tokens.text-disabled-brush;
+                                                    horizontal-stretch: 1;
+                                                }
+
+                                                if option.in-game: Text {
+                                                    text: "in game";
+                                                    font-size: Tokens.font-size-caption;
+                                                    color: Tokens.text-secondary-brush;
+                                                    vertical-alignment: center;
+                                                }
+                                            }
+
+                                            if option.detail != "": Text {
+                                                text: option.detail;
+                                                font-size: Tokens.font-size-caption;
+                                                color: Tokens.text-muted-brush;
+                                                wrap: word-wrap;
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                if ForgeState.base-text != "": Text {
+                    text: "·";
+                    color: Tokens.text-muted-brush;
+                    vertical-alignment: center;
+                }
+
+                if ForgeState.base-text != "": Rectangle {
+                    width: base-cell.width;
+                    height: base-cell.height;
+
+                    base-cell := InlineCell {
+                        text: ForgeState.base-text;
+                        drafted: ForgeState.base-drafted;
+                        changeable: ForgeState.can-change-base;
+                        tip: ForgeState.base-tip;
+                        label: "Base: " + ForgeState.base-text;
+                        clicked => {
+                            if (ForgeState.can-change-base) {
+                                base-popup.show();
+                            }
+                        }
+                    }
+
+                    base-popup := PopupWindow {
+                        x: Tokens.inline-cell-outdent.left;
+                        y: parent.height - Tokens.inline-cell-outdent.bottom + Tokens.space-4;
+                        width: Tokens.base-menu-width + Tokens.flyout-padding.left + Tokens.flyout-padding.right;
+                        height: MenuMetrics.height(ForgeState.base-options.length) + ForgeState.base-caption-lines * PickerMetrics.caption-line
+                            + Tokens.space-8 + Tokens.control-min-height + Tokens.space-2 + PickerMetrics.caption-line * 3;
+                        close-policy: PopupClosePolicy.close-on-click-outside;
+
+                        Rectangle {
+                            background: Tokens.hover-brush;
+                            border-radius: Tokens.control-radius;
+
+                            FocusScope {
+                                init => {
+                                    self.focus();
+                                }
+                                key-pressed(event) => {
+                                    if (event.text == Key.Escape) {
+                                        base-popup.close();
+                                        return accept;
+                                    }
+                                    reject
+                                }
+
+                                VerticalLayout {
+                                    padding-left: Tokens.flyout-padding.left;
+                                    padding-right: Tokens.flyout-padding.right;
+                                    padding-top: Tokens.flyout-padding.top;
+                                    padding-bottom: Tokens.flyout-padding.bottom;
+                                    spacing: Tokens.space-8;
+                                    alignment: start;
+
+                                    VerticalLayout {
+                                        spacing: Tokens.space-2;
+
+                                        for option[index] in ForgeState.base-options: MenuRow {
+                                            held: option.current;
+                                            enabled: option.available;
+                                            picked => {
+                                                ForgeState.pick-base(index);
+                                                base-popup.close();
+                                            }
+
+                                            VerticalLayout {
+                                                horizontal-stretch: 1;
+
+                                                HorizontalLayout {
+                                                    Text {
+                                                        text: option.name;
+                                                        color: Tokens.text-brush;
+                                                        horizontal-stretch: 1;
+                                                    }
+
+                                                    if option.in-game: Text {
+                                                        text: "in game";
+                                                        font-size: Tokens.font-size-caption;
+                                                        color: Tokens.text-secondary-brush;
+                                                        vertical-alignment: center;
+                                                    }
+                                                }
+
+                                                if option.implicits != "": Text {
+                                                    text: option.implicits;
+                                                    font-size: Tokens.font-size-caption;
+                                                    color: Tokens.text-secondary-brush;
+                                                }
+
+                                                if option.detail != "": Text {
+                                                    text: option.detail;
+                                                    font-size: Tokens.font-size-caption;
+                                                    color: Tokens.text-muted-brush;
+                                                }
+                                            }
+                                        }
+                                    }
+
+                                    VerticalLayout {
+                                        spacing: Tokens.space-2;
+
+                                        CheckBox {
+                                            text: "Allow incompatible affixes";
+                                            checked: ForgeState.base-allow-incompatible;
+                                            toggled(on) => {
+                                                ForgeState.base-allow(on);
+                                            }
+                                        }
+
+                                        HorizontalLayout {
+                                            padding-left: Tokens.check-box-caption-margin.left;
+
+                                            Text {
+                                                text: "Lets you choose a base the current affixes can't normally roll on. Writing it needs \"I know what I'm doing\" in Settings.";
+                                                font-size: Tokens.font-size-caption;
+                                                color: Tokens.text-muted-brush;
+                                                wrap: word-wrap;
+                                                height: PickerMetrics.caption-line * 3;
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                Text {
+                    text: "·";
+                    color: Tokens.text-muted-brush;
+                    vertical-alignment: center;
+                }
+
+                Text {
+                    text: ForgeState.summary;
+                    color: Tokens.text-secondary-brush;
+                    vertical-alignment: center;
+                }
+            }
+
+            if ForgeState.fields.length > 0: VerticalLayout {
+                padding-top: Tokens.status-strip-margin.top - Tokens.space-4;
+
+                FlexboxLayout {
+                    height: root.strip-one-line ? strip-measure.preferred-height : self.preferred-height;
+                    spacing-horizontal: Tokens.space-24;
+                    spacing-vertical: Tokens.space-8;
+                    alignment: start;
+                    cross-axis-alignment: center;
+                    cross-axis-line-alignment: start;
+
+                    for field[index] in ForgeState.fields: Rectangle {
+                        width: field.numeric ? Tokens.status-cell-width : flag.width;
+                        height: field.numeric ? numeric.preferred-height : flag.height;
+
+                        numeric := VerticalLayout {
+                            visible: field.numeric;
+                            spacing: Tokens.space-2;
+
+                            HorizontalLayout {
+                                spacing: Tokens.space-4;
+                                alignment: start;
+
+                                Text {
+                                    text: field.name;
+                                    color: Tokens.text-muted-brush;
+                                }
+
+                                if field.confirmed: Image {
+                                    width: Tokens.icon-size-tiny;
+                                    height: Tokens.icon-size-tiny;
+                                    y: (parent.height - self.height) / 2;
+                                    image-fit: contain;
+                                    source: Tokens.icon-confirmed;
+                                    colorize: Tokens.confirmed-brush;
+                                    accessible-label: "Confirmed";
+                                }
+
+                                if field.stale: Image {
+                                    width: Tokens.icon-size-tiny;
+                                    height: Tokens.icon-size-tiny;
+                                    y: (parent.height - self.height) / 2;
+                                    image-fit: contain;
+                                    source: Tokens.icon-warning;
+                                    colorize: Tokens.warning-brush;
+                                    accessible-label: "Stale draft";
+                                }
+
+                                if !field.editable: Image {
+                                    width: Tokens.icon-size-tiny;
+                                    height: Tokens.icon-size-tiny;
+                                    y: (parent.height - self.height) / 2;
+                                    image-fit: contain;
+                                    source: Tokens.icon-locked;
+                                    colorize: Tokens.text-muted-brush;
+                                    accessible-label: "Read-only";
+                                }
+                            }
+
+                            if field.numeric: ValueScrubber {
+                                cell: field.value;
+                            }
+                        }
+
+                        flag := FlagToggle {
+                            visible: !field.numeric;
+                            on-name: field.on-name;
+                            off-name: field.off-name;
+                            checked: field.checked;
+                            drafted: field.drafted;
+                            enabled: field.can-edit;
+                            confirmed: field.confirmed;
+                            stale: field.stale;
+                            tip: field.tip;
+                            toggled(on) => {
+                                ForgeState.toggle-flag(index, on);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        lists := ScrollView {
+            x: root.gutter;
+            y: header.height;
+            width: root.lists-width;
+            height: bar.y - header.height;
+            content-width: self.visible-width;
+            content-height: Math.max(affix-section.height + (ForgeState.has-unique && !root.unique-beside ? Tokens.unique-section-margin.top + unique-section.height : 0px),
+                root.unique-beside ? Tokens.unique-section-beside-margin.top + unique-section.height : 0px,
+                root.ladder ? ladder.height : 0px) + Tokens.lists-bottom-margin.bottom;
+
+            affix-section := VerticalLayout {
+                x: 0;
+                y: 0;
+                width: root.table-width;
+                height: self.preferred-height;
+                spacing: Tokens.space-6;
+                alignment: start;
+
+                // Implicits come with the base; only their roll positions reroll in place, and only a base change replaces them.
+                if ForgeState.has-implicits: VerticalLayout {
+                    spacing: Tokens.space-2;
+                    padding-bottom: Tokens.implicit-section-margin.bottom - Tokens.space-6;
+
+                    HorizontalLayout {
+                        padding-left: Tokens.table-header-inset.left;
+                        spacing: Tokens.space-6;
+                        alignment: start;
+
+                        Text {
+                            text: "Implicits";
+                            color: Tokens.text-muted-brush;
+                            vertical-alignment: center;
+                        }
+
+                        HelpButton {
+                            y: (parent.height - self.height) / 2;
+                            tip: ForgeState.implicit-note;
+                        }
+                    }
+
+                    if ForgeState.implicit-rows-shown: VerticalLayout {
+                        for line[index] in ForgeState.implicits: ModifierRowItem {
+                            line: line;
+                            index: index;
+                            kind: CellKind.implicit;
+                        }
+                    }
+
+                    if !ForgeState.implicit-rows-shown: VerticalLayout {
+                        padding-left: Tokens.implicit-row-margin.left;
+                        padding-right: Tokens.implicit-row-margin.right;
+                        padding-top: Tokens.implicit-row-margin.top;
+                        padding-bottom: Tokens.implicit-row-margin.bottom;
+                        spacing: Tokens.row-gap.bottom;
+
+                        for line in ForgeState.implicit-preview: Text {
+                            text: line;
+                            font-size: Tokens.font-size-value;
+                            color: ForgeState.implicit-preview-draft ? Tokens.draft-brush : Tokens.text-secondary-brush;
+                            wrap: word-wrap;
+                        }
+                    }
+                }
+
+                HorizontalLayout {
+                    padding-left: Tokens.table-header-inset.left;
+                    padding-right: Tokens.table-header-inset.right;
+                    spacing: Tokens.space-12;
+
+                    Text {
+                        width: Tokens.affix-value-column-width;
+                        text: "Value";
+                        color: Tokens.text-muted-brush;
+                    }
+
+                    Text {
+                        horizontal-stretch: 1;
+                        text: "Affix";
+                        color: Tokens.text-muted-brush;
+                    }
+
+                    if root.wide: Text {
+                        width: root.range-width;
+                        text: "Range";
+                        color: Tokens.text-muted-brush;
+                    }
+
+                    Text {
+                        width: Tokens.affix-tier-column-width;
+                        text: "Tier";
+                        color: Tokens.text-muted-brush;
+                    }
+
+                    Text {
+                        width: Tokens.affix-seal-column-width;
+                        text: "Seal";
+                        color: Tokens.text-muted-brush;
+                    }
+
+                    Rectangle {
+                        width: Tokens.affix-status-column-width;
+                    }
+                }
+
+                VerticalLayout {
+                    spacing: Tokens.row-gap.bottom;
+
+                    for affix[index] in ForgeState.affixes: AffixRowItem {
+                        affix: affix;
+                        index: index;
+                        selected: ForgeState.selected-affix == index;
+                        wide: root.wide;
+                        range-width: root.range-width;
+                    }
+                }
+
+                // Adding writes at once; the caption says what is free, or why adding and removing wait, in one line.
+                HorizontalLayout {
+                    padding-left: Tokens.table-header-inset.left;
+                    spacing: Tokens.space-12;
+                    alignment: start;
+
+                    add-button := Rectangle {
+                        width: add.preferred-width;
+                        height: Tokens.control-min-height;
+
+                        add := Button {
+                            width: parent.width;
+                            text: "Add affix";
+                            icon: Tokens.icon-add;
+                            kind: ButtonKind.subtle;
+                            enabled: ForgeState.can-change-affix-list;
+                            tip: ForgeState.add-affix-tip;
+                            clicked => {
+                                if (ForgeState.open-add()) {
+                                    add-popup.show();
+                                }
+                            }
+                        }
+
+                        add-popup := PopupWindow {
+                            x: 0;
+                            y: parent.height + Tokens.space-4;
+                            width: Tokens.replace-flyout-width + Tokens.flyout-padding.left + Tokens.flyout-padding.right;
+                            height: PickerMetrics.height(ForgeState.picker-rows.length);
+                            close-policy: PopupClosePolicy.close-on-click-outside;
+
+                            AffixPickerPanel {
+                                done => {
+                                    add-popup.close();
+                                }
+                            }
+                        }
+                    }
+
+                    Text {
+                        text: ForgeState.affix-list-note;
+                        font-size: Tokens.font-size-caption;
+                        color: Tokens.text-muted-brush;
+                        vertical-alignment: center;
+                        overflow: elide;
+                        horizontal-stretch: 1;
+
+                        note-touch := TouchArea { }
+
+                        TipTrigger {
+                            text: ForgeState.affix-list-note;
+                            hovered: note-touch.has-hover;
+                        }
+                    }
+                }
+            }
+
+            // Unique modifiers in the game's own tooltip treatment: under the table, or beside it from 1180px of lists.
+            unique-section := Rectangle {
+                x: root.unique-beside ? root.table-width + Tokens.unique-section-beside-margin.left : 0;
+                y: root.unique-beside ? Tokens.unique-section-beside-margin.top : affix-section.height + Tokens.unique-section-margin.top;
+                width: root.unique-beside ? root.lists-width - root.table-width - Tokens.unique-section-beside-margin.left : root.lists-width;
+                height: ForgeState.has-unique ? unique-layout.preferred-height : 0px;
+                visible: ForgeState.has-unique;
+                background: Tokens.unique-surface-brush;
+                border-width: 1px;
+                border-color: Tokens.unique-border-brush;
+                border-radius: Tokens.control-radius;
+
+                unique-layout := VerticalLayout {
+                    padding-left: Tokens.unique-section-padding.left;
+                    padding-right: Tokens.unique-section-padding.right;
+                    padding-top: Tokens.unique-section-padding.top;
+                    padding-bottom: Tokens.unique-section-padding.bottom;
+                    spacing: Tokens.space-8;
+
+                    HorizontalLayout {
+                        spacing: Tokens.space-12;
+
+                        Text {
+                            text: "Unique modifiers";
+                            font-size: Tokens.font-size-section;
+                            font-weight: Tokens.emphasis-weight;
+                            color: Tokens.unique-text-brush;
+                            horizontal-stretch: 1;
+                        }
+
+                        // A preview that failed says so with the error mark; one the item outran, with the warning mark.
+                        HorizontalLayout {
+                            spacing: Tokens.space-4;
+                            alignment: end;
+
+                            if ForgeState.preview-failed || ForgeState.preview-stale: Image {
+                                width: Tokens.icon-size-tiny;
+                                height: Tokens.icon-size-tiny;
+                                y: (parent.height - self.height) / 2;
+                                image-fit: contain;
+                                source: ForgeState.preview-failed ? Tokens.icon-error : Tokens.icon-warning;
+                                colorize: ForgeState.preview-failed ? Tokens.error-brush : Tokens.warning-brush;
+                            }
+
+                            Text {
+                                text: ForgeState.preview-status;
+                                font-size: Tokens.font-size-caption;
+                                color: ForgeState.preview-failed ? Tokens.error-brush : Tokens.unique-text-brush;
+                                max-width: Tokens.preview-status-max-width;
+                                vertical-alignment: center;
+                                overflow: elide;
+
+                                preview-touch := TouchArea { }
+
+                                TipTrigger {
+                                    text: ForgeState.preview-status;
+                                    hovered: preview-touch.has-hover;
+                                }
+                            }
+                        }
+                    }
+
+                    if ForgeState.formatting-error != "": HorizontalLayout {
+                        spacing: Tokens.space-8;
+
+                        Image {
+                            width: Tokens.icon-size;
+                            height: Tokens.icon-size;
+                            image-fit: contain;
+                            source: Tokens.icon-warning;
+                            colorize: Tokens.warning-brush;
+                        }
+
+                        Text {
+                            text: ForgeState.formatting-error;
+                            color: Tokens.warning-brush;
+                            wrap: word-wrap;
+                            horizontal-stretch: 1;
+                        }
+                    }
+
+                    VerticalLayout {
+                        spacing: Tokens.row-gap.bottom;
+
+                        for line[index] in ForgeState.unique-modifiers: ModifierRowItem {
+                            line: line;
+                            index: index;
+                            kind: CellKind.unique;
+                            on-unique: true;
+                            selected: ForgeState.selected-unique == index;
+                        }
+                    }
+                }
+            }
+
+            // From 1180px of lists, an item without unique modifiers gives the column beside the table to the selected affix's
+            // tier ladder; a press drafts the tier as the tier menu does.
+            ladder := VerticalLayout {
+                x: root.table-width + Tokens.tier-ladder-beside-margin.left;
+                y: 0;
+                width: Tokens.tier-ladder-width - Tokens.tier-ladder-beside-margin.left;
+                height: root.ladder ? self.preferred-height : 0px;
+                visible: root.ladder;
+                spacing: Tokens.space-6;
+                alignment: start;
+
+                HorizontalLayout {
+                    padding-left: Tokens.table-header-inset.left;
+
+                    Text {
+                        text: "Tiers";
+                        color: Tokens.text-muted-brush;
+                    }
+                }
+
+                if root.selected < 0: HorizontalLayout {
+                    padding-left: Tokens.table-header-inset.left;
+
+                    Text {
+                        text: ForgeState.ladder-note;
+                        font-size: Tokens.font-size-caption;
+                        color: Tokens.text-muted-brush;
+                        wrap: word-wrap;
+                    }
+                }
+
+                if root.selected >= 0: VerticalLayout {
+                    spacing: Tokens.space-4;
+
+                    HorizontalLayout {
+                        padding-left: Tokens.table-header-inset.left;
+
+                        Text {
+                            text: ForgeState.affixes[root.selected].name;
+                            font-weight: Tokens.emphasis-weight;
+                            color: Tokens.text-brush;
+                            overflow: elide;
+                        }
+                    }
+
+                    TierList {
+                        tiers: ForgeState.affixes[root.selected].tiers;
+                        held: ForgeState.affixes[root.selected].tier-index;
+                        enabled: ForgeState.affixes[root.selected].can-edit;
+                        picked(index) => {
+                            ForgeState.pick-tier(root.selected, index);
+                        }
+                    }
+                }
+            }
+        }
+
+        // The changes pane: beside the table, keeping its column when hidden; in a narrow window over the table's right side.
+        if ForgeState.pane-open: ChangesPane {
+            x: root.width - root.pane-width;
+            y: header.height;
+            width: root.pane-width;
+            height: bar.y - header.height;
+        }
+
+        // The action bar: the message with one icon for its kind, then Changes, Undo, Discard and Apply.
+        bar := Rectangle {
+            x: 0;
+            y: root.height - self.height;
+            width: root.width;
+            height: Math.max(Tokens.control-min-height, message.height) + Tokens.action-bar-padding.top + Tokens.action-bar-padding.bottom;
+            background: Tokens.surface-brush;
+
+            Rectangle {
+                x: 0;
+                y: 0;
+                height: 1px;
+                background: Tokens.hairline-brush;
+            }
+
+            message := HorizontalLayout {
+                x: Tokens.action-bar-padding.left;
+                y: (parent.height - self.height) / 2;
+                width: Math.max(0px, Math.min(Tokens.status-message-max-width, actions.x - self.x - Tokens.space-20));
+                height: self.preferred-height;
+                spacing: Tokens.space-10;
+                visible: ForgeState.message != "";
+
+                VerticalLayout {
+                    padding-top: Tokens.icon-baseline-nudge.top + Tokens.space-1;
+                    alignment: start;
+
+                    Image {
+                        width: Tokens.icon-size;
+                        height: Tokens.icon-size;
+                        image-fit: contain;
+                        source: ForgeState.message-tone == MessageTone.error ? Tokens.icon-error
+                            : ForgeState.message-tone == MessageTone.confirmed ? Tokens.icon-confirmed : Tokens.icon-info;
+                        colorize: ForgeState.message-tone == MessageTone.error ? Tokens.error-brush
+                            : ForgeState.message-tone == MessageTone.confirmed ? Tokens.confirmed-brush : Tokens.text-muted-brush;
+                    }
+                }
+
+                Text {
+                    text: ForgeState.message;
+                    color: ForgeState.message-tone == MessageTone.error ? Tokens.error-brush : Tokens.text-brush;
+                    wrap: word-wrap;
+                    horizontal-stretch: 1;
+                    accessible-role: text;
+                }
+            }
+
+            actions := HorizontalLayout {
+                x: parent.width - self.width - Tokens.action-bar-padding.right;
+                y: (parent.height - self.height) / 2;
+                width: self.preferred-width;
+                height: Tokens.control-min-height;
+                spacing: Tokens.space-8;
+
+                ChangesToggle {
+                    text: ForgeState.changes-text;
+                    checked <=> ForgeState.pane-open;
+                }
+
+                Button {
+                    text: ForgeState.undo-text;
+                    icon: Tokens.icon-undo;
+                    enabled: ForgeState.can-undo;
+                    tip: ForgeState.undo-tip;
+                    clicked => {
+                        ForgeState.undo();
+                    }
+                }
+
+                if ForgeState.drafts.length > 0: Button {
+                    text: ForgeState.discard-text;
+                    kind: ButtonKind.subtle;
+                    enabled: ForgeState.can-discard;
+                    tip: "Discard every draft on this item";
+                    clicked => {
+                        ForgeState.discard-all();
+                    }
+                }
+
+                Button {
+                    text: ForgeState.apply-text;
+                    kind: ButtonKind.primary;
+                    enabled: ForgeState.can-apply;
+                    tip: "Write the drafts to the game; each is read back to confirm it (Ctrl+S)";
+                    clicked => {
+                        ForgeState.apply();
+                    }
+                }
+            }
+        }
+    }
+}

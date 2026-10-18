@@ -1,7 +1,7 @@
 // Trainer pages (spec/trainer.md §5, DESIGN.md "Trainer Pages"; TrainerPageView.axaml): a page's sections along the top,
 // left out when it has one, and the chosen section beneath: rows of features, or Forge › Item, which is the Item Forge.
 // Rust (crates/ui/src/trainer) builds the rows from the catalog and owns every value; the view lays them out.
-// TODO(trainer): the Item Forge fills Forge › Item; until it is ported, the section shows the connection's empty state.
+// Forge › Item is the Item Forge (pages/forge/) while the session holds an item; otherwise the connection's empty state.
 
 import { ScrollView } from "std-widgets.slint";
 import { Tokens } from "../tokens.slint";
@@ -14,6 +14,8 @@ import { HelpButton } from "../widgets/help-button.slint";
 import { NumberBox } from "../widgets/number-box.slint";
 import { ChoiceBox } from "../widgets/choice-box.slint";
 import { EmptyState } from "common.slint";
+import { ItemForge } from "forge/editor.slint";
+import { ForgeState } from "forge/state.slint";
 
 // A row is a game hook (a switch, with values), an editor (fields read from the game), a list of what the character holds,
 // a feature not ported yet (a source checkout only), or a section's heading on a page that stacks its sections.
@@ -676,6 +678,9 @@ export component TrainerPage inherits Rectangle {
     in property <string> page-id;
     in property <string> page-title;
     in property <bool> compact;
+    // The window classes, for the Item Forge's layout.
+    in property <bool> narrow;
+    in property <bool> wide;
 
     init => {
         TrainerState.open(root.page-id);
@@ -695,7 +700,15 @@ export component TrainerPage inherits Rectangle {
             compact: root.compact;
         }
 
-        if TrainerState.item-forge: EmptyState {
+        // The item in the game's forge, while the session holds one (TODO(trainer): never yet in the real app).
+        if TrainerState.item-forge && ForgeState.has-item: ItemForge {
+            vertical-stretch: 1;
+            compact: root.compact;
+            narrow: root.narrow;
+            wide: root.wide;
+        }
+
+        if TrainerState.item-forge && !ForgeState.has-item: EmptyState {
             vertical-stretch: 1;
             title: TrainerState.empty-title;
             detail: TrainerState.empty-detail;

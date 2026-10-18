@@ -1,0 +1,240 @@
+// The Item Forge's state, shared with Rust (crates/ui/src/forge). Rust owns the item and its drafts; these carry them to
+// the view and carry the user's edits back. Until the trainer's session is ported nothing sets `has-item` in the real
+// app, so the Forge page keeps the connection's empty state (TODO(forge)).
+
+import { MessageTone } from "../common.slint";
+
+// Which value editor a cell edits: an affix row's value, a roll of a unique or implicit line, or a numeric item field.
+export enum CellKind { affix, unique, implicit, field }
+export struct CellRef { kind: CellKind, row: int, roll: int }
+
+// The game-owned colour a name takes.
+export enum ItemRarity { normal, magic, rare, exalted, unique, set, legendary }
+
+// A value cell: the value, the "was" caption while drafted, and where the value sits in the game's range.
+export struct ValueCell {
+    cell: CellRef,
+    label: string,
+    display: string,
+    was: string,
+    draft: bool,
+    // A usable table is known: the range bar shows (otherwise the tiny lock does).
+    mapped: bool,
+    // The value can change now; otherwise the cursor is the arrow and hover shows nothing.
+    editable: bool,
+    fraction: float,
+    game-fraction: float,
+    game-tick: bool,
+    tip: string,
+}
+
+export struct TierOption { label: string, range: string, in-game: bool }
+
+export struct AffixRowView {
+    value: ValueCell,
+    name: string,
+    replaced: bool,
+    detail: string,
+    reforged: bool,
+    name-tip: string,
+    range: string,
+    tier: string,
+    tier-drafted: bool,
+    exalted: bool,
+    tier-index: int,
+    seal: string,
+    sealed: bool,
+    seal-drafted: bool,
+    seal-index: int,
+    // Tier and seal can be drafted now.
+    can-edit: bool,
+    dirty: bool,
+    pending: bool,
+    stale: bool,
+    draft-tip: string,
+    confirmed: bool,
+    tiers: [TierOption],
+}
+
+// A unique modifier or an implicit: its rolls scrub in place; the line itself never changes.
+export struct ModifierRowView {
+    rolls: [ValueCell],
+    editable: bool,
+    fixed-text: string,
+    text: string,
+    drafted: bool,
+    range: string,
+    confirmed: bool,
+    stale: bool,
+    pending: bool,
+    draft-tip: string,
+    linked: string,
+}
+
+// An item-level value in the status strip: a number scrubbed in place, or a flag named by its state.
+export struct FieldView {
+    name: string,
+    numeric: bool,
+    value: ValueCell,
+    tip: string,
+    confirmed: bool,
+    stale: bool,
+    editable: bool,
+    can-edit: bool,
+    on-name: string,
+    off-name: string,
+    checked: bool,
+    drafted: bool,
+}
+
+export struct DraftEntryView { name: string, summary: string, effect: string, stale: bool }
+export struct AppliedEntryView { name: string, time: string, summary: string, effect: string, outcome: string }
+export struct MenuOptionView {
+    rarity: ItemRarity,
+    name: string,
+    detail: string,
+    implicits: string,
+    in-game: bool,
+    available: bool,
+    current: bool
+}
+export struct PickerRowView { name: string, detail: string, reforged: bool }
+
+export global ForgeState {
+    in property <bool> has-item;
+
+    // The header.
+    in property <string> item-name;
+    // The name opens the identity picker on a unique, set or legendary item.
+    in property <bool> has-identity;
+    in property <bool> identity-drafted;
+    in property <bool> can-change-identity;
+    in property <string> identity-tip;
+    in property <string> identity-search;
+    in property <[MenuOptionView]> identity-options;
+    in property <ItemRarity> name-rarity;
+    in property <string> rarity-text;
+    in property <bool> rarity-drafted;
+    in property <bool> can-change-rarity;
+    in property <string> rarity-tip;
+    in property <[MenuOptionView]> rarity-options;
+    in property <string> base-text;
+    in property <bool> base-drafted;
+    in property <bool> can-change-base;
+    in property <string> base-tip;
+    in property <[MenuOptionView]> base-options;
+    // The base and rarity menus' caption lines, for the flyouts' heights (a PopupWindow needs one).
+    in property <int> base-caption-lines;
+    in property <int> rarity-caption-lines;
+    in property <bool> base-allow-incompatible;
+    in property <string> summary;
+    in property <[FieldView]> fields;
+
+    // Implicits.
+    in property <bool> has-implicits;
+    in property <bool> implicit-rows-shown;
+    in property <string> implicit-note;
+    in property <[ModifierRowView]> implicits;
+    in property <[string]> implicit-preview;
+    in property <bool> implicit-preview-draft;
+
+    // The affix table.
+    in property <[AffixRowView]> affixes;
+    in property <int> selected-affix: -1;
+    in property <bool> can-change-affix-list;
+    in property <string> add-affix-tip;
+    in property <string> affix-list-note;
+    in property <string> ladder-note;
+
+    // Unique modifiers.
+    in property <bool> has-unique;
+    in property <[ModifierRowView]> unique-modifiers;
+    in property <int> selected-unique: -1;
+    in property <string> preview-status;
+    in property <bool> preview-failed;
+    in property <bool> preview-stale;
+    in property <string> formatting-error;
+
+    // The changes pane: open or closed is the view's (it follows the window class); the entries are Rust's.
+    in-out property <bool> pane-open: true;
+    in property <[DraftEntryView]> drafts;
+    in property <string> draft-count-text: "No drafts";
+    in property <[AppliedEntryView]> history;
+
+    // The action bar.
+    in property <string> message;
+    in property <MessageTone> message-tone;
+    in property <string> changes-text: "Changes";
+    in property <string> undo-text: "Undo";
+    in property <string> undo-tip;
+    in property <bool> can-undo;
+    in property <string> discard-text;
+    in property <bool> can-discard;
+    in property <string> apply-text: "Apply to game";
+    in property <bool> can-apply;
+
+    // The value popover, for the one cell typing.
+    in property <string> input-label;
+    in-out property <string> input-text;
+    in property <string> input-range;
+    in property <string> input-error;
+
+    // The affix picker.
+    in property <bool> picker-open;
+    in property <string> picker-title;
+    in property <string> picker-subtitle;
+    in property <string> picker-search;
+    in property <int> picker-filter;
+    in property <bool> picker-allow;
+    in property <bool> picker-allow-enabled;
+    in property <[PickerRowView]> picker-rows;
+    in property <int> picker-selected: -1;
+    in property <string> picker-status;
+    in property <string> picker-action;
+    in property <bool> can-use-picker;
+
+    // Rust asks a cell to take keyboard focus (a ledger entry for a value, Up/Down between rows).
+    in property <CellRef> focus-cell: { kind: CellKind.affix, row: -1, roll: -1 };
+    // Which of an affix row's cells: 0 value, 1 name, 2 tier, 3 seal.
+    in property <int> focus-part;
+    in property <int> focus-serial;
+
+    callback select-affix(int);
+    callback select-unique(int);
+    // Up / Down from a cell of row `int` in part `int`.
+    callback move-row(int, int, int);
+    callback press(CellRef);
+    callback scrub(CellRef, float);
+    callback end-scrub(CellRef, bool);
+    callback step(CellRef, int);
+    callback step-to-end(CellRef, bool);
+    callback begin-input(CellRef) -> bool;
+    callback input-edited(CellRef, string);
+    callback commit-input(CellRef) -> bool;
+    callback cancel-input(CellRef);
+    callback finish-input(CellRef);
+    callback pick-tier(int, int);
+    callback pick-seal(int, int);
+    callback toggle-flag(int, bool);
+    callback pick-rarity(int);
+    callback pick-base(int);
+    callback pick-identity(int);
+    callback identity-search-edited(string);
+    callback base-allow(bool);
+    callback open-replace(int) -> bool;
+    callback open-add() -> bool;
+    callback picker-search-edited(string);
+    callback picker-filter-changed(int);
+    callback picker-allow-changed(bool);
+    callback picker-select(int);
+    callback use-picker();
+    callback cancel-picker();
+    callback discard-row(int);
+    callback remove-affix(int);
+    callback show-draft(int);
+    callback discard-entry(int);
+    callback discard-all();
+    callback apply();
+    callback undo();
+    callback undo-draft();
+}

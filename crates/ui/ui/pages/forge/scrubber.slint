@@ -1,0 +1,373 @@
+// The value scrubber, the forge's signature control (DESIGN.md "Value Scrubber", "Range Bar"; spec/item-forge.md §6): the
+// value over its range bar, edited in place by dragging, by the arrow keys, or by typing in its popover.
+
+import { Tokens } from "../../tokens.slint";
+import { KeyboardFocus } from "../../globals.slint";
+import { TipTrigger } from "../../widgets/focus.slint";
+import { ForgeState, ValueCell, CellRef } from "state.slint";
+
+// Where a value sits inside the game's own minimum and maximum, with the game's value and the draft as separate ticks.
+export component RangeBar inherits Rectangle {
+    in property <float> fraction;
+    in property <float> game-fraction;
+    in property <bool> game-tick;
+    in property <bool> draft;
+    // Under the pointer or scrubbing: the track thickens.
+    in property <bool> active;
+    in property <bool> on-unique;
+
+    property <length> track: root.active ? Tokens.range-bar-track-thickness-active : Tokens.range-bar-track-thickness;
+    property <length> tick: Tokens.range-bar-tick-width;
+
+    height: Tokens.range-bar-height;
+
+    Rectangle {
+        x: 0;
+        y: Math.round((root.height - root.track) / 1px / 2) * 1px;
+        width: root.width;
+        height: root.track;
+        border-radius: root.track / 2;
+        background: root.on-unique ? Tokens.unique-range-track-brush : Tokens.range-track-brush;
+    }
+
+    Rectangle {
+        x: 0;
+        y: Math.round((root.height - root.track) / 1px / 2) * 1px;
+        width: Math.max(root.track, root.width * Math.clamp(root.fraction, 0, 1));
+        height: root.track;
+        border-radius: root.track / 2;
+        background: root.draft ? Tokens.draft-brush : root.on-unique ? Tokens.unique-range-fill-brush : Tokens.range-fill-brush;
+    }
+
+    // The game's value stays as a full-height tick while a draft moves away from it.
+    if root.game-tick: Rectangle {
+        x: Math.round(Math.clamp(root.game-fraction, 0, 1) * (root.width - root.tick) / 1px) * 1px;
+        y: 0;
+        width: root.tick;
+        height: root.height;
+        background: Tokens.text-brush;
+    }
+
+    if root.draft: Rectangle {
+        x: Math.round(Math.clamp(root.fraction, 0, 1) * (root.width - root.tick) / 1px) * 1px;
+        y: 0;
+        width: root.tick;
+        height: root.height;
+        background: Tokens.draft-brush;
+    }
+}
+
+// The value cell: one tab stop. Drag scrubs (Shift is four times finer), Left and Right step one attainable value (Shift
+// five), Home and End jump to the ends, Enter, F2 or a click without dragging opens the popover.
+export component ValueScrubber inherits Rectangle {
+    in property <ValueCell> cell;
+    in property <bool> on-unique;
+    // Up and Down from the cell move between rows; the row decides.
+    callback vertical(int);
+    callback menu-requested();
+    // A right-click, at the pointer in window coordinates.
+    callback context-menu(length, length);
+
+    property <bool> locked: !root.cell.editable;
+    property <bool> pressed;
+    property <bool> scrubbing;
+    property <length> press-x;
+    property <bool> keyboard-focus: focus.has-focus && KeyboardFocus.visible;
+    property <length> bar-y: value-line.preferred-height + Tokens.space-4;
+    property <int> serial: ForgeState.focus-serial;
+    property <bool> popup-open: popup.is-open;
+
+    changed serial => {
+        if (ForgeState.focus-cell.kind == root.cell.cell.kind && ForgeState.focus-cell.row == root.cell.cell.row
+            && ForgeState.focus-cell.roll == root.cell.cell.roll && ForgeState.focus-part == 0) {
+            focus.focus();
+        }
+    }
+
+    // Clicking away keeps a valid typed value and drops an invalid one.
+    changed popup-open => {
+        if (!root.popup-open) {
+            ForgeState.finish-input(root.cell.cell);
+        }
+    }
+
+    public function focus-cell() {
+        focus.focus();
+    }
+
+    function open-input() {
+        if (ForgeState.begin-input(root.cell.cell)) {
+            popup.show();
+        }
+    }
+
+    function end-gesture(cancelled: bool) {
+        if (root.scrubbing) {
+            ForgeState.end-scrub(root.cell.cell, cancelled);
+        }
+        root.pressed = false;
+        root.scrubbing = false;
+    }
+
+    accessible-role: slider;
+    accessible-label: root.cell.label;
+    accessible-value: root.cell.display;
+    accessible-description: root.cell.tip;
+
+    height: root.bar-y + Tokens.range-bar-height;
+
+    // The band behind the bar: only the bar answers the pointer, flat like every other cell.
+    Rectangle {
+        x: Tokens.aura-outdent.left;
+        y: root.bar-y + Tokens.aura-outdent.top;
+        width: root.width - Tokens.aura-outdent.left - Tokens.aura-outdent.right;
+        height: Tokens.range-bar-height - Tokens.aura-outdent.top - Tokens.aura-outdent.bottom;
+        border-radius: Tokens.control-radius;
+        visible: root.cell.mapped;
+        background: !root.locked && (touch.has-hover || root.scrubbing || root.keyboard-focus) ? Tokens.aura-brush : transparent;
+    }
+
+    value-line := HorizontalLayout {
+        x: 0;
+        y: 0;
+        width: root.width;
+        height: self.preferred-height;
+        spacing: Tokens.space-6;
+        alignment: start;
+
+        Text {
+            text: root.cell.display;
+            font-size: Tokens.font-size-value;
+            color: root.cell.draft ? Tokens.draft-brush : Tokens.text-brush;
+            vertical-alignment: center;
+            horizontal-stretch: 0;
+        }
+
+        if root.cell.was != "": Text {
+            text: root.cell.was;
+            font-size: Tokens.font-size-caption;
+            color: root.on-unique ? Tokens.unique-caption-brush : Tokens.text-muted-brush;
+            vertical-alignment: center;
+            overflow: elide;
+            horizontal-stretch: 1;
+        }
+    }
+
+    if root.cell.mapped: RangeBar {
+        x: 0;
+        y: root.bar-y;
+        width: root.width;
+        fraction: root.cell.fraction;
+        game-fraction: root.cell.game-fraction;
+        game-tick: root.cell.game-tick;
+        draft: root.cell.draft;
+        active: !root.locked && (touch.has-hover || root.scrubbing);
+        on-unique: root.on-unique;
+    }
+
+    // An unknown mapping shows the tiny lock in place of the bar; the tip says why.
+    if !root.cell.mapped: Image {
+        x: 0;
+        y: root.bar-y + (Tokens.range-bar-height - self.height) / 2;
+        width: Tokens.icon-size-tiny;
+        height: Tokens.icon-size-tiny;
+        image-fit: contain;
+        source: Tokens.icon-locked;
+        colorize: root.on-unique ? Tokens.unique-caption-brush : Tokens.text-muted-brush;
+    }
+
+    focus := FocusScope {
+        focus-gained(reason) => {
+            if (reason == FocusReason.tab-navigation) {
+                KeyboardFocus.visible = true;
+            }
+            ForgeState.press(root.cell.cell);
+        }
+        key-pressed(event) => {
+            if (root.pressed) {
+                // Escape mid-drag puts the value back where the drag began, leaving nothing to undo.
+                if (event.text == Key.Escape) {
+                    root.end-gesture(true);
+                    return accept;
+                }
+                return reject;
+            }
+            if (event.modifiers.control || event.modifiers.alt || event.modifiers.meta) {
+                return reject;
+            }
+            if (event.text == Key.LeftArrow) {
+                ForgeState.step(root.cell.cell, event.modifiers.shift ? -Tokens.scrub-large-step : -1);
+                return accept;
+            }
+            if (event.text == Key.RightArrow) {
+                ForgeState.step(root.cell.cell, event.modifiers.shift ? Tokens.scrub-large-step : 1);
+                return accept;
+            }
+            if (event.text == Key.Home) {
+                ForgeState.step-to-end(root.cell.cell, false);
+                return accept;
+            }
+            if (event.text == Key.End) {
+                ForgeState.step-to-end(root.cell.cell, true);
+                return accept;
+            }
+            if (event.text == Key.Return || event.text == Key.F2) {
+                root.open-input();
+                return accept;
+            }
+            if (event.text == Key.UpArrow) {
+                root.vertical(-1);
+                return accept;
+            }
+            if (event.text == Key.DownArrow) {
+                root.vertical(1);
+                return accept;
+            }
+            if (event.text == Key.F10 && event.modifiers.shift) {
+                root.menu-requested();
+                return accept;
+            }
+            reject
+        }
+
+        touch := TouchArea {
+            mouse-cursor: root.locked ? MouseCursor.default : MouseCursor.ew-resize;
+            pointer-event(event) => {
+                if (event.kind == PointerEventKind.down && event.button == PointerEventButton.left) {
+                    KeyboardFocus.visible = false;
+                    focus.focus();
+                    ForgeState.press(root.cell.cell);
+                    root.pressed = true;
+                    root.scrubbing = false;
+                    root.press-x = self.mouse-x;
+                } else if (event.kind == PointerEventKind.move && root.pressed && !root.locked) {
+                    if (root.scrubbing || Math.abs(self.mouse-x - root.press-x) >= Tokens.scrub-threshold) {
+                        root.scrubbing = true;
+                        ForgeState.scrub(root.cell.cell, (self.mouse-x - root.press-x) / (Tokens.scrub-span * (event.modifiers.shift ? Tokens.scrub-fine-factor : 1)));
+                    }
+                } else if (event.kind == PointerEventKind.up && event.button == PointerEventButton.left && root.pressed) {
+                    if (root.scrubbing) {
+                        root.end-gesture(false);
+                    } else {
+                        root.pressed = false;
+                        root.open-input();
+                    }
+                } else if (event.kind == PointerEventKind.down && event.button == PointerEventButton.right) {
+                    root.context-menu(self.absolute-position.x + self.mouse-x, self.absolute-position.y + self.mouse-y);
+                } else if (event.kind == PointerEventKind.cancel && root.pressed) {
+                    root.end-gesture(false);
+                }
+            }
+        }
+    }
+
+    TipTrigger {
+        text: root.cell.tip;
+        hovered: touch.has-hover && !root.pressed;
+        focused: focus.has-focus;
+    }
+
+    // Keyboard focus frames the whole cell, value and bar, in every state, locked too.
+    Rectangle {
+        x: Tokens.aura-outdent.left;
+        y: Tokens.aura-outdent.top;
+        width: root.width - Tokens.aura-outdent.left - Tokens.aura-outdent.right;
+        height: root.height - Tokens.aura-outdent.top - Tokens.aura-outdent.bottom;
+        border-radius: Tokens.control-radius;
+        border-width: root.keyboard-focus ? 1px : 0px;
+        border-color: Tokens.focus-brush;
+    }
+
+    // The value popover: the label, the text box (all selected), "min – max", and the reason while the text is no value.
+    popup := PopupWindow {
+        x: Tokens.aura-outdent.left;
+        y: root.height - Tokens.aura-outdent.bottom + Tokens.space-4;
+        width: Tokens.value-flyout-width + Tokens.flyout-padding.left + Tokens.flyout-padding.right;
+        height: Tokens.flyout-padding.top + Tokens.flyout-padding.bottom + Tokens.font-size-caption * 4 / 3 + Tokens.control-min-height
+            + Tokens.font-size-caption * 4 / 3 + Tokens.space-6 * 2
+            + (ForgeState.input-error != "" ? Tokens.space-6 + Tokens.font-size-caption * 8 / 3 : 0px);
+        close-policy: PopupClosePolicy.close-on-click-outside;
+
+        Rectangle {
+            background: Tokens.hover-brush;
+            border-radius: Tokens.control-radius;
+
+            FocusScope {
+                capture-key-pressed(event) => {
+                    if (event.text == Key.Escape) {
+                        ForgeState.cancel-input(root.cell.cell);
+                        popup.close();
+                        focus.focus();
+                        return accept;
+                    }
+                    reject
+                }
+
+                VerticalLayout {
+                    padding-left: Tokens.flyout-padding.left;
+                    padding-right: Tokens.flyout-padding.right;
+                    padding-top: Tokens.flyout-padding.top;
+                    padding-bottom: Tokens.flyout-padding.bottom;
+                    spacing: Tokens.space-6;
+                    alignment: start;
+
+                    Text {
+                        text: ForgeState.input-label;
+                        font-size: Tokens.font-size-caption;
+                        color: Tokens.text-muted-brush;
+                        overflow: elide;
+                    }
+
+                    Rectangle {
+                        height: Tokens.control-min-height;
+                        border-radius: Tokens.control-radius;
+                        border-width: 1px;
+                        border-color: input.has-focus ? Tokens.accent-brush : Tokens.strong-line-brush;
+                        background: Tokens.ground-brush;
+
+                        input := TextInput {
+                            x: Tokens.space-10;
+                            width: parent.width - Tokens.space-10 * 2;
+                            text <=> ForgeState.input-text;
+                            single-line: true;
+                            font-size: Tokens.font-size-value;
+                            color: Tokens.text-brush;
+                            selection-background-color: Tokens.accent-pressed-color;
+                            selection-foreground-color: Tokens.on-accent-color;
+                            vertical-alignment: center;
+                            accessible-label: ForgeState.input-label;
+                            init => {
+                                self.focus();
+                                self.select-all();
+                            }
+                            edited => {
+                                ForgeState.input-edited(root.cell.cell, self.text);
+                            }
+                            // Enter commits a valid value; an invalid one keeps the popover open with its reason.
+                            accepted => {
+                                if (ForgeState.commit-input(root.cell.cell)) {
+                                    popup.close();
+                                    focus.focus();
+                                }
+                            }
+                        }
+                    }
+
+                    Text {
+                        text: ForgeState.input-range;
+                        font-size: Tokens.font-size-caption;
+                        color: Tokens.text-muted-brush;
+                        overflow: elide;
+                    }
+
+                    if ForgeState.input-error != "": Text {
+                        text: ForgeState.input-error;
+                        font-size: Tokens.font-size-caption;
+                        color: Tokens.error-brush;
+                        wrap: word-wrap;
+                    }
+                }
+            }
+        }
+    }
+}
