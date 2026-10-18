@@ -2,8 +2,8 @@
 
 Investigation started 2026-10-17 after the first evaluation checkpoint, at the user's request to make runtime, hook and
 assembly conclusions stronger before protocol/session implementation. Original app source remains at
-`22eb727b0590ed825957cb05c2039b4c0768c5e2` for this investigation. Product protocol, gameplay operations and UI wiring
-remain separate; one read-only live scheduler request is now validated.
+`22eb727b0590ed825957cb05c2039b4c0768c5e2` for this investigation. The later protocol/control-session slice follows current app source `e1c1ed4`; gameplay operations and UI wiring
+remain separate. One read-only live scheduler request is validated; no subsequent live operation ran in the protocol step.
 
 ## Implementation verdict
 
@@ -15,7 +15,8 @@ controlled fixtures while the remaining acceptance gates stay explicit.
 |---|---|---|
 | Runtime calls | Checked invocation now constructs primitive and scalar ref/out storage, validates receivers/reference classes, and roots results/exceptions. The production layer executes in the real 6000.4.8 fixture, including explicit virtual/interface resolution. | Managed-reference ref/out, enums, structs and generic signatures remain rejected. Validate each actual game operation separately. |
 | Thread/GC ownership | Production thread-affine attachment leases and strong roots pass against actual 6000.4.8. Native reference field/array edges survive collection with incremental mode disabled/enabled. | Incremental phase interleaving and game shutdown ordering. Attachment does not establish Unity main-thread authority. |
-| Main-thread commands | First-party scheduler with process-thread transactions passes owned native tests, authored Unity normal/exception/worker/external-bootstrap runs, and one authorized offline-game checked frame read followed by entry restoration. | Protocol/session/offline admission, per-operation authority and shutdown/transient effects. External patch/context actors and code reclamation are not validated. Neither stock hook engine is adopted. |
+| Main-thread commands | First-party scheduler with process-thread transactions passes owned native tests, authored Unity normal/exception/worker/external-bootstrap runs, and one authorized offline-game checked frame read followed by entry restoration. | Persistent Rust helper/native protocol handlers, helper-side offline checks, per-operation authority and shutdown/transient effects. External patch/context actors and code reclamation are not validated. Neither stock hook engine is adopted. |
+| Control transport/session | Protocol 21 discovery/status/empty hooks, bounded Tokio pipe client, exact process/server identity, bound artifact hashes, offline gate and cancellation/cleanup lifecycle pass authored process/session tests. | Persistent Rust helper/bootstrap, native discovery/status and helper-side runtime offline/effect/owner/shutdown handling; then per-operation validation. No UI/game integration follows from wire tests. |
 | Managed files | Dotscope can implement offline transforms with independent before/after validation. | Decide malformed-type policy explicitly; broader format features remain separate requirements. |
 
 Unsafe code belongs at export calls, pointer/receiver construction, object ownership transitions and the
@@ -26,8 +27,8 @@ Nightly is available, but the established foundation does not need nightly-only 
 Matching-version runtime and managed player-loop experiments pass. The first checked invocation subset and narrow
 scheduler adapter are implemented. Authored Unity tests include a managed exception crossing its Rust frame and
 subsequent engine recovery; the external bootstrap and one offline-game frame read also pass. The assembly investigation
-separately distinguishes writer preservation from missing input semantics. Protocol/session and trainer operations
-remain separate work. A fake GUI is unnecessary: disposable process hosts cover the boundary and existing UI captures
+separately distinguishes writer preservation from missing input semantics. The subsequent protocol/control-session foundation also passes authored-host tests; native helper handlers and trainer
+operations remain separate work. A fake GUI is unnecessary: disposable process hosts cover the boundary and existing UI captures
 use fake sessions. The live probe restores its entry and retains the helper until process exit.
 
 ## Evidence standard and scope
@@ -378,3 +379,43 @@ The current original app tools CLI only reports its catalog; its former `capture
 research tooling supplies an existing `pefile` dependency; Mono.Cecil and installed LLVM provide independent metadata
 and disassembly views. The original app is not launched. REA's doctor found unsupported Node 25 and missing native
 providers/registration, so static findings here come from ordinary tools, with their identities and limits recorded.
+
+
+## Protocol 21 control sessions, 2026-10-18
+
+The source audit at original app `e1c1ed4` confirms a 336-byte request and 12-byte response header, one request per
+byte-mode pipe connection, and 1 MiB response limit. The implemented subset is Discover 6, Status 7 and empty SetHooks 15.
+Empty wanted hooks have count 0 and **no tail**. Discovery checks version/adapter/PID/source build ID, 37 required
+field offsets, duplicate/trailing/bounded data and strict UTF-8. Status requires exactly 16 bytes; a zero manager wins
+over its online flag when deciding that no character is present. Local GameAssembly/metadata hashes are not wire
+fields or a known-build whitelist.
+
+The pipe client holds a query/synchronize-only identity handle through each exchange, validates creation time/path
+and server PID before writing, and rechecks process identity afterward. Connect and exchange have separate 15-second
+deadlines. Busy/present and absent pipes are distinguished before sending. Anything after the first write attempt
+is conservatively MayHaveRun on failure; typed helper codes keep their definite/uncertain semantics. There is no
+automatic resend, process discovery, injection or helper unloading in this API.
+
+The safe trainer layer starts disabled, binds its transport to PID/start/executable and its profile to the derived
+installation artifact paths, gates process access on the current Player.log, and rechecks the log after discovery
+before Status. Offline runtime evidence is also required for Ready. Losing log admission, observing online/no-character
+state or receiving helper code 5 revokes the attachment without further client I/O. Explicit disconnect can clear hooks
+with a 3-second best-effort deadline; only a valid all-off reply acknowledges cleanup. New attachment invalidates that
+acknowledgement. Dropped attachment/cleanup futures preserve Connecting/Closing barriers until explicit resolution.
+
+Seven codec tests, six owned-child pipe tests, 21 session tests and one complete real-log/pipe/session child-host test
+pass, alongside the earlier 28 runtime/invocation/dispatcher/scheduler cases: 63 tests on stable and nightly release,
+one lifetime compile-fail check on each, plus four architecture checks on stable. `mise run verify` passes and captures
+were inspected. The two ignored test entry points are launched explicitly by parent tests. The authored PE/metadata
+and runtime replies are fake; they do not establish real discovery or effects. The evidence index is in
+[the trainer README](../crates/trainer/README.md).
+
+Deliberate differences from C#: server-PID/transport binding, strict malformed UTF-8/reserved bytes and always matching
+an expected helper source ID instead of its DLL-hash fast path. Missing-log refusal also does no further helper I/O,
+where the C# coordinator can conditionally attempt cleanup of already-held hooks. This slice cannot enable hooks and
+marks cleanup unconfirmed; independent helper cleanup remains required. Full protocol support and authentication are
+not claimed. Details and remaining work: [crates/trainer/README.md](../crates/trainer/README.md).
+
+Next implementation is the persistent Rust helper/bootstrap, source build-ID generation, real discovery/status and
+helper-side offline/owner/cleanup handling in an authored Unity player. The existing evaluation DLL still exposes the
+one-shot frame probe; no persistent production server or trainer UI composition has been added by this control slice.

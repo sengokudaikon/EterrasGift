@@ -1,0 +1,18 @@
+{
+  "date": "2026-10-18",
+  "status": "protocol21 control/session foundation passes owned fixtures",
+  "evidence": "artifacts\\trainer-eval\\protocol-session-95e3d0ed64494652a50a76df25f322d9\\report.json",
+  "original_app_commit": "e1c1ed4",
+  "foundation_cases_stable_and_nightly_release": 63,
+  "architecture_checks": 4,
+  "lifetime_compile_fail_checks_per_toolchain": 1,
+  "scope": "Discovery/status/empty-hook clear, pipe identity/uncertainty, offline admission and session lifecycle. No live game or UI wiring.",
+  "remaining": [
+    "Persistent Rust helper/bootstrap and source build-ID generation",
+    "Real native discovery/status + helper runtime offline checks",
+    "Independent feature cleanup, owner/shutdown behavior",
+    "Per-operation APIs and readback, then UI composition"
+  ],
+  "native_probe_build_report": "artifacts/trainer-eval/unity-hook-native-4b59b1ab3a164d8e9670e6cd38f9bf53/report.json",
+  "native_probe_build_only": true
+}

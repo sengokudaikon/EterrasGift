@@ -7,3 +7,9 @@ pub mod il2cpp;
 
 #[cfg(all(windows, target_arch = "x86_64"))]
 pub mod scheduler;
+
+#[cfg(windows)]
+pub mod pipe;
+pub mod process;
+pub mod protocol;
+pub mod transport;

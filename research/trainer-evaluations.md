@@ -154,7 +154,7 @@ NeoHook unwind diagnosis have been completed. Their limits remain explicit; they
    diagnostic edits now isolate both remaining baseline loader defects; making classes abstract is not behavior restoration.
 4. The first verified invocation/exception subset now passes in the real fixture. Add enum identity/width checks,
    reference writes and traced managed-reference ref/out storage; evaluate concrete collection methods separately
-   from generic-method construction. Then promote the helper adapter and protocol 21 transport. Extend disposable-host
+   from generic-method construction. Then implement persistent native helper handlers behind the verified protocol 21 control client. Extend disposable-host
    operation tests before connecting trainer UI to a real helper.
 5. The first-party scheduler adapter and external bootstrap now pass the authored Unity fixture and one explicitly
    authorized offline-game request. The checked getter returns frame 372,952 on the named main thread, exactly once;
@@ -182,3 +182,28 @@ That run returns frame 372,952 on Unity main TID 59160, with two original callba
 All 81 entry bytes are restored, original unwind bytes/files are unchanged, and the same game process stays responsive.
 The helper, original module, relay, trampoline and tables remain retained until process exit. No gameplay mutation,
 product session/protocol or active-unload claim follows. [Result index](../tools/trainer-eval/debugger/scheduler-report.json).
+
+
+## Protocol/control-session implementation, 2026-10-18
+
+Source `e1c1ed4` now backs the protocol 21 control port: discovery/status/empty-hooks framing, strict bounded replies,
+local process/server identity and delivery uncertainty in `eg-game-access`; current-log admission, installation-bound
+artifact profile and explicit asynchronous lifecycle in `eg-trainer`. The app/UI remain unwired. Seven wire, six
+owned-process pipe, 21 session and one combined log/pipe/session test pass. Together with prior foundations this is 63
+cases on stable/nightly release plus the lifetime check; architecture checks and `mise run verify` pass, captures
+inspected. Ignored child test entry points are exercised by the parent tests. No existing game was accessed.
+
+The old source specs correctly document the general336-byte layout but can obscure that empty SetHooks has no tail.
+Typed code 5 revokes attachment just like online status; it cannot leave a cached dispatcher available for later cleanup.
+Dropped futures retain connection/closing barriers, and reconnect cannot reuse an old cleanup acknowledgement.
+Server-PID/transport/path binding and strict UTF-8/unused-byte decoding strengthen the legacy control boundary.
+Expected helper source ID is always checked; the DLL-hash fast path is deferred. Missing-log refusal makes no further
+helper call, even where the original coordinator might conditionally clear already-held hooks. There is no hook-enable
+or gameplay-write API in this slice. See [trainer contracts](../crates/trainer/README.md) for the complete scope.
+
+All four dependent evaluation workspaces have refreshed offline lockfiles. The fake-host's four process cases and
+the two runtime-contract checks pass with selected mock DLL/current installed 6000.4.8 plus pinned exact archived
+headers. Initial direct calls omitted their input environment and failed; the corrected selections pass. The older
+6000.2.9 installed-header directory is no longer available here, so that historical installed-version run was not
+repeated. Unity Rust-host compiles and the native evaluation plugin builds with the new dependencies; the new plugin
+was not loaded into a player/game. Persistent helper server and actual discovery/status remain next.

@@ -60,3 +60,11 @@ env = { SLINT_EMIT_DEBUG_INFO = "1", SLINT_MCP_PORT = "9316" }
 description = "slint-viewer with its MCP server on 127.0.0.1:9315 (opens a window; no Rust logic)"
 run = "slint-viewer {{arg(name='file', default='crates/ui/ui/app.slint')}}"
 env = { SLINT_MCP_PORT = "9315" }
+
+[tasks."trainer:test"]
+description = "Trainer runtime, protocol, owned pipe/session fixtures, and tier checks; no live game"
+run = "cargo test -p eg-game-access -p eg-trainer -p eterras-gift --offline"
+
+[tasks."trainer:test:release"]
+description = "Trainer fixtures on installed nightly in release mode; no live game"
+run = "cargo +nightly test -p eg-game-access -p eg-trainer --release --offline"
