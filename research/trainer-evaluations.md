@@ -476,3 +476,35 @@ entries, restored entry/stopped server, three later frames, normal exit and unch
 Five codec, five runtime-helper and four session tests bring the foundation count to 138 on stable/nightly release.
 [Exact audit/build/run evidence and current live scope](../tools/trainer-eval/persistent-player/locale-report.json).
 Full affix/unique/base definitions, numeric property/formatting contracts and mappings remain separate work.
+
+## Live completed locale and item limits, 2026-10-19
+
+After the user explicitly restarted and asked to proceed, the same tested protocol 24 build passed in PID 62024.
+Release gating uses the real current Player.log, which reports offline play; no development override, fabricated log,
+game-folder write or gameplay mutation was used. The fresh process had no old trainer modules. CDB read-only snapshot
+and bootstrap preflight agree on exact image/creation time, original dispatcher/unwind, main TID 51628 and supported
+mitigation flags before startup.
+
+The live locale is `en`; application version is `1.5.2.2`. The nine literals produce ranges FP 0..255, LP 0..4,
+Weaver's Will 5..28, Weaver's Touch 5..14 and levels 0..100. These are actual game constants, not the fixture's
+intentionally different authored limits. The non-Weaver plain item's raw Weaver fields remain zero; ranges do not
+imply that every field applies to every item kind.
+
+Three forge copies are identical, with the previously observed type/subtype/individual ID/fingerprint but a new
+process-scoped address and **empty raw name**. This is a real app-completeness finding. C# `ForgeReader` reads
+`_fullName` directly, `ProcessMemory.ReadString` maps null to empty, `UniqueDescriptions` enriches modifiers/implicits
+without changing Name, and `ItemEditorViewModel` displays Name unchanged. Its catalog-backed BaseText is separate.
+The source does not prove a tooltip or forge UI lazily initializes the cache. A future full-name getter needs its
+own body audit, or a catalog fallback needs an explicit semantic decision; neither should be silently guessed here.
+The legacy fingerprint excludes Name, so full snapshot equality remains necessary.
+
+The owned session acknowledges empty-feature cleanup. External stop restores all 81 original entry bytes and unwind,
+observes server stop, preserves files and leaves the same game alive and responsive. A separate query/read-only check
+of the exact loaded helper's retained metric array proves eight accepted requests, seven completed commands on main
+TID 51628, 331 original normal returns and zero failures/wrong-thread entries. One helper generation remains loaded
+until process exit. No callback-drain or unload claim follows from those values.
+
+This promotes locale/version and literal-range execution for this exact target, not full localization/catalog
+support or arbitrary Unity compatibility. Live language switching, malformed/unready states and populated item
+cases remain untested there; authored cases remain valid. Full definition capture and rich descriptions/mappings
+remain the next implementation layer. [Live evidence](../tools/trainer-eval/persistent-player/locale-report.json).

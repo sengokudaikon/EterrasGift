@@ -528,3 +528,26 @@ All 138 foundation cases pass on stable/nightly release, plus existing architect
 preflight checks, isolated controller checks and workspace verification/captures. Static native/metadata outputs are
 ordinary tool observations, not REA Evidence or executed native-body proof. See
 [locale-report.json](../tools/trainer-eval/persistent-player/locale-report.json) for exact artifacts, hashes and live scope.
+
+### Authorized restarted-game observation
+
+The user restarted Last Epoch offline. Fresh PID 62024 (creation FILETIME 134368374694678390) has no retained trainer
+modules before startup. Current Player.log shows offline character play; Release admission is Allow. Fresh read-only
+CDB/WindowsAPI evidence matches all 81 original dispatcher bytes/unwind and supported process policies, with main
+TID 51628. The exact authored-tested source/DLL then returns language `en` and application version `1.5.2.2`.
+
+Literal limits are forging potential 0..255, legendary potential 0..4, Weaver's Will 5..28, Weaver's Touch 5..14 and
+level requirement 0..100. Three forge samples are identical: type 5/subtype 0/rarity 0, individual ID 918073198,
+fingerprint 0x8a3debae144d94d2, no affixes, implicit bytes [0,0,0] and level requirement 1. Their raw name is empty;
+no name is invented from an earlier process's Hatchet observation. The existing C# reader reads the same cache and
+accepts empty/null names without enrichment; why this cache is empty has not been demonstrated.
+
+Session cleanup is ConfirmedOff. Independent stop evidence restores every entry byte and original unwind, observes
+entry-restored 1/server-running 0/failure 0, preserves module files and leaves the same process responsive. A further
+query/read-only inspection of this helper's retained atomic array confirms seven commands on TID 51628, eight
+requests, 331 original normal returns and zero wrong-thread entries. It makes no target call or new target thread.
+Code remains pinned; snapshot counters are not a callback-drain or unload proof.
+
+This is one live locale/version observation, one limits observation and three plain raw-item observations. Locale
+changes, readiness/failure modes, populated affixes and unique/set identity remain authored coverage. Exact reports
+and the newly exposed raw-name limitation are retained in the locale evidence index.

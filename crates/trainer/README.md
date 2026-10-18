@@ -122,9 +122,9 @@ returns three identical plain-Hatchet snapshots under Release policy, then confi
 and the same live game process. Populated live affixes and unique/set data remain unvalidated on that game session;
 their authored cases pass. See the [forge evidence index](../../tools/trainer-eval/persistent-player/forge-report.json).
 The subsequent protocol 23 literal-ranges capability passes both authored Unity startup routes, including GC,
-replacement and runtime refusals. It has not been run in the real game. The
+replacement and runtime refusals. It also passes the later protocol 24 live offline capture. The
 [limits evidence index](../../tools/trainer-eval/persistent-player/limits-report.json) preserves exact build/source
-identities and scope. Next: actual game locale layout/getter validation and capture, localized definitions and descriptions,
+identities and scope. Next: full localized definitions, resolved item names and descriptions,
 then mappings and per-operation write/readback with independent effect cleanup before gameplay features or UI wiring.
 The older frame-count probe remains separate.
 The opt-in boxed-return/Int32-enum invocation contracts now pass authored standalone IL2CPP execution on the matching
@@ -132,7 +132,13 @@ runtime with GC on/off. See the [value-type evidence](../../tools/trainer-eval/u
 The subsequent [locale capture checkpoint](../../tools/trainer-eval/persistent-player/locale-report.json) audits the
 actual identifier layout and getter bodies, then validates protocol 24 capture through both authored Unity startup
 routes. It observes completed selection fields to avoid the legacy getter's blocking/initialization behavior.
-The real game's locale capture remains a separate live check; full localized definitions and mappings come next.
+The restarted offline game now passes Release-gated capture: language `en`, game version `1.5.2.2`, exact item limits
+and three identical plain-item snapshots. Independent retained counters confirm seven commands on Unity main TID
+51628, eight accepted requests and 331 original normal returns. Entry/unwind restoration, stopped server, acknowledged
+empty-feature cleanup and the same responsive process are confirmed. One helper generation remains pinned.
+The raw `_fullName` cache is empty in this process; the C# reader also accepts it without name enrichment. This does
+not yet provide a guaranteed display name. Locale transitions and populated live affixes/unique/set cases remain
+separate validation, as do full localized definitions and mappings.
 Validation commands, counts and the retained log/source index are in [validation.json](validation.json).
 
 Windows API contract: [GetNamedPipeServerProcessId](https://learn.microsoft.com/en-us/windows/win32/api/winbase/nf-winbase-getnamedpipeserverprocessid).

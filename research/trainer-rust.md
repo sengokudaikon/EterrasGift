@@ -22,7 +22,8 @@ Protocol 23 additionally reads literal item limits in both authored Unity startu
 exact Int32 enums now pass authored standalone IL2CPP execution with GC on/off.
 [Value-type evidence](../tools/trainer-eval/unity-rust-host/value-types-report.json). The actual locale layout/getters
 are now statically audited; protocol 24 reads the completed selection without starting or waiting for it, passing
-both authored Unity startup routes. [Locale evidence and live scope](../tools/trainer-eval/persistent-player/locale-report.json).
+both authored Unity startup routes and the user-restarted offline game (en / 1.5.2.2), including literal ranges.
+[Locale evidence and live limits](../tools/trainer-eval/persistent-player/locale-report.json).
 Full localized definitions, UI
 integration and gameplay writes remain separate work. See [trainer contracts](../crates/trainer/README.md).
 
