@@ -1,10 +1,10 @@
 //! Fake metadata/runtime tests for rejection, storage and rooting; not Unity compatibility evidence.
 use eg_game_access::il2cpp::raw::{self, Api, InvocationApi};
-use eg_game_access::il2cpp::{Argument, CheckedMethod, InvocationContext, InvocationOutcome, InvokeError, ReturnValue, RuntimeError, Scalar, ThreadContext};
+use eg_game_access::il2cpp::{Argument, CheckedMethod, InvocationContext, InvocationOutcome, InvokeError, ReturnValue, RuntimeError, Scalar, ThreadContext, ValueTypeContract};
 use static_assertions::assert_not_impl_any;
 use std::cell::RefCell;
 use std::collections::BTreeMap;
-use std::ffi::c_void;
+use std::ffi::{CStr, c_char, c_void};
 use std::ptr::{NonNull, null_mut};
 
 assert_not_impl_any!(InvocationContext<'static, 'static>: Send, Sync);
@@ -17,6 +17,10 @@ const OTHER: usize = 0x102;
 const STRUCT: usize = 0x103;
 const ARRAY: usize = 0x104;
 const ELEMENT: usize = 0x105;
+const ENUM: usize = 0x106;
+const OTHER_ENUM: usize = 0x107;
+const ENUM_BASE: usize = 0x108;
+const CORLIB: usize = 0x109;
 
 fn pointer<T>(id: usize) -> *mut T {
     std::ptr::without_provenance_mut(id)
@@ -34,6 +38,10 @@ struct Class {
     value: bool,
     generic: bool,
     inflated: bool,
+    enumeration: bool,
+    enum_base: usize,
+    size: i32,
+    alignment: u32,
 }
 #[derive(Clone, Copy, Default)]
 enum Action {
@@ -43,6 +51,7 @@ enum Action {
     ThrowAfterWrite,
     ExpectObject(usize),
     ExpectValueReceiver(usize),
+    ExpectEnumPair(i32, i32),
 }
 #[derive(Clone)]
 struct Method {
@@ -72,6 +81,9 @@ struct Fake {
     invocations: usize,
     fail_root: bool,
     result_needs_root: usize,
+    unboxes: usize,
+    corlib: usize,
+    int32_class: usize,
 }
 thread_local! { static FAKE: RefCell<Fake> = RefCell::new(Fake::default()); }
 
@@ -151,6 +163,31 @@ macro_rules! class_boolean {
 class_boolean!(class_value, value);
 class_boolean!(class_generic, generic);
 class_boolean!(class_inflated, inflated);
+class_boolean!(class_enum, enumeration);
+unsafe extern "C-unwind" fn get_corlib() -> *const c_void {
+    FAKE.with_borrow(|f| pointer(f.corlib))
+}
+unsafe extern "C-unwind" fn class_from_name(image: *const c_void, namespace: *const c_char, name: *const c_char) -> *mut raw::Class {
+    // SAFETY: the checked enum validator supplies static NUL-terminated corlib names.
+    let (namespace, name) = unsafe { (CStr::from_ptr(namespace), CStr::from_ptr(name)) };
+    assert_eq!(namespace, c"System");
+    assert_eq!(name, c"Int32");
+    FAKE.with_borrow(|f| {
+        assert_eq!(image.addr(), f.corlib);
+        pointer(f.int32_class)
+    })
+}
+unsafe extern "C-unwind" fn enum_base(class: *mut raw::Class) -> *const raw::Type {
+    FAKE.with_borrow(|f| pointer(f.classes[&class.addr()].enum_base))
+}
+unsafe extern "C-unwind" fn value_size(class: *mut raw::Class, alignment: *mut u32) -> i32 {
+    FAKE.with_borrow(|f| {
+        let class = f.classes[&class.addr()];
+        // SAFETY: the invocation validator supplies one writable alignment result.
+        unsafe { alignment.write(class.alignment) };
+        class.size
+    })
+}
 unsafe extern "C-unwind" fn assignable(expected: *mut raw::Class, actual: *mut raw::Class) -> bool {
     FAKE.with_borrow(|f| actual == expected || f.classes[&actual.addr()].parent == expected.addr())
 }
@@ -163,7 +200,10 @@ unsafe extern "C-unwind" fn object_class(object: *mut raw::Object) -> *mut raw::
     })
 }
 unsafe extern "C-unwind" fn unbox(object: *mut raw::Object) -> *mut c_void {
-    FAKE.with_borrow_mut(|f| std::ptr::from_mut(f.objects.get_mut(&object.addr()).unwrap().payload.as_mut()).cast())
+    FAKE.with_borrow_mut(|f| {
+        f.unboxes += 1;
+        std::ptr::from_mut(f.objects.get_mut(&object.addr()).unwrap().payload.as_mut()).cast()
+    })
 }
 unsafe extern "C-unwind" fn virtual_method(_: *mut raw::Object, _: *const raw::MethodInfo) -> *const raw::MethodInfo {
     panic!("direct invocation must not silently resolve a virtual override")
@@ -190,6 +230,10 @@ unsafe extern "C-unwind" fn invoke(method: *const raw::MethodInfo, receiver: *mu
                 }
                 Action::ExpectValueReceiver(expected) => {
                     assert_eq!(receiver.addr(), expected);
+                }
+                Action::ExpectEnumPair(first, second) => {
+                    assert_eq!((*arguments).cast::<i32>().read(), first);
+                    assert_eq!((*arguments.add(1)).cast::<i32>().read(), second);
                 }
             }
         }
@@ -230,12 +274,22 @@ fn invocation_api() -> InvocationApi {
         object_get_class: object_class,
         object_unbox: unbox,
         object_get_virtual_method: virtual_method,
+        get_corlib,
+        class_from_name,
+        class_is_enum: class_enum,
+        class_enum_basetype: enum_base,
+        class_value_size: value_size,
     }
 }
 fn context() -> ThreadContext {
     FAKE.with_borrow_mut(|f| {
         assert!(f.handles.is_empty());
-        *f = Fake { next: 0x1000, ..Fake::default() };
+        *f = Fake {
+            next: 0x1000,
+            corlib: CORLIB,
+            int32_class: 8,
+            ..Fake::default()
+        };
         for id in [OWNER, OTHER, ARRAY, ELEMENT] {
             f.classes.insert(id, Class::default());
         }
@@ -246,10 +300,34 @@ fn context() -> ThreadContext {
                 ..Class::default()
             },
         );
-        f.classes.insert(STRUCT, Class { value: true, ..Class::default() });
+        f.classes.insert(
+            STRUCT,
+            Class {
+                value: true,
+                size: 8,
+                alignment: 8,
+                ..Class::default()
+            },
+        );
+        for id in [ENUM, OTHER_ENUM] {
+            f.classes.insert(
+                id,
+                Class {
+                    value: true,
+                    enumeration: true,
+                    enum_base: ENUM_BASE,
+                    size: 4,
+                    alignment: 4,
+                    ..Class::default()
+                },
+            );
+        }
+        f.types.insert(ENUM_BASE, Type { code: 8, by_ref: false, class: 8 });
         for code in [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 0x18, 0x19] {
             f.classes.insert(code, Class { value: true, ..Class::default() });
         }
+        f.classes.get_mut(&8).unwrap().size = 4;
+        f.classes.get_mut(&8).unwrap().alignment = 4;
     });
     // SAFETY: thread-local fake engine attachment and correctly typed exports remain valid throughout the test.
     unsafe { ThreadContext::new(api()) }
@@ -529,4 +607,271 @@ fn instance_receivers_check_assignability_and_exact_value_box_before_unboxing() 
     assert!(method.invoke(Some(&value_root), &mut []).is_ok());
     assert!(matches!(method.invoke(Some(&derived), &mut []), Err(InvokeError::ObjectTypeMismatch)));
     assert_eq!(calls(), 2);
+}
+
+fn boxed_contract() -> ValueTypeContract {
+    ValueTypeContract::BoxedReturn {
+        class: NonNull::new(pointer(STRUCT)).unwrap(),
+        size: 8,
+        alignment: 8,
+    }
+}
+
+fn enum_contract(class: usize) -> ValueTypeContract {
+    ValueTypeContract::I32Enum {
+        class: NonNull::new(pointer(class)).unwrap(),
+    }
+}
+
+fn enum_method(parameters: &[usize], returns: Option<usize>) -> NonNull<raw::MethodInfo> {
+    let metadata = method(&vec![(0x11, false); parameters.len()], if returns.is_some() { (0x11, false) } else { (1, false) });
+    FAKE.with_borrow_mut(|f| {
+        let signature = f.methods[&metadata.as_ptr().addr()].clone();
+        for (parameter, class) in signature.parameters.iter().zip(parameters) {
+            f.types.get_mut(parameter).unwrap().class = *class;
+        }
+        if let Some(class) = returns {
+            f.types.get_mut(&signature.returns).unwrap().class = class;
+        }
+    });
+    metadata
+}
+
+#[test]
+fn opaque_boxed_return_is_rooted_without_copying_payload_then_usable_as_exact_receiver() {
+    let runtime = context();
+    let attached = runtime.attach().unwrap();
+    // SAFETY: valid fake runtime; opaque box payloads remain in fake managed storage.
+    let context = unsafe { InvocationContext::new(&attached, invocation_api()) };
+    let text = object(OWNER, 0);
+    let boxed = object(STRUCT, text.as_ptr().addr() as u64);
+    let payload = FAKE.with_borrow(|f| std::ptr::from_ref(f.objects[&boxed.as_ptr().addr()].payload.as_ref()).addr());
+    let metadata = method(&[], (0x11, false));
+    change_method(metadata, |method| method.result = boxed.as_ptr().addr());
+    // SAFETY: fake body returns the exact authorized 8-byte struct box, never native struct storage.
+    let getter = unsafe { context.bind_with_value_types(metadata, &[boxed_contract()]) }.unwrap();
+    let outcome = getter.invoke(None, &mut []).unwrap();
+    let InvocationOutcome::Returned(ReturnValue::Boxed(box_root)) = outcome else {
+        panic!("expected opaque rooted value box")
+    };
+    assert_eq!(box_root.target(), Some(boxed));
+    assert_eq!(handles(), 1);
+    assert_eq!(FAKE.with_borrow(|f| f.unboxes), 0, "returning a struct must not expose or copy its payload");
+
+    let code_metadata = method(&[], (0x0e, false));
+    change_method(code_metadata, |method| {
+        method.class = STRUCT;
+        method.instance = true;
+        method.action = Action::ExpectValueReceiver(payload);
+        method.result = text.as_ptr().addr();
+    });
+    // SAFETY: this exact value-type receiver method only reads its own managed payload.
+    let code_getter = unsafe { context.bind(code_metadata) }.unwrap();
+    let outcome = code_getter.invoke(Some(&box_root), &mut []).unwrap();
+    assert!(matches!(outcome, InvocationOutcome::Returned(ReturnValue::Reference(Some(_)))));
+    assert_eq!(FAKE.with_borrow(|f| f.unboxes), 1);
+    assert_eq!(handles(), 2);
+    drop(outcome);
+    drop(box_root);
+    assert_eq!(handles(), 0);
+}
+
+#[test]
+fn boxed_result_rejects_null_wrong_class_and_failed_root_without_unboxing() {
+    let runtime = context();
+    let attached = runtime.attach().unwrap();
+    // SAFETY: immutable fake metadata and registered result objects.
+    let context = unsafe { InvocationContext::new(&attached, invocation_api()) };
+    let metadata = method(&[], (0x11, false));
+    // SAFETY: authored method/result contract; intentional malformed results exercise validation.
+    let getter = unsafe { context.bind_with_value_types(metadata, &[boxed_contract()]) }.unwrap();
+    assert!(matches!(getter.invoke(None, &mut []), Err(InvokeError::UnexpectedReturn)));
+    let wrong = object(ENUM, 42);
+    change_method(metadata, |method| method.result = wrong.as_ptr().addr());
+    assert!(matches!(getter.invoke(None, &mut []), Err(InvokeError::ObjectTypeMismatch)));
+    assert_eq!(handles(), 0);
+    let correct = object(STRUCT, 42);
+    change_method(metadata, |method| method.result = correct.as_ptr().addr());
+    FAKE.with_borrow_mut(|f| f.fail_root = true);
+    assert!(matches!(getter.invoke(None, &mut []), Err(InvokeError::Runtime(RuntimeError::RootFailed))));
+    assert_eq!(FAKE.with_borrow(|f| f.unboxes), 0);
+    assert_eq!(calls(), 3, "result errors follow executed bodies");
+}
+
+#[test]
+fn explicit_box_contracts_reject_bad_size_alignment_class_and_duplicates_before_execution() {
+    let runtime = context();
+    let attached = runtime.attach().unwrap();
+    // SAFETY: fake immutable runtime, no malformed contract is invoked.
+    let context = unsafe { InvocationContext::new(&attached, invocation_api()) };
+    let metadata = method(&[], (0x11, false));
+    for (size, alignment) in [(0, 8), (-1, 8), (7, 8), (9, 8), (8, 0), (8, 3), (8, 4), (8, 16)] {
+        let contract = ValueTypeContract::BoxedReturn {
+            class: NonNull::new(pointer(STRUCT)).unwrap(),
+            size,
+            alignment,
+        };
+        // SAFETY: only the declared expectations are wrong; all metadata pointers are valid.
+        assert!(
+            unsafe { context.bind_with_value_types(metadata, &[contract]) }.is_err(),
+            "size {size}, alignment {alignment}"
+        );
+    }
+    for (class, size, alignment) in [(OWNER, 8, 8), (ENUM, 4, 4)] {
+        let contract = ValueTypeContract::BoxedReturn {
+            class: NonNull::new(pointer(class)).unwrap(),
+            size,
+            alignment,
+        };
+        // SAFETY: reference and enum classes are valid metadata, deliberately unsupported for opaque boxes.
+        assert!(unsafe { context.bind_with_value_types(metadata, &[contract]) }.is_err());
+    }
+    // SAFETY: duplicate declarations are rejected while binding, without executing the body.
+    assert!(unsafe { context.bind_with_value_types(metadata, &[boxed_contract(), boxed_contract()]) }.is_err());
+    for inflated in [false, true] {
+        FAKE.with_borrow_mut(|fake| {
+            let class = fake.classes.get_mut(&STRUCT).unwrap();
+            class.generic = !inflated;
+            class.inflated = inflated;
+        });
+        // SAFETY: generic/inflated value metadata is deliberately refused before execution.
+        assert!(unsafe { context.bind_with_value_types(metadata, &[boxed_contract()]) }.is_err());
+    }
+    assert_eq!(calls(), 0);
+}
+
+#[test]
+fn struct_arguments_and_byrefs_remain_unsupported_even_with_explicit_return_contracts() {
+    let runtime = context();
+    let attached = runtime.attach().unwrap();
+    // SAFETY: this fake runtime only observes rejected metadata in this test.
+    let context = unsafe { InvocationContext::new(&attached, invocation_api()) };
+    for metadata in [method(&[(0x11, false)], (1, false)), method(&[(0x11, true)], (1, false)), method(&[], (0x11, true))] {
+        // SAFETY: registered metadata, body is never invoked for unsupported arguments/byref returns.
+        assert!(unsafe { context.bind_with_value_types(metadata, &[boxed_contract()]) }.is_err());
+    }
+    let enum_byref = enum_method(&[ENUM], None);
+    FAKE.with_borrow_mut(|f| {
+        let parameter = f.methods[&enum_byref.as_ptr().addr()].parameters[0];
+        f.types.get_mut(&parameter).unwrap().by_ref = true;
+    });
+    // SAFETY: the enum class is valid, but ref/out enum native storage is intentionally unsupported.
+    assert!(unsafe { context.bind_with_value_types(enum_byref, &[enum_contract(ENUM)]) }.is_err());
+    assert_eq!(calls(), 0);
+}
+
+#[test]
+fn enum_arguments_require_exact_class_tags_and_initialized_int32_storage() {
+    let runtime = context();
+    let attached = runtime.attach().unwrap();
+    // SAFETY: fake runtime exports and enum metadata satisfy the exact Int32 contract.
+    let context = unsafe { InvocationContext::new(&attached, invocation_api()) };
+    let metadata = enum_method(&[ENUM, OTHER_ENUM], Some(ENUM));
+    let boxed = object(ENUM, u64::from((-12345_i32) as u32));
+    change_method(metadata, |method| {
+        method.result = boxed.as_ptr().addr();
+        method.action = Action::ExpectEnumPair(i32::MIN, i32::MAX);
+    });
+    // SAFETY: body accepts every initialized int32 value in the exact two enum argument classes.
+    let method = unsafe { context.bind_with_value_types(metadata, &[enum_contract(ENUM), enum_contract(OTHER_ENUM)]) }.unwrap();
+    let class = NonNull::new(pointer(ENUM)).unwrap();
+    let other = NonNull::new(pointer(OTHER_ENUM)).unwrap();
+    for (first, second) in [(other, class), (NonNull::dangling(), other)] {
+        assert!(matches!(
+            method.invoke(None, &mut [Argument::EnumI32 { class: first, value: 1 }, Argument::EnumI32 { class: second, value: 2 }]),
+            Err(InvokeError::ArgumentType { index: 0 })
+        ));
+    }
+    assert!(matches!(
+        method.invoke(None, &mut [Argument::Scalar(Scalar::I32(1)), Argument::EnumI32 { class: other, value: 2 }]),
+        Err(InvokeError::ArgumentType { index: 0 })
+    ));
+    assert_eq!(calls(), 0);
+    let result = method
+        .invoke(
+            None,
+            &mut [Argument::EnumI32 { class, value: i32::MIN }, Argument::EnumI32 { class: other, value: i32::MAX }],
+        )
+        .unwrap();
+    assert!(matches!(result, InvocationOutcome::Returned(ReturnValue::EnumI32 { value: -12345, .. })));
+    assert_eq!(handles(), 1);
+    assert_eq!(FAKE.with_borrow(|f| f.unboxes), 1);
+    drop(result);
+    assert_eq!(handles(), 0);
+}
+
+#[test]
+fn enum_result_requires_its_exact_box_class_and_keeps_managed_exceptions_rooted() {
+    let runtime = context();
+    let attached = runtime.attach().unwrap();
+    // SAFETY: registered fake enum metadata and live rooted results.
+    let context = unsafe { InvocationContext::new(&attached, invocation_api()) };
+    let metadata = enum_method(&[], Some(ENUM));
+    let wrong = object(OTHER_ENUM, 42);
+    change_method(metadata, |method| method.result = wrong.as_ptr().addr());
+    // SAFETY: body may return an intentionally wrong live fake box; validation must reject it.
+    let method = unsafe { context.bind_with_value_types(metadata, &[enum_contract(ENUM)]) }.unwrap();
+    assert!(matches!(method.invoke(None, &mut []), Err(InvokeError::ObjectTypeMismatch)));
+    assert_eq!(FAKE.with_borrow(|f| f.unboxes), 0);
+    assert_eq!(handles(), 0);
+    let exception = object(OWNER, 0);
+    change_method(metadata, |method| {
+        method.result = 0;
+        method.exception = exception.as_ptr().addr();
+    });
+    let outcome = method.invoke(None, &mut []).unwrap();
+    assert!(matches!(outcome, InvocationOutcome::Exception(_)));
+    assert_eq!(handles(), 1);
+    drop(outcome);
+    assert_eq!(handles(), 0);
+}
+
+#[test]
+fn enum_contract_checks_base_identity_flags_width_and_alignment_before_invocation() {
+    for invalid in 0..11 {
+        let runtime = context();
+        let attached = runtime.attach().unwrap();
+        // SAFETY: all fake pointers remain valid; individual invalid metadata is rejected below.
+        let context = unsafe { InvocationContext::new(&attached, invocation_api()) };
+        let metadata = enum_method(&[], Some(ENUM));
+        FAKE.with_borrow_mut(|f| match invalid {
+            0 => f.classes.get_mut(&ENUM).unwrap().enumeration = false,
+            1 => f.classes.get_mut(&ENUM).unwrap().value = false,
+            2 => f.classes.get_mut(&ENUM).unwrap().size = 8,
+            3 => f.classes.get_mut(&ENUM).unwrap().alignment = 8,
+            4 => f.types.get_mut(&ENUM_BASE).unwrap().code = 9,
+            5 => f.types.get_mut(&ENUM_BASE).unwrap().class = 9,
+            6 => f.types.get_mut(&ENUM_BASE).unwrap().by_ref = true,
+            7 => f.corlib = 0,
+            8 => f.int32_class = 0,
+            9 => f.classes.get_mut(&ENUM).unwrap().enum_base = 0,
+            _ => f.classes.get_mut(&ENUM).unwrap().generic = true,
+        });
+        // SAFETY: the fake runtime contract is intentionally invalid only for binding checks.
+        assert!(
+            unsafe { context.bind_with_value_types(metadata, &[enum_contract(ENUM)]) }.is_err(),
+            "invalid enum contract {invalid}"
+        );
+        assert_eq!(calls(), 0);
+    }
+}
+
+#[test]
+fn default_bind_still_rejects_enums_and_explicit_contracts_do_not_enable_generic_methods() {
+    let runtime = context();
+    let attached = runtime.attach().unwrap();
+    // SAFETY: live authored fake metadata, no rejected method body is invoked.
+    let context = unsafe { InvocationContext::new(&attached, invocation_api()) };
+    for metadata in [enum_method(&[ENUM], None), enum_method(&[], Some(ENUM))] {
+        // SAFETY: checking metadata only; normal binding must retain its old unsupported boundary.
+        assert!(matches!(unsafe { context.bind(metadata) }, Err(InvokeError::UnsupportedType { .. })));
+    }
+    let generic = enum_method(&[], Some(ENUM));
+    change_method(generic, |method| method.generic = true);
+    // SAFETY: generic method metadata is valid but deliberately not supported by this adapter.
+    assert!(matches!(
+        unsafe { context.bind_with_value_types(generic, &[enum_contract(ENUM)]) },
+        Err(InvokeError::GenericMethod)
+    ));
+    assert_eq!(calls(), 0);
 }

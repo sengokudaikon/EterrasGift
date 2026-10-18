@@ -5,5 +5,5 @@ mod invoke;
 pub mod raw;
 mod thread;
 
-pub use invoke::{Argument, CheckedMethod, InvocationContext, InvocationOutcome, InvokeError, ReturnValue, Scalar, SignaturePosition};
+pub use invoke::{Argument, CheckedMethod, InvocationContext, InvocationOutcome, InvokeError, ReturnValue, Scalar, SignaturePosition, ValueTypeContract};
 pub use thread::{AttachedThread, RuntimeError, StrongRoot, ThreadContext};

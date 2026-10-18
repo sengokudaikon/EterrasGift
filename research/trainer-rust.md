@@ -8,7 +8,7 @@ The trainer can be ported to Rust, including the in-process helper. Existing lib
 binding work, but none evaluated in this research establishes audited compatibility with the exact target runtime.
 Thread ownership, GC roots, ABI validation and dispatch remain responsibilities of the port.
 
-Follow-up through 2026-10-18: [trainer-validation.md](trainer-validation.md) records actual 6000.4.8 runtime execution,
+Follow-up through 2026-10-19: [trainer-validation.md](trainer-validation.md) records actual 6000.4.8 runtime execution,
 production Rust ownership/checked invocation and the first-party ExecuteTasks scheduler adapter. The authored player
 passes worker installation/restoration, exact frame-count comparison, managed-exception cleanup/recovery and no replay.
 The externally loaded bootstrap then passes in an idle authored player and in the explicitly authorized offline game:
@@ -18,7 +18,9 @@ the subsequent protocol 22 helper also returns owned forge snapshots through the
 Three explicitly authorized offline-game reads of a plain Hatchet pass under Release admission, followed by restored
 entry/unwind and a stopped server. [Evidence and limits](../tools/trainer-eval/persistent-player/forge-report.json).
 Protocol 23 additionally reads literal item limits in both authored Unity startup routes, with no game-body calls.
-[Evidence and scope](../tools/trainer-eval/persistent-player/limits-report.json). Full localized definitions, UI
+[Evidence and scope](../tools/trainer-eval/persistent-player/limits-report.json). Opt-in opaque boxed returns and
+exact Int32 enums now pass authored standalone IL2CPP execution with GC on/off.
+[Evidence and remaining locale audit](../tools/trainer-eval/unity-rust-host/value-types-report.json). Full localized definitions, UI
 integration and gameplay writes remain separate work. See [trainer contracts](../crates/trainer/README.md).
 
 ## Decisions and constraints

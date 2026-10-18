@@ -483,3 +483,29 @@ workspace verification pass; captures were inspected. [Exact evidence](../tools/
 These limits have authored-runtime coverage only; no newer helper was loaded into the real game for this checkpoint.
 Full catalog capture is blocked on additional validated localization/boxed-value/enum/property formatting contracts,
 not on literal ranges. The next-step source audit is in [trainer-evaluations.md](trainer-evaluations.md).
+
+## Opt-in value-type invocation checkpoint
+
+The checked invocation layer now accepts explicitly approved boxed struct returns and exact Int32 enum signatures
+through `bind_with_value_types`; ordinary binding keeps rejecting them. Boxed-return classes require independent
+payload size/alignment contracts, exact class identity and non-generic/non-enum shape. Returned boxes stay opaque,
+rooted and owned by IL2CPP, including their managed reference fields. The existing exact boxed-receiver path calls
+authorized getters without giving Rust a struct layout or payload reference.
+
+Enum classes require exact Int32 backing identity/size/alignment. Enum arguments carry their own class tags and
+initialized Int32 storage; wrong classes/plain Int32 arguments and byrefs are rejected. Undefined values and all
+signed bit patterns are preserved; Rust never constructs a typed enum. Result class validation, rooting failures
+and managed exceptions retain the existing uncertainty/no-rollback semantics. Nullable/generic values, arbitrary
+struct inputs/byrefs, other enum backing types and managed-reference ref/out remain excluded.
+
+Eight new fake-export tests bring the foundation count to 124 on stable debug/nightly release, plus existing
+architecture and lifetime checks. The actual standalone IL2CPP harness passes a reference-containing locale-like
+box through GC/getter/string-root/drop-box/GC, exact enum roundtrips including signed extrema, wrong-class/width/
+byref rejection and managed throw/recovery. All 34 previous native checks and normal shutdown pass. Stable debug
+and nightly release pass with incremental GC at 3 ms; nightly release also passes with it disabled. Source/runtime
+identities remain unchanged through each run. [Exact evidence](../tools/trainer-eval/unity-rust-host/value-types-report.json).
+
+Workspace verification/captures and isolated host Clippy/format checks pass. This checkpoint adds invocation
+mechanics, with no protocol change or game operation. Actual game locale layout, getter bodies, initialization
+and engine permission remain separate validation work. Full collections with incremental GC enabled do not prove
+arbitrary marking-phase interleaving or strict barriers; existing unsafe runtime/body ownership contracts remain.

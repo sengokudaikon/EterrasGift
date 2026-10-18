@@ -116,9 +116,13 @@ their authored cases pass. See the [forge evidence index](../../tools/trainer-ev
 The subsequent protocol 23 literal-ranges capability passes both authored Unity startup routes, including GC,
 replacement and runtime refusals. It has not been run in the real game. The
 [limits evidence index](../../tools/trainer-eval/persistent-player/limits-report.json) preserves exact build/source
-identities and scope. Next: narrow boxed locale/enum invocation validation, localized definitions and descriptions,
+identities and scope. Next: actual game locale layout/getter validation and capture, localized definitions and descriptions,
 then mappings and per-operation write/readback with independent effect cleanup before gameplay features or UI wiring.
 The older frame-count probe remains separate.
+The opt-in boxed-return/Int32-enum invocation contracts now pass authored standalone IL2CPP execution on the matching
+runtime with GC on/off. See the [value-type evidence](../../tools/trainer-eval/unity-rust-host/value-types-report.json).
+Actual game locale layout/getter bodies and per-operation signatures still require their own validation before a
+localized catalog can use those mechanics. The session protocol remains 23; no locale/capture request was added.
 Validation commands, counts and the retained log/source index are in [validation.json](validation.json).
 
 Windows API contract: [GetNamedPipeServerProcessId](https://learn.microsoft.com/en-us/windows/win32/api/winbase/nf-winbase-getnamedpipeserverprocessid).

@@ -64,6 +64,28 @@ pub enum Argument<'value, 'attachment, 'runtime> {
     Scalar(Scalar),
     ByRef(&'value mut Scalar),
     Reference(Option<&'value StrongRoot<'attachment, 'runtime>>),
+    /// Exact enum identity plus its signed Int32 storage. The class token is only compared with
+    /// validated signature metadata; invoke never dereferences this argument-supplied pointer.
+    EnumI32 {
+        class: NonNull<Class>,
+        value: i32,
+    },
+}
+
+/// Explicit runtime identities accepted only by unsafe `bind_with_value_types`.
+/// This grants no permission to copy struct payloads or pass struct/ref-enum arguments.
+#[derive(Clone, Copy, Debug)]
+pub enum ValueTypeContract {
+    BoxedReturn { class: NonNull<Class>, size: i32, alignment: u32 },
+    I32Enum { class: NonNull<Class> },
+}
+
+impl ValueTypeContract {
+    fn class(self) -> NonNull<Class> {
+        match self {
+            Self::BoxedReturn { class, .. } | Self::I32Enum { class } => class,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -82,6 +104,7 @@ pub enum InvokeError {
     GenericMethod,
     AbstractMethod,
     GenericDeclaringType,
+    InvalidValueTypeContract,
     TooManyParameters,
     UnsupportedType { position: SignaturePosition, type_code: i32, by_ref: bool },
     ArgumentCount { expected: usize, actual: usize },
@@ -111,7 +134,16 @@ impl From<RuntimeError> for InvokeError {
 pub enum ReturnValue<'attachment, 'runtime> {
     Void,
     Reference(Option<StrongRoot<'attachment, 'runtime>>),
-    Scalar { value: Scalar, root: StrongRoot<'attachment, 'runtime> },
+    Scalar {
+        value: Scalar,
+        root: StrongRoot<'attachment, 'runtime>,
+    },
+    /// An exact approved value-type box, retained without exposing or copying its payload.
+    Boxed(StrongRoot<'attachment, 'runtime>),
+    EnumI32 {
+        value: i32,
+        root: StrongRoot<'attachment, 'runtime>,
+    },
 }
 
 /// Managed exceptions returned through `il2cpp_runtime_invoke` are data, retained by a strong root.
@@ -126,6 +158,8 @@ enum ValueKind {
     Void,
     Scalar(ScalarKind),
     Reference,
+    Boxed,
+    EnumI32,
 }
 
 #[derive(Clone, Copy)]
@@ -172,6 +206,92 @@ impl<'attachment, 'runtime> InvocationContext<'attachment, 'runtime> {
     /// and uphold required main-thread/external synchronization. Metadata does
     /// not prove any of these properties; managed code can contain unsafe operations or native calls.
     pub unsafe fn bind(&self, method: NonNull<MethodInfo>) -> Result<CheckedMethod<'_, 'attachment, 'runtime>, InvokeError> {
+        // SAFETY: the caller supplies the same method/runtime permissions as bind_checked. Empty
+        // contracts preserve the original primitive/reference-only signature support.
+        unsafe { self.bind_checked(method, &[]) }
+    }
+
+    /// Authorize exact boxed value returns and/or exact Int32 enum signatures in addition to the
+    /// default bounded signature set. All allowlist entries are validated, copied and reduced to
+    /// owned signature facts; the checked method never borrows the caller's allowlist.
+    ///
+    /// # Safety
+    /// Every obligation of `bind` applies, including trusted callees/class initializers, runtime
+    /// identity/lifetime, main-thread permissions, native object life and aliasing. Each contract's
+    /// class must be live immutable metadata from this same runtime. The caller must independently
+    /// establish the expected size/alignment of each allowed boxed-return class for this artifact;
+    /// names or matching size alone do not establish identity. Approved struct returns are opaque
+    /// runtime-owned GC boxes, possibly containing managed references: no Rust payload layout,
+    /// blittability, or raw byte-copy permission is inferred. Nullable/generic/inflated classes,
+    /// arbitrary struct arguments, struct byrefs and enum byrefs remain unsupported.
+    /// Authorizing an Int32 enum method authorizes *every* signed Int32 value, including undefined
+    /// enum values and flag combinations. Bodies must not assume Rust enum validity or retain
+    /// native argument pointers. Result-validation/rooting errors can follow an executed body.
+    pub unsafe fn bind_with_value_types(&self, method: NonNull<MethodInfo>, contracts: &[ValueTypeContract]) -> Result<CheckedMethod<'_, 'attachment, 'runtime>, InvokeError> {
+        let contracts = contracts.to_vec();
+        // SAFETY: the caller establishes all metadata identities and method-body permissions.
+        unsafe {
+            self.validate_value_types(&contracts)?;
+            self.bind_checked(method, &contracts)
+        }
+    }
+
+    unsafe fn validate_value_types(&self, contracts: &[ValueTypeContract]) -> Result<(), InvokeError> {
+        let api = &self.api;
+        // SAFETY: bind_with_value_types receives live class metadata from this context's runtime.
+        unsafe {
+            for (index, contract) in contracts.iter().copied().enumerate() {
+                let class = contract.class();
+                if contracts[..index].iter().any(|prior| prior.class() == class)
+                    || !(api.class_is_valuetype)(class.as_ptr())
+                    || (api.class_is_generic)(class.as_ptr())
+                    || (api.class_is_inflated)(class.as_ptr())
+                {
+                    return Err(InvokeError::InvalidValueTypeContract);
+                }
+                match contract {
+                    ValueTypeContract::BoxedReturn { size, alignment, .. } => {
+                        if !(1..=65_536).contains(&size) || !alignment.is_power_of_two() || (api.class_is_enum)(class.as_ptr()) {
+                            return Err(InvokeError::InvalidValueTypeContract);
+                        }
+                        let mut actual_alignment = 0;
+                        if (api.class_value_size)(class.as_ptr(), &mut actual_alignment) != size || actual_alignment != alignment {
+                            return Err(InvokeError::InvalidValueTypeContract);
+                        }
+                    }
+                    ValueTypeContract::I32Enum { .. } => {
+                        if !(api.class_is_enum)(class.as_ptr()) {
+                            return Err(InvokeError::InvalidValueTypeContract);
+                        }
+                        let underlying = (api.class_enum_basetype)(class.as_ptr());
+                        if underlying.is_null() || (api.type_is_byref)(underlying) || (api.type_get_type)(underlying) != 0x08 {
+                            return Err(InvokeError::InvalidValueTypeContract);
+                        }
+                        let corlib = (api.get_corlib)();
+                        if corlib.is_null() {
+                            return Err(InvokeError::InvalidValueTypeContract);
+                        }
+                        let int32 = NonNull::new((api.class_from_name)(corlib, c"System".as_ptr(), c"Int32".as_ptr())).ok_or(InvokeError::InvalidValueTypeContract)?;
+                        if (api.class_from_type)(underlying) != int32.as_ptr() {
+                            return Err(InvokeError::InvalidValueTypeContract);
+                        }
+                        let mut underlying_alignment = 0;
+                        let mut enum_alignment = 0;
+                        if (api.class_value_size)(int32.as_ptr(), &mut underlying_alignment) != 4
+                            || !underlying_alignment.is_power_of_two()
+                            || (api.class_value_size)(class.as_ptr(), &mut enum_alignment) != 4
+                            || enum_alignment != underlying_alignment
+                        {
+                            return Err(InvokeError::InvalidValueTypeContract);
+                        }
+                    }
+                }
+            }
+            Ok(())
+        }
+    }
+
+    unsafe fn bind_checked(&self, method: NonNull<MethodInfo>, contracts: &[ValueTypeContract]) -> Result<CheckedMethod<'_, 'attachment, 'runtime>, InvokeError> {
         let api = &self.api;
         // SAFETY: caller provides live metadata from the runtime bound by new.
         unsafe {
@@ -191,9 +311,9 @@ impl<'attachment, 'runtime> InvocationContext<'attachment, 'runtime> {
             if count > 64 {
                 return Err(InvokeError::TooManyParameters);
             }
-            let returns = self.signature_type((api.method_get_return_type)(method.as_ptr()), SignaturePosition::Return)?;
+            let returns = self.signature_type((api.method_get_return_type)(method.as_ptr()), SignaturePosition::Return, contracts)?;
             let parameters = (0..count)
-                .map(|index| self.signature_type((api.method_get_param)(method.as_ptr(), index as u32), SignaturePosition::Parameter(index)))
+                .map(|index| self.signature_type((api.method_get_param)(method.as_ptr(), index as u32), SignaturePosition::Parameter(index), contracts))
                 .collect::<Result<Vec<_>, _>>()?;
             Ok(CheckedMethod {
                 context: self,
@@ -207,7 +327,7 @@ impl<'attachment, 'runtime> InvocationContext<'attachment, 'runtime> {
         }
     }
 
-    unsafe fn signature_type(&self, metadata: *const Type, position: SignaturePosition) -> Result<SignatureType, InvokeError> {
+    unsafe fn signature_type(&self, metadata: *const Type, position: SignaturePosition, contracts: &[ValueTypeContract]) -> Result<SignatureType, InvokeError> {
         if metadata.is_null() {
             return Err(InvokeError::InvalidMetadata);
         }
@@ -230,8 +350,15 @@ impl<'attachment, 'runtime> InvocationContext<'attachment, 'runtime> {
                 ValueKind::Scalar(scalar)
             } else if matches!(code, 0x0e | 0x12 | 0x14 | 0x1c | 0x1d) && !by_ref {
                 ValueKind::Reference
+            } else if code == 0x11 && !by_ref && !contracts.is_empty() {
+                let class = NonNull::new((api.class_from_type)(metadata)).ok_or(InvokeError::InvalidMetadata)?;
+                match contracts.iter().find(|contract| contract.class() == class) {
+                    Some(ValueTypeContract::BoxedReturn { .. }) if position == SignaturePosition::Return => ValueKind::Boxed,
+                    Some(ValueTypeContract::I32Enum { .. }) => ValueKind::EnumI32,
+                    _ => return Err(unsupported()),
+                }
             } else {
-                // Includes structs/enums, pointers, function pointers, generics, typed references,
+                // Includes unapproved structs/enums, pointers, function pointers, generics, typed references,
                 // ref reference arguments, and any future/unrecognized metadata code.
                 return Err(unsupported());
             };
@@ -243,6 +370,9 @@ impl<'attachment, 'runtime> InvocationContext<'attachment, 'runtime> {
                     return Err(unsupported());
                 }
                 if matches!(kind, ValueKind::Reference) && (api.class_is_valuetype)(class.as_ptr()) {
+                    return Err(unsupported());
+                }
+                if matches!(kind, ValueKind::Boxed | ValueKind::EnumI32) && !(api.class_is_valuetype)(class.as_ptr()) {
                     return Err(unsupported());
                 }
                 Some(class)
@@ -315,6 +445,7 @@ impl<'attachment, 'runtime> CheckedMethod<'_, 'attachment, 'runtime> {
             let valid = match (parameter.kind, parameter.by_ref, argument) {
                 (ValueKind::Scalar(kind), false, Argument::Scalar(value)) => value.kind() == kind,
                 (ValueKind::Scalar(kind), true, Argument::ByRef(value)) => value.kind() == kind,
+                (ValueKind::EnumI32, false, Argument::EnumI32 { class, .. }) => Some(*class) == parameter.class,
                 (ValueKind::Reference, false, Argument::Reference(root)) => {
                     if let Some(root) = root {
                         context.check_object(context.object(root)?, parameter.class.ok_or(InvokeError::InvalidMetadata)?, false)?;
@@ -333,6 +464,7 @@ impl<'attachment, 'runtime> CheckedMethod<'_, 'attachment, 'runtime> {
                 Argument::Scalar(value) => Some(ScalarStorage::new(*value)),
                 Argument::ByRef(value) => Some(ScalarStorage::new(**value)),
                 Argument::Reference(_) => None,
+                Argument::EnumI32 { value, .. } => Some(ScalarStorage::new(Scalar::I32(*value))),
             })
             .collect();
         let mut pointers = Vec::with_capacity(arguments.len());
@@ -386,7 +518,7 @@ impl<'attachment, 'runtime> CheckedMethod<'_, 'attachment, 'runtime> {
             return match self.returns.kind {
                 ValueKind::Void => Ok(ReturnValue::Void),
                 ValueKind::Reference => Ok(ReturnValue::Reference(None)),
-                ValueKind::Scalar(_) => Err(InvokeError::UnexpectedReturn),
+                ValueKind::Scalar(_) | ValueKind::Boxed | ValueKind::EnumI32 => Err(InvokeError::UnexpectedReturn),
             };
         };
         // SAFETY: a successful runtime invocation returned a live result from this runtime. Root
@@ -406,6 +538,19 @@ impl<'attachment, 'runtime> CheckedMethod<'_, 'attachment, 'runtime> {
                 // alias yet. Read the concrete primitive, never transmute arbitrary user types.
                 let value = unsafe { kind.read_box(payload) };
                 Ok(ReturnValue::Scalar { value, root })
+            }
+            ValueKind::Boxed => {
+                self.context.check_object(pointer, self.returns.class.ok_or(InvokeError::InvalidMetadata)?, true)?;
+                Ok(ReturnValue::Boxed(root))
+            }
+            ValueKind::EnumI32 => {
+                self.context.check_object(pointer, self.returns.class.ok_or(InvokeError::InvalidMetadata)?, true)?;
+                // SAFETY: bind_with_value_types checked this exact enum class has Int32 size and
+                // backing identity. The newly returned exact enum box remains rooted/nonmoving.
+                let payload = NonNull::new(unsafe { (self.context.api.object_unbox)(pointer.as_ptr()) }).ok_or(InvokeError::NullUnbox)?;
+                // SAFETY: the approved exact enum payload contains one initialized signed Int32.
+                let value = unsafe { payload.cast::<i32>().as_ptr().read_unaligned() };
+                Ok(ReturnValue::EnumI32 { value, root })
             }
         }
     }

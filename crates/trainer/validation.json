@@ -1,21 +1,22 @@
 {
-  "date": "2026-10-18",
-  "status": "protocol23 literal item limits pass both authored Unity startup routes; no new live-game read",
-  "evidence": "tools/trainer-eval/persistent-player/limits-report.json",
+  "date": "2026-10-19",
+  "status": "opt-in opaque boxed struct returns and exact Int32 enums pass authored actual IL2CPP execution",
+  "evidence": "tools/trainer-eval/unity-rust-host/value-types-report.json",
   "previous_protocol_session_evidence": "artifacts/trainer-eval/protocol-session-95e3d0ed64494652a50a76df25f322d9/report.json",
   "original_app_commit": "e1c1ed4",
-  "foundation_cases_stable_and_nightly_release": 116,
+  "foundation_cases_stable_and_nightly_release": 124,
   "architecture_checks": 4,
   "lifetime_compile_fail_checks_per_toolchain": 1,
-  "scope": "Nine metadata literals produce five owned item ranges; exact Int32/static/literal/ownership/bounds validation, independent runtime offline/native-manager gate. No managed game body or gameplay write. Authored Unity only for limits; prior protocol22 plain-Hatchet live evidence retained separately.",
+  "scope": "Production checked invocation in standalone authored 6000.4.8f1 runtime DLLs; no Unity player-loop call, live-game access, helper injection or locale/catalog protocol request.",
   "persistent_helper_evidence": "tools/trainer-eval/persistent-player/report.json",
   "remaining": [
-    "Localized definitions, rich read-only descriptions and mappings; live item limits and populated item cases",
+    "Actual game locale layout/getter audit and capture; localized definitions, rich descriptions/mappings; live limits/populated item cases",
     "Exact enum/reference write and traced managed-reference ref/out contracts",
     "Gameplay features with independent main-thread offline/owner cleanup and acknowledgement",
     "Per-operation writes/readback and uncertain-result handling, then UI composition"
   ],
   "native_probe_build_report": "artifacts/trainer-eval/unity-hook-native-4b59b1ab3a164d8e9670e6cd38f9bf53/report.json",
   "native_probe_build_only": true,
-  "prior_live_forge_evidence": "tools/trainer-eval/persistent-player/forge-report.json"
+  "prior_live_forge_evidence": "tools/trainer-eval/persistent-player/forge-report.json",
+  "prior_item_limits_evidence": "tools/trainer-eval/persistent-player/limits-report.json"
 }

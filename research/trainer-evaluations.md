@@ -366,3 +366,51 @@ cases on stable/nightly release (13 new), plus architecture/lifetime and eight P
 No real-game limits observation is claimed. The last observed game holds two stopped persistent generations;
 the current evaluator admits only a sole older one. Another build needs a fresh game process or a separately
 validated multi-generation admission path; restoring entry bytes alone never authorizes unloading old code.
+
+## Opt-in boxed returns and exact Int32 enums, 2026-10-19
+
+The next invocation layer is implemented without a general native struct representation.
+`InvocationContext::bind_with_value_types` takes explicit `ValueTypeContract::BoxedReturn` class/size/alignment or
+`I32Enum` class entries. Every contract must refer to live metadata from the same runtime. Ordinary `bind` continues
+rejecting struct and enum signatures. Contracts identify classes, not intended parameter positions or overloads;
+callers must still validate/select the exact method and separately authorize its body, callees and initializers.
+
+Boxed returns require non-generic, non-inflated, non-enum value classes, a separately established payload size in
+1..65536 and power-of-two alignment, both matching `il2cpp_class_value_size`. Only return positions are admitted;
+arbitrary struct arguments and byrefs stay rejected. IL2CPP owns the returned GC box, which is rooted before any
+metadata access and checked against the exact expected class. It may contain managed references. Rust never unboxes
+or copies an opaque return payload; an existing exact boxed-receiver call can invoke its authorized getter.
+
+Int32 enum contracts require an actual enum value class, exact corelib `System.Int32` backing identity, non-byref
+type code 0x08, four-byte payload and matching Int32 alignment. Arguments carry an explicit class tag and initialized
+Int32 storage. The supplied tag is only compared with signature identity, never dereferenced. Plain Int32 arguments,
+different enum classes and enum byrefs are rejected. Returns preserve the exact enum box and copy only its checked
+Int32 payload; no Rust enum is constructed. All signed Int32 patterns, including undefined values and flags, remain
+possible arguments, so unsafe body authorization must cover them all.
+
+Installed `Runtime::InvokeWithThrow` boxes value returns via `Object::Box`, retaining enum class identity.
+`Object::Box` applies GC barriers for copied reference-containing values. Its special handling of `Nullable<T>` can
+return null or a box of T, so nullable/generic/inflated classes are intentionally excluded. Byref returns, generic
+methods/declaring classes, arbitrary struct inputs, managed-reference ref/out and other enum backing types remain
+unsupported. Metadata/lifetime, nonmoving GC, engine state, aliasing and body/thread authorization remain unsafe
+preconditions; neither validated signatures nor these experiments make arbitrary game code safe to invoke.
+
+Eight new fake-export tests cover root-before-metadata, no opaque payload unboxing, exact receiver/getter chaining,
+null/wrong result boxes, root failure, layout/duplicate/generic contracts, enum class/backing/width/alignment and
+argument tags, signed extrema, exception roots and unchanged rejection boundaries. Full foundation count is 124.
+The independently authored `LocaleCode` fixture contains one fresh non-interned Unicode string, with known x64
+payload 8/8. It passes box-root -> collection -> exact receiver getter -> string-root -> drop box -> collection ->
+managed text check. Int32 enum roundtrips include negative/undefined/extreme values, wrong class and byte/ref/out
+rejections, rooted exceptions and subsequent recovery.
+
+Fresh 6000.4.8f1 standalone IL2CPP builds pass stable debug and nightly release with incremental GC at 3 ms; nightly
+release also passes with it disabled. All 34 existing native checks, attachment cleanup, input/source immutability
+and normal shutdown pass afterward. Required runner markers explicitly cover both added capabilities. These are
+authored runtime DLLs, not localization calls in the game or Unity player-loop evidence. Full collections in an
+incremental-enabled configuration do not establish phase-interleaved writes or strict barrier validation.
+[Exact builds, source hashes, runs and limits](../tools/trainer-eval/unity-rust-host/value-types-report.json).
+
+Actual locale capture next needs an independent audit of the target's `LocaleIdentifier` payload and actual
+`LocalizationSettings.get_SelectedLocale`, `Locale.get_Identifier`, `LocaleIdentifier.get_Code` and
+`Application.get_version` bodies/signatures and initialization. The C++ helper's call chain identifies behavior;
+it does not itself prove those execution contracts. No locale protocol request or catalog has been promoted here.

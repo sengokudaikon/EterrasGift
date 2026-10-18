@@ -3,7 +3,7 @@
 //! These are runtime exports, not generated method bodies or Unity internal calls. No runtime
 //! structure layout is assumed. Historical uint32 GC handles require a different adapter.
 
-use std::ffi::{CStr, c_void};
+use std::ffi::{CStr, c_char, c_void};
 use std::ptr::NonNull;
 
 macro_rules! opaque {
@@ -43,6 +43,11 @@ pub type ClassIsAssignableFrom = unsafe extern "C-unwind" fn(*mut Class, *mut Cl
 pub type ObjectGetClass = unsafe extern "C-unwind" fn(*mut Object) -> *mut Class;
 pub type ObjectUnbox = unsafe extern "C-unwind" fn(*mut Object) -> *mut c_void;
 pub type ObjectGetVirtualMethod = unsafe extern "C-unwind" fn(*mut Object, *const MethodInfo) -> *const MethodInfo;
+pub type GetCorlib = unsafe extern "C-unwind" fn() -> *const c_void;
+pub type ClassFromName = unsafe extern "C-unwind" fn(*const c_void, *const c_char, *const c_char) -> *mut Class;
+pub type ClassIsEnum = unsafe extern "C-unwind" fn(*const Class) -> bool;
+pub type ClassEnumBasetype = unsafe extern "C-unwind" fn(*mut Class) -> *const Type;
+pub type ClassValueSize = unsafe extern "C-unwind" fn(*mut Class, *mut u32) -> i32;
 
 /// Invocation/metadata exports from the Unity 6000.4 public header. Separate from attachment APIs.
 #[derive(Clone, Copy)]
@@ -66,6 +71,11 @@ pub struct InvocationApi {
     pub object_get_class: ObjectGetClass,
     pub object_unbox: ObjectUnbox,
     pub object_get_virtual_method: ObjectGetVirtualMethod,
+    pub get_corlib: GetCorlib,
+    pub class_from_name: ClassFromName,
+    pub class_is_enum: ClassIsEnum,
+    pub class_enum_basetype: ClassEnumBasetype,
+    pub class_value_size: ClassValueSize,
 }
 
 /// Only the exports needed to evaluate attachment and rooting. Loading this table calls no export.
@@ -154,6 +164,11 @@ impl InvocationApi {
             object_get_class: load!(c"il2cpp_object_get_class", ObjectGetClass),
             object_unbox: load!(c"il2cpp_object_unbox", ObjectUnbox),
             object_get_virtual_method: load!(c"il2cpp_object_get_virtual_method", ObjectGetVirtualMethod),
+            get_corlib: load!(c"il2cpp_get_corlib", GetCorlib),
+            class_from_name: load!(c"il2cpp_class_from_name", ClassFromName),
+            class_is_enum: load!(c"il2cpp_class_is_enum", ClassIsEnum),
+            class_enum_basetype: load!(c"il2cpp_class_enum_basetype", ClassEnumBasetype),
+            class_value_size: load!(c"il2cpp_class_value_size", ClassValueSize),
         })
     }
 }
