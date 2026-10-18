@@ -1,0 +1,192 @@
+// A pick from a list (Fluent's compact combo box, retinted): the choice and a chevron; one keyboard stop that opens a
+// bounded list. It is at least a field wide and grows as its choice's words need (`natural-width`); the caller places it.
+
+import { ScrollView } from "std-widgets.slint";
+import { Tokens } from "../tokens.slint";
+import { KeyboardFocus } from "../globals.slint";
+import { FocusRing } from "focus.slint";
+
+export component ChoiceBox inherits Rectangle {
+    in property <[string]> choices;
+    in property <int> index;
+    in property <string> label;
+    in property <bool> enabled: true;
+    callback chosen(int);
+
+    // The width its choice needs, and at least a field's (a combo box sizes to what it shows).
+    out property <length> natural-width: Math.max(Tokens.feature-field-width, Tokens.space-12 + measure.preferred-width + Tokens.space-8 + Tokens.icon-size-tiny + Tokens.space-10);
+
+    property <int> highlighted;
+    property <string> current: root.index >= 0 && root.index < root.choices.length ? root.choices[root.index] : "";
+
+    function open() {
+        root.highlighted = Math.max(0, root.index);
+        popup.show();
+    }
+
+    height: Tokens.control-min-height;
+    border-radius: Tokens.control-radius;
+    border-width: 1px;
+    border-color: !root.enabled ? Tokens.strong-line-brush : focus.has-focus ? Tokens.accent-brush : touch.has-hover ? Tokens.accent-trim-brush : Tokens.strong-line-brush;
+    background: !root.enabled ? Tokens.strong-line-brush : touch.has-hover ? Tokens.hover-brush : Tokens.surface-brush;
+
+    accessible-role: combobox;
+    accessible-label: root.label;
+    accessible-value: root.current;
+    accessible-enabled: root.enabled;
+    accessible-action-default => { root.open(); }
+
+    // The choice, unwrapped, for the natural width.
+    measure := Text {
+        visible: false;
+        text: root.current;
+    }
+
+    Text {
+        x: Tokens.space-12;
+        width: parent.width - self.x - Tokens.space-8 - Tokens.icon-size-tiny - Tokens.space-10;
+        height: parent.height;
+        text: root.current;
+        color: root.enabled ? Tokens.text-brush : Tokens.text-disabled-brush;
+        vertical-alignment: center;
+        overflow: elide;
+    }
+
+    Image {
+        x: parent.width - Tokens.space-10 - self.width;
+        y: (parent.height - self.height) / 2;
+        width: Tokens.icon-size-tiny;
+        height: Tokens.icon-size-tiny;
+        image-fit: contain;
+        source: Tokens.icon-chevron-down;
+        colorize: root.enabled ? Tokens.text-secondary-brush : Tokens.text-disabled-brush;
+    }
+
+    focus := FocusScope {
+        enabled: root.enabled;
+        focus-gained(reason) => {
+            if (reason == FocusReason.tab-navigation) {
+                KeyboardFocus.visible = true;
+            }
+        }
+        key-pressed(event) => {
+            if (event.text == Key.Return || event.text == " " || (event.text == Key.DownArrow && event.modifiers.alt)) {
+                root.open();
+                return accept;
+            }
+            // As a Windows combo box: Up and Down change the choice in place.
+            if (event.text == Key.UpArrow && root.index > 0) {
+                root.chosen(root.index - 1);
+                return accept;
+            }
+            if (event.text == Key.DownArrow && root.index < root.choices.length - 1) {
+                root.chosen(root.index + 1);
+                return accept;
+            }
+            reject
+        }
+
+        touch := TouchArea {
+            enabled: root.enabled;
+            pointer-event(event) => {
+                if (event.kind == PointerEventKind.down) {
+                    KeyboardFocus.visible = false;
+                }
+            }
+            clicked => {
+                focus.focus();
+                root.open();
+            }
+        }
+    }
+
+    FocusRing {
+        focused: focus.has-focus;
+    }
+
+    popup := PopupWindow {
+        x: 0;
+        y: root.height + Tokens.space-2;
+        width: Math.max(root.width, Tokens.value-flyout-width);
+        height: Math.min(root.choices.length, 8) * Tokens.control-min-height + Tokens.space-8;
+        close-policy: PopupClosePolicy.close-on-click-outside;
+
+        Rectangle {
+            background: Tokens.raised-brush;
+            border-width: 1px;
+            border-color: Tokens.strong-line-brush;
+            border-radius: Tokens.control-radius;
+
+            FocusScope {
+                init => {
+                    self.focus();
+                }
+                key-pressed(event) => {
+                    if (event.text == Key.Escape) {
+                        popup.close();
+                        return accept;
+                    }
+                    if (event.text == Key.UpArrow) {
+                        root.highlighted = Math.max(0, root.highlighted - 1);
+                        return accept;
+                    }
+                    if (event.text == Key.DownArrow) {
+                        root.highlighted = Math.min(root.choices.length - 1, root.highlighted + 1);
+                        return accept;
+                    }
+                    if (event.text == Key.Home) {
+                        root.highlighted = 0;
+                        return accept;
+                    }
+                    if (event.text == Key.End) {
+                        root.highlighted = root.choices.length - 1;
+                        return accept;
+                    }
+                    if (event.text == Key.Return || event.text == " ") {
+                        root.chosen(root.highlighted);
+                        popup.close();
+                        return accept;
+                    }
+                    reject
+                }
+
+                ScrollView {
+                    x: Tokens.space-4;
+                    y: Tokens.space-4;
+                    width: parent.width - Tokens.space-8;
+                    height: parent.height - Tokens.space-8;
+                    content-width: self.visible-width;
+                    content-height: root.choices.length * Tokens.control-min-height;
+                    content-y: -Math.max(0px, root.highlighted * Tokens.control-min-height - self.visible-height + Tokens.control-min-height);
+
+                    VerticalLayout {
+                        for choice[i] in root.choices: Rectangle {
+                            height: Tokens.control-min-height;
+                            border-radius: Tokens.control-radius;
+                            background: root.highlighted == i ? Tokens.selected-brush : transparent;
+
+                            Text {
+                                x: Tokens.space-8;
+                                width: parent.width - Tokens.space-16;
+                                text: choice;
+                                color: Tokens.text-brush;
+                                vertical-alignment: center;
+                                overflow: elide;
+                            }
+
+                            TouchArea {
+                                moved => {
+                                    root.highlighted = i;
+                                }
+                                clicked => {
+                                    root.chosen(i);
+                                    popup.close();
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

@@ -603,6 +603,7 @@ fn main() {
 
     capture_mods(&session);
     mods_captures(&session);
+    trainer_captures(&session);
 }
 
 fn capture_mods(session: &Session) {
@@ -1295,4 +1296,273 @@ fn mods_captures(session: &Session) {
     );
     sizes(&ui, "mods-update-available");
     assert_eq!(runner.builds.load(Ordering::Relaxed), 1);
+}
+
+/// The trainer's pages (spec/trainer.md §5): as the app shows them with no session (nothing connected), and in states
+/// only a connected game has, through a fake session that answers reads and writes from its own fields.
+fn trainer_captures(session: &Session) {
+    use eg_ui::trainer::catalog::{Area, FEATURES};
+    use eg_ui::trainer::session::{FieldError, FieldWrite, GameField, HookState, TrainerSession, Unconnected};
+    use eg_ui::{Connection, TrainerState};
+    use std::cell::RefCell;
+    use std::collections::{BTreeMap, BTreeSet};
+
+    /// An offline character connected to a game that holds `fields` and reports `hooks`.
+    #[derive(Default)]
+    struct FakeTrainer {
+        fields: RefCell<BTreeMap<String, Vec<GameField>>>,
+        hooks: BTreeMap<String, HookState>,
+        wanted: RefCell<BTreeSet<String>>,
+        values: RefCell<BTreeMap<String, Vec<f64>>>,
+    }
+
+    impl FakeTrainer {
+        fn holding(fields: &[(&str, &[(&str, f64)])]) -> FakeTrainer {
+            let fake = FakeTrainer::default();
+            for (id, values) in fields {
+                let list = values.iter().map(|(label, value)| GameField::new(*label, *value)).collect();
+                fake.fields.borrow_mut().insert((*id).to_owned(), list);
+            }
+            fake
+        }
+    }
+
+    impl TrainerSession for FakeTrainer {
+        fn is_connected(&self) -> bool {
+            true
+        }
+        fn is_hook_wanted(&self, id: &str) -> bool {
+            self.wanted.borrow().contains(id)
+        }
+        fn set_hook(&self, id: &str, on: bool) {
+            if on {
+                self.wanted.borrow_mut().insert(id.to_owned());
+            } else {
+                self.wanted.borrow_mut().remove(id);
+            }
+        }
+        fn hook_values(&self, id: &str) -> Vec<f64> {
+            self.values.borrow().get(id).cloned().unwrap_or_default()
+        }
+        fn set_hook_values(&self, id: &str, values: &[f64]) {
+            self.values.borrow_mut().insert(id.to_owned(), values.to_vec());
+        }
+        fn hook_state(&self, id: &str) -> Option<HookState> {
+            self.hooks.get(id).cloned()
+        }
+        fn read_fields(&self, id: &str) -> Result<Vec<GameField>, FieldError> {
+            Ok(self.fields.borrow().get(id).cloned().unwrap_or_default())
+        }
+        fn write_fields(&self, id: &str, writes: &[FieldWrite]) -> Result<Vec<GameField>, FieldError> {
+            let mut fields = self.fields.borrow_mut();
+            let list = fields.get_mut(id).expect("a field set the fake holds");
+            for (field, write) in list.iter_mut().zip(writes) {
+                field.value = write.wanted;
+            }
+            // A count written to 0 is no longer held.
+            list.retain(|field| field.label.is_empty() || field.value != 0.0);
+            Ok(list.clone())
+        }
+    }
+
+    // Renders (which lays the rows out and reports their heights), then lets the split into columns follow.
+    let show = |ui: &MainWindow| {
+        for _ in 0..3 {
+            settle();
+            ui.window().take_snapshot().expect("render");
+        }
+        settle();
+    };
+    let open = |page: &str, section: i32, width: u32, height: u32, fake: Option<FakeTrainer>| -> MainWindow {
+        let ui = session.open(true, width, height);
+        if let Some(fake) = fake {
+            eg_ui::trainer::bind(&ui, Rc::new(fake), FEATURES.to_vec(), false);
+            let connection = ui.global::<Connection>();
+            connection.set_connected(true);
+            connection.set_text("Connected".into());
+            connection.set_show_action(false);
+        }
+        // The page opens on its first section as it comes to show; the section is chosen as the strip would.
+        ui.global::<Nav>().invoke_navigate(page.into());
+        show(&ui);
+        ui.global::<TrainerState>().set_section(section);
+        show(&ui);
+        ui
+    };
+    let sizes = |ui: &MainWindow, name: &str, widths: &[(u32, u32)]| {
+        for &(width, height) in widths {
+            session.resize(width, height);
+            show(ui);
+            session.capture(ui, &format!("{name}-{width}"));
+        }
+    };
+    let small = [(680, 580), (940, 580), (1100, 700)];
+    fn state(ui: &MainWindow) -> TrainerState<'_> {
+        ui.global::<TrainerState>()
+    }
+
+    // As the app is: no offline character connected. Editors wait with their reason; a switch turned on says it waits too.
+    let ui = open("combat", 1, 1100, 700, None);
+    sizes(&ui, "trainer-combat", &small);
+    session.click(628.0, 149.0);
+    show(&ui);
+    session.capture(&ui, "trainer-combat-on-1100");
+    // Up steps a focused box by its step, within its range; the tip says so.
+    session.click(520.0, 149.0);
+    session.key(Key::UpArrow);
+    session.key(Key::UpArrow);
+    show(&ui);
+    assert_eq!(state(&ui).get_rows().row_data(1).expect("Damage multiplier").inline_value.text, "3");
+    std::thread::sleep(Duration::from_millis(600));
+    show(&ui);
+    session.capture(&ui, "trainer-value-stepped-1100");
+    let ui = open("world", 0, 940, 580, None);
+    session.capture(&ui, "trainer-world-940");
+    // The pane open beside the narrowest window: the rows narrow below their width, and long titles wrap with their (?).
+    session.resize(680, 580);
+    ui.global::<Nav>().invoke_toggle_pane();
+    show(&ui);
+    session.capture(&ui, "trainer-world-680-pane");
+    let ui = open("forge", 1, 1100, 700, None);
+    sizes(&ui, "forge-rules", &[(940, 580), (1100, 700)]);
+    let ui = open("loot", 0, 1100, 700, None);
+    session.capture(&ui, "trainer-values-1100");
+    state(&ui).set_section(1);
+    show(&ui);
+    session.capture(&ui, "trainer-values-quality-1100");
+    let ui = open("stash", 1, 940, 580, None);
+    session.capture(&ui, "stash-keys-unconnected-940");
+    let ui = open("character", 0, 1920, 1080, None);
+    session.capture(&ui, "character-unconnected-1920");
+
+    // Keyboard: the strip, then the first row's (?) opens its tip under it; Space on the switch turns it on.
+    let ui = session.open(true, 1100, 700);
+    ui.global::<Nav>().invoke_navigate("forge".into());
+    settle();
+    for _ in 0..4 {
+        session.key(Key::Tab);
+    }
+    session.key(Key::RightArrow);
+    show(&ui);
+    session.key(Key::Tab);
+    show(&ui);
+    session.capture(&ui, "trainer-keyboard-help");
+    session.key(Key::Tab);
+    session.type_text(" ");
+    show(&ui);
+    session.capture(&ui, "trainer-keyboard-switch");
+
+    // A connected game: an editor applied and read back.
+    let fake = FakeTrainer::holding(&[("points-earned", &[("", 40.0), ("", 30.0)])]);
+    let ui = open("character", 0, 1100, 700, Some(fake));
+    state(&ui).invoke_field_committed(5, 0, "48".into());
+    state(&ui).invoke_apply(5);
+    show(&ui);
+    sizes(&ui, "character-points", &[(680, 580), (940, 580), (1100, 700), (1440, 900), (1920, 1080)]);
+
+    let fake = FakeTrainer::holding(&[("attack-leech", &[("", 1.0), ("", 0.3)])]);
+    let ui = open("combat", 1, 1100, 700, Some(fake));
+    state(&ui).invoke_field_committed(5, 0, "1.1".into());
+    state(&ui).invoke_apply(5);
+    show(&ui);
+    sizes(&ui, "combat-rates", &[(680, 580), (940, 580), (1100, 700), (1920, 1080)]);
+
+    let fake = FakeTrainer::holding(&[("currency", &[("", 1200.0), ("", 3.0), ("", 45.0)])]);
+    let ui = open("stash", 0, 1100, 700, Some(fake));
+    sizes(&ui, "stash-currency", &small);
+    state(&ui).invoke_field_committed(0, 0, "5,000".into());
+    state(&ui).invoke_field_committed(0, 2, "120".into());
+    show(&ui);
+    session.capture(&ui, "stash-currency-draft-1100");
+
+    let keys: &[(&str, f64)] = &[("Arena Key", 3.0), ("Temporal Sanctum Key", 1.0), ("Black Market Token", 12.0)];
+    let fake = FakeTrainer::holding(&[("keys", keys)]);
+    let ui = open("stash", 1, 1100, 700, Some(fake));
+    sizes(&ui, "stash-keys", &small);
+    state(&ui).invoke_field_committed(0, 0, "10".into());
+    state(&ui).invoke_field_committed(0, 1, "0".into());
+    show(&ui);
+    session.capture(&ui, "stash-keys-draft-1100");
+    state(&ui).invoke_apply(0);
+    show(&ui);
+    session.capture(&ui, "stash-keys-applied-1100");
+    let fake = FakeTrainer::holding(&[("keys", &[])]);
+    let ui = open("stash", 1, 940, 580, Some(fake));
+    session.capture(&ui, "stash-keys-empty-940");
+
+    let echoes: &[(&str, f64)] = &[
+        ("Fading Echo", 4.0),
+        ("Plane of Exile", 1.0),
+        ("Tower of the Weaver", 2.0),
+        ("Soul Foundry", 20.0),
+        ("Heart of the Hive", 1.0),
+        ("The Great Bridge", 3.0),
+        ("Confluence of Oblivion", 1.0),
+        ("Woven Vessel of Memory", 2.0),
+        ("Cenotaph of Worlds", 1.0),
+        ("Vault of the Barnacle King", 1.0),
+    ];
+    let fake = FakeTrainer::holding(&[("woven-echoes", echoes)]);
+    let ui = open("stash", 2, 1100, 700, Some(fake));
+    sizes(&ui, "stash-echoes", &small);
+    // The wheel reaches the list's end: Apply under the last count, with the page's bottom margin.
+    session.resize(680, 580);
+    for _ in 0..10 {
+        session.scroll(400.0, 300.0, -120.0);
+    }
+    show(&ui);
+    session.capture(&ui, "stash-echoes-680-end");
+
+    let standing: &[(&str, f64)] = &[
+        ("", 7.0),
+        ("", 12400.0),
+        ("", 3100.0),
+        ("", 0.0),
+        ("", 0.0),
+        ("", 0.0),
+        ("", 2.0),
+        ("", 800.0),
+        ("", 150.0),
+        ("", 4.0),
+        ("", 2200.0),
+        ("", 900.0),
+    ];
+    let fake = FakeTrainer::holding(&[("faction-standing", standing)]);
+    let ui = open("factions", 0, 1100, 700, Some(fake));
+    sizes(&ui, "factions-standing", &small);
+    state(&ui).invoke_field_committed(0, 9, "6".into());
+    show(&ui);
+    session.capture(&ui, "factions-standing-draft-1100");
+
+    let fake = FakeTrainer::holding(&[("monolith-run", &[("", 300.0), ("", 10000.0), ("", 1.0)])]);
+    let ui = open("monolith", 0, 1100, 700, Some(fake));
+    state(&ui).invoke_field_committed(0, 0, "325".into());
+    state(&ui).invoke_apply(0);
+    show(&ui);
+    sizes(&ui, "monolith-run", &small);
+
+    // Hooks in a connected game: in place, and refused.
+    let mut fake = FakeTrainer::default();
+    fake.hooks.insert("god-mode".into(), HookState { on: true, failure: None });
+    fake.hooks.insert(
+        "damage-taken".into(),
+        HookState {
+            on: false,
+            failure: Some("the game's method was not found".into()),
+        },
+    );
+    for id in ["god-mode", "damage-taken"] {
+        fake.wanted.borrow_mut().insert(id.into());
+    }
+    let ui = open("combat", 0, 1100, 700, Some(fake));
+    session.capture(&ui, "trainer-hooks-connected-1100");
+
+    // A source checkout lists features that are not ported yet where they will go.
+    let ui = session.open(true, 1100, 700);
+    let mut features = FEATURES.to_vec();
+    features.iter_mut().filter(|feature| feature.area == Area::Loot).for_each(|feature| feature.ported = false);
+    eg_ui::trainer::bind(&ui, Rc::new(Unconnected::default()), features, true);
+    ui.global::<Nav>().invoke_navigate("loot".into());
+    show(&ui);
+    session.capture(&ui, "trainer-planned-1100");
 }

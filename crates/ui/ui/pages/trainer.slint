@@ -1,31 +1,132 @@
-// Trainer pages. Until the trainer is ported each page shows its section bar (when it has one) and the connection's
-// empty state (spec/trainer.md §3.10). TODO(trainer): the feature lists, the stash, and the Item Forge.
+// Trainer pages (spec/trainer.md §5, DESIGN.md "Trainer Pages"; TrainerPageView.axaml): a page's sections along the top,
+// left out when it has one, and the chosen section beneath: rows of features, or Forge › Item, which is the Item Forge.
+// Rust (crates/ui/src/trainer) builds the rows from the catalog and owns every value; the view lays them out.
+// TODO(trainer): the Item Forge fills Forge › Item; until it is ported, the section shows the connection's empty state.
 
+import { ScrollView } from "std-widgets.slint";
 import { Tokens } from "../tokens.slint";
 import { Connection, KeyboardFocus } from "../globals.slint";
 import { Button, ButtonKind } from "../widgets/button.slint";
+import { ToggleSwitch } from "../widgets/toggle.slint";
 import { FocusRing } from "../widgets/focus.slint";
+import { LabelText, CaptionText, CaptionTone } from "../widgets/text.slint";
+import { HelpButton } from "../widgets/help-button.slint";
+import { NumberBox } from "../widgets/number-box.slint";
+import { ChoiceBox } from "../widgets/choice-box.slint";
 import { EmptyState } from "common.slint";
+
+// A row is a game hook (a switch, with values), an editor (fields read from the game), a list of what the character holds,
+// a feature not ported yet (a source checkout only), or a section's heading on a page that stacks its sections.
+export enum FeatureRowKind { heading, hook, editor, held, planned }
+
+// A status line's mark: the check once the game holds it, the error mark with the reason.
+export enum FeatureTone { none, confirmed, error }
+
+// A hook's value: a number box with its unit, or a pick from a list.
+export struct FeatureValueView {
+    label: string,
+    accessible-name: string,
+    unit: string,
+    choice: bool,
+    choices: [string],
+    choice-index: int,
+    text: string,
+    step-tip: string,
+}
+
+// An editor's field: its name over what the game holds, and its box (a draft until Apply).
+export struct FeatureFieldView {
+    label: string,
+    group: string,
+    starts-group: bool,
+    first: bool,
+    accessible-name: string,
+    text: string,
+    game-text: string,
+    drafted: bool,
+    step-tip: string,
+}
+
+export struct FeatureRowView {
+    kind: FeatureRowKind,
+    title: string,
+    help: string,
+    // A hook: its switch, its one value on the title line or several listed under it, and where it stands.
+    on: bool,
+    has-inline: bool,
+    inline-value: FeatureValueView,
+    status: string,
+    tone: FeatureTone,
+    // An editor or held items.
+    can-use: bool,
+    needs-connection: bool,
+    unread: bool,
+    empty: bool,
+    has-drafts: bool,
+    can-apply: bool,
+    apply-text: string,
+    // A planned feature: its values and their defaults, or its fields' names.
+    details: string,
+}
+
+// A row's lists: a hook's values listed under its title, an editor's fields. They sit apart from the row so a change to the
+// row leaves their items in place (a box being typed in keeps its focus); a list is replaced only when its length changes.
+export struct FeatureRowModels {
+    listed-values: [FeatureValueView],
+    fields: [FeatureFieldView],
+}
+
+// The rows of one column, by their index in `TrainerState.rows`.
+export struct FeatureColumn { rows: [int] }
 
 export global TrainerState {
     // The forge's empty state for the current connection state.
     in property <string> empty-title: "Not connected";
     in property <string> empty-detail: "Connect, then place an item in the forge.";
+
+    // The open page: its sections (none when it has one), the chosen one, and what that section holds.
+    in property <[string]> sections;
+    in-out property <int> section;
+    in property <bool> item-forge;
+    in property <[FeatureRowView]> rows;
+    in property <[FeatureRowModels]> row-models;
+    in property <[FeatureColumn]> column-rows;
+    // Changes when another page or section opens, so the list starts at its top.
+    in property <int> serial;
+
+    callback open(string);
+    callback select-section(int);
+    // The layout reports how many columns fit and each row's height; Rust splits the rows into the columns.
+    callback columns-changed(int);
+    callback row-measured(int, length);
+
+    callback hook-toggled(int, bool);
+    callback value-edited(int, int, string);
+    callback value-committed(int, int, string);
+    callback value-stepped(int, int, int);
+    callback value-chosen(int, int, int);
+    callback field-edited(int, int, string);
+    callback field-committed(int, int, string);
+    callback field-stepped(int, int, int);
+    callback read(int);
+    callback apply(int);
+    callback discard(int);
 }
 
-// A page's section tabs, underlined in crimson like the game's active tab. One tab stop, as a Windows tab strip: Left and
-// Right (Home and End) move between sections, and the section follows the keyboard.
+// A page's section tabs in the manner of Windows' selector bar: plain words, the current one over the game's active-tab
+// mark, a crimson bar on a bronze line (the line carries it clear of the ground, where crimson alone is under 2:1), and a
+// hairline beneath the strip. One tab stop: Left and Right (Home and End) move between sections, and the section follows.
 component SectionBar inherits Rectangle {
     in property <[string]> sections;
     in-out property <int> current;
     in property <bool> compact;
 
     accessible-role: tab-list;
-    height: layout.preferred-height;
+    height: layout.preferred-height + Tokens.border-bottom.bottom;
 
     Rectangle {
-        y: parent.height - 1px;
-        height: 1px;
+        y: parent.height - self.height;
+        height: Tokens.border-bottom.bottom;
         background: Tokens.hairline-brush;
     }
 
@@ -59,6 +160,8 @@ component SectionBar inherits Rectangle {
         }
 
         layout := HorizontalLayout {
+            y: 0;
+            height: self.preferred-height;
             padding-left: root.compact ? Tokens.section-bar-compact-padding.left : Tokens.section-bar-padding.left;
             padding-top: Tokens.section-bar-padding.top;
             spacing: Tokens.space-24;
@@ -73,20 +176,25 @@ component SectionBar inherits Rectangle {
 
                 tab-layout := VerticalLayout {
                     padding-top: Tokens.section-tab-padding.top;
-                    padding-bottom: Tokens.section-tab-padding.bottom;
+                    padding-bottom: Tokens.section-tab-padding.bottom + Tokens.section-tab-indicator.bottom + Tokens.border-bottom.bottom;
 
                     label := Text {
                         text: section;
                         font-size: Tokens.font-size-value;
-                        font-weight: root.current == i ? Tokens.emphasis-weight : 400;
-                        color: root.current == i ? Tokens.text-brush : touch.has-hover ? Tokens.text-brush : Tokens.text-secondary-brush;
+                        color: root.current == i ? Tokens.text-brush : touch.has-hover ? Tokens.text-secondary-brush : Tokens.text-muted-brush;
                     }
                 }
 
                 Rectangle {
-                    y: parent.height - self.height;
+                    y: parent.height - Tokens.border-bottom.bottom - self.height;
                     height: Tokens.section-tab-indicator.bottom;
-                    background: root.current == i ? Tokens.primary-hover-brush : transparent;
+                    background: root.current == i ? Tokens.primary-brush : transparent;
+                }
+
+                Rectangle {
+                    y: parent.height - self.height;
+                    height: Tokens.border-bottom.bottom;
+                    background: root.current == i ? Tokens.accent-trim-brush : transparent;
                 }
 
                 touch := TouchArea {
@@ -115,32 +223,495 @@ component SectionBar inherits Rectangle {
     }
 }
 
+// One of a hook's several values: [name | box], the name indented under the title, the box in the value column.
+component ValueLine inherits Rectangle {
+    in property <FeatureValueView> value;
+    in property <int> row-index;
+    in property <int> value-index;
+    in property <length> title-width;
+    in property <length> value-right;
+
+    height: Math.max(Tokens.control-min-height, label.height);
+
+    label := Text {
+        x: Tokens.feature-nested-indent.left;
+        y: (parent.height - self.height) / 2;
+        width: root.title-width - self.x;
+        height: self.preferred-height;
+        text: root.value.label;
+        color: Tokens.text-secondary-brush;
+        wrap: word-wrap;
+    }
+
+    if !root.value.choice: NumberBox {
+        x: root.value-right - self.width;
+        y: (parent.height - self.height) / 2;
+        value: root.value.text;
+        unit: root.value.unit;
+        label: root.value.accessible-name;
+        tip: root.value.step-tip;
+        edited(text) => { TrainerState.value-edited(root.row-index, root.value-index, text); }
+        committed(text) => { TrainerState.value-committed(root.row-index, root.value-index, text); }
+        stepped(direction) => { TrainerState.value-stepped(root.row-index, root.value-index, direction); }
+    }
+
+    if root.value.choice: ChoiceBox {
+        width: self.natural-width;
+        x: root.value-right - self.width;
+        y: (parent.height - self.height) / 2;
+        choices: root.value.choices;
+        index: root.value.choice-index;
+        label: root.value.accessible-name;
+        chosen(choice) => { TrainerState.value-chosen(root.row-index, root.value-index, choice); }
+    }
+}
+
+// An editor's field: [name over "In game: N" | box], indented under the title, under its group's name when it heads one.
+component FieldLine inherits Rectangle {
+    in property <FeatureFieldView> field;
+    in property <int> row-index;
+    in property <int> field-index;
+    in property <length> title-width;
+    in property <length> value-x;
+    in property <bool> enabled;
+
+    property <length> group-height: root.field.starts-group ? group.y + group.height + Tokens.space-6 : 0px;
+    property <length> pair-height: label.height + Tokens.space-2 + game.height;
+    property <length> grid-height: Math.max(Tokens.control-min-height, root.pair-height);
+
+    height: root.group-height + root.grid-height;
+
+    group := LabelText {
+        visible: root.field.starts-group;
+        x: Tokens.feature-nested-indent.left;
+        y: root.field.first ? 0px : Tokens.feature-nested-group-margin.top;
+        width: parent.width - self.x;
+        height: root.field.starts-group ? self.preferred-height : 0px;
+        text: root.field.group;
+    }
+
+    label := Text {
+        x: Tokens.feature-nested-indent.left;
+        y: root.group-height + (root.grid-height - root.pair-height) / 2;
+        width: root.title-width - self.x;
+        height: self.preferred-height;
+        text: root.field.label;
+        color: root.field.drafted ? Tokens.draft-brush : Tokens.text-secondary-brush;
+        wrap: word-wrap;
+    }
+
+    game := Text {
+        x: label.x;
+        y: label.y + label.height + Tokens.space-2;
+        width: label.width;
+        height: self.preferred-height;
+        text: root.field.game-text;
+        font-size: Tokens.font-size-value;
+        color: Tokens.text-muted-brush;
+        wrap: word-wrap;
+    }
+
+    NumberBox {
+        x: root.value-x;
+        y: root.group-height + (root.grid-height - self.height) / 2;
+        value: root.field.text;
+        label: root.field.accessible-name;
+        tip: root.field.step-tip;
+        enabled: root.enabled;
+        drafted: root.field.drafted;
+        edited(text) => { TrainerState.field-edited(root.row-index, root.field-index, text); }
+        committed(text) => { TrainerState.field-committed(root.row-index, root.field-index, text); }
+        stepped(direction) => { TrainerState.field-stepped(root.row-index, root.field-index, direction); }
+    }
+}
+
+// One row: [title (?) | value | switch], a hairline under it and the hover ground under the whole of it, outdented so its
+// words keep the page's edge. Every height is worked out from texts given their width, so the column it sits in measures it
+// right however its words wrap (research/slint.md: wrapped text in `for` and `if`).
+component FeatureRow inherits Rectangle {
+    in property <FeatureRowView> feature;
+    in property <FeatureRowModels> models;
+    in property <int> row-index;
+    // It starts or ends its column: a heading starting one has no space above it; the last row has no hairline.
+    in property <bool> starts;
+    in property <bool> ends;
+
+    property <bool> heading: root.feature.kind == FeatureRowKind.heading;
+    property <bool> hook: root.feature.kind == FeatureRowKind.hook;
+    property <bool> held: root.feature.kind == FeatureRowKind.held;
+    property <bool> editor: root.feature.kind == FeatureRowKind.editor || root.held;
+    property <bool> planned: root.feature.kind == FeatureRowKind.planned;
+
+    // The three columns, 24 apart: the title's, the value's (a box, a choice growing left, or Apply) and the switch's.
+    property <length> switch-x: root.width - Tokens.feature-switch-min-width;
+    property <length> value-right: root.switch-x - Tokens.space-24;
+    property <length> value-x: root.value-right - Tokens.feature-value-column-width;
+    property <length> title-width: root.value-x - Tokens.space-24;
+    property <length> top: Tokens.feature-row-padding.top;
+
+    // The title line holds the title and its controls, centred on each other.
+    // The (?) follows the title's last word. A title with no room for it on its line keeps the line, and the (?) takes the
+    // next one, as an inline button wraps; a title that wraps anyway puts it on a line of its own too (Slint cannot place
+    // anything after a wrapped text's last word).
+    property <length> help-room: Tokens.space-6 + help.width + Tokens.feature-title-help-margin.right;
+    property <bool> help-below: measure.preferred-width + root.help-room > root.title-width;
+    property <length> title-height: title.height + (root.help-below ? measure.preferred-height : 0px);
+    property <length> line: Math.max(root.title-height, root.planned ? mark.height : Tokens.control-min-height);
+    property <length> below-title: root.top + root.line;
+    property <length> values-height: root.models.listed-values.length > 0 ? Tokens.feature-fields-margin.top + values.height : 0px;
+    property <bool> fields-shown: root.editor && !(root.held && root.feature.unread);
+    property <length> block-height: offline.height + unread.height + empty.height + (root.fields-shown ? Tokens.feature-fields-margin.top + fields.height : 0px);
+    property <length> actions-y: root.below-title + root.block-height + Tokens.feature-action-margin.top;
+    property <length> actions-height: root.editor ? Tokens.feature-action-margin.top + Tokens.control-min-height : 0px;
+    property <length> details-height: root.planned && root.feature.details != "" ? Tokens.feature-status-margin.top + details.height : 0px;
+    property <length> status-y: root.below-title + root.values-height + (root.editor ? root.block-height + root.actions-height : 0px) + Tokens.feature-status-margin.top;
+    property <length> status-height: root.feature.status != "" ? Tokens.feature-status-margin.top + status.height : 0px;
+
+    // Its own height, without the space a heading keeps above it; what the column split weighs.
+    out property <length> natural-height: root.heading ? heading-label.height + Tokens.feature-group-margin.bottom
+        : root.below-title + root.values-height + (root.editor ? root.block-height + root.actions-height : 0px) + root.details-height + root.status-height
+            + Tokens.feature-row-padding.bottom + 1px;
+    property <length> heading-space: root.heading && !root.starts ? Tokens.feature-section-spacing : 0px;
+
+    height: root.heading-space + root.natural-height;
+
+    init => {
+        TrainerState.row-measured(root.row-index, root.natural-height);
+    }
+    changed natural-height => {
+        TrainerState.row-measured(root.row-index, root.natural-height);
+    }
+
+    accessible-role: groupbox;
+    accessible-label: root.feature.title;
+
+    Rectangle {
+        x: Tokens.feature-row-outdent.left;
+        width: parent.width - Tokens.feature-row-outdent.left - Tokens.feature-row-outdent.right;
+        background: !root.heading && hover.has-hover ? Tokens.hover-brush : transparent;
+    }
+
+    Rectangle {
+        x: Tokens.feature-row-outdent.left;
+        y: parent.height - 1px;
+        width: parent.width - Tokens.feature-row-outdent.left - Tokens.feature-row-outdent.right;
+        height: 1px;
+        background: root.heading || root.ends ? transparent : Tokens.hairline-brush;
+    }
+
+    // The hover ground follows the pointer anywhere over the row, its controls included.
+    hover := TouchArea {
+        heading-label := LabelText {
+            visible: root.heading;
+            x: 0;
+            y: root.heading-space;
+            width: parent.width;
+            height: self.preferred-height;
+            text: root.feature.title;
+        }
+
+        // The title wraps in its column, its (?) after it.
+        measure := Text {
+            visible: false;
+            text: root.feature.title;
+        }
+
+        title := Text {
+            visible: !root.heading;
+            x: 0;
+            y: root.top + (root.line - root.title-height) / 2;
+            width: Math.min(measure.preferred-width, root.title-width);
+            height: self.preferred-height;
+            text: root.feature.title;
+            color: Tokens.text-brush;
+            wrap: word-wrap;
+        }
+
+        help := HelpButton {
+            visible: !root.heading;
+            x: root.help-below ? Tokens.feature-title-help-margin.left : title.width + Tokens.space-6;
+            y: title.y + root.title-height - measure.preferred-height / 2 - self.height / 2;
+            help: root.feature.help;
+            label: "About \{root.feature.title}";
+        }
+
+        // A hook: its one value on the title line, named for the feature; its switch at the far right.
+        if root.hook && root.feature.has-inline && !root.feature.inline-value.choice: NumberBox {
+            x: root.value-right - self.width;
+            y: root.top + (root.line - self.height) / 2;
+            value: root.feature.inline-value.text;
+            unit: root.feature.inline-value.unit;
+            label: root.feature.inline-value.accessible-name;
+            tip: root.feature.inline-value.step-tip;
+            edited(text) => { TrainerState.value-edited(root.row-index, 0, text); }
+            committed(text) => { TrainerState.value-committed(root.row-index, 0, text); }
+            stepped(direction) => { TrainerState.value-stepped(root.row-index, 0, direction); }
+        }
+
+        if root.hook && root.feature.has-inline && root.feature.inline-value.choice: ChoiceBox {
+            width: self.natural-width;
+            x: root.value-right - self.width;
+            y: root.top + (root.line - self.height) / 2;
+            choices: root.feature.inline-value.choices;
+            index: root.feature.inline-value.choice-index;
+            label: root.feature.inline-value.accessible-name;
+            chosen(choice) => { TrainerState.value-chosen(root.row-index, 0, choice); }
+        }
+
+        if root.hook: ToggleSwitch {
+            x: root.switch-x;
+            y: root.top + (root.line - self.height) / 2;
+            width: Tokens.feature-switch-min-width;
+            height: Tokens.control-min-height;
+            label: root.feature.title;
+            checked: root.feature.on;
+            toggled(on) => { TrainerState.hook-toggled(root.row-index, on); }
+        }
+
+        // Several values are listed under the title by name.
+        values := VerticalLayout {
+            x: 0;
+            y: root.below-title + Tokens.feature-fields-margin.top;
+            width: parent.width;
+            height: self.preferred-height;
+            spacing: Tokens.space-6;
+
+            for value[i] in root.models.listed-values: ValueLine {
+                value: value;
+                row-index: root.row-index;
+                value-index: i;
+                title-width: root.title-width;
+                value-right: root.value-right;
+            }
+        }
+
+        // An editor: Read again on the title line; while it waits for the game, the reason under the title.
+        if root.editor: Button {
+            x: root.switch-x;
+            y: root.top + (root.line - self.height) / 2;
+            width: Tokens.icon-button-size;
+            height: Tokens.icon-button-size;
+            icon: Tokens.icon-refresh;
+            kind: ButtonKind.subtle;
+            enabled: root.feature.can-use;
+            tip: root.held ? "Read again: what the stash holds now; drafts for what it still holds stay" : "Read again: what the game holds now; drafts that match it are cleared";
+            clicked => { TrainerState.read(root.row-index); }
+        }
+
+        offline := CaptionText {
+            visible: root.editor && root.feature.needs-connection;
+            x: Tokens.feature-nested-indent.left;
+            y: root.below-title;
+            width: parent.width - self.x;
+            height: self.visible ? self.preferred-height : 0px;
+            text: "Available once an offline character is connected.";
+        }
+
+        unread := CaptionText {
+            visible: root.held && root.feature.unread;
+            x: Tokens.feature-nested-indent.left;
+            y: offline.y + offline.height;
+            width: parent.width - self.x;
+            height: self.visible ? self.preferred-height : 0px;
+            text: "Not read yet";
+        }
+
+        empty := CaptionText {
+            visible: root.held && root.feature.empty;
+            x: Tokens.feature-nested-indent.left;
+            y: unread.y + unread.height;
+            width: parent.width - self.x;
+            height: self.visible ? self.preferred-height : 0px;
+            text: "None in your stash.";
+        }
+
+        fields := VerticalLayout {
+            visible: root.fields-shown;
+            x: 0;
+            y: empty.y + empty.height + Tokens.feature-fields-margin.top;
+            width: parent.width;
+            height: self.preferred-height;
+            spacing: Tokens.space-6;
+
+            for field[i] in root.models.fields: FieldLine {
+                field: field;
+                row-index: root.row-index;
+                field-index: i;
+                title-width: root.title-width;
+                value-x: root.value-x;
+                enabled: root.feature.can-use;
+            }
+        }
+
+        // Discard (only with drafts) right of the titles' column, Apply in the value column, under the boxes.
+        if root.editor && root.feature.has-drafts: Button {
+            x: root.title-width - self.width;
+            y: root.actions-y;
+            width: self.preferred-width;
+            height: Tokens.control-min-height;
+            text: "Discard";
+            kind: ButtonKind.subtle;
+            tip: "Puts every box back to what the game holds; nothing is written";
+            clicked => { TrainerState.discard(root.row-index); }
+        }
+
+        if root.editor: Button {
+            x: root.value-x;
+            y: root.actions-y;
+            width: Math.max(Tokens.feature-field-width, self.preferred-width);
+            height: Tokens.control-min-height;
+            text: root.feature.apply-text;
+            enabled: root.feature.can-apply;
+            tip: root.held ? "Writes the changed counts through the game, then reads them back" : "Writes the changed fields through the game, then reads them back";
+            clicked => { TrainerState.apply(root.row-index); }
+        }
+
+        // A planned feature: "Not ported yet" where its control will go, and what it will have under the title.
+        mark := CaptionText {
+            visible: root.planned;
+            x: root.value-x;
+            y: root.top + (root.line - self.height) / 2;
+            width: parent.width - self.x;
+            height: self.preferred-height;
+            wrap: no-wrap;
+            text: "Not ported yet";
+        }
+
+        details := CaptionText {
+            visible: root.planned && root.feature.details != "";
+            x: Tokens.feature-nested-indent.left;
+            y: root.below-title + Tokens.feature-status-margin.top;
+            width: parent.width - self.x;
+            height: self.visible ? self.preferred-height : 0px;
+            text: root.feature.details;
+        }
+
+        // Where it stands: the check once the game holds it, the error mark with the reason.
+        if root.feature.status != "" && root.feature.tone != FeatureTone.none: Image {
+            x: 0;
+            y: root.status-y + Tokens.feature-status-icon-margin.top;
+            width: Tokens.icon-size-tiny;
+            height: Tokens.icon-size-tiny;
+            image-fit: contain;
+            source: root.feature.tone == FeatureTone.confirmed ? Tokens.icon-confirmed : Tokens.icon-error;
+            colorize: root.feature.tone == FeatureTone.confirmed ? Tokens.confirmed-brush : Tokens.error-brush;
+        }
+
+        status := CaptionText {
+            visible: !root.heading && root.feature.status != "";
+            x: root.feature.tone != FeatureTone.none ? Tokens.icon-size-tiny + Tokens.feature-status-icon-margin.right : 0px;
+            y: root.status-y;
+            width: parent.width - self.x;
+            height: self.visible ? self.preferred-height : 0px;
+            text: root.feature.status;
+            tone: root.feature.tone == FeatureTone.confirmed ? CaptionTone.confirmed : root.feature.tone == FeatureTone.error ? CaptionTone.error : CaptionTone.muted;
+        }
+    }
+}
+
+// A section's rows: one width on every page (520–600), left beside the navigation; a page with room for two rows side by
+// side takes them in two columns, split by Rust from the heights the rows report (RowColumnsPanel.cs).
+component FeatureList inherits Rectangle {
+    in property <bool> compact;
+
+    property <length> margin-left: root.compact ? Tokens.trainer-body-compact-margin.left : Tokens.trainer-body-margin.left;
+    property <length> margin-right: root.compact ? Tokens.trainer-body-compact-margin.right : Tokens.trainer-body-margin.right;
+    property <length> available: root.width - root.margin-left - root.margin-right;
+    property <int> columns: Math.max(1, Math.min(Tokens.feature-max-columns, TrainerState.rows.length,
+        Math.floor((root.available + Tokens.feature-column-spacing) / (Tokens.feature-row-min-width + Tokens.feature-column-spacing))));
+    property <length> column-width: Math.min(Tokens.feature-row-max-width,
+        root.columns == 1 ? root.available : (root.available - Tokens.feature-column-spacing * (root.columns - 1)) / root.columns);
+
+    init => {
+        TrainerState.columns-changed(root.columns);
+    }
+    changed columns => {
+        TrainerState.columns-changed(root.columns);
+    }
+    property <int> serial: TrainerState.serial;
+    changed serial => {
+        scroll.content-y = 0;
+    }
+
+    scroll := ScrollView {
+        width: root.width;
+        height: root.height;
+        content-width: self.visible-width;
+        content-height: Tokens.trainer-body-margin.top + body.height + Tokens.trainer-body-margin.bottom;
+
+        // The rows' hover ground and hairlines reach past their words but stop at the body's edge.
+        Rectangle {
+            x: root.margin-left;
+            y: Tokens.trainer-body-margin.top;
+            width: TrainerState.column-rows.length * root.column-width + Math.max(0, TrainerState.column-rows.length - 1) * Tokens.feature-column-spacing;
+            height: body.height;
+            clip: true;
+
+            body := HorizontalLayout {
+                x: 0;
+                y: 0;
+                width: parent.width;
+                height: self.preferred-height;
+                spacing: Tokens.feature-column-spacing;
+                alignment: start;
+
+                for column in TrainerState.column-rows: VerticalLayout {
+                    width: root.column-width;
+                    alignment: start;
+
+                    for index[k] in column.rows: FeatureRow {
+                        feature: TrainerState.rows[index];
+                        models: TrainerState.row-models[index];
+                        row-index: index;
+                        starts: k == 0;
+                        ends: k == column.rows.length - 1;
+                    }
+                }
+            }
+        }
+    }
+}
+
 export component TrainerPage inherits Rectangle {
     in property <string> page-id;
     in property <string> page-title;
     in property <bool> compact;
 
-    property <bool> forge: root.page-id == "forge";
-    property <[string]> sections: root.forge ? ["Item", "Crafting rules"] : [];
+    init => {
+        TrainerState.open(root.page-id);
+    }
+    changed page-id => {
+        TrainerState.open(root.page-id);
+    }
+    property <int> section: TrainerState.section;
+    changed section => {
+        TrainerState.select-section(root.section);
+    }
 
     VerticalLayout {
-        if root.sections.length > 0: SectionBar {
-            sections: root.sections;
+        if TrainerState.sections.length > 1: SectionBar {
+            sections: TrainerState.sections;
+            current <=> TrainerState.section;
             compact: root.compact;
         }
 
-        EmptyState {
+        if TrainerState.item-forge: EmptyState {
             vertical-stretch: 1;
-            title: root.forge ? TrainerState.empty-title : root.page-title;
-            detail: root.forge ? TrainerState.empty-detail : "Not ported yet.";
+            title: TrainerState.empty-title;
+            detail: TrainerState.empty-detail;
 
-            if root.forge && Connection.show-action: Button {
+            if Connection.show-action: Button {
                 text: Connection.action-text;
                 kind: ButtonKind.primary;
                 clicked => {
                     Connection.connect();
                 }
             }
+        }
+
+        if !TrainerState.item-forge: FeatureList {
+            vertical-stretch: 1;
+            compact: root.compact;
         }
     }
 }

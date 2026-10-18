@@ -1,0 +1,139 @@
+// A number box without a spinner (the trainer's NumericUpDown, TrainerPageView.axaml "feature-value"): right-aligned
+// figures with a slot after them for a muted unit, kept empty or not so the numbers in a column end at one edge. Up and
+// Down (and the wheel while focused) step it, as its tip says; Enter or leaving the box commits what was typed. Rust owns
+// the number: what was typed reaches it as text, and the box shows `value` again once the typing is committed.
+
+import { Tokens } from "../tokens.slint";
+import { KeyboardFocus } from "../globals.slint";
+import { FocusRing, TipTrigger } from "focus.slint";
+
+export component NumberBox inherits Rectangle {
+    // The number as Rust formats it; empty while there is none (an editor's field not read yet).
+    in property <string> value;
+    in property <string> unit;
+    in property <string> label;
+    in property <string> tip;
+    in property <bool> enabled: true;
+    // A draft: the figures in the draft colour.
+    in property <bool> drafted;
+    callback edited(string);
+    callback committed(string);
+    callback stepped(int);
+
+    width: Tokens.feature-field-width;
+    height: Tokens.control-min-height;
+    border-radius: Tokens.control-radius;
+    border-width: 1px;
+    background: !root.enabled ? Tokens.strong-line-brush : input.has-focus ? Tokens.ground-brush : touch.has-hover ? Tokens.hover-brush : Tokens.surface-brush;
+    border-color: !root.enabled ? Tokens.strong-line-brush : input.has-focus ? Tokens.accent-brush : touch.has-hover ? Tokens.accent-trim-brush : Tokens.strong-line-brush;
+
+    accessible-role: text-input;
+    accessible-label: root.label;
+    accessible-value: root.value;
+    accessible-enabled: root.enabled;
+    forward-focus: input;
+
+    init => {
+        input.text = root.value;
+    }
+    // While the user types, the box keeps their words; otherwise it shows Rust's number.
+    changed value => {
+        if (!input.has-focus) {
+            input.text = root.value;
+        }
+    }
+    property <bool> focused: input.has-focus;
+    changed focused => {
+        if (!root.focused) {
+            root.commit();
+        }
+    }
+
+    function commit() {
+        root.committed(input.text);
+        input.text = root.value;
+    }
+
+    function step(direction: int) {
+        root.committed(input.text);
+        root.stepped(direction);
+        input.text = root.value;
+        input.select-all();
+    }
+
+    touch := TouchArea {
+        enabled: root.enabled;
+        mouse-cursor: MouseCursor.text;
+        pointer-event(event) => {
+            if (event.kind == PointerEventKind.down) {
+                KeyboardFocus.visible = false;
+            }
+        }
+        clicked => {
+            input.focus();
+        }
+        scroll-event(event) => {
+            if (input.has-focus && event.delta-y != 0) {
+                root.step(event.delta-y > 0 ? 1 : -1);
+                return accept;
+            }
+            reject
+        }
+    }
+
+    keys := FocusScope {
+        focus-on-click: false;
+        focus-on-tab-navigation: false;
+        capture-key-pressed(event) => {
+            if (event.text == Key.UpArrow && !event.modifiers.alt) {
+                root.step(1);
+                return accept;
+            }
+            if (event.text == Key.DownArrow && !event.modifiers.alt) {
+                root.step(-1);
+                return accept;
+            }
+            reject
+        }
+
+        input := TextInput {
+            x: Tokens.space-10;
+            // Fluent's text box keeps 6px inside its right edge before the unit's slot.
+            width: parent.width - self.x - Tokens.space-6 - Tokens.feature-unit-margin.left - Tokens.feature-unit-width - Tokens.feature-unit-margin.right;
+            height: parent.height;
+            enabled: root.enabled;
+            single-line: true;
+            horizontal-alignment: right;
+            vertical-alignment: center;
+            color: !root.enabled ? Tokens.text-disabled-brush : root.drafted ? Tokens.draft-brush : Tokens.text-brush;
+            selection-background-color: Tokens.accent-pressed-color;
+            selection-foreground-color: Tokens.on-accent-color;
+            edited => {
+                root.edited(self.text);
+            }
+            accepted => {
+                root.commit();
+            }
+        }
+    }
+
+    Text {
+        x: parent.width - Tokens.feature-unit-margin.right - self.width;
+        width: Tokens.feature-unit-width;
+        height: parent.height;
+        text: root.unit;
+        color: root.enabled ? Tokens.text-muted-brush : Tokens.text-disabled-brush;
+        vertical-alignment: center;
+    }
+
+    TipTrigger {
+        text: root.enabled ? root.tip : "";
+        hovered: touch.has-hover;
+        focused: input.has-focus;
+    }
+
+    // A box shows its own focus by its accent frame; the ring is for keyboard arrivals only.
+    FocusRing {
+        focused: input.has-focus;
+    }
+}
