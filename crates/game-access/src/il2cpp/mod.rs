@@ -1,5 +1,6 @@
 //! Narrow IL2CPP boundary. Raw declarations are separate from thread and root ownership.
 
+pub mod discovery;
 mod invoke;
 pub mod raw;
 mod thread;

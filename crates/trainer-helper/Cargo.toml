@@ -1,0 +1,24 @@
+[package]
+name = "eg-trainer-helper"
+description = "Explicitly bootstrapped, retained in-process trainer control helper."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+eg-trainer = { path = "../trainer" }
+eg-game-access = { path = "../game-access" }
+tokio = { workspace = true, features = ["macros"] }
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { workspace = true, features = ["Win32_Foundation", "Win32_System_Threading", "Win32_System_SystemInformation", "Win32_System_Pipes", "Win32_System_LibraryLoader", "Win32_System_Diagnostics_Debug"] }
+
+[build-dependencies]
+sha2.workspace = true
+
+[lints]
+workspace = true

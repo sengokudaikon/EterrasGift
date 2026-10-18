@@ -416,6 +416,25 @@ where the C# coordinator can conditionally attempt cleanup of already-held hooks
 marks cleanup unconfirmed; independent helper cleanup remains required. Full protocol support and authentication are
 not claimed. Details and remaining work: [crates/trainer/README.md](../crates/trainer/README.md).
 
-Next implementation is the persistent Rust helper/bootstrap, source build-ID generation, real discovery/status and
-helper-side offline/owner/cleanup handling in an authored Unity player. The existing evaluation DLL still exposes the
-one-shot frame probe; no persistent production server or trainer UI composition has been added by this control slice.
+The subsequent persistent Rust helper/bootstrap now provides source build-ID generation, real discovery/status,
+process ownership and asynchronous shutdown in an authored Unity player. The older evaluation DLL's one-shot frame
+probe remains separate. No trainer UI composition has been added. The next boundary is read-only game operations,
+then per-operation write/readback and independent feature cleanup; no feature installation exists yet.
+
+## Persistent-helper checkpoint
+
+The retained Rust DLL now passes the complete real-metadata/server/session/main-thread path in a disposable Unity
+6000.4.8f1 IL2CPP player. All 37 discovery offsets resolve; 11 requests yield six main-thread commands, with 78
+original callback normal returns and no wrong-thread entry. Cached pristine discovery survives entry installation.
+Runtime online and destroyed-native-manager states revoke readiness. The periodic helper watch independently sees
+the online transition without a request; its completed-command count stays unchanged. Empty-clear acknowledgement,
+entry restoration, server stop, three subsequent Unity frames, normal exit and unchanged player files all pass.
+
+Eight authored real-pipe server tests cover process ownership/takeover, malformed/setup retry, pending cancellation
+and uncertain running work. Four new discovery tests bring the foundation total to 75 on stable/nightly release;
+architecture/lifetime checks and workspace verification pass. The fixture exposed and resolved Windows verbatim-path
+handling and duplicate lookup of forwarded classes. [Full evidence and limits](../tools/trainer-eval/persistent-player/report.json).
+
+This establishes control-only integration on authored game-shaped metadata. Current Last Epoch metadata, gameplay
+effects, write/readback, independent effect cleanup, production injection and app/UI composition remain separate.
+The narrow x64/layout/GC/patching unsafe contracts are still required. Shutdown never grants permission to unload.

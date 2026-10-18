@@ -154,13 +154,13 @@ NeoHook unwind diagnosis have been completed. Their limits remain explicit; they
    diagnostic edits now isolate both remaining baseline loader defects; making classes abstract is not behavior restoration.
 4. The first verified invocation/exception subset now passes in the real fixture. Add enum identity/width checks,
    reference writes and traced managed-reference ref/out storage; evaluate concrete collection methods separately
-   from generic-method construction. Then implement persistent native helper handlers behind the verified protocol 21 control client. Extend disposable-host
-   operation tests before connecting trainer UI to a real helper.
+   from generic-method construction. Persistent native discovery/status handlers now exist behind the verified
+   protocol 21 control client. Extend disposable-host operation tests before connecting trainer UI to a real helper.
 5. The first-party scheduler adapter and external bootstrap now pass the authored Unity fixture and one explicitly
    authorized offline-game request. The checked getter returns frame 372,952 on the named main thread, exactly once;
    entry/unwind/files are restored/unchanged and the game remains responsive. [Evidence](../tools/trainer-eval/debugger/scheduler-report.json).
    Helper/code/tables stay loaded until process exit. Further live work requires the user's explicit scope; next
-   implementation is protocol 21/session/offline admission against authored hosts before game-specific operations.
+   implementation is read-only game-specific operations against authored hosts, then validated writes/readback.
 
 
 ## Scheduler promotion and first live read, 2026-10-18
@@ -207,3 +207,44 @@ headers. Initial direct calls omitted their input environment and failed; the co
 6000.2.9 installed-header directory is no longer available here, so that historical installed-version run was not
 repeated. Unity Rust-host compiles and the native evaluation plugin builds with the new dependencies; the new plugin
 was not loaded into a player/game. Persistent helper server and actual discovery/status remain next.
+
+## Persistent Rust helper and actual discovery/status, 2026-10-18
+
+`eg-trainer-helper` now builds a retained Windows x64 DLL, explicitly started after loader initialization. Its
+dedicated control OS thread owns the IL2CPP attachment and current-thread Tokio runtime. The persistent protocol 21
+server handles discovery, status and an empty ClearHooks; gameplay features remain absent. Metadata discovery resolves
+the public API, checks all 37 legacy keys and selected field/method/header contracts, and caches pristine dispatcher
+bytes before installing the existing scheduler. Its two allocation samples are strongly rooted. Exact MethodInfo,
+nonmoving-GC and narrow scheduler assumptions remain unsafe caller contracts, not general Unity-version detection.
+
+The server retains its owner process handle and creation identity across per-request connections. Other living
+processes are refused before backend access; owner death permits takeover because this slice has no installed effects.
+Pending disconnect/deadline cancellation proves no execution when successful. Running work retains the slot and
+reports uncertainty. Malformed input cannot reach the backend. Eight real-pipe tests with authored child processes
+exercise these cases, setup retry and shutdown during partial input. Future effects must be cleared and acknowledged
+on the engine thread before owner takeover; no current empty-set acknowledgement proves future gameplay cleanup.
+
+The complete authored Unity 6000.4.8f1 player now passes the real Session → PipeClient → server → scheduler → status
+path. Its final run accepts 11 requests, completes six commands on main TID 62076, and records 78 original normal
+callback returns with no wrong-thread entries. Rediscovery remains identical while the entry is patched. Runtime
+online state revokes readiness despite an offline authored log; a destroyed native manager is rejected even though
+its managed wrapper remains retained. Explicit disable acknowledges the empty feature set. Independent observation
+changes the helper online flag from 0 to 1 between frames 10 and 66, with no intervening pipe request and the completed
+command count unchanged at one. Shutdown restores the entry/stops the server, then Unity advances three frames and
+exits normally with unchanged player files. Owner exit/takeover is tested in fake-backend process tests, not this run.
+
+The fixture caught two real integration defects: Unity's log parser rejects Rust's canonical Windows verbatim paths,
+and class forwarding exposes one canonical type through multiple images. Child launch arguments now use ordinary
+local drive paths while identity checks retain canonical paths. Discovery accepts repeated identical class pointers
+and rejects distinct identities. Installed `vm/Image.cpp` confirms exported types participate in class lookup; the
+forwarding regression has a dedicated test. Initial failed reports are retained alongside passing evidence.
+
+There are now 75 foundation cases on stable/nightly release, one lifetime compile-fail check per toolchain and four
+architecture checks. Workspace Clippy/format/tokens/captures and isolated controller checks pass; captures inspected.
+The [evidence index](../tools/trainer-eval/persistent-player/report.json) records exact helper/build/player identities,
+installed-header hashes, logs, resolved failures and limits. No existing game was accessed in this step.
+
+Next is a read-only game operation returning owned data, followed by exact per-operation type/lifetime checks and
+write/readback experiments. Enum identity, reference writes and traced managed-reference ref/out remain unpromoted.
+Independent effect cleanup must precede enabling gameplay features. Helper/code/trampolines remain retained until
+process exit; restoration is not callback draining or unload permission. The app/UI remain unwired.

@@ -14,8 +14,10 @@ passes worker installation/restoration, exact frame-count comparison, managed-ex
 The externally loaded bootstrap then passes in an idle authored player and in the explicitly authorized offline game:
 one main-thread frame read returns 372,952 and the original entry is restored. [Evidence and limits](../tools/trainer-eval/debugger/scheduler-report.json).
 The helper/trampolines remain loaded until process exit. Original library comparisons below remain research history;
-the subsequent protocol/control-session foundation now passes authored-host tests, while persistent native handlers,
-UI integration and gameplay operations remain separate work. See [trainer contracts](../crates/trainer/README.md).
+the subsequent protocol/control-session foundation and persistent Rust discovery/status helper now pass the complete
+authored Unity-player path, including independent online observation and asynchronous entry restoration.
+[Evidence](../tools/trainer-eval/persistent-player/report.json). UI integration and gameplay operations remain separate
+work. See [trainer contracts](../crates/trainer/README.md).
 
 ## Decisions and constraints
 

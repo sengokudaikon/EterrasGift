@@ -63,8 +63,16 @@ env = { SLINT_MCP_PORT = "9315" }
 
 [tasks."trainer:test"]
 description = "Trainer runtime, protocol, owned pipe/session fixtures, and tier checks; no live game"
-run = "cargo test -p eg-game-access -p eg-trainer -p eterras-gift --offline"
+run = "cargo test -p eg-game-access -p eg-trainer -p eg-trainer-helper -p eterras-gift --offline"
 
 [tasks."trainer:test:release"]
 description = "Trainer fixtures on installed nightly in release mode; no live game"
-run = "cargo +nightly test -p eg-game-access -p eg-trainer --release --offline"
+run = "cargo +nightly test -p eg-game-access -p eg-trainer -p eg-trainer-helper --release --offline"
+
+[tasks."trainer:helper:build"]
+description = "Build and snapshot the retained Rust helper with source/DLL identities; no process access"
+run = "pwsh -NoProfile -File tools/trainer-eval/persistent-player/Build-Helper.ps1"
+
+[tasks."trainer:player:client:build"]
+description = "Build the isolated authored Unity-player controller; no player launch"
+run = "cargo build --manifest-path tools/trainer-eval/persistent-player/client/Cargo.toml --release --offline"

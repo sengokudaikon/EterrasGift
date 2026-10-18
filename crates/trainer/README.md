@@ -7,8 +7,9 @@ The app/UI do not use these services yet. The companion remains independent.
 ## Implemented subset
 
 Protocol 21 control requests are discovery (6), status (7), and clearing all gameplay hooks (15 with count 0 and
-**no tail**). Item/field writes, enabling gameplay features, definitions, item reads, injection and a persistent native
-server are not implemented here. `protocol::Request::decode` deliberately rejects other operations and nonzero reserved
+**no tail**). The separate [Rust helper](../trainer-helper/README.md) implements their persistent server and runtime
+handlers. Item/field writes, enabling gameplay features, definitions, item reads and injection are not implemented
+here. `protocol::Request::decode` deliberately rejects other operations and nonzero reserved
 fields in this subset. This is not a claim to implement every protocol 21 operation.
 
 `BuildProfile::capture` reads local files and captures GameAssembly/metadata hashes plus the expected helper source
@@ -56,7 +57,7 @@ means MayHaveRun, including a possible partial write. Header size/code/magic and
 before allocation. The connection is closed after the response. No request is resent automatically.
 
 Helper code 1 is an uncertain failure. Codes 2–6 are definite no-operation failures under the legacy helper contract;
-human text never determines the classification. The future Rust server must not report NotReady after a command
+human text never determines the classification. The Rust server must not report NotReady after a command
 started: canceling still-pending dispatcher work can prove no execution, while running work owns its slot until it
 finishes. Client disconnection cannot retract that work.
 
@@ -86,10 +87,11 @@ test copies its own executable to TEMP and serves three requests there, using th
 and pipe client, then exits. Its PE/metadata/runtime replies are authored data; they do not discover IL2CPP fields or
 validate gameplay effects. Two ignored test entry points are invoked explicitly by their parent tests.
 
-Next: implement the persistent Rust helper/bootstrap, source build-ID generation and actual discovery/status handlers,
-then combine them with the existing scheduler in the authored Unity player. Helper-side runtime offline checks,
-independent effect cleanup, owner/shutdown behavior and per-operation readback must precede gameplay writes or UI wiring.
-The previously authorized live frame-read probe remains separate; this step performs no new live test.
+The persistent helper/bootstrap, source build-ID generation and discovery/status handlers now exist, alongside
+process-owner and asynchronous shutdown handling. Its full combined fixture uses an authored Unity IL2CPP player.
+Next: read-only game operations and per-operation contract checks, then write/readback and independent engine-thread
+effect cleanup before gameplay features or UI wiring. The previously authorized live frame-read probe remains
+separate; this step performs no new live test.
 Validation commands, counts and the retained log/source index are in [validation.json](validation.json).
 
 Windows API contract: [GetNamedPipeServerProcessId](https://learn.microsoft.com/en-us/windows/win32/api/winbase/nf-winbase-getnamedpipeserverprocessid).
