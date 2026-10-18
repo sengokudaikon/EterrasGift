@@ -2228,6 +2228,8 @@ impl ForgeEditor {
     // ----- Apply and Undo apply -----
 
     /// One write through the session: refused at once when it needs the override while it is off.
+    /// TODO(forge): the session's readback outcomes beyond confirmed and refused (spec §11: EditNotKept forgets Undo apply,
+    /// an uncertain write recovers the item and clears drafts and history).
     fn write(&mut self, expected: &ForgeItem, edit: &ItemEdit) -> Result<ForgeItem, String> {
         if !self.game.can_write() {
             return Err("The session is not ready to write.".into());

@@ -214,6 +214,7 @@ fn bind(state: &ForgeState, view: &Rc<View>) {
         view.focus(reference(CellKind::Affix, next as usize, 0), part);
     });
     // A ledger entry selects its affix or unique row, or brings the cell that edits it into focus.
+    // TODO(forge): focus for a flag, the base and the identity cells (only value cells answer `focus-cell` yet).
     let weak = on(view);
     state.on_show_draft(move |index| {
         let Some(view) = weak.upgrade() else {
