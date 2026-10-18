@@ -12,6 +12,8 @@ Follow-up through 2026-10-18: [trainer-validation.md](trainer-validation.md) rec
 production Rust ownership, and the native ExecuteTasks/Rust dispatcher adapter in an authored IL2CPP player. Normal
 execution, managed-exception cleanup/recovery and quiescent disable pass. The original project survey below remains
 the library comparison; these newer results establish our bounded implementation path and its remaining game-use gates.
+The first user-authorized live read-only observation now confirms resident dispatcher bytes/unwind and actual process
+mitigations; [its report](../tools/trainer-eval/debugger/live-report.json) does not execute the Rust helper or hook in the game.
 
 ## Decisions and constraints
 

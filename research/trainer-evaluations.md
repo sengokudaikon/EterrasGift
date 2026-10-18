@@ -158,4 +158,6 @@ NeoHook unwind diagnosis have been completed. Their limits remain explicit; they
    reference writes and traced managed-reference ref/out storage; evaluate concrete collection methods separately
    from generic-method construction. Then promote the helper adapter and protocol 21 transport. Extend disposable-host
    operation tests before connecting trainer UI to a real helper.
-5. Live game validation remains opt-in and has not been performed. No additional fake GUI is needed now.
+5. The user authorized the first live read-only observation: loaded dispatcher bytes/unwind and actual process policy
+   match the investigated build/profile. [Evidence](../tools/trainer-eval/debugger/live-report.json) does not yet execute
+   a Rust helper or hook in the game. Future live work remains within the user's explicit scope. No extra fake GUI is needed.

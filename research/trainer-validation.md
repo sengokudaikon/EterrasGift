@@ -28,14 +28,16 @@ input semantics. The controlled native main-thread adapter also passes, includin
 Rust frame and subsequent engine recovery. These findings support implementing the typed invocation layer and promoting
 that bounded adapter behind production admission checks. The first checked invocation subset is now implemented;
 protocol/session and trainer operations remain separate work. A fake GUI is unnecessary:
-the disposable process host covers the boundary and existing UI captures use fake sessions. No live game validation has occurred.
+the disposable process host covers the boundary and existing UI captures use fake sessions. The first user-authorized
+live read-only observation now confirms loaded target bytes/unwind and process policy; helper/hook execution remains separate.
 
 ## Evidence standard and scope
 
 Keep these evidence levels separate: source/header contracts; synthetic ABI experiments; static inspection of the exact
 game artifacts; execution in a controlled IL2CPP fixture; execution in the actual game. One does not stand in for the next.
-Live game testing has not been requested. Original app tools and installed artifacts may be used offline; installed game
-files stay untouched. Generated assemblies and test executables run only in explicitly selected disposable processes.
+The user authorized the first live observation on 2026-10-18 after starting a fully offline game. Its bounded scope is
+query/read and noninvasive debugger inspection, without helper injection, game API calls or hooks. Installed game files
+stay untouched. Generated assemblies and test executables run only in explicitly selected disposable processes.
 
 Synthetic tests alone do not clear runtime acceptance. Record residual uncertainty and improve the next experiment
 rather than weakening acceptance criteria. Exact game runtime claims require actual runtime evidence later.
@@ -310,9 +312,34 @@ repeatable mise task are in [debugger/README.md](../tools/trainer-eval/debugger/
 
 Microsoft/Unity symbol stores and a local cache are configured through the user's `_NT_SYMBOL_PATH`. This test uses
 local matching Rust symbols and makes no claim about available game PDBs or remote symbol retrieval. Earlier Swift
-LLDB tests did not establish clean target recovery; use the verified Microsoft debugger route. The game has not been
-started or attached. A future user-started offline session can now support read-only live observations before any
-separately validated hook installation. Native debugger readiness does not enable managed C# debugging in a release build.
+LLDB tests did not establish clean target recovery; use the verified Microsoft debugger route. The setup probe did not
+start or attach a game. The subsequent user-started session supports the read-only observation below. Native debugger
+readiness does not enable managed C# debugging in a release build.
+
+### First live observation
+
+The user confirmed the running game was offline. Explicit PID 10472 and executable path were checked against the
+opened process's creation identity before/after observation. GameAssembly/UnityPlayer file identities match the prior
+static investigation. All 81 resident ExecuteTasks bytes at RVA `0x405c790` match both the baseline and current file;
+its live unwind bytes are `0104010004420000`. CDB independently decodes the same `[0x405c790,0x405c7e1)` function,
+version 1/no-handler record and alloc-40 prologue. No helper or entry patch is present at that target.
+
+Actual process policy queries succeed: DEP flags `0x3`/permanent, ASLR `0x5`, dynamic-code `0`, CFG `0`, signature `0`,
+shadow-stack `0x100` (enable bit clear). This matches the authored player's observed hook execution profile, closing
+the former static-PE-versus-live-policy uncertainty for this session. It is not proof of supported strict CET or a
+different process/configuration. Each future installation must query its actual process again.
+
+CDB noninvasive inspection captures 393 bounded-depth thread stacks, including the engine-named Unity main thread
+TID `0xe718`. It quits/detaches in 1.55 seconds; process creation identity is unchanged, the game remains alive and
+responsive, and both selected DLL files are unchanged. Game PDBs were not used: nearest-export labels with large
+offsets must not be treated as exact function names. The captured stack does not itself observe ExecuteTasks execution.
+Evidence and exact limits: [live-report.json](../tools/trainer-eval/debugger/live-report.json). This is ordinary Windows
+API/CDB evidence, not REA Evidence; REA tools remain unavailable in this session.
+
+Proceed with production scheduler-hook admission/lifecycle work. These observations clear the current loaded identity,
+original-byte/unwind and process-policy prerequisites. They do not establish an installation safe point, full caller
+set, exclusive patch ownership, arbitrary helper unloading or actual-game Rust invocation/GC/exception behavior. The
+next live execution milestone is a bounded scheduler probe and read-only command after that installation contract exists.
 
 ## Tooling provenance
 
