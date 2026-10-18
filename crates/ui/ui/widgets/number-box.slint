@@ -24,8 +24,10 @@ export component NumberBox inherits Rectangle {
     height: Tokens.control-min-height;
     border-radius: Tokens.control-radius;
     border-width: 1px;
-    background: !root.enabled ? Tokens.strong-line-brush : input.has-focus ? Tokens.ground-brush : touch.has-hover ? Tokens.hover-brush : Tokens.surface-brush;
-    border-color: !root.enabled ? Tokens.strong-line-brush : input.has-focus ? Tokens.accent-brush : touch.has-hover ? Tokens.accent-trim-brush : Tokens.strong-line-brush;
+    // Fluent's text box on the retinted palette (Theme.axaml): AltMediumLow at rest in a BaseMedium frame, AltMedium and
+    // BaseMediumHigh under the pointer, the ground in the accent frame while focused; frames step up under high contrast.
+    background: !root.enabled ? Tokens.strong-line-brush : input.has-focus ? Tokens.ground-brush : touch.has-hover ? Tokens.raised-brush : Tokens.hover-brush;
+    border-color: !root.enabled ? Tokens.strong-line-brush : input.has-focus ? Tokens.accent-brush : touch.has-hover ? Tokens.fluent-base-medium-high-color : (Tokens.high-contrast ? Tokens.text-secondary-brush : Tokens.fluent-base-medium-color);
 
     accessible-role: text-input;
     accessible-label: root.label;

@@ -21,8 +21,10 @@ export component TextField inherits Rectangle {
     horizontal-stretch: 1;
     border-radius: Tokens.control-radius;
     border-width: 1px;
-    background: input.has-focus ? Tokens.ground-brush : touch.has-hover ? Tokens.hover-brush : Tokens.surface-brush;
-    border-color: input.has-focus ? Tokens.accent-brush : Tokens.strong-line-brush;
+    // Fluent's text box on the retinted palette (Theme.axaml): AltMediumLow at rest in a BaseMedium frame, AltMedium and
+    // BaseMediumHigh under the pointer, the ground in the accent frame while focused; frames step up under high contrast.
+    background: input.has-focus ? Tokens.ground-brush : touch.has-hover ? Tokens.raised-brush : Tokens.hover-brush;
+    border-color: input.has-focus ? Tokens.accent-brush : touch.has-hover ? Tokens.fluent-base-medium-high-color : (Tokens.high-contrast ? Tokens.text-secondary-brush : Tokens.fluent-base-medium-color);
     forward-focus: input;
 
     touch := TouchArea {

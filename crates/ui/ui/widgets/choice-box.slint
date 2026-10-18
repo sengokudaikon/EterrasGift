@@ -27,8 +27,9 @@ export component ChoiceBox inherits Rectangle {
     height: Tokens.control-min-height;
     border-radius: Tokens.control-radius;
     border-width: 1px;
-    border-color: !root.enabled ? Tokens.strong-line-brush : focus.has-focus ? Tokens.accent-brush : touch.has-hover ? Tokens.accent-trim-brush : Tokens.strong-line-brush;
-    background: !root.enabled ? Tokens.strong-line-brush : touch.has-hover ? Tokens.hover-brush : Tokens.surface-brush;
+    // Fluent's combo box on the retinted palette, framed as the text boxes are.
+    border-color: !root.enabled ? Tokens.strong-line-brush : focus.has-focus ? Tokens.accent-brush : touch.has-hover ? Tokens.fluent-base-medium-high-color : (Tokens.high-contrast ? Tokens.text-secondary-brush : Tokens.fluent-base-medium-color);
+    background: !root.enabled ? Tokens.strong-line-brush : touch.has-hover ? Tokens.raised-brush : Tokens.hover-brush;
 
     accessible-role: combobox;
     accessible-label: root.label;
