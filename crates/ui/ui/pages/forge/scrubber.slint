@@ -27,7 +27,7 @@ export component RangeBar inherits Rectangle {
         width: root.width;
         height: root.track;
         border-radius: root.track / 2;
-        background: root.on-unique ? Tokens.unique-range-track-brush : Tokens.range-track-brush;
+        background: Tokens.range-track-brush;
     }
 
     Rectangle {
@@ -36,7 +36,7 @@ export component RangeBar inherits Rectangle {
         width: Math.max(root.track, root.width * Math.clamp(root.fraction, 0, 1));
         height: root.track;
         border-radius: root.track / 2;
-        background: root.draft ? Tokens.draft-brush : root.on-unique ? Tokens.unique-range-fill-brush : Tokens.range-fill-brush;
+        background: root.draft ? Tokens.draft-brush : Tokens.range-fill-brush;
     }
 
     // The game's value stays as a full-height tick while a draft moves away from it.
@@ -146,7 +146,7 @@ export component ValueScrubber inherits Rectangle {
         if root.cell.was != "": Text {
             text: root.cell.was;
             font-size: Tokens.font-size-caption;
-            color: root.on-unique ? Tokens.unique-caption-brush : Tokens.text-muted-brush;
+            color: Tokens.text-muted-brush;
             vertical-alignment: center;
             overflow: elide;
             horizontal-stretch: 1;
@@ -173,7 +173,7 @@ export component ValueScrubber inherits Rectangle {
         height: Tokens.icon-size-tiny;
         image-fit: contain;
         source: Tokens.icon-locked;
-        colorize: root.on-unique ? Tokens.unique-caption-brush : Tokens.text-muted-brush;
+        colorize: Tokens.text-muted-brush;
     }
 
     focus := FocusScope {

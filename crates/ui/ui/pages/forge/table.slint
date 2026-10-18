@@ -551,10 +551,11 @@ export component ModifierRowItem inherits Rectangle {
     height: layout.preferred-height;
     border-radius: Tokens.control-radius;
     border-width: root.on-unique ? 1px : 0px;
-    border-color: root.on-unique && root.selected ? Tokens.unique-text-brush : transparent;
+    // The game's tooltip has no hover or selection, so unique rows take the table's.
+    border-color: root.on-unique && root.selected ? Tokens.accent-brush : transparent;
     background: !root.on-unique ? transparent
-        : root.selected ? Tokens.unique-selected-overlay-brush
-        : touch.has-hover ? Tokens.unique-hover-overlay-brush : transparent;
+        : root.selected ? Tokens.selected-brush
+        : touch.has-hover ? Tokens.hover-brush : transparent;
 
     touch := TouchArea {
         enabled: root.on-unique;
@@ -629,7 +630,8 @@ export component ModifierRowItem inherits Rectangle {
             Text {
                 text: root.line.text;
                 font-size: Tokens.font-size-value;
-                color: root.line.drafted ? Tokens.draft-brush : Tokens.text-brush;
+                // A unique modifier line in the game's own line colour; teal while drafted.
+                color: root.line.drafted ? Tokens.draft-brush : root.on-unique ? Tokens.unique-text-brush : Tokens.text-brush;
                 wrap: word-wrap;
             }
 

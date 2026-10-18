@@ -1,0 +1,7 @@
+[alias]
+# cargo xtask tokens [--check]: regenerate crates/ui/ui/tokens.slint and icons from design/tokens.json
+xtask = "run --quiet -p xtask --"
+# Warnings are errors, as in the C# repo.
+lint = "clippy --workspace --all-targets -- -D warnings"
+# Headless PNG captures of the real UI into artifacts/captures.
+capture = "test -p eg-ui --test captures"

@@ -917,10 +917,26 @@ export component ItemForge inherits Rectangle {
                 width: root.unique-beside ? root.lists-width - root.table-width - Tokens.unique-section-beside-margin.left : root.lists-width;
                 height: ForgeState.has-unique ? unique-layout.preferred-height : 0px;
                 visible: ForgeState.has-unique;
-                background: Tokens.unique-surface-brush;
-                border-width: 1px;
-                border-color: Tokens.unique-border-brush;
+                // The tooltip's ground with its header glow in the top-left corner (an elliptical gradient, generated as an
+                // image by `cargo xtask tokens`); the copper frame is drawn over both.
+                background: Tokens.unique-surface-brush-ground;
                 border-radius: Tokens.control-radius;
+                clip: true;
+
+                Image {
+                    x: Tokens.unique-surface-brush-x;
+                    y: Tokens.unique-surface-brush-y;
+                    width: Tokens.unique-surface-brush-width;
+                    height: Tokens.unique-surface-brush-height;
+                    source: Tokens.unique-surface-brush-image;
+                    image-fit: fill;
+                }
+
+                Rectangle {
+                    border-width: 1px;
+                    border-color: Tokens.unique-border-brush;
+                    border-radius: Tokens.control-radius;
+                }
 
                 unique-layout := VerticalLayout {
                     padding-left: Tokens.unique-section-padding.left;
@@ -936,7 +952,8 @@ export component ItemForge inherits Rectangle {
                             text: "Unique modifiers";
                             font-size: Tokens.font-size-section;
                             font-weight: Tokens.emphasis-weight;
-                            color: Tokens.unique-text-brush;
+                            // The game heads the section in its tertiary body colour; the frame and the glow carry the unique.
+                            color: Tokens.text-muted-brush;
                             horizontal-stretch: 1;
                         }
 
@@ -957,7 +974,7 @@ export component ItemForge inherits Rectangle {
                             Text {
                                 text: ForgeState.preview-status;
                                 font-size: Tokens.font-size-caption;
-                                color: ForgeState.preview-failed ? Tokens.error-brush : Tokens.unique-text-brush;
+                                color: ForgeState.preview-failed ? Tokens.error-brush : Tokens.text-muted-brush;
                                 max-width: Tokens.preview-status-max-width;
                                 vertical-alignment: center;
                                 overflow: elide;

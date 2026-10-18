@@ -1,0 +1,62 @@
+# Project tasks: `mise tasks` lists them, `mise run <task>` runs one. Prefer these over ad-hoc scripts (AGENTS.md).
+# Rust is pinned by rust-toolchain.toml; slint-viewer and slint-lsp 1.18.1 are on PATH (AGENTS.md, Toolchain).
+
+[tasks.build]
+description = "Build the workspace"
+run = "cargo build"
+
+[tasks.run]
+description = "Run the app: real settings, real game host"
+run = "cargo run -p eterras-gift"
+
+[tasks.lint]
+description = "Clippy over every target, warnings as errors"
+run = "cargo lint"
+
+[tasks.fmt]
+description = "Format the workspace"
+run = "cargo fmt --all"
+
+[tasks."fmt:check"]
+description = "Fail if anything is unformatted"
+run = "cargo fmt --all --check"
+
+[tasks.tokens]
+description = "Regenerate tokens.slint and the icons from design/tokens.json"
+run = "cargo xtask tokens"
+
+[tasks."tokens:check"]
+description = "Fail if tokens.slint or the icons are stale"
+run = "cargo xtask tokens --check"
+
+[tasks.capture]
+description = "Headless PNG captures of the real UI on the fake game host, into artifacts/captures"
+run = "cargo capture"
+
+[tasks.verify]
+description = "Everything to run before calling work done; then look at artifacts/captures"
+run = ["cargo lint", "cargo fmt --all --check", "cargo xtask tokens --check", "cargo capture"]
+
+[tasks."slint:check"]
+description = "Fast compile check of a .slint file (default: app.slint)"
+run = "slint-viewer --check {{arg(name='file', default='crates/ui/ui/app.slint')}}"
+
+[tasks.preview]
+description = "Live preview of a .slint file, reloading on save (default: app.slint)"
+run = "slint-viewer --auto-reload {{arg(name='file', default='crates/ui/ui/app.slint')}}"
+
+[tasks.live]
+description = "The app with Slint's MCP server on 127.0.0.1:9316, headless. Real game host: never click Play"
+run = "cargo run -p eterras-gift --features slint/mcp --target-dir target/mcp"
+# Debug info is read at build time, the rest at run time. target/mcp keeps the normal build's cache intact.
+env = { SLINT_EMIT_DEBUG_INFO = "1", SLINT_MCP_PORT = "9316", SLINT_BACKEND = "headless" }
+
+[tasks."live:window"]
+description = "As live, in a visible window"
+run = "cargo run -p eterras-gift --features slint/mcp --target-dir target/mcp"
+env = { SLINT_EMIT_DEBUG_INFO = "1", SLINT_MCP_PORT = "9316" }
+
+[tasks."live:viewer"]
+description = "slint-viewer with its MCP server on 127.0.0.1:9315 (opens a window; no Rust logic)"
+run = "slint-viewer {{arg(name='file', default='crates/ui/ui/app.slint')}}"
+env = { SLINT_MCP_PORT = "9315" }

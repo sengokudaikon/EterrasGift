@@ -40,6 +40,9 @@ fn tokens(check: bool) -> Result<(), String> {
         let path = str_field(icon, "path", name)?;
         outputs.push((ui_dir.join("icons").join(format!("{}.svg", icon_file(name))), svg(name, path)?));
     }
+    for (name, gradient) in radial_gradients(&json) {
+        outputs.push((ui_dir.join("gradients").join(format!("{}.svg", kebab(name))), radial_svg(gradient, name)?));
+    }
 
     let stale: Vec<&PathBuf> = outputs
         .iter()
@@ -53,6 +56,7 @@ fn tokens(check: bool) -> Result<(), String> {
         return Err(format!("generated tokens are out of date, run `cargo xtask tokens`: {stale:?}"));
     }
     fs::create_dir_all(ui_dir.join("icons")).map_err(|e| e.to_string())?;
+    fs::create_dir_all(ui_dir.join("gradients")).map_err(|e| e.to_string())?;
     for (path, text) in &outputs {
         fs::write(path, text).map_err(|e| format!("{path:?}: {e}"))?;
     }
@@ -118,6 +122,20 @@ fn slint_tokens(json: &Value) -> Result<String, String> {
     for (name, gradient) in section(json, "gradients")? {
         notes.emit(&mut out, gradient);
         out.prop("brush", name, &linear_gradient(gradient, name)?);
+    }
+    // Slint's radial gradients are centred circles, so an off-centre or elliptical one is an SVG of the whole ellipse,
+    // placed by its bounds over a ground of its last stop.
+    for (name, gradient) in radial_gradients(json) {
+        notes.emit(&mut out, gradient);
+        let ellipse = Ellipse::read(gradient, name)?;
+        let stops = radial_stops(gradient, name)?;
+        let ground = stops.last().map(|(_, color)| color.clone()).ok_or(format!("{name}: no stops"))?;
+        out.prop("image", &format!("{name}Image"), &format!("@image-url(\"gradients/{}.svg\")", kebab(name)));
+        out.prop("length", &format!("{name}X"), &format!("{}px", fmt(ellipse.cx - ellipse.rx)));
+        out.prop("length", &format!("{name}Y"), &format!("{}px", fmt(ellipse.cy - ellipse.ry)));
+        out.prop("length", &format!("{name}Width"), &format!("{}px", fmt(2.0 * ellipse.rx)));
+        out.prop("length", &format!("{name}Height"), &format!("{}px", fmt(2.0 * ellipse.ry)));
+        out.prop("brush", &format!("{name}Ground"), &ground);
     }
     for (name, value) in section(json, "numbers")? {
         notes.emit(&mut out, value);
@@ -203,6 +221,84 @@ fn linear_gradient(gradient: &Value, name: &str) -> Result<String, String> {
         stops.push(format!("{color} {}%", fmt(offset * 100.0)));
     }
     Ok(format!("@linear-gradient({}deg, {})", fmt(angle), stops.join(", ")))
+}
+
+fn radial_gradients(json: &Value) -> impl Iterator<Item = (&String, &Value)> {
+    json.get("radialGradients").and_then(Value::as_object).into_iter().flatten()
+}
+
+/// A radial gradient's ellipse in absolute pixels (Avalonia's `Center`, `RadiusX`, `RadiusY`).
+struct Ellipse {
+    cx: f64,
+    cy: f64,
+    rx: f64,
+    ry: f64,
+}
+
+impl Ellipse {
+    fn read(gradient: &Value, name: &str) -> Result<Ellipse, String> {
+        let center = str_field(gradient, "center", name)?;
+        if center.contains('%') {
+            return Err(format!("{name}: a relative centre ({center}) is not supported"));
+        }
+        let mut parts = center.split(',').map(|p| p.trim().parse::<f64>());
+        let (Some(Ok(cx)), Some(Ok(cy))) = (parts.next(), parts.next()) else {
+            return Err(format!("{name}: cannot read centre {center:?}"));
+        };
+        Ok(Ellipse {
+            cx,
+            cy,
+            rx: number_field(gradient, "radiusX", name)?,
+            ry: number_field(gradient, "radiusY", name)?,
+        })
+    }
+}
+
+fn number_field(token: &Value, field: &str, name: &str) -> Result<f64, String> {
+    token.get(field).and_then(Value::as_f64).ok_or(format!("{name}: no `{field}` number"))
+}
+
+/// Offsets and colours: the token's name for a named colour (for `tokens.slint`), with its hex value beside it.
+fn radial_stops(gradient: &Value, name: &str) -> Result<Vec<(f64, String)>, String> {
+    let mut stops = Vec::new();
+    for stop in gradient.get("stops").and_then(Value::as_array).ok_or(format!("{name}: no stops"))? {
+        let offset = stop.get("offset").and_then(Value::as_f64).ok_or(format!("{name}: stop without offset"))?;
+        let color = match stop.get("color").and_then(Value::as_str) {
+            Some(color) => kebab(color),
+            None => str_field(stop, "value", name)?.to_owned(),
+        };
+        stops.push((offset, color));
+    }
+    Ok(stops)
+}
+
+/// The whole ellipse as an SVG the size of its bounds: a circle gradient squeezed to the ellipse.
+fn radial_svg(gradient: &Value, name: &str) -> Result<String, String> {
+    let e = Ellipse::read(gradient, name)?;
+    let mut stops = String::new();
+    for stop in gradient.get("stops").and_then(Value::as_array).ok_or(format!("{name}: no stops"))? {
+        let offset = stop.get("offset").and_then(Value::as_f64).ok_or(format!("{name}: stop without offset"))?;
+        let value = str_field(stop, "value", name)?;
+        let (rgb, alpha) = if value.len() == 9 {
+            (&value[..7], u8::from_str_radix(&value[7..], 16).map_err(|e| e.to_string())?)
+        } else {
+            (value, 255)
+        };
+        let _ = write!(
+            stops,
+            "<stop offset=\"{}\" stop-color=\"{rgb}\" stop-opacity=\"{}\"/>",
+            fmt(offset),
+            fmt(f64::from(alpha) / 255.0)
+        );
+    }
+    Ok(format!(
+        "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"{w}\" height=\"{h}\" viewBox=\"0 0 {w} {h}\"><defs><radialGradient id=\"g\" gradientUnits=\"userSpaceOnUse\" cx=\"{rx}\" cy=\"{ry}\" r=\"{rx}\" gradientTransform=\"translate(0 {ry}) scale(1 {k}) translate(0 -{ry})\">{stops}</radialGradient></defs><rect width=\"{w}\" height=\"{h}\" fill=\"url(#g)\"/></svg>{NEWLINE}",
+        w = fmt(2.0 * e.rx),
+        h = fmt(2.0 * e.ry),
+        rx = fmt(e.rx),
+        ry = fmt(e.ry),
+        k = fmt(e.ry / e.rx),
+    ))
 }
 
 /// One icon as an SVG whose view box is the path's own bounds, so it fills its box as Avalonia's `PathIcon` stretches
