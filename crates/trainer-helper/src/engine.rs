@@ -165,6 +165,32 @@ unsafe fn read_item_limits() -> Response {
     }
 }
 
+unsafe fn read_locale() -> Response {
+    // SAFETY: captured Unity main thread, after the original callback returned. The
+    // bootstrap retains the initialized runtime and trusted method implementations.
+    // RuntimeAccess first gates offline/native-manager life, then requires an already
+    // completed locale selection. Only audited identifier/code/version getters run;
+    // metadata setup, GC allocation, Application's framework .cctor/CTS store, the
+    // version internal-call cache and native return-buffer allocation/disposal are
+    // permitted. Read-only here means no gameplay mutation, not zero side effects.
+    unsafe {
+        let result = (|| {
+            let module = module().map_err(|error| server::failure(ResponseCode::Failed, error))?;
+            let (api, access) = apis(module).map_err(|error| server::failure(ResponseCode::Failed, error))?;
+            let invocation = raw::InvocationApi::resolve(|name| export(module, name)).map_err(|error| server::failure(ResponseCode::Failed, error.to_string()))?;
+            let thread = ThreadContext::new(api);
+            let attached = thread.attach().map_err(|error| server::failure(ResponseCode::NotReady, error.to_string()))?;
+            let locale = access.read_game_locale(&attached, invocation).map_err(map_discovery)?;
+            let payload = eg_game_access::locale::encode(&locale).map_err(|error| server::failure(ResponseCode::Failed, error.to_string()))?;
+            Ok::<_, Response>(Response {
+                code: ResponseCode::Done,
+                payload,
+            })
+        })();
+        result.unwrap_or_else(|error| error)
+    }
+}
+
 unsafe extern "C-unwind" fn callback(method: *const MethodInfo) {
     let state = state();
     state.metrics[2].fetch_add(1, SeqCst);
@@ -208,6 +234,7 @@ fn after_original(state: &Shared) {
                 // SAFETY: same main-thread and per-operation graph ownership contract above.
                 Request::ReadForge { .. } => unsafe { read_forge() },
                 Request::ReadItemLimits { .. } => unsafe { read_item_limits() },
+                Request::ReadLocale { .. } => unsafe { read_locale() },
                 // No feature installation API exists. Empty is the truthful complete feature set.
                 Request::ClearHooks { .. } => Response {
                     code: ResponseCode::Done,

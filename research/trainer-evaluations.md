@@ -414,3 +414,65 @@ Actual locale capture next needs an independent audit of the target's `LocaleIde
 `LocalizationSettings.get_SelectedLocale`, `Locale.get_Identifier`, `LocaleIdentifier.get_Code` and
 `Application.get_version` bodies/signatures and initialization. The C++ helper's call chain identifies behavior;
 it does not itself prove those execution contracts. No locale protocol request or catalog has been promoted here.
+
+## Completed locale/version capture, 2026-10-19
+
+The actual artifact audit disproves two assumptions that the earlier mechanical fixture could not settle.
+`UnityEngine.Localization.LocaleIdentifier` has **two** reference fields, `m_Code:String` and
+`m_CultureInfo:CultureInfo`, giving an independently derived x64 payload size/alignment of **16/8**. Native
+`Locale.get_Identifier` at GameAssembly RVA `0xB940D0` copies 16 bytes from the Locale's identifier field; `get_Code`
+at `0x3E3910` is a pointer load from its unboxed receiver. The earlier one-field `LocaleCode` fixture remains valid
+mechanical coverage but was not the target's actual layout.
+
+The legacy `LocalizationSettings.get_SelectedLocale` (`0x193C730`) delegates to `GetSelectedLocale` (`0x3C6A3D0`).
+That calls `GetSelectedLocaleAsync`, checks IsDone and can call WaitForCompletion. `GetSelectedLocaleAsync`
+(`0x3C6A110`) can create operations and replace the selected handle, while `get_Instance` can create settings.
+Invoking those getters blindly would not be a bounded observation. `m_ProjectLocale` is a project default, not a
+valid fallback for the user's selected language.
+
+The new operation reads `LocalizationSettings.s_Instance` without invoking its property, roots it and checks its
+native pointer. The 24-byte/8-aligned `m_SelectedLocaleAsync` value is boxed through public field_get_value_object,
+rooted, and read through metadata. Its declared `m_InternalOp:AsyncOperationBase<Locale>` supplies the exact closed
+generic base. The reader uses that base's FieldInfo values (avoiding derived shadow fields), requires matching
+handle/operation versions, `m_Status == Succeeded`, positive `m_referenceCount`, and exact Locale type on
+`<Result>k__BackingField`. Result and Locale are rooted before later metadata/allocation, with Locale native
+liveness checked. It never copies the generic handle into a Rust struct or calls its generic methods.
+
+Only the audited Identifier/Code getters and `Application.get_version` then run through checked invocation. Identifier
+is an opaque exact 16/8 return box. Boxing may class-initialize its class; handle/identifier types with `.cctor` are
+refused before that boxing path. A non-enum status type is rejected before calling enum_basetype. Strings are copied
+under strict UTF-16/UTF-8 and 4096-byte limits. No settings, pending/stale/failed selection or null result returns
+NotReady before Identifier/Code; metadata/text failures and managed exceptions fail the whole request.
+
+Application.version needs an explicit effects contract. Native RVA `0x3F7D410` can initialize Application's framework
+class, cache an internal call and marshal/dispose a native return buffer. The actual `.cctor` (`0x3F7BD70`) allocates
+and stores a CancellationTokenSource, with a GC barrier. UnityPlayer's paired name/function registration tables
+(`0x1EAE230` / `0x1EB5F10`, slot 418) bind `UnityEngine.Application::get_version_Injected` to RVA `0xF134E0`, which
+reads the application-info version field and builds the return string/span. This is read-only with respect to
+gameplay, not zero side effects or a proof that all engine internals are pure. Initialized engine/main-thread,
+trusted body/callee/class-initializer permissions and stable runtime/object graphs remain unsafe preconditions.
+
+Ordinary Cecil/PE/LLVM tools produced this static evidence, not REA Evidence. The REA tools remain unavailable in
+this session, with the earlier Node/registration/provider blocker unchanged. GameAssembly/current snapshot SHA256
+and generator config SHA512 agree. Cached dummy assemblies are metadata/address candidates, not native method
+bodies; config agreement corroborates provenance without authenticating the cache. Generic FieldOffset values in
+that cache are zero placeholders and were not used as closed runtime offsets. Native unwind entries can split a
+semantic function; excerpt/segment hashes do not claim whole-function coverage.
+
+Protocol **24** adds `ReadLocale` operation **20**. Its owned payload is language/version, each an LE-u32 UTF-8 byte
+length plus strict bounded text. Language must be nonblank, and version may be empty as in the original identity.
+The shared Ready/log/profile/runtime-offline/session-cancellation/no-replay rules apply. No locale disk cache or
+full definitions capture is implied. The explicit live evaluator now has opt-in `--read-locale` and
+`--read-item-limits` flags, with complete reported results and the existing cleanup/restoration behavior.
+
+Both authored Unity startup routes pass. Separate authored Unity.Localization/Unity.ResourceManager assemblies
+model the real graph, with tripwires on initialization/selection/waiting methods and a real Application.version
+whose authored bundle version is independently fixed. The Unicode locale survives GC, changes language with stable
+version and retains older owned copies. Five unready and four malformed/throwing cases verify full refusal,
+no getters for unready states, Session revocation/no followup I/O and explicit reconnect/recovery. Each route
+accepts 102 requests and runs 82 commands on its captured engine thread, with zero forbidden calls/errors/wrong-thread
+entries, restored entry/stopped server, three later frames, normal exit and unchanged player files.
+
+Five codec, five runtime-helper and four session tests bring the foundation count to 138 on stable/nightly release.
+[Exact audit/build/run evidence and current live scope](../tools/trainer-eval/persistent-player/locale-report.json).
+Full affix/unique/base definitions, numeric property/formatting contracts and mappings remain separate work.

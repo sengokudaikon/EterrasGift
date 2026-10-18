@@ -6,9 +6,9 @@ The app/UI do not use these services yet. The companion remains independent.
 
 ## Implemented subset
 
-Protocol 23 requests are discovery (6), status (7), clearing all gameplay hooks (15 with count 0 and **no tail**),
-the read-only forge snapshot (18), and literal item limits (19). The original C# app reads the snapshot externally;
-the Rust extensions deliberately increment the handshake version, so protocol 21/22 peers are rejected. The separate
+Protocol 24 requests are discovery (6), status (7), clearing all gameplay hooks (15 with count 0 and **no tail**),
+the read-only forge snapshot (18), literal item limits (19), and completed locale/version capture (20).
+The Rust extensions deliberately increment the handshake version, so older peers are rejected. The separate
 [Rust helper](../trainer-helper/README.md) implements the persistent server and runtime handlers.
 Item/field writes, enabling gameplay features, full definitions capture and production injection are not implemented
 here. `protocol::Request::decode` deliberately rejects other operations and nonzero reserved
@@ -42,6 +42,14 @@ owned ranges for forging potential, legendary potential, Weaver's Will, Weaver's
 The helper reads exact Int32 metadata literals, rechecks runtime admission and rejects changed types/flags or
 out-of-byte/reversed ranges. It does not invoke game methods or claim a localized catalog. The caller must retain
 the process/build profile alongside these ranges; raw ranges have no standalone cache identity.
+
+`read_locale` shares those session rules. It returns owned language and application-version strings, preserving their
+case and text with no fabricated locale. The helper requires an already completed, current selected-locale operation
+and live Settings/Locale native objects. It never calls settings initialization, locale-selection or waiting methods.
+Only the audited identifier/code/version getters execute; the latter permits framework initialization and allocation
+effects. Unready data and failures revoke the session and require explicit reconnection, without automatic replay.
+The payload is two LE-u32-length strict UTF-8 texts, capped at 4096 bytes each. Language must be nonblank; an empty
+application version remains valid as in the original identity model. This is not full definitions capture.
 
 Read failure drops the cached attachment and blocks further reads until an explicit new handshake. Offline-required
 revokes it as usual. A canceled read remains Connecting, with no cached runtime status, until explicit disconnect.
@@ -121,8 +129,10 @@ then mappings and per-operation write/readback with independent effect cleanup b
 The older frame-count probe remains separate.
 The opt-in boxed-return/Int32-enum invocation contracts now pass authored standalone IL2CPP execution on the matching
 runtime with GC on/off. See the [value-type evidence](../../tools/trainer-eval/unity-rust-host/value-types-report.json).
-Actual game locale layout/getter bodies and per-operation signatures still require their own validation before a
-localized catalog can use those mechanics. The session protocol remains 23; no locale/capture request was added.
+The subsequent [locale capture checkpoint](../../tools/trainer-eval/persistent-player/locale-report.json) audits the
+actual identifier layout and getter bodies, then validates protocol 24 capture through both authored Unity startup
+routes. It observes completed selection fields to avoid the legacy getter's blocking/initialization behavior.
+The real game's locale capture remains a separate live check; full localized definitions and mappings come next.
 Validation commands, counts and the retained log/source index are in [validation.json](validation.json).
 
 Windows API contract: [GetNamedPipeServerProcessId](https://learn.microsoft.com/en-us/windows/win32/api/winbase/nf-winbase-getnamedpipeserverprocessid).

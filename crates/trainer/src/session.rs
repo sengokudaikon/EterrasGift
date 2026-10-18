@@ -7,6 +7,7 @@ use eg_core::game_log::GameReadiness;
 use eg_game_access::{
     definitions::{self, ItemLimits},
     forge::{self, ForgeSnapshot},
+    locale::{self, GameLocale},
     process::ProcessIdentity,
     protocol::{Discovery, DispatcherSpec, HookState, ProtocolError, Request, ResponseCode, RuntimeStatus},
     transport::{Delivery, Transport, TransportError, TransportFailure},
@@ -213,6 +214,11 @@ impl<T: Transport, L: LogSource> Session<T, L> {
     /// profile is revalidated on every read, and the helper independently gates it.
     pub async fn read_item_limits(&mut self, now: Timestamp) -> Result<ItemLimits, SessionError> {
         self.read_owned(now, |dispatcher| Request::ReadItemLimits { dispatcher }, definitions::decode).await
+    }
+    /// Read only an already-completed runtime locale selection and the game application version.
+    /// This does not start localization or wait for its asynchronous initialization.
+    pub async fn read_locale(&mut self, now: Timestamp) -> Result<GameLocale, SessionError> {
+        self.read_owned(now, |dispatcher| Request::ReadLocale { dispatcher }, locale::decode).await
     }
     async fn read_owned<R>(&mut self, now: Timestamp, request: fn(DispatcherSpec) -> Request, decode: fn(&[u8]) -> Result<R, ProtocolError>) -> Result<R, SessionError> {
         if matches!(self.state, SessionState::Connecting | SessionState::Closing) {

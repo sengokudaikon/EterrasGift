@@ -28,7 +28,7 @@ Status roots the manager wrapper, checks assignability and reads its metadata-va
 It also reads the independent runtime online flag. No native Unity-object pointer is dereferenced.
 Returned manager addresses are ephemeral observations, never managed-object ownership tokens.
 
-Protocol 23 supports ReadForge (18) and ReadItemLimits (19), alongside Discover, Status and an empty ClearHooks. The forge wire model
+Protocol 24 supports ReadForge (18), ReadItemLimits (19) and ReadLocale (20), alongside Discover, Status and an empty ClearHooks. The forge wire model
 is in `eg-game-access::forge`. The read traverses rooted containers on the engine thread, validates
 exact scalar/reference classes, enum storage and array/list element types, and copies every value
 into owned Rust storage. Enum identities come from their actual field metadata, supporting nested
@@ -45,6 +45,21 @@ original helper. Runtime offline/native-manager admission runs first, independen
 The returned owned ranges omit localization, rarity names and the rest of the definitions catalog.
 Their exact 40-byte codec is `eg-game-access::definitions`. Older protocol versions are rejected.
 
+`ReadLocale` observes `LocalizationSettings.s_Instance` and its already completed selected-locale operation.
+The generic handle is boxed through the public field API and rooted; its operation must have matching versions,
+Succeeded status and a positive reference count. The declared result field must be exactly Locale. Settings and
+Locale wrappers must both have live native pointers. Uninitialized, pending, stale, failed and empty selections
+return NotReady, without invoking settings/selection/initialization/waiting methods. Metadata/layout failures fail
+the whole read. All objects, including the handle and returned identifier box, stay rooted through copying.
+
+Only the audited Locale.Identifier, LocaleIdentifier.Code and Application.version getters run. The real identifier
+has **two references, 16-byte payload and 8-byte alignment**; the earlier one-field invocation fixture was not its
+layout. The version getter may initialize Application's framework CancellationTokenSource, cache an internal call,
+allocate/convert strings and dispose a native buffer. These are explicitly authorized effects; read-only means no
+gameplay mutation. Body permissions and immutable runtime/graph/native-object lifetimes remain unsafe obligations.
+The owned language/version payload uses two bounded strict UTF-8 texts (`eg-game-access::locale`). There is no
+fallback to the project default locale and no locale/catalog disk cache yet.
+
 The complete feature set is currently empty:
 `features_on = 0` and clear replies contain count zero. No gameplay hook can be enabled and no item,
 stat or other gameplay field can be written through this helper. Before adding effects, their
@@ -54,7 +69,7 @@ The local pipe is `eterras-gift-<PID>`, one strict 336-byte request per connecti
 Discover claims ownership using the kernel-reported client PID and a retained process handle/start
 time. Normal per-request EOF preserves ownership. Other living processes receive Refused without
 reaching the backend; process death relinquishes ownership. This strengthens the original helper's
-ownership model. Protocol 23 still has no nonce or authentication against code in the same process.
+ownership model. Protocol 24 still has no nonce or authentication against code in the same process.
 
 Admission and request waits observe shutdown/process death. A five-second main-thread deadline or
 disconnect cancels pending work when possible. Once started, the request retains its dispatcher

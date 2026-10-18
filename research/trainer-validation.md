@@ -509,3 +509,22 @@ Workspace verification/captures and isolated host Clippy/format checks pass. Thi
 mechanics, with no protocol change or game operation. Actual game locale layout, getter bodies, initialization
 and engine permission remain separate validation work. Full collections with incremental GC enabled do not prove
 arbitrary marking-phase interleaving or strict barriers; existing unsafe runtime/body ownership contracts remain.
+
+## Completed locale capture checkpoint
+
+The actual locale audit identifies a two-reference 16/8 LocaleIdentifier, and proves that SelectedLocale can create
+work and wait synchronously. The reader therefore observes the already-completed handle graph through typed public
+field APIs. It checks operation/result identity, version/status/reference count, native wrapper life and no-cctor
+boxing before invoking only the audited Identifier/Code and Application.version getters. The latter explicitly
+permits framework initialization, internal-call caching and allocation/disposal; no gameplay mutation is requested.
+
+Protocol 24 operation 20 returns owned bounded strict language/version texts through the shared gated session.
+Both authored Unity startup routes pass GC, language changes, five unready and four malformed/throwing cases,
+explicit recovery and forbidden-initialization/selection/wait tripwires. Each accepts 102 requests and completes 82
+main-thread commands, with no wrong-thread/error/forbidden call, restoration/server stop, later frames and normal
+exit. The runtime fixture uses actual Application.version and separate game-shaped localization assemblies.
+
+All 138 foundation cases pass on stable/nightly release, plus existing architecture/lifetime, eight bootstrap
+preflight checks, isolated controller checks and workspace verification/captures. Static native/metadata outputs are
+ordinary tool observations, not REA Evidence or executed native-body proof. See
+[locale-report.json](../tools/trainer-eval/persistent-player/locale-report.json) for exact artifacts, hashes and live scope.

@@ -3,6 +3,7 @@ use eg_core::game_log::{GameLogEvent, GameLogState, GameLogStatus, GameReadiness
 use eg_game_access::{
     definitions::{self, ItemLimits, ValueRange},
     forge::{self, AffixSnapshot, ForgeSnapshot, ItemStatus},
+    locale::{self, GameLocale},
     process::ProcessIdentity,
     protocol::{Discovery, DispatcherSpec, ProtocolError, REQUIRED_KEYS, Request, Response, ResponseCode, RuntimeStatus},
     transport::{Delivery, Transport, TransportError, TransportFailure},
@@ -1219,4 +1220,143 @@ fn canceled_literal_limits_read_blocks_both_read_operations_until_explicit_disco
     assert_eq!(run(session.disconnect()), Cleanup::ConfirmedOff);
     assert_eq!(session.state(), SessionState::Disconnected);
     assert_eq!(wire.requests()[3], Request::ClearHooks { dispatcher: fixture.dispatcher });
+}
+
+#[test]
+fn locale_requires_ready_and_returns_owned_changed_language_with_stable_version() {
+    let fixture = Fixture::new();
+    let first = GameLocale {
+        language: "en-Ω-🌿".into(),
+        game_version: "23.7.137-fixture".into(),
+    };
+    let changed = GameLocale {
+        language: "sr-Latn-RS".into(),
+        ..first.clone()
+    };
+    let wire = FakeTransport::new(fixture.target.clone(), []);
+    let log = FakeLog::new([offline()]);
+    let mut session = fixture.session(&wire, &log, GatePolicy::Release);
+    assert!(matches!(run(session.read_locale(now())), Err(SessionError::Disabled)));
+    session.enable();
+    assert!(matches!(run(session.read_locale(now())), Err(SessionError::NotConnected)));
+    assert!(wire.requests().is_empty());
+    for step in [
+        fixture.discover(),
+        status(false, 0x1234, 0),
+        done(locale::encode(&first).unwrap()),
+        done(locale::encode(&changed).unwrap()),
+    ] {
+        wire.push(step);
+    }
+    run(session.connect(now())).unwrap();
+    let initial = run(session.read_locale(now())).unwrap();
+    assert_eq!(initial, first);
+    assert_eq!(run(session.read_locale(now())).unwrap(), changed);
+    assert_eq!(initial, first);
+    assert_eq!(session.state(), SessionState::Ready);
+    assert_eq!(wire.requests()[2], Request::ReadLocale { dispatcher: fixture.dispatcher });
+    assert_eq!(wire.requests()[3], Request::ReadLocale { dispatcher: fixture.dispatcher });
+    drop(session);
+    assert_eq!(initial.language, "en-Ω-🌿");
+}
+
+#[test]
+fn unready_or_malformed_locale_requires_explicit_reconnect_without_replay() {
+    for step in [
+        done(vec![1, 0, 0, 0, b'e']),
+        Step::Reply(Ok(Response {
+            code: ResponseCode::NotReady,
+            payload: b"selection operation pending".to_vec(),
+        })),
+        Step::Reply(Ok(Response {
+            code: ResponseCode::OfflineRequired,
+            payload: b"runtime online".to_vec(),
+        })),
+        Step::Reply(Err(TransportError {
+            delivery: Delivery::MayHaveRun,
+            failure: TransportFailure::Timeout,
+        })),
+    ] {
+        let fixture = Fixture::new();
+        let wire = FakeTransport::new(fixture.target.clone(), [fixture.discover(), status(false, 0x1234, 0), step]);
+        let log = FakeLog::new([offline()]);
+        let mut session = fixture.session(&wire, &log, GatePolicy::Release);
+        session.enable();
+        run(session.connect(now())).unwrap();
+        assert!(run(session.read_locale(now())).is_err());
+        assert_eq!(session.runtime_status(), None);
+        assert_eq!(session.cleanup(), Cleanup::Unconfirmed);
+        assert!(matches!(run(session.read_locale(now())), Err(SessionError::NotConnected)));
+        assert!(matches!(run(session.read_forge(now())), Err(SessionError::NotConnected)));
+        assert_eq!(wire.requests().len(), 3);
+        let expected = GameLocale {
+            language: "ja-JP".into(),
+            game_version: String::new(),
+        };
+        for step in [fixture.discover(), status(false, 0x1234, 0), done(locale::encode(&expected).unwrap())] {
+            wire.push(step);
+        }
+        run(session.connect(now())).unwrap();
+        assert_eq!(run(session.read_locale(now())).unwrap(), expected);
+        assert_eq!(wire.requests().len(), 6);
+    }
+}
+
+#[test]
+fn locale_discards_inflight_reply_after_admission_loss_and_rechecks_artifacts() {
+    for change_artifact in [false, true] {
+        let fixture = Fixture::new();
+        let log = FakeLog::new([offline()]);
+        let changed_log = log.clone();
+        let wire = FakeTransport::new(
+            fixture.target.clone(),
+            [
+                fixture.discover(),
+                status(false, 0x1234, 0),
+                Step::Action(
+                    Box::new(move || changed_log.set(online())),
+                    Response {
+                        code: ResponseCode::Done,
+                        payload: locale::encode(&GameLocale {
+                            language: "en-US".into(),
+                            game_version: "1.5".into(),
+                        })
+                        .unwrap(),
+                    },
+                ),
+            ],
+        );
+        let mut session = fixture.session(&wire, &log, GatePolicy::Release);
+        session.enable();
+        run(session.connect(now())).unwrap();
+        if change_artifact {
+            fs::write(&fixture.binary, b"changed before locale read").unwrap();
+            assert!(matches!(run(session.read_locale(now())), Err(SessionError::Identity(_))));
+        } else {
+            assert!(matches!(run(session.read_locale(now())), Err(SessionError::Gate(_))));
+        }
+        assert_eq!(session.runtime_status(), None);
+        assert_eq!(wire.requests().len(), if change_artifact { 2 } else { 3 });
+        assert!(run(session.read_locale(now())).is_err());
+        assert_eq!(wire.requests().len(), if change_artifact { 2 } else { 3 });
+    }
+}
+
+#[test]
+fn canceled_locale_read_preserves_shared_busy_barrier_until_disconnect() {
+    let fixture = Fixture::new();
+    let wire = FakeTransport::new(fixture.target.clone(), [fixture.discover(), status(false, 0x1234, 0), Step::Pending, clear()]);
+    let log = FakeLog::new([offline()]);
+    let mut session = fixture.session(&wire, &log, GatePolicy::Release);
+    session.enable();
+    run(session.connect(now())).unwrap();
+    let mut reading = Box::pin(session.read_locale(now()));
+    assert!(matches!(reading.as_mut().poll(&mut Context::from_waker(Waker::noop())), Poll::Pending));
+    drop(reading);
+    assert_eq!(session.state(), SessionState::Connecting);
+    assert!(matches!(run(session.read_locale(now())), Err(SessionError::Busy)));
+    assert!(matches!(run(session.read_item_limits(now())), Err(SessionError::Busy)));
+    assert!(matches!(run(session.read_forge(now())), Err(SessionError::Busy)));
+    assert_eq!(wire.requests().len(), 3);
+    assert_eq!(run(session.disconnect()), Cleanup::ConfirmedOff);
 }

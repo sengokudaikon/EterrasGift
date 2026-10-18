@@ -1,4 +1,4 @@
-//! Pure, bounded codecs for protocol 23: control, read-only forge snapshots and literal item limits.
+//! Pure, bounded codecs for protocol 24: control and bounded read-only game observations.
 //!
 //! Decoding establishes wire validity only. Process identity, helper provenance,
 //! dispatcher code, and permission to run a request belong to the session layer.
@@ -6,8 +6,8 @@
 use std::{collections::BTreeMap, error::Error, fmt};
 
 pub const MAGIC: u32 = 0x4546_4735;
-/// Version 23 adds ReadItemLimits (19); older helpers are incompatible.
-pub const VERSION: u32 = 23;
+/// Version 24 adds ReadLocale (20); older helpers are incompatible.
+pub const VERSION: u32 = 24;
 pub const ADAPTER: &str = "il2cpp-x64-v1";
 pub const REQUEST_SIZE: usize = 336;
 pub const RESPONSE_HEADER_SIZE: usize = 12;
@@ -55,6 +55,10 @@ pub enum Request {
     ReadItemLimits {
         dispatcher: DispatcherSpec,
     },
+    /// Reads the completed locale selection and application version, without starting selection.
+    ReadLocale {
+        dispatcher: DispatcherSpec,
+    },
 }
 
 impl Request {
@@ -67,6 +71,7 @@ impl Request {
             Self::ClearHooks { dispatcher } => (15, Some(dispatcher)),
             Self::ReadForge { dispatcher } => (18, Some(dispatcher)),
             Self::ReadItemLimits { dispatcher } => (19, Some(dispatcher)),
+            Self::ReadLocale { dispatcher } => (20, Some(dispatcher)),
         };
         bytes[4..8].copy_from_slice(&operation.to_le_bytes());
         if let Some(dispatcher) = dispatcher {
@@ -100,6 +105,7 @@ impl Request {
             15 => Ok(Self::ClearHooks { dispatcher }),
             18 => Ok(Self::ReadForge { dispatcher }),
             19 => Ok(Self::ReadItemLimits { dispatcher }),
+            20 => Ok(Self::ReadLocale { dispatcher }),
             _ => Err(ProtocolError::InvalidData),
         }
     }

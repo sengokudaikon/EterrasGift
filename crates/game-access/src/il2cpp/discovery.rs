@@ -16,6 +16,7 @@ use std::{
 
 mod forge;
 mod limits;
+mod locale;
 
 type Ptr = *mut c_void;
 type Class = *mut raw::Class;
@@ -123,6 +124,7 @@ exports! {
     field_offset: "il2cpp_field_get_offset" => unsafe extern "C-unwind" fn(Ptr) -> usize,
     static_get: "il2cpp_field_static_get_value" => unsafe extern "C-unwind" fn(Ptr, Ptr),
     field_get: "il2cpp_field_get_value" => unsafe extern "C-unwind" fn(*mut raw::Object, Ptr, Ptr),
+    field_get_object: "il2cpp_field_get_value_object" => unsafe extern "C-unwind" fn(Ptr, *mut raw::Object) -> *mut raw::Object,
     type_name: "il2cpp_type_get_name" => unsafe extern "C-unwind" fn(Type) -> *mut c_char,
     runtime_free: "il2cpp_free" => unsafe extern "C-unwind" fn(Ptr),
     type_class: "il2cpp_class_from_il2cpp_type" => raw::ClassFromType,
