@@ -29,17 +29,24 @@ fn control_requests_match_the_packed_native_layout() {
     assert_eq!(Request::decode(&golden), Ok(clear));
     golden.push(0);
     assert_eq!(Request::decode(&golden), Err(ProtocolError::InvalidData));
+    golden.pop();
+    golden[4] = 18;
+    let read_forge = Request::ReadForge { dispatcher: dispatcher() };
+    assert_eq!(read_forge.encode(), golden);
+    assert_eq!(Request::decode(&golden), Ok(read_forge));
 }
 
 #[test]
 fn requests_reject_reserved_fields_and_unsupported_operations() {
     let source = Request::Status { dispatcher: dispatcher() }.encode();
-    for position in (8..48).chain(72..REQUEST_SIZE) {
-        let mut bytes = source.clone();
-        bytes[position] = 1;
-        assert!(Request::decode(&bytes).is_err(), "reserved byte {position}");
+    for request in [Request::Status { dispatcher: dispatcher() }, Request::ReadForge { dispatcher: dispatcher() }] {
+        for position in (8..48).chain(72..REQUEST_SIZE) {
+            let mut bytes = request.encode();
+            bytes[position] = 1;
+            assert!(Request::decode(&bytes).is_err(), "reserved byte {position}");
+        }
     }
-    for operation in [0_u32, 1, 2, 3, 4, 5, 8, 14, 16, 17, u32::MAX] {
+    for operation in [0_u32, 1, 2, 3, 4, 5, 8, 14, 16, 17, 19, u32::MAX] {
         let mut bytes = source.clone();
         bytes[4..8].copy_from_slice(&operation.to_le_bytes());
         assert!(Request::decode(&bytes).is_err());
@@ -138,7 +145,7 @@ fn text(out: &mut Vec<u8>, value: &str) {
 
 /// Independently authored native appendInt/appendText wire format.
 fn discovery_payload(keys: &[&str]) -> Vec<u8> {
-    let mut out = 21_i32.to_le_bytes().to_vec();
+    let mut out = 22_i32.to_le_bytes().to_vec();
     text(&mut out, &"aB12".repeat(16));
     text(&mut out, "il2cpp-x64-v1");
     out.extend_from_slice(&678_i32.to_le_bytes());
@@ -182,7 +189,7 @@ fn discovery_matches_native_handshake_and_requires_all_fields() {
 fn discovery_rejects_incompatible_and_malformed_fields() {
     let golden = discovery_payload(&KEYS);
     let mut wire = golden.clone();
-    wire[..4].copy_from_slice(&20_i32.to_le_bytes());
+    wire[..4].copy_from_slice(&21_i32.to_le_bytes());
     assert_eq!(Discovery::decode(&wire, 678), Err(ProtocolError::IncompatibleVersion));
     wire = golden.clone();
     // version, build text length, 64 build bytes, adapter text length.

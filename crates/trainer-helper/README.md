@@ -1,8 +1,9 @@
 # Retained Rust control helper
 
 `eg-trainer-helper` is the explicitly started, in-process side of the trainer. It builds a Windows
-x64 DLL and has no loader-lock initialization, injection API or app/UI wiring. The authored Unity
-player calls `eg_helper_start(main_tid)` from its established engine main thread after initialization.
+x64 DLL and has no loader-lock initialization or app/UI wiring. The authored Unity player calls
+`eg_helper_start(main_tid)` from its established engine main thread after initialization. The evaluation controller
+also tests the explicit `eg_helper_bootstrap` native-thread entry after standard DLL loading.
 The caller must satisfy the unsafe startup contract; this is not a generic Unity-version adapter.
 
 The dedicated control OS thread owns its IL2CPP attachment and a current-thread Tokio runtime.
@@ -27,7 +28,16 @@ Status roots the manager wrapper, checks assignability and reads its metadata-va
 It also reads the independent runtime online flag. No native Unity-object pointer is dereferenced.
 Returned manager addresses are ephemeral observations, never managed-object ownership tokens.
 
-Only Discover, Status and an empty ClearHooks exist. The complete feature set is currently empty:
+Protocol 22 adds ReadForge (18) to Discover, Status and an empty ClearHooks. Its bounded wire model
+is in `eg-game-access::forge`. The read traverses rooted containers on the engine thread, validates
+exact scalar/reference classes, enum storage and array/list element types, and copies every value
+into owned Rust storage. Enum identities come from their actual field metadata, supporting nested
+and namespaced declarations. Strings use bounded strict UTF-16/UTF-8. Affixes are limited to 32,
+implicit rolls to three, unique/set rolls to eight; List capacity may exceed count, bounded to 4096.
+The main-thread copy requires no concurrent mutation of the graph or native-manager destruction.
+Runtime offline/native-manager checks precede item-graph access. No game methods are invoked.
+
+The complete feature set is currently empty:
 `features_on = 0` and clear replies contain count zero. No gameplay hook can be enabled and no item,
 stat or other gameplay field can be written through this helper. Before adding effects, their
 runtime-offline/owner-loss cleanup must run and acknowledge completion on the engine thread.
@@ -36,7 +46,7 @@ The local pipe is `eterras-gift-<PID>`, one strict 336-byte request per connecti
 Discover claims ownership using the kernel-reported client PID and a retained process handle/start
 time. Normal per-request EOF preserves ownership. Other living processes receive Refused without
 reaching the backend; process death relinquishes ownership. This strengthens the original helper's
-ownership model. Protocol 21 still has no nonce or authentication against code in the same process.
+ownership model. Protocol 22 still has no nonce or authentication against code in the same process.
 
 Admission and request waits observe shutdown/process death. A five-second main-thread deadline or
 disconnect cancels pending work when possible. Once started, the request retains its dispatcher
@@ -50,6 +60,15 @@ unwind table, helper module and GameAssembly remain retained until process exit.
 including after failure. A worker panic may leave the entry installed with a stop-only forwarding
 callback; cleanup then remains unconfirmed. The public server future must be driven to completion:
 dropping it cannot run asynchronous shutdown/restoration.
+
+The evaluation bootstrap uses an exact 112-byte config with process/main-thread/source identity and
+start/stop/observation operations. OS thread ownership/name only corroborates the caller's established
+Unity main-thread identity. A stop returns addresses of three retained atomic counters so the external
+controller can poll with process reads, without creating threads during patch restoration. Counter
+values and original entry/unwind bytes are checked independently. The source-ID DLL filename allows
+a distinct generation after a sole older generation is explicitly proven stopped and queried again;
+all older modules remain retained. Repeated startup of the same generation is refused. This is an
+experimental evaluator, not desktop-app injection or a general reload/unload mechanism.
 
 `eg_helper_build_id()` returns 64 lowercase ASCII hex characters plus NUL. The build script hashes
 relative paths and contents of the manifests, lockfile and Rust sources of core, game access, trainer

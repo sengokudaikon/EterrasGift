@@ -14,6 +14,8 @@ use std::{
     ptr::NonNull,
 };
 
+mod forge;
+
 type Ptr = *mut c_void;
 type Class = *mut raw::Class;
 type Method = *const raw::MethodInfo;
@@ -25,6 +27,7 @@ pub enum DiscoveryError {
     MissingExport(raw::MissingExport),
     Runtime(RuntimeError),
     NotReady(&'static str),
+    OfflineRequired,
     Contract(String),
 }
 
@@ -34,6 +37,7 @@ impl std::fmt::Display for DiscoveryError {
             Self::MissingExport(error) => error.fmt(f),
             Self::Runtime(error) => error.fmt(f),
             Self::NotReady(reason) => write!(f, "IL2CPP runtime is not ready: {reason}"),
+            Self::OfflineRequired => f.write_str("An offline character with a live item manager is required"),
             Self::Contract(contract) => write!(f, "Unsupported IL2CPP runtime contract: {contract}"),
         }
     }
@@ -55,6 +59,8 @@ macro_rules! exports {
         #[derive(Clone, Copy)]
         pub struct RuntimeAccess { $($field: $signature),+ }
         impl RuntimeAccess {
+            #[cfg(test)]
+            fn test_stubs() -> Self { Self { $($field: <$signature as TestExportStub>::test_stub()),+ } }
             /// Resolve the complete metadata/status export table.
             ///
             /// # Safety
@@ -73,6 +79,32 @@ macro_rules! exports {
     };
 }
 
+// Every test stub has its field's actual ABI/signature and fails if an unexpected export is
+// reached. Unlike casting one catch-all address, this does not manufacture mismatched functions.
+#[cfg(test)]
+trait TestExportStub {
+    fn test_stub() -> Self;
+}
+#[cfg(test)]
+macro_rules! test_export_stubs {
+    ($($argument:ident),*) => {
+        impl<$($argument,)* R> TestExportStub for unsafe extern "C-unwind" fn($($argument),*) -> R {
+            fn test_stub() -> Self {
+                unsafe extern "C-unwind" fn unexpected<$($argument,)* R>($(_: $argument),*) -> R { panic!("unexpected metadata export"); }
+                unexpected::<$($argument,)* R>
+            }
+        }
+    };
+}
+#[cfg(test)]
+test_export_stubs!();
+#[cfg(test)]
+test_export_stubs!(A);
+#[cfg(test)]
+test_export_stubs!(A, B);
+#[cfg(test)]
+test_export_stubs!(A, B, C);
+
 exports! {
     domain_get: "il2cpp_domain_get" => raw::DomainGet,
     assemblies: "il2cpp_domain_get_assemblies" => unsafe extern "C-unwind" fn(*const raw::Domain, *mut usize) -> *const Ptr,
@@ -81,14 +113,23 @@ exports! {
     class_parent: "il2cpp_class_get_parent" => unsafe extern "C-unwind" fn(Class) -> Class,
     class_nested: "il2cpp_class_get_nested_types" => unsafe extern "C-unwind" fn(Class, *mut Ptr) -> Class,
     class_name: "il2cpp_class_get_name" => unsafe extern "C-unwind" fn(Class) -> *const c_char,
+    class_namespace: "il2cpp_class_get_namespace" => unsafe extern "C-unwind" fn(Class) -> *const c_char,
+    class_image: "il2cpp_class_get_image" => unsafe extern "C-unwind" fn(Class) -> Ptr,
     class_field: "il2cpp_class_get_field_from_name" => unsafe extern "C-unwind" fn(Class, *const c_char) -> Ptr,
     field_type: "il2cpp_field_get_type" => unsafe extern "C-unwind" fn(Ptr) -> Type,
     field_flags: "il2cpp_field_get_flags" => unsafe extern "C-unwind" fn(Ptr) -> i32,
     field_offset: "il2cpp_field_get_offset" => unsafe extern "C-unwind" fn(Ptr) -> usize,
     static_get: "il2cpp_field_static_get_value" => unsafe extern "C-unwind" fn(Ptr, Ptr),
+    field_get: "il2cpp_field_get_value" => unsafe extern "C-unwind" fn(*mut raw::Object, Ptr, Ptr),
     type_name: "il2cpp_type_get_name" => unsafe extern "C-unwind" fn(Type) -> *mut c_char,
     runtime_free: "il2cpp_free" => unsafe extern "C-unwind" fn(Ptr),
     type_class: "il2cpp_class_from_il2cpp_type" => raw::ClassFromType,
+    type_code: "il2cpp_type_get_type" => raw::TypeGetType,
+    type_byref: "il2cpp_type_is_byref" => raw::TypeIsByref,
+    class_type: "il2cpp_class_get_type" => unsafe extern "C-unwind" fn(Class) -> Type,
+    class_element: "il2cpp_class_get_element_class" => unsafe extern "C-unwind" fn(Class) -> Class,
+    class_rank: "il2cpp_class_get_rank" => unsafe extern "C-unwind" fn(*const raw::Class) -> i32,
+    class_value: "il2cpp_class_is_valuetype" => raw::ClassIsValueType,
     class_enum: "il2cpp_class_is_enum" => unsafe extern "C-unwind" fn(*const raw::Class) -> bool,
     enum_base: "il2cpp_class_enum_basetype" => unsafe extern "C-unwind" fn(Class) -> Type,
     class_methods: "il2cpp_class_get_methods" => unsafe extern "C-unwind" fn(Class, *mut Ptr) -> Method,

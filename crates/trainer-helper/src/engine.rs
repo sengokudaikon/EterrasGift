@@ -25,7 +25,7 @@ use windows_sys::Win32::System::{
     Diagnostics::Debug::RtlLookupFunctionEntry,
     LibraryLoader::{GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS, GET_MODULE_HANDLE_EX_FLAG_PIN, GetModuleHandleExW, GetModuleHandleW, GetProcAddress},
     SystemInformation::GetTickCount64,
-    Threading::GetCurrentThreadId,
+    Threading::{GetCurrentProcessId, GetCurrentThreadId, GetProcessIdOfThread, GetThreadDescription, OpenThread, THREAD_QUERY_LIMITED_INFORMATION},
 };
 
 static STATE: OnceLock<Shared> = OnceLock::new();
@@ -78,10 +78,10 @@ unsafe fn image_size(module: NonNull<u8>) -> Result<usize, String> {
 }
 
 fn map_discovery(error: DiscoveryError) -> Response {
-    let code = if matches!(error, DiscoveryError::NotReady(_) | DiscoveryError::Runtime(_)) {
-        ResponseCode::NotReady
-    } else {
-        ResponseCode::Failed
+    let code = match error {
+        DiscoveryError::OfflineRequired => ResponseCode::OfflineRequired,
+        DiscoveryError::NotReady(_) | DiscoveryError::Runtime(_) => ResponseCode::NotReady,
+        _ => ResponseCode::Failed,
     };
     server::failure(code, error.to_string())
 }
@@ -120,6 +120,27 @@ unsafe fn read_status() -> Response {
             }
             Err(error) => map_discovery(error),
         }
+    }
+}
+
+unsafe fn read_forge() -> Response {
+    // SAFETY: called only after the engine original returns on its captured main thread.
+    // The bootstrap contract retains modules/metadata and excludes concurrent graph mutation.
+    // RuntimeAccess rechecks offline admission and validates/root-copies the entire object graph.
+    unsafe {
+        let result = (|| {
+            let module = module().map_err(|error| server::failure(ResponseCode::Failed, error))?;
+            let (api, access) = apis(module).map_err(|error| server::failure(ResponseCode::Failed, error))?;
+            let thread = ThreadContext::new(api);
+            let attached = thread.attach().map_err(|error| server::failure(ResponseCode::NotReady, error.to_string()))?;
+            let snapshot = access.read_forge(&attached).map_err(map_discovery)?;
+            let payload = eg_game_access::forge::encode(snapshot.as_ref()).map_err(|error| server::failure(ResponseCode::Failed, error.to_string()))?;
+            Ok::<_, Response>(Response {
+                code: ResponseCode::Done,
+                payload,
+            })
+        })();
+        result.unwrap_or_else(|error| error)
     }
 }
 
@@ -163,6 +184,8 @@ fn after_original(state: &Shared) {
             let response = match request {
                 // SAFETY: correct-thread gate and initialized exact-runtime contract above.
                 Request::Status { .. } => unsafe { read_status() },
+                // SAFETY: same main-thread and per-operation graph ownership contract above.
+                Request::ReadForge { .. } => unsafe { read_forge() },
                 // No feature installation API exists. Empty is the truthful complete feature set.
                 Request::ClearHooks { .. } => Response {
                     code: ResponseCode::Done,
@@ -301,6 +324,11 @@ pub unsafe extern "C" fn eg_helper_start(main_tid: u32) -> i32 {
     if main_tid == 0 || unsafe { GetCurrentThreadId() } != main_tid {
         return 2;
     }
+    // SAFETY: the caller established the actual Unity main thread and runtime contracts.
+    unsafe { start_authorized(main_tid) }
+}
+
+unsafe fn start_authorized(main_tid: u32) -> i32 {
     let state = state();
     if state.metrics[1].compare_exchange(0, main_tid as u64, SeqCst, SeqCst).is_err() {
         return 1;
@@ -330,6 +358,114 @@ pub unsafe extern "C" fn eg_helper_start(main_tid: u32) -> i32 {
         }
     }
 }
+
+#[repr(C)]
+struct BootstrapConfig {
+    magic: u32,
+    size: u32,
+    pid: u32,
+    main_tid: u32,
+    operation: u32,
+    status: i32,
+    build_id: [u8; 64],
+    reserved: [u8; 24],
+}
+const _: () = assert!(
+    std::mem::size_of::<BootstrapConfig>() == 112
+        && std::mem::offset_of!(BootstrapConfig, status) == 20
+        && std::mem::offset_of!(BootstrapConfig, build_id) == 24
+        && std::mem::offset_of!(BootstrapConfig, reserved) == 88
+);
+
+unsafe fn named_main_thread(main_tid: u32) -> bool {
+    use windows_sys::Win32::Foundation::{CloseHandle, LocalFree};
+    // SAFETY: query-only ownership/name corroboration of the explicitly nominated thread.
+    unsafe {
+        let thread = OpenThread(THREAD_QUERY_LIMITED_INFORMATION, 0, main_tid);
+        if thread.is_null() {
+            return false;
+        }
+        let belongs = GetProcessIdOfThread(thread) == GetCurrentProcessId();
+        let mut description = std::ptr::null_mut();
+        let result = GetThreadDescription(thread, &raw mut description);
+        CloseHandle(thread);
+        if result < 0 || description.is_null() {
+            return false;
+        }
+        // Windows owns a NUL-terminated allocation. Stop at its terminator, rather than reading
+        // the expected name's full length from a potentially shorter returned allocation.
+        let mut name = Vec::new();
+        for index in 0..1024 {
+            let unit = description.add(index).read();
+            if unit == 0 {
+                break;
+            }
+            name.push(unit);
+        }
+        LocalFree(description.cast());
+        belongs && name == "Unity Main Thread".encode_utf16().collect::<Vec<_>>()
+    }
+}
+
+#[unsafe(no_mangle)]
+/// Explicit Win32 remote-thread bootstrap after LoadLibrary returns. Operation 1 starts once;
+/// operation 2 accepts asynchronous shutdown and returns three retained read-only counter
+/// addresses (metrics 9/10/0) in the initially-zero reserved area. Poll those with process reads,
+/// without creating threads during restoration. Operation 3 copies their values for a helper
+/// already proven stopped. This never unloads code.
+///
+/// # Safety
+/// `parameter` must point to aligned, initialized, exclusively writable 112-byte BootstrapConfig
+/// storage retained until this thread exits. Caller establishes every `eg_helper_start` runtime,
+/// offline, exclusive-patching and retained-lifetime obligation, except that execution is on a
+/// dedicated native thread outside loader lock. The nominated TID must be the established Unity
+/// main thread. Its OS owner/name is only corroboration, not proof of engine-thread semantics.
+pub unsafe extern "system" fn eg_helper_bootstrap(parameter: *mut c_void) -> u32 {
+    if parameter.is_null() {
+        return 60;
+    }
+    // SAFETY: the caller supplies aligned, nonaliased configuration memory for this thread.
+    let config = unsafe { &mut *parameter.cast::<BootstrapConfig>() };
+    // Configuration has no shared Rust invariants: on panic status becomes 99 and the caller
+    // must ignore partial telemetry. No pointer into it is retained by the started worker.
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        // SAFETY: process-local OS queries; runtime use remains on the worker created below.
+        if config.magic != 0x4547_4253
+            || config.size != 112
+            || config.pid != unsafe { GetCurrentProcessId() }
+            || config.main_tid == 0
+            || config.main_tid == unsafe { GetCurrentThreadId() }
+            || config.build_id != BUILD_ID.as_bytes()
+            || config.reserved != [0; 24]
+            || !matches!(config.operation, 1..=3)
+            || !unsafe { named_main_thread(config.main_tid) }
+        {
+            return 60;
+        }
+        if config.operation == 1 {
+            // SAFETY: validated bootstrap identity plus the caller's exact runtime contract.
+            unsafe { start_authorized(config.main_tid) }
+        } else if state().metrics[1].load(SeqCst) == u64::from(config.main_tid) {
+            if config.operation == 2 {
+                for (slot, metric) in [9, 10, 0].into_iter().enumerate() {
+                    let address = state().metrics[metric].as_ptr() as usize as u64;
+                    config.reserved[slot * 8..slot * 8 + 8].copy_from_slice(&address.to_le_bytes());
+                }
+                eg_helper_shutdown()
+            } else {
+                for (slot, metric) in [9, 10, 0].into_iter().enumerate() {
+                    config.reserved[slot * 8..slot * 8 + 8].copy_from_slice(&state().metrics[metric].load(SeqCst).to_le_bytes());
+                }
+                0
+            }
+        } else {
+            61
+        }
+    }))
+    .unwrap_or(99);
+    config.status = result;
+    result as u32
+}
 #[unsafe(no_mangle)]
 pub extern "C" fn eg_helper_build_id() -> *const c_char {
     BUILD_ID_C.as_ptr().cast()
@@ -342,4 +478,42 @@ pub extern "C" fn eg_helper_metrics(selector: u32) -> u64 {
 pub extern "C" fn eg_helper_shutdown() -> i32 {
     state().stop.store(true, SeqCst);
     0
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn bootstrap_rejects_bad_admission_without_starting_a_worker() {
+        // SAFETY: the null path returns without accessing configuration or runtime state.
+        assert_eq!(unsafe { eg_helper_bootstrap(std::ptr::null_mut()) }, 60);
+        for invalid in 0..7 {
+            let mut config = BootstrapConfig {
+                magic: 0x4547_4253,
+                size: 112,
+                // SAFETY: local identity query, no game runtime involved.
+                pid: unsafe { GetCurrentProcessId() },
+                main_tid: u32::MAX,
+                operation: 1,
+                status: -1,
+                build_id: BUILD_ID.as_bytes().try_into().unwrap(),
+                reserved: [0; 24],
+            };
+            match invalid {
+                0 => config.magic = 0,
+                1 => config.size = 111,
+                2 => config.pid = 0,
+                3 => config.main_tid = 0,
+                4 => config.operation = 4,
+                5 => config.build_id = [0; 64],
+                _ => config.reserved[23] = 1,
+            }
+            // SAFETY: full aligned exclusively-owned storage. Every case fails before any
+            // runtime lookup/start, so no initialized IL2CPP or engine-thread contract is used.
+            assert_eq!(unsafe { eg_helper_bootstrap((&raw mut config).cast()) }, 60);
+            assert_eq!(config.status, 60);
+        }
+        assert_eq!(STATE.get().map(|shared| shared.metrics[1].load(SeqCst)), None);
+    }
 }

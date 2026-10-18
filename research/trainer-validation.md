@@ -438,3 +438,27 @@ handling and duplicate lookup of forwarded classes. [Full evidence and limits](.
 This establishes control-only integration on authored game-shaped metadata. Current Last Epoch metadata, gameplay
 effects, write/readback, independent effect cleanup, production injection and app/UI composition remain separate.
 The narrow x64/layout/GC/patching unsafe contracts are still required. Shutdown never grants permission to unload.
+
+## Read-only forge checkpoint
+
+Protocol 22 operation 18 now returns an owned forge snapshot through the complete main-thread helper/session path.
+Its per-operation checks validate exact primitive/enum storage, rooted object references, List/SZARRAY elements and
+bounded text/roll/affix counts. Empty containers are a successful empty forge; malformed state fails the whole read.
+The original app reads this data externally, so the new native request is an intentional protocol extension.
+
+The authored player passes all fields, Unicode, GC, replacement with reused individual ID, unique/set identity and
+five malformed graph cases, through both startup routes. A live read caught a global-enum lookup assumption; field
+metadata now supplies the enum identity, with nested/namespaced regression coverage. The corrected, independently
+bootstrapped build reads a plain Hatchet three times identically under Release/Allow. Five commands ran on main TID
+59160; six requests and 285 original normal returns are independently observed. Empty-feature cleanup, full original
+entry/unwind restoration, stopped server and the same responsive process are confirmed. Both helper generations
+remain loaded until process exit; the older one was proven stopped before the distinct newer build loaded.
+
+There are 103 passing Rust foundation cases on stable/nightly release, four architecture checks, one lifetime check
+per toolchain and eight pure bootstrap preflight regressions. Workspace verification/captures and isolated controller
+checks pass. [Exact reports and scope](../tools/trainer-eval/persistent-player/forge-report.json).
+
+Live populated affixes, unique/set identity, empty/replacement states and richer descriptions still need their own
+live evidence; current coverage for those raw states is authored. No app/UI binding, definitions, writes or gameplay
+effects are implemented. Main-thread graph ownership, exact x64 nonmoving GC and retained-code contracts remain
+unsafe preconditions; neither these tests nor restored entry bytes establish formal general safety or unloadability.

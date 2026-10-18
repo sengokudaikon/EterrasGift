@@ -6,11 +6,13 @@ The app/UI do not use these services yet. The companion remains independent.
 
 ## Implemented subset
 
-Protocol 21 control requests are discovery (6), status (7), and clearing all gameplay hooks (15 with count 0 and
-**no tail**). The separate [Rust helper](../trainer-helper/README.md) implements their persistent server and runtime
-handlers. Item/field writes, enabling gameplay features, definitions, item reads and injection are not implemented
+Protocol 22 requests are discovery (6), status (7), clearing all gameplay hooks (15 with count 0 and **no tail**), and
+the read-only forge snapshot (18). The original C# app reads that snapshot externally from process memory; adding an
+in-process operation deliberately increments the handshake version, so protocol 21 peers are rejected. The separate
+[Rust helper](../trainer-helper/README.md) implements the persistent server and runtime handlers.
+Item/field writes, enabling gameplay features, definitions and production injection are not implemented
 here. `protocol::Request::decode` deliberately rejects other operations and nonzero reserved
-fields in this subset. This is not a claim to implement every protocol 21 operation.
+fields in this subset. This is not a claim to implement every operation of the original protocol.
 
 `BuildProfile::capture` reads local files and captures GameAssembly/metadata hashes plus the expected helper source
 build ID. `Session::new` verifies the transport's PID/creation-time/executable identity, and binds those artifacts to
@@ -26,6 +28,19 @@ all 37 required offsets, artifact hash and file-backed executable dispatcher val
 the first Status, accounting for time elapsed during discovery. Status may install the legacy helper's scheduler.
 Runtime status must independently report offline play and a nonzero local manager before the session becomes Ready.
 The returned manager address is an ephemeral observation, never a root or durable managed-object token.
+
+`read_forge` requires Ready, rechecks Player.log before and after installation-artifact verification, and rechecks the
+log after receiving the complete reply. The helper independently requires runtime offline play and a live native
+manager in the main-thread read itself. An absent crafting/main/entry/item is a successful `None`; malformed data
+fails the complete read. The snapshot owns every string/vector and contains no managed root or memory borrow.
+Its item address and individual ID are observations scoped to the selected process identity; they do not authorize
+later dereferences or edits. The legacy fingerprint omits names, class requirement, special affix type and set-item
+identity; full snapshot equality remains necessary for those fields.
+
+Read failure drops the cached attachment and blocks further reads until an explicit new handshake. Offline-required
+revokes it as usual. A canceled read remains Connecting, with no cached runtime status, until explicit disconnect.
+Neither a malformed response nor a timeout triggers replay. Rich modifier descriptions, definitions, mappings and
+domain/UI composition remain separate from this raw snapshot.
 
 Polling with `refresh` rechecks the log before transport. Log denial, an online/no-character status, or helper code 5
 revokes Ready, discards the cached discovery and stops further client helper access. Cleanup becomes unconfirmed;
@@ -57,11 +72,11 @@ means MayHaveRun, including a possible partial write. Header size/code/magic and
 before allocation. The connection is closed after the response. No request is resent automatically.
 
 Helper code 1 is an uncertain failure. Codes 2–6 are definite no-operation failures under the legacy helper contract;
-human text never determines the classification. The Rust server must not report NotReady after a command
-started: canceling still-pending dispatcher work can prove no execution, while running work owns its slot until it
+human text never determines the classification. For cancellation/deadline, the Rust server must not report NotReady
+after dispatch started: canceling still-pending work can prove no execution, while running work owns its slot until it
 finishes. Client disconnection cannot retract that work.
 
-Protocol 21 has no request ID, session nonce, game hash fields or authentication. Local binary/metadata hashes are
+Protocol 22 retains the legacy framing and has no request ID, session nonce, game hash fields or authentication. Local binary/metadata hashes are
 profile identity, not values received from the helper or a known-build whitelist. The source build ID and server PID
 are compatibility/identity checks, not authentication against code already executing in that same process.
 
@@ -79,19 +94,21 @@ mise run trainer:test:release
 mise run verify
 ```
 
-Seven codec tests cover independent packed-wire examples and malformed/bounded input. Six pipe tests launch only
+Seven protocol and ten forge-codec tests cover independent wire examples and malformed/bounded input. Six pipe tests launch only
 owned child test processes, checking fragmentation, fresh connections, Busy/Missing, PID reuse, wrong-server
 rejection before sending, malformed/truncated replies and uncertain deadlines without replay. Session tests cover
 admission, artifacts, helper identity, offline transitions, cleanup and future-cancellation barriers. The combined
 test copies its own executable to TEMP and serves three requests there, using the real log reader, profile/session
 and pipe client, then exits. Its PE/metadata/runtime replies are authored data; they do not discover IL2CPP fields or
-validate gameplay effects. Two ignored test entry points are invoked explicitly by their parent tests.
+validate gameplay effects. Ignored child entry points are invoked explicitly by their parent tests.
 
-The persistent helper/bootstrap, source build-ID generation and discovery/status handlers now exist, alongside
-process-owner and asynchronous shutdown handling. Its full combined fixture uses an authored Unity IL2CPP player.
-Next: read-only game operations and per-operation contract checks, then write/readback and independent engine-thread
-effect cleanup before gameplay features or UI wiring. The previously authorized live frame-read probe remains
-separate; this step performs no new live test.
+The persistent helper/bootstrap and read-only forge operation now pass the full authored Unity IL2CPP fixture,
+including nested enums, Unicode, GC, replacement and malformed graphs. One explicitly authorized offline-game run
+returns three identical plain-Hatchet snapshots under Release policy, then confirms cleanup, entry/unwind restoration
+and the same live game process. Populated live affixes and unique/set data remain unvalidated on that game session;
+their authored cases pass. See the [forge evidence index](../../tools/trainer-eval/persistent-player/forge-report.json).
+Next: definitions and rich read-only descriptions, then per-operation write/readback and independent effect cleanup
+before gameplay features or UI wiring. The older frame-count probe remains separate.
 Validation commands, counts and the retained log/source index are in [validation.json](validation.json).
 
 Windows API contract: [GetNamedPipeServerProcessId](https://learn.microsoft.com/en-us/windows/win32/api/winbase/nf-winbase-getnamedpipeserverprocessid).

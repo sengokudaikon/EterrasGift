@@ -152,7 +152,8 @@ NeoHook unwind diagnosis have been completed. Their limits remain explicit; they
 3. Decide how to handle the real CoreModule's malformed orphan nested types. Dotscope preserves more payload than
    the current Cecil repair; experimental normalization changes public identity and is not shipping policy. Causal
    diagnostic edits now isolate both remaining baseline loader defects; making classes abstract is not behavior restoration.
-4. The first verified invocation/exception subset now passes in the real fixture. Add enum identity/width checks,
+4. The first verified invocation/exception subset now passes in the real fixture. Read-only enum-field identity and
+   Int32 storage checks now pass; add invocation enum identity/width checks,
    reference writes and traced managed-reference ref/out storage; evaluate concrete collection methods separately
    from generic-method construction. Persistent native discovery/status handlers now exist behind the verified
    protocol 21 control client. Extend disposable-host operation tests before connecting trainer UI to a real helper.
@@ -160,7 +161,7 @@ NeoHook unwind diagnosis have been completed. Their limits remain explicit; they
    authorized offline-game request. The checked getter returns frame 372,952 on the named main thread, exactly once;
    entry/unwind/files are restored/unchanged and the game remains responsive. [Evidence](../tools/trainer-eval/debugger/scheduler-report.json).
    Helper/code/tables stay loaded until process exit. Further live work requires the user's explicit scope; next
-   implementation is read-only game-specific operations against authored hosts, then validated writes/readback.
+   implementation is definitions and rich read-only descriptions after the validated forge snapshot, then writes/readback.
 
 
 ## Scheduler promotion and first live read, 2026-10-18
@@ -248,3 +249,58 @@ Next is a read-only game operation returning owned data, followed by exact per-o
 write/readback experiments. Enum identity, reference writes and traced managed-reference ref/out remain unpromoted.
 Independent effect cleanup must precede enabling gameplay features. Helper/code/trampolines remain retained until
 process exit; restoration is not callback draining or unload permission. The app/UI remain unwired.
+
+## Owned forge snapshots and live read, 2026-10-18
+
+The original `ForgeReader`/`ForgeItemLocator` reads process memory directly; there is no legacy native read-forge
+operation. The Rust port moves this graph traversal onto Unity's main thread and introduces operation 18 in protocol
+22. Both sides deliberately reject protocol 21 discovery. The original header's game-data comment says 18, but its
+actual enum assigns game data to 8 and ends at 17; the code wins. Existing operations retain their packed framing.
+
+The returned model owns all strings/vectors and includes item/individual identity, name, type/subtype/rarity/class,
+affixes, implicit rolls, unique/set identity and all existing item-status fields. It preserves the legacy fingerprint
+exactly, including omission of set identity, names, special affix type and class requirement. This is not a complete
+semantic state key. Addresses identify an observation in the selected process; they grant no later memory access.
+
+The helper rechecks runtime offline play and the manager's native lifetime before traversing any item field. Every
+reachable managed object is rooted before later metadata/GC-sensitive calls. Scalars use public `field_get_value`
+after exact class/width checks; enum reads bind the actual field's enum class and exact corelib Int32 backing. Lists
+require the closed corelib List definition and exact ItemAffix[] storage. SZARRAY rank/element identity, count versus
+capacity, and strict bounded UTF-16/UTF-8 are checked. Caps are 32 affixes, three implicit rolls, eight unique rolls,
+4096 List capacity and 4096 UTF-8 bytes per name. Null containers/entry/item mean an empty forge. Malformed graphs
+fail the entire read. No game method or gameplay mutation occurs. Concurrent graph mutation/native destruction and
+runtime shutdown remain excluded by the narrow unsafe main-thread contract.
+
+Session requires Ready, revalidates installation artifacts and the current log before sending, and rechecks the log
+after receiving a complete reply. Failure discards the attachment without replay; explicit reconnect is required.
+Dropping a read future leaves the existing Connecting barrier until explicit disconnect. Eight additional session
+tests cover these transitions. Ten independent codec cases and nine additional metadata/root cases cover the model,
+fingerprint, rooting failures, scalar widths, nested enums, array contracts and text bounds.
+
+Both direct P/Invoke and externally bootstrapped authored Unity players pass full snapshots, Unicode, forced GC,
+empty/replaced items, unique/set identity and malformed-type/count cases. The final external run accepts 47 requests,
+executes 36 commands on main TID 28208, preserves 156 original normal returns and exits after restoration plus three
+frames. Expected values and fingerprint literals are independent of production encoding. External shutdown returns
+retained atomic-counter addresses for read-only polling; it does not create new remote threads during restoration.
+
+The user then explicitly authorized live offline reads. Player.log was initially empty but populated before the
+actual client started, so both live attempts used Release/Allow without a development override. The first revealed
+that a separately named global `ClassRequirement` lookup fails on the real metadata despite discovery's valid field
+type. The reader now derives enum identity from that field; a nested-enum fixture reproduces the regression. The
+failed attempt still restored all 81 entry bytes and original unwind and stopped the server with the game alive.
+Its module remains retained. A distinct source-ID DLL was admitted only after checking that older generation's
+exact body/identity, confirmed stop and fresh telemetry, plus pristine dispatcher/unwind evidence.
+
+Three successful live reads return the same plain Hatchet, individual ID 918073198, fingerprint 0x8a3debae144d94d2,
+type 5/subtype 0/rarity 0, no affixes, implicit bytes [0,0,0], level requirement 1 and zero/false remaining status.
+Retained counters independently show five completed commands on Unity main TID 59160, six accepted requests, 285
+original normal returns, no helper error and no wrong-thread entry. Explicit cleanup is ConfirmedOff; the full entry
+and unwind are restored, the server is stopped and the same process stays responsive. This live case does not
+validate populated affixes or unique/set items; those remain authored coverage.
+
+All 103 Rust foundation cases pass on stable and nightly release, along with lifetime and architecture checks.
+Workspace verification/captures and isolated controller checks pass; eight pure bootstrap preflight regressions pass.
+The [forge evidence index](../tools/trainer-eval/persistent-player/forge-report.json) records successful/failed runs,
+source/DLL identities, exact snapshots, cleanup and limitations. Definitions, rich descriptions, domain/UI composition,
+sustained-polling performance, write/readback and effect cleanup remain ahead. The current helper's no-unload and
+exclusive patching/graph contracts remain in force.

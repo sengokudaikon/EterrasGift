@@ -1,10 +1,11 @@
-//! Serialized control session. No injection, gameplay commands or automatic retry are exposed.
+//! Serialized control session and owned read-only forge snapshots. No injection or automatic retry.
 use crate::{
     gate::{self, GateDecision, GatePolicy, GateVerdict, LogSource},
     profile::BuildProfile,
 };
 use eg_core::game_log::GameReadiness;
 use eg_game_access::{
+    forge::{self, ForgeSnapshot},
     process::ProcessIdentity,
     protocol::{Discovery, HookState, ProtocolError, Request, ResponseCode, RuntimeStatus},
     transport::{Delivery, Transport, TransportError, TransportFailure},
@@ -199,6 +200,51 @@ impl<T: Transport, L: LogSource> Session<T, L> {
         }
         result
     }
+    /// Copy the current forge on Unity's main thread. Returned data owns no managed references.
+    /// The item address/individual ID are observations scoped to this process identity, never
+    /// permission to dereference memory or edit an item. A dropped future leaves Connecting;
+    /// explicitly disconnect before another attachment or operation.
+    pub async fn read_forge(&mut self, now: Timestamp) -> Result<Option<ForgeSnapshot>, SessionError> {
+        if matches!(self.state, SessionState::Connecting | SessionState::Closing) {
+            return Err(SessionError::Busy);
+        }
+        self.gate(now)?;
+        if self.state != SessionState::Ready {
+            return Err(SessionError::NotConnected);
+        }
+        let dispatcher = self.discovery.as_ref().ok_or(SessionError::NotConnected)?.dispatcher;
+        let elapsed = std::time::Instant::now();
+        if let Err(error) = self.profile.validate(&dispatcher) {
+            self.release_without_io();
+            self.state = SessionState::Blocked;
+            return Err(SessionError::Identity(error.to_string()));
+        }
+        // File verification can take time. Admission must still hold immediately before I/O.
+        self.gate(advanced(now, elapsed)?)?;
+        let status = self.status.take();
+        self.state = SessionState::Connecting;
+        let result = self
+            .request(&Request::ReadForge { dispatcher })
+            .await
+            .and_then(|bytes| forge::decode(&bytes).map_err(SessionError::Protocol));
+        match result {
+            Ok(snapshot) => {
+                // The helper independently checks runtime offline/native-manager life in the
+                // same main-thread operation, before touching the graph. Recheck the log too.
+                self.gate(advanced(now, elapsed)?)?;
+                self.status = status;
+                self.state = SessionState::Ready;
+                Ok(snapshot)
+            }
+            Err(error) => {
+                self.release_without_io();
+                if self.state == SessionState::Connecting {
+                    self.state = SessionState::Blocked;
+                }
+                Err(error)
+            }
+        }
+    }
     async fn read_status(&mut self) -> Result<(), SessionError> {
         let dispatcher = self.discovery.as_ref().ok_or(SessionError::NotConnected)?.dispatcher;
         let bytes = self.request(&Request::Status { dispatcher }).await?;
@@ -269,4 +315,8 @@ impl<T: Transport, L: LogSource> Session<T, L> {
         self.enabled = false;
         self.disconnect().await
     }
+}
+
+fn advanced(now: Timestamp, elapsed: std::time::Instant) -> Result<Timestamp, SessionError> {
+    Timestamp::from_nanosecond(now.as_nanosecond() + elapsed.elapsed().as_nanos() as i128).map_err(|error| SessionError::Identity(error.to_string()))
 }

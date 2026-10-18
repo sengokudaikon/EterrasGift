@@ -7,4 +7,4 @@ mod engine;
 pub mod server;
 
 #[cfg(all(windows, target_arch = "x86_64"))]
-pub use engine::{eg_helper_build_id, eg_helper_metrics, eg_helper_shutdown, eg_helper_start};
+pub use engine::{eg_helper_bootstrap, eg_helper_build_id, eg_helper_metrics, eg_helper_shutdown, eg_helper_start};

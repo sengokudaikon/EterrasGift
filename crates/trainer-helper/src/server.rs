@@ -208,7 +208,7 @@ async fn serve(pid: u32, backend: &mut impl Backend, shared: &Shared) -> Result<
                             },
                             Err(error) => error,
                         },
-                        Request::Status { dispatcher } | Request::ClearHooks { dispatcher } => match backend.ensure_dispatcher(&dispatcher) {
+                        Request::Status { dispatcher } | Request::ClearHooks { dispatcher } | Request::ReadForge { dispatcher } => match backend.ensure_dispatcher(&dispatcher) {
                             Err(error) => error,
                             Ok(()) => match backend.submit(request) {
                                 Err(error) => error,

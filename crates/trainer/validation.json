@@ -1,16 +1,16 @@
 {
   "date": "2026-10-18",
-  "status": "persistent Rust helper and full protocol/session path pass authored Unity IL2CPP fixture",
-  "evidence": "tools/trainer-eval/persistent-player/report.json",
+  "status": "protocol22 owned forge snapshot passes authored Unity and authorized offline-game read",
+  "evidence": "tools/trainer-eval/persistent-player/forge-report.json",
   "previous_protocol_session_evidence": "artifacts/trainer-eval/protocol-session-95e3d0ed64494652a50a76df25f322d9/report.json",
   "original_app_commit": "e1c1ed4",
-  "foundation_cases_stable_and_nightly_release": 75,
+  "foundation_cases_stable_and_nightly_release": 103,
   "architecture_checks": 4,
   "lifetime_compile_fail_checks_per_toolchain": 1,
-  "scope": "Discovery/status/empty-hook clear, persistent Rust server, runtime metadata, process ownership, main-thread execution, offline observation and asynchronous entry restoration. Authored Unity player; no new live game or UI wiring.",
+  "scope": "Discovery/status/empty-hook clear and owned read-only forge snapshot with exact types/roots/bounds. Authored Unity plus three plain-Hatchet observations in the explicitly authorized offline game under Release policy. No UI wiring or gameplay writes.",
   "persistent_helper_evidence": "tools/trainer-eval/persistent-player/report.json",
   "remaining": [
-    "Read-only game operations and owned snapshots with per-operation validation",
+    "Definitions, rich read-only descriptions and mappings; populated live item cases",
     "Exact enum/reference write and traced managed-reference ref/out contracts",
     "Gameplay features with independent main-thread offline/owner cleanup and acknowledgement",
     "Per-operation writes/readback and uncertain-result handling, then UI composition"
