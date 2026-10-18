@@ -1,0 +1,490 @@
+// The forge's in-place cells and the small controls of its flyouts (DESIGN.md "In-place Cells", "Menus and Affix Picker",
+// "Item Header"). Each follows the one widget pattern: a FocusScope that shows keyboard focus on tab arrival, a TouchArea
+// that hides it on a press, then the tip trigger and the focus ring.
+
+import { Tokens } from "../../tokens.slint";
+import { KeyboardFocus, TipPlacement } from "../../globals.slint";
+import { FocusRing, TipTrigger } from "../../widgets/focus.slint";
+
+// A cell button: plain text until hovered (Dusk Brown in a Weathered Taupe frame). Disabled, it keeps its own colours and
+// only stops answering. Place it outdented by the cell padding so its hover frame reaches past the column.
+export component CellButton inherits Rectangle {
+    in property <bool> enabled: true;
+    in property <string> tip;
+    in property <string> label;
+    // Inline cells in the facts line answer like a cell only where they can change.
+    in property <bool> changeable: true;
+    callback clicked();
+    callback vertical(int);
+    callback menu-requested();
+    // A right-click, at the pointer in window coordinates.
+    callback context-menu(length, length);
+    out property <bool> has-focus: focus.has-focus;
+    out property <bool> hovered: touch.has-hover;
+
+    public function focus-cell() {
+        focus.focus();
+    }
+
+    property <bool> live: root.enabled && root.changeable;
+
+    accessible-role: button;
+    accessible-label: root.label;
+    accessible-enabled: root.enabled;
+    accessible-action-default => { root.clicked(); }
+
+    border-radius: Tokens.control-radius;
+    border-width: 1px;
+    background: root.live && touch.has-hover ? Tokens.hover-brush : transparent;
+    border-color: root.live && touch.has-hover ? Tokens.strong-line-brush : transparent;
+    height: layout.preferred-height;
+
+    layout := HorizontalLayout {
+        padding-left: Tokens.cell-padding.left;
+        padding-right: Tokens.cell-padding.right;
+        padding-top: Tokens.cell-padding.top;
+        padding-bottom: Tokens.cell-padding.bottom;
+
+        @children
+    }
+
+    focus := FocusScope {
+        enabled: root.enabled;
+        focus-on-tab-navigation: root.changeable;
+        focus-gained(reason) => {
+            if (reason == FocusReason.tab-navigation) {
+                KeyboardFocus.visible = true;
+            }
+        }
+        key-pressed(event) => {
+            if (event.modifiers.control || event.modifiers.alt || event.modifiers.meta) {
+                return reject;
+            }
+            if (event.text == Key.Return || event.text == " ") {
+                root.clicked();
+                return accept;
+            }
+            if (event.text == Key.UpArrow) {
+                root.vertical(-1);
+                return accept;
+            }
+            if (event.text == Key.DownArrow) {
+                root.vertical(1);
+                return accept;
+            }
+            if (event.text == Key.F10 && event.modifiers.shift) {
+                root.menu-requested();
+                return accept;
+            }
+            reject
+        }
+
+        touch := TouchArea {
+            enabled: root.enabled;
+            mouse-cursor: root.live ? MouseCursor.pointer : MouseCursor.default;
+            pointer-event(event) => {
+                if (event.kind == PointerEventKind.down) {
+                    KeyboardFocus.visible = false;
+                }
+                if (event.kind == PointerEventKind.down && event.button == PointerEventButton.right) {
+                    root.context-menu(self.absolute-position.x + self.mouse-x, self.absolute-position.y + self.mouse-y);
+                }
+            }
+            clicked => {
+                if (root.changeable) {
+                    focus.focus();
+                }
+                root.clicked();
+            }
+        }
+    }
+
+    TipTrigger {
+        text: root.tip;
+        hovered: touch.has-hover;
+        focused: focus.has-focus;
+    }
+
+    FocusRing {
+        focused: focus.has-focus;
+    }
+}
+
+// One entry of a flyout menu: the held one on Wine-Stained Brown in a brass frame, hover Dusk Brown, disabled dimmed.
+export component MenuRow inherits Rectangle {
+    in property <bool> held;
+    in property <bool> highlighted;
+    in property <bool> enabled: true;
+    callback picked();
+    out property <bool> hovered: touch.has-hover;
+
+    border-radius: Tokens.control-radius;
+    border-width: 1px;
+    border-color: root.held ? Tokens.accent-brush : root.highlighted && KeyboardFocus.visible ? Tokens.focus-brush : transparent;
+    background: root.held ? Tokens.selected-brush : touch.has-hover && root.enabled ? Tokens.hover-brush : transparent;
+    height: layout.preferred-height;
+
+    layout := HorizontalLayout {
+        padding-left: Tokens.cell-padding.left;
+        padding-right: Tokens.cell-padding.right;
+        padding-top: Tokens.cell-padding.top;
+        padding-bottom: Tokens.cell-padding.bottom;
+        spacing: Tokens.space-12;
+
+        @children
+    }
+
+    touch := TouchArea {
+        enabled: root.enabled;
+        clicked => {
+            root.picked();
+        }
+    }
+}
+
+// A status flag: labelled with its state in the game's words, both states laid out so it never resizes as it toggles.
+export component FlagToggle inherits Rectangle {
+    in property <string> on-name;
+    in property <string> off-name;
+    in property <bool> checked;
+    in property <bool> drafted;
+    in property <bool> enabled: true;
+    in property <bool> confirmed;
+    in property <bool> stale;
+    in property <string> tip;
+    callback toggled(bool);
+
+    property <bool> hovered: touch.has-hover && root.enabled;
+
+    accessible-role: switch;
+    accessible-label: root.on-name;
+    accessible-checkable: true;
+    accessible-checked: root.checked;
+    accessible-action-default => { root.toggled(!root.checked); }
+
+    border-radius: Tokens.control-radius;
+    border-width: 1px;
+    background: !root.enabled ? transparent
+        : root.hovered ? Tokens.hover-brush
+        : root.drafted && root.checked ? Tokens.draft-surface-brush : transparent;
+    border-color: root.drafted && root.checked && !root.hovered ? Tokens.draft-brush
+        : root.checked ? (root.hovered ? Tokens.accent-brush : Tokens.accent-trim-brush)
+        : root.hovered ? Tokens.strong-line-brush : Tokens.hairline-brush;
+    property <brush> ink: !root.enabled ? Tokens.text-disabled-brush
+        : root.drafted ? Tokens.draft-brush
+        : root.checked ? Tokens.text-brush
+        : root.hovered ? Tokens.text-secondary-brush : Tokens.text-muted-brush;
+    width: layout.preferred-width;
+    height: layout.preferred-height;
+
+    layout := HorizontalLayout {
+        padding-left: Tokens.flag-padding.left;
+        padding-right: Tokens.flag-padding.right;
+        padding-top: Tokens.flag-padding.top;
+        padding-bottom: Tokens.flag-padding.bottom;
+        spacing: Tokens.space-4;
+
+        Rectangle {
+            width: Math.max(off.preferred-width, on.preferred-width);
+            height: Math.max(off.preferred-height, on.preferred-height);
+
+            off := Text {
+                text: root.off-name;
+                color: root.ink;
+                opacity: root.checked ? 0 : 1;
+                horizontal-alignment: center;
+            }
+
+            on := Text {
+                text: root.on-name;
+                color: root.ink;
+                opacity: root.checked ? 1 : 0;
+                horizontal-alignment: center;
+            }
+        }
+
+        if root.confirmed: Image {
+            width: Tokens.icon-size-tiny;
+            height: Tokens.icon-size-tiny;
+            y: (parent.height - self.height) / 2;
+            image-fit: contain;
+            source: Tokens.icon-confirmed;
+            colorize: Tokens.confirmed-brush;
+            accessible-label: "Confirmed";
+        }
+
+        if root.stale: Image {
+            width: Tokens.icon-size-tiny;
+            height: Tokens.icon-size-tiny;
+            y: (parent.height - self.height) / 2;
+            image-fit: contain;
+            source: Tokens.icon-warning;
+            colorize: Tokens.warning-brush;
+            accessible-label: "Stale draft";
+        }
+    }
+
+    focus := FocusScope {
+        enabled: root.enabled;
+        focus-gained(reason) => {
+            if (reason == FocusReason.tab-navigation) {
+                KeyboardFocus.visible = true;
+            }
+        }
+        key-pressed(event) => {
+            if (event.text == " " || event.text == Key.Return) {
+                root.toggled(!root.checked);
+                return accept;
+            }
+            reject
+        }
+
+        touch := TouchArea {
+            enabled: root.enabled;
+            pointer-event(event) => {
+                if (event.kind == PointerEventKind.down) {
+                    KeyboardFocus.visible = false;
+                }
+            }
+            clicked => {
+                focus.focus();
+                root.toggled(!root.checked);
+            }
+        }
+    }
+
+    TipTrigger {
+        text: root.tip;
+        hovered: touch.has-hover;
+        focused: focus.has-focus;
+    }
+
+    FocusRing {
+        focused: focus.has-focus;
+    }
+}
+
+// Fluent's check box, retinted: Antique Brass with a Brass Shadow check when ticked.
+export component CheckBox inherits Rectangle {
+    in property <string> text;
+    in property <bool> checked;
+    in property <bool> enabled: true;
+    callback toggled(bool);
+
+    accessible-role: checkbox;
+    accessible-label: root.text;
+    accessible-checkable: true;
+    accessible-checked: root.checked;
+    accessible-action-default => { root.toggled(!root.checked); }
+
+    height: Tokens.control-min-height;
+    width: layout.preferred-width;
+
+    layout := HorizontalLayout {
+        spacing: Tokens.space-8;
+        alignment: start;
+
+        box := Rectangle {
+            width: Tokens.icon-size-nav;
+            height: Tokens.icon-size-nav;
+            y: (parent.height - self.height) / 2;
+            border-radius: Tokens.control-radius;
+            border-width: 1px;
+            border-color: !root.enabled ? Tokens.text-disabled-brush : root.checked ? Tokens.accent-brush : touch.has-hover ? Tokens.text-brush : Tokens.text-secondary-brush;
+            background: !root.enabled ? Tokens.ground-brush : root.checked ? (touch.has-hover ? Tokens.accent-pressed-brush : Tokens.accent-brush) : Tokens.ground-brush;
+
+            if root.checked: Path {
+                x: Tokens.space-4;
+                y: Tokens.space-4;
+                width: Tokens.space-12;
+                height: Tokens.space-12;
+                stroke: Tokens.on-accent-brush;
+                stroke-width: Tokens.space-2;
+                MoveTo { x: 0; y: Tokens.space-6 / 1px; }
+                LineTo { x: Tokens.space-4 / 1px; y: Tokens.space-10 / 1px; }
+                LineTo { x: Tokens.space-12 / 1px; y: Tokens.space-2 / 1px; }
+            }
+
+            FocusRing {
+                focused: focus.has-focus;
+            }
+        }
+
+        Text {
+            text: root.text;
+            color: root.enabled ? Tokens.text-brush : Tokens.text-disabled-brush;
+            vertical-alignment: center;
+        }
+    }
+
+    focus := FocusScope {
+        enabled: root.enabled;
+        focus-gained(reason) => {
+            if (reason == FocusReason.tab-navigation) {
+                KeyboardFocus.visible = true;
+            }
+        }
+        key-pressed(event) => {
+            if (event.text == " ") {
+                root.toggled(!root.checked);
+                return accept;
+            }
+            reject
+        }
+
+        touch := TouchArea {
+            enabled: root.enabled;
+            pointer-event(event) => {
+                if (event.kind == PointerEventKind.down) {
+                    KeyboardFocus.visible = false;
+                }
+            }
+            clicked => {
+                focus.focus();
+                root.toggled(!root.checked);
+            }
+        }
+    }
+}
+
+// Fluent's radio button, retinted: an Antique Brass ring around a Brass Shadow dot when chosen.
+export component RadioButton inherits Rectangle {
+    in property <string> text;
+    in property <bool> checked;
+    callback chosen();
+
+    accessible-role: radio-button;
+    accessible-label: root.text;
+    accessible-checkable: true;
+    accessible-checked: root.checked;
+    accessible-action-default => { root.chosen(); }
+
+    height: Tokens.control-min-height;
+    width: layout.preferred-width;
+
+    layout := HorizontalLayout {
+        spacing: Tokens.space-8;
+        alignment: start;
+
+        Rectangle {
+            width: Tokens.icon-size-nav;
+            height: Tokens.icon-size-nav;
+            y: (parent.height - self.height) / 2;
+            border-radius: self.width / 2;
+            border-width: root.checked ? 0px : 1px;
+            border-color: touch.has-hover ? Tokens.text-brush : Tokens.text-secondary-brush;
+            background: root.checked ? Tokens.accent-brush : Tokens.ground-brush;
+
+            if root.checked: Rectangle {
+                width: Tokens.space-8;
+                height: Tokens.space-8;
+                border-radius: self.width / 2;
+                background: Tokens.on-accent-brush;
+            }
+
+            FocusRing {
+                focused: focus.has-focus;
+                radius: parent.width / 2;
+            }
+        }
+
+        Text {
+            text: root.text;
+            color: Tokens.text-brush;
+            vertical-alignment: center;
+        }
+    }
+
+    focus := FocusScope {
+        focus-gained(reason) => {
+            if (reason == FocusReason.tab-navigation) {
+                KeyboardFocus.visible = true;
+            }
+        }
+        key-pressed(event) => {
+            if (event.text == " ") {
+                root.chosen();
+                return accept;
+            }
+            reject
+        }
+
+        touch := TouchArea {
+            pointer-event(event) => {
+                if (event.kind == PointerEventKind.down) {
+                    KeyboardFocus.visible = false;
+                }
+            }
+            clicked => {
+                focus.focus();
+                root.chosen();
+            }
+        }
+    }
+}
+
+// A (?) beside a label: a muted 14px icon whose tip opens on hover, on keyboard focus, or when pressed.
+export component HelpButton inherits Rectangle {
+    in property <string> tip;
+
+    property <bool> shown;
+
+    accessible-role: button;
+    accessible-label: root.tip;
+
+    width: Tokens.icon-size-small;
+    height: Tokens.icon-size-small;
+
+    Image {
+        width: Tokens.icon-size-small;
+        height: Tokens.icon-size-small;
+        image-fit: contain;
+        source: Tokens.icon-help;
+        colorize: touch.has-hover ? Tokens.text-secondary-brush : Tokens.text-muted-brush;
+    }
+
+    focus := FocusScope {
+        x: Tokens.help-button-outdent.left;
+        y: Tokens.help-button-outdent.top;
+        width: root.width - Tokens.help-button-outdent.left - Tokens.help-button-outdent.right;
+        height: root.height - Tokens.help-button-outdent.top - Tokens.help-button-outdent.bottom;
+        focus-gained(reason) => {
+            if (reason == FocusReason.tab-navigation) {
+                KeyboardFocus.visible = true;
+            }
+        }
+        focus-lost => {
+            root.shown = false;
+        }
+        key-pressed(event) => {
+            if (event.text == Key.Return || event.text == " ") {
+                root.shown = !root.shown;
+                return accept;
+            }
+            reject
+        }
+
+        touch := TouchArea {
+            pointer-event(event) => {
+                if (event.kind == PointerEventKind.down) {
+                    KeyboardFocus.visible = false;
+                }
+            }
+            clicked => {
+                focus.focus();
+                root.shown = !root.shown;
+            }
+        }
+    }
+
+    TipTrigger {
+        text: root.tip;
+        hovered: touch.has-hover || root.shown;
+        focused: focus.has-focus;
+    }
+
+    FocusRing {
+        focused: focus.has-focus;
+        radius: root.width / 2;
+    }
+}

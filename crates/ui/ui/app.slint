@@ -8,12 +8,15 @@ import { HomePage, HomeState, LaunchMode, BloomPhase } from "pages/home.slint";
 import { ModsPage, ModsState, ModRow, SourceRow, ModSettingRow, SettingChoiceRow, ModLogRow } from "pages/mods.slint";
 import { SettingsPage, SettingsState, LocationSetting, ModuleRow, SettingsSectionRow } from "pages/settings.slint";
 import { TrainerPage, TrainerState } from "pages/trainer.slint";
+import { ForgeState, CellKind, CellRef, ItemRarity, ValueCell, TierOption, AffixRowView, ModifierRowView, FieldView, DraftEntryView, AppliedEntryView, MenuOptionView,
+    PickerRowView } from "pages/forge/state.slint";
 import { MessageTone } from "pages/common.slint";
 import { Eterra, Mote } from "decorations.slint";
 import { PreparationWindow, PreparationState } from "preparation.slint";
 
 export { Tokens, Nav, NavRow, NavOutcome, Connection, HomeState, LaunchMode, BloomPhase, ModsState, SettingsState, LocationSetting, ModuleRow, SettingsSectionRow,
     TrainerState, MessageTone, Eterra, Mote, PreparationWindow, PreparationState, ModRow, SourceRow, ModSettingRow, SettingChoiceRow, ModLogRow }
+export { ForgeState, CellKind, CellRef, ItemRarity, ValueCell, TierOption, AffixRowView, ModifierRowView, FieldView, DraftEntryView, AppliedEntryView, MenuOptionView, PickerRowView }
 
 export component MainWindow inherits Window {
     title: "Eterra's Gift";
@@ -107,6 +110,8 @@ export component MainWindow inherits Window {
                 page-id: root.page;
                 page-title: Nav.current-title;
                 compact: root.compact;
+                narrow: root.narrow;
+                wide: root.wide;
             }
         }
 

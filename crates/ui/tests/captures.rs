@@ -35,6 +35,10 @@ use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
+// The fixture game behind the Item Forge (spec/forge-fixture.json); it names the forge module through this import.
+use eg_ui::forge;
+mod forge_fixture;
+
 /// A game host that records starts instead of making them, so no capture ever starts the real game.
 struct FakeGameHost {
     state: Mutex<FakeGame>,
@@ -602,6 +606,7 @@ fn main() {
     session.capture(&ui, "settings-save-retried");
 
     capture_mods(&session);
+    forge_captures(&session);
 }
 
 fn capture_mods(session: &Session) {
@@ -877,4 +882,251 @@ fn wait_for(what: &str, mut completed: impl FnMut() -> bool) {
         settle();
     }
     settle();
+}
+
+/// The Item Forge on the fixture game (spec/forge-fixture.json `captureScenarios`, the C# `ReviewCaptureTests`): every
+/// window class with drafts, the menus and the popover, Apply and a draft the game outran, the status strip and
+/// implicits, and a unique item. The real app has no game behind the forge yet; these attach the fixture.
+fn forge_captures(session: &Session) {
+    use eg_ui::forge::editor::{Cell, ForgeEditor};
+    use eg_ui::forge::item::Seal;
+    use eg_ui::{Connection, ForgeState};
+    use forge_fixture::{FixtureGame, FixtureState};
+    use std::cell::RefCell;
+
+    struct Forge {
+        ui: MainWindow,
+        handle: eg_ui::forge::ForgeHandle,
+        game: Rc<RefCell<FixtureState>>,
+    }
+
+    fn open(session: &Session, game: FixtureGame, width: u32, height: u32) -> Forge {
+        let state = game.state.clone();
+        let ui = session.open(true, width, height);
+        let connection = ui.global::<Connection>();
+        connection.set_connected(true);
+        connection.set_text("Connected".into());
+        connection.set_show_action(false);
+        ui.global::<Nav>().invoke_navigate("forge".into());
+        let handle = eg_ui::forge::attach(&ui, Box::new(game));
+        // Applied entries carry the local time; captures hold one.
+        handle.edit(|editor| editor.clock = || "23:54".into());
+        // The forge comes into being with the first frame, and its pane follows the window class from there.
+        ui.window().take_snapshot().expect("the forge's first frame");
+        settle();
+        Forge { ui, handle, game: state }
+    }
+
+    // Types a value into a cell's popover, as Enter commits it.
+    fn type_value(editor: &mut ForgeEditor, cell: Cell, text: &str) {
+        assert!(editor.begin_input(cell));
+        editor.set_input(cell, text);
+        assert!(editor.commit_input(cell));
+    }
+
+    // Two drafts pending at every window class: Movement Speed T1 → T4, Health +34 → +37 (the C# `PendingDraftsAtEachWindowClass`).
+    for (class, width, height) in SIZES {
+        let forge = open(session, FixtureGame::boots(false), width, height);
+        forge.handle.edit(|editor| {
+            editor.pick_tier(2, 4);
+            editor.select_affix(Some(0));
+            type_value(editor, Cell::Affix(0), "37");
+        });
+        let state = forge.ui.global::<ForgeState>();
+        assert_eq!(state.get_pane_open(), class != "narrow", "the pane starts closed only in a narrow window");
+        assert_eq!(state.get_apply_text(), "Apply 2 drafts");
+        state.set_pane_open(true);
+        settle();
+        session.capture(&forge.ui, &format!("item-{class}"));
+        state.set_pane_open(false);
+        settle();
+        session.capture(&forge.ui, &format!("item-{class}-hidden"));
+    }
+
+    // A seal-only draft beside a value draft, then Apply: both confirmed by readback, Fire Resistance moved where the game
+    // loads a normal affix (`seal-draft`, `confirmed`).
+    let forge = open(session, FixtureGame::boots(false), 1100, 700);
+    forge.handle.edit(|editor| {
+        type_value(editor, Cell::Affix(0), "37");
+        editor.select_affix(Some(3));
+        editor.pick_seal(3, Seal::Normal);
+    });
+    session.capture(&forge.ui, "item-seal-draft");
+    forge.handle.edit(ForgeEditor::apply);
+    assert!(forge.ui.global::<ForgeState>().get_message().starts_with("2 drafts applied."));
+    assert_eq!(forge.game.borrow().writes.len(), 2);
+    session.capture(&forge.ui, "item-confirmed");
+
+    // A draft the game changed after it was made: Apply refuses the whole ledger with the reason (`rejected`).
+    let forge = open(session, FixtureGame::boots(false), 1100, 700);
+    forge.handle.edit(|editor| type_value(editor, Cell::Affix(0), "37"));
+    forge.game.borrow_mut().item.as_mut().unwrap().affixes[0].roll = 120;
+    forge.handle.refresh();
+    forge.handle.edit(ForgeEditor::apply);
+    assert!(forge.ui.global::<ForgeState>().get_message().contains("changed in the game after you drafted it"));
+    assert!(forge.game.borrow().writes.is_empty());
+    session.capture(&forge.ui, "item-rejected");
+
+    // Maximized with the captured tier ranges: the selected affix's tier ladder beside the table (`tier-ladder`).
+    let forge = open(session, FixtureGame::boots(true), 1920, 1080);
+    forge.handle.edit(|editor| editor.pick_tier(0, 7));
+    session.capture(&forge.ui, "item-tier-ladder");
+
+    // A unique item with a drafted shared roll: the linked line previews it (`unique-standard`, `read-only`,
+    // `unique-maximized`).
+    let forge = open(session, FixtureGame::unique(), 1100, 700);
+    forge.handle.edit(|editor| {
+        editor.select_unique(Some(0));
+        type_value(editor, Cell::Unique(0, 0), "24");
+    });
+    assert_eq!(forge.ui.global::<ForgeState>().get_preview_status(), "Draft preview");
+    session.capture(&forge.ui, "item-unique-standard");
+    forge.handle.edit(|editor| editor.select_unique(Some(3)));
+    session.capture(&forge.ui, "item-unique-read-only");
+    session.resize(1920, 1080);
+    session.capture(&forge.ui, "item-unique-maximized");
+
+    // The ring: the status strip, a flag and the base drafted (`item-status-*`), then its implicits (`implicits*`).
+    for (class, width, height) in SIZES {
+        let forge = open(session, FixtureGame::ring(false), width, height);
+        forge.handle.edit(|editor| {
+            type_value(editor, Cell::Field(0), "60");
+            editor.toggle_flag(2, true);
+            editor.pick_base(1);
+        });
+        session.capture(&forge.ui, &format!("item-status-{class}"));
+    }
+    let forge = open(session, FixtureGame::ring(true), 1100, 700);
+    session.capture(&forge.ui, "item-implicits");
+    forge.handle.edit(|editor| type_value(editor, Cell::Implicit(0, 0), "200"));
+    session.capture(&forge.ui, "item-implicits-draft");
+    forge.handle.edit(|editor| {
+        editor.discard_all();
+        editor.pick_base(1);
+    });
+    session.capture(&forge.ui, "item-implicits-base-draft");
+
+    // ----- Real input on the cells (the C# `InPlaceMenusAndValuePopover`, `KeyboardTests`, `ReplacementCatalogue`) -----
+    let pointer = |forge: &Forge, x: f32, y: f32, kind: &str| {
+        let position = LogicalPosition::new(x, y);
+        let event = match kind {
+            "move" => WindowEvent::PointerMoved { position },
+            "down" => WindowEvent::PointerPressed {
+                position,
+                button: PointerEventButton::Left,
+            },
+            "up" => WindowEvent::PointerReleased {
+                position,
+                button: PointerEventButton::Left,
+            },
+            "right" => WindowEvent::PointerPressed {
+                position,
+                button: PointerEventButton::Right,
+            },
+            _ => WindowEvent::PointerReleased {
+                position,
+                button: PointerEventButton::Right,
+            },
+        };
+        forge.ui.window().dispatch_event(event);
+        settle();
+    };
+    // Rows of the table at 1100×700: 52px rows 2px apart under the header; the cells' columns.
+    let row_y = |row: usize| 190.0 + 54.0 * row as f32;
+    const VALUE_X: f32 = 150.0;
+    const NAME_X: f32 = 300.0;
+    const TIER_X: f32 = 530.0;
+
+    // A click on a tier cell opens the tier menu with the tier the item holds (`tier-menu`).
+    let forge = open(session, FixtureGame::boots(true), 1100, 700);
+    session.click(TIER_X, row_y(0));
+    session.capture(&forge.ui, "item-tier-menu");
+    session.key(Key::DownArrow);
+    session.key(Key::Return);
+    assert_eq!(
+        forge.ui.global::<ForgeState>().get_affixes().row_data(0).unwrap().tier,
+        "T6",
+        "Down and Enter pick the next tier"
+    );
+
+    let forge = open(session, FixtureGame::boots(true), 1100, 700);
+
+    // Hovering a value lights only its bar (`value-hover`); a click without dragging opens the popover (`value-popover`).
+    pointer(&forge, VALUE_X + 70.0, row_y(1) - 14.0, "move");
+    session.capture(&forge.ui, "item-value-hover");
+    session.click(VALUE_X, row_y(1) - 6.0);
+    assert_eq!(forge.ui.global::<ForgeState>().get_input_text(), "7.3");
+    session.capture(&forge.ui, "item-value-popover");
+    // A value outside the game's range keeps the popover open with the reason; Escape drops it.
+    session.control_key("a");
+    session.type_text("12");
+    session.key(Key::Return);
+    assert_eq!(forge.ui.global::<ForgeState>().get_input_error(), "Enter a value from 4.5% to 8.1%.");
+    session.capture(&forge.ui, "item-value-invalid");
+    session.key(Key::Escape);
+    assert_eq!(forge.ui.global::<ForgeState>().get_drafts().row_count(), 0);
+
+    // A drag scrubs through the values the game can produce, all one draft change (`value-scrub`).
+    pointer(&forge, VALUE_X, row_y(0) - 6.0, "move");
+    pointer(&forge, VALUE_X, row_y(0) - 6.0, "down");
+    for step in 1..=4 {
+        pointer(&forge, VALUE_X + 12.0 * step as f32, row_y(0) - 6.0, "move");
+    }
+    session.capture(&forge.ui, "item-value-scrub");
+    pointer(&forge, VALUE_X + 48.0, row_y(0) - 6.0, "up");
+    let drafts = forge.ui.global::<ForgeState>().get_drafts();
+    assert_eq!(drafts.row_count(), 1);
+    assert!(drafts.row_data(0).unwrap().summary.starts_with("Value +34 → +"));
+
+    // The row menu at the pointer (`row-menu`).
+    pointer(&forge, NAME_X, row_y(0), "move");
+    pointer(&forge, NAME_X, row_y(0), "right");
+    pointer(&forge, NAME_X, row_y(0), "right-up");
+    session.capture(&forge.ui, "item-row-menu");
+    session.key(Key::Escape);
+
+    // The name opens the affix picker: a search, the incompatible toggle, the first entry (`replace`).
+    let forge = open(session, FixtureGame::boots(false), 1100, 700);
+    session.click(NAME_X, row_y(3));
+    assert!(forge.ui.global::<ForgeState>().get_picker_open());
+    session.type_text("res");
+    forge.ui.global::<ForgeState>().invoke_picker_allow_changed(true);
+    settle();
+    session.key(Key::DownArrow);
+    session.capture(&forge.ui, "item-replace");
+    assert_eq!(forge.ui.global::<ForgeState>().get_picker_status(), "Compatible with this slot");
+    session.key(Key::Return);
+    assert_eq!(
+        forge.ui.global::<ForgeState>().get_drafts().row_data(0).unwrap().summary,
+        "Fire Resistance → Cold Resistance"
+    );
+    session.capture(&forge.ui, "item-replaced");
+
+    // A value whose mapping the game could not read: locked, with the reason as its tip, focus still shows
+    // (`value-focus-locked`).
+    let game = FixtureGame::boots(false);
+    game.state.borrow_mut().unmapped.push(1148);
+    let forge = open(session, game, 1100, 700);
+    session.click(VALUE_X, row_y(1) - 6.0);
+    session.key(Key::Tab);
+    session.key(Key::Backtab);
+    session.capture(&forge.ui, "item-value-focus-locked");
+
+    // Add affix opens the picker to add, its caption the free slots.
+    let forge = open(session, FixtureGame::boots(false), 1100, 700);
+    session.click(145.0, row_y(4) - 2.0);
+    assert_eq!(forge.ui.global::<ForgeState>().get_picker_title(), "Add affix");
+    session.capture(&forge.ui, "item-add-affix");
+    session.key(Key::Escape);
+
+    // The rarity in the facts line opens the rarity menu (`item-rarity-menu`); the base, the base picker (`item-base-picker`).
+    let forge = open(session, FixtureGame::ring(true), 1100, 700);
+    session.click(95.0, 117.0);
+    session.key(Key::DownArrow);
+    session.capture(&forge.ui, "item-rarity-menu");
+    session.key(Key::Return);
+    assert_eq!(forge.ui.global::<ForgeState>().get_rarity_text(), "Exalted");
+    let forge = open(session, FixtureGame::ring(true), 1100, 700);
+    session.click(155.0, 117.0);
+    session.capture(&forge.ui, "item-base-picker");
 }

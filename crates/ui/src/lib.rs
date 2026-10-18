@@ -6,6 +6,7 @@ slint::include_modules!();
 
 pub mod background;
 pub mod decorations;
+pub mod forge;
 pub mod home;
 pub mod mods;
 pub mod preparation;

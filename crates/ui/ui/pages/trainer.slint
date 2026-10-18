@@ -6,6 +6,9 @@ import { Connection, KeyboardFocus } from "../globals.slint";
 import { Button, ButtonKind } from "../widgets/button.slint";
 import { FocusRing } from "../widgets/focus.slint";
 import { EmptyState } from "common.slint";
+// TODO(forge) hook: the Item Forge in Forge › Item.
+import { ItemForge } from "forge/editor.slint";
+import { ForgeState } from "forge/state.slint";
 
 export global TrainerState {
     // The forge's empty state for the current connection state.
@@ -119,17 +122,30 @@ export component TrainerPage inherits Rectangle {
     in property <string> page-id;
     in property <string> page-title;
     in property <bool> compact;
+    // TODO(forge) hook: the window classes and the current section, for the Item Forge below.
+    in property <bool> narrow;
+    in property <bool> wide;
 
     property <bool> forge: root.page-id == "forge";
     property <[string]> sections: root.forge ? ["Item", "Crafting rules"] : [];
+    property <int> section;
 
     VerticalLayout {
         if root.sections.length > 0: SectionBar {
             sections: root.sections;
+            current <=> root.section;
             compact: root.compact;
         }
 
-        EmptyState {
+        // TODO(forge) hook: Forge › Item is the Item Forge while the session holds an item (never yet in the real app).
+        if root.forge && root.section == 0 && ForgeState.has-item: ItemForge {
+            vertical-stretch: 1;
+            compact: root.compact;
+            narrow: root.narrow;
+            wide: root.wide;
+        }
+
+        if !(root.forge && root.section == 0 && ForgeState.has-item): EmptyState {
             vertical-stretch: 1;
             title: root.forge ? TrainerState.empty-title : root.page-title;
             detail: root.forge ? TrainerState.empty-detail : "Not ported yet.";

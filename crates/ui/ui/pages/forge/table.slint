@@ -1,0 +1,731 @@
+// The affix table's rows, the tier and seal menus, and the modifier rows shared by implicits and unique modifiers
+// (DESIGN.md "Rows", "In-place Cells", "Implicits", "Unique Modifiers"; spec/item-forge.md §4, §5, §7, §9).
+
+import { Tokens } from "../../tokens.slint";
+import { KeyboardFocus } from "../../globals.slint";
+import { TipTrigger } from "../../widgets/focus.slint";
+import { ForgeState, AffixRowView, ModifierRowView, TierOption, CellKind } from "state.slint";
+import { ValueScrubber } from "scrubber.slint";
+import { CellButton, MenuRow } from "cells.slint";
+import { AffixPickerPanel, PickerMetrics } from "picker.slint";
+
+// The tiers as menu rows: "T5", its range in the game's format, "in game" on the tier the game holds.
+export component TierList inherits VerticalLayout {
+    in property <[TierOption]> tiers;
+    in property <int> held: -1;
+    in property <int> highlighted: -1;
+    in property <bool> enabled: true;
+    callback picked(int);
+
+    spacing: Tokens.space-2;
+
+    for tier[index] in root.tiers: MenuRow {
+        held: root.held == index;
+        highlighted: root.highlighted == index;
+        enabled: root.enabled;
+        picked => {
+            root.picked(index);
+        }
+
+        Text {
+            text: tier.label;
+            font-size: Tokens.font-size-value;
+            color: Tokens.text-brush;
+            vertical-alignment: center;
+            horizontal-stretch: 0;
+        }
+
+        Text {
+            text: tier.range;
+            font-size: Tokens.font-size-body;
+            color: Tokens.text-muted-brush;
+            vertical-alignment: center;
+            horizontal-stretch: 1;
+        }
+
+        if tier.in-game: Text {
+            text: "in game";
+            font-size: Tokens.font-size-caption;
+            color: Tokens.text-secondary-brush;
+            vertical-alignment: center;
+            horizontal-stretch: 0;
+        }
+    }
+}
+
+// A menu flyout's frame: Dusk Brown in a hairline, the app's padding, keyboard Up/Down/Enter/Escape.
+component MenuFrame inherits Rectangle {
+    in property <int> count;
+    in-out property <int> highlighted;
+    callback chosen(int);
+    callback dismissed();
+
+    background: Tokens.hover-brush;
+    border-radius: Tokens.control-radius;
+
+    FocusScope {
+        init => {
+            self.focus();
+        }
+        key-pressed(event) => {
+            if (event.text == Key.Escape) {
+                root.dismissed();
+                return accept;
+            }
+            if (event.text == Key.UpArrow) {
+                KeyboardFocus.visible = true;
+                root.highlighted = Math.max(0, root.highlighted - 1);
+                return accept;
+            }
+            if (event.text == Key.DownArrow) {
+                KeyboardFocus.visible = true;
+                root.highlighted = Math.min(root.count - 1, root.highlighted + 1);
+                return accept;
+            }
+            if (event.text == Key.Return || event.text == " ") {
+                root.chosen(root.highlighted);
+                return accept;
+            }
+            reject
+        }
+
+        VerticalLayout {
+            padding-left: Tokens.flyout-padding.left;
+            padding-right: Tokens.flyout-padding.right;
+            padding-top: Tokens.flyout-padding.top;
+            padding-bottom: Tokens.flyout-padding.bottom;
+
+            @children
+        }
+    }
+}
+
+// The height of a flyout of `rows` menu rows: 30px rows 2px apart inside the flyout padding.
+export global MenuMetrics {
+    out property <length> row: Tokens.font-size-value * 4 / 3 + Tokens.cell-padding.top + Tokens.cell-padding.bottom + 2px;
+
+    public pure function height(rows: int) -> length {
+        return rows * self.row + Math.max(0, rows - 1) * Tokens.space-2 + Tokens.flyout-padding.top + Tokens.flyout-padding.bottom + 2px;
+    }
+}
+
+// One affix: [value | name over type | range at wide | tier | seal | status]. Touching any cell selects the row.
+export component AffixRowItem inherits Rectangle {
+    in property <AffixRowView> affix;
+    in property <int> index;
+    in property <bool> selected;
+    in property <bool> wide;
+    in property <length> range-width;
+
+    property <int> serial: ForgeState.focus-serial;
+    property <int> tier-highlight;
+    property <int> seal-highlight;
+    property <length> content-height: Math.max(Tokens.row-min-height, name-cell.height);
+
+    changed serial => {
+        if (ForgeState.focus-cell.kind == CellKind.affix && ForgeState.focus-cell.row == root.index) {
+            if (ForgeState.focus-part == 1) {
+                name-cell.focus-cell();
+            } else if (ForgeState.focus-part == 2) {
+                tier-cell.focus-cell();
+            } else if (ForgeState.focus-part == 3) {
+                seal-cell.focus-cell();
+            }
+        }
+    }
+
+    function open-tiers() {
+        ForgeState.select-affix(root.index);
+        root.tier-highlight = root.affix.tier-index;
+        tier-popup.show();
+    }
+
+    function open-seals() {
+        ForgeState.select-affix(root.index);
+        root.seal-highlight = root.affix.seal-index;
+        seal-popup.show();
+    }
+
+    function open-picker() {
+        if (ForgeState.open-replace(root.index)) {
+            picker-popup.show();
+        }
+    }
+
+    function show-menu(at-x: length) {
+        menu.show({ x: at-x, y: root.height - Tokens.space-8 });
+    }
+
+    // A right-click opens the row menu at the pointer.
+    function menu-at(x: length, y: length) {
+        ForgeState.select-affix(root.index);
+        menu.show({ x: x - root.absolute-position.x, y: y - root.absolute-position.y });
+    }
+
+    accessible-role: list-item;
+    accessible-label: root.affix.name;
+    accessible-item-selected: root.selected;
+
+    height: root.content-height + 2px;
+    border-radius: Tokens.control-radius;
+    border-width: 1px;
+    border-color: root.selected ? Tokens.accent-brush : transparent;
+    background: root.selected ? Tokens.selected-brush : hover.has-hover ? Tokens.hover-brush : transparent;
+
+    menu := ContextMenuArea {
+        Menu {
+            MenuItem {
+                title: "Replace affix…";
+                icon: Tokens.icon-replace;
+                activated => {
+                    root.open-picker();
+                }
+            }
+
+            MenuItem {
+                title: "Discard draft";
+                icon: Tokens.icon-close;
+                enabled: root.affix.dirty;
+                activated => {
+                    ForgeState.discard-row(root.index);
+                }
+            }
+
+            MenuSeparator { }
+
+            MenuItem {
+                title: "Remove affix";
+                icon: Tokens.icon-remove;
+                enabled: ForgeState.can-change-affix-list;
+                activated => {
+                    ForgeState.remove-affix(root.index);
+                }
+            }
+        }
+
+        hover := TouchArea {
+            pointer-event(event) => {
+                if (event.kind == PointerEventKind.down) {
+                    KeyboardFocus.visible = false;
+                    ForgeState.select-affix(root.index);
+                }
+                if (event.kind == PointerEventKind.down && event.button == PointerEventButton.right) {
+                    root.menu-at(self.absolute-position.x + self.mouse-x, self.absolute-position.y + self.mouse-y);
+                }
+            }
+        }
+
+        HorizontalLayout {
+            padding-left: Tokens.row-padding.left + 1px;
+            padding-right: Tokens.row-padding.right + 1px;
+            padding-top: 1px;
+            padding-bottom: 1px;
+            spacing: Tokens.space-12;
+
+            Rectangle {
+                width: Tokens.affix-value-column-width;
+
+                ValueScrubber {
+                    y: (parent.height - self.height) / 2;
+                    width: parent.width;
+                    cell: root.affix.value;
+                    vertical(delta) => {
+                        ForgeState.move-row(root.index, delta, 0);
+                    }
+                    menu-requested => {
+                        root.show-menu(0);
+                    }
+                    context-menu(x, y) => {
+                        root.menu-at(x, y);
+                    }
+                }
+            }
+
+            Rectangle {
+                horizontal-stretch: 1;
+
+                name-cell := CellButton {
+                    x: Tokens.cell-outdent.left;
+                    y: (parent.height - self.height) / 2;
+                    width: parent.width - Tokens.cell-outdent.left - Tokens.cell-outdent.right;
+                    tip: root.affix.name-tip;
+                    label: "Replace " + root.affix.name;
+                    clicked => {
+                        root.open-picker();
+                    }
+                    vertical(delta) => {
+                        ForgeState.move-row(root.index, delta, 1);
+                    }
+                    menu-requested => {
+                        root.show-menu(parent.x);
+                    }
+                    context-menu(x, y) => {
+                        root.menu-at(x, y);
+                    }
+
+                    VerticalLayout {
+                        spacing: Tokens.space-1;
+                        alignment: center;
+
+                        Text {
+                            text: root.affix.name;
+                            font-size: Tokens.font-size-value;
+                            color: root.affix.replaced ? Tokens.draft-brush : Tokens.text-brush;
+                            overflow: elide;
+                        }
+
+                        Text {
+                            text: root.affix.detail;
+                            font-size: Tokens.font-size-caption;
+                            color: root.affix.reforged ? Tokens.reforged-affix-brush : Tokens.text-muted-brush;
+                            overflow: elide;
+                        }
+
+                        // The confirm settle: the mark arrives as ash and settles into sage.
+                        if root.affix.confirmed: HorizontalLayout {
+                            property <bool> settled;
+                            init => {
+                                self.settled = true;
+                            }
+                            spacing: Tokens.space-4;
+                            alignment: start;
+                            opacity: self.settled ? 1 : 0;
+                            animate opacity {
+                                duration: Tokens.settle-duration;
+                                easing: cubic-bezier(0.215, 0.61, 0.355, 1);
+                                enabled: Tokens.motion;
+                            }
+
+                            Image {
+                                width: Tokens.icon-size-tiny;
+                                height: Tokens.icon-size-tiny;
+                                y: (parent.height - self.height) / 2;
+                                image-fit: contain;
+                                source: Tokens.icon-confirmed;
+                                colorize: parent.settled ? Tokens.confirmed-brush : Tokens.ash-brush;
+                            }
+
+                            Text {
+                                text: "Confirmed";
+                                font-size: Tokens.font-size-caption;
+                                color: parent.settled ? Tokens.confirmed-brush : Tokens.ash-brush;
+                                animate color {
+                                    duration: Tokens.settle-duration;
+                                    easing: cubic-bezier(0.215, 0.61, 0.355, 1);
+                                    enabled: Tokens.motion;
+                                }
+                            }
+                        }
+
+                        // In words in the row too: the changes pane can be closed, and the status icon's tip is hover-only.
+                        if root.affix.stale: HorizontalLayout {
+                            spacing: Tokens.space-4;
+                            alignment: start;
+
+                            Image {
+                                width: Tokens.icon-size-tiny;
+                                height: Tokens.icon-size-tiny;
+                                y: (parent.height - self.height) / 2;
+                                image-fit: contain;
+                                source: Tokens.icon-warning;
+                                colorize: Tokens.warning-brush;
+                            }
+
+                            Text {
+                                text: "Changed in game — discard and redo";
+                                font-size: Tokens.font-size-caption;
+                                color: Tokens.warning-brush;
+                                overflow: elide;
+                            }
+                        }
+                    }
+                }
+
+                picker-popup := PopupWindow {
+                    x: Tokens.cell-outdent.left;
+                    y: (parent.height + name-cell.height) / 2 + Tokens.space-4;
+                    width: Tokens.replace-flyout-width + Tokens.flyout-padding.left + Tokens.flyout-padding.right;
+                    height: PickerMetrics.height(ForgeState.picker-rows.length);
+                    close-policy: PopupClosePolicy.close-on-click-outside;
+
+                    AffixPickerPanel {
+                        done => {
+                            picker-popup.close();
+                            name-cell.focus-cell();
+                        }
+                    }
+                }
+            }
+
+            if root.wide: Text {
+                width: root.range-width;
+                text: root.affix.range;
+                font-size: Tokens.font-size-caption;
+                color: Tokens.text-muted-brush;
+                vertical-alignment: center;
+            }
+
+            Rectangle {
+                width: Tokens.affix-tier-column-width;
+
+                tier-cell := CellButton {
+                    x: Tokens.cell-outdent.left;
+                    y: (parent.height - self.height) / 2;
+                    width: parent.width - Tokens.cell-outdent.left - Tokens.cell-outdent.right;
+                    enabled: root.affix.can-edit;
+                    tip: "Change tier";
+                    label: "Tier for " + root.affix.name;
+                    clicked => {
+                        root.open-tiers();
+                    }
+                    vertical(delta) => {
+                        ForgeState.move-row(root.index, delta, 2);
+                    }
+                    menu-requested => {
+                        root.show-menu(parent.x);
+                    }
+                    context-menu(x, y) => {
+                        root.menu-at(x, y);
+                    }
+
+                    Text {
+                        text: root.affix.tier;
+                        font-size: Tokens.font-size-value;
+                        color: root.affix.tier-drafted ? Tokens.draft-brush : root.affix.exalted ? Tokens.rarity-exalted-brush : Tokens.text-brush;
+                    }
+                }
+
+                tier-popup := PopupWindow {
+                    x: Tokens.cell-outdent.left;
+                    y: (parent.height + tier-cell.height) / 2 + Tokens.space-4;
+                    width: Tokens.menu-flyout-width + Tokens.flyout-padding.left + Tokens.flyout-padding.right;
+                    height: MenuMetrics.height(root.affix.tiers.length);
+                    close-policy: PopupClosePolicy.close-on-click-outside;
+
+                    MenuFrame {
+                        count: root.affix.tiers.length;
+                        highlighted <=> root.tier-highlight;
+                        chosen(index) => {
+                            ForgeState.pick-tier(root.index, index);
+                            tier-popup.close();
+                            tier-cell.focus-cell();
+                        }
+                        dismissed => {
+                            tier-popup.close();
+                            tier-cell.focus-cell();
+                        }
+
+                        TierList {
+                            tiers: root.affix.tiers;
+                            held: root.affix.tier-index;
+                            highlighted: root.tier-highlight;
+                            picked(index) => {
+                                ForgeState.pick-tier(root.index, index);
+                                tier-popup.close();
+                            }
+                        }
+                    }
+                }
+            }
+
+            Rectangle {
+                width: Tokens.affix-seal-column-width;
+
+                seal-cell := CellButton {
+                    x: Tokens.cell-outdent.left;
+                    y: (parent.height - self.height) / 2;
+                    width: parent.width - Tokens.cell-outdent.left - Tokens.cell-outdent.right;
+                    enabled: root.affix.can-edit;
+                    tip: "Change seal state";
+                    label: "Seal state for " + root.affix.name;
+                    clicked => {
+                        root.open-seals();
+                    }
+                    vertical(delta) => {
+                        ForgeState.move-row(root.index, delta, 3);
+                    }
+                    menu-requested => {
+                        root.show-menu(parent.x);
+                    }
+                    context-menu(x, y) => {
+                        root.menu-at(x, y);
+                    }
+
+                    Text {
+                        text: root.affix.seal;
+                        color: root.affix.seal-drafted ? Tokens.draft-brush : root.affix.sealed ? Tokens.text-secondary-brush : Tokens.text-muted-brush;
+                        overflow: elide;
+                    }
+                }
+
+                seal-popup := PopupWindow {
+                    x: Tokens.cell-outdent.left;
+                    y: (parent.height + seal-cell.height) / 2 + Tokens.space-4;
+                    width: Tokens.menu-flyout-width + Tokens.flyout-padding.left + Tokens.flyout-padding.right;
+                    height: MenuMetrics.height(4);
+                    close-policy: PopupClosePolicy.close-on-click-outside;
+
+                    MenuFrame {
+                        count: 4;
+                        highlighted <=> root.seal-highlight;
+                        chosen(index) => {
+                            ForgeState.pick-seal(root.index, index);
+                            seal-popup.close();
+                            seal-cell.focus-cell();
+                        }
+                        dismissed => {
+                            seal-popup.close();
+                            seal-cell.focus-cell();
+                        }
+
+                        VerticalLayout {
+                            spacing: Tokens.space-2;
+
+                            for seal[index] in ["Normal", "Sealed", "Primordial", "Corrupted"]: MenuRow {
+                                held: root.affix.seal-index == index;
+                                highlighted: root.seal-highlight == index;
+                                picked => {
+                                    ForgeState.pick-seal(root.index, index);
+                                    seal-popup.close();
+                                }
+
+                                Text {
+                                    text: seal;
+                                    color: Tokens.text-brush;
+                                    vertical-alignment: center;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // The draft pencil or the stale triangle, each with its tip.
+            Rectangle {
+                width: Tokens.affix-status-column-width;
+
+                if root.affix.pending || root.affix.stale: Image {
+                    width: Tokens.icon-size;
+                    height: Tokens.icon-size;
+                    y: (parent.height - self.height) / 2;
+                    image-fit: contain;
+                    source: root.affix.stale ? Tokens.icon-warning : Tokens.icon-draft;
+                    colorize: root.affix.stale ? Tokens.warning-brush : Tokens.draft-brush;
+                    accessible-role: image;
+                    accessible-label: root.affix.stale ? "Stale draft" : "Draft";
+
+                    status-touch := TouchArea { }
+
+                    TipTrigger {
+                        text: root.affix.stale ? "The game changed this affix after you drafted it." : "Draft: " + root.affix.draft-tip;
+                        hovered: status-touch.has-hover;
+                    }
+                }
+            }
+        }
+    }
+}
+
+// One implicit or unique modifier on the table's columns: its rolls scrub in the value column, the game's line beside them.
+export component ModifierRowItem inherits Rectangle {
+    in property <ModifierRowView> line;
+    in property <int> index;
+    in property <CellKind> kind;
+    // Unique modifiers are a list on the tooltip ground; implicits are plain rows.
+    in property <bool> on-unique;
+    in property <bool> selected;
+
+    property <length> padding-x: root.on-unique ? Tokens.row-padding.left : Tokens.implicit-row-margin.left;
+    property <length> padding-y: root.on-unique ? Tokens.unique-row-margin.top : Tokens.implicit-row-margin.top;
+
+    accessible-role: list-item;
+    accessible-label: root.line.text;
+    accessible-item-selected: root.selected;
+
+    height: layout.preferred-height;
+    border-radius: Tokens.control-radius;
+    border-width: root.on-unique ? 1px : 0px;
+    border-color: root.on-unique && root.selected ? Tokens.unique-text-brush : transparent;
+    background: !root.on-unique ? transparent
+        : root.selected ? Tokens.unique-selected-overlay-brush
+        : touch.has-hover ? Tokens.unique-hover-overlay-brush : transparent;
+
+    touch := TouchArea {
+        enabled: root.on-unique;
+        pointer-event(event) => {
+            if (event.kind == PointerEventKind.down) {
+                KeyboardFocus.visible = false;
+                ForgeState.select-unique(root.index);
+            }
+        }
+    }
+
+    layout := HorizontalLayout {
+        padding-left: root.padding-x;
+        padding-right: root.padding-x;
+        padding-top: root.padding-y;
+        padding-bottom: root.padding-y;
+        spacing: Tokens.space-12;
+
+        VerticalLayout {
+            width: Tokens.affix-value-column-width;
+            spacing: Tokens.space-2;
+            alignment: root.on-unique ? start : center;
+
+            if root.line.editable: VerticalLayout {
+                spacing: Tokens.space-2;
+
+                for cell in root.line.rolls: ValueScrubber {
+                    cell: cell;
+                    on-unique: root.on-unique;
+                    vertical(delta) => {
+                        if (root.on-unique) {
+                            ForgeState.select-unique(Math.max(0, root.index + delta));
+                        }
+                    }
+                }
+            }
+
+            if !root.line.editable: HorizontalLayout {
+                spacing: Tokens.space-6;
+                alignment: start;
+
+                Image {
+                    width: Tokens.icon-size-small;
+                    height: Tokens.icon-size-small;
+                    y: (parent.height - self.height) / 2;
+                    image-fit: contain;
+                    source: Tokens.icon-locked;
+                    colorize: root.on-unique ? Tokens.unique-caption-brush : Tokens.text-muted-brush;
+                }
+
+                fixed := Text {
+                    text: root.line.fixed-text;
+                    font-size: Tokens.font-size-caption;
+                    color: root.on-unique ? Tokens.unique-caption-brush : Tokens.text-muted-brush;
+                    vertical-alignment: center;
+
+                    fixed-touch := TouchArea { }
+
+                    TipTrigger {
+                        text: root.line.fixed-text;
+                        hovered: fixed-touch.has-hover;
+                    }
+                }
+            }
+        }
+
+        VerticalLayout {
+            horizontal-stretch: 1;
+            spacing: root.on-unique ? Tokens.space-2 : Tokens.space-1;
+            alignment: center;
+
+            Text {
+                text: root.line.text;
+                font-size: Tokens.font-size-value;
+                color: root.line.drafted ? Tokens.draft-brush : Tokens.text-brush;
+                wrap: word-wrap;
+            }
+
+            if root.line.range != "" || root.line.confirmed: HorizontalLayout {
+                spacing: Tokens.space-8;
+                alignment: start;
+
+                if root.line.range != "": Text {
+                    text: root.line.range;
+                    font-size: Tokens.font-size-caption;
+                    color: root.on-unique ? Tokens.unique-caption-brush : Tokens.text-muted-brush;
+                }
+
+                if root.line.confirmed: HorizontalLayout {
+                    property <bool> settled;
+                    init => {
+                        self.settled = true;
+                    }
+                    spacing: Tokens.space-4;
+                    opacity: self.settled ? 1 : 0;
+                    animate opacity {
+                        duration: Tokens.settle-duration;
+                        easing: cubic-bezier(0.215, 0.61, 0.355, 1);
+                        enabled: Tokens.motion;
+                    }
+
+                    Image {
+                        width: Tokens.icon-size-tiny;
+                        height: Tokens.icon-size-tiny;
+                        y: (parent.height - self.height) / 2;
+                        image-fit: contain;
+                        source: Tokens.icon-confirmed;
+                        colorize: parent.settled ? Tokens.confirmed-brush : Tokens.ash-brush;
+                    }
+
+                    Text {
+                        text: "Confirmed";
+                        font-size: Tokens.font-size-caption;
+                        color: parent.settled ? Tokens.confirmed-brush : Tokens.ash-brush;
+                    }
+                }
+            }
+
+            if root.line.stale: HorizontalLayout {
+                spacing: Tokens.space-4;
+                alignment: start;
+
+                Image {
+                    width: Tokens.icon-size-tiny;
+                    height: Tokens.icon-size-tiny;
+                    y: Tokens.space-2;
+                    image-fit: contain;
+                    source: Tokens.icon-warning;
+                    colorize: Tokens.warning-brush;
+                }
+
+                Text {
+                    text: "Changed in game — discard and redo";
+                    font-size: Tokens.font-size-caption;
+                    color: Tokens.warning-brush;
+                    wrap: word-wrap;
+                    horizontal-stretch: 1;
+                }
+            }
+
+            if root.line.linked != "": Text {
+                text: root.line.linked;
+                font-size: Tokens.font-size-caption;
+                color: Tokens.unique-caption-brush;
+                wrap: word-wrap;
+
+                linked-touch := TouchArea { }
+
+                TipTrigger {
+                    text: "These lines share one roll in the game, so changing one changes the other.";
+                    hovered: linked-touch.has-hover;
+                }
+            }
+        }
+
+        Rectangle {
+            width: Tokens.affix-status-column-width;
+
+            if root.line.pending || root.line.stale: Image {
+                y: root.on-unique ? 0 : (parent.height - self.height) / 2;
+                width: root.on-unique ? Tokens.icon-size-small : Tokens.icon-size;
+                height: self.width;
+                image-fit: contain;
+                source: root.line.stale ? Tokens.icon-warning : Tokens.icon-draft;
+                colorize: root.line.stale ? Tokens.warning-brush : Tokens.draft-brush;
+                accessible-role: image;
+                accessible-label: root.line.stale ? "Stale draft" : "Draft";
+
+                icon-touch := TouchArea { }
+
+                TipTrigger {
+                    text: root.line.stale
+                        ? (root.on-unique ? "The game changed these rolls after you drafted them." : "The game changed this roll after you drafted it.")
+                        : (root.on-unique ? "Draft" : "Draft: " + root.line.draft-tip);
+                    hovered: icon-touch.has-hover;
+                }
+            }
+        }
+    }
+}
