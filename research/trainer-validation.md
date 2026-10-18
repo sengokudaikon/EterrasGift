@@ -12,7 +12,7 @@ controlled fixtures while the remaining acceptance gates stay explicit.
 
 | Area | Ready to implement or already implemented | Gate before game use |
 |---|---|---|
-| Runtime calls | Export resolution exists. Real 6000.4.8 invocation passes the tested scalar/reference/ref-out, value receiver, exception and simple virtual/interface cases. Add narrowly typed argument construction and exception results. | Closed generics, broader dispatch and unsupported signatures must be explicit. Validate each actual game operation separately. |
+| Runtime calls | Checked invocation now constructs primitive and scalar ref/out storage, validates receivers/reference classes, and roots results/exceptions. The production layer executes in the real 6000.4.8 fixture, including explicit virtual/interface resolution. | Managed-reference ref/out, enums, structs and generic signatures remain rejected. Validate each actual game operation separately. |
 | Thread/GC ownership | Production thread-affine attachment leases and strong roots pass against actual 6000.4.8. Native reference field/array edges survive collection with incremental mode disabled/enabled. | Incremental phase interleaving and game shutdown ordering. Attachment does not establish Unity main-thread authority. |
 | Main-thread commands | Actual 6000.4.8 player invokes the native hook, original-first Rust dispatcher and managed-exception cleanup/recovery. Quiescent disable restores scheduling without replay. | Production admission/failure paths, actual game installation/quiescence, process policy and retained helper lifetime. Neither stock hook engine is adopted. |
 | Managed files | Dotscope can implement offline transforms with independent before/after validation. | Decide malformed-type policy explicitly; broader format features remain separate requirements. |
@@ -26,8 +26,8 @@ The matching-version runtime and managed player-loop experiments now pass. The h
 candidate and explicit acceptance conditions; the assembly investigation distinguishes writer preservation from missing
 input semantics. The controlled native main-thread adapter also passes, including a managed exception crossing its
 Rust frame and subsequent engine recovery. These findings support implementing the typed invocation layer and promoting
-that bounded adapter behind production admission checks. Protocol/session and trainer operations remain deferred in
-this investigation. A fake GUI is unnecessary:
+that bounded adapter behind production admission checks. The first checked invocation subset is now implemented;
+protocol/session and trainer operations remain separate work. A fake GUI is unnecessary:
 the disposable process host covers the boundary and existing UI captures use fake sessions. No live game validation has occurred.
 
 ## Evidence standard and scope
@@ -37,8 +37,8 @@ game artifacts; execution in a controlled IL2CPP fixture; execution in the actua
 Live game testing has not been requested. Original app tools and installed artifacts may be used offline; installed game
 files stay untouched. Generated assemblies and test executables run only in explicitly selected disposable processes.
 
-The active goal is not complete merely because synthetic tests pass. Record residual uncertainty and improve the next
-experiment rather than weakening acceptance criteria. Exact game runtime claims require actual runtime evidence later.
+Synthetic tests alone do not clear runtime acceptance. Record residual uncertainty and improve the next experiment
+rather than weakening acceptance criteria. Exact game runtime claims require actual runtime evidence later.
 
 ## 1. Runtime calls, attachment and collector
 
@@ -118,6 +118,60 @@ The [controlled player](../tools/trainer-eval/unity-player/report.json) also bui
 payload callbacks after the first Update. Both run on thread 1 in FIFO order in frame 2, after Update and before
 LateUpdate. Payloads match, the worker joins and the process exits zero. This is an observed managed scheduling trace,
 not a native hook or injected Rust adapter test, and exact frame timing is not a promised scheduling contract.
+
+### Checked invocation implementation, 2026-10-18
+
+`eg-game-access::il2cpp` now exposes `InvocationContext`, `CheckedMethod`, explicit `Scalar`/`Argument` storage and
+rooted `InvocationOutcome` values. `raw::InvocationApi` resolves its complete public-export table separately from the
+existing ownership table. No runtime structure layout or generic Rust `unbox<T>` is introduced.
+
+The two unsafe admission steps have separate obligations. Constructing the context establishes the matching live API,
+immutable metadata, nonmoving collector and externally coordinated runtime lifetime. Binding a method authorizes its
+body, callees, initializers and callbacks for **every** value/receiver accepted by the checked signature, on this thread,
+without retaining native argument storage. Neither metadata checks nor attachment establish Unity main-thread permission,
+native engine-object liveness, aliasing safety or the safety of arbitrary game/native code. Bound methods and results
+remain tied to the attachment and are neither Send nor Sync.
+
+Safe invocation checks arity, exact primitive kind, byref shape, root provenance and receiver/reference class before
+executing the body. Scalars use owned temporary storage; managed code never writes a Rust enum discriminant or bool.
+Boolean payloads use bytes and normalize on copyback. Reference argument entries contain the rooted object pointer
+directly. Boxed value receivers require the exact declaring class and are unboxed while their owner remains rooted.
+Non-null results and exceptions are rooted before metadata queries; primitive boxes require exact class validation
+before decoding. Scalar byref writes copy back even on a managed exception or result-root failure.
+
+Invocation is deliberately direct. Virtual/interface execution resolves `il2cpp_object_get_virtual_method` explicitly,
+then independently authorizes/binds the selected method. Direct binding rejects abstract declarations. This keeps
+override authorization visible instead of silently selecting another body.
+
+All three final-source runs pass, including the existing 34 native checks and normal shutdown:
+
+| Runtime GC setting | Rust configuration | Build artifact | Execution artifact |
+|---|---|---|---|
+| Incremental 3 ms | Nightly 1.101 release | `unity-codegen-20261018-125600-9a5a566c` | `unity-rust-38a1d7d0764d4b10b43b7e41b3d2d409` |
+| Incremental 3 ms | Stable 1.99.1 debug | same build | `unity-rust-2ca7fd6423bb4911bffde753dc1e8a14` |
+| Incremental disabled | Nightly 1.101 release | `unity-codegen-20261018-125722-dbdb6b48` | `unity-rust-65114510b096499e91593f2d6605b4d6` |
+
+Artifacts are under `artifacts/trainer-eval/`. The committed [host report](../tools/trainer-eval/unity-rust-host/report.json)
+indexes identities and scope. The runner records all compiled host/runtime Rust sources before building and verifies
+them after execution, together with runtime/data identities. The actual host tests every supported primitive input kind,
+Boolean/i32 boxed results, scalar ref/out, null argument/result, void return, array element/rank compatibility,
+mutating boxed receivers, rooted exceptions through collection, and byref writes completed before a managed throw.
+Wrong arity, same-width wrong scalar, byref shape, receiver, context and array class are rejected. Explicit base dispatch
+returns 103; resolved virtual/interface dispatch returns 203. Seven fake tests add noncanonical Boolean byte 3,
+root failures, wrong result-box class and unsupported metadata cases. Independent read-only review found no concrete
+soundness defect under the documented unsafe contracts; this is not a formal proof.
+
+This is a useful subset, not trainer operation parity. Managed-reference ref/out, enums, arbitrary struct parameters or
+results, pointer/function-pointer signatures, byref returns, generic methods and constructed generic declaring types
+are rejected. Full collection with incremental mode enabled still does not prove phase-interleaved barrier behavior.
+An invocation error does **not** guarantee that the body was skipped: result rooting/validation may fail after writes.
+The future operation/session layer must preserve uncertain outcomes and never infer rollback or automatic retry safety.
+
+The original native source is byte-identical between research baseline `22eb727` and current adjacent app `e1c1ed4`.
+It identifies the next concrete gaps: `ItemAffix..ctor` needs enum identity/underlying-width checks; faction/monolith
+lookups need GC-traced object ref/out storage; affix edits need methods on constructed `List<ItemAffix>`, which is distinct
+from constructing generic methods. Add those cases and public-API reference writes to the controlled fixture boundary,
+then production helper admission/lifecycle and protocol/session integration. Real operation tests must precede app wiring.
 
 ## 2. Hook unwinding, patching and teardown
 

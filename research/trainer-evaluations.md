@@ -96,7 +96,9 @@ packages. This supports the user's permissions hypothesis; the earlier failures 
 thread-affine context. Its unsafe constructor requires the caller to establish runtime lifetime, exact ABI, and exclusive
 ownership of detachment. Multiple leases on one context share an attachment, including out-of-order lease destruction.
 Strong roots borrow their lease, free exactly once and expose only raw pointers. The adapter explicitly assumes modern
-pointer-valued GC handles. No arbitrary object-reference, invocation, field-write or process-injection API is exposed.
+pointer-valued GC handles. The follow-up checked invocation layer binds caller-authorized live metadata, checks exact
+argument kinds and receiver/reference classes, and roots normal results and managed exceptions. Unsupported signatures
+are rejected before invocation. There is no arbitrary safe `call<T>`, reference field-write or process-injection API.
 
 `crates/trainer` contains a safe single-slot dispatcher. An operation owns the slot until it finishes even if its receiver
 times out. Commands and results are destroyed outside the state lock. The future Unity adapter must establish the correct
@@ -118,12 +120,12 @@ unchanged Unity-emitted invoker definitions; see [its report](../tools/trainer-e
 
 ## Workspace validation
 
-- `cargo test -p eg-game-access -p eg-trainer -p eterras-gift --offline`: 16 runtime/dispatch tests, one compile-fail
+- `cargo test -p eg-game-access -p eg-trainer -p eterras-gift --offline`: 23 invocation/runtime/dispatch tests, one compile-fail
   documentation test and four architecture tests pass.
-- `cargo +nightly test -p eg-game-access -p eg-trainer --offline`: the same 16 tests and lifetime check pass.
+- `cargo +nightly test -p eg-game-access -p eg-trainer --release --offline`: the same 23 tests and lifetime check pass.
 - `cargo lint`, `cargo fmt --all --check`, and `cargo xtask tokens --check`: pass.
-- `cargo capture`: generates 32 fake-host captures. Home standard, Forge narrow and Settings high contrast were
-  visually inspected; no UI source changed in this work.
+- `mise run verify`: workspace Clippy, formatting, generated-token checks and current fake-host captures pass.
+  Trainer combat and unique-item captures were visually inspected in the invocation follow-up; no UI source changed.
 - The standalone native ABI package passes Clippy with warnings denied. Its five tests pass in stable debug and
   nightly release configurations.
 - Both .NET evaluation projects build with zero warnings/errors. The complete local Cecil comparison run passes.
@@ -152,6 +154,8 @@ NeoHook unwind diagnosis have been completed. Their limits remain explicit; they
 3. Decide how to handle the real CoreModule's malformed orphan nested types. Dotscope preserves more payload than
    the current Cecil repair; experimental normalization changes public identity and is not shipping policy. Causal
    diagnostic edits now isolate both remaining baseline loader defects; making classes abstract is not behavior restoration.
-4. Add the verified invocation/exception and reference-write layer, then the helper adapter and protocol 21 transport
-   after the requested investigation. Extend disposable-host operation tests before wiring trainer UI.
+4. The first verified invocation/exception subset now passes in the real fixture. Add enum identity/width checks,
+   reference writes and traced managed-reference ref/out storage; evaluate concrete collection methods separately
+   from generic-method construction. Then promote the helper adapter and protocol 21 transport. Extend disposable-host
+   operation tests before connecting trainer UI to a real helper.
 5. Live game validation remains opt-in and has not been performed. No additional fake GUI is needed now.

@@ -144,6 +144,10 @@ pub struct StrongRoot<'attachment, 'runtime> {
 }
 
 impl StrongRoot<'_, '_> {
+    pub(crate) fn belongs_to(&self, attachment: &AttachedThread<'_>) -> bool {
+        std::ptr::eq(self.attachment.context, attachment.context)
+    }
+
     pub fn target(&self) -> Option<NonNull<Object>> {
         // SAFETY: this live handle belongs to the runtime; its lease is still attached.
         NonNull::new(unsafe { (self.attachment.context.api.gchandle_get_target)(self.handle.as_ptr()) })
