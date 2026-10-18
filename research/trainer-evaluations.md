@@ -304,3 +304,65 @@ The [forge evidence index](../tools/trainer-eval/persistent-player/forge-report.
 source/DLL identities, exact snapshots, cleanup and limitations. Definitions, rich descriptions, domain/UI composition,
 sustained-polling performance, write/readback and effect cleanup remain ahead. The current helper's no-unload and
 exclusive patching/graph contracts remain in force.
+
+## Literal item limits and the remaining catalog boundary, 2026-10-18
+
+The next read-only capability is the game's item ranges: `ItemData.MinForgingPotential` /
+`MaxForgingPotential`, `MinLegendaryPotential` / `MaxLegendaryPotential`, `MinWeaversWill` /
+`MaxWeaversWill`, `MinWeaversTouch` / `MaxWeaversTouch`, and `ExperienceTracker.maxLevel`.
+The original `native/game-data.h::appendItemConstants` supplies zero as the level minimum.
+These nine fields are metadata literals, not mutable item fields. The Rust reader requires exact
+corelib Int32 identity, non-byref type, static/literal flags and declaring-class ownership before the
+public static getter. That runtime's literal path reads the metadata default before static-storage
+setup, so this operation invokes no class initializer or game body. Out-of-byte or reversed ranges
+fail the whole result. It runs after the original scheduler callback on the established engine main
+thread, with independent runtime-offline and native-manager admission before any constants lookup.
+
+Protocol 23 introduces `ReadItemLimits` operation 19 with the existing strict 336-byte framing.
+Its reply is exactly five min/max LE Int32 pairs (40 bytes), without locale or rarity names. Session
+shares the forge read's Ready requirement, build/file-backed dispatcher verification, log rechecks,
+cancellation barrier and failure/no-replay behavior. No separate raw-ranges disk cache is introduced:
+the caller must keep the selected process/build profile with the observation.
+
+The C# source audit changes the next implementation order:
+
+- Full legacy `GameData` is operation **8**; comments saying 18 are stale. Its payload always begins
+  with locale and application version, including when only constants are requested. Our standalone
+  limits reply intentionally does not impersonate that payload or a complete `GameDataCatalog`.
+- `native/game-data.h::gameLanguage` calls `LocalizationSettings.get_SelectedLocale`, then
+  `Locale.get_Identifier` (a boxed value type), then `LocaleIdentifier.get_Code` with an unboxed
+  receiver. The existing checked Rust invocation rejects arbitrary struct returns. This needs a
+  narrow, rooted boxed-value capability with exact type/size/alignment and receiver tests, or an
+  independently validated field-only alternative. Blanket struct ABI support is unnecessary here.
+- Localized/generated affix names call the virtual `getAffixDisplayName`. Raw `affixDisplayName`
+  can be stale. Field-only inventories must identify raw names and unavailable generated names.
+  Exact metadata plus virtual target selection and method-body/thread authorization are separate
+  obligations. A successfully resolved method does not establish execution safety.
+- Numeric affix/unique properties call `GetPropertyInfo` and `GetRounding`; the latter may return
+  an enum, also outside the current primitive/reference invocation subset. Unique names, base names,
+  rarity names and implicit endpoint text add their own getters/localization/constructor calls.
+- Capture must bind binary/metadata, game version, locale and extraction version; pin list totals
+  across pages, reject duplicate IDs across the whole capture, and preserve null equipment filters
+  versus empty ones. Match optional numeric failures explicitly, rather than inventing ranges.
+  Legacy f64-to-f32 conversion lacks a post-cast finite check; Rust should reject unrepresentable
+  values. Strict flags and UTF-8 also remain intentional improvements over the legacy reader.
+- Mapping is a later capability: the game formats all 256 roll positions in pages of 16 against a
+  serialized item/draft context. Raw numeric quantities may differ from displayed scale. A usable
+  table needs a fixed context/language/unit, 256 finite displayed values, monotonicity and a changing
+  value. Mapping a unique roll may name a tooltip line because one roll can affect several lines.
+  Copying simple range interpolation would not preserve the existing app's behavior.
+
+Sources are the adjacent app at `e1c1ed4`: `native/game-data.h`, `native/protocol.h`,
+`Native/NativeGameData.cs`, `Sessions/Descriptions/GameDataService.cs`, domain `Models/GameData.cs`
+and application `Sessions/Requests/RollMapping.cs`. Method calls above describe the C# helper's
+behavior; they have not been authorized as safe Rust invocation contracts by this constants slice.
+
+Both authored Unity startup routes pass the limits read, including GC/replacement stability and runtime denials,
+alongside the earlier forge scenarios. Each accepts 52 requests and executes 41 main-thread commands, then restores
+the entry/stops the server and exits normally after three more frames with unchanged files. The external route
+records 158 original normal returns and zero helper errors/wrong-thread entries. There are 116 passing foundation
+cases on stable/nightly release (13 new), plus architecture/lifetime and eight Python preflight checks.
+[Build identities, source hashes, exact ranges and limits](../tools/trainer-eval/persistent-player/limits-report.json).
+No real-game limits observation is claimed. The last observed game holds two stopped persistent generations;
+the current evaluator admits only a sole older one. Another build needs a fresh game process or a separately
+validated multi-generation admission path; restoring entry bytes alone never authorizes unloading old code.

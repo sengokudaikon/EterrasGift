@@ -1,4 +1,4 @@
-//! Pure, bounded codecs for protocol 22: the legacy control subset and read-only forge snapshots.
+//! Pure, bounded codecs for protocol 23: control, read-only forge snapshots and literal item limits.
 //!
 //! Decoding establishes wire validity only. Process identity, helper provenance,
 //! dispatcher code, and permission to run a request belong to the session layer.
@@ -6,8 +6,8 @@
 use std::{collections::BTreeMap, error::Error, fmt};
 
 pub const MAGIC: u32 = 0x4546_4735;
-/// Version 22 adds ReadForge (18); version 21 helpers must be restarted.
-pub const VERSION: u32 = 22;
+/// Version 23 adds ReadItemLimits (19); older helpers are incompatible.
+pub const VERSION: u32 = 23;
 pub const ADAPTER: &str = "il2cpp-x64-v1";
 pub const REQUEST_SIZE: usize = 336;
 pub const RESPONSE_HEADER_SIZE: usize = 12;
@@ -51,6 +51,10 @@ pub enum Request {
     ReadForge {
         dispatcher: DispatcherSpec,
     },
+    /// Reads literal metadata ranges; it does not capture a localized game-data catalog.
+    ReadItemLimits {
+        dispatcher: DispatcherSpec,
+    },
 }
 
 impl Request {
@@ -62,6 +66,7 @@ impl Request {
             Self::Status { dispatcher } => (7, Some(dispatcher)),
             Self::ClearHooks { dispatcher } => (15, Some(dispatcher)),
             Self::ReadForge { dispatcher } => (18, Some(dispatcher)),
+            Self::ReadItemLimits { dispatcher } => (19, Some(dispatcher)),
         };
         bytes[4..8].copy_from_slice(&operation.to_le_bytes());
         if let Some(dispatcher) = dispatcher {
@@ -94,6 +99,7 @@ impl Request {
             7 => Ok(Self::Status { dispatcher }),
             15 => Ok(Self::ClearHooks { dispatcher }),
             18 => Ok(Self::ReadForge { dispatcher }),
+            19 => Ok(Self::ReadItemLimits { dispatcher }),
             _ => Err(ProtocolError::InvalidData),
         }
     }

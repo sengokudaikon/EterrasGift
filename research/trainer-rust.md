@@ -17,7 +17,9 @@ The helper/trampolines remain loaded until process exit. Original library compar
 the subsequent protocol 22 helper also returns owned forge snapshots through the complete authored Unity path.
 Three explicitly authorized offline-game reads of a plain Hatchet pass under Release admission, followed by restored
 entry/unwind and a stopped server. [Evidence and limits](../tools/trainer-eval/persistent-player/forge-report.json).
-Definitions, UI integration and gameplay writes remain separate work. See [trainer contracts](../crates/trainer/README.md).
+Protocol 23 additionally reads literal item limits in both authored Unity startup routes, with no game-body calls.
+[Evidence and scope](../tools/trainer-eval/persistent-player/limits-report.json). Full localized definitions, UI
+integration and gameplay writes remain separate work. See [trainer contracts](../crates/trainer/README.md).
 
 ## Decisions and constraints
 

@@ -1,6 +1,7 @@
 //! Session admission uses owned artifacts and scripted services; no game is opened.
 use eg_core::game_log::{GameLogEvent, GameLogState, GameLogStatus, GameReadiness, LoggedCharacter};
 use eg_game_access::{
+    definitions::{self, ItemLimits, ValueRange},
     forge::{self, AffixSnapshot, ForgeSnapshot, ItemStatus},
     process::ProcessIdentity,
     protocol::{Discovery, DispatcherSpec, ProtocolError, REQUIRED_KEYS, Request, Response, ResponseCode, RuntimeStatus},
@@ -105,6 +106,16 @@ fn forge_item() -> ForgeSnapshot {
     };
     snapshot.fingerprint = snapshot.legacy_fingerprint();
     snapshot
+}
+
+fn item_limits() -> ItemLimits {
+    ItemLimits {
+        forging_potential: ValueRange { minimum: 3, maximum: 211 },
+        legendary_potential: ValueRange { minimum: 1, maximum: 6 },
+        weavers_will: ValueRange { minimum: 2, maximum: 49 },
+        weavers_touch: ValueRange { minimum: 4, maximum: 77 },
+        level_requirement: ValueRange { minimum: 0, maximum: 137 },
+    }
 }
 
 enum Step {
@@ -1085,4 +1096,127 @@ fn canceled_forge_read_remains_busy_until_explicit_disconnect_without_replay() {
     run(session.connect(now())).unwrap();
     assert_eq!(session.state(), SessionState::Ready);
     assert_eq!(wire.requests().len(), 6);
+}
+
+#[test]
+fn literal_limits_require_admission_and_keep_owned_results_across_forge_reads() {
+    let fixture = Fixture::new();
+    let wire = FakeTransport::new(fixture.target.clone(), []);
+    let log = FakeLog::new([offline()]);
+    let mut session = fixture.session(&wire, &log, GatePolicy::Release);
+    assert!(matches!(run(session.read_item_limits(now())), Err(SessionError::Disabled)));
+    assert!(log.reads().is_empty());
+    session.enable();
+    assert!(matches!(run(session.read_item_limits(now())), Err(SessionError::NotConnected)));
+    assert!(wire.requests().is_empty());
+    wire.push(fixture.discover());
+    wire.push(status(false, 0x1234, 0));
+    wire.push(done(definitions::encode(&item_limits()).unwrap()));
+    wire.push(done(forge::encode(None).unwrap()));
+    run(session.connect(now())).unwrap();
+    let initial_status = *session.runtime_status().unwrap();
+    let limits = run(session.read_item_limits(now())).unwrap();
+    assert_eq!(limits, item_limits());
+    assert_eq!(run(session.read_forge(now())).unwrap(), None);
+    assert_eq!(session.runtime_status(), Some(&initial_status));
+    assert_eq!(session.state(), SessionState::Ready);
+    assert_eq!(wire.requests()[2], Request::ReadItemLimits { dispatcher: fixture.dispatcher });
+    log.set(online());
+    assert!(matches!(run(session.read_item_limits(now())), Err(SessionError::Gate(_))));
+    assert_eq!(wire.requests().len(), 4);
+    drop(session);
+    assert_eq!(limits, item_limits());
+}
+
+#[test]
+fn literal_limits_fail_closed_on_malformed_reply_runtime_refusal_and_transport_uncertainty() {
+    for (reply, state) in [
+        (done(vec![0; 39]), SessionState::Blocked),
+        (done(vec![0; 41]), SessionState::Blocked),
+        (done([256_i32.to_le_bytes().as_slice(), &[0; 36]].concat()), SessionState::Blocked),
+        (
+            Step::Reply(Ok(Response {
+                code: ResponseCode::OfflineRequired,
+                payload: b"runtime went online".to_vec(),
+            })),
+            SessionState::WaitingForCharacter,
+        ),
+        (
+            Step::Reply(Err(TransportError {
+                delivery: Delivery::MayHaveRun,
+                failure: TransportFailure::Timeout,
+            })),
+            SessionState::Blocked,
+        ),
+    ] {
+        let fixture = Fixture::new();
+        let wire = FakeTransport::new(fixture.target.clone(), [fixture.discover(), status(false, 0x1234, 0), reply]);
+        let log = FakeLog::new([offline()]);
+        let mut session = fixture.session(&wire, &log, GatePolicy::Release);
+        session.enable();
+        run(session.connect(now())).unwrap();
+        assert!(run(session.read_item_limits(now())).is_err());
+        assert_eq!(session.state(), state);
+        assert_eq!(session.runtime_status(), None);
+        assert_eq!(session.cleanup(), Cleanup::Unconfirmed);
+        assert!(matches!(run(session.read_item_limits(now())), Err(SessionError::NotConnected)));
+        assert!(matches!(run(session.read_forge(now())), Err(SessionError::NotConnected)));
+        assert_eq!(wire.requests().len(), 3);
+    }
+}
+
+#[test]
+fn literal_limits_recheck_artifacts_and_discard_replies_after_lost_log_admission() {
+    for change_artifact in [false, true] {
+        let fixture = Fixture::new();
+        let log = FakeLog::new([offline()]);
+        let changed_log = log.clone();
+        let wire = FakeTransport::new(
+            fixture.target.clone(),
+            [
+                fixture.discover(),
+                status(false, 0x1234, 0),
+                Step::Action(
+                    Box::new(move || changed_log.set(online())),
+                    Response {
+                        code: ResponseCode::Done,
+                        payload: definitions::encode(&item_limits()).unwrap(),
+                    },
+                ),
+            ],
+        );
+        let mut session = fixture.session(&wire, &log, GatePolicy::Release);
+        session.enable();
+        run(session.connect(now())).unwrap();
+        if change_artifact {
+            fs::write(&fixture.metadata, b"changed before literal read").unwrap();
+            assert!(matches!(run(session.read_item_limits(now())), Err(SessionError::Identity(_))));
+        } else {
+            assert!(matches!(run(session.read_item_limits(now())), Err(SessionError::Gate(_))));
+        }
+        assert_eq!(session.state(), if change_artifact { SessionState::Blocked } else { SessionState::WaitingForCharacter });
+        assert_eq!(session.runtime_status(), None);
+        assert_eq!(wire.requests().len(), if change_artifact { 2 } else { 3 });
+    }
+}
+
+#[test]
+fn canceled_literal_limits_read_blocks_both_read_operations_until_explicit_disconnect() {
+    let fixture = Fixture::new();
+    let wire = FakeTransport::new(fixture.target.clone(), [fixture.discover(), status(false, 0x1234, 0), Step::Pending, clear()]);
+    let log = FakeLog::new([offline()]);
+    let mut session = fixture.session(&wire, &log, GatePolicy::Release);
+    session.enable();
+    run(session.connect(now())).unwrap();
+    let mut reading = Box::pin(session.read_item_limits(now()));
+    assert!(matches!(reading.as_mut().poll(&mut Context::from_waker(Waker::noop())), Poll::Pending));
+    drop(reading);
+    assert_eq!(session.state(), SessionState::Connecting);
+    assert_eq!(session.runtime_status(), None);
+    assert!(matches!(run(session.read_item_limits(now())), Err(SessionError::Busy)));
+    assert!(matches!(run(session.read_forge(now())), Err(SessionError::Busy)));
+    assert_eq!(wire.requests().len(), 3);
+    assert_eq!(run(session.disconnect()), Cleanup::ConfirmedOff);
+    assert_eq!(session.state(), SessionState::Disconnected);
+    assert_eq!(wire.requests()[3], Request::ClearHooks { dispatcher: fixture.dispatcher });
 }

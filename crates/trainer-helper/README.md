@@ -28,7 +28,7 @@ Status roots the manager wrapper, checks assignability and reads its metadata-va
 It also reads the independent runtime online flag. No native Unity-object pointer is dereferenced.
 Returned manager addresses are ephemeral observations, never managed-object ownership tokens.
 
-Protocol 22 adds ReadForge (18) to Discover, Status and an empty ClearHooks. Its bounded wire model
+Protocol 23 supports ReadForge (18) and ReadItemLimits (19), alongside Discover, Status and an empty ClearHooks. The forge wire model
 is in `eg-game-access::forge`. The read traverses rooted containers on the engine thread, validates
 exact scalar/reference classes, enum storage and array/list element types, and copies every value
 into owned Rust storage. Enum identities come from their actual field metadata, supporting nested
@@ -36,6 +36,14 @@ and namespaced declarations. Strings use bounded strict UTF-16/UTF-8. Affixes ar
 implicit rolls to three, unique/set rolls to eight; List capacity may exceed count, bounded to 4096.
 The main-thread copy requires no concurrent mutation of the graph or native-manager destruction.
 Runtime offline/native-manager checks precede item-graph access. No game methods are invoked.
+
+`ReadItemLimits` reads the eight exact `System.Int32` static literal fields on `ItemData` and
+`ExperienceTracker.maxLevel`, using the public static getter's metadata-default branch. It checks
+declaring ownership, type, non-byref storage and literal/static flags before copying each constant.
+All five ranges must satisfy `0 <= minimum <= maximum <= 255`; level minimum zero follows the
+original helper. Runtime offline/native-manager admission runs first, independently of Session.
+The returned owned ranges omit localization, rarity names and the rest of the definitions catalog.
+Their exact 40-byte codec is `eg-game-access::definitions`. Older protocol versions are rejected.
 
 The complete feature set is currently empty:
 `features_on = 0` and clear replies contain count zero. No gameplay hook can be enabled and no item,
@@ -46,7 +54,7 @@ The local pipe is `eterras-gift-<PID>`, one strict 336-byte request per connecti
 Discover claims ownership using the kernel-reported client PID and a retained process handle/start
 time. Normal per-request EOF preserves ownership. Other living processes receive Refused without
 reaching the backend; process death relinquishes ownership. This strengthens the original helper's
-ownership model. Protocol 22 still has no nonce or authentication against code in the same process.
+ownership model. Protocol 23 still has no nonce or authentication against code in the same process.
 
 Admission and request waits observe shutdown/process death. A five-second main-thread deadline or
 disconnect cancels pending work when possible. Once started, the request retains its dispatcher

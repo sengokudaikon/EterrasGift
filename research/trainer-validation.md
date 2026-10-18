@@ -462,3 +462,24 @@ Live populated affixes, unique/set identity, empty/replacement states and richer
 live evidence; current coverage for those raw states is authored. No app/UI binding, definitions, writes or gameplay
 effects are implemented. Main-thread graph ownership, exact x64 nonmoving GC and retained-code contracts remain
 unsafe preconditions; neither these tests nor restored entry bytes establish formal general safety or unloadability.
+
+## Literal item limits checkpoint
+
+Protocol 23 operation 19 reads the eight `ItemData` limit literals and `ExperienceTracker.maxLevel` through exact
+metadata, with zero as the original helper's level minimum. Static/literal flags, exact Int32 identity, non-byref
+storage and declaring ownership precede each default-value copy. Out-of-byte/reversed ranges fail the full result.
+Installed Unity source confirms the literal static-getter branch returns before static storage setup; no managed
+body runs. Both session admission and independent engine-thread offline/native-manager checks apply.
+
+The authored player deliberately uses unusual nonzero minima and different maxima: 3..211, 1..6, 2..49, 4..77 and
+0..137. Ordinary and external-bootstrap paths both pass exact limits, GC/replacement stability and retained copies,
+online/destroyed-manager refusal, the earlier forge cases, original-entry restoration, stopped server, three later
+Unity frames, normal exit and unchanged files. Each accepts 52 requests and completes 41 commands on the established
+main thread; the external run preserves 158 original normal returns with no helper error/wrong-thread entry.
+
+All 116 foundation cases pass on stable/nightly release, including five new limit-codec, four metadata and four
+session cases. Architecture/lifetime checks, eight bootstrap preflight regressions, isolated controller checks and
+workspace verification pass; captures were inspected. [Exact evidence](../tools/trainer-eval/persistent-player/limits-report.json).
+These limits have authored-runtime coverage only; no newer helper was loaded into the real game for this checkpoint.
+Full catalog capture is blocked on additional validated localization/boxed-value/enum/property formatting contracts,
+not on literal ranges. The next-step source audit is in [trainer-evaluations.md](trainer-evaluations.md).

@@ -208,35 +208,37 @@ async fn serve(pid: u32, backend: &mut impl Backend, shared: &Shared) -> Result<
                             },
                             Err(error) => error,
                         },
-                        Request::Status { dispatcher } | Request::ClearHooks { dispatcher } | Request::ReadForge { dispatcher } => match backend.ensure_dispatcher(&dispatcher) {
-                            Err(error) => error,
-                            Ok(()) => match backend.submit(request) {
+                        Request::Status { dispatcher } | Request::ClearHooks { dispatcher } | Request::ReadForge { dispatcher } | Request::ReadItemLimits { dispatcher } => {
+                            match backend.ensure_dispatcher(&dispatcher) {
                                 Err(error) => error,
-                                Ok(mut pending) => {
-                                    let complete = async {
-                                        loop {
-                                            if let Some(result) = pending.try_result() {
-                                                break result;
+                                Ok(()) => match backend.submit(request) {
+                                    Err(error) => error,
+                                    Ok(mut pending) => {
+                                        let complete = async {
+                                            loop {
+                                                if let Some(result) = pending.try_result() {
+                                                    break result;
+                                                }
+                                                sleep(Duration::from_millis(2)).await;
                                             }
-                                            sleep(Duration::from_millis(2)).await;
+                                        };
+                                        let completion = async {
+                                            let mut extra = [0u8; 1];
+                                            tokio::select! { outcome=complete => Ok(outcome), _=pipe.read(&mut extra) => Err(()) }
+                                        };
+                                        match wait(completion, shared, owner.as_ref(), Duration::from_secs(5)).await {
+                                            Ok(Ok(Outcome::Completed(response))) => response,
+                                            Ok(Ok(Outcome::Abandoned)) => failure(ResponseCode::Failed, "Main-thread request unwound; outcome uncertain"),
+                                            Ok(Err(())) | Err(_) => match pending.cancel() {
+                                                Some(Cancellation::NotStarted) => failure(ResponseCode::NotReady, "Request canceled before the main thread took it; nothing ran"),
+                                                Some(Cancellation::Finished(Outcome::Completed(response))) => response,
+                                                _ => failure(ResponseCode::Failed, "Request may have started; do not replay it"),
+                                            },
                                         }
-                                    };
-                                    let completion = async {
-                                        let mut extra = [0u8; 1];
-                                        tokio::select! { outcome=complete => Ok(outcome), _=pipe.read(&mut extra) => Err(()) }
-                                    };
-                                    match wait(completion, shared, owner.as_ref(), Duration::from_secs(5)).await {
-                                        Ok(Ok(Outcome::Completed(response))) => response,
-                                        Ok(Ok(Outcome::Abandoned)) => failure(ResponseCode::Failed, "Main-thread request unwound; outcome uncertain"),
-                                        Ok(Err(())) | Err(_) => match pending.cancel() {
-                                            Some(Cancellation::NotStarted) => failure(ResponseCode::NotReady, "Request canceled before the main thread took it; nothing ran"),
-                                            Some(Cancellation::Finished(Outcome::Completed(response))) => response,
-                                            _ => failure(ResponseCode::Failed, "Request may have started; do not replay it"),
-                                        },
                                     }
-                                }
-                            },
-                        },
+                                },
+                            }
+                        }
                     }
                 }
             }

@@ -144,6 +144,27 @@ unsafe fn read_forge() -> Response {
     }
 }
 
+unsafe fn read_item_limits() -> Response {
+    // SAFETY: the dispatcher authorizes the captured main thread after the original
+    // callback returned. Runtime/metadata lifetime follows the bootstrap contract;
+    // the accessor rechecks offline/native-manager life before reading literal fields.
+    unsafe {
+        let result = (|| {
+            let module = module().map_err(|error| server::failure(ResponseCode::Failed, error))?;
+            let (api, access) = apis(module).map_err(|error| server::failure(ResponseCode::Failed, error))?;
+            let thread = ThreadContext::new(api);
+            let attached = thread.attach().map_err(|error| server::failure(ResponseCode::NotReady, error.to_string()))?;
+            let limits = access.read_item_limits(&attached).map_err(map_discovery)?;
+            let payload = eg_game_access::definitions::encode(&limits).map_err(|error| server::failure(ResponseCode::Failed, error.to_string()))?;
+            Ok::<_, Response>(Response {
+                code: ResponseCode::Done,
+                payload,
+            })
+        })();
+        result.unwrap_or_else(|error| error)
+    }
+}
+
 unsafe extern "C-unwind" fn callback(method: *const MethodInfo) {
     let state = state();
     state.metrics[2].fetch_add(1, SeqCst);
@@ -186,6 +207,7 @@ fn after_original(state: &Shared) {
                 Request::Status { .. } => unsafe { read_status() },
                 // SAFETY: same main-thread and per-operation graph ownership contract above.
                 Request::ReadForge { .. } => unsafe { read_forge() },
+                Request::ReadItemLimits { .. } => unsafe { read_item_limits() },
                 // No feature installation API exists. Empty is the truthful complete feature set.
                 Request::ClearHooks { .. } => Response {
                     code: ResponseCode::Done,

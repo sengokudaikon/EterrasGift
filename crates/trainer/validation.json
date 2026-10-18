@@ -1,20 +1,21 @@
 {
   "date": "2026-10-18",
-  "status": "protocol22 owned forge snapshot passes authored Unity and authorized offline-game read",
-  "evidence": "tools/trainer-eval/persistent-player/forge-report.json",
+  "status": "protocol23 literal item limits pass both authored Unity startup routes; no new live-game read",
+  "evidence": "tools/trainer-eval/persistent-player/limits-report.json",
   "previous_protocol_session_evidence": "artifacts/trainer-eval/protocol-session-95e3d0ed64494652a50a76df25f322d9/report.json",
   "original_app_commit": "e1c1ed4",
-  "foundation_cases_stable_and_nightly_release": 103,
+  "foundation_cases_stable_and_nightly_release": 116,
   "architecture_checks": 4,
   "lifetime_compile_fail_checks_per_toolchain": 1,
-  "scope": "Discovery/status/empty-hook clear and owned read-only forge snapshot with exact types/roots/bounds. Authored Unity plus three plain-Hatchet observations in the explicitly authorized offline game under Release policy. No UI wiring or gameplay writes.",
+  "scope": "Nine metadata literals produce five owned item ranges; exact Int32/static/literal/ownership/bounds validation, independent runtime offline/native-manager gate. No managed game body or gameplay write. Authored Unity only for limits; prior protocol22 plain-Hatchet live evidence retained separately.",
   "persistent_helper_evidence": "tools/trainer-eval/persistent-player/report.json",
   "remaining": [
-    "Definitions, rich read-only descriptions and mappings; populated live item cases",
+    "Localized definitions, rich read-only descriptions and mappings; live item limits and populated item cases",
     "Exact enum/reference write and traced managed-reference ref/out contracts",
     "Gameplay features with independent main-thread offline/owner cleanup and acknowledgement",
     "Per-operation writes/readback and uncertain-result handling, then UI composition"
   ],
   "native_probe_build_report": "artifacts/trainer-eval/unity-hook-native-4b59b1ab3a164d8e9670e6cd38f9bf53/report.json",
-  "native_probe_build_only": true
+  "native_probe_build_only": true,
+  "prior_live_forge_evidence": "tools/trainer-eval/persistent-player/forge-report.json"
 }

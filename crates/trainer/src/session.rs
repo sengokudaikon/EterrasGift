@@ -5,9 +5,10 @@ use crate::{
 };
 use eg_core::game_log::GameReadiness;
 use eg_game_access::{
+    definitions::{self, ItemLimits},
     forge::{self, ForgeSnapshot},
     process::ProcessIdentity,
-    protocol::{Discovery, HookState, ProtocolError, Request, ResponseCode, RuntimeStatus},
+    protocol::{Discovery, DispatcherSpec, HookState, ProtocolError, Request, ResponseCode, RuntimeStatus},
     transport::{Delivery, Transport, TransportError, TransportFailure},
 };
 use jiff::Timestamp;
@@ -205,6 +206,15 @@ impl<T: Transport, L: LogSource> Session<T, L> {
     /// permission to dereference memory or edit an item. A dropped future leaves Connecting;
     /// explicitly disconnect before another attachment or operation.
     pub async fn read_forge(&mut self, now: Timestamp) -> Result<Option<ForgeSnapshot>, SessionError> {
+        self.read_owned(now, |dispatcher| Request::ReadForge { dispatcher }, forge::decode).await
+    }
+    /// Copy the game's literal item ranges. This carries no locale, rarity names or
+    /// claim that the rest of the definitions catalog has been captured. The build
+    /// profile is revalidated on every read, and the helper independently gates it.
+    pub async fn read_item_limits(&mut self, now: Timestamp) -> Result<ItemLimits, SessionError> {
+        self.read_owned(now, |dispatcher| Request::ReadItemLimits { dispatcher }, definitions::decode).await
+    }
+    async fn read_owned<R>(&mut self, now: Timestamp, request: fn(DispatcherSpec) -> Request, decode: fn(&[u8]) -> Result<R, ProtocolError>) -> Result<R, SessionError> {
         if matches!(self.state, SessionState::Connecting | SessionState::Closing) {
             return Err(SessionError::Busy);
         }
@@ -223,14 +233,11 @@ impl<T: Transport, L: LogSource> Session<T, L> {
         self.gate(advanced(now, elapsed)?)?;
         let status = self.status.take();
         self.state = SessionState::Connecting;
-        let result = self
-            .request(&Request::ReadForge { dispatcher })
-            .await
-            .and_then(|bytes| forge::decode(&bytes).map_err(SessionError::Protocol));
+        let result = self.request(&request(dispatcher)).await.and_then(|bytes| decode(&bytes).map_err(SessionError::Protocol));
         match result {
             Ok(snapshot) => {
                 // The helper independently checks runtime offline/native-manager life in the
-                // same main-thread operation, before touching the graph. Recheck the log too.
+                // same main-thread operation, before reading data. Recheck the log too.
                 self.gate(advanced(now, elapsed)?)?;
                 self.status = status;
                 self.state = SessionState::Ready;
