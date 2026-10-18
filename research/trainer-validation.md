@@ -300,6 +300,20 @@ stream failure. The combined diagnostic output loads all 3,194 reflected types o
 comparison. These interventions change instantiability; they do not restore missing methods or correct stream behavior.
 They are causal tests, not a production repair policy, and no target methods were invoked.
 
+## Native debugger readiness, 2026-10-18
+
+At the user's request, Microsoft.WinDbg 1.2610.1001.0 is installed with its bundled x64 CDB 10.0.29661.1004.
+CDB's Microsoft signature is valid. An authored native Rust process passes actual attach, private PDB resolution,
+named breakpoint, register/stack/source inspection, explicit detach, post-detach resume and normal exit. The probe
+selects only the child it creates; it has no PID/name option for other processes. Exact identities, evidence and the
+repeatable mise task are in [debugger/README.md](../tools/trainer-eval/debugger/README.md).
+
+Microsoft/Unity symbol stores and a local cache are configured through the user's `_NT_SYMBOL_PATH`. This test uses
+local matching Rust symbols and makes no claim about available game PDBs or remote symbol retrieval. Earlier Swift
+LLDB tests did not establish clean target recovery; use the verified Microsoft debugger route. The game has not been
+started or attached. A future user-started offline session can now support read-only live observations before any
+separately validated hook installation. Native debugger readiness does not enable managed C# debugging in a release build.
+
 ## Tooling provenance
 
 The current original app tools CLI only reports its catalog; its former `capture` command was removed. Its private
