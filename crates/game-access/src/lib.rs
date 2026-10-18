@@ -4,3 +4,6 @@
 //! It does not establish compatibility with any live Unity build. See `research/trainer-rust.md`.
 
 pub mod il2cpp;
+
+#[cfg(all(windows, target_arch = "x86_64"))]
+pub mod scheduler;

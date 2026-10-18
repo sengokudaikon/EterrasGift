@@ -9,11 +9,12 @@ binding work, but none evaluated in this research establishes audited compatibil
 Thread ownership, GC roots, ABI validation and dispatch remain responsibilities of the port.
 
 Follow-up through 2026-10-18: [trainer-validation.md](trainer-validation.md) records actual 6000.4.8 runtime execution,
-production Rust ownership, and the native ExecuteTasks/Rust dispatcher adapter in an authored IL2CPP player. Normal
-execution, managed-exception cleanup/recovery and quiescent disable pass. The original project survey below remains
-the library comparison; these newer results establish our bounded implementation path and its remaining game-use gates.
-The first user-authorized live read-only observation now confirms resident dispatcher bytes/unwind and actual process
-mitigations; [its report](../tools/trainer-eval/debugger/live-report.json) does not execute the Rust helper or hook in the game.
+production Rust ownership/checked invocation and the first-party ExecuteTasks scheduler adapter. The authored player
+passes worker installation/restoration, exact frame-count comparison, managed-exception cleanup/recovery and no replay.
+The externally loaded bootstrap then passes in an idle authored player and in the explicitly authorized offline game:
+one main-thread frame read returns 372,952 and the original entry is restored. [Evidence and limits](../tools/trainer-eval/debugger/scheduler-report.json).
+The helper/trampolines remain loaded until process exit. Original library comparisons below remain research history;
+protocol/session/offline-gate integration and gameplay operations are still separate work.
 
 ## Decisions and constraints
 
@@ -56,7 +57,7 @@ No runtime initialization was performed. Keep our narrow ownership boundary rath
 
 | Tool | Current support evidence | Proposed use |
 |---|---|---|
-| [Il2CppInspectorRedux](https://github.com/LukeFZ/Il2CppInspectorRedux) | Lists metadata 35, 38, 39 and newer 104â€“110 variants. Generates C++ scaffolding, JSON and shim assemblies. | First offline extraction candidate; generate narrow Rust bindings from JSON or selected compatible headers. |
+| [Il2CppInspectorRedux](https://github.com/LukeFZ/Il2CppInspectorRedux) | Lists metadata 35, 38, 39 and newer 104–110 variants. Generates C++ scaffolding, JSON and shim assemblies. | First offline extraction candidate; generate narrow Rust bindings from JSON or selected compatible headers. |
 | [Original Inspector](https://github.com/djkaty/Il2CppInspector) | Development suspended. | Historical reference. |
 | [Original Dumper](https://github.com/Perfare/Il2CppDumper) | Advertised Unity range ends at 2022.2. | Do not infer Unity 6 support. |
 | [Cpp2IL](https://github.com/SamboyCoding/Cpp2IL) | Active rewrite, metadata analysis and IL reconstruction. | Independent comparison; reconstructed IL is not guaranteed original behaviour. |
@@ -72,7 +73,7 @@ array, string or object-layout assumptions in a versioned adapter. bindgen does 
 
 ## Frida and main thread execution
 
-[frida-il2cpp-bridge](https://github.com/vfsfitvnm/frida-il2cpp-bridge) advertises Unity 5.3.0â€“6000.3.x, with testing
+[frida-il2cpp-bridge](https://github.com/vfsfitvnm/frida-il2cpp-bridge) advertises Unity 5.3.0–6000.3.x, with testing
 focused on Android/Linux. That is not verification of Windows 6000.4. Rust [frida-gum](https://docs.rs/crate/frida-gum/latest)
 bindings exist (0.17.2, May 2026), but do not automatically include the TypeScript IL2CPP bridge and bring native Gum.
 Use Frida as an experimental comparison tool rather than a required shipping dependency.

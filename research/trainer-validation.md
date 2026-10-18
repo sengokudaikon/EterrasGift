@@ -2,7 +2,8 @@
 
 Investigation started 2026-10-17 after the first evaluation checkpoint, at the user's request to make runtime, hook and
 assembly conclusions stronger before protocol/session implementation. Original app source remains at
-`22eb727b0590ed825957cb05c2039b4c0768c5e2`. No protocol, operation or UI work is part of this investigation.
+`22eb727b0590ed825957cb05c2039b4c0768c5e2` for this investigation. Product protocol, gameplay operations and UI wiring
+remain separate; one read-only live scheduler request is now validated.
 
 ## Implementation verdict
 
@@ -14,22 +15,20 @@ controlled fixtures while the remaining acceptance gates stay explicit.
 |---|---|---|
 | Runtime calls | Checked invocation now constructs primitive and scalar ref/out storage, validates receivers/reference classes, and roots results/exceptions. The production layer executes in the real 6000.4.8 fixture, including explicit virtual/interface resolution. | Managed-reference ref/out, enums, structs and generic signatures remain rejected. Validate each actual game operation separately. |
 | Thread/GC ownership | Production thread-affine attachment leases and strong roots pass against actual 6000.4.8. Native reference field/array edges survive collection with incremental mode disabled/enabled. | Incremental phase interleaving and game shutdown ordering. Attachment does not establish Unity main-thread authority. |
-| Main-thread commands | Actual 6000.4.8 player invokes the native hook, original-first Rust dispatcher and managed-exception cleanup/recovery. Quiescent disable restores scheduling without replay. | Production admission/failure paths, actual game installation/quiescence, process policy and retained helper lifetime. Neither stock hook engine is adopted. |
+| Main-thread commands | First-party scheduler with process-thread transactions passes owned native tests, authored Unity normal/exception/worker/external-bootstrap runs, and one authorized offline-game checked frame read followed by entry restoration. | Protocol/session/offline admission, per-operation authority and shutdown/transient effects. External patch/context actors and code reclamation are not validated. Neither stock hook engine is adopted. |
 | Managed files | Dotscope can implement offline transforms with independent before/after validation. | Decide malformed-type policy explicitly; broader format features remain separate requirements. |
 
-Unsafe code belongs at export calls, pointer/receiver construction, object ownership transitions and eventually the
+Unsafe code belongs at export calls, pointer/receiver construction, object ownership transitions and the
 hook boundary. A typed Rust wrapper cannot establish an arbitrary game's metadata/ABI or runtime lifetime by itself.
 Use `runtime_invoke` for the first verified signatures; do not expose a generic safe `call<T>` over arbitrary pointers.
 Nightly is available, but the established foundation does not need nightly-only language features.
 
-The matching-version runtime and managed player-loop experiments now pass. The hook investigation supplies a bounded
-candidate and explicit acceptance conditions; the assembly investigation distinguishes writer preservation from missing
-input semantics. The controlled native main-thread adapter also passes, including a managed exception crossing its
-Rust frame and subsequent engine recovery. These findings support implementing the typed invocation layer and promoting
-that bounded adapter behind production admission checks. The first checked invocation subset is now implemented;
-protocol/session and trainer operations remain separate work. A fake GUI is unnecessary:
-the disposable process host covers the boundary and existing UI captures use fake sessions. The first user-authorized
-live read-only observation now confirms loaded target bytes/unwind and process policy; helper/hook execution remains separate.
+Matching-version runtime and managed player-loop experiments pass. The first checked invocation subset and narrow
+scheduler adapter are implemented. Authored Unity tests include a managed exception crossing its Rust frame and
+subsequent engine recovery; the external bootstrap and one offline-game frame read also pass. The assembly investigation
+separately distinguishes writer preservation from missing input semantics. Protocol/session and trainer operations
+remain separate work. A fake GUI is unnecessary: disposable process hosts cover the boundary and existing UI captures
+use fake sessions. The live probe restores its entry and retains the helper until process exit.
 
 ## Evidence standard and scope
 
@@ -37,7 +36,9 @@ Keep these evidence levels separate: source/header contracts; synthetic ABI expe
 game artifacts; execution in a controlled IL2CPP fixture; execution in the actual game. One does not stand in for the next.
 The user authorized the first live observation on 2026-10-18 after starting a fully offline game. Its bounded scope is
 query/read and noninvasive debugger inspection, without helper injection, game API calls or hooks. Installed game files
-stay untouched. Generated assemblies and test executables run only in explicitly selected disposable processes.
+stay untouched. The later separately authorized helper/bootstrap performs one queued read-only getter in that same
+offline game, restores its entry and retains its code until exit. Assembly transforms and other experiments remain
+in disposable fixtures. Neither milestone authorizes arbitrary gameplay edits or further live sessions.
 
 Synthetic tests alone do not clear runtime acceptance. Record residual uncertainty and improve the next experiment
 rather than weakening acceptance criteria. Exact game runtime claims require actual runtime evidence later.
@@ -336,10 +337,40 @@ offsets must not be treated as exact function names. The captured stack does not
 Evidence and exact limits: [live-report.json](../tools/trainer-eval/debugger/live-report.json). This is ordinary Windows
 API/CDB evidence, not REA Evidence; REA tools remain unavailable in this session.
 
-Proceed with production scheduler-hook admission/lifecycle work. These observations clear the current loaded identity,
-original-byte/unwind and process-policy prerequisites. They do not establish an installation safe point, full caller
-set, exclusive patch ownership, arbitrary helper unloading or actual-game Rust invocation/GC/exception behavior. The
-next live execution milestone is a bounded scheduler probe and read-only command after that installation contract exists.
+### First live scheduler request
+
+The next authorized milestone is now complete. `eg-game-access::scheduler::SchedulerHook` replaces the evaluation
+NeoHook dependency with a target-specific implementation. It admits only the exact SUB/CMP prefix and alloc-40
+record, publishes a 23-byte JE/JNE trampoline with registered unwind info, and retains all exposed storage/modules.
+Transactions serialize before freezing; opened threads are checked back to this process; changed native censuses,
+entry PCs, stale bytes, handler records, cross-page writes and unsupported policies reject. There is no RIP redirection.
+Suspended sections allocate/log/call no managed code. Five owned native tests pass on stable debug/nightly release,
+including per-PC unwind with both branch outcomes and eight callers across 40 toggles. OS suspension/context APIs
+have no wall-clock guarantee, and persistent resume failure remains a recovery condition.
+
+The final authored Unity player passes normal and managed-throw modes with background-worker installation/restoration
+and a checked frame-count read matching managed Time.frameCount. A separate idle-mode child invokes no helper import;
+the external controller loads the DLL and starts its explicit bootstrap after loader completion. It passes one queued
+read/restoration and independent continuing-frame checks. Controller/dependency/helper hashes gate subsequent live use.
+
+Fresh read-only preflight confirms the same PID 10472, main TID 59160, module hashes,81 dispatcher bytes, original
+unwind record and observed policies. The authorized live bootstrap attaches its worker, resolves the target through
+metadata, installs, runs original ExecuteTasks before dispatch, invokes exactly one checked Time.get_frameCount,
+acknowledges completion, closes admission and restores the original entry. Returned frame: 372,952. There are two hook
+entries/two normal original returns, one command execution, zero errors/thread mismatches, and execution TID 59160.
+All 81 original bytes are restored; unwind and runtime DLL files are unchanged; the same game remains responsive.
+[Exact evidence](../tools/trainer-eval/debugger/scheduler-report.json) records native/controller identities and scopes.
+This is ordinary WindowsAPI evidence, not REA Evidence.
+
+The helper stays loaded with its executable page, relay and registered table until process exit. Already admitted
+callbacks can finish safely; restoration is not a drain/unload proof. Exclusive target ownership, cross-library patch
+coordination and external context/thread actors remain unsafe caller obligations. The controller is one-shot and rejects
+another helper load in this process. This success establishes the narrow live read path, not arbitrary call safety,
+strict CET, gameplay writes, protocol 21/session/offline gating or product disconnect/shutdown behavior.
+
+Next implementation: helper/protocol 21 transport and a session state machine against authored hosts, with positive
+offline admission and per-operation metadata/authority checks. Add read-only game operations before persistent/transient
+writes; reference-writing, enum/struct/generic support and incremental-GC interleaving remain their own gates.
 
 ## Tooling provenance
 

@@ -1338,6 +1338,7 @@ name = "eg-game-access"
 version = "0.1.0"
 dependencies = [
  "static_assertions",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

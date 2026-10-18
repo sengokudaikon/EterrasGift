@@ -98,10 +98,10 @@ ownership of detachment. Multiple leases on one context share an attachment, inc
 Strong roots borrow their lease, free exactly once and expose only raw pointers. The adapter explicitly assumes modern
 pointer-valued GC handles. The follow-up checked invocation layer binds caller-authorized live metadata, checks exact
 argument kinds and receiver/reference classes, and roots normal results and managed exceptions. Unsupported signatures
-are rejected before invocation. There is no arbitrary safe `call<T>`, reference field-write or process-injection API.
+are rejected before invocation. There is no arbitrary safe `call<T>` or reference field-write API. The later external scheduler evaluation tool explicitly loads its narrow helper; it is not an app API.
 
 `crates/trainer` contains a safe single-slot dispatcher. An operation owns the slot until it finishes even if its receiver
-times out. Commands and results are destroyed outside the state lock. The future Unity adapter must establish the correct
+times out. Commands and results are destroyed outside the state lock. The Unity adapter establishes the captured
 main-thread callback; the queue itself does not. Rust panics can produce an abandoned result but foreign exceptions and
 access violations are not translated by the queue.
 
@@ -120,12 +120,12 @@ unchanged Unity-emitted invoker definitions; see [its report](../tools/trainer-e
 
 ## Workspace validation
 
-- `cargo test -p eg-game-access -p eg-trainer -p eterras-gift --offline`: 23 invocation/runtime/dispatch tests, one compile-fail
+- `cargo test -p eg-game-access -p eg-trainer -p eterras-gift --offline`: 28 invocation/runtime/dispatch/scheduler tests, one compile-fail
   documentation test and four architecture tests pass.
-- `cargo +nightly test -p eg-game-access -p eg-trainer --release --offline`: the same 23 tests and lifetime check pass.
+- `cargo +nightly test -p eg-game-access -p eg-trainer --release --offline`: the same 28 tests and lifetime check pass.
 - `cargo lint`, `cargo fmt --all --check`, and `cargo xtask tokens --check`: pass.
 - `mise run verify`: workspace Clippy, formatting, generated-token checks and current fake-host captures pass.
-  Trainer combat and unique-item captures were visually inspected in the invocation follow-up; no UI source changed.
+  Trainer combat and unique-item captures were visually inspected after this scheduler follow-up; no UI source changed.
 - The standalone native ABI package passes Clippy with warnings denied. Its five tests pass in stable debug and
   nightly release configurations.
 - Both .NET evaluation projects build with zero warnings/errors. The complete local Cecil comparison run passes.
@@ -143,14 +143,12 @@ NeoHook unwind diagnosis have been completed. Their limits remain explicit; they
 1. Controlled IL2CPP invocation/GC and production Rust ownership now pass on matching 6000.4.8f1 as well as 6000.2.9f1.
    The actual 6000.4.8 IL2CPP player also validates UnitySynchronizationContext callback thread/order. Simple virtual/interface
    resolution passes; enabled incremental-GC configuration passes positive full-collection cases, with phase-interleaved writes separate.
-2. The hook corpus now covers register saves, frame pointers and explicit unsupported handler rejection. Complementary
-   conditional transfers pass per-PC unwind and execution checks. Establish a defensible supported-target/lifetime
-   policy before game use; these isolated candidate patches are not shipping dependencies. Focused CFG/CET compatibility
-   tests pass with enforcement controls; strict/dynamic-region CET and mitigated suspended-thread probes remain separate.
-   The [bounded adoption policy](../tools/trainer-eval/hook-eval/supported-policy.md) recommends the near-entry conditional
-   candidate with permanent ownership and explicit rejection checks. The [combined native-player probe](../tools/trainer-eval/unity-hook-player/report.json)
-   now passes original-first production dispatch, a managed exception crossing the Rust hook with cleanup/recovery,
-   and quiescent disable without replay. Production lifecycle/admission and actual-game validation remain separate.
+2. The hook corpus covers register saves, frame pointers and unsupported handler rejection. Complementary conditional
+   transfers pass per-PC unwind/execution. The [bounded policy](../tools/trainer-eval/hook-eval/supported-policy.md) is
+   now implemented by the first-party adapter; isolated candidate patches are not shipping dependencies. Native and
+   [Unity-player tests](../tools/trainer-eval/unity-hook-player/report.json) pass normal/exception behavior, worker
+   transactions, permanent ownership, entry restoration and the checked frame getter. One authorized live request also
+   passes. Strict/dynamic-region CET, coexisting patchers and active code reclamation remain unsupported.
 3. Decide how to handle the real CoreModule's malformed orphan nested types. Dotscope preserves more payload than
    the current Cecil repair; experimental normalization changes public identity and is not shipping policy. Causal
    diagnostic edits now isolate both remaining baseline loader defects; making classes abstract is not behavior restoration.
@@ -158,6 +156,29 @@ NeoHook unwind diagnosis have been completed. Their limits remain explicit; they
    reference writes and traced managed-reference ref/out storage; evaluate concrete collection methods separately
    from generic-method construction. Then promote the helper adapter and protocol 21 transport. Extend disposable-host
    operation tests before connecting trainer UI to a real helper.
-5. The user authorized the first live read-only observation: loaded dispatcher bytes/unwind and actual process policy
-   match the investigated build/profile. [Evidence](../tools/trainer-eval/debugger/live-report.json) does not yet execute
-   a Rust helper or hook in the game. Future live work remains within the user's explicit scope. No extra fake GUI is needed.
+5. The first-party scheduler adapter and external bootstrap now pass the authored Unity fixture and one explicitly
+   authorized offline-game request. The checked getter returns frame 372,952 on the named main thread, exactly once;
+   entry/unwind/files are restored/unchanged and the game remains responsive. [Evidence](../tools/trainer-eval/debugger/scheduler-report.json).
+   Helper/code/tables stay loaded until process exit. Further live work requires the user's explicit scope; next
+   implementation is protocol 21/session/offline admission against authored hosts before game-specific operations.
+
+
+## Scheduler promotion and first live read, 2026-10-18
+
+A first-party adapter now lives in `eg-game-access::scheduler`, with no NeoHook dependency. Its exact 11-byte
+SUB/CMP prefix, 23-byte conditional trampoline and registered alloc-40 unwind record are tested at every instruction
+boundary with both ZF states. Separate tests reject stale bytes and handler-bearing originals, and eight known caller
+threads survive 40 install/restore toggles before joining. Stable debug and nightly release pass all five tests.
+Entry changes serialize this library's transactions, verify thread ownership and two native censuses, reject PCs in
+the first 11 bytes, recheck owned bytes under suspension and resume on every ordinary error path. Cross-page writes
+and unsupported policies are rejected. Resume failures take priority; OS calls are not guaranteed time-bounded.
+External patch/context/thread actors remain explicit caller obligations. No managed code/heap/logging runs frozen.
+
+The updated evaluation plugin exercises the production scheduler, dispatcher and checked frame getter together.
+Normal and managed-throw authored-player runs pass with native worker installation/restoration. An idle player then
+passes the actual external LoadLibrary/bootstrap path and independently records continued frame progression.
+Only after matching source/helper/controller identities and fresh live preflight does the game receive the helper.
+That run returns frame 372,952 on Unity main TID 59160, with two original callback normal returns and one owned request.
+All 81 entry bytes are restored, original unwind bytes/files are unchanged, and the same game process stays responsive.
+The helper, original module, relay, trampoline and tables remain retained until process exit. No gameplay mutation,
+product session/protocol or active-unload claim follows. [Result index](../tools/trainer-eval/debugger/scheduler-report.json).
