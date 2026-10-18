@@ -300,9 +300,20 @@ export component CheckBox inherits Rectangle {
                 height: Tokens.space-12;
                 stroke: Tokens.on-accent-brush;
                 stroke-width: Tokens.space-2;
-                MoveTo { x: 0; y: Tokens.space-6 / 1px; }
-                LineTo { x: Tokens.space-4 / 1px; y: Tokens.space-10 / 1px; }
-                LineTo { x: Tokens.space-12 / 1px; y: Tokens.space-2 / 1px; }
+                MoveTo {
+                    x: 0;
+                    y: Tokens.space-6 / 1px;
+                }
+
+                LineTo {
+                    x: Tokens.space-4 / 1px;
+                    y: Tokens.space-10 / 1px;
+                }
+
+                LineTo {
+                    x: Tokens.space-12 / 1px;
+                    y: Tokens.space-2 / 1px;
+                }
             }
 
             FocusRing {

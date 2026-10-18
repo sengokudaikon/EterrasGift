@@ -12,10 +12,33 @@ import { FocusRing } from "../../widgets/focus.slint";
 import { MessageTone } from "../common.slint";
 import { ForgeState, ItemRarity, CellKind } from "state.slint";
 import { ValueScrubber } from "scrubber.slint";
-import { CellButton, FlagToggle, MenuRow, CheckBox, HelpButton } from "cells.slint";
-import { AffixRowItem, ModifierRowItem, TierList, MenuMetrics } from "table.slint";
-import { AffixPickerPanel, PickerMetrics } from "picker.slint";
+import {
+    CellButton,
+    FlagToggle,
+    MenuRow,
+    CheckBox,
+    HelpButton,
+} from "cells.slint";
+import {
+    AffixRowItem,
+    ModifierRowItem,
+    TierList,
+    MenuMetrics,
+} from "table.slint";
+import { AffixPickerPanel, PickerMetrics, SearchBox } from "picker.slint";
 import { ChangesPane } from "pane.slint";
+
+// The game-owned colour of a rarity's names (EpochColor), for item names only.
+global RarityInk {
+    public pure function of(rarity: ItemRarity) -> brush {
+        return rarity == ItemRarity.legendary ? Tokens.rarity-legendary-brush
+            : rarity == ItemRarity.set ? Tokens.rarity-set-brush
+            : rarity == ItemRarity.unique ? Tokens.rarity-unique-brush
+            : rarity == ItemRarity.exalted ? Tokens.rarity-exalted-brush
+            : rarity == ItemRarity.rare ? Tokens.rarity-rare-brush
+            : rarity == ItemRarity.magic ? Tokens.rarity-magic-brush : Tokens.rarity-normal-brush;
+    }
+}
 
 // A cell in the facts line: plain text that answers like a cell where it can change, outdented so hovering never moves it.
 component InlineCell inherits Rectangle {
@@ -140,6 +163,8 @@ export component ItemForge inherits Rectangle {
         : root.wide ? Math.min(Tokens.affix-table-max-width, root.lists-width) : root.lists-width;
     property <length> range-width: range-measure.preferred-width;
     property <int> selected: ForgeState.selected-affix;
+    // An identity entry: the name over its caption in the menu row's padding.
+    property <length> identity-row: Tokens.font-size-body * 4 / 3 + Tokens.font-size-caption * 4 / 3 + Tokens.cell-padding.top + Tokens.cell-padding.bottom + 2px;
     property <int> rarity-highlight;
     property <int> base-highlight;
 
@@ -230,24 +255,157 @@ export component ItemForge inherits Rectangle {
             padding-bottom: Tokens.header-padding.bottom;
             spacing: Tokens.space-4;
 
-            Text {
-                text: ForgeState.item-name;
-                font-family: Tokens.display-font;
-                font-size: Tokens.font-size-title;
-                font-weight: Tokens.display-weight;
-                letter-spacing: Tokens.tracking-title;
-                wrap: word-wrap;
-                max-lines: Tokens.title-max-lines;
-                overflow: elide;
-                min-height: Tokens.line-height-title;
-                vertical-alignment: center;
-                color: ForgeState.name-rarity == ItemRarity.legendary ? Tokens.rarity-legendary-brush
-                    : ForgeState.name-rarity == ItemRarity.set ? Tokens.rarity-set-brush
-                    : ForgeState.name-rarity == ItemRarity.unique ? Tokens.rarity-unique-brush
-                    : ForgeState.name-rarity == ItemRarity.exalted ? Tokens.rarity-exalted-brush
-                    : ForgeState.name-rarity == ItemRarity.rare ? Tokens.rarity-rare-brush
-                    : ForgeState.name-rarity == ItemRarity.magic ? Tokens.rarity-magic-brush : Tokens.rarity-normal-brush;
-                accessible-label: "Item: " + ForgeState.item-name;
+            // On a unique, set or legendary item the name is a cell that opens the identity picker; a drafted unique shows
+            // its name in teal.
+            Rectangle {
+                height: title.preferred-height;
+
+                if ForgeState.has-identity: CellButton {
+                    x: Tokens.inline-cell-outdent.left;
+                    y: Tokens.inline-cell-outdent.top;
+                    width: Math.min(title.preferred-width, parent.width) - Tokens.inline-cell-outdent.left - Tokens.inline-cell-outdent.right;
+                    height: parent.height - Tokens.inline-cell-outdent.top - Tokens.inline-cell-outdent.bottom;
+                    changeable: ForgeState.can-change-identity;
+                    tip: ForgeState.identity-tip;
+                    label: "Item: " + ForgeState.item-name;
+                    clicked => {
+                        if (ForgeState.can-change-identity) {
+                            ForgeState.identity-search-edited("");
+                            identity-popup.show();
+                        }
+                    }
+                }
+
+                title := Text {
+                    x: 0;
+                    width: parent.width;
+                    text: ForgeState.item-name;
+                    font-family: Tokens.display-font;
+                    font-size: Tokens.font-size-title;
+                    font-weight: Tokens.display-weight;
+                    letter-spacing: Tokens.tracking-title;
+                    wrap: word-wrap;
+                    max-lines: Tokens.title-max-lines;
+                    overflow: elide;
+                    min-height: Tokens.line-height-title;
+                    vertical-alignment: center;
+                    color: ForgeState.identity-drafted ? Tokens.draft-brush : RarityInk.of(ForgeState.name-rarity);
+                    accessible-label: "Item: " + ForgeState.item-name;
+                }
+
+                identity-popup := PopupWindow {
+                    x: Tokens.inline-cell-outdent.left;
+                    y: parent.height - Tokens.inline-cell-outdent.bottom + Tokens.space-4;
+                    width: Tokens.base-menu-width + Tokens.flyout-padding.left + Tokens.flyout-padding.right;
+                    height: Tokens.flyout-padding.top + Tokens.flyout-padding.bottom + Tokens.control-min-height + Tokens.space-8 * 2
+                        + Math.min(Tokens.replace-list-max-height, Math.max(1, ForgeState.identity-options.length) * (root.identity-row + Tokens.space-2))
+                        + PickerMetrics.caption-line * 3;
+                    close-policy: PopupClosePolicy.close-on-click-outside;
+
+                    Rectangle {
+                        background: Tokens.hover-brush;
+                        border-radius: Tokens.control-radius;
+
+                        FocusScope {
+                            capture-key-pressed(event) => {
+                                if (event.text == Key.Escape) {
+                                    identity-popup.close();
+                                    return accept;
+                                }
+                                reject
+                            }
+
+                            VerticalLayout {
+                                padding-left: Tokens.flyout-padding.left;
+                                padding-right: Tokens.flyout-padding.right;
+                                padding-top: Tokens.flyout-padding.top;
+                                padding-bottom: Tokens.flyout-padding.bottom;
+                                spacing: Tokens.space-8;
+                                alignment: start;
+
+                                SearchBox {
+                                    text: ForgeState.identity-search;
+                                    placeholder: "Name or ID";
+                                    label: "Search uniques and set items";
+                                    init => {
+                                        self.focus-input();
+                                    }
+                                    edited(text) => {
+                                        ForgeState.identity-search-edited(text);
+                                    }
+                                }
+
+                                Rectangle {
+                                    height: Math.min(Tokens.replace-list-max-height, Math.max(1, ForgeState.identity-options.length) * (root.identity-row + Tokens.space-2));
+
+                                    if ForgeState.identity-options.length == 0: Text {
+                                        x: Tokens.empty-list-margin.left;
+                                        y: Tokens.empty-list-margin.top;
+                                        width: parent.width - Tokens.empty-list-margin.left - Tokens.empty-list-margin.right;
+                                        text: "No unique or set item matches this search.";
+                                        color: Tokens.text-muted-brush;
+                                        wrap: word-wrap;
+                                    }
+
+                                    ScrollView {
+                                        content-width: self.visible-width;
+                                        content-height: ForgeState.identity-options.length * (root.identity-row + Tokens.space-2);
+
+                                        VerticalLayout {
+                                            spacing: Tokens.space-2;
+                                            alignment: start;
+
+                                            for option[index] in ForgeState.identity-options: MenuRow {
+                                                held: option.current;
+                                                enabled: option.available;
+                                                picked => {
+                                                    ForgeState.pick-identity(index);
+                                                    identity-popup.close();
+                                                }
+
+                                                VerticalLayout {
+                                                    horizontal-stretch: 1;
+
+                                                    HorizontalLayout {
+                                                        // Each name in the colour of the rarity the item would end with; one it can't become is dimmed.
+                                                        Text {
+                                                            text: option.name;
+                                                            color: option.available ? RarityInk.of(option.rarity) : Tokens.text-disabled-brush;
+                                                            overflow: elide;
+                                                            horizontal-stretch: 1;
+                                                        }
+
+                                                        if option.in-game: Text {
+                                                            text: "in game";
+                                                            font-size: Tokens.font-size-caption;
+                                                            color: Tokens.text-secondary-brush;
+                                                            vertical-alignment: center;
+                                                        }
+                                                    }
+
+                                                    Text {
+                                                        text: option.detail;
+                                                        font-size: Tokens.font-size-caption;
+                                                        color: Tokens.text-muted-brush;
+                                                        overflow: elide;
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+
+                                Text {
+                                    text: "The rarity follows the game: a unique with affixes is legendary, and a set item holds none. Rolls, legendary potential and Weaver's Will carry over.";
+                                    font-size: Tokens.font-size-caption;
+                                    color: Tokens.text-muted-brush;
+                                    wrap: word-wrap;
+                                    height: PickerMetrics.caption-line * 3;
+                                }
+                            }
+                        }
+                    }
+                }
             }
 
             HorizontalLayout {
@@ -255,23 +413,23 @@ export component ItemForge inherits Rectangle {
                 alignment: start;
 
                 Rectangle {
-                width: rarity-cell.width;
-                height: rarity-cell.height;
+                    width: rarity-cell.width;
+                    height: rarity-cell.height;
 
-                rarity-cell := InlineCell {
-                    text: ForgeState.rarity-text;
-                    emphasis: true;
-                    drafted: ForgeState.rarity-drafted;
-                    changeable: ForgeState.can-change-rarity;
-                    tip: ForgeState.rarity-tip;
-                    label: "Rarity: " + ForgeState.rarity-text;
-                    clicked => {
-                        if (ForgeState.can-change-rarity) {
-                            root.rarity-highlight = 0;
-                            rarity-popup.show();
+                    rarity-cell := InlineCell {
+                        text: ForgeState.rarity-text;
+                        emphasis: true;
+                        drafted: ForgeState.rarity-drafted;
+                        changeable: ForgeState.can-change-rarity;
+                        tip: ForgeState.rarity-tip;
+                        label: "Rarity: " + ForgeState.rarity-text;
+                        clicked => {
+                            if (ForgeState.can-change-rarity) {
+                                root.rarity-highlight = 0;
+                                rarity-popup.show();
+                            }
                         }
                     }
-                }
 
                     rarity-popup := PopupWindow {
                         x: Tokens.inline-cell-outdent.left;
@@ -362,21 +520,21 @@ export component ItemForge inherits Rectangle {
                 }
 
                 if ForgeState.base-text != "": Rectangle {
-                width: base-cell.width;
-                height: base-cell.height;
+                    width: base-cell.width;
+                    height: base-cell.height;
 
-                base-cell := InlineCell {
-                    text: ForgeState.base-text;
-                    drafted: ForgeState.base-drafted;
-                    changeable: ForgeState.can-change-base;
-                    tip: ForgeState.base-tip;
-                    label: "Base: " + ForgeState.base-text;
-                    clicked => {
-                        if (ForgeState.can-change-base) {
-                            base-popup.show();
+                    base-cell := InlineCell {
+                        text: ForgeState.base-text;
+                        drafted: ForgeState.base-drafted;
+                        changeable: ForgeState.can-change-base;
+                        tip: ForgeState.base-tip;
+                        label: "Base: " + ForgeState.base-text;
+                        clicked => {
+                            if (ForgeState.can-change-base) {
+                                base-popup.show();
+                            }
                         }
                     }
-                }
 
                     base-popup := PopupWindow {
                         x: Tokens.inline-cell-outdent.left;

@@ -120,6 +120,9 @@ pub struct ForgeEditor {
     pub implicits: Vec<RollRow>,
     pub fields: Vec<FieldDraft>,
     pub base: Option<FieldDraft>,
+    /// The identity picker behind a unique-backed item's name.
+    pub identity: Option<FieldDraft>,
+    pub identity_search: String,
     fields_key: String,
     selected_affix: Option<usize>,
     selected_unique: Option<usize>,
@@ -153,6 +156,8 @@ impl ForgeEditor {
             implicits: Vec::new(),
             fields: Vec::new(),
             base: None,
+            identity: None,
+            identity_search: String::new(),
             fields_key: String::new(),
             selected_affix: None,
             selected_unique: None,
@@ -216,9 +221,21 @@ impl ForgeEditor {
         !self.writing && self.game.can_write()
     }
 
-    /// Drafts can change: the session is ready and nothing is being written.
+    /// Drafts can change: the session is ready, nothing is being written and no identity is drafted (a new unique brings
+    /// its own modifiers, so it is drafted alone).
     pub fn can_mutate(&self) -> bool {
-        self.can_change_draft()
+        self.can_change_draft() && !self.is_identity_drafted()
+    }
+
+    fn has_other_drafts(&self) -> bool {
+        self.affixes.iter().any(AffixRow::is_dirty)
+            || self.uniques.iter().any(RollRow::is_dirty)
+            || self.implicits.iter().any(RollRow::is_dirty)
+            || self.fields.iter().chain(self.base.iter()).any(FieldDraft::is_dirty)
+    }
+
+    fn fields_mut(&mut self) -> impl Iterator<Item = &mut FieldDraft> {
+        self.fields.iter_mut().chain(self.base.iter_mut()).chain(self.identity.iter_mut())
     }
 
     fn unrestricted(&self) -> bool {
@@ -237,7 +254,167 @@ impl ForgeEditor {
     }
 
     fn all_fields(&self) -> impl Iterator<Item = &FieldDraft> {
-        self.fields.iter().chain(self.base.iter())
+        self.fields.iter().chain(self.base.iter()).chain(self.identity.iter())
+    }
+
+    // ----- Identity -----
+
+    pub fn has_identity(&self) -> bool {
+        self.identity.is_some()
+    }
+
+    pub fn is_identity_drafted(&self) -> bool {
+        self.identity.as_ref().is_some_and(FieldDraft::is_dirty)
+    }
+
+    /// The drafted identity's unique, base and rarity.
+    fn drafted_identity(&self) -> Option<(u16, u16, u8)> {
+        let item = self.item.as_ref()?;
+        let identity = self.identity.as_ref().filter(|identity| identity.is_dirty())?;
+        match self.identity_edit(item, identity.value() as u16) {
+            ItemEdit::Identity { unique_id, sub_type, rarity, .. } => Some((unique_id, sub_type, rarity)),
+            _ => None,
+        }
+    }
+
+    /// The item's name as the game holds it; a drafted unique shows its own until applied or discarded.
+    pub fn item_name(&self) -> String {
+        match self.drafted_identity().and_then(|(id, _, _)| self.catalog().unique(id)) {
+            Some(unique) => unique.name.clone(),
+            None => self.item.as_ref().map(|item| item.name.clone()).unwrap_or_default(),
+        }
+    }
+
+    pub fn can_change_identity(&self) -> bool {
+        self.identity.as_ref().is_some_and(FieldDraft::is_editable) && self.can_change_draft() && !self.has_other_drafts()
+    }
+
+    pub fn identity_tip(&self) -> String {
+        match &self.identity {
+            None => String::new(),
+            Some(identity) if !identity.is_editable() => identity.read_only_reason.clone(),
+            _ if self.has_other_drafts() => "Apply or discard the other drafts first. A new unique brings its own modifiers.".into(),
+            _ => "Change which unique or set item this is. The rarity follows the game: with affixes it is legendary, and a set item holds none.".into(),
+        }
+    }
+
+    /// The game's name for a unique-backed rarity.
+    fn rarity_label(&self, rarity: u8) -> String {
+        self.catalog().rarity_name(rarity).unwrap_or_else(|| {
+            match rarity {
+                item::LEGENDARY => "Legendary",
+                item::SET => "Set",
+                _ => "Unique",
+            }
+            .into()
+        })
+    }
+
+    /// The edit that makes the item this unique or set item: the unique's base (the item's own when the unique comes on
+    /// it), and the rarity the game gives it. A legendary the game never makes of this unique needs the override.
+    fn identity_edit(&self, item: &ForgeItem, unique_id: u16) -> ItemEdit {
+        let unique = self.catalog().unique(unique_id);
+        let sub_type = match unique {
+            Some(unique) if !unique.sub_types.is_empty() && !unique.sub_types.contains(&item.sub_type) => unique.sub_types[0],
+            _ => item.sub_type,
+        };
+        let rarity = item::identity_rarity(item, unique.is_some_and(|unique| unique.is_set));
+        let unrestricted = unique.is_some_and(|unique| rarity == item::LEGENDARY && !unique.can_drop_as_legendary);
+        ItemEdit::Identity {
+            unique_id,
+            sub_type,
+            rarity,
+            unrestricted,
+        }
+    }
+
+    /// The uniques and set items of the item's type, uniques first, each with the rarity it would end with (spec §3.5).
+    /// TODO(forge): the legendary-potential and Weaver's Will cautions ("keeps … it never holds").
+    fn identity_options(&self, item: &ForgeItem) -> Vec<FieldOption> {
+        let mut uniques: Vec<&super::game::UniqueDefinition> = self.catalog().uniques.iter().filter(|unique| unique.item_type == item.item_type).collect();
+        uniques.sort_by(|a, b| (a.is_set, &a.name).cmp(&(b.is_set, &b.name)));
+        uniques
+            .into_iter()
+            .map(|unique| {
+                let game = Some(unique.id) == item.identity_id();
+                let edit = self.identity_edit(item, unique.id);
+                let (sub_type, rarity, needs) = match edit {
+                    ItemEdit::Identity {
+                        sub_type, rarity, unrestricted, ..
+                    } => (sub_type, rarity, unrestricted),
+                    _ => (item.sub_type, item.rarity, false),
+                };
+                let rarity = if game { item.rarity } else { rarity };
+                let mut detail = vec![self.rarity_label(rarity)];
+                if let Some(base) = self.catalog().base(item.item_type, sub_type) {
+                    detail.push(base.name.clone());
+                }
+                if !unique.is_set {
+                    detail.push(
+                        if unique.legendary_type == LegendaryType::WeaversWill {
+                            "Weaver's Will"
+                        } else {
+                            "legendary potential"
+                        }
+                        .into(),
+                    );
+                }
+                let mut available = true;
+                if !game && unique.is_set && !item.affixes.is_empty() {
+                    detail.push("holds no affixes: remove them first".into());
+                    available = false;
+                } else if !game {
+                    if needs {
+                        let note = if self.unrestricted() { "" } else { "; needs \"I know what I'm doing\"" };
+                        detail.push(format!("never legendary in the game{note}"));
+                        available = self.unrestricted();
+                    }
+                    if edit.reverse(item).is_none() {
+                        detail.push("one-way: Undo apply cannot reverse it".into());
+                    }
+                }
+                FieldOption {
+                    value: i64::from(unique.id),
+                    name: unique.name.clone(),
+                    detail: detail.join(" · "),
+                    in_game: game,
+                    implicits: String::new(),
+                    available,
+                    rarity: self.rarity_label(rarity),
+                }
+            })
+            .collect()
+    }
+
+    /// The identity options the search matches, by name or ID.
+    pub fn identity_choices(&self) -> Vec<&FieldOption> {
+        let search = self.identity_search.to_lowercase();
+        self.identity
+            .iter()
+            .flat_map(|identity| identity.options.iter())
+            .filter(|option| search.is_empty() || option.name.to_lowercase().contains(&search) || option.value.to_string().contains(&search))
+            .collect()
+    }
+
+    pub fn set_identity_search(&mut self, search: &str) {
+        self.identity_search = search.into();
+    }
+
+    /// Picks a unique from the searched choices; it is drafted alone.
+    pub fn pick_identity(&mut self, choice: usize) {
+        if !self.can_change_identity() && !self.is_identity_drafted() {
+            return;
+        }
+        let Some(value) = self.identity_choices().get(choice).filter(|option| option.available).map(|option| option.value) else {
+            return;
+        };
+        if let Some(identity) = self.identity.as_mut()
+            && identity.set(value)
+        {
+            let uid = identity.uid;
+            self.edited(RowRef::Field(uid));
+        }
+        self.resolve_tables();
     }
 
     // ----- Header -----
@@ -277,20 +454,18 @@ impl ForgeEditor {
             return String::new();
         };
         if !self.is_crafted() {
-            return self.catalog().rarity_name(item.rarity).unwrap_or_else(|| {
-                match item.rarity {
-                    item::LEGENDARY => "Legendary",
-                    item::SET => "Set",
-                    _ => "Unique",
-                }
-                .into()
-            });
+            return self.rarity_label(self.drafted_identity().map_or(item.rarity, |(_, _, rarity)| rarity));
         }
         if self.is_draft_exalted() { "Exalted".into() } else { self.count_rarity_name() }
     }
 
     pub fn is_rarity_drafted(&self) -> bool {
-        self.is_crafted() && self.is_draft_exalted() != self.item.as_ref().is_some_and(ForgeItem::is_exalted)
+        if self.is_crafted() {
+            self.is_draft_exalted() != self.item.as_ref().is_some_and(ForgeItem::is_exalted)
+        } else {
+            self.drafted_identity()
+                .is_some_and(|(_, _, rarity)| Some(rarity) != self.item.as_ref().map(|item| item.rarity))
+        }
     }
 
     pub fn can_change_rarity(&self) -> bool {
@@ -307,16 +482,29 @@ impl ForgeEditor {
         }
     }
 
+    /// The base a draft would give the item: a drafted base, or the base a drafted unique comes on when it differs.
+    fn drafted_base(&self) -> Option<u16> {
+        let item = self.item.as_ref()?;
+        match (&self.base, self.drafted_identity()) {
+            (Some(base), _) if base.is_dirty() => Some(base_of(base.value()).1),
+            (_, Some((_, sub_type, _))) if sub_type != item.sub_type => Some(sub_type),
+            _ => None,
+        }
+    }
+
     pub fn base_text(&self) -> String {
-        match (&self.base, &self.item) {
-            (Some(base), _) if base.is_dirty() => base.display(),
-            (_, Some(item)) => self.catalog().base(item.item_type, item.sub_type).map(|base| base.name.clone()).unwrap_or_default(),
-            _ => String::new(),
+        match &self.item {
+            Some(item) => self
+                .catalog()
+                .base(item.item_type, self.drafted_base().unwrap_or(item.sub_type))
+                .map(|base| base.name.clone())
+                .unwrap_or_default(),
+            None => String::new(),
         }
     }
 
     pub fn is_base_drafted(&self) -> bool {
-        self.base.as_ref().is_some_and(FieldDraft::is_dirty)
+        self.drafted_base().is_some()
     }
 
     pub fn can_change_base(&self) -> bool {
@@ -453,10 +641,10 @@ impl ForgeEditor {
         let Some(item) = self.item.as_ref() else {
             return Vec::new();
         };
-        let sub_type = match &self.base {
-            Some(base) if base.is_dirty() => base_of(base.value()).1,
-            _ if item.implicits.is_none() => item.sub_type,
-            _ => return Vec::new(),
+        let sub_type = match self.drafted_base() {
+            Some(sub_type) => sub_type,
+            None if item.implicits.is_none() => item.sub_type,
+            None => return Vec::new(),
         };
         self.catalog().base(item.item_type, sub_type).map(|base| base.implicits.clone()).unwrap_or_default()
     }
@@ -1017,7 +1205,7 @@ impl ForgeEditor {
                 }
             }
             RowRef::Field(uid) => {
-                if let Some(field) = self.fields.iter_mut().chain(self.base.iter_mut()).find(|field| field.uid == uid) {
+                if let Some(field) = self.fields_mut().find(|field| field.uid == uid) {
                     field.reset();
                 }
             }
@@ -1052,7 +1240,7 @@ impl ForgeEditor {
         for row in self.uniques.iter_mut().chain(self.implicits.iter_mut()) {
             row.reset();
         }
-        for field in self.fields.iter_mut().chain(self.base.iter_mut()) {
+        for field in self.fields_mut() {
             field.reset();
         }
         self.draft_order.clear();
@@ -1166,7 +1354,7 @@ impl ForgeEditor {
                 }
             }
             RowRef::Field(uid) => {
-                if let Some(field) = self.fields.iter_mut().chain(self.base.iter_mut()).find(|r| r.uid == uid) {
+                if let Some(field) = self.fields_mut().find(|r| r.uid == uid) {
                     field.undo_draft();
                 }
             }
@@ -1462,6 +1650,7 @@ impl ForgeEditor {
         let Some(item) = self.item.clone() else {
             self.fields.clear();
             self.base = None;
+            self.identity = None;
             self.fields_key.clear();
             return Vec::new();
         };
@@ -1473,7 +1662,7 @@ impl ForgeEditor {
             item.item_type,
             self.catalog().limits.is_some(),
             self.unrestricted(),
-            item.unique.as_ref().map(|unique| unique.id)
+            item.identity_id()
         );
         if key == self.fields_key
             && let Some(status) = item.status
@@ -1490,6 +1679,11 @@ impl ForgeEditor {
             if let Some(base) = self.base.as_mut() {
                 base.options = options;
             }
+            let options = self.identity_options(&item);
+            if let Some(identity) = self.identity.as_mut() {
+                identity.update(item.identity_id().map_or(0, i64::from));
+                identity.options = options;
+            }
             return Vec::new();
         }
         self.fields_key = key;
@@ -1498,18 +1692,13 @@ impl ForgeEditor {
         } else {
             Vec::new()
         };
-        for field in self.fields.iter().chain(self.base.iter()).map(|field| field.uid).collect::<Vec<_>>() {
+        for field in self.all_fields().map(|field| field.uid).collect::<Vec<_>>() {
             self.forget(RowRef::Field(field));
         }
         self.rebuild_fields(&item);
         let mut lost = Vec::new();
         for old in drafted {
-            match self
-                .fields
-                .iter_mut()
-                .chain(self.base.iter_mut())
-                .find(|field| field.field == old.field && field.kind == old.kind)
-            {
+            match self.fields_mut().find(|field| field.field == old.field && field.kind == old.kind) {
                 Some(rebuilt) => rebuilt.carry_stale(&old),
                 None => lost.push(old.name),
             }
@@ -1520,6 +1709,8 @@ impl ForgeEditor {
     fn rebuild_fields(&mut self, item: &ForgeItem) {
         self.fields.clear();
         self.base = None;
+        self.identity = None;
+        self.identity_search.clear();
         let Some(status) = item.status else {
             return;
         };
@@ -1617,7 +1808,10 @@ impl ForgeEditor {
             let uid = self.uid();
             self.base = Some(FieldDraft::base(uid, base_key(item.item_type, item.sub_type), self.base_options(item)));
         }
-        // TODO(forge): the identity picker on unique, set and legendary items (spec §3.5).
+        if backed && let Some(identity) = item.identity_id() {
+            let uid = self.uid();
+            self.identity = Some(FieldDraft::identity(uid, i64::from(identity), self.identity_options(item)));
+        }
     }
 
     /// Values only "I know what I'm doing" writes (spec §3.1 override cells).
@@ -1706,6 +1900,7 @@ impl ForgeEditor {
                     in_game: base.sub_type == item.sub_type,
                     implicits: base.implicits.join("\n"),
                     available: true,
+                    rarity: String::new(),
                 }
             })
             .collect()
@@ -2160,9 +2355,15 @@ impl ForgeEditor {
             );
         }
         for field in fields {
-            let edit = field.read_edit();
+            let edit = if field.kind == FieldKind::Identity {
+                self.identity_edit(&projected, field.value() as u16)
+            } else {
+                field.read_edit()
+            };
             let problem = match &edit {
                 edit if edit.needs_override() && !self.unrestricted() => Some(OVERRIDE_REQUIRED.to_string()),
+                ItemEdit::Identity { rarity: item::SET, .. } if !projected.affixes.is_empty() => Some("A set item holds no affixes. Remove them first.".into()),
+                ItemEdit::Identity { .. } if !edit.is_valid(&projected) => Some("That unique does not fit this item.".into()),
                 ItemEdit::Status { .. } if !edit.is_valid(&projected) => Some(format!("{} does not apply to this item.", field.name)),
                 ItemEdit::Base { .. } if !edit.is_valid(&projected) => Some("This item's base cannot change.".into()),
                 _ => None,
@@ -2260,7 +2461,7 @@ impl ForgeEditor {
                 self.draft_order.retain(|entry| !matches!(entry, RowRef::Implicit(_)));
             }
             StepRow::Field(uid) => {
-                if let Some(field) = self.fields.iter_mut().chain(self.base.iter_mut()).find(|f| f.uid == *uid) {
+                if let Some(field) = self.fields_mut().find(|f| f.uid == *uid) {
                     field.reset();
                     field.confirmed = true;
                 }
@@ -2392,7 +2593,7 @@ impl ForgeEditor {
             for row in self.uniques.iter_mut().chain(self.implicits.iter_mut()) {
                 row.confirmed = false;
             }
-            for field in self.fields.iter_mut().chain(self.base.iter_mut()) {
+            for field in self.fields_mut() {
                 field.confirmed = false;
             }
             let summary = if restored == 1 {

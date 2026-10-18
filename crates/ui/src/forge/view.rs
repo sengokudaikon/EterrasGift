@@ -28,6 +28,7 @@ struct Models {
     history: Rc<VecModel<AppliedEntryView>>,
     rarity_options: Rc<VecModel<MenuOptionView>>,
     base_options: Rc<VecModel<MenuOptionView>>,
+    identity_options: Rc<VecModel<MenuOptionView>>,
     picker_rows: Rc<VecModel<PickerRowView>>,
 }
 
@@ -78,6 +79,7 @@ pub fn attach(window: &MainWindow, game: Box<dyn ForgeGame>) -> ForgeHandle {
     state.set_history(ModelRc::from(view.models.history.clone()));
     state.set_rarity_options(ModelRc::from(view.models.rarity_options.clone()));
     state.set_base_options(ModelRc::from(view.models.base_options.clone()));
+    state.set_identity_options(ModelRc::from(view.models.identity_options.clone()));
     state.set_picker_rows(ModelRc::from(view.models.picker_rows.clone()));
     bind(&state, &view);
     view.show();
@@ -134,6 +136,8 @@ fn bind(state: &ForgeState, view: &Rc<View>) {
     state.on_toggle_flag(edit!(view, |editor, index, on| editor.toggle_flag(index.max(0) as usize, on)));
     state.on_pick_rarity(edit!(view, |editor, index| editor.pick_rarity(index == 1)));
     state.on_pick_base(edit!(view, |editor, index| editor.pick_base(index.max(0) as usize)));
+    state.on_pick_identity(edit!(view, |editor, index| editor.pick_identity(index.max(0) as usize)));
+    state.on_identity_search_edited(edit!(view, |editor, text| editor.set_identity_search(&text)));
     state.on_base_allow(edit!(view, |editor, allow| editor.set_base_allow_incompatible(allow)));
     state.on_picker_search_edited(edit!(view, |editor, text| editor.picker_search(&text)));
     state.on_picker_filter_changed(edit!(view, |editor, filter| editor.picker_filter(match filter {
@@ -258,16 +262,28 @@ impl View {
         if !editor.has_item() {
             return;
         }
-        state.set_item_name(editor.item().map(|item| item.name.clone()).unwrap_or_default().into());
-        state.set_name_rarity(match editor.rarity_name() {
-            "Legendary" => ItemRarity::Legendary,
-            "Set" => ItemRarity::Set,
-            "Unique" => ItemRarity::Unique,
-            "Exalted" => ItemRarity::Exalted,
-            "Rare" => ItemRarity::Rare,
-            "Magic" => ItemRarity::Magic,
-            _ => ItemRarity::Normal,
-        });
+        state.set_item_name(editor.item_name().into());
+        state.set_has_identity(editor.has_identity());
+        state.set_identity_drafted(editor.is_identity_drafted());
+        state.set_can_change_identity(editor.can_change_identity());
+        state.set_identity_tip(editor.identity_tip().into());
+        state.set_identity_search(editor.identity_search.clone().into());
+        let held = editor.identity.as_ref().map_or(-1, |identity| identity.value());
+        let identities: Vec<MenuOptionView> = editor
+            .identity_choices()
+            .into_iter()
+            .map(|option| MenuOptionView {
+                name: option.name.clone().into(),
+                detail: option.detail.clone().into(),
+                implicits: SharedString::new(),
+                in_game: option.in_game,
+                available: option.available,
+                current: option.value == held,
+                rarity: rarity_of(&option.rarity),
+            })
+            .collect();
+        update(&self.models.identity_options, identities);
+        state.set_name_rarity(rarity_of(editor.rarity_name()));
         state.set_rarity_text(editor.rarity_text().into());
         state.set_rarity_drafted(editor.is_rarity_drafted());
         state.set_can_change_rarity(editor.can_change_rarity());
@@ -282,6 +298,7 @@ impl View {
                 in_game: option.in_game,
                 available: option.available,
                 current: option.current,
+                rarity: ItemRarity::Normal,
             })
             .collect();
         state.set_rarity_caption_lines(rarities.iter().filter(|option| !option.detail.is_empty()).count() as i32);
@@ -303,6 +320,7 @@ impl View {
                         in_game: option.in_game,
                         available: option.available,
                         current: option.value == base.value(),
+                        rarity: ItemRarity::Normal,
                     })
                     .collect()
             })
@@ -586,6 +604,19 @@ impl View {
         state.set_picker_status(editor.picker_status().into());
         state.set_picker_action(editor.picker_action().into());
         state.set_can_use_picker(editor.can_use_picker());
+    }
+}
+
+/// The game-owned colour of a rarity name.
+fn rarity_of(name: &str) -> ItemRarity {
+    match name {
+        "Legendary" => ItemRarity::Legendary,
+        "Set" => ItemRarity::Set,
+        "Unique" => ItemRarity::Unique,
+        "Exalted" => ItemRarity::Exalted,
+        "Rare" => ItemRarity::Rare,
+        "Magic" => ItemRarity::Magic,
+        _ => ItemRarity::Normal,
     }
 }
 

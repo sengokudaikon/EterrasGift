@@ -814,6 +814,8 @@ pub struct FieldOption {
     pub in_game: bool,
     pub implicits: String,
     pub available: bool,
+    /// The rarity the item would end with (an identity), which colours the name.
+    pub rarity: String,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -821,6 +823,8 @@ pub enum FieldKind {
     Number,
     Flag,
     Base,
+    /// Which unique or set item a unique-backed item is; the value is the unique's id.
+    Identity,
 }
 
 /// One item-level value held as a draft: a status number, a status flag or the base (the C# `ItemFieldDraft`).
@@ -907,6 +911,7 @@ impl FieldDraft {
                 in_game: !game,
                 implicits: String::new(),
                 available: true,
+                rarity: String::new(),
             },
             FieldOption {
                 value: 1,
@@ -915,9 +920,19 @@ impl FieldDraft {
                 in_game: game,
                 implicits: String::new(),
                 available: true,
+                rarity: String::new(),
             },
         ];
         FieldDraft::new(uid, FieldKind::Flag, Some(field), name, i64::from(game), options, String::new())
+    }
+
+    pub fn identity(uid: u64, game: i64, options: Vec<FieldOption>) -> FieldDraft {
+        let reason = if options.iter().all(|option| option.value == game) {
+            "No other unique or set item of this item type is known. Refresh game data in Settings.".to_string()
+        } else {
+            String::new()
+        };
+        FieldDraft::new(uid, FieldKind::Identity, None, "Identity", game, options, reason)
     }
 
     pub fn base(uid: u64, game: i64, options: Vec<FieldOption>) -> FieldDraft {

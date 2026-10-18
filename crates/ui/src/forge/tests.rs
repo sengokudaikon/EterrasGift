@@ -234,3 +234,46 @@ fn the_picker_replaces_as_a_draft_and_adds_at_once() {
     editor.undo();
     assert_eq!(editor.affixes.len(), 4);
 }
+
+#[test]
+fn the_name_drafts_another_unique_alone_with_the_rarity_the_game_gives() {
+    let game = FixtureGame::unique_ring();
+    let state = game.state.clone();
+    let mut editor = ForgeEditor::new(Box::new(game));
+    assert!(editor.has_identity());
+    assert!(editor.can_change_identity());
+    let names: Vec<&str> = editor.identity_choices().iter().map(|option| option.name.as_str()).collect();
+    assert_eq!(
+        names,
+        [
+            "Fixture Ember Unique",
+            "Fixture Potential Unique",
+            "Fixture Sapphire Unique",
+            "Fixture Woven Unique",
+            "Fixture Set Ring"
+        ]
+    );
+    let detail = |editor: &ForgeEditor, name: &str| editor.identity_choices().iter().find(|option| option.name == name).unwrap().detail.clone();
+    assert_eq!(detail(&editor, "Fixture Sapphire Unique"), "Unique · Sapphire Ring · legendary potential");
+    assert_eq!(detail(&editor, "Fixture Woven Unique"), "Unique · Gold Ring · Weaver's Will");
+    assert_eq!(detail(&editor, "Fixture Set Ring"), "Set · Gold Ring");
+    editor.set_identity_search("72");
+    assert_eq!(editor.identity_choices().len(), 1);
+    editor.set_identity_search("");
+    editor.pick_identity(2);
+    assert!(editor.is_identity_drafted());
+    assert_eq!(editor.item_name(), "Fixture Sapphire Unique");
+    assert_eq!(editor.base_text(), "Sapphire Ring");
+    assert!(editor.is_base_drafted());
+    assert_eq!(editor.drafts()[0].summary, "Fixture Potential Unique → Fixture Sapphire Unique");
+    // Every other row and field holds still while an identity is drafted.
+    assert!(!editor.can_mutate());
+    editor.pick_identity(3);
+    assert_eq!(editor.base_text(), "Gold Ring");
+    editor.apply();
+    assert_eq!(editor.message(), ("Edit readback confirmed: Identity.", MessageKind::Confirmed));
+    assert_eq!(state.borrow().item.as_ref().unwrap().identity_id(), Some(71));
+    assert_eq!(editor.item_name(), "Fixture Woven Unique");
+    editor.undo();
+    assert_eq!(state.borrow().item.as_ref().unwrap().identity_id(), Some(70));
+}

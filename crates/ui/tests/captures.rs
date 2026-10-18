@@ -1129,4 +1129,15 @@ fn forge_captures(session: &Session) {
     let forge = open(session, FixtureGame::ring(true), 1100, 700);
     session.click(155.0, 117.0);
     session.capture(&forge.ui, "item-base-picker");
+
+    // A unique's name opens the identity picker; a pick drafts the unique alone (`item-identity-picker-*`, `item-identity-draft-*`).
+    for (width, height) in [(1100, 700), (940, 580)] {
+        let forge = open(session, FixtureGame::unique_ring(), width, height);
+        session.click(200.0, 84.0);
+        session.capture(&forge.ui, &format!("item-identity-picker-{width}"));
+        session.key(Key::Escape);
+        forge.handle.edit(|editor| editor.pick_identity(2));
+        assert!(forge.ui.global::<ForgeState>().get_identity_drafted());
+        session.capture(&forge.ui, &format!("item-identity-draft-{width}"));
+    }
 }

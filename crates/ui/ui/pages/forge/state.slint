@@ -89,7 +89,15 @@ export struct FieldView {
 
 export struct DraftEntryView { name: string, summary: string, effect: string, stale: bool }
 export struct AppliedEntryView { name: string, time: string, summary: string, effect: string, outcome: string }
-export struct MenuOptionView { name: string, detail: string, implicits: string, in-game: bool, available: bool, current: bool }
+export struct MenuOptionView {
+    rarity: ItemRarity,
+    name: string,
+    detail: string,
+    implicits: string,
+    in-game: bool,
+    available: bool,
+    current: bool
+}
 export struct PickerRowView { name: string, detail: string, reforged: bool }
 
 export global ForgeState {
@@ -97,6 +105,13 @@ export global ForgeState {
 
     // The header.
     in property <string> item-name;
+    // The name opens the identity picker on a unique, set or legendary item.
+    in property <bool> has-identity;
+    in property <bool> identity-drafted;
+    in property <bool> can-change-identity;
+    in property <string> identity-tip;
+    in property <string> identity-search;
+    in property <[MenuOptionView]> identity-options;
     in property <ItemRarity> name-rarity;
     in property <string> rarity-text;
     in property <bool> rarity-drafted;
@@ -203,6 +218,8 @@ export global ForgeState {
     callback toggle-flag(int, bool);
     callback pick-rarity(int);
     callback pick-base(int);
+    callback pick-identity(int);
+    callback identity-search-edited(string);
     callback base-allow(bool);
     callback open-replace(int) -> bool;
     callback open-add() -> bool;

@@ -223,6 +223,8 @@ pub struct ForgeItem {
     pub rarity: u8,
     pub affixes: Vec<AffixState>,
     pub unique: Option<UniqueState>,
+    /// A set item's identity and rolls (the unique's move here when it becomes a set item, and back).
+    pub set_item: Option<UniqueState>,
     /// None when the game did not describe the implicits.
     pub implicits: Option<Vec<ModifierState>>,
     pub implicit_rolls: Vec<u8>,
@@ -230,6 +232,11 @@ pub struct ForgeItem {
 }
 
 impl ForgeItem {
+    /// Which unique or set item a unique-backed item is.
+    pub fn identity_id(&self) -> Option<u16> {
+        self.unique.as_ref().or(self.set_item.as_ref()).map(|identity| identity.id)
+    }
+
     pub fn is_exalted(&self) -> bool {
         self.affixes.iter().any(|affix| affix.tier >= EXALTED_TIER)
     }
@@ -366,6 +373,25 @@ pub enum ItemEdit {
         slot: usize,
         id: u16,
     },
+    /// Makes a unique-backed item another unique or set item, with the rarity the game gives it (spec §15.4.5).
+    Identity {
+        unique_id: u16,
+        sub_type: u16,
+        rarity: u8,
+        unrestricted: bool,
+    },
+}
+
+/// The rarity the game gives an item becoming a unique or set item: a set item is a set; with affixes, or already
+/// legendary, a legendary; otherwise a unique.
+pub fn identity_rarity(item: &ForgeItem, set_item: bool) -> u8 {
+    if set_item {
+        SET
+    } else if !item.affixes.is_empty() || item.rarity == LEGENDARY {
+        LEGENDARY
+    } else {
+        UNIQUE
+    }
 }
 
 impl ItemEdit {
@@ -375,6 +401,7 @@ impl ItemEdit {
             ItemEdit::Affix { allow_incompatible, .. } | ItemEdit::Add { allow_incompatible, .. } => *allow_incompatible,
             ItemEdit::Status { unrestricted, .. } => *unrestricted,
             ItemEdit::Base { allow_incompatible, .. } => *allow_incompatible,
+            ItemEdit::Identity { unrestricted, .. } => *unrestricted,
             _ => false,
         }
     }
@@ -459,6 +486,10 @@ impl ItemEdit {
                 StatusField::Corrupted | StatusField::Ruined => true,
             },
             ItemEdit::Base { sub_type, .. } => !is_unique_backed(item.rarity) && *sub_type != item.sub_type,
+            ItemEdit::Identity { unique_id, rarity, .. } => {
+                let set = *rarity == SET;
+                is_unique_backed(item.rarity) && item.identity_id().is_some_and(|id| id != *unique_id) && *rarity == identity_rarity(item, set) && (!set || item.affixes.is_empty())
+            }
         }
     }
 
@@ -504,6 +535,33 @@ impl ItemEdit {
             }
             ItemEdit::Status { field, value, .. } => after.status = before.status.map(|status| status.with(*field, *value)),
             ItemEdit::Base { sub_type, .. } => after.sub_type = *sub_type,
+            ItemEdit::Identity { unique_id, sub_type, rarity, .. } => {
+                // The rolls move with the item, between the unique and the set side.
+                let rolls = before
+                    .unique
+                    .as_ref()
+                    .or(before.set_item.as_ref())
+                    .map(|identity| identity.rolls.clone())
+                    .unwrap_or_default();
+                let identity = UniqueState {
+                    id: *unique_id,
+                    rolls,
+                    modifiers: Vec::new(),
+                    formatting_error: String::new(),
+                };
+                after.sub_type = *sub_type;
+                after.rarity = *rarity;
+                if *rarity == SET {
+                    after.unique = None;
+                    after.set_item = Some(identity);
+                } else {
+                    after.set_item = None;
+                    after.unique = Some(UniqueState {
+                        modifiers: before.unique.as_ref().map(|unique| unique.modifiers.clone()).unwrap_or_default(),
+                        ..identity
+                    });
+                }
+            }
         }
         after
     }
@@ -590,6 +648,16 @@ impl ItemEdit {
                 sub_type: before.sub_type,
                 allow_incompatible: *allow_incompatible,
             }),
+            // A reverse the game would refuse (it gives another rarity back) makes the change one-way.
+            ItemEdit::Identity { unrestricted, .. } => {
+                let back = ItemEdit::Identity {
+                    unique_id: before.identity_id()?,
+                    sub_type: before.sub_type,
+                    rarity: before.rarity,
+                    unrestricted: *unrestricted,
+                };
+                back.is_valid(&self.project(before)).then_some(back)
+            }
             ItemEdit::Add { .. } | ItemEdit::Remove { .. } => None,
         }
     }
@@ -779,6 +847,7 @@ mod tests {
             unique: None,
             implicits: None,
             implicit_rolls: Vec::new(),
+            set_item: None,
             status: None,
         }
     }

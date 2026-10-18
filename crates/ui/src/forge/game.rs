@@ -44,7 +44,11 @@ pub struct UniqueDefinition {
     pub id: u16,
     pub name: String,
     pub item_type: u16,
+    /// The bases it comes on.
+    pub sub_types: Vec<u16>,
     pub legendary_type: LegendaryType,
+    pub is_set: bool,
+    pub can_drop_as_legendary: bool,
 }
 
 /// The captured game data the forge reads.

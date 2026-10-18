@@ -17,6 +17,7 @@ use std::rc::Rc;
 
 pub const BOOTS: u16 = 3;
 pub const RING: u16 = 20;
+pub const AMULET: u16 = 21;
 
 /// What a capture can change behind the editor: the item the game holds, and tables it cannot read.
 #[derive(Default)]
@@ -52,6 +53,23 @@ impl FixtureGame {
         FixtureGame::new(Some(ring(implicits)), false, true, implicits)
     }
 
+    /// A unique ring (`UniqueIdentityTests`): its name opens the identity picker.
+    pub fn unique_ring() -> FixtureGame {
+        let mut item = ring(false);
+        item.token = "123:456:1122334455667788:01020304".into();
+        item.name = "Fixture Potential Unique".into();
+        item.rarity = 7;
+        item.affixes.clear();
+        item.unique = Some(UniqueState {
+            id: 70,
+            rolls: vec![100, 7],
+            modifiers: Vec::new(),
+            formatting_error: String::new(),
+        });
+        item.status = Some(ItemStatus::default());
+        FixtureGame::new(Some(item), false, true, false)
+    }
+
     pub fn new(item: Option<ForgeItem>, seed_tiers: bool, identity: bool, base_implicits: bool) -> FixtureGame {
         FixtureGame {
             catalog: catalog(seed_tiers, base_implicits),
@@ -68,6 +86,18 @@ impl FixtureGame {
         if let Some(item) = self.state.borrow_mut().item.as_mut() {
             change(item);
         }
+    }
+}
+
+fn unique_definition(id: u16, name: &str, item_type: u16, sub_types: &[u16], legendary_type: LegendaryType, is_set: bool, legendary: bool) -> UniqueDefinition {
+    UniqueDefinition {
+        id,
+        name: name.into(),
+        item_type,
+        sub_types: sub_types.to_vec(),
+        legendary_type,
+        is_set,
+        can_drop_as_legendary: legendary,
     }
 }
 
@@ -135,12 +165,17 @@ fn catalog(seed_tiers: bool, base_implicits: bool) -> Catalog {
                 },
             ],
         }],
-        uniques: vec![UniqueDefinition {
-            id: 77,
-            name: "Wayfarer's Boots".into(),
-            item_type: BOOTS,
-            legendary_type: LegendaryType::LegendaryPotential,
-        }],
+        uniques: vec![
+            unique_definition(77, "Wayfarer's Boots", BOOTS, &[0], LegendaryType::LegendaryPotential, false, true),
+            // The ring uniques of the C# `UniqueIdentityTests`: one on another base and never legendary, one with Weaver's
+            // Will, a set item; the amulet's must not be offered.
+            unique_definition(70, "Fixture Potential Unique", RING, &[2], LegendaryType::LegendaryPotential, false, false),
+            unique_definition(71, "Fixture Woven Unique", RING, &[2, 5], LegendaryType::WeaversWill, false, true),
+            unique_definition(72, "Fixture Set Ring", RING, &[2], LegendaryType::LegendaryPotential, true, false),
+            unique_definition(73, "Fixture Sapphire Unique", RING, &[5], LegendaryType::LegendaryPotential, false, false),
+            unique_definition(74, "Fixture Ember Unique", RING, &[2], LegendaryType::LegendaryPotential, false, true),
+            unique_definition(80, "Fixture Amulet Unique", AMULET, &[0], LegendaryType::LegendaryPotential, false, false),
+        ],
         ..Catalog::default()
     };
     for definition in &mut catalog.definitions {
@@ -247,6 +282,7 @@ pub fn boots() -> ForgeItem {
             affix(3, 4001, 4, 230, AffixKind::Suffix, Seal::Corrupted, Category::Standard),
         ],
         unique: None,
+        set_item: None,
         implicits: None,
         implicit_rolls: Vec::new(),
         status: None,
@@ -298,6 +334,7 @@ pub fn unique_boots() -> ForgeItem {
         idol: false,
         rarity: 9,
         affixes: vec![affix(0, 25, 7, 170, AffixKind::Suffix, Seal::Normal, Category::Standard)],
+        set_item: None,
         unique: Some(UniqueState {
             id: 77,
             modifiers: format_unique(&rolls, &modifiers),
@@ -320,6 +357,7 @@ pub fn ring(implicits: bool) -> ForgeItem {
         rarity: 3,
         affixes: vec![affix(0, 25, 5, 170, AffixKind::Suffix, Seal::Normal, Category::Standard)],
         unique: None,
+        set_item: None,
         implicits: implicits.then(|| vec![modifier(0, "+14 Armor", "(10 to 16)", &[0], true), modifier(1, "+5% Cold Resistance", "", &[], true)]),
         implicit_rolls: if implicits { vec![128, 0] } else { vec![128] },
         status: Some(ItemStatus {
@@ -421,6 +459,12 @@ impl ForgeGame for FixtureGame {
             return Err("The edit could not be confirmed.".into());
         }
         let mut after = edit.project(&item);
+        // The game names the item after its new identity.
+        if let ItemEdit::Identity { unique_id, .. } = edit
+            && let Some(unique) = self.catalog.unique(*unique_id)
+        {
+            after.name = unique.name.clone();
+        }
         if let Some(unique) = after.unique.as_mut() {
             unique.modifiers = format_unique(&unique.rolls, &unique.modifiers);
         }
