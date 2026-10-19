@@ -3,7 +3,7 @@ use eg_game_access::fields::{self, AttackLeechObservation, AttackLeechRead, Atta
 use eg_trainer::{
     backend::AttackLeechSnapshot,
     field_writes::{AttackLeechDecision, AttackLeechPlan, AttackLeechTarget, RateWriteStatus},
-    writes::WriteControl,
+    writes::{WriteControl, WriteObservation, WriteOutcome},
 };
 
 fn observation() -> AttackLeechObservation {
@@ -62,7 +62,10 @@ fn explicit_rate_change_needs_two_exact_full_observations_preserves_bits_and_rec
         let p = plan(&f, target, value);
         let wire = FakeTransport::new(f.target.clone(), [f.discover(), status(false, 0x1234, 0), ack(&p), ack(&p), clear()]);
         let mut session = ready(&f, &wire, &FakeLog::new([offline()]));
-        assert_eq!(run(session.set_attack_leech_rate(now(), &p)).unwrap(), RateWriteStatus::Confirmed(*p.projected()));
+        assert_eq!(
+            run(session.write(now(), &p.clone().into())).unwrap(),
+            WriteOutcome::Confirmed(WriteObservation::Field(*p.projected()))
+        );
         assert_eq!(session.state(), SessionState::Ready);
         assert!(session.last_write().is_none());
         assert!(matches!(&wire.requests()[2],Request::SetAttackLeechRate(w) if *w.expected()==observation() && w.projected()==*p.projected() && w.expected_manager()==0x1234));
@@ -149,12 +152,20 @@ fn only_trusted_prestore_refusal_or_not_sent_is_definitive_never_a_retry() {
         let mut session = ready(&f, &wire, &FakeLog::new([offline()]));
         let result = run(session.set_attack_leech_rate(now(), &p)).unwrap();
         assert_eq!(matches!(result, RateWriteStatus::Uncertain { .. }), fault == 1 || fault >= 7);
-        assert!(run(session.set_attack_leech_rate(now(), &p)).is_err());
-        assert_eq!(wire.requests().len(), 3);
+        if (2..=4).contains(&fault) {
+            assert_eq!(session.state(), SessionState::Ready);
+            wire.push(done(fields::encode(&AttackLeechRead::Available(observation()))));
+            assert!(matches!(run(session.read_attack_leech(now())).unwrap(), AttackLeechRead::Available(_)));
+            assert_eq!(wire.requests().len(), 4);
+        } else {
+            assert!(run(session.set_attack_leech_rate(now(), &p)).is_err());
+            assert_eq!(wire.requests().len(), 3);
+        }
+        assert_eq!(wire.requests().iter().filter(|r| matches!(r, Request::SetAttackLeechRate(_))).count(), 1);
     }
 }
 #[test]
-fn every_separate_read_failure_is_uncertain_including_not_sent_and_feature_local_unavailable() {
+fn independent_rate_drift_is_known_but_changed_identity_or_failed_reads_are_uncertain() {
     for fault in 0..24 {
         let f = Fixture::new();
         let p = plan(&f, AttackLeechTarget::AttackRate, 1.1);
@@ -194,8 +205,14 @@ fn every_separate_read_failure_is_uncertain_including_not_sent_and_feature_local
         };
         let wire = FakeTransport::new(f.target.clone(), [f.discover(), status(false, 0x1234, 0), ack(&p), last]);
         let mut session = ready(&f, &wire, &FakeLog::new([offline()]));
-        assert!(matches!(run(session.set_attack_leech_rate(now(), &p)).unwrap(), RateWriteStatus::Uncertain { .. }));
-        assert_eq!(session.state(), SessionState::Blocked);
+        let result = run(session.set_attack_leech_rate(now(), &p)).unwrap();
+        if (7..=8).contains(&fault) {
+            assert_eq!(result, RateWriteStatus::NotKept(actual));
+            assert_eq!(session.state(), SessionState::Ready);
+        } else {
+            assert!(matches!(result, RateWriteStatus::Uncertain { .. }));
+            assert_eq!(session.state(), SessionState::Blocked);
+        }
         assert_eq!(wire.requests().len(), 4);
     }
 }

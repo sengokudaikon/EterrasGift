@@ -1,4 +1,104 @@
 use super::*;
+use eg_game_access::protocol::ResponseCode;
+use eg_trainer::writes::{WriteObservation, WriteOutcome, WritePlan};
+
+#[test]
+fn generic_forge_write_publishes_known_different_state_without_undo_or_reconnect() {
+    run(async {
+        let shared = writable();
+        let (handle, worker) = start(&shared, options(), None);
+        connected(&handle).await;
+        let original = handle.snapshot();
+        let plan = original.level_requirement_plan(17).unwrap();
+        let mut actual = plan.projected().clone();
+        actual.status.level_requirement = 18;
+        actual.name.push_str(" changed by the game");
+        actual.fingerprint = actual.legacy_fingerprint();
+        *shared.write_result.lock().unwrap() = Some(WriteStatus::NotKept(actual.clone()));
+        let generic = WritePlan::from(plan);
+        assert_eq!(command(&handle, Command::Write(generic.clone())).await.unwrap_err().kind, ErrorKind::WriteNotKept);
+        let state = handle.snapshot();
+        assert_eq!(state.phase, Phase::Ready);
+        assert_eq!(state.generation, original.generation);
+        assert_eq!(
+            state.write_outcome(&generic),
+            Some(WriteOutcome::NotKept(WriteObservation::Forge(Box::new(actual.clone()))))
+        );
+        assert!(matches!(state.forge, ForgeState::Item { snapshot, .. } if *snapshot == actual));
+        assert!(state.undo_level_requirement.is_none());
+        let next = handle.snapshot().level_requirement_plan(16).unwrap();
+        command(&handle, Command::Write(next.into())).await.unwrap();
+        assert_eq!(shared.count("connect"), 1);
+        assert_eq!(shared.count("write"), 2);
+        shutdown(&handle, worker).await;
+    });
+}
+
+#[test]
+fn ordinary_forge_refusals_keep_the_connection_but_runtime_refusals_release_it() {
+    run(async {
+        for code in [
+            ResponseCode::NotReady,
+            ResponseCode::StaleItem,
+            ResponseCode::Refused,
+            ResponseCode::OfflineRequired,
+            ResponseCode::RestartRequired,
+        ] {
+            let shared = writable();
+            let (handle, worker) = start(&shared, options(), None);
+            connected(&handle).await;
+            let plan = handle.snapshot().level_requirement_plan(17).unwrap();
+            *shared.write_result.lock().unwrap() = Some(WriteStatus::NotApplied {
+                code,
+                message: "trusted refusal".into(),
+            });
+            let error = command(&handle, Command::Write(plan.into())).await.unwrap_err();
+            if matches!(code, ResponseCode::NotReady | ResponseCode::StaleItem | ResponseCode::Refused) {
+                assert_eq!(error.kind, ErrorKind::WriteNotApplied);
+                assert_eq!(handle.snapshot().phase, Phase::Ready);
+                command(&handle, Command::ReadForge).await.unwrap();
+                assert_eq!(shared.count("connect"), 1);
+            } else {
+                assert_eq!(
+                    error.kind,
+                    if code == ResponseCode::OfflineRequired {
+                        ErrorKind::Gate
+                    } else {
+                        ErrorKind::RestartRequired
+                    }
+                );
+                assert!(handle.snapshot().attached.is_none());
+            }
+            assert_eq!(shared.count("write"), 1);
+            assert_eq!(shared.count("disconnect"), 0);
+            shutdown(&handle, worker).await;
+        }
+    });
+}
+
+#[test]
+fn forge_confirmation_survives_later_gate_loss_without_publishing_a_live_item() {
+    run(async {
+        let shared = writable();
+        let (handle, worker) = start(&shared, options(), None);
+        connected(&handle).await;
+        let plan = WritePlan::from(handle.snapshot().level_requirement_plan(17).unwrap());
+        shared.write_block.arm();
+        let receipt = handle.try_submit(Command::Write(plan.clone())).unwrap();
+        shared.write_block.wait_started().await;
+        assert_eq!(handle.snapshot().write_outcome(&plan), Some(WriteOutcome::Pending));
+        *shared.log.lock().unwrap() = log(GameReadiness::Online);
+        shared.write_block.finish();
+        assert_eq!(receipt.wait().await.unwrap_err().kind, ErrorKind::Gate);
+        let state = handle.snapshot();
+        assert_eq!(state.write_outcome(&plan), Some(WriteOutcome::Confirmed(plan.projected())));
+        assert!(matches!(state.forge, ForgeState::Unobserved));
+        assert!(state.undo_level_requirement.is_none());
+        assert_eq!(shared.count("write"), 1);
+        assert_eq!(shared.count("disconnect"), 0);
+        shutdown(&handle, worker).await;
+    });
+}
 
 fn writable() -> Arc<Shared> {
     use eg_trainer::backend::ItemStatus;

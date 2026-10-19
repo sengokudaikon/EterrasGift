@@ -2,7 +2,7 @@ use super::*;
 use eg_trainer::{
     catalog::{CatalogIdentity, EXTRACTION_VERSION, GameCatalog},
     edits::{CatalogProvenance, EditError, ExpectedObservation},
-    writes::{LevelRequirementPlan, WriteControl, WriteStatus},
+    writes::{LevelRequirementPlan, WriteControl, WriteObservation, WriteOutcome, WriteStatus},
 };
 
 fn plan(fixture: &Fixture) -> LevelRequirementPlan {
@@ -51,13 +51,42 @@ fn explicit_write_requires_exact_readback_and_retains_confirmed_result_after_dis
         ],
     );
     let mut session = ready(&f, &wire, &FakeLog::new([offline()]));
-    assert_eq!(run(session.set_level_requirement(now(), &plan)).unwrap(), WriteStatus::Confirmed(plan.projected().clone()));
+    assert_eq!(
+        run(session.write(now(), &plan.clone().into())).unwrap(),
+        WriteOutcome::Confirmed(WriteObservation::Forge(Box::new(plan.projected().clone())))
+    );
     assert_eq!(session.state(), SessionState::Ready);
     assert_eq!(wire.requests().len(), 4);
     assert!(matches!(&wire.requests()[2], Request::SetLevelRequirement(request) if request.expected() == plan.before().snapshot() && request.expected_manager() == 0x1234));
     run(session.disconnect());
     assert_eq!(session.last_write().unwrap().status, WriteStatus::Confirmed(plan.projected().clone()));
     assert_eq!(wire.requests().len(), 5);
+}
+#[test]
+fn readback_of_a_replaced_forge_item_is_unknown_even_with_equal_values() {
+    for changed_address in [false, true] {
+        let f = Fixture::new();
+        let plan = plan(&f);
+        let mut actual = plan.projected().clone();
+        if changed_address {
+            actual.item += 1;
+        } else {
+            actual.individual_id += 1;
+        }
+        let wire = FakeTransport::new(
+            f.target.clone(),
+            [
+                f.discover(),
+                status(false, 0x1234, 0),
+                done(forge::encode(Some(plan.projected())).unwrap()),
+                done(forge::encode(Some(&actual)).unwrap()),
+            ],
+        );
+        let mut session = ready(&f, &wire, &FakeLog::new([offline()]));
+        assert!(matches!(run(session.write(now(), &plan.into())).unwrap(), WriteOutcome::Uncertain { .. }));
+        assert_eq!(session.state(), SessionState::Blocked);
+        assert_eq!(wire.requests().len(), 4);
+    }
 }
 #[test]
 fn malformed_mismatched_or_failed_write_is_uncertain_and_never_replayed() {
@@ -122,8 +151,16 @@ fn delivery_and_trusted_prestore_refusals_preserve_certainty_without_retry() {
         let mut session = ready(&f, &wire, &FakeLog::new([offline()]));
         let result = run(session.set_level_requirement(now(), &plan)).unwrap();
         assert_eq!(matches!(result, WriteStatus::Uncertain { .. }), fault == 1);
-        assert!(run(session.set_level_requirement(now(), &plan)).is_err());
-        assert_eq!(wire.requests().len(), 3);
+        if (2..=4).contains(&fault) {
+            assert_eq!(session.state(), SessionState::Ready);
+            wire.push(done(forge::encode(Some(plan.before().snapshot())).unwrap()));
+            assert!(run(session.read_forge(now())).unwrap().is_some());
+            assert_eq!(wire.requests().len(), 4);
+        } else {
+            assert!(run(session.set_level_requirement(now(), &plan)).is_err());
+            assert_eq!(wire.requests().len(), 3);
+        }
+        assert_eq!(wire.requests().iter().filter(|r| matches!(r, Request::SetLevelRequirement(_))).count(), 1);
     }
 }
 #[test]
@@ -236,7 +273,7 @@ fn plans_recheck_full_observation_and_manager_including_fields_outside_legacy_ha
 }
 
 #[test]
-fn every_separate_readback_failure_is_uncertain_even_when_that_read_was_not_sent() {
+fn separate_readback_retains_known_drift_but_malformed_missing_or_failed_reads_are_uncertain() {
     for fault in 0..11 {
         let f = Fixture::new();
         let plan = plan(&f);
@@ -267,9 +304,15 @@ fn every_separate_readback_failure_is_uncertain_even_when_that_read_was_not_sent
             [f.discover(), status(false, 0x1234, 0), done(forge::encode(Some(plan.projected())).unwrap()), last],
         );
         let mut session = ready(&f, &wire, &FakeLog::new([offline()]));
-        assert!(matches!(run(session.set_level_requirement(now(), &plan)).unwrap(), WriteStatus::Uncertain { .. }));
+        let result = run(session.set_level_requirement(now(), &plan)).unwrap();
+        if fault == 2 {
+            assert_eq!(result, WriteStatus::NotKept(changed));
+            assert_eq!(session.state(), SessionState::Ready);
+        } else {
+            assert!(matches!(result, WriteStatus::Uncertain { .. }));
+            assert!(run(session.set_level_requirement(now(), &plan)).is_err());
+        }
         assert!(matches!(wire.requests()[3], Request::ReadForge { .. }));
-        assert!(run(session.set_level_requirement(now(), &plan)).is_err());
         assert_eq!(wire.requests().len(), 4);
     }
 }

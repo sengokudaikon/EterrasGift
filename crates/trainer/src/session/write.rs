@@ -1,23 +1,32 @@
 use super::*;
-use crate::writes::{AllowWrite, LevelRequirementPlan, WriteControl, WriteRecord, WriteStatus};
-use eg_game_access::write::{LevelRequirementWrite, WriteReply, classify_response};
+use crate::{
+    field_writes::{RateWriteRecord, RateWriteStatus},
+    writes::{AllowWrite, LevelRequirementPlan, WriteControl, WriteObservation, WriteOutcome, WritePlan, WriteRecord, WriteStatus},
+};
+use eg_game_access::{
+    rate_write::{AttackLeechRateWrite, RateWriteReply},
+    write::{LevelRequirementWrite, WriteReply},
+};
 
 impl<T: Transport, L: LogSource> Session<T, L> {
     pub fn last_write(&self) -> Option<&WriteRecord> {
         self.last_write.as_ref()
     }
 
-    /// Explicitly submit one level requirement change. Errors returned through
-    /// Err occur before transport is entered. After that point the owned record
-    /// and returned status always preserve certainty, including lost admission.
-    /// Confirmation requires native full readback and a separate fresh ReadForge
-    /// exchange. Every failure of that later exchange is an uncertain write.
-    /// The application must additionally recheck its generation and observation.
-    /// Dropping this future preserves Pending and blocks all work until cleanup.
     pub async fn set_level_requirement(&mut self, now: Timestamp, plan: &LevelRequirementPlan) -> Result<WriteStatus, SessionError> {
         self.set_level_requirement_controlled(now, plan, &mut AllowWrite).await
     }
     pub async fn set_level_requirement_controlled(&mut self, now: Timestamp, plan: &LevelRequirementPlan, control: &mut dyn WriteControl) -> Result<WriteStatus, SessionError> {
+        Ok(self.write_controlled(now, &plan.clone().into(), control).await?.map(WriteObservation::into_forge))
+    }
+
+    /// Submit once. Err is pre-submission; all later failures retain certainty.
+    /// A native ACK is provisional until a separate admitted read completes.
+    /// Dropping this future leaves Pending and blocks further work until cleanup.
+    pub async fn write(&mut self, now: Timestamp, plan: &WritePlan) -> Result<WriteOutcome<WriteObservation>, SessionError> {
+        self.write_controlled(now, plan, &mut AllowWrite).await
+    }
+    pub async fn write_controlled(&mut self, now: Timestamp, plan: &WritePlan, control: &mut dyn WriteControl) -> Result<WriteOutcome<WriteObservation>, SessionError> {
         if matches!(self.state, SessionState::Connecting | SessionState::Closing) {
             return Err(SessionError::Busy);
         }
@@ -25,101 +34,76 @@ impl<T: Transport, L: LogSource> Session<T, L> {
         if self.state != SessionState::Ready {
             return Err(SessionError::NotConnected);
         }
-        let expected = plan.before();
-        if expected.process() != &self.target
-            || !expected.catalog_identity().binary_hash.eq_ignore_ascii_case(self.profile.binary_hash())
-            || !expected.catalog_identity().metadata_hash.eq_ignore_ascii_case(self.profile.metadata_hash())
-            || self.status.as_ref().is_none_or(|status| status.online || status.manager != plan.manager())
-        {
-            return Err(SessionError::Identity("write belongs to a different runtime, manager or catalog".into()));
-        }
         let dispatcher = self.discovery.as_ref().ok_or(SessionError::NotConnected)?.dispatcher;
-        let request = LevelRequirementWrite::new(dispatcher, plan.manager(), expected.snapshot().clone(), plan.value()).map_err(SessionError::Protocol)?;
+        let (request, readback) = self.prepare_write(plan, dispatcher)?;
         let elapsed = std::time::Instant::now();
-        if let Err(error) = self.profile.validate(&dispatcher) {
-            self.release_without_io();
-            self.state = SessionState::Blocked;
-            return Err(SessionError::Identity(error.to_string()));
-        }
-        self.write_gate(advanced(now, elapsed)?)?;
+        self.write_provenance(now, elapsed, &dispatcher)?;
         if !control.allowed() {
             return Err(SessionError::Busy);
         }
-        let status = self.status.take();
+        let runtime = self.status.take();
         self.state = SessionState::Connecting;
-        // Set this before polling transport: after cancellation no caller may
-        // infer nonexecution from absence of a returned acknowledgement.
-        self.last_write = Some(WriteRecord {
-            plan: plan.clone(),
-            status: WriteStatus::Pending,
-        });
-        let mut result = match self.transport.send(&Request::SetLevelRequirement(request.clone())).await {
-            Ok(response) => match classify_response(&response, &request) {
-                WriteReply::Confirmed(snapshot) => WriteStatus::Confirmed(snapshot),
-                WriteReply::NotApplied { code, message } => WriteStatus::NotApplied { code, message },
-                WriteReply::Uncertain { reason } => WriteStatus::uncertain(reason),
-            },
-            Err(error) if error.delivery == Delivery::NotSent => WriteStatus::NotApplied {
-                code: ResponseCode::NotReady,
-                message: error.to_string(),
-            },
-            Err(error) => WriteStatus::uncertain(error.to_string()),
+        self.record_write(plan, WriteOutcome::Pending);
+        let (mut result, mut healthy) = match self.transport.send(&request).await {
+            Ok(response) => (
+                classify_ack(&request, &response),
+                !matches!(response.code, ResponseCode::OfflineRequired | ResponseCode::RestartRequired),
+            ),
+            Err(error) => {
+                let result = if error.delivery == Delivery::NotSent {
+                    WriteOutcome::NotApplied {
+                        code: ResponseCode::NotReady,
+                        message: error.to_string(),
+                    }
+                } else {
+                    WriteOutcome::uncertain(error.to_string())
+                };
+                (result, false)
+            }
         };
-        // No more process/pipe access follows a loss of Player.log admission.
-        // A trusted pre-store refusal stays definitive even if admission changed;
-        // an apparent success is withheld if its provenance can no longer hold.
-        let admitted = advanced(now, elapsed).and_then(|time| self.write_gate(time));
-        let artifacts = if admitted.is_ok() {
-            self.profile.validate(&dispatcher).map_err(|error| error.to_string())
-        } else {
-            Ok(())
-        };
-        if let WriteStatus::Confirmed(_) = result {
-            if let Err(error) = &admitted {
-                result = WriteStatus::uncertain(format!("write reply arrived after admission loss: {error}"));
-            } else if let Err(error) = &artifacts {
-                result = WriteStatus::uncertain(format!("write artifacts changed before confirmation: {error}"));
+        // A trusted pre-store refusal stays definitive after admission loss.
+        // No further native I/O follows a failed gate or changed artifact.
+        if let Err(error) = self.write_provenance(now, elapsed, &dispatcher) {
+            healthy = false;
+            if matches!(result, WriteOutcome::Confirmed(_)) {
+                result = WriteOutcome::uncertain(format!("write reply lost confirmation provenance: {error}"));
             }
         }
-        if matches!(result, WriteStatus::Confirmed(_)) {
-            // File verification may take time. Recheck admission immediately
-            // before the independent read, and honor cleanup between requests.
-            // The store has already run: no subsequent failure is NotApplied.
-            if let Err(error) = advanced(now, elapsed).and_then(|time| self.write_gate(time)) {
-                result = WriteStatus::uncertain(format!("write sent but independent readback admission failed: {error}"));
-            } else if !control.allowed() {
-                result = WriteStatus::uncertain("write acknowledged before queued cleanup; separate readback was not submitted");
+        if healthy && matches!(result, WriteOutcome::Confirmed(_)) {
+            if !control.allowed() {
+                result = WriteOutcome::uncertain("write acknowledged before queued cleanup; separate readback was not submitted");
             } else {
-                result = match self.transport.send(&Request::ReadForge { dispatcher }).await {
-                    Ok(response) if response.code == ResponseCode::Done => match forge::decode(&response.payload) {
-                        Ok(Some(actual)) if actual == *plan.projected() => WriteStatus::Confirmed(actual),
-                        Ok(_) => WriteStatus::uncertain("separate readback differs from the full projected item"),
-                        Err(error) => WriteStatus::uncertain(format!("invalid separate write readback: {error}")),
-                    },
-                    Ok(response) => WriteStatus::uncertain(format!("write sent but separate readback was refused: {:?}", response.code)),
-                    Err(error) => WriteStatus::uncertain(format!("write sent but separate readback failed: {error}")),
+                result = match self.transport.send(&readback).await {
+                    Ok(response) if response.code == ResponseCode::Done => decode_readback(plan, &response.payload),
+                    Ok(response) => WriteOutcome::uncertain(format!("write sent but independent readback was refused: {:?}", response.code)),
+                    Err(error) => WriteOutcome::uncertain(format!("write sent but independent readback failed: {error}")),
                 };
-                if matches!(result, WriteStatus::Confirmed(_)) {
-                    let provenance = advanced(now, elapsed)
-                        .and_then(|time| self.write_gate(time))
-                        .and_then(|()| self.profile.validate(&dispatcher).map_err(|error| SessionError::Identity(error.to_string())))
-                        .and_then(|()| advanced(now, elapsed).and_then(|time| self.write_gate(time)));
-                    if let Err(error) = provenance {
-                        result = WriteStatus::uncertain(format!("independent readback lost confirmation provenance: {error}"));
-                    }
+                if matches!(result, WriteOutcome::Confirmed(_) | WriteOutcome::NotKept(_))
+                    && let Err(error) = self.write_provenance(now, elapsed, &dispatcher)
+                {
+                    result = WriteOutcome::uncertain(format!("independent readback lost confirmation provenance: {error}"));
                 }
             }
         }
-        let reusable = admitted.is_ok() && artifacts.is_ok() && matches!(result, WriteStatus::Confirmed(_));
+        let reusable = healthy
+            && matches!(
+                result,
+                WriteOutcome::Confirmed(_)
+                    | WriteOutcome::NotKept(_)
+                    | WriteOutcome::NotApplied {
+                        code: ResponseCode::NotReady | ResponseCode::StaleItem | ResponseCode::Refused,
+                        ..
+                    }
+            );
         if reusable {
-            self.status = status;
+            self.status = runtime;
             self.state = SessionState::Ready;
         } else {
             self.release_without_io();
             if self.state == SessionState::Connecting {
                 self.state = if matches!(
                     result,
-                    WriteStatus::NotApplied {
+                    WriteOutcome::NotApplied {
                         code: ResponseCode::OfflineRequired,
                         ..
                     }
@@ -130,15 +114,76 @@ impl<T: Transport, L: LogSource> Session<T, L> {
                 };
             }
         }
-        self.last_write.as_mut().expect("write record retained during exclusive submission").status = result.clone();
+        self.record_write(plan, result.clone());
         Ok(result)
     }
 
+    fn prepare_write(&self, plan: &WritePlan, dispatcher: DispatcherSpec) -> Result<(Request, Request), SessionError> {
+        match plan {
+            WritePlan::Forge(plan) => {
+                let expected = plan.before();
+                if expected.process() != &self.target
+                    || !expected.catalog_identity().binary_hash.eq_ignore_ascii_case(self.profile.binary_hash())
+                    || !expected.catalog_identity().metadata_hash.eq_ignore_ascii_case(self.profile.metadata_hash())
+                    || self.status.as_ref().is_none_or(|status| status.online || status.manager != plan.manager())
+                {
+                    return Err(SessionError::Identity("write belongs to a different runtime, manager or catalog".into()));
+                }
+                let request = LevelRequirementWrite::new(dispatcher, plan.manager(), expected.snapshot().clone(), plan.value()).map_err(SessionError::Protocol)?;
+                Ok((Request::SetLevelRequirement(request), Request::ReadForge { dispatcher }))
+            }
+            WritePlan::Field(plan) => {
+                let expected = plan.before();
+                if expected.process != self.target || self.status.as_ref().is_none_or(|s| s.online || s.manager == 0 || s.manager != expected.manager) {
+                    return Err(SessionError::Identity("field write belongs to a different process or offline manager".into()));
+                }
+                let AttackLeechRead::Available(before) = expected.read else {
+                    return Err(SessionError::Identity("field plan has no complete expected observation".into()));
+                };
+                let target = match plan.target() {
+                    crate::field_writes::AttackLeechTarget::AttackRate => fields::AttackLeechTarget::AttackRate,
+                    crate::field_writes::AttackLeechTarget::IncreasedLeechRate => fields::AttackLeechTarget::IncreasedLeechRate,
+                };
+                let request = AttackLeechRateWrite::new(dispatcher, before, target, plan.projected_bits()).map_err(SessionError::Protocol)?;
+                Ok((
+                    Request::SetAttackLeechRate(request),
+                    Request::ReadAttackLeech {
+                        dispatcher,
+                        expected_manager: expected.manager,
+                    },
+                ))
+            }
+        }
+    }
+    fn write_provenance(&mut self, now: Timestamp, elapsed: std::time::Instant, dispatcher: &DispatcherSpec) -> Result<(), SessionError> {
+        self.write_gate(advanced(now, elapsed)?)?;
+        if let Err(error) = self.profile.validate(dispatcher) {
+            self.release_without_io();
+            self.state = SessionState::Blocked;
+            return Err(SessionError::Identity(error.to_string()));
+        }
+        self.write_gate(advanced(now, elapsed)?)
+    }
+    fn record_write(&mut self, plan: &WritePlan, status: WriteOutcome<WriteObservation>) {
+        match plan {
+            WritePlan::Forge(plan) => {
+                self.last_write = Some(WriteRecord {
+                    plan: (**plan).clone(),
+                    status: status.map(WriteObservation::into_forge),
+                })
+            }
+            WritePlan::Field(plan) => {
+                self.last_rate_write = Some(RateWriteRecord {
+                    plan: (**plan).clone(),
+                    status: status.map(WriteObservation::into_field),
+                })
+            }
+        }
+    }
     pub(super) fn write_gate(&mut self, now: Timestamp) -> Result<(), SessionError> {
         if !self.enabled {
             return Err(SessionError::Disabled);
         }
-        // Development probe permission can discover a runtime, never write one.
         let decision = gate::evaluate(&self.log.read(self.started), self.started, now, GatePolicy::Release);
         if decision.verdict == GateVerdict::Allow {
             return Ok(());
@@ -151,7 +196,6 @@ impl<T: Transport, L: LogSource> Session<T, L> {
         };
         Err(SessionError::Gate(decision))
     }
-
     pub(super) fn abandon_pending_write(&mut self) {
         if let Some(record) = &mut self.last_write
             && record.status == WriteStatus::Pending
@@ -159,9 +203,39 @@ impl<T: Transport, L: LogSource> Session<T, L> {
             record.status = WriteStatus::uncertain("write future abandoned before complete confirmation; never replay");
         }
         if let Some(record) = &mut self.last_rate_write
-            && record.status == crate::field_writes::RateWriteStatus::Pending
+            && record.status == RateWriteStatus::Pending
         {
-            record.status = crate::field_writes::RateWriteStatus::uncertain("rate write future abandoned before complete confirmation; never replay");
+            record.status = RateWriteStatus::uncertain("field write future abandoned before complete confirmation; never replay");
         }
+    }
+}
+
+fn classify_ack(request: &Request, response: &eg_game_access::protocol::Response) -> WriteOutcome<WriteObservation> {
+    match request {
+        Request::SetLevelRequirement(request) => match eg_game_access::write::classify_response(response, request) {
+            WriteReply::Confirmed(actual) => WriteOutcome::Confirmed(WriteObservation::forge(actual)),
+            WriteReply::NotApplied { code, message } => WriteOutcome::NotApplied { code, message },
+            WriteReply::Uncertain { reason } => WriteOutcome::uncertain(reason),
+        },
+        Request::SetAttackLeechRate(request) => match eg_game_access::rate_write::classify_response(response, request) {
+            RateWriteReply::Confirmed(actual) => WriteOutcome::Confirmed(WriteObservation::Field(actual)),
+            RateWriteReply::NotApplied { code, message } => WriteOutcome::NotApplied { code, message },
+            RateWriteReply::Uncertain { reason } => WriteOutcome::uncertain(reason),
+        },
+        _ => unreachable!("prepared mutation request"),
+    }
+}
+fn decode_readback(plan: &WritePlan, payload: &[u8]) -> WriteOutcome<WriteObservation> {
+    let actual = match plan {
+        WritePlan::Forge(_) => forge::decode(payload).map(|actual| actual.map(WriteObservation::forge)),
+        WritePlan::Field(_) => fields::decode(payload).map(|actual| match actual {
+            AttackLeechRead::Available(actual) => Some(WriteObservation::Field(actual)),
+            AttackLeechRead::Unavailable(_) => None,
+        }),
+    };
+    match actual {
+        Ok(Some(actual)) => plan.observe(actual),
+        Ok(None) => WriteOutcome::uncertain("independent readback has no complete target observation"),
+        Err(error) => WriteOutcome::uncertain(format!("invalid independent write readback: {error}")),
     }
 }

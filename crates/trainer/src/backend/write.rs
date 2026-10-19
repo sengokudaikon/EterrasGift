@@ -1,8 +1,8 @@
 use super::*;
 
-struct CurrentIntent {
-    intent: Arc<Mutex<u64>>,
-    epoch: u64,
+pub(super) struct CurrentIntent {
+    pub(super) intent: Arc<Mutex<u64>>,
+    pub(super) epoch: u64,
 }
 impl WriteControl for CurrentIntent {
     fn allowed(&mut self) -> bool {
@@ -73,27 +73,9 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
             intent: self.intent.clone(),
             epoch,
         };
-        let status = match self.connection.as_mut().unwrap().set_level_requirement(self.clock.now(), &plan, &mut control).await {
-            Ok(status) => status,
-            Err(error) if error.delivery == Some(Delivery::MayHaveRun) => WriteStatus::uncertain(error.message),
-            Err(error) => WriteStatus::NotApplied {
-                code: ResponseCode::Refused,
-                message: error.message,
-            },
-        };
-        // This operation has drained. Its outcome belongs to the submitted plan
-        // even if cleanup was queued while it ran. Never discard certainty, and
-        // never publish its forge snapshot into a newer generation.
-        let status = match status {
-            WriteStatus::Confirmed(snapshot) if &snapshot == plan.projected() => WriteStatus::Confirmed(snapshot),
-            WriteStatus::Confirmed(_) => WriteStatus::uncertain("connection returned a mismatched write confirmation"),
-            WriteStatus::Pending => WriteStatus::uncertain("connection returned before write completion"),
-            WriteStatus::NotApplied {
-                code: ResponseCode::Done | ResponseCode::Failed,
-                ..
-            } => WriteStatus::uncertain("connection mislabeled a success/failure code as pre-store refusal"),
-            status => status,
-        };
+        let write_plan = WritePlan::from(plan.clone());
+        let (status, failure) = self.submit_write(&write_plan, &mut control).await;
+        let status = status.map(WriteObservation::into_forge);
         self.state.last_write = Some(WriteRecord {
             plan: plan.clone(),
             status: status.clone(),
@@ -108,19 +90,16 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
             ));
         }
         let result = match status {
-            WriteStatus::Confirmed(snapshot) => {
+            WriteStatus::Confirmed(snapshot) | WriteStatus::NotKept(snapshot) => {
                 if let Err(error) = self.admit_using_policy(&target, GatePolicy::Release) {
-                    let uncertain = WriteStatus::uncertain(format!("admission lost before write publication: {error}"));
-                    self.state.last_write.as_mut().unwrap().status = uncertain;
-                    Err(write_error(
-                        ErrorKind::WriteUncertain,
-                        "write reply could not be confirmed after admission loss",
-                        Delivery::MayHaveRun,
-                    ))
+                    // Confirmation is historical. Admission controls publication,
+                    // not whether the completed write is retroactively unknown.
+                    Err(error)
                 } else {
                     let data = self.state.catalog.data().cloned().ok_or_else(|| invalid_edit("catalog missing after write"))?;
+                    let kept = snapshot == *plan.projected();
                     let forge = self.forge_state(Some(snapshot), &data);
-                    let undo = if undoing {
+                    let undo = if undoing || !kept {
                         None
                     } else {
                         self.state.last_write.as_ref().and_then(|record| crate::undo::LevelUndo::from_confirmed(record).ok())
@@ -129,23 +108,76 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
                         this.state.forge = forge;
                         this.state.undo_level_requirement = undo;
                     })?;
-                    Ok(())
+                    if kept {
+                        Ok(())
+                    } else {
+                        Err(write_error(
+                            ErrorKind::WriteNotKept,
+                            "independent readback differs from the requested item",
+                            Delivery::MayHaveRun,
+                        ))
+                    }
                 }
             }
             WriteStatus::NotApplied { message, .. } => Err(write_error(ErrorKind::WriteNotApplied, message, Delivery::NotSent)),
             WriteStatus::Uncertain { message } => Err(write_error(ErrorKind::WriteUncertain, message, Delivery::MayHaveRun)),
             WriteStatus::Pending => unreachable!(),
         };
+        self.finish_write(result, failure, target)
+    }
+    pub(super) async fn submit_write(&mut self, plan: &WritePlan, control: &mut dyn WriteControl) -> (WriteOutcome<WriteObservation>, Option<BackendError>) {
+        let (status, mut failure) = match self.connection.as_mut().unwrap().write(self.clock.now(), plan, control).await {
+            Ok(status) => (status, None),
+            Err(error) => {
+                let status = if error.delivery == Some(Delivery::MayHaveRun) {
+                    WriteOutcome::uncertain(error.message.clone())
+                } else {
+                    WriteOutcome::NotApplied {
+                        code: ResponseCode::Refused,
+                        message: error.message.clone(),
+                    }
+                };
+                (status, Some(error))
+            }
+        };
+        let status = plan.completed(status);
+        if let WriteOutcome::NotApplied { code, message } = &status {
+            let kind = match code {
+                ResponseCode::OfflineRequired => Some(ErrorKind::Gate),
+                ResponseCode::RestartRequired => Some(ErrorKind::RestartRequired),
+                _ => None,
+            };
+            if let Some(kind) = kind {
+                failure = Some(BackendError::blocked(kind, message.clone()));
+            }
+        }
+        (status, failure)
+    }
+    pub(super) fn finish_write(&mut self, result: Result<(), BackendError>, failure: Option<BackendError>, target: ProcessIdentity) -> Result<(), BackendError> {
+        let result = match failure {
+            Some(error) => Err(error),
+            None => result,
+        };
         if let Err(error) = &result {
-            self.fail(error.clone(), Some(target));
+            let reusable = (error.kind == ErrorKind::WriteNotKept
+                || (matches!(error.kind, ErrorKind::WriteNotApplied | ErrorKind::InvalidEdit | ErrorKind::NotReady) && error.delivery != Some(Delivery::MayHaveRun)))
+                && self.connection.as_ref().is_some_and(BackendConnection::is_ready);
+            if reusable {
+                self.state.error = Some(error.clone());
+                self.publish();
+            } else if error.kind == ErrorKind::Gate {
+                self.handle_connection_gate(error);
+            } else if self.connection.is_some() {
+                self.fail(error.clone(), Some(target));
+            }
         }
         result
     }
 }
-fn invalid_edit(error: impl fmt::Display) -> BackendError {
+pub(super) fn invalid_edit(error: impl fmt::Display) -> BackendError {
     BackendError::blocked(ErrorKind::InvalidEdit, error.to_string())
 }
-fn write_error(kind: ErrorKind, message: impl Into<String>, delivery: Delivery) -> BackendError {
+pub(super) fn write_error(kind: ErrorKind, message: impl Into<String>, delivery: Delivery) -> BackendError {
     BackendError {
         kind,
         message: message.into(),

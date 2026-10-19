@@ -3,26 +3,6 @@ use super::*;
 #[cfg(test)]
 mod tests;
 
-struct CurrentRateIntent {
-    intent: Arc<Mutex<u64>>,
-    epoch: u64,
-}
-impl WriteControl for CurrentRateIntent {
-    fn allowed(&mut self) -> bool {
-        *self.intent.lock().unwrap_or_else(|p| p.into_inner()) == self.epoch
-    }
-}
-fn invalid_rate(error: impl fmt::Display) -> BackendError {
-    BackendError::blocked(ErrorKind::InvalidEdit, error.to_string())
-}
-fn rate_error(kind: ErrorKind, message: impl Into<String>, delivery: Delivery) -> BackendError {
-    BackendError {
-        kind,
-        message: message.into(),
-        delivery: Some(delivery),
-        retry_when_waiting: false,
-    }
-}
 impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> BackendWorker<P, C, L, K> {
     pub(super) async fn set_attack_leech_rate(&mut self, plan: AttackLeechPlan) -> Result<(), BackendError> {
         let result = self.set_attack_leech_rate_inner(plan).await;
@@ -50,7 +30,11 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
             return Err(BackendError::blocked(ErrorKind::NotReady, "attack/leech rate writes are unavailable"));
         }
         let expected = plan.before();
-        let current = self.state.attack_leech.as_ref().ok_or_else(|| invalid_rate("current rate observation missing"))?;
+        let current = self
+            .state
+            .attack_leech
+            .as_ref()
+            .ok_or_else(|| super::write::invalid_edit("current rate observation missing"))?;
         if self.state.attached.as_ref() != Some(&expected.process)
             || expected.generation != self.state.generation
             || self
@@ -59,9 +43,9 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
                 .as_ref()
                 .is_none_or(|status| status.online || status.manager == 0 || status.manager != expected.manager)
         {
-            return Err(invalid_rate("rate plan belongs to another process, generation or manager"));
+            return Err(super::write::invalid_edit("rate plan belongs to another process, generation or manager"));
         }
-        plan.recheck(current).map_err(invalid_rate)?;
+        plan.recheck(current).map_err(super::write::invalid_edit)?;
         // Reserve before any RPC: a confirmed store must never discover counter exhaustion.
         let sequence = self
             .attack_leech_sequence
@@ -69,7 +53,12 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
             .ok_or_else(|| BackendError::blocked(ErrorKind::Fault, "attack/leech observation sequence exhausted"))?;
         let target = expected.process.clone();
         self.admit_using_policy(&target, GatePolicy::Release)?;
-        let refreshed = self.connection.as_mut().ok_or_else(|| invalid_rate("connection released"))?.refresh(self.clock.now()).await;
+        let refreshed = self
+            .connection
+            .as_mut()
+            .ok_or_else(|| super::write::invalid_edit("connection released"))?
+            .refresh(self.clock.now())
+            .await;
         let status = match refreshed {
             Ok(status) => status,
             Err(error) => {
@@ -85,8 +74,13 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
         if status.manager != expected.manager {
             return Err(BackendError::blocked(ErrorKind::Identity, "character manager changed before rate write"));
         }
-        plan.recheck(self.state.attack_leech.as_ref().ok_or_else(|| invalid_rate("current rate observation released"))?)
-            .map_err(invalid_rate)?;
+        plan.recheck(
+            self.state
+                .attack_leech
+                .as_ref()
+                .ok_or_else(|| super::write::invalid_edit("current rate observation released"))?,
+        )
+        .map_err(super::write::invalid_edit)?;
         self.admit_using_policy(&target, GatePolicy::Release)?;
         self.commit(epoch, |this| {
             this.state.activity = Some(Activity::WritingAttackLeech);
@@ -96,26 +90,13 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
                 status: RateWriteStatus::Pending,
             });
         })?;
-        let mut control = CurrentRateIntent {
+        let mut control = super::write::CurrentIntent {
             intent: self.intent.clone(),
             epoch,
         };
-        let result = self.connection.as_mut().unwrap().set_attack_leech_rate(self.clock.now(), &plan, &mut control).await;
-        let mut status = match result {
-            Ok(RateWriteStatus::Confirmed(actual)) if actual == *plan.projected() => RateWriteStatus::Confirmed(actual),
-            Ok(RateWriteStatus::Confirmed(_)) => RateWriteStatus::uncertain("connection returned mismatched complete rate confirmation"),
-            Ok(RateWriteStatus::Pending) => RateWriteStatus::uncertain("connection returned before rate write completion"),
-            Ok(RateWriteStatus::NotApplied {
-                code: ResponseCode::Done | ResponseCode::Failed,
-                ..
-            }) => RateWriteStatus::uncertain("connection mislabeled a success/failure code as pre-store refusal"),
-            Ok(status) => status,
-            Err(error) if error.delivery == Some(Delivery::MayHaveRun) => RateWriteStatus::uncertain(error.message),
-            Err(error) => RateWriteStatus::NotApplied {
-                code: ResponseCode::Refused,
-                message: error.message,
-            },
-        };
+        let write_plan = WritePlan::from(plan.clone());
+        let (status, failure) = self.submit_write(&write_plan, &mut control).await;
+        let status = status.map(WriteObservation::into_field);
         self.state.activity = None;
         // Retain historical certainty even if cleanup was queued; no older-generation
         // observation may be published. Session already performed independent readback.
@@ -126,22 +107,27 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
                 "rate write drained before queued cleanup; inspect retained outcome",
             ));
         }
-        if matches!(status, RateWriteStatus::Confirmed(_)) {
-            let current_scope = self.state.generation == expected.generation
-                && self.state.attached.as_ref() == Some(&target)
-                && self.state.runtime_status.as_ref().is_some_and(|s| !s.online && s.manager == expected.manager);
-            if !current_scope {
-                status = RateWriteStatus::uncertain("rate confirmation lost current process/generation/manager scope");
-            } else if let Err(error) = self.admit_using_policy(&target, GatePolicy::Release) {
-                status = RateWriteStatus::uncertain(format!("admission lost before rate publication: {error}"));
-            }
-        }
         self.state.last_rate_write = Some(RateWriteRecord {
             plan: plan.clone(),
             status: status.clone(),
         });
         let result = match status {
-            RateWriteStatus::Confirmed(actual) => {
+            RateWriteStatus::Confirmed(actual) | RateWriteStatus::NotKept(actual) => {
+                // The retained result predates this publication check.
+                if self.state.generation != expected.generation
+                    || self.state.attached.as_ref() != Some(&target)
+                    || self.state.runtime_status.as_ref().is_none_or(|s| s.online || s.manager != expected.manager)
+                {
+                    return self.finish_write(
+                        Err(BackendError::blocked(ErrorKind::Identity, "field write lost current publication scope")),
+                        failure,
+                        target,
+                    );
+                }
+                if let Err(error) = self.admit_using_policy(&target, GatePolicy::Release) {
+                    return self.finish_write(Err(error), failure, target);
+                }
+                let kept = actual == *plan.projected();
                 self.commit(epoch, |this| {
                     this.attack_leech_sequence = sequence;
                     this.state.attack_leech = Some(AttackLeechSnapshot {
@@ -156,15 +142,20 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
                 self.event(BackendEvent::ReadPublished {
                     generation: self.state.generation,
                 });
-                Ok(())
+                if kept {
+                    Ok(())
+                } else {
+                    Err(super::write::write_error(
+                        ErrorKind::WriteNotKept,
+                        "independent readback differs from the requested fields",
+                        Delivery::MayHaveRun,
+                    ))
+                }
             }
-            RateWriteStatus::NotApplied { message, .. } => Err(rate_error(ErrorKind::WriteNotApplied, message, Delivery::NotSent)),
-            RateWriteStatus::Uncertain { message } => Err(rate_error(ErrorKind::WriteUncertain, message, Delivery::MayHaveRun)),
+            RateWriteStatus::NotApplied { message, .. } => Err(super::write::write_error(ErrorKind::WriteNotApplied, message, Delivery::NotSent)),
+            RateWriteStatus::Uncertain { message } => Err(super::write::write_error(ErrorKind::WriteUncertain, message, Delivery::MayHaveRun)),
             RateWriteStatus::Pending => unreachable!(),
         };
-        if let Err(error) = &result {
-            self.fail(error.clone(), Some(target));
-        }
-        result
+        self.finish_write(result, failure, target)
     }
 }

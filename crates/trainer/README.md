@@ -4,14 +4,38 @@ The trainer owns the offline gate, artifact profile, serialized control session 
 `eg-game-access` owns protocol codecs, explicit process identity, the Windows pipe client and unsafe runtime access.
 The app/UI do not use these services yet. The companion remains independent.
 
+The current [native preparer](../trainer-host/README.md) uses a small unsafe supported-game boundary,
+with callback-local thread validation instead of pre-bootstrap RuntimeAttestation. Historical checkpoint
+notes below describe their original implementation. `mise run trainer:verify` runs the trainer tests and
+workspace verification; native fixtures remain a separate gate.
+
+The current write service accepts `Command::Write(WritePlan)` and `Session::write` for both
+forge edits and field changes. `WriteOutcome<T>` represents Pending, Confirmed, NotApplied,
+NotKept (a complete independent observation of the same target), or Uncertain. Native ACKs
+remain provisional until the separate read completes under renewed admission. A missing,
+malformed or replaced target cannot become NotKept. `BackendSnapshot::write_outcome(&plan)`
+exposes the retained typed result independently of connection readiness; receipts report
+command completion and diagnostics, while watch snapshots carry write certainty.
+
+Ordinary pre-store refusals and NotKept preserve a healthy connection. NotKept publishes the
+actual observation, advances field observation sequences and creates no Undo. Transport,
+protocol, identity, restart or offline failures release the connection. Later publication
+gate loss suppresses live data without downgrading an already independently confirmed
+historical result. Nothing retries a mutation. The old narrow entrypoints are conveniences
+over this common lifecycle; protocol28 operations22/24 remain internal until native feature work.
+The app/UI remain disconnected; read-only integration is next.
+See the [write-service cleanup checkpoint](../../tools/trainer-eval/persistent-player/write-service-refactor-report.json)
+for the product-test gates and owned Unity route.
+
 ## Implemented subset
 
-Protocol26 requests are discovery (6), status (7), clearing all gameplay hooks (15 with count 0 and **no tail**),
+Protocol28 requests are discovery (6), status (7), clearing all gameplay hooks (15 with count 0 and **no tail**),
 the forge snapshot (18), literal item limits (19), completed locale/version capture (20), catalog pages (21),
-and one explicit level-requirement write with complete expected-state tail (22).
+an explicit level-requirement write with complete expected-state tail (22), cached attack/leech reads (23),
+and conditional one-field attack/leech rate writes (24).
 The Rust extensions deliberately increment the handshake version, so older peers are rejected. The separate
 [Rust helper](../trainer-helper/README.md) implements the persistent server and runtime handlers.
-Other item/field writes, enabling gameplay features, complete localized formatting and production Last Epoch authority are not implemented
+Other item/field writes, enabling gameplay features, complete localized formatting and desktop UI composition are not implemented
 here. `protocol::Request::decode` deliberately rejects other operations and nonzero reserved
 fields in this subset. This is not a claim to implement every operation of the original protocol.
 
@@ -84,7 +108,8 @@ remain unverified until fresh capture. Writes, feature hooks and field editors s
 `SessionConnector` repeats the exact process-bound offline gate around an injected helper preparer and the session
 handshake. Independent log cursors, immutable profile/helper identity and transport binding are checked before pipe
 use. Loaded or uncertain preparation failures retain MayHaveRun and never retry automatically. This is the safe
-orchestration boundary; an app-owned Rust remote preparer and UI composition are still separate work.
+orchestration boundary. `eg-trainer-host::NativePreparer` supplies the supported-game Rust bootstrap;
+desktop UI composition remains separate work.
 
 Read failure drops the cached attachment and blocks further reads until an explicit new handshake. Offline-required
 revokes it as usual. A canceled read remains Connecting, with no cached runtime status, until explicit disconnect.
@@ -120,7 +145,7 @@ absence means Missing. Both prove NotSent. Once a write is attempted, I/O failur
 means MayHaveRun, including a possible partial write. Header size/code/magic and the 1 MiB payload bound are checked
 before allocation. The connection is closed after the response. No request is resent automatically.
 
-Helper code 1 is an uncertain failure. Codes 2–6 are definite no-operation failures under the legacy helper contract;
+Helper code 1 is an uncertain failure. Codes 2â€“6 are definite no-operation failures under the legacy helper contract;
 human text never determines the classification. For cancellation/deadline, the Rust server must not report NotReady
 after dispatch started: canceling still-pending work can prove no execution, while running work owns its slot until it
 finishes. Client disconnection cannot retract that work.
@@ -138,9 +163,7 @@ Other deliberate differences are stricter malformed UTF-8/reserved-byte rejectio
 requiring the expected helper source build ID, without the legacy DLL-hash fast path.
 
 ```powershell
-mise run trainer:test
-mise run trainer:test:release
-mise run verify
+mise run trainer:verify
 ```
 
 Seven protocol, ten forge-codec and five item-limit codec tests cover independent wire examples and malformed/bounded input. Six pipe tests launch only
@@ -184,8 +207,9 @@ or mismatched acknowledgements, potential delivery and lost confirmation provena
 future retains Pending and a busy session until explicit cleanup records uncertainty. No path retries a write.
 
 The later service checkpoint adds a separate ReadForge exchange after native acknowledgement. Confirmation and
-Undo remain pending through both responses; every later refusal, read failure, malformed/mismatched snapshot or
-admission loss is an uncertain write, even if the read itself was not sent. Cleanup can stop between requests
+Undo remain pending through both responses; a later read refusal, malformed/missing/replaced snapshot or
+admission loss is an uncertain write, even if the read itself was not sent. A valid same-target differing
+readback now yields NotKept as described above. Cleanup can stop between requests
 without claiming the earlier store did not happen. All four authored routes exercise the actual background worker,
 including a dropped Apply receipt, exact separate readback, retained level Undo, explicit restoration and a consumed
 token rejected before I/O. See [apply-undo-report.json](../../tools/trainer-eval/persistent-player/apply-undo-report.json).

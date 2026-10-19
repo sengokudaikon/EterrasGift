@@ -168,23 +168,6 @@ impl AttackLeechPlan {
     }
 }
 
-/// Outcome for the narrow current-player rate operation, separate from forge writes.
-/// Pending is set before transport; abandoning its future never proves nonexecution.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum RateWriteStatus {
-    Pending,
-    Confirmed(AttackLeechObservation),
-    NotApplied { code: eg_game_access::protocol::ResponseCode, message: String },
-    Uncertain { message: String },
-}
-impl RateWriteStatus {
-    pub fn uncertain(message: impl Into<String>) -> Self {
-        Self::Uncertain { message: message.into() }
-    }
-}
+pub type RateWriteStatus = crate::writes::WriteOutcome<AttackLeechObservation>;
 /// Owned historical outcome. No roots, native pointers, Undo or replay authority.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct RateWriteRecord {
-    pub plan: AttackLeechPlan,
-    pub status: RateWriteStatus,
-}
+pub type RateWriteRecord = crate::writes::WriteRecord<AttackLeechPlan, AttackLeechObservation>;

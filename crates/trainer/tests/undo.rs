@@ -124,9 +124,10 @@ fn fresh_exact_after_observation_prepares_only_the_original_level_with_full_iden
 }
 
 #[test]
-fn pending_refused_and_uncertain_records_cannot_create_undo_tokens() {
+fn only_confirmed_records_can_create_undo_tokens() {
     for status in [
         WriteStatus::Pending,
+        WriteStatus::NotKept(record(87).plan.projected().clone()),
         WriteStatus::NotApplied {
             code: ResponseCode::StaleItem,
             message: "Changed".into(),

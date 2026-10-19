@@ -2,11 +2,12 @@
 //! Construction is pure. Only an explicit submission may execute a plan; neither
 //! failure nor a lost reply permits a retry. An address here is an opaque token.
 
+use crate::field_writes::AttackLeechPlan;
 use crate::{
     catalog::GameCatalog,
     edits::{self, CatalogProvenance, EditError, ExpectedObservation, ItemEdit, PreparedEdit, StatusEdit, StatusField},
 };
-use eg_game_access::{forge::ForgeSnapshot, protocol::ResponseCode};
+use eg_game_access::{fields::AttackLeechObservation, forge::ForgeSnapshot, protocol::ResponseCode};
 
 /// Checked after potentially lengthy local validation and immediately before
 /// entering transport. A false result cancels only work that has not been sent.
@@ -68,19 +69,119 @@ impl LevelRequirementPlan {
 /// Pending is set before entering transport code. If its future is abandoned,
 /// cleanup converts it to Uncertain; it never becomes NotApplied by cancellation.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub enum WriteStatus {
+pub enum WriteOutcome<T> {
     Pending,
-    Confirmed(ForgeSnapshot),
-    NotApplied { code: ResponseCode, message: String },
-    Uncertain { message: String },
+    Confirmed(T),
+    /// A complete independent observation of the same target differs from the
+    /// request. This is known state, not proof that the setter never ran.
+    NotKept(T),
+    NotApplied {
+        code: ResponseCode,
+        message: String,
+    },
+    Uncertain {
+        message: String,
+    },
 }
-impl WriteStatus {
+impl<T> WriteOutcome<T> {
     pub fn uncertain(message: impl Into<String>) -> Self {
         Self::Uncertain { message: message.into() }
     }
+    pub fn map<U>(self, mut map: impl FnMut(T) -> U) -> WriteOutcome<U> {
+        match self {
+            Self::Pending => WriteOutcome::Pending,
+            Self::Confirmed(actual) => WriteOutcome::Confirmed(map(actual)),
+            Self::NotKept(actual) => WriteOutcome::NotKept(map(actual)),
+            Self::NotApplied { code, message } => WriteOutcome::NotApplied { code, message },
+            Self::Uncertain { message } => WriteOutcome::Uncertain { message },
+        }
+    }
+}
+pub type WriteStatus = WriteOutcome<ForgeSnapshot>;
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct WriteRecord<P = LevelRequirementPlan, T = ForgeSnapshot> {
+    pub plan: P,
+    pub status: WriteOutcome<T>,
+}
+
+/// The service accepts domain plans; native operation numbers stay internal.
+/// More supported edits/field sets extend these variants, not the outcome model.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum WritePlan {
+    Forge(Box<LevelRequirementPlan>),
+    Field(Box<AttackLeechPlan>),
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct WriteRecord {
-    pub plan: LevelRequirementPlan,
-    pub status: WriteStatus,
+pub enum WriteObservation {
+    Forge(Box<ForgeSnapshot>),
+    Field(AttackLeechObservation),
+}
+impl WriteObservation {
+    pub(crate) fn into_forge(self) -> ForgeSnapshot {
+        match self {
+            Self::Forge(actual) => *actual,
+            _ => unreachable!("forge plan returned field data"),
+        }
+    }
+    pub(crate) fn into_field(self) -> AttackLeechObservation {
+        match self {
+            Self::Field(actual) => actual,
+            _ => unreachable!("field plan returned forge data"),
+        }
+    }
+    pub(crate) fn forge(actual: ForgeSnapshot) -> Self {
+        Self::Forge(Box::new(actual))
+    }
+}
+impl WritePlan {
+    pub fn projected(&self) -> WriteObservation {
+        match self {
+            Self::Forge(plan) => WriteObservation::Forge(Box::new(plan.projected().clone())),
+            Self::Field(plan) => WriteObservation::Field(*plan.projected()),
+        }
+    }
+    /// Compare only identity here. Full value equality is checked separately;
+    /// neither tokens nor this check establish native lifetime across requests.
+    pub(crate) fn same_target(&self, actual: &WriteObservation) -> bool {
+        match (self, actual) {
+            (Self::Forge(plan), WriteObservation::Forge(actual)) => actual.item == plan.before().snapshot().item && actual.individual_id == plan.before().snapshot().individual_id,
+            (Self::Field(plan), WriteObservation::Field(actual)) => {
+                let expected = plan.projected();
+                actual.manager == expected.manager && actual.actor == expected.actor && actual.stats == expected.stats
+            }
+            _ => false,
+        }
+    }
+    pub(crate) fn observe(&self, actual: WriteObservation) -> WriteOutcome<WriteObservation> {
+        if actual == self.projected() {
+            WriteOutcome::Confirmed(actual)
+        } else if self.same_target(&actual) {
+            WriteOutcome::NotKept(actual)
+        } else {
+            WriteOutcome::uncertain("independent readback belongs to a different target")
+        }
+    }
+    pub(crate) fn completed(&self, outcome: WriteOutcome<WriteObservation>) -> WriteOutcome<WriteObservation> {
+        match outcome {
+            WriteOutcome::Confirmed(actual) if actual == self.projected() => WriteOutcome::Confirmed(actual),
+            WriteOutcome::NotKept(actual) if self.same_target(&actual) && actual != self.projected() => WriteOutcome::NotKept(actual),
+            WriteOutcome::Confirmed(_) | WriteOutcome::NotKept(_) => WriteOutcome::uncertain("connection returned a mismatched write outcome"),
+            WriteOutcome::Pending => WriteOutcome::uncertain("connection returned before write completion"),
+            WriteOutcome::NotApplied {
+                code: ResponseCode::Done | ResponseCode::Failed,
+                ..
+            } => WriteOutcome::uncertain("connection mislabeled a success/failure code as pre-store refusal"),
+            outcome => outcome,
+        }
+    }
+}
+impl From<LevelRequirementPlan> for WritePlan {
+    fn from(plan: LevelRequirementPlan) -> Self {
+        Self::Forge(Box::new(plan))
+    }
+}
+impl From<AttackLeechPlan> for WritePlan {
+    fn from(plan: AttackLeechPlan) -> Self {
+        Self::Field(Box::new(plan))
+    }
 }

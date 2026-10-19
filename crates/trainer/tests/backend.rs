@@ -270,7 +270,7 @@ impl BackendConnection for Connection {
             .unwrap()
             .take()
             .unwrap_or_else(|| Ok(RateWriteStatus::Confirmed(*plan.projected())));
-        if let Ok(RateWriteStatus::Confirmed(actual)) = &result {
+        if let Ok(RateWriteStatus::Confirmed(actual) | RateWriteStatus::NotKept(actual)) = &result {
             // Scripted connection only: model Session's ACK/fresh-read boundary;
             // this does not claim native ACK or actual IL2CPP execution.
             *self.shared.attack_leech_read.lock().unwrap() = eg_game_access::fields::AttackLeechRead::Available(*actual);
@@ -294,7 +294,7 @@ impl BackendConnection for Connection {
             .unwrap()
             .take()
             .unwrap_or_else(|| WriteStatus::Confirmed(plan.projected().clone()));
-        if let WriteStatus::Confirmed(snapshot) = &result {
+        if let WriteStatus::Confirmed(snapshot) | WriteStatus::NotKept(snapshot) = &result {
             *self.shared.forge_item.lock().unwrap() = Some(snapshot.clone());
         }
         Ok(result)

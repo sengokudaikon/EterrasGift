@@ -4,6 +4,14 @@ The objective is the trainer port ready for UI integration, preserving the C# be
 A green interop fixture alone does not establish that. This checklist separates the remaining application and game
 contracts from already validated lower layers; unsupported capabilities must stay explicit until proven.
 
+The next cleanup stage consolidates both existing writes behind `WritePlan`/`WriteOutcome<T>`,
+one session submission/readback lifecycle and `Command::Write`. Known same-target readback drift
+is retained and published as NotKept; ordinary refusals keep healthy sessions. Historical
+confirmation survives later publication gate loss. Cancellation, stale-plan and uncertain-delivery
+guards remain. Native operations and supported feature scope are unchanged; app/UI integration is next.
+The [checkpoint](../tools/trainer-eval/persistent-player/write-service-refactor-report.json) records
+520 stable cases,516 nightly release cases, workspace verification/captures and the final owned Unity worker route.
+
 | Requirement | Current evidence and remaining work |
 |---|---|
 | Exact x64 invocation, threads, roots, main-thread dispatch | Authored real IL2CPP and authorized offline-game observations; retained code lifetime and limited ABI contracts remain explicit. |
@@ -11,9 +19,9 @@ contracts from already validated lower layers; unsupported capabilities must sta
 | Owned forge, locale and limits | Both authored routes and live protocol 24 evidence. |
 | Definitions and resolved names | Protocol 25 authored pages, total/locale/duplicate checks, provenance, separate raw snapshots and bounded cache. Live catalog not yet claimed. |
 | Complete numeric metadata and game formatting | Ordinary properties and all five special selectors pass all four authored routes, including SP43. Text-only formatting, exact-provider parsing and synchronous exact-context composition pass authored four-mode ABI/root proofs under explicit nonmutation. Actual-game arithmetic, generated/localized names, descriptions and tooltip/roll mapping remain open. |
-| Application worker and observable state | Real authored worker level Apply/Undo and conditional rate writes pass all four earlier startup routes. The full NativePreparer/VerifiedTransport/SessionConnector-to-worker route now also passes stable debug and nightly release, including six response-boundary cleanup/gate-loss cases, helper reuse, Pending publication and separate confirmation reads. Nonblocking commands, generation-bound state, cache/progress and inert log adapters exist. Production authority and app/UI composition remain open. |
-| Production helper preparation/bootstrap | `eg-trainer-host` implements the retained HelperPreparer/VerifiedTransport, with explicit unsafe per-target RuntimeAttestation. The fourth authored route reuses one helper across three preparations and a new session after disconnect. Twelve host tests cover admission, no-replay/panic fences, guard retention and exact dispatcher proof. Windows remote start/stop remains validated; a production Last Epoch authority and app composition remain required. |
-| Feature hooks and field editors | All76 descriptors and local intents have compiled C# parity. Explicit attack/leech observations and conditional one-field changes pass native/Session/worker authored proofs. The first unpatched instance-Boolean callback passes forwarding and foreign-unwind fixtures; no physical gameplay hook is supported yet. The other field sets, physical ownership and callback offline cleanup still need implementation. The audit maps68 hooks/74 owners/31 patches/7 field sets. |
+| Application worker and observable state | Real authored worker level Apply/Undo and conditional rate writes pass all four earlier startup routes. The full NativePreparer/VerifiedTransport/SessionConnector-to-worker route now also passes stable debug and nightly release, including six response-boundary cleanup/gate-loss cases, helper reuse, Pending publication and separate confirmation reads. Nonblocking commands, generation-bound state, cache/progress and inert log adapters exist. The authority interface is now removed; actual-game validation of the callback-local check and app/UI composition remain open. |
+| Production helper preparation/bootstrap | `eg-trainer-host` now loads/starts/connects through a small unsafe supported-game boundary. RuntimeAuthority/RuntimeAttestation and pre-load thread nomination are removed; callback-local context/managed-ID validation establishes dispatch identity. The existing scheduler, pristine dispatcher proof, Release gate, process identity and unfinished-call ownership remain. The updated owned worker route passes171 requests/163 commands, eight preparations and one helper. Actual-game execution of this new callback check is not claimed. |
+| Feature hooks and field editors | All76 descriptors and local intents have compiled C# parity. Explicit attack/leech observations and conditional one-field changes pass native/Session/worker authored proofs. The first unpatched instance-Boolean callback passes forwarding and foreign-unwind fixtures; no physical gameplay hook is supported yet. The other field sets, physical ownership and callback offline cleanup still need implementation. The audit maps68 feature registrations/74 owners/54 detour targets/31 patches/7 field sets. |
 | Forge drafts, apply, readback and undo | One level Apply/Undo path passes real worker execution on all four authored routes: full stale guard, Int32 store, native ACK plus separate ReadForge, retained reverse plan, uncertainty and cleanup. Pure planning exists for seven edit kinds. Other native edits, multi-edit batches and the full draft/Undo workflow remain required. |
 | UI adapter and captures | Existing Slint views use stand-ins. Connect owned state/commands after backend contracts pass; do not perform synchronous capture/bootstrap on the Slint thread. |
 
@@ -190,3 +198,11 @@ receipt-writing failure. This closes the extracted-reader runtime gap only. The 
 bootstrap layer needs a separately admitted, retained one-shot candidate carrier
 and transport before scheduler installation; the existing full RuntimeAttestation
 remains a separate unsafe contract.
+
+
+The shipping refactor supersedes the historical pre-bootstrap authority requirements in the
+checkpoint notes above. Current code keeps the supported-game assumptions in one unsafe
+constructor and validates thread identity at the actual dispatcher callback. A first owned
+run exposed the fixture's obsolete pre-callback main-TID assertion; the rebuilt fixture now
+allows an unknown initial TID and still checks every later command against its independent
+main-thread observation. See the [current report](../tools/trainer-eval/persistent-player/bootstrap-simplification-report.json).

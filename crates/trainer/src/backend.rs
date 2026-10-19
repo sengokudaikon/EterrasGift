@@ -40,7 +40,7 @@ use crate::{
     field_writes::{AttackLeechDecision, AttackLeechPlan, AttackLeechTarget, FieldPlanError, RateWriteRecord, RateWriteStatus},
     gate::{self, GateDecision, GatePolicy, GateVerdict, LogSource},
     session::{Cleanup, Session, SessionError},
-    writes::{LevelRequirementPlan, WriteControl, WriteRecord, WriteStatus},
+    writes::{LevelRequirementPlan, WriteControl, WriteObservation, WriteOutcome, WritePlan, WriteRecord, WriteStatus},
 };
 
 pub trait ProcessLocator: Send + 'static {
@@ -58,6 +58,21 @@ pub trait Connector: Send + 'static {
 
 pub trait BackendConnection: Send + 'static {
     fn target(&self) -> &ProcessIdentity;
+    /// Connection health is independent of a particular write's certainty.
+    fn is_ready(&self) -> bool {
+        true
+    }
+    /// Return certainty after entering transport; Err is pre-submission unless
+    /// delivery explicitly says MayHaveRun. Confirmed/NotKept require a complete
+    /// independent read under renewed admission, not only a native ACK.
+    fn write(&mut self, now: Timestamp, plan: &WritePlan, control: &mut dyn WriteControl) -> impl Future<Output = Result<WriteOutcome<WriteObservation>, BackendError>> + Send {
+        async move {
+            match plan {
+                WritePlan::Forge(plan) => Ok(self.set_level_requirement(now, plan, control).await?.map(WriteObservation::forge)),
+                WritePlan::Field(plan) => Ok(self.set_attack_leech_rate(now, plan, control).await?.map(WriteObservation::Field)),
+            }
+        }
+    }
     fn refresh(&mut self, now: Timestamp) -> impl Future<Output = Result<RuntimeStatus, BackendError>> + Send;
     fn capture_catalog(&mut self, now: Timestamp) -> impl Future<Output = Result<GameCatalog, BackendError>> + Send;
     fn capture_catalog_observed(&mut self, now: Timestamp, observer: &mut dyn CaptureObserver) -> impl Future<Output = Result<CaptureOutcome, BackendError>> + Send {
@@ -106,6 +121,12 @@ pub trait BackendConnection: Send + 'static {
 impl<T: Transport + Send + 'static, L: LogSource + Send + 'static> BackendConnection for Session<T, L> {
     fn target(&self) -> &ProcessIdentity {
         self.target()
+    }
+    fn is_ready(&self) -> bool {
+        self.state() == crate::session::SessionState::Ready
+    }
+    async fn write(&mut self, now: Timestamp, plan: &WritePlan, control: &mut dyn WriteControl) -> Result<WriteOutcome<WriteObservation>, BackendError> {
+        Ok(self.write_controlled(now, plan, control).await?)
     }
     async fn refresh(&mut self, now: Timestamp) -> Result<RuntimeStatus, BackendError> {
         Session::refresh(self, now).await?;
@@ -171,6 +192,7 @@ pub enum ErrorKind {
     Fault,
     InvalidEdit,
     WriteNotApplied,
+    WriteNotKept,
     WriteUncertain,
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -357,6 +379,22 @@ pub struct BackendSnapshot {
     pub undo_level_requirement: Option<crate::undo::LevelUndo>,
 }
 impl BackendSnapshot {
+    /// The outcome for this exact submitted plan. Historical certainty survives
+    /// connection loss; publishing its observation still requires current scope.
+    pub fn write_outcome(&self, plan: &WritePlan) -> Option<WriteOutcome<WriteObservation>> {
+        match plan {
+            WritePlan::Forge(plan) => self
+                .last_write
+                .as_ref()
+                .filter(|r| &r.plan == plan.as_ref())
+                .map(|r| r.status.clone().map(WriteObservation::forge)),
+            WritePlan::Field(plan) => self
+                .last_rate_write
+                .as_ref()
+                .filter(|r| &r.plan == plan.as_ref())
+                .map(|r| r.status.clone().map(WriteObservation::Field)),
+        }
+    }
     /// Pure CURRENT-player intent from the latest exact owned observation.
     /// Caller must still submit explicitly; this provides no historical lifetime ticket.
     pub fn attack_leech_plan(&self, target: AttackLeechTarget, value: f64) -> Result<AttackLeechDecision, FieldPlanError> {
@@ -453,6 +491,7 @@ pub enum Command {
     RefreshCatalog,
     ReadForge,
     ReadAttackLeech,
+    Write(WritePlan),
     ApplyLevelRequirement(Box<LevelRequirementPlan>),
     SetAttackLeechRate(Box<AttackLeechPlan>),
     UndoLevelRequirement(Box<crate::undo::LevelUndo>),
@@ -821,6 +860,8 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
             Command::RefreshCatalog => self.read(true).await,
             Command::ReadForge => self.read(false).await,
             Command::ReadAttackLeech => self.read_attack_leech().await,
+            Command::Write(WritePlan::Forge(plan)) => self.write_level_requirement(*plan).await,
+            Command::Write(WritePlan::Field(plan)) => self.set_attack_leech_rate(*plan).await,
             Command::SetAttackLeechRate(plan) => self.set_attack_leech_rate(*plan).await,
             Command::ApplyLevelRequirement(plan) => self.write_level_requirement(*plan).await,
             Command::UndoLevelRequirement(undo) => self.undo_level_requirement(*undo).await,

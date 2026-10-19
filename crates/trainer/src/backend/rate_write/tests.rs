@@ -141,7 +141,7 @@ fn default_rate_capability_is_false_and_default_submission_is_preflight_only() {
     let AttackLeechDecision::Change(plan) = AttackLeechPlan::prepare(&current, AttackLeechTarget::AttackRate, 1.1).unwrap() else {
         panic!()
     };
-    let mut control = CurrentRateIntent {
+    let mut control = super::super::write::CurrentIntent {
         intent: Arc::new(Mutex::new(0)),
         epoch: 0,
     };

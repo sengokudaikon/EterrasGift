@@ -1,6 +1,59 @@
 use super::*;
 use eg_game_access::fields::{AttackLeechObservation, AttackLeechRead, ObservedObjectIdentity, ObservedRate};
 use eg_trainer::backend::Activity;
+use eg_trainer::writes::{WriteObservation, WriteOutcome, WritePlan};
+
+#[test]
+fn generic_field_write_publishes_all_actual_bits_and_advances_sequence_without_reconnect() {
+    run(async {
+        let shared = writable();
+        let (handle, worker) = start(&shared, options(), None);
+        connected(&handle).await;
+        let plan = prepare(&handle, AttackLeechTarget::AttackRate, 1.1).await;
+        let mut actual = *plan.projected();
+        actual.attack_rate.raw_bits = 1.2_f32.to_bits();
+        actual.increased_leech_rate.raw_bits = 0.25_f32.to_bits();
+        *shared.rate_write_result.lock().unwrap() = Some(Ok(RateWriteStatus::NotKept(actual)));
+        let generic = WritePlan::from(plan.clone());
+        assert_eq!(command(&handle, Command::Write(generic.clone())).await.unwrap_err().kind, ErrorKind::WriteNotKept);
+        let state = handle.snapshot();
+        assert_eq!(state.phase, Phase::Ready);
+        assert_eq!(state.write_outcome(&generic), Some(WriteOutcome::NotKept(WriteObservation::Field(actual))));
+        let observed = state.attack_leech.unwrap();
+        assert_eq!(observed.read, AttackLeechRead::Available(actual));
+        assert_eq!(observed.sequence, plan.before().sequence + 1);
+        assert_eq!(shared.count("connect"), 1);
+        assert_eq!(shared.count("rate-write"), 1);
+        assert_eq!(shared.count("rate-confirmation-read"), 1);
+        command(&handle, Command::ReadAttackLeech).await.unwrap();
+        assert_eq!(shared.count("rate-write"), 1);
+        shutdown(&handle, worker).await;
+    });
+}
+
+#[test]
+fn not_kept_label_cannot_publish_another_player_or_an_exact_success() {
+    run(async {
+        for wrong_identity in [false, true] {
+            let shared = writable();
+            let (handle, worker) = start(&shared, options(), None);
+            connected(&handle).await;
+            let plan = prepare(&handle, AttackLeechTarget::AttackRate, 1.1).await;
+            let mut actual = *plan.projected();
+            if wrong_identity {
+                actual.actor = ObservedObjectIdentity::new(0x8888, 0x9999).unwrap();
+                actual.attack_rate.raw_bits ^= 1;
+            }
+            *shared.rate_write_result.lock().unwrap() = Some(Ok(RateWriteStatus::NotKept(actual)));
+            let generic = WritePlan::from(plan);
+            assert_eq!(command(&handle, Command::Write(generic.clone())).await.unwrap_err().kind, ErrorKind::WriteUncertain);
+            assert!(matches!(handle.snapshot().write_outcome(&generic), Some(WriteOutcome::Uncertain { .. })));
+            assert!(handle.snapshot().attack_leech.is_none());
+            assert_eq!(handle.snapshot().phase, Phase::Blocked);
+            shutdown(&handle, worker).await;
+        }
+    });
+}
 fn observed() -> AttackLeechRead {
     let id = |n| ObservedObjectIdentity::new(n, n + 1).unwrap();
     AttackLeechRead::Available(AttackLeechObservation {
@@ -280,7 +333,7 @@ fn dropped_receipt_drains_uncertainty_blocks_and_monitor_retry_never_replays() {
 #[test]
 fn mismatched_or_pending_connection_results_are_uncertain_and_not_sent_is_definitive() {
     run(async {
-        for fault in 0..6 {
+        for fault in 0..7 {
             let shared = writable();
             let (handle, worker) = start(&shared, options(), None);
             connected(&handle).await;
@@ -297,6 +350,12 @@ fn mismatched_or_pending_connection_results_are_uncertain_and_not_sent_is_defini
                     retry_when_waiting: true,
                 }),
                 3 => Err(BackendError::blocked(ErrorKind::NotReady, "proven pre-send refusal")),
+                6 => Err(BackendError {
+                    kind: ErrorKind::NotReady,
+                    message: "not-ready diagnostic cannot override uncertain delivery".into(),
+                    delivery: Some(Delivery::MayHaveRun),
+                    retry_when_waiting: true,
+                }),
                 _ => Ok(RateWriteStatus::NotApplied {
                     code: if fault == 4 {
                         eg_game_access::protocol::ResponseCode::Failed
@@ -307,16 +366,23 @@ fn mismatched_or_pending_connection_results_are_uncertain_and_not_sent_is_defini
                 }),
             });
             let e = command(&handle, Command::SetAttackLeechRate(Box::new(plan))).await.unwrap_err();
-            assert_eq!(e.kind, if fault == 3 { ErrorKind::WriteNotApplied } else { ErrorKind::WriteUncertain });
-            assert_eq!(handle.snapshot().phase, Phase::Blocked);
+            assert_eq!(
+                e.kind,
+                match fault {
+                    2 => ErrorKind::Transport,
+                    3 | 6 => ErrorKind::NotReady,
+                    _ => ErrorKind::WriteUncertain,
+                }
+            );
+            assert_eq!(handle.snapshot().phase, if fault == 3 { Phase::Ready } else { Phase::Blocked });
             assert_eq!(shared.count("rate-write"), 1);
-            assert!(handle.snapshot().attack_leech.is_none());
+            assert_eq!(handle.snapshot().attack_leech.is_some(), fault == 3);
             shutdown(&handle, worker).await;
         }
     });
 }
 #[test]
-fn log_loss_after_confirmation_withholds_publication_and_keeps_uncertainty() {
+fn log_loss_after_confirmation_withholds_publication_and_retains_historical_confirmation() {
     run(async {
         let shared = writable();
         let (handle, worker) = start(&shared, options(), None);
@@ -327,10 +393,10 @@ fn log_loss_after_confirmation_withholds_publication_and_keeps_uncertainty() {
         shared.rate_readback_block.wait_started().await;
         *shared.log.lock().unwrap() = log(GameReadiness::Online);
         shared.rate_readback_block.finish();
-        assert_eq!(receipt.wait().await.unwrap_err().kind, ErrorKind::WriteUncertain);
+        assert_eq!(receipt.wait().await.unwrap_err().kind, ErrorKind::Gate);
         let state = handle.snapshot();
         assert!(state.attack_leech.is_none());
-        assert!(matches!(state.last_rate_write.unwrap().status, RateWriteStatus::Uncertain { .. }));
+        assert!(matches!(state.last_rate_write.unwrap().status, RateWriteStatus::Confirmed(_)));
         assert_eq!(shared.count("disconnect"), 0);
         shutdown(&handle, worker).await;
     });
