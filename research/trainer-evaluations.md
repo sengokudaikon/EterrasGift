@@ -748,3 +748,28 @@ The old implicit/affix/unique builders and preformatted unique branch remain
 separate closures, as do descriptions, private clones, sampled mappings and helper
 exposure. No actual game was accessed. See [scope](../tools/trainer-eval/unity-rust-host/numeric-modifier-README.md)
 and [exact evidence](../tools/trainer-eval/unity-rust-host/numeric-modifier-report.json).
+
+
+## Exact Boolean bridge execution, 2026-10-19
+
+The [bridge-call checkpoint](../tools/trainer-eval/bridge-execution/report.json)
+passes all four original modes and all four current-source packaged replays. Each
+process completes 92 cases: 64 bridge body calls, 16 checked original-entry
+controls and 12 synthetic skips. Both real INC flag outcomes pass, with independent
+managed counter/result/effect checks, 24 exceptions, 16 foreign Rust cleanups,
+60 Rust guard drops, 76 C++ caller drops and four attached/joined workers. Roots
+return to zero, the original 34 native checks/shutdown pass, and all 108 original
+bytes remain unchanged. There were no runtime fixes or refreezes.
+
+The exact private bridge has allocation-only unwind metadata and becomes RX with
+a successful cache flush/table registration before pointer publication. A closed
+reserved/active caller gate covers every target call. The original 260 inputs and
+current-source replay's 243 inputs, results, logs, host binaries, source copies and
+both independent reviews are retained under separate immutable evidence indices.
+Standalone tests/Clippy/fmt and full workspace verification pass; the fresh
+combat-rates capture was inspected. Foundation remains 508.
+
+This is synchronous authored bridge/foreign-unwind evidence, separate from the
+previous synthetic OS cut-point test. It performs no entry writes and establishes
+no alias inventory, physical ownership/install/restore, callback-safe offline/owner
+policy, helper capability, actual-game execution or full UI readiness.

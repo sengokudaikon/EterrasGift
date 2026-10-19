@@ -145,3 +145,24 @@ Helper integration must also resolve the gameplay-cleanup TODO in `server.rs::re
 disarm effects before stop-path early returns. This experiment does not establish support
 for offhand, player-stat hooks, global RNG/perfect rolls, raw patches or the remaining
 feature catalog.
+
+## Completed bridge execution experiment
+
+The [authored bridge harness](../tools/trainer-eval/bridge-execution/README.md)
+now executes the 19-byte relocated prefix and rejoins the unchanged original
+continuation. Both original native GC builds pass stable debug/nightly release,
+with 92 cases, 24 managed exceptions and 16 foreign Rust cleanups per process.
+Starts of -1/0 exercise both real INC flag outcomes. Every original body result and
+side effect is independently checked; the full 108-byte target stays unchanged.
+
+The harness publishes private RX code, allocation-only unwind metadata and its
+original pointers under a closed reserved/active caller gate. All code and
+registrations remain resident until owned child exit. Four joined workers retain
+the existing root/attachment contracts. The separate checked-in package replay
+also passes all four modes using current ROOT dependencies and the exact retained
+native images; both source sets and independent reviews are retained separately.
+
+This closes the synchronous bridge-call/foreign-unwind experiment. It adds no
+entry writes, alias inventory, physical owner, runtime offline/owner-liveness
+policy, gameplay capability or actual-game execution. Physical installation and
+restoration remain unvalidated.

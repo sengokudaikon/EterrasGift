@@ -105,3 +105,12 @@ inspected. This adds a narrow mechanism for later tooltip
 work, with no producer arithmetic/acquisition proof, description, sampled mapping,
 helper endpoint or actual-game formatter authority. Exact synchronous graph and
 culture/provider exclusion remains the unsafe caller's responsibility.
+
+
+The [exact bridge-call checkpoint](../tools/trainer-eval/bridge-execution/README.md)
+adds passing original and current-source packaged four-mode matrices: 92 cases,
+24 managed exceptions and 16 foreign Rust cleanups per child, with both INC flag
+outcomes, exact retained roots/threads and a reserved/active caller gate. Original
+entry bytes remain unchanged. Synchronous bridge calls are now proven for the
+exact authored images; physical entry installation/restoration, alias inventory
+and gameplay owner/offline/native-lifetime admission remain open.

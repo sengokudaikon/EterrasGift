@@ -511,3 +511,20 @@ This requires separately admitted producer provenance and one synchronous exclus
 main-thread graph/culture/provider span. It does not acquire the modifier, reproduce
 producer arithmetic, add descriptions/mapping/wire capabilities or access a game.
 See tools/trainer-eval/unity-rust-host/numeric-modifier-README.md and its report.
+
+
+## Authored exact bridge execution checkpoint (2026-10-19)
+
+The private 19-byte Boolean bridge now runs through both INC flag outcomes and
+rejoins original+7, using its own allocation-only Windows unwind record. Original
+and packaged current-source matrices each pass all four Rust/GC modes: 92 cases,
+24 managed exceptions, 16 foreign Rust cleanups, four joined workers and zero
+roots per process. All 108 original body bytes remain unchanged. Source-bound
+reserved/active caller gating covers setup/calls/exception GC/managed readback.
+
+Full source/result/host/native evidence and independent reviews are retained.
+Workspace verification and standalone checks pass, and captures were inspected.
+This closes synchronous authored bridge execution, without any original-entry
+writes, physical installation/restoration, alias inventory, production gameplay
+policy, helper capability or actual-game access. See the checked-in harness and
+its report at tools/trainer-eval/bridge-execution/.
