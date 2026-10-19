@@ -70,6 +70,24 @@ unproved by the ABI result. In particular, the old spy calls the original symbol
 a physically patched experiment must first publish and forward through a typed
 trampoline, or it would recurse.
 
+## Completed Windows metadata experiment
+
+The [synthetic unwind oracle](../tools/trainer-eval/unpatched-bool-abi/bridge-unwind-report.json)
+passes both frozen native images on stable debug and nightly release under Windows
+build 26100. Each run checks 52 original instruction-boundary contexts and eight
+proposed bridge contexts, including both ZF states, the early return and late RBX
+save. Stack/return address, nonvolatile GPRs and XMM6-15 lower 128 bits match the
+source-derived expectations. The bridge has its own allocation-only unwind record;
+the relay is only a null-lookup leaf control.
+
+Bridge bytes remain data in a read/write page. No bridge instructions, IL2CPP
+initialization, GC pressure or entry writes occur. These are OS- and image-specific
+metadata observations, with all inputs and OS identities unchanged. Actual bridge
+execution, complete alias/caller admission, a closed caller gate and physical
+installation/restoration remain separate tests. The portable ABI tool also has its
+own [four-run reproduction receipt](../tools/trainer-eval/unpatched-bool-abi/portable-report.json),
+without changing the original proof-bearing Rust or fixture sources.
+
 ## Ownership and callback admission
 
 Keep physical entry ownership separate from logical permission. A resident owner retains

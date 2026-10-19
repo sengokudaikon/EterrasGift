@@ -697,3 +697,22 @@ production gameplay capability or actual-game execution is established. Static
 inspection finds a shrinkwrapped late RBX save in the authored target's unwind data;
 new bridge metadata and actual Windows unwind controls are required. Source and
 results: tools/trainer-eval/unpatched-bool-abi/README.md and report.json.
+
+
+## Reusable Boolean ABI tooling and Windows unwind metadata, 2026-10-19
+
+The checked-in standalone oracle now reproduces the same 46-case/12-exception/
+eight-Rust-unwind matrix in four newly owned processes. Preparation copies dependencies
+to TEMP and verifies both installed and isolated SDK trees, editor/compiler identities,
+all six byte-preserved proof sources, native output and data. All 4290 frozen inputs
+remain unchanged. Initial workspace-lock and intermediate wiring records are retained;
+there were no runtime fixes. See the portable-report.json beside its README.
+
+A separate metadata-only experiment passes 60 source-derived Windows unwind contexts
+on both native images and Rust profiles under Windows build 26100. It checks early
+return, late RBX save, both proposed bridge branches, nonvolatile GPRs and XMM6-15
+lower 128 bits. Bridge bytes stay in a nonexecutable read/write page; no IL2CPP/GC
+initialization, instruction invocation or entry patch occurs. This is not complete
+alias/caller or physical ownership proof. Exact results and limitations are in
+tools/trainer-eval/unpatched-bool-abi/bridge-unwind-report.json. The next fixture
+separates real bridge execution from quiescent entry installation/restoration.
