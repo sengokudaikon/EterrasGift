@@ -28,7 +28,8 @@ Status roots the manager wrapper, checks assignability and reads its metadata-va
 It also reads the independent runtime online flag. No native Unity-object pointer is dereferenced.
 Returned manager addresses are ephemeral observations, never managed-object ownership tokens.
 
-Protocol 25 supports ReadForge (18), ReadItemLimits (19), ReadLocale (20) and ReadCatalogPage (21), alongside Discover, Status and an empty ClearHooks. The forge wire model
+Protocol26 supports ReadForge (18), ReadItemLimits (19), ReadLocale (20), ReadCatalogPage (21) and the narrow
+SetLevelRequirement (22), alongside Discover, Status and an empty ClearHooks. The forge wire model
 is in `eg-game-access::forge`. The read traverses rooted containers on the engine thread, validates
 exact scalar/reference classes, enum storage and array/list element types, and copies every value
 into owned Rust storage. Enum identities come from their actual field metadata, supporting nested
@@ -60,9 +61,15 @@ gameplay mutation. Body permissions and immutable runtime/graph/native-object li
 The owned language/version payload uses two bounded strict UTF-8 texts (`eg-game-access::locale`). There is no
 fallback to the project default locale and no locale/catalog disk cache yet.
 
-The complete feature set is currently empty:
-`features_on = 0` and clear replies contain count zero. No gameplay hook can be enabled and no item,
-stat or other gameplay field can be written through this helper. Before adding effects, their
+SetLevelRequirement accepts a full bounded expected snapshot and opaque manager token. It roots the current
+graph, compares every owned field and manager identity, validates the exact mutable Int32 backing field,
+checks literal bounds and independently gates offline/native liveness. One public field API store is followed
+by exact full readback. Every failure after store entry is uncertain; no RebuildID, game setter or rollback
+runs. Only owned authored Unity validation is claimed. Later game recalculation can replace the level again.
+
+The complete hook feature set is currently empty:
+`features_on = 0` and clear replies contain count zero. No gameplay hook can be enabled; other item,
+stat or gameplay field writes remain unavailable. Before adding effects, their
 runtime-offline/owner-loss cleanup must run and acknowledge completion on the engine thread.
 
 The local pipe is `eterras-gift-<PID>`, one strict 336-byte request per connection. The first valid

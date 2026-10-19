@@ -1,4 +1,6 @@
 //! Session admission uses owned artifacts and scripted services; no game is opened.
+#[path = "session/write.rs"]
+mod writes;
 use eg_core::game_log::{GameLogEvent, GameLogState, GameLogStatus, GameReadiness, LoggedCharacter};
 use eg_game_access::{
     catalog::{self, CatalogEntries, CatalogKind, CatalogPage, DefinitionName, DefinitionNameSource, ItemTypeDefinition},

@@ -750,3 +750,50 @@ An installed-source check distinguishes static reads: Field::StaticGetValueInter
 copies storage without Runtime::ClassInit. Field::GetValueObject on a static field DOES call Runtime::ClassInit.
 The reader uses the former for ready static state and the latter only on validated instance reference fields.
 Public API choice therefore matters when avoiding lazy game initializers.
+
+## First explicit native write and game-BCL parser proof (2026-10-19)
+
+Protocol26 adds operation22: exact336-byte header plus a bounded complete expected ForgeSnapshot tail. The private
+validated request owns canonical bytes. Header-only/truncated/invalid UTF8 input never obtains ownership, installs
+a scheduler or enters the queue. Byte streams cannot prove the absence of future input: interruption after submission
+remains conservative Failed unless completion is already known. Running work retains its queue slot until drained.
+
+The native level setter re-resolves and roots manager/crafting/main/entry/item, validates the exact declaring owner,
+nonstatic/nonliteral/nonreadonly Int32 backing field and current maxLevel, and compares every owned snapshot field.
+A final field-only gate verifies all graph edges, native manager liveness and canonical offline state immediately
+before one field_set_value store. No request pointer is dereferenced. No fixed field offset, getter, constructor,
+RebuildID or reference setter is used. All errors after entering the void store are Failed/uncertain; SEH recovery
+and rollback are not claimed. Immediate readback must match the entire projected snapshot exactly.
+
+Session and actor plans bind process, catalog, generation and manager. Writes require Release Player.log admission,
+even with a development session, fresh artifact validation, and runtime admission. Lost/malformed/mismatched replies
+or lost confirmation provenance are uncertain and never replayed. Dropped futures retain Pending/Busy until explicit
+cleanup records uncertainty; dropped actor receipts do not cancel accepted work. Cleanup drains the operation and
+retains its outcome with the original plan without publishing its item into a newer generation. Pre-write refresh
+refusals revoke Ready. The separate level_requirement capability does not advertise other forge edits/hooks/fields.
+
+All four [authored routes](../tools/trainer-eval/persistent-player/level-write-report.json) pass578 requests and527
+main-thread commands each:17/0/137 and fresh-plan restoration87; full-width0x01000057 to17;138 refusal and local
+negative/256 rejection; stale names/class/affix-special outside the legacy fingerprint; item/individual/manager
+tokens, actual removed/moved/replaced graphs; rarities7/8/9; online/null/destroyed native managers. Independent fixture
+observations show serialized bytes and unrelated fields unchanged, with no rebuild/refresh/callback tripwire hit.
+Every child exits normally after scheduler restoration/server shutdown and three further frames; all file manifests
+remain unchanged. These are owned authored children only, not actual-game writes or a full Undo workflow.
+
+Foundation passes361 cases on stable/nightly release, plus ownership compile-fail each and four architecture guards.
+Nine new session and eight new actor tests cover write certainty and lifecycle. One stable scheduler test initially
+hit a safe precommit ThreadsChanged refusal and poisoned its serial test mutex; the log is retained. The fixture now
+retries only that exact precommit outcome with unchanged11-byte entry/is_installed assertions and a64-attempt bound.
+All other errors fail immediately; production scheduler code is unchanged. Stable/nightly scheduler tests and20
+parallel repeated trials pass100 cases. Final stable foundation rerun passes. Workspace verification/captures pass;
+the forge capture was inspected. See artifacts/trainer-eval/level-write-{stable,nightly}-tests.log,
+level-write-stable-initial-threads-changed.log and level-write-verify.log.
+
+Separately, [display-parser-report.json](../tools/trainer-eval/unity-rust-host/display-parser-report.json) records
+four standalone matching Unity6000.4.8 BCL runs: stable debug/nightly release, incremental GC off/on3ms. The checked
+exact String TryParse overload uses NumberStyles231, explicit I32 enum and F64 out storage without expanding the
+invocation contract. Captured culture, exact suffix, grouping/exponents/negative/percent scale, invalid culture,
+nonfinite values, Unicode/NUL rejection, rooted exceptions and recovery pass through actual collections. Mono's
+GetCultureInfo("en-Ω-🌿") resolves to"en" internally; true unknown base cultures throw. Rust adds no fallback or
+normalization. Static audit covers BCL cctor/locks/cache/globalization effects. This proves matching-runtime calls,
+not actual-game BCL equivalence, a native formatter or a production mapping/parser request.

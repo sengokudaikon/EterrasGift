@@ -1,4 +1,5 @@
-//! Serialized control session and owned read-only forge snapshots. No injection or automatic retry.
+//! Serialized control session, owned observations and explicit guarded writes. No automatic retry.
+mod write;
 use crate::{
     gate::{self, GateDecision, GatePolicy, GateVerdict, LogSource},
     profile::{BuildProfile, ProfileLease},
@@ -113,6 +114,7 @@ pub struct Session<T, L> {
     discovery: Option<Discovery>,
     status: Option<RuntimeStatus>,
     cleanup: Cleanup,
+    last_write: Option<crate::writes::WriteRecord>,
 }
 impl<T: Transport, L: LogSource> Session<T, L> {
     pub fn new(target: ProcessIdentity, transport: T, log: L, profile: BuildProfile, policy: GatePolicy) -> Result<Self, SessionError> {
@@ -136,6 +138,7 @@ impl<T: Transport, L: LogSource> Session<T, L> {
             discovery: None,
             status: None,
             cleanup: Cleanup::NotNeeded,
+            last_write: None,
         })
     }
     pub fn state(&self) -> SessionState {
@@ -538,6 +541,7 @@ impl<T: Transport, L: LogSource> Session<T, L> {
     }
     /// Explicit asynchronous cleanup; dropping Session never claims to turn effects off or unload code.
     pub async fn disconnect(&mut self) -> Cleanup {
+        self.abandon_pending_write();
         self.status = None;
         self.state = SessionState::Closing;
         // Best effort, as in HookSync.TurnOffAsync. Cancellation never proves a submitted clear ran.

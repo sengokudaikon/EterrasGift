@@ -1,10 +1,11 @@
-//! Application-owned, serialized read-only trainer service.
+//! Application-owned, serialized trainer service with explicit write admission.
 //!
 //! Construction does not spawn, discover, or access files/processes. The owner
 //! explicitly runs the worker on a background Tokio runtime. All accepted work
 //! runs to completion; dropping a receipt is not cancellation. Cleanup barriers
 //! suppress publication from an earlier operation, then drain it before cleanup.
 //! Watch snapshots are authoritative; broadcast events can lag and are advisory.
+mod write;
 
 use std::{
     fmt,
@@ -35,6 +36,7 @@ use crate::{
     catalog_cache::CatalogCache,
     gate::{self, GateDecision, GatePolicy, GateVerdict, LogSource},
     session::{Cleanup, Session, SessionError},
+    writes::{LevelRequirementPlan, WriteControl, WriteRecord, WriteStatus},
 };
 
 pub trait ProcessLocator: Send + 'static {
@@ -68,6 +70,14 @@ pub trait BackendConnection: Send + 'static {
         }
     }
     fn read_forge(&mut self, now: Timestamp) -> impl Future<Output = Result<Option<ForgeSnapshot>, BackendError>> + Send;
+    fn supports_level_requirement(&self) -> bool {
+        false
+    }
+    /// Err must mean submission was not attempted (or carry MayHaveRun). Once
+    /// transport is entered, return a certainty-bearing status even on failure.
+    fn set_level_requirement(&mut self, _: Timestamp, _: &LevelRequirementPlan, _: &mut dyn WriteControl) -> impl Future<Output = Result<WriteStatus, BackendError>> + Send {
+        async { Err(BackendError::blocked(ErrorKind::NotReady, "level requirement writes are unavailable")) }
+    }
     fn disconnect(&mut self) -> impl Future<Output = Cleanup> + Send;
     // Dropping a connection must perform no process/pipe I/O. Admission loss
     // drops it directly, without asking the helper to perform cleanup.
@@ -91,6 +101,12 @@ impl<T: Transport + Send + 'static, L: LogSource + Send + 'static> BackendConnec
     }
     async fn read_forge(&mut self, now: Timestamp) -> Result<Option<ForgeSnapshot>, BackendError> {
         Ok(Session::read_forge(self, now).await?)
+    }
+    fn supports_level_requirement(&self) -> bool {
+        true
+    }
+    async fn set_level_requirement(&mut self, now: Timestamp, plan: &LevelRequirementPlan, control: &mut dyn WriteControl) -> Result<WriteStatus, BackendError> {
+        Ok(Session::set_level_requirement_controlled(self, now, plan, control).await?)
     }
     async fn disconnect(&mut self) -> Cleanup {
         Session::disconnect(self).await
@@ -121,6 +137,9 @@ pub enum ErrorKind {
     Superseded,
     Stopped,
     Fault,
+    InvalidEdit,
+    WriteNotApplied,
+    WriteUncertain,
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct BackendError {
@@ -214,12 +233,14 @@ pub enum Activity {
     CapturingCatalog,
     ReadingForge,
     Refreshing,
+    WritingForge,
 }
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Capabilities {
     pub read_forge: bool,
     pub read_catalog: bool,
     pub write_forge: bool,
+    pub level_requirement: bool,
     pub hooks: bool,
     pub fields: bool,
 }
@@ -281,6 +302,47 @@ pub struct BackendSnapshot {
     pub catalog: CatalogState,
     pub forge: ForgeState,
     pub capabilities: Capabilities,
+    pub last_write: Option<WriteRecord>,
+}
+impl BackendSnapshot {
+    pub fn expected_observation(&self) -> Result<crate::edits::ExpectedObservation, crate::edits::EditError> {
+        use crate::edits::{EditError, ExpectedObservation};
+        let (
+            CatalogState::Current { generation, data },
+            ForgeState::Item {
+                generation: item_generation,
+                snapshot,
+                ..
+            },
+            Some(target),
+        ) = (&self.catalog, &self.forge, &self.attached)
+        else {
+            return Err(EditError::InvalidObservation);
+        };
+        if self.phase != Phase::Ready || *generation != self.generation || *item_generation != self.generation {
+            return Err(EditError::IdentityChanged);
+        }
+        ExpectedObservation::new(self.generation, target.clone(), data.identity.clone(), snapshot.as_ref().clone())
+    }
+    pub fn level_requirement_plan(&self, value: i32) -> Result<LevelRequirementPlan, crate::edits::EditError> {
+        use crate::edits::{CatalogProvenance, EditError};
+        let expected = self.expected_observation()?;
+        let status = self
+            .runtime_status
+            .filter(|status| !status.online && status.manager != 0)
+            .ok_or(EditError::OfflineRequired)?;
+        let catalog = self.catalog.data().ok_or(EditError::CatalogNotVerified)?;
+        LevelRequirementPlan::new(
+            &expected,
+            status.manager,
+            catalog,
+            &CatalogProvenance::RuntimeRead {
+                generation: self.generation,
+                process: expected.process().clone(),
+            },
+            value,
+        )
+    }
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum BackendEvent {
@@ -302,6 +364,7 @@ pub enum Command {
     Disconnect,
     RefreshCatalog,
     ReadForge,
+    ApplyLevelRequirement(Box<LevelRequirementPlan>),
     Shutdown,
 }
 impl Command {
@@ -449,6 +512,7 @@ pub fn service<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K
         catalog: CatalogState::Missing,
         forge: ForgeState::Unobserved,
         capabilities: Capabilities::default(),
+        last_write: None,
     };
     let (sender, commands) = mpsc::channel(32);
     let (snapshots, receiver) = watch::channel(state.clone());
@@ -525,6 +589,9 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
         self.state.capabilities = Capabilities {
             read_forge: self.state.phase == Phase::Ready,
             read_catalog: self.state.phase == Phase::Ready,
+            level_requirement: self.state.phase == Phase::Ready
+                && self.state.activity.is_none()
+                && self.connection.as_ref().is_some_and(BackendConnection::supports_level_requirement),
             ..Capabilities::default()
         };
         self.snapshots.send_replace(self.state.clone());
@@ -633,6 +700,7 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
             }
             Command::RefreshCatalog => self.read(true).await,
             Command::ReadForge => self.read(false).await,
+            Command::ApplyLevelRequirement(plan) => self.write_level_requirement(*plan).await,
         }
     }
     async fn poll(&mut self) {
@@ -647,12 +715,15 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
         }
     }
     fn admit(&mut self, target: &ProcessIdentity) -> Result<(), BackendError> {
+        self.admit_using_policy(target, self.options.policy)
+    }
+    fn admit_using_policy(&mut self, target: &ProcessIdentity, policy: GatePolicy) -> Result<(), BackendError> {
         let started = Timestamp::from_nanosecond((i128::from(target.created) - 116_444_736_000_000_000) * 100)
             .map_err(|_| BackendError::blocked(ErrorKind::Identity, "invalid process creation time"))?;
         if target.pid == 0 || target.created == 0 || !target.executable.is_absolute() {
             return Err(BackendError::blocked(ErrorKind::Identity, "invalid process identity"));
         }
-        let decision = gate::evaluate(&self.log.read(started), started, self.clock.now(), self.options.policy);
+        let decision = gate::evaluate(&self.log.read(started), started, self.clock.now(), policy);
         self.state.gate = Some(decision);
         match decision.verdict {
             GateVerdict::Allow | GateVerdict::Probe => Ok(()),

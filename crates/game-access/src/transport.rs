@@ -1,5 +1,5 @@
 //! One-request transport and explicit uncertainty. Dropping a send future cannot retract submitted work.
-use crate::protocol::{ProtocolError, RESPONSE_HEADER_SIZE, Request, Response};
+use crate::protocol::{ProtocolError, REQUEST_SIZE, RESPONSE_HEADER_SIZE, Request, RequestFrame, Response};
 use std::{future::Future, io};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
@@ -36,6 +36,38 @@ pub trait Transport {
     fn target(&self) -> &crate::process::ProcessIdentity;
     /// Implementations must bind server identity before sending and never replay a submitted request.
     fn send(&mut self, request: &Request) -> impl Future<Output = Result<Response, TransportError>> + Send;
+}
+
+#[derive(Debug)]
+pub enum RequestReadError {
+    Io(io::Error),
+    Protocol(ProtocolError),
+}
+impl std::fmt::Display for RequestReadError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Io(error) => write!(f, "request read: {error}"),
+            Self::Protocol(error) => write!(f, "request read: {error}"),
+        }
+    }
+}
+impl std::error::Error for RequestReadError {}
+
+/// Reads one declared bounded frame. The caller owns its whole-read deadline,
+/// client identity and any admission; no ownership/queue action occurs here.
+/// Following stream data is not part of this frame. A server can separately
+/// refuse already buffered excess before submission, never undo accepted work.
+pub async fn read_request<S: AsyncRead + Unpin>(stream: &mut S) -> Result<Request, RequestReadError> {
+    let mut header = [0; REQUEST_SIZE];
+    stream.read_exact(&mut header).await.map_err(RequestReadError::Io)?;
+    let mut frame = RequestFrame::new(&header).map_err(RequestReadError::Protocol)?;
+    let mut chunk = [0; 8192];
+    while frame.remaining() != 0 {
+        let length = frame.remaining().min(chunk.len());
+        stream.read_exact(&mut chunk[..length]).await.map_err(RequestReadError::Io)?;
+        frame.push(&chunk[..length]).map_err(RequestReadError::Protocol)?;
+    }
+    frame.finish().map_err(RequestReadError::Protocol)
 }
 
 /// Generic framed exchange. The first write attempt is the conservative uncertainty boundary;

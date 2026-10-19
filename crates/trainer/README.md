@@ -6,11 +6,12 @@ The app/UI do not use these services yet. The companion remains independent.
 
 ## Implemented subset
 
-Protocol 25 requests are discovery (6), status (7), clearing all gameplay hooks (15 with count 0 and **no tail**),
-the read-only forge snapshot (18), literal item limits (19), completed locale/version capture (20), and catalog pages (21).
+Protocol26 requests are discovery (6), status (7), clearing all gameplay hooks (15 with count 0 and **no tail**),
+the forge snapshot (18), literal item limits (19), completed locale/version capture (20), catalog pages (21),
+and one explicit level-requirement write with complete expected-state tail (22).
 The Rust extensions deliberately increment the handshake version, so older peers are rejected. The separate
 [Rust helper](../trainer-helper/README.md) implements the persistent server and runtime handlers.
-Item/field writes, enabling gameplay features, complete localized formatting and production injection are not implemented
+Other item/field writes, enabling gameplay features, complete localized formatting and production Last Epoch authority are not implemented
 here. `protocol::Request::decode` deliberately rejects other operations and nonzero reserved
 fields in this subset. This is not a claim to implement every operation of the original protocol.
 
@@ -174,6 +175,25 @@ The raw `_fullName` cache is empty in this process; the C# reader also accepts i
 not yet provide a guaranteed display name. Locale transitions and populated live affixes/unique/set cases remain
 separate validation, as do full localized definitions and mappings.
 Validation commands, counts and the retained log/source index are in [validation.json](validation.json).
+
+`writes::LevelRequirementPlan` is the first submitted edit plan. It requires a current runtime catalog,
+complete observation, process/generation and manager identity. `Session::set_level_requirement` sends one explicit
+protocol26 request with the entire expected snapshot, then requires the exact projected snapshot in response.
+It uses Release admission even in a development session. Errors before transport starts remain local; malformed
+or mismatched acknowledgements, potential delivery and lost confirmation provenance remain Uncertain. An abandoned
+future retains Pending and a busy session until explicit cleanup records uncertainty. No path retries a write.
+
+The background service accepts `ApplyLevelRequirement` explicitly. It rechecks generation/full observation and
+fresh runtime status before submission, drains writes through queued cleanup, and retains the outcome with its
+original plan. Only its separate `level_requirement` capability is available on supported ready connections;
+generic `write_forge`, hooks and fields remain false. Readiness is revoked on failed pre-write refresh. Single
+operation support is not the complete Apply/draft/batch/Undo workflow, and app/UI composition remains separate.
+
+The [standalone parser proof](../../tools/trainer-eval/unity-rust-host/display-parser-report.json) validates the
+exact BCL `Double.TryParse(String, NumberStyles, IFormatProvider, out Double)` overload with style231, captured
+culture and exact unit suffix. Stable/nightly and incremental GC off/on pass. Unicode minus and host locale
+normalization are not added. Unity's own culture parent fallback is retained explicitly. This proof enables no
+native formatting/mapping opcode and does not prove the target game's BCL binary equivalent.
 
 The [Rust bootstrap checkpoint](../../tools/trainer-eval/persistent-player/bootstrap-report.json) passes plugin,
 Python and Rust startup against the same authored Unity 6000.4.8f1 child build. Rust checks full pristine dispatcher

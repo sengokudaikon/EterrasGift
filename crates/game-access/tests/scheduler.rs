@@ -82,20 +82,53 @@ fn prepare() -> SchedulerHook {
     }
 }
 
+/// The test harness itself creates/finishes threads while another test holds SERIAL.
+/// A changed census rejects before commit, after all acquired suspensions have been
+/// released (a failed resume overrides that rejection with its own fatal error).
+/// Only this exact precommit outcome permits another bounded transaction attempt.
+fn commit_with_stable_census(hook: &mut SchedulerHook, installing: bool) {
+    let target = eg_owned_dispatch as *const () as *const u8;
+    let was_installed = hook.is_installed();
+    assert_ne!(was_installed, installing);
+    // SAFETY: SERIAL protects this authored target; all transaction callers are owned.
+    let before: [u8; 11] = unsafe { std::slice::from_raw_parts(target, 11) }.try_into().unwrap();
+    for attempt in 0..64 {
+        // SAFETY: same exclusive private target/retained callback contract as each caller;
+        // no target calls run here and every previous attempt has fully released suspension.
+        let result = unsafe { if installing { hook.install() } else { hook.restore_entry() } };
+        match result {
+            Ok(()) => {
+                assert_eq!(hook.is_installed(), installing);
+                return;
+            }
+            Err(HookError::ThreadsChanged) => {
+                assert_eq!(hook.is_installed(), was_installed, "rejected census attempt {attempt} changed installed state");
+                // SAFETY: ThreadsChanged is returned before patching and after successful resume.
+                assert_eq!(
+                    unsafe { std::slice::from_raw_parts(target, 11) },
+                    before,
+                    "rejected census attempt {attempt} changed entry bytes"
+                );
+                std::thread::sleep(std::time::Duration::from_millis(1));
+            }
+            Err(error) => panic!("unexpected transaction failure, never retried: {error}"),
+        }
+    }
+    panic!("thread census did not stabilize within 64 precommit attempts");
+}
+
 #[test]
 fn real_transaction_installs_forwards_restores_and_retains_the_original() {
     let _guard = SERIAL.lock().unwrap();
     CALLED.store(0, SeqCst);
     let mut hook = prepare();
     ORIGINAL.store(hook.original() as *const () as *mut u8, SeqCst);
-    // SAFETY: exclusive owned target; caller is outside it. All storage prepared before suspension.
-    unsafe { hook.install() }.unwrap();
+    commit_with_stable_census(&mut hook, true);
     assert!(hook.is_installed());
     // SAFETY: authored target and callback implement the exact declared C-unwind signature.
     unsafe { eg_owned_dispatch(std::ptr::null()) };
     assert_eq!(CALLED.load(SeqCst), 1);
-    // SAFETY: same exclusive owned target contract; all generated storage remains retained.
-    unsafe { hook.restore_entry() }.unwrap();
+    commit_with_stable_census(&mut hook, false);
     // SAFETY: restored authored original and retained trampoline remain executable.
     unsafe {
         eg_owned_dispatch(std::ptr::null());
@@ -201,8 +234,8 @@ fn concurrent_known_callers_survive_repeated_transactions_and_join_before_cleanu
         worker.join().unwrap();
     }
     if hook.is_installed() {
-        // SAFETY: all known private-target callers have joined; registered storage remains retained.
-        unsafe { hook.restore_entry() }.unwrap();
+        // Known callers have joined; unrelated test-harness threads may still finish.
+        commit_with_stable_census(&mut hook, false);
     }
     assert!(committed >= 2, "must actually exercise both installation and restoration");
 }

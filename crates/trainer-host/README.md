@@ -10,7 +10,9 @@ log readers and retained process generations. Before a first load, its authority
 must return an identity/profile-bound `RuntimeAttestation`. Constructing that
 attestation is unsafe: the authority establishes the exact IL2CPP ABI, metadata,
 GC, main-thread, method-body, exclusive patch and lifetime contracts required by
-the lower bootstrap API. File hashes and a named thread are corroborating checks.
+the lower bootstrap API. Requested writes additionally require permission for the
+narrow metadata-validated Int32 level store and exclusive graph/readback ownership.
+File hashes and a named thread are corroborating checks.
 The authored player controller has an authority limited to its newly spawned,
 manifest-validated Unity 6000.4.8f1 child. A production Last Epoch authority still
 needs implementation and validation.

@@ -14,7 +14,7 @@ contracts from already validated lower layers; unsupported capabilities must sta
 | Application worker and observable state | Serialized actor and safe session connector pass 34 focused lifecycle/admission tests. Nonblocking commands, generation-bound publication, cache states and cleanup barriers exist. Capture progress is observable and a cleanup intent stops between completed requests without losing cleanup authority. Inert log factory and watcher-input adapter pass two tests; production preparer and UI adapters still need composition. |
 | Production helper preparation/bootstrap | `eg-trainer-host` implements the retained HelperPreparer/VerifiedTransport, with explicit unsafe per-target RuntimeAttestation. The fourth authored route reuses one helper across three preparations and a new session after disconnect. Twelve host tests cover admission, no-replay/panic fences, guard retention and exact dispatcher proof. Windows remote start/stop remains validated; a production Last Epoch authority and app composition remain required. |
 | Feature hooks and field editors | Require exact target/body contracts, wanted-state synchronization and independent owner/offline cleanup. Enabling features is currently unsupported. |
-| Forge drafts, apply, readback and undo | Pure edit planning and operation-specific readback diagnostics pass 20 tests, with complete observation/process/generation/catalog binding. No submission or native write exists yet. Batch planning, main-thread stale comparison, uncertainty recovery and undo remain required. A fingerprint is insufficient. |
+| Forge drafts, apply, readback and undo | Pure planning exists for seven edit kinds. Protocol26's level-requirement submission passes all four authored routes: complete expected snapshot/manager comparison, metadata-validated Int32 store, exact readback and retained uncertainty. Other native edits, batch planning, draft workflows and Undo remain required. A fingerprint is insufficient. |
 | UI adapter and captures | Existing Slint views use stand-ins. Connect owned state/commands after backend contracts pass; do not perform synchronous capture/bootstrap on the Slint thread. |
 
 The current game process has a stopped, pinned protocol 24 helper. Replacing a helper does not unload old code.
@@ -46,3 +46,15 @@ boxing/child rooting through the existing nongeneric Array.GetValue interface. T
 12 valid/local scenarios and seven malformed dictionary cases through every startup route (440 requests, 392
 main-thread commands each). The 323 foundation tests pass stable/nightly release. Destroyed native wrappers and
 custom comparers remain explicitly unavailable; no game dictionary getter or cache-fill routine is called.
+
+The first [write checkpoint](../tools/trainer-eval/persistent-player/level-write-report.json) passes all four startup
+routes:578 requests,527 main-thread commands each. It changes only the validated Int32 level backing field; no
+RebuildID or game setter runs. Bounds, unique/set/legendary refusals, full stale state, replacement and manager/offline
+guards pass, with independent fixture observations and explicit fresh-plan restoration. There are361 foundation
+cases on each toolchain. This is a single-operation path, not the full draft/Apply/Undo workflow or app composition.
+Level requirement can be recalculated later by the game; no persistence guarantee is implied.
+
+The [standalone display parser](../tools/trainer-eval/unity-rust-host/display-parser-report.json) passes stable debug
+and nightly release with incremental GC off/on using the existing checked enum/outDouble invocation contracts.
+It strips only the exact unit suffix and parses the captured culture through the matching runtime's BCL. Unity
+Mono's own parent-culture fallback remains observable. No host parser fallback or production mapping opcode exists.

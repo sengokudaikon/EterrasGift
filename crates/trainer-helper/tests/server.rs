@@ -408,3 +408,119 @@ fn client_disconnect_during_running_work_keeps_slot_until_completion() {
     fixture.finish();
     assert_eq!(fixture.counters()[..4], [1, 3, 3, 2]);
 }
+
+fn level_write() -> Request {
+    use eg_game_access::{
+        forge::{ForgeSnapshot, ItemStatus},
+        write::LevelRequirementWrite,
+    };
+    let mut expected = ForgeSnapshot {
+        item: 0x1234,
+        individual_id: 42,
+        fingerprint: 0,
+        name: "owned".into(),
+        item_type: 4,
+        sub_type: 1,
+        rarity: 2,
+        class_requirement: 0,
+        affixes: vec![],
+        implicit_rolls: vec![],
+        identity: None,
+        status: ItemStatus {
+            forging_potential: 1,
+            forging_potential_type: 0,
+            legendary_potential: 0,
+            weavers_will: 0,
+            weavers_touch: 0,
+            corrupted: false,
+            ruined: false,
+            level_requirement: 20,
+        },
+    };
+    expected.fingerprint = expected.legacy_fingerprint();
+    Request::SetLevelRequirement(LevelRequirementWrite::new(spec(), 0x1000, expected, 30).unwrap())
+}
+#[test]
+fn incomplete_or_invalid_expected_tail_never_reaches_scheduler_or_queue() {
+    let mut fixture = Fixture::spawn("normal");
+    runtime().block_on(async {
+        use tokio::io::AsyncReadExt;
+        let mut client = fixture.client();
+        assert_eq!(client.send(&Request::Discover).await.unwrap().code, ResponseCode::Done);
+        let frame = level_write().encode();
+        for prefix in [eg_game_access::protocol::REQUEST_SIZE, frame.len() - 1] {
+            let mut pipe = open_raw(fixture.child.id()).await;
+            pipe.write_all(&frame[..prefix]).await.unwrap();
+            sleep(Duration::from_millis(100)).await;
+            assert_eq!(fixture.counters()[..4], [1, 0, 0, 0], "partial write must not install or submit");
+            drop(pipe);
+            sleep(Duration::from_millis(100)).await;
+        }
+        let mut malformed = frame;
+        malformed[336 + 23] = 0xff;
+        let mut pipe = open_raw(fixture.child.id()).await;
+        pipe.write_all(&malformed).await.unwrap();
+        let mut header = [0; 12];
+        timeout(LIMIT, pipe.read_exact(&mut header)).await.unwrap().unwrap();
+        assert_eq!(Response::decode_header(&header).unwrap().0, ResponseCode::Refused);
+        drop(pipe);
+        assert_eq!(fixture.counters()[..4], [1, 0, 0, 0]);
+        // A later complete frame is a separate explicit request, never replayed by server.
+        assert_eq!(client.send(&level_write()).await.unwrap().code, ResponseCode::Done);
+    });
+    fixture.finish();
+    assert_eq!(fixture.counters()[..4], [1, 1, 1, 1]);
+}
+#[test]
+fn running_write_suffix_is_uncertain_and_cannot_release_or_replay_running_slot() {
+    let mut fixture = Fixture::spawn("running");
+    runtime().block_on(async {
+        use tokio::io::AsyncReadExt;
+        let mut client = fixture.client();
+        assert_eq!(client.send(&Request::Discover).await.unwrap().code, ResponseCode::Done);
+        let mut pipe = open_raw(fixture.child.id()).await;
+        pipe.write_all(&level_write().encode()).await.unwrap();
+        fixture.wait_file("running");
+        pipe.write_all(&[0xaa]).await.unwrap();
+        let mut header = [0; 12];
+        timeout(LIMIT, pipe.read_exact(&mut header)).await.unwrap().unwrap();
+        let (code, len) = Response::decode_header(&header).unwrap();
+        assert_eq!(code, ResponseCode::Failed);
+        let mut body = vec![0; len];
+        pipe.read_exact(&mut body).await.unwrap();
+        drop(pipe);
+        assert_eq!(client.send(&status()).await.unwrap().code, ResponseCode::NotReady);
+        assert_eq!(fixture.counters()[3], 1);
+        fs::write(fixture.directory.join("release"), []).unwrap();
+        sleep(Duration::from_millis(100)).await;
+        assert_eq!(client.send(&status()).await.unwrap().code, ResponseCode::Done);
+    });
+    fixture.finish();
+    assert_eq!(fixture.counters()[..4], [1, 3, 3, 2]);
+}
+#[test]
+fn suffix_after_queued_write_is_conservative_failure_and_cancels_without_execution() {
+    let mut fixture = Fixture::spawn("pending");
+    runtime().block_on(async {
+        use tokio::io::AsyncReadExt;
+        let mut client = fixture.client();
+        assert_eq!(client.send(&Request::Discover).await.unwrap().code, ResponseCode::Done);
+        let mut frame = level_write().encode();
+        frame.push(0xaa);
+        let mut pipe = open_raw(fixture.child.id()).await;
+        pipe.write_all(&frame).await.unwrap();
+        let mut header = [0; 12];
+        timeout(LIMIT, pipe.read_exact(&mut header)).await.unwrap().unwrap();
+        let (code, len) = Response::decode_header(&header).unwrap();
+        assert_eq!(code, ResponseCode::Failed);
+        let mut body = vec![0; len];
+        pipe.read_exact(&mut body).await.unwrap();
+        drop(pipe);
+        fs::write(fixture.directory.join("execute"), []).unwrap();
+        sleep(Duration::from_millis(100)).await;
+        assert_eq!(fixture.counters()[3], 0);
+        assert_eq!(client.send(&status()).await.unwrap().code, ResponseCode::Done);
+    });
+    fixture.finish();
+    assert_eq!(fixture.counters()[..4], [1, 2, 2, 1]);
+}

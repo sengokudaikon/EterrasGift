@@ -21,6 +21,8 @@ mod catalog_numeric;
 mod forge;
 mod limits;
 mod locale;
+mod write;
+pub use write::LevelWriteError;
 
 type Ptr = *mut c_void;
 type Class = *mut raw::Class;

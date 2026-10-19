@@ -7,6 +7,17 @@ use crate::{
 };
 use std::{ffi::CStr, ptr::NonNull};
 
+pub(super) struct ForgeGraph<'a, 'r> {
+    pub(super) images: Images,
+    pub(super) manager: Root<'a, 'r>,
+    pub(super) item: Root<'a, 'r>,
+    pub(super) online_field: Ptr,
+    pub(super) manager_field: Ptr,
+    pub(super) cached_ptr_field: Ptr,
+    pub(super) links: Vec<(Ptr, Ptr, Ptr)>,
+    pub(super) _parents: Vec<Root<'a, 'r>>,
+}
+
 pub(super) type Root<'a, 'r> = StrongRoot<'a, 'r>;
 
 // Private and closed: each destination type has one exact public runtime primitive class.
@@ -331,6 +342,14 @@ impl RuntimeAccess {
     /// snapshot's item address is only an ephemeral identity token. Runtime shutdown is excluded.
     pub unsafe fn read_forge(&self, attached: &AttachedThread<'_>) -> Result<Option<ForgeSnapshot>, DiscoveryError> {
         unsafe {
+            let Some(graph) = self.forge_graph(attached)? else { return Ok(None) };
+            self.forge_snapshot(attached, &graph).map(Some)
+        }
+    }
+
+    // Internal callers inherit read_forge's complete live-runtime/graph contract.
+    pub(super) unsafe fn forge_graph<'a, 'r>(&self, attached: &'a AttachedThread<'r>) -> Result<Option<ForgeGraph<'a, 'r>>, DiscoveryError> {
+        unsafe {
             let images = self.images()?;
             let online = self.static_field(self.class(&images, c"EHG.Multiplayer", c"GameplayEnvironment")?, c"_isOnlinePlay", "System.Boolean")?;
             if (self.type_class)((self.field_type)(online)) != self.system_class(c"Boolean")? {
@@ -354,6 +373,7 @@ impl RuntimeAccess {
             let manager = NonNull::new(manager).ok_or(DiscoveryError::OfflineRequired)?;
             let manager = attached.root(manager)?;
             self.check_object(manager_class, target(&manager)?)?;
+            let cached_ptr_field = self.instance_field(&manager, c"m_CachedPtr", self.system_class(c"IntPtr")?)?;
             if self.primitive::<usize>(&manager, c"m_CachedPtr")? == 0 {
                 return Err(DiscoveryError::OfflineRequired);
             }
@@ -375,40 +395,80 @@ impl RuntimeAccess {
                 return Ok(None);
             };
             self.exact(&item, self.class(&images, c"", c"ItemDataUnpacked")?)?;
-            let rarity: u8 = self.primitive(&item, c"rarity")?;
+            // Retain the intermediate parents and exact validated reference fields so a writer
+            // can recheck every edge without further metadata work or a managed invocation.
+            let links = vec![
+                (
+                    target(&manager)?.as_ptr().cast(),
+                    self.instance_field(&manager, c"crafting", crafting_class)?,
+                    target(&crafting)?.as_ptr().cast(),
+                ),
+                (
+                    target(&crafting)?.as_ptr().cast(),
+                    self.instance_field(&crafting, c"main", main_class)?,
+                    target(&main)?.as_ptr().cast(),
+                ),
+                (
+                    target(&main)?.as_ptr().cast(),
+                    self.instance_field(&main, c"content", entry_class)?,
+                    target(&entry)?.as_ptr().cast(),
+                ),
+                (
+                    target(&entry)?.as_ptr().cast(),
+                    self.instance_field(&entry, c"data", item_class)?,
+                    target(&item)?.as_ptr().cast(),
+                ),
+            ];
+            Ok(Some(ForgeGraph {
+                images,
+                manager,
+                item,
+                online_field: online,
+                manager_field,
+                cached_ptr_field,
+                links,
+                _parents: vec![crafting, main, entry],
+            }))
+        }
+    }
+
+    pub(super) unsafe fn forge_snapshot(&self, attached: &AttachedThread<'_>, graph: &ForgeGraph<'_, '_>) -> Result<ForgeSnapshot, DiscoveryError> {
+        unsafe {
+            let item = &graph.item;
+            let rarity: u8 = self.primitive(item, c"rarity")?;
             let identity = if matches!(rarity, 7..=9) {
                 Some(UniqueIdentity {
-                    id: self.primitive(&item, c"uniqueID")?,
-                    rolls: self.roll_array(attached, &item, c"uniqueRolls", 8)?,
+                    id: self.primitive(item, c"uniqueID")?,
+                    rolls: self.roll_array(attached, item, c"uniqueRolls", 8)?,
                 })
             } else {
                 None
             };
             let mut snapshot = ForgeSnapshot {
-                item: target(&item)?.as_ptr() as u64,
-                individual_id: self.primitive(&item, c"individualID")?,
+                item: target(item)?.as_ptr() as u64,
+                individual_id: self.primitive(item, c"individualID")?,
                 fingerprint: 0,
-                name: self.text(attached, &item, c"_fullName")?,
-                item_type: self.primitive(&item, c"itemType")?,
-                sub_type: self.primitive(&item, c"subType")?,
+                name: self.text(attached, item, c"_fullName")?,
+                item_type: self.primitive(item, c"itemType")?,
+                sub_type: self.primitive(item, c"subType")?,
                 rarity,
-                class_requirement: self.enumeration(&item, c"classReq", c"ClassRequirement")?,
-                affixes: self.affixes(attached, &images, &item)?,
-                implicit_rolls: self.roll_array(attached, &item, c"implicitRolls", 3)?,
+                class_requirement: self.enumeration(item, c"classReq", c"ClassRequirement")?,
+                affixes: self.affixes(attached, &graph.images, item)?,
+                implicit_rolls: self.roll_array(attached, item, c"implicitRolls", 3)?,
                 identity,
                 status: ItemStatus {
-                    forging_potential: self.primitive(&item, c"forgingPotential")?,
-                    forging_potential_type: self.enumeration(&item, c"forgingPotentialType", c"ForgingPotentialType")?,
-                    legendary_potential: self.primitive(&item, c"legendaryPotential")?,
-                    weavers_will: self.primitive(&item, c"weaversWill")?,
-                    weavers_touch: self.primitive(&item, c"weaversTouch")?,
-                    corrupted: self.boolean(&item, c"corrupted")?,
-                    ruined: self.boolean(&item, c"ruined")?,
-                    level_requirement: self.primitive(&item, c"<LvlReq>k__BackingField")?,
+                    forging_potential: self.primitive(item, c"forgingPotential")?,
+                    forging_potential_type: self.enumeration(item, c"forgingPotentialType", c"ForgingPotentialType")?,
+                    legendary_potential: self.primitive(item, c"legendaryPotential")?,
+                    weavers_will: self.primitive(item, c"weaversWill")?,
+                    weavers_touch: self.primitive(item, c"weaversTouch")?,
+                    corrupted: self.boolean(item, c"corrupted")?,
+                    ruined: self.boolean(item, c"ruined")?,
+                    level_requirement: self.primitive(item, c"<LvlReq>k__BackingField")?,
                 },
             };
             snapshot.fingerprint = snapshot.legacy_fingerprint();
-            Ok(Some(snapshot))
+            Ok(snapshot)
         }
     }
 }

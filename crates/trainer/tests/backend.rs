@@ -8,6 +8,9 @@ use std::{
     },
     time::Duration,
 };
+#[path = "backend/write.rs"]
+mod writes;
+use eg_trainer::writes::{LevelRequirementPlan, WriteControl, WriteStatus};
 
 use eg_core::game_log::{GameLogState, GameLogStatus, GameReadiness};
 use eg_game_access::catalog::CatalogKind;
@@ -111,6 +114,10 @@ struct Shared {
     capture_block: Block,
     forge_block: Block,
     disconnect_block: Block,
+    write_block: Block,
+    write_enabled: AtomicBool,
+    forge_item: Mutex<Option<ForgeSnapshot>>,
+    write_result: Mutex<Option<WriteStatus>>,
     active: AtomicUsize,
     maximum: AtomicUsize,
     aborted: AtomicUsize,
@@ -132,6 +139,10 @@ impl Shared {
             capture_block: Block::default(),
             forge_block: Block::default(),
             disconnect_block: Block::default(),
+            write_block: Block::default(),
+            write_enabled: AtomicBool::new(false),
+            forge_item: Mutex::new(None),
+            write_result: Mutex::new(None),
             active: AtomicUsize::new(0),
             maximum: AtomicUsize::new(0),
             aborted: AtomicUsize::new(0),
@@ -209,7 +220,27 @@ impl BackendConnection for Connection {
         if let Some(error) = self.shared.read_errors.lock().unwrap().pop_front() {
             return Err(error);
         }
-        Ok(None)
+        Ok(self.shared.forge_item.lock().unwrap().clone())
+    }
+    fn supports_level_requirement(&self) -> bool {
+        self.shared.write_enabled.load(Ordering::SeqCst)
+    }
+    async fn set_level_requirement(&mut self, _: Timestamp, plan: &LevelRequirementPlan, control: &mut dyn WriteControl) -> Result<WriteStatus, BackendError> {
+        if !control.allowed() {
+            return Err(BackendError::blocked(ErrorKind::Superseded, "cleanup before submission"));
+        }
+        self.shared.call("write", &self.shared.write_block).await;
+        let result = self
+            .shared
+            .write_result
+            .lock()
+            .unwrap()
+            .take()
+            .unwrap_or_else(|| WriteStatus::Confirmed(plan.projected().clone()));
+        if let WriteStatus::Confirmed(snapshot) = &result {
+            *self.shared.forge_item.lock().unwrap() = Some(snapshot.clone());
+        }
+        Ok(result)
     }
     async fn disconnect(&mut self) -> Cleanup {
         self.shared.call("disconnect", &self.shared.disconnect_block).await;

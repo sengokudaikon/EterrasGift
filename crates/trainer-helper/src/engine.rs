@@ -5,11 +5,12 @@ use crate::{
 use eg_game_access::{
     il2cpp::{
         ThreadContext,
-        discovery::{DiscoveryError, RuntimeAccess},
+        discovery::{DiscoveryError, LevelWriteError, RuntimeAccess},
         raw::{self, ExecuteTasks, MethodInfo},
     },
     protocol::{Discovery, DispatcherSpec, Request, Response, ResponseCode},
     scheduler::{HookError, SchedulerHook},
+    write::LevelRequirementWrite,
 };
 use eg_trainer::dispatch::{Dispatcher, Pending};
 use std::{
@@ -120,6 +121,41 @@ unsafe fn read_status() -> Response {
             }
             Err(error) => map_discovery(error),
         }
+    }
+}
+
+unsafe fn set_level_requirement(write: &LevelRequirementWrite) -> Response {
+    // SAFETY: only the established main thread calls this after original returns.
+    // Startup's exact-runtime ownership contract must additionally authorize this
+    // particular field mutation and exclude concurrent graph mutation/shutdown.
+    // RuntimeAccess holds the original graph roots through stale check and store;
+    // its typed failures after the store boundary are exclusively Failed.
+    unsafe {
+        let result = (|| {
+            let module = module().map_err(|error| server::failure(ResponseCode::Failed, error))?;
+            let (api, access) = apis(module).map_err(|error| server::failure(ResponseCode::Failed, error))?;
+            let writer = raw::FieldWriteApi::resolve(|name| export(module, name)).map_err(|error| server::failure(ResponseCode::Refused, error.to_string()))?;
+            let thread = ThreadContext::new(api);
+            let attached = thread.attach().map_err(|error| server::failure(ResponseCode::NotReady, error.to_string()))?;
+            let snapshot = access
+                .set_level_requirement(&attached, writer, write.expected_manager(), write.expected(), i32::from(write.value()))
+                .map_err(|error| {
+                    let code = match &error {
+                        LevelWriteError::NotReady(_) => ResponseCode::NotReady,
+                        LevelWriteError::Stale(_) => ResponseCode::StaleItem,
+                        LevelWriteError::Refused(_) => ResponseCode::Refused,
+                        LevelWriteError::Offline => ResponseCode::OfflineRequired,
+                        LevelWriteError::Failed(_) => ResponseCode::Failed,
+                    };
+                    server::failure(code, error.to_string())
+                })?;
+            let payload = eg_game_access::forge::encode(Some(&snapshot)).map_err(|error| server::failure(ResponseCode::Failed, error.to_string()))?;
+            Ok::<_, Response>(Response {
+                code: ResponseCode::Done,
+                payload,
+            })
+        })();
+        result.unwrap_or_else(|error| error)
     }
 }
 
@@ -262,6 +298,9 @@ fn after_original(state: &Shared) {
                 Request::ReadItemLimits { .. } => unsafe { read_item_limits() },
                 Request::ReadLocale { .. } => unsafe { read_locale() },
                 Request::ReadCatalogPage { kind, cursor, .. } => unsafe { read_catalog_page(kind, cursor) },
+                // SAFETY: the same established thread plus this narrow operation's
+                // explicit exclusive-write/root/metadata contract described above.
+                Request::SetLevelRequirement(write) => unsafe { set_level_requirement(&write) },
                 // No feature installation API exists. Empty is the truthful complete feature set.
                 Request::ClearHooks { .. } => Response {
                     code: ResponseCode::Done,
@@ -394,6 +433,9 @@ unsafe fn worker() -> Result<(), String> {
 /// Caller authorizes offline use, identifies exact Unity6000.4.8 Windows x64 ABI/layout and initialized
 /// game classes, and retains runtime metadata through process exit. Caller grants SchedulerHook's
 /// exclusive target/control-flow/thread-creation contracts and prevents domain teardown until shutdown.
+/// Explicit write requests additionally require permission and exclusive rooted graph ownership
+/// for the validated ItemDataUnpacked Int32 level field store and full readback. No other
+/// gameplay writes, RebuildID, getters or constructors are authorized by this operation.
 /// Never call under DllMain/loader lock. No helper/code unload is allowed, including on failure.
 pub unsafe extern "C" fn eg_helper_start(main_tid: u32) -> i32 {
     // SAFETY: local identity query takes no parameters.

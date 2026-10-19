@@ -690,8 +690,11 @@ impl RemoteHelper {
     /// nonmoving GC/modern handles, live metadata, and all helper runtime, dispatcher, invocation
     /// and exclusive-patch-ownership contracts. The nominated held thread is the real engine
     /// main thread. Catalog admission includes the audited corlib Array.GetValue reflection,
-    /// boxing/type-cache and GC/profiler effects, with Entry initializers rejected. The thread's
-    /// OS description is only corroboration. Every module, native runtime and
+    /// boxing/type-cache and GC/profiler effects, with Entry initializers rejected.
+    /// Requested level-requirement writes additionally authorize the exact mutable Int32
+    /// ItemDataUnpacked backing-field store, exclusive rooted graph access and full readback;
+    /// a bootstrap or metadata match alone never supplies permission for that mutation.
+    /// The thread's OS description is only corroboration. Every module, native runtime and
     /// method body remains loaded/unchanged through all pending calls and helper residency.
     /// No other actor may load/unload/patch helper or admitted modules during preflight/start.
     /// Caller also excludes nonstandard/renamed existing helpers; the module-name checks below

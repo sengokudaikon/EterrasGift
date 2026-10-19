@@ -1,5 +1,8 @@
 //! One request per local connection; process ownership survives normal connection closure.
-use eg_game_access::protocol::{Discovery, DispatcherSpec, REQUEST_SIZE, Request, Response, ResponseCode};
+use eg_game_access::{
+    protocol::{Discovery, DispatcherSpec, Request, Response, ResponseCode},
+    transport::{RequestReadError, read_request},
+};
 use eg_trainer::dispatch::{Cancellation, Outcome, Pending};
 use std::{
     future::Future,
@@ -179,13 +182,12 @@ async fn serve(pid: u32, backend: &mut impl Backend, shared: &Shared) -> Result<
             Ok(owner) => owner,
             Err(_) => continue,
         };
-        let mut bytes = [0; REQUEST_SIZE];
-        if !matches!(wait(pipe.read_exact(&mut bytes), shared, Some(&client), Duration::from_secs(15)).await, Ok(Ok(_))) {
-            continue;
-        }
-        let response = match Request::decode(&bytes) {
-            Err(_) => failure(ResponseCode::Refused, "Invalid or unsupported control request; nothing was run"),
-            Ok(request) => {
+        // One deadline covers header and bounded body. No ownership, scheduler
+        // installation or queue admission can follow a header-only write.
+        let received = wait(read_request(&mut pipe), shared, Some(&client), Duration::from_secs(15)).await;
+        let response = match received {
+            Ok(Err(RequestReadError::Protocol(_))) => failure(ResponseCode::Refused, "Invalid or unsupported request frame; nothing was run"),
+            Ok(Ok(request)) => {
                 reap(&mut owner, shared);
                 if owner.as_ref().is_some_and(|owner| owner.pid != client.pid || owner.created != client.created) {
                     failure(ResponseCode::Refused, "Another live application owns this helper; nothing was run")
@@ -208,12 +210,7 @@ async fn serve(pid: u32, backend: &mut impl Backend, shared: &Shared) -> Result<
                             },
                             Err(error) => error,
                         },
-                        Request::Status { dispatcher }
-                        | Request::ClearHooks { dispatcher }
-                        | Request::ReadForge { dispatcher }
-                        | Request::ReadItemLimits { dispatcher }
-                        | Request::ReadLocale { dispatcher }
-                        | Request::ReadCatalogPage { dispatcher, .. } => match backend.ensure_dispatcher(&dispatcher) {
+                        request => match backend.ensure_dispatcher(&request.dispatcher().expect("non-discovery request has dispatcher")) {
                             Err(error) => error,
                             Ok(()) => match backend.submit(request) {
                                 Err(error) => error,
@@ -233,8 +230,11 @@ async fn serve(pid: u32, backend: &mut impl Backend, shared: &Shared) -> Result<
                                     match wait(completion, shared, owner.as_ref(), Duration::from_secs(5)).await {
                                         Ok(Ok(Outcome::Completed(response))) => response,
                                         Ok(Ok(Outcome::Abandoned)) => failure(ResponseCode::Failed, "Main-thread request unwound; outcome uncertain"),
-                                        Ok(Err(())) | Err(_) => match pending.cancel() {
-                                            Some(Cancellation::NotStarted) => failure(ResponseCode::NotReady, "Request canceled before the main thread took it; nothing ran"),
+                                        interrupted @ (Ok(Err(())) | Err(_)) => match pending.cancel() {
+                                            Some(Cancellation::NotStarted) if interrupted.is_err() => {
+                                                failure(ResponseCode::NotReady, "Request canceled before the main thread took it; nothing ran")
+                                            }
+                                            Some(Cancellation::NotStarted) => failure(ResponseCode::Failed, "Request exchange interrupted after submission; do not replay it"),
                                             Some(Cancellation::Finished(Outcome::Completed(response))) => response,
                                             _ => failure(ResponseCode::Failed, "Request may have started; do not replay it"),
                                         },
@@ -245,6 +245,7 @@ async fn serve(pid: u32, backend: &mut impl Backend, shared: &Shared) -> Result<
                     }
                 }
             }
+            _ => continue,
         };
         let frame = response.encode().map_err(|error| error.to_string())?;
         let _ = wait(pipe.write_all(&frame), shared, owner.as_ref(), Duration::from_secs(15)).await;

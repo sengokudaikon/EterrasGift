@@ -1,14 +1,18 @@
-//! Pure, bounded codecs for protocol 25: control and bounded read-only game observations.
+//! Pure, bounded codecs for protocol26: control, observations and a narrow full-state write.
 //!
 //! Decoding establishes wire validity only. Process identity, helper provenance,
 //! dispatcher code, and permission to run a request belong to the session layer.
 
-use crate::catalog::CatalogKind;
+use crate::{
+    catalog::CatalogKind,
+    forge,
+    write::{LevelRequirementWrite, MAX_EXPECTED_BYTES, MIN_EXPECTED_BYTES, SET_LEVEL_REQUIREMENT_OPERATION},
+};
 use std::{collections::BTreeMap, error::Error, fmt};
 
 pub const MAGIC: u32 = 0x4546_4735;
-/// Version 25 adds paged catalog capture (21); older helpers are incompatible.
-pub const VERSION: u32 = 25;
+/// Version26 adds a bounded full expected-snapshot tail for level requirement (22).
+pub const VERSION: u32 = 26;
 pub const ADAPTER: &str = "il2cpp-x64-v1";
 pub const REQUEST_SIZE: usize = 336;
 pub const RESPONSE_HEADER_SIZE: usize = 12;
@@ -66,9 +70,23 @@ pub enum Request {
         kind: CatalogKind,
         cursor: u32,
     },
+    /// Explicit mutation; native admission compares the complete expected item.
+    SetLevelRequirement(LevelRequirementWrite),
 }
 
 impl Request {
+    pub fn dispatcher(&self) -> Option<DispatcherSpec> {
+        match self {
+            Self::Discover => None,
+            Self::Status { dispatcher }
+            | Self::ClearHooks { dispatcher }
+            | Self::ReadForge { dispatcher }
+            | Self::ReadItemLimits { dispatcher }
+            | Self::ReadLocale { dispatcher }
+            | Self::ReadCatalogPage { dispatcher, .. } => Some(*dispatcher),
+            Self::SetLevelRequirement(write) => Some(write.dispatcher()),
+        }
+    }
     pub fn encode(&self) -> Vec<u8> {
         let mut bytes = vec![0; REQUEST_SIZE];
         bytes[..4].copy_from_slice(&MAGIC.to_le_bytes());
@@ -84,6 +102,7 @@ impl Request {
                 bytes[12..16].copy_from_slice(&cursor.to_le_bytes());
                 (21, Some(dispatcher))
             }
+            Self::SetLevelRequirement(write) => return write.encode(),
         };
         bytes[4..8].copy_from_slice(&operation.to_le_bytes());
         if let Some(dispatcher) = dispatcher {
@@ -93,8 +112,50 @@ impl Request {
         bytes
     }
 
-    /// Accepts exactly the supported control requests, including their reserved bytes.
+    /// A bounded read plan only, never an executable request or ownership claim.
+    pub fn decode_header(bytes: &[u8]) -> Result<RequestHeader, ProtocolError> {
+        if bytes.len() != REQUEST_SIZE {
+            return Err(ProtocolError::InvalidData);
+        }
+        let mut reader = Reader::new(bytes);
+        if reader.u32()? != MAGIC {
+            return Err(ProtocolError::IncompatibleVersion);
+        }
+        if reader.u32()? != SET_LEVEL_REQUIREMENT_OPERATION {
+            Self::decode_fixed(bytes)?;
+            return Ok(RequestHeader { tail_len: 0 });
+        }
+        let value = reader.u32()?;
+        let tail_len = reader.u32()? as usize;
+        let manager = reader.u64()?;
+        if value > 255 || manager == 0 || !(MIN_EXPECTED_BYTES..=MAX_EXPECTED_BYTES).contains(&tail_len) || bytes[24..48].iter().chain(&bytes[72..]).any(|byte| *byte != 0) {
+            return Err(ProtocolError::InvalidData);
+        }
+        Ok(RequestHeader { tail_len })
+    }
+    /// Accepts exactly one complete frame, including all reserved bytes and the
+    /// write's entire strict expected-state tail. A header alone cannot submit it.
     pub fn decode(bytes: &[u8]) -> Result<Self, ProtocolError> {
+        let header = Self::decode_header(bytes.get(..REQUEST_SIZE).ok_or(ProtocolError::InvalidData)?)?;
+        if bytes.len() != header.total_len() {
+            return Err(ProtocolError::InvalidData);
+        }
+        if header.tail_len == 0 {
+            return Self::decode_fixed(bytes);
+        }
+        let mut fields = Reader::new(&bytes[8..24]);
+        let value = fields.u32()? as i32;
+        let _tail_len = fields.u32()?;
+        let expected_manager = fields.u64()?;
+        let mut dispatcher = Reader::new(&bytes[48..72]);
+        let dispatcher = DispatcherSpec {
+            rva: dispatcher.u64()?,
+            bytes: dispatcher.array()?,
+        };
+        let expected = forge::decode(&bytes[REQUEST_SIZE..])?.ok_or(ProtocolError::InvalidData)?;
+        Ok(Self::SetLevelRequirement(LevelRequirementWrite::new(dispatcher, expected_manager, expected, value)?))
+    }
+    fn decode_fixed(bytes: &[u8]) -> Result<Self, ProtocolError> {
         if bytes.len() != REQUEST_SIZE {
             return Err(ProtocolError::InvalidData);
         }
@@ -130,6 +191,61 @@ impl Request {
             }
             _ => Err(ProtocolError::InvalidData),
         }
+    }
+}
+
+/// A bounded frame length, not a decoded request. Read the complete tail before
+/// assigning helper ownership, installing a dispatcher or submitting any work.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct RequestHeader {
+    tail_len: usize,
+}
+impl RequestHeader {
+    pub fn tail_len(self) -> usize {
+        self.tail_len
+    }
+    pub fn total_len(self) -> usize {
+        REQUEST_SIZE + self.tail_len
+    }
+}
+
+/// Pure receiver state. Seen excess poisons the frame; future stream bytes
+/// cannot retroactively revoke a command already admitted as one complete frame.
+pub struct RequestFrame {
+    header: RequestHeader,
+    bytes: Vec<u8>,
+    poisoned: bool,
+}
+impl RequestFrame {
+    pub fn new(header: &[u8]) -> Result<Self, ProtocolError> {
+        let header_plan = Request::decode_header(header)?;
+        let mut bytes = Vec::with_capacity(header_plan.total_len());
+        bytes.extend_from_slice(header);
+        Ok(Self {
+            header: header_plan,
+            bytes,
+            poisoned: false,
+        })
+    }
+    pub fn remaining(&self) -> usize {
+        self.header.total_len() - self.bytes.len()
+    }
+    pub fn push(&mut self, bytes: &[u8]) -> Result<(), ProtocolError> {
+        if self.poisoned {
+            return Err(ProtocolError::InvalidData);
+        }
+        if bytes.len() > self.remaining() {
+            self.poisoned = true;
+            return Err(ProtocolError::InvalidData);
+        }
+        self.bytes.extend_from_slice(bytes);
+        Ok(())
+    }
+    pub fn finish(self) -> Result<Request, ProtocolError> {
+        if self.poisoned || self.remaining() != 0 {
+            return Err(ProtocolError::InvalidData);
+        }
+        Request::decode(&self.bytes)
     }
 }
 

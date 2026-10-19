@@ -63,6 +63,8 @@ impl RuntimeAttestation {
     /// The caller establishes every runtime, metadata, GC, method-body, real-main-thread,
     /// exclusive patch ownership and residency lifetime obligation of RemoteHelper::start
     /// for this exact process/profile and helper generation. Those obligations continue
+    /// through explicitly requested writes, including the narrow mutable Int32 level
+    /// backing-field store and exclusive rooted graph/readback ownership contract.
     /// through pending calls and helper residency, including when this guard is dropped.
     /// After a potentially submitted start, `keep_alive` remains pinned even when
     /// the last preparer/transport drops. Pre-start and factual NotSent failures
@@ -327,19 +329,11 @@ fn transport_error(error: impl std::fmt::Display, delivery: Delivery) -> Transpo
 }
 
 fn require_request_proof(request: &Request, known: Option<DispatcherSpec>, has_proof: bool) -> Result<(), BootstrapError> {
-    let requested = match request {
-        Request::Discover => return Ok(()),
-        Request::Status { dispatcher }
-        | Request::ClearHooks { dispatcher }
-        | Request::ReadForge { dispatcher }
-        | Request::ReadItemLimits { dispatcher }
-        | Request::ReadLocale { dispatcher }
-        | Request::ReadCatalogPage { dispatcher, .. } => dispatcher,
-    };
+    let Some(requested) = request.dispatcher() else { return Ok(()) };
     if !has_proof {
         return Err(BootstrapError::Invalid("request before full pristine dispatcher proof"));
     }
-    if known.as_ref() != Some(requested) {
+    if known != Some(requested) {
         return Err(BootstrapError::Invalid("request dispatcher differs from retained pristine proof"));
     }
     Ok(())

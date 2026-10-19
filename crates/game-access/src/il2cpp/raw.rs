@@ -14,7 +14,45 @@ macro_rules! opaque {
     )+ };
 }
 
-opaque!(Domain, Thread, Object, MethodInfo, Exception, Class, Type);
+opaque!(Domain, Thread, Object, MethodInfo, Exception, Class, Type, FieldInfo);
+
+pub type FieldSetValue = unsafe extern "C-unwind" fn(*mut Object, *mut FieldInfo, *mut c_void);
+
+/// The mutation export is deliberately separate from read-only runtime access.
+#[derive(Clone, Copy)]
+pub struct FieldWriteApi {
+    pub field_set_value: FieldSetValue,
+}
+
+impl FieldWriteApi {
+    /// Resolve the exact Unity 6000.4 export without performing a write.
+    ///
+    /// # Safety
+    /// The resolver must return this named export with its exact ABI, from the same live
+    /// runtime as every object/field passed to it. Code must remain loaded for all uses.
+    pub unsafe fn resolve(mut symbol: impl FnMut(&'static CStr) -> Option<NonNull<c_void>>) -> Result<Self, MissingExport> {
+        let name = c"il2cpp_field_set_value";
+        let address = symbol(name).ok_or(MissingExport(name))?;
+        Ok(Self {
+            // SAFETY: the caller establishes the named export's ABI and lifetime.
+            field_set_value: unsafe { std::mem::transmute::<*mut c_void, FieldSetValue>(address.as_ptr()) },
+        })
+    }
+
+    /// Store one exact Int32 instance field. This grants no general managed-memory access.
+    ///
+    /// # Safety
+    /// The caller must be attached to this runtime on the authorized engine thread, hold a
+    /// strong root for the live object, and exclude shutdown, graph mutation and reentrancy.
+    /// `field` must belong to the object's validated exact class and describe a mutable,
+    /// nonstatic, nonliteral, nonreadonly, nonbyref core System.Int32 (IL2CPP_TYPE_I4) field.
+    /// Its metadata and storage must be valid, and this particular mutation must be authorized.
+    /// A void export provides no failure/SEH recovery guarantee; the write is attempted at entry.
+    pub unsafe fn set_i32(&self, object: NonNull<Object>, field: NonNull<FieldInfo>, mut value: i32) {
+        // SAFETY: this per-call contract proves the exact destination and four-byte source width.
+        unsafe { (self.field_set_value)(object.as_ptr(), field.as_ptr(), (&mut value as *mut i32).cast()) };
+    }
+}
 
 pub type DomainGet = unsafe extern "C-unwind" fn() -> *mut Domain;
 pub type ThreadCurrent = unsafe extern "C-unwind" fn() -> *mut Thread;
