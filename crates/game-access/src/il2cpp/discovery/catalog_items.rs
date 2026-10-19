@@ -1,19 +1,25 @@
 //! Affix and unique identity capture from already-loaded definition assets.
 //!
-//! Ordinary numeric property presentation is copied from the ready PropertyList graph. Special
-//! property registries and game formatters remain explicit unknowns; raw display fields retain
-//! their provenance and do not stand in for generated text.
+//! Numeric presentation is copied from ready PropertyList/special registries. Ailment dictionary
+//! entries use audited framework Array.GetValue boxing; game formatters remain explicit unknowns.
+//! Raw display fields retain their provenance and do not stand in for generated text.
 
 use super::{DiscoveryError, Images, RuntimeAccess, catalog::page_bounds, forge::Root, unsupported};
 use crate::{
     catalog::{AffixDefinition, Availability, CatalogEntries, DefinitionName, DefinitionNameSource, RarityDefinition, UniqueDefinition},
-    il2cpp::AttachedThread,
+    il2cpp::{AttachedThread, raw},
 };
 
 impl RuntimeAccess {
     // These helpers inherit read_catalog_page's main-thread, nonmoving-GC, initialized-runtime,
-    // exclusive immutable graph and no-shutdown contract. They invoke no managed method bodies.
-    pub(super) unsafe fn catalog_affixes(&self, attached: &AttachedThread<'_>, images: &Images, cursor: u32) -> Result<(u32, CatalogEntries), DiscoveryError> {
+    // exclusive immutable graph and no-shutdown contract, including its audited framework boxing.
+    pub(super) unsafe fn catalog_affixes(
+        &self,
+        attached: &AttachedThread<'_>,
+        images: &Images,
+        cursor: u32,
+        api: raw::InvocationApi,
+    ) -> Result<(u32, CatalogEntries), DiscoveryError> {
         unsafe {
             let owner = self.class(images, c"", c"AffixList")?;
             let globals = self.class(images, c"LE.AssetManagement", c"GlobalAssets")?;
@@ -43,7 +49,7 @@ impl RuntimeAccess {
                 return Err(DiscoveryError::NotReady("affix definitions are empty"));
             }
             let mut entries = Vec::new();
-            let mut numeric = self.catalog_numeric(attached, images)?;
+            let mut numeric = self.catalog_numeric(attached, images, api)?;
             for index in page_bounds(total, cursor)? {
                 let definition = &definitions[index];
                 let item_types = self
@@ -76,7 +82,13 @@ impl RuntimeAccess {
         }
     }
 
-    pub(super) unsafe fn catalog_uniques(&self, attached: &AttachedThread<'_>, images: &Images, cursor: u32) -> Result<(u32, CatalogEntries), DiscoveryError> {
+    pub(super) unsafe fn catalog_uniques(
+        &self,
+        attached: &AttachedThread<'_>,
+        images: &Images,
+        cursor: u32,
+        api: raw::InvocationApi,
+    ) -> Result<(u32, CatalogEntries), DiscoveryError> {
         unsafe {
             let owner = self.class(images, c"", c"UniqueList")?;
             let master = self
@@ -96,7 +108,7 @@ impl RuntimeAccess {
                 return Err(DiscoveryError::NotReady("unique definitions are empty"));
             }
             let mut entries = Vec::new();
-            let mut numeric = self.catalog_numeric(attached, images)?;
+            let mut numeric = self.catalog_numeric(attached, images, api)?;
             for index in page_bounds(total, cursor)? {
                 let definition = &definitions[index];
                 self.exact(definition, entry)?;

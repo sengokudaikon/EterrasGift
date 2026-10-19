@@ -1,20 +1,19 @@
 {
   "date": "2026-10-19",
-  "status": "Concrete retained NativePreparer passes authored Unity startup/reuse; pure mapping/tooltip/preview models pass; no game admission policy or native writes enabled",
-  "evidence": "tools/trainer-eval/persistent-player/native-preparer-report.json",
+  "status": "All five special numeric selectors pass authored Unity validation, including ready SP43 dictionary semantics; no live catalog execution claimed",
+  "evidence": "tools/trainer-eval/persistent-player/ailment-report.json",
   "previous_protocol_session_evidence": "artifacts/trainer-eval/protocol-session-95e3d0ed64494652a50a76df25f322d9/report.json",
   "original_app_commit": "e1c1ed4",
-  "foundation_cases_stable_and_nightly_release": 317,
+  "foundation_cases_stable_and_nightly_release": 323,
   "architecture_checks": 4,
   "lifetime_compile_fail_checks_per_toolchain": 1,
-  "scope": "Only owned manifest-validated Unity 6000.4.8f1 children. The authored RuntimeAuthority is restricted to the newly spawned child; a Last Epoch authority remains required. Preparer proof precedes first Status; later exact-dispatcher requests reuse it. No actual-game access, gameplay writes or helper unload.",
+  "scope": "Only owned manifest-validated Unity 6000.4.8f1 children. Exact ready corlib Dictionary/Entry snapshots use audited nongeneric System.Array.GetValue and rooted opaque value boxes; no generic/refout ABI broadening or Rust Entry payload layout. Framework reflection/type caches, boxing/allocation and GC/profiler callbacks are authorized; no game dictionary getter/fill, Entry cctor, gameplay write or actual-game calls.",
   "persistent_helper_evidence": "tools/trainer-eval/persistent-player/report.json",
   "remaining": [
-    "Production Last Epoch runtime authority and app composition",
-    "SP43 ready dictionary adapter and its Unity-shaped cases",
-    "Native localized formatting, game BCL display parsing and detached previews",
-    "Native edit submission/full stale/readback/uncertainty/undo and hook/field services",
-    "Async UI integration"
+    "Native game localized formatting, exact display parsing and actual sampled mappings",
+    "Detached clone construction/isolation and previews",
+    "Native edits/full stale/readback/uncertainty/undo and hook/field services",
+    "Production Last Epoch authority, app composition and async UI adapters"
   ],
   "native_probe_build_report": "artifacts/trainer-eval/unity-hook-native-4b59b1ab3a164d8e9670e6cd38f9bf53/report.json",
   "native_probe_build_only": true,
@@ -22,7 +21,7 @@
   "prior_item_limits_evidence": "tools/trainer-eval/persistent-player/limits-report.json",
   "prior_value_type_evidence": "tools/trainer-eval/unity-rust-host/value-types-report.json",
   "live_checkpoint_workspace_log": "artifacts/trainer-eval/locale-live-verify.log",
-  "workspace_verification_log": "artifacts/trainer-eval/native-preparer-verify.log",
+  "workspace_verification_log": "artifacts/trainer-eval/ailment-verify.log",
   "actor_tests": 19,
   "connector_tests": 15,
   "core_cases_stable": 39,
@@ -33,5 +32,7 @@
   "special_numeric_unit_tests": 15,
   "lease_progress_tests": 17,
   "native_host_tests": 12,
-  "pure_mapping_tests": 25
+  "pure_mapping_tests": 25,
+  "ailment_unit_tests": 5,
+  "invocation_tests": 16
 }

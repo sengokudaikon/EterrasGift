@@ -10,7 +10,7 @@ contracts from already validated lower layers; unsupported capabilities must sta
 | Offline admission and serialized sessions | Player.log plus independent helper guards, identity binding, no uncertain replay, cancellation and cleanup tests. |
 | Owned forge, locale and limits | Both authored routes and live protocol 24 evidence. |
 | Definitions and resolved names | Protocol 25 authored pages, total/locale/duplicate checks, provenance, separate raw snapshots and bounded cache. Live catalog not yet claimed. |
-| Complete numeric metadata and game formatting | Ordinary properties plus Ability/Player/Tracker/IdolAltar selectors pass all three authored routes. SP43's ready ailment-cache semantics remain unavailable. Generated names, localized rarity names and actual tooltip/roll mapping still require implementation and validation. |
+| Complete numeric metadata and game formatting | Ordinary properties and all five special selectors pass all four authored routes, including SP43's ready ailment dictionary. Generated names, localized rarity names and actual tooltip/roll mapping still require implementation and validation. |
 | Application worker and observable state | Serialized actor and safe session connector pass 34 focused lifecycle/admission tests. Nonblocking commands, generation-bound publication, cache states and cleanup barriers exist. Capture progress is observable and a cleanup intent stops between completed requests without losing cleanup authority. Inert log factory and watcher-input adapter pass two tests; production preparer and UI adapters still need composition. |
 | Production helper preparation/bootstrap | `eg-trainer-host` implements the retained HelperPreparer/VerifiedTransport, with explicit unsafe per-target RuntimeAttestation. The fourth authored route reuses one helper across three preparations and a new session after disconnect. Twelve host tests cover admission, no-replay/panic fences, guard retention and exact dispatcher proof. Windows remote start/stop remains validated; a production Last Epoch authority and app composition remain required. |
 | Feature hooks and field editors | Require exact target/body contracts, wanted-state synchronization and independent owner/offline cleanup. Enabling features is currently unsupported. |
@@ -39,3 +39,10 @@ composition and pure sampled mapping/tooltip/preview models. All four authored r
 main-thread commands; 317 foundation tests pass both toolchains. Actual game formatting, a display parser and native
 mapping/preview requests remain disabled. The mapping builder requires all 256 captured display samples and pins
 full observation/query/context/language/unit; its injected parser grants no host/game locale parity by itself.
+
+The [ailment checkpoint](../tools/trainer-eval/persistent-player/ailment-report.json) completes the five special
+numeric selectors with extraction version 4. Four real standalone GC configurations prove opaque generic Entry
+boxing/child rooting through the existing nongeneric Array.GetValue interface. The full Unity adapter then passes
+12 valid/local scenarios and seven malformed dictionary cases through every startup route (440 requests, 392
+main-thread commands each). The 323 foundation tests pass stable/nightly release. Destroyed native wrappers and
+custom comparers remain explicitly unavailable; no game dictionary getter or cache-fill routine is called.

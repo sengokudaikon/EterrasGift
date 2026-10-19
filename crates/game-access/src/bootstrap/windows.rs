@@ -689,7 +689,9 @@ impl RemoteHelper {
     /// runtime with the exact admitted GameAssembly/UnityPlayer artifact and method bodies,
     /// nonmoving GC/modern handles, live metadata, and all helper runtime, dispatcher, invocation
     /// and exclusive-patch-ownership contracts. The nominated held thread is the real engine
-    /// main thread; its OS description is only corroboration. Every module, native runtime and
+    /// main thread. Catalog admission includes the audited corlib Array.GetValue reflection,
+    /// boxing/type-cache and GC/profiler effects, with Entry initializers rejected. The thread's
+    /// OS description is only corroboration. Every module, native runtime and
     /// method body remains loaded/unchanged through all pending calls and helper residency.
     /// No other actor may load/unload/patch helper or admitted modules during preflight/start.
     /// Caller also excludes nonstandard/renamed existing helpers; the module-name checks below

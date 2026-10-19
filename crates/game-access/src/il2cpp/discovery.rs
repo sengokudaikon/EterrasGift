@@ -15,6 +15,7 @@ use std::{
 };
 
 mod catalog;
+mod catalog_ailment;
 mod catalog_items;
 mod catalog_numeric;
 mod forge;

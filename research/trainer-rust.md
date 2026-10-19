@@ -242,3 +242,16 @@ No native formatting/mapping/preview/write requests are enabled. Value parameter
 runtime_invoke is not managed ref/out; tooltip SlotType fits the existing enum subset.
 Byte-clone constructors and object_new can initialize classes/refresh private state, so
 allocation is not an inert byte-copy contract and raw ForgeSnapshot alone cannot reproduce it.
+
+## Ready ailment dictionary checkpoint (2026-10-19)
+
+[Ailment evidence](../tools/trainer-eval/persistent-player/ailment-report.json): all five special
+numeric selectors pass authored coverage, extraction version4. Existing nongeneric Array.GetValue
+returns a rooted opaque generic Entry box, avoiding generic ABI/struct layout expansion. Four real
+standalone GC configurations pass; twelve Unity cache/liveness scenarios and seven malformed
+dictionary cases pass all four startup routes (440 requests,392 main-thread commands each).
+323 foundation tests pass both toolchains. No actual-game calls or gameplay writes occur.
+StaticGetValue reads storage after metadata field setup; static GetValueObject can run a cctor.
+Destroyed native wrappers/custom comparers remain explicit unavailable cases; legacy destroyed
+wrapper field access is deliberately stricter here. Localized formatting, sampled values, private
+clones/previews, edits/hooks/fields, game authority and UI adapters remain required.

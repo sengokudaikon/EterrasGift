@@ -1,4 +1,4 @@
-//! Source-bound numeric property capture without managed calls or lazy singleton initialization.
+//! Source-bound numeric capture from ready registries; only audited framework boxing is invoked.
 
 use super::{
     Class, DiscoveryError, Images, RuntimeAccess,
@@ -7,7 +7,7 @@ use super::{
 };
 use crate::{
     catalog::{AffixTier, Availability, MAX_DESCRIPTIONS, MAX_DISPLAY_ORDER, MAX_PROPERTIES, NumericProperty, UniqueNumericData},
-    il2cpp::AttachedThread,
+    il2cpp::{AttachedThread, raw},
 };
 use std::{collections::BTreeMap, ffi::CStr};
 
@@ -41,6 +41,8 @@ pub(super) struct PropertyCatalog<'a, 'r> {
     images: Option<Images>,
     special: BTreeMap<u8, Availability<SpecialRegistry<'a, 'r>>>,
     special_roots: usize,
+    invocation: Option<raw::InvocationApi>,
+    ailments: Option<Availability<super::catalog_ailment::AilmentSnapshot<'a, 'r>>>,
 }
 
 enum SpecialRegistry<'a, 'r> {
@@ -109,10 +111,19 @@ fn ordinary_property(property: u8) -> bool {
 impl RuntimeAccess {
     // Helpers inherit read_catalog_page's initialized main-thread/exclusive graph contract.
     // Missing optional PropertyList is a capability absence; a present malformed type is not.
-    pub(super) unsafe fn catalog_numeric<'a, 'r>(&self, attached: &'a AttachedThread<'r>, images: &Images) -> Result<NumericCapture<'a, 'r>, DiscoveryError> {
+    pub(super) unsafe fn catalog_numeric<'a, 'r>(
+        &self,
+        attached: &'a AttachedThread<'r>,
+        images: &Images,
+        api: raw::InvocationApi,
+    ) -> Result<NumericCapture<'a, 'r>, DiscoveryError> {
         // SAFETY: same initialized-runtime and immutable admitted graph as this helper's caller.
+        let mut properties = unsafe { self.catalog_properties(attached, images)? };
+        if let Availability::Available(properties) = &mut properties {
+            properties.invocation = Some(api);
+        }
         Ok(NumericCapture {
-            properties: unsafe { self.catalog_properties(attached, images)? },
+            properties,
             budget: NumericBudget::new(),
         })
     }
@@ -307,6 +318,8 @@ impl RuntimeAccess {
                 }),
                 special: BTreeMap::new(),
                 special_roots: 0,
+                invocation: None,
+                ailments: None,
             }))
         }
     }
@@ -407,7 +420,7 @@ impl RuntimeAccess {
 
     // Registry storage is inspected lazily, only for a requested special SP. Every selected
     // object is rooted before further metadata/GC calls and stays rooted with its parents.
-    unsafe fn catalog_optional_class(&self, images: &Images, namespace: &CStr, name: &CStr) -> Result<Option<Class>, DiscoveryError> {
+    pub(super) unsafe fn catalog_optional_class(&self, images: &Images, namespace: &CStr, name: &CStr) -> Result<Option<Class>, DiscoveryError> {
         unsafe {
             let mut owner = (self.class_from_name)(images.game, namespace.as_ptr(), name.as_ptr());
             for image in &images.all {
@@ -569,7 +582,36 @@ impl RuntimeAccess {
     ) -> Result<Availability<SelectedInfo<'a, 'r>>, DiscoveryError> {
         unsafe {
             if raw.property == 43 {
-                return Ok(unavailable("SP43 requires the game's initialized ailment dictionary-cache semantics"));
+                let Some(images) = &properties.images else {
+                    return Ok(unavailable("Ailment metadata is unavailable"));
+                };
+                let Some(api) = properties.invocation else {
+                    return Ok(unavailable("Ailment array-box invocation is not admitted"));
+                };
+                if properties.ailments.is_none() {
+                    properties.ailments = Some(self.catalog_ailments(attached, images, api)?);
+                }
+                let snapshot = match properties.ailments.as_mut().expect("just cached or already present") {
+                    Availability::Available(value) => value,
+                    Availability::Unavailable { reason } => return Ok(unavailable(reason.clone())),
+                };
+                let selected = match self.catalog_ailment_effect(attached, images, snapshot, raw.special_tag)? {
+                    Availability::Available(value) => value,
+                    Availability::Unavailable { reason } => return Ok(unavailable(reason)),
+                };
+                let root = properties
+                    .definitions
+                    .iter()
+                    .find(|(property, _)| *property == selected)
+                    .map(|(_, root)| root)
+                    .or(properties.default.as_ref());
+                let Some(root) = root else {
+                    return Ok(unavailable("Selected ailment stat info and default are absent"));
+                };
+                return Ok(Availability::Available(SelectedInfo {
+                    root: attached.root(target(root)?)?,
+                    stat_overrides: true,
+                }));
             }
             if matches!(raw.property, 98 | 123 | 130) && raw.tags < 0 {
                 return Ok(unavailable("The game's indexed property-info getter throws for negative tags"));
@@ -918,6 +960,8 @@ mod tests {
                 images: None,
                 special: BTreeMap::new(),
                 special_roots: 0,
+                invocation: None,
+                ailments: None,
             }
         }
     }

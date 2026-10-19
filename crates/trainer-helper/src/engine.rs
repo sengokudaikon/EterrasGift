@@ -195,7 +195,10 @@ unsafe fn read_catalog_page(kind: eg_game_access::catalog::CatalogKind, cursor: 
     // SAFETY: same captured main-thread/runtime ownership as read_locale. Catalog capture
     // copies only the audited, already-published definition graphs; it never starts asset
     // loading, invokes item builders, or changes gameplay state. Locale getter effects are
-    // covered by read_locale's contract. Every pointer stays inside this bounded operation.
+    // covered by read_locale's contract. The admitted catalog contract also permits the exact
+    // corlib Array.GetValue(Int32) reflection/type-cache, allocation/boxing and GC/profiler
+    // effects for a ready ailment cache; Entry initializers and dictionary getters are refused.
+    // Every pointer stays inside this bounded operation.
     unsafe {
         let result = (|| {
             let module = module().map_err(|error| server::failure(ResponseCode::Failed, error))?;

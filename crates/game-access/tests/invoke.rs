@@ -875,3 +875,38 @@ fn default_bind_still_rejects_enums_and_explicit_contracts_do_not_enable_generic
     ));
     assert_eq!(calls(), 0);
 }
+
+#[test]
+fn nongeneric_object_return_keeps_a_closed_generic_value_box_rooted_without_payload_exposure() {
+    let runtime = context();
+    let attached = runtime.attach().unwrap();
+    // SAFETY: authored nongeneric Array-like method returns Object; actual result is a generic box.
+    let context = unsafe { InvocationContext::new(&attached, invocation_api()) };
+    FAKE.with_borrow_mut(|f| {
+        f.classes.get_mut(&ARRAY).unwrap().parent = OWNER;
+        let entry = f.classes.get_mut(&STRUCT).unwrap();
+        entry.parent = OWNER;
+        entry.inflated = true;
+    });
+    let array = object(ARRAY, 0);
+    let entry = object(STRUCT, 0x1234);
+    let metadata = method(&[(8, false)], (0x1c, false));
+    change_method(metadata, |method| {
+        method.instance = true;
+        method.action = Action::ExpectValueReceiver(array.as_ptr().addr());
+        method.result = entry.as_ptr().addr();
+    });
+    // SAFETY: the receiver and method are live objects/metadata from this fake engine.
+    let array_root = unsafe { attached.root(array) }.unwrap();
+    let method = unsafe { context.bind(metadata) }.unwrap();
+    let result = method.invoke(Some(&array_root), &mut [Argument::Scalar(Scalar::I32(0))]).unwrap();
+    let InvocationOutcome::Returned(ReturnValue::Reference(Some(entry_root))) = result else {
+        panic!("expected rooted Object box");
+    };
+    assert_eq!(entry_root.target(), Some(entry));
+    assert_eq!(FAKE.with_borrow(|f| f.unboxes), 0);
+    drop(array_root);
+    assert_eq!(handles(), 1, "the generic value box is independently rooted");
+    drop(entry_root);
+    assert_eq!(handles(), 0);
+}

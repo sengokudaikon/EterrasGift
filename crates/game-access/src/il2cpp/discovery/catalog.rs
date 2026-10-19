@@ -78,7 +78,11 @@ impl RuntimeAccess {
     /// # Safety
     /// The complete `read_game_locale` contract applies, including the exact audited locale and
     /// Application.version framework getter bodies and their permitted initialization/allocation
-    /// effects. The current thread must be the Unity main thread after its original dispatcher.
+    /// effects. SP43 capture also authorizes this artifact's audited corlib
+    /// System.Array.GetValue(Int32) body: rank/bounds/reflection checks, runtime type caches,
+    /// metadata setup, allocation/boxing and GC/profiler callbacks. Dictionary Entry class
+    /// initializers are rejected before boxing; no game dictionary getter or cache fill is called.
+    /// The current thread must be the Unity main thread after its original dispatcher.
     /// Runtime code and metadata remain initialized/loaded, and every definition graph, collection,
     /// string and Unity native object's lifetime must remain unchanged throughout this copy.
     /// Definition singleton static references must already be populated by the game. No gameplay
@@ -97,8 +101,8 @@ impl RuntimeAccess {
             let images = self.images()?;
             let (total, entries) = match kind {
                 CatalogKind::Bases => self.catalog_bases(attached, &images, cursor)?,
-                CatalogKind::Affixes => self.catalog_affixes(attached, &images, cursor)?,
-                CatalogKind::Uniques => self.catalog_uniques(attached, &images, cursor)?,
+                CatalogKind::Affixes => self.catalog_affixes(attached, &images, cursor, api)?,
+                CatalogKind::Uniques => self.catalog_uniques(attached, &images, cursor, api)?,
                 CatalogKind::Rarities => self.catalog_rarities(cursor)?,
             };
             if total == 0 {

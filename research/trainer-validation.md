@@ -714,3 +714,39 @@ alias facts needed to construct an equivalent detached graph. Those runtime clos
 The combined foundation passes 317 stable/nightly-release cases, plus one ownership compile-fail check each and four
 architecture guards. Host tests/Clippy were rerun after the final admission recheck. Workspace verification/captures
 pass; the combat capture was inspected. Exact controller/source identities and static audit paths are in the index.
+
+## SP43 ready dictionary and opaque Entry ownership (2026-10-19)
+
+The [ailment evidence](../tools/trainer-eval/persistent-player/ailment-report.json) completes all five special numeric
+selectors. The adapter observes only dictionaryInitialised=true and null-comparer ready storage. It validates exact
+closed corlib Dictionary/Entry field identities, Byte AilmentID and reference Ailment types, Int32 counters/hash/next,
+array bounds, bucket/free-chain coverage, duplicate keys/hash coherence and stable version. Entry initializers are
+refused. Cpp2IL generic field offsets are placeholder zero and are never used as payload addresses.
+
+Checked nongeneric System.Array.GetValue(Int32)->Object produces an opaque strongly rooted closed Entry box. Public
+field access then copies scalar fields and roots its value reference. This needs no generic method admission,
+managed ref/out reference support or Rust Entry layout. Exact source/native body audit permits framework reflection,
+type caches, boxing/allocation, write barriers and GC/profiler callbacks. No AilmentList getter/fill or game constructor
+runs. Four standalone real6000.4.8 configurations (stable debug/nightly release; incremental off/on3ms) pass generic
+Entry, nested child and fresh-string rooting through successive parent-root drops and full collections, plus the
+existing34 native checks and shutdown. Positive reachability does not prove eventual collection or arbitrary GC
+phase interleaving. The adapter never uses the observed24-byte/alignment8 Entry payload as a Rust layout.
+
+Full Unity-shaped execution then passes twelve valid/local scenarios and seven malformed dictionary cases through
+all four startup routes. Cached values win over the changed source list; cached null stays unavailable with no
+fallback; only a true miss selects ready GlobalAssets AilmentList.list[0]. A custom comparer remains unavailable.
+A selected destroyed Unity native object is also unavailable while its managed wrapper remains rooted; this is an
+explicit stricter liveness policy than legacy direct-field reading. Malformed present chains/counts/hash fail the
+operation and block follow-up until explicit reconnect. The unchanged owned catalog/cache survives failures.
+
+Each route accepts440 requests and completes392 main-thread commands, with no wrong-thread/failure metric, restored
+entry, stopped server, later frames, normal exit and unchanged files. The preparer retains one admitted generation;
+the direct Rust route independently checks post-stop spans. Numeric extraction version4 invalidates earlier
+capability caches. Foundation tests pass323 stable/nightly-release cases plus one ownership compile-fail check each
+and four architecture checks. Workspace verification/captures pass; the world-page capture was inspected. No actual
+game process is accessed, and native formatting/mapping/preview/write capabilities remain separate work.
+
+An installed-source check distinguishes static reads: Field::StaticGetValueInternal calls Class::SetupFields and
+copies storage without Runtime::ClassInit. Field::GetValueObject on a static field DOES call Runtime::ClassInit.
+The reader uses the former for ready static state and the latter only on validated instance reference fields.
+Public API choice therefore matters when avoiding lazy game initializers.

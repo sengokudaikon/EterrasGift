@@ -206,5 +206,13 @@ It requires exact context/language/unit/draft equality and an explicit display p
 diagnostic because their scale can differ from displayed values. No mapping/preview opcode or native formatter is
 enabled. The combined foundation passes 317 tests on stable and nightly release; 25 cover these pure mapping models.
 
+The [ailment checkpoint](../../tools/trainer-eval/persistent-player/ailment-report.json) completes all five special
+numeric selectors with extraction version 4. SP43 reads the already-initialized dictionary, validates full bucket/
+free-chain/hash/key/version coherence and roots values copied through opaque Entry boxes. Found nulls do not fall
+back; only true misses select the first ready source entry. Custom comparers and destroyed native objects are
+unavailable. All four authored startup routes pass 440 requests and 392 main-thread commands, with 323 foundation
+tests on stable and nightly release. Numeric capture now permits audited framework reflection/boxing/allocation
+and GC/profiler effects; dictionary/gameplay getters, fills and writes remain excluded.
+
 Windows API contract: [GetNamedPipeServerProcessId](https://learn.microsoft.com/en-us/windows/win32/api/winbase/nf-winbase-getnamedpipeserverprocessid).
 Tokio API usage follows the restored, pinned 1.53.3 source at `src/net/windows/named_pipe.rs`.
