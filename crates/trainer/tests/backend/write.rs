@@ -164,6 +164,32 @@ fn mismatched_connection_confirmation_is_uncertain_even_if_legacy_hash_matches()
     });
 }
 #[test]
+fn success_or_failure_code_cannot_be_reported_as_definite_level_nonexecution() {
+    run(async {
+        for code in [eg_game_access::protocol::ResponseCode::Done, eg_game_access::protocol::ResponseCode::Failed] {
+            let shared = writable();
+            let (handle, worker) = start(&shared, options(), None);
+            connected(&handle).await;
+            let plan = handle.snapshot().level_requirement_plan(17).unwrap();
+            *shared.write_result.lock().unwrap() = Some(WriteStatus::NotApplied {
+                code,
+                message: "adapter mislabeled a possibly executed operation".into(),
+            });
+            let error = command(&handle, Command::ApplyLevelRequirement(Box::new(plan))).await.unwrap_err();
+            assert_eq!(error.kind, ErrorKind::WriteUncertain);
+            assert_eq!(error.delivery, Some(Delivery::MayHaveRun));
+            let state = handle.snapshot();
+            assert_eq!(state.phase, Phase::Blocked);
+            assert!(matches!(state.last_write.unwrap().status, WriteStatus::Uncertain { .. }));
+            assert_eq!(state.forge, ForgeState::Unobserved);
+            assert!(state.undo_level_requirement.is_none());
+            command(&handle, Command::Retry).await.unwrap();
+            assert_eq!(shared.count("write"), 1);
+            shutdown(&handle, worker).await;
+        }
+    });
+}
+#[test]
 fn write_preflight_refresh_failure_releases_connection_instead_of_retaining_ready() {
     run(async {
         let shared = writable();

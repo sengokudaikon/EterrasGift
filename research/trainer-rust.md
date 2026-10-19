@@ -528,3 +528,10 @@ This closes synchronous authored bridge execution, without any original-entry
 writes, physical installation/restoration, alias inventory, production gameplay
 policy, helper capability or actual-game access. See the checked-in harness and
 its report at tools/trainer-eval/bridge-execution/.
+
+
+Level worker certainty now normalizes contradictory NotApplied{Done|Failed}
+connection results to Uncertain/MayHaveRun, matching the existing rate path.
+One full worker regression reproduces the previous incorrect nonexecution label
+and verifies blocking, no item/Undo publication and no write replay on Retry.
+Foundation509 stable/nightly; no native, wire or ABI change.

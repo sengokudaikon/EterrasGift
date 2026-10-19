@@ -773,3 +773,17 @@ This is synchronous authored bridge/foreign-unwind evidence, separate from the
 previous synthetic OS cut-point test. It performs no entry writes and establishes
 no alias inventory, physical ownership/install/restore, callback-safe offline/owner
 policy, helper capability, actual-game execution or full UI readiness.
+
+
+## Worker level-write certainty alignment, 2026-10-19
+
+A full worker regression reproduced inconsistent handling of a custom connection
+returning NotApplied with a Done/Failed response code: level writes reported
+definite nonexecution, while the rate path already rejected that contradiction.
+The level worker now retains Uncertain/MayHaveRun, blocks the session, publishes
+no item or Undo, and never resubmits the write on Retry. Both contradictory codes
+pass the new regression; all 50 worker integration tests pass. The actual Session
+classifier already preserved this distinction, so no native/protocol change is
+needed. Foundation is now 509 (514 stable/510 nightly including extra guards).
+The failing-before log and passing suites remain under artifacts/trainer-eval/
+level-certainty-*.log.

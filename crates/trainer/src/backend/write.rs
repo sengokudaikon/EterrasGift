@@ -88,6 +88,10 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
             WriteStatus::Confirmed(snapshot) if &snapshot == plan.projected() => WriteStatus::Confirmed(snapshot),
             WriteStatus::Confirmed(_) => WriteStatus::uncertain("connection returned a mismatched write confirmation"),
             WriteStatus::Pending => WriteStatus::uncertain("connection returned before write completion"),
+            WriteStatus::NotApplied {
+                code: ResponseCode::Done | ResponseCode::Failed,
+                ..
+            } => WriteStatus::uncertain("connection mislabeled a success/failure code as pre-store refusal"),
             status => status,
         };
         self.state.last_write = Some(WriteRecord {

@@ -114,3 +114,7 @@ outcomes, exact retained roots/threads and a reserved/active caller gate. Origin
 entry bytes remain unchanged. Synchronous bridge calls are now proven for the
 exact authored images; physical entry installation/restoration, alias inventory
 and gameplay owner/offline/native-lifetime admission remain open.
+
+The level worker now matches rate-write certainty for malformed adapter results:
+Done/Failed cannot be labeled a definitive pre-store refusal. Its new full worker
+regression raises the current foundation count to 509 on both toolchains.
