@@ -535,3 +535,12 @@ connection results to Uncertain/MayHaveRun, matching the existing rate path.
 One full worker regression reproduces the previous incorrect nonexecution label
 and verifies blocking, no item/Undo publication and no write replay on Retry.
 Foundation509 stable/nightly; no native, wire or ABI change.
+
+
+Static callback-offline audit: exact warmed Boolean field reader copies one byte
+without managed/runtime setup effects on its admitted branch; cold setup excluded.
+class_is_inited is size/layout warmness, NOT successful cctor completion. Offline
+character/owner/native lifetime and writer/transition exclusion remain separate.
+Current status() contract cannot be reused inside active gameplay hooks. Retained
+22-span/18-source audit adds no callable reader, target execution or production
+code. See tools/trainer-eval/bridge-execution/offline-contract-report.json.

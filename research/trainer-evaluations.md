@@ -787,3 +787,18 @@ classifier already preserved this distinction, so no native/protocol change is
 needed. Foundation is now 509 (514 stable/510 nightly including extra guards).
 The failing-before log and passing suites remain under artifacts/trainer-eval/
 level-certainty-*.log.
+
+
+## Offline callback read: static contract audit, 2026-10-19
+
+The [audit receipt](../tools/trainer-eval/bridge-execution/offline-contract-report.json)
+retains 52 analysis/source files plus their index, with 22 native body spans and
+PE offsets independently checked by ROOT. The exact warmed normal-static Boolean
+reader has an allocation-free native path; cold setup and the game getter/class
+initialization have broader effects and are not admitted in callbacks. Crucially,
+il2cpp_class_is_inited checks only size/layout initialization. Setter, inlined
+Reset and cctor writes plus seven direct caller sites do not prove all writer
+threads/async continuation affinity or whole-decision transition exclusion.
+Meaningful offline character/native lifetime/owner authority remains independent.
+No production reader/code or target execution was added. REA was unavailable;
+these are ordinary static Mono.Cecil/PE/LLVM observations of retained files.

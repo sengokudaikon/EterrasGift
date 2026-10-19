@@ -166,3 +166,27 @@ This closes the synchronous bridge-call/foreign-unwind experiment. It adds no
 entry writes, alias inventory, physical owner, runtime offline/owner-liveness
 policy, gameplay capability or actual-game execution. Physical installation and
 restoration remain unvalidated.
+
+
+## Fresh offline-flag read: static contract audit
+
+The [retained offline-read audit](../tools/trainer-eval/bridge-execution/offline-contract-report.json)
+independently binds 22 native spans and 18 SDK/original-app source snapshots.
+For the exact warm normal-static Boolean path, public static_get copies one byte
+without metadata locking, managed invocation, allocation or explicit GC/profiler
+calls. This is a narrow mechanism under valid stable metadata/storage, not callback
+authority. Cold metadata setup has locking/allocation/GC effects and remains excluded.
+
+Four obligations remain separate: layout/SetupFields warmness; successful completed
+managed initialization; meaningful current offline character/owner/generation;
+and writer/transition exclusion through the whole synchronous decision.
+il2cpp_class_is_inited reports only size_inited, explicitly permitting incomplete
+managed initialization. The game's getter can execute class initialization; it
+cannot replace the warm reader under the same contract. Setter, inlined Reset and
+cctor write the flag, and seven direct caller sites include async continuations.
+Their names do not prove thread affinity or a complete writer inventory.
+
+A false flag alone supplies no character/receiver/native lifetime or owner lease.
+RuntimeAccess::status remains forbidden in gameplay callbacks: its explicit
+after-original/no-active-hooks contract, discovery, allocation and rooting remain
+unchanged. No new reader, callback, target invocation or production code was added.

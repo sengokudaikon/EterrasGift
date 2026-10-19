@@ -118,3 +118,10 @@ and gameplay owner/offline/native-lifetime admission remain open.
 The level worker now matches rate-write certainty for malformed adapter results:
 Done/Failed cannot be labeled a definitive pre-store refusal. Its new full worker
 regression raises the current foundation count to 509 on both toolchains.
+
+
+The [offline callback contract audit](../tools/trainer-eval/bridge-execution/offline-contract-report.json)
+confirms the exact warmed scalar-read mechanism while leaving managed cctor
+completion, meaningful current offline ownership and full writer/transition
+exclusion unproved. class_is_inited is layout warmness only. Existing status()
+requires no active hooks and cannot be reused for gameplay callback admission.
