@@ -134,7 +134,7 @@ impl<T: Transport, L: LogSource> Session<T, L> {
         Ok(result)
     }
 
-    fn write_gate(&mut self, now: Timestamp) -> Result<(), SessionError> {
+    pub(super) fn write_gate(&mut self, now: Timestamp) -> Result<(), SessionError> {
         if !self.enabled {
             return Err(SessionError::Disabled);
         }
@@ -157,6 +157,11 @@ impl<T: Transport, L: LogSource> Session<T, L> {
             && record.status == WriteStatus::Pending
         {
             record.status = WriteStatus::uncertain("write future abandoned before complete confirmation; never replay");
+        }
+        if let Some(record) = &mut self.last_rate_write
+            && record.status == crate::field_writes::RateWriteStatus::Pending
+        {
+            record.status = crate::field_writes::RateWriteStatus::uncertain("rate write future abandoned before complete confirmation; never replay");
         }
     }
 }

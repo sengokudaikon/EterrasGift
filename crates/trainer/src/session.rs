@@ -1,4 +1,5 @@
 //! Serialized control session, owned observations and explicit guarded writes. No automatic retry.
+mod rate_write;
 mod write;
 use crate::{
     gate::{self, GateDecision, GatePolicy, GateVerdict, LogSource},
@@ -116,6 +117,7 @@ pub struct Session<T, L> {
     status: Option<RuntimeStatus>,
     cleanup: Cleanup,
     last_write: Option<crate::writes::WriteRecord>,
+    last_rate_write: Option<crate::field_writes::RateWriteRecord>,
 }
 impl<T: Transport, L: LogSource> Session<T, L> {
     pub fn new(target: ProcessIdentity, transport: T, log: L, profile: BuildProfile, policy: GatePolicy) -> Result<Self, SessionError> {
@@ -140,6 +142,7 @@ impl<T: Transport, L: LogSource> Session<T, L> {
             status: None,
             cleanup: Cleanup::NotNeeded,
             last_write: None,
+            last_rate_write: None,
         })
     }
     pub fn state(&self) -> SessionState {

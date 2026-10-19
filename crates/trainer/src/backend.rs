@@ -6,6 +6,7 @@
 //! suppress publication from an earlier operation, then drain it before cleanup.
 //! Watch snapshots are authoritative; broadcast events can lag and are advisory.
 mod fields;
+mod rate_write;
 mod write;
 
 use std::{
@@ -36,6 +37,7 @@ use tokio::sync::{broadcast, mpsc, oneshot, watch};
 use crate::{
     catalog::{GameCatalog, ResolvedItemName},
     catalog_cache::CatalogCache,
+    field_writes::{AttackLeechDecision, AttackLeechPlan, AttackLeechTarget, FieldPlanError, RateWriteRecord, RateWriteStatus},
     gate::{self, GateDecision, GatePolicy, GateVerdict, LogSource},
     session::{Cleanup, Session, SessionError},
     writes::{LevelRequirementPlan, WriteControl, WriteRecord, WriteStatus},
@@ -78,6 +80,16 @@ pub trait BackendConnection: Send + 'static {
     fn read_attack_leech(&mut self, _: Timestamp) -> impl Future<Output = Result<AttackLeechRead, BackendError>> + Send {
         async { Err(BackendError::blocked(ErrorKind::NotReady, "attack/leech reads are unavailable")) }
     }
+    fn supports_attack_leech_rate(&self) -> bool {
+        false
+    }
+    /// Err means submission was not attempted, unless it explicitly carries MayHaveRun.
+    /// Returned status must retain every outcome after entering transport; no retry.
+    /// Confirmed requires full projected native acknowledgement and a separate fresh
+    /// read under renewed admission. The backend separately checks its current sequence.
+    fn set_attack_leech_rate(&mut self, _: Timestamp, _: &AttackLeechPlan, _: &mut dyn WriteControl) -> impl Future<Output = Result<RateWriteStatus, BackendError>> + Send {
+        async { Err(BackendError::blocked(ErrorKind::NotReady, "attack/leech writes are unavailable")) }
+    }
     fn supports_level_requirement(&self) -> bool {
         false
     }
@@ -115,6 +127,12 @@ impl<T: Transport + Send + 'static, L: LogSource + Send + 'static> BackendConnec
     }
     async fn read_attack_leech(&mut self, now: Timestamp) -> Result<AttackLeechRead, BackendError> {
         Ok(Session::read_attack_leech(self, now).await?)
+    }
+    fn supports_attack_leech_rate(&self) -> bool {
+        true
+    }
+    async fn set_attack_leech_rate(&mut self, now: Timestamp, plan: &AttackLeechPlan, control: &mut dyn WriteControl) -> Result<RateWriteStatus, BackendError> {
+        Ok(Session::set_attack_leech_rate_controlled(self, now, plan, control).await?)
     }
     fn supports_level_requirement(&self) -> bool {
         true
@@ -249,12 +267,15 @@ pub enum Activity {
     ReadingAttackLeech,
     Refreshing,
     WritingForge,
+    WritingAttackLeech,
 }
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Capabilities {
     pub read_forge: bool,
     pub read_catalog: bool,
     pub read_attack_leech: bool,
+    /// Narrow operation support, not current observation eligibility or lifetime authority.
+    pub attack_leech_rate: bool,
     pub write_forge: bool,
     /// Operation support on this ready connection. Current item eligibility and
     /// range/observation checks still belong to level_requirement_plan.
@@ -332,9 +353,26 @@ pub struct BackendSnapshot {
     pub attack_leech: Option<AttackLeechSnapshot>,
     pub capabilities: Capabilities,
     pub last_write: Option<WriteRecord>,
+    pub last_rate_write: Option<RateWriteRecord>,
     pub undo_level_requirement: Option<crate::undo::LevelUndo>,
 }
 impl BackendSnapshot {
+    /// Pure CURRENT-player intent from the latest exact owned observation.
+    /// Caller must still submit explicitly; this provides no historical lifetime ticket.
+    pub fn attack_leech_plan(&self, target: AttackLeechTarget, value: f64) -> Result<AttackLeechDecision, FieldPlanError> {
+        let current = self.attack_leech.as_ref().ok_or(FieldPlanError::InvalidObservation)?;
+        if self.phase != Phase::Ready
+            || self.attached.as_ref() != Some(&current.process)
+            || current.generation != self.generation
+            || self
+                .runtime_status
+                .as_ref()
+                .is_none_or(|status| status.online || status.manager == 0 || status.manager != current.manager)
+        {
+            return Err(FieldPlanError::StaleObservation);
+        }
+        AttackLeechPlan::prepare(current, target, value)
+    }
     pub fn expected_observation(&self) -> Result<crate::edits::ExpectedObservation, crate::edits::EditError> {
         use crate::edits::{EditError, ExpectedObservation};
         let (
@@ -416,6 +454,7 @@ pub enum Command {
     ReadForge,
     ReadAttackLeech,
     ApplyLevelRequirement(Box<LevelRequirementPlan>),
+    SetAttackLeechRate(Box<AttackLeechPlan>),
     UndoLevelRequirement(Box<crate::undo::LevelUndo>),
     Shutdown,
 }
@@ -567,6 +606,7 @@ pub fn service<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K
         attack_leech: None,
         capabilities: Capabilities::default(),
         last_write: None,
+        last_rate_write: None,
         undo_level_requirement: None,
     };
     let (sender, commands) = mpsc::channel(32);
@@ -666,6 +706,9 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
             read_attack_leech: self.state.phase == Phase::Ready
                 && self.state.activity.is_none()
                 && self.connection.as_ref().is_some_and(BackendConnection::supports_read_attack_leech),
+            attack_leech_rate: self.state.phase == Phase::Ready
+                && self.state.activity.is_none()
+                && self.connection.as_ref().is_some_and(BackendConnection::supports_attack_leech_rate),
             level_requirement: self.state.phase == Phase::Ready
                 && self.state.activity.is_none()
                 && self.connection.as_ref().is_some_and(BackendConnection::supports_level_requirement),
@@ -778,6 +821,7 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
             Command::RefreshCatalog => self.read(true).await,
             Command::ReadForge => self.read(false).await,
             Command::ReadAttackLeech => self.read_attack_leech().await,
+            Command::SetAttackLeechRate(plan) => self.set_attack_leech_rate(*plan).await,
             Command::ApplyLevelRequirement(plan) => self.write_level_requirement(*plan).await,
             Command::UndoLevelRequirement(undo) => self.undo_level_requirement(*undo).await,
         }

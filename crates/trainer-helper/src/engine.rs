@@ -5,10 +5,11 @@ use crate::{
 use eg_game_access::{
     il2cpp::{
         ThreadContext,
-        discovery::{DiscoveryError, LevelWriteError, RuntimeAccess},
+        discovery::{AttackLeechWriteError, DiscoveryError, LevelWriteError, RuntimeAccess},
         raw::{self, ExecuteTasks, MethodInfo},
     },
     protocol::{Discovery, DispatcherSpec, Request, Response, ResponseCode},
+    rate_write::AttackLeechRateWrite,
     scheduler::{HookError, SchedulerHook},
     write::LevelRequirementWrite,
 };
@@ -159,6 +160,41 @@ unsafe fn set_level_requirement(write: &LevelRequirementWrite) -> Response {
     }
 }
 
+unsafe fn set_attack_leech_rate(write: &AttackLeechRateWrite) -> Response {
+    // SAFETY: the admitted engine main thread calls after the original dispatcher.
+    // Startup additionally authorizes this conditional CURRENT-player field change
+    // and exclusive initialized graph/scalar/native lifetime through full readback.
+    // Expected wire tokens are comparison data only; RuntimeAccess resolves and
+    // roots the current graph rather than dereferencing them. Its only returned
+    // post-setter error is Failed, which never permits retry or rollback.
+    unsafe {
+        let result = (|| {
+            let module = module().map_err(|error| server::failure(ResponseCode::NotReady, error))?;
+            let (api, access) = apis(module).map_err(|error| server::failure(ResponseCode::Refused, error))?;
+            let writer = raw::FieldWriteApi::resolve(|name| export(module, name)).map_err(|error| server::failure(ResponseCode::Refused, error.to_string()))?;
+            let thread = ThreadContext::new(api);
+            let attached = thread.attach().map_err(|error| server::failure(ResponseCode::NotReady, error.to_string()))?;
+            let observation = access
+                .set_attack_leech(&attached, writer, write.expected(), write.target(), write.desired_value())
+                .map_err(|error| {
+                    let code = match &error {
+                        AttackLeechWriteError::NotReady(_) => ResponseCode::NotReady,
+                        AttackLeechWriteError::Stale(_) => ResponseCode::StaleItem,
+                        AttackLeechWriteError::Refused(_) => ResponseCode::Refused,
+                        AttackLeechWriteError::Offline => ResponseCode::OfflineRequired,
+                        AttackLeechWriteError::Failed(_) => ResponseCode::Failed,
+                    };
+                    server::failure(code, error.to_string())
+                })?;
+            Ok::<_, Response>(Response {
+                code: ResponseCode::Done,
+                payload: eg_game_access::fields::encode(&eg_game_access::fields::AttackLeechRead::Available(observation)),
+            })
+        })();
+        result.unwrap_or_else(|error| error)
+    }
+}
+
 unsafe fn read_forge() -> Response {
     // SAFETY: called only after the engine original returns on its captured main thread.
     // The bootstrap contract retains modules/metadata and excludes concurrent graph mutation.
@@ -301,7 +337,8 @@ fn after_original(state: &Shared) {
         return;
     }
     // Independent runtime observation continues while the owning app is alive. There are no
-    // gameplay features in this slice, so offline/owner loss requires no code/field mutations.
+    // persistent gameplay hooks in this slice. Completed explicit field writes are
+    // retained; offline/owner loss does not initiate restoration or reapplication.
     // SAFETY: time query and known main-thread status contracts above.
     let tick = unsafe { GetTickCount64() };
     if tick >= NEXT_POLL.load(SeqCst) && state.metrics[11].load(SeqCst) != 0 {
@@ -323,6 +360,7 @@ fn after_original(state: &Shared) {
                 // SAFETY: the same established thread plus this narrow operation's
                 // explicit exclusive-write/root/metadata contract described above.
                 Request::SetLevelRequirement(write) => unsafe { set_level_requirement(&write) },
+                Request::SetAttackLeechRate(write) => unsafe { set_attack_leech_rate(&write) },
                 // No feature installation API exists. Empty is the truthful complete feature set.
                 Request::ClearHooks { .. } => Response {
                     code: ResponseCode::Done,
@@ -456,10 +494,14 @@ unsafe fn worker() -> Result<(), String> {
 /// game classes, and retains runtime metadata through process exit. Caller grants SchedulerHook's
 /// exclusive target/control-flow/thread-creation contracts and prevents domain teardown until shutdown.
 /// Explicit write requests additionally require permission and exclusive rooted graph ownership
-/// for the validated ItemDataUnpacked Int32 level field store and full readback. No other
-/// gameplay writes, RebuildID, getters or constructors are authorized by this operation.
-/// Attack/leech reads additionally require populated static caches and exclusive
-/// reference, scalar and Unity native-lifetime access across the rooted copy;
+/// for the validated ItemDataUnpacked Int32 level field store and full readback.
+/// Conditional current-player rate requests additionally authorize one selected
+/// CharacterStats.attackRate or BaseStats.increasedLeechRate Single store. They require
+/// populated static caches and exclusive reference, scalar and Unity native-lifetime
+/// access through the rooted comparison, store and complete readback. Expected tokens
+/// grant no historical selection, replay or lifetime authority. Other gameplay writes,
+/// RebuildID, getters and constructors are not authorized by this operation.
+/// Attack/leech reads require the same initialized caches and exclusive rooted copy;
 /// strong GC roots alone do not preserve native-object lifetime.
 /// Never call under DllMain/loader lock. No helper/code unload is allowed, including on failure.
 pub unsafe extern "C" fn eg_helper_start(main_tid: u32) -> i32 {

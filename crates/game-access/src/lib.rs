@@ -21,5 +21,6 @@ pub mod scheduler;
 pub mod pipe;
 pub mod process;
 pub mod protocol;
+pub mod rate_write;
 pub mod transport;
 pub mod write;

@@ -68,6 +68,9 @@ impl RuntimeAttestation {
     /// and through pending calls and helper residency, including when this guard is dropped.
     /// Attack/leech reads additionally require populated static caches and exclusive
     /// reference, scalar and Unity native-object lifetime access for the rooted copy.
+    /// Rate writes additionally authorize the selected CURRENT-player mutable Single field
+    /// under that same exclusive lifetime through guarded comparison, one store and readback.
+    /// Equality tokens provide no historical selection, replay or native-lifetime authority.
     /// After a potentially submitted start, `keep_alive` remains pinned even when
     /// the last preparer/transport drops. Pre-start and factual NotSent failures
     /// release it normally. Reclaiming after confirmed target exit is not implemented.

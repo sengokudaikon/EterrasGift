@@ -1,4 +1,4 @@
-//! Pure, bounded codecs for protocol27: control, observations and a narrow full-state write.
+//! Pure, bounded codecs for protocol28: control, observations and narrow conditional writes.
 //!
 //! Decoding establishes wire validity only. Process identity, helper provenance,
 //! dispatcher code, and permission to run a request belong to the session layer.
@@ -6,13 +6,14 @@
 use crate::{
     catalog::CatalogKind,
     forge,
+    rate_write::{AttackLeechRateWrite, SET_ATTACK_LEECH_RATE_OPERATION},
     write::{LevelRequirementWrite, MAX_EXPECTED_BYTES, MIN_EXPECTED_BYTES, SET_LEVEL_REQUIREMENT_OPERATION},
 };
 use std::{collections::BTreeMap, error::Error, fmt};
 
 pub const MAGIC: u32 = 0x4546_4735;
-/// Version27 adds manager-bound attack/leech field observation (23).
-pub const VERSION: u32 = 27;
+/// Version28 adds a conditional current-player attack/leech rate write (24).
+pub const VERSION: u32 = 28;
 pub const ADAPTER: &str = "il2cpp-x64-v1";
 pub const REQUEST_SIZE: usize = 336;
 pub const RESPONSE_HEADER_SIZE: usize = 12;
@@ -72,6 +73,8 @@ pub enum Request {
     },
     /// Explicit mutation; native admission compares the complete expected item.
     SetLevelRequirement(LevelRequirementWrite),
+    /// Conditional CURRENT-player intent; full expected tokens/bits, no lifetime ticket.
+    SetAttackLeechRate(AttackLeechRateWrite),
     /// Reads cached player fields only; expected_manager is an opaque identity token.
     ReadAttackLeech {
         dispatcher: DispatcherSpec,
@@ -91,6 +94,7 @@ impl Request {
             | Self::ReadCatalogPage { dispatcher, .. }
             | Self::ReadAttackLeech { dispatcher, .. } => Some(*dispatcher),
             Self::SetLevelRequirement(write) => Some(write.dispatcher()),
+            Self::SetAttackLeechRate(write) => Some(write.dispatcher()),
         }
     }
     pub fn encode(&self) -> Vec<u8> {
@@ -109,6 +113,7 @@ impl Request {
                 (21, Some(dispatcher))
             }
             Self::SetLevelRequirement(write) => return write.encode(),
+            Self::SetAttackLeechRate(write) => return write.encode(),
             Self::ReadAttackLeech { dispatcher, expected_manager } => {
                 bytes[8..16].copy_from_slice(&expected_manager.to_le_bytes());
                 (23, Some(dispatcher))
@@ -174,6 +179,9 @@ impl Request {
             return Err(ProtocolError::IncompatibleVersion);
         }
         let operation = reader.u32()?;
+        if operation == SET_ATTACK_LEECH_RATE_OPERATION {
+            return Ok(Self::SetAttackLeechRate(AttackLeechRateWrite::decode(bytes)?));
+        }
         let reserved_start = if matches!(operation, 21 | 23) { 16 } else { 8 };
         if bytes[reserved_start..48].iter().chain(&bytes[72..]).any(|byte| *byte != 0) {
             return Err(ProtocolError::InvalidData);

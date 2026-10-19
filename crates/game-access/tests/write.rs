@@ -243,7 +243,7 @@ fn minimal_schema_bound_is_exact() {
     let request = LevelRequirementWrite::new(spec(), 1, item, 0).unwrap();
     assert!(decode_frame(&request.encode()).is_ok());
     assert_eq!(REQUEST_SIZE, 336);
-    assert_eq!(eg_game_access::protocol::VERSION, 27);
+    assert_eq!(eg_game_access::protocol::VERSION, 28); // TEMP handshake draft.
 }
 #[test]
 fn projection_changes_only_requested_level_and_its_legacy_fingerprint() {

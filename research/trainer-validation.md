@@ -844,3 +844,18 @@ no exposed helper parser/mapping request and no actual-game call or BCL byte-equ
 Foundation396 passes stable/nightly release, plus one ownership compile-fail each and four architecture checks.
 Workspace lint/format/tokens/captures pass; the item-status capture was inspected. Logs are
 artifacts/trainer-eval/apply-undo-{stable,nightly}-tests.log and apply-undo-verify.log.
+
+## Conditional actor-stat writes, 2026-10-19
+
+Protocol28 and the narrow attack_leech_rate command now pass full authored helper/Session/
+worker validation. Foundation490 passes stable and nightly release; complete workspace
+verification passes. All four startup routes complete750 requests/692 main-thread commands
+with scheduler restoration, stopped server, three later frames, exit0 and unchanged files.
+Native primitive instrumentation separately proves41 cases/13 actual setter calls in each
+of four Unity/GC/toolchain configurations. Helper runs verify full ACK plus separate read,
+independent actual component bits, Pending publication and no stale-plan I/O.
+
+[Current scope and limitations](../tools/trainer-eval/persistent-player/rate-write-README.md),
+[exact build/run/source/failure index](../tools/trainer-eval/persistent-player/rate-write-report.json),
+and [primitive instrumentation](../tools/trainer-eval/rate-write-primitive/README.md) distinguish
+these proofs from actual-game mutation, gameplay hooks, broad field support and UI binding.

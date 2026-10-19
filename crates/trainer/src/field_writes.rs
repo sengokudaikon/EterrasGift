@@ -2,8 +2,8 @@
 //! `attack-leech` editor descriptors. This module performs no I/O and grants no native write authority.
 //!
 //! Bounds are the source editor's doubles, checked before its float projection. UI steps never
-//! quantize an input. Unlike the legacy native range comparison alone, nonfinite inputs are rejected
-//! explicitly. The source's `shortestDecimal(float)` is a display conversion: widening an f32 to f64
+//! quantize an input. Nonfinite inputs are rejected as in the original runFields entrypoint.
+//! The source's `shortestDecimal(float)` is a display conversion: widening an f32 to f64
 //! is not the same decimal that the user typed (e.g. 1.1 or the 0.01 lower bound). Neither display text
 //! nor widened decimal equality replaces raw-bit observation comparisons.
 //!
@@ -166,4 +166,25 @@ impl AttackLeechPlan {
             Err(FieldPlanError::StaleObservation)
         }
     }
+}
+
+/// Outcome for the narrow current-player rate operation, separate from forge writes.
+/// Pending is set before transport; abandoning its future never proves nonexecution.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum RateWriteStatus {
+    Pending,
+    Confirmed(AttackLeechObservation),
+    NotApplied { code: eg_game_access::protocol::ResponseCode, message: String },
+    Uncertain { message: String },
+}
+impl RateWriteStatus {
+    pub fn uncertain(message: impl Into<String>) -> Self {
+        Self::Uncertain { message: message.into() }
+    }
+}
+/// Owned historical outcome. No roots, native pointers, Undo or replay authority.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RateWriteRecord {
+    pub plan: AttackLeechPlan,
+    pub status: RateWriteStatus,
 }

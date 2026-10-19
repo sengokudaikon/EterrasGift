@@ -223,7 +223,7 @@ fn text(out: &mut Vec<u8>, value: &str) {
 
 /// Independently authored native appendInt/appendText wire format.
 fn discovery_payload(keys: &[&str]) -> Vec<u8> {
-    let mut out = 27_i32.to_le_bytes().to_vec();
+    let mut out = 28_i32.to_le_bytes().to_vec();
     text(&mut out, &"aB12".repeat(16));
     text(&mut out, "il2cpp-x64-v1");
     out.extend_from_slice(&678_i32.to_le_bytes());

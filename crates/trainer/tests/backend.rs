@@ -10,8 +10,11 @@ use std::{
 };
 #[path = "backend/fields.rs"]
 mod fields;
+#[path = "backend/rate_write.rs"]
+mod rate_writes;
 #[path = "backend/write.rs"]
 mod writes;
+use eg_trainer::field_writes::{AttackLeechDecision, AttackLeechPlan, AttackLeechTarget, RateWriteStatus};
 use eg_trainer::writes::{LevelRequirementPlan, WriteControl, WriteStatus};
 
 use eg_core::game_log::{GameLogState, GameLogStatus, GameReadiness};
@@ -117,6 +120,11 @@ struct Shared {
     forge_block: Block,
     disconnect_block: Block,
     write_block: Block,
+    refresh_block: Block,
+    rate_write_block: Block,
+    rate_readback_block: Block,
+    rate_write_enabled: AtomicBool,
+    rate_write_result: Mutex<Option<Result<RateWriteStatus, BackendError>>>,
     write_enabled: AtomicBool,
     attack_leech_enabled: AtomicBool,
     attack_leech_read: Mutex<eg_game_access::fields::AttackLeechRead>,
@@ -145,6 +153,11 @@ impl Shared {
             forge_block: Block::default(),
             disconnect_block: Block::default(),
             write_block: Block::default(),
+            refresh_block: Block::default(),
+            rate_write_block: Block::default(),
+            rate_readback_block: Block::default(),
+            rate_write_enabled: AtomicBool::new(false),
+            rate_write_result: Mutex::new(None),
             write_enabled: AtomicBool::new(false),
             attack_leech_enabled: AtomicBool::new(false),
             attack_leech_read: Mutex::new(eg_game_access::fields::AttackLeechRead::Unavailable(
@@ -215,7 +228,7 @@ impl BackendConnection for Connection {
         &self.target
     }
     async fn refresh(&mut self, _: Timestamp) -> Result<RuntimeStatus, BackendError> {
-        self.shared.record("refresh");
+        self.shared.call("refresh", &self.shared.refresh_block).await;
         if let Some(error) = self.shared.read_errors.lock().unwrap().pop_front() {
             return Err(error);
         }
@@ -241,6 +254,33 @@ impl BackendConnection for Connection {
     async fn read_attack_leech(&mut self, _: Timestamp) -> Result<eg_game_access::fields::AttackLeechRead, BackendError> {
         self.shared.call("attack-leech", &self.shared.attack_leech_block).await;
         Ok(*self.shared.attack_leech_read.lock().unwrap())
+    }
+    fn supports_attack_leech_rate(&self) -> bool {
+        self.shared.rate_write_enabled.load(Ordering::SeqCst)
+    }
+    async fn set_attack_leech_rate(&mut self, _: Timestamp, plan: &AttackLeechPlan, control: &mut dyn WriteControl) -> Result<RateWriteStatus, BackendError> {
+        if !control.allowed() {
+            return Err(BackendError::blocked(ErrorKind::Superseded, "cleanup before rate submission"));
+        }
+        self.shared.call("rate-write", &self.shared.rate_write_block).await;
+        let result = self
+            .shared
+            .rate_write_result
+            .lock()
+            .unwrap()
+            .take()
+            .unwrap_or_else(|| Ok(RateWriteStatus::Confirmed(*plan.projected())));
+        if let Ok(RateWriteStatus::Confirmed(actual)) = &result {
+            // Scripted connection only: model Session's ACK/fresh-read boundary;
+            // this does not claim native ACK or actual IL2CPP execution.
+            *self.shared.attack_leech_read.lock().unwrap() = eg_game_access::fields::AttackLeechRead::Available(*actual);
+            self.shared.record("rate-ack");
+            if !control.allowed() {
+                return Ok(RateWriteStatus::uncertain("cleanup after ACK before independent read"));
+            }
+            self.shared.call("rate-confirmation-read", &self.shared.rate_readback_block).await;
+        }
+        result
     }
     async fn set_level_requirement(&mut self, _: Timestamp, plan: &LevelRequirementPlan, control: &mut dyn WriteControl) -> Result<WriteStatus, BackendError> {
         if !control.allowed() {

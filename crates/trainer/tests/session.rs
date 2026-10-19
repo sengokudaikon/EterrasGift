@@ -1,6 +1,8 @@
 //! Session admission uses owned artifacts and scripted services; no game is opened.
 #[path = "session/fields.rs"]
 mod fields;
+#[path = "session/rate_write.rs"]
+mod rate_writes;
 #[path = "session/write.rs"]
 mod writes;
 use eg_core::game_log::{GameLogEvent, GameLogState, GameLogStatus, GameReadiness, LoggedCharacter};

@@ -190,7 +190,7 @@ pub fn decode(bytes: &[u8]) -> Result<AttackLeechRead, ProtocolError> {
     }
 }
 
-/// TEMP one-field target only; no wire operation is enabled.
+/// Selected field for a conditional CURRENT-player operation; never lifetime or replay authority.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum AttackLeechTarget {
     AttackRate,

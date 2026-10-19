@@ -10,10 +10,10 @@ contracts from already validated lower layers; unsupported capabilities must sta
 | Offline admission and serialized sessions | Player.log plus independent helper guards, identity binding, no uncertain replay, cancellation and cleanup tests. |
 | Owned forge, locale and limits | Both authored routes and live protocol 24 evidence. |
 | Definitions and resolved names | Protocol 25 authored pages, total/locale/duplicate checks, provenance, separate raw snapshots and bounded cache. Live catalog not yet claimed. |
-| Complete numeric metadata and game formatting | Ordinary properties and all five special selectors pass all four authored routes, including SP43's ready ailment dictionary. Generated names, localized rarity names and actual tooltip/roll mapping still require implementation and validation. |
-| Application worker and observable state | Actor and connector pass46 focused lifecycle/admission tests. Real authored Unity worker Apply/readback/Undo and cleanup pass all four startup routes. Nonblocking commands, generation-bound publication, cache states, capture progress and cleanup barriers exist. Inert log factory/watcher adapter pass two tests; app/UI composition remains open. |
+| Complete numeric metadata and game formatting | Ordinary properties and all five special selectors pass all four authored routes, including SP43. Text-only formatting and exact-provider parsing pass authored four-mode ABI/root proofs. Context capture/composition, actual-game arithmetic, generated/localized names, descriptions and tooltip/roll mapping remain open. |
+| Application worker and observable state | Real authored worker level Apply/Undo and conditional rate writes pass all four startup routes, with Pending publication, separate confirmation reads and cleanup barriers. Nonblocking commands, generation-bound state, cache/progress and inert log adapters exist. Worker proofs use the direct verified-child Session connector; full NativePreparer-to-worker and app/UI composition remain open. |
 | Production helper preparation/bootstrap | `eg-trainer-host` implements the retained HelperPreparer/VerifiedTransport, with explicit unsafe per-target RuntimeAttestation. The fourth authored route reuses one helper across three preparations and a new session after disconnect. Twelve host tests cover admission, no-replay/panic fences, guard retention and exact dispatcher proof. Windows remote start/stop remains validated; a production Last Epoch authority and app composition remain required. |
-| Feature hooks and field editors | All76 descriptors and pure intent/value/report state are ported, with independently compiled C# parity. The source audit maps68 hook features,74 physical owners,31 patches and7 field sets. Native effects, stable field observations and physical owner/offline cleanup remain unsupported. |
+| Feature hooks and field editors | All76 descriptors and local intents have compiled C# parity. Explicit attack/leech observations and conditional one-field changes pass native/Session/worker authored proofs. The other field sets and gameplay hooks remain unsupported. The audit maps68 hooks/74 owners/31 patches/7 field sets; physical ownership and callback offline cleanup still need implementation. |
 | Forge drafts, apply, readback and undo | One level Apply/Undo path passes real worker execution on all four authored routes: full stale guard, Int32 store, native ACK plus separate ReadForge, retained reverse plan, uncertainty and cleanup. Pure planning exists for seven edit kinds. Other native edits, multi-edit batches and the full draft/Undo workflow remain required. |
 | UI adapter and captures | Existing Slint views use stand-ins. Connect owned state/commands after backend contracts pass; do not perform synchronous capture/bootstrap on the Slint thread. |
 
@@ -59,3 +59,19 @@ The [standalone display parser](../tools/trainer-eval/unity-rust-host/display-pa
 and nightly release with incremental GC off/on using the existing checked enum/outDouble invocation contracts.
 It strips only the exact unit suffix and parses the captured culture through the matching runtime's BCL. Unity
 Mono's own parent-culture fallback remains observable. No host parser fallback or production mapping opcode exists.
+
+## Current conditional-rate checkpoint, 2026-10-19
+
+The [rate-write path](../tools/trainer-eval/persistent-player/rate-write-README.md) passes
+all four authored helper routes:750 requests/692 main-thread commands each, with exact
+current-player guards, native full ACK, separate readback, independent C# bits and worker
+Pending/sequence publication. Forge history remains independent. No generic field/hook
+capability or rate Undo is implied. The source-bound unsafe native-lifetime/main-thread
+contracts still apply; full equality is not historical selection or replay authority.
+
+Foundation490 stable/nightly plus ownership/architecture guards and full workspace
+verification pass. The numeric text/provider adapters are separately validated; exact
+format-context capture is reviewed in TEMP and awaits authored runtime validation.
+The [first gameplay-hook proposal](trainer-first-hook.md) deliberately needs a new ABI,
+physical owner and callback-admission experiment. None of this connects the existing
+Slint stand-ins or establishes actual-game writes.

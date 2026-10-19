@@ -131,7 +131,10 @@ impl RuntimeAccess {
     /// HOST observation. Full token/rawbit equality cannot rule out cross-request
     /// ABA; caller must separately establish current selection authority/ownership.
     /// A host read sequence/generation alone is insufficient. No retained observation
-    /// ticket/lifecycle mechanism is provided here and no wire exposure is authorized.
+    /// ticket/lifecycle mechanism is provided here. A containing wire operation must
+    /// independently admit its conditional CURRENT-player mutation; this primitive
+    /// and expected tokens do not grant that authority. Such an operation need not
+    /// promise historical selection continuity or request-consumption/replay state.
     /// After entering the void setter, every returned failure is uncertain; this
     /// function cannot recover arbitrary SEH/native faults, unwind or guarantee rollback.
     pub unsafe fn set_attack_leech(

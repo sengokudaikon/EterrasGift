@@ -399,3 +399,32 @@ scheduler ordering, worker integration, actual-game mutation or persistence.
 The combined foundation passes452 stable/nightly release cases plus ownership/architecture
 guards; Clippy and formatting pass. No protocol, helper endpoint, general fields or gameplay
 hook capability is added. See [primitive scope/evidence](../tools/trainer-eval/rate-write-primitive/README.md).
+
+## Conditional rate writes through the helper and worker, 2026-10-19
+
+Protocol28 now carries a strict336-byte one-field current-player request with full six-token
+and two-raw-value expectation. The main-thread helper uses the reviewed rooted Single
+primitive. Session marks Pending before transport, accepts only the full projected ACK,
+and requires a separate matching ReadAttackLeech before confirmation. Every post-attempt
+uncertainty is retained without retry. Strict Release log/profile/runtime offline admission
+applies even in Development; tokens never become addresses or historical selection tickets.
+
+The real worker validates process/generation/manager/sequence before status and submission,
+reserves the next sequence before sending, publishes Pending through confirmation and
+retains drained historical outcomes across cleanup epochs. Successful rate writes preserve
+forge history and Undo. Stale old plans perform no I/O. Generic fields/hooks remain off.
+
+All four authored bootstrap routes pass750 requests/692 main-thread commands each, including
+eight Session changes, eighteen direct refusals, three Session refusals and two real worker
+rate changes with independent C# backing-field checks. Each proves restored entry/stopped
+server, zero owner, three later frames, exit0 and unchanged files. The first105-second suite
+timeout before the rate cases is retained; a300-second total bound leaves per-request limits
+unchanged. This is authored helper/scheduler/pipe/worker evidence, not actual-game mutation.
+
+Foundation490 stable/nightly release plus ownership/architecture checks passes. Full lint,
+formatting, token and capture verification passes; captures were inspected.
+See [scope](../tools/trainer-eval/persistent-player/rate-write-README.md) and
+[exact evidence](../tools/trainer-eval/persistent-player/rate-write-report.json).
+The next [gameplay-hook hypothesis](trainer-first-hook.md) still needs its own authored
+ABI/physical ownership proof. Numeric context capture remains a separately reviewed TEMP
+candidate; no formatter/mapping wire or actual-game formatter calls are enabled.

@@ -696,6 +696,10 @@ impl RemoteHelper {
     /// a bootstrap or metadata match alone never supplies permission for that mutation.
     /// Attack/leech reads require already initialized static caches and exclude concurrent
     /// reference/scalar mutations and Unity native-object destruction throughout the rooted copy.
+    /// Conditional current-player rate writes additionally authorize the selected mutable
+    /// CharacterStats.attackRate or BaseStats.increasedLeechRate Single field, with exclusive
+    /// graph/scalar/native lifetime through comparison, one store and full readback. Expected
+    /// tokens prove neither historical selection continuity nor consumed-request/replay state.
     /// The thread's OS description is only corroboration. Every module, native runtime and
     /// method body remains loaded/unchanged through all pending calls and helper residency.
     /// No other actor may load/unload/patch helper or admitted modules during preflight/start.

@@ -1,0 +1,450 @@
+use super::*;
+use eg_game_access::fields::{AttackLeechObservation, AttackLeechRead, ObservedObjectIdentity, ObservedRate};
+use eg_trainer::backend::Activity;
+fn observed() -> AttackLeechRead {
+    let id = |n| ObservedObjectIdentity::new(n, n + 1).unwrap();
+    AttackLeechRead::Available(AttackLeechObservation {
+        manager: id(0x1000),
+        actor: id(0x2000),
+        stats: id(0x3000),
+        attack_rate: ObservedRate { raw_bits: 0x7fc12345 },
+        increased_leech_rate: ObservedRate { raw_bits: 0x80000000 },
+    })
+}
+fn writable() -> Arc<Shared> {
+    let shared = Shared::new();
+    shared.attack_leech_enabled.store(true, Ordering::SeqCst);
+    shared.rate_write_enabled.store(true, Ordering::SeqCst);
+    *shared.attack_leech_read.lock().unwrap() = observed();
+    shared
+}
+async fn prepare(handle: &BackendHandle, target: AttackLeechTarget, value: f64) -> AttackLeechPlan {
+    command(handle, Command::ReadAttackLeech).await.unwrap();
+    match handle.snapshot().attack_leech_plan(target, value).unwrap() {
+        AttackLeechDecision::Change(plan) => plan,
+        AttackLeechDecision::NoOp => panic!("test needs a change"),
+    }
+}
+#[test]
+fn only_explicit_narrow_command_writes_and_full_confirmed_observation_gets_next_sequence() {
+    run(async {
+        for (target, value) in [(AttackLeechTarget::AttackRate, 1.1), (AttackLeechTarget::IncreasedLeechRate, 0.0)] {
+            let shared = writable();
+            let (handle, worker) = start(&shared, options(), None);
+            connected(&handle).await;
+            let plan = prepare(&handle, target, value).await;
+            let state = handle.snapshot();
+            assert!(state.capabilities.attack_leech_rate);
+            assert!(!state.capabilities.fields && !state.capabilities.hooks && !state.capabilities.write_forge);
+            assert_eq!(shared.count("rate-write"), 0);
+            command(&handle, Command::SetAttackLeechRate(Box::new(plan.clone()))).await.unwrap();
+            let state = handle.snapshot();
+            let fresh = state.attack_leech.unwrap();
+            assert_eq!(fresh.read, AttackLeechRead::Available(*plan.projected()));
+            assert_eq!(fresh.sequence, plan.before().sequence + 1);
+            assert_eq!(fresh.generation, plan.before().generation);
+            assert_eq!(fresh.process, plan.before().process);
+            assert_eq!(state.last_rate_write.unwrap().status, RateWriteStatus::Confirmed(*plan.projected()));
+            assert!(state.last_write.is_none());
+            assert_eq!(shared.count("rate-write"), 1);
+            assert_eq!(shared.count("rate-confirmation-read"), 1);
+            let refreshes = shared.count("refresh");
+            assert_eq!(
+                command(&handle, Command::SetAttackLeechRate(Box::new(plan))).await.unwrap_err().kind,
+                ErrorKind::InvalidEdit
+            );
+            assert_eq!(shared.count("refresh"), refreshes);
+            assert_eq!(shared.count("rate-write"), 1);
+            shutdown(&handle, worker).await;
+        }
+    });
+}
+#[test]
+fn unavailable_capability_and_noop_intent_do_not_perform_status_or_write_io() {
+    run(async {
+        let shared = writable();
+        let (handle, worker) = start(&shared, options(), None);
+        connected(&handle).await;
+        let plan = prepare(&handle, AttackLeechTarget::AttackRate, 1.1).await;
+        shared.rate_write_enabled.store(false, Ordering::SeqCst);
+        command(&handle, Command::ReadForge).await.unwrap();
+        assert!(!handle.snapshot().capabilities.attack_leech_rate);
+        let n = shared.count("refresh");
+        assert_eq!(command(&handle, Command::SetAttackLeechRate(Box::new(plan))).await.unwrap_err().kind, ErrorKind::NotReady);
+        assert_eq!(shared.count("refresh"), n);
+        assert!(handle.snapshot().last_rate_write.is_none());
+        assert_eq!(
+            handle.snapshot().attack_leech_plan(AttackLeechTarget::IncreasedLeechRate, -0.0).unwrap(),
+            AttackLeechDecision::NoOp
+        );
+        assert_eq!(shared.count("rate-write"), 0);
+        shutdown(&handle, worker).await;
+    });
+}
+#[test]
+fn every_stale_snapshot_component_rejects_before_status_or_write_io() {
+    run(async {
+        for part in 0..14 {
+            let shared = writable();
+            let (handle, worker) = start(&shared, options(), None);
+            connected(&handle).await;
+            command(&handle, Command::ReadAttackLeech).await.unwrap();
+            let mut before = handle.snapshot().attack_leech.unwrap();
+            match part {
+                0 => before.process.pid += 1,
+                1 => before.process.created += 1,
+                2 => before.process.executable = PathBuf::from(r"C:\other\fixture.exe"),
+                3 => before.generation += 1,
+                4 => before.sequence += 1,
+                5 => {
+                    before.manager += 2;
+                    if let AttackLeechRead::Available(ref mut o) = before.read {
+                        o.manager = ObservedObjectIdentity::new(before.manager, o.manager.native_token()).unwrap();
+                    }
+                }
+                n => {
+                    let AttackLeechRead::Available(ref mut o) = before.read else { unreachable!() };
+                    let id = |i: ObservedObjectIdentity, native: bool| {
+                        ObservedObjectIdentity::new(i.wrapper_token() ^ u64::from(!native), i.native_token() ^ u64::from(native)).unwrap()
+                    };
+                    match n - 6 {
+                        0 => {
+                            before.manager = o.manager.wrapper_token() ^ 1;
+                            o.manager = id(o.manager, false)
+                        }
+                        1 => o.manager = id(o.manager, true),
+                        2 => o.actor = id(o.actor, false),
+                        3 => o.actor = id(o.actor, true),
+                        4 => o.stats = id(o.stats, false),
+                        5 => o.stats = id(o.stats, true),
+                        6 => o.attack_rate.raw_bits ^= 1,
+                        7 => o.increased_leech_rate.raw_bits ^= 1,
+                        _ => unreachable!(),
+                    }
+                }
+            }
+            let AttackLeechDecision::Change(plan) = AttackLeechPlan::prepare(&before, AttackLeechTarget::AttackRate, 1.1).unwrap() else {
+                panic!()
+            };
+            let n = shared.count("refresh");
+            assert_eq!(
+                command(&handle, Command::SetAttackLeechRate(Box::new(plan))).await.unwrap_err().kind,
+                ErrorKind::InvalidEdit
+            );
+            assert_eq!(shared.count("refresh"), n);
+            assert_eq!(shared.count("rate-write"), 0);
+            assert!(handle.snapshot().last_rate_write.is_none());
+            shutdown(&handle, worker).await;
+        }
+    });
+}
+#[test]
+fn new_publication_with_equal_bits_and_reconnect_invalidate_prior_plan_before_io() {
+    run(async {
+        let shared = writable();
+        let (handle, worker) = start(&shared, options(), None);
+        connected(&handle).await;
+        let plan = prepare(&handle, AttackLeechTarget::AttackRate, 1.1).await;
+        command(&handle, Command::ReadAttackLeech).await.unwrap();
+        let n = shared.count("refresh");
+        assert_eq!(
+            command(&handle, Command::SetAttackLeechRate(Box::new(plan.clone()))).await.unwrap_err().kind,
+            ErrorKind::InvalidEdit
+        );
+        assert_eq!(shared.count("refresh"), n);
+        command(&handle, Command::Disconnect).await.unwrap();
+        command(&handle, Command::Connect).await.unwrap();
+        let n = shared.count("refresh");
+        assert_eq!(
+            command(&handle, Command::SetAttackLeechRate(Box::new(plan))).await.unwrap_err().kind,
+            ErrorKind::InvalidEdit
+        );
+        assert_eq!(shared.count("refresh"), n);
+        assert_eq!(shared.count("rate-write"), 0);
+        shutdown(&handle, worker).await;
+    });
+}
+#[test]
+fn release_gate_blocks_development_permission_before_refresh_and_online_status_blocks_write() {
+    run(async {
+        for fault in 0..3 {
+            let shared = writable();
+            let mut config = options();
+            config.policy = GatePolicy::Development;
+            let (handle, worker) = start(&shared, config, None);
+            connected(&handle).await;
+            let plan = prepare(&handle, AttackLeechTarget::AttackRate, 1.1).await;
+            let n = shared.count("refresh");
+            if fault == 0 {
+                *shared.log.lock().unwrap() = GameLogState::missing();
+            } else if fault == 1 {
+                shared.status.lock().unwrap().online = true;
+            } else {
+                shared.status.lock().unwrap().manager = 0x9999;
+            }
+            let error = command(&handle, Command::SetAttackLeechRate(Box::new(plan))).await.unwrap_err();
+            assert_eq!(error.kind, if fault == 2 { ErrorKind::Identity } else { ErrorKind::Gate });
+            if fault == 0 {
+                assert_eq!(shared.count("refresh"), n);
+            }
+            assert_eq!(shared.count("rate-write"), 0);
+            assert!(handle.snapshot().last_rate_write.is_none());
+            assert!(handle.snapshot().attack_leech.is_none());
+            shutdown(&handle, worker).await;
+        }
+    });
+}
+#[test]
+fn pending_watch_remains_pending_through_ack_and_independent_confirmation_read() {
+    run(async {
+        let shared = writable();
+        let (handle, worker) = start(&shared, options(), None);
+        connected(&handle).await;
+        let plan = prepare(&handle, AttackLeechTarget::AttackRate, 1.1).await;
+        shared.rate_write_block.arm();
+        shared.rate_readback_block.arm();
+        let receipt = handle.try_submit(Command::SetAttackLeechRate(Box::new(plan.clone()))).unwrap();
+        shared.rate_write_block.wait_started().await;
+        let state = handle.snapshot();
+        assert_eq!(state.activity, Some(Activity::WritingAttackLeech));
+        assert_eq!(state.last_rate_write.unwrap().status, RateWriteStatus::Pending);
+        assert!(!state.capabilities.attack_leech_rate);
+        shared.rate_write_block.finish();
+        shared.rate_readback_block.wait_started().await;
+        assert_eq!(shared.count("rate-ack"), 1);
+        assert_eq!(handle.snapshot().last_rate_write.unwrap().status, RateWriteStatus::Pending);
+        assert_eq!(handle.snapshot().attack_leech.unwrap().sequence, plan.before().sequence);
+        shared.rate_readback_block.finish();
+        receipt.wait().await.unwrap();
+        assert!(matches!(handle.snapshot().last_rate_write.unwrap().status, RateWriteStatus::Confirmed(_)));
+        assert_eq!(shared.maximum.load(Ordering::SeqCst), 1);
+        shutdown(&handle, worker).await;
+    });
+}
+#[test]
+fn queued_cleanup_drains_once_retains_uncertainty_after_ack_and_suppresses_new_observation() {
+    run(async {
+        for during_read in [false, true] {
+            let shared = writable();
+            let (handle, worker) = start(&shared, options(), None);
+            connected(&handle).await;
+            let plan = prepare(&handle, AttackLeechTarget::AttackRate, 1.1).await;
+            let block = if during_read { &shared.rate_readback_block } else { &shared.rate_write_block };
+            block.arm();
+            let receipt = handle.try_submit(Command::SetAttackLeechRate(Box::new(plan.clone()))).unwrap();
+            block.wait_started().await;
+            let disable = handle.try_submit(Command::Disable).unwrap();
+            assert_eq!(shared.count("disconnect"), 0);
+            block.finish();
+            assert_eq!(receipt.wait().await.unwrap_err().kind, ErrorKind::Superseded);
+            disable.wait().await.unwrap();
+            let state = handle.snapshot();
+            assert_eq!(state.phase, Phase::Disabled);
+            assert!(state.attack_leech.is_none());
+            let status = state.last_rate_write.unwrap().status;
+            if during_read {
+                assert_eq!(status, RateWriteStatus::Confirmed(*plan.projected()));
+            } else {
+                assert!(matches!(status, RateWriteStatus::Uncertain { .. }));
+                assert_eq!(shared.count("rate-confirmation-read"), 0);
+            }
+            assert_eq!(shared.count("rate-write"), 1);
+            assert_eq!(shared.aborted.load(Ordering::SeqCst), 0);
+            shutdown(&handle, worker).await;
+        }
+    });
+}
+#[test]
+fn dropped_receipt_drains_uncertainty_blocks_and_monitor_retry_never_replays() {
+    run(async {
+        let shared = writable();
+        let (handle, worker) = start(&shared, options(), None);
+        connected(&handle).await;
+        let plan = prepare(&handle, AttackLeechTarget::AttackRate, 1.1).await;
+        *shared.rate_write_result.lock().unwrap() = Some(Ok(RateWriteStatus::uncertain("reply lost")));
+        shared.rate_write_block.arm();
+        drop(handle.try_submit(Command::SetAttackLeechRate(Box::new(plan))).unwrap());
+        shared.rate_write_block.wait_started().await;
+        shared.rate_write_block.finish();
+        wait_phase(&handle, Phase::Blocked).await;
+        assert!(matches!(handle.snapshot().last_rate_write.unwrap().status, RateWriteStatus::Uncertain { .. }));
+        assert_eq!(handle.snapshot().error.unwrap().delivery, Some(Delivery::MayHaveRun));
+        command(&handle, Command::StartMonitoring).await.unwrap();
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        command(&handle, Command::Retry).await.unwrap();
+        assert_eq!(shared.count("rate-write"), 1);
+        assert_eq!(shared.aborted.load(Ordering::SeqCst), 0);
+        shutdown(&handle, worker).await;
+    });
+}
+#[test]
+fn mismatched_or_pending_connection_results_are_uncertain_and_not_sent_is_definitive() {
+    run(async {
+        for fault in 0..6 {
+            let shared = writable();
+            let (handle, worker) = start(&shared, options(), None);
+            connected(&handle).await;
+            let plan = prepare(&handle, AttackLeechTarget::AttackRate, 1.1).await;
+            let mut wrong = *plan.projected();
+            wrong.increased_leech_rate.raw_bits ^= 1;
+            *shared.rate_write_result.lock().unwrap() = Some(match fault {
+                0 => Ok(RateWriteStatus::Confirmed(wrong)),
+                1 => Ok(RateWriteStatus::Pending),
+                2 => Err(BackendError {
+                    kind: ErrorKind::Transport,
+                    message: "may have run".into(),
+                    delivery: Some(Delivery::MayHaveRun),
+                    retry_when_waiting: true,
+                }),
+                3 => Err(BackendError::blocked(ErrorKind::NotReady, "proven pre-send refusal")),
+                _ => Ok(RateWriteStatus::NotApplied {
+                    code: if fault == 4 {
+                        eg_game_access::protocol::ResponseCode::Failed
+                    } else {
+                        eg_game_access::protocol::ResponseCode::Done
+                    },
+                    message: "invalid alleged refusal".into(),
+                }),
+            });
+            let e = command(&handle, Command::SetAttackLeechRate(Box::new(plan))).await.unwrap_err();
+            assert_eq!(e.kind, if fault == 3 { ErrorKind::WriteNotApplied } else { ErrorKind::WriteUncertain });
+            assert_eq!(handle.snapshot().phase, Phase::Blocked);
+            assert_eq!(shared.count("rate-write"), 1);
+            assert!(handle.snapshot().attack_leech.is_none());
+            shutdown(&handle, worker).await;
+        }
+    });
+}
+#[test]
+fn log_loss_after_confirmation_withholds_publication_and_keeps_uncertainty() {
+    run(async {
+        let shared = writable();
+        let (handle, worker) = start(&shared, options(), None);
+        connected(&handle).await;
+        let plan = prepare(&handle, AttackLeechTarget::AttackRate, 1.1).await;
+        shared.rate_readback_block.arm();
+        let receipt = handle.try_submit(Command::SetAttackLeechRate(Box::new(plan))).unwrap();
+        shared.rate_readback_block.wait_started().await;
+        *shared.log.lock().unwrap() = log(GameReadiness::Online);
+        shared.rate_readback_block.finish();
+        assert_eq!(receipt.wait().await.unwrap_err().kind, ErrorKind::WriteUncertain);
+        let state = handle.snapshot();
+        assert!(state.attack_leech.is_none());
+        assert!(matches!(state.last_rate_write.unwrap().status, RateWriteStatus::Uncertain { .. }));
+        assert_eq!(shared.count("disconnect"), 0);
+        shutdown(&handle, worker).await;
+    });
+}
+#[test]
+fn fresh_status_failure_or_cleanup_barrier_prevents_submission_and_releases_old_ready() {
+    run(async {
+        for barrier in [false, true] {
+            let shared = writable();
+            let (handle, worker) = start(&shared, options(), None);
+            connected(&handle).await;
+            let plan = prepare(&handle, AttackLeechTarget::AttackRate, 1.1).await;
+            if barrier {
+                shared.refresh_block.arm();
+                let receipt = handle.try_submit(Command::SetAttackLeechRate(Box::new(plan))).unwrap();
+                shared.refresh_block.wait_started().await;
+                let disable = handle.try_submit(Command::Disable).unwrap();
+                shared.refresh_block.finish();
+                assert_eq!(receipt.wait().await.unwrap_err().kind, ErrorKind::Superseded);
+                disable.wait().await.unwrap();
+            } else {
+                shared.read_errors.lock().unwrap().push_back(BackendError::blocked(ErrorKind::NotReady, "status refused"));
+                assert_eq!(command(&handle, Command::SetAttackLeechRate(Box::new(plan))).await.unwrap_err().kind, ErrorKind::NotReady);
+                assert_eq!(handle.snapshot().phase, Phase::Blocked);
+            }
+            assert_eq!(shared.count("rate-write"), 0);
+            assert!(handle.snapshot().last_rate_write.is_none());
+            assert!(handle.snapshot().attack_leech.is_none());
+            shutdown(&handle, worker).await;
+        }
+    });
+}
+
+fn both_writable() -> Arc<Shared> {
+    use eg_trainer::backend::ItemStatus;
+    let shared = Shared::new();
+    shared.write_enabled.store(true, Ordering::SeqCst);
+    let mut snapshot = ForgeSnapshot {
+        item: 0x1234,
+        individual_id: 37,
+        fingerprint: 0,
+        name: "authored mutable item".into(),
+        item_type: 3,
+        sub_type: 1,
+        rarity: 2,
+        class_requirement: 0,
+        affixes: vec![],
+        implicit_rolls: vec![],
+        identity: None,
+        status: ItemStatus {
+            forging_potential: 1,
+            forging_potential_type: 0,
+            legendary_potential: 0,
+            weavers_will: 0,
+            weavers_touch: 0,
+            corrupted: false,
+            ruined: false,
+            level_requirement: 20,
+        },
+    };
+    snapshot.fingerprint = snapshot.legacy_fingerprint();
+    *shared.forge_item.lock().unwrap() = Some(snapshot);
+    shared.attack_leech_enabled.store(true, Ordering::SeqCst);
+    shared.rate_write_enabled.store(true, Ordering::SeqCst);
+    *shared.attack_leech_read.lock().unwrap() = observed();
+    shared
+}
+
+#[test]
+fn independent_forge_and_rate_records_survive_success_and_uncertainty_in_either_order() {
+    run(async {
+        for rate_first in [false, true] {
+            let shared = both_writable();
+            let (handle, worker) = start(&shared, options(), None);
+            connected(&handle).await;
+            if rate_first {
+                let rate = prepare(&handle, AttackLeechTarget::AttackRate, 1.1).await;
+                command(&handle, Command::SetAttackLeechRate(Box::new(rate))).await.unwrap();
+                let kept = handle.snapshot().last_rate_write.unwrap();
+                let forge = handle.snapshot().level_requirement_plan(17).unwrap();
+                command(&handle, Command::ApplyLevelRequirement(Box::new(forge))).await.unwrap();
+                assert_eq!(handle.snapshot().last_rate_write, Some(kept.clone()));
+                assert!(handle.snapshot().undo_level_requirement.is_some());
+                *shared.write_result.lock().unwrap() = Some(WriteStatus::uncertain("forge uncertainty"));
+                let forge = handle.snapshot().level_requirement_plan(19).unwrap();
+                assert_eq!(
+                    command(&handle, Command::ApplyLevelRequirement(Box::new(forge))).await.unwrap_err().kind,
+                    ErrorKind::WriteUncertain
+                );
+                assert_eq!(handle.snapshot().last_rate_write, Some(kept));
+            } else {
+                let forge = handle.snapshot().level_requirement_plan(17).unwrap();
+                command(&handle, Command::ApplyLevelRequirement(Box::new(forge))).await.unwrap();
+                let kept = handle.snapshot().last_write.unwrap();
+                let undo = handle.snapshot().undo_level_requirement.unwrap();
+                let rate = prepare(&handle, AttackLeechTarget::AttackRate, 1.1).await;
+                command(&handle, Command::SetAttackLeechRate(Box::new(rate))).await.unwrap();
+                assert_eq!(handle.snapshot().last_write, Some(kept.clone()));
+                assert_eq!(handle.snapshot().undo_level_requirement, Some(undo));
+                *shared.rate_write_result.lock().unwrap() = Some(Ok(RateWriteStatus::uncertain("rate uncertainty")));
+                let rate = prepare(&handle, AttackLeechTarget::AttackRate, 1.2).await;
+                assert_eq!(
+                    command(&handle, Command::SetAttackLeechRate(Box::new(rate))).await.unwrap_err().kind,
+                    ErrorKind::WriteUncertain
+                );
+                assert_eq!(handle.snapshot().last_write, Some(kept));
+            }
+            let state = handle.snapshot();
+            assert_eq!(state.phase, Phase::Blocked);
+            assert!(state.undo_level_requirement.is_none());
+            assert_eq!(state.forge, ForgeState::Unobserved);
+            assert!(state.attack_leech.is_none());
+            assert!(state.last_rate_write.is_some() && state.last_write.is_some());
+            shutdown(&handle, worker).await;
+        }
+    });
+}
