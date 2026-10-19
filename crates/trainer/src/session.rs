@@ -5,6 +5,7 @@ use crate::{
 };
 use eg_core::game_log::GameReadiness;
 use eg_game_access::{
+    catalog::{self, CatalogKind, CatalogPage},
     definitions::{self, ItemLimits},
     forge::{self, ForgeSnapshot},
     locale::{self, GameLocale},
@@ -220,7 +221,50 @@ impl<T: Transport, L: LogSource> Session<T, L> {
     pub async fn read_locale(&mut self, now: Timestamp) -> Result<GameLocale, SessionError> {
         self.read_owned(now, |dispatcher| Request::ReadLocale { dispatcher }, locale::decode).await
     }
-    async fn read_owned<R>(&mut self, now: Timestamp, request: fn(DispatcherSpec) -> Request, decode: fn(&[u8]) -> Result<R, ProtocolError>) -> Result<R, SessionError> {
+    pub async fn read_catalog_page(&mut self, now: Timestamp, kind: CatalogKind, cursor: u32) -> Result<CatalogPage, SessionError> {
+        let page = self
+            .read_owned(now, |dispatcher| Request::ReadCatalogPage { dispatcher, kind, cursor }, catalog::decode)
+            .await?;
+        if page.kind != kind || page.cursor != cursor {
+            self.release_without_io();
+            self.state = SessionState::Blocked;
+            return Err(SessionError::Protocol(ProtocolError::InvalidData));
+        }
+        Ok(page)
+    }
+    /// Capture all definition kinds without publishing partial results. Locale/version and each
+    /// population are pinned. This relies on immutable game definition assets, not a snapshot lock.
+    pub async fn capture_catalog(&mut self, now: Timestamp) -> Result<crate::catalog::GameCatalog, SessionError> {
+        let elapsed = std::time::Instant::now();
+        let result = self.capture_catalog_inner(now, elapsed).await;
+        if result.is_err() && self.state == SessionState::Ready {
+            self.release_without_io();
+            self.state = SessionState::Blocked;
+        }
+        result
+    }
+    async fn capture_catalog_inner(&mut self, now: Timestamp, elapsed: std::time::Instant) -> Result<crate::catalog::GameCatalog, SessionError> {
+        let locale = self.read_locale(advanced(now, elapsed)?).await?;
+        let limits = self.read_item_limits(advanced(now, elapsed)?).await?;
+        let identity = crate::catalog::CatalogIdentity {
+            binary_hash: self.profile.binary_hash().into(),
+            metadata_hash: self.profile.metadata_hash().into(),
+            locale: locale.clone(),
+            extraction_version: crate::catalog::EXTRACTION_VERSION,
+        };
+        let mut builder = crate::catalog::CatalogBuilder::new(identity, limits).map_err(SessionError::Protocol)?;
+        for kind in [CatalogKind::Bases, CatalogKind::Affixes, CatalogKind::Uniques, CatalogKind::Rarities] {
+            while let Some(cursor) = builder.next_cursor(kind) {
+                let page = self.read_catalog_page(advanced(now, elapsed)?, kind, cursor).await?;
+                builder.push(page).map_err(SessionError::Protocol)?;
+            }
+        }
+        if self.read_locale(advanced(now, elapsed)?).await? != locale {
+            return Err(SessionError::Protocol(ProtocolError::InvalidData));
+        }
+        builder.finish().map_err(SessionError::Protocol)
+    }
+    async fn read_owned<R>(&mut self, now: Timestamp, request: impl FnOnce(DispatcherSpec) -> Request, decode: fn(&[u8]) -> Result<R, ProtocolError>) -> Result<R, SessionError> {
         if matches!(self.state, SessionState::Connecting | SessionState::Closing) {
             return Err(SessionError::Busy);
         }

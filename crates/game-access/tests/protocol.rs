@@ -59,7 +59,7 @@ fn requests_reject_reserved_fields_and_unsupported_operations() {
             assert!(Request::decode(&bytes).is_err(), "reserved byte {position}");
         }
     }
-    for operation in [0_u32, 1, 2, 3, 4, 5, 8, 14, 16, 17, 21, u32::MAX] {
+    for operation in [0_u32, 1, 2, 3, 4, 5, 8, 14, 16, 17, 22, u32::MAX] {
         let mut bytes = source.clone();
         bytes[4..8].copy_from_slice(&operation.to_le_bytes());
         assert!(Request::decode(&bytes).is_err());
@@ -70,6 +70,45 @@ fn requests_reject_reserved_fields_and_unsupported_operations() {
     let mut discover = Request::Discover.encode();
     discover[56] = 1;
     assert!(Request::decode(&discover).is_err());
+}
+
+#[test]
+fn catalog_query_has_two_bounded_fields_and_no_other_reserved_data() {
+    use eg_game_access::catalog::CatalogKind;
+    for kind in [CatalogKind::Bases, CatalogKind::Affixes, CatalogKind::Uniques, CatalogKind::Rarities] {
+        for cursor in [0, 16.min(kind.maximum_total()), kind.maximum_total()] {
+            let request = Request::ReadCatalogPage {
+                dispatcher: dispatcher(),
+                kind,
+                cursor,
+            };
+            let bytes = request.encode();
+            assert_eq!(u32::from_le_bytes(bytes[4..8].try_into().unwrap()), 21);
+            assert_eq!(u32::from_le_bytes(bytes[8..12].try_into().unwrap()), kind as u32);
+            assert_eq!(u32::from_le_bytes(bytes[12..16].try_into().unwrap()), cursor);
+            assert_eq!(Request::decode(&bytes), Ok(request));
+            for offset in (16..48).chain(72..REQUEST_SIZE) {
+                let mut malformed = bytes.clone();
+                malformed[offset] = 1;
+                assert_eq!(Request::decode(&malformed), Err(ProtocolError::InvalidData));
+            }
+        }
+        let bytes = Request::ReadCatalogPage {
+            dispatcher: dispatcher(),
+            kind,
+            cursor: kind.maximum_total() + 1,
+        }
+        .encode();
+        assert_eq!(Request::decode(&bytes), Err(ProtocolError::InvalidData));
+    }
+    let mut bytes = Request::ReadCatalogPage {
+        dispatcher: dispatcher(),
+        kind: CatalogKind::Bases,
+        cursor: 0,
+    }
+    .encode();
+    bytes[8..12].copy_from_slice(&u32::MAX.to_le_bytes());
+    assert_eq!(Request::decode(&bytes), Err(ProtocolError::InvalidData));
 }
 
 #[test]
@@ -158,7 +197,7 @@ fn text(out: &mut Vec<u8>, value: &str) {
 
 /// Independently authored native appendInt/appendText wire format.
 fn discovery_payload(keys: &[&str]) -> Vec<u8> {
-    let mut out = 24_i32.to_le_bytes().to_vec();
+    let mut out = 25_i32.to_le_bytes().to_vec();
     text(&mut out, &"aB12".repeat(16));
     text(&mut out, "il2cpp-x64-v1");
     out.extend_from_slice(&678_i32.to_le_bytes());
@@ -202,7 +241,7 @@ fn discovery_matches_native_handshake_and_requires_all_fields() {
 fn discovery_rejects_incompatible_and_malformed_fields() {
     let golden = discovery_payload(&KEYS);
     let mut wire = golden.clone();
-    for version in [21_i32, 22, 23, 25] {
+    for version in [21_i32, 22, 23, 24, 26] {
         wire[..4].copy_from_slice(&version.to_le_bytes());
         assert_eq!(Discovery::decode(&wire, 678), Err(ProtocolError::IncompatibleVersion));
     }

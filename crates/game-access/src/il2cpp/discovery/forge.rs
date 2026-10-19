@@ -7,10 +7,10 @@ use crate::{
 };
 use std::{ffi::CStr, ptr::NonNull};
 
-type Root<'a, 'r> = StrongRoot<'a, 'r>;
+pub(super) type Root<'a, 'r> = StrongRoot<'a, 'r>;
 
 // Private and closed: each destination type has one exact public runtime primitive class.
-trait Primitive: Copy + Default {
+pub(super) trait Primitive: Copy + Default {
     const NAME: &'static CStr;
 }
 impl Primitive for u8 {
@@ -25,11 +25,14 @@ impl Primitive for u32 {
 impl Primitive for i32 {
     const NAME: &'static CStr = c"Int32";
 }
+impl Primitive for f32 {
+    const NAME: &'static CStr = c"Single";
+}
 impl Primitive for usize {
     const NAME: &'static CStr = c"IntPtr";
 }
 
-fn target(root: &Root<'_, '_>) -> Result<NonNull<raw::Object>, DiscoveryError> {
+pub(super) fn target(root: &Root<'_, '_>) -> Result<NonNull<raw::Object>, DiscoveryError> {
     root.target().ok_or_else(|| unsupported("forge root target"))
 }
 
@@ -54,7 +57,7 @@ fn decode_text(units: &[u16]) -> Result<String, DiscoveryError> {
 
 impl RuntimeAccess {
     // All internal unsafe helpers inherit read_forge's live attached-runtime and graph access contract.
-    unsafe fn system_class(&self, name: &CStr) -> Result<Class, DiscoveryError> {
+    pub(super) unsafe fn system_class(&self, name: &CStr) -> Result<Class, DiscoveryError> {
         unsafe {
             let image = (self.corlib)();
             if image.is_null() {
@@ -68,7 +71,7 @@ impl RuntimeAccess {
         }
     }
 
-    unsafe fn instance_field(&self, object: &Root<'_, '_>, name: &CStr, expected: Class) -> Result<Ptr, DiscoveryError> {
+    pub(super) unsafe fn instance_field(&self, object: &Root<'_, '_>, name: &CStr, expected: Class) -> Result<Ptr, DiscoveryError> {
         unsafe {
             let object = target(object)?;
             let class = (self.object_class)(object.as_ptr());
@@ -84,7 +87,7 @@ impl RuntimeAccess {
         }
     }
 
-    unsafe fn field_class(&self, field: Ptr) -> Result<Class, DiscoveryError> {
+    pub(super) unsafe fn field_class(&self, field: Ptr) -> Result<Class, DiscoveryError> {
         unsafe {
             let ty = (self.field_type)(field);
             if ty.is_null() || (self.type_byref)(ty) {
@@ -98,7 +101,7 @@ impl RuntimeAccess {
         }
     }
 
-    unsafe fn primitive<T: Primitive>(&self, object: &Root<'_, '_>, name: &CStr) -> Result<T, DiscoveryError> {
+    pub(super) unsafe fn primitive<T: Primitive>(&self, object: &Root<'_, '_>, name: &CStr) -> Result<T, DiscoveryError> {
         unsafe {
             let class = self.system_class(T::NAME)?;
             let field = self.instance_field(object, name, class)?;
@@ -110,7 +113,7 @@ impl RuntimeAccess {
         }
     }
 
-    unsafe fn boolean(&self, object: &Root<'_, '_>, name: &CStr) -> Result<bool, DiscoveryError> {
+    pub(super) unsafe fn boolean(&self, object: &Root<'_, '_>, name: &CStr) -> Result<bool, DiscoveryError> {
         unsafe {
             let class = self.system_class(c"Boolean")?;
             let field = self.instance_field(object, name, class)?;
@@ -124,7 +127,7 @@ impl RuntimeAccess {
         }
     }
 
-    unsafe fn enumeration(&self, object: &Root<'_, '_>, name: &CStr, enum_name: &CStr) -> Result<i32, DiscoveryError> {
+    pub(super) unsafe fn enumeration(&self, object: &Root<'_, '_>, name: &CStr, enum_name: &CStr) -> Result<i32, DiscoveryError> {
         unsafe {
             let object_class = (self.object_class)(target(object)?.as_ptr());
             if object_class.is_null() {
@@ -157,7 +160,13 @@ impl RuntimeAccess {
         }
     }
 
-    unsafe fn reference<'a, 'r>(&self, attached: &'a AttachedThread<'r>, object: &Root<'_, '_>, name: &CStr, declared: Class) -> Result<Option<Root<'a, 'r>>, DiscoveryError> {
+    pub(super) unsafe fn reference<'a, 'r>(
+        &self,
+        attached: &'a AttachedThread<'r>,
+        object: &Root<'_, '_>,
+        name: &CStr,
+        declared: Class,
+    ) -> Result<Option<Root<'a, 'r>>, DiscoveryError> {
         unsafe {
             if declared.is_null() || (self.class_value)(declared) {
                 return Err(unsupported("forge reference field class"));
@@ -175,7 +184,7 @@ impl RuntimeAccess {
         }
     }
 
-    unsafe fn exact(&self, object: &Root<'_, '_>, expected: Class) -> Result<(), DiscoveryError> {
+    pub(super) unsafe fn exact(&self, object: &Root<'_, '_>, expected: Class) -> Result<(), DiscoveryError> {
         unsafe {
             if (self.object_class)(target(object)?.as_ptr()) != expected {
                 return Err(unsupported("unexpected forge object type"));
@@ -184,7 +193,7 @@ impl RuntimeAccess {
         }
     }
 
-    unsafe fn text(&self, attached: &AttachedThread<'_>, object: &Root<'_, '_>, name: &CStr) -> Result<String, DiscoveryError> {
+    pub(super) unsafe fn text(&self, attached: &AttachedThread<'_>, object: &Root<'_, '_>, name: &CStr) -> Result<String, DiscoveryError> {
         unsafe {
             let class = self.system_class(c"String")?;
             let Some(text) = self.reference(attached, object, name, class)? else {
@@ -208,7 +217,7 @@ impl RuntimeAccess {
         }
     }
 
-    unsafe fn array_class(&self, class: Class, element: Class) -> Result<(), DiscoveryError> {
+    pub(super) unsafe fn array_class(&self, class: Class, element: Class) -> Result<(), DiscoveryError> {
         unsafe {
             if class.is_null() || (self.class_rank)(class) != 1 || (self.type_code)((self.class_type)(class)) != 0x1d || (self.class_element)(class) != element {
                 return Err(unsupported("forge SZARRAY element/rank"));
@@ -217,7 +226,7 @@ impl RuntimeAccess {
         }
     }
 
-    unsafe fn array_count(&self, array: &Root<'_, '_>, element: Class, maximum: u32) -> Result<u32, DiscoveryError> {
+    pub(super) unsafe fn array_count(&self, array: &Root<'_, '_>, element: Class, maximum: u32) -> Result<u32, DiscoveryError> {
         unsafe {
             let object = target(array)?;
             self.array_class((self.object_class)(object.as_ptr()), element)?;

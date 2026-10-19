@@ -6,11 +6,11 @@ The app/UI do not use these services yet. The companion remains independent.
 
 ## Implemented subset
 
-Protocol 24 requests are discovery (6), status (7), clearing all gameplay hooks (15 with count 0 and **no tail**),
-the read-only forge snapshot (18), literal item limits (19), and completed locale/version capture (20).
+Protocol 25 requests are discovery (6), status (7), clearing all gameplay hooks (15 with count 0 and **no tail**),
+the read-only forge snapshot (18), literal item limits (19), completed locale/version capture (20), and catalog pages (21).
 The Rust extensions deliberately increment the handshake version, so older peers are rejected. The separate
 [Rust helper](../trainer-helper/README.md) implements the persistent server and runtime handlers.
-Item/field writes, enabling gameplay features, full definitions capture and production injection are not implemented
+Item/field writes, enabling gameplay features, complete localized formatting and production injection are not implemented
 here. `protocol::Request::decode` deliberately rejects other operations and nonzero reserved
 fields in this subset. This is not a claim to implement every operation of the original protocol.
 
@@ -50,6 +50,24 @@ Only the audited identifier/code/version getters execute; the latter permits fra
 effects. Unready data and failures revoke the session and require explicit reconnection, without automatic replay.
 The payload is two LE-u32-length strict UTF-8 texts, capped at 4096 bytes each. Language must be nonblank; an empty
 application version remains valid as in the original identity model. This is not full definitions capture.
+
+`read_catalog_page` and `capture_catalog` copy already-loaded base/subtype/implicit definitions, affix identity and
+restriction/tier metadata, and unique/set identity. Pages carry kind, cursor, total and locale/version, with at most
+16 entries and a 1 MiB payload. The complete capture pins locale and each population, rejects duplicate identities
+across pages, and checks locale again before publishing anything. A rejected page poisons the assembler; session
+failure requires an explicit reconnect. Immutable definition assets remain a runtime contract: pinned counts do not
+make this an atomic snapshot. Each request currently rehashes game artifacts; large captures need performance work.
+
+Definition names retain their source (stored display, internal name, or runtime display). Generated affix names,
+rarity names, numeric interpretation and implicit endpoint formatting are explicitly unavailable in this adapter.
+Raw implicit ranges remain available. `GameCatalog::resolve_item_name` preserves the raw forge observation and
+returns separate provenance: the runtime cache first, then a matching unique/set or base definition. A base fallback
+does not reproduce a full affixed name. The native full-name builder also writes lore and is deliberately not invoked.
+
+`CatalogCache` stores fully revalidated canonical pages with identity and SHA-256 integrity, a 64 MiB total bound,
+atomic catalog/last-key writes and three-build retention. Missing files are cache misses; corruption is explicit.
+Cache identity includes binary/metadata hashes, language, application version and extraction version. Saved data is
+never proof of current runtime verification or permission to edit. See [catalog evidence](../../tools/trainer-eval/persistent-player/catalog-report.json).
 
 Read failure drops the cached attachment and blocks further reads until an explicit new handshake. Offline-required
 revokes it as usual. A canceled read remains Connecting, with no cached runtime status, until explicit disconnect.

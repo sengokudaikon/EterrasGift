@@ -1,13 +1,14 @@
-//! Pure, bounded codecs for protocol 24: control and bounded read-only game observations.
+//! Pure, bounded codecs for protocol 25: control and bounded read-only game observations.
 //!
 //! Decoding establishes wire validity only. Process identity, helper provenance,
 //! dispatcher code, and permission to run a request belong to the session layer.
 
+use crate::catalog::CatalogKind;
 use std::{collections::BTreeMap, error::Error, fmt};
 
 pub const MAGIC: u32 = 0x4546_4735;
-/// Version 24 adds ReadLocale (20); older helpers are incompatible.
-pub const VERSION: u32 = 24;
+/// Version 25 adds paged catalog capture (21); older helpers are incompatible.
+pub const VERSION: u32 = 25;
 pub const ADAPTER: &str = "il2cpp-x64-v1";
 pub const REQUEST_SIZE: usize = 336;
 pub const RESPONSE_HEADER_SIZE: usize = 12;
@@ -59,6 +60,12 @@ pub enum Request {
     ReadLocale {
         dispatcher: DispatcherSpec,
     },
+    /// Copies at most sixteen definitions, with locale and total repeated on every page.
+    ReadCatalogPage {
+        dispatcher: DispatcherSpec,
+        kind: CatalogKind,
+        cursor: u32,
+    },
 }
 
 impl Request {
@@ -72,6 +79,11 @@ impl Request {
             Self::ReadForge { dispatcher } => (18, Some(dispatcher)),
             Self::ReadItemLimits { dispatcher } => (19, Some(dispatcher)),
             Self::ReadLocale { dispatcher } => (20, Some(dispatcher)),
+            Self::ReadCatalogPage { dispatcher, kind, cursor } => {
+                bytes[8..12].copy_from_slice(&(*kind as u32).to_le_bytes());
+                bytes[12..16].copy_from_slice(&cursor.to_le_bytes());
+                (21, Some(dispatcher))
+            }
         };
         bytes[4..8].copy_from_slice(&operation.to_le_bytes());
         if let Some(dispatcher) = dispatcher {
@@ -91,7 +103,8 @@ impl Request {
             return Err(ProtocolError::IncompatibleVersion);
         }
         let operation = reader.u32()?;
-        if bytes[8..48].iter().chain(&bytes[72..]).any(|byte| *byte != 0) {
+        let reserved_start = if operation == 21 { 16 } else { 8 };
+        if bytes[reserved_start..48].iter().chain(&bytes[72..]).any(|byte| *byte != 0) {
             return Err(ProtocolError::InvalidData);
         }
         let mut dispatcher_reader = Reader::new(&bytes[48..72]);
@@ -106,6 +119,15 @@ impl Request {
             18 => Ok(Self::ReadForge { dispatcher }),
             19 => Ok(Self::ReadItemLimits { dispatcher }),
             20 => Ok(Self::ReadLocale { dispatcher }),
+            21 => {
+                let mut query = Reader::new(&bytes[8..16]);
+                let kind = CatalogKind::try_from(query.u32()?)?;
+                let cursor = query.u32()?;
+                if cursor > kind.maximum_total() {
+                    return Err(ProtocolError::InvalidData);
+                }
+                Ok(Self::ReadCatalogPage { dispatcher, kind, cursor })
+            }
             _ => Err(ProtocolError::InvalidData),
         }
     }

@@ -2,6 +2,8 @@
 
 #![forbid(unsafe_code)]
 
+pub mod catalog;
+pub mod catalog_cache;
 pub mod dispatch;
 
 pub mod gate;

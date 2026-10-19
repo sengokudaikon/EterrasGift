@@ -1,16 +1,17 @@
 {
   "date": "2026-10-19",
-  "status": "protocol24 locale/version and literal limits pass both authored startup routes and authorized live offline reads",
-  "evidence": "tools/trainer-eval/persistent-player/locale-report.json",
+  "status": "protocol25 typed catalog capture, provenance and cache pass authored validation; prior live locale/limits evidence retained",
+  "evidence": "tools/trainer-eval/persistent-player/catalog-report.json",
   "previous_protocol_session_evidence": "artifacts/trainer-eval/protocol-session-95e3d0ed64494652a50a76df25f322d9/report.json",
   "original_app_commit": "e1c1ed4",
-  "foundation_cases_stable_and_nightly_release": 138,
+  "foundation_cases_stable_and_nightly_release": 175,
   "architecture_checks": 4,
   "lifetime_compile_fail_checks_per_toolchain": 1,
-  "scope": "Protocol24 typed completed-locale capture and literal item limits pass authored Unity and the user-authorized restarted offline game. Release policy; en/1.5.2.2, exact ranges and three identical plain-item snapshots; confirmed cleanup/restoration/server stop.",
+  "scope": "Already-published rooted definition graphs, exact metadata widths, owned canonical pages, identity-pinned complete capture, explicit unavailable formatting/numeric capabilities, separate name provenance and bounded catalog cache. No gameplay writes or item name/lore rebuild.",
   "persistent_helper_evidence": "tools/trainer-eval/persistent-player/report.json",
   "remaining": [
-    "Full localized definitions, rich descriptions/mappings, resolved item names and populated live item cases",
+    "Complete property metadata, localized formatting, rich descriptions and roll mappings",
+    "Application actor, production Rust discovery/bootstrap, cache/current verification and generation-bound state",
     "Exact enum/reference write and traced managed-reference ref/out contracts",
     "Gameplay features with independent main-thread offline/owner cleanup and acknowledgement",
     "Per-operation writes/readback and uncertain-result handling, then UI composition"
@@ -20,5 +21,6 @@
   "prior_live_forge_evidence": "tools/trainer-eval/persistent-player/forge-report.json",
   "prior_item_limits_evidence": "tools/trainer-eval/persistent-player/limits-report.json",
   "prior_value_type_evidence": "tools/trainer-eval/unity-rust-host/value-types-report.json",
-  "live_checkpoint_workspace_log": "artifacts/trainer-eval/locale-live-verify.log"
+  "live_checkpoint_workspace_log": "artifacts/trainer-eval/locale-live-verify.log",
+  "workspace_verification_log": "artifacts/trainer-eval/catalog-verify.log"
 }

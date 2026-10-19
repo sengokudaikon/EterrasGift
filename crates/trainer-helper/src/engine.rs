@@ -191,6 +191,29 @@ unsafe fn read_locale() -> Response {
     }
 }
 
+unsafe fn read_catalog_page(kind: eg_game_access::catalog::CatalogKind, cursor: u32) -> Response {
+    // SAFETY: same captured main-thread/runtime ownership as read_locale. Catalog capture
+    // copies only the audited, already-published definition graphs; it never starts asset
+    // loading, invokes item builders, or changes gameplay state. Locale getter effects are
+    // covered by read_locale's contract. Every pointer stays inside this bounded operation.
+    unsafe {
+        let result = (|| {
+            let module = module().map_err(|error| server::failure(ResponseCode::Failed, error))?;
+            let (api, access) = apis(module).map_err(|error| server::failure(ResponseCode::Failed, error))?;
+            let invocation = raw::InvocationApi::resolve(|name| export(module, name)).map_err(|error| server::failure(ResponseCode::Failed, error.to_string()))?;
+            let thread = ThreadContext::new(api);
+            let attached = thread.attach().map_err(|error| server::failure(ResponseCode::NotReady, error.to_string()))?;
+            let page = access.read_catalog_page(&attached, invocation, kind, cursor).map_err(map_discovery)?;
+            let payload = eg_game_access::catalog::encode(&page).map_err(|error| server::failure(ResponseCode::Failed, error.to_string()))?;
+            Ok::<_, Response>(Response {
+                code: ResponseCode::Done,
+                payload,
+            })
+        })();
+        result.unwrap_or_else(|error| error)
+    }
+}
+
 unsafe extern "C-unwind" fn callback(method: *const MethodInfo) {
     let state = state();
     state.metrics[2].fetch_add(1, SeqCst);
@@ -235,6 +258,7 @@ fn after_original(state: &Shared) {
                 Request::ReadForge { .. } => unsafe { read_forge() },
                 Request::ReadItemLimits { .. } => unsafe { read_item_limits() },
                 Request::ReadLocale { .. } => unsafe { read_locale() },
+                Request::ReadCatalogPage { kind, cursor, .. } => unsafe { read_catalog_page(kind, cursor) },
                 // No feature installation API exists. Empty is the truthful complete feature set.
                 Request::ClearHooks { .. } => Response {
                     code: ResponseCode::Done,

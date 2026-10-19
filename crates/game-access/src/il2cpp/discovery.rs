@@ -14,6 +14,8 @@ use std::{
     ptr::NonNull,
 };
 
+mod catalog;
+mod catalog_items;
 mod forge;
 mod limits;
 mod locale;

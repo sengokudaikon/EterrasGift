@@ -212,7 +212,8 @@ async fn serve(pid: u32, backend: &mut impl Backend, shared: &Shared) -> Result<
                         | Request::ClearHooks { dispatcher }
                         | Request::ReadForge { dispatcher }
                         | Request::ReadItemLimits { dispatcher }
-                        | Request::ReadLocale { dispatcher } => match backend.ensure_dispatcher(&dispatcher) {
+                        | Request::ReadLocale { dispatcher }
+                        | Request::ReadCatalogPage { dispatcher, .. } => match backend.ensure_dispatcher(&dispatcher) {
                             Err(error) => error,
                             Ok(()) => match backend.submit(request) {
                                 Err(error) => error,

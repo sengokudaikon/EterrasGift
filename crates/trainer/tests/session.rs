@@ -1,6 +1,7 @@
 //! Session admission uses owned artifacts and scripted services; no game is opened.
 use eg_core::game_log::{GameLogEvent, GameLogState, GameLogStatus, GameReadiness, LoggedCharacter};
 use eg_game_access::{
+    catalog::{self, CatalogEntries, CatalogKind, CatalogPage, DefinitionName, DefinitionNameSource, ItemTypeDefinition},
     definitions::{self, ItemLimits, ValueRange},
     forge::{self, AffixSnapshot, ForgeSnapshot, ItemStatus},
     locale::{self, GameLocale},
@@ -27,6 +28,213 @@ const HELPER_ID: &str = "0123456789abcdef0123456789abcdef0123456789abcdef0123456
 
 fn started() -> Timestamp {
     "2026-10-18T10:00:00Z".parse().unwrap()
+}
+
+fn catalog_page(kind: CatalogKind, cursor: u32, total: u32) -> CatalogPage {
+    CatalogPage {
+        locale: GameLocale {
+            language: "en-fixture".into(),
+            game_version: "fixture-version".into(),
+        },
+        kind,
+        cursor,
+        total,
+        entries: match kind {
+            CatalogKind::Bases => CatalogEntries::Bases(
+                (cursor..total.min(cursor + 16))
+                    .map(|id| ItemTypeDefinition {
+                        item_type: id as u8,
+                        name: DefinitionName {
+                            text: format!("Base {id}"),
+                            source: DefinitionNameSource::StoredDisplay,
+                        },
+                        sub_types: vec![],
+                    })
+                    .collect(),
+            ),
+            CatalogKind::Affixes => CatalogEntries::Affixes(vec![]),
+            CatalogKind::Uniques => CatalogEntries::Uniques(vec![]),
+            CatalogKind::Rarities => CatalogEntries::Rarities(vec![]),
+        },
+    }
+}
+
+#[test]
+fn catalog_capture_pins_identity_and_publishes_only_after_all_pages_and_final_locale() {
+    let fixture = Fixture::new();
+    let first = catalog_page(CatalogKind::Bases, 0, 17);
+    let wire = FakeTransport::new(
+        fixture.target.clone(),
+        [
+            fixture.discover(),
+            status(false, 0x1234, 0),
+            done(locale::encode(&first.locale).unwrap()),
+            done(definitions::encode(&item_limits()).unwrap()),
+            done(catalog::encode(&first).unwrap()),
+            done(catalog::encode(&catalog_page(CatalogKind::Bases, 16, 17)).unwrap()),
+            done(catalog::encode(&catalog_page(CatalogKind::Affixes, 0, 0)).unwrap()),
+            done(catalog::encode(&catalog_page(CatalogKind::Uniques, 0, 0)).unwrap()),
+            done(catalog::encode(&catalog_page(CatalogKind::Rarities, 0, 0)).unwrap()),
+            done(locale::encode(&first.locale).unwrap()),
+        ],
+    );
+    let log = FakeLog::new([offline()]);
+    let mut session = fixture.session(&wire, &log, GatePolicy::Release);
+    session.enable();
+    run(session.connect(now())).unwrap();
+    let catalog = run(session.capture_catalog(now())).unwrap();
+    assert_eq!(catalog.bases.len(), 17);
+    assert_eq!(catalog.identity.locale, first.locale);
+    assert_eq!(catalog.identity.binary_hash, fixture.profile().binary_hash());
+    assert_eq!(catalog.limits, item_limits());
+    assert_eq!(session.state(), SessionState::Ready);
+    assert_eq!(
+        wire.requests()[4],
+        Request::ReadCatalogPage {
+            dispatcher: fixture.dispatcher,
+            kind: CatalogKind::Bases,
+            cursor: 0
+        }
+    );
+    assert_eq!(
+        wire.requests()[5],
+        Request::ReadCatalogPage {
+            dispatcher: fixture.dispatcher,
+            kind: CatalogKind::Bases,
+            cursor: 16
+        }
+    );
+    assert_eq!(wire.requests().len(), 10);
+}
+
+#[test]
+fn catalog_page_binds_response_to_query_and_never_replays_or_recovers_implicitly() {
+    for fault in 0..4 {
+        let fixture = Fixture::new();
+        let log = FakeLog::new([offline()]);
+        let mut page = catalog_page(CatalogKind::Bases, 0, 17);
+        match fault {
+            0 => page = catalog_page(CatalogKind::Bases, 16, 17),
+            1 => page = catalog_page(CatalogKind::Affixes, 0, 0),
+            _ => {}
+        }
+        let reply = if fault == 2 {
+            done(vec![0xff])
+        } else if fault == 3 {
+            Step::Reply(Err(TransportError {
+                delivery: Delivery::MayHaveRun,
+                failure: TransportFailure::Timeout,
+            }))
+        } else {
+            done(catalog::encode(&page).unwrap())
+        };
+        let wire = FakeTransport::new(fixture.target.clone(), [fixture.discover(), status(false, 0x1234, 0), reply]);
+        let mut session = fixture.session(&wire, &log, GatePolicy::Release);
+        session.enable();
+        run(session.connect(now())).unwrap();
+        assert!(run(session.read_catalog_page(now(), CatalogKind::Bases, 0)).is_err());
+        assert_eq!(session.state(), SessionState::Blocked);
+        assert!(session.runtime_status().is_none());
+        assert!(run(session.capture_catalog(now())).is_err());
+        assert_eq!(wire.requests().len(), 3);
+    }
+}
+
+#[test]
+fn catalog_capture_rejects_midpage_drift_and_discards_complete_capture_after_language_change() {
+    for fault in 0..4 {
+        let fixture = Fixture::new();
+        let first = catalog_page(CatalogKind::Bases, 0, 17);
+        let mut second = catalog_page(CatalogKind::Bases, 16, 17);
+        match fault {
+            0 => second.total = 18,
+            1 => second.locale.language = "sr-Latn-RS".into(),
+            2 => {
+                if let CatalogEntries::Bases(entries) = &mut second.entries {
+                    entries[0].item_type = 0;
+                }
+            }
+            _ => {}
+        }
+        if fault == 0
+            && let CatalogEntries::Bases(entries) = &mut second.entries
+        {
+            entries.push(ItemTypeDefinition {
+                item_type: 17,
+                name: DefinitionName {
+                    text: "new base".into(),
+                    source: DefinitionNameSource::StoredDisplay,
+                },
+                sub_types: vec![],
+            });
+        }
+        let mut steps = vec![
+            fixture.discover(),
+            status(false, 0x1234, 0),
+            done(locale::encode(&first.locale).unwrap()),
+            done(definitions::encode(&item_limits()).unwrap()),
+            done(catalog::encode(&first).unwrap()),
+            done(catalog::encode(&second).unwrap()),
+        ];
+        if fault == 3 {
+            for kind in [CatalogKind::Affixes, CatalogKind::Uniques, CatalogKind::Rarities] {
+                steps.push(done(catalog::encode(&catalog_page(kind, 0, 0)).unwrap()));
+            }
+            let mut changed = first.locale.clone();
+            changed.language = "sr-Latn-RS".into();
+            steps.push(done(locale::encode(&changed).unwrap()));
+        }
+        let wire = FakeTransport::new(fixture.target.clone(), steps);
+        let log = FakeLog::new([offline()]);
+        let mut session = fixture.session(&wire, &log, GatePolicy::Release);
+        session.enable();
+        run(session.connect(now())).unwrap();
+        assert!(matches!(run(session.capture_catalog(now())), Err(SessionError::Protocol(_))));
+        assert_eq!(session.state(), SessionState::Blocked);
+        let count = wire.requests().len();
+        assert!(run(session.capture_catalog(now())).is_err());
+        assert_eq!(wire.requests().len(), count);
+    }
+}
+
+#[test]
+fn catalog_read_preserves_gate_artifact_and_cancellation_barriers() {
+    for fault in 0..3 {
+        let fixture = Fixture::new();
+        let page = catalog_page(CatalogKind::Bases, 0, 1);
+        let log = FakeLog::new([offline()]);
+        let wire = FakeTransport::new(fixture.target.clone(), [fixture.discover(), status(false, 0x1234, 0)]);
+        let mut session = fixture.session(&wire, &log, GatePolicy::Release);
+        session.enable();
+        run(session.connect(now())).unwrap();
+        if fault == 0 {
+            fs::write(&fixture.metadata, b"changed catalog metadata").unwrap();
+        }
+        if fault == 1 {
+            let changed = log.clone();
+            wire.push(Step::Action(
+                Box::new(move || changed.set(online())),
+                Response {
+                    code: ResponseCode::Done,
+                    payload: catalog::encode(&page).unwrap(),
+                },
+            ));
+        }
+        if fault == 2 {
+            wire.push(Step::Pending);
+            let mut future = Box::pin(session.read_catalog_page(now(), CatalogKind::Bases, 0));
+            let mut context = Context::from_waker(Waker::noop());
+            assert!(future.as_mut().poll(&mut context).is_pending());
+            drop(future);
+            assert_eq!(session.state(), SessionState::Connecting);
+            assert!(matches!(run(session.capture_catalog(now())), Err(SessionError::Busy)));
+        } else {
+            assert!(run(session.read_catalog_page(now(), CatalogKind::Bases, 0)).is_err());
+            assert_eq!(wire.requests().len(), if fault == 0 { 2 } else { 3 });
+            assert_ne!(session.state(), SessionState::Ready);
+        }
+        assert!(session.runtime_status().is_none());
+    }
 }
 
 fn now() -> Timestamp {

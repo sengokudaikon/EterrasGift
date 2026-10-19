@@ -551,3 +551,28 @@ Code remains pinned; snapshot counters are not a callback-drain or unload proof.
 This is one live locale/version observation, one limits observation and three plain raw-item observations. Locale
 changes, readiness/failure modes, populated affixes and unique/set identity remain authored coverage. Exact reports
 and the newly exposed raw-name limitation are retained in the locale evidence index.
+
+## Catalog identity and name-resolution checkpoint
+
+Protocol 25 operation 21 adds bounded, typed pages of already-loaded definitions. Both authored Unity startup routes
+capture 17 bases, 18 affixes, 17 uniques and ten explicit unavailable rarity names. Every authored identity, raw
+implicit range, restriction, flag and name source is checked, with GC between pages. Raw-empty base, unique and set
+items resolve separately from their unchanged raw snapshots. The audited game full-name builder also writes lore;
+it is not invoked under a read-only name-cache assumption.
+
+The session publishes no partial catalog and rejects language changes, changed totals and duplicate IDs across
+pages. Invalid graph sizes, null required entries/lists, NaN/Infinity and unready singleton references fail closed;
+explicit reconnect restores valid capture. Singleton factories, generated-name/rarity formatters and gameplay-write
+tripwires remain untouched. Each route accepts 216 requests and completes 185 main-thread commands, with zero
+failure/wrong-thread/forbidden calls, restored entry, stopped server, three later frames and normal exit.
+
+175 foundation cases pass on stable debug and nightly release, plus the compile-fail ownership test per toolchain,
+four architecture checks and workspace verification/captures. The cache adds bounded canonical persistence and
+three-build retention, tested separately with corruption, identity mismatch, oversized files and failed replacement.
+Static observations remain ordinary tools, not REA Evidence. No live catalog call is claimed at this checkpoint.
+
+Generated localized names, numeric interpretation and endpoint formatting remain explicit unavailable capabilities.
+The application actor, production process/bootstrap service, rich mappings and write/readback contracts still precede
+complete trainer UI integration. Full captures currently rehash both game artifacts per page; this needs measurement
+and an equivalent immutable-artifact strategy before large-game polling is practical.
+[Exact catalog evidence](../tools/trainer-eval/persistent-player/catalog-report.json).

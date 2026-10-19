@@ -24,8 +24,10 @@ exact Int32 enums now pass authored standalone IL2CPP execution with GC on/off.
 are now statically audited; protocol 24 reads the completed selection without starting or waiting for it, passing
 both authored Unity startup routes and the user-restarted offline game (en / 1.5.2.2), including literal ranges.
 [Locale evidence and live limits](../tools/trainer-eval/persistent-player/locale-report.json).
-Full localized definitions, UI
-integration and gameplay writes remain separate work. See [trainer contracts](../crates/trainer/README.md).
+Protocol 25 now captures already-loaded definition pages and resolves names with explicit provenance, passing
+both authored Unity startup routes, with bounded cache persistence. Generated formatting and numeric interpretation
+remain explicit unavailable capabilities. [Catalog evidence](../tools/trainer-eval/persistent-player/catalog-report.json).
+Complete localized definitions, application lifecycle/UI integration and gameplay writes remain separate work. See [trainer contracts](../crates/trainer/README.md).
 
 ## Decisions and constraints
 

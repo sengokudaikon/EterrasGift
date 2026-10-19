@@ -28,7 +28,7 @@ Status roots the manager wrapper, checks assignability and reads its metadata-va
 It also reads the independent runtime online flag. No native Unity-object pointer is dereferenced.
 Returned manager addresses are ephemeral observations, never managed-object ownership tokens.
 
-Protocol 24 supports ReadForge (18), ReadItemLimits (19) and ReadLocale (20), alongside Discover, Status and an empty ClearHooks. The forge wire model
+Protocol 25 supports ReadForge (18), ReadItemLimits (19), ReadLocale (20) and ReadCatalogPage (21), alongside Discover, Status and an empty ClearHooks. The forge wire model
 is in `eg-game-access::forge`. The read traverses rooted containers on the engine thread, validates
 exact scalar/reference classes, enum storage and array/list element types, and copies every value
 into owned Rust storage. Enum identities come from their actual field metadata, supporting nested
@@ -69,7 +69,7 @@ The local pipe is `eterras-gift-<PID>`, one strict 336-byte request per connecti
 Discover claims ownership using the kernel-reported client PID and a retained process handle/start
 time. Normal per-request EOF preserves ownership. Other living processes receive Refused without
 reaching the backend; process death relinquishes ownership. This strengthens the original helper's
-ownership model. Protocol 24 still has no nonce or authentication against code in the same process.
+ownership model. Protocol 25 still has no nonce or authentication against code in the same process.
 
 Admission and request waits observe shutdown/process death. A five-second main-thread deadline or
 disconnect cancels pending work when possible. Once started, the request retains its dispatcher
