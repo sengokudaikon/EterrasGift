@@ -694,6 +694,8 @@ impl RemoteHelper {
     /// Requested level-requirement writes additionally authorize the exact mutable Int32
     /// ItemDataUnpacked backing-field store, exclusive rooted graph access and full readback;
     /// a bootstrap or metadata match alone never supplies permission for that mutation.
+    /// Attack/leech reads require already initialized static caches and exclude concurrent
+    /// reference/scalar mutations and Unity native-object destruction throughout the rooted copy.
     /// The thread's OS description is only corroboration. Every module, native runtime and
     /// method body remains loaded/unchanged through all pending calls and helper residency.
     /// No other actor may load/unload/patch helper or admitted modules during preflight/start.

@@ -180,6 +180,27 @@ unsafe fn read_forge() -> Response {
     }
 }
 
+unsafe fn read_attack_leech(expected_manager: u64) -> Response {
+    // SAFETY: the established engine main thread calls only after the original
+    // dispatcher returns. Startup additionally guarantees initialized static
+    // caches, nonmoving GC and exclusive reference/scalar/native-lifetime access
+    // throughout this rooted field copy; no game getter or refresh is called.
+    unsafe {
+        let result = (|| {
+            let module = module().map_err(|error| server::failure(ResponseCode::Failed, error))?;
+            let (api, access) = apis(module).map_err(|error| server::failure(ResponseCode::Failed, error))?;
+            let thread = ThreadContext::new(api);
+            let attached = thread.attach().map_err(|error| server::failure(ResponseCode::NotReady, error.to_string()))?;
+            let observation = access.read_attack_leech(&attached, expected_manager).map_err(map_discovery)?;
+            Ok::<_, Response>(Response {
+                code: ResponseCode::Done,
+                payload: eg_game_access::fields::encode(&observation),
+            })
+        })();
+        result.unwrap_or_else(|error| error)
+    }
+}
+
 unsafe fn read_item_limits() -> Response {
     // SAFETY: the dispatcher authorizes the captured main thread after the original
     // callback returned. Runtime/metadata lifetime follows the bootstrap contract;
@@ -295,6 +316,7 @@ fn after_original(state: &Shared) {
                 Request::Status { .. } => unsafe { read_status() },
                 // SAFETY: same main-thread and per-operation graph ownership contract above.
                 Request::ReadForge { .. } => unsafe { read_forge() },
+                Request::ReadAttackLeech { expected_manager, .. } => unsafe { read_attack_leech(expected_manager) },
                 Request::ReadItemLimits { .. } => unsafe { read_item_limits() },
                 Request::ReadLocale { .. } => unsafe { read_locale() },
                 Request::ReadCatalogPage { kind, cursor, .. } => unsafe { read_catalog_page(kind, cursor) },
@@ -436,6 +458,9 @@ unsafe fn worker() -> Result<(), String> {
 /// Explicit write requests additionally require permission and exclusive rooted graph ownership
 /// for the validated ItemDataUnpacked Int32 level field store and full readback. No other
 /// gameplay writes, RebuildID, getters or constructors are authorized by this operation.
+/// Attack/leech reads additionally require populated static caches and exclusive
+/// reference, scalar and Unity native-lifetime access across the rooted copy;
+/// strong GC roots alone do not preserve native-object lifetime.
 /// Never call under DllMain/loader lock. No helper/code unload is allowed, including on failure.
 pub unsafe extern "C" fn eg_helper_start(main_tid: u32) -> i32 {
     // SAFETY: local identity query takes no parameters.

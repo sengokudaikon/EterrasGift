@@ -64,8 +64,10 @@ impl RuntimeAttestation {
     /// exclusive patch ownership and residency lifetime obligation of RemoteHelper::start
     /// for this exact process/profile and helper generation. Those obligations continue
     /// through explicitly requested writes, including the narrow mutable Int32 level
-    /// backing-field store and exclusive rooted graph/readback ownership contract.
-    /// through pending calls and helper residency, including when this guard is dropped.
+    /// backing-field store and exclusive rooted graph/readback ownership contract,
+    /// and through pending calls and helper residency, including when this guard is dropped.
+    /// Attack/leech reads additionally require populated static caches and exclusive
+    /// reference, scalar and Unity native-object lifetime access for the rooted copy.
     /// After a potentially submitted start, `keep_alive` remains pinned even when
     /// the last preparer/transport drops. Pre-start and factual NotSent failures
     /// release it normally. Reclaiming after confirmed target exit is not implemented.

@@ -5,6 +5,7 @@
 //! runs to completion; dropping a receipt is not cancellation. Cleanup barriers
 //! suppress publication from an earlier operation, then drain it before cleanup.
 //! Watch snapshots are authoritative; broadcast events can lag and are advisory.
+mod fields;
 mod write;
 
 use std::{
@@ -20,6 +21,7 @@ use std::{
 pub use crate::session::{CaptureControl, CaptureObserver, CaptureOutcome, CaptureProgress};
 use eg_core::game_log::GameReadiness;
 pub use eg_game_access::{
+    fields::{AttackLeechObservation, AttackLeechRead, AttackLeechUnavailable, ObservedObjectIdentity, ObservedRate, RateUnavailable},
     forge::{AffixSnapshot, ForgeSnapshot, ItemStatus, UniqueIdentity},
     process::ProcessIdentity,
     protocol::RuntimeStatus,
@@ -70,6 +72,12 @@ pub trait BackendConnection: Send + 'static {
         }
     }
     fn read_forge(&mut self, now: Timestamp) -> impl Future<Output = Result<Option<ForgeSnapshot>, BackendError>> + Send;
+    fn supports_read_attack_leech(&self) -> bool {
+        false
+    }
+    fn read_attack_leech(&mut self, _: Timestamp) -> impl Future<Output = Result<AttackLeechRead, BackendError>> + Send {
+        async { Err(BackendError::blocked(ErrorKind::NotReady, "attack/leech reads are unavailable")) }
+    }
     fn supports_level_requirement(&self) -> bool {
         false
     }
@@ -101,6 +109,12 @@ impl<T: Transport + Send + 'static, L: LogSource + Send + 'static> BackendConnec
     }
     async fn read_forge(&mut self, now: Timestamp) -> Result<Option<ForgeSnapshot>, BackendError> {
         Ok(Session::read_forge(self, now).await?)
+    }
+    fn supports_read_attack_leech(&self) -> bool {
+        true
+    }
+    async fn read_attack_leech(&mut self, now: Timestamp) -> Result<AttackLeechRead, BackendError> {
+        Ok(Session::read_attack_leech(self, now).await?)
     }
     fn supports_level_requirement(&self) -> bool {
         true
@@ -232,6 +246,7 @@ pub enum Activity {
     Connecting,
     CapturingCatalog,
     ReadingForge,
+    ReadingAttackLeech,
     Refreshing,
     WritingForge,
 }
@@ -239,6 +254,7 @@ pub enum Activity {
 pub struct Capabilities {
     pub read_forge: bool,
     pub read_catalog: bool,
+    pub read_attack_leech: bool,
     pub write_forge: bool,
     /// Operation support on this ready connection. Current item eligibility and
     /// range/observation checks still belong to level_requirement_plan.
@@ -283,6 +299,16 @@ pub struct RetainedHelper {
     pub target: ProcessIdentity,
     pub residency: HelperResidency,
 }
+/// One owned read bound to its process, connection generation, admitted manager and monotonically
+/// increasing publication sequence. Tokens and raw rates authorize no dereference or write.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AttackLeechSnapshot {
+    pub process: ProcessIdentity,
+    pub generation: u64,
+    pub sequence: u64,
+    pub manager: u64,
+    pub read: AttackLeechRead,
+}
 #[derive(Clone, Debug, PartialEq)]
 pub struct BackendSnapshot {
     pub revision: u64,
@@ -303,6 +329,7 @@ pub struct BackendSnapshot {
     pub cache_error: Option<String>,
     pub catalog: CatalogState,
     pub forge: ForgeState,
+    pub attack_leech: Option<AttackLeechSnapshot>,
     pub capabilities: Capabilities,
     pub last_write: Option<WriteRecord>,
     pub undo_level_requirement: Option<crate::undo::LevelUndo>,
@@ -387,6 +414,7 @@ pub enum Command {
     Disconnect,
     RefreshCatalog,
     ReadForge,
+    ReadAttackLeech,
     ApplyLevelRequirement(Box<LevelRequirementPlan>),
     UndoLevelRequirement(Box<crate::undo::LevelUndo>),
     Shutdown,
@@ -505,6 +533,7 @@ where
     blocked: Option<ProcessIdentity>,
     next_discovery: tokio::time::Instant,
     command_epoch: u64,
+    attack_leech_sequence: u64,
     paused: bool,
 }
 
@@ -535,6 +564,7 @@ pub fn service<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K
         cache_error: None,
         catalog: CatalogState::Missing,
         forge: ForgeState::Unobserved,
+        attack_leech: None,
         capabilities: Capabilities::default(),
         last_write: None,
         undo_level_requirement: None,
@@ -567,6 +597,7 @@ pub fn service<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K
             blocked: None,
             next_discovery: tokio::time::Instant::now(),
             command_epoch: 0,
+            attack_leech_sequence: 0,
             paused: false,
         },
     )
@@ -610,6 +641,18 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
         }
     }
     fn publish(&mut self) {
+        if self.state.attack_leech.as_ref().is_some_and(|observation| {
+            self.state.phase != Phase::Ready
+                || observation.generation != self.state.generation
+                || self.state.attached.as_ref() != Some(&observation.process)
+                || self
+                    .state
+                    .runtime_status
+                    .as_ref()
+                    .is_none_or(|status| status.online || status.manager == 0 || status.manager != observation.manager)
+        }) {
+            self.state.attack_leech = None;
+        }
         if self.state.undo_level_requirement.as_ref().is_some_and(|undo| {
             self.state.expected_observation().as_ref() != Ok(undo.after())
                 || self.state.runtime_status.as_ref().is_none_or(|status| status.online || status.manager != undo.manager())
@@ -620,6 +663,9 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
         self.state.capabilities = Capabilities {
             read_forge: self.state.phase == Phase::Ready,
             read_catalog: self.state.phase == Phase::Ready,
+            read_attack_leech: self.state.phase == Phase::Ready
+                && self.state.activity.is_none()
+                && self.connection.as_ref().is_some_and(BackendConnection::supports_read_attack_leech),
             level_requirement: self.state.phase == Phase::Ready
                 && self.state.activity.is_none()
                 && self.connection.as_ref().is_some_and(BackendConnection::supports_level_requirement),
@@ -731,6 +777,7 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
             }
             Command::RefreshCatalog => self.read(true).await,
             Command::ReadForge => self.read(false).await,
+            Command::ReadAttackLeech => self.read_attack_leech().await,
             Command::ApplyLevelRequirement(plan) => self.write_level_requirement(*plan).await,
             Command::UndoLevelRequirement(undo) => self.undo_level_requirement(*undo).await,
         }
@@ -891,6 +938,9 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
         result
     }
     fn check_status(&mut self, status: RuntimeStatus) -> Result<(), BackendError> {
+        if self.state.attack_leech.as_ref().is_some_and(|observation| observation.manager != status.manager) {
+            self.state.attack_leech = None;
+        }
         if status.online || status.manager == 0 {
             self.release_without_io();
             self.state.phase = Phase::WaitingForCharacter;
@@ -1020,6 +1070,7 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
         }
     }
     fn release_without_io(&mut self) {
+        self.state.attack_leech = None;
         self.state.undo_level_requirement = None;
         if self.connection.take().is_some() {
             self.state.cleanup = Cleanup::Unconfirmed;

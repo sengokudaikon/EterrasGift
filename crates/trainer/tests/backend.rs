@@ -8,6 +8,8 @@ use std::{
     },
     time::Duration,
 };
+#[path = "backend/fields.rs"]
+mod fields;
 #[path = "backend/write.rs"]
 mod writes;
 use eg_trainer::writes::{LevelRequirementPlan, WriteControl, WriteStatus};
@@ -116,6 +118,9 @@ struct Shared {
     disconnect_block: Block,
     write_block: Block,
     write_enabled: AtomicBool,
+    attack_leech_enabled: AtomicBool,
+    attack_leech_read: Mutex<eg_game_access::fields::AttackLeechRead>,
+    attack_leech_block: Block,
     forge_item: Mutex<Option<ForgeSnapshot>>,
     write_result: Mutex<Option<WriteStatus>>,
     active: AtomicUsize,
@@ -141,6 +146,11 @@ impl Shared {
             disconnect_block: Block::default(),
             write_block: Block::default(),
             write_enabled: AtomicBool::new(false),
+            attack_leech_enabled: AtomicBool::new(false),
+            attack_leech_read: Mutex::new(eg_game_access::fields::AttackLeechRead::Unavailable(
+                eg_game_access::fields::AttackLeechUnavailable::StatsAbsent,
+            )),
+            attack_leech_block: Block::default(),
             forge_item: Mutex::new(None),
             write_result: Mutex::new(None),
             active: AtomicUsize::new(0),
@@ -224,6 +234,13 @@ impl BackendConnection for Connection {
     }
     fn supports_level_requirement(&self) -> bool {
         self.shared.write_enabled.load(Ordering::SeqCst)
+    }
+    fn supports_read_attack_leech(&self) -> bool {
+        self.shared.attack_leech_enabled.load(Ordering::SeqCst)
+    }
+    async fn read_attack_leech(&mut self, _: Timestamp) -> Result<eg_game_access::fields::AttackLeechRead, BackendError> {
+        self.shared.call("attack-leech", &self.shared.attack_leech_block).await;
+        Ok(*self.shared.attack_leech_read.lock().unwrap())
     }
     async fn set_level_requirement(&mut self, _: Timestamp, plan: &LevelRequirementPlan, control: &mut dyn WriteControl) -> Result<WriteStatus, BackendError> {
         if !control.allowed() {

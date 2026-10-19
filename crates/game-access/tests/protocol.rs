@@ -73,6 +73,32 @@ fn requests_reject_reserved_fields_and_unsupported_operations() {
 }
 
 #[test]
+fn attack_leech_request_binds_nonzero_manager_and_has_no_tail() {
+    let request = Request::ReadAttackLeech {
+        dispatcher: dispatcher(),
+        expected_manager: 0x1817_1615_1413_1211,
+    };
+    let mut golden = vec![0; 336];
+    golden[..16].copy_from_slice(&[0x35, 0x47, 0x46, 0x45, 23, 0, 0, 0, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18]);
+    golden[48..56].copy_from_slice(&[1, 2, 3, 4, 5, 6, 7, 8]);
+    golden[56..72].copy_from_slice(&dispatcher().bytes);
+    assert_eq!(request.encode(), golden);
+    assert_eq!(Request::decode(&golden), Ok(request));
+    assert_eq!(Request::decode_header(&golden).unwrap().tail_len(), 0);
+    for offset in (16..48).chain(72..336) {
+        let mut malformed = golden.clone();
+        malformed[offset] = 1;
+        assert!(Request::decode(&malformed).is_err(), "reserved byte {offset}");
+        assert!(Request::decode_header(&malformed).is_err());
+    }
+    let mut zero = golden.clone();
+    zero[8..16].fill(0);
+    assert!(Request::decode(&zero).is_err());
+    golden.push(0);
+    assert!(Request::decode(&golden).is_err());
+}
+
+#[test]
 fn catalog_query_has_two_bounded_fields_and_no_other_reserved_data() {
     use eg_game_access::catalog::CatalogKind;
     for kind in [CatalogKind::Bases, CatalogKind::Affixes, CatalogKind::Uniques, CatalogKind::Rarities] {
@@ -197,7 +223,7 @@ fn text(out: &mut Vec<u8>, value: &str) {
 
 /// Independently authored native appendInt/appendText wire format.
 fn discovery_payload(keys: &[&str]) -> Vec<u8> {
-    let mut out = 26_i32.to_le_bytes().to_vec();
+    let mut out = 27_i32.to_le_bytes().to_vec();
     text(&mut out, &"aB12".repeat(16));
     text(&mut out, "il2cpp-x64-v1");
     out.extend_from_slice(&678_i32.to_le_bytes());

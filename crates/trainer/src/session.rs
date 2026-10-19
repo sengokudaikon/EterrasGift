@@ -8,6 +8,7 @@ use eg_core::game_log::GameReadiness;
 use eg_game_access::{
     catalog::{self, CatalogKind, CatalogPage},
     definitions::{self, ItemLimits},
+    fields::{self, AttackLeechRead, AttackLeechUnavailable},
     forge::{self, ForgeSnapshot},
     locale::{self, GameLocale},
     process::ProcessIdentity,
@@ -262,6 +263,59 @@ impl<T: Transport, L: LogSource> Session<T, L> {
     /// explicitly disconnect before another attachment or operation.
     pub async fn read_forge(&mut self, now: Timestamp) -> Result<Option<ForgeSnapshot>, SessionError> {
         self.read_owned(now, |dispatcher| Request::ReadForge { dispatcher }, forge::decode).await
+    }
+    /// Observe the two audited actor-stat fields. Identity tokens and raw float bits convey no
+    /// write authority. Feature-local graph unavailability leaves the admitted session ready;
+    /// runtime offline/manager refusal revokes admission even though its typed reason is returned.
+    pub async fn read_attack_leech(&mut self, now: Timestamp) -> Result<AttackLeechRead, SessionError> {
+        if matches!(self.state, SessionState::Connecting | SessionState::Closing) {
+            return Err(SessionError::Busy);
+        }
+        self.gate(now)?;
+        if self.state != SessionState::Ready {
+            return Err(SessionError::NotConnected);
+        }
+        let expected_manager = self
+            .status
+            .filter(|status| !status.online && status.manager != 0)
+            .ok_or(SessionError::NotConnected)?
+            .manager;
+        let dispatcher = self.discovery.as_ref().ok_or(SessionError::NotConnected)?.dispatcher;
+        let elapsed = std::time::Instant::now();
+        let read = match self
+            .read_owned_control(
+                now,
+                |dispatcher| Request::ReadAttackLeech { dispatcher, expected_manager },
+                |bytes| {
+                    let read = fields::decode(bytes)?;
+                    if matches!(read, AttackLeechRead::Available(observation) if observation.manager.wrapper_token() != expected_manager) {
+                        return Err(ProtocolError::InvalidData);
+                    }
+                    Ok(read)
+                },
+                None,
+                None,
+            )
+            .await?
+        {
+            OwnedRead::Complete(read) => read,
+            OwnedRead::Stopped => return Err(SessionError::Protocol(ProtocolError::InvalidData)),
+        };
+        // This read also verifies the profile after I/O, rather than retaining an earlier match.
+        if let Err(error) = self.profile.validate(&dispatcher) {
+            self.release_without_io();
+            self.state = SessionState::Blocked;
+            return Err(SessionError::Identity(error.to_string()));
+        }
+        self.gate(advanced(now, elapsed)?)?;
+        if matches!(
+            read,
+            AttackLeechRead::Unavailable(AttackLeechUnavailable::OfflineRequired | AttackLeechUnavailable::ManagerAbsent | AttackLeechUnavailable::ManagerChanged)
+        ) {
+            self.release_without_io();
+            self.state = SessionState::WaitingForCharacter;
+        }
+        Ok(read)
     }
     /// Copy the game's literal item ranges. This carries no locale, rarity names or
     /// claim that the rest of the definitions catalog has been captured. The build

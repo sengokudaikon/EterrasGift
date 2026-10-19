@@ -261,3 +261,8 @@ and GC/profiler effects; dictionary/gameplay getters, fills and writes remain ex
 
 Windows API contract: [GetNamedPipeServerProcessId](https://learn.microsoft.com/en-us/windows/win32/api/winbase/nf-winbase-getnamedpipeserverprocessid).
 Tokio API usage follows the restored, pinned 1.53.3 source at `src/net/windows/named_pipe.rs`.
+
+The [completed read-only attack/leech checkpoint](../../tools/trainer-eval/persistent-player/attack-leech-README.md) now passes all four authored routes
+(658 requests / 603 main-thread commands each), including the real worker and existing Apply/Undo.
+The foundation passes 421 stable/nightly tests plus ownership/architecture guards. Generic field
+writes and gameplay hooks remain unsupported; this reader has not run in the actual game.

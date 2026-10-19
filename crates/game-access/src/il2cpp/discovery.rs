@@ -14,6 +14,7 @@ use std::{
     ptr::NonNull,
 };
 
+mod attack_leech;
 mod catalog;
 mod catalog_ailment;
 mod catalog_items;

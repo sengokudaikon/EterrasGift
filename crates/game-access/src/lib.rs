@@ -8,6 +8,7 @@ pub mod artifact;
 pub mod bootstrap;
 pub mod catalog;
 pub mod definitions;
+pub mod fields;
 pub mod forge;
 pub mod il2cpp;
 pub mod locale;

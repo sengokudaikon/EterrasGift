@@ -1,4 +1,4 @@
-//! Pure, bounded codecs for protocol26: control, observations and a narrow full-state write.
+//! Pure, bounded codecs for protocol27: control, observations and a narrow full-state write.
 //!
 //! Decoding establishes wire validity only. Process identity, helper provenance,
 //! dispatcher code, and permission to run a request belong to the session layer.
@@ -11,8 +11,8 @@ use crate::{
 use std::{collections::BTreeMap, error::Error, fmt};
 
 pub const MAGIC: u32 = 0x4546_4735;
-/// Version26 adds a bounded full expected-snapshot tail for level requirement (22).
-pub const VERSION: u32 = 26;
+/// Version27 adds manager-bound attack/leech field observation (23).
+pub const VERSION: u32 = 27;
 pub const ADAPTER: &str = "il2cpp-x64-v1";
 pub const REQUEST_SIZE: usize = 336;
 pub const RESPONSE_HEADER_SIZE: usize = 12;
@@ -72,6 +72,11 @@ pub enum Request {
     },
     /// Explicit mutation; native admission compares the complete expected item.
     SetLevelRequirement(LevelRequirementWrite),
+    /// Reads cached player fields only; expected_manager is an opaque identity token.
+    ReadAttackLeech {
+        dispatcher: DispatcherSpec,
+        expected_manager: u64,
+    },
 }
 
 impl Request {
@@ -83,7 +88,8 @@ impl Request {
             | Self::ReadForge { dispatcher }
             | Self::ReadItemLimits { dispatcher }
             | Self::ReadLocale { dispatcher }
-            | Self::ReadCatalogPage { dispatcher, .. } => Some(*dispatcher),
+            | Self::ReadCatalogPage { dispatcher, .. }
+            | Self::ReadAttackLeech { dispatcher, .. } => Some(*dispatcher),
             Self::SetLevelRequirement(write) => Some(write.dispatcher()),
         }
     }
@@ -103,6 +109,10 @@ impl Request {
                 (21, Some(dispatcher))
             }
             Self::SetLevelRequirement(write) => return write.encode(),
+            Self::ReadAttackLeech { dispatcher, expected_manager } => {
+                bytes[8..16].copy_from_slice(&expected_manager.to_le_bytes());
+                (23, Some(dispatcher))
+            }
         };
         bytes[4..8].copy_from_slice(&operation.to_le_bytes());
         if let Some(dispatcher) = dispatcher {
@@ -164,7 +174,7 @@ impl Request {
             return Err(ProtocolError::IncompatibleVersion);
         }
         let operation = reader.u32()?;
-        let reserved_start = if operation == 21 { 16 } else { 8 };
+        let reserved_start = if matches!(operation, 21 | 23) { 16 } else { 8 };
         if bytes[reserved_start..48].iter().chain(&bytes[72..]).any(|byte| *byte != 0) {
             return Err(ProtocolError::InvalidData);
         }
@@ -180,6 +190,14 @@ impl Request {
             18 => Ok(Self::ReadForge { dispatcher }),
             19 => Ok(Self::ReadItemLimits { dispatcher }),
             20 => Ok(Self::ReadLocale { dispatcher }),
+            23 => {
+                let mut query = Reader::new(&bytes[8..16]);
+                let expected_manager = query.u64()?;
+                if expected_manager == 0 {
+                    return Err(ProtocolError::InvalidData);
+                }
+                Ok(Self::ReadAttackLeech { dispatcher, expected_manager })
+            }
             21 => {
                 let mut query = Reader::new(&bytes[8..16]);
                 let kind = CatalogKind::try_from(query.u32()?)?;

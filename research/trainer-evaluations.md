@@ -508,3 +508,37 @@ This promotes locale/version and literal-range execution for this exact target, 
 support or arbitrary Unity compatibility. Live language switching, malformed/unready states and populated item
 cases remain untested there; authored cases remain valid. Full definition capture and rich descriptions/mappings
 remain the next implementation layer. [Live evidence](../tools/trainer-eval/persistent-player/locale-report.json).
+
+## Read-only attack/leech checkpoint, 2026-10-19
+
+Protocol 27 adds manager-bound ReadAttackLeech (operation 23). The production field-only
+reader roots the published manager/actor/stats graph, validates exact metadata and native
+liveness, and copies raw f32 bits without getters, initialization, refresh or writes.
+Exact CharacterStats is deliberately required because the original attack getter is virtual.
+Dead/absent/changed managers revoke admission; local missing/dead/unsupported actor/stats
+remain typed unavailable. Session repeats profile/log checks; the worker publishes owned
+process/generation/checked-sequence results and clears them across admission/manager drift.
+
+All four newly owned Unity 6000.4.8f1 startup routes pass 658 requests / 603 main-thread
+commands each, including the previous Apply/Undo suite. Eight float boundary/raw-bit cases,
+GC, object replacement, nine local unavailable and three global unavailable cases pass.
+Four real worker reads publish sequences 1..4 with local-cache recovery. Getter/init/refresh
+tripwires remain zero; every child proves entry restoration, stopped server, later frames,
+normal exit and unchanged player files. The combined foundation passes 421 tests on stable
+and nightly release, plus ownership/architecture checks. Full workspace verification passes;
+headless captures were inspected. See [reader evidence and scope](../tools/trainer-eval/persistent-player/attack-leech-README.md)
+and [exact identities](../tools/trainer-eval/persistent-player/attack-leech-report.json).
+
+This adds no field-write or gameplay-hook capability and has not run in the actual game.
+Initialized static caches, nonmoving GC, real main-thread execution and exclusive reachable
+reference/scalar/native-lifetime access remain unsafe caller obligations. Rechecks are not
+synchronization and GC roots do not preserve native lifetime. Equality tokens may be reused.
+
+The [numeric formatter audit](../tools/trainer-eval/numeric-formatter-audit/README.md) also
+identifies a smaller five-argument static route needing no new invocation ABI or item clone.
+It unconditionally asks for virtual More rounding, so every modifier needs a rooted validated
+override list. Formatting uses current managed-thread culture; the original host parses with
+selected game language. Their equality is unproved, including custom NumberFormat values
+with identical culture names. Numeric text can become independently available; mappings need
+a separately admitted stable rooted provider. No formatter endpoint or provider parser is
+promoted by this checkpoint. Localized descriptions and affix getter delegates remain open.
