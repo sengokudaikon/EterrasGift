@@ -26,8 +26,6 @@ mod formatter;
 pub use formatter::{NumericDisplay, NumericDisplayUnavailable, NumericModifierDisplay};
 mod limits;
 mod locale;
-mod parser;
-pub use parser::{DisplayScalarUnavailable, NumericFormatContext, NumericFormatContextPart, NumericFormatContextUnavailable};
 mod write;
 pub use write::ForgeWriteError;
 
