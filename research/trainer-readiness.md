@@ -93,3 +93,15 @@ The integrated context checkpoint passes 498 foundation cases on both toolchains
 (503 stable tests including architecture/doc checks; 499 nightly including docs).
 Host Clippy/formatting and full workspace lint, formatting, tokens and captures
 pass; the combat-rates capture was inspected. This remains authored evidence.
+
+
+The [numeric modifier leaf](../tools/trainer-eval/unity-rust-host/numeric-modifier-README.md)
+now validates exact already-produced Value/min/max/property-info fields and feeds
+the existing formatter, returning owned raw bits and text. Four reviewed authored
+standalone candidate and root-source modes and ten new full-entrypoint fake cases
+pass. The integrated 508 foundation cases pass on both toolchains, host Clippy/format
+and full workspace verification pass, and the unchanged combat-rates capture was
+inspected. This adds a narrow mechanism for later tooltip
+work, with no producer arithmetic/acquisition proof, description, sampled mapping,
+helper endpoint or actual-game formatter authority. Exact synchronous graph and
+culture/provider exclusion remains the unsafe caller's responsibility.

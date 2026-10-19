@@ -1,4 +1,7 @@
 //! Staged numeric text only: no description/localization getter, item construction or scalar parse.
+mod modifier;
+pub use modifier::NumericModifierDisplay;
+
 use super::{Class, DiscoveryError, Ptr, RuntimeAccess, forge::Root};
 use crate::il2cpp::{Argument, AttachedThread, InvocationContext, InvocationOutcome, ReturnValue, Scalar, StrongRoot, ValueTypeContract, raw};
 use std::{ffi::CStr, ptr::NonNull};

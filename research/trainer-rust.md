@@ -489,3 +489,25 @@ initialization, instruction invocation or entry patch occurs. This is not comple
 alias/caller or physical ownership proof. Exact results and limitations are in
 tools/trainer-eval/unpatched-bool-abi/bridge-unwind-report.json. The next fixture
 separates real bridge execution from quiescent entry installation/restoration.
+
+
+## Numeric modifier field adapter checkpoint (2026-10-19)
+
+The already-produced exact ItemTooltipPropertyModifierInfo leaf can now be read
+through public validated FieldInfo APIs and fed to the existing static formatter.
+Owned Value/min/max raw bits, varying, ModType, specialTag and display text leave
+the adapter; roots and pointers do not. Retained getters are plain field loads;
+ConvertValueToString forwards to the same five-argument formatter with suffix false.
+The original parser/provider/context and formatter bodies remain unchanged.
+
+508 foundation cases pass stable and nightly release (513 stable including
+architecture/docs; 509 nightly including docs). All four ROOT-source standalone
+Unity modes pass, including real GC pressure at field/root/String/invoke boundaries.
+Host Clippy/format and workspace lint/format/tokens/captures pass; the fresh
+combat-rates capture was inspected. Candidate and ROOT matrices are separate,
+with immutable input manifests and complete native builds retained.
+
+This requires separately admitted producer provenance and one synchronous exclusive
+main-thread graph/culture/provider span. It does not acquire the modifier, reproduce
+producer arithmetic, add descriptions/mapping/wire capabilities or access a game.
+See tools/trainer-eval/unity-rust-host/numeric-modifier-README.md and its report.

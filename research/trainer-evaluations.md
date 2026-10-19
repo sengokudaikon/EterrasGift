@@ -716,3 +716,35 @@ initialization, instruction invocation or entry patch occurs. This is not comple
 alias/caller or physical ownership proof. Exact results and limitations are in
 tools/trainer-eval/unpatched-bool-abi/bridge-unwind-report.json. The next fixture
 separates real bridge execution from quiescent entry installation/restoration.
+
+
+## Numeric modifier field observations, 2026-10-19
+
+The source-bound leaf audit finds direct six-byte Value/MinValue/MaxValue getters
+and an exact concrete conversion forwarding property info, ModType, specialTag
+and Value to the existing static formatter with false suffix. The integrated
+unsafe adapter instead reads validated FieldInfo values, immediately roots the
+property child and accepts only exact StatPropertyInfo. It returns owned raw
+float bits and text, retaining signed zeros and reversed finite endpoints without
+inventing range or roll formulas.
+
+All four reviewed standalone candidate modes pass: 64 calls each, with 20 owned
+results, 38 pre-body refusals and six post-body refusals after 26 formatter calls.
+Each records 659 field-read collections, 50 child-root collections, 609 collections
+after actual roots, 23 during rooted String copy and 487 before invocation. The
+fixture's deliberately different compiled offsets agree with runtime metadata;
+no offset is embedded in the adapter. Ten full-entrypoint fake tests pass stable
+debug and nightly release. All previous runtime markers and 34 native checks stay
+required. Full native products, 76 exact source inputs, four hosts/results and SDK
+checks are retained; no runtime fix or source refreeze was needed. All four root-source modes pass with the same counters. The 508 foundation cases
+pass stable and nightly release, plus architecture/doc checks. Host Clippy/format
+and full workspace lint, formatting, tokens and captures pass; the unchanged
+combat-rates capture was inspected.
+
+The caller still owns synchronous main-thread, offline/target/registry/generation,
+producer provenance and unchanged graph/culture/provider admission. Source roots
+and diagnostic identity do not establish historical selection or synchronization.
+The old implicit/affix/unique builders and preformatted unique branch remain
+separate closures, as do descriptions, private clones, sampled mappings and helper
+exposure. No actual game was accessed. See [scope](../tools/trainer-eval/unity-rust-host/numeric-modifier-README.md)
+and [exact evidence](../tools/trainer-eval/unity-rust-host/numeric-modifier-report.json).

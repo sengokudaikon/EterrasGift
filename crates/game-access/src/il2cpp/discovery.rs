@@ -22,7 +22,7 @@ mod catalog_items;
 mod catalog_numeric;
 mod forge;
 mod formatter;
-pub use formatter::{NumericDisplay, NumericDisplayUnavailable};
+pub use formatter::{NumericDisplay, NumericDisplayUnavailable, NumericModifierDisplay};
 mod limits;
 mod locale;
 mod parser;
