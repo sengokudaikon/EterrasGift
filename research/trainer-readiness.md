@@ -158,3 +158,14 @@ new pure cases pass on both toolchains, including retained failing-before regres
 Updated stable/nightly controllers also pass the full owned worker route (171/163,
 13 setters, 44 Pending observations and six boundaries each) using the unchanged native
 pair. Root tests/Clippy/format/tokens/captures pass; production authority remains open.
+
+The [control-worker-first checkpoint](../tools/trainer-eval/persistent-player/control-worker-first-report.json)
+now discovers a runtime-main candidate on an owned native worker before any main-side
+detector preparation or C# identity oracle. One stable Unity6000.4.8f1 run passes eight
+captures, ten later independent observations, 40 freed roots, one owned attach/detach,
+OS-exit-before-join and three later frames before normal exit. All 879 inputs and the
+complete 305-product/16-snapshot set are unchanged. Seven Rust and seven Python pure
+tests, probe Clippy/format and workspace verification pass; the capture was inspected.
+Initialized runtime, canonical publication, stable lifetime and later callback identity
+remain authored premises. No production authority, pre-bootstrap transport, forced GC,
+second compiler or actual-game operation is established by this ordering experiment.

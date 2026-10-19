@@ -875,3 +875,16 @@ new pure cases pass on both toolchains, including retained failing-before regres
 Updated stable/nightly controllers also pass the full owned worker route (171/163,
 13 setters, 44 Pending observations and six boundaries each) using the unchanged native
 pair. Root tests/Clippy/format/tokens/captures pass; production authority remains open.
+
+The [control-worker-first checkpoint](../tools/trainer-eval/persistent-player/control-worker-first-report.json)
+passes one new owned Unity6000.4.8f1 run. Candidate discovery and cold preparation occur
+inside one native worker attachment before any main detector capture or C# identity
+oracle. Joining in frame1 precedes the first main observation in frame2. Eight captures,
+ten oracles, 40 created/freed roots, one attach/detach, one foreign cleanup and three
+post-finalization frames reconcile with normal exit0. All 879 inputs, 305 products and
+16 source/plugin pairs remain unchanged; original main-first evidence stays separate.
+The five exact tested source changes are integrated with seven Rust/seven Python pure
+checks, Clippy/format and full verification/capture inspection. Inert compiler/formatter
+and command/checker corrections are retained without native retries. Production runtime
+initialization/publication, probe transport, callback/lifetime/offline authority, forced
+GC and a second probe compiler remain separate validation work.
