@@ -127,7 +127,8 @@ impl ForgeGame for ObservedGame {
             && !state.capabilities.base_change
             && !state.capabilities.identity_change
             && !state.capabilities.affix_rolls
-            && !state.capabilities.affix_change)
+            && !state.capabilities.affix_change
+            && !state.capabilities.affix_list)
             .then_some(READ_ONLY)
     }
     fn resolve(&self, _: &ForgeItem, _: &RollRequest) -> Result<ValueTable, GameError> {
@@ -248,6 +249,7 @@ impl Writer {
 
 fn supports(state: &BackendSnapshot, edit: &ItemEdit) -> bool {
     match edit {
+        ItemEdit::Add { .. } | ItemEdit::Remove { .. } => state.capabilities.affix_list,
         ItemEdit::Affix { .. } => state.capabilities.affix_change,
         ItemEdit::Status { field, .. } => state.capabilities.status_fields[*field as usize],
         ItemEdit::Base { .. } => state.capabilities.base_change,
@@ -261,6 +263,41 @@ fn supports(state: &BackendSnapshot, edit: &ItemEdit) -> bool {
 fn canonical_edit(edit: &ItemEdit, override_enabled: bool) -> Option<eg_trainer::edits::ItemEdit> {
     use eg_trainer::edits as native;
     Some(match edit {
+        ItemEdit::Add {
+            id,
+            tier,
+            roll,
+            seal,
+            kind,
+            category,
+            allow_incompatible,
+        } => native::ItemEdit::AddAffix(native::AddAffixEdit {
+            id: i32::from(*id),
+            tier: i32::from(*tier),
+            roll: i32::from(*roll),
+            seal: match seal {
+                Seal::Normal => native::SealState::Normal,
+                Seal::Sealed => native::SealState::Sealed,
+                Seal::Primordial => native::SealState::Primordial,
+                Seal::Corrupted => native::SealState::Corrupted,
+            },
+            kind: match kind {
+                AffixKind::Prefix => native::AffixKind::Prefix,
+                AffixKind::Suffix => native::AffixKind::Suffix,
+            },
+            category: Some(match category {
+                Category::Standard => 0,
+                Category::Experimental => 1,
+                Category::Personal => 2,
+                Category::Set => 3,
+                Category::Corrupted => 6,
+            }),
+            allow_incompatible: *allow_incompatible,
+        }),
+        ItemEdit::Remove { slot, id } => native::ItemEdit::RemoveAffix(native::RemoveAffixEdit {
+            slot: i32::try_from(*slot).ok()?,
+            id: i32::from(*id),
+        }),
         ItemEdit::Affix {
             slot,
             id,

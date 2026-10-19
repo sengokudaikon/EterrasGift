@@ -952,3 +952,84 @@ fn level_cache_readback_uses_the_same_exact_rule_in_pure_and_submittable_plans()
     }
     assert_eq!(ForgePlan::edit(&expected, 0, &c, &provenance(), intent, false), Err(EditError::InvalidObservation));
 }
+
+#[test]
+fn inserted_sealed_affix_is_undone_at_its_new_slot_even_when_id_already_exists() {
+    use eg_trainer::{
+        undo::ForgeUndo,
+        writes::{ForgePlan, WriteRecord, WriteStatus},
+    };
+    let c = catalog();
+    let before = item();
+    let expected = observation(before.clone(), &c);
+    let edit = ItemEdit::AddAffix(AddAffixEdit {
+        id: 1,
+        tier: 2,
+        roll: 239,
+        seal: SealState::Sealed,
+        kind: AffixKind::Prefix,
+        category: Some(0),
+        allow_incompatible: true,
+    });
+    let plan = ForgePlan::edit(&expected, 17, &c, &provenance(), edit, true).unwrap();
+    assert_eq!((plan.projected().affixes[0].id, plan.projected().affixes[0].seal), (1, 1));
+    let token = ForgeUndo::from_confirmed(&WriteRecord {
+        status: WriteStatus::Confirmed(plan.projected().clone()),
+        plan,
+    })
+    .unwrap();
+    assert!(matches!(token.reverse_edit(),ItemEdit::RemoveAffix(e) if e.slot==0 && e.id==1));
+    let reverse = token.prepare(token.after(), 17, &c, &provenance()).unwrap();
+    assert_eq!(reverse.projected().affixes, before.affixes);
+    let mut changed = token.after().snapshot().clone();
+    changed.affixes[0].roll += 1;
+    refresh(&mut changed);
+    assert_eq!(token.prepare(&observation(changed, &c), 17, &c, &provenance()), Err(EditError::StaleItem));
+}
+#[test]
+fn removed_affix_restore_uses_current_catalog_and_can_require_override() {
+    use eg_trainer::{
+        undo::ForgeUndo,
+        writes::{ForgePlan, WriteRecord, WriteStatus},
+    };
+    let mut c = catalog();
+    let expected = observation(item(), &c);
+    let plan = ForgePlan::edit(&expected, 17, &c, &provenance(), ItemEdit::RemoveAffix(RemoveAffixEdit { slot: 0, id: 1 }), false).unwrap();
+    let token = ForgeUndo::from_confirmed(&WriteRecord {
+        status: WriteStatus::Confirmed(plan.projected().clone()),
+        plan,
+    })
+    .unwrap();
+    assert!(token.prepare(token.after(), 17, &c, &provenance()).is_ok());
+    c.affixes.get_mut(&1).unwrap().special = 1;
+    assert_eq!(token.prepare(token.after(), 17, &c, &provenance()), Err(EditError::OverrideRequired));
+    assert!(token.prepare_with_override(token.after(), 17, &c, &provenance(), true).unwrap().unrestricted());
+}
+#[test]
+fn removing_the_only_unserializable_id_can_repair_an_item_but_cannot_offer_undo() {
+    use eg_trainer::{
+        undo::ForgeUndo,
+        writes::{ForgePlan, WriteRecord, WriteStatus},
+    };
+    let c = catalog();
+    let mut before = item();
+    before.affixes[0].id = 65500;
+    refresh(&mut before);
+    let plan = ForgePlan::edit(
+        &observation(before, &c),
+        17,
+        &c,
+        &provenance(),
+        ItemEdit::RemoveAffix(RemoveAffixEdit { slot: 0, id: 65500 }),
+        false,
+    )
+    .unwrap();
+    assert!(plan.projected().affixes.iter().all(|a| a.id <= 4095));
+    assert_eq!(
+        ForgeUndo::from_confirmed(&WriteRecord {
+            status: WriteStatus::Confirmed(plan.projected().clone()),
+            plan
+        }),
+        Err(EditError::InvalidValues)
+    );
+}

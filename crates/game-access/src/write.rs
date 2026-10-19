@@ -1,4 +1,4 @@
-//! Owned protocol33 Forge writes and bounded native acknowledgement decoding.
+//! Owned protocol34 Forge writes and bounded native acknowledgement decoding.
 //! These codecs grant no process access or write permission. Host generation,
 //! profile, policy and main-thread runtime admission remain independent checks.
 
@@ -50,12 +50,25 @@ impl AffixRolls {
 
 pub const SET_STATUS_OPERATION: u32 = 10;
 pub const CHANGE_BASE_OPERATION: u32 = 11;
+pub const ADD_AFFIX_OPERATION: u32 = 13;
+pub const REMOVE_AFFIX_OPERATION: u32 = 14;
 pub const CHANGE_IDENTITY_OPERATION: u32 = 17;
 
 /// Only operations implemented by the helper. Wire numbers remain internal to
 /// transport; domain planning separately checks catalog compatibility/override.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ForgeMutation {
+    AddAffix {
+        id: u16,
+        tier: u8,
+        roll: u8,
+        seal: u8,
+        unrestricted: bool,
+    },
+    RemoveAffix {
+        slot: u8,
+        id: u16,
+    },
     Affix {
         slot: u8,
         id: u16,
@@ -88,7 +101,9 @@ pub enum ForgeMutation {
 impl ForgeMutation {
     pub fn unrestricted(self) -> bool {
         match self {
-            Self::Affix { unrestricted, .. }
+            Self::RemoveAffix { .. } => false,
+            Self::AddAffix { unrestricted, .. }
+            | Self::Affix { unrestricted, .. }
             | Self::AffixRolls { unrestricted, .. }
             | Self::Status { unrestricted, .. }
             | Self::Base { unrestricted, .. }
@@ -97,6 +112,29 @@ impl ForgeMutation {
     }
     pub fn project(self, item: &mut ForgeSnapshot) {
         match self {
+            // Transport-only projection: constructor-owned kind/category/name
+            // are resolved by the native runtime, not inferred by this codec.
+            Self::AddAffix { id, tier, roll, seal, .. } => {
+                item.affixes.push(AffixSnapshot {
+                    slot: item.affixes.len() as u8,
+                    id,
+                    tier: u16::from(tier),
+                    roll,
+                    seal: i32::from(seal),
+                    kind: 0,
+                    special: 0,
+                    name: String::new(),
+                });
+                reorder_affixes(item);
+                item.rarity = affix_list_rarity(item, &item.affixes);
+            }
+            Self::RemoveAffix { slot, .. } => {
+                if usize::from(slot) < item.affixes.len() {
+                    item.affixes.remove(usize::from(slot));
+                }
+                reorder_affixes(item);
+                item.rarity = affix_list_rarity(item, &item.affixes);
+            }
             Self::Affix { slot, id, tier, roll, seal, .. } => {
                 if let Some(affix) = item.affixes.get_mut(usize::from(slot)) {
                     affix.id = id;
@@ -104,10 +142,7 @@ impl ForgeMutation {
                     affix.roll = roll;
                     affix.seal = i32::from(seal);
                 }
-                item.affixes.sort_by_key(|a| affix_order_key(item.rarity, a.seal));
-                for (slot, affix) in item.affixes.iter_mut().enumerate() {
-                    affix.slot = slot as u8;
-                }
+                reorder_affixes(item);
             }
             Self::AffixRolls { rolls, .. } => {
                 for change in rolls.changes() {
@@ -138,6 +173,17 @@ impl ForgeMutation {
         }
         let unrestricted = flags == 1;
         match operation {
+            ADD_AFFIX_OPERATION if value <= 4095 && selector == 0 && (1..=8).contains(&(extra & 255)) && (extra >> 16) <= 3 => Ok(Self::AddAffix {
+                id: value as u16,
+                tier: extra as u8,
+                roll: (extra >> 8) as u8,
+                seal: (extra >> 16) as u8,
+                unrestricted,
+            }),
+            REMOVE_AFFIX_OPERATION if value <= 65535 && selector < 32 && flags == 0 && extra == 0 => Ok(Self::RemoveAffix {
+                slot: selector as u8,
+                id: value as u16,
+            }),
             CHANGE_AFFIX_OPERATION if value <= 4095 && selector < 32 && (1..=8).contains(&(extra & 255)) && (extra >> 16) <= 3 => Ok(Self::Affix {
                 slot: selector as u8,
                 id: value as u16,
@@ -208,6 +254,8 @@ impl ForgeMutation {
     }
     fn header_fields(self) -> (u32, u32, u32, u32) {
         match self {
+            Self::AddAffix { id, tier, roll, seal, .. } => (ADD_AFFIX_OPERATION, u32::from(id), 0, u32::from(tier) | (u32::from(roll) << 8) | (u32::from(seal) << 16)),
+            Self::RemoveAffix { slot, id } => (REMOVE_AFFIX_OPERATION, u32::from(id), u32::from(slot), 0),
             Self::Affix { slot, id, tier, roll, seal, .. } => (
                 CHANGE_AFFIX_OPERATION,
                 u32::from(id),
@@ -504,4 +552,19 @@ pub fn affix_order_key(rarity: u8, seal: i32) -> u8 {
             _ => 2,
         }
     }
+}
+
+fn reorder_affixes(item: &mut ForgeSnapshot) {
+    item.affixes.sort_by_key(|a| affix_order_key(item.rarity, a.seal));
+    for (slot, affix) in item.affixes.iter_mut().enumerate() {
+        affix.slot = slot as u8;
+    }
+}
+/// Host expectation only: the native writer invokes the game's rarity method.
+pub fn affix_list_rarity(item: &ForgeSnapshot, affixes: &[AffixSnapshot]) -> u8 {
+    if matches!(item.rarity, 7..=9) || item.rarity > 6 {
+        return item.rarity;
+    }
+    let seals = affixes.iter().map(|a| a.seal).filter(|s| *s != 0).collect::<std::collections::BTreeSet<_>>();
+    affixes.len().saturating_sub(seals.len()).min(4) as u8
 }

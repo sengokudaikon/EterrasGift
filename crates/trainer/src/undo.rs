@@ -33,6 +33,42 @@ impl ForgeUndo {
         let before = record.plan.before();
         let item = before.snapshot();
         let reverse = match record.plan.edit_intent() {
+            ItemEdit::AddAffix(_) => {
+                let occupied = record.plan.moves().values().copied().collect::<std::collections::BTreeSet<_>>();
+                let added = snapshot.affixes.iter().filter(|a| !occupied.contains(&a.slot)).collect::<Vec<_>>();
+                let [added] = added.as_slice() else {
+                    return Err(EditError::InvalidObservation);
+                };
+                ItemEdit::RemoveAffix(crate::edits::RemoveAffixEdit {
+                    slot: i32::from(added.slot),
+                    id: i32::from(added.id),
+                })
+            }
+            ItemEdit::RemoveAffix(edit) => {
+                let removed = &item.affixes[edit.slot as usize];
+                if removed.id > 4095 {
+                    return Err(EditError::InvalidValues);
+                }
+                ItemEdit::AddAffix(crate::edits::AddAffixEdit {
+                    id: i32::from(removed.id),
+                    tier: i32::from(removed.tier),
+                    roll: i32::from(removed.roll),
+                    seal: match removed.seal {
+                        0 => crate::edits::SealState::Normal,
+                        1 => crate::edits::SealState::Sealed,
+                        2 => crate::edits::SealState::Primordial,
+                        3 => crate::edits::SealState::Corrupted,
+                        _ => return Err(EditError::InvalidValues),
+                    },
+                    kind: match removed.kind {
+                        0 => crate::edits::AffixKind::Prefix,
+                        1 => crate::edits::AffixKind::Suffix,
+                        _ => return Err(EditError::InvalidValues),
+                    },
+                    category: Some(removed.special),
+                    allow_incompatible: false,
+                })
+            }
             ItemEdit::Affix(edit) => {
                 let old = &item.affixes[edit.slot as usize];
                 ItemEdit::Affix(crate::edits::AffixEdit {
@@ -50,7 +86,7 @@ impl ForgeUndo {
                     allow_incompatible: edit.allow_incompatible,
                 })
             }
-            ItemEdit::Roll(edit) => ItemEdit::Roll(RollEdit {
+            ItemEdit::Roll(edit) if edit.target == crate::edits::RollTarget::Affix => ItemEdit::Roll(RollEdit {
                 changes: edit
                     .changes
                     .iter()
@@ -128,6 +164,14 @@ impl ForgeUndo {
         // This rechecks actual current literal limits, field eligibility,
         // exact catalog identity and fresh RuntimeRead provenance. Retain the
         // original edit's flag and recheck the current override permission.
-        ForgePlan::edit(current, manager, catalog, provenance, self.reverse.clone(), override_enabled)
+        let mut reverse = self.reverse.clone();
+        if let ItemEdit::AddAffix(add) = &mut reverse {
+            let definition = catalog.affixes.get(&(add.id as u16)).ok_or(EditError::MissingDefinition)?;
+            let compatible = crate::edits::compatibility(catalog, current.snapshot(), definition, None, None, false).allowed;
+            let (prefixes, suffixes) = crate::edits::free_slots(current.snapshot());
+            let free = add.seal != crate::edits::SealState::Normal || (if add.kind == crate::edits::AffixKind::Prefix { prefixes } else { suffixes }) > 0;
+            add.allow_incompatible = !(compatible && free);
+        }
+        ForgePlan::edit(current, manager, catalog, provenance, reverse, override_enabled)
     }
 }

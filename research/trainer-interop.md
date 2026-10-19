@@ -40,7 +40,7 @@ and mutation boundaries. The named-pipe server has one owner; a new client does 
 unfinished work. Unfinished remote calls retain their thread/process handles and input buffers.
 A helper generation is reused rather than unloading executing code or reinjecting over it.
 
-Every Forge edit validates all destinations before its first store and checks the complete
+Every Forge edit validates all destinations before its first mutation and checks the complete
 expected snapshot, including fields omitted by the legacy fingerprint. This prevents a late
 validation refusal after an earlier store. A managed refresh may still fail after mutation;
 that is Uncertain, with no implicit rollback or retry.
@@ -115,3 +115,7 @@ manifest entries were SHA256-verified before pruning. `workspace/` preserves ori
 paths, and `moves.tsv` lists moved entries/counts/bytes. Moving outputs out of the checkout does
 not reclaim disk space. The active helper package and latest authored build pair remain under
 artifacts; rebuild receipts are local diagnostics, never a runtime `passed` certificate.
+
+Affix list changes call managed Clear/Add for reference barriers. Constructor refusal precedes
+the rewrite; failure after Clear, including the game rarity method, remains Uncertain. The host
+rarity projection is an expectation checked by independent readback; it is not the native writer.

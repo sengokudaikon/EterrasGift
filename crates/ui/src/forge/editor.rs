@@ -2263,13 +2263,15 @@ impl ForgeEditor {
         let (Some(picker), Some(definition)) = (self.picker.clone(), self.picked()) else {
             return;
         };
-        self.picker = None;
         if picker.adding {
-            if let Ok(edit) = self.add_edit(&definition) {
+            let addition = self.add_edit(&definition);
+            self.picker = None;
+            if let Ok(edit) = addition {
                 self.write_affix_list(edit, "Add affix", &definition.name);
             }
             return;
         }
+        self.picker = None;
         if let Some(index) = self.selected_affix
             && self.affixes[index].select_definition(definition, picker.allow_incompatible)
         {
@@ -2313,17 +2315,20 @@ impl ForgeEditor {
 
     fn affix_list_reverse(&self, edit: &ItemEdit, before: &ForgeItem, after: &ForgeItem) -> Option<ItemEdit> {
         match edit {
-            ItemEdit::Add { id, .. } => after
-                .affixes
-                .iter()
-                .find(|affix| affix.id == *id && before.affixes.iter().all(|b| b.id != affix.id))
+            ItemEdit::Add { .. } => edit
+                .moves(before)
+                .get(&before.affixes.len())
+                .and_then(|slot| after.affix(*slot))
                 .map(|added| ItemEdit::Remove { slot: added.slot, id: added.id }),
-            ItemEdit::Remove { slot, .. } => before.affix(*slot).map(|removed| {
+            ItemEdit::Remove { slot, .. } => before.affix(*slot).and_then(|removed| {
                 let definition = self.catalog().definition(removed.id);
+                if !definition.verified || removed.id > 4095 {
+                    return None;
+                }
                 let compatible = self.game.compatibility(after, &definition, None, self.unrestricted()) == Compatibility::Allowed;
                 let (prefixes, suffixes) = after.free_slots();
                 let free = removed.seal != Seal::Normal || (if removed.kind == AffixKind::Prefix { prefixes } else { suffixes }) > 0;
-                ItemEdit::Add {
+                Some(ItemEdit::Add {
                     id: removed.id,
                     tier: removed.tier,
                     roll: removed.roll,
@@ -2331,7 +2336,7 @@ impl ForgeEditor {
                     kind: removed.kind,
                     category: removed.category,
                     allow_incompatible: !(compatible && free),
-                }
+                })
             }),
             _ => None,
         }

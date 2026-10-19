@@ -118,6 +118,9 @@ pub trait BackendConnection: Send + 'static {
     fn supports_identity_change(&self) -> bool {
         false
     }
+    fn supports_affix_list(&self) -> bool {
+        false
+    }
     fn supports_affix_change(&self) -> bool {
         false
     }
@@ -126,6 +129,7 @@ pub trait BackendConnection: Send + 'static {
     }
     fn supports_forge(&self, edit: &crate::edits::ItemEdit) -> bool {
         match edit {
+            crate::edits::ItemEdit::AddAffix(_) | crate::edits::ItemEdit::RemoveAffix(_) => self.supports_affix_list(),
             crate::edits::ItemEdit::Affix(_) => self.supports_affix_change(),
             crate::edits::ItemEdit::Roll(edit) if edit.target == crate::edits::RollTarget::Affix => self.supports_affix_rolls(),
             crate::edits::ItemEdit::Status(edit) => self.supports_status(edit.field),
@@ -191,6 +195,9 @@ impl<T: Transport + Send + 'static, L: LogSource + Send + 'static> BackendConnec
         true
     }
     fn supports_identity_change(&self) -> bool {
+        true
+    }
+    fn supports_affix_list(&self) -> bool {
         true
     }
     fn supports_affix_change(&self) -> bool {
@@ -349,6 +356,7 @@ pub struct Capabilities {
     pub identity_change: bool,
     pub affix_rolls: bool,
     pub affix_change: bool,
+    pub affix_list: bool,
     pub hooks: bool,
     pub fields: bool,
 }
@@ -830,6 +838,7 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
                 && self.connection.as_ref().is_some_and(BackendConnection::supports_level_requirement),
             base_change: self.state.phase == Phase::Ready && self.state.activity.is_none() && self.connection.as_ref().is_some_and(BackendConnection::supports_base_change),
             identity_change: self.state.phase == Phase::Ready && self.state.activity.is_none() && self.connection.as_ref().is_some_and(BackendConnection::supports_identity_change),
+            affix_list: self.state.phase == Phase::Ready && self.state.activity.is_none() && self.connection.as_ref().is_some_and(BackendConnection::supports_affix_list),
             affix_change: self.state.phase == Phase::Ready && self.state.activity.is_none() && self.connection.as_ref().is_some_and(BackendConnection::supports_affix_change),
             affix_rolls: self.state.phase == Phase::Ready && self.state.activity.is_none() && self.connection.as_ref().is_some_and(BackendConnection::supports_affix_rolls),
             status_fields: std::array::from_fn(|index| {

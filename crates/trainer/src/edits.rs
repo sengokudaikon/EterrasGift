@@ -321,13 +321,6 @@ fn order(affixes: &mut [AffixSnapshot], rarity: u8) {
     affixes.sort_by_key(|a| affix_order_key(rarity, a.seal));
 }
 
-fn rarity_after(item: &ForgeSnapshot, affixes: &[AffixSnapshot]) -> u8 {
-    if backed(item.rarity) || item.rarity > 6 {
-        return item.rarity;
-    }
-    let seals = affixes.iter().map(|a| a.seal).filter(|s| *s != 0).collect::<BTreeSet<_>>();
-    affixes.len().saturating_sub(seals.len()).min(4) as u8
-}
 pub fn free_slots(item: &ForgeSnapshot) -> (i32, i32) {
     let each = if matches!(item.rarity, 7 | 8) {
         0
@@ -527,7 +520,7 @@ pub fn prepare(
             });
             new_problem(before, &ordered)?;
             order(&mut ordered, before.rarity);
-            after.rarity = rarity_after(before, &ordered);
+            after.rarity = eg_game_access::write::affix_list_rarity(before, &ordered);
         }
         ItemEdit::RemoveAffix(e) => {
             let slot = index(before, e.slot)?;
@@ -537,7 +530,7 @@ pub fn prepare(
             ordered.remove(slot);
             new_problem(before, &ordered)?;
             order(&mut ordered, before.rarity);
-            after.rarity = rarity_after(before, &ordered);
+            after.rarity = eg_game_access::write::affix_list_rarity(before, &ordered);
         }
         ItemEdit::Roll(e) => {
             if e.changes.is_empty()

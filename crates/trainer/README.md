@@ -82,7 +82,7 @@ The helper stores only selected roll bytes, leaving affix reconstruction to the 
 and UpdateEntry run once per batch. A reverse plan restores the selected original rolls, with
 fresh stale/override checks. Native ACKs still need separate readback; game normalization is
 NotKept and refresh failures remain uncertain. Unique/implicit roll targets remain refused until native mapping
-queries exist; insertion and removal remain separate work.
+queries exist.
 The editor integration above uses these native operations; formatting, previews and mappings remain separate.
 
 
@@ -97,4 +97,12 @@ validates the resulting layout before changing the existing list through managed
 Seal flags and refresh signatures are prevalidated. Constructor normalization is observed through
 independent readback; refresh/rewrite exceptions are uncertain. Undo reconstructs the prior affix
 at its moved slot and rechecks override permission. The original strict-affix set-identity
-readback omission is fixed. Add/remove and actual-value mapping controls remain disabled.
+readback omission is fixed. Actual-value mapping controls remain disabled.
+
+Add/remove (ops 13/14, protocol34, `affix_list`) are connected through the same service and editor.
+They reuse the managed list rewrite and seal flags, then invoke the game rarity method for items
+without unique backing before RebuildID/UpdateEntry. All these signatures are checked before the
+first mutation; any later exception is uncertain, with no automatic rollback or retry. Removal
+checks the slot and ID against the full expected observation, can remove an unserializable ID,
+and never offers to reconstruct such an ID. Conditional Undo otherwise follows current catalog
+and override rules. Inserted duplicate IDs are identified by their resulting slot for Undo.

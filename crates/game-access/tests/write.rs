@@ -244,7 +244,7 @@ fn minimal_schema_bound_is_exact() {
     let request = ForgeWrite::level_requirement(spec(), 1, item, 0).unwrap();
     assert!(decode_frame(&request.encode()).is_ok());
     assert_eq!(REQUEST_SIZE, 336);
-    assert_eq!(eg_game_access::protocol::VERSION, 33); // TEMP handshake draft.
+    assert_eq!(eg_game_access::protocol::VERSION, 34); // TEMP handshake draft.
 }
 #[test]
 fn projection_changes_only_requested_level_and_its_legacy_fingerprint() {
@@ -601,5 +601,33 @@ fn replacement_frame_bounds_and_reserved_bits_are_checked_before_submission() {
         let mut damaged = bytes.clone();
         set32(&mut damaged, offset, value);
         assert!(decode_header(&damaged[..REQUEST_SIZE]).is_err(), "{offset}/{value}");
+    }
+}
+
+#[test]
+fn affix_list_frames_reject_bad_bounds_flags_and_unused_fields() {
+    for mutation in [
+        ForgeMutation::AddAffix {
+            id: 4095,
+            tier: 8,
+            roll: 255,
+            seal: 2,
+            unrestricted: true,
+        },
+        ForgeMutation::RemoveAffix { slot: 31, id: 65500 },
+    ] {
+        let request = ForgeWrite::edit(spec(), 12, snapshot(), mutation).unwrap();
+        let bytes = request.encode();
+        assert_eq!(decode_frame(&bytes).unwrap(), Request::EditForge(request));
+        let damage = if matches!(mutation, ForgeMutation::AddAffix { .. }) {
+            vec![(8, 4096), (24, 1), (28, 2), (32, 0), (32, 9), (32, 0x40001), (80, 1)]
+        } else {
+            vec![(8, 65536), (24, 32), (28, 1), (32, 1), (80, 1)]
+        };
+        for (offset, value) in damage {
+            let mut damaged = bytes.clone();
+            set32(&mut damaged, offset, value);
+            assert!(decode_header(&damaged[..REQUEST_SIZE]).is_err(), "{mutation:?} {offset}/{value}");
+        }
     }
 }

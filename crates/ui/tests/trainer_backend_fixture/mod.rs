@@ -159,6 +159,9 @@ impl BackendConnection for OwnedConnection {
         self.0.reads.fetch_add(1, Ordering::SeqCst);
         Ok(self.0.item.lock().unwrap().clone())
     }
+    fn supports_affix_list(&self) -> bool {
+        true
+    }
     fn supports_affix_change(&self) -> bool {
         true
     }
@@ -333,7 +336,7 @@ pub(super) fn capture(session: &Session) {
     wait(|| ui.global::<eg_ui::ForgeState>().get_has_item());
     assert_eq!(ui.global::<eg_ui::ForgeState>().get_item_name(), "Owned Hatchet Ω");
     assert!(!ui.global::<eg_ui::ForgeState>().get_can_apply());
-    assert!(!ui.global::<eg_ui::ForgeState>().get_can_change_affix_list());
+    assert!(ui.global::<eg_ui::ForgeState>().get_can_change_affix_list());
     assert!(ui.global::<eg_ui::ForgeState>().get_affixes().row_data(0).unwrap().can_edit);
     assert_eq!(ui.global::<eg_ui::ForgeState>().get_affixes().row_count(), 1);
     ui.global::<eg_ui::ForgeState>().invoke_apply();
@@ -529,6 +532,61 @@ pub(super) fn capture(session: &Session) {
     forge.invoke_undo();
     wait(|| !forge.get_can_undo() && data.item.lock().unwrap().as_ref().unwrap().affixes.iter().all(|a| a.tier == 5 && a.seal == 0));
     assert_eq!(data.item.lock().unwrap().as_ref().unwrap().affixes.iter().map(|a| a.id).collect::<Vec<_>>(), vec![4, 1]);
+    // Adding and removing write immediately, with the same asynchronous outcomes.
+    *data.item.lock().unwrap() = Some(item("Add and remove", 24));
+    command(&handle, Command::ReadForge, || true);
+    wait(|| forge.get_item_name() == "Add and remove");
+    assert!(forge.get_can_change_affix_list());
+    // Click the real Add button and confirm through the visible picker.
+    session.click(160.0, 307.0);
+    assert!(forge.get_picker_open());
+    forge.invoke_picker_search_edited("Vitality".into());
+    forge.invoke_picker_select(0);
+    session.capture(&ui, "backend-forge-add-picker");
+    session.key(Key::Return);
+    wait(|| forge.get_can_undo() && data.item.lock().unwrap().as_ref().unwrap().affixes.len() == 2);
+    assert_eq!(data.item.lock().unwrap().as_ref().unwrap().rarity, 2);
+    session.capture(&ui, "backend-forge-added");
+    forge.invoke_undo();
+    wait(|| !forge.get_can_undo() && forge.get_can_change_affix_list() && data.item.lock().unwrap().as_ref().unwrap().affixes.len() == 1);
+    assert_eq!(data.item.lock().unwrap().as_ref().unwrap().rarity, 1);
+    forge.invoke_remove_affix(0);
+    wait(|| forge.get_can_undo() && data.item.lock().unwrap().as_ref().unwrap().affixes.is_empty());
+    assert_eq!(data.item.lock().unwrap().as_ref().unwrap().rarity, 0);
+    session.capture(&ui, "backend-forge-removed-last");
+    session.resize(680, 580);
+    session.capture(&ui, "backend-forge-removed-last-narrow");
+    session.resize(1100, 700);
+    forge.invoke_undo();
+    wait(|| !forge.get_can_undo() && forge.get_can_change_affix_list() && data.item.lock().unwrap().as_ref().unwrap().affixes.len() == 1);
+    assert_eq!(data.item.lock().unwrap().as_ref().unwrap().affixes[0].id, 1);
+    // Explicit incompatible permission survives closing the picker; duplicate IDs
+    // still undo the newly appended slot rather than the original affix.
+    command(&handle, Command::SetOverride(true), || true);
+    assert!(forge.invoke_open_add());
+    forge.invoke_picker_allow_changed(true);
+    forge.invoke_picker_search_edited("Health".into());
+    forge.invoke_picker_select(0);
+    forge.invoke_use_picker();
+    wait(|| forge.get_can_undo() && data.item.lock().unwrap().as_ref().unwrap().affixes.len() == 2);
+    assert_eq!(data.item.lock().unwrap().as_ref().unwrap().affixes.iter().map(|a| a.id).collect::<Vec<_>>(), vec![1, 1]);
+    forge.invoke_undo();
+    wait(|| !forge.get_can_undo() && forge.get_can_change_affix_list() && data.item.lock().unwrap().as_ref().unwrap().affixes.len() == 1);
+    assert_eq!(data.item.lock().unwrap().as_ref().unwrap().affixes[0].roll, 171);
+    command(&handle, Command::SetOverride(false), || true);
+    // Refusal, known mismatch and uncertainty never create a list Undo token.
+    for (mode, label) in [(3, "refused"), (1, "not-kept"), (2, "uncertain")] {
+        data.outcome.store(mode, Ordering::SeqCst);
+        forge.invoke_remove_affix(0);
+        wait(|| !forge.get_message().contains("Waiting for independent readback") && !forge.get_can_undo());
+        session.capture(&ui, &format!("backend-forge-remove-{label}"));
+        if mode == 2 {
+            data.outcome.store(0, Ordering::SeqCst);
+            ui.global::<eg_ui::Connection>().invoke_connect();
+            wait(|| handle.snapshot().phase == Phase::Ready && forge.get_has_item());
+        }
+    }
+    data.outcome.store(0, Ordering::SeqCst);
     let mut unsupported = item("Unsupported status", 19);
     unsupported.status.level_requirement = -1;
     unsupported.fingerprint = unsupported.legacy_fingerprint();

@@ -1,4 +1,4 @@
-//! Game-specific replacement: construct, validate, then rewrite through List<T>'s barriers.
+//! Game-specific affix list edits: construct, validate, then rewrite through List<T>'s barriers.
 
 use super::*;
 use crate::{
@@ -7,7 +7,7 @@ use crate::{
     write::{affix_order_key, layout_problems},
 };
 
-pub(super) struct AffixReplacement<'a, 'r> {
+pub(super) struct AffixRewrite<'a, 'r> {
     list: Root<'a, 'r>,
     // All old objects remain rooted across Clear, Add, refresh, GC and exceptions.
     _original: Vec<Root<'a, 'r>>,
@@ -26,15 +26,29 @@ impl RuntimeAccess {
         api: raw::InvocationApi,
         expected: &ForgeSnapshot,
         mutation: ForgeMutation,
-    ) -> Result<AffixReplacement<'a, 'r>, ForgeWriteError> {
+    ) -> Result<AffixRewrite<'a, 'r>, ForgeWriteError> {
         unsafe {
-            let ForgeMutation::Affix { slot, id, tier, roll, seal, .. } = mutation else {
-                unreachable!()
+            let (slot, construction) = match mutation {
+                ForgeMutation::Affix { slot, id, tier, roll, seal, .. } => {
+                    if usize::from(slot) >= expected.affixes.len() {
+                        return Err(ForgeWriteError::Refused("Invalid affix slot".into()));
+                    }
+                    (slot, Some((id, tier, roll, seal)))
+                }
+                ForgeMutation::AddAffix { id, tier, roll, seal, .. } => {
+                    if expected.affixes.len() >= 32 {
+                        return Err(ForgeWriteError::Refused("Affix list is full".into()));
+                    }
+                    (expected.affixes.len() as u8, Some((id, tier, roll, seal)))
+                }
+                ForgeMutation::RemoveAffix { slot, id } => {
+                    if expected.affixes.get(usize::from(slot)).is_none_or(|a| a.id != id) {
+                        return Err(ForgeWriteError::Refused("That affix is no longer in that slot".into()));
+                    }
+                    (slot, None)
+                }
+                _ => unreachable!(),
             };
-            if usize::from(slot) >= expected.affixes.len() || seal > 3 {
-                return Err(ForgeWriteError::Refused("Invalid affix slot or seal".into()));
-            }
-            self.validate_affix_definition(attached, graph, id, u16::from(tier))?;
             let class = self.class(&graph.images, c"", c"ItemAffix")?;
             let list = self
                 .catalog_reference(attached, &graph.item, c"affixes")?
@@ -52,54 +66,72 @@ impl RuntimeAccess {
                 .map(|name| self.mutable_field(owner, name, c"Boolean", 0x02))
                 .into_iter()
                 .collect::<Result<Vec<_>, _>>()?;
-            let constructor = self.method(class, c".ctor", &["System.UInt16", "System.Byte", "System.Byte", "System.Byte", "SealedAffixType"], true)?;
-            let enum_class = NonNull::new(self.field_class(self.field(class, c"sealedAffixType")?)?).ok_or_else(|| ForgeWriteError::Refused("Missing seal enum".into()))?;
-            let context = InvocationContext::new(attached, api);
-            let constructor = context
-                .bind_with_value_types(
-                    NonNull::new(constructor.cast_mut()).expect("resolved constructor"),
-                    &[ValueTypeContract::I32Enum { class: enum_class }],
-                )
-                .map_err(|e| ForgeWriteError::Refused(e.to_string()))?;
-            // Root before any further runtime call, including constructor invocation.
-            let object = NonNull::new((self.object_new)(class)).ok_or_else(|| ForgeWriteError::Refused("Cannot allocate ItemAffix".into()))?;
-            let replacement = attached.root(object).map_err(DiscoveryError::from)?;
-            let result = constructor
-                .invoke(
-                    Some(&replacement),
-                    &mut [
-                        Argument::Scalar(Scalar::U16(id)),
-                        Argument::Scalar(Scalar::U8(tier - 1)),
-                        Argument::Scalar(Scalar::U8(roll)),
-                        Argument::Scalar(Scalar::U8(expected.item_type)),
-                        Argument::EnumI32 {
-                            class: enum_class,
-                            value: i32::from(seal),
-                        },
-                    ],
-                )
-                .map_err(|e| ForgeWriteError::Refused(e.to_string()))?;
-            if !matches!(result, InvocationOutcome::Returned(ReturnValue::Void)) {
-                return Err(ForgeWriteError::Refused("Affix constructor raised an exception".into()));
-            }
-            self.exact(&replacement, class)?;
-            let mut values = expected.affixes.clone();
-            values[usize::from(slot)] = AffixSnapshot {
-                slot,
-                id: self.primitive(&replacement, c"affixId")?,
-                tier: u16::from(self.primitive::<u8>(&replacement, c"affixTier")?) + 1,
-                roll: self.primitive(&replacement, c"affixRoll")?,
-                kind: self.enumeration(&replacement, c"affixType", c"AffixType")?,
-                seal: self.enumeration(&replacement, c"sealedAffixType", c"SealedAffixType")?,
-                special: self.enumeration(&replacement, c"specialAffixType", c"SpecialAffixType")?,
-                name: self.text(attached, &replacement, c"affixName")?,
+            let replacement = if let Some((id, tier, roll, seal)) = construction {
+                self.validate_affix_definition(attached, graph, id, u16::from(tier))?;
+                if seal > 3 {
+                    return Err(ForgeWriteError::Refused("Invalid affix seal".into()));
+                }
+                let constructor = self.method(class, c".ctor", &["System.UInt16", "System.Byte", "System.Byte", "System.Byte", "SealedAffixType"], true)?;
+                let enum_class = NonNull::new(self.field_class(self.field(class, c"sealedAffixType")?)?).ok_or_else(|| ForgeWriteError::Refused("Missing seal enum".into()))?;
+                let context = InvocationContext::new(attached, api);
+                let constructor = context
+                    .bind_with_value_types(
+                        NonNull::new(constructor.cast_mut()).expect("resolved constructor"),
+                        &[ValueTypeContract::I32Enum { class: enum_class }],
+                    )
+                    .map_err(|e| ForgeWriteError::Refused(e.to_string()))?;
+                // Root before any further runtime call, including constructor invocation.
+                let object = NonNull::new((self.object_new)(class)).ok_or_else(|| ForgeWriteError::Refused("Cannot allocate ItemAffix".into()))?;
+                let replacement = attached.root(object).map_err(DiscoveryError::from)?;
+                let result = constructor
+                    .invoke(
+                        Some(&replacement),
+                        &mut [
+                            Argument::Scalar(Scalar::U16(id)),
+                            Argument::Scalar(Scalar::U8(tier - 1)),
+                            Argument::Scalar(Scalar::U8(roll)),
+                            Argument::Scalar(Scalar::U8(expected.item_type)),
+                            Argument::EnumI32 {
+                                class: enum_class,
+                                value: i32::from(seal),
+                            },
+                        ],
+                    )
+                    .map_err(|e| ForgeWriteError::Refused(e.to_string()))?;
+                if !matches!(result, InvocationOutcome::Returned(ReturnValue::Void)) {
+                    return Err(ForgeWriteError::Refused("Affix constructor raised an exception".into()));
+                }
+                self.exact(&replacement, class)?;
+                Some(replacement)
+            } else {
+                None
             };
-            if values[usize::from(slot)].id > 4095 {
-                return Err(ForgeWriteError::Refused("Constructor returned an unserializable affix ID".into()));
+            let mut values = expected.affixes.clone();
+            if let Some(replacement) = &replacement {
+                let value = AffixSnapshot {
+                    slot,
+                    id: self.primitive(replacement, c"affixId")?,
+                    tier: u16::from(self.primitive::<u8>(replacement, c"affixTier")?) + 1,
+                    roll: self.primitive(replacement, c"affixRoll")?,
+                    kind: self.enumeration(replacement, c"affixType", c"AffixType")?,
+                    seal: self.enumeration(replacement, c"sealedAffixType", c"SealedAffixType")?,
+                    special: self.enumeration(replacement, c"specialAffixType", c"SpecialAffixType")?,
+                    name: self.text(attached, replacement, c"affixName")?,
+                };
+                if value.id > 4095 || !(1..=8).contains(&value.tier) || !(0..=3).contains(&value.seal) {
+                    return Err(ForgeWriteError::Refused("Constructor returned an unserializable affix".into()));
+                }
+                if usize::from(slot) == values.len() {
+                    values.push(value);
+                } else {
+                    values[usize::from(slot)] = value;
+                }
+            } else {
+                values.remove(usize::from(slot));
             }
             let old = layout_problems(expected, &expected.affixes);
             if layout_problems(expected, &values).iter().any(|p| !old.contains(p)) {
-                return Err(ForgeWriteError::Refused("Affix replacement introduces an invalid seal layout".into()));
+                return Err(ForgeWriteError::Refused("Affix edit introduces an invalid seal layout".into()));
             }
             values.sort_by_key(|a| affix_order_key(expected.rarity, a.seal));
             let flags = flag_fields
@@ -109,10 +141,13 @@ impl RuntimeAccess {
                 .collect();
             let mut next = Vec::with_capacity(original.len());
             for value in &values {
-                let root = if value.slot == slot { &replacement } else { &original[usize::from(value.slot)] };
+                let root = match &replacement {
+                    Some(replacement) if value.slot == slot => replacement,
+                    _ => &original[usize::from(value.slot)],
+                };
                 next.push(attached.root(target(root)?).map_err(DiscoveryError::from)?);
             }
-            Ok(AffixReplacement {
+            Ok(AffixRewrite {
                 list,
                 _original: original,
                 next,
@@ -168,7 +203,7 @@ impl RuntimeAccess {
     }
 }
 
-impl AffixReplacement<'_, '_> {
+impl AffixRewrite<'_, '_> {
     /// Caller crossed the mutation boundary: any error is uncertain, even from Clear.
     pub(super) unsafe fn apply(
         &self,

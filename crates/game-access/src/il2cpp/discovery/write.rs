@@ -313,7 +313,7 @@ impl RuntimeAccess {
     /// For rebuilding edits, `invoke` must describe this same runtime and the
     /// refresh methods must be callable synchronously; roots survive managed
     /// calls, exceptions and GC. Refresh failures are uncertain and never retried.
-    /// Affix replacement authorizes object_new, the exact ItemAffix constructor and
+    /// Affix construction authorizes object_new, the exact ItemAffix constructor and
     /// closed corlib List<ItemAffix>.Clear/Add. The constructor may allocate/GC and
     /// normalize the new object but must not modify the selected item. Clear/Add
     /// perform managed reference stores with barriers; failure after Clear is uncertain.
@@ -347,7 +347,12 @@ impl RuntimeAccess {
             {
                 return Err(ForgeWriteError::Refused("Unsupported status edit".into()));
             }
-            if !level && expected.affixes.iter().any(|affix| affix.id > 4095) {
+            if !level
+                && expected
+                    .affixes
+                    .iter()
+                    .any(|affix| affix.id > 4095 && !matches!(mutation,ForgeMutation::RemoveAffix{slot,id} if slot==affix.slot && id==affix.id))
+            {
                 return Err(ForgeWriteError::Refused(
                     "Rebuilding would truncate an affix ID outside the game's 12-bit save format".into(),
                 ));
@@ -367,7 +372,7 @@ impl RuntimeAccess {
             let mut affix_stores = Vec::new();
             let mut replacement = None;
             match mutation {
-                ForgeMutation::Affix { .. } => {
+                ForgeMutation::Affix { .. } | ForgeMutation::AddAffix { .. } | ForgeMutation::RemoveAffix { .. } => {
                     replacement = Some(self.prepare_affix(
                         attached,
                         &graph,
@@ -487,6 +492,9 @@ impl RuntimeAccess {
                     if matches!(mutation, ForgeMutation::Identity { .. }) && self.has_refresh(unpacked, c"MakeFullName")? {
                         methods.push((unpacked, c"MakeFullName", false));
                     }
+                }
+                if matches!(mutation, ForgeMutation::AddAffix { .. } | ForgeMutation::RemoveAffix { .. }) && !matches!(expected.rarity, 7..=9) {
+                    methods.push((item_data, c"setRarityFromAffixesForNormalMagicOrRareItem", false));
                 }
                 methods.push((item_data, c"RebuildID", false));
                 methods.push((self.class(&graph.images, c"", c"ItemContainerEntry")?, c"UpdateEntry", true));
