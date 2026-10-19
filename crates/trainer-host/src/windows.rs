@@ -95,14 +95,45 @@ impl RuntimeAttestation {
     }
 }
 
+/// Resources registered before an authority may submit target work. Registration is
+/// irreversible: owners stay pinned even if authority/preparation is canceled, unwinds
+/// or returns an error. Reclamation after proved target exit is intentionally deferred.
+/// This journal supplies ownership only; it supplies no runtime or thread authority.
+pub struct AuthorityJournal {
+    owners: Vec<PinnedHostGuard>,
+}
+impl AuthorityJournal {
+    fn new() -> Self {
+        Self { owners: Vec::new() }
+    }
+    /// Register the real resource owner BEFORE any possibly submitted target operation.
+    /// The owner must cover pending calls, remote allocations, module leases and all
+    /// required residency guards. Retaining an unrelated Arc does not satisfy that
+    /// caller obligation. There is no release or factual-NotSent override API.
+    pub fn retain_owner(&mut self, owner: Arc<dyn Any + Send + Sync>) {
+        let mut guard = PinnedHostGuard::new(owner);
+        guard.armed = true;
+        self.owners.push(guard);
+    }
+}
+
 pub trait RuntimeAuthority: Send + 'static {
     /// Called only after fresh offline admission. Implementations must use the supplied
     /// callback before each process access and bind evidence to this exact profile.
+    /// Before possibly submitting any native work, register its actual resource owner
+    /// in `journal`. The owner must already cover provisional allocations/calls and
+    /// survive cancellation or unwind at every submission boundary. Keeping the only
+    /// owner inside this future or a not-yet-returned attestation is insufficient.
+    /// Guards returned with an attestation must already be registered here if the
+    /// authority's own target work requires their retained lifetime.
+    /// Query-only authorities register nothing. Journal ownership does not authorize
+    /// a probe, bootstrap, runtime access or construction of RuntimeAttestation.
     fn attest(
         &mut self,
         target: &ProcessIdentity,
         profile: &BuildProfile,
         admission: &mut dyn AdmissionCheck,
+        journal: &mut AuthorityJournal,
     ) -> impl Future<Output = Result<RuntimeAttestation, PreparationFailure>> + Send;
 }
 
@@ -113,28 +144,25 @@ struct RuntimeRecord {
     proof: Option<DispatcherProof>,
     rejected: Option<String>,
 }
-enum Retained {
-    Attempting {
-        target: ProcessIdentity,
-    },
-    Loaded {
-        target: ProcessIdentity,
-        runtime: Arc<Mutex<RuntimeRecord>>,
-    },
-    Uncertain {
-        target: ProcessIdentity,
-        _failure: RemoteFailure,
-        _attestation: Box<RuntimeAttestation>,
-    },
-    Rejected {
-        target: ProcessIdentity,
-        failure: PreparationFailure,
-    },
+struct Retained {
+    target: ProcessIdentity,
+    profile: BuildProfile,
+    journal: AuthorityJournal,
+    state: RetainedState,
+}
+enum RetainedState {
+    Attesting,
+    Attempting,
+    Loaded { runtime: Arc<Mutex<RuntimeRecord>> },
+    Uncertain { _failure: RemoteFailure, _attestation: Box<RuntimeAttestation> },
+    Rejected { failure: PreparationFailure },
 }
 impl Retained {
-    fn target(&self) -> &ProcessIdentity {
-        match self {
-            Self::Attempting { target } | Self::Loaded { target, .. } | Self::Uncertain { target, .. } | Self::Rejected { target, .. } => target,
+    fn residency(&self) -> PreparationResidency {
+        match &self.state {
+            RetainedState::Loaded { .. } => PreparationResidency::Loaded,
+            RetainedState::Rejected { failure } => failure.residency,
+            RetainedState::Attesting | RetainedState::Attempting | RetainedState::Uncertain { .. } => PreparationResidency::MayBeLoaded,
         }
     }
 }
@@ -164,21 +192,37 @@ impl<A: RuntimeAuthority, F: LogFactory> NativePreparer<A, F> {
         self.retained.len()
     }
     pub fn uncertain_targets(&self) -> usize {
-        self.retained
-            .iter()
-            .filter(|value| matches!(value, Retained::Attempting { .. } | Retained::Uncertain { .. } | Retained::Rejected { .. }))
-            .count()
+        self.retained.iter().filter(|value| !matches!(value.state, RetainedState::Loaded { .. })).count()
     }
     /// Full pristine proof has been checked at least once. This is historical
     /// preparation evidence, not a claim that the retained server is running.
     pub fn verified_targets(&self) -> usize {
         self.retained
             .iter()
-            .filter(|value| match value {
-                Retained::Loaded { runtime, .. } => runtime.lock().unwrap_or_else(|poison| poison.into_inner()).proof.is_some(),
+            .filter(|value| match &value.state {
+                RetainedState::Loaded { runtime } => runtime.lock().unwrap_or_else(|poison| poison.into_inner()).proof.is_some(),
                 _ => false,
             })
             .count()
+    }
+    fn known_residency(&self, target: &ProcessIdentity) -> PreparationResidency {
+        self.retained
+            .iter()
+            .find(|entry| entry.target == *target)
+            .map_or(PreparationResidency::NotLoaded, Retained::residency)
+    }
+    fn reject_authority_attempt(&mut self, index: usize, mut failure: PreparationFailure) -> PreparationFailure {
+        if failure.residency == PreparationResidency::NotLoaded && !self.retained[index].journal.owners.is_empty() {
+            failure.residency = PreparationResidency::MayBeLoaded;
+            failure.error.delivery = Some(Delivery::MayHaveRun);
+            failure.error.retry_when_waiting = false;
+        }
+        if failure.residency == PreparationResidency::NotLoaded {
+            self.retained.remove(index);
+        } else {
+            self.retained[index].state = RetainedState::Rejected { failure: failure.clone() };
+        }
+        failure
     }
     fn transport(&mut self, target: &ProcessIdentity, runtime: Arc<Mutex<RuntimeRecord>>) -> Result<VerifiedTransport<F::Log>, PreparationFailure> {
         let log = self.logs.create(target).map_err(|error| failed(error, PreparationResidency::Loaded))?;
@@ -199,24 +243,31 @@ impl<A: RuntimeAuthority, F: LogFactory> HelperPreparer for NativePreparer<A, F>
         profile: &BuildProfile,
         admission: &mut dyn AdmissionCheck,
     ) -> Result<PreparedHelper<Self::Transport>, PreparationFailure> {
-        admission.check().map_err(|error| failed(error, PreparationResidency::NotLoaded))?;
+        let known_residency = self.known_residency(target);
+        admission.check().map_err(|error| failed(error, known_residency))?;
         if !profile.helper_build_id().eq_ignore_ascii_case(self.artifact.source_id()) {
             return Err(failed(
                 BackendError::blocked(ErrorKind::Identity, "helper artifact source differs from session profile"),
-                PreparationResidency::NotLoaded,
+                known_residency,
             ));
         }
-        let existing = self.retained.iter().find(|value| value.target() == target);
+        let existing = self.retained.iter().find(|value| value.target == *target);
         let runtime = if let Some(existing) = existing {
-            match existing {
-                Retained::Rejected { failure, .. } => return Err(failure.clone()),
-                Retained::Attempting { .. } | Retained::Uncertain { .. } => {
+            if existing.profile != *profile {
+                return Err(failed(
+                    BackendError::blocked(ErrorKind::Identity, "retained authority attempt belongs to another artifact profile"),
+                    existing.residency(),
+                ));
+            }
+            match &existing.state {
+                RetainedState::Rejected { failure } => return Err(failure.clone()),
+                RetainedState::Attesting | RetainedState::Attempting | RetainedState::Uncertain { .. } => {
                     return Err(failed(
-                        BackendError::blocked(ErrorKind::RestartRequired, "a prior helper load may have run; reinjection is refused"),
+                        BackendError::blocked(ErrorKind::RestartRequired, "a prior authority or helper attempt may have run; replay is refused"),
                         PreparationResidency::MayBeLoaded,
                     ));
                 }
-                Retained::Loaded { runtime, .. } => {
+                RetainedState::Loaded { runtime } => {
                     let record = runtime.lock().unwrap_or_else(|poison| poison.into_inner());
                     if record.attestation.profile != *profile || record.rejected.is_some() {
                         return Err(failed(
@@ -238,31 +289,28 @@ impl<A: RuntimeAuthority, F: LogFactory> HelperPreparer for NativePreparer<A, F>
                     PreparationResidency::NotLoaded,
                 ));
             }
-            let mut attestation = match self.authority.attest(target, profile, admission).await {
-                Ok(value) => value,
-                Err(failure) => {
-                    if failure.residency != PreparationResidency::NotLoaded {
-                        self.retained.push(Retained::Rejected {
-                            target: target.clone(),
-                            failure: failure.clone(),
-                        });
-                    }
-                    return Err(failure);
-                }
-            };
-            if attestation.target != *target || attestation.profile != *profile || attestation.game.sha256() != profile.binary_hash() {
-                return Err(failed(
-                    BackendError::blocked(ErrorKind::Identity, "runtime attestation belongs to another process or artifact profile"),
-                    PreparationResidency::NotLoaded,
-                ));
-            }
-            admission.check().map_err(|error| failed(error, PreparationResidency::NotLoaded))?;
-            // Reserve the no-replay fence before the synchronous unsafe call:
-            // even a caught admission-callback panic leaves this target blocked.
+            // Reserve before polling authority. Cancellation/unwind leaves this exact
+            // target/profile and its already registered owners retained without replay.
             let retained_index = self.retained.len();
-            self.retained.push(Retained::Attempting { target: target.clone() });
+            self.retained.push(Retained {
+                target: target.clone(),
+                profile: profile.clone(),
+                journal: AuthorityJournal::new(),
+                state: RetainedState::Attesting,
+            });
+            let mut attestation = match self.authority.attest(target, profile, admission, &mut self.retained[retained_index].journal).await {
+                Ok(value) => value,
+                Err(failure) => return Err(self.reject_authority_attempt(retained_index, failure)),
+            };
+            if let Err(error) = validate_authority_identity(target, profile, &attestation.target, &attestation.profile, attestation.game.sha256()) {
+                return Err(self.reject_authority_attempt(retained_index, failed(error, PreparationResidency::NotLoaded)));
+            }
+            if let Err(error) = admission.check() {
+                return Err(self.reject_authority_attempt(retained_index, failed(error, PreparationResidency::NotLoaded)));
+            }
+            self.retained[retained_index].state = RetainedState::Attempting;
             // Arm before entering the unsafe operation, including possible unwind.
-            // Only a factual NotSent result can make releasing this guard safe.
+            // Authority journal owners remain independently pinned even for NotSent.
             attestation.keep_alive.armed = true;
             // SAFETY: only unsafe construction of this exact identity-bound attestation can
             // supply the caller contract. Its ownership guards are retained in RuntimeRecord.
@@ -279,22 +327,16 @@ impl<A: RuntimeAuthority, F: LogFactory> HelperPreparer for NativePreparer<A, F>
             let helper = match result {
                 Ok(helper) => helper,
                 Err(failure) => {
-                    let residency = if failure.delivery == RemoteDelivery::MayHaveRun {
-                        PreparationResidency::MayBeLoaded
-                    } else {
-                        attestation.keep_alive.armed = false;
-                        self.retained.remove(retained_index);
-                        PreparationResidency::NotLoaded
-                    };
                     let error = BackendError::blocked(ErrorKind::Transport, failure.to_string());
-                    if residency == PreparationResidency::MayBeLoaded {
-                        self.retained[retained_index] = Retained::Uncertain {
-                            target: target.clone(),
-                            _failure: failure,
-                            _attestation: Box::new(attestation),
-                        };
+                    if failure.delivery == RemoteDelivery::NotSent {
+                        attestation.keep_alive.armed = false;
+                        return Err(self.reject_authority_attempt(retained_index, failed(error, PreparationResidency::NotLoaded)));
                     }
-                    return Err(failed(error, residency));
+                    self.retained[retained_index].state = RetainedState::Uncertain {
+                        _failure: failure,
+                        _attestation: Box::new(attestation),
+                    };
+                    return Err(failed(error, PreparationResidency::MayBeLoaded));
                 }
             };
             let runtime = Arc::new(Mutex::new(RuntimeRecord {
@@ -304,10 +346,7 @@ impl<A: RuntimeAuthority, F: LogFactory> HelperPreparer for NativePreparer<A, F>
                 proof: None,
                 rejected: None,
             }));
-            self.retained[retained_index] = Retained::Loaded {
-                target: target.clone(),
-                runtime: Arc::clone(&runtime),
-            };
+            self.retained[retained_index].state = RetainedState::Loaded { runtime: Arc::clone(&runtime) };
             runtime
         };
         let transport = self.transport(target, runtime)?;
@@ -318,6 +357,22 @@ impl<A: RuntimeAuthority, F: LogFactory> HelperPreparer for NativePreparer<A, F>
             transport,
         })
     }
+}
+
+fn validate_authority_identity(
+    target: &ProcessIdentity,
+    profile: &BuildProfile,
+    actual_target: &ProcessIdentity,
+    actual_profile: &BuildProfile,
+    game_sha256: &str,
+) -> Result<(), BackendError> {
+    if actual_target != target || actual_profile != profile || game_sha256 != profile.binary_hash() {
+        return Err(BackendError::blocked(
+            ErrorKind::Identity,
+            "runtime attestation belongs to another process or artifact profile",
+        ));
+    }
+    Ok(())
 }
 
 fn failed(error: BackendError, residency: PreparationResidency) -> PreparationFailure {
@@ -471,7 +526,7 @@ mod tests {
     }
     struct NeverAuthority(Arc<AtomicUsize>);
     impl RuntimeAuthority for NeverAuthority {
-        async fn attest(&mut self, _: &ProcessIdentity, _: &BuildProfile, _: &mut dyn AdmissionCheck) -> Result<RuntimeAttestation, PreparationFailure> {
+        async fn attest(&mut self, _: &ProcessIdentity, _: &BuildProfile, _: &mut dyn AdmissionCheck, _: &mut AuthorityJournal) -> Result<RuntimeAttestation, PreparationFailure> {
             self.0.fetch_add(1, SeqCst);
             panic!("Attempting target reached authority");
         }
@@ -485,7 +540,12 @@ mod tests {
         let mut preparer = NativePreparer::new(fixture.artifact.clone(), NeverAuthority(calls.clone()), logs);
         // This is the stored state immediately before the unsafe start boundary.
         // Exercise unwind and later public prepare without opening any process.
-        preparer.retained.push(Retained::Attempting { target: fixture.target.clone() });
+        preparer.retained.push(Retained {
+            target: fixture.target.clone(),
+            profile: fixture.profile.clone(),
+            journal: AuthorityJournal::new(),
+            state: RetainedState::Attempting,
+        });
         let drops = Arc::new(AtomicUsize::new(0));
         let owner = Arc::new(CountDrop(drops.clone()));
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
@@ -538,5 +598,123 @@ mod tests {
         }
         assert!(require_request_proof(&Request::Discover, None, false).is_ok());
         assert!(require_request_proof(&Request::Discover, Some(spec), true).is_ok());
+    }
+    fn reserved(preparer: &mut NativePreparer<NeverAuthority, support::Logs>, fixture: &support::Fixture, registered: bool) -> Option<(Arc<CountDrop>, Arc<AtomicUsize>)> {
+        let mut journal = AuthorityJournal::new();
+        let owner = registered.then(|| {
+            let drops = Arc::new(AtomicUsize::new(0));
+            let owner = Arc::new(CountDrop(drops.clone()));
+            journal.retain_owner(owner.clone());
+            (owner, drops)
+        });
+        preparer.retained.push(Retained {
+            target: fixture.target.clone(),
+            profile: fixture.profile.clone(),
+            journal,
+            state: RetainedState::Attesting,
+        });
+        owner
+    }
+    #[test]
+    fn wrong_success_identity_facts_are_rejected_and_registered_owners_preserved() {
+        for registered in [false, true] {
+            for mismatch in 0..3 {
+                let fixture = support::Fixture::new();
+                let mut preparer = NativePreparer::new(fixture.artifact.clone(), NeverAuthority(Arc::new(AtomicUsize::new(0))), support::Logs::default());
+                let owner = reserved(&mut preparer, &fixture, registered);
+                let different = support::other_target(&fixture.target, 999);
+                let profile = fixture.profile_with_source(&"a".repeat(64));
+                let (target, actual_profile, hash) = match mismatch {
+                    0 => (&different, &fixture.profile, fixture.profile.binary_hash()),
+                    1 => (&fixture.target, &profile, fixture.profile.binary_hash()),
+                    _ => (&fixture.target, &fixture.profile, "wrong module hash"),
+                };
+                let error = validate_authority_identity(&fixture.target, &fixture.profile, target, actual_profile, hash).unwrap_err();
+                let failure = preparer.reject_authority_attempt(0, failed(error, PreparationResidency::NotLoaded));
+                assert_eq!(failure.error.kind, ErrorKind::Identity);
+                assert_eq!(
+                    failure.residency,
+                    if registered {
+                        PreparationResidency::MayBeLoaded
+                    } else {
+                        PreparationResidency::NotLoaded
+                    }
+                );
+                assert_eq!(preparer.retained_targets(), usize::from(registered));
+                drop(preparer);
+                if let Some((owner, drops)) = owner {
+                    assert_eq!(drops.load(SeqCst), 0);
+                    reclaim_one_authored_pin(&owner);
+                    drop(owner);
+                    assert_eq!(drops.load(SeqCst), 1);
+                }
+            }
+        }
+        let fixture = support::Fixture::new();
+        assert!(validate_authority_identity(&fixture.target, &fixture.profile, &fixture.target, &fixture.profile, fixture.profile.binary_hash()).is_ok());
+    }
+    #[test]
+    fn post_authority_gate_and_helper_not_sent_preserve_prior_residency_in_exact_slot() {
+        for registered in [false, true] {
+            for helper_not_sent in [false, true] {
+                let fixture = support::Fixture::new();
+                let mut preparer = NativePreparer::new(fixture.artifact.clone(), NeverAuthority(Arc::new(AtomicUsize::new(0))), support::Logs::default());
+                // A previous canceled target must remain unchanged when the following
+                // target succeeds authority but is refused before any helper submission.
+                reserved(&mut preparer, &fixture, false);
+                preparer.retained[0].target.pid = 123;
+                let owner = reserved(&mut preparer, &fixture, registered);
+                let journal_address = &preparer.retained[1].journal as *const AuthorityJournal;
+                if helper_not_sent {
+                    preparer.retained[1].state = RetainedState::Attempting;
+                }
+                let error = if helper_not_sent {
+                    BackendError::blocked(ErrorKind::Transport, "authored factual helper NotSent; no loader called")
+                } else {
+                    BackendError::blocked(ErrorKind::Gate, "authored post-authority gate loss")
+                };
+                let failure = preparer.reject_authority_attempt(1, failed(error, PreparationResidency::NotLoaded));
+                assert_eq!(
+                    failure.residency,
+                    if registered {
+                        PreparationResidency::MayBeLoaded
+                    } else {
+                        PreparationResidency::NotLoaded
+                    }
+                );
+                assert_eq!(preparer.retained_targets(), if registered { 2 } else { 1 });
+                assert_eq!(preparer.retained[0].target.pid, 123);
+                assert!(matches!(preparer.retained[0].state, RetainedState::Attesting));
+                if registered {
+                    assert_eq!(&preparer.retained[1].journal as *const AuthorityJournal, journal_address);
+                    assert_eq!(preparer.retained[1].target, fixture.target);
+                    assert_eq!(preparer.retained[1].profile, fixture.profile);
+                    assert!(matches!(preparer.retained[1].state, RetainedState::Rejected { .. }));
+                }
+                drop(preparer);
+                if let Some((owner, drops)) = owner {
+                    assert_eq!(drops.load(SeqCst), 0);
+                    reclaim_one_authored_pin(&owner);
+                    drop(owner);
+                    assert_eq!(drops.load(SeqCst), 1);
+                }
+            }
+        }
+    }
+    #[test]
+    fn journal_registration_pins_every_owner_without_any_future_or_native_call() {
+        let drops = Arc::new(AtomicUsize::new(0));
+        let first = Arc::new(CountDrop(drops.clone()));
+        let second = Arc::new(CountDrop(drops.clone()));
+        let mut journal = AuthorityJournal::new();
+        journal.retain_owner(first.clone());
+        journal.retain_owner(second.clone());
+        drop(journal);
+        assert_eq!(drops.load(SeqCst), 0);
+        reclaim_one_authored_pin(&first);
+        reclaim_one_authored_pin(&second);
+        drop(first);
+        drop(second);
+        assert_eq!(drops.load(SeqCst), 2);
     }
 }

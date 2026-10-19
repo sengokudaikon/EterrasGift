@@ -149,3 +149,12 @@ passes one isolated Unity 6000.4.8f1 run: nine native captures, eleven independe
 cleanup and three later frames before normal exit. All 696 frozen inputs remain unchanged.
 This validates the narrow reader/predicate mechanism under authored lifecycle admission; forced
 GC, another probe compiler and production authority/publication/lifetime remain separate work.
+
+The [authority-attempt journal](../tools/trainer-eval/persistent-player/authority-journal-README.md)
+now reserves process/profile identity before the authority future and pins registered
+resource owners through cancellation/unwind. Owner-empty explicit NotLoaded remains
+retryable; contradictory resident NotLoaded becomes MayBeLoaded without replay. Ten
+new pure cases pass on both toolchains, including retained failing-before regressions.
+Updated stable/nightly controllers also pass the full owned worker route (171/163,
+13 setters, 44 Pending observations and six boundaries each) using the unchanged native
+pair. Root tests/Clippy/format/tokens/captures pass; production authority remains open.

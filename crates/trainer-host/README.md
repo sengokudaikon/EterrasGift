@@ -26,8 +26,9 @@ scheduler is expected to have changed the entry since the original check.
 
 The preparer survives session failures and disconnects. It reuses an admitted loaded
 generation, retains uncertain calls and refuses another load after uncertainty or a
-caught startup panic. A reservation precedes the unsafe startup boundary. A factual
-NotSent result releases that reservation; successful and uncertain results retain it.
+caught authority/startup panic. A reservation precedes the authority await and the
+unsafe startup boundary. A factual NotSent result releases that reservation only
+when authority registered no owners; successful and uncertain results retain it.
 The caller's ownership guard is pinned after a potentially submitted start, including
 when the final preparer/transport drops. Confirmed-exit reclamation is not implemented.
 There are eight retained target slots per preparer and no automatic eviction.
@@ -41,3 +42,20 @@ The offline host tests use authored inert file bytes and scripted authority fail
 They check admission ordering, source/profile binding, replay fences, capacity, guard
 retention, caught panic and exact dispatcher proof. Successful preparation is tested
 by the authored player controller's `--rust-preparer` route.
+
+Before awaiting `RuntimeAuthority`, `NativePreparer` reserves an exact process/profile slot.
+A canceled or unwound authority remains fenced even when it registered no owners. A
+completed explicit NotLoaded refusal releases the slot only if no owner was registered.
+The authority receives an `AuthorityJournal` whose only public operation is `retain_owner`.
+It must register the real pending-call/allocation/module/residency owner before any
+possibly submitted target operation. Registration permanently pins that Arc through
+cancellation, refusal and preparer Drop; target-exit reclamation is deferred. Returning
+an unrelated owner or keeping the only owner in the future does not meet this contract.
+Any guards that authority will return inside an attestation must already be registered
+when its own target work requires their retained lifetime.
+
+This ownership journal grants no probe or runtime authority. The unsafe attestation
+constructor and raw helper bootstrap contract remain unchanged. A registered authority
+owner prevents later identity/gate/helper-NotSent refusals from claiming NotLoaded. The
+normal query-only authored authority registers nothing and keeps its existing retryable
+NotLoaded behavior. No pre-bootstrap runtime reader or new target call is implemented.
