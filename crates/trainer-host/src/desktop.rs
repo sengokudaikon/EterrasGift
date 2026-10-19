@@ -9,7 +9,26 @@ use eg_trainer::{
     session::Session,
 };
 use jiff::Timestamp;
-use std::{path::PathBuf, sync::Arc};
+use std::{
+    path::{Path, PathBuf},
+    sync::Arc,
+};
+
+// Product metadata, independent of build/test reports. Unknown report fields
+// (including `passed`) have no bearing on runtime admission.
+fn package(bytes: &[u8], manifest: &Path) -> Result<(PathBuf, String, String), BackendError> {
+    let metadata: serde_json::Value = serde_json::from_slice(bytes).map_err(|e| BackendError::blocked(ErrorKind::Identity, e.to_string()))?;
+    let text = |key| {
+        metadata[key]
+            .as_str()
+            .filter(|s| !s.is_empty())
+            .map(str::to_owned)
+            .ok_or_else(|| BackendError::blocked(ErrorKind::Identity, "The trainer helper package is incomplete. Rebuild Eterra's Gift."))
+    };
+    let dll = PathBuf::from(text("dll")?);
+    let dll = if dll.is_absolute() { dll } else { manifest.parent().unwrap_or(manifest).join(dll) };
+    Ok((dll, text("dll_sha256")?, text("helper_build_id")?))
+}
 
 pub struct GameProcesses {
     executable_name: String,
@@ -91,26 +110,8 @@ impl<F: LogFactory + Clone> Connector for DesktopConnector<F> {
                     BackendError::blocked(ErrorKind::Identity, format!("The trainer helper could not be opened: {e}"))
                 }
             })?;
-            let report: serde_json::Value = serde_json::from_slice(&bytes).map_err(|e| BackendError::blocked(ErrorKind::Identity, e.to_string()))?;
-            let text = |key| {
-                report[key]
-                    .as_str()
-                    .ok_or_else(|| BackendError::blocked(ErrorKind::Identity, "The trainer helper package is incomplete. Rebuild Eterra's Gift."))
-            };
-            if report["passed"] != true {
-                return Err(BackendError::blocked(
-                    ErrorKind::Identity,
-                    "The trainer helper build did not complete. Rebuild Eterra's Gift.",
-                ));
-            }
-            let dll = PathBuf::from(text("dll")?);
-            let dll = if dll.is_absolute() {
-                dll
-            } else {
-                self.manifest.parent().unwrap_or(&self.manifest).join(dll)
-            };
-            let artifact =
-                Arc::new(HelperArtifact::capture(&dll, text("dll_sha256")?, text("helper_build_id")?).map_err(|e| BackendError::blocked(ErrorKind::Identity, e.to_string()))?);
+            let (dll, hash, source_id) = package(&bytes, &self.manifest)?;
+            let artifact = Arc::new(HelperArtifact::capture(&dll, &hash, &source_id).map_err(|e| BackendError::blocked(ErrorKind::Identity, e.to_string()))?);
             // SAFETY: the desktop selects the supported Last Epoch executable. The
             // game-specific runtime and callback assumptions are those documented by
             // NativePreparer; per-target metadata/offline/identity checks remain active.
@@ -118,5 +119,24 @@ impl<F: LogFactory + Clone> Connector for DesktopConnector<F> {
             self.session = Some(SessionConnector::new(preparer, self.logs.clone(), artifact.source_id(), GatePolicy::Release)?);
         }
         self.session.as_mut().unwrap().connect(target, now).await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn package_does_not_admit_from_evaluation_results() {
+        let manifest = std::env::temp_dir().join("app/helper.json");
+        let metadata = serde_json::json!({"dll": "helper.dll", "dll_sha256": "hash", "helper_build_id": "source"});
+        let expected = (manifest.parent().unwrap().join("helper.dll"), "hash".into(), "source".into());
+        assert_eq!(package(&serde_json::to_vec(&metadata).unwrap(), &manifest).unwrap(), expected);
+        for passed in [false, true] {
+            let mut report = metadata.clone();
+            report["passed"] = passed.into();
+            assert_eq!(package(&serde_json::to_vec(&report).unwrap(), &manifest).unwrap(), expected);
+        }
+        assert!(package(br#"{"passed":true}"#, &manifest).is_err());
     }
 }

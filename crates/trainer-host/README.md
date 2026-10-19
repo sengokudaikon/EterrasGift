@@ -9,6 +9,8 @@ all matching instances so the worker can reject ambiguity. `DesktopConnector`
 lazily validates the helper manifest beside the app after Release admission,
 then retains the same NativePreparer/SessionConnector across reconnections.
 Source builds publish that manifest with `mise run trainer:helper:build`.
+It contains only the DLL path, SHA256 and helper source ID. Build/evaluation
+reports and their `passed` flags do not participate in runtime admission.
 Missing or invalid packages block with an actionable reason and explicit Retry.
 The desktop keeps the unsafe supported-game assumptions at composition; these
 types do not certify a runtime based on a filename or manifest.
