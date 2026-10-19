@@ -1,4 +1,6 @@
 //! Session admission uses owned artifacts and scripted services; no game is opened.
+#[path = "session/descriptions.rs"]
+mod descriptions;
 #[path = "session/fields.rs"]
 mod fields;
 #[path = "session/rate_write.rs"]

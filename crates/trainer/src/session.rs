@@ -267,6 +267,33 @@ impl<T: Transport, L: LogSource> Session<T, L> {
     pub async fn read_forge(&mut self, now: Timestamp) -> Result<Option<ForgeSnapshot>, SessionError> {
         self.read_owned(now, |dispatcher| Request::ReadForge { dispatcher }, forge::decode).await
     }
+    /// Optional presentation. A game formatting refusal leaves the session ready;
+    /// transport, protocol, process and offline failures still revoke admission.
+    pub async fn describe_implicits(&mut self, now: Timestamp, expected: &ForgeSnapshot) -> Result<Option<Vec<eg_game_access::mapping::ModifierSnapshot>>, SessionError> {
+        let manager = self.status.filter(|s| !s.online && s.manager != 0).ok_or(SessionError::NotConnected)?.manager;
+        let dispatcher = self.discovery.as_ref().ok_or(SessionError::NotConnected)?.dispatcher;
+        let query = eg_game_access::mapping::ImplicitDescriptionRequest::new(dispatcher, manager, expected.clone()).map_err(SessionError::Protocol)?;
+        let result = self.read_owned(now, |_| Request::DescribeImplicits(query), eg_game_access::mapping::decode_modifiers).await;
+        match result {
+            Ok(modifiers) => {
+                if modifiers.iter().any(|m| {
+                    m.index as usize >= eg_game_access::catalog::MAX_IMPLICITS
+                        || m.roll_ids.len() > 1
+                        || m.roll_ids.iter().any(|id| usize::from(*id) >= expected.implicit_rolls.len() || u32::from(*id) != m.index)
+                }) {
+                    self.release_without_io();
+                    self.state = SessionState::Blocked;
+                    return Err(SessionError::Protocol(ProtocolError::InvalidData));
+                }
+                Ok(Some(modifiers))
+            }
+            Err(SessionError::Helper {
+                code: ResponseCode::Refused | ResponseCode::Failed | ResponseCode::NotReady | ResponseCode::StaleItem,
+                ..
+            }) if self.state == SessionState::Ready => Ok(None),
+            Err(error) => Err(error),
+        }
+    }
     /// Observe the two audited actor-stat fields. Identity tokens and raw float bits convey no
     /// write authority. Feature-local graph unavailability leaves the admitted session ready;
     /// runtime offline/manager refusal revokes admission even though its typed reason is returned.
@@ -511,7 +538,9 @@ impl<T: Transport, L: LogSource> Session<T, L> {
         }
         let status = self.status.take();
         self.state = SessionState::Connecting;
-        let result = self.request(&request(dispatcher)).await.and_then(|bytes| decode(&bytes).map_err(SessionError::Protocol));
+        let request = request(dispatcher);
+        let optional_description = matches!(request, Request::DescribeImplicits(_));
+        let result = self.request(&request).await.and_then(|bytes| decode(&bytes).map_err(SessionError::Protocol));
         match result {
             Ok(snapshot) => {
                 if let Some(lease) = lease
@@ -532,6 +561,20 @@ impl<T: Transport, L: LogSource> Session<T, L> {
                 Ok(OwnedRead::Complete(snapshot))
             }
             Err(error) => {
+                if optional_description
+                    && matches!(
+                        &error,
+                        SessionError::Helper {
+                            code: ResponseCode::Refused | ResponseCode::Failed | ResponseCode::NotReady | ResponseCode::StaleItem,
+                            ..
+                        }
+                    )
+                {
+                    self.gate(advanced(now, elapsed)?)?;
+                    self.status = status;
+                    self.state = SessionState::Ready;
+                    return Err(error);
+                }
                 self.release_without_io();
                 if self.state == SessionState::Connecting {
                     self.state = SessionState::Blocked;

@@ -73,7 +73,9 @@ by the original C# reader; they are not evidence that field walking is inherentl
 The isolated numeric formatter is retained with its tests. Virtual dispatch must use the exact
 resolved override; culture and provider affect text. Raw numeric quantities do not always have
 the same scale as display text. None of those mechanisms provides a producer, description,
-preview or roll-mapping operation by itself. The unused in-game display parser/provider/context
+preview or roll-mapping operation by itself. Implicit descriptions now use the game tooltip
+builder directly and resolve virtual text/range methods; they do not use the staged numeric
+field adapter or infer display values from numeric fields. The unused in-game display parser/provider/context
 modules were removed. Future host parsing follows the captured locale as the original app did.
 
 ## Hook work remains separate

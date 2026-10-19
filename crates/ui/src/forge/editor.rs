@@ -267,7 +267,7 @@ impl ForgeEditor {
             self.recovery_required = false;
             self.say("Item read again. The previous write was not retried.", MessageKind::Info);
         }
-        if self.applied_at.as_ref().is_some_and(|at| Some(at) != snapshot.as_ref()) {
+        if self.applied_at.as_ref().is_some_and(|at| snapshot.as_ref().is_none_or(|current| !at.same_state(current))) {
             self.applied = None;
             self.applied_at = None;
         }
@@ -290,8 +290,10 @@ impl ForgeEditor {
                 let snapshot = self.game.read();
                 if snapshot != self.item {
                     let message = (self.message.clone(), self.message_kind);
-                    self.applied = None;
-                    self.applied_at = None;
+                    if !self.item.as_ref().zip(snapshot.as_ref()).is_some_and(|(before, after)| before.same_state(after)) {
+                        self.applied = None;
+                        self.applied_at = None;
+                    }
                     self.update_item(snapshot, None);
                     self.say(message.0, message.1);
                 }

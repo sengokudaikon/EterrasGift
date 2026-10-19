@@ -223,6 +223,24 @@ pub struct ForgeItem {
 }
 
 impl ForgeItem {
+    /// Original ForgeSnapshotComparer.StateEquals: optional tooltip text/ranges
+    /// and formatting availability are presentation, never a stale-write or Undo key.
+    pub fn same_state(&self, other: &Self) -> bool {
+        fn identity(value: &Option<UniqueState>) -> Option<(u16, &[u8])> {
+            value.as_ref().map(|state| (state.id, state.rolls.as_slice()))
+        }
+        self.token == other.token
+            && self.name == other.name
+            && self.item_type == other.item_type
+            && self.sub_type == other.sub_type
+            && self.idol == other.idol
+            && self.rarity == other.rarity
+            && self.affixes == other.affixes
+            && self.implicit_rolls == other.implicit_rolls
+            && self.status == other.status
+            && identity(&self.unique) == identity(&other.unique)
+            && identity(&self.set_item) == identity(&other.set_item)
+    }
     /// Which unique or set item a unique-backed item is.
     pub fn identity_id(&self) -> Option<u16> {
         self.unique.as_ref().or(self.set_item.as_ref()).map(|identity| identity.id)
@@ -842,6 +860,38 @@ mod tests {
             set_item: None,
             status: None,
         }
+    }
+
+    #[test]
+    fn item_state_ignores_optional_tooltips_but_keeps_identity_and_roll_changes() {
+        let before = item(vec![affix(0, 25, Seal::Normal)]);
+        let mut formatted = before.clone();
+        formatted.implicits = Some(vec![ModifierState {
+            index: 0,
+            text: "Armour +5".into(),
+            range: "[5 to 5]".into(),
+            roll_ids: vec![],
+            editable: true,
+        }]);
+        assert_ne!(before, formatted);
+        assert!(before.same_state(&formatted));
+        formatted.implicit_rolls.push(1);
+        assert!(!before.same_state(&formatted));
+        let mut unique = before.clone();
+        unique.unique = Some(UniqueState {
+            id: 7,
+            rolls: vec![12],
+            modifiers: vec![],
+            formatting_error: String::new(),
+        });
+        let mut error = unique.clone();
+        error.unique.as_mut().unwrap().formatting_error = "unavailable".into();
+        assert!(unique.same_state(&error));
+        error.unique.as_mut().unwrap().id = 8;
+        assert!(!unique.same_state(&error));
+        error = unique.clone();
+        error.unique.as_mut().unwrap().rolls[0] = 13;
+        assert!(!unique.same_state(&error));
     }
 
     #[test]

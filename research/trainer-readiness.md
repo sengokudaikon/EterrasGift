@@ -7,7 +7,7 @@ interop assumptions and retained evaluation conclusions are in [trainer-interop.
 |---|---|---|
 | Desktop composition | Worker thread, manual/automatic connection, helper package validation; trainer startup failure leaves Home/Mods running | Final bundle assembly and restart handling |
 | Bootstrap | DLL load/start/connect, callback-local managed main-ID check; process/log/artifact gates and pending-call retention | Actual-game validation of the simplified callback path |
-| Reads | Owned rooted forge snapshots, literal limits, completed locale, catalog subset and names/cache | Formatted descriptions, previews, mapping; getter replacements must match readiness behavior |
+| Reads | Owned rooted forge snapshots, literal limits, completed locale, catalog subset and names/cache; game-built implicit descriptions | Unique descriptions, previews, mapping; getter replacements must match readiness behavior |
 | Forge writes | One EditForge request/ForgePlan/WriteOutcome path: seven status fields, base/subtype, unique/set identity, regular affix-roll batches, replacement/tier/seal and add/remove | Unique/implicit rolls |
 | Editor | Ordered single-edit drafts, fresh reads, Pending/Confirmed/refusal/NotKept/Uncertain, conditional reverse Undo; status/base/identity, replacement/tier/seal and immediate add/remove controls connected | Actual-value mapping; unsupported controls stay disabled |
 | Other features | Typed attack/leech observations and one conditional rate primitive; original feature descriptors/inventories | UI field integration, other six field sets, all gameplay detours/patches and offline/owner-loss effect cleanup |
@@ -32,7 +32,7 @@ worker-to-Slint route, including mixed drafts, delayed completion, partial refus
 NotKept, Uncertain, Retry and gate loss. Native fixture execution is separate and uses only owned
 children. No current cleanup check accesses Last Epoch.
 
-Next: complete unique/implicit roll operations one at a time
+Next: complete sampled actual-value mapping, then unique/implicit roll operations one at a time
 through native, service, UI and captures. Consolidate the remaining presentation/domain and
 feature-table duplication as those areas are touched. Keep the hook-engine trial separate.
 Historical reports and ignored artifacts are archived as described in the interop notes;
@@ -56,3 +56,16 @@ unique-backed items retain their rarity. Undo removes the actual inserted slot, 
 explicitly allowed duplicate IDs, or reconstructs a removed affix under current definitions and
 override permission. A removed ID outside the 12-bit save range cannot be reconstructed and does
 not offer Undo. Add/remove remain immediate writes and wait for drafts to be applied/discarded.
+
+Implicit descriptions now call the game's get_Implicits, GetItemImplicit and tooltip builder,
+then virtual ToModifierString(false)/ToRangeString(false). The conditional read compares the
+entire expected Forge item and manager before and after formatting; all intermediate objects
+remain rooted across GC. Fixed lines beyond roll storage remain visible. Formatting refusal
+clears optional descriptions while preserving the admitted session; malformed protocol data,
+transport loss and offline failure still revoke it. These are read-only descriptions, not
+sampled value tables: implicit/unique roll writes and actual-value controls remain unavailable.
+
+Tooltip text and formatting availability are presentation, matching the original StateEquals
+rules. Their arrival/loss does not invalidate ordered drafts or confirmed Undo. The UI adapter
+still compares the complete native ExpectedObservation before each write, including fields
+absent from its presentation model. Unit and worker-to-Slint tests cover this distinction.

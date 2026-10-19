@@ -25,6 +25,7 @@ pub use eg_game_access::transport::Delivery;
 pub use eg_game_access::{
     fields::{AttackLeechObservation, AttackLeechRead, AttackLeechUnavailable, ObservedObjectIdentity, ObservedRate, RateUnavailable},
     forge::{AffixSnapshot, ForgeSnapshot, ItemStatus, UniqueIdentity},
+    mapping::ModifierSnapshot,
     process::ProcessIdentity,
     protocol::RuntimeStatus,
 };
@@ -90,6 +91,9 @@ pub trait BackendConnection: Send + 'static {
         }
     }
     fn read_forge(&mut self, now: Timestamp) -> impl Future<Output = Result<Option<ForgeSnapshot>, BackendError>> + Send;
+    fn describe_implicits(&mut self, _: Timestamp, _: &ForgeSnapshot) -> impl Future<Output = Result<Option<Vec<ModifierSnapshot>>, BackendError>> + Send {
+        async { Ok(None) }
+    }
     fn supports_read_attack_leech(&self) -> bool {
         false
     }
@@ -169,6 +173,9 @@ impl<T: Transport + Send + 'static, L: LogSource + Send + 'static> BackendConnec
     }
     async fn capture_catalog_observed(&mut self, now: Timestamp, observer: &mut dyn CaptureObserver) -> Result<CaptureOutcome, BackendError> {
         Ok(Session::capture_catalog_observed(self, now, observer).await?)
+    }
+    async fn describe_implicits(&mut self, now: Timestamp, expected: &ForgeSnapshot) -> Result<Option<Vec<ModifierSnapshot>>, BackendError> {
+        Ok(Session::describe_implicits(self, now, expected).await?)
     }
     async fn read_forge(&mut self, now: Timestamp) -> Result<Option<ForgeSnapshot>, BackendError> {
         Ok(Session::read_forge(self, now).await?)
@@ -385,6 +392,7 @@ pub enum ForgeState {
         generation: u64,
         snapshot: Arc<ForgeSnapshot>,
         resolved_name: Option<ResolvedItemName>,
+        implicits: Option<Vec<ModifierSnapshot>>,
     },
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1095,8 +1103,17 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
             let forge = self.connection.as_mut().unwrap().read_forge(self.clock.now()).await?;
             self.superseded(epoch)?;
             self.admit(target)?;
+            let implicits = match &forge {
+                Some(item) => self.connection.as_mut().unwrap().describe_implicits(self.clock.now(), item).await?,
+                None => None,
+            };
+            self.superseded(epoch)?;
+            self.admit(target)?;
             let data = Arc::new(catalog);
-            let forge = self.forge_state(forge, &data);
+            let mut forge = self.forge_state(forge, &data);
+            if let ForgeState::Item { implicits: observed, .. } = &mut forge {
+                *observed = implicits;
+            }
             self.commit(epoch, |this| {
                 this.state.forge = forge;
                 this.state.catalog = CatalogState::Current {
@@ -1182,7 +1199,16 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
             let forge = self.connection.as_mut().unwrap().read_forge(self.clock.now()).await?;
             self.superseded(epoch)?;
             self.admit(&target)?;
-            let forge = self.forge_state(forge, &data);
+            let implicits = match &forge {
+                Some(item) => self.connection.as_mut().unwrap().describe_implicits(self.clock.now(), item).await?,
+                None => None,
+            };
+            self.superseded(epoch)?;
+            self.admit(&target)?;
+            let mut forge = self.forge_state(forge, &data);
+            if let ForgeState::Item { implicits: observed, .. } = &mut forge {
+                *observed = implicits;
+            }
             self.commit(epoch, |this| {
                 this.state.forge = forge;
                 this.state.catalog = CatalogState::Current {
@@ -1222,6 +1248,7 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
                     generation: self.state.generation,
                     snapshot: Arc::new(snapshot),
                     resolved_name,
+                    implicits: None,
                 }
             }
         }

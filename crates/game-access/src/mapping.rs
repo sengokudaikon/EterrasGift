@@ -103,6 +103,60 @@ pub struct UniqueRollPreview {
     pub modifiers: Vec<ModifierSnapshot>,
 }
 
+/// Conditional presentation read. Tokens are compared against a freshly rooted graph.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ImplicitDescriptionRequest {
+    pub(crate) dispatcher: crate::protocol::DispatcherSpec,
+    pub(crate) manager: u64,
+    pub(crate) expected: Box<crate::forge::ForgeSnapshot>,
+}
+impl ImplicitDescriptionRequest {
+    pub const OPERATION: u32 = 12;
+    pub fn new(dispatcher: crate::protocol::DispatcherSpec, manager: u64, expected: crate::forge::ForgeSnapshot) -> Result<Self, ProtocolError> {
+        if manager == 0 {
+            return invalid();
+        }
+        crate::forge::encode(Some(&expected))?;
+        Ok(Self {
+            dispatcher,
+            manager,
+            expected: Box::new(expected),
+        })
+    }
+    pub fn dispatcher(&self) -> crate::protocol::DispatcherSpec {
+        self.dispatcher
+    }
+    pub fn expected(&self) -> &crate::forge::ForgeSnapshot {
+        &self.expected
+    }
+    pub fn manager(&self) -> u64 {
+        self.manager
+    }
+
+    pub fn encode(&self) -> Result<Vec<u8>, ProtocolError> {
+        use crate::protocol::{MAGIC, REQUEST_SIZE};
+        if self.manager == 0 {
+            return invalid();
+        }
+        let tail = crate::forge::encode(Some(&self.expected))?;
+        let mut bytes = vec![0; REQUEST_SIZE];
+        bytes[..4].copy_from_slice(&MAGIC.to_le_bytes());
+        bytes[4..8].copy_from_slice(&Self::OPERATION.to_le_bytes());
+        bytes[12..16].copy_from_slice(&(tail.len() as u32).to_le_bytes());
+        bytes[16..24].copy_from_slice(&self.manager.to_le_bytes());
+        bytes[48..56].copy_from_slice(&self.dispatcher.rva.to_le_bytes());
+        bytes[56..72].copy_from_slice(&self.dispatcher.bytes);
+        bytes.extend(tail);
+        Ok(bytes)
+    }
+    pub(crate) fn validate_header(bytes: &[u8]) -> Result<(), ProtocolError> {
+        if bytes[8..12].iter().chain(&bytes[24..48]).chain(&bytes[72..]).any(|b| *b != 0) {
+            return invalid();
+        }
+        Ok(())
+    }
+}
+
 fn invalid<T>() -> Result<T, ProtocolError> {
     Err(ProtocolError::InvalidData)
 }

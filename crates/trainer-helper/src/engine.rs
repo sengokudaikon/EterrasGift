@@ -218,6 +218,27 @@ unsafe fn read_forge() -> Response {
     }
 }
 
+unsafe fn describe_implicits(query: &eg_game_access::mapping::ImplicitDescriptionRequest) -> Response {
+    // SAFETY: the scheduler supplies the same supported main-thread runtime and
+    // synchronous rooted graph span as read_forge, including tooltip allocations.
+    unsafe {
+        let result = (|| {
+            let module = module().map_err(|e| server::failure(ResponseCode::Failed, e))?;
+            let (api, access) = apis(module).map_err(|e| server::failure(ResponseCode::Failed, e))?;
+            let invoke = raw::InvocationApi::resolve(|name| export(module, name)).map_err(|e| server::failure(ResponseCode::Refused, e.to_string()))?;
+            let thread = ThreadContext::new(api);
+            let attached = thread.attach().map_err(|e| server::failure(ResponseCode::NotReady, e.to_string()))?;
+            let descriptions = access.describe_implicits(&attached, invoke, query).map_err(map_discovery)?;
+            let payload = eg_game_access::mapping::encode_modifiers(&descriptions).map_err(|e| server::failure(ResponseCode::Failed, e.to_string()))?;
+            Ok::<_, Response>(Response {
+                code: ResponseCode::Done,
+                payload,
+            })
+        })();
+        result.unwrap_or_else(|error| error)
+    }
+}
+
 unsafe fn read_attack_leech(expected_manager: u64) -> Response {
     // SAFETY: the established engine main thread calls only after the original
     // dispatcher returns. Startup additionally guarantees initialized static
@@ -390,6 +411,7 @@ fn after_original(state: &Shared) {
                 Request::Status { .. } => unsafe { read_status() },
                 // SAFETY: same main-thread and per-operation graph ownership contract above.
                 Request::ReadForge { .. } => unsafe { read_forge() },
+                Request::DescribeImplicits(query) => unsafe { describe_implicits(&query) },
                 Request::ReadAttackLeech { expected_manager, .. } => unsafe { read_attack_leech(expected_manager) },
                 Request::ReadItemLimits { .. } => unsafe { read_item_limits() },
                 Request::ReadLocale { .. } => unsafe { read_locale() },

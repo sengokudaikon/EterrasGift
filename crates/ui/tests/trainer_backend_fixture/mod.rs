@@ -24,6 +24,7 @@ struct Data {
     connects: AtomicUsize,
     writes: AtomicUsize,
     outcome: AtomicUsize,
+    descriptions: AtomicUsize,
     refuse_at: AtomicUsize,
     expected: Mutex<Vec<ForgeSnapshot>>,
 }
@@ -159,6 +160,27 @@ impl BackendConnection for OwnedConnection {
         self.0.reads.fetch_add(1, Ordering::SeqCst);
         Ok(self.0.item.lock().unwrap().clone())
     }
+    async fn describe_implicits(&mut self, _: jiff::Timestamp, expected: &ForgeSnapshot) -> Result<Option<Vec<backend::ModifierSnapshot>>, BackendError> {
+        assert_eq!(self.0.item.lock().unwrap().as_ref(), Some(expected));
+        Ok((self.0.descriptions.load(Ordering::SeqCst) == 1).then(|| {
+            vec![
+                backend::ModifierSnapshot {
+                    index: 0,
+                    text: "Armour +17 Ω".into(),
+                    range: "[10 to 25]".into(),
+                    roll_ids: vec![0],
+                    editable: true,
+                },
+                backend::ModifierSnapshot {
+                    index: 1,
+                    text: "Ward +5".into(),
+                    range: "[5 to 5]".into(),
+                    roll_ids: vec![],
+                    editable: true,
+                },
+            ]
+        }))
+    }
     fn supports_affix_list(&self) -> bool {
         true
     }
@@ -283,6 +305,7 @@ pub(super) fn capture(session: &Session) {
         connects: AtomicUsize::new(0),
         writes: AtomicUsize::new(0),
         outcome: AtomicUsize::new(0),
+        descriptions: AtomicUsize::new(0),
         refuse_at: AtomicUsize::new(0),
         expected: Mutex::new(Vec::new()),
     });
@@ -417,7 +440,7 @@ pub(super) fn capture(session: &Session) {
     data.outcome.store(2, Ordering::SeqCst);
     assert!(forge.invoke_begin_input(field.clone()));
     forge.invoke_input_edited(field.clone(), "60".into());
-    assert!(forge.invoke_commit_input(field));
+    assert!(forge.invoke_commit_input(field.clone()));
     forge.invoke_toggle_flag(2, true);
     forge.invoke_apply();
     let until = Instant::now() + Duration::from_secs(8);
@@ -587,6 +610,42 @@ pub(super) fn capture(session: &Session) {
         }
     }
     data.outcome.store(0, Ordering::SeqCst);
+    // Optional game tooltip text reaches the real editor. Actual-value controls
+    // remain disabled until a sampled mapping is available; failure clears old text.
+    *data.item.lock().unwrap() = Some(item("Described item", 31));
+    data.descriptions.store(1, Ordering::SeqCst);
+    command(&handle, Command::ReadForge, || true);
+    wait(|| forge.get_implicits().row_count() == 2);
+    assert_eq!(forge.get_implicits().row_data(0).unwrap().text, "Armour +17 Ω");
+    assert_eq!(forge.get_implicits().row_data(1).unwrap().text, "Ward +5");
+    assert!(!forge.get_can_apply());
+    let value = forge.get_implicits().row_data(0).unwrap().rolls.row_data(0).unwrap();
+    assert!(!value.mapped && !value.editable);
+    session.capture(&ui, "backend-forge-implicit-descriptions");
+    session.resize(680, 580);
+    session.capture(&ui, "backend-forge-implicit-descriptions-narrow");
+    session.resize(1100, 700);
+    // A mixed batch crosses fresh reads with/without optional descriptions.
+    assert!(forge.invoke_begin_input(field.clone()));
+    forge.invoke_input_edited(field.clone(), "61".into());
+    assert!(forge.invoke_commit_input(field.clone()));
+    forge.invoke_toggle_flag(2, true);
+    forge.invoke_apply();
+    wait(|| forge.get_can_undo() && forge.get_history().row_count() == 2);
+    command(&handle, Command::ReadForge, || true);
+    wait(|| forge.get_implicits().row_count() == 2);
+    assert!(forge.get_can_undo());
+    data.descriptions.store(0, Ordering::SeqCst);
+    command(&handle, Command::ReadForge, || true);
+    wait(|| !forge.get_implicit_rows_shown());
+    assert!(forge.get_can_undo());
+    forge.invoke_undo();
+    wait(|| !forge.get_can_undo() && forge.get_can_change_affix_list());
+    assert_eq!(data.item.lock().unwrap().as_ref().unwrap().status.forging_potential, 21);
+    assert!(!data.item.lock().unwrap().as_ref().unwrap().status.corrupted);
+    assert!(forge.get_can_change_affix_list());
+    assert_eq!(handle.snapshot().phase, Phase::Ready);
+    session.capture(&ui, "backend-forge-implicit-unavailable");
     let mut unsupported = item("Unsupported status", 19);
     unsupported.status.level_requirement = -1;
     unsupported.fingerprint = unsupported.legacy_fingerprint();

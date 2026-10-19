@@ -167,7 +167,7 @@ impl Writer {
         if !supports(&state, edit) {
             return refused("This edit is unavailable in this build.");
         }
-        if project_item(&state).ok().flatten().as_ref() != Some(expected) {
+        if project_item(&state).ok().flatten().as_ref().is_none_or(|actual| !actual.same_state(expected)) {
             return refused("The item changed. Discard the stale draft and edit it again.");
         }
         match self.backend.try_submit(Command::ReadForge) {
@@ -203,6 +203,7 @@ impl Writer {
                         generation: observed.generation,
                         snapshot: Arc::new(actual),
                         resolved_name,
+                        implicits: None,
                     };
                     // Keep projection failure explicit; never substitute the
                     // requested presentation for an undisplayable readback.
@@ -221,8 +222,12 @@ impl Writer {
         // fields omitted from the editor. Each draft step obtains a new read.
         if state.generation != pending.before.generation
             || state.attached != pending.before.attached
-            || state.forge != pending.before.forge
-            || project_item(&state).ok().flatten().as_ref() != Some(&pending.expected)
+            || !state
+                .expected_observation()
+                .ok()
+                .zip(pending.before.expected_observation().ok())
+                .is_some_and(|(current, before)| current == before)
+            || project_item(&state).ok().flatten().as_ref().is_none_or(|actual| !actual.same_state(&pending.expected))
         {
             return Some(refused("The item changed before submission. Discard the stale draft and edit it again."));
         }
@@ -609,6 +614,7 @@ fn project_item(state: &BackendSnapshot) -> Result<Option<ForgeItem>, String> {
         generation,
         snapshot,
         resolved_name,
+        implicits,
     } = &state.forge
     else {
         return Ok(None);
@@ -668,7 +674,18 @@ fn project_item(state: &BackendSnapshot) -> Result<Option<ForgeItem>, String> {
         affixes,
         unique: if snapshot.rarity == 8 { None } else { identity.clone() },
         set_item: if snapshot.rarity == 8 { identity } else { None },
-        implicits: None,
+        implicits: implicits.as_ref().map(|lines| {
+            lines
+                .iter()
+                .map(|line| item::ModifierState {
+                    index: line.index as usize,
+                    text: line.text.clone(),
+                    range: line.range.clone(),
+                    roll_ids: line.roll_ids.iter().map(|id| usize::from(*id)).collect(),
+                    editable: line.editable,
+                })
+                .collect()
+        }),
         implicit_rolls: snapshot.implicit_rolls.clone(),
         status,
     }))

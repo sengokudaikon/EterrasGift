@@ -1,4 +1,4 @@
-//! Pure, bounded codecs for protocol34: control, observations and narrow conditional writes.
+//! Pure, bounded codecs for protocol35: control, observations and narrow conditional writes.
 //!
 //! Decoding establishes wire validity only. Process identity, helper provenance,
 //! dispatcher code, and permission to run a request belong to the session layer.
@@ -15,8 +15,8 @@ use crate::{
 use std::{collections::BTreeMap, error::Error, fmt};
 
 pub const MAGIC: u32 = 0x4546_4735;
-/// Version32 adds bounded affix roll batches to the complete expected-state write path.
-pub const VERSION: u32 = 34;
+/// Version35 adds conditional, game-built implicit descriptions.
+pub const VERSION: u32 = 35;
 pub const ADAPTER: &str = "il2cpp-x64-v1";
 pub const REQUEST_SIZE: usize = 336;
 pub const RESPONSE_HEADER_SIZE: usize = 12;
@@ -76,6 +76,7 @@ pub enum Request {
     },
     /// Explicit mutation; native admission compares the complete expected item.
     EditForge(ForgeWrite),
+    DescribeImplicits(crate::mapping::ImplicitDescriptionRequest),
     /// Conditional CURRENT-player intent; full expected tokens/bits, no lifetime ticket.
     SetAttackLeechRate(AttackLeechRateWrite),
     /// Reads cached player fields only; expected_manager is an opaque identity token.
@@ -97,6 +98,7 @@ impl Request {
             | Self::ReadCatalogPage { dispatcher, .. }
             | Self::ReadAttackLeech { dispatcher, .. } => Some(*dispatcher),
             Self::EditForge(write) => Some(write.dispatcher()),
+            Self::DescribeImplicits(query) => Some(query.dispatcher),
             Self::SetAttackLeechRate(write) => Some(write.dispatcher()),
         }
     }
@@ -116,6 +118,7 @@ impl Request {
                 (21, Some(dispatcher))
             }
             Self::EditForge(write) => return write.encode(),
+            Self::DescribeImplicits(query) => return query.encode().expect("validated description request"),
             Self::SetAttackLeechRate(write) => return write.encode(),
             Self::ReadAttackLeech { dispatcher, expected_manager } => {
                 bytes[8..16].copy_from_slice(&expected_manager.to_le_bytes());
@@ -142,7 +145,8 @@ impl Request {
         let operation = reader.u32()?;
         if !matches!(
             operation,
-            ADD_AFFIX_OPERATION
+            crate::mapping::ImplicitDescriptionRequest::OPERATION
+                | ADD_AFFIX_OPERATION
                 | REMOVE_AFFIX_OPERATION
                 | CHANGE_AFFIX_OPERATION
                 | SET_STATUS_OPERATION
@@ -156,7 +160,11 @@ impl Request {
         let _value = reader.u32()?;
         let tail_len = reader.u32()? as usize;
         let manager = reader.u64()?;
-        ForgeMutation::decode_header(bytes)?;
+        if operation == crate::mapping::ImplicitDescriptionRequest::OPERATION {
+            crate::mapping::ImplicitDescriptionRequest::validate_header(bytes)?;
+        } else {
+            ForgeMutation::decode_header(bytes)?;
+        }
         if manager == 0 || !(MIN_EXPECTED_BYTES..=MAX_EXPECTED_BYTES).contains(&tail_len) {
             return Err(ProtocolError::InvalidData);
         }
@@ -182,6 +190,13 @@ impl Request {
             bytes: dispatcher.array()?,
         };
         let expected = forge::decode(&bytes[REQUEST_SIZE..])?.ok_or(ProtocolError::InvalidData)?;
+        if u32::from_le_bytes(bytes[4..8].try_into().unwrap()) == crate::mapping::ImplicitDescriptionRequest::OPERATION {
+            return Ok(Self::DescribeImplicits(crate::mapping::ImplicitDescriptionRequest {
+                dispatcher,
+                manager: expected_manager,
+                expected: Box::new(expected),
+            }));
+        }
         let mutation = ForgeMutation::decode_header(&bytes[..REQUEST_SIZE])?;
         Ok(Self::EditForge(ForgeWrite::edit(dispatcher, expected_manager, expected, mutation)?))
     }
