@@ -17,7 +17,11 @@ use std::{
 };
 
 use eg_core::game_log::GameReadiness;
-pub use eg_game_access::{forge::ForgeSnapshot, process::ProcessIdentity, protocol::RuntimeStatus};
+pub use eg_game_access::{
+    forge::{AffixSnapshot, ForgeSnapshot, ItemStatus, UniqueIdentity},
+    process::ProcessIdentity,
+    protocol::RuntimeStatus,
+};
 use eg_game_access::{
     protocol::ResponseCode,
     transport::{Delivery, Transport, TransportFailure},

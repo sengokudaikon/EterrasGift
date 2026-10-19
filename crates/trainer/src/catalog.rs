@@ -4,12 +4,14 @@
 //! The adapter requires definition graphs to remain immutable during a capture.
 //! No partial catalog is published and no name fallback overwrites the raw observation.
 
-use eg_game_access::{
-    catalog::{self, AffixDefinition, CatalogEntries, CatalogKind, CatalogPage, DefinitionNameSource, ItemTypeDefinition, RarityDefinition, UniqueDefinition},
-    definitions::ItemLimits,
-    forge::ForgeSnapshot,
+use eg_game_access::{catalog, forge::ForgeSnapshot, protocol::ProtocolError};
+pub use eg_game_access::{
+    catalog::{
+        AffixDefinition, AffixTier, Availability, CatalogEntries, CatalogKind, CatalogPage, DefinitionName, DefinitionNameSource, ImplicitDefinition, ItemTypeDefinition,
+        NumericProperty, RarityDefinition, SubTypeDefinition, UniqueDefinition, UniqueNumericData,
+    },
+    definitions::{ItemLimits, ValueRange},
     locale::GameLocale,
-    protocol::ProtocolError,
 };
 use std::collections::{BTreeMap, BTreeSet};
 

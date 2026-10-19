@@ -606,3 +606,37 @@ after successful resume or proof that the exact kernel thread object terminated.
 four architecture checks, isolated controller checks and workspace verification/captures. Pure helper PE/config
 validation additionally reads the actual compiled DLL without loading it; partial section overlap and source-getter
 adapters are checked. [Exact evidence](../tools/trainer-eval/persistent-player/numeric-report.json).
+
+## Rust remote bootstrap and capture leases (2026-10-19)
+
+The [bootstrap evidence index](../tools/trainer-eval/persistent-player/bootstrap-report.json) records a single immutable
+helper/player generation passing plugin loading, the retained Python bootstrap and the new Rust Windows bootstrap.
+Each route accepts 263 requests and completes 227 main-thread commands, including ordinary numeric catalogs and
+all previous runtime/GC/malformed graph cases. All restore the entry, stop the server, run later frames and exit
+normally without changed player files. No actual-game process was accessed for this checkpoint.
+
+The Rust route verifies exact process creation time/path, held thread identity and independently reported Awake TID,
+module/helper files and system-loader mapping before ordinary LoadLibraryW plus the explicit helper entry. A full
+file-derived dispatcher body, runtime-function table record and unwind mapping must match before first Status.
+Stop is submitted once; restoration polling creates no remote threads. Pending calls retain their inputs, thread
+handles and leases on timeout/error and are never replayed. Runtime/GC/main-thread/exclusive patch/lifetime caller
+contracts remain unsafe and require app-specific admission before a production preparer can use this layer.
+
+The first authored Rust attempt refused before loading because its exact thread-name literal omitted spaces.
+Both name checks now share a selector for Windows' observed `Unity Main Thread`; a regression test rejects the old
+spelling and approximate matches. Nine Windows controller tests pass. The combined foundation passes 264 tests on
+stable and nightly release, plus one compile-fail ownership check each and four architecture guards. Core passes
+39 stable tests, including two streaming hash tests. Workspace lint, format, generated tokens and captures pass;
+the forge capture was inspected.
+
+Capture-scoped Windows file leases stream the same held artifact once, then recheck current final path and retained
+128-bit file/volume identity before and after each page. The handle denies write/delete sharing. Unsupported local
+capabilities, oversized optimization inputs and sharing conflicts retain full-hash validation; actual content or
+identity mismatches fail closed. Twelve focused tests cover leases/fallback, including page-boundary artifact change
+and an oversized sparse file without hashing its contents. Cancellation/error closes the capture-local lease.
+Public individual reads retain their previous full checks; saved catalogs still require runtime verification.
+
+The pure edit kernel adds complete observation binding and operation-specific planning/readback diagnostics for
+seven edit types, with 20 tests. It deliberately applies the 12-bit serialized affix-ID bound to every rebuilding
+operation and keeps the 32-affix raw-result bound even on malformed layouts. No write transport/native handler,
+batch apply, undo or gameplay feature implementation follows from these pure tests.

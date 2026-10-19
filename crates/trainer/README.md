@@ -175,5 +175,17 @@ not yet provide a guaranteed display name. Locale transitions and populated live
 separate validation, as do full localized definitions and mappings.
 Validation commands, counts and the retained log/source index are in [validation.json](validation.json).
 
+The [Rust bootstrap checkpoint](../../tools/trainer-eval/persistent-player/bootstrap-report.json) passes plugin,
+Python and Rust startup against the same authored Unity 6000.4.8f1 child build. Rust checks full pristine dispatcher
+body/table/unwind spans before Status and uses remote-memory-only polling after its one-shot stop. Pending remote
+calls retain input and handles when completion is uncertain. App-specific unsafe admission/preparer composition
+still needs implementation; an artifact hash and named thread alone do not establish runtime safety.
+
+`sources` supplies an inert absolute-path log factory and a watch-channel process locator so composition can use the
+existing watcher without coupling trainer and companion. `edits` supplies pure owned planning for seven edit kinds
+and detailed readback diagnostics. These models do not send writes or prove a native mutation safe. Catalog capture
+uses short-lived Windows read leases when available; public individual reads and unsupported lease capabilities
+retain full artifact revalidation.
+
 Windows API contract: [GetNamedPipeServerProcessId](https://learn.microsoft.com/en-us/windows/win32/api/winbase/nf-winbase-getnamedpipeserverprocessid).
 Tokio API usage follows the restored, pinned 1.53.3 source at `src/net/windows/named_pipe.rs`.

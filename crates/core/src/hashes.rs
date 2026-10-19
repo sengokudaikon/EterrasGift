@@ -2,6 +2,7 @@
 
 use crate::paths;
 use sha2::{Digest, Sha256};
+use std::io::{self, Read};
 use std::path::Path;
 
 pub fn hex_upper(bytes: &[u8]) -> String {
@@ -16,6 +17,22 @@ pub fn hex_upper(bytes: &[u8]) -> String {
 
 pub fn of_bytes(bytes: &[u8]) -> String {
     hex_upper(Sha256::digest(bytes).as_slice())
+}
+
+/// Stream a reader to EOF without allocating its complete contents.
+pub fn of_reader(mut reader: impl Read) -> io::Result<String> {
+    let mut hash = Sha256::new();
+    let mut buffer = [0_u8; 65536];
+    loop {
+        let count = match reader.read(&mut buffer) {
+            Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
+            result => result?,
+        };
+        if count == 0 {
+            return Ok(hex_upper(hash.finalize().as_slice()));
+        }
+        hash.update(&buffer[..count]);
+    }
 }
 
 /// The hash of the text's UTF-8 bytes.

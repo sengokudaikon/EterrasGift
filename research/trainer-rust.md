@@ -204,3 +204,16 @@ edge cases and index-width thresholds remain gates before broad adoption.
 
 Run results and reproduction commands belong in [trainer-evaluations.md](trainer-evaluations.md). A passing fake runtime
 establishes wrapper behaviour, not compatibility with Unity, its GC, or an actual native detour.
+
+## Rust remote bootstrap checkpoint (2026-10-19)
+
+See [bootstrap evidence](../tools/trainer-eval/persistent-player/bootstrap-report.json):
+264 foundation tests pass on stable and nightly release, with one ownership compile-fail check each.
+Plugin, Python and new Rust loading/start/stop routes pass the same owned Unity 6000.4.8f1 fixture
+(263 requests, 227 main-thread commands per route). Rust checks full dispatcher body/table/unwind
+before first Status and proves restoration with remote-memory-only polling after one stop request.
+Uncertain calls retain ownership and are not replayed; no helper is unloaded. This checkpoint
+performs no actual-game calls and does not establish arbitrary-target unsafe runtime admission.
+Capture-local file leases remove repeated full hashes when supported; fallback retains full checks.
+Pure edit planning/readback and composition inputs exist; app-specific preparation, complete game
+formatting/mappings, native edits, hook/field services and async UI integration remain required.

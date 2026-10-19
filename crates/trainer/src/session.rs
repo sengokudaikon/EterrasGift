@@ -1,7 +1,7 @@
 //! Serialized control session and owned read-only forge snapshots. No injection or automatic retry.
 use crate::{
     gate::{self, GateDecision, GatePolicy, GateVerdict, LogSource},
-    profile::BuildProfile,
+    profile::{BuildProfile, ProfileLease},
 };
 use eg_core::game_log::GameReadiness;
 use eg_game_access::{
@@ -222,8 +222,11 @@ impl<T: Transport, L: LogSource> Session<T, L> {
         self.read_owned(now, |dispatcher| Request::ReadLocale { dispatcher }, locale::decode).await
     }
     pub async fn read_catalog_page(&mut self, now: Timestamp, kind: CatalogKind, cursor: u32) -> Result<CatalogPage, SessionError> {
+        self.read_catalog_page_with_lease(now, kind, cursor, None).await
+    }
+    async fn read_catalog_page_with_lease(&mut self, now: Timestamp, kind: CatalogKind, cursor: u32, lease: Option<&ProfileLease>) -> Result<CatalogPage, SessionError> {
         let page = self
-            .read_owned(now, |dispatcher| Request::ReadCatalogPage { dispatcher, kind, cursor }, catalog::decode)
+            .read_owned_with_lease(now, |dispatcher| Request::ReadCatalogPage { dispatcher, kind, cursor }, catalog::decode, lease)
             .await?;
         if page.kind != kind || page.cursor != cursor {
             self.release_without_io();
@@ -244,8 +247,28 @@ impl<T: Transport, L: LogSource> Session<T, L> {
         result
     }
     async fn capture_catalog_inner(&mut self, now: Timestamp, elapsed: std::time::Instant) -> Result<crate::catalog::GameCatalog, SessionError> {
-        let locale = self.read_locale(advanced(now, elapsed)?).await?;
-        let limits = self.read_item_limits(advanced(now, elapsed)?).await?;
+        if matches!(self.state, SessionState::Connecting | SessionState::Closing) {
+            return Err(SessionError::Busy);
+        }
+        self.gate(advanced(now, elapsed)?)?;
+        if self.state != SessionState::Ready {
+            return Err(SessionError::NotConnected);
+        }
+        let dispatcher = self.discovery.as_ref().ok_or(SessionError::NotConnected)?.dispatcher;
+        // This local guard closes on every success, error, and future drop. It is
+        // never retained in Session or reused by an unrelated public read.
+        let lease = self.profile.capture_lease(&dispatcher).map_err(|error| SessionError::Identity(error.to_string()))?;
+        let locale = self
+            .read_owned_with_lease(advanced(now, elapsed)?, |dispatcher| Request::ReadLocale { dispatcher }, locale::decode, Some(&lease))
+            .await?;
+        let limits = self
+            .read_owned_with_lease(
+                advanced(now, elapsed)?,
+                |dispatcher| Request::ReadItemLimits { dispatcher },
+                definitions::decode,
+                Some(&lease),
+            )
+            .await?;
         let identity = crate::catalog::CatalogIdentity {
             binary_hash: self.profile.binary_hash().into(),
             metadata_hash: self.profile.metadata_hash().into(),
@@ -255,16 +278,32 @@ impl<T: Transport, L: LogSource> Session<T, L> {
         let mut builder = crate::catalog::CatalogBuilder::new(identity, limits).map_err(SessionError::Protocol)?;
         for kind in [CatalogKind::Bases, CatalogKind::Affixes, CatalogKind::Uniques, CatalogKind::Rarities] {
             while let Some(cursor) = builder.next_cursor(kind) {
-                let page = self.read_catalog_page(advanced(now, elapsed)?, kind, cursor).await?;
+                let page = self.read_catalog_page_with_lease(advanced(now, elapsed)?, kind, cursor, Some(&lease)).await?;
                 builder.push(page).map_err(SessionError::Protocol)?;
             }
         }
-        if self.read_locale(advanced(now, elapsed)?).await? != locale {
+        if self
+            .read_owned_with_lease(advanced(now, elapsed)?, |dispatcher| Request::ReadLocale { dispatcher }, locale::decode, Some(&lease))
+            .await?
+            != locale
+        {
             return Err(SessionError::Protocol(ProtocolError::InvalidData));
         }
+        self.profile
+            .validate_lease(&dispatcher, &lease)
+            .map_err(|error| SessionError::Identity(error.to_string()))?;
         builder.finish().map_err(SessionError::Protocol)
     }
     async fn read_owned<R>(&mut self, now: Timestamp, request: impl FnOnce(DispatcherSpec) -> Request, decode: fn(&[u8]) -> Result<R, ProtocolError>) -> Result<R, SessionError> {
+        self.read_owned_with_lease(now, request, decode, None).await
+    }
+    async fn read_owned_with_lease<R>(
+        &mut self,
+        now: Timestamp,
+        request: impl FnOnce(DispatcherSpec) -> Request,
+        decode: fn(&[u8]) -> Result<R, ProtocolError>,
+        lease: Option<&ProfileLease>,
+    ) -> Result<R, SessionError> {
         if matches!(self.state, SessionState::Connecting | SessionState::Closing) {
             return Err(SessionError::Busy);
         }
@@ -274,7 +313,11 @@ impl<T: Transport, L: LogSource> Session<T, L> {
         }
         let dispatcher = self.discovery.as_ref().ok_or(SessionError::NotConnected)?.dispatcher;
         let elapsed = std::time::Instant::now();
-        if let Err(error) = self.profile.validate(&dispatcher) {
+        let validation = match lease {
+            Some(lease) => self.profile.validate_lease(&dispatcher, lease),
+            None => self.profile.validate(&dispatcher),
+        };
+        if let Err(error) = validation {
             self.release_without_io();
             self.state = SessionState::Blocked;
             return Err(SessionError::Identity(error.to_string()));
@@ -286,6 +329,13 @@ impl<T: Transport, L: LogSource> Session<T, L> {
         let result = self.request(&request(dispatcher)).await.and_then(|bytes| decode(&bytes).map_err(SessionError::Protocol));
         match result {
             Ok(snapshot) => {
+                if let Some(lease) = lease
+                    && let Err(error) = self.profile.validate_lease(&dispatcher, lease)
+                {
+                    self.release_without_io();
+                    self.state = SessionState::Blocked;
+                    return Err(SessionError::Identity(error.to_string()));
+                }
                 // The helper independently checks runtime offline/native-manager life in the
                 // same main-thread operation, before reading data. Recheck the log too.
                 self.gate(advanced(now, elapsed)?)?;

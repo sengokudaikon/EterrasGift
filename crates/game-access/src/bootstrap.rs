@@ -5,6 +5,8 @@
 //! Process admission and retained-code lifetime remain separate from parsing these bytes.
 
 use eg_core::hashes;
+#[cfg(windows)]
+pub mod windows;
 use std::{
     fs::File,
     io::{self, Read},

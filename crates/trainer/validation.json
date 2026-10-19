@@ -1,20 +1,19 @@
 {
   "date": "2026-10-19",
-  "status": "ordinary-property numeric capture, actor, connector and scheduler termination fix pass authored validation; no live numeric execution claimed",
-  "evidence": "tools/trainer-eval/persistent-player/numeric-report.json",
+  "status": "Rust remote loading/start, full pristine dispatcher proof and RPM-only stopped proof pass the owned Unity player; no actual-game bootstrap run claimed",
+  "evidence": "tools/trainer-eval/persistent-player/bootstrap-report.json",
   "previous_protocol_session_evidence": "artifacts/trainer-eval/protocol-session-95e3d0ed64494652a50a76df25f322d9/report.json",
   "original_app_commit": "e1c1ed4",
-  "foundation_cases_stable_and_nightly_release": 221,
+  "foundation_cases_stable_and_nightly_release": 264,
   "architecture_checks": 4,
   "lifetime_compile_fail_checks_per_toolchain": 1,
-  "scope": "Ordinary PropertyList first-match/default selection, exact numeric ranges/rounding/presentation fields, explicit special-registry absence; no lazy metadata factories or gameplay writes. Actor/connector tests use scripted services. Pure Rust bootstrap parser never loads DLLs or accesses targets. Windows remote controller not yet part of this checkpoint.",
+  "scope": "Only manifest-validated newly spawned authored Unity 6000.4.8f1 children. Rust unsafe caller contracts are established by owned fixture setup and independently corroborated Awake main TID. Artifact/name checks alone do not establish runtime/GC/patch/lifetime contracts for arbitrary targets. No gameplay write, real-game call, helper unload or automatic operation replay.",
   "persistent_helper_evidence": "tools/trainer-eval/persistent-player/report.json",
   "remaining": [
-    "Special-property registries and generated/localized formatting",
-    "Actual game tooltip/roll mappings and detached item previews",
-    "Production Rust remote startup and safe app-specific admission/composition",
-    "Generation-bound edit/hook/field services and readback/uncertainty contracts",
-    "UI adapters and integration validation"
+    "App-specific runtime admission and retained bootstrap/preparer integration",
+    "Special-property registries, localization/formatting, actual roll mappings and detached previews",
+    "Edit submission, uncertainty/undo and hook/field services",
+    "Async UI adapter and integration validation"
   ],
   "native_probe_build_report": "artifacts/trainer-eval/unity-hook-native-4b59b1ab3a164d8e9670e6cd38f9bf53/report.json",
   "native_probe_build_only": true,
@@ -22,7 +21,12 @@
   "prior_item_limits_evidence": "tools/trainer-eval/persistent-player/limits-report.json",
   "prior_value_type_evidence": "tools/trainer-eval/unity-rust-host/value-types-report.json",
   "live_checkpoint_workspace_log": "artifacts/trainer-eval/locale-live-verify.log",
-  "workspace_verification_log": "artifacts/trainer-eval/numeric-verify.log",
+  "workspace_verification_log": "artifacts/trainer-eval/bootstrap-verify.log",
   "actor_tests": 16,
-  "connector_tests": 15
+  "connector_tests": 15,
+  "core_cases_stable": 39,
+  "windows_bootstrap_tests": 9,
+  "artifact_lease_tests": 12,
+  "pure_edit_tests": 20,
+  "composition_source_tests": 2
 }

@@ -7,7 +7,9 @@ pub mod catalog;
 pub mod catalog_cache;
 pub mod connection;
 pub mod dispatch;
+pub mod edits;
 
 pub mod gate;
 pub mod profile;
 pub mod session;
+pub mod sources;
