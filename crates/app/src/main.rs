@@ -81,12 +81,6 @@ fn main() -> Result<(), slint::PlatformError> {
     // Mods never load online: a proxy a start with mods left in place (the app closed while it waited) goes aside now.
     launcher.settle_mod_loader();
 
-    // A startup error opens Settings, which says why.
-    let start = if arguments.settings || store.startup_error().is_some() || trainer.problem.is_some() {
-        Page::Settings
-    } else {
-        Page::Home
-    };
     let found_game = launcher.find_install().map(|install| install.executable);
     let window = MainWindow::new()?;
     let trainer_runtime = if trainer_on {
@@ -110,11 +104,20 @@ fn main() -> Result<(), slint::PlatformError> {
             Ok(runtime) => Some(runtime),
             Err(error) => {
                 FaultLog::new(&root, None).write("Trainer startup", Some(&error), None, None);
-                std::process::exit(1);
+                trainer.problem = Some(format!("The trainer could not start: {error}"));
+                None
             }
         }
     } else {
         None
+    };
+    // Isolate an optional module's startup fault. Companion pages remain usable,
+    // and Settings displays the fault without changing the saved module choice.
+    let trainer_on = trainer_runtime.is_some();
+    let start = if arguments.settings || store.startup_error().is_some() || trainer.problem.is_some() {
+        Page::Settings
+    } else {
+        Page::Home
     };
     let service = SettingsService::new(store);
     // TODO(launcher): Restart now needs a launcher that starts the app again on exit code 42.
