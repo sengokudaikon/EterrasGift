@@ -48,6 +48,12 @@ game's RebuildID/UpdateEntry methods and accept its derived level requirement un
 the store is uncertain, with no automatic retry or implicit rollback. Unique eligibility calls
 the game's metadata-checked getUnique(UInt16), with a rooted result and a fresh full stale check.
 Host and helper share the small status rule function, using their own observed definition data.
+Plan construction has one entry point, `ForgePlan::edit(..., override_enabled)`, and
+revalidation always receives the current override setting. `edits::inspect_readback` is the
+single readback policy for both pure and submitted plans. The direct level-cache store expects
+an exact complete snapshot, including names and fingerprint, because it does not rebuild the
+item. Rebuilding status and roll edits allow derived names and level to change; base/identity
+edits also allow the game's derived class requirement. Their other guards remain unchanged.
 The worker defaults override off, serializes `SetOverride` with writes, and checks the current
 setting before submission and Undo. The desktop supplies the saved startup preference; live
 settings actions remain separate. A new Undo is retained only

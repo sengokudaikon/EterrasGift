@@ -1,7 +1,7 @@
 use super::*;
 use eg_trainer::{
     catalog::{CatalogIdentity, EXTRACTION_VERSION, GameCatalog},
-    edits::{CatalogProvenance, EditError, ExpectedObservation},
+    edits::{CatalogProvenance, EditError, ExpectedObservation, ItemEdit, StatusEdit, StatusField},
     writes::{ForgePlan, WriteControl, WriteObservation, WriteOutcome, WriteStatus},
 };
 
@@ -28,7 +28,19 @@ fn plan(fixture: &Fixture) -> ForgePlan {
         generation: 1,
         process: fixture.target.clone(),
     };
-    ForgePlan::level_requirement(&expected, 0x1234, &catalog, &provenance, 17).unwrap()
+    ForgePlan::edit(
+        &expected,
+        0x1234,
+        &catalog,
+        &provenance,
+        ItemEdit::Status(StatusEdit {
+            field: StatusField::LevelRequirement,
+            value: 17,
+            unrestricted: false,
+        }),
+        false,
+    )
+    .unwrap()
 }
 fn ready(fixture: &Fixture, wire: &FakeTransport, log: &FakeLog) -> Session<FakeTransport, FakeLog> {
     let mut session = fixture.session(wire, log, GatePolicy::Release);
@@ -285,12 +297,12 @@ fn cleanup_control_can_stop_validated_write_before_transport_is_entered() {
 fn plans_recheck_full_observation_and_manager_including_fields_outside_legacy_hash() {
     let f = Fixture::new();
     let plan = plan(&f);
-    assert_eq!(plan.recheck(plan.before(), 0x5678), Err(EditError::IdentityChanged));
+    assert_eq!(plan.recheck(plan.before(), 0x5678, false), Err(EditError::IdentityChanged));
     let mut changed = plan.before().snapshot().clone();
     changed.name.push_str(" drift");
     assert_eq!(changed.fingerprint, plan.before().snapshot().fingerprint);
     let expected = ExpectedObservation::new(1, f.target, plan.before().catalog_identity().clone(), changed).unwrap();
-    assert_eq!(plan.recheck(&expected, 0x1234), Err(EditError::StaleItem));
+    assert_eq!(plan.recheck(&expected, 0x1234, false), Err(EditError::StaleItem));
 }
 
 #[test]

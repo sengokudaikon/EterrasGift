@@ -776,6 +776,8 @@ fn validate_status(item: &ForgeSnapshot, catalog: &GameCatalog, e: &StatusEdit) 
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ReadbackPolicy {
+    /// Direct cache store: no rebuild, rename or other derived change is expected.
+    LevelRequirement,
     Strict,
     Override,
     Roll,
@@ -815,6 +817,10 @@ fn policy(edit: &ItemEdit) -> ReadbackPolicy {
             }
         }
         ItemEdit::Roll(_) => ReadbackPolicy::Roll,
+        ItemEdit::Status(StatusEdit {
+            field: StatusField::LevelRequirement,
+            ..
+        }) => ReadbackPolicy::LevelRequirement,
         ItemEdit::Status(_) => ReadbackPolicy::Status,
         ItemEdit::BaseType(_) => ReadbackPolicy::Base,
         ItemEdit::UniqueIdentity(e) => {
@@ -859,6 +865,10 @@ fn inspect_readback(before: &ForgeSnapshot, edit: &ItemEdit, expected: &ForgeSna
         return diagnostics;
     };
     let differences = &mut diagnostics.differences;
+    if diagnostics.policy == ReadbackPolicy::LevelRequirement {
+        compare(differences, "item", expected, after);
+        return diagnostics;
+    }
     compare(differences, "token.item", &before.item, &after.item);
     compare(differences, "token.individual_id", &before.individual_id, &after.individual_id);
     if let ItemEdit::Affix(e) = edit {

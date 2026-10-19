@@ -7,7 +7,7 @@ use eg_game_access::{
 };
 use eg_trainer::{
     catalog::{CatalogIdentity, EXTRACTION_VERSION, GameCatalog},
-    edits::{CatalogProvenance, EditError, ExpectedObservation},
+    edits::{CatalogProvenance, EditError, ExpectedObservation, ItemEdit, StatusEdit, StatusField},
     undo::ForgeUndo,
     writes::{ForgePlan, WriteRecord, WriteStatus},
 };
@@ -100,7 +100,19 @@ fn observation(snapshot: ForgeSnapshot) -> ExpectedObservation {
 }
 
 fn record(old: i32) -> WriteRecord {
-    let plan = ForgePlan::level_requirement(&observation(snapshot(old)), MANAGER, &catalog(), &provenance(), 17).unwrap();
+    let plan = ForgePlan::edit(
+        &observation(snapshot(old)),
+        MANAGER,
+        &catalog(),
+        &provenance(),
+        ItemEdit::Status(StatusEdit {
+            field: StatusField::LevelRequirement,
+            value: 17,
+            unrestricted: false,
+        }),
+        false,
+    )
+    .unwrap();
     let status = WriteStatus::Confirmed(plan.projected().clone());
     WriteRecord { plan, status }
 }
@@ -283,7 +295,18 @@ fn unique_set_or_legendary_drift_is_stale_and_cannot_create_an_original_level_pl
         let current = observation(changed);
         assert_eq!(token.prepare(&current, MANAGER, &catalog(), &provenance()), Err(EditError::StaleItem));
         assert_eq!(
-            ForgePlan::level_requirement(&current, MANAGER, &catalog(), &provenance(), 87),
+            ForgePlan::edit(
+                &current,
+                MANAGER,
+                &catalog(),
+                &provenance(),
+                ItemEdit::Status(StatusEdit {
+                    field: StatusField::LevelRequirement,
+                    value: 87,
+                    unrestricted: false
+                }),
+                false
+            ),
             Err(EditError::InvalidStatus)
         );
     }

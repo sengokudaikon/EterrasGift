@@ -5,7 +5,7 @@
 use crate::field_writes::AttackLeechPlan;
 use crate::{
     catalog::GameCatalog,
-    edits::{self, CatalogProvenance, EditError, ExpectedObservation, ItemEdit, PreparedEdit, StatusEdit, StatusField},
+    edits::{self, CatalogProvenance, EditError, ExpectedObservation, ItemEdit, PreparedEdit},
 };
 pub use eg_game_access::protocol::ResponseCode;
 use eg_game_access::{fields::AttackLeechObservation, forge::ForgeSnapshot};
@@ -28,36 +28,6 @@ pub struct ForgePlan {
     manager: u64,
 }
 impl ForgePlan {
-    pub fn level_requirement(expected: &ExpectedObservation, manager: u64, catalog: &GameCatalog, provenance: &CatalogProvenance, value: i32) -> Result<Self, EditError> {
-        Self::new(expected, manager, catalog, provenance, StatusField::LevelRequirement, value)
-    }
-    pub fn new(expected: &ExpectedObservation, manager: u64, catalog: &GameCatalog, provenance: &CatalogProvenance, field: StatusField, value: i32) -> Result<Self, EditError> {
-        Self::prepare(
-            expected,
-            manager,
-            catalog,
-            provenance,
-            StatusEdit {
-                field,
-                value,
-                unrestricted: false,
-            },
-            false,
-        )
-    }
-    pub fn prepare(
-        expected: &ExpectedObservation,
-        manager: u64,
-        catalog: &GameCatalog,
-        provenance: &CatalogProvenance,
-        edit: StatusEdit,
-        override_enabled: bool,
-    ) -> Result<Self, EditError> {
-        if manager == 0 {
-            return Err(EditError::InvalidObservation);
-        }
-        Self::edit(expected, manager, catalog, provenance, ItemEdit::Status(edit), override_enabled)
-    }
     pub fn edit(
         expected: &ExpectedObservation,
         manager: u64,
@@ -66,18 +36,19 @@ impl ForgePlan {
         edit: ItemEdit,
         override_enabled: bool,
     ) -> Result<Self, EditError> {
-        if manager == 0
-            || !matches!(
-                edit,
-                ItemEdit::Status(_)
-                    | ItemEdit::BaseType(_)
-                    | ItemEdit::UniqueIdentity(_)
-                    | ItemEdit::Roll(edits::RollEdit {
-                        target: edits::RollTarget::Affix,
-                        ..
-                    })
-            )
-        {
+        if manager == 0 {
+            return Err(EditError::InvalidObservation);
+        }
+        if !matches!(
+            edit,
+            ItemEdit::Status(_)
+                | ItemEdit::BaseType(_)
+                | ItemEdit::UniqueIdentity(_)
+                | ItemEdit::Roll(edits::RollEdit {
+                    target: edits::RollTarget::Affix,
+                    ..
+                })
+        ) {
             return Err(EditError::InvalidValues);
         }
         let prepared = edits::prepare(expected, catalog, provenance, edit, override_enabled, None)?;
@@ -133,25 +104,12 @@ impl ForgePlan {
         self.edit_intent().needs_override()
     }
     pub fn matches(&self, actual: &ForgeSnapshot) -> bool {
-        if matches!(
-            self.edit_intent(),
-            ItemEdit::Status(StatusEdit {
-                field: StatusField::LevelRequirement,
-                ..
-            })
-        ) {
-            actual == self.projected()
-        } else {
-            self.prepared.inspect_readback(Some(actual)).confirmed()
-        }
+        self.prepared.inspect_readback(Some(actual)).confirmed()
     }
     pub fn projected(&self) -> &ForgeSnapshot {
         self.prepared.projected()
     }
-    pub fn recheck(&self, current: &ExpectedObservation, manager: u64) -> Result<(), EditError> {
-        self.recheck_with_override(current, manager, false)
-    }
-    pub fn recheck_with_override(&self, current: &ExpectedObservation, manager: u64, override_enabled: bool) -> Result<(), EditError> {
+    pub fn recheck(&self, current: &ExpectedObservation, manager: u64, override_enabled: bool) -> Result<(), EditError> {
         if manager != self.manager {
             return Err(EditError::IdentityChanged);
         }

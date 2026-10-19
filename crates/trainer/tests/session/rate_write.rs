@@ -378,7 +378,7 @@ fn definitive_refusal_stays_not_applied_after_simultaneous_log_loss() {
 
 use eg_trainer::{
     catalog::{CatalogIdentity, EXTRACTION_VERSION, GameCatalog},
-    edits::{CatalogProvenance, ExpectedObservation},
+    edits::{CatalogProvenance, ExpectedObservation, ItemEdit, StatusEdit, StatusField},
     writes::{ForgePlan, WriteStatus},
 };
 fn forge_plan(fixture: &Fixture) -> ForgePlan {
@@ -404,7 +404,19 @@ fn forge_plan(fixture: &Fixture) -> ForgePlan {
         generation: 1,
         process: fixture.target.clone(),
     };
-    ForgePlan::level_requirement(&expected, 0x1234, &catalog, &provenance, 17).unwrap()
+    ForgePlan::edit(
+        &expected,
+        0x1234,
+        &catalog,
+        &provenance,
+        ItemEdit::Status(StatusEdit {
+            field: StatusField::LevelRequirement,
+            value: 17,
+            unrestricted: false,
+        }),
+        false,
+    )
+    .unwrap()
 }
 
 #[test]

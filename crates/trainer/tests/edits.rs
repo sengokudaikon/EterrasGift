@@ -835,7 +835,7 @@ fn forge_base_and_identity_plans_preserve_conditional_reverse_rules() {
         assert_eq!(reverse.projected().rarity, before.rarity);
         assert_eq!(reverse.projected().identity, before.identity);
         if override_enabled {
-            assert_eq!(plan.recheck_with_override(&expected, 17, false), Err(EditError::OverrideRequired));
+            assert_eq!(plan.recheck(&expected, 17, false), Err(EditError::OverrideRequired));
             assert_eq!(undo.prepare_with_override(&current, 17, &c, &provenance(), false), Err(EditError::OverrideRequired));
         }
         after.status.forging_potential += 1;
@@ -874,7 +874,7 @@ fn forge_plans_refuse_unimplemented_edits_and_set_identity_changes_are_stale() {
     set.identity.as_mut().unwrap().id = 913;
     refresh(&mut set);
     assert_eq!(set.fingerprint, fingerprint); // Original legacy fingerprint omits set identities.
-    assert_eq!(plan.recheck(&observation(set, &c), 17), Err(EditError::StaleItem));
+    assert_eq!(plan.recheck(&observation(set, &c), 17, false), Err(EditError::StaleItem));
 }
 
 #[test]
@@ -927,4 +927,28 @@ fn forge_affix_roll_batch_and_reverse_keep_unselected_state_and_reject_stale_tar
         allow_incompatible: false,
     });
     assert_eq!(ForgePlan::edit(&expected, 17, &c, &provenance(), bad, false), Err(EditError::InvalidValues));
+}
+
+#[test]
+fn level_cache_readback_uses_the_same_exact_rule_in_pure_and_submittable_plans() {
+    use eg_trainer::{edits::ReadbackPolicy, writes::ForgePlan};
+    let c = catalog();
+    let expected = observation(item(), &c);
+    let intent = status(StatusField::LevelRequirement, 80, false);
+    let pure = prepare(&expected, &c, &provenance(), intent.clone(), false, None).unwrap();
+    let plan = ForgePlan::edit(&expected, 17, &c, &provenance(), intent.clone(), false).unwrap();
+    assert!(plan.matches(pure.projected()));
+    assert_eq!(pure.inspect_readback(Some(pure.projected())).policy, ReadbackPolicy::LevelRequirement);
+    for fault in 0..4 {
+        let mut actual = pure.projected().clone();
+        match fault {
+            0 => actual.name.push_str(" changed"),
+            1 => actual.affixes[0].name.push_str(" changed"),
+            2 => actual.fingerprint ^= 1,
+            _ => actual.status.level_requirement -= 1,
+        }
+        assert!(!pure.inspect_readback(Some(&actual)).confirmed());
+        assert!(!plan.matches(&actual));
+    }
+    assert_eq!(ForgePlan::edit(&expected, 0, &c, &provenance(), intent, false), Err(EditError::InvalidObservation));
 }
