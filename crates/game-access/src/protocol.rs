@@ -1,4 +1,4 @@
-//! Pure, bounded codecs for protocol29: control, observations and narrow conditional writes.
+//! Pure, bounded codecs for protocol30: control, observations and narrow conditional writes.
 //!
 //! Decoding establishes wire validity only. Process identity, helper provenance,
 //! dispatcher code, and permission to run a request belong to the session layer.
@@ -12,8 +12,8 @@ use crate::{
 use std::{collections::BTreeMap, error::Error, fmt};
 
 pub const MAGIC: u32 = 0x4546_4735;
-/// Version29 replaces the level-only request with generic conditional status edits (10).
-pub const VERSION: u32 = 29;
+/// Version30 adds all seven status fields and the explicit override bit to operation10.
+pub const VERSION: u32 = 30;
 pub const ADAPTER: &str = "il2cpp-x64-v1";
 pub const REQUEST_SIZE: usize = 336;
 pub const RESPONSE_HEADER_SIZE: usize = 12;
@@ -144,12 +144,13 @@ impl Request {
         let tail_len = reader.u32()? as usize;
         let manager = reader.u64()?;
         let field = StatusField::from_wire(reader.u32()?)?;
+        let flags = reader.u32()?;
         if value > 255
             || manager == 0
-            || !field.supported()
+            || flags > 1
             || (matches!(field, StatusField::Corrupted | StatusField::Ruined) && value > 1)
             || !(MIN_EXPECTED_BYTES..=MAX_EXPECTED_BYTES).contains(&tail_len)
-            || bytes[28..48].iter().chain(&bytes[72..]).any(|byte| *byte != 0)
+            || bytes[32..48].iter().chain(&bytes[72..]).any(|byte| *byte != 0)
         {
             return Err(ProtocolError::InvalidData);
         }
@@ -176,7 +177,15 @@ impl Request {
         };
         let expected = forge::decode(&bytes[REQUEST_SIZE..])?.ok_or(ProtocolError::InvalidData)?;
         let field = StatusField::from_wire(u32::from_le_bytes(bytes[24..28].try_into().map_err(|_| ProtocolError::InvalidData)?))?;
-        Ok(Self::SetStatus(StatusWrite::new(dispatcher, expected_manager, expected, field, value)?))
+        let unrestricted = bytes[28] == 1;
+        Ok(Self::SetStatus(StatusWrite::with_override(
+            dispatcher,
+            expected_manager,
+            expected,
+            field,
+            value,
+            unrestricted,
+        )?))
     }
     fn decode_fixed(bytes: &[u8]) -> Result<Self, ProtocolError> {
         if bytes.len() != REQUEST_SIZE {

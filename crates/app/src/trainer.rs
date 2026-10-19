@@ -16,7 +16,15 @@ pub struct Trainer {
     worker: JoinHandle<()>,
 }
 impl Trainer {
-    pub fn start(helper_manifest: PathBuf, player_log: PathBuf, cache: PathBuf, executable_name: String, auto_connect: bool, no_connect: bool) -> Result<Self, String> {
+    pub fn start(
+        helper_manifest: PathBuf,
+        player_log: PathBuf,
+        cache: PathBuf,
+        executable_name: String,
+        auto_connect: bool,
+        no_connect: bool,
+        override_enabled: bool,
+    ) -> Result<Self, String> {
         let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build().map_err(|e| e.to_string())?;
         let logs = FileLogFactory::new(player_log).map_err(|e| e.to_string())?;
         let (handle, worker) = backend::service(
@@ -28,6 +36,7 @@ impl Trainer {
             SystemClock,
             BackendOptions {
                 auto_connect,
+                override_enabled,
                 ..Default::default()
             },
             Some(CatalogCache::new(cache)),

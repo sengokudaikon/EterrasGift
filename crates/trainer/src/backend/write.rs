@@ -39,7 +39,7 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
         }
         let current = self.state.expected_observation().map_err(invalid_edit)?;
         let manager = self.state.runtime_status.ok_or_else(|| invalid_edit("runtime status missing"))?.manager;
-        plan.recheck(&current, manager).map_err(invalid_edit)?;
+        plan.recheck_with_override(&current, manager, self.state.override_enabled).map_err(invalid_edit)?;
         let target = current.process().clone();
         self.admit_using_policy(&target, GatePolicy::Release)?;
         let refreshed = self.connection.as_mut().ok_or_else(|| invalid_edit("connection released"))?.refresh(self.clock.now()).await;
@@ -58,7 +58,7 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
         if status.manager != plan.manager() {
             return Err(BackendError::blocked(ErrorKind::Identity, "character manager changed before write"));
         }
-        plan.recheck(&current, status.manager).map_err(invalid_edit)?;
+        plan.recheck_with_override(&current, status.manager, self.state.override_enabled).map_err(invalid_edit)?;
         self.admit_using_policy(&target, GatePolicy::Release)?;
         self.commit(epoch, |this| {
             this.state.activity = Some(Activity::WritingForge);
@@ -102,7 +102,23 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
                     let undo = if undoing || !kept {
                         None
                     } else {
-                        self.state.last_write.as_ref().and_then(|record| crate::undo::StatusUndo::from_confirmed(record).ok())
+                        self.state
+                            .last_write
+                            .as_ref()
+                            .and_then(|record| crate::undo::StatusUndo::from_confirmed(record).ok())
+                            .filter(|undo| {
+                                undo.prepare_with_override(
+                                    undo.after(),
+                                    plan.manager(),
+                                    &data,
+                                    &crate::edits::CatalogProvenance::RuntimeRead {
+                                        generation: self.state.generation,
+                                        process: target.clone(),
+                                    },
+                                    self.state.override_enabled,
+                                )
+                                .is_ok()
+                            })
                     };
                     self.commit(epoch, |this| {
                         this.state.forge = forge;

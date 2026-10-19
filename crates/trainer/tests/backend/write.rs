@@ -3,6 +3,81 @@ use eg_game_access::protocol::ResponseCode;
 use eg_trainer::writes::{WriteObservation, WriteOutcome, WritePlan};
 
 #[test]
+fn queued_override_revocation_refuses_old_plans_and_undo_before_io() {
+    use eg_trainer::edits::{EditError, StatusEdit, StatusField};
+    run(async {
+        let shared = writable();
+        {
+            let mut item = shared.forge_item.lock().unwrap();
+            let item = item.as_mut().unwrap();
+            item.item_type = 25;
+            item.fingerprint = item.legacy_fingerprint();
+        }
+        let (handle, worker) = start(&shared, options(), None);
+        connected(&handle).await;
+        let edit = StatusEdit {
+            field: StatusField::WeaversTouch,
+            value: 10,
+            unrestricted: true,
+        };
+        assert_eq!(handle.snapshot().status_edit_plan(edit.clone()), Err(EditError::OverrideRequired));
+        command(&handle, Command::SetOverride(true)).await.unwrap();
+        let plan = handle.snapshot().status_edit_plan(edit).unwrap();
+        command(&handle, Command::SetOverride(false)).await.unwrap();
+        let reads = shared.count("refresh");
+        assert_eq!(command(&handle, Command::Write(plan.clone().into())).await.unwrap_err().kind, ErrorKind::InvalidEdit);
+        assert_eq!(shared.count("refresh"), reads);
+        assert_eq!(shared.count("write"), 0);
+        command(&handle, Command::SetOverride(true)).await.unwrap();
+        command(&handle, Command::Write(plan.into())).await.unwrap();
+        let undo = handle.snapshot().undo_status.clone().unwrap();
+        command(&handle, Command::SetOverride(false)).await.unwrap();
+        let reads = shared.count("refresh");
+        assert_eq!(
+            command(&handle, Command::UndoStatus(Box::new(undo.clone()))).await.unwrap_err().kind,
+            ErrorKind::InvalidEdit
+        );
+        assert_eq!(shared.count("refresh"), reads);
+        assert_eq!(shared.count("write"), 1);
+        command(&handle, Command::SetOverride(true)).await.unwrap();
+        command(&handle, Command::UndoStatus(Box::new(undo))).await.unwrap();
+        assert_eq!(shared.forge_item.lock().unwrap().as_ref().unwrap().status.weavers_touch, 0);
+        shutdown(&handle, worker).await;
+    });
+}
+
+#[test]
+fn reducing_above_limit_legendary_will_does_not_offer_an_illegal_increase_as_undo() {
+    use eg_trainer::edits::{StatusEdit, StatusField};
+    run(async {
+        let shared = writable();
+        {
+            let mut item = shared.forge_item.lock().unwrap();
+            let item = item.as_mut().unwrap();
+            item.rarity = 9;
+            item.identity = Some(eg_game_access::forge::UniqueIdentity { id: 911, rolls: vec![] });
+            item.status.weavers_will = 255;
+            item.fingerprint = item.legacy_fingerprint();
+        }
+        let (handle, worker) = start(&shared, options(), None);
+        connected(&handle).await;
+        command(&handle, Command::SetOverride(true)).await.unwrap();
+        let plan = handle
+            .snapshot()
+            .status_edit_plan(StatusEdit {
+                field: StatusField::WeaversWill,
+                value: 80,
+                unrestricted: true,
+            })
+            .unwrap();
+        command(&handle, Command::Write(plan.into())).await.unwrap();
+        assert!(handle.snapshot().undo_status.is_none());
+        assert!(matches!(handle.snapshot().last_write.as_ref().map(|r| &r.status), Some(WriteStatus::Confirmed(item)) if item.status.weavers_will == 80));
+        shutdown(&handle, worker).await;
+    });
+}
+
+#[test]
 fn status_family_uses_shared_write_outcomes_and_conditional_undo() {
     run(async {
         let shared = writable();

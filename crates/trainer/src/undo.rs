@@ -17,6 +17,7 @@ pub struct StatusUndo {
     manager: u64,
     restore_value: i32,
     field: crate::edits::StatusField,
+    unrestricted: bool,
 }
 
 impl StatusUndo {
@@ -44,6 +45,7 @@ impl StatusUndo {
             manager: record.plan.manager(),
             restore_value,
             field,
+            unrestricted: record.plan.unrestricted(),
         })
     }
 
@@ -64,6 +66,16 @@ impl StatusUndo {
     /// cache or an older generation cannot establish fresh catalog provenance.
     /// Failure leaves this pure token unchanged and never retries a submission.
     pub fn prepare(&self, current: &ExpectedObservation, manager: u64, catalog: &GameCatalog, provenance: &CatalogProvenance) -> Result<StatusPlan, EditError> {
+        self.prepare_with_override(current, manager, catalog, provenance, false)
+    }
+    pub fn prepare_with_override(
+        &self,
+        current: &ExpectedObservation,
+        manager: u64,
+        catalog: &GameCatalog,
+        provenance: &CatalogProvenance,
+        override_enabled: bool,
+    ) -> Result<StatusPlan, EditError> {
         if manager != self.manager
             || current.generation() != self.after.generation()
             || current.process() != self.after.process()
@@ -75,7 +87,19 @@ impl StatusUndo {
             return Err(EditError::StaleItem);
         }
         // This rechecks actual current literal limits, field eligibility,
-        // exact catalog identity and fresh RuntimeRead provenance. No override.
-        StatusPlan::new(current, manager, catalog, provenance, self.field, self.restore_value)
+        // exact catalog identity and fresh RuntimeRead provenance. Retain the
+        // original edit's flag and recheck the current override permission.
+        StatusPlan::prepare(
+            current,
+            manager,
+            catalog,
+            provenance,
+            crate::edits::StatusEdit {
+                field: self.field,
+                value: self.restore_value,
+                unrestricted: self.unrestricted,
+            },
+            override_enabled,
+        )
     }
 }

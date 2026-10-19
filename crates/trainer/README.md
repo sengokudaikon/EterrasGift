@@ -34,13 +34,21 @@ Ordinary pre-store refusals and NotKept preserve a healthy connection. NotKept p
 actual observation, advances field observation sequences and creates no Undo. Transport,
 protocol, identity, restart or offline failures release the connection. Later publication
 gate loss suppresses live data without downgrading an already independently confirmed
-historical result. Nothing retries a mutation. Protocol29 replaces the level-only operation 22
-with generic status operation 10. `StatusPlan`/`StatusUndo` cover level requirement, forging
-potential, corrupted and ruined; `status_fields` advertises support separately from item
+historical result. Nothing retries a mutation. Protocol30 carries all seven fields and an
+explicit override bit through generic status operation 10. `StatusPlan`/`StatusUndo` cover
+level requirement, forging/legendary potential, Weaver's Will/Touch, corrupted and ruined;
+`status_fields` advertises support separately from item
 eligibility. Rebuilding fields use the game's RebuildID/UpdateEntry methods and accept its
 derived level requirement under the existing readback rules. A managed refresh failure after
-the store is uncertain, with no automatic retry or implicit rollback. Legendary potential,
-Weaver's Will and Weaver's Touch remain unsupported native operations.
+the store is uncertain, with no automatic retry or implicit rollback. Unique eligibility calls
+the game's metadata-checked getUnique(UInt16), with a rooted result and a fresh full stale check.
+Host and helper share the small status rule function, using their own observed definition data.
+The worker defaults override off, serializes `SetOverride` with writes, and checks the current
+setting before submission and Undo. The desktop supplies the saved startup preference; live
+settings/editor command binding remains part of UI integration. A new Undo is retained only
+when a valid reverse plan can be prepared under the current game rules (an above-maximum Will
+reduction may not be reversible); using the token rechecks current permission and observations.
+See the [remaining status checkpoint](../../tools/trainer-eval/persistent-player/remaining-status-report.json).
 The read-only adapter is connected; writes through the editor remain the next integration step.
 See the [write-service cleanup checkpoint](../../tools/trainer-eval/persistent-player/write-service-refactor-report.json)
 for the product-test gates and owned Unity route.

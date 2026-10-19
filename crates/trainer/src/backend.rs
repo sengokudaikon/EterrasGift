@@ -161,8 +161,8 @@ impl<T: Transport + Send + 'static, L: LogSource + Send + 'static> BackendConnec
     fn supports_level_requirement(&self) -> bool {
         true
     }
-    fn supports_status(&self, field: crate::edits::StatusField) -> bool {
-        field.supported()
+    fn supports_status(&self, _field: crate::edits::StatusField) -> bool {
+        true
     }
     async fn set_status(&mut self, now: Timestamp, plan: &StatusPlan, control: &mut dyn WriteControl) -> Result<WriteStatus, BackendError> {
         Ok(Session::set_status_controlled(self, now, plan, control).await?)
@@ -367,6 +367,7 @@ pub struct BackendSnapshot {
     pub enabled: bool,
     pub monitoring: bool,
     pub auto_connect: bool,
+    pub override_enabled: bool,
     pub phase: Phase,
     pub activity: Option<Activity>,
     pub capture_progress: Option<CaptureProgress>,
@@ -442,6 +443,13 @@ impl BackendSnapshot {
         self.status_plan(crate::edits::StatusField::LevelRequirement, value)
     }
     pub fn status_plan(&self, field: crate::edits::StatusField, value: i32) -> Result<StatusPlan, crate::edits::EditError> {
+        self.status_edit_plan(crate::edits::StatusEdit {
+            field,
+            value,
+            unrestricted: false,
+        })
+    }
+    pub fn status_edit_plan(&self, edit: crate::edits::StatusEdit) -> Result<StatusPlan, crate::edits::EditError> {
         use crate::edits::{CatalogProvenance, EditError};
         let expected = self.expected_observation()?;
         let status = self
@@ -449,7 +457,7 @@ impl BackendSnapshot {
             .filter(|status| !status.online && status.manager != 0)
             .ok_or(EditError::OfflineRequired)?;
         let catalog = self.catalog.data().ok_or(EditError::CatalogNotVerified)?;
-        StatusPlan::new(
+        StatusPlan::prepare(
             &expected,
             status.manager,
             catalog,
@@ -457,8 +465,8 @@ impl BackendSnapshot {
                 generation: self.generation,
                 process: expected.process().clone(),
             },
-            field,
-            value,
+            edit,
+            self.override_enabled,
         )
     }
     pub fn status_undo_plan(&self, undo: &crate::undo::StatusUndo) -> Result<StatusPlan, crate::edits::EditError> {
@@ -471,7 +479,7 @@ impl BackendSnapshot {
             .runtime_status
             .filter(|status| !status.online && status.manager != 0)
             .ok_or(EditError::OfflineRequired)?;
-        undo.prepare(
+        undo.prepare_with_override(
             &current,
             status.manager,
             self.catalog.data().ok_or(EditError::CatalogNotVerified)?,
@@ -479,6 +487,7 @@ impl BackendSnapshot {
                 generation: self.generation,
                 process: current.process().clone(),
             },
+            self.override_enabled,
         )
     }
 }
@@ -497,6 +506,8 @@ pub enum Command {
     Disable,
     StartMonitoring,
     SetAutoConnect(bool),
+    /// Serialized with edits: accepted work drains before this setting changes.
+    SetOverride(bool),
     Connect,
     Retry,
     Disconnect,
@@ -519,6 +530,7 @@ impl Command {
 pub struct BackendOptions {
     pub policy: GatePolicy,
     pub auto_connect: bool,
+    pub override_enabled: bool,
     pub poll_interval: Duration,
     pub discovery_interval: Duration,
 }
@@ -527,6 +539,7 @@ impl Default for BackendOptions {
         Self {
             policy: GatePolicy::Release,
             auto_connect: true,
+            override_enabled: false,
             poll_interval: Duration::from_millis(250),
             discovery_interval: Duration::from_secs(1),
         }
@@ -641,6 +654,7 @@ pub fn service<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K
         enabled: false,
         monitoring: false,
         auto_connect: options.auto_connect,
+        override_enabled: options.override_enabled,
         phase: Phase::Disabled,
         activity: None,
         capture_progress: None,
@@ -823,6 +837,11 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
     }
     async fn command(&mut self, command: Command) -> Result<(), BackendError> {
         match command {
+            Command::SetOverride(value) => {
+                self.state.override_enabled = value;
+                self.publish();
+                Ok(())
+            }
             Command::Enable => {
                 self.state.enabled = true;
                 self.paused = false;

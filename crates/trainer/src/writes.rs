@@ -32,21 +32,32 @@ impl StatusPlan {
         Self::new(expected, manager, catalog, provenance, StatusField::LevelRequirement, value)
     }
     pub fn new(expected: &ExpectedObservation, manager: u64, catalog: &GameCatalog, provenance: &CatalogProvenance, field: StatusField, value: i32) -> Result<Self, EditError> {
-        if manager == 0 || !field.supported() {
-            return Err(EditError::InvalidObservation);
-        }
-        let prepared = edits::prepare(
+        Self::prepare(
             expected,
+            manager,
             catalog,
             provenance,
-            ItemEdit::Status(StatusEdit {
+            StatusEdit {
                 field,
                 value,
                 unrestricted: false,
-            }),
+            },
             false,
-            None,
-        )?;
+        )
+    }
+    pub fn prepare(
+        expected: &ExpectedObservation,
+        manager: u64,
+        catalog: &GameCatalog,
+        provenance: &CatalogProvenance,
+        edit: StatusEdit,
+        override_enabled: bool,
+    ) -> Result<Self, EditError> {
+        if manager == 0 {
+            return Err(EditError::InvalidObservation);
+        }
+        let field = edit.field;
+        let prepared = edits::prepare(expected, catalog, provenance, ItemEdit::Status(edit), override_enabled, None)?;
         Ok(Self { prepared, manager, field })
     }
     pub fn before(&self) -> &ExpectedObservation {
@@ -61,6 +72,9 @@ impl StatusPlan {
     pub fn field(&self) -> StatusField {
         self.field
     }
+    pub fn unrestricted(&self) -> bool {
+        matches!(self.prepared.edit(), ItemEdit::Status(StatusEdit { unrestricted: true, .. }))
+    }
     pub fn matches(&self, actual: &ForgeSnapshot) -> bool {
         if self.field == StatusField::LevelRequirement {
             actual == self.projected()
@@ -72,10 +86,13 @@ impl StatusPlan {
         self.prepared.projected()
     }
     pub fn recheck(&self, current: &ExpectedObservation, manager: u64) -> Result<(), EditError> {
+        self.recheck_with_override(current, manager, false)
+    }
+    pub fn recheck_with_override(&self, current: &ExpectedObservation, manager: u64, override_enabled: bool) -> Result<(), EditError> {
         if manager != self.manager {
             return Err(EditError::IdentityChanged);
         }
-        self.prepared.recheck(current, true, false)
+        self.prepared.recheck(current, true, override_enabled)
     }
 }
 

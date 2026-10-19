@@ -761,35 +761,17 @@ pub fn legendary_fits(item: &ForgeSnapshot, set: bool, legendary_type: i32) -> b
     }
 }
 fn validate_status(item: &ForgeSnapshot, catalog: &GameCatalog, e: &StatusEdit) -> Result<(), EditError> {
-    let s = &item.status;
-    let limits = &catalog.limits;
-    let in_range = |range: eg_game_access::definitions::ValueRange| e.value >= i32::from(range.minimum) && e.value <= i32::from(range.maximum) && byte(e.value);
-    let valid = match e.field {
-        StatusField::ForgingPotential => !backed(item.rarity) && in_range(limits.forging_potential),
-        StatusField::Corrupted | StatusField::Ruined => matches!(e.value, 0 | 1),
-        StatusField::LevelRequirement => !backed(item.rarity) && in_range(limits.level_requirement),
-        StatusField::WeaversTouch => e.unrestricted && idol(item.item_type) && (e.value == 0 || in_range(limits.weavers_touch)),
-        StatusField::LegendaryPotential | StatusField::WeaversWill => {
-            let will = e.field == StatusField::WeaversWill;
-            if will && e.unrestricted && item.rarity == 9 {
-                byte(e.value) && e.value <= i32::from(s.weavers_will.max(limits.weavers_will.maximum)) && (s.weavers_will > 0 || s.legendary_potential == 0 || e.value == 0)
-            } else if item.rarity == 7 {
-                let id = item.identity.as_ref().ok_or(EditError::InvalidStatus)?.id;
-                let d = catalog.uniques.get(&id).ok_or(EditError::MissingDefinition)?;
-                let forced = will && e.unrestricted && d.legendary_type == 0;
-                (d.legendary_type == i32::from(will) || forced)
-                    && (if will { s.legendary_potential == 0 } else { s.weavers_will == 0 })
-                    && (if will {
-                        in_range(limits.weavers_will) || (forced && e.value == 0)
-                    } else {
-                        in_range(limits.legendary_potential)
-                    })
-            } else {
-                false
-            }
-        }
+    let legendary_type = if e.field.requires_definition(item) {
+        let id = item.identity.as_ref().ok_or(EditError::InvalidStatus)?.id;
+        Some(catalog.uniques.get(&id).ok_or(EditError::MissingDefinition)?.legendary_type)
+    } else {
+        None
     };
-    if valid { Ok(()) } else { Err(EditError::InvalidStatus) }
+    if e.field.allows(item, &catalog.limits, e.value, e.unrestricted, legendary_type) {
+        Ok(())
+    } else {
+        Err(EditError::InvalidStatus)
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

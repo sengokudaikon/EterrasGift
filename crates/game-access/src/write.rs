@@ -1,4 +1,4 @@
-//! Owned protocol29 status writes and bounded native acknowledgement decoding.
+//! Owned protocol30 status writes and bounded native acknowledgement decoding.
 //! These codecs grant no process access or write permission. Host generation,
 //! profile, policy and main-thread runtime admission remain independent checks.
 
@@ -33,8 +33,41 @@ impl StatusField {
             _ => invalid(),
         }
     }
-    pub fn supported(self) -> bool {
-        matches!(self, Self::ForgingPotential | Self::Corrupted | Self::Ruined | Self::LevelRequirement)
+    pub fn requires_definition(self, item: &ForgeSnapshot) -> bool {
+        matches!(self, Self::LegendaryPotential | Self::WeaversWill) && item.rarity == 7
+    }
+    /// Game status rules shared by planning and the native pre-store guard.
+    /// `legendary_type` comes from the captured catalog on the host and getUnique
+    /// inside the game. Neither an override nor an absent definition guesses it.
+    pub fn allows(self, item: &ForgeSnapshot, limits: &crate::definitions::ItemLimits, value: i32, unrestricted: bool, legendary_type: Option<i32>) -> bool {
+        if !(0..=255).contains(&value) {
+            return false;
+        }
+        let status = &item.status;
+        let in_range = |range: crate::definitions::ValueRange| (i32::from(range.minimum)..=i32::from(range.maximum)).contains(&value);
+        match self {
+            Self::ForgingPotential => !matches!(item.rarity, 7..=9) && in_range(limits.forging_potential),
+            Self::LevelRequirement => !matches!(item.rarity, 7..=9) && in_range(limits.level_requirement),
+            Self::Corrupted | Self::Ruined => matches!(value, 0 | 1),
+            Self::WeaversTouch => unrestricted && (25..=33).contains(&item.item_type) && (value == 0 || in_range(limits.weavers_touch)),
+            Self::LegendaryPotential | Self::WeaversWill => {
+                let will = self == Self::WeaversWill;
+                if will && unrestricted && item.rarity == 9 {
+                    value <= i32::from(status.weavers_will.max(limits.weavers_will.maximum)) && (status.weavers_will > 0 || status.legendary_potential == 0 || value == 0)
+                } else if item.rarity == 7 {
+                    let forced = will && unrestricted && legendary_type == Some(0);
+                    (legendary_type == Some(i32::from(will)) || forced)
+                        && (if will { status.legendary_potential == 0 } else { status.weavers_will == 0 })
+                        && (if will {
+                            in_range(limits.weavers_will) || (forced && value == 0)
+                        } else {
+                            in_range(limits.legendary_potential)
+                        })
+                } else {
+                    false
+                }
+            }
+        }
     }
     pub fn value(self, item: &ForgeSnapshot) -> i32 {
         match self {
@@ -78,6 +111,7 @@ pub struct StatusWrite {
     expected: Box<ForgeSnapshot>,
     value: u8,
     field: StatusField,
+    unrestricted: bool,
     canonical_expected: Vec<u8>,
 }
 impl StatusWrite {
@@ -88,8 +122,18 @@ impl StatusWrite {
         Self::new(dispatcher, expected_manager, expected, StatusField::LevelRequirement, value)
     }
     pub fn new(dispatcher: DispatcherSpec, expected_manager: u64, expected: ForgeSnapshot, field: StatusField, value: i32) -> Result<Self, ProtocolError> {
+        Self::with_override(dispatcher, expected_manager, expected, field, value, false)
+    }
+    pub fn with_override(
+        dispatcher: DispatcherSpec,
+        expected_manager: u64,
+        expected: ForgeSnapshot,
+        field: StatusField,
+        value: i32,
+        unrestricted: bool,
+    ) -> Result<Self, ProtocolError> {
         let value = u8::try_from(value).map_err(|_| ProtocolError::InvalidData)?;
-        if expected_manager == 0 || !field.supported() || (matches!(field, StatusField::Corrupted | StatusField::Ruined) && value > 1) {
+        if expected_manager == 0 || (matches!(field, StatusField::Corrupted | StatusField::Ruined) && value > 1) {
             return invalid();
         }
         let canonical_expected = forge::encode(Some(&expected))?;
@@ -102,6 +146,7 @@ impl StatusWrite {
             expected: Box::new(expected),
             value,
             field,
+            unrestricted,
             canonical_expected,
         })
     }
@@ -116,6 +161,9 @@ impl StatusWrite {
     }
     pub fn field(&self) -> StatusField {
         self.field
+    }
+    pub fn unrestricted(&self) -> bool {
+        self.unrestricted
     }
     pub fn dispatcher(&self) -> DispatcherSpec {
         self.dispatcher
@@ -135,6 +183,7 @@ impl StatusWrite {
         frame[12..16].copy_from_slice(&(self.canonical_expected.len() as u32).to_le_bytes());
         frame[16..24].copy_from_slice(&self.expected_manager.to_le_bytes());
         frame[24..28].copy_from_slice(&(self.field as u32).to_le_bytes());
+        frame[28..32].copy_from_slice(&u32::from(self.unrestricted).to_le_bytes());
         frame[48..56].copy_from_slice(&self.dispatcher.rva.to_le_bytes());
         frame[56..72].copy_from_slice(&self.dispatcher.bytes);
         frame.extend_from_slice(&self.canonical_expected);

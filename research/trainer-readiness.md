@@ -27,7 +27,7 @@ Validation:530 nightly release trainer/controller cases and56 UI unit tests pass
 verification and inspected worker/UI captures. The helper build publishes matching debug/release receipts;
 their retained DLL hashes were checked without loading a DLL or accessing a running game.
 
-The next feature increment replaces the level-only request with protocol 29 status operation 10.
+The first feature increment replaced the level-only request with protocol 29 status operation 10.
 Level, forging potential, corrupted and ruined share `StatusPlan`, worker/session write handling
 and conditional `StatusUndo`. Non-level edits call RebuildID and UpdateEntry; their readback
 allows the derived level to change. Valid same-target native acknowledgements remain provisional,
@@ -41,8 +41,23 @@ passes 226 requests/216 commands through the production worker route, with 10 pr
 helper load, GC during rebuild, independent Apply/Undo observations, NotKept, two post-store
 refresh exceptions, restored dispatcher, stopped server and normal exit. Native rebuilding
 also refuses inherited affix IDs outside the 12-bit save format before attempting a store.
-The current `mise run trainer:verify` gate passes 534 trainer/controller tests (five native
+That checkpoint's `mise run trainer:verify` gate passed 534 trainer/controller tests (five native
 fixture entrypoints stay ignored), workspace Clippy/format/tokens and inspected fake-host captures.
+
+Protocol30 completes the seven status fields. Legendary potential, Weaver's Will and Weaver's
+Touch use the shared write/readback/Undo path, current worker override permission and an explicit
+per-edit flag. Host and helper share the range/eligibility rules; native unique edits call the
+game's getUnique(UInt16), root its result, check identity/type and recheck the full current item.
+Missing, throwing, mismatched or stale lookups refuse before the store. Override revocation rejects
+old plans and Undo before native I/O. An irreversible above-limit Will reduction remains confirmed
+without offering an invalid Undo. The editor is still read-only; other Forge edits, formatting,
+mapping, previews and gameplay/field families remain open.
+The [authored remaining-status checkpoint](../tools/trainer-eval/persistent-player/remaining-status-report.json)
+passes 291 requests/281 main-thread commands, six additional status scenarios and five independent
+lookup refusal cases. Ten preparations reuse one helper, with restored dispatcher, stopped server,
+unchanged player files and normal exit. No actual-game run is claimed.
+The current `mise run trainer:verify` passes 538 trainer/controller tests (five ignored fixture
+entrypoints), workspace Clippy/format/tokens and inspected fake-host captures.
 
 | Requirement | Current evidence and remaining work |
 |---|---|

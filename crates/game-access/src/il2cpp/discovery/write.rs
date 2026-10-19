@@ -6,10 +6,10 @@ use super::{
 };
 use crate::{
     forge::ForgeSnapshot,
-    il2cpp::{AttachedThread, InvocationContext, InvocationOutcome, ReturnValue, raw},
+    il2cpp::{Argument, AttachedThread, InvocationContext, InvocationOutcome, ReturnValue, Scalar, raw},
     write::StatusField,
 };
-use std::ptr::NonNull;
+use std::{ffi::CStr, ptr::NonNull};
 
 /// Only `Failed` may describe an operation whose store was attempted. No variant permits retry.
 #[derive(Debug)]
@@ -64,9 +64,11 @@ impl RuntimeAccess {
             let (name, primitive, code) = match kind {
                 StatusField::LevelRequirement => (c"<LvlReq>k__BackingField", c"Int32", 0x08),
                 StatusField::ForgingPotential => (c"forgingPotential", c"Byte", 0x05),
+                StatusField::LegendaryPotential => (c"legendaryPotential", c"Byte", 0x05),
+                StatusField::WeaversWill => (c"weaversWill", c"Byte", 0x05),
+                StatusField::WeaversTouch => (c"weaversTouch", c"Byte", 0x05),
                 StatusField::Corrupted => (c"corrupted", c"Boolean", 0x02),
                 StatusField::Ruined => (c"ruined", c"Boolean", 0x02),
-                _ => return Err(StatusWriteError::Refused("This status field is not supported yet".into())),
             };
             let field = self.field(owner, name)?;
             let ty = (self.field_type)(field);
@@ -81,6 +83,69 @@ impl RuntimeAccess {
                 return Err(StatusWriteError::Refused("Status field is not the exact mutable instance field".into()));
             }
             NonNull::new(field.cast()).ok_or_else(|| StatusWriteError::Refused("Missing status field".into()))
+        }
+    }
+
+    // The original helper calls UniqueList.getUnique(UInt16). Validate its exact
+    // static signature, root the return across GC, then read only its identity
+    // and LegendaryType. Never walk the full catalog during an edit.
+    unsafe fn status_legendary_type(&self, attached: &AttachedThread<'_>, graph: &ForgeGraph<'_, '_>, api: raw::InvocationApi, id: u16) -> Result<i32, StatusWriteError> {
+        unsafe {
+            let owner = self.class(&graph.images, c"", c"UniqueList")?;
+            let entry = self.catalog_nested(owner, c"Entry")?;
+            let mut iterator = std::ptr::null_mut();
+            let mut found = None;
+            let mut complete = false;
+            for _ in 0..100_000 {
+                let method = (self.class_methods)(owner, &mut iterator);
+                if method.is_null() {
+                    complete = true;
+                    break;
+                }
+                let name = (self.method_name)(method);
+                if name.is_null() {
+                    return Err(StatusWriteError::Refused("Missing unique lookup method name".into()));
+                }
+                if CStr::from_ptr(name) != c"getUnique" || (self.method_params)(method) != 1 {
+                    continue;
+                }
+                let parameter = (self.method_param)(method, 0);
+                let returns = (self.method_return)(method);
+                if found.is_some()
+                    || (self.method_instance)(method)
+                    || (api.method_get_class)(method) != owner
+                    || parameter.is_null()
+                    || returns.is_null()
+                    || (self.type_byref)(parameter)
+                    || (self.type_byref)(returns)
+                    || (self.type_code)(parameter) != 0x07
+                    || (self.type_class)(parameter) != self.system_class(c"UInt16")?
+                    || (self.type_code)(returns) != 0x12
+                    || (self.type_class)(returns) != entry
+                {
+                    return Err(StatusWriteError::Refused("Unique lookup signature differs from getUnique(UInt16) -> Entry".into()));
+                }
+                found = NonNull::new(method.cast_mut());
+            }
+            if !complete {
+                return Err(StatusWriteError::Refused("Unique lookup method enumeration limit".into()));
+            }
+            let method = found.ok_or_else(|| StatusWriteError::Refused("Missing getUnique(UInt16)".into()))?;
+            let context = InvocationContext::new(attached, api);
+            let method = context.bind(method).map_err(|e| StatusWriteError::Refused(e.to_string()))?;
+            let definition = match method
+                .invoke(None, &mut [Argument::Scalar(Scalar::U16(id))])
+                .map_err(|e| StatusWriteError::Refused(e.to_string()))?
+            {
+                InvocationOutcome::Returned(ReturnValue::Reference(Some(root))) => root,
+                InvocationOutcome::Returned(ReturnValue::Reference(None)) => return Err(StatusWriteError::NotReady("Unique definition is unavailable".into())),
+                _ => return Err(StatusWriteError::Refused("Unique lookup threw or returned an unexpected value".into())),
+            };
+            self.exact(&definition, entry)?;
+            if self.primitive::<u16>(&definition, c"uniqueID")? != id {
+                return Err(StatusWriteError::Refused("Unique lookup returned a different identity".into()));
+            }
+            Ok(self.enumeration(&definition, c"legendaryType", c"LegendaryType")?)
         }
     }
 
@@ -131,6 +196,8 @@ impl RuntimeAccess {
     /// For rebuilding edits, `invoke` must describe this same runtime and the
     /// two refresh methods must be callable synchronously; roots survive managed
     /// calls, exceptions and GC. Refresh failures are uncertain and never retried.
+    /// Unique eligibility additionally calls getUnique(UInt16) before the store;
+    /// its result must be valid game definition data in this runtime.
     /// Expected addresses are opaque comparisons only. After entering the void setter, failures
     /// are uncertain; this API cannot recover an access violation/SEH or guarantee rollback.
     #[allow(clippy::too_many_arguments)]
@@ -143,11 +210,11 @@ impl RuntimeAccess {
         expected: &ForgeSnapshot,
         kind: StatusField,
         value: i32,
+        unrestricted: bool,
     ) -> Result<ForgeSnapshot, StatusWriteError> {
         unsafe {
             if expected_manager == 0
                 || !(0..=255).contains(&value)
-                || !kind.supported()
                 || (matches!(kind, StatusField::LevelRequirement | StatusField::ForgingPotential) && matches!(expected.rarity, 7..=9))
                 || (matches!(kind, StatusField::Corrupted | StatusField::Ruined) && value > 1)
             {
@@ -159,18 +226,26 @@ impl RuntimeAccess {
                 ));
             }
             let limits = self.read_item_limits(attached)?;
-            let valid = match kind {
-                StatusField::LevelRequirement => !matches!(expected.rarity, 7..=9) && value <= i32::from(limits.level_requirement.maximum),
-                StatusField::ForgingPotential => {
-                    !matches!(expected.rarity, 7..=9) && (i32::from(limits.forging_potential.minimum)..=i32::from(limits.forging_potential.maximum)).contains(&value)
+            let graph = self.forge_graph(attached)?.ok_or_else(|| StatusWriteError::NotReady("Forge has no current item".into()))?;
+            self.status_final_gate(&graph, expected_manager)?;
+            let legendary_type = if kind.requires_definition(expected) {
+                if self.forge_snapshot(attached, &graph)? != *expected {
+                    return Err(StatusWriteError::Stale("Complete current item differs before unique lookup".into()));
                 }
-                StatusField::Corrupted | StatusField::Ruined => matches!(value, 0 | 1),
-                _ => false,
+                let id = expected.identity.as_ref().ok_or_else(|| StatusWriteError::Refused("Unique identity is missing".into()))?.id;
+                Some(self.status_legendary_type(
+                    attached,
+                    &graph,
+                    invoke.ok_or_else(|| StatusWriteError::Refused("Missing unique lookup invocation API".into()))?,
+                    id,
+                )?)
+            } else {
+                None
             };
+            let valid = kind.allows(expected, &limits, value, unrestricted, legendary_type);
             if !valid {
                 return Err(StatusWriteError::Refused("Status value or item eligibility is outside the game's rules".into()));
             }
-            let graph = self.forge_graph(attached)?.ok_or_else(|| StatusWriteError::NotReady("Forge has no current item".into()))?;
             let owner = self.class(&graph.images, c"", if kind == StatusField::LevelRequirement { c"ItemDataUnpacked" } else { c"ItemData" })?;
             let field = self.status_field(owner, kind)?;
             // Resolve/bind every refresh before the store. Metadata/signature
@@ -577,6 +652,7 @@ mod tests {
                         e,
                         StatusField::LevelRequirement,
                         value,
+                        false,
                     )
                 },
                 Err(StatusWriteError::Refused(_))

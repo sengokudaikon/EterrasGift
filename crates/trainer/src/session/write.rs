@@ -129,7 +129,8 @@ impl<T: Transport, L: LogSource> Session<T, L> {
                 {
                     return Err(SessionError::Identity("write belongs to a different runtime, manager or catalog".into()));
                 }
-                let request = StatusWrite::new(dispatcher, plan.manager(), expected.snapshot().clone(), plan.field(), plan.value()).map_err(SessionError::Protocol)?;
+                let request = StatusWrite::with_override(dispatcher, plan.manager(), expected.snapshot().clone(), plan.field(), plan.value(), plan.unrestricted())
+                    .map_err(SessionError::Protocol)?;
                 Ok((Request::SetStatus(request), Request::ReadForge { dispatcher }))
             }
             WritePlan::Field(plan) => {

@@ -70,7 +70,7 @@ fn catalog() -> GameCatalog {
         limits: ItemLimits {
             forging_potential: r,
             legendary_potential: r,
-            weavers_will: r,
+            weavers_will: ValueRange { minimum: 0, maximum: 49 },
             weavers_touch: r,
             level_requirement: r,
         },
@@ -248,8 +248,8 @@ impl BackendConnection for Connection {
     fn supports_level_requirement(&self) -> bool {
         self.shared.write_enabled.load(Ordering::SeqCst)
     }
-    fn supports_status(&self, field: eg_trainer::edits::StatusField) -> bool {
-        field.supported() && self.supports_level_requirement()
+    fn supports_status(&self, _field: eg_trainer::edits::StatusField) -> bool {
+        self.supports_level_requirement()
     }
     fn supports_read_attack_leech(&self) -> bool {
         self.shared.attack_leech_enabled.load(Ordering::SeqCst)
@@ -329,6 +329,7 @@ impl Clock for FakeClock {
 fn options() -> BackendOptions {
     BackendOptions {
         policy: GatePolicy::Release,
+        override_enabled: false,
         auto_connect: false,
         poll_interval: Duration::from_millis(5),
         discovery_interval: Duration::from_millis(10),

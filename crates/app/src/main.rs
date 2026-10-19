@@ -100,6 +100,11 @@ fn main() -> Result<(), slint::PlatformError> {
             process_name,
             automatic,
             arguments.no_connect,
+            store
+                .module_settings(trainer_settings::ID)
+                .and_then(|v| v.get("iKnowWhatImDoing"))
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false),
         ) {
             Ok(runtime) => Some(runtime),
             Err(error) => {

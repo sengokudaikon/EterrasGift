@@ -149,6 +149,7 @@ unsafe fn set_status(write: &StatusWrite) -> Response {
                     write.expected(),
                     write.field(),
                     i32::from(write.value()),
+                    write.unrestricted(),
                 )
                 .map_err(|error| {
                     let code = match &error {

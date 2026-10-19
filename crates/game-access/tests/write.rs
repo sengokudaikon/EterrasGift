@@ -92,7 +92,7 @@ fn independent_literal_full_snapshot_wire_and_infallible_owned_encoder() {
 #[test]
 fn every_header_reserved_byte_is_strict_and_known_fields_are_bounded() {
     let bytes = literal();
-    for at in (28..48).chain(72..336) {
+    for at in (32..48).chain(72..336) {
         let mut bad = bytes.clone();
         bad[at] = 1;
         assert!(decode_header(&bad[..336]).is_err(), "reserved {at}");
@@ -244,7 +244,7 @@ fn minimal_schema_bound_is_exact() {
     let request = StatusWrite::level_requirement(spec(), 1, item, 0).unwrap();
     assert!(decode_frame(&request.encode()).is_ok());
     assert_eq!(REQUEST_SIZE, 336);
-    assert_eq!(eg_game_access::protocol::VERSION, 29); // TEMP handshake draft.
+    assert_eq!(eg_game_access::protocol::VERSION, 30); // TEMP handshake draft.
 }
 #[test]
 fn projection_changes_only_requested_level_and_its_legacy_fingerprint() {
@@ -264,6 +264,9 @@ fn status_fields_have_one_strict_frame_and_boolean_values_are_canonical() {
         (StatusField::Corrupted, 1),
         (StatusField::Ruined, 0),
         (StatusField::LevelRequirement, 17),
+        (StatusField::LegendaryPotential, 6),
+        (StatusField::WeaversWill, 49),
+        (StatusField::WeaversTouch, 77),
     ] {
         let request = StatusWrite::new(spec(), 1, snapshot(), field, value).unwrap();
         let bytes = request.encode();
@@ -278,11 +281,75 @@ fn status_fields_have_one_strict_frame_and_boolean_values_are_canonical() {
         set32(&mut invalid, 24, field as u32);
         assert!(Request::decode_header(&invalid[..REQUEST_SIZE]).is_err());
     }
-    for field in [1, 2, 6, 7, u32::MAX] {
+    for field in [7, u32::MAX] {
         let mut invalid = write().encode();
         set32(&mut invalid, 24, field);
         assert!(Request::decode_header(&invalid[..REQUEST_SIZE]).is_err());
     }
+}
+
+#[test]
+fn override_is_one_explicit_bit_and_all_other_flag_bits_are_rejected() {
+    let request = StatusWrite::with_override(spec(), 1, snapshot(), StatusField::WeaversTouch, 77, true).unwrap();
+    let bytes = request.encode();
+    assert_eq!(&bytes[28..32], &1_u32.to_le_bytes());
+    assert_eq!(Request::decode(&bytes).unwrap(), Request::SetStatus(request));
+    assert!(!write().unrestricted());
+    for flags in [2, 3, 256, 65536, u32::MAX] {
+        let mut invalid = bytes.clone();
+        set32(&mut invalid, 28, flags);
+        assert!(Request::decode_header(&invalid[..REQUEST_SIZE]).is_err());
+    }
+}
+
+#[test]
+fn potential_and_weaver_rules_keep_literal_bounds_identity_and_override_distinct() {
+    use eg_game_access::definitions::{ItemLimits, ValueRange};
+    let limits = ItemLimits {
+        forging_potential: ValueRange { minimum: 3, maximum: 211 },
+        legendary_potential: ValueRange { minimum: 1, maximum: 6 },
+        weavers_will: ValueRange { minimum: 2, maximum: 49 },
+        weavers_touch: ValueRange { minimum: 4, maximum: 77 },
+        level_requirement: ValueRange { minimum: 0, maximum: 137 },
+    };
+    let mut item = snapshot();
+    item.rarity = 7;
+    for (field, value, flag, definition, expected) in [
+        (StatusField::LegendaryPotential, 6, false, Some(0), true),
+        (StatusField::LegendaryPotential, 0, false, Some(0), false),
+        (StatusField::LegendaryPotential, 7, true, Some(0), false),
+        (StatusField::LegendaryPotential, 1, true, Some(1), false),
+        (StatusField::WeaversWill, 49, false, Some(1), true),
+        (StatusField::WeaversWill, 0, false, Some(1), false),
+        (StatusField::WeaversWill, 10, false, Some(0), false),
+        (StatusField::WeaversWill, 10, true, Some(0), true),
+        (StatusField::WeaversWill, 0, true, Some(0), true),
+        (StatusField::WeaversWill, 50, true, Some(0), false),
+        (StatusField::WeaversWill, 10, true, None, false),
+        (StatusField::WeaversWill, 10, true, Some(99), false),
+    ] {
+        assert_eq!(field.allows(&item, &limits, value, flag, definition), expected, "{field:?}/{value}/{flag}/{definition:?}");
+    }
+    item.status.legendary_potential = 1;
+    assert!(!StatusField::WeaversWill.allows(&item, &limits, 10, true, Some(0)));
+    item.status.legendary_potential = 0;
+    item.status.weavers_will = 2;
+    assert!(!StatusField::LegendaryPotential.allows(&item, &limits, 1, true, Some(0)));
+    item.rarity = 8;
+    assert!(!StatusField::WeaversWill.allows(&item, &limits, 10, true, Some(1)));
+    item.rarity = 9;
+    item.status.weavers_will = 80;
+    item.status.legendary_potential = 1;
+    assert!(StatusField::WeaversWill.allows(&item, &limits, 79, true, None));
+    assert!(!StatusField::WeaversWill.allows(&item, &limits, 81, true, None));
+    item.status.weavers_will = 0;
+    assert!(!StatusField::WeaversWill.allows(&item, &limits, 10, true, None));
+    item.item_type = 25;
+    for (value, flag, expected) in [(0, true, true), (4, true, true), (77, true, true), (3, true, false), (78, true, false), (4, false, false)] {
+        assert_eq!(StatusField::WeaversTouch.allows(&item, &limits, value, flag, None), expected);
+    }
+    item.item_type = 24;
+    assert!(!StatusField::WeaversTouch.allows(&item, &limits, 4, true, None));
 }
 fn done(item: Option<&ForgeSnapshot>) -> Response {
     Response {
