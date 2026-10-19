@@ -183,6 +183,13 @@ impl ForgeEditor {
         self.game.as_mut()
     }
 
+    /// Replace an owned observation provider, never a synchronous native call.
+    /// Normal refresh rules preserve row identity and invalidate changed items.
+    pub fn observe(&mut self, game: Box<dyn ForgeGame>) {
+        self.game = game;
+        self.refresh();
+    }
+
     pub fn catalog(&self) -> &Catalog {
         self.game.catalog()
     }
@@ -196,6 +203,11 @@ impl ForgeEditor {
     }
 
     pub fn message(&self) -> (&str, MessageKind) {
+        if self.message.is_empty()
+            && let Some(reason) = self.game.read_only_reason()
+        {
+            return (reason, MessageKind::Info);
+        }
         (&self.message, self.message_kind)
     }
 

@@ -15,6 +15,7 @@ pub mod shell;
 pub mod stubs;
 pub mod system;
 pub mod trainer;
+pub mod trainer_backend;
 pub mod trainer_settings;
 
 use eg_companion::launcher::GameLauncher;
@@ -31,6 +32,7 @@ pub struct App {
     pub mods: Option<mods::ModsPage>,
     /// This run has the trainer: its pages, its connection block and its Settings groups.
     pub trainer: bool,
+    pub trainer_backend: Option<eg_trainer::backend::BackendHandle>,
     /// Home, or Settings when the settings file or a module has something to say.
     pub start: Page,
 }
@@ -47,6 +49,11 @@ pub fn install(window: &MainWindow, app: App) {
     settings::bind_with_close(window, app.settings, before_close);
     stubs::install(window, app.trainer);
     trainer::install(window);
+    if app.trainer
+        && let Some(backend) = app.trainer_backend
+    {
+        trainer_backend::bind(window, backend);
+    }
     apply_system_settings(window);
 }
 

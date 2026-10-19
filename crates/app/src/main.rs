@@ -1,6 +1,7 @@
 #![windows_subsystem = "windows"]
 //! Eterra's Gift: the composition. It finds the checkout or install it belongs to, opens the settings, builds the
 //! companion's services and the window, and runs it (`spec/architecture.md` §5).
+mod trainer;
 
 use eg_companion::host::FileGameHost;
 use eg_companion::launcher::GameLauncher;
@@ -31,7 +32,7 @@ struct Arguments {
     supervised: bool,
     /// Open on Settings.
     settings: bool,
-    /// Modules start no background work. TODO(trainer): the trainer reads it once it starts looking for the game.
+    /// Do not begin trainer discovery or automatic connection.
     no_connect: bool,
 }
 
@@ -87,11 +88,38 @@ fn main() -> Result<(), slint::PlatformError> {
         Page::Home
     };
     let found_game = launcher.find_install().map(|install| install.executable);
+    let window = MainWindow::new()?;
+    let trainer_runtime = if trainer_on {
+        let automatic = store
+            .module_settings(trainer_settings::ID)
+            .and_then(|v| v.get("autoConnect"))
+            .and_then(|v| v.as_bool())
+            .unwrap_or(true);
+        let process_name = found_game
+            .as_ref()
+            .and_then(|p| p.file_name())
+            .map_or_else(|| "Last Epoch.exe".into(), |name| name.to_string_lossy().into_owned());
+        match trainer::Trainer::start(
+            executable.with_file_name("eg_trainer_helper.json"),
+            folders::player_log(),
+            store.paths().module_directory("trainer").join("catalog"),
+            process_name,
+            automatic,
+            arguments.no_connect,
+        ) {
+            Ok(runtime) => Some(runtime),
+            Err(error) => {
+                FaultLog::new(&root, None).write("Trainer startup", Some(&error), None, None);
+                std::process::exit(1);
+            }
+        }
+    } else {
+        None
+    };
     let service = SettingsService::new(store);
     // TODO(launcher): Restart now needs a launcher that starts the app again on exit code 42.
     let settings = SettingsPage::new(service.clone(), vec![trainer], found_game, dotnet::found_directory(), false);
 
-    let window = MainWindow::new()?;
     eg_ui::install(
         &window,
         App {
@@ -104,11 +132,13 @@ fn main() -> Result<(), slint::PlatformError> {
                 sources: sources.clone(),
             }),
             trainer: trainer_on,
+            trainer_backend: trainer_runtime.as_ref().map(|runtime| runtime.handle.clone()),
             start,
         },
     );
     eg_ui::follow_system_settings(&window);
     let result = window.run();
+    let trainer_closed = trainer_runtime.is_none_or(|runtime| runtime.close());
     launcher.cancel();
     eg_ui::mods::cancel_work(&window);
     mods.cancellation().cancel();
@@ -118,7 +148,7 @@ fn main() -> Result<(), slint::PlatformError> {
     let settings = service.close();
     // Stops a start with mods that still waits for MelonLoader, so its proxy is set aside before the app exits.
     launcher.stop();
-    if background_fault || mods.faulted() || matches!(settings.outcome, SaveOutcome::Faulted(_)) {
+    if !trainer_closed || background_fault || mods.faulted() || matches!(settings.outcome, SaveOutcome::Faulted(_)) {
         std::process::exit(1);
     }
     result

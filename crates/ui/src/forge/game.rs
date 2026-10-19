@@ -1,6 +1,6 @@
 //! What the forge asks of the game: the item, the captured game data, value tables, writes and the unique preview. The
-//! trainer's session will answer it (TODO(forge)); until then the real app has no game and shows the connection's empty
-//! state, and captures and tests answer it with a fixture.
+//! production adapter reads owned worker snapshots only. Synchronous write/mapping
+//! methods remain fixture interfaces until the async write editor is connected.
 
 use super::item::{AffixDefinition, ForgeItem, ItemEdit, ModifierState, RollRequest, ValueTable};
 
@@ -99,6 +99,11 @@ pub type GameError = String;
 
 pub trait ForgeGame {
     fn catalog(&self) -> &Catalog;
+
+    /// Persistent explanation when an observation provider offers no writes.
+    fn read_only_reason(&self) -> Option<&str> {
+        None
+    }
 
     /// The item in the forge now, or None when the forge is empty.
     fn read(&self) -> Option<ForgeItem>;

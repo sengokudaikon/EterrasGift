@@ -4,6 +4,15 @@
 `eg-trainer::connection::SessionConnector`. Construction is inert. Explicit
 preparation runs on the trainer worker, after the process-bound Player.log gate.
 
+`desktop::GameProcesses` supplies exact query-only process identities and retains
+all matching instances so the worker can reject ambiguity. `DesktopConnector`
+lazily validates the helper manifest beside the app after Release admission,
+then retains the same NativePreparer/SessionConnector across reconnections.
+Source builds publish that manifest with `mise run trainer:helper:build`.
+Missing or invalid packages block with an actionable reason and explicit Retry.
+The desktop keeps the unsafe supported-game assumptions at composition; these
+types do not certify a runtime based on a filename or manifest.
+
 `NativePreparer` loads the matching helper, starts it outside loader lock and
 returns a verified named-pipe transport. It checks the process birth/path, local
 artifact identity and helper source ID. No runtime authority object, main-thread

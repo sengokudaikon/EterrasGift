@@ -38,6 +38,7 @@ use std::time::{Duration, Instant};
 // The fixture game behind the Item Forge (spec/forge-fixture.json); it names the forge module through this import.
 use eg_ui::forge;
 mod forge_fixture;
+mod trainer_backend_fixture;
 
 /// A game host that records starts instead of making them, so no capture ever starts the real game.
 struct FakeGameHost {
@@ -198,6 +199,7 @@ impl Session {
                 mods: None,
                 settings: SettingsPage::new(service, vec![eg_ui::trainer_settings::descriptor(true)], None, None, false),
                 trainer: true,
+                trainer_backend: None,
                 start: Page::Settings,
             },
         );
@@ -221,6 +223,7 @@ impl Session {
             mods: None,
             settings,
             trainer: trainer_on,
+            trainer_backend: None,
             start: Page::Home,
         };
         eg_ui::install(&ui, app);
@@ -305,6 +308,7 @@ impl Session {
                 }),
                 settings: SettingsPage::new(fixture.settings.clone(), vec![], fixture.host.find_install().map(|install| install.executable), None, false),
                 trainer: false,
+                trainer_backend: None,
                 start: Page::Mods,
             },
         );
@@ -404,6 +408,10 @@ fn main() {
     let session = Session { window, out, data };
     // No event loop runs here, so work the pages hand to a thread runs at once instead.
     eg_ui::background::run_inline(true);
+    if std::env::args().any(|arg| arg == "--trainer-backend") {
+        trainer_backend_fixture::capture(&session);
+        return;
+    }
 
     // Every page at every window class.
     let ui = session.open(true, 1100, 700);
@@ -609,6 +617,7 @@ fn main() {
     mods_captures(&session);
     trainer_captures(&session);
     forge_captures(&session);
+    trainer_backend_fixture::capture(&session);
 }
 
 fn capture_mods(session: &Session) {

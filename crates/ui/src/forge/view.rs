@@ -46,6 +46,10 @@ pub struct ForgeHandle {
 }
 
 impl ForgeHandle {
+    pub fn observe(&self, game: Box<dyn ForgeGame>) {
+        self.view.editor.borrow_mut().observe(game);
+        self.view.show();
+    }
     /// Reads the forge again, as when the session publishes another read of the item.
     pub fn refresh(&self) {
         self.view.editor.borrow_mut().refresh();
@@ -60,8 +64,8 @@ impl ForgeHandle {
     }
 }
 
-/// Puts a game behind the window's forge. The real app has none yet (TODO(forge): the trainer's session), so its Forge
-/// page keeps the connection's empty state.
+/// Puts an observation provider behind the window's forge. Production uses owned
+/// read-only snapshots; editing fixtures exercise the remaining editor behavior.
 pub fn attach(window: &MainWindow, game: Box<dyn ForgeGame>) -> ForgeHandle {
     let view = Rc::new(View {
         editor: RefCell::new(ForgeEditor::new(game)),

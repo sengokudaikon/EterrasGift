@@ -16,6 +16,17 @@ guards remain. Native operations and supported feature scope are unchanged; app/
 The [checkpoint](../tools/trainer-eval/persistent-player/write-service-refactor-report.json) records
 520 stable cases,516 nightly release cases, workspace verification/captures and the final owned Unity worker route.
 
+The desktop now runs the worker on its own Tokio thread and supplies its handle to the Slint forge.
+Manual connection, empty/read-only items, replacement, unsupported display values and offline-gate loss
+have a worker-to-UI fake-session route and captures. Native work and hashing stay off the UI thread;
+write/mapping/preview operations cannot run through this adapter. Helper package lookup is lazy and
+gate-protected, with source-build receipts published beside the app. No new live-game run is claimed.
+Next: carry typed write/recovery results into the editor, merge duplicate models/feature tables and
+connect the remaining settings/cache actions; hook-engine and feature-family work remains after that.
+Validation:530 nightly release trainer/controller cases and56 UI unit tests pass, plus full workspace
+verification and inspected worker/UI captures. The helper build publishes matching debug/release receipts;
+their retained DLL hashes were checked without loading a DLL or accessing a running game.
+
 | Requirement | Current evidence and remaining work |
 |---|---|
 | Exact x64 invocation, threads, roots, main-thread dispatch | Authored real IL2CPP and authorized offline-game observations; retained code lifetime and limited ABI contracts remain explicit. |
@@ -27,7 +38,7 @@ The [checkpoint](../tools/trainer-eval/persistent-player/write-service-refactor-
 | Production helper preparation/bootstrap | `eg-trainer-host` now loads/starts/connects through a small unsafe supported-game boundary. RuntimeAuthority/RuntimeAttestation and pre-load thread nomination are removed; callback-local context/managed-ID validation establishes dispatch identity. The existing scheduler, pristine dispatcher proof, Release gate, process identity and unfinished-call ownership remain. The updated owned worker route passes171 requests/163 commands, eight preparations and one helper. Actual-game execution of this new callback check is not claimed. |
 | Feature hooks and field editors | All76 descriptors and local intents have compiled C# parity. Explicit attack/leech observations and conditional one-field changes pass native/Session/worker authored proofs. The first unpatched instance-Boolean callback passes forwarding and foreign-unwind fixtures; no physical gameplay hook is supported yet. The other field sets, physical ownership and callback offline cleanup still need implementation. The audit maps68 feature registrations/74 owners/54 detour targets/31 patches/7 field sets. |
 | Forge drafts, apply, readback and undo | One level Apply/Undo path passes real worker execution on all four authored routes: full stale guard, Int32 store, native ACK plus separate ReadForge, retained reverse plan, uncertainty and cleanup. Pure planning exists for seven edit kinds. Other native edits, multi-edit batches and the full draft/Undo workflow remain required. |
-| UI adapter and captures | Existing Slint views use stand-ins. Connect owned state/commands after backend contracts pass; do not perform synchronous capture/bootstrap on the Slint thread. |
+| UI adapter and captures | The desktop has a read-only worker/snapshot adapter, manual connection and guarded owned forge display. Fake-session captures cover async navigation, empty/replaced items and gate loss. Native work stays on the worker. Typed writes, mappings/previews, settings/cache actions and duplicate model/catalog cleanup remain. |
 
 The last retained live evidence describes a stopped, pinned protocol24 helper; the current process has not been
 queried during this authored-work checkpoint. Replacing a helper does not unload old code.

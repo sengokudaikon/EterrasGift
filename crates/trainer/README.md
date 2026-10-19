@@ -2,7 +2,20 @@
 
 The trainer owns the offline gate, artifact profile, serialized control session and owned-command dispatcher.
 `eg-game-access` owns protocol codecs, explicit process identity, the Windows pipe client and unsafe runtime access.
-The app/UI do not use these services yet. The companion remains independent.
+The desktop now composes one background worker and a read-only Slint forge adapter. The companion remains independent.
+
+The read-only path queues Connect/Retry and observes owned worker snapshots. It shows the current
+item, captured names, status values and affix metadata; unavailable formatting/mappings stay explicit.
+It cannot submit edits, and clears the visible item after gate/identity/connection loss. Construction
+does no native work; `--no-connect` skips automatic startup and a later manual Connect starts reads.
+The startup module flag and automatic-connection preference are honored. Live settings/cache actions,
+typed write-editor integration and the shared feature/domain model cleanup remain work.
+
+Source runs prepare the helper with `mise run trainer:helper:build` before connecting. That task publishes
+`eg_trainer_helper.json` beside both debug/release apps, referencing the retained versioned DLL.
+The connector opens and validates it only after Release admission. Missing/invalid packages show a
+reason and Retry. Final bundle assembly remains separate. UI integration tests use fake connections
+and FakeGameHost only; this is not a new live-game validation claim.
 
 The current [native preparer](../trainer-host/README.md) uses a small unsafe supported-game boundary,
 with callback-local thread validation instead of pre-bootstrap RuntimeAttestation. Historical checkpoint
@@ -23,7 +36,7 @@ protocol, identity, restart or offline failures release the connection. Later pu
 gate loss suppresses live data without downgrading an already independently confirmed
 historical result. Nothing retries a mutation. The old narrow entrypoints are conveniences
 over this common lifecycle; protocol28 operations22/24 remain internal until native feature work.
-The app/UI remain disconnected; read-only integration is next.
+The read-only adapter is connected; writes through the editor remain the next integration step.
 See the [write-service cleanup checkpoint](../../tools/trainer-eval/persistent-player/write-service-refactor-report.json)
 for the product-test gates and owned Unity route.
 
@@ -35,7 +48,7 @@ an explicit level-requirement write with complete expected-state tail (22), cach
 and conditional one-field attack/leech rate writes (24).
 The Rust extensions deliberately increment the handshake version, so older peers are rejected. The separate
 [Rust helper](../trainer-helper/README.md) implements the persistent server and runtime handlers.
-Other item/field writes, enabling gameplay features, complete localized formatting and desktop UI composition are not implemented
+Other item/field writes, enabling gameplay features, complete localized formatting and desktop editing integration are not implemented
 here. `protocol::Request::decode` deliberately rejects other operations and nonzero reserved
 fields in this subset. This is not a claim to implement every operation of the original protocol.
 

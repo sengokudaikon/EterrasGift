@@ -1373,8 +1373,10 @@ dependencies = [
  "eg-game-access",
  "eg-trainer",
  "jiff",
+ "serde_json",
  "tempfile",
  "tokio",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -1383,6 +1385,7 @@ version = "0.1.0"
 dependencies = [
  "eg-companion",
  "eg-core",
+ "eg-trainer",
  "image",
  "jiff",
  "rfd",
@@ -1390,6 +1393,7 @@ dependencies = [
  "slint",
  "slint-build",
  "tempfile",
+ "tokio",
  "windows-sys 0.61.2",
 ]
 
@@ -1454,8 +1458,11 @@ version = "0.1.0"
 dependencies = [
  "eg-companion",
  "eg-core",
+ "eg-trainer",
+ "eg-trainer-host",
  "eg-ui",
  "slint",
+ "tokio",
 ]
 
 [[package]]

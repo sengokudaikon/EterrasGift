@@ -33,6 +33,10 @@ run = "cargo xtask tokens --check"
 description = "Headless PNG captures of the real UI on the fake game host, into artifacts/captures"
 run = "cargo capture"
 
+[tasks."capture:trainer"]
+description = "Read-only worker-to-UI integration on owned fake sessions"
+run = "cargo capture -- --trainer-backend"
+
 [tasks.verify]
 description = "Everything to run before calling work done; then look at artifacts/captures"
 run = ["cargo lint", "cargo fmt --all --check", "cargo xtask tokens --check", "cargo capture"]
