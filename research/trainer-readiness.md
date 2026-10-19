@@ -169,3 +169,15 @@ tests, probe Clippy/format and workspace verification pass; the capture was insp
 Initialized runtime, canonical publication, stable lifetime and later callback identity
 remain authored premises. No production authority, pre-bootstrap transport, forced GC,
 second compiler or actual-game operation is established by this ordering experiment.
+
+The reusable [runtime-init candidate reader](../tools/trainer-eval/persistent-player/runtime-thread-reader-report.json)
+now lives in game-access: a separate 21-export table, existing attached lease, two
+local roots, exact metadata and distinct owned Windows/managed IDs. Seven full-entry
+fake tests and248 game-access cases pass on each compiler; ROOT trainer suites pass
+531 stable/527 nightly including guards/docs, and full workspace verification passes.
+Nightly strict all-target Clippy retains one reproduced pre-existing module-order
+warning; the new target passes strictly. No persistent suppression was introduced.
+Shared-reader native integration is source-only preparation. The prior local-reader
+runtime proof is separate; initialization/publication, GC/lifetime and later bootstrap
+authority are still external obligations. Current helper source fingerprint919bea5d
+differs from historical260081fc pairs; no new helper runtime validation is claimed.

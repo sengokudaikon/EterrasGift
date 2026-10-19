@@ -3,6 +3,7 @@
 pub mod discovery;
 mod invoke;
 pub mod raw;
+pub mod runtime_thread;
 mod thread;
 
 pub use invoke::{Argument, CheckedMethod, InvocationContext, InvocationOutcome, InvokeError, ReturnValue, Scalar, SignaturePosition, ValueTypeContract};

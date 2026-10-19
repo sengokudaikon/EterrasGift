@@ -888,3 +888,18 @@ checks, Clippy/format and full verification/capture inspection. Inert compiler/f
 and command/checker corrections are retained without native retries. Production runtime
 initialization/publication, probe transport, callback/lifetime/offline authority, forced
 GC and a second probe compiler remain separate validation work.
+
+The [shared runtime-init-thread reader](../tools/trainer-eval/persistent-player/runtime-thread-reader-report.json)
+is now integrated as a narrow unsafe game-access primitive. It takes a matching
+existing attachment, roots the main Thread and InternalThread locally, validates exact
+classes/fields, and returns separate positive Windows/managed scalar candidates.
+Seven full-entrypoint fake tests pass stable/nightly, including immediate rooting,
+padded storage, metadata refusal, null/root failures and bounds;248 game-access cases
+pass each. ROOT trainer suites pass531 stable/527 nightly, all workspace checks pass
+and the unchanged capture was inspected. The reproduced pre-existing nightly
+items_after_test_module warning remains documented; new-target strict Clippy passes.
+All209 retained payload files and exact formatter/lock lineage were independently
+checked. The primary report omits one test name but raw/source evidence contains all7;
+the separate final review records this without rewriting historical evidence.
+This extracted code has not run in IL2CPP yet. Its next owned fixture is source-only;
+no old fixture-only proof, scalar result or GC root grants production authority.
