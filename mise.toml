@@ -1,5 +1,5 @@
 # Project tasks: `mise tasks` lists them, `mise run <task>` runs one. Prefer these over ad-hoc scripts (AGENTS.md).
-# Rust is pinned by rust-toolchain.toml; slint-viewer and slint-lsp 1.18.1 are on PATH (AGENTS.md, Toolchain).
+# Rust nightly is selected by rust-toolchain.toml; slint-viewer and slint-lsp 1.18.1 are on PATH.
 
 [tasks.build]
 description = "Build the workspace"
@@ -62,16 +62,12 @@ run = "slint-viewer {{arg(name='file', default='crates/ui/ui/app.slint')}}"
 env = { SLINT_MCP_PORT = "9315" }
 
 [tasks."trainer:test"]
-description = "Trainer runtime, protocol, owned pipe/session fixtures, and tier checks; no live game"
-run = "cargo test -p eg-game-access -p eg-trainer -p eg-trainer-helper -p eg-trainer-host -p eterras-gift --offline"
-
-[tasks."trainer:test:release"]
-description = "Trainer fixtures on installed nightly in release mode; no live game"
-run = "cargo +nightly test -p eg-game-access -p eg-trainer -p eg-trainer-helper -p eg-trainer-host --release --offline"
+description = "Nightly release trainer fixtures and tier checks; no live game"
+run = "cargo test -p eg-game-access -p eg-trainer -p eg-trainer-helper -p eg-trainer-host -p eterras-gift --release --offline"
 
 [tasks."trainer:verify"]
-description = "Trainer product tests followed by workspace lint, format, tokens and fake-host captures"
-run = ["mise run trainer:test", "mise run verify"]
+description = "Nightly release trainer/controller tests, then workspace lint, format, tokens and fake-host captures"
+run = ["mise run trainer:test", "mise run trainer:player:client:test", "mise run verify"]
 
 [tasks."trainer:helper:build"]
 description = "Build and snapshot the retained Rust helper with source/DLL identities; no process access"
@@ -82,11 +78,8 @@ description = "Build the isolated authored Unity-player controller; no player la
 run = "cargo build --manifest-path tools/trainer-eval/persistent-player/client/Cargo.toml --release --offline"
 
 [tasks."trainer:player:client:test"]
-description = "Pure controller/response-barrier tests on stable and nightly; no player launch"
-run = [
-    "cargo test --manifest-path tools/trainer-eval/persistent-player/client/Cargo.toml --offline",
-    "cargo +nightly test --manifest-path tools/trainer-eval/persistent-player/client/Cargo.toml --release --offline --target-dir target/preparer-worker-nightly",
-]
+description = "Nightly release controller/response-barrier tests; no player launch"
+run = "cargo test --manifest-path tools/trainer-eval/persistent-player/client/Cargo.toml --release --offline"
 
 [tasks."trainer:bootstrap:test"]
 description = "Pure previous-generation bootstrap admission regressions; no process access"

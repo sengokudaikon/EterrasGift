@@ -4,6 +4,10 @@ The objective is the trainer port ready for UI integration, preserving the C# be
 A green interop fixture alone does not establish that. This checklist separates the remaining application and game
 contracts from already validated lower layers; unsupported capabilities must stay explicit until proven.
 
+Current verification uses nightly only. `mise run trainer:verify` runs the release trainer/tier and controller
+suites once, followed by workspace checks. Individual test tasks remain available for focused work.
+Earlier compiler matrices below are historical results, not additional gates.
+
 The next cleanup stage consolidates both existing writes behind `WritePlan`/`WriteOutcome<T>`,
 one session submission/readback lifecycle and `Command::Write`. Known same-target readback drift
 is retained and published as NotKept; ordinary refusals keep healthy sessions. Historical

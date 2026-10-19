@@ -145,7 +145,7 @@ absence means Missing. Both prove NotSent. Once a write is attempted, I/O failur
 means MayHaveRun, including a possible partial write. Header size/code/magic and the 1 MiB payload bound are checked
 before allocation. The connection is closed after the response. No request is resent automatically.
 
-Helper code 1 is an uncertain failure. Codes 2â€“6 are definite no-operation failures under the legacy helper contract;
+Helper code 1 is an uncertain failure. Codes 2–6 are definite no-operation failures under the legacy helper contract;
 human text never determines the classification. For cancellation/deadline, the Rust server must not report NotReady
 after dispatch started: canceling still-pending work can prove no execution, while running work owns its slot until it
 finishes. Client disconnection cannot retract that work.
@@ -165,6 +165,10 @@ requiring the expected helper source build ID, without the legacy DLL-hash fast 
 ```powershell
 mise run trainer:verify
 ```
+
+The workspace uses nightly. Trainer and controller tests run once in release mode;
+`trainer:verify` includes both suites, tier guards and workspace lint, format, tokens and captures.
+Earlier stable/nightly matrices below describe historical evidence, not current gates.
 
 Seven protocol, ten forge-codec and five item-limit codec tests cover independent wire examples and malformed/bounded input. Six pipe tests launch only
 owned child test processes, checking fragmentation, fresh connections, Busy/Missing, PID reuse, wrong-server

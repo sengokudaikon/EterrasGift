@@ -16,152 +16,6 @@ fn unavailable<T>(reason: impl Into<String>) -> Availability<T> {
     Availability::Unavailable { reason: reason.into() }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::super::{Method, Ptr, Type};
-    use super::*;
-    use std::cell::Cell;
-    thread_local! {
-        static ENUM: Cell<bool> = const {Cell::new(true)};
-        static BYREF: Cell<bool> = const {Cell::new(false)};
-        static CODE: Cell<i32> = const {Cell::new(5)};
-        static BASE: Cell<usize> = const {Cell::new(0x4000)};
-        static ENUM_BASE_CALLS: Cell<usize> = const {Cell::new(0)};
-        static CCTOR: Cell<bool> = const {Cell::new(false)};
-    }
-    fn pointer<T>(value: usize) -> *mut T {
-        std::ptr::without_provenance_mut(value)
-    }
-    unsafe extern "C-unwind" fn is_enum(_: *const raw::Class) -> bool {
-        ENUM.get()
-    }
-    unsafe extern "C-unwind" fn enum_base(_: Class) -> Type {
-        ENUM_BASE_CALLS.set(ENUM_BASE_CALLS.get() + 1);
-        pointer(0x2000)
-    }
-    unsafe extern "C-unwind" fn byref(_: Type) -> bool {
-        BYREF.get()
-    }
-    unsafe extern "C-unwind" fn code(_: Type) -> i32 {
-        CODE.get()
-    }
-    unsafe extern "C-unwind" fn class(_: Type) -> Class {
-        pointer(BASE.get())
-    }
-    unsafe extern "C-unwind" fn corlib() -> Ptr {
-        pointer(0x3000)
-    }
-    unsafe extern "C-unwind" fn class_from_name(_: Ptr, _: *const std::ffi::c_char, name: *const std::ffi::c_char) -> Class {
-        // SAFETY: the runtime adapter supplies one static NUL-terminated class name.
-        assert_eq!(unsafe { CStr::from_ptr(name) }, c"Byte");
-        pointer(0x4000)
-    }
-    unsafe extern "C-unwind" fn methods(_: Class, iterator: *mut Ptr) -> Method {
-        // SAFETY: caller provides one initialized writable metadata iterator.
-        unsafe {
-            if (*iterator).is_null() {
-                *iterator = pointer(1);
-                pointer(0x5000)
-            } else {
-                std::ptr::null()
-            }
-        }
-    }
-    unsafe extern "C-unwind" fn method_name(_: Method) -> *const std::ffi::c_char {
-        if CCTOR.get() { c".cctor".as_ptr() } else { c"Read".as_ptr() }
-    }
-    #[test]
-    fn key_metadata_rejects_nonenum_and_wrong_width_before_any_value_copy() {
-        for (enumeration, by_ref, code_value, base, accepted) in [
-            (true, false, 5, 0x4000, true),
-            (false, false, 5, 0x4000, false),
-            (true, true, 5, 0x4000, false),
-            (true, false, 8, 0x4000, false),
-            (true, false, 5, 0x4001, false),
-        ] {
-            ENUM.set(enumeration);
-            BYREF.set(by_ref);
-            CODE.set(code_value);
-            BASE.set(base);
-            ENUM_BASE_CALLS.set(0);
-            let mut access = RuntimeAccess::test_stubs();
-            access.class_enum = is_enum;
-            access.enum_base = enum_base;
-            access.type_byref = byref;
-            access.type_code = code;
-            access.type_class = class;
-            access.corlib = corlib;
-            access.class_from_name = class_from_name;
-            // SAFETY: fake metadata has no object/field-copy export; only exact key metadata is inspected.
-            assert_eq!(unsafe { access.ailment_key_class(pointer(0x1000)) }.is_ok(), accepted);
-            assert_eq!(ENUM_BASE_CALLS.get(), usize::from(enumeration));
-        }
-    }
-    #[test]
-    fn generic_entry_initializer_is_refused_before_any_box_allocation() {
-        let mut access = RuntimeAccess::test_stubs();
-        access.class_methods = methods;
-        access.method_name = method_name;
-        for cctor in [false, true] {
-            CCTOR.set(cctor);
-            // SAFETY: fake method enumeration is bounded and no allocation/invoke export is provided.
-            assert_eq!(unsafe { access.ailment_no_cctor(pointer(0x1000)) }.is_ok(), !cctor);
-        }
-    }
-    fn fixture() -> (Vec<Entry>, Vec<i32>) {
-        // Two colliding live keys, plus a removed slot in the free chain.
-        (
-            vec![
-                Entry { hash: 1, next: -1, key: 1 },
-                Entry { hash: -1, next: -1, key: 0 },
-                Entry { hash: 8, next: 0, key: 8 },
-            ],
-            vec![0, 3, 0, 0, 0, 0, 0],
-        )
-    }
-    #[test]
-    fn real_dictionary_shape_preserves_collision_order_and_removed_slots() {
-        let (entries, buckets) = fixture();
-        coherent_dictionary(&entries, &buckets, 1, 1).unwrap();
-        coherent_dictionary(&[], &[], 0, -1).unwrap();
-        coherent_dictionary(&[], &[0, 0, 0], 0, -1).unwrap();
-    }
-    #[test]
-    fn duplicate_keys_incoherent_hashes_cycles_and_wrong_bucket_membership_are_refused() {
-        for case in 0..7 {
-            let (mut entries, mut buckets) = fixture();
-            match case {
-                0 => {
-                    entries[2].key = 1;
-                    entries[2].hash = 1;
-                }
-                1 => entries[2].hash = 123,
-                2 => entries[0].next = 2,
-                3 => {
-                    buckets[1] = 0;
-                    buckets[2] = 3;
-                }
-                4 => entries[2].next = 99,
-                5 => buckets[1] = i32::MIN,
-                _ => buckets[0] = 1,
-            }
-            assert!(coherent_dictionary(&entries, &buckets, 1, 1).is_err(), "case {case}");
-        }
-    }
-    #[test]
-    fn free_chain_and_active_count_must_cover_every_allocated_entry_once() {
-        let (mut entries, buckets) = fixture();
-        for (count, head) in [(0, -1), (1, -1), (1, 0), (2, 1), (4, 1), (-1, 1)] {
-            assert!(coherent_dictionary(&entries, &buckets, count, head).is_err());
-        }
-        entries[1].next = 1;
-        assert!(coherent_dictionary(&entries, &buckets, 1, 1).is_err());
-        let (entries, _) = fixture();
-        assert!(coherent_dictionary(&entries, &[], 1, 1).is_err());
-        assert!(coherent_dictionary(&entries, &vec![0; 4097], 1, 1).is_err());
-    }
-}
-
 #[derive(Clone, Copy, Debug)]
 struct Entry {
     hash: i32,
@@ -500,5 +354,151 @@ impl RuntimeAccess {
             snapshot.effects.insert(key, selected.clone());
             Ok(selected)
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::super::{Method, Ptr, Type};
+    use super::*;
+    use std::cell::Cell;
+    thread_local! {
+        static ENUM: Cell<bool> = const {Cell::new(true)};
+        static BYREF: Cell<bool> = const {Cell::new(false)};
+        static CODE: Cell<i32> = const {Cell::new(5)};
+        static BASE: Cell<usize> = const {Cell::new(0x4000)};
+        static ENUM_BASE_CALLS: Cell<usize> = const {Cell::new(0)};
+        static CCTOR: Cell<bool> = const {Cell::new(false)};
+    }
+    fn pointer<T>(value: usize) -> *mut T {
+        std::ptr::without_provenance_mut(value)
+    }
+    unsafe extern "C-unwind" fn is_enum(_: *const raw::Class) -> bool {
+        ENUM.get()
+    }
+    unsafe extern "C-unwind" fn enum_base(_: Class) -> Type {
+        ENUM_BASE_CALLS.set(ENUM_BASE_CALLS.get() + 1);
+        pointer(0x2000)
+    }
+    unsafe extern "C-unwind" fn byref(_: Type) -> bool {
+        BYREF.get()
+    }
+    unsafe extern "C-unwind" fn code(_: Type) -> i32 {
+        CODE.get()
+    }
+    unsafe extern "C-unwind" fn class(_: Type) -> Class {
+        pointer(BASE.get())
+    }
+    unsafe extern "C-unwind" fn corlib() -> Ptr {
+        pointer(0x3000)
+    }
+    unsafe extern "C-unwind" fn class_from_name(_: Ptr, _: *const std::ffi::c_char, name: *const std::ffi::c_char) -> Class {
+        // SAFETY: the runtime adapter supplies one static NUL-terminated class name.
+        assert_eq!(unsafe { CStr::from_ptr(name) }, c"Byte");
+        pointer(0x4000)
+    }
+    unsafe extern "C-unwind" fn methods(_: Class, iterator: *mut Ptr) -> Method {
+        // SAFETY: caller provides one initialized writable metadata iterator.
+        unsafe {
+            if (*iterator).is_null() {
+                *iterator = pointer(1);
+                pointer(0x5000)
+            } else {
+                std::ptr::null()
+            }
+        }
+    }
+    unsafe extern "C-unwind" fn method_name(_: Method) -> *const std::ffi::c_char {
+        if CCTOR.get() { c".cctor".as_ptr() } else { c"Read".as_ptr() }
+    }
+    #[test]
+    fn key_metadata_rejects_nonenum_and_wrong_width_before_any_value_copy() {
+        for (enumeration, by_ref, code_value, base, accepted) in [
+            (true, false, 5, 0x4000, true),
+            (false, false, 5, 0x4000, false),
+            (true, true, 5, 0x4000, false),
+            (true, false, 8, 0x4000, false),
+            (true, false, 5, 0x4001, false),
+        ] {
+            ENUM.set(enumeration);
+            BYREF.set(by_ref);
+            CODE.set(code_value);
+            BASE.set(base);
+            ENUM_BASE_CALLS.set(0);
+            let mut access = RuntimeAccess::test_stubs();
+            access.class_enum = is_enum;
+            access.enum_base = enum_base;
+            access.type_byref = byref;
+            access.type_code = code;
+            access.type_class = class;
+            access.corlib = corlib;
+            access.class_from_name = class_from_name;
+            // SAFETY: fake metadata has no object/field-copy export; only exact key metadata is inspected.
+            assert_eq!(unsafe { access.ailment_key_class(pointer(0x1000)) }.is_ok(), accepted);
+            assert_eq!(ENUM_BASE_CALLS.get(), usize::from(enumeration));
+        }
+    }
+    #[test]
+    fn generic_entry_initializer_is_refused_before_any_box_allocation() {
+        let mut access = RuntimeAccess::test_stubs();
+        access.class_methods = methods;
+        access.method_name = method_name;
+        for cctor in [false, true] {
+            CCTOR.set(cctor);
+            // SAFETY: fake method enumeration is bounded and no allocation/invoke export is provided.
+            assert_eq!(unsafe { access.ailment_no_cctor(pointer(0x1000)) }.is_ok(), !cctor);
+        }
+    }
+    fn fixture() -> (Vec<Entry>, Vec<i32>) {
+        // Two colliding live keys, plus a removed slot in the free chain.
+        (
+            vec![
+                Entry { hash: 1, next: -1, key: 1 },
+                Entry { hash: -1, next: -1, key: 0 },
+                Entry { hash: 8, next: 0, key: 8 },
+            ],
+            vec![0, 3, 0, 0, 0, 0, 0],
+        )
+    }
+    #[test]
+    fn real_dictionary_shape_preserves_collision_order_and_removed_slots() {
+        let (entries, buckets) = fixture();
+        coherent_dictionary(&entries, &buckets, 1, 1).unwrap();
+        coherent_dictionary(&[], &[], 0, -1).unwrap();
+        coherent_dictionary(&[], &[0, 0, 0], 0, -1).unwrap();
+    }
+    #[test]
+    fn duplicate_keys_incoherent_hashes_cycles_and_wrong_bucket_membership_are_refused() {
+        for case in 0..7 {
+            let (mut entries, mut buckets) = fixture();
+            match case {
+                0 => {
+                    entries[2].key = 1;
+                    entries[2].hash = 1;
+                }
+                1 => entries[2].hash = 123,
+                2 => entries[0].next = 2,
+                3 => {
+                    buckets[1] = 0;
+                    buckets[2] = 3;
+                }
+                4 => entries[2].next = 99,
+                5 => buckets[1] = i32::MIN,
+                _ => buckets[0] = 1,
+            }
+            assert!(coherent_dictionary(&entries, &buckets, 1, 1).is_err(), "case {case}");
+        }
+    }
+    #[test]
+    fn free_chain_and_active_count_must_cover_every_allocated_entry_once() {
+        let (mut entries, buckets) = fixture();
+        for (count, head) in [(0, -1), (1, -1), (1, 0), (2, 1), (4, 1), (-1, 1)] {
+            assert!(coherent_dictionary(&entries, &buckets, count, head).is_err());
+        }
+        entries[1].next = 1;
+        assert!(coherent_dictionary(&entries, &buckets, 1, 1).is_err());
+        let (entries, _) = fixture();
+        assert!(coherent_dictionary(&entries, &[], 1, 1).is_err());
+        assert!(coherent_dictionary(&entries, &vec![0; 4097], 1, 1).is_err());
     }
 }
