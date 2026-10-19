@@ -217,3 +217,13 @@ performs no actual-game calls and does not establish arbitrary-target unsafe run
 Capture-local file leases remove repeated full hashes when supported; fallback retains full checks.
 Pure edit planning/readback and composition inputs exist; app-specific preparation, complete game
 formatting/mappings, native edits, hook/field services and async UI integration remain required.
+
+## Special numeric and progress checkpoint (2026-10-19)
+
+[Special numeric evidence](../tools/trainer-eval/persistent-player/special-numeric-report.json):
+280 foundation tests pass on stable and nightly release. Four ready special registries now
+use field-only selectors; SP43 still requires initialized ailment dictionary-cache semantics.
+Extraction version 3 invalidates older numeric capability caches. All three authored Unity
+startup routes pass 333 requests and 292 main-thread commands, including ten registry scenarios,
+four additional malformed graphs, exact progress and first-page stopping followed by cleanup
+and reconnect. No actual-game calls, gameplay edits or helper unload occur in this checkpoint.

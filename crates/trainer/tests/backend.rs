@@ -10,11 +10,13 @@ use std::{
 };
 
 use eg_core::game_log::{GameLogState, GameLogStatus, GameReadiness};
+use eg_game_access::catalog::CatalogKind;
 use eg_game_access::{
     definitions::{ItemLimits, ValueRange},
     locale::GameLocale,
     transport::Delivery,
 };
+use eg_trainer::backend::{CaptureControl, CaptureObserver, CaptureOutcome, CaptureProgress};
 use eg_trainer::{
     backend::{
         self, BackendConnection, BackendError, BackendHandle, BackendOptions, CatalogState, Clock, Command, Connector, ErrorKind, ForgeSnapshot, ForgeState, Phase,
@@ -661,5 +663,134 @@ fn failed_new_preparation_cannot_reuse_an_old_cleanup_acknowledgement() {
         assert_eq!(handle.snapshot().phase, Phase::Blocked);
         shutdown(&handle, worker).await;
         assert_eq!(handle.snapshot().cleanup, Cleanup::Unconfirmed);
+    });
+}
+
+struct PagedConnect(Arc<Shared>);
+struct PagedConnection(Connection);
+impl Connector for PagedConnect {
+    type Connection = PagedConnection;
+    async fn connect(&mut self, target: ProcessIdentity, _: Timestamp) -> Result<PagedConnection, BackendError> {
+        Ok(PagedConnection(Connection { shared: self.0.clone(), target }))
+    }
+}
+impl BackendConnection for PagedConnection {
+    fn target(&self) -> &ProcessIdentity {
+        self.0.target()
+    }
+    async fn refresh(&mut self, now: Timestamp) -> Result<RuntimeStatus, BackendError> {
+        self.0.refresh(now).await
+    }
+    async fn capture_catalog(&mut self, now: Timestamp) -> Result<GameCatalog, BackendError> {
+        self.0.capture_catalog(now).await
+    }
+    async fn read_forge(&mut self, now: Timestamp) -> Result<Option<ForgeSnapshot>, BackendError> {
+        self.0.read_forge(now).await
+    }
+    async fn disconnect(&mut self) -> Cleanup {
+        self.0.disconnect().await
+    }
+    async fn capture_catalog_observed(&mut self, _: Timestamp, observer: &mut dyn CaptureObserver) -> Result<CaptureOutcome, BackendError> {
+        for index in 0..3 {
+            if observer.control() == CaptureControl::Stop {
+                return Ok(CaptureOutcome::Stopped);
+            }
+            self.0.shared.call("page", &self.0.shared.capture_block).await;
+            if observer.control() == CaptureControl::Stop {
+                return Ok(CaptureOutcome::Stopped);
+            }
+            observer.progress(CaptureProgress::Page {
+                kind: CatalogKind::Bases,
+                cursor: index * 16,
+                total: 48,
+                count: 16,
+                pages: index + 1,
+                bytes: u64::from(index + 1) * 100,
+            });
+        }
+        Ok(CaptureOutcome::Complete(Box::new(catalog())))
+    }
+}
+fn start_paged(shared: &Arc<Shared>) -> (BackendHandle, tokio::task::JoinHandle<()>) {
+    let (handle, worker) = backend::service(Locator(shared.clone()), PagedConnect(shared.clone()), Logs(shared.clone()), FakeClock, options(), None);
+    (handle, tokio::spawn(worker.run()))
+}
+
+#[test]
+fn queued_cleanup_finishes_inflight_page_stops_before_next_page_and_cleans_once() {
+    run(async {
+        let shared = Shared::new();
+        shared.capture_block.arm();
+        let (handle, worker) = start_paged(&shared);
+        command(&handle, Command::Enable).await.unwrap();
+        let connect = handle.try_submit(Command::Connect).unwrap();
+        shared.capture_block.wait_started().await;
+        let disable = handle.try_submit(Command::Disable).unwrap();
+        shared.capture_block.finish();
+        assert_eq!(connect.wait().await.unwrap_err().kind, ErrorKind::Superseded);
+        disable.wait().await.unwrap();
+        assert_eq!(shared.count("page"), 1);
+        assert_eq!(shared.count("forge"), 0);
+        assert_eq!(shared.count("disconnect"), 1);
+        assert_eq!(shared.aborted.load(Ordering::SeqCst), 0);
+        assert_eq!(handle.snapshot().phase, Phase::Disabled);
+        assert_eq!(handle.snapshot().capture_progress, None);
+        assert!(matches!(handle.snapshot().catalog, CatalogState::Missing));
+        shutdown(&handle, worker).await;
+    });
+}
+
+#[test]
+fn watch_reports_capture_progress_without_current_data_before_first_forge() {
+    run(async {
+        let shared = Shared::new();
+        shared.forge_block.arm();
+        let (handle, worker) = start_paged(&shared);
+        command(&handle, Command::Enable).await.unwrap();
+        let connect = handle.try_submit(Command::Connect).unwrap();
+        shared.forge_block.wait_started().await;
+        let state = handle.snapshot();
+        assert_eq!(state.phase, Phase::Connecting);
+        assert!(matches!(state.catalog, CatalogState::Missing));
+        assert_eq!(
+            state.capture_progress,
+            Some(CaptureProgress::Page {
+                kind: CatalogKind::Bases,
+                cursor: 32,
+                total: 48,
+                count: 16,
+                pages: 3,
+                bytes: 300
+            })
+        );
+        shared.forge_block.finish();
+        connect.wait().await.unwrap();
+        assert_eq!(handle.snapshot().phase, Phase::Ready);
+        assert_eq!(handle.snapshot().capture_progress, None);
+        shutdown(&handle, worker).await;
+    });
+}
+
+#[test]
+fn stopping_refresh_keeps_old_catalog_stale_without_publishing_new_partial_capture() {
+    run(async {
+        let shared = Shared::new();
+        let (handle, worker) = start_paged(&shared);
+        connected(&handle).await;
+        let old = handle.snapshot().catalog.data().unwrap().clone();
+        shared.capture_block.arm();
+        let refresh = handle.try_submit(Command::RefreshCatalog).unwrap();
+        shared.capture_block.wait_started().await;
+        let stop = handle.try_submit(Command::Disconnect).unwrap();
+        shared.capture_block.finish();
+        assert_eq!(refresh.wait().await.unwrap_err().kind, ErrorKind::Superseded);
+        stop.wait().await.unwrap();
+        let state = handle.snapshot();
+        assert!(matches!(&state.catalog,CatalogState::Stale(data) if Arc::ptr_eq(data,&old)));
+        assert_eq!(shared.count("page"), 4);
+        assert_eq!(shared.count("forge"), 1);
+        assert_eq!(shared.count("disconnect"), 1);
+        assert_eq!(shared.aborted.load(Ordering::SeqCst), 0);
+        shutdown(&handle, worker).await;
     });
 }

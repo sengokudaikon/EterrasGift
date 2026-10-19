@@ -15,7 +15,7 @@ pub use eg_game_access::{
 };
 use std::collections::{BTreeMap, BTreeSet};
 
-pub const EXTRACTION_VERSION: u32 = 2;
+pub const EXTRACTION_VERSION: u32 = 3;
 pub const MAX_CATALOG_BYTES: usize = 64 * 1024 * 1024;
 
 #[derive(Clone, Debug, PartialEq, Eq)]

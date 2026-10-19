@@ -10,8 +10,8 @@ contracts from already validated lower layers; unsupported capabilities must sta
 | Offline admission and serialized sessions | Player.log plus independent helper guards, identity binding, no uncertain replay, cancellation and cleanup tests. |
 | Owned forge, locale and limits | Both authored routes and live protocol 24 evidence. |
 | Definitions and resolved names | Protocol 25 authored pages, total/locale/duplicate checks, provenance, separate raw snapshots and bounded cache. Live catalog not yet claimed. |
-| Complete numeric metadata and game formatting | Ordinary-property field route passes both authored Unity routes. Special registries, generated names, localized rarity names and tooltip/roll mapping still require implementation and validation. |
-| Application worker and observable state | Serialized actor and safe session connector pass 31 focused lifecycle/admission tests. Nonblocking commands, generation-bound publication, cache states and cleanup barriers exist. Inert log factory and watcher-input adapter pass two tests; production preparer and UI adapters still need composition. |
+| Complete numeric metadata and game formatting | Ordinary properties plus Ability/Player/Tracker/IdolAltar selectors pass all three authored routes. SP43's ready ailment-cache semantics remain unavailable. Generated names, localized rarity names and actual tooltip/roll mapping still require implementation and validation. |
+| Application worker and observable state | Serialized actor and safe session connector pass 34 focused lifecycle/admission tests. Nonblocking commands, generation-bound publication, cache states and cleanup barriers exist. Capture progress is observable and a cleanup intent stops between completed requests without losing cleanup authority. Inert log factory and watcher-input adapter pass two tests; production preparer and UI adapters still need composition. |
 | Production helper preparation/bootstrap | Rust Windows remote loading/start and one-shot stop pass the owned Unity 6000.4.8f1 child, alongside plugin and Python routes. Full pristine dispatcher body/table/unwind proof precedes first Status; stopped proof uses RPM only. Nine controller tests cover pending-call retention and validation. Its unsafe runtime/GC/thread/patch/lifetime admission and app-specific composition remain required for game use. |
 | Feature hooks and field editors | Require exact target/body contracts, wanted-state synchronization and independent owner/offline cleanup. Enabling features is currently unsupported. |
 | Forge drafts, apply, readback and undo | Pure edit planning and operation-specific readback diagnostics pass 20 tests, with complete observation/process/generation/catalog binding. No submission or native write exists yet. Batch planning, main-thread stale comparison, uncertainty recovery and undo remain required. A fingerprint is insufficient. |
@@ -26,3 +26,10 @@ all three authored startup routes and 264 foundation tests on stable and nightly
 leases hash each held artifact once, then validate path/file identity around page requests; unsupported leases retain
 the full-hash fallback. Twelve focused tests cover lease behavior. This changes capture I/O cost without making saved
 catalogs current or granting write authority.
+
+The later [special registry checkpoint](../tools/trainer-eval/persistent-player/special-numeric-report.json) passes
+280 foundation tests on both toolchains and all three Unity routes (333 requests, 292 main-thread commands each).
+Extraction version 3 prevents reuse of older numeric capability results. Ten special-registry scenarios and four
+new malformed graphs pass, including signed tags versus UInt16 ability IDs, first-match/default selection and exact
+info inheritance. Authored capture stops after its first page, acknowledges ClearHooks, reconnects explicitly and
+keeps the previous catalog/cache unchanged. Seven-page completion progress matches actual payload sizes.

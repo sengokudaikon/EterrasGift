@@ -187,5 +187,13 @@ and detailed readback diagnostics. These models do not send writes or prove a na
 uses short-lived Windows read leases when available; public individual reads and unsupported lease capabilities
 retain full artifact revalidation.
 
+The [special numeric checkpoint](../../tools/trainer-eval/persistent-player/special-numeric-report.json) adds field-only
+Ability, Player, Tracker and IdolAltar selection with extraction version 3. SP43 remains unavailable until ready
+ailment-dictionary semantics are proven. All three authored startup routes pass 333 requests and 292 main-thread
+commands. `capture_catalog_observed` reports page/byte progress and returns a distinct Stopped outcome between
+completed RPCs; it keeps Ready/discovery for explicit cleanup and publishes no partial catalog. Backend cleanup
+intent suppresses stale progress/data and drains the current response before stopping. The foundation now passes
+280 tests on stable and nightly release, plus ownership and architecture checks.
+
 Windows API contract: [GetNamedPipeServerProcessId](https://learn.microsoft.com/en-us/windows/win32/api/winbase/nf-winbase-getnamedpipeserverprocessid).
 Tokio API usage follows the restored, pinned 1.53.3 source at `src/net/windows/named_pipe.rs`.

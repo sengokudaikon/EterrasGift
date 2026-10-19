@@ -32,6 +32,56 @@ pub enum Cleanup {
     ConfirmedOff,
     Unconfirmed,
 }
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CaptureControl {
+    Continue,
+    Stop,
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CaptureProgress {
+    Starting,
+    LeaseVerified {
+        bytes_read: Option<u64>,
+    },
+    LocaleRead,
+    LimitsRead,
+    Page {
+        kind: CatalogKind,
+        cursor: u32,
+        total: u32,
+        count: u32,
+        pages: u32,
+        bytes: u64,
+    },
+    VerifyingLocale {
+        pages: u32,
+        bytes: u64,
+    },
+    Complete {
+        pages: u32,
+        bytes: u64,
+    },
+}
+/// Called only between completed synchronous work/RPCs, never to abort an
+/// exchange. Returning Stop leaves Ready and discovery available for cleanup.
+pub trait CaptureObserver: Send {
+    fn control(&mut self) -> CaptureControl {
+        CaptureControl::Continue
+    }
+    fn progress(&mut self, _: CaptureProgress) {}
+}
+struct ContinueCapture;
+impl CaptureObserver for ContinueCapture {}
+#[derive(Clone, Debug, PartialEq)]
+pub enum CaptureOutcome {
+    Complete(Box<crate::catalog::GameCatalog>),
+    Stopped,
+}
+enum OwnedRead<R> {
+    Complete(R),
+    Stopped,
+}
 #[derive(Debug)]
 pub enum SessionError {
     Disabled,
@@ -238,15 +288,21 @@ impl<T: Transport, L: LogSource> Session<T, L> {
     /// Capture all definition kinds without publishing partial results. Locale/version and each
     /// population are pinned. This relies on immutable game definition assets, not a snapshot lock.
     pub async fn capture_catalog(&mut self, now: Timestamp) -> Result<crate::catalog::GameCatalog, SessionError> {
+        match self.capture_catalog_observed(now, &mut ContinueCapture).await? {
+            CaptureOutcome::Complete(catalog) => Ok(*catalog),
+            CaptureOutcome::Stopped => Err(SessionError::Protocol(ProtocolError::InvalidData)),
+        }
+    }
+    pub async fn capture_catalog_observed(&mut self, now: Timestamp, observer: &mut dyn CaptureObserver) -> Result<CaptureOutcome, SessionError> {
         let elapsed = std::time::Instant::now();
-        let result = self.capture_catalog_inner(now, elapsed).await;
+        let result = self.capture_catalog_inner(now, elapsed, observer).await;
         if result.is_err() && self.state == SessionState::Ready {
             self.release_without_io();
             self.state = SessionState::Blocked;
         }
         result
     }
-    async fn capture_catalog_inner(&mut self, now: Timestamp, elapsed: std::time::Instant) -> Result<crate::catalog::GameCatalog, SessionError> {
+    async fn capture_catalog_inner(&mut self, now: Timestamp, elapsed: std::time::Instant, observer: &mut dyn CaptureObserver) -> Result<CaptureOutcome, SessionError> {
         if matches!(self.state, SessionState::Connecting | SessionState::Closing) {
             return Err(SessionError::Busy);
         }
@@ -254,21 +310,39 @@ impl<T: Transport, L: LogSource> Session<T, L> {
         if self.state != SessionState::Ready {
             return Err(SessionError::NotConnected);
         }
+        if observer.control() == CaptureControl::Stop {
+            return Ok(CaptureOutcome::Stopped);
+        }
+        observer.progress(CaptureProgress::Starting);
         let dispatcher = self.discovery.as_ref().ok_or(SessionError::NotConnected)?.dispatcher;
         // This local guard closes on every success, error, and future drop. It is
         // never retained in Session or reused by an unrelated public read.
         let lease = self.profile.capture_lease(&dispatcher).map_err(|error| SessionError::Identity(error.to_string()))?;
-        let locale = self
-            .read_owned_with_lease(advanced(now, elapsed)?, |dispatcher| Request::ReadLocale { dispatcher }, locale::decode, Some(&lease))
-            .await?;
-        let limits = self
-            .read_owned_with_lease(
-                advanced(now, elapsed)?,
-                |dispatcher| Request::ReadItemLimits { dispatcher },
-                definitions::decode,
-                Some(&lease),
-            )
-            .await?;
+        observer.progress(CaptureProgress::LeaseVerified { bytes_read: lease.bytes_read() });
+        macro_rules! copied {
+            ($future:expr) => {
+                match $future.await? {
+                    OwnedRead::Complete(value) => value,
+                    OwnedRead::Stopped => return Ok(CaptureOutcome::Stopped),
+                }
+            };
+        }
+        let locale = copied!(self.read_owned_control(
+            advanced(now, elapsed)?,
+            |dispatcher| Request::ReadLocale { dispatcher },
+            locale::decode,
+            Some(&lease),
+            Some(observer)
+        ));
+        observer.progress(CaptureProgress::LocaleRead);
+        let limits = copied!(self.read_owned_control(
+            advanced(now, elapsed)?,
+            |dispatcher| Request::ReadItemLimits { dispatcher },
+            definitions::decode,
+            Some(&lease),
+            Some(observer),
+        ));
+        observer.progress(CaptureProgress::LimitsRead);
         let identity = crate::catalog::CatalogIdentity {
             binary_hash: self.profile.binary_hash().into(),
             metadata_hash: self.profile.metadata_hash().into(),
@@ -276,23 +350,55 @@ impl<T: Transport, L: LogSource> Session<T, L> {
             extraction_version: crate::catalog::EXTRACTION_VERSION,
         };
         let mut builder = crate::catalog::CatalogBuilder::new(identity, limits).map_err(SessionError::Protocol)?;
+        let mut pages = 0;
+        let mut bytes = 0u64;
         for kind in [CatalogKind::Bases, CatalogKind::Affixes, CatalogKind::Uniques, CatalogKind::Rarities] {
             while let Some(cursor) = builder.next_cursor(kind) {
-                let page = self.read_catalog_page_with_lease(advanced(now, elapsed)?, kind, cursor, Some(&lease)).await?;
+                let (page, length) = copied!(self.read_owned_control(
+                    advanced(now, elapsed)?,
+                    |dispatcher| Request::ReadCatalogPage { dispatcher, kind, cursor },
+                    |payload| Ok((catalog::decode(payload)?, payload.len())),
+                    Some(&lease),
+                    Some(observer)
+                ));
+                if page.kind != kind || page.cursor != cursor {
+                    return Err(SessionError::Protocol(ProtocolError::InvalidData));
+                }
+                let count = page.entries.len() as u32;
+                let total = page.total;
                 builder.push(page).map_err(SessionError::Protocol)?;
+                pages += 1;
+                bytes += length as u64;
+                observer.progress(CaptureProgress::Page {
+                    kind,
+                    cursor,
+                    total,
+                    count,
+                    pages,
+                    bytes,
+                });
             }
         }
-        if self
-            .read_owned_with_lease(advanced(now, elapsed)?, |dispatcher| Request::ReadLocale { dispatcher }, locale::decode, Some(&lease))
-            .await?
-            != locale
+        observer.progress(CaptureProgress::VerifyingLocale { pages, bytes });
+        if copied!(self.read_owned_control(
+            advanced(now, elapsed)?,
+            |dispatcher| Request::ReadLocale { dispatcher },
+            locale::decode,
+            Some(&lease),
+            Some(observer)
+        )) != locale
         {
             return Err(SessionError::Protocol(ProtocolError::InvalidData));
         }
         self.profile
             .validate_lease(&dispatcher, &lease)
             .map_err(|error| SessionError::Identity(error.to_string()))?;
-        builder.finish().map_err(SessionError::Protocol)
+        let catalog = builder.finish().map_err(SessionError::Protocol)?;
+        observer.progress(CaptureProgress::Complete { pages, bytes });
+        if observer.control() == CaptureControl::Stop {
+            return Ok(CaptureOutcome::Stopped);
+        }
+        Ok(CaptureOutcome::Complete(Box::new(catalog)))
     }
     async fn read_owned<R>(&mut self, now: Timestamp, request: impl FnOnce(DispatcherSpec) -> Request, decode: fn(&[u8]) -> Result<R, ProtocolError>) -> Result<R, SessionError> {
         self.read_owned_with_lease(now, request, decode, None).await
@@ -304,12 +410,28 @@ impl<T: Transport, L: LogSource> Session<T, L> {
         decode: fn(&[u8]) -> Result<R, ProtocolError>,
         lease: Option<&ProfileLease>,
     ) -> Result<R, SessionError> {
+        match self.read_owned_control(now, request, decode, lease, None).await? {
+            OwnedRead::Complete(value) => Ok(value),
+            OwnedRead::Stopped => Err(SessionError::Protocol(ProtocolError::InvalidData)),
+        }
+    }
+    async fn read_owned_control<R>(
+        &mut self,
+        now: Timestamp,
+        request: impl FnOnce(DispatcherSpec) -> Request,
+        decode: impl FnOnce(&[u8]) -> Result<R, ProtocolError>,
+        lease: Option<&ProfileLease>,
+        mut observer: Option<&mut dyn CaptureObserver>,
+    ) -> Result<OwnedRead<R>, SessionError> {
         if matches!(self.state, SessionState::Connecting | SessionState::Closing) {
             return Err(SessionError::Busy);
         }
         self.gate(now)?;
         if self.state != SessionState::Ready {
             return Err(SessionError::NotConnected);
+        }
+        if observer.as_mut().is_some_and(|observer| observer.control() == CaptureControl::Stop) {
+            return Ok(OwnedRead::Stopped);
         }
         let dispatcher = self.discovery.as_ref().ok_or(SessionError::NotConnected)?.dispatcher;
         let elapsed = std::time::Instant::now();
@@ -324,6 +446,9 @@ impl<T: Transport, L: LogSource> Session<T, L> {
         }
         // File verification can take time. Admission must still hold immediately before I/O.
         self.gate(advanced(now, elapsed)?)?;
+        if observer.as_mut().is_some_and(|observer| observer.control() == CaptureControl::Stop) {
+            return Ok(OwnedRead::Stopped);
+        }
         let status = self.status.take();
         self.state = SessionState::Connecting;
         let result = self.request(&request(dispatcher)).await.and_then(|bytes| decode(&bytes).map_err(SessionError::Protocol));
@@ -341,7 +466,10 @@ impl<T: Transport, L: LogSource> Session<T, L> {
                 self.gate(advanced(now, elapsed)?)?;
                 self.status = status;
                 self.state = SessionState::Ready;
-                Ok(snapshot)
+                if observer.as_mut().is_some_and(|observer| observer.control() == CaptureControl::Stop) {
+                    return Ok(OwnedRead::Stopped);
+                }
+                Ok(OwnedRead::Complete(snapshot))
             }
             Err(error) => {
                 self.release_without_io();

@@ -16,6 +16,7 @@ use std::{
     time::Duration,
 };
 
+pub use crate::session::{CaptureControl, CaptureObserver, CaptureOutcome, CaptureProgress};
 use eg_core::game_log::GameReadiness;
 pub use eg_game_access::{
     forge::{AffixSnapshot, ForgeSnapshot, ItemStatus, UniqueIdentity},
@@ -53,6 +54,19 @@ pub trait BackendConnection: Send + 'static {
     fn target(&self) -> &ProcessIdentity;
     fn refresh(&mut self, now: Timestamp) -> impl Future<Output = Result<RuntimeStatus, BackendError>> + Send;
     fn capture_catalog(&mut self, now: Timestamp) -> impl Future<Output = Result<GameCatalog, BackendError>> + Send;
+    fn capture_catalog_observed(&mut self, now: Timestamp, observer: &mut dyn CaptureObserver) -> impl Future<Output = Result<CaptureOutcome, BackendError>> + Send {
+        async move {
+            if observer.control() == CaptureControl::Stop {
+                return Ok(CaptureOutcome::Stopped);
+            }
+            observer.progress(CaptureProgress::Starting);
+            let catalog = self.capture_catalog(now).await?;
+            if observer.control() == CaptureControl::Stop {
+                return Ok(CaptureOutcome::Stopped);
+            }
+            Ok(CaptureOutcome::Complete(Box::new(catalog)))
+        }
+    }
     fn read_forge(&mut self, now: Timestamp) -> impl Future<Output = Result<Option<ForgeSnapshot>, BackendError>> + Send;
     fn disconnect(&mut self) -> impl Future<Output = Cleanup> + Send;
     // Dropping a connection must perform no process/pipe I/O. Admission loss
@@ -71,6 +85,9 @@ impl<T: Transport + Send + 'static, L: LogSource + Send + 'static> BackendConnec
     }
     async fn capture_catalog(&mut self, now: Timestamp) -> Result<GameCatalog, BackendError> {
         Ok(Session::capture_catalog(self, now).await?)
+    }
+    async fn capture_catalog_observed(&mut self, now: Timestamp, observer: &mut dyn CaptureObserver) -> Result<CaptureOutcome, BackendError> {
+        Ok(Session::capture_catalog_observed(self, now, observer).await?)
     }
     async fn read_forge(&mut self, now: Timestamp) -> Result<Option<ForgeSnapshot>, BackendError> {
         Ok(Session::read_forge(self, now).await?)
@@ -252,6 +269,7 @@ pub struct BackendSnapshot {
     pub auto_connect: bool,
     pub phase: Phase,
     pub activity: Option<Activity>,
+    pub capture_progress: Option<CaptureProgress>,
     pub detected: Option<ProcessIdentity>,
     pub attached: Option<ProcessIdentity>,
     pub retained_helper: Option<RetainedHelper>,
@@ -419,6 +437,7 @@ pub fn service<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K
         auto_connect: options.auto_connect,
         phase: Phase::Disabled,
         activity: None,
+        capture_progress: None,
         detected: None,
         attached: None,
         retained_helper: None,
@@ -690,6 +709,7 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
         self.state.generation = self.state.generation.wrapping_add(1);
         self.state.phase = Phase::Connecting;
         self.state.activity = Some(Activity::Connecting);
+        self.state.capture_progress = None;
         self.state.error = None;
         self.state.retained_helper = Some(RetainedHelper {
             target: target.clone(),
@@ -729,7 +749,7 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
             self.check_status(status)?;
             self.state.activity = Some(Activity::CapturingCatalog);
             self.publish_if_current(epoch)?;
-            let catalog = self.connection.as_mut().unwrap().capture_catalog(self.clock.now()).await?;
+            let catalog = self.capture_observed(epoch).await?;
             self.superseded(epoch)?;
             self.admit(target)?;
             self.state.activity = Some(Activity::ReadingForge);
@@ -747,6 +767,7 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
                 };
                 this.state.phase = Phase::Ready;
                 this.state.activity = None;
+                this.state.capture_progress = None;
                 this.state.error = None;
             })?;
             self.event(BackendEvent::Connected {
@@ -806,7 +827,7 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
             self.superseded(epoch)?;
             self.check_status(status)?;
             let data = if capture {
-                let data = self.connection.as_mut().unwrap().capture_catalog(self.clock.now()).await?;
+                let data = self.capture_observed(epoch).await?;
                 self.superseded(epoch)?;
                 Arc::new(data)
             } else {
@@ -828,6 +849,7 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
                     data: data.clone(),
                 };
                 this.state.activity = None;
+                this.state.capture_progress = None;
                 this.state.error = None;
             })?;
             self.event(BackendEvent::ReadPublished {
@@ -863,6 +885,29 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
             }
         }
     }
+    async fn capture_observed(&mut self, epoch: u64) -> Result<GameCatalog, BackendError> {
+        let now = self.clock.now();
+        let outcome = {
+            let mut observer = CapturePublication {
+                state: &mut self.state,
+                snapshots: &self.snapshots,
+                intent: &self.intent,
+                epoch,
+            };
+            self.connection
+                .as_mut()
+                .ok_or_else(|| BackendError::blocked(ErrorKind::NotConnected, "connection released"))?
+                .capture_catalog_observed(now, &mut observer)
+                .await?
+        };
+        match outcome {
+            CaptureOutcome::Complete(catalog) => Ok(*catalog),
+            CaptureOutcome::Stopped => {
+                self.superseded(epoch)?;
+                Err(BackendError::blocked(ErrorKind::Protocol, "capture stopped without a cleanup barrier"))
+            }
+        }
+    }
     fn handle_connection_gate(&mut self, error: &BackendError) {
         if error.kind == ErrorKind::Gate && self.connection.is_some() {
             self.release_without_io();
@@ -878,6 +923,7 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
         self.state.attached = None;
         self.state.runtime_status = None;
         self.state.activity = None;
+        self.state.capture_progress = None;
         self.state.forge = ForgeState::Unobserved;
         if let CatalogState::Current { data, .. } = &self.state.catalog {
             self.state.catalog = CatalogState::Stale(data.clone());
@@ -899,6 +945,7 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
     async fn close(&mut self, disable: bool, stop: bool) {
         self.state.phase = Phase::Closing;
         self.state.activity = None;
+        self.state.capture_progress = None;
         self.state.forge = ForgeState::Unobserved;
         self.publish();
         if let Some(mut connection) = self.connection.take() {
@@ -923,5 +970,30 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
         if stop {
             self.event(BackendEvent::Stopped);
         }
+    }
+}
+
+struct CapturePublication<'a> {
+    state: &'a mut BackendSnapshot,
+    snapshots: &'a watch::Sender<BackendSnapshot>,
+    intent: &'a Mutex<u64>,
+    epoch: u64,
+}
+impl CaptureObserver for CapturePublication<'_> {
+    fn control(&mut self) -> CaptureControl {
+        if *self.intent.lock().unwrap_or_else(|p| p.into_inner()) == self.epoch {
+            CaptureControl::Continue
+        } else {
+            CaptureControl::Stop
+        }
+    }
+    fn progress(&mut self, progress: CaptureProgress) {
+        let epoch = self.intent.lock().unwrap_or_else(|p| p.into_inner());
+        if *epoch != self.epoch {
+            return;
+        }
+        self.state.capture_progress = Some(progress);
+        self.state.revision = self.state.revision.wrapping_add(1);
+        self.snapshots.send_replace(self.state.clone());
     }
 }

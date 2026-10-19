@@ -640,3 +640,36 @@ The pure edit kernel adds complete observation binding and operation-specific pl
 seven edit types, with 20 tests. It deliberately applies the 12-bit serialized affix-ID bound to every rebuilding
 operation and keeps the 32-affix raw-result bound even on malformed layouts. No write transport/native handler,
 batch apply, undo or gameplay feature implementation follows from these pure tests.
+
+## Ready special numeric registries and capture stopping (2026-10-19)
+
+The [special numeric evidence](../tools/trainer-eval/persistent-player/special-numeric-report.json) validates ready
+Ability58, Player98, Tracker123 and IdolAltar130 field routes through plugin, Python and Rust startup. Each accepts
+333 requests and completes 292 main-thread commands, with zero wrong-thread/failure metrics, full restoration,
+stopped server, later frames, normal exit and unchanged files. This checkpoint makes no actual-game calls.
+
+Ability IDs are UInt16-backed, compared against untruncated signed tags; first matching entries and their null-list
+behavior are preserved. Indexed negative tags are unavailable. Typed defaults and inherited More/Quotient rounding
+follow exact metadata: Player/Idol info derives through SingleListPropertyInfo and PropertyInfoWithLocKey; Tracker
+derives directly from BasePropertyInfo; Ability derives through PropertyInfoWithLocKey. No new managed getters or
+lazy registry initialization run. Fifteen numeric unit tests and ten authored valid/local capability scenarios pass;
+four new malformed null-entry graphs fail closed and require explicit reconnect. SP43 remains unavailable because
+the initialized dictionary may differ from its source list. Numeric extraction version 3 invalidates prior caches.
+
+Session capture now reports progress and accepts a synchronous stop decision between completed work/RPCs. It
+rechecks that decision after file/log validation immediately before sending and after a completed response. Stop
+returns a distinct outcome, closes local file leases and preserves Ready/discovery for cleanup; dropped futures
+still retain the previous Connecting barrier. Real admission/protocol errors remain failures. The actor consults
+its accepted cleanup intent epoch and publishes progress only while current; no partial catalog is made Current.
+
+The authored test verifies seven pages and 16437 payload bytes, then stops another capture after exactly its locale,
+limits and first-page requests. ClearHooks is acknowledged once, explicit reconnect/read succeeds and the original
+owned catalog/cache remains unchanged. Foundation tests pass 280 cases on stable and nightly release, plus one
+ownership compile-fail check each and four architecture checks. Workspace verification/captures pass; the forge
+implicit-item capture was inspected.
+
+Follow-up static signature audit corrects a legacy C++ notation ambiguity: GetItemImplicit(Int32,Int32,Int32) and
+the tooltip SlotType argument are value parameters. Addresses in runtime_invoke argument storage do not imply
+managed ref/out. Existing enum/scalar invocation may support these signatures after body/caller contracts pass.
+Actual displayed scalar mapping must parse the game's display and unit; the legacy host deliberately discards the
+raw quantity because its scale can differ. No endpoint interpolation or raw-quantity fallback is authorized.

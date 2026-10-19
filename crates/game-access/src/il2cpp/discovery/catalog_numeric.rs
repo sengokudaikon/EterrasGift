@@ -9,7 +9,7 @@ use crate::{
     catalog::{AffixTier, Availability, MAX_DESCRIPTIONS, MAX_DISPLAY_ORDER, MAX_PROPERTIES, NumericProperty, UniqueNumericData},
     il2cpp::AttachedThread,
 };
-use std::collections::BTreeMap;
+use std::{collections::BTreeMap, ffi::CStr};
 
 #[derive(Clone, Copy)]
 pub(super) struct RawProperty {
@@ -38,6 +38,29 @@ pub(super) struct PropertyCatalog<'a, 'r> {
     default: Option<Root<'a, 'r>>,
     overrides: Class,
     cache: BTreeMap<(usize, i32, u8), Availability<Presentation>>,
+    images: Option<Images>,
+    special: BTreeMap<u8, Availability<SpecialRegistry<'a, 'r>>>,
+    special_roots: usize,
+}
+
+enum SpecialRegistry<'a, 'r> {
+    Indexed {
+        _master: Root<'a, 'r>,
+        definitions: Vec<Root<'a, 'r>>,
+        default: Option<Root<'a, 'r>>,
+    },
+    Ability {
+        _master: Root<'a, 'r>,
+        definitions: Vec<(u16, Root<'a, 'r>)>,
+        default: Option<Root<'a, 'r>>,
+        info_class: Class,
+        resolved: BTreeMap<usize, Availability<Vec<Root<'a, 'r>>>>,
+    },
+}
+
+struct SelectedInfo<'a, 'r> {
+    root: Root<'a, 'r>,
+    stat_overrides: bool,
 }
 
 #[derive(Clone, Copy)]
@@ -71,6 +94,14 @@ fn unavailable<T>(reason: impl Into<String>) -> Availability<T> {
     Availability::Unavailable { reason: reason.into() }
 }
 
+fn charge_special_roots(used: &mut usize, count: usize) -> Result<(), DiscoveryError> {
+    *used = used
+        .checked_add(count)
+        .filter(|count| *count <= 16384)
+        .ok_or_else(|| unsupported("special numeric registry aggregate root budget"))?;
+    Ok(())
+}
+
 fn ordinary_property(property: u8) -> bool {
     !matches!(property, 43 | 58 | 98 | 123 | 130)
 }
@@ -86,13 +117,13 @@ impl RuntimeAccess {
         })
     }
 
-    pub(super) unsafe fn catalog_affix_numeric(
+    pub(super) unsafe fn catalog_affix_numeric<'a, 'r>(
         &self,
-        attached: &AttachedThread<'_>,
+        attached: &'a AttachedThread<'r>,
         images: &Images,
         definition: &Root<'_, '_>,
         tiers: &[Root<'_, '_>],
-        capture: &mut NumericCapture<'_, '_>,
+        capture: &mut NumericCapture<'a, 'r>,
     ) -> Result<Availability<Vec<AffixTier>>, DiscoveryError> {
         unsafe {
             let properties = match &mut capture.properties {
@@ -155,12 +186,12 @@ impl RuntimeAccess {
         }
     }
 
-    pub(super) unsafe fn catalog_unique_numeric(
+    pub(super) unsafe fn catalog_unique_numeric<'a, 'r>(
         &self,
-        attached: &AttachedThread<'_>,
+        attached: &'a AttachedThread<'r>,
         images: &Images,
         definition: &Root<'_, '_>,
-        capture: &mut NumericCapture<'_, '_>,
+        capture: &mut NumericCapture<'a, 'r>,
     ) -> Result<Availability<UniqueNumericData>, DiscoveryError> {
         unsafe {
             let metadata = match &mut capture.properties {
@@ -270,38 +301,50 @@ impl RuntimeAccess {
                 default,
                 overrides,
                 cache: BTreeMap::new(),
+                images: Some(Images {
+                    game: images.game,
+                    all: images.all.clone(),
+                }),
+                special: BTreeMap::new(),
+                special_roots: 0,
             }))
         }
     }
 
-    pub(super) unsafe fn catalog_numeric_property(
+    pub(super) unsafe fn catalog_numeric_property<'a, 'r>(
         &self,
-        attached: &AttachedThread<'_>,
-        properties: &mut PropertyCatalog<'_, '_>,
+        attached: &'a AttachedThread<'r>,
+        properties: &mut PropertyCatalog<'a, 'r>,
         raw: RawProperty,
     ) -> Result<Availability<NumericProperty>, DiscoveryError> {
         unsafe {
             if !raw.minimum.is_finite() || !raw.maximum.is_finite() || !(-1..=7).contains(&raw.roll_id) {
                 return Err(unsupported("numeric property finite range/roll identity"));
             }
-            if !ordinary_property(raw.property) {
-                return Ok(unavailable(format!(
-                    "SP {} requires a separate property-info registry that has not been admitted",
-                    raw.property
-                )));
-            }
             if !(0..=3).contains(&raw.modifier_type) {
                 return Ok(unavailable(format!("The game's rounding getter throws for modifier type {}", raw.modifier_type)));
             }
-            let selected = properties
-                .definitions
-                .iter()
-                .find(|(property, _)| *property == raw.property)
-                .map(|(_, root)| root)
-                .or(properties.default.as_ref());
-            let Some(info) = selected else {
-                return Ok(unavailable("The selected PropertyList entry and default property are both absent"));
+            let selected = if ordinary_property(raw.property) {
+                let root = properties
+                    .definitions
+                    .iter()
+                    .find(|(property, _)| *property == raw.property)
+                    .map(|(_, root)| root)
+                    .or(properties.default.as_ref());
+                let Some(root) = root else {
+                    return Ok(unavailable("The selected PropertyList entry and default property are both absent"));
+                };
+                SelectedInfo {
+                    root: attached.root(target(root)?)?,
+                    stat_overrides: true,
+                }
+            } else {
+                match self.catalog_special_selected(attached, properties, raw)? {
+                    Availability::Available(value) => value,
+                    Availability::Unavailable { reason } => return Ok(unavailable(reason)),
+                }
             };
+            let info = &selected.root;
             let key = (target(info)?.as_ptr() as usize, raw.modifier_type, raw.special_tag);
             let presentation = if let Some(value) = properties.cache.get(&key) {
                 value.clone()
@@ -309,6 +352,7 @@ impl RuntimeAccess {
                 let rounding = match raw.modifier_type {
                     0 => self.enumeration(info, c"roundingForAdded", c"PropertyRounding")?,
                     1 => 0,
+                    2 | 3 if !selected.stat_overrides => self.enumeration(info, c"roundingForMore", c"PropertyRounding")?,
                     2 | 3 => {
                         let Some(list) = self.catalog_reference(attached, info, c"moreRoundingOverrides")? else {
                             let reason = "The game's StatPropertyInfo rounding getter requires a nonnull override list";
@@ -358,6 +402,250 @@ impl RuntimeAccess {
                     less_is_better: presentation.less,
                 }),
             })
+        }
+    }
+
+    // Registry storage is inspected lazily, only for a requested special SP. Every selected
+    // object is rooted before further metadata/GC calls and stays rooted with its parents.
+    unsafe fn catalog_optional_class(&self, images: &Images, namespace: &CStr, name: &CStr) -> Result<Option<Class>, DiscoveryError> {
+        unsafe {
+            let mut owner = (self.class_from_name)(images.game, namespace.as_ptr(), name.as_ptr());
+            for image in &images.all {
+                super::record_class(&mut owner, (self.class_from_name)(*image, namespace.as_ptr(), name.as_ptr()), name)?;
+            }
+            Ok((!owner.is_null()).then_some(owner))
+        }
+    }
+
+    unsafe fn catalog_ready_registry<'a, 'r>(&self, attached: &'a AttachedThread<'r>, images: &Images, owner: Class) -> Result<Availability<Root<'a, 'r>>, DiscoveryError> {
+        unsafe {
+            let ready = self.static_field(owner, c"instanceFound", "System.Boolean")?;
+            if self.field_class(ready)? != self.system_class(c"Boolean")? {
+                return Err(unsupported("special numeric readiness class"));
+            }
+            let mut value = 0_u8;
+            (self.static_get)(ready, (&mut value as *mut u8).cast());
+            match value {
+                0 => return Ok(unavailable("Special numeric registry is not already initialized")),
+                1 => {}
+                _ => return Err(unsupported("special numeric readiness Boolean representation")),
+            }
+            let Some(master) = self.catalog_static(attached, owner, c"instance", owner)? else {
+                return Ok(unavailable("Special numeric registry instance is absent"));
+            };
+            self.exact(&master, owner)?;
+            if !self.catalog_live(attached, images, &master)? {
+                return Ok(unavailable("Special numeric registry native object is destroyed"));
+            }
+            Ok(Availability::Available(master))
+        }
+    }
+
+    unsafe fn catalog_special_registry<'a, 'r>(
+        &self,
+        attached: &'a AttachedThread<'r>,
+        images: &Images,
+        property: u8,
+    ) -> Result<Availability<SpecialRegistry<'a, 'r>>, DiscoveryError> {
+        unsafe {
+            let (owner_name, info_name) = match property {
+                58 => (c"AbilityPropertyList", c"AbilityPropertyInfo"),
+                98 => (c"PlayerPropertyList", c"PlayerPropertyInfo"),
+                123 => (c"TrackerPropertyList", c"TrackerPropertyInfo"),
+                130 => (c"IdolAltarPropertyList", c"IdolAltarPropertyInfo"),
+                _ => return Ok(unavailable("This special property-info selector has not been admitted")),
+            };
+            let Some(owner) = self.catalog_optional_class(images, c"", owner_name)? else {
+                return Ok(unavailable("This runtime does not expose the optional special numeric registry"));
+            };
+            let master = if property == 130 {
+                let item_list = self.class(images, c"", c"ItemList")?;
+                let assets = self.class(images, c"LE.AssetManagement", c"GlobalAssets")?;
+                let Some(items) = self.catalog_static(attached, assets, c"_storage_MasterItemsList", item_list)? else {
+                    return Ok(unavailable("Idol altar master items are not already initialized"));
+                };
+                self.exact(&items, item_list)?;
+                if !self.catalog_live(attached, images, &items)? {
+                    return Ok(unavailable("Idol altar master item native object is destroyed"));
+                }
+                // The getter's ItemList/GlobalAssets lazy initialization is deliberately bypassed.
+                let Some(master) = self.reference(attached, &items, c"idolAltarPropertyList", owner)? else {
+                    return Ok(unavailable("Idol altar property registry is absent"));
+                };
+                self.exact(&master, owner)?;
+                if !self.catalog_live(attached, images, &master)? {
+                    return Ok(unavailable("Idol altar property registry native object is destroyed"));
+                }
+                master
+            } else {
+                match self.catalog_ready_registry(attached, images, owner)? {
+                    Availability::Available(master) => master,
+                    Availability::Unavailable { reason } => return Ok(unavailable(reason)),
+                }
+            };
+            let info = self.class(images, c"", info_name)?;
+            let base = self.class(images, c"", c"BasePropertyInfo")?;
+            let key = self.class(images, c"", c"PropertyInfoWithLocKey")?;
+            if (self.class_parent)(key) != base {
+                return Err(unsupported("special numeric localized-info hierarchy"));
+            }
+            let expected_parent = match property {
+                123 => base,
+                58 => key,
+                98 | 130 => {
+                    let single = self.class(images, c"", c"SingleListPropertyInfo")?;
+                    if (self.class_parent)(single) != key {
+                        return Err(unsupported("special numeric single-list hierarchy"));
+                    }
+                    single
+                }
+                _ => unreachable!(),
+            };
+            if (self.class_parent)(info) != expected_parent {
+                return Err(unsupported("special numeric selected-info hierarchy"));
+            }
+            let default = self.reference(attached, &master, c"defaultProperty", info)?;
+            if let Some(default) = &default {
+                self.exact(default, info)?;
+            }
+            let Some(list) = self.catalog_reference(attached, &master, c"list")? else {
+                return Ok(unavailable("The game's special property selector requires a nonnull list"));
+            };
+            if property == 58 {
+                let entry_class = self.catalog_nested(owner, c"Entry")?;
+                let mut definitions = Vec::new();
+                for entry in self.catalog_list(attached, &list, entry_class, 4096)? {
+                    self.exact(&entry, entry_class)?;
+                    definitions.push((self.catalog_ability_id(&entry)?, entry));
+                }
+                Ok(Availability::Available(SpecialRegistry::Ability {
+                    _master: master,
+                    definitions,
+                    default,
+                    info_class: info,
+                    resolved: BTreeMap::new(),
+                }))
+            } else {
+                let definitions = self.catalog_list(attached, &list, info, 4096)?;
+                for entry in &definitions {
+                    self.exact(entry, info)?;
+                }
+                Ok(Availability::Available(SpecialRegistry::Indexed {
+                    _master: master,
+                    definitions,
+                    default,
+                }))
+            }
+        }
+    }
+
+    unsafe fn catalog_ability_id(&self, object: &Root<'_, '_>) -> Result<u16, DiscoveryError> {
+        unsafe {
+            let owner = (self.object_class)(target(object)?.as_ptr());
+            if owner.is_null() {
+                return Err(unsupported("numeric ability-ID owner"));
+            }
+            let field = self.field(owner, c"abilityID")?;
+            let class = self.field_class(field)?;
+            let name = (self.class_name)(class);
+            if (self.field_flags)(field) & 0x10 != 0 || name.is_null() || CStr::from_ptr(name) != c"AbilityID" || !(self.class_enum)(class) {
+                return Err(unsupported("numeric UInt16 AbilityID enum storage/identity"));
+            }
+            let base = (self.enum_base)(class);
+            if base.is_null() || (self.type_byref)(base) || (self.type_code)(base) != 0x07 || (self.type_class)(base) != self.system_class(c"UInt16")? {
+                return Err(unsupported("numeric AbilityID UInt16 enum underlying type"));
+            }
+            let mut value = 0_u16;
+            (self.field_get)(target(object)?.as_ptr(), field, (&mut value as *mut u16).cast());
+            Ok(value)
+        }
+    }
+
+    unsafe fn catalog_special_selected<'a, 'r>(
+        &self,
+        attached: &'a AttachedThread<'r>,
+        properties: &mut PropertyCatalog<'a, 'r>,
+        raw: RawProperty,
+    ) -> Result<Availability<SelectedInfo<'a, 'r>>, DiscoveryError> {
+        unsafe {
+            if raw.property == 43 {
+                return Ok(unavailable("SP43 requires the game's initialized ailment dictionary-cache semantics"));
+            }
+            if matches!(raw.property, 98 | 123 | 130) && raw.tags < 0 {
+                return Ok(unavailable("The game's indexed property-info getter throws for negative tags"));
+            }
+            if let std::collections::btree_map::Entry::Vacant(slot) = properties.special.entry(raw.property) {
+                let Some(images) = &properties.images else {
+                    return Ok(unavailable("Special property-info metadata is unavailable"));
+                };
+                let registry = self.catalog_special_registry(attached, images, raw.property)?;
+                if let Availability::Available(registry) = &registry {
+                    let count = match registry {
+                        SpecialRegistry::Indexed { definitions, default, .. } => definitions.len() + usize::from(default.is_some()) + 1,
+                        SpecialRegistry::Ability { definitions, default, .. } => definitions.len() + usize::from(default.is_some()) + 1,
+                    };
+                    charge_special_roots(&mut properties.special_roots, count)?;
+                }
+                slot.insert(registry);
+            }
+            let registry = match properties.special.get_mut(&raw.property).expect("just inserted or previously cached") {
+                Availability::Available(value) => value,
+                Availability::Unavailable { reason } => return Ok(unavailable(reason.clone())),
+            };
+            let info = match registry {
+                SpecialRegistry::Indexed { definitions, default, .. } => {
+                    let info = definitions.get(raw.tags as usize).or(default.as_ref());
+                    let Some(info) = info else {
+                        return Ok(unavailable("The selected special property info and default are absent"));
+                    };
+                    attached.root(target(info)?)?
+                }
+                SpecialRegistry::Ability {
+                    definitions,
+                    default,
+                    info_class,
+                    resolved,
+                    ..
+                } => {
+                    let selected = definitions.iter().find(|(id, _)| i32::from(*id) == raw.tags);
+                    if let Some((_, entry)) = selected {
+                        let entry_key = target(entry)?.as_ptr() as usize;
+                        if let std::collections::btree_map::Entry::Vacant(slot) = resolved.entry(entry_key) {
+                            let infos = if let Some(list) = self.catalog_reference(attached, entry, c"properties")? {
+                                // Byte specialTag can address at most 256 entries. Larger lists are
+                                // conservatively refused rather than copied without a useful bound.
+                                let infos = self.catalog_list(attached, &list, *info_class, 256)?;
+                                for info in &infos {
+                                    self.exact(info, *info_class)?;
+                                }
+                                charge_special_roots(&mut properties.special_roots, infos.len())?;
+                                Availability::Available(infos)
+                            } else {
+                                unavailable("The game's matching ability entry requires a nonnull properties list")
+                            };
+                            slot.insert(infos);
+                        }
+                        let infos = match resolved.get(&entry_key).expect("just inserted or previously cached") {
+                            Availability::Available(infos) => infos,
+                            Availability::Unavailable { reason } => return Ok(unavailable(reason.clone())),
+                        };
+                        let info = infos.get(usize::from(raw.special_tag)).or(default.as_ref());
+                        let Some(info) = info else {
+                            return Ok(unavailable("The selected ability property and default are absent"));
+                        };
+                        attached.root(target(info)?)?
+                    } else {
+                        let Some(info) = default else {
+                            return Ok(unavailable("The unmatched ability property's default info is absent"));
+                        };
+                        attached.root(target(info)?)?
+                    }
+                }
+            };
+            Ok(Availability::Available(SelectedInfo {
+                root: info,
+                stat_overrides: false,
+            }))
         }
     }
 
@@ -414,7 +702,14 @@ mod tests {
     const LESS: usize = 5;
     const OVERRIDES: usize = 6;
     const READY: usize = 7;
+    const ABILITY_ID: usize = 8;
+    const PROPERTIES: usize = 9;
+    const ABILITY_ENUM: usize = 0xf000;
+    const USHORT_CLASS: usize = 0x11000;
     thread_local! {
+        static ENUM_CODE: Cell<i32> = const { Cell::new(7) };
+        static LAST_OBJECT: Cell<usize> = const { Cell::new(0) };
+        static EXPECTED_ROOTS: Cell<usize> = const { Cell::new(5) };
         static ROOTS: Cell<usize> = const { Cell::new(0) };
         static READS: Cell<usize> = const { Cell::new(0) };
         static BASE_CLASS: Cell<usize> = const { Cell::new(INT_CLASS) };
@@ -449,7 +744,7 @@ mod tests {
         ROOTS.set(ROOTS.get() - 1);
     }
     unsafe extern "C-unwind" fn object_class(_: *mut raw::Object) -> Class {
-        assert_eq!(ROOTS.get(), 4, "selected info must remain rooted with its catalog parents");
+        assert_eq!(ROOTS.get(), EXPECTED_ROOTS.get(), "selected info must remain rooted with its catalog parents");
         token(INFO_CLASS)
     }
     unsafe extern "C-unwind" fn field(_: Class, name: *const c_char) -> Ptr {
@@ -463,6 +758,8 @@ mod tests {
             n if n == c"lessIsBetter" => LESS,
             n if n == c"moreRoundingOverrides" => OVERRIDES,
             n if n == c"instanceFound" => READY,
+            n if n == c"abilityID" => ABILITY_ID,
+            n if n == c"properties" => PROPERTIES,
             _ => panic!("unexpected field"),
         })
     }
@@ -482,13 +779,15 @@ mod tests {
         token(match ty as usize {
             ADDED | MORE => ENUM_CLASS,
             PERCENT | TENTH | LESS | READY => BOOL_CLASS,
-            OVERRIDES => 0xa000,
+            OVERRIDES | PROPERTIES => 0xa000,
+            ABILITY_ID => ABILITY_ENUM,
             BASE_TYPE => BASE_CLASS.get(),
             _ => panic!("unexpected type"),
         })
     }
     unsafe extern "C-unwind" fn field_get(object: *mut raw::Object, field: Ptr, destination: Ptr) {
         READS.set(READS.get() + 1);
+        LAST_OBJECT.set(object as usize);
         // SAFETY: typed field metadata proves the exact destination width before this fake copy.
         unsafe {
             match field as usize {
@@ -500,7 +799,8 @@ mod tests {
                 }),
                 PERCENT | LESS => destination.cast::<u8>().write(1),
                 TENTH => destination.cast::<u8>().write(0),
-                OVERRIDES => destination.cast::<*mut raw::Object>().write(std::ptr::null_mut()),
+                OVERRIDES | PROPERTIES => destination.cast::<*mut raw::Object>().write(std::ptr::null_mut()),
+                ABILITY_ID => destination.cast::<u16>().write(u16::MAX),
                 _ => panic!("unexpected field read"),
             }
         }
@@ -512,8 +812,15 @@ mod tests {
             destination.cast::<u8>().write(READINESS.get());
         }
     }
-    unsafe extern "C-unwind" fn name(_: Class) -> *const c_char {
-        c"PropertyRounding".as_ptr()
+    unsafe extern "C-unwind" fn name(class: Class) -> *const c_char {
+        if class as usize == ABILITY_ENUM {
+            c"AbilityID".as_ptr()
+        } else {
+            c"PropertyRounding".as_ptr()
+        }
+    }
+    unsafe extern "C-unwind" fn type_code(_: Type) -> i32 {
+        ENUM_CODE.get()
     }
     unsafe extern "C-unwind" fn is_enum(_: *const raw::Class) -> bool {
         IS_ENUM.get()
@@ -542,6 +849,8 @@ mod tests {
         match unsafe { CStr::from_ptr(name) } {
             n if n == c"Boolean" => token(BOOL_CLASS),
             n if n == c"Int32" => token(INT_CLASS),
+            n if n == c"UInt16" => token(USHORT_CLASS),
+            n if n == c"AbilityPropertyList" || n == c"PlayerPropertyList" || n == c"TrackerPropertyList" || n == c"IdolAltarPropertyList" => std::ptr::null_mut(),
             n if n == c"PropertyList" => {
                 if PROPERTY_PRESENT.get() {
                     token(0xc000)
@@ -554,6 +863,9 @@ mod tests {
     }
     fn fixture() -> (RuntimeAccess, ThreadContext) {
         ROOTS.set(0);
+        EXPECTED_ROOTS.set(5);
+        ENUM_CODE.set(7);
+        LAST_OBJECT.set(0);
         READS.set(0);
         BASE_CLASS.set(INT_CLASS);
         IS_ENUM.set(true);
@@ -568,6 +880,7 @@ mod tests {
         access.field_offset = offset;
         access.type_byref = byref;
         access.type_class = type_class;
+        access.type_code = type_code;
         access.field_get = field_get;
         access.static_get = static_get;
         access.class_name = name;
@@ -602,6 +915,9 @@ mod tests {
                 default: Some(attached.root(NonNull::new(token(DEFAULT)).unwrap()).unwrap()),
                 overrides: token(0xd000),
                 cache: BTreeMap::new(),
+                images: None,
+                special: BTreeMap::new(),
+                special_roots: 0,
             }
         }
     }
@@ -749,6 +1065,234 @@ mod tests {
         assert!(unsafe { access.catalog_numeric_property(&attached, &mut catalog, raw) }.is_err());
         assert_eq!(READS.get(), 0);
     }
+    #[test]
+    fn special_indexed_selectors_use_signed_tags_then_their_own_default_and_base_rounding() {
+        for property in [98, 123, 130] {
+            let (access, context) = fixture();
+            let attached = context.attach().unwrap();
+            // SAFETY: all fake roots are known immutable managed objects owned by this test.
+            let mut catalog = unsafe { catalog(&attached) };
+            // SAFETY: the registry retains its instance, each list item and typed fallback.
+            unsafe {
+                catalog.special.insert(
+                    property,
+                    Availability::Available(SpecialRegistry::Indexed {
+                        _master: attached.root(NonNull::new(token(MASTER)).unwrap()).unwrap(),
+                        definitions: vec![
+                            attached.root(NonNull::new(token(INFO)).unwrap()).unwrap(),
+                            attached.root(NonNull::new(token(SECOND)).unwrap()).unwrap(),
+                        ],
+                        default: Some(attached.root(NonNull::new(token(DEFAULT)).unwrap()).unwrap()),
+                    }),
+                );
+            }
+            EXPECTED_ROOTS.set(9);
+            for (tags, rounding) in [(0, 101), (1, 202), (2, 303), (i32::MAX, 303)] {
+                let mut value = raw(property, 2);
+                value.tags = tags;
+                // SAFETY: source-bound special info uses BasePropertyInfo MORE field, not Stat overrides.
+                let Availability::Available(result) = (unsafe { access.catalog_numeric_property(&attached, &mut catalog, value) }).unwrap() else {
+                    panic!("expected indexed numeric");
+                };
+                assert_eq!(result.rounding, rounding);
+                assert_eq!(result.tags, tags);
+                assert!(result.display_added_as_percentage && result.less_is_better);
+            }
+            let reads = READS.get();
+            for tags in [i32::MIN, -1] {
+                let mut value = raw(property, 3);
+                value.tags = tags;
+                // SAFETY: negative native signed indices would throw and are refused before metadata.
+                assert!(matches!(
+                    unsafe { access.catalog_numeric_property(&attached, &mut catalog, value) }.unwrap(),
+                    Availability::Unavailable { .. }
+                ));
+            }
+            assert_eq!(READS.get(), reads);
+            drop(catalog);
+            assert_eq!(ROOTS.get(), 0);
+        }
+    }
+
+    #[test]
+    fn ability_tags_never_truncate_to_ushort_or_turn_negative_values_into_matches() {
+        let (access, context) = fixture();
+        let attached = context.attach().unwrap();
+        // SAFETY: fake immutable catalog roots use Box-backed GC handles.
+        let mut catalog = unsafe { catalog(&attached) };
+        // SAFETY: no Entry.properties may be read because every full Int32 comparison must miss.
+        unsafe {
+            catalog.special.insert(
+                58,
+                Availability::Available(SpecialRegistry::Ability {
+                    _master: attached.root(NonNull::new(token(MASTER)).unwrap()).unwrap(),
+                    definitions: vec![
+                        (1, attached.root(NonNull::new(token(INFO)).unwrap()).unwrap()),
+                        (3, attached.root(NonNull::new(token(SECOND)).unwrap()).unwrap()),
+                        (65535, attached.root(NonNull::new(token(INFO)).unwrap()).unwrap()),
+                    ],
+                    default: Some(attached.root(NonNull::new(token(DEFAULT)).unwrap()).unwrap()),
+                    info_class: token(INFO_CLASS),
+                    resolved: BTreeMap::new(),
+                }),
+            );
+        }
+        EXPECTED_ROOTS.set(10);
+        for tags in [65537, 65539, -65533, -1, i32::MIN, i32::MAX] {
+            let mut value = raw(58, 3);
+            value.tags = tags;
+            // SAFETY: no full Int32 tag equals any zero-extended AbilityID; choose own default.
+            let Availability::Available(result) = (unsafe { access.catalog_numeric_property(&attached, &mut catalog, value) }).unwrap() else {
+                panic!("expected ability default");
+            };
+            assert_eq!(result.rounding, 303);
+            assert_eq!(result.tags, tags);
+        }
+        // Same rooted default presentation is cached across the distinct unmatched tags.
+        assert_eq!(READS.get(), 4);
+        drop(catalog);
+        assert_eq!(ROOTS.get(), 0);
+    }
+
+    #[test]
+    fn missing_selected_special_default_remains_unavailable_without_ordinary_fallback() {
+        let (access, context) = fixture();
+        let attached = context.attach().unwrap();
+        // SAFETY: exact fake immutable roots; ordinary default exists but special default does not.
+        let mut catalog = unsafe { catalog(&attached) };
+        // SAFETY: retains the special parent while its empty list/default represent absent data.
+        unsafe {
+            catalog.special.insert(
+                98,
+                Availability::Available(SpecialRegistry::Indexed {
+                    _master: attached.root(NonNull::new(token(MASTER)).unwrap()).unwrap(),
+                    definitions: Vec::new(),
+                    default: None,
+                }),
+            );
+        }
+        let mut value = raw(98, 0);
+        value.tags = 0;
+        // SAFETY: the exact special selector must not fabricate ordinary/default semantics.
+        assert!(matches!(
+            unsafe { access.catalog_numeric_property(&attached, &mut catalog, value) }.unwrap(),
+            Availability::Unavailable { .. }
+        ));
+        assert_eq!(READS.get(), 0);
+        drop(catalog);
+        assert_eq!(ROOTS.get(), 0);
+    }
+
+    #[test]
+    fn ability_id_requires_exact_ushort_enum_before_the_typed_destination_is_written() {
+        for (is_enum, base, code, valid) in [
+            (true, USHORT_CLASS, 7, true),
+            (false, USHORT_CLASS, 7, false),
+            (true, INT_CLASS, 7, false),
+            (true, USHORT_CLASS, 8, false),
+        ] {
+            let (access, context) = fixture();
+            let attached = context.attach().unwrap();
+            IS_ENUM.set(is_enum);
+            BASE_CLASS.set(base);
+            ENUM_CODE.set(code);
+            EXPECTED_ROOTS.set(1);
+            // SAFETY: fake metadata must prove UInt16 width/identity before the one authored copy.
+            let object = unsafe { attached.root(NonNull::new(token(INFO)).unwrap()) }.unwrap();
+            // SAFETY: fake metadata intentionally accepts or rejects the exact field contract.
+            let result = unsafe { access.catalog_ability_id(&object) };
+            if valid {
+                assert_eq!(result.unwrap(), u16::MAX);
+            } else {
+                assert!(result.is_err());
+            }
+            assert_eq!(READS.get(), usize::from(valid));
+            assert_eq!(ENUM_BASE_CALLS.get(), usize::from(is_enum));
+            drop(object);
+            assert_eq!(ROOTS.get(), 0);
+        }
+    }
+
+    #[test]
+    fn absent_special_capabilities_and_unready_registries_do_not_touch_the_asset_graph() {
+        let (access, context) = fixture();
+        let attached = context.attach().unwrap();
+        let images = Images {
+            game: token(0xe000),
+            all: vec![token(0xe000)],
+        };
+        for property in [58, 98, 123, 130] {
+            // SAFETY: fake class exports return absent capability; no asset calls are permitted.
+            assert!(matches!(
+                unsafe { access.catalog_special_registry(&attached, &images, property) }.unwrap(),
+                Availability::Unavailable { .. }
+            ));
+        }
+        assert_eq!(READS.get(), 0);
+        for value in [0, 2] {
+            READINESS.set(value);
+            // SAFETY: exact bool metadata is present, but readiness prevents object traversal.
+            let result = unsafe { access.catalog_ready_registry(&attached, &images, token(0xc000)) };
+            if value == 0 {
+                assert!(matches!(result.unwrap(), Availability::Unavailable { .. }));
+            } else {
+                assert!(result.is_err());
+            }
+        }
+        assert_eq!(READS.get(), 2);
+        assert_eq!(ROOTS.get(), 0);
+    }
+
+    #[test]
+    fn first_matching_ability_entry_with_null_properties_is_not_skipped_or_defaulted() {
+        let (access, context) = fixture();
+        let attached = context.attach().unwrap();
+        // SAFETY: exact fake immutable roots retained by the catalog and registry.
+        let mut catalog = unsafe { catalog(&attached) };
+        // SAFETY: duplicate IDs are intentional and native first-match order must survive.
+        unsafe {
+            catalog.special.insert(
+                58,
+                Availability::Available(SpecialRegistry::Ability {
+                    _master: attached.root(NonNull::new(token(MASTER)).unwrap()).unwrap(),
+                    definitions: vec![
+                        (3, attached.root(NonNull::new(token(INFO)).unwrap()).unwrap()),
+                        (3, attached.root(NonNull::new(token(SECOND)).unwrap()).unwrap()),
+                    ],
+                    default: Some(attached.root(NonNull::new(token(DEFAULT)).unwrap()).unwrap()),
+                    info_class: token(INFO_CLASS),
+                    resolved: BTreeMap::new(),
+                }),
+            );
+        }
+        EXPECTED_ROOTS.set(8);
+        let mut value = raw(58, 0);
+        value.tags = 3;
+        value.special_tag = 2;
+        // SAFETY: a null properties list is a throwing selector branch and stays unavailable.
+        for _ in 0..2 {
+            assert!(matches!(
+                unsafe { access.catalog_numeric_property(&attached, &mut catalog, value) }.unwrap(),
+                Availability::Unavailable { .. }
+            ));
+            assert_eq!(LAST_OBJECT.get(), INFO);
+            assert_eq!(READS.get(), 1, "the first selected entry's missing list is cached without trying duplicates");
+        }
+        drop(catalog);
+        assert_eq!(ROOTS.get(), 0);
+    }
+    #[test]
+    fn special_registry_roots_have_an_aggregate_bound_and_failed_charge_preserves_the_counter() {
+        let mut used = 0;
+        charge_special_roots(&mut used, 4096).unwrap();
+        charge_special_roots(&mut used, 12288).unwrap();
+        assert_eq!(used, 16384);
+        assert!(charge_special_roots(&mut used, 1).is_err());
+        assert_eq!(used, 16384);
+        assert!(charge_special_roots(&mut used, usize::MAX).is_err());
+        assert_eq!(used, 16384);
+    }
+
     #[test]
     fn numeric_copy_budget_reserves_names_and_rejects_aggregate_or_integer_overflow() {
         let mut budget = NumericBudget::new();

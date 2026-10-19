@@ -13,6 +13,7 @@ use eg_game_access::{
     protocol::{Discovery, DispatcherSpec, REQUIRED_KEYS, Request, Response, ResponseCode, RuntimeStatus},
     transport::{Transport, TransportError},
 };
+use eg_trainer::session::{CaptureControl, CaptureObserver, CaptureOutcome, CaptureProgress, Cleanup};
 use eg_trainer::{
     gate::{GatePolicy, LogSource},
     profile::BuildProfile,
@@ -431,4 +432,170 @@ fn fallback_rehashes_each_page_and_rejects_an_inflight_artifact_change() {
     assert_eq!(session.state(), SessionState::Blocked);
     drop(writer);
     assert!(OpenOptions::new().write(true).open(&f.binary).is_ok());
+}
+
+struct Observe {
+    events: Vec<CaptureProgress>,
+    stop: bool,
+    when: fn(&CaptureProgress) -> bool,
+    calls: usize,
+    stop_on_control: Option<usize>,
+}
+impl Observe {
+    fn at(when: fn(&CaptureProgress) -> bool) -> Self {
+        Self {
+            events: vec![],
+            stop: false,
+            when,
+            calls: 0,
+            stop_on_control: None,
+        }
+    }
+}
+impl CaptureObserver for Observe {
+    fn control(&mut self) -> CaptureControl {
+        self.calls += 1;
+        if self.stop || self.stop_on_control == Some(self.calls) {
+            self.stop = true;
+            CaptureControl::Stop
+        } else {
+            CaptureControl::Continue
+        }
+    }
+    fn progress(&mut self, event: CaptureProgress) {
+        self.stop |= (self.when)(&event);
+        self.events.push(event);
+    }
+}
+fn connected(f: &Fixture) -> (Session<Wire, Logs>, Arc<Mutex<WireState>>) {
+    let log = Logs::new();
+    let wire = f.wire(log.clone());
+    let shared = wire.shared.clone();
+    let mut session = Session::new(f.target.clone(), wire, log, f.profile(), GatePolicy::Release).unwrap();
+    session.enable();
+    run(session.connect(now())).unwrap();
+    (session, shared)
+}
+
+#[test]
+fn successful_progress_counts_actual_payload_bytes_without_publishing_partial_catalogs() {
+    let f = Fixture::new();
+    let (mut session, shared) = connected(&f);
+    let mut observer = Observe::at(|_| false);
+    let outcome = run(session.capture_catalog_observed(now(), &mut observer)).unwrap();
+    assert!(matches!(outcome,CaptureOutcome::Complete(catalog) if catalog.bases.len()==17));
+    let copied: Vec<_> = observer
+        .events
+        .iter()
+        .filter_map(|event| match event {
+            CaptureProgress::Page {
+                kind,
+                cursor,
+                total,
+                count,
+                pages,
+                bytes,
+            } => Some((*kind, *cursor, *total, *count, *pages, *bytes)),
+            _ => None,
+        })
+        .collect();
+    let expected = [
+        (CatalogKind::Bases, 0, 17, 16),
+        (CatalogKind::Bases, 16, 17, 1),
+        (CatalogKind::Affixes, 0, 0, 0),
+        (CatalogKind::Uniques, 0, 0, 0),
+        (CatalogKind::Rarities, 0, 0, 0),
+    ];
+    let mut bytes = 0;
+    for (index, (kind, cursor, total, count)) in expected.into_iter().enumerate() {
+        bytes += catalog::encode(&page(kind, cursor, total)).unwrap().len() as u64;
+        assert_eq!(copied[index], (kind, cursor, total, count, index as u32 + 1, bytes));
+    }
+    assert_eq!(observer.events.last(), Some(&CaptureProgress::Complete { pages: 5, bytes }));
+    assert_eq!(session.state(), SessionState::Ready);
+    assert_eq!(shared.lock().unwrap().requests.len(), 10);
+}
+
+#[test]
+fn stopping_after_a_page_drops_lease_keeps_ready_and_allows_confirmed_cleanup() {
+    let f = Fixture::new();
+    let (mut session, shared) = connected(&f);
+    let mut observer = Observe::at(|event| {
+        matches!(
+            event,
+            CaptureProgress::Page {
+                kind: CatalogKind::Bases,
+                cursor: 0,
+                ..
+            }
+        )
+    });
+    assert_eq!(run(session.capture_catalog_observed(now(), &mut observer)).unwrap(), CaptureOutcome::Stopped);
+    assert_eq!(shared.lock().unwrap().requests.len(), 5);
+    assert_eq!(session.state(), SessionState::Ready);
+    assert!(session.runtime_status().is_some());
+    assert!(OpenOptions::new().write(true).open(&f.metadata).is_ok());
+    assert_eq!(run(session.disconnect()), Cleanup::ConfirmedOff);
+    assert_eq!(shared.lock().unwrap().requests.len(), 6);
+    assert!(!observer.events.iter().any(|event| matches!(event, CaptureProgress::Complete { .. })));
+}
+
+#[test]
+fn deliberate_stops_before_first_rpc_after_limits_and_before_final_locale_preserve_cleanup() {
+    for phase in 0..4 {
+        let f = Fixture::new();
+        let (mut session, shared) = connected(&f);
+        let mut observer = Observe::at(match phase {
+            0 => |_| false,
+            1 => |event| matches!(event, CaptureProgress::LeaseVerified { .. }),
+            2 => |event| matches!(event, CaptureProgress::LimitsRead),
+            _ => |event| matches!(event, CaptureProgress::VerifyingLocale { .. }),
+        });
+        observer.stop = phase == 0;
+        assert_eq!(run(session.capture_catalog_observed(now(), &mut observer)).unwrap(), CaptureOutcome::Stopped);
+        assert_eq!(shared.lock().unwrap().requests.len(), [2, 2, 4, 9][phase]);
+        assert_eq!(session.state(), SessionState::Ready);
+        assert!(OpenOptions::new().write(true).open(&f.binary).is_ok());
+        assert_eq!(run(session.disconnect()), Cleanup::ConfirmedOff);
+    }
+}
+
+#[test]
+fn stop_after_final_validation_discards_even_a_complete_local_catalog() {
+    let f = Fixture::new();
+    let (mut session, shared) = connected(&f);
+    let mut observer = Observe::at(|event| matches!(event, CaptureProgress::Complete { .. }));
+    assert_eq!(run(session.capture_catalog_observed(now(), &mut observer)).unwrap(), CaptureOutcome::Stopped);
+    assert_eq!(shared.lock().unwrap().requests.len(), 10);
+    assert_eq!(session.state(), SessionState::Ready);
+    assert_eq!(run(session.disconnect()), Cleanup::ConfirmedOff);
+}
+
+#[test]
+fn control_is_checked_again_after_artifact_validation_immediately_before_rpc() {
+    let f = Fixture::new();
+    let (mut session, shared) = connected(&f);
+    let mut observer = Observe::at(|_| false);
+    observer.stop_on_control = Some(6);
+    assert_eq!(run(session.capture_catalog_observed(now(), &mut observer)).unwrap(), CaptureOutcome::Stopped);
+    assert_eq!(
+        shared.lock().unwrap().requests.len(),
+        3,
+        "locale finished; limits stopped after file validation before send"
+    );
+    assert_eq!(session.state(), SessionState::Ready);
+    assert_eq!(run(session.disconnect()), Cleanup::ConfirmedOff);
+}
+
+#[test]
+fn observer_stop_does_not_turn_log_admission_failure_into_successful_cancellation() {
+    let f = Fixture::new();
+    let (mut session, shared) = connected(&f);
+    shared.lock().unwrap().lose_log = true;
+    let mut observer = Observe::at(|event| matches!(event, CaptureProgress::Page { .. }));
+    assert!(matches!(run(session.capture_catalog_observed(now(), &mut observer)), Err(SessionError::Gate(_))));
+    assert_eq!(session.state(), SessionState::WaitingForCharacter);
+    let before = shared.lock().unwrap().requests.len();
+    assert_eq!(run(session.disconnect()), Cleanup::Unconfirmed);
+    assert_eq!(shared.lock().unwrap().requests.len(), before);
 }

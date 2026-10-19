@@ -6,7 +6,7 @@ use eg_game_access::{
     process::ProcessIdentity,
 };
 use eg_trainer::{
-    catalog::{CatalogIdentity, GameCatalog},
+    catalog::{CatalogIdentity, EXTRACTION_VERSION, GameCatalog},
     edits::*,
 };
 use std::{collections::BTreeMap, path::PathBuf};
@@ -42,7 +42,7 @@ fn catalog() -> GameCatalog {
             language: "en".into(),
             game_version: "1.5".into(),
         },
-        extraction_version: 2,
+        extraction_version: EXTRACTION_VERSION,
     };
     let range = |minimum, maximum| ValueRange { minimum, maximum };
     let limits = ItemLimits {
