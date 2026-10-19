@@ -117,8 +117,12 @@ pub trait BackendConnection: Send + 'static {
     fn supports_identity_change(&self) -> bool {
         false
     }
+    fn supports_affix_rolls(&self) -> bool {
+        false
+    }
     fn supports_forge(&self, edit: &crate::edits::ItemEdit) -> bool {
         match edit {
+            crate::edits::ItemEdit::Roll(edit) if edit.target == crate::edits::RollTarget::Affix => self.supports_affix_rolls(),
             crate::edits::ItemEdit::Status(edit) => self.supports_status(edit.field),
             crate::edits::ItemEdit::BaseType(_) => self.supports_base_change(),
             crate::edits::ItemEdit::UniqueIdentity(_) => self.supports_identity_change(),
@@ -182,6 +186,9 @@ impl<T: Transport + Send + 'static, L: LogSource + Send + 'static> BackendConnec
         true
     }
     fn supports_identity_change(&self) -> bool {
+        true
+    }
+    fn supports_affix_rolls(&self) -> bool {
         true
     }
     async fn edit_forge(&mut self, now: Timestamp, plan: &ForgePlan, control: &mut dyn WriteControl) -> Result<WriteStatus, BackendError> {
@@ -332,6 +339,7 @@ pub struct Capabilities {
     pub status_fields: [bool; 7],
     pub base_change: bool,
     pub identity_change: bool,
+    pub affix_rolls: bool,
     pub hooks: bool,
     pub fields: bool,
 }
@@ -804,6 +812,7 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
                 && self.connection.as_ref().is_some_and(BackendConnection::supports_level_requirement),
             base_change: self.state.phase == Phase::Ready && self.state.activity.is_none() && self.connection.as_ref().is_some_and(BackendConnection::supports_base_change),
             identity_change: self.state.phase == Phase::Ready && self.state.activity.is_none() && self.connection.as_ref().is_some_and(BackendConnection::supports_identity_change),
+            affix_rolls: self.state.phase == Phase::Ready && self.state.activity.is_none() && self.connection.as_ref().is_some_and(BackendConnection::supports_affix_rolls),
             status_fields: std::array::from_fn(|index| {
                 self.state.phase == Phase::Ready
                     && self.state.activity.is_none()

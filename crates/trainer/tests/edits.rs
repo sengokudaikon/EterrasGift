@@ -876,3 +876,55 @@ fn forge_plans_refuse_unimplemented_edits_and_set_identity_changes_are_stale() {
     assert_eq!(set.fingerprint, fingerprint); // Original legacy fingerprint omits set identities.
     assert_eq!(plan.recheck(&observation(set, &c), 17), Err(EditError::StaleItem));
 }
+
+#[test]
+fn forge_affix_roll_batch_and_reverse_keep_unselected_state_and_reject_stale_targets() {
+    use eg_game_access::write::ForgeMutation;
+    use eg_trainer::{
+        undo::ForgeUndo,
+        writes::{ForgePlan, WriteRecord, WriteStatus},
+    };
+    let c = catalog();
+    let before = item();
+    let expected = observation(before.clone(), &c);
+    let edit = ItemEdit::Roll(RollEdit {
+        target: RollTarget::Affix,
+        changes: vec![RollChange { index: 1, value: 255 }, RollChange { index: 0, value: 0 }],
+        allow_incompatible: false,
+    });
+    let plan = ForgePlan::edit(&expected, 17, &c, &provenance(), edit.clone(), false).unwrap();
+    let ForgeMutation::AffixRolls { rolls, .. } = plan.mutation() else {
+        panic!("affix rolls required")
+    };
+    assert_eq!(rolls.changes().iter().map(|c| (c.slot, c.value)).collect::<Vec<_>>(), vec![(1, 255), (0, 0)]);
+    let mut after = plan.projected().clone();
+    after.status.level_requirement = 86;
+    after.name = "derived name".into();
+    refresh(&mut after);
+    assert!(plan.matches(&after));
+    let undo = ForgeUndo::from_confirmed(&WriteRecord {
+        plan: plan.clone(),
+        status: WriteStatus::Confirmed(after.clone()),
+    })
+    .unwrap();
+    let reverse = undo.prepare(&observation(after.clone(), &c), 17, &c, &provenance()).unwrap();
+    assert_eq!(reverse.projected().affixes, before.affixes);
+    after.affixes[0].roll = 13;
+    refresh(&mut after);
+    assert!(!plan.matches(&after));
+    assert_eq!(undo.prepare(&observation(after, &c), 17, &c, &provenance()), Err(EditError::StaleItem));
+    for target in [RollTarget::Unique, RollTarget::Implicit] {
+        let ItemEdit::Roll(mut edit) = edit.clone() else { unreachable!() };
+        edit.target = target;
+        assert_eq!(
+            ForgePlan::edit(&expected, 17, &c, &provenance(), ItemEdit::Roll(edit), false),
+            Err(EditError::InvalidValues)
+        );
+    }
+    let bad = ItemEdit::Roll(RollEdit {
+        target: RollTarget::Affix,
+        changes: vec![RollChange { index: 0, value: 1 }, RollChange { index: 2, value: 1 }],
+        allow_incompatible: false,
+    });
+    assert_eq!(ForgePlan::edit(&expected, 17, &c, &provenance(), bad, false), Err(EditError::InvalidValues));
+}

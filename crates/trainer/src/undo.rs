@@ -7,7 +7,7 @@
 
 use crate::{
     catalog::GameCatalog,
-    edits::{BaseTypeEdit, CatalogProvenance, EditError, ExpectedObservation, ItemEdit, StatusEdit, UniqueIdentityEdit},
+    edits::{BaseTypeEdit, CatalogProvenance, EditError, ExpectedObservation, ItemEdit, RollChange, RollEdit, StatusEdit, UniqueIdentityEdit},
     writes::{ForgePlan, WriteRecord, WriteStatus},
 };
 
@@ -33,6 +33,17 @@ impl ForgeUndo {
         let before = record.plan.before();
         let item = before.snapshot();
         let reverse = match record.plan.edit_intent() {
+            ItemEdit::Roll(edit) => ItemEdit::Roll(RollEdit {
+                changes: edit
+                    .changes
+                    .iter()
+                    .map(|c| RollChange {
+                        index: c.index,
+                        value: i32::from(item.affixes[c.index as usize].roll),
+                    })
+                    .collect(),
+                ..edit.clone()
+            }),
             ItemEdit::Status(edit) => {
                 let value = edit.field.value(item);
                 if u8::try_from(value).is_err() {

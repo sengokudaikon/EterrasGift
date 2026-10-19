@@ -34,7 +34,7 @@ Ordinary pre-store refusals and NotKept preserve a healthy connection. NotKept p
 actual observation, advances field observation sequences and creates no Undo. Transport,
 protocol, identity, restart or offline failures release the connection. Later publication
 gate loss suppresses live data without downgrading an already independently confirmed
-historical result. Nothing retries a mutation. Protocol31 carries all seven status fields and an
+historical result. Nothing retries a mutation. Protocol32 carries all seven status fields and an
 explicit override bit through operation 10. `ForgePlan`/`ForgeUndo` cover
 level requirement, forging/legendary potential, Weaver's Will/Touch, corrupted and ruined;
 `status_fields` advertises support separately from item eligibility. Rebuilding fields use the
@@ -60,6 +60,18 @@ multi-field changes. Undo is a freshly validated reverse edit, not raw memory re
 type changes and unrestricted identities recheck the current override before Apply and Undo.
 The [authored checkpoint](../../tools/trainer-eval/persistent-player/base-identity-report.json)
 records owned Unity validation; actual-game writes and desktop editing remain unvalidated/unwired.
+
+Affix roll batches (op 2, affix target only) now share this path too. `forge_plan(ItemEdit::Roll)`
+accepts one to 32 distinct current slots and byte roll values; `affix_rolls` advertises support.
+Host planning checks the captured compatibility/tier rules and current override. The helper
+independently checks the whole expected item, every selected current definition/tier and every
+exact mutable Byte destination before the first store, retaining the affixes across refresh/GC.
+The helper stores only selected roll bytes, leaving affix reconstruction to the game. RebuildID
+and UpdateEntry run once per batch. A reverse plan restores the selected original rolls, with
+fresh stale/override checks. Native ACKs still need separate readback; game normalization is
+NotKept and refresh failures remain uncertain. The [authored roll checkpoint](../../tools/trainer-eval/persistent-player/affix-roll-report.json)
+records the product route. Unique/implicit roll targets remain refused until native mapping
+queries exist; affix replacement, insertion and removal remain separate work.
 See the [remaining status checkpoint](../../tools/trainer-eval/persistent-player/remaining-status-report.json).
 The read-only adapter is connected; writes through the editor remain the next integration step.
 See the [write-service cleanup checkpoint](../../tools/trainer-eval/persistent-player/write-service-refactor-report.json)

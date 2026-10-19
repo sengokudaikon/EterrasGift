@@ -1,4 +1,4 @@
-//! Pure, bounded codecs for protocol31: control, observations and narrow conditional writes.
+//! Pure, bounded codecs for protocol32: control, observations and narrow conditional writes.
 //!
 //! Decoding establishes wire validity only. Process identity, helper provenance,
 //! dispatcher code, and permission to run a request belong to the session layer.
@@ -7,13 +7,15 @@ use crate::{
     catalog::CatalogKind,
     forge,
     rate_write::{AttackLeechRateWrite, SET_ATTACK_LEECH_RATE_OPERATION},
-    write::{CHANGE_BASE_OPERATION, CHANGE_IDENTITY_OPERATION, ForgeMutation, ForgeWrite, MAX_EXPECTED_BYTES, MIN_EXPECTED_BYTES, SET_STATUS_OPERATION},
+    write::{
+        CHANGE_AFFIX_ROLLS_OPERATION, CHANGE_BASE_OPERATION, CHANGE_IDENTITY_OPERATION, ForgeMutation, ForgeWrite, MAX_EXPECTED_BYTES, MIN_EXPECTED_BYTES, SET_STATUS_OPERATION,
+    },
 };
 use std::{collections::BTreeMap, error::Error, fmt};
 
 pub const MAGIC: u32 = 0x4546_4735;
-/// Version30 adds all seven status fields and the explicit override bit to operation10.
-pub const VERSION: u32 = 31;
+/// Version32 adds bounded affix roll batches to the complete expected-state write path.
+pub const VERSION: u32 = 32;
 pub const ADAPTER: &str = "il2cpp-x64-v1";
 pub const REQUEST_SIZE: usize = 336;
 pub const RESPONSE_HEADER_SIZE: usize = 12;
@@ -137,18 +139,18 @@ impl Request {
             return Err(ProtocolError::IncompatibleVersion);
         }
         let operation = reader.u32()?;
-        if !matches!(operation, SET_STATUS_OPERATION | CHANGE_BASE_OPERATION | CHANGE_IDENTITY_OPERATION) {
+        if !matches!(
+            operation,
+            SET_STATUS_OPERATION | CHANGE_BASE_OPERATION | CHANGE_IDENTITY_OPERATION | CHANGE_AFFIX_ROLLS_OPERATION
+        ) {
             Self::decode_fixed(bytes)?;
             return Ok(RequestHeader { tail_len: 0 });
         }
-        let value = reader.u32()?;
+        let _value = reader.u32()?;
         let tail_len = reader.u32()? as usize;
         let manager = reader.u64()?;
-        let selector = reader.u32()?;
-        let flags = reader.u32()?;
-        let extra = reader.u32()?;
-        ForgeMutation::header(operation, value, selector, flags, extra)?;
-        if manager == 0 || !(MIN_EXPECTED_BYTES..=MAX_EXPECTED_BYTES).contains(&tail_len) || bytes[36..48].iter().chain(&bytes[72..]).any(|byte| *byte != 0) {
+        ForgeMutation::decode_header(bytes)?;
+        if manager == 0 || !(MIN_EXPECTED_BYTES..=MAX_EXPECTED_BYTES).contains(&tail_len) {
             return Err(ProtocolError::InvalidData);
         }
         Ok(RequestHeader { tail_len })
@@ -164,7 +166,7 @@ impl Request {
             return Self::decode_fixed(bytes);
         }
         let mut fields = Reader::new(&bytes[8..24]);
-        let value = fields.u32()?;
+        let _value = fields.u32()?;
         let _tail_len = fields.u32()?;
         let expected_manager = fields.u64()?;
         let mut dispatcher = Reader::new(&bytes[48..72]);
@@ -173,8 +175,7 @@ impl Request {
             bytes: dispatcher.array()?,
         };
         let expected = forge::decode(&bytes[REQUEST_SIZE..])?.ok_or(ProtocolError::InvalidData)?;
-        let read = |at| u32::from_le_bytes(bytes[at..at + 4].try_into().expect("validated header"));
-        let mutation = ForgeMutation::header(read(4), value, read(24), read(28), read(32))?;
+        let mutation = ForgeMutation::decode_header(&bytes[..REQUEST_SIZE])?;
         Ok(Self::EditForge(ForgeWrite::edit(dispatcher, expected_manager, expected, mutation)?))
     }
 

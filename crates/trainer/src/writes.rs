@@ -65,7 +65,18 @@ impl ForgePlan {
         edit: ItemEdit,
         override_enabled: bool,
     ) -> Result<Self, EditError> {
-        if manager == 0 || !matches!(edit, ItemEdit::Status(_) | ItemEdit::BaseType(_) | ItemEdit::UniqueIdentity(_)) {
+        if manager == 0
+            || !matches!(
+                edit,
+                ItemEdit::Status(_)
+                    | ItemEdit::BaseType(_)
+                    | ItemEdit::UniqueIdentity(_)
+                    | ItemEdit::Roll(edits::RollEdit {
+                        target: edits::RollTarget::Affix,
+                        ..
+                    })
+            )
+        {
             return Err(EditError::InvalidValues);
         }
         let prepared = edits::prepare(expected, catalog, provenance, edit, override_enabled, None)?;
@@ -84,6 +95,20 @@ impl ForgePlan {
         use eg_game_access::write::ForgeMutation;
         let item = self.projected();
         match self.edit_intent() {
+            ItemEdit::Roll(edit) => ForgeMutation::AffixRolls {
+                rolls: eg_game_access::write::AffixRolls::new(
+                    &edit
+                        .changes
+                        .iter()
+                        .map(|c| eg_game_access::write::AffixRollChange {
+                            slot: c.index as u8,
+                            value: c.value as u8,
+                        })
+                        .collect::<Vec<_>>(),
+                )
+                .expect("validated affix roll batch"),
+                unrestricted: edit.allow_incompatible,
+            },
             ItemEdit::Status(edit) => ForgeMutation::Status {
                 field: edit.field,
                 value: edit.field.value(item) as u8,

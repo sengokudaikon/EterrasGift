@@ -1,4 +1,4 @@
-//! Owned protocol31 Forge writes and bounded native acknowledgement decoding.
+//! Owned protocol32 Forge writes and bounded native acknowledgement decoding.
 //! These codecs grant no process access or write permission. Host generation,
 //! profile, policy and main-thread runtime admission remain independent checks.
 
@@ -6,6 +6,45 @@ use crate::{
     forge::{self, ForgeSnapshot},
     protocol::{DispatcherSpec, MAGIC, MAX_RESPONSE_SIZE, ProtocolError, REQUEST_SIZE, Response, ResponseCode},
 };
+
+pub const CHANGE_AFFIX_ROLLS_OPERATION: u32 = 2;
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct AffixRollChange {
+    pub slot: u8,
+    pub value: u8,
+}
+
+/// A bounded, nonempty batch with distinct slots. Slots still need a fresh item
+/// and definition check in the helper; construction grants no memory access.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct AffixRolls {
+    changes: [AffixRollChange; 32],
+    len: u8,
+}
+impl AffixRolls {
+    pub fn new(changes: &[AffixRollChange]) -> Result<Self, ProtocolError> {
+        if changes.is_empty() || changes.len() > 32 {
+            return invalid();
+        }
+        let mut seen = 0_u32;
+        let mut result = Self {
+            changes: [AffixRollChange::default(); 32],
+            len: changes.len() as u8,
+        };
+        for (index, change) in changes.iter().copied().enumerate() {
+            if change.slot >= 32 || seen & (1_u32 << change.slot) != 0 {
+                return invalid();
+            }
+            seen |= 1_u32 << change.slot;
+            result.changes[index] = change;
+        }
+        Ok(result)
+    }
+    pub fn changes(&self) -> &[AffixRollChange] {
+        &self.changes[..usize::from(self.len)]
+    }
+}
 
 pub const SET_STATUS_OPERATION: u32 = 10;
 pub const CHANGE_BASE_OPERATION: u32 = 11;
@@ -15,6 +54,7 @@ pub const CHANGE_IDENTITY_OPERATION: u32 = 17;
 /// transport; domain planning separately checks catalog compatibility/override.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ForgeMutation {
+    AffixRolls { rolls: AffixRolls, unrestricted: bool },
     Status { field: StatusField, value: u8, unrestricted: bool },
     Base { item_type: u8, sub_type: u16, unrestricted: bool },
     Identity { id: u16, sub_type: u8, rarity: u8, unrestricted: bool },
@@ -22,11 +62,18 @@ pub enum ForgeMutation {
 impl ForgeMutation {
     pub fn unrestricted(self) -> bool {
         match self {
-            Self::Status { unrestricted, .. } | Self::Base { unrestricted, .. } | Self::Identity { unrestricted, .. } => unrestricted,
+            Self::AffixRolls { unrestricted, .. } | Self::Status { unrestricted, .. } | Self::Base { unrestricted, .. } | Self::Identity { unrestricted, .. } => unrestricted,
         }
     }
     pub fn project(self, item: &mut ForgeSnapshot) {
         match self {
+            Self::AffixRolls { rolls, .. } => {
+                for change in rolls.changes() {
+                    if let Some(affix) = item.affixes.get_mut(usize::from(change.slot)) {
+                        affix.roll = change.value;
+                    }
+                }
+            }
             Self::Status { field, value, .. } => field.project(item, value),
             Self::Base { item_type, sub_type, .. } => {
                 item.item_type = item_type;
@@ -74,8 +121,44 @@ impl ForgeMutation {
             _ => invalid(),
         }
     }
+    pub(crate) fn decode_header(bytes: &[u8]) -> Result<Self, ProtocolError> {
+        if bytes.len() != REQUEST_SIZE {
+            return invalid();
+        }
+        let read = |at| u32::from_le_bytes(bytes[at..at + 4].try_into().expect("fixed request header"));
+        if bytes[36..48].iter().chain(&bytes[72..80]).any(|byte| *byte != 0) {
+            return invalid();
+        }
+        if read(4) == CHANGE_AFFIX_ROLLS_OPERATION {
+            let count = read(8) as usize;
+            if !(1..=32).contains(&count) || read(24) != 0 || read(28) > 1 || read(32) != 0 || bytes[80 + count * 8..].iter().any(|byte| *byte != 0) {
+                return invalid();
+            }
+            let mut changes = Vec::with_capacity(count);
+            for index in 0..count {
+                let slot = read(80 + index * 8);
+                let value = read(84 + index * 8);
+                if slot >= 32 || value > 255 {
+                    return invalid();
+                }
+                changes.push(AffixRollChange {
+                    slot: slot as u8,
+                    value: value as u8,
+                });
+            }
+            return Ok(Self::AffixRolls {
+                rolls: AffixRolls::new(&changes)?,
+                unrestricted: read(28) == 1,
+            });
+        }
+        if bytes[80..].iter().any(|byte| *byte != 0) {
+            return invalid();
+        }
+        Self::header(read(4), read(8), read(24), read(28), read(32))
+    }
     fn header_fields(self) -> (u32, u32, u32, u32) {
         match self {
+            Self::AffixRolls { rolls, .. } => (CHANGE_AFFIX_ROLLS_OPERATION, u32::from(rolls.len), 0, 0),
             Self::Status { field, value, .. } => (SET_STATUS_OPERATION, u32::from(value), field as u32, 0),
             Self::Base { item_type, sub_type, .. } => (CHANGE_BASE_OPERATION, u32::from(sub_type), u32::from(item_type), 0),
             Self::Identity { id, sub_type, rarity, .. } => (CHANGE_IDENTITY_OPERATION, u32::from(id), u32::from(sub_type), u32::from(rarity)),
@@ -209,7 +292,9 @@ impl ForgeWrite {
     }
     pub fn edit(dispatcher: DispatcherSpec, expected_manager: u64, expected: ForgeSnapshot, mutation: ForgeMutation) -> Result<Self, ProtocolError> {
         let (op, value, selector, extra) = mutation.header_fields();
-        ForgeMutation::header(op, value, selector, u32::from(mutation.unrestricted()), extra)?;
+        if !matches!(mutation, ForgeMutation::AffixRolls { .. }) {
+            ForgeMutation::header(op, value, selector, u32::from(mutation.unrestricted()), extra)?;
+        }
         if expected_manager == 0 {
             return invalid();
         }
@@ -260,6 +345,12 @@ impl ForgeWrite {
         frame[32..36].copy_from_slice(&extra.to_le_bytes());
         frame[48..56].copy_from_slice(&self.dispatcher.rva.to_le_bytes());
         frame[56..72].copy_from_slice(&self.dispatcher.bytes);
+        if let ForgeMutation::AffixRolls { rolls, .. } = self.mutation {
+            for (index, change) in rolls.changes().iter().enumerate() {
+                frame[80 + index * 8..84 + index * 8].copy_from_slice(&u32::from(change.slot).to_le_bytes());
+                frame[84 + index * 8..88 + index * 8].copy_from_slice(&u32::from(change.value).to_le_bytes());
+            }
+        }
         frame.extend_from_slice(&self.canonical_expected);
         frame
     }

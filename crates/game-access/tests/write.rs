@@ -244,7 +244,7 @@ fn minimal_schema_bound_is_exact() {
     let request = ForgeWrite::level_requirement(spec(), 1, item, 0).unwrap();
     assert!(decode_frame(&request.encode()).is_ok());
     assert_eq!(REQUEST_SIZE, 336);
-    assert_eq!(eg_game_access::protocol::VERSION, 31); // TEMP handshake draft.
+    assert_eq!(eg_game_access::protocol::VERSION, 32); // TEMP handshake draft.
 }
 #[test]
 fn projection_changes_only_requested_level_and_its_legacy_fingerprint() {
@@ -533,4 +533,53 @@ fn base_and_identity_share_bounded_frames_with_exact_scalar_widths() {
         excess.push(0);
         assert!(Request::decode(&excess).is_err());
     }
+}
+
+#[test]
+fn affix_roll_batches_have_a_strict_fixed_header_and_complete_expected_tail() {
+    for count in [1, 2, 32] {
+        let changes = (0..count)
+            .map(|slot| AffixRollChange {
+                slot,
+                value: if slot % 2 == 0 { 0 } else { 255 },
+            })
+            .collect::<Vec<_>>();
+        let mutation = ForgeMutation::AffixRolls {
+            rolls: AffixRolls::new(&changes).unwrap(),
+            unrestricted: count == 32,
+        };
+        let request = ForgeWrite::edit(spec(), 4, snapshot(), mutation).unwrap();
+        let bytes = request.encode();
+        assert_eq!(&bytes[4..12], [2, 0, 0, 0, count, 0, 0, 0]);
+        for (i, change) in changes.iter().enumerate() {
+            assert_eq!(u32::from_le_bytes(bytes[80 + i * 8..84 + i * 8].try_into().unwrap()), u32::from(change.slot));
+            assert_eq!(u32::from_le_bytes(bytes[84 + i * 8..88 + i * 8].try_into().unwrap()), u32::from(change.value));
+        }
+        assert_eq!(Request::decode(&bytes).unwrap(), Request::EditForge(request));
+        for end in 0..bytes.len() {
+            assert!(Request::decode(&bytes[..end]).is_err());
+        }
+        for (at, value) in [(8, 0), (8, 33), (24, 1), (24, 2), (28, 2), (32, 1), (80, 32), (84, 256)] {
+            let mut invalid = bytes.clone();
+            set32(&mut invalid, at, value);
+            assert!(Request::decode_header(&invalid[..REQUEST_SIZE]).is_err(), "at {at}: {value}");
+        }
+        for at in (36..48).chain(72..80).chain(80 + usize::from(count) * 8..336) {
+            let mut invalid = bytes.clone();
+            invalid[at] = 1;
+            assert!(Request::decode_header(&invalid[..REQUEST_SIZE]).is_err(), "reserved {at}");
+        }
+        if count > 1 {
+            let mut invalid = bytes.clone();
+            set32(&mut invalid, 88, 0);
+            assert!(Request::decode_header(&invalid[..REQUEST_SIZE]).is_err());
+        }
+        let mut excess = bytes;
+        excess.push(0);
+        assert!(Request::decode(&excess).is_err());
+    }
+    assert!(AffixRolls::new(&[]).is_err());
+    assert!(AffixRolls::new(&[AffixRollChange { slot: 32, value: 0 }]).is_err());
+    assert!(AffixRolls::new(&[AffixRollChange { slot: 0, value: 0 }, AffixRollChange { slot: 0, value: 255 }]).is_err());
+    assert!(AffixRolls::new(&[AffixRollChange { slot: 0, value: 0 }; 33]).is_err());
 }

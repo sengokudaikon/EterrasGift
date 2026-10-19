@@ -54,7 +54,7 @@ fn invalid(bytes: &[u8]) {
 fn independent_packed_golden_and_full_projection() {
     let write = write();
     let bytes = golden();
-    assert_eq!(VERSION, 31);
+    assert_eq!(VERSION, 32);
     assert_eq!(write.encode(), bytes);
     assert_eq!(AttackLeechRateWrite::decode(&bytes).unwrap(), write);
     let request = Request::SetAttackLeechRate(write.clone());

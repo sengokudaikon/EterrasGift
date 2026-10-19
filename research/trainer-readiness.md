@@ -41,6 +41,19 @@ tests pass (five fixture entrypoints remain ignored), plus workspace verificatio
 fake-host captures. Affix/roll edits, formatting, mapping, previews,
 gameplay hooks, remaining field sets and writable editor integration remain work.
 
+Protocol32 adds affix-only roll batches to the same Forge plan/write/result/Undo path. One to 32
+distinct byte-valued changes are accepted; unique and implicit targets stay unsupported without
+native mapping observations. The helper validates all destinations and current definitions before
+storing any roll, roots original affixes through refresh/GC and calls RebuildID/UpdateEntry once.
+The [authored roll checkpoint](../tools/trainer-eval/persistent-player/affix-roll-report.json) records
+single/multiple/maximum batches, conditional Undo, override revocation, replacement during refresh,
+late definition/tier failures with no partial stores, known normalization and uncertain refresh
+exceptions. Affix reconstruction/add/remove, mapping/formatting/previews, hooks/field sets and the
+writable editor are still work. The owned route completed 585 requests/569 main-thread commands,
+with sixteen preparations/one helper load, restored dispatcher/stopped server and normal exit.
+All 543 trainer/controller tests pass (five fixture entrypoints ignored), plus workspace checks and
+inspected fake-host captures. This adds no live-game validation.
+
 The first feature increment replaced the level-only request with protocol 29 status operation 10.
 Level, forging potential, corrupted and ruined share `StatusPlan`, worker/session write handling
 and conditional `StatusUndo`. Non-level edits call RebuildID and UpdateEntry; their readback

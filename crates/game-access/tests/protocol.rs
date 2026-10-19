@@ -223,7 +223,7 @@ fn text(out: &mut Vec<u8>, value: &str) {
 
 /// Independently authored native appendInt/appendText wire format.
 fn discovery_payload(keys: &[&str]) -> Vec<u8> {
-    let mut out = 31_i32.to_le_bytes().to_vec();
+    let mut out = 32_i32.to_le_bytes().to_vec();
     text(&mut out, &"aB12".repeat(16));
     text(&mut out, "il2cpp-x64-v1");
     out.extend_from_slice(&678_i32.to_le_bytes());
@@ -267,7 +267,7 @@ fn discovery_matches_native_handshake_and_requires_all_fields() {
 fn discovery_rejects_incompatible_and_malformed_fields() {
     let golden = discovery_payload(&KEYS);
     let mut wire = golden.clone();
-    for version in [21_i32, 22, 23, 24, 25, 26, 27, 28, 29, 30] {
+    for version in [21_i32, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31] {
         wire[..4].copy_from_slice(&version.to_le_bytes());
         assert_eq!(Discovery::decode(&wire, 678), Err(ProtocolError::IncompatibleVersion));
     }

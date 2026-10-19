@@ -205,6 +205,45 @@ impl RuntimeAccess {
         }
     }
 
+    // Mirrors the original validateDefinition: only already-loaded affix IDs
+    // and tier counts are needed, without extracting numeric/display catalogs.
+    unsafe fn validate_affix_definition(&self, attached: &AttachedThread<'_>, graph: &ForgeGraph<'_, '_>, id: u16, tier_value: u16) -> Result<(), ForgeWriteError> {
+        unsafe {
+            if id > 4095 || !(1..=8).contains(&tier_value) {
+                return Err(ForgeWriteError::Refused("Invalid serialized affix ID/tier".into()));
+            }
+            let owner = self.class(&graph.images, c"", c"AffixList")?;
+            let globals = self.class(&graph.images, c"LE.AssetManagement", c"GlobalAssets")?;
+            let master = self
+                .catalog_static(attached, globals, c"_storage_MasterAffixesList", owner)?
+                .ok_or_else(|| ForgeWriteError::NotReady("Affix definitions are unavailable".into()))?;
+            self.exact(&master, owner)?;
+            if !self.catalog_live(attached, &graph.images, &master)? {
+                return Err(ForgeWriteError::NotReady("Affix definitions are destroyed".into()));
+            }
+            let tier_class = self.catalog_nested(owner, c"Tier")?;
+            for (field, name) in [(c"singleAffixes", c"SingleAffix"), (c"multiAffixes", c"MultiAffix")] {
+                let class = self.catalog_nested(owner, name)?;
+                let array = self
+                    .catalog_reference(attached, &master, field)?
+                    .ok_or_else(|| ForgeWriteError::NotReady("Affix definition array is unavailable".into()))?;
+                for definition in self.catalog_array(attached, &array, class, 10000)?.into_iter().flatten() {
+                    if self.primitive::<i32>(&definition, c"affixId")? != i32::from(id) {
+                        continue;
+                    }
+                    let tiers = self
+                        .catalog_reference(attached, &definition, c"tiers")?
+                        .ok_or_else(|| ForgeWriteError::Refused("Affix tiers are unavailable".into()))?;
+                    if usize::from(tier_value) > self.catalog_list(attached, &tiers, tier_class, 128)?.len() {
+                        return Err(ForgeWriteError::Refused("Tier exceeds current definition".into()));
+                    }
+                    return Ok(());
+                }
+            }
+            Err(ForgeWriteError::Refused("Affix ID has no definition in this build".into()))
+        }
+    }
+
     unsafe fn has_refresh(&self, owner: Class, name: &CStr) -> Result<bool, ForgeWriteError> {
         unsafe {
             let mut iterator = std::ptr::null_mut();
@@ -316,7 +355,27 @@ impl RuntimeAccess {
             let unpacked = self.class(&graph.images, c"", c"ItemDataUnpacked")?;
             // All destinations are validated before the first scalar store.
             let mut stores = Vec::new();
+            // Keep every original affix rooted even if a later refresh replaces
+            // its list, clears it or throws. Every batch destination is checked first.
+            let mut affix_roots = Vec::new();
+            let mut affix_stores = Vec::new();
             match mutation {
+                ForgeMutation::AffixRolls { rolls, .. } => {
+                    let class = self.class(&graph.images, c"", c"ItemAffix")?;
+                    let list = self
+                        .catalog_reference(attached, &graph.item, c"affixes")?
+                        .ok_or_else(|| ForgeWriteError::Refused("Missing affix list".into()))?;
+                    affix_roots = self.catalog_list(attached, &list, class, 32)?;
+                    let field = self.mutable_field(class, c"affixRoll", c"Byte", 0x05)?;
+                    for change in rolls.changes() {
+                        let index = usize::from(change.slot);
+                        let before = expected.affixes.get(index).ok_or_else(|| ForgeWriteError::Refused("Invalid affix slot".into()))?;
+                        let affix = affix_roots.get(index).ok_or_else(|| ForgeWriteError::Stale("Affix slot disappeared".into()))?;
+                        self.exact(affix, class)?;
+                        self.validate_affix_definition(attached, &graph, before.id, before.tier)?;
+                        affix_stores.push((target(affix)?, field, change.value));
+                    }
+                }
                 ForgeMutation::Status { field, value, unrestricted } => {
                     let limits = self.read_item_limits(attached)?;
                     let legendary_type = if field.requires_definition(expected) {
@@ -407,7 +466,7 @@ impl RuntimeAccess {
             if !level {
                 let context = context.as_ref().ok_or_else(|| ForgeWriteError::Refused("Missing refresh invocation API".into()))?;
                 let mut methods = Vec::new();
-                if !matches!(mutation, ForgeMutation::Status { .. }) {
+                if matches!(mutation, ForgeMutation::Base { .. } | ForgeMutation::Identity { .. }) {
                     methods.push((unpacked, c"AfterIDChange", false));
                     if matches!(mutation, ForgeMutation::Identity { .. }) && self.has_refresh(unpacked, c"MakeFullName")? {
                         methods.push((unpacked, c"MakeFullName", false));
@@ -462,7 +521,12 @@ impl RuntimeAccess {
                         _ => unreachable!("validated Forge scalar destination"),
                     }
                 }
-                readback().map_err(uncertain)
+                for (affix, field, value) in affix_stores {
+                    write_api.set_u8(affix, field, value);
+                }
+                let result = readback().map_err(uncertain);
+                drop(affix_roots);
+                result
             }
         }
     }
