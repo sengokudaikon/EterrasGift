@@ -834,3 +834,28 @@ hashes after runtime. Controller tests pass eight cases on stable/nightly releas
 Clippy/format and full workspace lint, format, tokens and captures pass. The fresh
 combat-rates capture was inspected. Exact receipts are in the compact
 [machine report](../tools/trainer-eval/persistent-player/preparer-worker-report.json).
+
+
+## Unity main OS thread: static mechanisms, 2026-10-19
+
+The [main-thread audit](../tools/trainer-eval/persistent-player/main-thread-contract.md)
+identifies two separate candidates. Exported mono_thread_get_main returns the runtime-
+initialization Thread. Exact Thread/InternalThread metadata exposes its Windows OS ID;
+the native source chain reaches GetCurrentThreadId. Managed IDs in that object,
+UnitySynchronizationContext and Awaitable are separate and cannot be used as OS TIDs.
+
+ROOT acquired a read-only disk snapshot of UnityPlayer, matching the historical game's
+097D image, under writer/delete denial. The running game was not opened or executed.
+Its consumed registration tables pair CurrentThreadIsMainThread with a complete 46-byte
+caller-OS-ID comparison. The previously retained authored 27F0 image has a different
+wrapper with profiling paths. Three direct stores establish the cached engine ID's
+OS-ID representation, without proving complete writer/startup/lifecycle behavior.
+
+ROOT independently checked 28 original and five extension native spans, table slots,
+Windows import, 25 source snapshots, 19 installed/isolated SDK pairs and all retained
+file hashes. Original audit and later exact-engine extension stay separate, including
+interrupted static-analysis output. Ordinary PE/LLVM/Mono.Cecil tools were used because
+REA was unavailable. No reader, unsafe API, runtime authority or target invocation was
+added. The next owned fixture will compare independent C# oracles with rooted metadata,
+canonical context and the engine predicate on main callbacks and a native worker.
+Its plan is retained; native execution is not claimed.

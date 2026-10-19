@@ -557,3 +557,18 @@ production-game authority claim. All 163 ROOT source inputs match the frozen can
 Tool tests 8/8, Clippy/fmt and full workspace verification/captures pass. See
 `tools/trainer-eval/persistent-player/preparer-worker-README.md` and its machine report.
 This is authored fixture composition, not UI wiring or physical gameplay-hook support.
+
+
+## Unity main OS-thread contract: static checkpoint, 2026-10-19
+
+Exported mono_thread_get_main plus exact Thread/InternalThread metadata exposes a
+runtime-init-thread Windows OS-ID candidate. UnitySynchronizationContext/Awaitable
+cached IDs are managed Int32 IDs, not OS TIDs. The read-only installed-disk UnityPlayer
+snapshot matches historical 097D; its table's 46-byte caller predicate target directly
+compares Windows IDs. Authored 27F0 has different profiling paths. Initialization,
+complete writers, canonical context, lifetime and staged pre-bootstrap authority
+remain open. ROOT checked 28 original plus five extension spans, registration/import,
+25 source snapshots and 19 SDK pairs. No running process access, native invocation,
+new reader/API or production authority was added. Static evidence and the retained
+next owned-fixture plan are indexed in
+`tools/trainer-eval/persistent-player/main-thread-contract-report.json`.

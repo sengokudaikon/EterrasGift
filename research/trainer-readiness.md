@@ -134,3 +134,11 @@ preparations and six cleanup/gate-loss boundaries without replay. Worker/dispatc
 server shutdown is confirmed separately from scalar rollback; OS-owner death and
 production authority remain untested. Root tool checks and full workspace verification
 pass, with the refreshed combat-rates capture inspected.
+
+
+The [main-thread identity audit](../tools/trainer-eval/persistent-player/main-thread-contract.md)
+finds a runtime-main OS-ID metadata path and the exact engine caller predicate. Runtime
+initialization, Unity-main identity, canonical publication, held OS identity and safe
+execution/offline/native lifetime remain distinct contracts. A later true callback
+cannot retroactively authorize the current pre-bootstrap TID requirement. The owned
+oracle-versus-detector experiment is being prepared without production API changes.

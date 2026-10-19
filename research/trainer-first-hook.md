@@ -190,3 +190,16 @@ A false flag alone supplies no character/receiver/native lifetime or owner lease
 RuntimeAccess::status remains forbidden in gameplay callbacks: its explicit
 after-original/no-active-hooks contract, discovery, allocation and rooting remain
 unchanged. No new reader, callback, target invocation or production code was added.
+
+
+## Main-thread identity remains a separate admission contract
+
+The [retained thread audit](../tools/trainer-eval/persistent-player/main-thread-contract.md)
+separates Windows IDs from managed context IDs, and runtime-init identity from Unity
+engine main. The actual UnityPlayer table's 46-byte predicate target compares the caller's
+OS ID with a cached engine ID; three direct stores do not prove all startup/lifecycle
+writers. Cold resolution and the authored engine's profiling paths have broader effects.
+A future genuine callback can provide an engine-main witness only under separately
+admitted initialization, module/import/registration and runtime lifetime. It cannot
+retroactively justify a pre-bootstrap thread guess or grant offline/owner permission.
+No callback or physical hook was added by this static audit.
