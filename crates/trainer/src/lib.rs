@@ -10,6 +10,7 @@ pub mod dispatch;
 pub mod edits;
 
 pub mod gate;
+pub mod mapping;
 pub mod profile;
 pub mod session;
 pub mod sources;

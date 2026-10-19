@@ -11,6 +11,7 @@ pub mod definitions;
 pub mod forge;
 pub mod il2cpp;
 pub mod locale;
+pub mod mapping;
 
 #[cfg(all(windows, target_arch = "x86_64"))]
 pub mod scheduler;

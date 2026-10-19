@@ -1366,6 +1366,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "eg-trainer-host"
+version = "0.1.0"
+dependencies = [
+ "eg-core",
+ "eg-game-access",
+ "eg-trainer",
+ "jiff",
+ "tempfile",
+ "tokio",
+]
+
+[[package]]
 name = "eg-ui"
 version = "0.1.0"
 dependencies = [

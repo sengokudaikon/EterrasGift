@@ -195,5 +195,16 @@ completed RPCs; it keeps Ready/discovery for explicit cleanup and publishes no p
 intent suppresses stale progress/data and drains the current response before stopping. The foundation now passes
 280 tests on stable and nightly release, plus ownership and architecture checks.
 
+The [native preparer checkpoint](../../tools/trainer-eval/persistent-player/native-preparer-report.json) adds
+`eg-trainer-host`, keeping unsafe admission outside this crate. Its concrete `HelperPreparer` retains native
+generations and uncertain calls, proves pristine dispatcher code through its returned transport, and reuses a
+loaded helper after session disconnect. The fourth authored route verifies three preparations with one runtime
+attestation and one retained/verified target. Production game authority remains separate work.
+
+`mapping` provides pure observation-bound tooltip/preview models and a poisoned builder for all 256 actual samples.
+It requires exact context/language/unit/draft equality and an explicit display parser. Raw game quantities stay
+diagnostic because their scale can differ from displayed values. No mapping/preview opcode or native formatter is
+enabled. The combined foundation passes 317 tests on stable and nightly release; 25 cover these pure mapping models.
+
 Windows API contract: [GetNamedPipeServerProcessId](https://learn.microsoft.com/en-us/windows/win32/api/winbase/nf-winbase-getnamedpipeserverprocessid).
 Tokio API usage follows the restored, pinned 1.53.3 source at `src/net/windows/named_pipe.rs`.

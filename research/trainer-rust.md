@@ -227,3 +227,18 @@ Extraction version 3 invalidates older numeric capability caches. All three auth
 startup routes pass 333 requests and 292 main-thread commands, including ten registry scenarios,
 four additional malformed graphs, exact progress and first-page stopping followed by cleanup
 and reconnect. No actual-game calls, gameplay edits or helper unload occur in this checkpoint.
+
+## Retained preparation and mapping contracts (2026-10-19)
+
+[Native preparer evidence](../tools/trainer-eval/persistent-player/native-preparer-report.json):
+317 foundation tests pass stable/nightly release. The concrete eg-trainer-host preparer passes
+a fourth authored route and reuses one helper across three preparations and a new session.
+RuntimeAttestation remains an explicit unsafe per-target contract; actual game authority and
+app composition remain work. Uncertain starts, caught-panic fences and pinned host guards
+prevent reinjection/reclamation claims; confirmed-exit reclamation is not implemented.
+Pure tooltip/preview codecs and complete 256-sample assembly pass25 additional tests with
+exact full observation/context/query/language/unit binding and injected display parsing.
+No native formatting/mapping/preview/write requests are enabled. Value parameter storage in
+runtime_invoke is not managed ref/out; tooltip SlotType fits the existing enum subset.
+Byte-clone constructors and object_new can initialize classes/refresh private state, so
+allocation is not an inert byte-copy contract and raw ForgeSnapshot alone cannot reproduce it.

@@ -673,3 +673,44 @@ the tooltip SlotType argument are value parameters. Addresses in runtime_invoke 
 managed ref/out. Existing enum/scalar invocation may support these signatures after body/caller contracts pass.
 Actual displayed scalar mapping must parse the game's display and unit; the legacy host deliberately discards the
 raw quantity because its scale can differ. No endpoint interpolation or raw-quantity fallback is authorized.
+
+## Concrete retained preparer and pure mapping models (2026-10-19)
+
+The [native preparer evidence](../tools/trainer-eval/persistent-player/native-preparer-report.json) adds the fourth
+authored startup route. `eg-trainer-host` implements HelperPreparer for the serialized trainer connector and returns
+a VerifiedTransport. Its unsafe RuntimeAttestation binds an exact target/profile and real main-thread/runtime/GC/
+patch/lifetime contracts; only the newly owned authored child has an implemented authority. A production Last Epoch
+authority is still required. File/thread checks alone do not establish those contracts.
+
+The fourth route prepares three transports across a confirmed disconnect and a new Session, observing one runtime
+attestation and one retained/verified target throughout. Full dispatcher body/table/unwind proof precedes the first
+Status; later requests carry that exact proven spec. Fresh Release admission is checked before transport access and
+again after helper artifact hashing. Shutdown uses the authored main-thread phase-end, final restoration/server
+metrics and normal child exit. The independent Rust bootstrap route separately proves full post-stop spans by RPM.
+All four routes pass the same immutable generation, each with 333 requests, 292 main-thread commands and unchanged
+player files. No actual-game process is accessed or gameplay writes performed.
+
+A reserved Attempting marker precedes unsafe startup and survives caught panic. Factual NotSent releases it;
+Loaded/MayHaveRun results retain generation evidence, pending calls and host ownership. The ownership Arc is pinned
+after a potentially submitted start, including when the final local composition drops. Confirmed-exit reclamation
+is not implemented; eight target slots bound ordinary retained generations and none are silently evicted. Twelve
+offline host tests cover admission/source binding, fences, capacity, panic/drop and exact request proof.
+
+Pure mapping, tooltip and unique-preview codecs add 25 tests. They validate strict UTF-8, finite quantities, counts,
+shared roll IDs, canonical page order and bounded input. The observation-bound builder requires 16 complete pages
+(256 actual samples), exact opaque context/language/unit/query/draft and a full current observation. Any failure
+poisons it; monotonic plateaus and source nearest-value tie order are preserved. An explicit display parser is
+required. Raw quantities are diagnostic: the C# source discards them because display scale may differ. No mapping
+opcode, native formatter/parser/preview call, persistence or capability is enabled by these pure models.
+
+Static continuation records value arguments for GetItemImplicit and tooltip SlotType, plus the existing supported
+outDouble needed by Double.TryParse(String,NumberStyles,IFormatProvider,out Double). Exact style is231; strip only
+the exact trailing unit, then parse the captured culture. The UI's permissive input normalization is a different
+contract. Object allocation can initialize classes: installed Object::NewAllocSpecific calls Runtime::ClassInit;
+il2cpp_object_new returns null after a caught cctor exception. Detached byte construction calls deserialization and
+virtual AfterIDChange/private cache refresh. A ForgeSnapshot lacks serialization, affixCountForSetProps and event/
+alias facts needed to construct an equivalent detached graph. Those runtime closure and GC proofs remain open.
+
+The combined foundation passes 317 stable/nightly-release cases, plus one ownership compile-fail check each and four
+architecture guards. Host tests/Clippy were rerun after the final admission recheck. Workspace verification/captures
+pass; the combat capture was inspected. Exact controller/source identities and static audit paths are in the index.
