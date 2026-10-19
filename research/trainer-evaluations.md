@@ -903,3 +903,22 @@ checked. The primary report omits one test name but raw/source evidence contains
 the separate final review records this without rewriting historical evidence.
 This extracted code has not run in IL2CPP yet. Its next owned fixture is source-only;
 no old fixture-only proof, scalar result or GC root grants production authority.
+
+The [shared-reader native checkpoint](../tools/trainer-eval/persistent-player/shared-reader-report.json)
+now closes the extracted-reader runtime gap above. One stable1.99.1 owned Unity6000.4.8f1
+run compares the production reader against unchanged fixture metadata and independent
+C# oracles. Eight captures return the same53460/1 main identity, with65984/5 native
+worker negative control. Actual capture-local original GC export forwarding reports
+shared2 plus fixture5 roots per capture,56created/freed; ten oracle samples, frame1
+join before frame2 observation, three later frames and childexit0 reconcile. All1886
+frozen inputs,199final sources and complete305products/16snapshots rehash correctly.
+Only the probe plugin changes in the separately retained derived player; no Editor run.
+Root receipt writing failed after Python on unsupported Set-Content -NoClobber;
+shell1 is observed, Python controller exit is unknown, childexit0/controllerpassed JSON
+remain distinct. No rerun. All failures, exact source histories, DLL/PDB, two complete
+player generations and raw/review receipts are retained in the ignored evidence archive.
+Exact5 fixture sources integrate with15Rust/17Python pure tests, probeClippy/fmt and
+fullworkspaceverify/capture inspection. Narrow Python -text preserves cross-worktree
+bytes. No actual game, production RuntimeAuthority, callback/physicalhook permission,
+fullGC or early/shutdown/reload proof is claimed. Next: design the separately admitted,
+retained control-worker carrier and scalar transport before scheduler installation.

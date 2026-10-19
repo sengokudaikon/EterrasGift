@@ -181,3 +181,12 @@ Shared-reader native integration is source-only preparation. The prior local-rea
 runtime proof is separate; initialization/publication, GC/lifetime and later bootstrap
 authority are still external obligations. Current helper source fingerprint919bea5d
 differs from historical260081fc pairs; no new helper runtime validation is claimed.
+
+The reusable runtime-init-thread reader now passes its own worker-first owned Unity
+experiment:8captures/56balancedroots/10independentoracles and all1886 frozen inputs
+unchanged. See [shared-reader report](../tools/trainer-eval/persistent-player/shared-reader-report.json).
+Child exit0 is explicit; Python controller exit remains unknown after post-call host
+receipt-writing failure. This closes the extracted-reader runtime gap only. The next
+bootstrap layer needs a separately admitted, retained one-shot candidate carrier
+and transport before scheduler installation; the existing full RuntimeAttestation
+remains a separate unsafe contract.
