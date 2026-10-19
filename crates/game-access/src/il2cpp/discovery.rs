@@ -156,6 +156,7 @@ exports! {
     method_generic: "il2cpp_method_is_generic" => raw::MethodIsGeneric,
     method_inflated: "il2cpp_method_is_inflated" => raw::MethodIsInflated,
     corlib: "il2cpp_get_corlib" => unsafe extern "C-unwind" fn() -> Ptr,
+    object_new: "il2cpp_object_new" => unsafe extern "C-unwind" fn(Class) -> *mut raw::Object,
     array_new: "il2cpp_array_new" => unsafe extern "C-unwind" fn(Class, usize) -> *mut raw::Object,
     array_length: "il2cpp_array_length" => unsafe extern "C-unwind" fn(*mut raw::Object) -> u32,
     string_new: "il2cpp_string_new" => unsafe extern "C-unwind" fn(*const c_char) -> *mut raw::Object,

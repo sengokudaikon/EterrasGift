@@ -54,7 +54,8 @@ ordinary refusals and known mismatches can keep a healthy session.
 
 `edits::inspect_readback` is the single comparison policy. The direct level-cache store
 requires an exact complete snapshot: it does not rebuild the item. Rebuilding status and roll
-edits permit derived names/level to change. Base and identity changes also permit the game's
+edits permit derived names/level to change. Affix reconstruction also permits those derived
+values and compares set identity, fixing the original strict-overload omission. Base and identity changes also permit the game's
 derived class requirement. Each policy retains its other item/status/identity/roll checks.
 Undo is a new conditional reverse edit, with current catalog, full stale-state and override
 checks; it is not a raw memory rollback. Mixed UI drafts run ordered single writes, obtain a

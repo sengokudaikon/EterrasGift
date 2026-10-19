@@ -1,4 +1,4 @@
-//! Pure, bounded codecs for protocol32: control, observations and narrow conditional writes.
+//! Pure, bounded codecs for protocol33: control, observations and narrow conditional writes.
 //!
 //! Decoding establishes wire validity only. Process identity, helper provenance,
 //! dispatcher code, and permission to run a request belong to the session layer.
@@ -8,14 +8,15 @@ use crate::{
     forge,
     rate_write::{AttackLeechRateWrite, SET_ATTACK_LEECH_RATE_OPERATION},
     write::{
-        CHANGE_AFFIX_ROLLS_OPERATION, CHANGE_BASE_OPERATION, CHANGE_IDENTITY_OPERATION, ForgeMutation, ForgeWrite, MAX_EXPECTED_BYTES, MIN_EXPECTED_BYTES, SET_STATUS_OPERATION,
+        CHANGE_AFFIX_OPERATION, CHANGE_AFFIX_ROLLS_OPERATION, CHANGE_BASE_OPERATION, CHANGE_IDENTITY_OPERATION, ForgeMutation, ForgeWrite, MAX_EXPECTED_BYTES, MIN_EXPECTED_BYTES,
+        SET_STATUS_OPERATION,
     },
 };
 use std::{collections::BTreeMap, error::Error, fmt};
 
 pub const MAGIC: u32 = 0x4546_4735;
 /// Version32 adds bounded affix roll batches to the complete expected-state write path.
-pub const VERSION: u32 = 32;
+pub const VERSION: u32 = 33;
 pub const ADAPTER: &str = "il2cpp-x64-v1";
 pub const REQUEST_SIZE: usize = 336;
 pub const RESPONSE_HEADER_SIZE: usize = 12;
@@ -141,7 +142,7 @@ impl Request {
         let operation = reader.u32()?;
         if !matches!(
             operation,
-            SET_STATUS_OPERATION | CHANGE_BASE_OPERATION | CHANGE_IDENTITY_OPERATION | CHANGE_AFFIX_ROLLS_OPERATION
+            CHANGE_AFFIX_OPERATION | SET_STATUS_OPERATION | CHANGE_BASE_OPERATION | CHANGE_IDENTITY_OPERATION | CHANGE_AFFIX_ROLLS_OPERATION
         ) {
             Self::decode_fixed(bytes)?;
             return Ok(RequestHeader { tail_len: 0 });

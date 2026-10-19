@@ -730,7 +730,7 @@ fn added_unknown_category_tolerance_never_hides_category_change_on_an_existing_a
     assert!(!p.inspect_readback(Some(&after)).confirmed());
 }
 #[test]
-fn source_strict_affix_set_identity_omission_is_explicit_but_preflight_still_checks_it() {
+fn strict_affix_readback_and_preflight_both_include_set_identity() {
     let c = catalog();
     let mut i = unique(item(), 8, 912);
     i.affixes.push(AffixSnapshot {
@@ -763,7 +763,7 @@ fn source_strict_affix_set_identity_omission_is_explicit_but_preflight_still_che
     let mut after = p.projected().clone();
     after.identity.as_mut().unwrap().id = 911;
     refresh(&mut after);
-    assert!(p.inspect_readback(Some(&after)).confirmed());
+    assert!(!p.inspect_readback(Some(&after)).confirmed());
     assert_eq!(p.recheck(&observation(after, &c), true, false), Err(EditError::StaleItem));
 }
 
@@ -852,7 +852,7 @@ fn forge_plans_refuse_unimplemented_edits_and_set_identity_changes_are_stale() {
     use eg_trainer::writes::ForgePlan;
     let c = catalog();
     let expected = observation(item(), &c);
-    assert_eq!(ForgePlan::edit(&expected, 17, &c, &provenance(), replacement(), true), Err(EditError::InvalidValues));
+    assert!(ForgePlan::edit(&expected, 17, &c, &provenance(), replacement(), true).is_ok());
     let mut set = unique(item(), 8, 912);
     refresh(&mut set);
     let expected = observation(set.clone(), &c);

@@ -71,7 +71,7 @@ collateral drift is NotKept. All failures after the first store remain uncertain
 multi-field changes. Undo is a freshly validated reverse edit, not raw memory restoration. Idol
 type changes and unrestricted identities recheck the current override before Apply and Undo.
 The archived authored checkpoint
-records owned Unity validation; actual-game writes and desktop editing remain unvalidated/unwired.
+records owned Unity validation; actual-game writes remain unvalidated.
 
 Affix roll batches (op 2, affix target only) now share this path too. `forge_plan(ItemEdit::Roll)`
 accepts one to 32 distinct current slots and byte roll values; `affix_rolls` advertises support.
@@ -82,10 +82,19 @@ The helper stores only selected roll bytes, leaving affix reconstruction to the 
 and UpdateEntry run once per batch. A reverse plan restores the selected original rolls, with
 fresh stale/override checks. Native ACKs still need separate readback; game normalization is
 NotKept and refresh failures remain uncertain. Unique/implicit roll targets remain refused until native mapping
-queries exist; affix replacement, insertion and removal remain separate work.
+queries exist; insertion and removal remain separate work.
 The editor integration above uses these native operations; formatting, previews and mappings remain separate.
 
 
 Historical per-feature reports are preserved at `archive/trainer-evaluations-2026-10-19`.
 Current assumptions, test gates and archive location are in
 [trainer-interop.md](../../research/trainer-interop.md).
+
+Affix replacement, tier and seal changes (op 1, protocol33) use the same plan/outcome and editor
+command path. `affix_change` advertises support. The native helper invokes the game's exact
+ItemAffix(UInt16, Byte, Byte, Byte itemType, SealedAffixType) constructor, roots its result and
+validates the resulting layout before changing the existing list through managed Clear/Add.
+Seal flags and refresh signatures are prevalidated. Constructor normalization is observed through
+independent readback; refresh/rewrite exceptions are uncertain. Undo reconstructs the prior affix
+at its moved slot and rechecks override permission. The original strict-affix set-identity
+readback omission is fixed. Add/remove and actual-value mapping controls remain disabled.

@@ -328,3 +328,72 @@ fn pure_preparation_failure_preserves_the_owned_token_and_never_changes_the_reco
     assert_eq!(next.projected().status.level_requirement, 87);
     assert_eq!(record, saved);
 }
+
+#[test]
+fn affix_undo_follows_the_reordered_slot_and_rechecks_override() {
+    use eg_trainer::catalog::{AffixDefinition, Availability};
+    use eg_trainer::edits::{AffixEdit, SealState};
+    let mut data = catalog();
+    for id in [1, 2] {
+        data.affixes.insert(
+            id,
+            AffixDefinition {
+                id,
+                raw_name: "authored".into(),
+                raw_display_name: String::new(),
+                game_display_name: Availability::Unavailable { reason: "not formatted".into() },
+                kind: 0,
+                special: 0,
+                class_requirement: 0,
+                item_types: Some(vec![17]),
+                tier_count: 8,
+                standard_effect: 1.0,
+                numeric: Availability::Unavailable { reason: "not mapped".into() },
+            },
+        );
+    }
+    let mut before = snapshot(10);
+    before.affixes = (0..2)
+        .map(|slot| AffixSnapshot {
+            slot,
+            id: 1,
+            tier: 2,
+            roll: 10 + slot,
+            kind: 0,
+            seal: 0,
+            name: String::new(),
+            special: 0,
+        })
+        .collect();
+    before.class_requirement = 0;
+    before.fingerprint = before.legacy_fingerprint();
+    let plan = ForgePlan::edit(
+        &observation(before),
+        MANAGER,
+        &data,
+        &provenance(),
+        ItemEdit::Affix(AffixEdit {
+            slot: 1,
+            id: 2,
+            tier: 3,
+            roll: 200,
+            seal: SealState::Sealed,
+            allow_incompatible: true,
+        }),
+        true,
+    )
+    .unwrap();
+    assert_eq!(plan.moves()[&1], 0);
+    let token = ForgeUndo::from_confirmed(&WriteRecord {
+        status: WriteStatus::Confirmed(plan.projected().clone()),
+        plan,
+    })
+    .unwrap();
+    assert!(matches!(token.reverse_edit(), ItemEdit::Affix(e) if e.slot==0 && e.id==1 && e.tier==2 && e.roll==11 && e.seal==SealState::Normal));
+    assert_eq!(token.prepare(token.after(), MANAGER, &data, &provenance()), Err(EditError::OverrideRequired));
+    let reverse = token.prepare_with_override(token.after(), MANAGER, &data, &provenance(), true).unwrap();
+    assert_eq!(
+        reverse.projected().affixes.iter().map(|a| (a.id, a.roll, a.seal)).collect::<Vec<_>>(),
+        vec![(1, 11, 0), (1, 10, 0)]
+    );
+}

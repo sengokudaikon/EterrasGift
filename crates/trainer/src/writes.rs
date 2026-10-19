@@ -41,7 +41,8 @@ impl ForgePlan {
         }
         if !matches!(
             edit,
-            ItemEdit::Status(_)
+            ItemEdit::Affix(_)
+                | ItemEdit::Status(_)
                 | ItemEdit::BaseType(_)
                 | ItemEdit::UniqueIdentity(_)
                 | ItemEdit::Roll(edits::RollEdit {
@@ -67,6 +68,14 @@ impl ForgePlan {
         use eg_game_access::write::ForgeMutation;
         let item = self.projected();
         match self.edit_intent() {
+            ItemEdit::Affix(edit) => ForgeMutation::Affix {
+                slot: edit.slot as u8,
+                id: edit.id as u16,
+                tier: edit.tier as u8,
+                roll: edit.roll as u8,
+                seal: edit.seal as u8,
+                unrestricted: edit.allow_incompatible,
+            },
             ItemEdit::Roll(edit) => ForgeMutation::AffixRolls {
                 rolls: eg_game_access::write::AffixRolls::new(
                     &edit
@@ -99,6 +108,9 @@ impl ForgePlan {
             },
             _ => unreachable!("ForgePlan only admits implemented native edits"),
         }
+    }
+    pub fn moves(&self) -> &std::collections::BTreeMap<u8, u8> {
+        self.prepared.moves()
     }
     pub fn unrestricted(&self) -> bool {
         self.edit_intent().needs_override()

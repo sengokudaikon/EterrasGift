@@ -1,5 +1,7 @@
 //! Conditional Forge stores, game refresh and rooted full readback.
 
+mod affix;
+
 use super::{
     Class, DiscoveryError, Ptr, RuntimeAccess,
     forge::{ForgeGraph, Root, target},
@@ -311,6 +313,10 @@ impl RuntimeAccess {
     /// For rebuilding edits, `invoke` must describe this same runtime and the
     /// refresh methods must be callable synchronously; roots survive managed
     /// calls, exceptions and GC. Refresh failures are uncertain and never retried.
+    /// Affix replacement authorizes object_new, the exact ItemAffix constructor and
+    /// closed corlib List<ItemAffix>.Clear/Add. The constructor may allocate/GC and
+    /// normalize the new object but must not modify the selected item. Clear/Add
+    /// perform managed reference stores with barriers; failure after Clear is uncertain.
     /// Unique eligibility additionally calls getUnique(UInt16) before the store;
     /// its result must be valid game definition data in this runtime.
     /// Expected addresses are opaque comparisons only. After entering the void setter, failures
@@ -359,7 +365,17 @@ impl RuntimeAccess {
             // its list, clears it or throws. Every batch destination is checked first.
             let mut affix_roots = Vec::new();
             let mut affix_stores = Vec::new();
+            let mut replacement = None;
             match mutation {
+                ForgeMutation::Affix { .. } => {
+                    replacement = Some(self.prepare_affix(
+                        attached,
+                        &graph,
+                        invoke.ok_or_else(|| ForgeWriteError::Refused("Missing invocation API".into()))?,
+                        expected,
+                        mutation,
+                    )?);
+                }
                 ForgeMutation::AffixRolls { rolls, .. } => {
                     let class = self.class(&graph.images, c"", c"ItemAffix")?;
                     let list = self
@@ -514,6 +530,11 @@ impl RuntimeAccess {
                 attempt_store(write_api, object, *field, *value, readback)
             } else {
                 // STORE ATTEMPT BOUNDARY: every later failure is uncertain.
+                if let Some(replacement) = &replacement {
+                    replacement
+                        .apply(attached, write_api, invoke.expect("validated invocation API"), object)
+                        .map_err(uncertain)?;
+                }
                 for (field, value) in stores {
                     match value {
                         Scalar::U8(value) => write_api.set_u8(object, field, value),

@@ -112,6 +112,11 @@ pub type GameError = String;
 pub trait ForgeGame {
     fn catalog(&self) -> &Catalog;
 
+    /// Production uses the trainer's captured class, category and idol rules.
+    fn compatibility(&self, item: &ForgeItem, definition: &AffixDefinition, slot: Option<&super::item::AffixState>, unrestricted: bool) -> super::item::Compatibility {
+        super::item::compatibility(item, definition, slot, unrestricted)
+    }
+
     /// Persistent explanation when an observation provider offers no writes.
     fn read_only_reason(&self) -> Option<&str> {
         None

@@ -33,6 +33,23 @@ impl ForgeUndo {
         let before = record.plan.before();
         let item = before.snapshot();
         let reverse = match record.plan.edit_intent() {
+            ItemEdit::Affix(edit) => {
+                let old = &item.affixes[edit.slot as usize];
+                ItemEdit::Affix(crate::edits::AffixEdit {
+                    slot: i32::from(*record.plan.moves().get(&(edit.slot as u8)).ok_or(EditError::InvalidValues)?),
+                    id: i32::from(old.id),
+                    tier: i32::from(old.tier),
+                    roll: i32::from(old.roll),
+                    seal: match old.seal {
+                        0 => crate::edits::SealState::Normal,
+                        1 => crate::edits::SealState::Sealed,
+                        2 => crate::edits::SealState::Primordial,
+                        3 => crate::edits::SealState::Corrupted,
+                        _ => return Err(EditError::InvalidValues),
+                    },
+                    allow_incompatible: edit.allow_incompatible,
+                })
+            }
             ItemEdit::Roll(edit) => ItemEdit::Roll(RollEdit {
                 changes: edit
                     .changes

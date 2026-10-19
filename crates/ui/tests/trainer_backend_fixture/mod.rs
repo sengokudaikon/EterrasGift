@@ -126,28 +126,41 @@ impl BackendConnection for OwnedConnection {
                 })
                 .collect(),
             rarities: Default::default(),
-            affixes: [(
-                1,
-                AffixDefinition {
-                    id: 1,
-                    raw_name: "Health".into(),
-                    raw_display_name: "Health Ω".into(),
-                    game_display_name: Availability::Unavailable { reason: "not formatted".into() },
-                    kind: 0,
-                    special: 0,
-                    class_requirement: 0,
-                    item_types: None,
-                    tier_count: 8,
-                    standard_effect: 0.0,
-                    numeric: Availability::Unavailable { reason: "not mapped".into() },
-                },
-            )]
-            .into(),
+            affixes: (1..=5)
+                .map(|id| {
+                    (
+                        id,
+                        AffixDefinition {
+                            id,
+                            raw_name: "Health".into(),
+                            raw_display_name: match id {
+                                1 => "Health Ω",
+                                2 => "Vitality Ω",
+                                3 => "Class restricted",
+                                4 => "Resistance",
+                                _ => "Resistance II",
+                            }
+                            .into(),
+                            game_display_name: Availability::Unavailable { reason: "not formatted".into() },
+                            kind: i32::from(id >= 4),
+                            special: 0,
+                            class_requirement: if id == 3 { 2 } else { 0 },
+                            item_types: Some(vec![3]),
+                            tier_count: 8,
+                            standard_effect: 0.0,
+                            numeric: Availability::Unavailable { reason: "not mapped".into() },
+                        },
+                    )
+                })
+                .collect(),
         })
     }
     async fn read_forge(&mut self, _: jiff::Timestamp) -> Result<Option<ForgeSnapshot>, BackendError> {
         self.0.reads.fetch_add(1, Ordering::SeqCst);
         Ok(self.0.item.lock().unwrap().clone())
+    }
+    fn supports_affix_change(&self) -> bool {
+        true
     }
     fn supports_base_change(&self) -> bool {
         true
@@ -321,7 +334,7 @@ pub(super) fn capture(session: &Session) {
     assert_eq!(ui.global::<eg_ui::ForgeState>().get_item_name(), "Owned Hatchet Ω");
     assert!(!ui.global::<eg_ui::ForgeState>().get_can_apply());
     assert!(!ui.global::<eg_ui::ForgeState>().get_can_change_affix_list());
-    assert!(!ui.global::<eg_ui::ForgeState>().get_affixes().row_data(0).unwrap().can_edit);
+    assert!(ui.global::<eg_ui::ForgeState>().get_affixes().row_data(0).unwrap().can_edit);
     assert_eq!(ui.global::<eg_ui::ForgeState>().get_affixes().row_count(), 1);
     ui.global::<eg_ui::ForgeState>().invoke_apply();
     assert_eq!(handle.snapshot().last_write, None);
@@ -453,6 +466,69 @@ pub(super) fn capture(session: &Session) {
     *data.item.lock().unwrap() = Some(item("Replaced item", 18));
     command(&handle, Command::ReadForge, || true);
     wait(|| ui.global::<eg_ui::ForgeState>().get_item_name() == "Replaced item");
+    // Open the actual pop-up, then submit through its keyboard action.
+    session.click(280.0, 258.0);
+    assert!(forge.get_picker_open());
+    forge.invoke_picker_search_edited("Class restricted".into());
+    assert_eq!(forge.get_picker_rows().row_count(), 0, "captured class rules filter the picker");
+    forge.invoke_picker_search_edited("Vitality".into());
+    forge.invoke_picker_select(0);
+    session.capture(&ui, "backend-forge-affix-picker");
+    session.key(Key::Return);
+    assert!(!forge.get_picker_open());
+    forge.invoke_pick_tier(0, 2);
+    forge.invoke_pick_seal(0, 1);
+    assert!(forge.get_can_apply());
+    session.capture(&ui, "backend-forge-affix-draft");
+    forge.invoke_apply();
+    wait(|| forge.get_can_undo() && data.item.lock().unwrap().as_ref().unwrap().affixes[0].id == 2);
+    let actual = data.item.lock().unwrap().clone().unwrap();
+    assert_eq!((actual.affixes[0].tier, actual.affixes[0].seal), (3, 1));
+    session.capture(&ui, "backend-forge-affix-confirmed");
+    session.resize(680, 580);
+    session.capture(&ui, "backend-forge-affix-confirmed-narrow");
+    session.resize(1100, 700);
+    forge.invoke_undo();
+    wait(|| !forge.get_can_undo() && data.item.lock().unwrap().as_ref().unwrap().affixes[0].id == 1);
+    assert_eq!(data.item.lock().unwrap().as_ref().unwrap().affixes[0].seal, 0);
+    // Two different affix edits share a batch; the second moves before the first.
+    let mut mixed = item("Mixed affix draft", 23);
+    let mut suffix = mixed.affixes[0].clone();
+    suffix.slot = 1;
+    suffix.id = 4;
+    suffix.kind = 1;
+    suffix.name = "Resistance".into();
+    mixed.affixes.push(suffix);
+    mixed.fingerprint = mixed.legacy_fingerprint();
+    *data.item.lock().unwrap() = Some(mixed);
+    command(&handle, Command::ReadForge, || true);
+    wait(|| forge.get_affixes().row_count() == 2);
+    forge.invoke_pick_tier(0, 2);
+    assert!(forge.invoke_open_replace(1));
+    forge.invoke_picker_search_edited("Resistance II".into());
+    forge.invoke_picker_select(0);
+    forge.invoke_use_picker();
+    forge.invoke_pick_seal(1, 1);
+    assert_eq!(forge.get_drafts().row_count(), 2);
+    assert!(forge.get_can_apply());
+    forge.invoke_apply();
+    wait(|| forge.get_can_undo() && data.item.lock().unwrap().as_ref().unwrap().affixes[0].id == 5);
+    assert_eq!(
+        data.item
+            .lock()
+            .unwrap()
+            .as_ref()
+            .unwrap()
+            .affixes
+            .iter()
+            .map(|a| (a.id, a.tier, a.seal))
+            .collect::<Vec<_>>(),
+        vec![(5, 5, 1), (1, 3, 0)]
+    );
+    session.capture(&ui, "backend-forge-affix-mixed-confirmed");
+    forge.invoke_undo();
+    wait(|| !forge.get_can_undo() && data.item.lock().unwrap().as_ref().unwrap().affixes.iter().all(|a| a.tier == 5 && a.seal == 0));
+    assert_eq!(data.item.lock().unwrap().as_ref().unwrap().affixes.iter().map(|a| a.id).collect::<Vec<_>>(), vec![4, 1]);
     let mut unsupported = item("Unsupported status", 19);
     unsupported.status.level_requirement = -1;
     unsupported.fingerprint = unsupported.legacy_fingerprint();

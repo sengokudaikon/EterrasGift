@@ -3,7 +3,7 @@
 //! the game through `ForgeGame`; the editor computes none.
 
 use super::game::{Catalog, EditOutcome, ForgeGame, LegendaryType, WriteOutcome, refused};
-use super::item::{self, AffixDefinition, AffixKind, Category, Compatibility, ForgeItem, ItemEdit, Moves, RollRequest, RollTarget, Seal, StatusField, compatibility};
+use super::item::{self, AffixDefinition, AffixKind, Category, Compatibility, ForgeItem, ItemEdit, Moves, RollRequest, RollTarget, Seal, StatusField};
 use super::rows::{AffixRow, FieldDraft, FieldKind, FieldOption, RollRow, ValueEditor, base_key, base_of};
 use std::collections::{HashMap, VecDeque};
 
@@ -2035,7 +2035,7 @@ impl ForgeEditor {
 
     fn compatibility_of(&self, definition: &AffixDefinition, slot: Option<&item::AffixState>) -> Compatibility {
         match self.item.as_ref() {
-            Some(item) => compatibility(item, definition, slot, self.unrestricted()),
+            Some(item) => self.game.compatibility(item, definition, slot, self.unrestricted()),
             None => Compatibility::Unknown,
         }
     }
@@ -2232,6 +2232,7 @@ impl ForgeEditor {
             Compatibility::Rejected(reason) => match reason {
                 item::Rejection::SlotType => "Incompatible: this affix belongs in the other slot (prefix or suffix).".into(),
                 item::Rejection::AlreadyPresent => "Incompatible: the item already has this affix.".into(),
+                item::Rejection::ClassRequirement => "Incompatible: this affix requires another class.".into(),
                 item::Rejection::EquipmentType => "Incompatible: this affix rolls on another kind of item.".into(),
                 item::Rejection::SpecialCategory => "Incompatible: this kind of affix (experimental, personal, set) stays in its own slots.".into(),
             },
@@ -2319,7 +2320,7 @@ impl ForgeEditor {
                 .map(|added| ItemEdit::Remove { slot: added.slot, id: added.id }),
             ItemEdit::Remove { slot, .. } => before.affix(*slot).map(|removed| {
                 let definition = self.catalog().definition(removed.id);
-                let compatible = compatibility(after, &definition, None, self.unrestricted()) == Compatibility::Allowed;
+                let compatible = self.game.compatibility(after, &definition, None, self.unrestricted()) == Compatibility::Allowed;
                 let (prefixes, suffixes) = after.free_slots();
                 let free = removed.seal != Seal::Normal || (if removed.kind == AffixKind::Prefix { prefixes } else { suffixes }) > 0;
                 ItemEdit::Add {
@@ -2506,7 +2507,7 @@ impl ForgeEditor {
         } else {
             row.allows_incompatible()
         };
-        let compatibility = compatibility(item, &definition, item.affix(slot), self.unrestricted());
+        let compatibility = self.game.compatibility(item, &definition, item.affix(slot), self.unrestricted());
         if let Some(problem) = self.replacement_problem(compatibility, allow) {
             return Err(problem);
         }

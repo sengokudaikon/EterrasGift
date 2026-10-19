@@ -308,47 +308,8 @@ fn affix_values(id: i32, tier: i32, roll: i32) -> Result<(), EditError> {
     Ok(())
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum LayoutProblem {
-    Capacity,
-    UniqueCorrupted,
-    LegendaryUncorrupted,
-    UniqueSealed,
-    MultipleSealed,
-    MultipleCorrupted,
-    PrimordialTier,
-    NormalTierEight,
-}
-fn layout_problems(item: &ForgeSnapshot, affixes: &[AffixSnapshot]) -> Vec<LayoutProblem> {
-    let mut problems = Vec::new();
-    let sealed = affixes.iter().filter(|a| a.seal == 1).count();
-    let corrupted = affixes.iter().filter(|a| a.seal == 3).count();
-    if affixes.len() > if backed(item.rarity) { 7 } else { 32 } {
-        problems.push(LayoutProblem::Capacity)
-    }
-    if corrupted > 0 && matches!(item.rarity, 7 | 8) {
-        problems.push(LayoutProblem::UniqueCorrupted)
-    }
-    if corrupted > 0 && item.rarity == 9 && !item.status.corrupted {
-        problems.push(LayoutProblem::LegendaryUncorrupted)
-    }
-    if sealed > 0 && backed(item.rarity) {
-        problems.push(LayoutProblem::UniqueSealed)
-    }
-    if sealed > 1 {
-        problems.push(LayoutProblem::MultipleSealed)
-    }
-    if corrupted > 1 {
-        problems.push(LayoutProblem::MultipleCorrupted)
-    }
-    if affixes.iter().any(|a| a.seal == 2 && a.tier != 8) {
-        problems.push(LayoutProblem::PrimordialTier)
-    }
-    if affixes.iter().any(|a| a.seal == 0 && a.tier == 8) {
-        problems.push(LayoutProblem::NormalTierEight)
-    }
-    problems
-}
+pub use eg_game_access::write::LayoutProblem;
+use eg_game_access::write::{affix_order_key, layout_problems};
 fn new_problem(item: &ForgeSnapshot, affixes: &[AffixSnapshot]) -> Result<(), EditError> {
     let old = layout_problems(item, &item.affixes);
     match layout_problems(item, affixes).into_iter().find(|p| !old.contains(p)) {
@@ -357,19 +318,9 @@ fn new_problem(item: &ForgeSnapshot, affixes: &[AffixSnapshot]) -> Result<(), Ed
     }
 }
 fn order(affixes: &mut [AffixSnapshot], rarity: u8) {
-    // Stable sorting retains order within each load group.
-    affixes.sort_by_key(|a| {
-        if backed(rarity) {
-            if a.seal == 3 { 1 } else { 0 }
-        } else {
-            match a.seal {
-                1 => 0,
-                3 => 1,
-                _ => 2,
-            }
-        }
-    });
+    affixes.sort_by_key(|a| affix_order_key(rarity, a.seal));
 }
+
 fn rarity_after(item: &ForgeSnapshot, affixes: &[AffixSnapshot]) -> u8 {
     if backed(item.rarity) || item.rarity > 6 {
         return item.rarity;
@@ -903,11 +854,8 @@ fn inspect_readback(before: &ForgeSnapshot, edit: &ItemEdit, expected: &ForgeSna
         compare(differences, "classRequirement", &expected.class_requirement, &after.class_requirement)
     }
     compare(differences, "rarity", &expected.rarity, &after.rarity);
-    // Preserve the C# strict-affix exception: set identity is not read back by
-    // that overload; other edit policies compare the full identity and rolls.
-    if !matches!(edit, ItemEdit::Affix(_)) || before.rarity != 8 {
-        compare(differences, "identity", &expected.identity, &after.identity)
-    }
+    // The original strict-affix overload omitted set identity. Preserve it here.
+    compare(differences, "identity", &expected.identity, &after.identity);
     if !matches!(edit, ItemEdit::BaseType(BaseTypeEdit { item_type: Some(_), .. })) {
         compare(differences, "implicitRolls", &expected.implicit_rolls, &after.implicit_rolls)
     }

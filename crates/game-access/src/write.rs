@@ -1,11 +1,13 @@
-//! Owned protocol32 Forge writes and bounded native acknowledgement decoding.
+//! Owned protocol33 Forge writes and bounded native acknowledgement decoding.
 //! These codecs grant no process access or write permission. Host generation,
 //! profile, policy and main-thread runtime admission remain independent checks.
 
 use crate::{
-    forge::{self, ForgeSnapshot},
+    forge::{self, AffixSnapshot, ForgeSnapshot},
     protocol::{DispatcherSpec, MAGIC, MAX_RESPONSE_SIZE, ProtocolError, REQUEST_SIZE, Response, ResponseCode},
 };
+
+pub const CHANGE_AFFIX_OPERATION: u32 = 1;
 
 pub const CHANGE_AFFIX_ROLLS_OPERATION: u32 = 2;
 
@@ -54,19 +56,59 @@ pub const CHANGE_IDENTITY_OPERATION: u32 = 17;
 /// transport; domain planning separately checks catalog compatibility/override.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ForgeMutation {
-    AffixRolls { rolls: AffixRolls, unrestricted: bool },
-    Status { field: StatusField, value: u8, unrestricted: bool },
-    Base { item_type: u8, sub_type: u16, unrestricted: bool },
-    Identity { id: u16, sub_type: u8, rarity: u8, unrestricted: bool },
+    Affix {
+        slot: u8,
+        id: u16,
+        tier: u8,
+        roll: u8,
+        seal: u8,
+        unrestricted: bool,
+    },
+    AffixRolls {
+        rolls: AffixRolls,
+        unrestricted: bool,
+    },
+    Status {
+        field: StatusField,
+        value: u8,
+        unrestricted: bool,
+    },
+    Base {
+        item_type: u8,
+        sub_type: u16,
+        unrestricted: bool,
+    },
+    Identity {
+        id: u16,
+        sub_type: u8,
+        rarity: u8,
+        unrestricted: bool,
+    },
 }
 impl ForgeMutation {
     pub fn unrestricted(self) -> bool {
         match self {
-            Self::AffixRolls { unrestricted, .. } | Self::Status { unrestricted, .. } | Self::Base { unrestricted, .. } | Self::Identity { unrestricted, .. } => unrestricted,
+            Self::Affix { unrestricted, .. }
+            | Self::AffixRolls { unrestricted, .. }
+            | Self::Status { unrestricted, .. }
+            | Self::Base { unrestricted, .. }
+            | Self::Identity { unrestricted, .. } => unrestricted,
         }
     }
     pub fn project(self, item: &mut ForgeSnapshot) {
         match self {
+            Self::Affix { slot, id, tier, roll, seal, .. } => {
+                if let Some(affix) = item.affixes.get_mut(usize::from(slot)) {
+                    affix.id = id;
+                    affix.tier = u16::from(tier);
+                    affix.roll = roll;
+                    affix.seal = i32::from(seal);
+                }
+                item.affixes.sort_by_key(|a| affix_order_key(item.rarity, a.seal));
+                for (slot, affix) in item.affixes.iter_mut().enumerate() {
+                    affix.slot = slot as u8;
+                }
+            }
             Self::AffixRolls { rolls, .. } => {
                 for change in rolls.changes() {
                     if let Some(affix) = item.affixes.get_mut(usize::from(change.slot)) {
@@ -96,6 +138,14 @@ impl ForgeMutation {
         }
         let unrestricted = flags == 1;
         match operation {
+            CHANGE_AFFIX_OPERATION if value <= 4095 && selector < 32 && (1..=8).contains(&(extra & 255)) && (extra >> 16) <= 3 => Ok(Self::Affix {
+                slot: selector as u8,
+                id: value as u16,
+                tier: extra as u8,
+                roll: (extra >> 8) as u8,
+                seal: (extra >> 16) as u8,
+                unrestricted,
+            }),
             SET_STATUS_OPERATION if value <= 255 && extra == 0 => {
                 let field = StatusField::from_wire(selector)?;
                 if matches!(field, StatusField::Corrupted | StatusField::Ruined) && value > 1 {
@@ -158,6 +208,12 @@ impl ForgeMutation {
     }
     fn header_fields(self) -> (u32, u32, u32, u32) {
         match self {
+            Self::Affix { slot, id, tier, roll, seal, .. } => (
+                CHANGE_AFFIX_OPERATION,
+                u32::from(id),
+                u32::from(slot),
+                u32::from(tier) | (u32::from(roll) << 8) | (u32::from(seal) << 16),
+            ),
             Self::AffixRolls { rolls, .. } => (CHANGE_AFFIX_ROLLS_OPERATION, u32::from(rolls.len), 0, 0),
             Self::Status { field, value, .. } => (SET_STATUS_OPERATION, u32::from(value), field as u32, 0),
             Self::Base { item_type, sub_type, .. } => (CHANGE_BASE_OPERATION, u32::from(sub_type), u32::from(item_type), 0),
@@ -393,5 +449,59 @@ pub fn classify_response(response: &Response, request: &ForgeWrite) -> WriteRepl
     WriteReply::NotApplied {
         code: response.code,
         message: message.into(),
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LayoutProblem {
+    Capacity,
+    UniqueCorrupted,
+    LegendaryUncorrupted,
+    UniqueSealed,
+    MultipleSealed,
+    MultipleCorrupted,
+    PrimordialTier,
+    NormalTierEight,
+}
+pub fn layout_problems(item: &ForgeSnapshot, affixes: &[AffixSnapshot]) -> Vec<LayoutProblem> {
+    let mut problems = Vec::new();
+    let sealed = affixes.iter().filter(|a| a.seal == 1).count();
+    let corrupted = affixes.iter().filter(|a| a.seal == 3).count();
+    if affixes.len() > if matches!(item.rarity, 7..=9) { 7 } else { 32 } {
+        problems.push(LayoutProblem::Capacity)
+    }
+    if corrupted > 0 && matches!(item.rarity, 7 | 8) {
+        problems.push(LayoutProblem::UniqueCorrupted)
+    }
+    if corrupted > 0 && item.rarity == 9 && !item.status.corrupted {
+        problems.push(LayoutProblem::LegendaryUncorrupted)
+    }
+    if sealed > 0 && matches!(item.rarity, 7..=9) {
+        problems.push(LayoutProblem::UniqueSealed)
+    }
+    if sealed > 1 {
+        problems.push(LayoutProblem::MultipleSealed)
+    }
+    if corrupted > 1 {
+        problems.push(LayoutProblem::MultipleCorrupted)
+    }
+    if affixes.iter().any(|a| a.seal == 2 && a.tier != 8) {
+        problems.push(LayoutProblem::PrimordialTier)
+    }
+    if affixes.iter().any(|a| a.seal == 0 && a.tier == 8) {
+        problems.push(LayoutProblem::NormalTierEight)
+    }
+    problems
+}
+/// Stable load grouping used by the game: regular seal, corrupted seal, remaining affixes.
+pub fn affix_order_key(rarity: u8, seal: i32) -> u8 {
+    if matches!(rarity, 7..=9) {
+        u8::from(seal == 3)
+    } else {
+        match seal {
+            1 => 0,
+            3 => 1,
+            _ => 2,
+        }
     }
 }

@@ -665,6 +665,7 @@ pub enum Compatibility {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Rejection {
+    ClassRequirement,
     SlotType,
     EquipmentType,
     SpecialCategory,

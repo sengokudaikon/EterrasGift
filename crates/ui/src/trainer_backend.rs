@@ -30,6 +30,74 @@ impl ForgeGame for ObservedGame {
     fn catalog(&self) -> &Catalog {
         &self.catalog
     }
+    fn compatibility(&self, item: &ForgeItem, definition: &AffixDefinition, slot: Option<&AffixState>, unrestricted: bool) -> item::Compatibility {
+        use eg_trainer::edits::{CompatibilityReason, compatibility};
+        use item::{Compatibility, Rejection};
+        let state = self.writer.borrow().backend.snapshot();
+        let Some(data) = state.catalog.data() else {
+            return Compatibility::Unknown;
+        };
+        let Some(definition) = data.affixes.get(&definition.id) else {
+            return Compatibility::Unknown;
+        };
+        let ForgeState::Item { snapshot, .. } = &state.forge else {
+            return Compatibility::Unknown;
+        };
+        if project_item(&state).ok().flatten().is_none_or(|actual| actual.token != item.token) {
+            return Compatibility::Unknown;
+        }
+        // Earlier draft steps may already move/replace affixes in this local
+        // projection. Keep the captured class context and use the domain rules.
+        let mut projected = (**snapshot).clone();
+        let Ok(item_type) = u8::try_from(item.item_type) else {
+            return Compatibility::Unknown;
+        };
+        projected.item_type = item_type;
+        projected.sub_type = item.sub_type;
+        projected.rarity = item.rarity;
+        projected.affixes.clear();
+        for affix in &item.affixes {
+            let Ok(slot) = u8::try_from(affix.slot) else {
+                return Compatibility::Unknown;
+            };
+            projected.affixes.push(eg_trainer::backend::AffixSnapshot {
+                slot,
+                id: affix.id,
+                tier: u16::from(affix.tier),
+                roll: affix.roll,
+                kind: match affix.kind {
+                    AffixKind::Prefix => 0,
+                    AffixKind::Suffix => 1,
+                },
+                special: match affix.category {
+                    Category::Standard => 0,
+                    Category::Experimental => 1,
+                    Category::Personal => 2,
+                    Category::Set => 3,
+                    Category::Corrupted => 6,
+                },
+                seal: affix.seal.index() as i32,
+                name: String::new(),
+            });
+        }
+        let slot = match slot {
+            Some(slot) => match projected.affixes.iter().find(|a| usize::from(a.slot) == slot.slot) {
+                Some(a) => Some(a),
+                None => return Compatibility::Unknown,
+            },
+            None => None,
+        };
+        match compatibility(data, &projected, definition, slot, None, unrestricted).reason {
+            CompatibilityReason::None => Compatibility::Allowed,
+            CompatibilityReason::Override => Compatibility::Override,
+            CompatibilityReason::ClassRequirement => Compatibility::Rejected(Rejection::ClassRequirement),
+            CompatibilityReason::SlotType => Compatibility::Rejected(Rejection::SlotType),
+            CompatibilityReason::EquipmentType => Compatibility::Rejected(Rejection::EquipmentType),
+            CompatibilityReason::SpecialCategory => Compatibility::Rejected(Rejection::SpecialCategory),
+            CompatibilityReason::AlreadyPresent => Compatibility::Rejected(Rejection::AlreadyPresent),
+            CompatibilityReason::MissingMetadata | CompatibilityReason::UnknownGameValue => Compatibility::Unknown,
+        }
+    }
     fn read(&self) -> Option<ForgeItem> {
         let writer = self.writer.borrow();
         if writer.backend.subscribe().has_changed().is_err() {
@@ -55,7 +123,11 @@ impl ForgeGame for ObservedGame {
     }
     fn read_only_reason(&self) -> Option<&str> {
         let state = self.writer.borrow().backend.snapshot();
-        (!state.capabilities.status_fields.iter().any(|s| *s) && !state.capabilities.base_change && !state.capabilities.identity_change && !state.capabilities.affix_rolls)
+        (!state.capabilities.status_fields.iter().any(|s| *s)
+            && !state.capabilities.base_change
+            && !state.capabilities.identity_change
+            && !state.capabilities.affix_rolls
+            && !state.capabilities.affix_change)
             .then_some(READ_ONLY)
     }
     fn resolve(&self, _: &ForgeItem, _: &RollRequest) -> Result<ValueTable, GameError> {
@@ -176,6 +248,7 @@ impl Writer {
 
 fn supports(state: &BackendSnapshot, edit: &ItemEdit) -> bool {
     match edit {
+        ItemEdit::Affix { .. } => state.capabilities.affix_change,
         ItemEdit::Status { field, .. } => state.capabilities.status_fields[*field as usize],
         ItemEdit::Base { .. } => state.capabilities.base_change,
         ItemEdit::Identity { .. } => state.capabilities.identity_change,
@@ -188,6 +261,26 @@ fn supports(state: &BackendSnapshot, edit: &ItemEdit) -> bool {
 fn canonical_edit(edit: &ItemEdit, override_enabled: bool) -> Option<eg_trainer::edits::ItemEdit> {
     use eg_trainer::edits as native;
     Some(match edit {
+        ItemEdit::Affix {
+            slot,
+            id,
+            tier,
+            roll,
+            seal,
+            allow_incompatible,
+        } => native::ItemEdit::Affix(native::AffixEdit {
+            slot: i32::try_from(*slot).ok()?,
+            id: i32::from(*id),
+            tier: i32::from(*tier),
+            roll: i32::from(*roll),
+            seal: match seal {
+                item::Seal::Normal => native::SealState::Normal,
+                item::Seal::Sealed => native::SealState::Sealed,
+                item::Seal::Primordial => native::SealState::Primordial,
+                item::Seal::Corrupted => native::SealState::Corrupted,
+            },
+            allow_incompatible: *allow_incompatible,
+        }),
         ItemEdit::Status { field, value, unrestricted } => native::ItemEdit::Status(native::StatusEdit {
             field: *field,
             value: i32::from(*value),
@@ -456,9 +549,13 @@ fn project_catalog(data: &GameCatalog) -> Catalog {
                 name,
                 kind,
                 category,
-                item_types: vec![],
+                item_types: definition
+                    .item_types
+                    .as_ref()
+                    .map(|types| types.iter().filter_map(|t| u16::try_from(*t).ok()).collect())
+                    .unwrap_or_default(),
                 max_tier,
-                verified: false,
+                verified: definition.id <= 4095 && (1..=8).contains(&max_tier) && definition.item_types.as_ref().is_some_and(|types| types.iter().all(|t| (0..=41).contains(t))),
             });
         }
     }
