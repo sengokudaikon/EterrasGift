@@ -451,3 +451,22 @@ passes both toolchains (503 stable cases including architecture/ownership guards
 Clippy/formatting pass, and the combat capture was inspected. No helper opcode,
 mapping/description capability, actual-game execution or UI binding is added.
 See tools/trainer-eval/unity-rust-host/numeric-context-README.md and its report index.
+
+
+## First gameplay callback ABI, 2026-10-19
+
+The authored unpatched instance Boolean oracle passes stable debug/nightly release
+with incremental GC off/on. Each mode has 46 cases, including 12 managed exceptions
+and eight foreign unwinds through Rust cleanup guards to an outer typed C++ catcher.
+Receiver and hidden-argument forwarding, original side effects, enabled bypass,
+worker passthrough, exception rooting and recovery pass. Both workers join, all roots
+are released, and the original native regression and shutdown pass. All 164 frozen
+inputs remain unchanged; no runtime fixes or refreezes occurred. Initial build and
+extraction failures remain retained.
+
+This validates the tested C-unwind ABI under source-bound lifetime and attachment
+contracts. No entry patch, trampoline, real owner/offline/main-thread admission,
+production gameplay capability or actual-game execution is established. Static
+inspection finds a shrinkwrapped late RBX save in the authored target's unwind data;
+new bridge metadata and actual Windows unwind controls are required. Source and
+results: tools/trainer-eval/unpatched-bool-abi/README.md and report.json.
