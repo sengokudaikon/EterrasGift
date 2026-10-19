@@ -69,6 +69,10 @@ run = "cargo test -p eg-game-access -p eg-trainer -p eg-trainer-helper -p eg-tra
 description = "Trainer fixtures on installed nightly in release mode; no live game"
 run = "cargo +nightly test -p eg-game-access -p eg-trainer -p eg-trainer-helper -p eg-trainer-host --release --offline"
 
+[tasks."trainer:verify"]
+description = "Trainer product tests followed by workspace lint, format, tokens and fake-host captures"
+run = ["mise run trainer:test", "mise run verify"]
+
 [tasks."trainer:helper:build"]
 description = "Build and snapshot the retained Rust helper with source/DLL identities; no process access"
 run = "pwsh -NoProfile -File tools/trainer-eval/persistent-player/Build-Helper.ps1"

@@ -2,14 +2,14 @@ use eg_core::game_log::{GameLogState, GameLogStatus, GameReadiness};
 use eg_game_access::{bootstrap::HelperArtifact, process::ProcessIdentity};
 use eg_trainer::{
     backend::{BackendError, ErrorKind},
-    connection::{AdmissionCheck, LogFactory, PreparationFailure, PreparationResidency},
+    connection::{AdmissionCheck, LogFactory},
     gate::LogSource,
     profile::BuildProfile,
 };
 use std::{
     future::Future,
     sync::{
-        Arc, Mutex,
+        Arc,
         atomic::{AtomicUsize, Ordering},
     },
     time::Duration,
@@ -156,14 +156,4 @@ impl LogFactory for Logs {
         self.calls.fetch_add(1, Ordering::SeqCst);
         Ok(Log)
     }
-}
-pub type Observed = Arc<Mutex<Vec<(ProcessIdentity, BuildProfile)>>>;
-pub fn failure(residency: PreparationResidency) -> PreparationFailure {
-    PreparationFailure {
-        error: BackendError::blocked(ErrorKind::Fault, "authored authority failure before any process access"),
-        residency,
-    }
-}
-pub fn other_target(target: &ProcessIdentity, pid: u32) -> ProcessIdentity {
-    ProcessIdentity { pid, ..target.clone() }
 }

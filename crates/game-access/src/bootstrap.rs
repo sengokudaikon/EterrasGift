@@ -69,12 +69,12 @@ pub struct BootstrapConfig {
     operation: BootstrapOperation,
 }
 impl BootstrapConfig {
-    pub fn new(pid: u32, main_tid: u32, source_id: &str, operation: BootstrapOperation) -> Result<Self> {
-        if pid == 0 || main_tid == 0 || !source_id_valid(source_id) {
-            return invalid("PID, main thread or source ID");
+    pub fn new(pid: u32, source_id: &str, operation: BootstrapOperation) -> Result<Self> {
+        if pid == 0 || !source_id_valid(source_id) {
+            return invalid("PID or source ID");
         }
         let mut bytes = [0; CONFIG_SIZE];
-        for (at, value) in [(0, CONFIG_MAGIC), (4, CONFIG_SIZE as u32), (8, pid), (12, main_tid), (16, operation as u32)] {
+        for (at, value) in [(0, CONFIG_MAGIC), (4, CONFIG_SIZE as u32), (8, pid), (16, operation as u32)] {
             bytes[at..at + 4].copy_from_slice(&value.to_le_bytes());
         }
         bytes[20..24].copy_from_slice(&(-1_i32).to_le_bytes());

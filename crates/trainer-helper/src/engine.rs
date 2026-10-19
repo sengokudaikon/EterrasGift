@@ -19,7 +19,7 @@ use std::{
     ptr::NonNull,
     sync::{
         OnceLock,
-        atomic::{AtomicPtr, AtomicU64, Ordering::SeqCst},
+        atomic::{AtomicBool, AtomicPtr, AtomicU64, Ordering::SeqCst},
     },
     time::{Duration, Instant},
 };
@@ -27,9 +27,10 @@ use windows_sys::Win32::System::{
     Diagnostics::Debug::RtlLookupFunctionEntry,
     LibraryLoader::{GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS, GET_MODULE_HANDLE_EX_FLAG_PIN, GetModuleHandleExW, GetModuleHandleW, GetProcAddress},
     SystemInformation::GetTickCount64,
-    Threading::{GetCurrentProcessId, GetCurrentThreadId, GetProcessIdOfThread, GetThreadDescription, OpenThread, THREAD_QUERY_LIMITED_INFORMATION},
+    Threading::{GetCurrentProcessId, GetCurrentThreadId},
 };
 
+static STARTED: AtomicBool = AtomicBool::new(false);
 static STATE: OnceLock<Shared> = OnceLock::new();
 static QUEUE: OnceLock<Dispatcher<Request, Response>> = OnceLock::new();
 static ORIGINAL: AtomicPtr<u8> = AtomicPtr::new(std::ptr::null_mut());
@@ -326,15 +327,50 @@ unsafe extern "C-unwind" fn callback(method: *const MethodInfo) {
     }
 }
 
-fn after_original(state: &Shared) {
-    // SAFETY: process-local identity query.
-    let tid = unsafe { GetCurrentThreadId() } as u64;
-    if tid != state.metrics[1].load(SeqCst) {
-        state.metrics[14].fetch_add(1, SeqCst);
-        return;
+// The engine callback establishes its own thread identity. A worker calling
+// ExecuteTasks has no Unity context and cannot claim the queue or the main TID.
+fn claim_dispatch_thread(main: &AtomicU64, tid: u64, check: impl FnOnce() -> Result<bool, String>) -> Result<bool, String> {
+    let known = main.load(SeqCst);
+    if known != 0 {
+        return Ok(known == tid);
     }
+    if tid == 0 || !check()? {
+        return Ok(false);
+    }
+    Ok(main.compare_exchange(0, tid, SeqCst, SeqCst).unwrap_or_else(|known| known) == 0 || main.load(SeqCst) == tid)
+}
+
+unsafe fn check_dispatch_thread() -> Result<bool, String> {
+    // SAFETY: called after original ExecuteTasks on a thread of the retained
+    // initialized runtime. The getters access only its thread-local context.
+    unsafe {
+        let module = module()?;
+        let (api, access) = apis(module)?;
+        let invocation = raw::InvocationApi::resolve(|name| export(module, name)).map_err(|e| e.to_string())?;
+        let thread = ThreadContext::new(api);
+        let attached = thread.attach().map_err(|e| e.to_string())?;
+        access.is_dispatcher_thread(&attached, invocation).map_err(|e| e.to_string())
+    }
+}
+
+fn after_original(state: &Shared) {
     if state.stop.load(SeqCst) {
         return;
+    }
+    // SAFETY: process-local identity query and callback-local initialized runtime.
+    let tid = unsafe { GetCurrentThreadId() } as u64;
+    match claim_dispatch_thread(&state.metrics[1], tid, || unsafe { check_dispatch_thread() }) {
+        Ok(true) => {}
+        Ok(false) => {
+            state.metrics[14].fetch_add(1, SeqCst);
+            return;
+        }
+        Err(error) => {
+            eprintln!("EG_HELPER_DISPATCH_THREAD {error}");
+            state.metrics[0].store(31, SeqCst);
+            state.stop.store(true, SeqCst);
+            return;
+        }
     }
     // Independent runtime observation continues while the owning app is alive. There are no
     // persistent gameplay hooks in this slice. Completed explicit field writes are
@@ -488,34 +524,20 @@ unsafe fn worker() -> Result<(), String> {
 }
 
 #[unsafe(no_mangle)]
-/// Start once, explicitly after loader initialization on the established Unity main thread.
+/// Start once after loader initialization, from either an engine or native control thread.
+/// The legacy argument is ignored; only the verified callback establishes the main TID.
 /// # Safety
-/// Caller authorizes offline use, identifies exact Unity6000.4.8 Windows x64 ABI/layout and initialized
-/// game classes, and retains runtime metadata through process exit. Caller grants SchedulerHook's
-/// exclusive target/control-flow/thread-creation contracts and prevents domain teardown until shutdown.
-/// Explicit write requests additionally require permission and exclusive rooted graph ownership
-/// for the validated ItemDataUnpacked Int32 level field store and full readback.
-/// Conditional current-player rate requests additionally authorize one selected
-/// CharacterStats.attackRate or BaseStats.increasedLeechRate Single store. They require
-/// populated static caches and exclusive reference, scalar and Unity native-lifetime
-/// access through the rooted comparison, store and complete readback. Expected tokens
-/// grant no historical selection, replay or lifetime authority. Other gameplay writes,
-/// RebuildID, getters and constructors are not authorized by this operation.
-/// Attack/leech reads require the same initialized caches and exclusive rooted copy;
-/// strong GC roots alone do not preserve native-object lifetime.
-/// Never call under DllMain/loader lock. No helper/code unload is allowed, including on failure.
-pub unsafe extern "C" fn eg_helper_start(main_tid: u32) -> i32 {
-    // SAFETY: local identity query takes no parameters.
-    if main_tid == 0 || unsafe { GetCurrentThreadId() } != main_tid {
-        return 2;
-    }
-    // SAFETY: the caller established the actual Unity main thread and runtime contracts.
-    unsafe { start_authorized(main_tid) }
+/// Caller selects the supported initialized Unity6000.4.8 Windows x64 runtime,
+/// retains helper/runtime modules through game exit and excludes competing patches.
+/// Never call under DllMain/loader lock. Per-operation graph checks still apply.
+pub unsafe extern "C" fn eg_helper_start(_legacy_main_tid: u32) -> i32 {
+    // SAFETY: caller establishes the supported runtime and module lifetime.
+    unsafe { start_authorized() }
 }
 
-unsafe fn start_authorized(main_tid: u32) -> i32 {
+unsafe fn start_authorized() -> i32 {
     let state = state();
-    if state.metrics[1].compare_exchange(0, main_tid as u64, SeqCst, SeqCst).is_err() {
+    if STARTED.compare_exchange(false, true, SeqCst, SeqCst).is_err() {
         return 1;
     }
     // SAFETY: exact modules identified by caller; pin before publishing persistent work.
@@ -549,7 +571,7 @@ struct BootstrapConfig {
     magic: u32,
     size: u32,
     pid: u32,
-    main_tid: u32,
+    _legacy_main_tid: u32,
     operation: u32,
     status: i32,
     build_id: [u8; 64],
@@ -562,36 +584,6 @@ const _: () = assert!(
         && std::mem::offset_of!(BootstrapConfig, reserved) == 88
 );
 
-unsafe fn named_main_thread(main_tid: u32) -> bool {
-    use windows_sys::Win32::Foundation::{CloseHandle, LocalFree};
-    // SAFETY: query-only ownership/name corroboration of the explicitly nominated thread.
-    unsafe {
-        let thread = OpenThread(THREAD_QUERY_LIMITED_INFORMATION, 0, main_tid);
-        if thread.is_null() {
-            return false;
-        }
-        let belongs = GetProcessIdOfThread(thread) == GetCurrentProcessId();
-        let mut description = std::ptr::null_mut();
-        let result = GetThreadDescription(thread, &raw mut description);
-        CloseHandle(thread);
-        if result < 0 || description.is_null() {
-            return false;
-        }
-        // Windows owns a NUL-terminated allocation. Stop at its terminator, rather than reading
-        // the expected name's full length from a potentially shorter returned allocation.
-        let mut name = Vec::new();
-        for index in 0..1024 {
-            let unit = description.add(index).read();
-            if unit == 0 {
-                break;
-            }
-            name.push(unit);
-        }
-        LocalFree(description.cast());
-        belongs && name == "Unity Main Thread".encode_utf16().collect::<Vec<_>>()
-    }
-}
-
 #[unsafe(no_mangle)]
 /// Explicit Win32 remote-thread bootstrap after LoadLibrary returns. Operation 1 starts once;
 /// operation 2 accepts asynchronous shutdown and returns three retained read-only counter
@@ -603,8 +595,8 @@ unsafe fn named_main_thread(main_tid: u32) -> bool {
 /// `parameter` must point to aligned, initialized, exclusively writable 112-byte BootstrapConfig
 /// storage retained until this thread exits. Caller establishes every `eg_helper_start` runtime,
 /// offline, exclusive-patching and retained-lifetime obligation, except that execution is on a
-/// dedicated native thread outside loader lock. The nominated TID must be the established Unity
-/// main thread. Its OS owner/name is only corroboration, not proof of engine-thread semantics.
+/// dedicated native thread outside loader lock. The legacy TID slot is ignored;
+/// callback-local synchronization-context validation establishes the execution thread.
 pub unsafe extern "system" fn eg_helper_bootstrap(parameter: *mut c_void) -> u32 {
     if parameter.is_null() {
         return 60;
@@ -618,19 +610,16 @@ pub unsafe extern "system" fn eg_helper_bootstrap(parameter: *mut c_void) -> u32
         if config.magic != 0x4547_4253
             || config.size != 112
             || config.pid != unsafe { GetCurrentProcessId() }
-            || config.main_tid == 0
-            || config.main_tid == unsafe { GetCurrentThreadId() }
             || config.build_id != BUILD_ID.as_bytes()
             || config.reserved != [0; 24]
             || !matches!(config.operation, 1..=3)
-            || !unsafe { named_main_thread(config.main_tid) }
         {
             return 60;
         }
         if config.operation == 1 {
             // SAFETY: validated bootstrap identity plus the caller's exact runtime contract.
-            unsafe { start_authorized(config.main_tid) }
-        } else if state().metrics[1].load(SeqCst) == u64::from(config.main_tid) {
+            unsafe { start_authorized() }
+        } else if STARTED.load(SeqCst) {
             if config.operation == 2 {
                 for (slot, metric) in [9, 10, 0].into_iter().enumerate() {
                     let address = state().metrics[metric].as_ptr() as usize as u64;
@@ -670,6 +659,18 @@ mod tests {
     use super::*;
 
     #[test]
+    fn only_a_verified_callback_claims_the_queue_thread() {
+        let main = AtomicU64::new(0);
+        assert!(!claim_dispatch_thread(&main, 12, || Ok(false)).unwrap());
+        assert_eq!(main.load(SeqCst), 0);
+        assert!(claim_dispatch_thread(&main, 13, || Err("getter failed".into())).is_err());
+        assert_eq!(main.load(SeqCst), 0);
+        assert!(claim_dispatch_thread(&main, 14, || Ok(true)).unwrap());
+        assert!(!claim_dispatch_thread(&main, 15, || panic!("another thread cannot replace main")).unwrap());
+        assert!(claim_dispatch_thread(&main, 14, || panic!("known main needs no new managed call")).unwrap());
+    }
+
+    #[test]
     fn bootstrap_rejects_bad_admission_without_starting_a_worker() {
         // SAFETY: the null path returns without accessing configuration or runtime state.
         assert_eq!(unsafe { eg_helper_bootstrap(std::ptr::null_mut()) }, 60);
@@ -679,7 +680,7 @@ mod tests {
                 size: 112,
                 // SAFETY: local identity query, no game runtime involved.
                 pid: unsafe { GetCurrentProcessId() },
-                main_tid: u32::MAX,
+                _legacy_main_tid: u32::MAX,
                 operation: 1,
                 status: -1,
                 build_id: BUILD_ID.as_bytes().try_into().unwrap(),
@@ -689,7 +690,7 @@ mod tests {
                 0 => config.magic = 0,
                 1 => config.size = 111,
                 2 => config.pid = 0,
-                3 => config.main_tid = 0,
+                3 => config.operation = 0,
                 4 => config.operation = 4,
                 5 => config.build_id = [0; 64],
                 _ => config.reserved[23] = 1,

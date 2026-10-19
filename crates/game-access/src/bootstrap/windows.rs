@@ -18,20 +18,20 @@ use std::{
     time::Duration,
 };
 use windows_sys::Win32::{
-    Foundation::{ERROR_NO_MORE_FILES, FILETIME, GetLastError, HANDLE, INVALID_HANDLE_VALUE, LocalFree},
+    Foundation::{ERROR_NO_MORE_FILES, FILETIME, GetLastError, HANDLE, INVALID_HANDLE_VALUE},
     Storage::FileSystem::FILE_SHARE_READ,
     System::{
         Diagnostics::{
             Debug::{ReadProcessMemory, WriteProcessMemory},
-            ToolHelp::{CreateToolhelp32Snapshot, MODULEENTRY32W, Module32FirstW, Module32NextW, TH32CS_SNAPMODULE, TH32CS_SNAPTHREAD, THREADENTRY32, Thread32First, Thread32Next},
+            ToolHelp::{CreateToolhelp32Snapshot, MODULEENTRY32W, Module32FirstW, Module32NextW, TH32CS_SNAPMODULE},
         },
         LibraryLoader::{GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS, GET_MODULE_HANDLE_EX_FLAG_PIN, GetModuleFileNameW, GetModuleHandleExW, GetModuleHandleW, GetProcAddress},
         Memory::{MEM_COMMIT, MEM_RELEASE, MEM_RESERVE, PAGE_READWRITE, VirtualAllocEx, VirtualFreeEx},
         Threading::{
-            CreateRemoteThread, GetCurrentProcessId, GetExitCodeThread, GetProcessIdOfThread, GetProcessMitigationPolicy, GetProcessTimes, GetThreadDescription, GetThreadId,
-            GetThreadTimes, IsWow64Process2, OpenProcess, OpenThread, PROCESS_CREATE_THREAD, PROCESS_QUERY_INFORMATION, PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_SYNCHRONIZE,
-            PROCESS_VM_OPERATION, PROCESS_VM_READ, PROCESS_VM_WRITE, ProcessControlFlowGuardPolicy, ProcessDEPPolicy, ProcessDynamicCodePolicy, ProcessSignaturePolicy,
-            ProcessUserShadowStackPolicy, QueryFullProcessImageNameW, THREAD_QUERY_LIMITED_INFORMATION, THREAD_SYNCHRONIZE, WaitForSingleObject,
+            CreateRemoteThread, GetCurrentProcessId, GetExitCodeThread, GetProcessMitigationPolicy, GetProcessTimes, IsWow64Process2, OpenProcess, PROCESS_CREATE_THREAD,
+            PROCESS_QUERY_INFORMATION, PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_SYNCHRONIZE, PROCESS_VM_OPERATION, PROCESS_VM_READ, PROCESS_VM_WRITE,
+            ProcessControlFlowGuardPolicy, ProcessDEPPolicy, ProcessDynamicCodePolicy, ProcessSignaturePolicy, ProcessUserShadowStackPolicy, QueryFullProcessImageNameW,
+            WaitForSingleObject,
         },
     },
 };
@@ -124,52 +124,6 @@ impl ModuleIdentity {
     }
 }
 
-#[derive(Clone, Debug)]
-pub struct MainThreadIdentity {
-    pub tid: u32,
-    pub created: u64,
-    pid: u32,
-    handle: Arc<OwnedHandle>,
-}
-fn is_unity_main_thread(name: &str) -> bool {
-    name == "Unity Main Thread"
-}
-fn thread_identity(handle: &OwnedHandle, pid: u32) -> Result<(u32, u64, String)> {
-    let h = handle.as_raw_handle();
-    // SAFETY: owned query/synchronize handle and initialized output slots.
-    unsafe {
-        if WaitForSingleObject(h, 0) != 0x102 || GetProcessIdOfThread(h) != pid {
-            return invalid("main thread owner/lifetime");
-        }
-        let zero: FILETIME = std::mem::zeroed();
-        let (mut created, mut exited, mut kernel, mut user) = (zero, zero, zero, zero);
-        if GetThreadTimes(h, &mut created, &mut exited, &mut kernel, &mut user) == 0 {
-            return Err(last());
-        }
-        let mut description = std::ptr::null_mut();
-        if GetThreadDescription(h, &mut description) < 0 || description.is_null() {
-            return invalid("thread description unavailable");
-        }
-        struct Description(*mut u16);
-        impl Drop for Description {
-            fn drop(&mut self) {
-                unsafe {
-                    LocalFree(self.0.cast());
-                }
-            }
-        }
-        let description = Description(description);
-        let mut length = 0;
-        while length < 256 && description.0.add(length).read() != 0 {
-            length += 1;
-        }
-        if length == 256 {
-            return invalid("thread description length");
-        }
-        let name = String::from_utf16(std::slice::from_raw_parts(description.0, length)).map_err(|_| BootstrapError::Invalid("thread description UTF16"))?;
-        Ok((GetThreadId(h), filetime(created), name))
-    }
-}
 fn process_identity(handle: &OwnedHandle, pid: u32) -> Result<ProcessIdentity> {
     // SAFETY: query/synchronize handle and initialized bounded identity outputs.
     unsafe {
@@ -204,47 +158,6 @@ fn query_process(target: &ProcessIdentity, admit: Admission<'_>) -> Result<Owned
     }
     Ok(handle)
 }
-/// Query-only discovery. Name/owner/time corroboration does not prove engine-thread semantics.
-pub fn capture_main_thread(target: &ProcessIdentity, admit: Admission<'_>) -> Result<MainThreadIdentity> {
-    let process = query_process(target, admit)?;
-    // SAFETY: ToolHelp snapshot enumerates metadata and does not suspend or execute target code.
-    let snapshot = owned(unsafe { CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0) })?;
-    let mut entry: THREADENTRY32 = unsafe { std::mem::zeroed() };
-    entry.dwSize = std::mem::size_of::<THREADENTRY32>() as u32;
-    let mut found = None;
-    let mut total = 0;
-    let mut more = unsafe { Thread32First(snapshot.as_raw_handle(), &mut entry) };
-    while more != 0 {
-        total += 1;
-        if total > 65536 {
-            return invalid("thread inventory bound");
-        }
-        if entry.th32OwnerProcessID == target.pid {
-            let handle = owned(unsafe { OpenThread(THREAD_QUERY_LIMITED_INFORMATION | THREAD_SYNCHRONIZE, 0, entry.th32ThreadID) })?;
-            let (tid, created, name) = thread_identity(&handle, target.pid)?;
-            if is_unity_main_thread(&name) {
-                if found.is_some() {
-                    return invalid("multiple Unity Main Thread identities");
-                }
-                found = Some(MainThreadIdentity {
-                    tid,
-                    created,
-                    pid: target.pid,
-                    handle: Arc::new(handle),
-                });
-            }
-        }
-        more = unsafe { Thread32Next(snapshot.as_raw_handle(), &mut entry) };
-    }
-    if unsafe { GetLastError() } != ERROR_NO_MORE_FILES {
-        return Err(last());
-    }
-    if process_identity(&process, target.pid)? != *target {
-        return invalid("target identity changed during thread inventory");
-    }
-    found.ok_or(BootstrapError::Invalid("Unity Main Thread is absent"))
-}
-
 #[derive(Clone, Debug)]
 struct Module {
     base: u64,
@@ -634,16 +547,6 @@ fn resolve_loader(modules: &[Module]) -> Result<(u64, ModuleIdentity, Vec<u8>)> 
     }
 }
 
-fn validate_main(main: &MainThreadIdentity, target: &ProcessIdentity) -> Result<()> {
-    if main.pid != target.pid {
-        return invalid("main thread process changed");
-    }
-    let (tid, created, name) = thread_identity(&main.handle, target.pid)?;
-    if tid != main.tid || created != main.created || !is_unity_main_thread(&name) {
-        return invalid("main thread identity/name changed");
-    }
-    Ok(())
-}
 fn module_span(base: u64, size: u32, rva: u32, len: usize) -> Result<u64> {
     let end = u64::from(rva).checked_add(len as u64).ok_or(BootstrapError::Invalid("module span overflow"))?;
     if base == 0 || end > u64::from(size) {
@@ -674,7 +577,6 @@ fn wait_call(mut call: PendingCall, timeout: Duration, stage: &'static str, admi
 /// Drop never stops the helper or releases its remote loader reference.
 pub struct RemoteHelper {
     process: Arc<ProcessLease>,
-    main: MainThreadIdentity,
     artifact: Arc<HelperArtifact>,
     loaded: Module,
     modules: Vec<ModuleIdentity>,
@@ -685,32 +587,14 @@ impl RemoteHelper {
     /// Load the exact helper and explicitly run its one-shot bootstrap.
     ///
     /// # Safety
-    /// Caller proves the target is an authorized offline initialized Unity6000.4 Windows x64
-    /// runtime with the exact admitted GameAssembly/UnityPlayer artifact and method bodies,
-    /// nonmoving GC/modern handles, live metadata, and all helper runtime, dispatcher, invocation
-    /// and exclusive-patch-ownership contracts. The nominated held thread is the real engine
-    /// main thread. Catalog admission includes the audited corlib Array.GetValue reflection,
-    /// boxing/type-cache and GC/profiler effects, with Entry initializers rejected.
-    /// Requested level-requirement writes additionally authorize the exact mutable Int32
-    /// ItemDataUnpacked backing-field store, exclusive rooted graph access and full readback;
-    /// a bootstrap or metadata match alone never supplies permission for that mutation.
-    /// Attack/leech reads require already initialized static caches and exclude concurrent
-    /// reference/scalar mutations and Unity native-object destruction throughout the rooted copy.
-    /// Conditional current-player rate writes additionally authorize the selected mutable
-    /// CharacterStats.attackRate or BaseStats.increasedLeechRate Single field, with exclusive
-    /// graph/scalar/native lifetime through comparison, one store and full readback. Expected
-    /// tokens prove neither historical selection continuity nor consumed-request/replay state.
-    /// The thread's OS description is only corroboration. Every module, native runtime and
-    /// method body remains loaded/unchanged through all pending calls and helper residency.
-    /// No other actor may load/unload/patch helper or admitted modules during preflight/start.
-    /// Caller also excludes nonstandard/renamed existing helpers; the module-name checks below
-    /// reject known names and the selected path and do not establish a generic code census.
-    /// The known helper's DllMain and dependency initialization are authorized. Artifact bytes,
-    /// names, OS thread checks and successful startup alone cannot establish these obligations.
-    /// `admit` must freshly enforce policy before process access and each mutation stage.
+    /// The caller selects a supported offline Unity6000.4 Windows x64 game with the
+    /// modern nonmoving IL2CPP ABI. The helper and game modules remain resident;
+    /// no competing patcher may modify the dispatcher during installation. Runtime
+    /// graph access happens only in the verified ExecuteTasks callback, under each
+    /// operation's own checks. Bootstrap does not nominate or discover a main TID.
+    /// `admit` freshly enforces offline policy before process access and mutation.
     pub unsafe fn start(
         target: ProcessIdentity,
-        main: MainThreadIdentity,
         artifact: Arc<HelperArtifact>,
         modules: &[ModuleIdentity],
         admit: Admission<'_>,
@@ -722,12 +606,7 @@ impl RemoteHelper {
                 return invalid("bootstrap target or timeout");
             }
             let query = query_process(&target, admit)?;
-            validate_main(&main, &target)?;
             policies(&query)?;
-            let found = capture_main_thread(&target, admit)?;
-            if found.tid != main.tid || found.created != main.created {
-                return invalid("main thread inventory changed");
-            }
             let inventory = inventory(target.pid)?;
             reject_helpers(&inventory, &artifact)?;
             for name in ["GameAssembly.dll", "UnityPlayer.dll"] {
@@ -781,7 +660,6 @@ impl RemoteHelper {
         let load = (|| {
             admit()?;
             process.verify()?;
-            validate_main(&main, &target)?;
             artifact.verify_unchanged()?;
             let before = inventory(target.pid)?;
             reject_helpers(&before, &artifact)?;
@@ -799,7 +677,6 @@ impl RemoteHelper {
         let after = (|| {
             admit()?;
             process.verify()?;
-            validate_main(&main, &target)?;
             artifact.verify_unchanged()?;
             let inventory = inventory(target.pid)?;
             for identity in modules {
@@ -817,12 +694,11 @@ impl RemoteHelper {
             Ok(loaded)
         })()
         .map_err(|error| failure("loaded module validation", RemoteDelivery::MayHaveRun, error))?;
-        let config = BootstrapConfig::new(target.pid, main.tid, artifact.source_id(), BootstrapOperation::Start)
-            .map_err(|e| failure("start configuration", RemoteDelivery::MayHaveRun, e))?;
+        let config =
+            BootstrapConfig::new(target.pid, artifact.source_id(), BootstrapOperation::Start).map_err(|e| failure("start configuration", RemoteDelivery::MayHaveRun, e))?;
         let start = (|| {
             admit()?;
             process.verify()?;
-            validate_main(&main, &target)?;
             artifact.verify_unchanged()?;
             let address = module_span(after.base, after.size, artifact.bootstrap_rva(), 16)?;
             if process.read(address, 16)? != artifact.code_bytes(artifact.bootstrap_rva(), 16)? {
@@ -841,7 +717,6 @@ impl RemoteHelper {
         }
         Ok(Self {
             process,
-            main,
             artifact,
             loaded: after,
             modules: modules.to_vec(),
@@ -870,13 +745,12 @@ impl RemoteHelper {
             }
             admit()?;
             self.process.verify()?;
-            validate_main(&self.main, &self.process.target)?;
             self.artifact.verify_unchanged()?;
             let address = module_span(self.loaded.base, self.loaded.size, self.artifact.bootstrap_rva(), 16)?;
             if self.process.read(address, 16)? != self.artifact.code_bytes(self.artifact.bootstrap_rva(), 16)? {
                 return invalid("helper bootstrap entry changed before stop");
             }
-            let config = BootstrapConfig::new(self.process.target.pid, self.main.tid, self.artifact.source_id(), BootstrapOperation::Stop)?;
+            let config = BootstrapConfig::new(self.process.target.pid, self.artifact.source_id(), BootstrapOperation::Stop)?;
             self.stop_attempted = true;
             call(Arc::clone(&self.process), address, config.bytes(), Some(config.clone()), Arc::clone(&self.artifact))
         })()
@@ -1020,7 +894,7 @@ mod tests {
         owned(unsafe { CreateEventW(std::ptr::null(), 1, 0, std::ptr::null()) }).unwrap()
     }
     fn pending(wait: u32, status: i32) -> (PendingCall, Arc<FakeIo>) {
-        let config = BootstrapConfig::new(11, 22, SOURCE, BootstrapOperation::Start).unwrap();
+        let config = BootstrapConfig::new(11, SOURCE, BootstrapOperation::Start).unwrap();
         let mut response = config.bytes().to_vec();
         response[20..24].copy_from_slice(&status.to_le_bytes());
         let fake = Arc::new(FakeIo {
@@ -1063,13 +937,6 @@ mod tests {
         unsafe {
             CloseHandle(raw_thread);
             Arc::decrement_strong_count(process);
-        }
-    }
-    #[test]
-    fn unity_main_thread_description_matches_the_validated_player_exactly() {
-        assert!(is_unity_main_thread("Unity Main Thread"));
-        for name in ["UnityMainThread", "unity main thread", "Unity Main Thread ", "Unity Main Thread\0", "Main Thread", ""] {
-            assert!(!is_unity_main_thread(name), "unexpected main thread description accepted: {name:?}");
         }
     }
     #[test]

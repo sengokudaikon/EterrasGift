@@ -51,11 +51,9 @@ fn image() -> Vec<u8> {
 
 #[test]
 fn configuration_matches_independent_native_layout_and_strict_reply_contract() {
-    let config = BootstrapConfig::new(0x11223344, 0x55667788, SOURCE, BootstrapOperation::Start).unwrap();
+    let config = BootstrapConfig::new(0x11223344, SOURCE, BootstrapOperation::Start).unwrap();
     let mut expected = [0; 112];
-    expected[..24].copy_from_slice(&[
-        0x53, 0x42, 0x47, 0x45, 112, 0, 0, 0, 0x44, 0x33, 0x22, 0x11, 0x88, 0x77, 0x66, 0x55, 1, 0, 0, 0, 255, 255, 255, 255,
-    ]);
+    expected[..24].copy_from_slice(&[0x53, 0x42, 0x47, 0x45, 112, 0, 0, 0, 0x44, 0x33, 0x22, 0x11, 0, 0, 0, 0, 1, 0, 0, 0, 255, 255, 255, 255]);
     expected[24..88].copy_from_slice(SOURCE.as_bytes());
     assert_eq!(config.bytes(), &expected);
     expected[20..24].fill(0);
@@ -71,20 +69,15 @@ fn configuration_matches_independent_native_layout_and_strict_reply_contract() {
     for len in 0..CONFIG_SIZE {
         assert!(config.decode_reply(0, &expected[..len]).is_err())
     }
-    for (pid, tid, id) in [
-        (0, 2, SOURCE),
-        (1, 0, SOURCE),
-        (1, 2, "abc"),
-        (1, 2, "G123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"),
-    ] {
-        assert!(BootstrapConfig::new(pid, tid, id, BootstrapOperation::Start).is_err())
+    for (pid, id) in [(0, SOURCE), (1, "abc"), (1, "G123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef")] {
+        assert!(BootstrapConfig::new(pid, id, BootstrapOperation::Start).is_err())
     }
 }
 
 #[test]
 fn stop_telemetry_is_validated_as_a_complete_distinct_aligned_bounded_set() {
     for operation in [BootstrapOperation::Stop, BootstrapOperation::InspectStopped] {
-        let config = BootstrapConfig::new(1, 2, SOURCE, operation).unwrap();
+        let config = BootstrapConfig::new(1, SOURCE, operation).unwrap();
         let mut bytes = *config.bytes();
         bytes[20..24].fill(0);
         for (i, value) in [0x1000_u64, 0x1008, 0x1010].into_iter().enumerate() {

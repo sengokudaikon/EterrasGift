@@ -2,7 +2,7 @@
 
 `eg-trainer-helper` is the explicitly started, in-process side of the trainer. It builds a Windows
 x64 DLL and has no loader-lock initialization or app/UI wiring. The authored Unity player calls
-`eg_helper_start(main_tid)` from its established engine main thread after initialization. The evaluation controller
+`eg_helper_start(legacy_tid)` after initialization; that legacy argument is ignored. The evaluation controller
 also tests the explicit `eg_helper_bootstrap` native-thread entry after standard DLL loading.
 The caller must satisfy the unsafe startup contract; this is not a generic Unity-version adapter.
 
@@ -18,8 +18,10 @@ future field writes or invocations; those need exact per-operation type, storage
 The first successful discovery retains pristine dispatcher bytes. Subsequent status/empty-clear
 requests must match this profile, even while the scheduler entry is patched. The existing bounded
 first-party scheduler installs from the control thread. Its callback calls Unity's original first,
-with no Rust lock or catch around that call. After a normal return it checks the established main
-thread and takes at most one owned command. Rust panics in this post-call work close admission;
+with no Rust lock or catch around that call. After a normal return, the first accepted callback
+checks the current UnitySynchronizationContext main managed ID against Thread.CurrentThread.ManagedThreadId.
+Only a matching callback establishes the Windows thread ID used for subsequent dispatch; other threads
+forward the original without taking a command. There is no pre-bootstrap main-thread nomination. Rust panics in this post-call work close admission;
 native/managed unwind recovery is not promised. Independently, the callback observes runtime status
 at most once per second while an owner is present.
 
@@ -28,8 +30,9 @@ Status roots the manager wrapper, checks assignability and reads its metadata-va
 It also reads the independent runtime online flag. No native Unity-object pointer is dereferenced.
 Returned manager addresses are ephemeral observations, never managed-object ownership tokens.
 
-Protocol26 supports ReadForge (18), ReadItemLimits (19), ReadLocale (20), ReadCatalogPage (21) and the narrow
-SetLevelRequirement (22), alongside Discover, Status and an empty ClearHooks. The forge wire model
+Protocol28 supports ReadForge (18), ReadItemLimits (19), ReadLocale (20), ReadCatalogPage (21) and the narrow
+SetLevelRequirement (22), ReadAttackLeech (23) and SetAttackLeechRate (24), alongside Discover,
+Status and an empty ClearHooks. The forge wire model
 is in `eg-game-access::forge`. The read traverses rooted containers on the engine thread, validates
 exact scalar/reference classes, enum storage and array/list element types, and copies every value
 into owned Rust storage. Enum identities come from their actual field metadata, supporting nested

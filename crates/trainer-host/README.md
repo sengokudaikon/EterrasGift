@@ -1,61 +1,40 @@
 # Native trainer composition
 
-`eg-trainer-host` implements the concrete Windows x64 `HelperPreparer` used by
-`eg-trainer::connection::SessionConnector`. It belongs to the trainer tier; the
-domain/session crate keeps `forbid(unsafe_code)`. Construction performs no target
-access. The caller runs preparation and session work on its background worker.
+`eg-trainer-host` supplies the Windows x64 `HelperPreparer` used by
+`eg-trainer::connection::SessionConnector`. Construction is inert. Explicit
+preparation runs on the trainer worker, after the process-bound Player.log gate.
 
-`NativePreparer` owns the exact helper artifact, a runtime authority, independent
-log readers and retained process generations. Before a first load, its authority
-must return an identity/profile-bound `RuntimeAttestation`. Constructing that
-attestation is unsafe: the authority establishes the exact IL2CPP ABI, metadata,
-GC, main-thread, method-body, exclusive patch and lifetime contracts required by
-the lower bootstrap API. Requested writes additionally require permission for the
-narrow metadata-validated Int32 level store and exclusive graph/readback ownership.
-File hashes and a named thread are corroborating checks.
-The authored player controller has an authority limited to its newly spawned,
-manifest-validated Unity 6000.4.8f1 child. A production Last Epoch authority still
-needs implementation and validation.
+`NativePreparer` loads the matching helper, starts it outside loader lock and
+returns a verified named-pipe transport. It checks the process birth/path, local
+artifact identity and helper source ID. No runtime authority object, main-thread
+nomination or pre-bootstrap thread probe is required.
 
-Preparation repeats the connector's admission callback before startup. The returned
-`VerifiedTransport` independently uses fresh Release-policy log admission, preserves
-the exact target and verifies the complete file-derived dispatcher body, exception
-table record and unwind mapping before the first Status. Subsequent requests must
-carry that exact dispatcher. Reusing a retained helper reuses its proof; an installed
-scheduler is expected to have changed the entry since the original check.
+The constructor is the small unsafe, game-specific boundary: targets must be the
+supported initialized Unity6000.4 Windows x64 game or an owned matching fixture.
+Runtime/module lifetime and absence of competing scheduler patchers are supported
+execution assumptions. File hashes do not establish those external facts.
 
-The preparer survives session failures and disconnects. It reuses an admitted loaded
-generation, retains uncertain calls and refuses another load after uncertainty or a
-caught authority/startup panic. A reservation precedes the authority await and the
-unsafe startup boundary. A factual NotSent result releases that reservation only
-when authority registered no owners; successful and uncertain results retain it.
-The caller's ownership guard is pinned after a potentially submitted start, including
-when the final preparer/transport drops. Confirmed-exit reclamation is not implemented.
-There are eight retained target slots per preparer and no automatic eviction.
+The helper checks its execution thread inside the verified ExecuteTasks callback:
+the current UnitySynchronizationContext's managed main ID must equal the current
+managed thread ID. Only then is the callback's Windows ID retained for dispatch.
+The original ExecuteTasks still runs first; worker calls cannot claim the queue.
 
-Dropping this composition submits no RPC, stop or unload. The lower pending-call
-guard may release its configuration allocation after proving its thread has exited.
-Explicit session cleanup remains the session's responsibility. Helper code stays
-resident; a stopped or missing server never causes reinjection into that process.
+Preparation retains a registry keyed by process birth/path and artifact profile.
+It reserves an entry before native startup, reuses a loaded helper and fences any
+unfinished/uncertain attempt. Factual NotSent failures release the reservation.
+`RemoteFailure`/`PendingCall` retain unfinished calls and their input allocations;
+no unrelated host-side ownership journal or eight-target capacity limit remains.
+Dropping preparation submits no stop/unload and cannot release an unfinished
+remote call's storage. Published helper/trampoline code remains resident until
+process exit. Host-side registry pruning after confirmed exit remains future work.
 
-The offline host tests use authored inert file bytes and scripted authority failures.
-They check admission ordering, source/profile binding, replay fences, capacity, guard
-retention, caught panic and exact dispatcher proof. Successful preparation is tested
-by the authored player controller's `--rust-preparer` route.
+`VerifiedTransport` repeats Release offline admission and checks the complete
+file-derived dispatcher body/table/unwind before the first Status can install the
+scheduler. Later requests must carry that same dispatcher. Disconnect clears
+features but does not unload the helper or authorize another load.
 
-Before awaiting `RuntimeAuthority`, `NativePreparer` reserves an exact process/profile slot.
-A canceled or unwound authority remains fenced even when it registered no owners. A
-completed explicit NotLoaded refusal releases the slot only if no owner was registered.
-The authority receives an `AuthorityJournal` whose only public operation is `retain_owner`.
-It must register the real pending-call/allocation/module/residency owner before any
-possibly submitted target operation. Registration permanently pins that Arc through
-cancellation, refusal and preparer Drop; target-exit reclamation is deferred. Returning
-an unrelated owner or keeping the only owner in the future does not meet this contract.
-Any guards that authority will return inside an attestation must already be registered
-when its own target work requires their retained lifetime.
-
-This ownership journal grants no probe or runtime authority. The unsafe attestation
-constructor and raw helper bootstrap contract remain unchanged. A registered authority
-owner prevents later identity/gate/helper-NotSent refusals from claiming NotLoaded. The
-normal query-only authored authority registers nothing and keeps its existing retryable
-NotLoaded behavior. No pre-bootstrap runtime reader or new target call is implemented.
+Run `mise run trainer:verify` for the trainer product suite followed by workspace
+lint, formatting, token checks and fake-host captures. The persistent-player
+controller exercises the complete owned `--rust-preparer-worker` route. No test
+selects a running Last Epoch process. The pre-refactor source and tests remain at
+Git tag `archive/trainer-foundation`; historical native reports retain their scope.
