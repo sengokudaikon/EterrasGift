@@ -63,6 +63,15 @@ impl FieldWriteApi {
         unsafe { (self.field_set_value)(object.as_ptr(), field.as_ptr(), std::ptr::from_mut(&mut value).cast()) };
     }
 
+    /// Store one exact UInt16 instance field.
+    /// # Safety
+    /// The set_i32 ownership/runtime contract applies, with an exact mutable
+    /// System.UInt16/U2 field instead of Int32. Source and storage are two bytes.
+    pub unsafe fn set_u16(&self, object: NonNull<Object>, field: NonNull<FieldInfo>, mut value: u16) {
+        // SAFETY: caller validates the destination metadata and two-byte width.
+        unsafe { (self.field_set_value)(object.as_ptr(), field.as_ptr(), std::ptr::from_mut(&mut value).cast()) };
+    }
+
     /// One exact System.Single instance-field assignment, no conversion.
     ///
     /// # Safety

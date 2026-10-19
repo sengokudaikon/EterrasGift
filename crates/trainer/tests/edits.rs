@@ -766,3 +766,113 @@ fn source_strict_affix_set_identity_omission_is_explicit_but_preflight_still_che
     assert!(p.inspect_readback(Some(&after)).confirmed());
     assert_eq!(p.recheck(&observation(after, &c), true, false), Err(EditError::StaleItem));
 }
+
+#[test]
+fn forge_base_and_identity_plans_preserve_conditional_reverse_rules() {
+    use eg_trainer::{
+        undo::ForgeUndo,
+        writes::{ForgePlan, WriteRecord, WriteStatus},
+    };
+    let c = catalog();
+    let mut plain = item();
+    plain.affixes.clear();
+    refresh(&mut plain);
+    let mut idol = plain.clone();
+    idol.item_type = 25;
+    refresh(&mut idol);
+    let mut unique_item = unique(plain.clone(), 7, 911);
+    refresh(&mut unique_item);
+    for (before, edit, override_enabled) in [
+        (
+            plain,
+            ItemEdit::BaseType(BaseTypeEdit {
+                sub_type: 1,
+                item_type: None,
+                allow_incompatible: false,
+            }),
+            false,
+        ),
+        (
+            idol,
+            ItemEdit::BaseType(BaseTypeEdit {
+                sub_type: 2,
+                item_type: Some(26),
+                allow_incompatible: false,
+            }),
+            true,
+        ),
+        (
+            unique_item,
+            ItemEdit::UniqueIdentity(UniqueIdentityEdit {
+                unique_id: 912,
+                sub_type: 1,
+                rarity: 8,
+                unrestricted: false,
+            }),
+            false,
+        ),
+    ] {
+        let expected = observation(before.clone(), &c);
+        let plan = ForgePlan::edit(&expected, 17, &c, &provenance(), edit, override_enabled).unwrap();
+        let mut after = plan.projected().clone();
+        after.name = "new game name".into();
+        after.class_requirement = 6;
+        after.status.level_requirement = 86;
+        if before.item_type == 25 {
+            after.implicit_rolls = vec![7];
+        }
+        refresh(&mut after);
+        assert!(plan.matches(&after));
+        let undo = ForgeUndo::from_confirmed(&WriteRecord {
+            plan: plan.clone(),
+            status: WriteStatus::Confirmed(after.clone()),
+        })
+        .unwrap();
+        let current = observation(after.clone(), &c);
+        let reverse = undo.prepare_with_override(&current, 17, &c, &provenance(), override_enabled).unwrap();
+        assert_eq!(reverse.projected().item_type, before.item_type);
+        assert_eq!(reverse.projected().sub_type, before.sub_type);
+        assert_eq!(reverse.projected().rarity, before.rarity);
+        assert_eq!(reverse.projected().identity, before.identity);
+        if override_enabled {
+            assert_eq!(plan.recheck_with_override(&expected, 17, false), Err(EditError::OverrideRequired));
+            assert_eq!(undo.prepare_with_override(&current, 17, &c, &provenance(), false), Err(EditError::OverrideRequired));
+        }
+        after.status.forging_potential += 1;
+        refresh(&mut after);
+        assert!(!plan.matches(&after));
+        assert_eq!(
+            undo.prepare_with_override(&observation(after, &c), 17, &c, &provenance(), override_enabled),
+            Err(EditError::StaleItem)
+        );
+    }
+}
+#[test]
+fn forge_plans_refuse_unimplemented_edits_and_set_identity_changes_are_stale() {
+    use eg_trainer::writes::ForgePlan;
+    let c = catalog();
+    let expected = observation(item(), &c);
+    assert_eq!(ForgePlan::edit(&expected, 17, &c, &provenance(), replacement(), true), Err(EditError::InvalidValues));
+    let mut set = unique(item(), 8, 912);
+    refresh(&mut set);
+    let expected = observation(set.clone(), &c);
+    let plan = ForgePlan::edit(
+        &expected,
+        17,
+        &c,
+        &provenance(),
+        ItemEdit::UniqueIdentity(UniqueIdentityEdit {
+            unique_id: 911,
+            sub_type: 1,
+            rarity: 7,
+            unrestricted: false,
+        }),
+        false,
+    )
+    .unwrap();
+    let fingerprint = set.fingerprint;
+    set.identity.as_mut().unwrap().id = 913;
+    refresh(&mut set);
+    assert_eq!(set.fingerprint, fingerprint); // Original legacy fingerprint omits set identities.
+    assert_eq!(plan.recheck(&observation(set, &c), 17), Err(EditError::StaleItem));
+}

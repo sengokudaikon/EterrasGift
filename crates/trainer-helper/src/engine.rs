@@ -5,13 +5,13 @@ use crate::{
 use eg_game_access::{
     il2cpp::{
         ThreadContext,
-        discovery::{AttackLeechWriteError, DiscoveryError, RuntimeAccess, StatusWriteError},
+        discovery::{AttackLeechWriteError, DiscoveryError, ForgeWriteError, RuntimeAccess},
         raw::{self, ExecuteTasks, MethodInfo},
     },
     protocol::{Discovery, DispatcherSpec, Request, Response, ResponseCode},
     rate_write::AttackLeechRateWrite,
     scheduler::{HookError, SchedulerHook},
-    write::StatusWrite,
+    write::ForgeWrite,
 };
 use eg_trainer::dispatch::{Dispatcher, Pending};
 use std::{
@@ -126,7 +126,7 @@ unsafe fn read_status() -> Response {
     }
 }
 
-unsafe fn set_status(write: &StatusWrite) -> Response {
+unsafe fn edit_forge(write: &ForgeWrite) -> Response {
     // SAFETY: only the established main thread calls this after original returns.
     // Startup's exact-runtime ownership contract must additionally authorize this
     // particular field mutation and exclude concurrent graph mutation/shutdown.
@@ -141,23 +141,14 @@ unsafe fn set_status(write: &StatusWrite) -> Response {
             let thread = ThreadContext::new(api);
             let attached = thread.attach().map_err(|error| server::failure(ResponseCode::NotReady, error.to_string()))?;
             let snapshot = access
-                .set_status(
-                    &attached,
-                    writer,
-                    Some(invoke),
-                    write.expected_manager(),
-                    write.expected(),
-                    write.field(),
-                    i32::from(write.value()),
-                    write.unrestricted(),
-                )
+                .edit_forge(&attached, writer, Some(invoke), write.expected_manager(), write.expected(), write.mutation())
                 .map_err(|error| {
                     let code = match &error {
-                        StatusWriteError::NotReady(_) => ResponseCode::NotReady,
-                        StatusWriteError::Stale(_) => ResponseCode::StaleItem,
-                        StatusWriteError::Refused(_) => ResponseCode::Refused,
-                        StatusWriteError::Offline => ResponseCode::OfflineRequired,
-                        StatusWriteError::Failed(_) => ResponseCode::Failed,
+                        ForgeWriteError::NotReady(_) => ResponseCode::NotReady,
+                        ForgeWriteError::Stale(_) => ResponseCode::StaleItem,
+                        ForgeWriteError::Refused(_) => ResponseCode::Refused,
+                        ForgeWriteError::Offline => ResponseCode::OfflineRequired,
+                        ForgeWriteError::Failed(_) => ResponseCode::Failed,
                     };
                     server::failure(code, error.to_string())
                 })?;
@@ -405,7 +396,7 @@ fn after_original(state: &Shared) {
                 Request::ReadCatalogPage { kind, cursor, .. } => unsafe { read_catalog_page(kind, cursor) },
                 // SAFETY: the same established thread plus this narrow operation's
                 // explicit exclusive-write/root/metadata contract described above.
-                Request::SetStatus(write) => unsafe { set_status(&write) },
+                Request::EditForge(write) => unsafe { edit_forge(&write) },
                 Request::SetAttackLeechRate(write) => unsafe { set_attack_leech_rate(&write) },
                 // No feature installation API exists. Empty is the truthful complete feature set.
                 Request::ClearHooks { .. } => Response {

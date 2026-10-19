@@ -1,19 +1,19 @@
-//! Conditional status stores, game refresh and rooted full readback.
+//! Conditional Forge stores, game refresh and rooted full readback.
 
 use super::{
     Class, DiscoveryError, Ptr, RuntimeAccess,
-    forge::{ForgeGraph, target},
+    forge::{ForgeGraph, Root, target},
 };
 use crate::{
     forge::ForgeSnapshot,
     il2cpp::{Argument, AttachedThread, InvocationContext, InvocationOutcome, ReturnValue, Scalar, raw},
-    write::StatusField,
+    write::{ForgeMutation, StatusField},
 };
 use std::{ffi::CStr, ptr::NonNull};
 
 /// Only `Failed` may describe an operation whose store was attempted. No variant permits retry.
 #[derive(Debug)]
-pub enum StatusWriteError {
+pub enum ForgeWriteError {
     NotReady(String),
     Stale(String),
     Refused(String),
@@ -21,7 +21,7 @@ pub enum StatusWriteError {
     Failed(String),
 }
 
-impl std::fmt::Display for StatusWriteError {
+impl std::fmt::Display for ForgeWriteError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::NotReady(s) | Self::Stale(s) | Self::Refused(s) | Self::Failed(s) => f.write_str(s),
@@ -29,8 +29,8 @@ impl std::fmt::Display for StatusWriteError {
         }
     }
 }
-impl std::error::Error for StatusWriteError {}
-impl From<DiscoveryError> for StatusWriteError {
+impl std::error::Error for ForgeWriteError {}
+impl From<DiscoveryError> for ForgeWriteError {
     fn from(error: DiscoveryError) -> Self {
         match error {
             DiscoveryError::OfflineRequired => Self::Offline,
@@ -39,8 +39,8 @@ impl From<DiscoveryError> for StatusWriteError {
         }
     }
 }
-fn uncertain(error: impl std::fmt::Display) -> StatusWriteError {
-    StatusWriteError::Failed(format!("Status store attempted; readback unconfirmed: {error}"))
+fn uncertain(error: impl std::fmt::Display) -> ForgeWriteError {
+    ForgeWriteError::Failed(format!("Forge store attempted; readback unconfirmed: {error}"))
 }
 
 // The only store boundary. The caller has validated the exact field and retains all graph roots.
@@ -49,8 +49,8 @@ unsafe fn attempt_store<T>(
     object: NonNull<raw::Object>,
     field: NonNull<raw::FieldInfo>,
     value: i32,
-    readback: impl FnOnce() -> Result<T, StatusWriteError>,
-) -> Result<T, StatusWriteError> {
+    readback: impl FnOnce() -> Result<T, ForgeWriteError>,
+) -> Result<T, ForgeWriteError> {
     // STORE ATTEMPT BOUNDARY: nothing below may return a definite pre-store refusal.
     // SAFETY: the internal caller establishes FieldWriteApi::set_i32's complete contract.
     unsafe { api.set_i32(object, field, value) };
@@ -58,8 +58,8 @@ unsafe fn attempt_store<T>(
 }
 
 impl RuntimeAccess {
-    // Internal caller supplies set_status's full live-runtime/exclusive-write contract.
-    unsafe fn status_field(&self, owner: Class, kind: StatusField) -> Result<NonNull<raw::FieldInfo>, StatusWriteError> {
+    // Internal caller supplies edit_forge's full live-runtime/exclusive-write contract.
+    unsafe fn status_field(&self, owner: Class, kind: StatusField) -> Result<NonNull<raw::FieldInfo>, ForgeWriteError> {
         unsafe {
             let (name, primitive, code) = match kind {
                 StatusField::LevelRequirement => (c"<LvlReq>k__BackingField", c"Int32", 0x08),
@@ -70,6 +70,11 @@ impl RuntimeAccess {
                 StatusField::Corrupted => (c"corrupted", c"Boolean", 0x02),
                 StatusField::Ruined => (c"ruined", c"Boolean", 0x02),
             };
+            self.mutable_field(owner, name, primitive, code)
+        }
+    }
+    unsafe fn mutable_field(&self, owner: Class, name: &CStr, primitive: &CStr, code: i32) -> Result<NonNull<raw::FieldInfo>, ForgeWriteError> {
+        unsafe {
             let field = self.field(owner, name)?;
             let ty = (self.field_type)(field);
             if ty.is_null()
@@ -80,16 +85,22 @@ impl RuntimeAccess {
                 || (self.field_flags)(field) & 0x70 != 0
                 || !(16..=16384).contains(&(self.field_offset)(field))
             {
-                return Err(StatusWriteError::Refused("Status field is not the exact mutable instance field".into()));
+                return Err(ForgeWriteError::Refused("Not the exact mutable instance field".into()));
             }
-            NonNull::new(field.cast()).ok_or_else(|| StatusWriteError::Refused("Missing status field".into()))
+            NonNull::new(field.cast()).ok_or_else(|| ForgeWriteError::Refused("Missing mutable field".into()))
         }
     }
 
     // The original helper calls UniqueList.getUnique(UInt16). Validate its exact
     // static signature, root the return across GC, then read only its identity
     // and LegendaryType. Never walk the full catalog during an edit.
-    unsafe fn status_legendary_type(&self, attached: &AttachedThread<'_>, graph: &ForgeGraph<'_, '_>, api: raw::InvocationApi, id: u16) -> Result<i32, StatusWriteError> {
+    unsafe fn unique_definition<'a, 'r>(
+        &self,
+        attached: &'a AttachedThread<'r>,
+        graph: &ForgeGraph<'_, '_>,
+        api: raw::InvocationApi,
+        id: u16,
+    ) -> Result<Root<'a, 'r>, ForgeWriteError> {
         unsafe {
             let owner = self.class(&graph.images, c"", c"UniqueList")?;
             let entry = self.catalog_nested(owner, c"Entry")?;
@@ -104,7 +115,7 @@ impl RuntimeAccess {
                 }
                 let name = (self.method_name)(method);
                 if name.is_null() {
-                    return Err(StatusWriteError::Refused("Missing unique lookup method name".into()));
+                    return Err(ForgeWriteError::Refused("Missing unique lookup method name".into()));
                 }
                 if CStr::from_ptr(name) != c"getUnique" || (self.method_params)(method) != 1 {
                     continue;
@@ -123,68 +134,133 @@ impl RuntimeAccess {
                     || (self.type_code)(returns) != 0x12
                     || (self.type_class)(returns) != entry
                 {
-                    return Err(StatusWriteError::Refused("Unique lookup signature differs from getUnique(UInt16) -> Entry".into()));
+                    return Err(ForgeWriteError::Refused("Unique lookup signature differs from getUnique(UInt16) -> Entry".into()));
                 }
                 found = NonNull::new(method.cast_mut());
             }
             if !complete {
-                return Err(StatusWriteError::Refused("Unique lookup method enumeration limit".into()));
+                return Err(ForgeWriteError::Refused("Unique lookup method enumeration limit".into()));
             }
-            let method = found.ok_or_else(|| StatusWriteError::Refused("Missing getUnique(UInt16)".into()))?;
+            let method = found.ok_or_else(|| ForgeWriteError::Refused("Missing getUnique(UInt16)".into()))?;
             let context = InvocationContext::new(attached, api);
-            let method = context.bind(method).map_err(|e| StatusWriteError::Refused(e.to_string()))?;
+            let method = context.bind(method).map_err(|e| ForgeWriteError::Refused(e.to_string()))?;
             let definition = match method
                 .invoke(None, &mut [Argument::Scalar(Scalar::U16(id))])
-                .map_err(|e| StatusWriteError::Refused(e.to_string()))?
+                .map_err(|e| ForgeWriteError::Refused(e.to_string()))?
             {
                 InvocationOutcome::Returned(ReturnValue::Reference(Some(root))) => root,
-                InvocationOutcome::Returned(ReturnValue::Reference(None)) => return Err(StatusWriteError::NotReady("Unique definition is unavailable".into())),
-                _ => return Err(StatusWriteError::Refused("Unique lookup threw or returned an unexpected value".into())),
+                InvocationOutcome::Returned(ReturnValue::Reference(None)) => return Err(ForgeWriteError::NotReady("Unique definition is unavailable".into())),
+                _ => return Err(ForgeWriteError::Refused("Unique lookup threw or returned an unexpected value".into())),
             };
             self.exact(&definition, entry)?;
             if self.primitive::<u16>(&definition, c"uniqueID")? != id {
-                return Err(StatusWriteError::Refused("Unique lookup returned a different identity".into()));
+                return Err(ForgeWriteError::Refused("Unique lookup returned a different identity".into()));
             }
-            Ok(self.enumeration(&definition, c"legendaryType", c"LegendaryType")?)
+            Ok(definition)
+        }
+    }
+
+    // Only the base registry used by the original op 11 is acquired. Every
+    // returned object and collection is rooted across the managed getter/GC.
+    unsafe fn validate_base(
+        &self,
+        attached: &AttachedThread<'_>,
+        graph: &ForgeGraph<'_, '_>,
+        api: raw::InvocationApi,
+        item_type: u8,
+        sub_type: u16,
+    ) -> Result<(), ForgeWriteError> {
+        unsafe {
+            let owner = self.class(&graph.images, c"", c"ItemList")?;
+            let context = InvocationContext::new(attached, api);
+            let method = context
+                .bind(self.zero_arg_method(owner, c"get", owner, false, &api)?)
+                .map_err(|e| ForgeWriteError::Refused(e.to_string()))?;
+            let registry = match method.invoke(None, &mut []).map_err(|e| ForgeWriteError::Refused(e.to_string()))? {
+                InvocationOutcome::Returned(ReturnValue::Reference(Some(root))) => root,
+                InvocationOutcome::Returned(ReturnValue::Reference(None)) => return Err(ForgeWriteError::NotReady("Base registry is unavailable".into())),
+                _ => return Err(ForgeWriteError::Refused("Base registry getter threw or returned an unexpected value".into())),
+            };
+            self.exact(&registry, owner)?;
+            let bases = self
+                .catalog_reference(attached, &registry, c"EquippableItems")?
+                .ok_or_else(|| ForgeWriteError::NotReady("Base definitions unavailable".into()))?;
+            let base_class = self.catalog_nested(owner, c"BaseEquipmentItem")?;
+            let sub_class = self.catalog_nested(owner, c"EquipmentItem")?;
+            for base in self.catalog_array(attached, &bases, base_class, 256)?.into_iter().flatten() {
+                if self.primitive::<i32>(&base, c"baseTypeID")? != i32::from(item_type) {
+                    continue;
+                }
+                let subs = self
+                    .catalog_reference(attached, &base, c"subItems")?
+                    .ok_or_else(|| ForgeWriteError::NotReady("Subtype definitions unavailable".into()))?;
+                for sub in self.catalog_list(attached, &subs, sub_class, 1024)? {
+                    if self.primitive::<i32>(&sub, c"subTypeID")? == i32::from(sub_type) {
+                        return Ok(());
+                    }
+                }
+                break;
+            }
+            Err(ForgeWriteError::Refused("Base/subtype is absent from the current registry".into()))
+        }
+    }
+
+    unsafe fn has_refresh(&self, owner: Class, name: &CStr) -> Result<bool, ForgeWriteError> {
+        unsafe {
+            let mut iterator = std::ptr::null_mut();
+            for _ in 0..100_000 {
+                let method = (self.class_methods)(owner, &mut iterator);
+                if method.is_null() {
+                    return Ok(false);
+                }
+                let actual = (self.method_name)(method);
+                if actual.is_null() {
+                    return Err(ForgeWriteError::Refused("Missing refresh method name".into()));
+                }
+                if CStr::from_ptr(actual) == name && (self.method_params)(method) == 0 {
+                    return Ok(true);
+                }
+            }
+            Err(ForgeWriteError::Refused("Refresh method enumeration limit".into()))
         }
     }
 
     // Uses already validated metadata; no new object is dereferenced from the current statics/edges.
-    unsafe fn status_final_gate(&self, graph: &ForgeGraph<'_, '_>, manager: u64) -> Result<(), StatusWriteError> {
+    unsafe fn status_final_gate(&self, graph: &ForgeGraph<'_, '_>, manager: u64) -> Result<(), ForgeWriteError> {
         unsafe {
             let held = target(&graph.manager)?;
             if held.as_ptr() as u64 != manager {
-                return Err(StatusWriteError::Stale("Current manager changed".into()));
+                return Err(ForgeWriteError::Stale("Current manager changed".into()));
             }
             let mut current: Ptr = std::ptr::null_mut();
             (self.static_get)(graph.manager_field, (&mut current as *mut Ptr).cast());
             if current != held.as_ptr().cast() {
-                return Err(StatusWriteError::Stale("Current manager changed".into()));
+                return Err(ForgeWriteError::Stale("Current manager changed".into()));
             }
             let mut cached = 0_usize;
             (self.field_get)(held.as_ptr(), graph.cached_ptr_field, (&mut cached as *mut usize).cast());
             if cached == 0 {
-                return Err(StatusWriteError::Offline);
+                return Err(ForgeWriteError::Offline);
             }
             for &(parent, field, expected) in &graph.links {
                 let mut child: Ptr = std::ptr::null_mut();
                 (self.field_get)(parent.cast(), field, (&mut child as *mut Ptr).cast());
                 if child != expected {
-                    return Err(StatusWriteError::Stale("Current forge item mapping changed".into()));
+                    return Err(ForgeWriteError::Stale("Current forge item mapping changed".into()));
                 }
             }
             let mut online = 1_u8;
             (self.static_get)(graph.online_field, (&mut online as *mut u8).cast());
             match online {
                 0 => Ok(()),
-                1 => Err(StatusWriteError::Offline),
-                _ => Err(StatusWriteError::Refused("Noncanonical runtime online Boolean".into())),
+                1 => Err(ForgeWriteError::Offline),
+                _ => Err(ForgeWriteError::Refused("Noncanonical runtime online Boolean".into())),
             }
         }
     }
 
-    /// Change one supported status field and copy the complete result. Level uses a
-    /// direct Int32 store; other fields use Byte/Boolean then RebuildID and UpdateEntry.
+    /// Apply a supported Forge mutation and copy the complete result. Level uses a
+    /// direct Int32 store; rebuilding edits call the game refresh methods.
     ///
     /// # Safety
     /// All `read_forge` runtime/main-thread/nonmoving-GC conditions apply, with exclusive WRITE
@@ -194,96 +270,179 @@ impl RuntimeAccess {
     /// and attachment must belong to the same initialized source-bound Unity 6000.4 runtime.
     /// `Field::SetValue` must implement the direct, metadata-validated scalar assignment.
     /// For rebuilding edits, `invoke` must describe this same runtime and the
-    /// two refresh methods must be callable synchronously; roots survive managed
+    /// refresh methods must be callable synchronously; roots survive managed
     /// calls, exceptions and GC. Refresh failures are uncertain and never retried.
     /// Unique eligibility additionally calls getUnique(UInt16) before the store;
     /// its result must be valid game definition data in this runtime.
     /// Expected addresses are opaque comparisons only. After entering the void setter, failures
     /// are uncertain; this API cannot recover an access violation/SEH or guarantee rollback.
-    #[allow(clippy::too_many_arguments)]
-    pub unsafe fn set_status(
+    pub unsafe fn edit_forge(
         &self,
         attached: &AttachedThread<'_>,
         write_api: raw::FieldWriteApi,
         invoke: Option<raw::InvocationApi>,
         expected_manager: u64,
         expected: &ForgeSnapshot,
-        kind: StatusField,
-        value: i32,
-        unrestricted: bool,
-    ) -> Result<ForgeSnapshot, StatusWriteError> {
+        mutation: ForgeMutation,
+    ) -> Result<ForgeSnapshot, ForgeWriteError> {
         unsafe {
-            if expected_manager == 0
-                || !(0..=255).contains(&value)
-                || (matches!(kind, StatusField::LevelRequirement | StatusField::ForgingPotential) && matches!(expected.rarity, 7..=9))
-                || (matches!(kind, StatusField::Corrupted | StatusField::Ruined) && value > 1)
-            {
-                return Err(StatusWriteError::Refused("Unsupported status edit or invalid byte-domain value".into()));
+            let level = matches!(
+                mutation,
+                ForgeMutation::Status {
+                    field: StatusField::LevelRequirement,
+                    ..
+                }
+            );
+            if expected_manager == 0 {
+                return Err(ForgeWriteError::Refused("Missing expected manager".into()));
             }
-            if kind != StatusField::LevelRequirement && expected.affixes.iter().any(|affix| affix.id > 4095) {
-                return Err(StatusWriteError::Refused(
+            if let ForgeMutation::Status { field, value, .. } = mutation
+                && ((matches!(field, StatusField::LevelRequirement | StatusField::ForgingPotential) && matches!(expected.rarity, 7..=9))
+                    || (matches!(field, StatusField::Corrupted | StatusField::Ruined) && value > 1))
+            {
+                return Err(ForgeWriteError::Refused("Unsupported status edit".into()));
+            }
+            if !level && expected.affixes.iter().any(|affix| affix.id > 4095) {
+                return Err(ForgeWriteError::Refused(
                     "Rebuilding would truncate an affix ID outside the game's 12-bit save format".into(),
                 ));
             }
-            let limits = self.read_item_limits(attached)?;
-            let graph = self.forge_graph(attached)?.ok_or_else(|| StatusWriteError::NotReady("Forge has no current item".into()))?;
+            let graph = self.forge_graph(attached)?.ok_or_else(|| ForgeWriteError::NotReady("Forge has no current item".into()))?;
             self.status_final_gate(&graph, expected_manager)?;
-            let legendary_type = if kind.requires_definition(expected) {
-                if self.forge_snapshot(attached, &graph)? != *expected {
-                    return Err(StatusWriteError::Stale("Complete current item differs before unique lookup".into()));
-                }
-                let id = expected.identity.as_ref().ok_or_else(|| StatusWriteError::Refused("Unique identity is missing".into()))?.id;
-                Some(self.status_legendary_type(
-                    attached,
-                    &graph,
-                    invoke.ok_or_else(|| StatusWriteError::Refused("Missing unique lookup invocation API".into()))?,
-                    id,
-                )?)
-            } else {
-                None
-            };
-            let valid = kind.allows(expected, &limits, value, unrestricted, legendary_type);
-            if !valid {
-                return Err(StatusWriteError::Refused("Status value or item eligibility is outside the game's rules".into()));
+            if self.forge_snapshot(attached, &graph)? != *expected {
+                return Err(ForgeWriteError::Stale("Complete current item differs before definition lookup".into()));
             }
-            let owner = self.class(&graph.images, c"", if kind == StatusField::LevelRequirement { c"ItemDataUnpacked" } else { c"ItemData" })?;
-            let field = self.status_field(owner, kind)?;
-            // Resolve/bind every refresh before the store. Metadata/signature
-            // failures here are definite pre-store refusals.
+            let item_data = self.class(&graph.images, c"", c"ItemData")?;
+            let unpacked = self.class(&graph.images, c"", c"ItemDataUnpacked")?;
+            // All destinations are validated before the first scalar store.
+            let mut stores = Vec::new();
+            match mutation {
+                ForgeMutation::Status { field, value, unrestricted } => {
+                    let limits = self.read_item_limits(attached)?;
+                    let legendary_type = if field.requires_definition(expected) {
+                        let id = expected.identity.as_ref().ok_or_else(|| ForgeWriteError::Refused("Unique identity missing".into()))?.id;
+                        let definition = self.unique_definition(attached, &graph, invoke.ok_or_else(|| ForgeWriteError::Refused("Missing invocation API".into()))?, id)?;
+                        Some(self.enumeration(&definition, c"legendaryType", c"LegendaryType")?)
+                    } else {
+                        None
+                    };
+                    if !field.allows(expected, &limits, i32::from(value), unrestricted, legendary_type) {
+                        return Err(ForgeWriteError::Refused("Status value or item eligibility is outside the game's rules".into()));
+                    }
+                    stores.push((
+                        self.status_field(if level { unpacked } else { item_data }, field)?,
+                        if level { Scalar::I32(i32::from(value)) } else { Scalar::U8(value) },
+                    ));
+                }
+                ForgeMutation::Base {
+                    item_type,
+                    sub_type,
+                    unrestricted,
+                } => {
+                    let changed_type = item_type != expected.item_type;
+                    if matches!(expected.rarity, 7..=9)
+                        || (!changed_type && sub_type == expected.sub_type)
+                        || (changed_type && (!unrestricted || !(25..=33).contains(&item_type) || !(25..=33).contains(&expected.item_type)))
+                    {
+                        return Err(ForgeWriteError::Refused("Base changes require a non-unique item and compatible type".into()));
+                    }
+                    self.validate_base(
+                        attached,
+                        &graph,
+                        invoke.ok_or_else(|| ForgeWriteError::Refused("Missing invocation API".into()))?,
+                        item_type,
+                        sub_type,
+                    )?;
+                    stores.push((self.mutable_field(item_data, c"subType", c"UInt16", 0x07)?, Scalar::U16(sub_type)));
+                    if changed_type {
+                        stores.push((self.mutable_field(item_data, c"itemType", c"Byte", 0x05)?, Scalar::U8(item_type)));
+                    }
+                }
+                ForgeMutation::Identity {
+                    id,
+                    sub_type,
+                    rarity,
+                    unrestricted,
+                } => {
+                    if !matches!(expected.rarity, 7..=9) || expected.identity.as_ref().is_none_or(|old| old.id == id) || !matches!(rarity, 7..=9) {
+                        return Err(ForgeWriteError::Refused("Identity changes require a different unique/set identity".into()));
+                    }
+                    let definition = self.unique_definition(attached, &graph, invoke.ok_or_else(|| ForgeWriteError::Refused("Missing invocation API".into()))?, id)?;
+                    let subs = self
+                        .catalog_reference(attached, &definition, c"subTypes")?
+                        .ok_or_else(|| ForgeWriteError::Refused("Missing unique subtypes".into()))?;
+                    let subtypes = self.catalog_values::<u8>(attached, &subs, self.system_class(c"Byte")?, 256)?;
+                    let set = self.boolean(&definition, c"isSetItem")?;
+                    let legendary = self.boolean(&definition, c"canDropAsLegendary")?;
+                    let legendary_type = self.enumeration(&definition, c"legendaryType", c"LegendaryType")?;
+                    let computed = if set {
+                        8
+                    } else if !expected.affixes.is_empty() || expected.rarity == 9 {
+                        9
+                    } else {
+                        7
+                    };
+                    let potential_fits = if set {
+                        expected.status.legendary_potential == 0 && expected.status.weavers_will == 0
+                    } else if legendary_type == 1 {
+                        expected.status.legendary_potential == 0
+                    } else {
+                        expected.status.weavers_will == 0
+                    };
+                    if self.primitive::<u8>(&definition, c"baseType")? != expected.item_type
+                        || !subtypes.contains(&sub_type)
+                        || rarity != computed
+                        || (set && !expected.affixes.is_empty())
+                        || (!unrestricted && ((rarity == 9 && !legendary) || !potential_fits))
+                    {
+                        return Err(ForgeWriteError::Refused("Identity is incompatible with the current item/definition".into()));
+                    }
+                    stores.push((self.mutable_field(item_data, c"uniqueID", c"UInt16", 0x07)?, Scalar::U16(id)));
+                    stores.push((self.mutable_field(item_data, c"subType", c"UInt16", 0x07)?, Scalar::U16(u16::from(sub_type))));
+                    stores.push((self.mutable_field(item_data, c"rarity", c"Byte", 0x05)?, Scalar::U8(rarity)));
+                }
+            }
             let context = invoke.map(|api| InvocationContext::new(attached, api));
-            let refresh = if kind == StatusField::LevelRequirement {
-                None
-            } else {
-                let context = context.as_ref().ok_or_else(|| StatusWriteError::Refused("Missing refresh invocation API".into()))?;
-                let item_data = self.class(&graph.images, c"", c"ItemData")?;
-                let entry = self.class(&graph.images, c"", c"ItemContainerEntry")?;
-                let rebuild = context
-                    .bind(NonNull::new(self.method(item_data, c"RebuildID", &[], true)?.cast_mut()).ok_or_else(|| StatusWriteError::Refused("Missing RebuildID".into()))?)
-                    .map_err(|e| StatusWriteError::Refused(e.to_string()))?;
-                let update = context
-                    .bind(NonNull::new(self.method(entry, c"UpdateEntry", &[], true)?.cast_mut()).ok_or_else(|| StatusWriteError::Refused("Missing UpdateEntry".into()))?)
-                    .map_err(|e| StatusWriteError::Refused(e.to_string()))?;
-                Some((rebuild, update))
-            };
+            let mut refresh = Vec::new();
+            if !level {
+                let context = context.as_ref().ok_or_else(|| ForgeWriteError::Refused("Missing refresh invocation API".into()))?;
+                let mut methods = Vec::new();
+                if !matches!(mutation, ForgeMutation::Status { .. }) {
+                    methods.push((unpacked, c"AfterIDChange", false));
+                    if matches!(mutation, ForgeMutation::Identity { .. }) && self.has_refresh(unpacked, c"MakeFullName")? {
+                        methods.push((unpacked, c"MakeFullName", false));
+                    }
+                }
+                methods.push((item_data, c"RebuildID", false));
+                methods.push((self.class(&graph.images, c"", c"ItemContainerEntry")?, c"UpdateEntry", true));
+                for (owner, name, entry) in methods {
+                    let method = context
+                        .bind(NonNull::new(self.method(owner, name, &[], true)?.cast_mut()).ok_or_else(|| ForgeWriteError::Refused("Missing refresh method".into()))?)
+                        .map_err(|e| ForgeWriteError::Refused(e.to_string()))?;
+                    refresh.push((method, entry));
+                }
+            }
             // Metadata/limit validation has finished. Refresh all current graph edges, retaining
             // both graphs' roots until the operation ends, and compare every owned field.
-            let current = self.forge_graph(attached)?.ok_or_else(|| StatusWriteError::Stale("Current item disappeared".into()))?;
+            let current = self.forge_graph(attached)?.ok_or_else(|| ForgeWriteError::Stale("Current item disappeared".into()))?;
             let before = self.forge_snapshot(attached, &current)?;
             if before != *expected || target(&graph.item)? != target(&current.item)? {
-                return Err(StatusWriteError::Stale("Complete current item differs from expected".into()));
+                return Err(ForgeWriteError::Stale("Complete current item differs from expected".into()));
             }
             let object = target(&current.item)?;
             self.status_final_gate(&current, expected_manager)?;
             let readback = || {
-                if let Some((rebuild, update)) = &refresh {
-                    let entry = current._parents.last().ok_or_else(|| StatusWriteError::Failed("Missing retained forge entry".into()))?;
-                    for (method, root) in [(rebuild, &current.item), (update, entry)] {
-                        match method.invoke(Some(root), &mut []).map_err(uncertain)? {
-                            InvocationOutcome::Returned(ReturnValue::Void) => {}
-                            _ => return Err(StatusWriteError::Failed("Game refresh raised an exception or returned an unexpected value".into())),
-                        }
-                        self.status_final_gate(&current, expected_manager)?;
+                for (method, is_entry) in &refresh {
+                    let root = if *is_entry {
+                        current._parents.last().ok_or_else(|| ForgeWriteError::Failed("Missing retained forge entry".into()))?
+                    } else {
+                        &current.item
+                    };
+                    match method.invoke(Some(root), &mut []).map_err(uncertain)? {
+                        InvocationOutcome::Returned(ReturnValue::Void) => {}
+                        _ => return Err(ForgeWriteError::Failed("Game refresh raised an exception or returned an unexpected value".into())),
                     }
+                    self.status_final_gate(&current, expected_manager)?;
                 }
                 self.status_final_gate(&current, expected_manager)?;
                 let actual = self.forge_snapshot(attached, &current)?;
@@ -292,11 +451,17 @@ impl RuntimeAccess {
                 // its separate read and decides Confirmed versus NotKept.
                 Ok(actual)
             };
-            if kind == StatusField::LevelRequirement {
-                attempt_store(write_api, object, field, value, readback)
+            if let [(field, Scalar::I32(value))] = stores.as_slice() {
+                attempt_store(write_api, object, *field, *value, readback)
             } else {
-                // STORE ATTEMPT BOUNDARY: exact Byte/Boolean field, canonical u8.
-                write_api.set_u8(object, field, value as u8);
+                // STORE ATTEMPT BOUNDARY: every later failure is uncertain.
+                for (field, value) in stores {
+                    match value {
+                        Scalar::U8(value) => write_api.set_u8(object, field, value),
+                        Scalar::U16(value) => write_api.set_u16(object, field, value),
+                        _ => unreachable!("validated Forge scalar destination"),
+                    }
+                }
                 readback().map_err(uncertain)
             }
         }
@@ -541,20 +706,20 @@ mod tests {
         // SAFETY: same authored contract for all deliberately changed identity/gate values.
         unsafe {
             assert!(a.status_final_gate(&g, MANAGER as u64).is_ok());
-            assert!(matches!(a.status_final_gate(&g, u64::MAX), Err(StatusWriteError::Stale(_))));
+            assert!(matches!(a.status_final_gate(&g, u64::MAX), Err(ForgeWriteError::Stale(_))));
             CURRENT_MANAGER.set(123);
-            assert!(matches!(a.status_final_gate(&g, MANAGER as u64), Err(StatusWriteError::Stale(_))));
+            assert!(matches!(a.status_final_gate(&g, MANAGER as u64), Err(ForgeWriteError::Stale(_))));
             CURRENT_MANAGER.set(MANAGER);
             CURRENT_ITEM.set(321);
-            assert!(matches!(a.status_final_gate(&g, MANAGER as u64), Err(StatusWriteError::Stale(_))));
+            assert!(matches!(a.status_final_gate(&g, MANAGER as u64), Err(ForgeWriteError::Stale(_))));
             CURRENT_ITEM.set(ITEM);
             LIVE.set(0);
-            assert!(matches!(a.status_final_gate(&g, MANAGER as u64), Err(StatusWriteError::Offline)));
+            assert!(matches!(a.status_final_gate(&g, MANAGER as u64), Err(ForgeWriteError::Offline)));
             LIVE.set(1);
             ONLINE.set(1);
-            assert!(matches!(a.status_final_gate(&g, MANAGER as u64), Err(StatusWriteError::Offline)));
+            assert!(matches!(a.status_final_gate(&g, MANAGER as u64), Err(ForgeWriteError::Offline)));
             ONLINE.set(2);
-            assert!(matches!(a.status_final_gate(&g, MANAGER as u64), Err(StatusWriteError::Refused(_))));
+            assert!(matches!(a.status_final_gate(&g, MANAGER as u64), Err(ForgeWriteError::Refused(_))));
         }
         assert_eq!(STORES.get(), 0);
         drop(g);
@@ -567,11 +732,11 @@ mod tests {
         // SAFETY: authored graph roots keep both fake object identities alive through each call.
         let g = unsafe { graph(&attached) };
         for error in [
-            StatusWriteError::NotReady("n".into()),
-            StatusWriteError::Stale("s".into()),
-            StatusWriteError::Refused("r".into()),
-            StatusWriteError::Offline,
-            StatusWriteError::Failed("f".into()),
+            ForgeWriteError::NotReady("n".into()),
+            ForgeWriteError::Stale("s".into()),
+            ForgeWriteError::Refused("r".into()),
+            ForgeWriteError::Offline,
+            ForgeWriteError::Failed("f".into()),
         ] {
             let prior = STORES.get();
             // SAFETY: exact authored field ABI/Int32 destination, with manager+item roots retained.
@@ -584,7 +749,7 @@ mod tests {
                     || Err(error),
                 )
             };
-            assert!(matches!(result, Err(StatusWriteError::Failed(_))));
+            assert!(matches!(result, Err(ForgeWriteError::Failed(_))));
             assert_eq!(STORES.get(), prior + 1);
             assert_eq!(VALUE.get(), 37);
         }
@@ -631,31 +796,26 @@ mod tests {
                 level_requirement: 0,
             },
         };
-        for (manager, value, rarity) in [
-            (0, 1, 0),
-            (MANAGER as u64, -1, 0),
-            (MANAGER as u64, 256, 0),
-            (MANAGER as u64, 1, 7),
-            (MANAGER as u64, 1, 8),
-            (MANAGER as u64, 1, 9),
-        ] {
+        for (manager, value, rarity) in [(0, 1, 0), (MANAGER as u64, 1, 7), (MANAGER as u64, 1, 8), (MANAGER as u64, 1, 9)] {
             let e = &mut expected;
             e.rarity = rarity;
             // SAFETY: invalid requests must return before any unprovided fake metadata export.
             assert!(matches!(
                 unsafe {
-                    a.set_status(
+                    a.edit_forge(
                         &attached,
                         raw::FieldWriteApi { field_set_value: set },
                         None,
                         manager,
                         e,
-                        StatusField::LevelRequirement,
-                        value,
-                        false,
+                        ForgeMutation::Status {
+                            field: StatusField::LevelRequirement,
+                            value: value as u8,
+                            unrestricted: false,
+                        },
                     )
                 },
-                Err(StatusWriteError::Refused(_))
+                Err(ForgeWriteError::Refused(_))
             ));
         }
         assert_eq!(STORES.get(), 0);

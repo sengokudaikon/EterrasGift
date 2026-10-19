@@ -3,7 +3,7 @@ use eg_game_access::{
     forge::{ForgeSnapshot, ItemStatus},
     protocol::{DispatcherSpec, ProtocolError, REQUEST_SIZE, Request, RequestFrame, VERSION},
     rate_write::AttackLeechRateWrite,
-    write::StatusWrite,
+    write::ForgeWrite,
 };
 
 fn dispatcher() -> DispatcherSpec {
@@ -54,7 +54,7 @@ fn invalid(bytes: &[u8]) {
 fn independent_packed_golden_and_full_projection() {
     let write = write();
     let bytes = golden();
-    assert_eq!(VERSION, 30);
+    assert_eq!(VERSION, 31);
     assert_eq!(write.encode(), bytes);
     assert_eq!(AttackLeechRateWrite::decode(&bytes).unwrap(), write);
     let request = Request::SetAttackLeechRate(write.clone());
@@ -245,7 +245,7 @@ fn status_bounded_tail_header_cannot_submit_without_complete_expected_item() {
         },
     };
     forge.fingerprint = forge.legacy_fingerprint();
-    let request = Request::SetStatus(StatusWrite::level_requirement(dispatcher(), 7, forge, 2).unwrap());
+    let request = Request::EditForge(ForgeWrite::level_requirement(dispatcher(), 7, forge, 2).unwrap());
     let bytes = request.encode();
     let header = Request::decode_header(&bytes[..336]).unwrap();
     assert!(header.tail_len() > 0);

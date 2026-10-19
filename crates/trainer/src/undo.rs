@@ -1,4 +1,4 @@
-//! Conditional undo intent for one confirmed status change.
+//! Conditional undo intent for one confirmed Forge edit.
 //!
 //! This is narrower than the C# EditWorkflow's reversed confirmed batches and
 //! draft handling. A token performs no I/O, consumes no history, and grants no
@@ -7,21 +7,19 @@
 
 use crate::{
     catalog::GameCatalog,
-    edits::{CatalogProvenance, EditError, ExpectedObservation},
-    writes::{StatusPlan, WriteRecord, WriteStatus},
+    edits::{BaseTypeEdit, CatalogProvenance, EditError, ExpectedObservation, ItemEdit, StatusEdit, UniqueIdentityEdit},
+    writes::{ForgePlan, WriteRecord, WriteStatus},
 };
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct StatusUndo {
+pub struct ForgeUndo {
     after: ExpectedObservation,
     manager: u64,
-    restore_value: i32,
-    field: crate::edits::StatusField,
-    unrestricted: bool,
+    reverse: ItemEdit,
 }
 
-impl StatusUndo {
-    /// Capture only an exact confirmed projection. The record's status is a
+impl ForgeUndo {
+    /// Capture a confirmed result under the edit's readback policy. The record's status is a
     /// caller-supplied fact, not a certificate of transport/runtime execution.
     /// Current literal ranges are checked later against the fresh catalog; the
     /// original plan retains their identity but not their complete values.
@@ -33,19 +31,32 @@ impl StatusUndo {
             return Err(EditError::InvalidObservation);
         }
         let before = record.plan.before();
-        let field = record.plan.field();
-        let restore_value = field.value(before.snapshot());
-        // Every supported game's literal range is byte-valued. An impossible
-        // previous value is unavailable for undo, with no implicit override.
-        if u8::try_from(restore_value).is_err() {
-            return Err(EditError::InvalidStatus);
-        }
+        let item = before.snapshot();
+        let reverse = match record.plan.edit_intent() {
+            ItemEdit::Status(edit) => {
+                let value = edit.field.value(item);
+                if u8::try_from(value).is_err() {
+                    return Err(EditError::InvalidStatus);
+                }
+                ItemEdit::Status(StatusEdit { value, ..edit.clone() })
+            }
+            ItemEdit::BaseType(edit) => ItemEdit::BaseType(BaseTypeEdit {
+                sub_type: i32::from(item.sub_type),
+                allow_incompatible: edit.allow_incompatible,
+                item_type: edit.item_type.map(|_| i32::from(item.item_type)),
+            }),
+            ItemEdit::UniqueIdentity(edit) => ItemEdit::UniqueIdentity(UniqueIdentityEdit {
+                unique_id: i32::from(item.identity.as_ref().ok_or(EditError::InvalidUniqueIdentity)?.id),
+                sub_type: i32::from(item.sub_type),
+                rarity: i32::from(item.rarity),
+                unrestricted: edit.unrestricted,
+            }),
+            _ => return Err(EditError::InvalidValues),
+        };
         Ok(Self {
             after: ExpectedObservation::new(before.generation(), before.process().clone(), before.catalog_identity().clone(), snapshot.clone())?,
             manager: record.plan.manager(),
-            restore_value,
-            field,
-            unrestricted: record.plan.unrestricted(),
+            reverse,
         })
     }
 
@@ -57,15 +68,15 @@ impl StatusUndo {
         self.manager
     }
 
-    pub fn restore_value(&self) -> i32 {
-        self.restore_value
+    pub fn reverse_edit(&self) -> &ItemEdit {
+        &self.reverse
     }
 
     /// Build a new conditional write from the exact confirmed after-state.
     /// Full equality includes fields omitted from the legacy fingerprint. A
     /// cache or an older generation cannot establish fresh catalog provenance.
     /// Failure leaves this pure token unchanged and never retries a submission.
-    pub fn prepare(&self, current: &ExpectedObservation, manager: u64, catalog: &GameCatalog, provenance: &CatalogProvenance) -> Result<StatusPlan, EditError> {
+    pub fn prepare(&self, current: &ExpectedObservation, manager: u64, catalog: &GameCatalog, provenance: &CatalogProvenance) -> Result<ForgePlan, EditError> {
         self.prepare_with_override(current, manager, catalog, provenance, false)
     }
     pub fn prepare_with_override(
@@ -75,7 +86,7 @@ impl StatusUndo {
         catalog: &GameCatalog,
         provenance: &CatalogProvenance,
         override_enabled: bool,
-    ) -> Result<StatusPlan, EditError> {
+    ) -> Result<ForgePlan, EditError> {
         if manager != self.manager
             || current.generation() != self.after.generation()
             || current.process() != self.after.process()
@@ -89,17 +100,6 @@ impl StatusUndo {
         // This rechecks actual current literal limits, field eligibility,
         // exact catalog identity and fresh RuntimeRead provenance. Retain the
         // original edit's flag and recheck the current override permission.
-        StatusPlan::prepare(
-            current,
-            manager,
-            catalog,
-            provenance,
-            crate::edits::StatusEdit {
-                field: self.field,
-                value: self.restore_value,
-                unrestricted: self.unrestricted,
-            },
-            override_enabled,
-        )
+        ForgePlan::edit(current, manager, catalog, provenance, self.reverse.clone(), override_enabled)
     }
 }

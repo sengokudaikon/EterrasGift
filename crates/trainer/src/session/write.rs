@@ -1,11 +1,11 @@
 use super::*;
 use crate::{
     field_writes::{RateWriteRecord, RateWriteStatus},
-    writes::{AllowWrite, StatusPlan, WriteControl, WriteObservation, WriteOutcome, WritePlan, WriteRecord, WriteStatus},
+    writes::{AllowWrite, ForgePlan, WriteControl, WriteObservation, WriteOutcome, WritePlan, WriteRecord, WriteStatus},
 };
 use eg_game_access::{
     rate_write::{AttackLeechRateWrite, RateWriteReply},
-    write::{StatusWrite, WriteReply},
+    write::{ForgeWrite, WriteReply},
 };
 
 impl<T: Transport, L: LogSource> Session<T, L> {
@@ -13,10 +13,10 @@ impl<T: Transport, L: LogSource> Session<T, L> {
         self.last_write.as_ref()
     }
 
-    pub async fn set_status(&mut self, now: Timestamp, plan: &StatusPlan) -> Result<WriteStatus, SessionError> {
-        self.set_status_controlled(now, plan, &mut AllowWrite).await
+    pub async fn edit_forge(&mut self, now: Timestamp, plan: &ForgePlan) -> Result<WriteStatus, SessionError> {
+        self.edit_forge_controlled(now, plan, &mut AllowWrite).await
     }
-    pub async fn set_status_controlled(&mut self, now: Timestamp, plan: &StatusPlan, control: &mut dyn WriteControl) -> Result<WriteStatus, SessionError> {
+    pub async fn edit_forge_controlled(&mut self, now: Timestamp, plan: &ForgePlan, control: &mut dyn WriteControl) -> Result<WriteStatus, SessionError> {
         Ok(self.write_controlled(now, &plan.clone().into(), control).await?.map(WriteObservation::into_forge))
     }
 
@@ -129,9 +129,8 @@ impl<T: Transport, L: LogSource> Session<T, L> {
                 {
                     return Err(SessionError::Identity("write belongs to a different runtime, manager or catalog".into()));
                 }
-                let request = StatusWrite::with_override(dispatcher, plan.manager(), expected.snapshot().clone(), plan.field(), plan.value(), plan.unrestricted())
-                    .map_err(SessionError::Protocol)?;
-                Ok((Request::SetStatus(request), Request::ReadForge { dispatcher }))
+                let request = ForgeWrite::edit(dispatcher, plan.manager(), expected.snapshot().clone(), plan.mutation()).map_err(SessionError::Protocol)?;
+                Ok((Request::EditForge(request), Request::ReadForge { dispatcher }))
             }
             WritePlan::Field(plan) => {
                 let expected = plan.before();
@@ -213,7 +212,7 @@ impl<T: Transport, L: LogSource> Session<T, L> {
 
 fn classify_ack(request: &Request, response: &eg_game_access::protocol::Response) -> WriteOutcome<WriteObservation> {
     match request {
-        Request::SetStatus(request) => match eg_game_access::write::classify_response(response, request) {
+        Request::EditForge(request) => match eg_game_access::write::classify_response(response, request) {
             WriteReply::Confirmed(actual) => WriteOutcome::Confirmed(WriteObservation::forge(actual)),
             WriteReply::NotApplied { code, message } => WriteOutcome::NotApplied { code, message },
             WriteReply::Uncertain { reason } => WriteOutcome::uncertain(reason),

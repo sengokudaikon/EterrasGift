@@ -39,8 +39,8 @@ fn snapshot() -> ForgeSnapshot {
         },
     }
 }
-fn write() -> StatusWrite {
-    StatusWrite::level_requirement(spec(), 0x1111222233334444, snapshot(), 80).unwrap()
+fn write() -> ForgeWrite {
+    ForgeWrite::level_requirement(spec(), 0x1111222233334444, snapshot(), 80).unwrap()
 }
 fn hex(text: &str) -> Vec<u8> {
     text.as_bytes()
@@ -76,15 +76,15 @@ fn independent_literal_full_snapshot_wire_and_infallible_owned_encoder() {
     assert_eq!(tail_literal().len(), 49);
     assert_eq!(forge::encode(Some(&snapshot())).unwrap(), tail_literal());
     assert_eq!(write().encode(), literal());
-    assert_eq!(decode_frame(&literal()).unwrap(), Request::SetStatus(write()));
+    assert_eq!(decode_frame(&literal()).unwrap(), Request::EditForge(write()));
     let layout = decode_header(&literal()[..336]).unwrap();
     assert_eq!(layout.tail_len(), 49);
     assert_eq!(layout.total_len(), 385);
     let mut original = snapshot();
-    let request = StatusWrite::level_requirement(spec(), 4, original.clone(), 255).unwrap();
+    let request = ForgeWrite::level_requirement(spec(), 4, original.clone(), 255).unwrap();
     original.name = "changed after construction".into();
     assert_eq!(request.expected().name, "A");
-    assert_eq!(request.value(), 255);
+    assert_eq!(request.projected().status.level_requirement, 255);
     assert_eq!(request.expected_manager(), 4);
     assert_eq!(request.dispatcher(), spec());
     assert!(decode_frame(&request.clone().encode()).is_ok());
@@ -115,12 +115,12 @@ fn every_header_reserved_byte_is_strict_and_known_fields_are_bounded() {
     let mut bad = bytes;
     bad[16..24].fill(0);
     assert!(decode_header(&bad[..336]).is_err());
-    assert!(StatusWrite::level_requirement(spec(), 0, snapshot(), 80).is_err());
+    assert!(ForgeWrite::level_requirement(spec(), 0, snapshot(), 80).is_err());
     for value in [-1, 256, i32::MIN, i32::MAX] {
-        assert!(StatusWrite::level_requirement(spec(), 1, snapshot(), value).is_err());
+        assert!(ForgeWrite::level_requirement(spec(), 1, snapshot(), value).is_err());
     }
     for value in [0, 255] {
-        assert!(StatusWrite::level_requirement(spec(), u64::MAX, snapshot(), value).is_ok());
+        assert!(ForgeWrite::level_requirement(spec(), u64::MAX, snapshot(), value).is_ok());
     }
 }
 #[test]
@@ -148,7 +148,7 @@ fn assembler_accepts_arbitrary_fragmentation_only_after_complete_decode() {
             assembler.push(bytes).unwrap();
         }
         assert_eq!(assembler.remaining(), 0);
-        assert_eq!(assembler.finish().unwrap(), Request::SetStatus(write()));
+        assert_eq!(assembler.finish().unwrap(), Request::EditForge(write()));
     }
 }
 #[test]
@@ -194,7 +194,7 @@ fn strict_expected_presence_utf8_bools_and_fingerprint() {
     assert!(decode_frame(&frame).is_err());
     let mut invalid = snapshot();
     invalid.fingerprint ^= 1;
-    assert_eq!(StatusWrite::level_requirement(spec(), 1, invalid, 80), Err(ProtocolError::InvalidData));
+    assert_eq!(ForgeWrite::level_requirement(spec(), 1, invalid, 80), Err(ProtocolError::InvalidData));
     let mut frame = literal();
     set32(&mut frame, 12, 1);
     frame.truncate(337);
@@ -227,11 +227,11 @@ fn maximum_schema_bound_is_exact_and_allows_large_inherited_ids_without_rebuild(
     assert_eq!(forge::encode(Some(&maximum)).unwrap().len(), MAX_EXPECTED_BYTES);
     assert_eq!(MAX_EXPECTED_BYTES, 135870);
     // Wire decoding is not eligibility: native must refuse unique-backed items before store.
-    let request = StatusWrite::level_requirement(spec(), 1, maximum.clone(), 0).unwrap();
+    let request = ForgeWrite::level_requirement(spec(), 1, maximum.clone(), 0).unwrap();
     assert_eq!(request.encode().len(), MAX_REQUEST_BYTES);
-    assert_eq!(decode_frame(&request.encode()).unwrap(), Request::SetStatus(request));
+    assert_eq!(decode_frame(&request.encode()).unwrap(), Request::EditForge(request));
     maximum.name.push('x');
-    assert!(StatusWrite::level_requirement(spec(), 1, maximum, 0).is_err());
+    assert!(ForgeWrite::level_requirement(spec(), 1, maximum, 0).is_err());
     let mut oversized = vec![0; MAX_REQUEST_BYTES + 1];
     oversized[..4].copy_from_slice(&MAGIC.to_le_bytes());
     assert!(decode_frame(&oversized).is_err());
@@ -241,10 +241,10 @@ fn minimal_schema_bound_is_exact() {
     let mut item = snapshot();
     item.name.clear();
     assert_eq!(forge::encode(Some(&item)).unwrap().len(), MIN_EXPECTED_BYTES);
-    let request = StatusWrite::level_requirement(spec(), 1, item, 0).unwrap();
+    let request = ForgeWrite::level_requirement(spec(), 1, item, 0).unwrap();
     assert!(decode_frame(&request.encode()).is_ok());
     assert_eq!(REQUEST_SIZE, 336);
-    assert_eq!(eg_game_access::protocol::VERSION, 30); // TEMP handshake draft.
+    assert_eq!(eg_game_access::protocol::VERSION, 31); // TEMP handshake draft.
 }
 #[test]
 fn projection_changes_only_requested_level_and_its_legacy_fingerprint() {
@@ -268,15 +268,15 @@ fn status_fields_have_one_strict_frame_and_boolean_values_are_canonical() {
         (StatusField::WeaversWill, 49),
         (StatusField::WeaversTouch, 77),
     ] {
-        let request = StatusWrite::new(spec(), 1, snapshot(), field, value).unwrap();
+        let request = ForgeWrite::new(spec(), 1, snapshot(), field, value).unwrap();
         let bytes = request.encode();
         assert_eq!(u32::from_le_bytes(bytes[4..8].try_into().unwrap()), 10);
         assert_eq!(u32::from_le_bytes(bytes[24..28].try_into().unwrap()), field as u32);
-        assert_eq!(Request::decode(&bytes).unwrap(), Request::SetStatus(request.clone()));
+        assert_eq!(Request::decode(&bytes).unwrap(), Request::EditForge(request.clone()));
         assert_eq!(field.value(&request.projected()), value);
     }
     for field in [StatusField::Corrupted, StatusField::Ruined] {
-        assert!(StatusWrite::new(spec(), 1, snapshot(), field, 2).is_err());
+        assert!(ForgeWrite::new(spec(), 1, snapshot(), field, 2).is_err());
         let mut invalid = write().encode();
         set32(&mut invalid, 24, field as u32);
         assert!(Request::decode_header(&invalid[..REQUEST_SIZE]).is_err());
@@ -290,10 +290,10 @@ fn status_fields_have_one_strict_frame_and_boolean_values_are_canonical() {
 
 #[test]
 fn override_is_one_explicit_bit_and_all_other_flag_bits_are_rejected() {
-    let request = StatusWrite::with_override(spec(), 1, snapshot(), StatusField::WeaversTouch, 77, true).unwrap();
+    let request = ForgeWrite::with_override(spec(), 1, snapshot(), StatusField::WeaversTouch, 77, true).unwrap();
     let bytes = request.encode();
     assert_eq!(&bytes[28..32], &1_u32.to_le_bytes());
-    assert_eq!(Request::decode(&bytes).unwrap(), Request::SetStatus(request));
+    assert_eq!(Request::decode(&bytes).unwrap(), Request::EditForge(request));
     assert!(!write().unrestricted());
     for flags in [2, 3, 256, 65536, u32::MAX] {
         let mut invalid = bytes.clone();
@@ -471,4 +471,66 @@ fn async_reader_rejects_unbounded_header_without_waiting_for_body() {
         let result = tokio::time::timeout(std::time::Duration::from_secs(1), task).await.unwrap().unwrap();
         assert!(matches!(result, Err(eg_game_access::transport::RequestReadError::Protocol(_))));
     });
+}
+
+#[test]
+fn base_and_identity_share_bounded_frames_with_exact_scalar_widths() {
+    for mutation in [
+        ForgeMutation::Base {
+            item_type: 255,
+            sub_type: 65535,
+            unrestricted: false,
+        },
+        ForgeMutation::Base {
+            item_type: 26,
+            sub_type: 513,
+            unrestricted: true,
+        },
+        ForgeMutation::Identity {
+            id: 65535,
+            sub_type: 255,
+            rarity: 9,
+            unrestricted: true,
+        },
+        ForgeMutation::Identity {
+            id: 912,
+            sub_type: 2,
+            rarity: 8,
+            unrestricted: false,
+        },
+    ] {
+        let request = ForgeWrite::edit(spec(), 1, snapshot(), mutation).unwrap();
+        let frame = request.encode();
+        let (operation, value, selector, extra) = match mutation {
+            ForgeMutation::Base { item_type, sub_type, .. } => (11, u32::from(sub_type), u32::from(item_type), 0),
+            ForgeMutation::Identity { id, sub_type, rarity, .. } => (17, u32::from(id), u32::from(sub_type), u32::from(rarity)),
+            _ => unreachable!(),
+        };
+        for (at, expected) in [(4, operation), (8, value), (24, selector), (28, u32::from(mutation.unrestricted())), (32, extra)] {
+            assert_eq!(u32::from_le_bytes(frame[at..at + 4].try_into().unwrap()), expected);
+        }
+        assert_eq!(Request::decode(&frame).unwrap(), Request::EditForge(request));
+        for (at, bad) in [
+            (8, 65536),
+            (24, 256),
+            (28, 2),
+            (32, if operation == 11 { 1 } else { 6 }),
+            (32, if operation == 11 { 255 } else { 10 }),
+        ] {
+            let mut invalid = frame.clone();
+            set32(&mut invalid, at, bad);
+            assert!(Request::decode_header(&invalid[..REQUEST_SIZE]).is_err());
+        }
+        for at in (36..48).chain(72..336) {
+            let mut invalid = frame.clone();
+            invalid[at] = 1;
+            assert!(Request::decode_header(&invalid[..REQUEST_SIZE]).is_err());
+        }
+        for end in REQUEST_SIZE..frame.len() {
+            assert!(Request::decode(&frame[..end]).is_err());
+        }
+        let mut excess = frame;
+        excess.push(0);
+        assert!(Request::decode(&excess).is_err());
+    }
 }

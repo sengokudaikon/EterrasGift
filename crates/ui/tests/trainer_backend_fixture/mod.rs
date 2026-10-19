@@ -110,10 +110,10 @@ impl BackendConnection for OwnedConnection {
     fn supports_level_requirement(&self) -> bool {
         true
     }
-    async fn set_status(
+    async fn edit_forge(
         &mut self,
         _: jiff::Timestamp,
-        _: &eg_trainer::writes::StatusPlan,
+        _: &eg_trainer::writes::ForgePlan,
         _: &mut dyn eg_trainer::writes::WriteControl,
     ) -> Result<eg_trainer::writes::WriteStatus, BackendError> {
         panic!("read-only UI submitted a write")

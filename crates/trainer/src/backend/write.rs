@@ -11,15 +11,15 @@ impl WriteControl for CurrentIntent {
 }
 
 impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> BackendWorker<P, C, L, K> {
-    pub(super) async fn write_status(&mut self, plan: StatusPlan) -> Result<(), BackendError> {
-        self.execute_status(plan, false).await
+    pub(super) async fn write_forge(&mut self, plan: ForgePlan) -> Result<(), BackendError> {
+        self.execute_forge(plan, false).await
     }
-    pub(super) async fn undo_status(&mut self, undo: crate::undo::StatusUndo) -> Result<(), BackendError> {
-        let plan = self.state.status_undo_plan(&undo).map_err(invalid_edit)?;
-        self.execute_status(plan, true).await
+    pub(super) async fn undo_forge(&mut self, undo: crate::undo::ForgeUndo) -> Result<(), BackendError> {
+        let plan = self.state.forge_undo_plan(&undo).map_err(invalid_edit)?;
+        self.execute_forge(plan, true).await
     }
-    async fn execute_status(&mut self, plan: StatusPlan, undoing: bool) -> Result<(), BackendError> {
-        let result = self.write_status_inner(plan, undoing).await;
+    async fn execute_forge(&mut self, plan: ForgePlan, undoing: bool) -> Result<(), BackendError> {
+        let result = self.write_forge_inner(plan, undoing).await;
         if let Err(error) = &result
             && self.state.phase == Phase::Ready
             && matches!(error.kind, ErrorKind::Transport | ErrorKind::Protocol | ErrorKind::Identity | ErrorKind::RestartRequired)
@@ -28,14 +28,14 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
         }
         result
     }
-    async fn write_status_inner(&mut self, plan: StatusPlan, undoing: bool) -> Result<(), BackendError> {
+    async fn write_forge_inner(&mut self, plan: ForgePlan, undoing: bool) -> Result<(), BackendError> {
         if !self.state.enabled {
             return Err(BackendError::blocked(ErrorKind::Disabled, "trainer disabled"));
         }
         let epoch = self.command_epoch;
         self.superseded(epoch)?;
-        if !self.connection.as_ref().is_some_and(|connection| connection.supports_status(plan.field())) {
-            return Err(BackendError::blocked(ErrorKind::NotReady, "this status field is unavailable"));
+        if !self.connection.as_ref().is_some_and(|connection| connection.supports_forge(plan.edit_intent())) {
+            return Err(BackendError::blocked(ErrorKind::NotReady, "this Forge edit is unavailable"));
         }
         let current = self.state.expected_observation().map_err(invalid_edit)?;
         let manager = self.state.runtime_status.ok_or_else(|| invalid_edit("runtime status missing"))?.manager;
@@ -63,7 +63,7 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
         self.commit(epoch, |this| {
             this.state.activity = Some(Activity::WritingForge);
             this.state.error = None;
-            this.state.undo_status = None;
+            this.state.undo_forge = None;
             this.state.last_write = Some(WriteRecord {
                 plan: plan.clone(),
                 status: WriteStatus::Pending,
@@ -105,7 +105,7 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
                         self.state
                             .last_write
                             .as_ref()
-                            .and_then(|record| crate::undo::StatusUndo::from_confirmed(record).ok())
+                            .and_then(|record| crate::undo::ForgeUndo::from_confirmed(record).ok())
                             .filter(|undo| {
                                 undo.prepare_with_override(
                                     undo.after(),
@@ -122,7 +122,7 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
                     };
                     self.commit(epoch, |this| {
                         this.state.forge = forge;
-                        this.state.undo_status = undo;
+                        this.state.undo_forge = undo;
                     })?;
                     if kept {
                         Ok(())

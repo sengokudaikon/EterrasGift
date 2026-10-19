@@ -29,7 +29,7 @@ mod locale;
 mod parser;
 pub use parser::{DisplayScalarUnavailable, NumericFormatContext, NumericFormatContextPart, NumericFormatContextUnavailable};
 mod write;
-pub use write::StatusWriteError;
+pub use write::ForgeWriteError;
 
 type Ptr = *mut c_void;
 type Class = *mut raw::Class;
@@ -301,6 +301,48 @@ impl RuntimeAccess {
                 return Err(unsupported(format!("static field {}", name.to_string_lossy())));
             }
             Ok(field)
+        }
+    }
+
+    pub(super) unsafe fn zero_arg_method(
+        &self,
+        owner: Class,
+        name: &CStr,
+        returns: Class,
+        instance: bool,
+        api: &raw::InvocationApi,
+    ) -> Result<NonNull<raw::MethodInfo>, DiscoveryError> {
+        unsafe {
+            let mut iterator = std::ptr::null_mut();
+            let mut found = None;
+            for _ in 0..100_000 {
+                let method = (self.class_methods)(owner, &mut iterator);
+                if method.is_null() {
+                    return found.ok_or_else(|| unsupported(format!("zero-argument getter missing: {}", name.to_string_lossy())));
+                }
+                let actual = (self.method_name)(method);
+                if actual.is_null() {
+                    return Err(unsupported("zero-argument getter name"));
+                }
+                if CStr::from_ptr(actual) != name {
+                    continue;
+                }
+                let ty = (api.method_get_return_type)(method);
+                let mut implementation_flags = 0;
+                if found.is_some()
+                    || (api.method_get_param_count)(method) != 0
+                    || (api.method_is_instance)(method) != instance
+                    || (api.method_get_class)(method) != owner
+                    || ty.is_null()
+                    || (api.type_is_byref)(ty)
+                    || (api.class_from_type)(ty) != returns
+                    || (api.method_get_flags)(method, &mut implementation_flags) & 0x0440 != 0
+                {
+                    return Err(unsupported(format!("zero-argument getter contract: {}", name.to_string_lossy())));
+                }
+                found = NonNull::new(method.cast_mut());
+            }
+            Err(unsupported("zero-argument getter enumeration limit"))
         }
     }
 

@@ -1,4 +1,4 @@
-//! Process, generation and catalog bound plans for the supported native forge status edits.
+//! Process, generation and catalog bound plans for the supported native Forge edits.
 //! Construction is pure. Only an explicit submission may execute a plan; neither
 //! failure nor a lost reply permits a retry. An address here is an opaque token.
 
@@ -22,12 +22,11 @@ impl WriteControl for AllowWrite {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct StatusPlan {
+pub struct ForgePlan {
     prepared: PreparedEdit,
     manager: u64,
-    field: StatusField,
 }
-impl StatusPlan {
+impl ForgePlan {
     pub fn level_requirement(expected: &ExpectedObservation, manager: u64, catalog: &GameCatalog, provenance: &CatalogProvenance, value: i32) -> Result<Self, EditError> {
         Self::new(expected, manager, catalog, provenance, StatusField::LevelRequirement, value)
     }
@@ -56,9 +55,21 @@ impl StatusPlan {
         if manager == 0 {
             return Err(EditError::InvalidObservation);
         }
-        let field = edit.field;
-        let prepared = edits::prepare(expected, catalog, provenance, ItemEdit::Status(edit), override_enabled, None)?;
-        Ok(Self { prepared, manager, field })
+        Self::edit(expected, manager, catalog, provenance, ItemEdit::Status(edit), override_enabled)
+    }
+    pub fn edit(
+        expected: &ExpectedObservation,
+        manager: u64,
+        catalog: &GameCatalog,
+        provenance: &CatalogProvenance,
+        edit: ItemEdit,
+        override_enabled: bool,
+    ) -> Result<Self, EditError> {
+        if manager == 0 || !matches!(edit, ItemEdit::Status(_) | ItemEdit::BaseType(_) | ItemEdit::UniqueIdentity(_)) {
+            return Err(EditError::InvalidValues);
+        }
+        let prepared = edits::prepare(expected, catalog, provenance, edit, override_enabled, None)?;
+        Ok(Self { prepared, manager })
     }
     pub fn before(&self) -> &ExpectedObservation {
         self.prepared.before()
@@ -66,17 +77,43 @@ impl StatusPlan {
     pub fn manager(&self) -> u64 {
         self.manager
     }
-    pub fn value(&self) -> i32 {
-        self.field.value(self.prepared.projected())
+    pub fn edit_intent(&self) -> &ItemEdit {
+        self.prepared.edit()
     }
-    pub fn field(&self) -> StatusField {
-        self.field
+    pub fn mutation(&self) -> eg_game_access::write::ForgeMutation {
+        use eg_game_access::write::ForgeMutation;
+        let item = self.projected();
+        match self.edit_intent() {
+            ItemEdit::Status(edit) => ForgeMutation::Status {
+                field: edit.field,
+                value: edit.field.value(item) as u8,
+                unrestricted: edit.unrestricted,
+            },
+            ItemEdit::BaseType(_) => ForgeMutation::Base {
+                item_type: item.item_type,
+                sub_type: item.sub_type,
+                unrestricted: self.unrestricted(),
+            },
+            ItemEdit::UniqueIdentity(_) => ForgeMutation::Identity {
+                id: item.identity.as_ref().expect("validated identity edit").id,
+                sub_type: item.sub_type as u8,
+                rarity: item.rarity,
+                unrestricted: self.unrestricted(),
+            },
+            _ => unreachable!("ForgePlan only admits implemented native edits"),
+        }
     }
     pub fn unrestricted(&self) -> bool {
-        matches!(self.prepared.edit(), ItemEdit::Status(StatusEdit { unrestricted: true, .. }))
+        self.edit_intent().needs_override()
     }
     pub fn matches(&self, actual: &ForgeSnapshot) -> bool {
-        if self.field == StatusField::LevelRequirement {
+        if matches!(
+            self.edit_intent(),
+            ItemEdit::Status(StatusEdit {
+                field: StatusField::LevelRequirement,
+                ..
+            })
+        ) {
             actual == self.projected()
         } else {
             self.prepared.inspect_readback(Some(actual)).confirmed()
@@ -130,7 +167,7 @@ impl<T> WriteOutcome<T> {
 }
 pub type WriteStatus = WriteOutcome<ForgeSnapshot>;
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct WriteRecord<P = StatusPlan, T = ForgeSnapshot> {
+pub struct WriteRecord<P = ForgePlan, T = ForgeSnapshot> {
     pub plan: P,
     pub status: WriteOutcome<T>,
 }
@@ -139,7 +176,7 @@ pub struct WriteRecord<P = StatusPlan, T = ForgeSnapshot> {
 /// More supported edits/field sets extend these variants, not the outcome model.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum WritePlan {
-    Forge(Box<StatusPlan>),
+    Forge(Box<ForgePlan>),
     Field(Box<AttackLeechPlan>),
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -213,8 +250,8 @@ impl WritePlan {
         }
     }
 }
-impl From<StatusPlan> for WritePlan {
-    fn from(plan: StatusPlan) -> Self {
+impl From<ForgePlan> for WritePlan {
+    fn from(plan: ForgePlan) -> Self {
         Self::Forge(Box::new(plan))
     }
 }

@@ -8,13 +8,11 @@ Current verification uses pinned `nightly-2026-10-17` (Rust 1.101.0-nightly). `m
 suites once, followed by workspace checks. Individual test tasks remain available for focused work.
 Earlier compiler matrices below are historical results, not additional gates.
 
-The next cleanup stage consolidates both existing writes behind `WritePlan`/`WriteOutcome<T>`,
-one session submission/readback lifecycle and `Command::Write`. Known same-target readback drift
-is retained and published as NotKept; ordinary refusals keep healthy sessions. Historical
-confirmation survives later publication gate loss. Cancellation, stale-plan and uncertain-delivery
-guards remain. Native operations and supported feature scope are unchanged; app/UI integration is next.
-The [checkpoint](../tools/trainer-eval/persistent-player/write-service-refactor-report.json) records
-520 stable cases,516 nightly release cases, workspace verification/captures and the final owned Unity worker route.
+The shared service now accepts `WritePlan`/`WriteOutcome<T>` through one session submission/readback
+lifecycle and `Command::Write`. Known same-target drift is retained as NotKept, ordinary refusals
+keep healthy sessions, and historical confirmation survives later publication gate loss. Cancellation,
+stale-plan and uncertain-delivery guards remain. The earlier [write-service checkpoint](../tools/trainer-eval/persistent-player/write-service-refactor-report.json)
+records the original consolidation; compiler matrices there are historical.
 
 The desktop now runs the worker on its own Tokio thread and supplies its handle to the Slint forge.
 Manual connection, empty/read-only items, replacement, unsupported display values and offline-gate loss
@@ -26,6 +24,22 @@ connect the remaining settings/cache actions; hook-engine and feature-family wor
 Validation:530 nightly release trainer/controller cases and56 UI unit tests pass, plus full workspace
 verification and inspected worker/UI captures. The helper build publishes matching debug/release receipts;
 their retained DLL hashes were checked without loading a DLL or accessing a running game.
+
+Protocol31 adds base/subtype and unique/set identity edits to `ForgePlan`/`ForgeUndo` and the shared
+worker/session submission path. All destination fields and refresh signatures are checked before
+any store; runtime definitions are acquired through the original game's getters and rooted across
+GC. Fresh full-state comparison catches set identity changes omitted by the legacy fingerprint.
+The original reverse-edit Undo behavior is preserved with current catalog/override validation.
+Managed failures after one or several stores remain uncertain; meaningful independently observed
+normalization is NotKept and keeps the connection. Derived names, class/level and idol implicit
+layout follow the existing domain readback rules. The desktop adapter remains read-only.
+The [base/identity checkpoint](../tools/trainer-eval/persistent-player/base-identity-report.json)
+records eight Apply/Undo cases, fourteen definite pre-store refusals, known normalization and four
+post-store exceptions. The owned route completed 488 requests/474 main-thread commands, fourteen
+preparations/one helper load, restored entry/stopped server and normal exit. All 541 trainer/controller
+tests pass (five fixture entrypoints remain ignored), plus workspace verification and inspected
+fake-host captures. Affix/roll edits, formatting, mapping, previews,
+gameplay hooks, remaining field sets and writable editor integration remain work.
 
 The first feature increment replaced the level-only request with protocol 29 status operation 10.
 Level, forging potential, corrupted and ruined share `StatusPlan`, worker/session write handling

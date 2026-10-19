@@ -379,9 +379,9 @@ fn definitive_refusal_stays_not_applied_after_simultaneous_log_loss() {
 use eg_trainer::{
     catalog::{CatalogIdentity, EXTRACTION_VERSION, GameCatalog},
     edits::{CatalogProvenance, ExpectedObservation},
-    writes::{StatusPlan, WriteStatus},
+    writes::{ForgePlan, WriteStatus},
 };
-fn forge_plan(fixture: &Fixture) -> StatusPlan {
+fn forge_plan(fixture: &Fixture) -> ForgePlan {
     let profile = fixture.profile();
     let catalog = GameCatalog {
         identity: CatalogIdentity {
@@ -404,7 +404,7 @@ fn forge_plan(fixture: &Fixture) -> StatusPlan {
         generation: 1,
         process: fixture.target.clone(),
     };
-    StatusPlan::level_requirement(&expected, 0x1234, &catalog, &provenance, 17).unwrap()
+    ForgePlan::level_requirement(&expected, 0x1234, &catalog, &provenance, 17).unwrap()
 }
 
 #[test]
@@ -434,20 +434,20 @@ fn rate_and_forge_records_survive_each_other_including_abandoned_second_submissi
                 assert!(matches!(run(session.set_attack_leech_rate(now(), &rate)).unwrap(), RateWriteStatus::Confirmed(_)));
                 let kept = session.last_rate_write().unwrap().clone();
                 if abandon {
-                    let mut future = Box::pin(session.set_status(now(), &forge));
+                    let mut future = Box::pin(session.edit_forge(now(), &forge));
                     assert!(future.as_mut().poll(&mut Context::from_waker(Waker::noop())).is_pending());
                     drop(future);
                     assert_eq!(session.last_write().unwrap().status, WriteStatus::Pending);
                     wire.push(clear());
                 } else {
-                    assert!(matches!(run(session.set_status(now(), &forge)).unwrap(), WriteStatus::Uncertain { .. }));
+                    assert!(matches!(run(session.edit_forge(now(), &forge)).unwrap(), WriteStatus::Uncertain { .. }));
                 }
                 assert_eq!(session.last_rate_write(), Some(&kept));
                 run(session.disconnect());
                 assert!(matches!(session.last_write().unwrap().status, WriteStatus::Uncertain { .. }));
                 assert_eq!(session.last_rate_write(), Some(&kept));
             } else {
-                assert!(matches!(run(session.set_status(now(), &forge)).unwrap(), WriteStatus::Confirmed(_)));
+                assert!(matches!(run(session.edit_forge(now(), &forge)).unwrap(), WriteStatus::Confirmed(_)));
                 let kept = session.last_write().unwrap().clone();
                 if abandon {
                     let mut future = Box::pin(session.set_attack_leech_rate(now(), &rate));

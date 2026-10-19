@@ -178,41 +178,6 @@ impl RuntimeAccess {
         }
     }
 
-    unsafe fn locale_method(&self, owner: Class, name: &CStr, returns: Class, instance: bool, api: &raw::InvocationApi) -> Result<NonNull<raw::MethodInfo>, DiscoveryError> {
-        unsafe {
-            let mut iterator = std::ptr::null_mut();
-            let mut found = None;
-            for _ in 0..100_000 {
-                let method = (self.class_methods)(owner, &mut iterator);
-                if method.is_null() {
-                    return found.ok_or_else(|| unsupported(format!("locale getter missing: {}", name.to_string_lossy())));
-                }
-                let actual = (self.method_name)(method);
-                if actual.is_null() {
-                    return Err(unsupported("locale getter name"));
-                }
-                if CStr::from_ptr(actual) != name {
-                    continue;
-                }
-                let ty = (api.method_get_return_type)(method);
-                let mut implementation_flags = 0;
-                if found.is_some()
-                    || (api.method_get_param_count)(method) != 0
-                    || (api.method_is_instance)(method) != instance
-                    || (api.method_get_class)(method) != owner
-                    || ty.is_null()
-                    || (api.type_is_byref)(ty)
-                    || (api.class_from_type)(ty) != returns
-                    || (api.method_get_flags)(method, &mut implementation_flags) & 0x0440 != 0
-                {
-                    return Err(unsupported(format!("locale getter contract: {}", name.to_string_lossy())));
-                }
-                found = NonNull::new(method.cast_mut());
-            }
-            Err(unsupported("locale getter enumeration limit"))
-        }
-    }
-
     unsafe fn locale_text(&self, root: Option<&Root<'_, '_>>, string_class: Class) -> Result<String, DiscoveryError> {
         unsafe {
             let Some(root) = root else {
@@ -325,10 +290,10 @@ impl RuntimeAccess {
             // These are the only managed bodies authorized by this narrowly scoped operation.
             self.locale_no_cctor(identifier_class)?;
             let string_class = self.locale_system(c"String")?;
-            let identifier_method = self.locale_method(locale_class, c"get_Identifier", identifier_class, true, &api)?;
-            let code_method = self.locale_method(identifier_class, c"get_Code", string_class, true, &api)?;
+            let identifier_method = self.zero_arg_method(locale_class, c"get_Identifier", identifier_class, true, &api)?;
+            let code_method = self.zero_arg_method(identifier_class, c"get_Code", string_class, true, &api)?;
             let application = self.class(&images, c"UnityEngine", c"Application")?;
-            let version_method = self.locale_method(application, c"get_version", string_class, false, &api)?;
+            let version_method = self.zero_arg_method(application, c"get_version", string_class, false, &api)?;
             let context = InvocationContext::new(attached, api);
             let contract = ValueTypeContract::BoxedReturn {
                 class: NonNull::new(identifier_class).ok_or_else(|| unsupported("locale identifier class"))?,

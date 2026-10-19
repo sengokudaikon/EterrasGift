@@ -1,4 +1,4 @@
-//! Owned protocol30 status writes and bounded native acknowledgement decoding.
+//! Owned protocol31 Forge writes and bounded native acknowledgement decoding.
 //! These codecs grant no process access or write permission. Host generation,
 //! profile, policy and main-thread runtime admission remain independent checks.
 
@@ -8,6 +8,80 @@ use crate::{
 };
 
 pub const SET_STATUS_OPERATION: u32 = 10;
+pub const CHANGE_BASE_OPERATION: u32 = 11;
+pub const CHANGE_IDENTITY_OPERATION: u32 = 17;
+
+/// Only operations implemented by the helper. Wire numbers remain internal to
+/// transport; domain planning separately checks catalog compatibility/override.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ForgeMutation {
+    Status { field: StatusField, value: u8, unrestricted: bool },
+    Base { item_type: u8, sub_type: u16, unrestricted: bool },
+    Identity { id: u16, sub_type: u8, rarity: u8, unrestricted: bool },
+}
+impl ForgeMutation {
+    pub fn unrestricted(self) -> bool {
+        match self {
+            Self::Status { unrestricted, .. } | Self::Base { unrestricted, .. } | Self::Identity { unrestricted, .. } => unrestricted,
+        }
+    }
+    pub fn project(self, item: &mut ForgeSnapshot) {
+        match self {
+            Self::Status { field, value, .. } => field.project(item, value),
+            Self::Base { item_type, sub_type, .. } => {
+                item.item_type = item_type;
+                item.sub_type = sub_type;
+            }
+            Self::Identity { id, sub_type, rarity, .. } => {
+                if let Some(identity) = &mut item.identity {
+                    identity.id = id;
+                }
+                item.sub_type = u16::from(sub_type);
+                item.rarity = rarity;
+            }
+        }
+        item.fingerprint = item.legacy_fingerprint();
+    }
+    /// Validates fixed fields before a tail can be allocated or submitted.
+    pub(crate) fn header(operation: u32, value: u32, selector: u32, flags: u32, extra: u32) -> Result<Self, ProtocolError> {
+        if flags > 1 {
+            return invalid();
+        }
+        let unrestricted = flags == 1;
+        match operation {
+            SET_STATUS_OPERATION if value <= 255 && extra == 0 => {
+                let field = StatusField::from_wire(selector)?;
+                if matches!(field, StatusField::Corrupted | StatusField::Ruined) && value > 1 {
+                    return invalid();
+                }
+                Ok(Self::Status {
+                    field,
+                    value: value as u8,
+                    unrestricted,
+                })
+            }
+            CHANGE_BASE_OPERATION if value <= 65535 && selector <= 255 && extra == 0 => Ok(Self::Base {
+                item_type: selector as u8,
+                sub_type: value as u16,
+                unrestricted,
+            }),
+            CHANGE_IDENTITY_OPERATION if value <= 65535 && selector <= 255 && matches!(extra, 7..=9) => Ok(Self::Identity {
+                id: value as u16,
+                sub_type: selector as u8,
+                rarity: extra as u8,
+                unrestricted,
+            }),
+            _ => invalid(),
+        }
+    }
+    fn header_fields(self) -> (u32, u32, u32, u32) {
+        match self {
+            Self::Status { field, value, .. } => (SET_STATUS_OPERATION, u32::from(value), field as u32, 0),
+            Self::Base { item_type, sub_type, .. } => (CHANGE_BASE_OPERATION, u32::from(sub_type), u32::from(item_type), 0),
+            Self::Identity { id, sub_type, rarity, .. } => (CHANGE_IDENTITY_OPERATION, u32::from(id), u32::from(sub_type), u32::from(rarity)),
+        }
+    }
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(i32)]
@@ -105,16 +179,14 @@ fn invalid<T>() -> Result<T, ProtocolError> {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct StatusWrite {
+pub struct ForgeWrite {
     dispatcher: DispatcherSpec,
     expected_manager: u64,
     expected: Box<ForgeSnapshot>,
-    value: u8,
-    field: StatusField,
-    unrestricted: bool,
+    mutation: ForgeMutation,
     canonical_expected: Vec<u8>,
 }
-impl StatusWrite {
+impl ForgeWrite {
     /// Validates/copies the complete expected item before any transport operation.
     /// Manager and item addresses are opaque identity tokens, never dereferenced.
     /// Eligibility and the current game's literal maxLevel remain native checks.
@@ -133,7 +205,12 @@ impl StatusWrite {
         unrestricted: bool,
     ) -> Result<Self, ProtocolError> {
         let value = u8::try_from(value).map_err(|_| ProtocolError::InvalidData)?;
-        if expected_manager == 0 || (matches!(field, StatusField::Corrupted | StatusField::Ruined) && value > 1) {
+        Self::edit(dispatcher, expected_manager, expected, ForgeMutation::Status { field, value, unrestricted })
+    }
+    pub fn edit(dispatcher: DispatcherSpec, expected_manager: u64, expected: ForgeSnapshot, mutation: ForgeMutation) -> Result<Self, ProtocolError> {
+        let (op, value, selector, extra) = mutation.header_fields();
+        ForgeMutation::header(op, value, selector, u32::from(mutation.unrestricted()), extra)?;
+        if expected_manager == 0 {
             return invalid();
         }
         let canonical_expected = forge::encode(Some(&expected))?;
@@ -144,9 +221,7 @@ impl StatusWrite {
             dispatcher,
             expected_manager,
             expected: Box::new(expected),
-            value,
-            field,
-            unrestricted,
+            mutation,
             canonical_expected,
         })
     }
@@ -156,21 +231,18 @@ impl StatusWrite {
     pub fn expected_manager(&self) -> u64 {
         self.expected_manager
     }
-    pub fn value(&self) -> u8 {
-        self.value
-    }
-    pub fn field(&self) -> StatusField {
-        self.field
+    pub fn mutation(&self) -> ForgeMutation {
+        self.mutation
     }
     pub fn unrestricted(&self) -> bool {
-        self.unrestricted
+        self.mutation.unrestricted()
     }
     pub fn dispatcher(&self) -> DispatcherSpec {
         self.dispatcher
     }
     pub fn projected(&self) -> ForgeSnapshot {
         let mut projected = (*self.expected).clone();
-        self.field.project(&mut projected, self.value);
+        self.mutation.project(&mut projected);
         projected
     }
     /// Infallible apart from allocation: all fields and canonical tail are owned,
@@ -178,12 +250,14 @@ impl StatusWrite {
     pub fn encode(&self) -> Vec<u8> {
         let mut frame = vec![0; REQUEST_SIZE];
         frame[..4].copy_from_slice(&MAGIC.to_le_bytes());
-        frame[4..8].copy_from_slice(&SET_STATUS_OPERATION.to_le_bytes());
-        frame[8..12].copy_from_slice(&i32::from(self.value).to_le_bytes());
+        let (op, value, selector, extra) = self.mutation.header_fields();
+        frame[4..8].copy_from_slice(&op.to_le_bytes());
+        frame[8..12].copy_from_slice(&value.to_le_bytes());
         frame[12..16].copy_from_slice(&(self.canonical_expected.len() as u32).to_le_bytes());
         frame[16..24].copy_from_slice(&self.expected_manager.to_le_bytes());
-        frame[24..28].copy_from_slice(&(self.field as u32).to_le_bytes());
-        frame[28..32].copy_from_slice(&u32::from(self.unrestricted).to_le_bytes());
+        frame[24..28].copy_from_slice(&selector.to_le_bytes());
+        frame[28..32].copy_from_slice(&u32::from(self.unrestricted()).to_le_bytes());
+        frame[32..36].copy_from_slice(&extra.to_le_bytes());
         frame[48..56].copy_from_slice(&self.dispatcher.rva.to_le_bytes());
         frame[56..72].copy_from_slice(&self.dispatcher.bytes);
         frame.extend_from_slice(&self.canonical_expected);
@@ -205,7 +279,7 @@ pub enum WriteReply {
 fn uncertain(reason: impl Into<String>) -> WriteReply {
     WriteReply::Uncertain { reason: reason.into() }
 }
-pub fn classify_response(response: &Response, request: &StatusWrite) -> WriteReply {
+pub fn classify_response(response: &Response, request: &ForgeWrite) -> WriteReply {
     if response.payload.len() > MAX_RESPONSE_SIZE {
         return uncertain("response exceeds frame bound");
     }

@@ -15,7 +15,7 @@ mod rate_writes;
 #[path = "backend/write.rs"]
 mod writes;
 use eg_trainer::field_writes::{AttackLeechDecision, AttackLeechPlan, AttackLeechTarget, RateWriteStatus};
-use eg_trainer::writes::{StatusPlan, WriteControl, WriteStatus};
+use eg_trainer::writes::{ForgePlan, WriteControl, WriteStatus};
 
 use eg_core::game_log::{GameLogState, GameLogStatus, GameReadiness};
 use eg_game_access::catalog::CatalogKind;
@@ -285,7 +285,13 @@ impl BackendConnection for Connection {
         }
         result
     }
-    async fn set_status(&mut self, _: Timestamp, plan: &StatusPlan, control: &mut dyn WriteControl) -> Result<WriteStatus, BackendError> {
+    fn supports_base_change(&self) -> bool {
+        self.supports_level_requirement()
+    }
+    fn supports_identity_change(&self) -> bool {
+        self.supports_level_requirement()
+    }
+    async fn edit_forge(&mut self, _: Timestamp, plan: &ForgePlan, control: &mut dyn WriteControl) -> Result<WriteStatus, BackendError> {
         if !control.allowed() {
             return Err(BackendError::blocked(ErrorKind::Superseded, "cleanup before submission"));
         }
