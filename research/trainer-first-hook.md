@@ -44,6 +44,17 @@ Generated C++ and an authored executable must validate the Boolean return, hidde
 argument forwarding and unwind behavior. This cannot be cast to `ExecuteTasks`.
 `SchedulerHook` admits a different static ABI, entry prefix and alloc-40 unwind shape.
 
+The compiler configuration is part of this contract. Foreign exceptions need
+`C-unwind` boundaries and Rust `panic=unwind` to reach the C++ handler with Rust
+cleanup. `panic=abort` aborts when an ordinary C++ exception crosses an unwinding
+Rust boundary; the ABI string alone does not provide containment. Rust panic handling remains separate from C++ exception
+handling, and `catch_unwind` is not a foreign-exception catcher.
+See the [Rust Reference unwind table](https://doc.rust-lang.org/reference/items/functions.html#unwinding)
+and [Rustonomicon](https://doc.rust-lang.org/nomicon/ffi.html#ffi-and-unwinding).
+The evaluated C++ caller uses `/EHs`: `/EHsc` adds an assumption that `extern "C"`
+functions do not throw. Access violations remain terminal, rather than recovered
+C++ failures. See [MSVC exception-handling options](https://learn.microsoft.com/en-us/cpp/build/reference/eh-exception-handling-model).
+
 ## Completed unpatched ABI experiment
 
 The [source-bound oracle](../tools/trainer-eval/unpatched-bool-abi/README.md) passes
