@@ -214,3 +214,5 @@ A future genuine callback can provide an engine-main witness only under separate
 admitted initialization, module/import/registration and runtime lifetime. It cannot
 retroactively justify a pre-bootstrap thread guess or grant offline/owner permission.
 No callback or physical hook was added by this static audit.
+
+The separate [owned thread-identity proof](../tools/trainer-eval/persistent-player/thread-identity-README.md) now validates the exact reader and main/worker predicate controls. It grants no pre-bootstrap, offline, callback, graph or physical-patching authority.

@@ -87,3 +87,10 @@ run = [
 [tasks."trainer:bootstrap:test"]
 description = "Pure previous-generation bootstrap admission regressions; no process access"
 run = "python tools/trainer-eval/persistent-player/test_bootstrap.py"
+
+[tasks."trainer:thread-identity:test"]
+description = "Pure thread-probe validators and mocked controller cleanup tests; no Unity/player execution"
+run = [
+    "cargo test --manifest-path tools/trainer-eval/persistent-player/thread-identity-probe/Cargo.toml --locked --offline",
+    "python -B -I tools/trainer-eval/persistent-player/test_thread_identity.py",
+]

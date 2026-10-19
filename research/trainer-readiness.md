@@ -142,3 +142,10 @@ initialization, Unity-main identity, canonical publication, held OS identity and
 execution/offline/native lifetime remain distinct contracts. A later true callback
 cannot retroactively authorize the current pre-bootstrap TID requirement. The owned
 oracle-versus-detector experiment is being prepared without production API changes.
+
+The [owned thread-identity checkpoint](../tools/trainer-eval/persistent-player/thread-identity-README.md)
+passes one isolated Unity 6000.4.8f1 run: nine native captures, eleven independent C# observations,
+45 roots freed, one scoped native-worker attach/detach and OS-exit-before-join, one foreign Rust
+cleanup and three later frames before normal exit. All 696 frozen inputs remain unchanged.
+This validates the narrow reader/predicate mechanism under authored lifecycle admission; forced
+GC, another probe compiler and production authority/publication/lifetime remain separate work.

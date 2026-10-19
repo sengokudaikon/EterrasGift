@@ -859,3 +859,10 @@ REA was unavailable. No reader, unsafe API, runtime authority or target invocati
 added. The next owned fixture will compare independent C# oracles with rooted metadata,
 canonical context and the engine predicate on main callbacks and a native worker.
 Its plan is retained; native execution is not claimed.
+
+The [owned thread-identity checkpoint](../tools/trainer-eval/persistent-player/thread-identity-README.md)
+passes one isolated Unity 6000.4.8f1 run: nine native captures, eleven independent C# observations,
+45 roots freed, one scoped native-worker attach/detach and OS-exit-before-join, one foreign Rust
+cleanup and three later frames before normal exit. All 696 frozen inputs remain unchanged.
+This validates the narrow reader/predicate mechanism under authored lifecycle admission; forced
+GC, another probe compiler and production authority/publication/lifetime remain separate work.
