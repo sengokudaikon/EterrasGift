@@ -9,6 +9,7 @@ pub mod connection;
 pub mod dispatch;
 pub mod edits;
 pub mod features;
+pub mod field_writes;
 
 pub mod gate;
 pub mod mapping;

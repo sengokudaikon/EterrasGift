@@ -313,3 +313,36 @@ selected game language. Their equality is unproved, including custom NumberForma
 with identical culture names. Numeric text can become independently available; mappings need
 a separately admitted stable rooted provider. No formatter endpoint or provider parser is
 promoted by this checkpoint. Localized descriptions and affix getter delegates remain open.
+
+## Numeric text adapter and pure field planning, 2026-10-19
+
+The exact five-argument static numeric formatter adapter is now implemented, independently
+reviewed and exercised through its full public entrypoint against authored IL2CPP DLLs.
+Review corrected the actual StatPropertyInfo -> PropertyInfoWithLocKey -> BasePropertyInfo
+chain; the first draft's direct-parent assumption would have refused valid game objects.
+Every modifier validates the rooted override list before invoking the audited virtual path.
+The fixed false suffix and actual final-percent unit rule match the selected source route.
+
+Production source is byte-identical to reviewed candidate C2DF673B... . Stable debug and
+nightly release, each with incremental GC off/3 ms, pass all four configurations. Each records
+42 formatter / 42 virtual override / zero unadmitted calls, 370 preinvoke collections,
+39 rooted-result-copy collections and one rooted-exception collection. Full malformed graph,
+invalid input/result, managed exception, failed root and recovery cases pass. Earlier parser,
+boxed Entry, checked invocation and native probes remain in the same runs. This validates
+authored ABI/root/BCL mechanics, not the actual game's numerical algorithms or live execution.
+
+The adapter returns bounded owned text/unit only. No formatter wire request, parsed mapping,
+provider capture/drift detection, description/localization delegate or item clone is enabled.
+Exact active-body permission and exclusive graph/culture/provider nonmutation remain unsafe
+caller obligations; same culture Name cannot establish the same custom number format.
+
+A separate pure attack/leech single-field planner validates source f64 ranges before f32
+projection, compares raw bits, retains complete process/generation/sequence/graph context and
+preserves the other rate. Nine tests cover bounds, no-op, nonfinite input, preserved NaNs and
+complete stale-state drift. It grants no native authority, endpoint, capability or Undo.
+Full equality does not eliminate address reuse between requests: future writes need an
+explicit selection-lifetime policy or retained helper ticket, beyond per-call roots.
+
+Foundation438 passes stable/nightly release plus ownership/architecture checks; full workspace
+verification and inspected captures pass. [Detailed scope](../tools/trainer-eval/unity-rust-host/numeric-formatter-README.md)
+and [exact evidence](../tools/trainer-eval/unity-rust-host/numeric-formatter-report.json).

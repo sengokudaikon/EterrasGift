@@ -266,3 +266,5 @@ The [completed read-only attack/leech checkpoint](../../tools/trainer-eval/persi
 (658 requests / 603 main-thread commands each), including the real worker and existing Apply/Undo.
 The foundation passes 421 stable/nightly tests plus ownership/architecture guards. Generic field
 writes and gameplay hooks remain unsupported; this reader has not run in the actual game.
+
+`field_writes` now provides pure single-field attack/leech planning with source f64 bounds, exact f32 projection/no-op and complete observation rechecks. Nine stable/nightly tests pass. It grants no native write capability or selection-lifetime proof; tokens can be reused between requests.
