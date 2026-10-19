@@ -12,7 +12,14 @@ impl WriteControl for CurrentIntent {
 
 impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> BackendWorker<P, C, L, K> {
     pub(super) async fn write_level_requirement(&mut self, plan: LevelRequirementPlan) -> Result<(), BackendError> {
-        let result = self.write_level_requirement_inner(plan).await;
+        self.execute_level_requirement(plan, false).await
+    }
+    pub(super) async fn undo_level_requirement(&mut self, undo: crate::undo::LevelUndo) -> Result<(), BackendError> {
+        let plan = self.state.level_undo_plan(&undo).map_err(invalid_edit)?;
+        self.execute_level_requirement(plan, true).await
+    }
+    async fn execute_level_requirement(&mut self, plan: LevelRequirementPlan, undoing: bool) -> Result<(), BackendError> {
+        let result = self.write_level_requirement_inner(plan, undoing).await;
         if let Err(error) = &result
             && self.state.phase == Phase::Ready
             && matches!(error.kind, ErrorKind::Transport | ErrorKind::Protocol | ErrorKind::Identity | ErrorKind::RestartRequired)
@@ -21,7 +28,7 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
         }
         result
     }
-    async fn write_level_requirement_inner(&mut self, plan: LevelRequirementPlan) -> Result<(), BackendError> {
+    async fn write_level_requirement_inner(&mut self, plan: LevelRequirementPlan, undoing: bool) -> Result<(), BackendError> {
         if !self.state.enabled {
             return Err(BackendError::blocked(ErrorKind::Disabled, "trainer disabled"));
         }
@@ -56,6 +63,7 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
         self.commit(epoch, |this| {
             this.state.activity = Some(Activity::WritingForge);
             this.state.error = None;
+            this.state.undo_level_requirement = None;
             this.state.last_write = Some(WriteRecord {
                 plan: plan.clone(),
                 status: WriteStatus::Pending,
@@ -108,7 +116,15 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
                 } else {
                     let data = self.state.catalog.data().cloned().ok_or_else(|| invalid_edit("catalog missing after write"))?;
                     let forge = self.forge_state(Some(snapshot), &data);
-                    self.commit(epoch, |this| this.state.forge = forge)?;
+                    let undo = if undoing {
+                        None
+                    } else {
+                        self.state.last_write.as_ref().and_then(|record| crate::undo::LevelUndo::from_confirmed(record).ok())
+                    };
+                    self.commit(epoch, |this| {
+                        this.state.forge = forge;
+                        this.state.undo_level_requirement = undo;
+                    })?;
                     Ok(())
                 }
             }

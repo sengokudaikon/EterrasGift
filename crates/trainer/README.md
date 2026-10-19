@@ -183,6 +183,25 @@ It uses Release admission even in a development session. Errors before transport
 or mismatched acknowledgements, potential delivery and lost confirmation provenance remain Uncertain. An abandoned
 future retains Pending and a busy session until explicit cleanup records uncertainty. No path retries a write.
 
+The later service checkpoint adds a separate ReadForge exchange after native acknowledgement. Confirmation and
+Undo remain pending through both responses; every later refusal, read failure, malformed/mismatched snapshot or
+admission loss is an uncertain write, even if the read itself was not sent. Cleanup can stop between requests
+without claiming the earlier store did not happen. All four authored routes exercise the actual background worker,
+including a dropped Apply receipt, exact separate readback, retained level Undo, explicit restoration and a consumed
+token rejected before I/O. See [apply-undo-report.json](../../tools/trainer-eval/persistent-player/apply-undo-report.json).
+
+`undo::LevelUndo` is a conditional reverse plan for that one confirmed operation. It binds the complete after-state,
+manager, process/generation and catalog; preparation checks fresh runtime provenance and current literal bounds.
+The service publishes it atomically with the confirmed item, clears it on item/context changes or attempted writes,
+and consumes it after successful Undo. It supplies neither redo nor the complete multi-edit/draft Undo workflow.
+
+`features` ports all76 descriptors and eight pages into immutable typed data. Local wanted intent, numeric values,
+logical reports and unknown physical state remain separate; construction and updates perform no I/O. Switches start
+off and saved output contains numeric values only. Saved fitting follows the C# behavior; live invalid input is
+rejected atomically, and fractional values are not rounded to the UI step. All native feature support remains
+Unsupported. An independent [compiled catalog comparison](../../tools/trainer-eval/feature-registry-parity/README.md)
+matches1,108 scalar properties, including every title/description/default/choice/range/group, with zero differences.
+
 The background service accepts `ApplyLevelRequirement` explicitly. It rechecks generation/full observation and
 fresh runtime status before submission, drains writes through queued cleanup, and retains the outcome with its
 original plan. Only its separate `level_requirement` capability is available on supported ready connections;
@@ -194,6 +213,12 @@ exact BCL `Double.TryParse(String, NumberStyles, IFormatProvider, out Double)` o
 culture and exact unit suffix. Stable/nightly and incremental GC off/on pass. Unicode minus and host locale
 normalization are not added. Unity's own culture parent fallback is retained explicitly. This proof enables no
 native formatting/mapping opcode and does not prove the target game's BCL binary equivalent.
+
+The parser now also has a native RuntimeAccess adapter. Its exact production source passes the four standalone
+runtime configurations, with an operation-only UTF16 string allocator and the existing checked invocation contracts.
+It requires explicit permission for the audited BCL initialization/cache/lock/allocation closure; a containing game
+operation must supply offline/context admission. No helper parser/formatter request is exposed. Exact evidence is
+in [parser-adapter-report.json](../../tools/trainer-eval/unity-rust-host/parser-adapter-report.json).
 
 The [Rust bootstrap checkpoint](../../tools/trainer-eval/persistent-player/bootstrap-report.json) passes plugin,
 Python and Rust startup against the same authored Unity 6000.4.8f1 child build. Rust checks full pristine dispatcher

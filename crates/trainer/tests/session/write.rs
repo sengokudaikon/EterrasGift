@@ -42,16 +42,22 @@ fn explicit_write_requires_exact_readback_and_retains_confirmed_result_after_dis
     let plan = plan(&f);
     let wire = FakeTransport::new(
         f.target.clone(),
-        [f.discover(), status(false, 0x1234, 0), done(forge::encode(Some(plan.projected())).unwrap()), clear()],
+        [
+            f.discover(),
+            status(false, 0x1234, 0),
+            done(forge::encode(Some(plan.projected())).unwrap()),
+            done(forge::encode(Some(plan.projected())).unwrap()),
+            clear(),
+        ],
     );
     let mut session = ready(&f, &wire, &FakeLog::new([offline()]));
     assert_eq!(run(session.set_level_requirement(now(), &plan)).unwrap(), WriteStatus::Confirmed(plan.projected().clone()));
     assert_eq!(session.state(), SessionState::Ready);
-    assert_eq!(wire.requests().len(), 3);
+    assert_eq!(wire.requests().len(), 4);
     assert!(matches!(&wire.requests()[2], Request::SetLevelRequirement(request) if request.expected() == plan.before().snapshot() && request.expected_manager() == 0x1234));
     run(session.disconnect());
     assert_eq!(session.last_write().unwrap().status, WriteStatus::Confirmed(plan.projected().clone()));
-    assert_eq!(wire.requests().len(), 4);
+    assert_eq!(wire.requests().len(), 5);
 }
 #[test]
 fn malformed_mismatched_or_failed_write_is_uncertain_and_never_replayed() {
@@ -227,4 +233,120 @@ fn plans_recheck_full_observation_and_manager_including_fields_outside_legacy_ha
     assert_eq!(changed.fingerprint, plan.before().snapshot().fingerprint);
     let expected = ExpectedObservation::new(1, f.target, plan.before().catalog_identity().clone(), changed).unwrap();
     assert_eq!(plan.recheck(&expected, 0x1234), Err(EditError::StaleItem));
+}
+
+#[test]
+fn every_separate_readback_failure_is_uncertain_even_when_that_read_was_not_sent() {
+    for fault in 0..11 {
+        let f = Fixture::new();
+        let plan = plan(&f);
+        let mut changed = plan.projected().clone();
+        changed.name.push_str(" next-frame change");
+        let last = match fault {
+            0 => done(vec![1]),
+            1 => done(forge::encode(None).unwrap()),
+            2 => done(forge::encode(Some(&changed)).unwrap()),
+            3 | 4 => Step::Reply(Err(TransportError {
+                delivery: if fault == 3 { Delivery::NotSent } else { Delivery::MayHaveRun },
+                failure: TransportFailure::Timeout,
+            })),
+            _ => Step::Reply(Ok(Response {
+                code: [
+                    ResponseCode::Failed,
+                    ResponseCode::NotReady,
+                    ResponseCode::StaleItem,
+                    ResponseCode::Refused,
+                    ResponseCode::OfflineRequired,
+                    ResponseCode::RestartRequired,
+                ][fault - 5],
+                payload: b"readback refused after prior write".to_vec(),
+            })),
+        };
+        let wire = FakeTransport::new(
+            f.target.clone(),
+            [f.discover(), status(false, 0x1234, 0), done(forge::encode(Some(plan.projected())).unwrap()), last],
+        );
+        let mut session = ready(&f, &wire, &FakeLog::new([offline()]));
+        assert!(matches!(run(session.set_level_requirement(now(), &plan)).unwrap(), WriteStatus::Uncertain { .. }));
+        assert!(matches!(wire.requests()[3], Request::ReadForge { .. }));
+        assert!(run(session.set_level_requirement(now(), &plan)).is_err());
+        assert_eq!(wire.requests().len(), 4);
+    }
+}
+#[test]
+fn separate_readback_cannot_confirm_after_its_log_or_artifacts_change() {
+    for change_file in [false, true] {
+        let f = Fixture::new();
+        let plan = plan(&f);
+        let log = FakeLog::new([offline()]);
+        let changed_log = log.clone();
+        let metadata = f.metadata.clone();
+        let reply = forge::encode(Some(plan.projected())).unwrap();
+        let wire = FakeTransport::new(
+            f.target.clone(),
+            [
+                f.discover(),
+                status(false, 0x1234, 0),
+                done(reply.clone()),
+                Step::Action(
+                    Box::new(move || {
+                        if change_file {
+                            fs::write(metadata, b"changed during separate readback").unwrap();
+                        } else {
+                            changed_log.set(online());
+                        }
+                    }),
+                    Response {
+                        code: ResponseCode::Done,
+                        payload: reply,
+                    },
+                ),
+            ],
+        );
+        let mut session = ready(&f, &wire, &log);
+        assert!(matches!(run(session.set_level_requirement(now(), &plan)).unwrap(), WriteStatus::Uncertain { .. }));
+        assert_ne!(session.state(), SessionState::Ready);
+        assert_eq!(wire.requests().len(), 4);
+    }
+}
+#[test]
+fn native_ack_does_not_clear_pending_while_the_separate_read_is_in_flight() {
+    let f = Fixture::new();
+    let plan = plan(&f);
+    let wire = FakeTransport::new(
+        f.target.clone(),
+        [f.discover(), status(false, 0x1234, 0), done(forge::encode(Some(plan.projected())).unwrap()), Step::Pending],
+    );
+    let mut session = ready(&f, &wire, &FakeLog::new([offline()]));
+    let mut pending = Box::pin(session.set_level_requirement(now(), &plan));
+    assert!(pending.as_mut().poll(&mut Context::from_waker(Waker::noop())).is_pending());
+    drop(pending);
+    assert_eq!(session.last_write().unwrap().status, WriteStatus::Pending);
+    assert_eq!(wire.requests().len(), 4);
+    assert!(matches!(run(session.set_level_requirement(now(), &plan)), Err(SessionError::Busy)));
+    wire.push(clear());
+    run(session.disconnect());
+    assert!(matches!(session.last_write().unwrap().status, WriteStatus::Uncertain { .. }));
+    assert_eq!(wire.requests().len(), 5);
+}
+#[test]
+fn cleanup_after_native_ack_stops_before_separate_read_without_claiming_no_store() {
+    struct StopAfterFirst(bool);
+    impl WriteControl for StopAfterFirst {
+        fn allowed(&mut self) -> bool {
+            std::mem::replace(&mut self.0, false)
+        }
+    }
+    let f = Fixture::new();
+    let plan = plan(&f);
+    let wire = FakeTransport::new(
+        f.target.clone(),
+        [f.discover(), status(false, 0x1234, 0), done(forge::encode(Some(plan.projected())).unwrap())],
+    );
+    let mut session = ready(&f, &wire, &FakeLog::new([offline()]));
+    assert!(matches!(
+        run(session.set_level_requirement_controlled(now(), &plan, &mut StopAfterFirst(true))).unwrap(),
+        WriteStatus::Uncertain { .. }
+    ));
+    assert_eq!(wire.requests().len(), 3);
 }

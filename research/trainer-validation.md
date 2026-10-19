@@ -797,3 +797,50 @@ nonfinite values, Unicode/NUL rejection, rooted exceptions and recovery pass thr
 GetCultureInfo("en-Ω-🌿") resolves to"en" internally; true unknown base cultures throw. Rust adds no fallback or
 normalization. Static audit covers BCL cctor/locks/cache/globalization effects. This proves matching-runtime calls,
 not actual-game BCL equivalence, a native formatter or a production mapping/parser request.
+
+## Service Apply/readback/Undo, typed feature intent and native parser adapter (2026-10-19)
+
+The next [authored worker checkpoint](../tools/trainer-eval/persistent-player/apply-undo-report.json) passes all four
+startup routes with602 requests and550 main-thread commands each. A real Tokio BackendWorker connects through a
+singleton direct Session to the already verified owned child. This validates the worker/session pipeline; it does
+not claim a new NativePreparer connector integration. All original read/write scenarios remain intact.
+
+Apply receipt disposal does not cancel accepted work. The watch state remains Pending after native ACK, before
+separate ReadForge and after that response but before publication, for both Apply and Undo (six observations).
+The trace independently confirms Status -> SetLevelRequirement ACK -> ReadForge. Confirmed full snapshot and Undo
+token publish together only after the separate read. Explicit Undo restores the complete original snapshot and
+consumes the token; replaying that consumed intent is InvalidEdit before any RPC. Two independent C# observations
+confirm17/87, unchanged serialized bytes and no forbidden rebuild/getter/callback. Disable acknowledges one empty
+ClearHooks, the worker shuts down and joins, and the original controller session resumes. Every player restores
+the scheduler, stops the server, runs three later frames and exits normally with unchanged file manifests.
+
+Session separately treats every later read error as an unconfirmed earlier write, including a NotSent read, typed
+refusal, malformed/mismatched reply, admission/artifact loss and cancellation between requests. A canceled future
+retains Pending/Busy until explicit cleanup records uncertainty. LevelUndo is a conditional reverse plan with
+full after-state/process/generation/catalog/manager matching and fresh range/provenance checks, with no override.
+Attempted edits and context drift clear Undo. Successful Undo consumes it without creating redo. This is one
+operation, not the complete multi-edit/draft workflow. Session54, backend31 and pure Undo12 tests pass.
+
+The pure feature layer carries all76 original descriptors, eight pages,68 typed hook IDs, seven typed field sets,
+and legacy owner dependencies. Wanted switches start off; only numeric values are saved. Saved fitting follows
+C# defaults/clamping/choice behavior; strict transactional live validation is a deliberate stronger boundary.
+Fractional increments remain valid without UI-step quantization. Logical reports cannot prove physical cleanup:
+physical state stays Unknown and every native descriptor capability stays Unsupported. Eleven tests pass. The
+[independent compiled parity check](../tools/trainer-eval/feature-registry-parity/README.md) compares the evaluated,
+unmodified C# catalog against Rust: eight pages,76 descriptors,29 values,24 fields and1,108 scalar properties all
+match, including text/order/Needs/defaults/choices/hints/limits/steps/units/groups. No app/game is launched for that test.
+The [hook/field audit](../tools/trainer-eval/hooks-fields-audit/README.md) retains source hashes and the concrete
+cleanup, identity, transition and partial-mutation corrections required before adding native effects.
+
+The [native parser adapter](../tools/trainer-eval/unity-rust-host/parser-adapter-report.json) is now RuntimeAccess
+code, called directly by a supervised standalone host. Production parser source is byte-identical to the tested
+candidate. Four real configurations pass the exact method/enum/outDouble/string-root path, alongside the earlier
+oracle, generic Entry checks and34 native checks. Four new fake-export tests cover input/overload/allocator/root
+contract failures. Game-access lib70 and invocation16 pass stable/nightly release. The operation-only UTF16 string
+factory broadens no general invocation ABI. Framework initialization/cache/locks/globalization/GC effects require
+the caller's explicit unsafe permission; the containing operation must provide offline/context admission. There is
+no exposed helper parser/mapping request and no actual-game call or BCL byte-equivalence claim.
+
+Foundation396 passes stable/nightly release, plus one ownership compile-fail each and four architecture checks.
+Workspace lint/format/tokens/captures pass; the item-status capture was inspected. Logs are
+artifacts/trainer-eval/apply-undo-{stable,nightly}-tests.log and apply-undo-verify.log.

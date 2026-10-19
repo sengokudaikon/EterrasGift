@@ -10,6 +10,8 @@ impl<T: Transport, L: LogSource> Session<T, L> {
     /// Explicitly submit one level requirement change. Errors returned through
     /// Err occur before transport is entered. After that point the owned record
     /// and returned status always preserve certainty, including lost admission.
+    /// Confirmation requires native full readback and a separate fresh ReadForge
+    /// exchange. Every failure of that later exchange is an uncertain write.
     /// The application must additionally recheck its generation and observation.
     /// Dropping this future preserves Pending and blocks all work until cleanup.
     pub async fn set_level_requirement(&mut self, now: Timestamp, plan: &LevelRequirementPlan) -> Result<WriteStatus, SessionError> {
@@ -79,6 +81,35 @@ impl<T: Transport, L: LogSource> Session<T, L> {
                 result = WriteStatus::uncertain(format!("write artifacts changed before confirmation: {error}"));
             }
         }
+        if matches!(result, WriteStatus::Confirmed(_)) {
+            // File verification may take time. Recheck admission immediately
+            // before the independent read, and honor cleanup between requests.
+            // The store has already run: no subsequent failure is NotApplied.
+            if let Err(error) = advanced(now, elapsed).and_then(|time| self.write_gate(time)) {
+                result = WriteStatus::uncertain(format!("write sent but independent readback admission failed: {error}"));
+            } else if !control.allowed() {
+                result = WriteStatus::uncertain("write acknowledged before queued cleanup; separate readback was not submitted");
+            } else {
+                result = match self.transport.send(&Request::ReadForge { dispatcher }).await {
+                    Ok(response) if response.code == ResponseCode::Done => match forge::decode(&response.payload) {
+                        Ok(Some(actual)) if actual == *plan.projected() => WriteStatus::Confirmed(actual),
+                        Ok(_) => WriteStatus::uncertain("separate readback differs from the full projected item"),
+                        Err(error) => WriteStatus::uncertain(format!("invalid separate write readback: {error}")),
+                    },
+                    Ok(response) => WriteStatus::uncertain(format!("write sent but separate readback was refused: {:?}", response.code)),
+                    Err(error) => WriteStatus::uncertain(format!("write sent but separate readback failed: {error}")),
+                };
+                if matches!(result, WriteStatus::Confirmed(_)) {
+                    let provenance = advanced(now, elapsed)
+                        .and_then(|time| self.write_gate(time))
+                        .and_then(|()| self.profile.validate(&dispatcher).map_err(|error| SessionError::Identity(error.to_string())))
+                        .and_then(|()| advanced(now, elapsed).and_then(|time| self.write_gate(time)));
+                    if let Err(error) = provenance {
+                        result = WriteStatus::uncertain(format!("independent readback lost confirmation provenance: {error}"));
+                    }
+                }
+            }
+        }
         let reusable = admitted.is_ok() && artifacts.is_ok() && matches!(result, WriteStatus::Confirmed(_));
         if reusable {
             self.status = status;
@@ -125,7 +156,7 @@ impl<T: Transport, L: LogSource> Session<T, L> {
         if let Some(record) = &mut self.last_write
             && record.status == WriteStatus::Pending
         {
-            record.status = WriteStatus::uncertain("write future abandoned before acknowledgement; never replay");
+            record.status = WriteStatus::uncertain("write future abandoned before complete confirmation; never replay");
         }
     }
 }

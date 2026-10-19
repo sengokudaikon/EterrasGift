@@ -202,3 +202,100 @@ fn gate_or_not_ready_refresh_failure_revokes_old_ready_state_without_submitting(
         }
     });
 }
+
+#[test]
+fn explicit_undo_uses_a_fresh_reverse_plan_and_consumes_the_last_apply() {
+    run(async {
+        let shared = writable();
+        let original = shared.forge_item.lock().unwrap().clone().unwrap();
+        let (handle, worker) = start(&shared, options(), None);
+        connected(&handle).await;
+        let plan = handle.snapshot().level_requirement_plan(17).unwrap();
+        command(&handle, Command::ApplyLevelRequirement(Box::new(plan))).await.unwrap();
+        let undo = handle.snapshot().undo_level_requirement.unwrap();
+        assert_eq!(undo.restore_value(), 20);
+        let fresh = handle.snapshot().level_undo_plan(&undo).unwrap();
+        assert_eq!(fresh.before().snapshot().status.level_requirement, 17);
+        assert_eq!(fresh.value(), 20);
+        command(&handle, Command::UndoLevelRequirement(Box::new(undo.clone()))).await.unwrap();
+        assert!(matches!(handle.snapshot().forge, ForgeState::Item { snapshot, .. } if *snapshot == original));
+        assert!(handle.snapshot().undo_level_requirement.is_none());
+        assert_eq!(shared.count("write"), 2);
+        assert_eq!(
+            command(&handle, Command::UndoLevelRequirement(Box::new(undo))).await.unwrap_err().kind,
+            ErrorKind::InvalidEdit
+        );
+        assert_eq!(shared.count("write"), 2);
+        shutdown(&handle, worker).await;
+    });
+}
+#[test]
+fn next_apply_replaces_undo_and_old_ui_intent_is_refused_before_io() {
+    run(async {
+        let shared = writable();
+        let (handle, worker) = start(&shared, options(), None);
+        connected(&handle).await;
+        let plan = handle.snapshot().level_requirement_plan(17).unwrap();
+        command(&handle, Command::ApplyLevelRequirement(Box::new(plan))).await.unwrap();
+        let old = handle.snapshot().undo_level_requirement.unwrap();
+        let plan = handle.snapshot().level_requirement_plan(19).unwrap();
+        command(&handle, Command::ApplyLevelRequirement(Box::new(plan))).await.unwrap();
+        let refreshes = shared.count("refresh");
+        assert_eq!(
+            command(&handle, Command::UndoLevelRequirement(Box::new(old))).await.unwrap_err().kind,
+            ErrorKind::InvalidEdit
+        );
+        assert_eq!(shared.count("refresh"), refreshes);
+        assert_eq!(handle.snapshot().undo_level_requirement.unwrap().restore_value(), 17);
+        assert_eq!(shared.count("write"), 2);
+        shutdown(&handle, worker).await;
+    });
+}
+#[test]
+fn observed_change_outside_legacy_hash_discards_undo_and_disconnect_cannot_reuse_it() {
+    run(async {
+        let shared = writable();
+        let (handle, worker) = start(&shared, options(), None);
+        connected(&handle).await;
+        let plan = handle.snapshot().level_requirement_plan(17).unwrap();
+        command(&handle, Command::ApplyLevelRequirement(Box::new(plan))).await.unwrap();
+        let undo = handle.snapshot().undo_level_requirement.unwrap();
+        shared.forge_item.lock().unwrap().as_mut().unwrap().name.push_str(" external drift");
+        command(&handle, Command::ReadForge).await.unwrap();
+        assert!(handle.snapshot().undo_level_requirement.is_none());
+        assert_eq!(
+            command(&handle, Command::UndoLevelRequirement(Box::new(undo.clone()))).await.unwrap_err().kind,
+            ErrorKind::InvalidEdit
+        );
+        command(&handle, Command::Disconnect).await.unwrap();
+        command(&handle, Command::Connect).await.unwrap();
+        assert_eq!(
+            command(&handle, Command::UndoLevelRequirement(Box::new(undo))).await.unwrap_err().kind,
+            ErrorKind::InvalidEdit
+        );
+        assert_eq!(shared.count("write"), 1);
+        shutdown(&handle, worker).await;
+    });
+}
+#[test]
+fn uncertain_undo_discards_its_token_and_releases_live_item_without_replay() {
+    run(async {
+        let shared = writable();
+        let (handle, worker) = start(&shared, options(), None);
+        connected(&handle).await;
+        let plan = handle.snapshot().level_requirement_plan(17).unwrap();
+        command(&handle, Command::ApplyLevelRequirement(Box::new(plan))).await.unwrap();
+        let undo = handle.snapshot().undo_level_requirement.unwrap();
+        *shared.write_result.lock().unwrap() = Some(WriteStatus::uncertain("reverse readback unavailable"));
+        assert_eq!(
+            command(&handle, Command::UndoLevelRequirement(Box::new(undo))).await.unwrap_err().kind,
+            ErrorKind::WriteUncertain
+        );
+        let state = handle.snapshot();
+        assert!(state.undo_level_requirement.is_none());
+        assert_eq!(state.forge, ForgeState::Unobserved);
+        assert_eq!(state.phase, Phase::Blocked);
+        assert_eq!(shared.count("write"), 2);
+        shutdown(&handle, worker).await;
+    });
+}

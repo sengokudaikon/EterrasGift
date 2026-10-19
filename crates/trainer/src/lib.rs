@@ -8,10 +8,12 @@ pub mod catalog_cache;
 pub mod connection;
 pub mod dispatch;
 pub mod edits;
+pub mod features;
 
 pub mod gate;
 pub mod mapping;
 pub mod profile;
 pub mod session;
 pub mod sources;
+pub mod undo;
 pub mod writes;

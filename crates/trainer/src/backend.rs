@@ -240,6 +240,8 @@ pub struct Capabilities {
     pub read_forge: bool,
     pub read_catalog: bool,
     pub write_forge: bool,
+    /// Operation support on this ready connection. Current item eligibility and
+    /// range/observation checks still belong to level_requirement_plan.
     pub level_requirement: bool,
     pub hooks: bool,
     pub fields: bool,
@@ -303,6 +305,7 @@ pub struct BackendSnapshot {
     pub forge: ForgeState,
     pub capabilities: Capabilities,
     pub last_write: Option<WriteRecord>,
+    pub undo_level_requirement: Option<crate::undo::LevelUndo>,
 }
 impl BackendSnapshot {
     pub fn expected_observation(&self) -> Result<crate::edits::ExpectedObservation, crate::edits::EditError> {
@@ -343,6 +346,26 @@ impl BackendSnapshot {
             value,
         )
     }
+    pub fn level_undo_plan(&self, undo: &crate::undo::LevelUndo) -> Result<LevelRequirementPlan, crate::edits::EditError> {
+        use crate::edits::{CatalogProvenance, EditError};
+        if self.undo_level_requirement.as_ref() != Some(undo) {
+            return Err(EditError::IdentityChanged);
+        }
+        let current = self.expected_observation()?;
+        let status = self
+            .runtime_status
+            .filter(|status| !status.online && status.manager != 0)
+            .ok_or(EditError::OfflineRequired)?;
+        undo.prepare(
+            &current,
+            status.manager,
+            self.catalog.data().ok_or(EditError::CatalogNotVerified)?,
+            &CatalogProvenance::RuntimeRead {
+                generation: self.generation,
+                process: current.process().clone(),
+            },
+        )
+    }
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum BackendEvent {
@@ -365,6 +388,7 @@ pub enum Command {
     RefreshCatalog,
     ReadForge,
     ApplyLevelRequirement(Box<LevelRequirementPlan>),
+    UndoLevelRequirement(Box<crate::undo::LevelUndo>),
     Shutdown,
 }
 impl Command {
@@ -513,6 +537,7 @@ pub fn service<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K
         forge: ForgeState::Unobserved,
         capabilities: Capabilities::default(),
         last_write: None,
+        undo_level_requirement: None,
     };
     let (sender, commands) = mpsc::channel(32);
     let (snapshots, receiver) = watch::channel(state.clone());
@@ -585,6 +610,12 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
         }
     }
     fn publish(&mut self) {
+        if self.state.undo_level_requirement.as_ref().is_some_and(|undo| {
+            self.state.expected_observation().as_ref() != Ok(undo.after())
+                || self.state.runtime_status.as_ref().is_none_or(|status| status.online || status.manager != undo.manager())
+        }) {
+            self.state.undo_level_requirement = None;
+        }
         self.state.revision = self.state.revision.wrapping_add(1);
         self.state.capabilities = Capabilities {
             read_forge: self.state.phase == Phase::Ready,
@@ -701,6 +732,7 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
             Command::RefreshCatalog => self.read(true).await,
             Command::ReadForge => self.read(false).await,
             Command::ApplyLevelRequirement(plan) => self.write_level_requirement(*plan).await,
+            Command::UndoLevelRequirement(undo) => self.undo_level_requirement(*undo).await,
         }
     }
     async fn poll(&mut self) {
@@ -988,6 +1020,7 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
         }
     }
     fn release_without_io(&mut self) {
+        self.state.undo_level_requirement = None;
         if self.connection.take().is_some() {
             self.state.cleanup = Cleanup::Unconfirmed;
         }

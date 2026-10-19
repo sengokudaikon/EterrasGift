@@ -210,3 +210,24 @@ impl InvocationApi {
         })
     }
 }
+
+/// Exact UTF16 string allocator, resolved only for operations that authorize allocation.
+#[derive(Clone, Copy)]
+pub struct StringFactoryApi {
+    pub string_new_utf16: unsafe extern "C-unwind" fn(*const u16, i32) -> *mut Object,
+}
+impl StringFactoryApi {
+    /// Resolve without invoking the allocator.
+    ///
+    /// # Safety
+    /// The address must be the exact Unity6000.4 public export with this ABI, from the same
+    /// initialized runtime as subsequent calls, and remain loaded for every use.
+    pub unsafe fn resolve(mut symbol: impl FnMut(&'static CStr) -> Option<NonNull<c_void>>) -> Result<Self, MissingExport> {
+        let name = c"il2cpp_string_new_utf16";
+        let address = symbol(name).ok_or(MissingExport(name))?;
+        Ok(Self {
+            // SAFETY: caller establishes export identity, ABI and code lifetime.
+            string_new_utf16: unsafe { std::mem::transmute::<*mut c_void, unsafe extern "C-unwind" fn(*const u16, i32) -> *mut Object>(address.as_ptr()) },
+        })
+    }
+}

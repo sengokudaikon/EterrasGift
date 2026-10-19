@@ -21,6 +21,8 @@ mod catalog_numeric;
 mod forge;
 mod limits;
 mod locale;
+mod parser;
+pub use parser::DisplayScalarUnavailable;
 mod write;
 pub use write::LevelWriteError;
 
