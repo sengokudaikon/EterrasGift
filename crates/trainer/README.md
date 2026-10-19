@@ -59,8 +59,11 @@ failure requires an explicit reconnect. Immutable definition assets remain a run
 make this an atomic snapshot. Each request currently rehashes game artifacts; large captures need performance work.
 
 Definition names retain their source (stored display, internal name, or runtime display). Generated affix names,
-rarity names, numeric interpretation and implicit endpoint formatting are explicitly unavailable in this adapter.
-Raw implicit ranges remain available. `GameCatalog::resolve_item_name` preserves the raw forge observation and
+rarity names and implicit endpoint formatting are explicitly unavailable in this adapter. Ordinary property numeric
+ranges, rounding and display flags come from already-loaded PropertyList metadata, including ordered first-match
+selection/default and rounding overrides. Five special registry-backed SP identities remain explicitly unavailable;
+no property factory/getter or linear displayed-value interpolation is invoked. Raw implicit ranges remain available.
+`GameCatalog::resolve_item_name` preserves the raw forge observation and
 returns separate provenance: the runtime cache first, then a matching unique/set or base definition. A base fallback
 does not reproduce a full affixed name. The native full-name builder also writes lore and is deliberately not invoked.
 
@@ -68,6 +71,19 @@ does not reproduce a full affixed name. The native full-name builder also writes
 atomic catalog/last-key writes and three-build retention. Missing files are cache misses; corruption is explicit.
 Cache identity includes binary/metadata hashes, language, application version and extraction version. Saved data is
 never proof of current runtime verification or permission to edit. See [catalog evidence](../../tools/trainer-eval/persistent-player/catalog-report.json).
+Extraction version 2 adds the ordinary numeric route; [numeric evidence](../../tools/trainer-eval/persistent-player/numeric-report.json)
+records its authored coverage and special-property/formatting limitations.
+
+`backend::service` supplies a serialized background worker, bounded command queue, watch snapshots and typed events.
+Construction does no I/O or spawning. Enable/monitor/connect are explicit, connection phase is separate from read
+activity, and initial catalog/forge results publish together under a generation. Accepted cleanup barriers suppress
+old results and drain in-flight operations; receipt cancellation never aborts a submitted operation. Saved catalogs
+remain unverified until fresh capture. Writes, feature hooks and field editors stay explicit false capabilities.
+
+`SessionConnector` repeats the exact process-bound offline gate around an injected helper preparer and the session
+handshake. Independent log cursors, immutable profile/helper identity and transport binding are checked before pipe
+use. Loaded or uncertain preparation failures retain MayHaveRun and never retry automatically. This is the safe
+orchestration boundary; an app-owned Rust remote preparer and UI composition are still separate work.
 
 Read failure drops the cached attachment and blocks further reads until an explicit new handshake. Offline-required
 revokes it as usual. A canceled read remains Connecting, with no cached runtime status, until explicit disconnect.

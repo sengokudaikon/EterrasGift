@@ -576,3 +576,33 @@ The application actor, production process/bootstrap service, rich mappings and w
 complete trainer UI integration. Full captures currently rehash both game artifacts per page; this needs measurement
 and an equivalent immutable-artifact strategy before large-game polling is practical.
 [Exact catalog evidence](../tools/trainer-eval/persistent-player/catalog-report.json).
+
+## Numeric metadata and application-worker checkpoint
+
+The ordinary-property numeric reader reproduces audited PropertyList field selection and StatPropertyInfo rounding,
+without calling lazy asset factories or property getters. It preserves first-match/default semantics, display flags,
+ordered special-tag overrides, negative/reversed ranges and unique roll identities. SP 43/58/98/123/130 require
+separate registries and remain explicit unavailable. Extraction version 2 separates this cache capability from the
+initial catalog checkpoint; generated text, endpoint formatting and actual roll mappings are still separate work.
+
+Both real Unity fixture routes verify 15 available/three unavailable affixes and 12 available/five unavailable unique
+entries. Three local capability failures keep Ready; five malformed numeric graphs fail closed. Each route completes
+227 main-thread commands from 263 accepted requests, with no forbidden calls/failures/wrong-thread entry, restored
+scheduler/server stop, three subsequent frames and normal exit. This is authored coverage, with no live numeric claim.
+
+The application actor adds nonblocking owned commands, watch state, generation/cleanup barriers, saved/current cache
+states and atomic initial catalog+forge publication. Its safe connector repeats admission and binds preparation,
+artifact, transport and helper identity before the session handshake. Sixteen actor and 15 connector tests pass.
+Production remote startup, complete feature/edit APIs and UI wiring remain unimplemented at this checkpoint.
+
+The stable test run exposed a suspension access-denied failure while threads could exit between census and freeze.
+The original failing handle's terminated state was not captured; the precise cause is an inference. The fix admits
+only kernel-signaled held thread objects as an exited census member, or a fresh pre-suspension census proving a TID
+disappeared. Live access failures remain fatal. A deterministic authored-child test verifies the distinction, and
+the suspension path still allocates/logs/locks nothing while threads are frozen. Resume ownership is cleared only
+after successful resume or proof that the exact kernel thread object terminated. Both authored routes pass again.
+
+221 foundation tests pass on stable debug/nightly release, plus the ownership compile-fail test per toolchain,
+four architecture checks, isolated controller checks and workspace verification/captures. Pure helper PE/config
+validation additionally reads the actual compiled DLL without loading it; partial section overlap and source-getter
+adapters are checked. [Exact evidence](../tools/trainer-eval/persistent-player/numeric-report.json).

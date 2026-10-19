@@ -6,7 +6,7 @@ use windows_sys::Win32::System::Diagnostics::Debug::{CONTEXT, CONTEXT_CONTROL_AM
 use windows_sys::Win32::System::LibraryLoader::{GetModuleHandleW, GetProcAddress};
 use windows_sys::Win32::System::Threading::{
     GetCurrentProcessId, GetCurrentThreadId, GetProcessIdOfThread, OpenThread, ResumeThread, SuspendThread, THREAD_GET_CONTEXT, THREAD_QUERY_LIMITED_INFORMATION,
-    THREAD_SUSPEND_RESUME,
+    THREAD_SUSPEND_RESUME, THREAD_SYNCHRONIZE, WaitForSingleObject,
 };
 use windows_sys::Win32::System::WindowsProgramming::{CLIENT_ID, SYSTEM_PROCESS_INFORMATION, SYSTEM_THREAD_INFORMATION};
 
@@ -17,6 +17,18 @@ const THREAD_BYTES: usize = std::mem::size_of::<SYSTEM_THREAD_INFORMATION>();
 const PID_OFFSET: usize = std::mem::offset_of!(SYSTEM_PROCESS_INFORMATION, UniqueProcessId);
 const TID_OFFSET: usize = std::mem::offset_of!(SYSTEM_THREAD_INFORMATION, ClientId) + std::mem::offset_of!(CLIENT_ID, UniqueThread);
 const _: () = assert!(PROCESS_BYTES == 0x100 && THREAD_BYTES == 0x50 && PID_OFFSET == 0x50 && TID_OFFSET == 0x30);
+
+fn thread_failure(handle: HANDLE, operation: &'static str) -> HookError {
+    // Preserve the failed operation's error before the wait can change last-error state.
+    let error = failure(operation);
+    // SAFETY: owned SYNCHRONIZE thread handle, zero-time kernel query. A signaled thread
+    // object proves termination, unlike an access-denied code or STILL_ACTIVE exit value.
+    if unsafe { WaitForSingleObject(handle, 0) } == 0 {
+        HookError::ThreadsChanged
+    } else {
+        error
+    }
+}
 
 #[repr(C, align(16))]
 struct AlignedContext(CONTEXT);
@@ -71,9 +83,13 @@ impl ThreadSet {
                 continue;
             }
             // SAFETY: census supplied this process's TID. Failure rejects; no inaccessible thread is skipped.
-            let handle = unsafe { OpenThread(THREAD_SUSPEND_RESUME | THREAD_GET_CONTEXT | THREAD_QUERY_LIMITED_INFORMATION, 0, id) };
+            let handle = unsafe { OpenThread(THREAD_SUSPEND_RESUME | THREAD_GET_CONTEXT | THREAD_QUERY_LIMITED_INFORMATION | THREAD_SYNCHRONIZE, 0, id) };
             if handle.is_null() {
-                return Err(failure("open thread"));
+                let error = failure("open thread");
+                // No suspension or patch has happened. A fresh native census may prove the
+                // selected TID disappeared; permission failures on a surviving TID stay fatal.
+                set.census()?;
+                return Err(if set.ids.contains(&id) { error } else { HookError::ThreadsChanged });
             }
             let thread = Thread { id, handle, suspended: false };
             // SAFETY: owned query-capable handle. A census TID can be recycled before OpenThread;
@@ -137,7 +153,7 @@ impl ThreadSet {
             for thread in &mut suspended.set.threads {
                 // SAFETY: owned handle with SUSPEND_RESUME rights, never the current control thread.
                 if unsafe { SuspendThread(thread.handle) } == u32::MAX {
-                    return Err(failure("suspend thread"));
+                    return Err(thread_failure(thread.handle, "suspend thread"));
                 }
                 thread.suspended = true;
                 // SAFETY: correctly initialized, explicitly 16-byte-aligned context on our stack.
@@ -145,7 +161,7 @@ impl ThreadSet {
                 context.0.ContextFlags = CONTEXT_CONTROL_AMD64;
                 // SAFETY: valid suspended thread and correctly aligned/sized context storage.
                 if unsafe { GetThreadContext(thread.handle, &raw mut context.0) } == 0 {
-                    return Err(failure("get thread context"));
+                    return Err(thread_failure(thread.handle, "get thread context"));
                 }
                 if (entry..entry + length).contains(&(context.0.Rip as usize)) {
                     return Err(HookError::ThreadInEntry);
@@ -177,7 +193,14 @@ impl Suspended<'_> {
             if thread.suspended {
                 // SAFETY: decrement exactly the one suspension acquired by this transaction.
                 if unsafe { ResumeThread(thread.handle) } == u32::MAX {
-                    result = Err(failure("resume thread"));
+                    let error = thread_failure(thread.handle, "resume thread");
+                    if error == HookError::ThreadsChanged {
+                        // There is no surviving execution/suspension to release on this proven
+                        // terminated kernel object. Never apply this exception to a live handle.
+                        thread.suspended = false;
+                    } else {
+                        result = Err(error);
+                    }
                 } else {
                     thread.suspended = false;
                 }
@@ -193,5 +216,45 @@ impl Drop for Suspended<'_> {
     fn drop(&mut self) {
         // Also runs on validation rejection/unwind; handle/Vec destruction happens after this guard.
         let _ = self.release();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use windows_sys::Win32::Foundation::SetLastError;
+
+    #[test]
+    fn only_kernel_proven_thread_exit_turns_an_access_failure_into_changed_census() {
+        let (started_tx, started_rx) = std::sync::mpsc::channel();
+        let (exit_tx, exit_rx) = std::sync::mpsc::channel();
+        let child = std::thread::spawn(move || {
+            // SAFETY: query the owned child's actual native TID.
+            started_tx.send(unsafe { GetCurrentThreadId() }).unwrap();
+            exit_rx.recv().unwrap();
+        });
+        let tid = started_rx.recv().unwrap();
+        // SAFETY: owned live child TID with the actual transaction's rights.
+        let handle = unsafe { OpenThread(THREAD_SYNCHRONIZE | THREAD_QUERY_LIMITED_INFORMATION | THREAD_SUSPEND_RESUME, 0, tid) };
+        assert!(!handle.is_null());
+        let owned = Thread {
+            id: tid,
+            handle,
+            suspended: false,
+        };
+        // SAFETY: set only this test thread's last error; the native handle remains live.
+        unsafe { SetLastError(5) };
+        assert_eq!(
+            thread_failure(owned.handle, "authored access failure"),
+            HookError::Win32 {
+                operation: "authored access failure",
+                code: 5
+            }
+        );
+        exit_tx.send(()).unwrap();
+        child.join().unwrap();
+        // SAFETY: the same retained handle now denotes the proven terminated child.
+        assert_eq!(unsafe { SuspendThread(owned.handle) }, u32::MAX);
+        assert_eq!(thread_failure(owned.handle, "suspend ended child"), HookError::ThreadsChanged);
     }
 }

@@ -16,6 +16,7 @@ use std::{
 
 mod catalog;
 mod catalog_items;
+mod catalog_numeric;
 mod forge;
 mod limits;
 mod locale;

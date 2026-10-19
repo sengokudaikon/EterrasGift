@@ -27,7 +27,9 @@ both authored Unity startup routes and the user-restarted offline game (en / 1.5
 Protocol 25 now captures already-loaded definition pages and resolves names with explicit provenance, passing
 both authored Unity startup routes, with bounded cache persistence. Generated formatting and numeric interpretation
 remain explicit unavailable capabilities. [Catalog evidence](../tools/trainer-eval/persistent-player/catalog-report.json).
-Complete localized definitions, application lifecycle/UI integration and gameplay writes remain separate work. See [trainer contracts](../crates/trainer/README.md).
+Ordinary numeric ranges/rounding now pass both authored Unity startup routes; the application actor and safe
+session connector pass scripted lifecycle tests. [Numeric and lifecycle evidence](../tools/trainer-eval/persistent-player/numeric-report.json).
+Special registries, game formatting/mappings, production bootstrap/UI integration and gameplay writes remain separate work. See [trainer contracts](../crates/trainer/README.md).
 
 ## Decisions and constraints
 

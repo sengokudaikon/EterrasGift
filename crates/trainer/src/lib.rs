@@ -2,8 +2,10 @@
 
 #![forbid(unsafe_code)]
 
+pub mod backend;
 pub mod catalog;
 pub mod catalog_cache;
+pub mod connection;
 pub mod dispatch;
 
 pub mod gate;

@@ -51,6 +51,20 @@ unsafe extern "C-unwind" {
 static SERIAL: Mutex<()> = Mutex::new(());
 static ORIGINAL: AtomicPtr<u8> = AtomicPtr::new(std::ptr::null_mut());
 static CALLED: AtomicUsize = AtomicUsize::new(0);
+struct Callers {
+    running: Arc<AtomicBool>,
+    workers: Vec<std::thread::JoinHandle<()>>,
+}
+impl Drop for Callers {
+    fn drop(&mut self) {
+        self.running.store(false, SeqCst);
+        for worker in self.workers.drain(..) {
+            // Even a failed transaction assertion must leave no private-target caller running.
+            // Preserve the original test failure if a worker also panicked during unwinding.
+            let _ = worker.join();
+        }
+    }
+}
 unsafe extern "C-unwind" fn callback(method: *const MethodInfo) {
     CALLED.fetch_add(1, SeqCst);
     // SAFETY: test publishes the retained exact-signature original before installation.
@@ -157,10 +171,13 @@ fn concurrent_known_callers_survive_repeated_transactions_and_join_before_cleanu
     let mut hook = prepare();
     ORIGINAL.store(hook.original() as *const () as *mut u8, SeqCst);
     let running = Arc::new(AtomicBool::new(true));
-    let mut workers = Vec::new();
+    let mut callers = Callers {
+        running: running.clone(),
+        workers: Vec::new(),
+    };
     for _ in 0..8 {
         let running = running.clone();
-        workers.push(std::thread::spawn(move || {
+        callers.workers.push(std::thread::spawn(move || {
             while running.load(SeqCst) {
                 // SAFETY: exact owned target/ABI; transaction accounts for these explicit callers.
                 unsafe { eg_owned_dispatch(std::ptr::null()) };
@@ -180,7 +197,7 @@ fn concurrent_known_callers_survive_repeated_transactions_and_join_before_cleanu
         }
     }
     running.store(false, SeqCst);
-    for worker in workers {
+    for worker in callers.workers.drain(..) {
         worker.join().unwrap();
     }
     if hook.is_installed() {

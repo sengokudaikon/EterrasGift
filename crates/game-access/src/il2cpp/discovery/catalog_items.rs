@@ -1,15 +1,14 @@
 //! Affix and unique identity capture from already-loaded definition assets.
 //!
-//! Formatting and numeric interpretation require further audited method contracts. Their
-//! absence is explicit in the owned model; raw display fields never masquerade as generated text.
+//! Ordinary numeric property presentation is copied from the ready PropertyList graph. Special
+//! property registries and game formatters remain explicit unknowns; raw display fields retain
+//! their provenance and do not stand in for generated text.
 
 use super::{DiscoveryError, Images, RuntimeAccess, catalog::page_bounds, forge::Root, unsupported};
 use crate::{
     catalog::{AffixDefinition, Availability, CatalogEntries, DefinitionName, DefinitionNameSource, RarityDefinition, UniqueDefinition},
     il2cpp::AttachedThread,
 };
-
-const NUMERIC_UNAVAILABLE: &str = "Property metadata, rounding, and tooltip formatting have not been validated for this adapter";
 
 impl RuntimeAccess {
     // These helpers inherit read_catalog_page's main-thread, nonmoving-GC, initialized-runtime,
@@ -44,6 +43,7 @@ impl RuntimeAccess {
                 return Err(DiscoveryError::NotReady("affix definitions are empty"));
             }
             let mut entries = Vec::new();
+            let mut numeric = self.catalog_numeric(attached, images)?;
             for index in page_bounds(total, cursor)? {
                 let definition = &definitions[index];
                 let item_types = self
@@ -69,9 +69,7 @@ impl RuntimeAccess {
                     item_types,
                     tier_count: tiers.len() as u16,
                     standard_effect: self.primitive(definition, c"standardAffixEffectModifier")?,
-                    numeric: Availability::Unavailable {
-                        reason: NUMERIC_UNAVAILABLE.into(),
-                    },
+                    numeric: self.catalog_affix_numeric(attached, images, definition, &tiers, &mut numeric)?,
                 });
             }
             Ok((total, CatalogEntries::Affixes(entries)))
@@ -98,6 +96,7 @@ impl RuntimeAccess {
                 return Err(DiscoveryError::NotReady("unique definitions are empty"));
             }
             let mut entries = Vec::new();
+            let mut numeric = self.catalog_numeric(attached, images)?;
             for index in page_bounds(total, cursor)? {
                 let definition = &definitions[index];
                 self.exact(definition, entry)?;
@@ -114,9 +113,7 @@ impl RuntimeAccess {
                     legendary_type: self.enumeration(definition, c"legendaryType", c"LegendaryType")?,
                     can_drop_as_legendary: self.boolean(definition, c"canDropAsLegendary")?,
                     is_pre_corrupted: self.boolean(definition, c"isPreCorrupted")?,
-                    numeric: Availability::Unavailable {
-                        reason: NUMERIC_UNAVAILABLE.into(),
-                    },
+                    numeric: self.catalog_unique_numeric(attached, images, definition, &mut numeric)?,
                 });
             }
             Ok((total, CatalogEntries::Uniques(entries)))

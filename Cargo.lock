@@ -1337,6 +1337,7 @@ dependencies = [
 name = "eg-game-access"
 version = "0.1.0"
 dependencies = [
+ "eg-core",
  "static_assertions",
  "tokio",
  "windows-sys 0.61.2",

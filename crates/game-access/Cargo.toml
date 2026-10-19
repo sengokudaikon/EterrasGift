@@ -7,9 +7,10 @@ rust-version.workspace = true
 publish.workspace = true
 
 [target.'cfg(windows)'.dependencies]
-windows-sys = { workspace = true, features = ["Win32_Foundation", "Win32_System_Diagnostics_Debug", "Win32_System_Kernel", "Win32_System_LibraryLoader", "Win32_System_Memory", "Win32_System_Pipes", "Win32_System_Threading", "Win32_System_WindowsProgramming"] }
+windows-sys = { workspace = true, features = ["Win32_Foundation", "Win32_Storage_FileSystem", "Win32_System_Diagnostics_Debug", "Win32_System_Kernel", "Win32_System_LibraryLoader", "Win32_System_Memory", "Win32_System_Pipes", "Win32_System_Threading", "Win32_System_WindowsProgramming"] }
 
 [dependencies]
+eg-core.workspace = true
 tokio.workspace = true
 
 [dev-dependencies]
