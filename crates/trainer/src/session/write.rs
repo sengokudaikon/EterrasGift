@@ -1,11 +1,11 @@
 use super::*;
 use crate::{
     field_writes::{RateWriteRecord, RateWriteStatus},
-    writes::{AllowWrite, LevelRequirementPlan, WriteControl, WriteObservation, WriteOutcome, WritePlan, WriteRecord, WriteStatus},
+    writes::{AllowWrite, StatusPlan, WriteControl, WriteObservation, WriteOutcome, WritePlan, WriteRecord, WriteStatus},
 };
 use eg_game_access::{
     rate_write::{AttackLeechRateWrite, RateWriteReply},
-    write::{LevelRequirementWrite, WriteReply},
+    write::{StatusWrite, WriteReply},
 };
 
 impl<T: Transport, L: LogSource> Session<T, L> {
@@ -13,10 +13,10 @@ impl<T: Transport, L: LogSource> Session<T, L> {
         self.last_write.as_ref()
     }
 
-    pub async fn set_level_requirement(&mut self, now: Timestamp, plan: &LevelRequirementPlan) -> Result<WriteStatus, SessionError> {
-        self.set_level_requirement_controlled(now, plan, &mut AllowWrite).await
+    pub async fn set_status(&mut self, now: Timestamp, plan: &StatusPlan) -> Result<WriteStatus, SessionError> {
+        self.set_status_controlled(now, plan, &mut AllowWrite).await
     }
-    pub async fn set_level_requirement_controlled(&mut self, now: Timestamp, plan: &LevelRequirementPlan, control: &mut dyn WriteControl) -> Result<WriteStatus, SessionError> {
+    pub async fn set_status_controlled(&mut self, now: Timestamp, plan: &StatusPlan, control: &mut dyn WriteControl) -> Result<WriteStatus, SessionError> {
         Ok(self.write_controlled(now, &plan.clone().into(), control).await?.map(WriteObservation::into_forge))
     }
 
@@ -129,8 +129,8 @@ impl<T: Transport, L: LogSource> Session<T, L> {
                 {
                     return Err(SessionError::Identity("write belongs to a different runtime, manager or catalog".into()));
                 }
-                let request = LevelRequirementWrite::new(dispatcher, plan.manager(), expected.snapshot().clone(), plan.value()).map_err(SessionError::Protocol)?;
-                Ok((Request::SetLevelRequirement(request), Request::ReadForge { dispatcher }))
+                let request = StatusWrite::new(dispatcher, plan.manager(), expected.snapshot().clone(), plan.field(), plan.value()).map_err(SessionError::Protocol)?;
+                Ok((Request::SetStatus(request), Request::ReadForge { dispatcher }))
             }
             WritePlan::Field(plan) => {
                 let expected = plan.before();
@@ -212,7 +212,7 @@ impl<T: Transport, L: LogSource> Session<T, L> {
 
 fn classify_ack(request: &Request, response: &eg_game_access::protocol::Response) -> WriteOutcome<WriteObservation> {
     match request {
-        Request::SetLevelRequirement(request) => match eg_game_access::write::classify_response(response, request) {
+        Request::SetStatus(request) => match eg_game_access::write::classify_response(response, request) {
             WriteReply::Confirmed(actual) => WriteOutcome::Confirmed(WriteObservation::forge(actual)),
             WriteReply::NotApplied { code, message } => WriteOutcome::NotApplied { code, message },
             WriteReply::Uncertain { reason } => WriteOutcome::uncertain(reason),

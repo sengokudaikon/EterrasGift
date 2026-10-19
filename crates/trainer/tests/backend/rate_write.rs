@@ -477,25 +477,22 @@ fn independent_forge_and_rate_records_survive_success_and_uncertainty_in_either_
                 command(&handle, Command::SetAttackLeechRate(Box::new(rate))).await.unwrap();
                 let kept = handle.snapshot().last_rate_write.unwrap();
                 let forge = handle.snapshot().level_requirement_plan(17).unwrap();
-                command(&handle, Command::ApplyLevelRequirement(Box::new(forge))).await.unwrap();
+                command(&handle, Command::ApplyStatus(Box::new(forge))).await.unwrap();
                 assert_eq!(handle.snapshot().last_rate_write, Some(kept.clone()));
-                assert!(handle.snapshot().undo_level_requirement.is_some());
+                assert!(handle.snapshot().undo_status.is_some());
                 *shared.write_result.lock().unwrap() = Some(WriteStatus::uncertain("forge uncertainty"));
                 let forge = handle.snapshot().level_requirement_plan(19).unwrap();
-                assert_eq!(
-                    command(&handle, Command::ApplyLevelRequirement(Box::new(forge))).await.unwrap_err().kind,
-                    ErrorKind::WriteUncertain
-                );
+                assert_eq!(command(&handle, Command::ApplyStatus(Box::new(forge))).await.unwrap_err().kind, ErrorKind::WriteUncertain);
                 assert_eq!(handle.snapshot().last_rate_write, Some(kept));
             } else {
                 let forge = handle.snapshot().level_requirement_plan(17).unwrap();
-                command(&handle, Command::ApplyLevelRequirement(Box::new(forge))).await.unwrap();
+                command(&handle, Command::ApplyStatus(Box::new(forge))).await.unwrap();
                 let kept = handle.snapshot().last_write.unwrap();
-                let undo = handle.snapshot().undo_level_requirement.unwrap();
+                let undo = handle.snapshot().undo_status.unwrap();
                 let rate = prepare(&handle, AttackLeechTarget::AttackRate, 1.1).await;
                 command(&handle, Command::SetAttackLeechRate(Box::new(rate))).await.unwrap();
                 assert_eq!(handle.snapshot().last_write, Some(kept.clone()));
-                assert_eq!(handle.snapshot().undo_level_requirement, Some(undo));
+                assert_eq!(handle.snapshot().undo_status, Some(undo));
                 *shared.rate_write_result.lock().unwrap() = Some(Ok(RateWriteStatus::uncertain("rate uncertainty")));
                 let rate = prepare(&handle, AttackLeechTarget::AttackRate, 1.2).await;
                 assert_eq!(
@@ -506,7 +503,7 @@ fn independent_forge_and_rate_records_survive_success_and_uncertainty_in_either_
             }
             let state = handle.snapshot();
             assert_eq!(state.phase, Phase::Blocked);
-            assert!(state.undo_level_requirement.is_none());
+            assert!(state.undo_status.is_none());
             assert_eq!(state.forge, ForgeState::Unobserved);
             assert!(state.attack_leech.is_none());
             assert!(state.last_rate_write.is_some() && state.last_write.is_some());

@@ -15,7 +15,7 @@ mod rate_writes;
 #[path = "backend/write.rs"]
 mod writes;
 use eg_trainer::field_writes::{AttackLeechDecision, AttackLeechPlan, AttackLeechTarget, RateWriteStatus};
-use eg_trainer::writes::{LevelRequirementPlan, WriteControl, WriteStatus};
+use eg_trainer::writes::{StatusPlan, WriteControl, WriteStatus};
 
 use eg_core::game_log::{GameLogState, GameLogStatus, GameReadiness};
 use eg_game_access::catalog::CatalogKind;
@@ -248,6 +248,9 @@ impl BackendConnection for Connection {
     fn supports_level_requirement(&self) -> bool {
         self.shared.write_enabled.load(Ordering::SeqCst)
     }
+    fn supports_status(&self, field: eg_trainer::edits::StatusField) -> bool {
+        field.supported() && self.supports_level_requirement()
+    }
     fn supports_read_attack_leech(&self) -> bool {
         self.shared.attack_leech_enabled.load(Ordering::SeqCst)
     }
@@ -282,7 +285,7 @@ impl BackendConnection for Connection {
         }
         result
     }
-    async fn set_level_requirement(&mut self, _: Timestamp, plan: &LevelRequirementPlan, control: &mut dyn WriteControl) -> Result<WriteStatus, BackendError> {
+    async fn set_status(&mut self, _: Timestamp, plan: &StatusPlan, control: &mut dyn WriteControl) -> Result<WriteStatus, BackendError> {
         if !control.allowed() {
             return Err(BackendError::blocked(ErrorKind::Superseded, "cleanup before submission"));
         }

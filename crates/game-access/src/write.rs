@@ -1,4 +1,4 @@
-//! Owned protocol26 level-requirement writes and strict full readback classification.
+//! Owned protocol29 status writes and bounded native acknowledgement decoding.
 //! These codecs grant no process access or write permission. Host generation,
 //! profile, policy and main-thread runtime admission remain independent checks.
 
@@ -7,7 +7,59 @@ use crate::{
     protocol::{DispatcherSpec, MAGIC, MAX_RESPONSE_SIZE, ProtocolError, REQUEST_SIZE, Response, ResponseCode},
 };
 
-pub const SET_LEVEL_REQUIREMENT_OPERATION: u32 = 22;
+pub const SET_STATUS_OPERATION: u32 = 10;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(i32)]
+pub enum StatusField {
+    ForgingPotential = 0,
+    LegendaryPotential = 1,
+    WeaversWill = 2,
+    Corrupted = 3,
+    Ruined = 4,
+    LevelRequirement = 5,
+    WeaversTouch = 6,
+}
+impl StatusField {
+    pub fn from_wire(value: u32) -> Result<Self, ProtocolError> {
+        match value {
+            0 => Ok(Self::ForgingPotential),
+            1 => Ok(Self::LegendaryPotential),
+            2 => Ok(Self::WeaversWill),
+            3 => Ok(Self::Corrupted),
+            4 => Ok(Self::Ruined),
+            5 => Ok(Self::LevelRequirement),
+            6 => Ok(Self::WeaversTouch),
+            _ => invalid(),
+        }
+    }
+    pub fn supported(self) -> bool {
+        matches!(self, Self::ForgingPotential | Self::Corrupted | Self::Ruined | Self::LevelRequirement)
+    }
+    pub fn value(self, item: &ForgeSnapshot) -> i32 {
+        match self {
+            Self::ForgingPotential => i32::from(item.status.forging_potential),
+            Self::LegendaryPotential => i32::from(item.status.legendary_potential),
+            Self::WeaversWill => i32::from(item.status.weavers_will),
+            Self::Corrupted => i32::from(item.status.corrupted),
+            Self::Ruined => i32::from(item.status.ruined),
+            Self::LevelRequirement => item.status.level_requirement,
+            Self::WeaversTouch => i32::from(item.status.weavers_touch),
+        }
+    }
+    pub fn project(self, item: &mut ForgeSnapshot, value: u8) {
+        match self {
+            Self::ForgingPotential => item.status.forging_potential = value,
+            Self::LegendaryPotential => item.status.legendary_potential = value,
+            Self::WeaversWill => item.status.weavers_will = value,
+            Self::Corrupted => item.status.corrupted = value != 0,
+            Self::Ruined => item.status.ruined = value != 0,
+            Self::LevelRequirement => item.status.level_requirement = i32::from(value),
+            Self::WeaversTouch => item.status.weavers_touch = value,
+        }
+        item.fingerprint = item.legacy_fingerprint();
+    }
+}
 pub const MAX_ERROR_TEXT: usize = 4096;
 /// Exact maximum of the existing strict owned forge schema: fixed48, main name,
 /// 32 affixes each20+name bytes,3 implicit rolls,optional identity3+8roll bytes.
@@ -20,20 +72,24 @@ fn invalid<T>() -> Result<T, ProtocolError> {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct LevelRequirementWrite {
+pub struct StatusWrite {
     dispatcher: DispatcherSpec,
     expected_manager: u64,
     expected: Box<ForgeSnapshot>,
     value: u8,
+    field: StatusField,
     canonical_expected: Vec<u8>,
 }
-impl LevelRequirementWrite {
+impl StatusWrite {
     /// Validates/copies the complete expected item before any transport operation.
     /// Manager and item addresses are opaque identity tokens, never dereferenced.
     /// Eligibility and the current game's literal maxLevel remain native checks.
-    pub fn new(dispatcher: DispatcherSpec, expected_manager: u64, expected: ForgeSnapshot, value: i32) -> Result<Self, ProtocolError> {
+    pub fn level_requirement(dispatcher: DispatcherSpec, expected_manager: u64, expected: ForgeSnapshot, value: i32) -> Result<Self, ProtocolError> {
+        Self::new(dispatcher, expected_manager, expected, StatusField::LevelRequirement, value)
+    }
+    pub fn new(dispatcher: DispatcherSpec, expected_manager: u64, expected: ForgeSnapshot, field: StatusField, value: i32) -> Result<Self, ProtocolError> {
         let value = u8::try_from(value).map_err(|_| ProtocolError::InvalidData)?;
-        if expected_manager == 0 {
+        if expected_manager == 0 || !field.supported() || (matches!(field, StatusField::Corrupted | StatusField::Ruined) && value > 1) {
             return invalid();
         }
         let canonical_expected = forge::encode(Some(&expected))?;
@@ -45,6 +101,7 @@ impl LevelRequirementWrite {
             expected_manager,
             expected: Box::new(expected),
             value,
+            field,
             canonical_expected,
         })
     }
@@ -57,13 +114,15 @@ impl LevelRequirementWrite {
     pub fn value(&self) -> u8 {
         self.value
     }
+    pub fn field(&self) -> StatusField {
+        self.field
+    }
     pub fn dispatcher(&self) -> DispatcherSpec {
         self.dispatcher
     }
     pub fn projected(&self) -> ForgeSnapshot {
         let mut projected = (*self.expected).clone();
-        projected.status.level_requirement = i32::from(self.value);
-        projected.fingerprint = projected.legacy_fingerprint();
+        self.field.project(&mut projected, self.value);
         projected
     }
     /// Infallible apart from allocation: all fields and canonical tail are owned,
@@ -71,10 +130,11 @@ impl LevelRequirementWrite {
     pub fn encode(&self) -> Vec<u8> {
         let mut frame = vec![0; REQUEST_SIZE];
         frame[..4].copy_from_slice(&MAGIC.to_le_bytes());
-        frame[4..8].copy_from_slice(&SET_LEVEL_REQUIREMENT_OPERATION.to_le_bytes());
+        frame[4..8].copy_from_slice(&SET_STATUS_OPERATION.to_le_bytes());
         frame[8..12].copy_from_slice(&i32::from(self.value).to_le_bytes());
         frame[12..16].copy_from_slice(&(self.canonical_expected.len() as u32).to_le_bytes());
         frame[16..24].copy_from_slice(&self.expected_manager.to_le_bytes());
+        frame[24..28].copy_from_slice(&(self.field as u32).to_le_bytes());
         frame[48..56].copy_from_slice(&self.dispatcher.rva.to_le_bytes());
         frame[56..72].copy_from_slice(&self.dispatcher.bytes);
         frame.extend_from_slice(&self.canonical_expected);
@@ -84,8 +144,8 @@ impl LevelRequirementWrite {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum WriteReply {
-    /// Exact projected full readback. This classifies bytes, not delivery evidence;
-    /// the host still rechecks current generation/identity before publication.
+    /// Complete native acknowledgement for the same item. This is provisional;
+    /// only the session's separate read may publish Confirmed or NotKept.
     Confirmed(ForgeSnapshot),
     /// Trusted helper contract raises these codes only before the store boundary.
     /// This is never permission for an automatic write retry.
@@ -96,14 +156,14 @@ pub enum WriteReply {
 fn uncertain(reason: impl Into<String>) -> WriteReply {
     WriteReply::Uncertain { reason: reason.into() }
 }
-pub fn classify_response(response: &Response, request: &LevelRequirementWrite) -> WriteReply {
+pub fn classify_response(response: &Response, request: &StatusWrite) -> WriteReply {
     if response.payload.len() > MAX_RESPONSE_SIZE {
         return uncertain("response exceeds frame bound");
     }
     if response.code == ResponseCode::Done {
         return match forge::decode(&response.payload) {
-            Ok(Some(actual)) if actual == request.projected() => WriteReply::Confirmed(actual),
-            Ok(_) => uncertain("write readback differs from full projected item"),
+            Ok(Some(actual)) if actual.item == request.expected().item && actual.individual_id == request.expected().individual_id => WriteReply::Confirmed(actual),
+            Ok(_) => uncertain("write acknowledgement has no current target"),
             Err(_) => uncertain("invalid write readback payload"),
         };
     }

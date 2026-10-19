@@ -39,8 +39,8 @@ fn snapshot() -> ForgeSnapshot {
         },
     }
 }
-fn write() -> LevelRequirementWrite {
-    LevelRequirementWrite::new(spec(), 0x1111222233334444, snapshot(), 80).unwrap()
+fn write() -> StatusWrite {
+    StatusWrite::level_requirement(spec(), 0x1111222233334444, snapshot(), 80).unwrap()
 }
 fn hex(text: &str) -> Vec<u8> {
     text.as_bytes()
@@ -59,8 +59,9 @@ fn tail_literal() -> Vec<u8> {
 fn literal() -> Vec<u8> {
     let mut frame = vec![0; 336];
     frame[..24].copy_from_slice(&[
-        0x35, 0x47, 0x46, 0x45, 22, 0, 0, 0, 80, 0, 0, 0, 49, 0, 0, 0, 0x44, 0x44, 0x33, 0x33, 0x22, 0x22, 0x11, 0x11,
+        0x35, 0x47, 0x46, 0x45, 10, 0, 0, 0, 80, 0, 0, 0, 49, 0, 0, 0, 0x44, 0x44, 0x33, 0x33, 0x22, 0x22, 0x11, 0x11,
     ]);
+    frame[24..28].copy_from_slice(&5_u32.to_le_bytes());
     frame[48..56].copy_from_slice(&[0, 0x10, 0, 0, 0, 0, 0, 0]);
     frame[56..72].fill(0xcc);
     frame.extend_from_slice(&tail_literal());
@@ -75,12 +76,12 @@ fn independent_literal_full_snapshot_wire_and_infallible_owned_encoder() {
     assert_eq!(tail_literal().len(), 49);
     assert_eq!(forge::encode(Some(&snapshot())).unwrap(), tail_literal());
     assert_eq!(write().encode(), literal());
-    assert_eq!(decode_frame(&literal()).unwrap(), Request::SetLevelRequirement(write()));
+    assert_eq!(decode_frame(&literal()).unwrap(), Request::SetStatus(write()));
     let layout = decode_header(&literal()[..336]).unwrap();
     assert_eq!(layout.tail_len(), 49);
     assert_eq!(layout.total_len(), 385);
     let mut original = snapshot();
-    let request = LevelRequirementWrite::new(spec(), 4, original.clone(), 255).unwrap();
+    let request = StatusWrite::level_requirement(spec(), 4, original.clone(), 255).unwrap();
     original.name = "changed after construction".into();
     assert_eq!(request.expected().name, "A");
     assert_eq!(request.value(), 255);
@@ -91,7 +92,7 @@ fn independent_literal_full_snapshot_wire_and_infallible_owned_encoder() {
 #[test]
 fn every_header_reserved_byte_is_strict_and_known_fields_are_bounded() {
     let bytes = literal();
-    for at in (24..48).chain(72..336) {
+    for at in (28..48).chain(72..336) {
         let mut bad = bytes.clone();
         bad[at] = 1;
         assert!(decode_header(&bad[..336]).is_err(), "reserved {at}");
@@ -114,12 +115,12 @@ fn every_header_reserved_byte_is_strict_and_known_fields_are_bounded() {
     let mut bad = bytes;
     bad[16..24].fill(0);
     assert!(decode_header(&bad[..336]).is_err());
-    assert!(LevelRequirementWrite::new(spec(), 0, snapshot(), 80).is_err());
+    assert!(StatusWrite::level_requirement(spec(), 0, snapshot(), 80).is_err());
     for value in [-1, 256, i32::MIN, i32::MAX] {
-        assert!(LevelRequirementWrite::new(spec(), 1, snapshot(), value).is_err());
+        assert!(StatusWrite::level_requirement(spec(), 1, snapshot(), value).is_err());
     }
     for value in [0, 255] {
-        assert!(LevelRequirementWrite::new(spec(), u64::MAX, snapshot(), value).is_ok());
+        assert!(StatusWrite::level_requirement(spec(), u64::MAX, snapshot(), value).is_ok());
     }
 }
 #[test]
@@ -147,7 +148,7 @@ fn assembler_accepts_arbitrary_fragmentation_only_after_complete_decode() {
             assembler.push(bytes).unwrap();
         }
         assert_eq!(assembler.remaining(), 0);
-        assert_eq!(assembler.finish().unwrap(), Request::SetLevelRequirement(write()));
+        assert_eq!(assembler.finish().unwrap(), Request::SetStatus(write()));
     }
 }
 #[test]
@@ -193,7 +194,7 @@ fn strict_expected_presence_utf8_bools_and_fingerprint() {
     assert!(decode_frame(&frame).is_err());
     let mut invalid = snapshot();
     invalid.fingerprint ^= 1;
-    assert_eq!(LevelRequirementWrite::new(spec(), 1, invalid, 80), Err(ProtocolError::InvalidData));
+    assert_eq!(StatusWrite::level_requirement(spec(), 1, invalid, 80), Err(ProtocolError::InvalidData));
     let mut frame = literal();
     set32(&mut frame, 12, 1);
     frame.truncate(337);
@@ -226,11 +227,11 @@ fn maximum_schema_bound_is_exact_and_allows_large_inherited_ids_without_rebuild(
     assert_eq!(forge::encode(Some(&maximum)).unwrap().len(), MAX_EXPECTED_BYTES);
     assert_eq!(MAX_EXPECTED_BYTES, 135870);
     // Wire decoding is not eligibility: native must refuse unique-backed items before store.
-    let request = LevelRequirementWrite::new(spec(), 1, maximum.clone(), 0).unwrap();
+    let request = StatusWrite::level_requirement(spec(), 1, maximum.clone(), 0).unwrap();
     assert_eq!(request.encode().len(), MAX_REQUEST_BYTES);
-    assert_eq!(decode_frame(&request.encode()).unwrap(), Request::SetLevelRequirement(request));
+    assert_eq!(decode_frame(&request.encode()).unwrap(), Request::SetStatus(request));
     maximum.name.push('x');
-    assert!(LevelRequirementWrite::new(spec(), 1, maximum, 0).is_err());
+    assert!(StatusWrite::level_requirement(spec(), 1, maximum, 0).is_err());
     let mut oversized = vec![0; MAX_REQUEST_BYTES + 1];
     oversized[..4].copy_from_slice(&MAGIC.to_le_bytes());
     assert!(decode_frame(&oversized).is_err());
@@ -240,10 +241,10 @@ fn minimal_schema_bound_is_exact() {
     let mut item = snapshot();
     item.name.clear();
     assert_eq!(forge::encode(Some(&item)).unwrap().len(), MIN_EXPECTED_BYTES);
-    let request = LevelRequirementWrite::new(spec(), 1, item, 0).unwrap();
+    let request = StatusWrite::level_requirement(spec(), 1, item, 0).unwrap();
     assert!(decode_frame(&request.encode()).is_ok());
     assert_eq!(REQUEST_SIZE, 336);
-    assert_eq!(eg_game_access::protocol::VERSION, 28); // TEMP handshake draft.
+    assert_eq!(eg_game_access::protocol::VERSION, 29); // TEMP handshake draft.
 }
 #[test]
 fn projection_changes_only_requested_level_and_its_legacy_fingerprint() {
@@ -255,6 +256,34 @@ fn projection_changes_only_requested_level_and_its_legacy_fingerprint() {
     assert_ne!(request.projected().fingerprint, snapshot().fingerprint);
     assert_eq!(request.expected(), &snapshot());
 }
+
+#[test]
+fn status_fields_have_one_strict_frame_and_boolean_values_are_canonical() {
+    for (field, value) in [
+        (StatusField::ForgingPotential, 211),
+        (StatusField::Corrupted, 1),
+        (StatusField::Ruined, 0),
+        (StatusField::LevelRequirement, 17),
+    ] {
+        let request = StatusWrite::new(spec(), 1, snapshot(), field, value).unwrap();
+        let bytes = request.encode();
+        assert_eq!(u32::from_le_bytes(bytes[4..8].try_into().unwrap()), 10);
+        assert_eq!(u32::from_le_bytes(bytes[24..28].try_into().unwrap()), field as u32);
+        assert_eq!(Request::decode(&bytes).unwrap(), Request::SetStatus(request.clone()));
+        assert_eq!(field.value(&request.projected()), value);
+    }
+    for field in [StatusField::Corrupted, StatusField::Ruined] {
+        assert!(StatusWrite::new(spec(), 1, snapshot(), field, 2).is_err());
+        let mut invalid = write().encode();
+        set32(&mut invalid, 24, field as u32);
+        assert!(Request::decode_header(&invalid[..REQUEST_SIZE]).is_err());
+    }
+    for field in [1, 2, 6, 7, u32::MAX] {
+        let mut invalid = write().encode();
+        set32(&mut invalid, 24, field);
+        assert!(Request::decode_header(&invalid[..REQUEST_SIZE]).is_err());
+    }
+}
 fn done(item: Option<&ForgeSnapshot>) -> Response {
     Response {
         code: ResponseCode::Done,
@@ -262,10 +291,10 @@ fn done(item: Option<&ForgeSnapshot>) -> Response {
     }
 }
 #[test]
-fn matching_full_readback_confirmed_and_any_mismatch_uncertain() {
+fn native_ack_is_provisional_but_replaced_target_is_unknown() {
     let request = write();
     assert_eq!(classify_response(&done(Some(&request.projected())), &request), WriteReply::Confirmed(request.projected()));
-    assert!(matches!(classify_response(&done(Some(&snapshot())), &request), WriteReply::Uncertain { .. }));
+    assert_eq!(classify_response(&done(Some(&snapshot())), &request), WriteReply::Confirmed(snapshot()));
     assert!(matches!(classify_response(&done(None), &request), WriteReply::Uncertain { .. }));
     for field in 0..5 {
         let mut actual = request.projected();
@@ -277,7 +306,10 @@ fn matching_full_readback_confirmed_and_any_mismatch_uncertain() {
             _ => actual.status.corrupted = true,
         }
         actual.fingerprint = actual.legacy_fingerprint();
-        assert!(matches!(classify_response(&done(Some(&actual)), &request), WriteReply::Uncertain { .. }));
+        assert_eq!(
+            matches!(classify_response(&done(Some(&actual)), &request), WriteReply::Uncertain { .. }),
+            matches!(field, 1 | 3)
+        );
     }
 }
 #[test]

@@ -8,8 +8,8 @@ use eg_game_access::{
 use eg_trainer::{
     catalog::{CatalogIdentity, EXTRACTION_VERSION, GameCatalog},
     edits::{CatalogProvenance, EditError, ExpectedObservation},
-    undo::LevelUndo,
-    writes::{LevelRequirementPlan, WriteRecord, WriteStatus},
+    undo::StatusUndo,
+    writes::{StatusPlan, WriteRecord, WriteStatus},
 };
 use std::collections::BTreeMap;
 
@@ -100,7 +100,7 @@ fn observation(snapshot: ForgeSnapshot) -> ExpectedObservation {
 }
 
 fn record(old: i32) -> WriteRecord {
-    let plan = LevelRequirementPlan::new(&observation(snapshot(old)), MANAGER, &catalog(), &provenance(), 17).unwrap();
+    let plan = StatusPlan::level_requirement(&observation(snapshot(old)), MANAGER, &catalog(), &provenance(), 17).unwrap();
     let status = WriteStatus::Confirmed(plan.projected().clone());
     WriteRecord { plan, status }
 }
@@ -108,7 +108,7 @@ fn record(old: i32) -> WriteRecord {
 #[test]
 fn fresh_exact_after_observation_prepares_only_the_original_level_with_full_identity() {
     let confirmed = record(87);
-    let token = LevelUndo::from_confirmed(&confirmed).unwrap();
+    let token = StatusUndo::from_confirmed(&confirmed).unwrap();
     assert_eq!(token.manager(), MANAGER);
     assert_eq!(token.restore_value(), 87);
     assert_eq!(token.after().snapshot(), confirmed.plan.projected());
@@ -136,7 +136,7 @@ fn only_confirmed_records_can_create_undo_tokens() {
     ] {
         let mut record = record(87);
         record.status = status;
-        assert_eq!(LevelUndo::from_confirmed(&record), Err(EditError::InvalidObservation));
+        assert_eq!(StatusUndo::from_confirmed(&record), Err(EditError::InvalidObservation));
     }
 }
 
@@ -152,13 +152,13 @@ fn confirmed_label_without_the_exact_projected_payload_is_not_enough() {
         alter(&mut wrong);
         assert_eq!(wrong.fingerprint, wrong.legacy_fingerprint());
         record.status = WriteStatus::Confirmed(wrong);
-        assert_eq!(LevelUndo::from_confirmed(&record), Err(EditError::InvalidObservation));
+        assert_eq!(StatusUndo::from_confirmed(&record), Err(EditError::InvalidObservation));
     }
 }
 
 #[test]
 fn fields_outside_legacy_fingerprint_still_make_undo_stale() {
-    let token = LevelUndo::from_confirmed(&record(87)).unwrap();
+    let token = StatusUndo::from_confirmed(&record(87)).unwrap();
     for alter in [
         |s: &mut ForgeSnapshot| s.name.push('x'),
         |s: &mut ForgeSnapshot| s.class_requirement += 1,
@@ -175,7 +175,7 @@ fn fields_outside_legacy_fingerprint_still_make_undo_stale() {
 
 #[test]
 fn same_id_replacement_and_other_item_changes_cannot_be_restored_by_old_token() {
-    let token = LevelUndo::from_confirmed(&record(87)).unwrap();
+    let token = StatusUndo::from_confirmed(&record(87)).unwrap();
     for alter in [
         |s: &mut ForgeSnapshot| s.item += 16,
         |s: &mut ForgeSnapshot| s.status.level_requirement += 1,
@@ -192,7 +192,7 @@ fn same_id_replacement_and_other_item_changes_cannot_be_restored_by_old_token() 
 
 #[test]
 fn manager_and_generation_changes_invalidate_the_undo_identity() {
-    let token = LevelUndo::from_confirmed(&record(87)).unwrap();
+    let token = StatusUndo::from_confirmed(&record(87)).unwrap();
     for manager in [0, MANAGER + 16] {
         assert_eq!(token.prepare(token.after(), manager, &catalog(), &provenance()), Err(EditError::IdentityChanged));
     }
@@ -202,7 +202,7 @@ fn manager_and_generation_changes_invalidate_the_undo_identity() {
 
 #[test]
 fn process_creation_image_or_pid_change_cannot_reuse_undo() {
-    let token = LevelUndo::from_confirmed(&record(87)).unwrap();
+    let token = StatusUndo::from_confirmed(&record(87)).unwrap();
     for alter in [
         |p: &mut ProcessIdentity| p.pid += 1,
         |p: &mut ProcessIdentity| p.created += 1,
@@ -217,7 +217,7 @@ fn process_creation_image_or_pid_change_cannot_reuse_undo() {
 
 #[test]
 fn changed_catalog_identity_or_a_cached_catalog_cannot_authorize_restore() {
-    let token = LevelUndo::from_confirmed(&record(87)).unwrap();
+    let token = StatusUndo::from_confirmed(&record(87)).unwrap();
     for alter in [
         |c: &mut CatalogIdentity| c.binary_hash = "c".repeat(64),
         |c: &mut CatalogIdentity| c.metadata_hash = "c".repeat(64),
@@ -248,12 +248,12 @@ fn changed_catalog_identity_or_a_cached_catalog_cannot_authorize_restore() {
 
 #[test]
 fn old_level_outside_current_literal_range_is_unavailable_without_override() {
-    let token = LevelUndo::from_confirmed(&record(138)).unwrap();
+    let token = StatusUndo::from_confirmed(&record(138)).unwrap();
     assert_eq!(token.prepare(token.after(), MANAGER, &catalog(), &provenance()), Err(EditError::InvalidStatus));
     for old in [-1, 256, 0x01000057] {
-        assert_eq!(LevelUndo::from_confirmed(&record(old)), Err(EditError::InvalidStatus));
+        assert_eq!(StatusUndo::from_confirmed(&record(old)), Err(EditError::InvalidStatus));
     }
-    let token = LevelUndo::from_confirmed(&record(87)).unwrap();
+    let token = StatusUndo::from_confirmed(&record(87)).unwrap();
     let mut narrower = catalog();
     narrower.limits.level_requirement.maximum = 86;
     assert_eq!(token.prepare(token.after(), MANAGER, &narrower, &provenance()), Err(EditError::InvalidStatus));
@@ -263,7 +263,7 @@ fn old_level_outside_current_literal_range_is_unavailable_without_override() {
 fn literal_endpoints_can_be_restored_and_the_prior_token_is_stale_after_restore() {
     for old in [0, 137] {
         let confirmed = record(old);
-        let token = LevelUndo::from_confirmed(&confirmed).unwrap();
+        let token = StatusUndo::from_confirmed(&confirmed).unwrap();
         let restored = token.prepare(token.after(), MANAGER, &catalog(), &provenance()).unwrap();
         assert_eq!(restored.value(), old);
         assert_eq!(restored.projected(), confirmed.plan.before().snapshot());
@@ -274,7 +274,7 @@ fn literal_endpoints_can_be_restored_and_the_prior_token_is_stale_after_restore(
 
 #[test]
 fn unique_set_or_legendary_drift_is_stale_and_cannot_create_an_original_level_plan() {
-    let token = LevelUndo::from_confirmed(&record(87)).unwrap();
+    let token = StatusUndo::from_confirmed(&record(87)).unwrap();
     for rarity in [7, 8, 9] {
         let mut changed = token.after().snapshot().clone();
         changed.rarity = rarity;
@@ -282,7 +282,10 @@ fn unique_set_or_legendary_drift_is_stale_and_cannot_create_an_original_level_pl
         changed.fingerprint = changed.legacy_fingerprint();
         let current = observation(changed);
         assert_eq!(token.prepare(&current, MANAGER, &catalog(), &provenance()), Err(EditError::StaleItem));
-        assert_eq!(LevelRequirementPlan::new(&current, MANAGER, &catalog(), &provenance(), 87), Err(EditError::InvalidStatus));
+        assert_eq!(
+            StatusPlan::level_requirement(&current, MANAGER, &catalog(), &provenance(), 87),
+            Err(EditError::InvalidStatus)
+        );
     }
 }
 
@@ -290,7 +293,7 @@ fn unique_set_or_legendary_drift_is_stale_and_cannot_create_an_original_level_pl
 fn pure_preparation_failure_preserves_the_owned_token_and_never_changes_the_record() {
     let record = record(87);
     let saved = record.clone();
-    let token = LevelUndo::from_confirmed(&record).unwrap();
+    let token = StatusUndo::from_confirmed(&record).unwrap();
     let saved_token = token.clone();
     assert_eq!(
         token.prepare(token.after(), MANAGER, &catalog(), &CatalogProvenance::CachedOnly),

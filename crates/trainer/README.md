@@ -34,8 +34,13 @@ Ordinary pre-store refusals and NotKept preserve a healthy connection. NotKept p
 actual observation, advances field observation sequences and creates no Undo. Transport,
 protocol, identity, restart or offline failures release the connection. Later publication
 gate loss suppresses live data without downgrading an already independently confirmed
-historical result. Nothing retries a mutation. The old narrow entrypoints are conveniences
-over this common lifecycle; protocol28 operations22/24 remain internal until native feature work.
+historical result. Nothing retries a mutation. Protocol29 replaces the level-only operation 22
+with generic status operation 10. `StatusPlan`/`StatusUndo` cover level requirement, forging
+potential, corrupted and ruined; `status_fields` advertises support separately from item
+eligibility. Rebuilding fields use the game's RebuildID/UpdateEntry methods and accept its
+derived level requirement under the existing readback rules. A managed refresh failure after
+the store is uncertain, with no automatic retry or implicit rollback. Legendary potential,
+Weaver's Will and Weaver's Touch remain unsupported native operations.
 The read-only adapter is connected; writes through the editor remain the next integration step.
 See the [write-service cleanup checkpoint](../../tools/trainer-eval/persistent-player/write-service-refactor-report.json)
 for the product-test gates and owned Unity route.
@@ -216,9 +221,10 @@ not yet provide a guaranteed display name. Locale transitions and populated live
 separate validation, as do full localized definitions and mappings.
 Validation commands, counts and the retained log/source index are in [validation.json](validation.json).
 
-`writes::LevelRequirementPlan` is the first submitted edit plan. It requires a current runtime catalog,
-complete observation, process/generation and manager identity. `Session::set_level_requirement` sends one explicit
-protocol26 request with the entire expected snapshot, then requires the exact projected snapshot in response.
+The first submitted edit plan was level-only; it is now the level specialization of `writes::StatusPlan`.
+It requires a current runtime catalog, complete observation, process/generation and manager identity.
+`Session::set_status` sends one explicit request with the entire expected snapshot. A complete
+same-item native acknowledgement is provisional until the independent readback below.
 It uses Release admission even in a development session. Errors before transport starts remain local; malformed
 or mismatched acknowledgements, potential delivery and lost confirmation provenance remain Uncertain. An abandoned
 future retains Pending and a busy session until explicit cleanup records uncertainty. No path retries a write.
@@ -231,7 +237,7 @@ without claiming the earlier store did not happen. All four authored routes exer
 including a dropped Apply receipt, exact separate readback, retained level Undo, explicit restoration and a consumed
 token rejected before I/O. See [apply-undo-report.json](../../tools/trainer-eval/persistent-player/apply-undo-report.json).
 
-`undo::LevelUndo` is a conditional reverse plan for that one confirmed operation. It binds the complete after-state,
+`undo::StatusUndo` is a conditional reverse plan for a confirmed status operation. It binds the complete after-state,
 manager, process/generation and catalog; preparation checks fresh runtime provenance and current literal bounds.
 The service publishes it atomically with the confirmed item, clears it on item/context changes or attempted writes,
 and consumes it after successful Undo. It supplies neither redo nor the complete multi-edit/draft Undo workflow.

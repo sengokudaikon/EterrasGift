@@ -1,4 +1,4 @@
-//! Pure, bounded codecs for protocol28: control, observations and narrow conditional writes.
+//! Pure, bounded codecs for protocol29: control, observations and narrow conditional writes.
 //!
 //! Decoding establishes wire validity only. Process identity, helper provenance,
 //! dispatcher code, and permission to run a request belong to the session layer.
@@ -7,13 +7,13 @@ use crate::{
     catalog::CatalogKind,
     forge,
     rate_write::{AttackLeechRateWrite, SET_ATTACK_LEECH_RATE_OPERATION},
-    write::{LevelRequirementWrite, MAX_EXPECTED_BYTES, MIN_EXPECTED_BYTES, SET_LEVEL_REQUIREMENT_OPERATION},
+    write::{MAX_EXPECTED_BYTES, MIN_EXPECTED_BYTES, SET_STATUS_OPERATION, StatusField, StatusWrite},
 };
 use std::{collections::BTreeMap, error::Error, fmt};
 
 pub const MAGIC: u32 = 0x4546_4735;
-/// Version28 adds a conditional current-player attack/leech rate write (24).
-pub const VERSION: u32 = 28;
+/// Version29 replaces the level-only request with generic conditional status edits (10).
+pub const VERSION: u32 = 29;
 pub const ADAPTER: &str = "il2cpp-x64-v1";
 pub const REQUEST_SIZE: usize = 336;
 pub const RESPONSE_HEADER_SIZE: usize = 12;
@@ -72,7 +72,7 @@ pub enum Request {
         cursor: u32,
     },
     /// Explicit mutation; native admission compares the complete expected item.
-    SetLevelRequirement(LevelRequirementWrite),
+    SetStatus(StatusWrite),
     /// Conditional CURRENT-player intent; full expected tokens/bits, no lifetime ticket.
     SetAttackLeechRate(AttackLeechRateWrite),
     /// Reads cached player fields only; expected_manager is an opaque identity token.
@@ -93,7 +93,7 @@ impl Request {
             | Self::ReadLocale { dispatcher }
             | Self::ReadCatalogPage { dispatcher, .. }
             | Self::ReadAttackLeech { dispatcher, .. } => Some(*dispatcher),
-            Self::SetLevelRequirement(write) => Some(write.dispatcher()),
+            Self::SetStatus(write) => Some(write.dispatcher()),
             Self::SetAttackLeechRate(write) => Some(write.dispatcher()),
         }
     }
@@ -112,7 +112,7 @@ impl Request {
                 bytes[12..16].copy_from_slice(&cursor.to_le_bytes());
                 (21, Some(dispatcher))
             }
-            Self::SetLevelRequirement(write) => return write.encode(),
+            Self::SetStatus(write) => return write.encode(),
             Self::SetAttackLeechRate(write) => return write.encode(),
             Self::ReadAttackLeech { dispatcher, expected_manager } => {
                 bytes[8..16].copy_from_slice(&expected_manager.to_le_bytes());
@@ -136,14 +136,21 @@ impl Request {
         if reader.u32()? != MAGIC {
             return Err(ProtocolError::IncompatibleVersion);
         }
-        if reader.u32()? != SET_LEVEL_REQUIREMENT_OPERATION {
+        if reader.u32()? != SET_STATUS_OPERATION {
             Self::decode_fixed(bytes)?;
             return Ok(RequestHeader { tail_len: 0 });
         }
         let value = reader.u32()?;
         let tail_len = reader.u32()? as usize;
         let manager = reader.u64()?;
-        if value > 255 || manager == 0 || !(MIN_EXPECTED_BYTES..=MAX_EXPECTED_BYTES).contains(&tail_len) || bytes[24..48].iter().chain(&bytes[72..]).any(|byte| *byte != 0) {
+        let field = StatusField::from_wire(reader.u32()?)?;
+        if value > 255
+            || manager == 0
+            || !field.supported()
+            || (matches!(field, StatusField::Corrupted | StatusField::Ruined) && value > 1)
+            || !(MIN_EXPECTED_BYTES..=MAX_EXPECTED_BYTES).contains(&tail_len)
+            || bytes[28..48].iter().chain(&bytes[72..]).any(|byte| *byte != 0)
+        {
             return Err(ProtocolError::InvalidData);
         }
         Ok(RequestHeader { tail_len })
@@ -168,7 +175,8 @@ impl Request {
             bytes: dispatcher.array()?,
         };
         let expected = forge::decode(&bytes[REQUEST_SIZE..])?.ok_or(ProtocolError::InvalidData)?;
-        Ok(Self::SetLevelRequirement(LevelRequirementWrite::new(dispatcher, expected_manager, expected, value)?))
+        let field = StatusField::from_wire(u32::from_le_bytes(bytes[24..28].try_into().map_err(|_| ProtocolError::InvalidData)?))?;
+        Ok(Self::SetStatus(StatusWrite::new(dispatcher, expected_manager, expected, field, value)?))
     }
     fn decode_fixed(bytes: &[u8]) -> Result<Self, ProtocolError> {
         if bytes.len() != REQUEST_SIZE {

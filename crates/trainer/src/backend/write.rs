@@ -11,15 +11,15 @@ impl WriteControl for CurrentIntent {
 }
 
 impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> BackendWorker<P, C, L, K> {
-    pub(super) async fn write_level_requirement(&mut self, plan: LevelRequirementPlan) -> Result<(), BackendError> {
-        self.execute_level_requirement(plan, false).await
+    pub(super) async fn write_status(&mut self, plan: StatusPlan) -> Result<(), BackendError> {
+        self.execute_status(plan, false).await
     }
-    pub(super) async fn undo_level_requirement(&mut self, undo: crate::undo::LevelUndo) -> Result<(), BackendError> {
-        let plan = self.state.level_undo_plan(&undo).map_err(invalid_edit)?;
-        self.execute_level_requirement(plan, true).await
+    pub(super) async fn undo_status(&mut self, undo: crate::undo::StatusUndo) -> Result<(), BackendError> {
+        let plan = self.state.status_undo_plan(&undo).map_err(invalid_edit)?;
+        self.execute_status(plan, true).await
     }
-    async fn execute_level_requirement(&mut self, plan: LevelRequirementPlan, undoing: bool) -> Result<(), BackendError> {
-        let result = self.write_level_requirement_inner(plan, undoing).await;
+    async fn execute_status(&mut self, plan: StatusPlan, undoing: bool) -> Result<(), BackendError> {
+        let result = self.write_status_inner(plan, undoing).await;
         if let Err(error) = &result
             && self.state.phase == Phase::Ready
             && matches!(error.kind, ErrorKind::Transport | ErrorKind::Protocol | ErrorKind::Identity | ErrorKind::RestartRequired)
@@ -28,14 +28,14 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
         }
         result
     }
-    async fn write_level_requirement_inner(&mut self, plan: LevelRequirementPlan, undoing: bool) -> Result<(), BackendError> {
+    async fn write_status_inner(&mut self, plan: StatusPlan, undoing: bool) -> Result<(), BackendError> {
         if !self.state.enabled {
             return Err(BackendError::blocked(ErrorKind::Disabled, "trainer disabled"));
         }
         let epoch = self.command_epoch;
         self.superseded(epoch)?;
-        if !self.connection.as_ref().is_some_and(BackendConnection::supports_level_requirement) {
-            return Err(BackendError::blocked(ErrorKind::NotReady, "level requirement writes are unavailable"));
+        if !self.connection.as_ref().is_some_and(|connection| connection.supports_status(plan.field())) {
+            return Err(BackendError::blocked(ErrorKind::NotReady, "this status field is unavailable"));
         }
         let current = self.state.expected_observation().map_err(invalid_edit)?;
         let manager = self.state.runtime_status.ok_or_else(|| invalid_edit("runtime status missing"))?.manager;
@@ -63,7 +63,7 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
         self.commit(epoch, |this| {
             this.state.activity = Some(Activity::WritingForge);
             this.state.error = None;
-            this.state.undo_level_requirement = None;
+            this.state.undo_status = None;
             this.state.last_write = Some(WriteRecord {
                 plan: plan.clone(),
                 status: WriteStatus::Pending,
@@ -97,16 +97,16 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
                     Err(error)
                 } else {
                     let data = self.state.catalog.data().cloned().ok_or_else(|| invalid_edit("catalog missing after write"))?;
-                    let kept = snapshot == *plan.projected();
+                    let kept = plan.matches(&snapshot);
                     let forge = self.forge_state(Some(snapshot), &data);
                     let undo = if undoing || !kept {
                         None
                     } else {
-                        self.state.last_write.as_ref().and_then(|record| crate::undo::LevelUndo::from_confirmed(record).ok())
+                        self.state.last_write.as_ref().and_then(|record| crate::undo::StatusUndo::from_confirmed(record).ok())
                     };
                     self.commit(epoch, |this| {
                         this.state.forge = forge;
-                        this.state.undo_level_requirement = undo;
+                        this.state.undo_status = undo;
                     })?;
                     if kept {
                         Ok(())

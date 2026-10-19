@@ -29,7 +29,7 @@ mod locale;
 mod parser;
 pub use parser::{DisplayScalarUnavailable, NumericFormatContext, NumericFormatContextPart, NumericFormatContextUnavailable};
 mod write;
-pub use write::LevelWriteError;
+pub use write::StatusWriteError;
 
 type Ptr = *mut c_void;
 type Class = *mut raw::Class;

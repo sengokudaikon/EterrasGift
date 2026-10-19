@@ -53,6 +53,16 @@ impl FieldWriteApi {
         unsafe { (self.field_set_value)(object.as_ptr(), field.as_ptr(), (&mut value as *mut i32).cast()) };
     }
 
+    /// Store one exact Byte or canonical Boolean instance field.
+    /// # Safety
+    /// The set_i32 ownership/runtime contract applies, with an exact mutable
+    /// System.Byte/U1 or System.Boolean/BOOLEAN field instead of Int32. For
+    /// Boolean the caller must supply 0 or 1. Source and storage are one byte.
+    pub unsafe fn set_u8(&self, object: NonNull<Object>, field: NonNull<FieldInfo>, mut value: u8) {
+        // SAFETY: caller validates the destination metadata and one-byte width.
+        unsafe { (self.field_set_value)(object.as_ptr(), field.as_ptr(), std::ptr::from_mut(&mut value).cast()) };
+    }
+
     /// One exact System.Single instance-field assignment, no conversion.
     ///
     /// # Safety

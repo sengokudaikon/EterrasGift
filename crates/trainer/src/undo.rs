@@ -1,4 +1,4 @@
-//! Conditional undo intent for one confirmed level-requirement change.
+//! Conditional undo intent for one confirmed status change.
 //!
 //! This is narrower than the C# EditWorkflow's reversed confirmed batches and
 //! draft handling. A token performs no I/O, consumes no history, and grants no
@@ -8,17 +8,18 @@
 use crate::{
     catalog::GameCatalog,
     edits::{CatalogProvenance, EditError, ExpectedObservation},
-    writes::{LevelRequirementPlan, WriteRecord, WriteStatus},
+    writes::{StatusPlan, WriteRecord, WriteStatus},
 };
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct LevelUndo {
+pub struct StatusUndo {
     after: ExpectedObservation,
     manager: u64,
     restore_value: i32,
+    field: crate::edits::StatusField,
 }
 
-impl LevelUndo {
+impl StatusUndo {
     /// Capture only an exact confirmed projection. The record's status is a
     /// caller-supplied fact, not a certificate of transport/runtime execution.
     /// Current literal ranges are checked later against the fresh catalog; the
@@ -27,11 +28,12 @@ impl LevelUndo {
         let WriteStatus::Confirmed(snapshot) = &record.status else {
             return Err(EditError::InvalidObservation);
         };
-        if snapshot != record.plan.projected() {
+        if !record.plan.matches(snapshot) {
             return Err(EditError::InvalidObservation);
         }
         let before = record.plan.before();
-        let restore_value = before.snapshot().status.level_requirement;
+        let field = record.plan.field();
+        let restore_value = field.value(before.snapshot());
         // Every supported game's literal range is byte-valued. An impossible
         // previous value is unavailable for undo, with no implicit override.
         if u8::try_from(restore_value).is_err() {
@@ -41,6 +43,7 @@ impl LevelUndo {
             after: ExpectedObservation::new(before.generation(), before.process().clone(), before.catalog_identity().clone(), snapshot.clone())?,
             manager: record.plan.manager(),
             restore_value,
+            field,
         })
     }
 
@@ -60,7 +63,7 @@ impl LevelUndo {
     /// Full equality includes fields omitted from the legacy fingerprint. A
     /// cache or an older generation cannot establish fresh catalog provenance.
     /// Failure leaves this pure token unchanged and never retries a submission.
-    pub fn prepare(&self, current: &ExpectedObservation, manager: u64, catalog: &GameCatalog, provenance: &CatalogProvenance) -> Result<LevelRequirementPlan, EditError> {
+    pub fn prepare(&self, current: &ExpectedObservation, manager: u64, catalog: &GameCatalog, provenance: &CatalogProvenance) -> Result<StatusPlan, EditError> {
         if manager != self.manager
             || current.generation() != self.after.generation()
             || current.process() != self.after.process()
@@ -71,8 +74,8 @@ impl LevelUndo {
         if current.snapshot() != self.after.snapshot() {
             return Err(EditError::StaleItem);
         }
-        // This rechecks actual current literal limits, plain-item eligibility,
+        // This rechecks actual current literal limits, field eligibility,
         // exact catalog identity and fresh RuntimeRead provenance. No override.
-        LevelRequirementPlan::new(current, manager, catalog, provenance, self.restore_value)
+        StatusPlan::new(current, manager, catalog, provenance, self.field, self.restore_value)
     }
 }

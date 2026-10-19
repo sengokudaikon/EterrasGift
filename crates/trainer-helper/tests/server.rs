@@ -412,7 +412,7 @@ fn client_disconnect_during_running_work_keeps_slot_until_completion() {
 fn level_write() -> Request {
     use eg_game_access::{
         forge::{ForgeSnapshot, ItemStatus},
-        write::LevelRequirementWrite,
+        write::StatusWrite,
     };
     let mut expected = ForgeSnapshot {
         item: 0x1234,
@@ -438,7 +438,7 @@ fn level_write() -> Request {
         },
     };
     expected.fingerprint = expected.legacy_fingerprint();
-    Request::SetLevelRequirement(LevelRequirementWrite::new(spec(), 0x1000, expected, 30).unwrap())
+    Request::SetStatus(StatusWrite::level_requirement(spec(), 0x1000, expected, 30).unwrap())
 }
 #[test]
 fn incomplete_or_invalid_expected_tail_never_reaches_scheduler_or_queue() {

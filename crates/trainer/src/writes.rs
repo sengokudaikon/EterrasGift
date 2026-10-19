@@ -1,4 +1,4 @@
-//! Process, generation and catalog bound plans for the first native forge write.
+//! Process, generation and catalog bound plans for the supported native forge status edits.
 //! Construction is pure. Only an explicit submission may execute a plan; neither
 //! failure nor a lost reply permits a retry. An address here is an opaque token.
 
@@ -22,13 +22,17 @@ impl WriteControl for AllowWrite {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct LevelRequirementPlan {
+pub struct StatusPlan {
     prepared: PreparedEdit,
     manager: u64,
+    field: StatusField,
 }
-impl LevelRequirementPlan {
-    pub fn new(expected: &ExpectedObservation, manager: u64, catalog: &GameCatalog, provenance: &CatalogProvenance, value: i32) -> Result<Self, EditError> {
-        if manager == 0 {
+impl StatusPlan {
+    pub fn level_requirement(expected: &ExpectedObservation, manager: u64, catalog: &GameCatalog, provenance: &CatalogProvenance, value: i32) -> Result<Self, EditError> {
+        Self::new(expected, manager, catalog, provenance, StatusField::LevelRequirement, value)
+    }
+    pub fn new(expected: &ExpectedObservation, manager: u64, catalog: &GameCatalog, provenance: &CatalogProvenance, field: StatusField, value: i32) -> Result<Self, EditError> {
+        if manager == 0 || !field.supported() {
             return Err(EditError::InvalidObservation);
         }
         let prepared = edits::prepare(
@@ -36,14 +40,14 @@ impl LevelRequirementPlan {
             catalog,
             provenance,
             ItemEdit::Status(StatusEdit {
-                field: StatusField::LevelRequirement,
+                field,
                 value,
                 unrestricted: false,
             }),
             false,
             None,
         )?;
-        Ok(Self { prepared, manager })
+        Ok(Self { prepared, manager, field })
     }
     pub fn before(&self) -> &ExpectedObservation {
         self.prepared.before()
@@ -52,7 +56,17 @@ impl LevelRequirementPlan {
         self.manager
     }
     pub fn value(&self) -> i32 {
-        self.prepared.projected().status.level_requirement
+        self.field.value(self.prepared.projected())
+    }
+    pub fn field(&self) -> StatusField {
+        self.field
+    }
+    pub fn matches(&self, actual: &ForgeSnapshot) -> bool {
+        if self.field == StatusField::LevelRequirement {
+            actual == self.projected()
+        } else {
+            self.prepared.inspect_readback(Some(actual)).confirmed()
+        }
     }
     pub fn projected(&self) -> &ForgeSnapshot {
         self.prepared.projected()
@@ -99,7 +113,7 @@ impl<T> WriteOutcome<T> {
 }
 pub type WriteStatus = WriteOutcome<ForgeSnapshot>;
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct WriteRecord<P = LevelRequirementPlan, T = ForgeSnapshot> {
+pub struct WriteRecord<P = StatusPlan, T = ForgeSnapshot> {
     pub plan: P,
     pub status: WriteOutcome<T>,
 }
@@ -108,7 +122,7 @@ pub struct WriteRecord<P = LevelRequirementPlan, T = ForgeSnapshot> {
 /// More supported edits/field sets extend these variants, not the outcome model.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum WritePlan {
-    Forge(Box<LevelRequirementPlan>),
+    Forge(Box<StatusPlan>),
     Field(Box<AttackLeechPlan>),
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -134,6 +148,13 @@ impl WriteObservation {
     }
 }
 impl WritePlan {
+    fn matches(&self, actual: &WriteObservation) -> bool {
+        match (self, actual) {
+            (Self::Forge(plan), WriteObservation::Forge(actual)) => plan.matches(actual),
+            (Self::Field(plan), WriteObservation::Field(actual)) => actual == plan.projected(),
+            _ => false,
+        }
+    }
     pub fn projected(&self) -> WriteObservation {
         match self {
             Self::Forge(plan) => WriteObservation::Forge(Box::new(plan.projected().clone())),
@@ -153,7 +174,7 @@ impl WritePlan {
         }
     }
     pub(crate) fn observe(&self, actual: WriteObservation) -> WriteOutcome<WriteObservation> {
-        if actual == self.projected() {
+        if self.matches(&actual) {
             WriteOutcome::Confirmed(actual)
         } else if self.same_target(&actual) {
             WriteOutcome::NotKept(actual)
@@ -163,8 +184,8 @@ impl WritePlan {
     }
     pub(crate) fn completed(&self, outcome: WriteOutcome<WriteObservation>) -> WriteOutcome<WriteObservation> {
         match outcome {
-            WriteOutcome::Confirmed(actual) if actual == self.projected() => WriteOutcome::Confirmed(actual),
-            WriteOutcome::NotKept(actual) if self.same_target(&actual) && actual != self.projected() => WriteOutcome::NotKept(actual),
+            WriteOutcome::Confirmed(actual) if self.matches(&actual) => WriteOutcome::Confirmed(actual),
+            WriteOutcome::NotKept(actual) if self.same_target(&actual) && !self.matches(&actual) => WriteOutcome::NotKept(actual),
             WriteOutcome::Confirmed(_) | WriteOutcome::NotKept(_) => WriteOutcome::uncertain("connection returned a mismatched write outcome"),
             WriteOutcome::Pending => WriteOutcome::uncertain("connection returned before write completion"),
             WriteOutcome::NotApplied {
@@ -175,8 +196,8 @@ impl WritePlan {
         }
     }
 }
-impl From<LevelRequirementPlan> for WritePlan {
-    fn from(plan: LevelRequirementPlan) -> Self {
+impl From<StatusPlan> for WritePlan {
+    fn from(plan: StatusPlan) -> Self {
         Self::Forge(Box::new(plan))
     }
 }

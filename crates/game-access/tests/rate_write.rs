@@ -3,7 +3,7 @@ use eg_game_access::{
     forge::{ForgeSnapshot, ItemStatus},
     protocol::{DispatcherSpec, ProtocolError, REQUEST_SIZE, Request, RequestFrame, VERSION},
     rate_write::AttackLeechRateWrite,
-    write::LevelRequirementWrite,
+    write::StatusWrite,
 };
 
 fn dispatcher() -> DispatcherSpec {
@@ -54,7 +54,7 @@ fn invalid(bytes: &[u8]) {
 fn independent_packed_golden_and_full_projection() {
     let write = write();
     let bytes = golden();
-    assert_eq!(VERSION, 28);
+    assert_eq!(VERSION, 29);
     assert_eq!(write.encode(), bytes);
     assert_eq!(AttackLeechRateWrite::decode(&bytes).unwrap(), write);
     let request = Request::SetAttackLeechRate(write.clone());
@@ -220,7 +220,7 @@ fn existing_op23_and_read_response_v1_remain_literal_byte_compatible() {
 }
 
 #[test]
-fn op22_bounded_tail_header_cannot_submit_without_complete_expected_item() {
+fn status_bounded_tail_header_cannot_submit_without_complete_expected_item() {
     let mut forge = ForgeSnapshot {
         item: 1,
         individual_id: 2,
@@ -245,7 +245,7 @@ fn op22_bounded_tail_header_cannot_submit_without_complete_expected_item() {
         },
     };
     forge.fingerprint = forge.legacy_fingerprint();
-    let request = Request::SetLevelRequirement(LevelRequirementWrite::new(dispatcher(), 7, forge, 2).unwrap());
+    let request = Request::SetStatus(StatusWrite::level_requirement(dispatcher(), 7, forge, 2).unwrap());
     let bytes = request.encode();
     let header = Request::decode_header(&bytes[..336]).unwrap();
     assert!(header.tail_len() > 0);

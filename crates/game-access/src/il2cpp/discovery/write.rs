@@ -1,4 +1,4 @@
-//! One metadata-validated Int32 store, with a full guarded snapshot and readback.
+//! Conditional status stores, game refresh and rooted full readback.
 
 use super::{
     Class, DiscoveryError, Ptr, RuntimeAccess,
@@ -6,13 +6,14 @@ use super::{
 };
 use crate::{
     forge::ForgeSnapshot,
-    il2cpp::{AttachedThread, raw},
+    il2cpp::{AttachedThread, InvocationContext, InvocationOutcome, ReturnValue, raw},
+    write::StatusField,
 };
 use std::ptr::NonNull;
 
 /// Only `Failed` may describe an operation whose store was attempted. No variant permits retry.
 #[derive(Debug)]
-pub enum LevelWriteError {
+pub enum StatusWriteError {
     NotReady(String),
     Stale(String),
     Refused(String),
@@ -20,7 +21,7 @@ pub enum LevelWriteError {
     Failed(String),
 }
 
-impl std::fmt::Display for LevelWriteError {
+impl std::fmt::Display for StatusWriteError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::NotReady(s) | Self::Stale(s) | Self::Refused(s) | Self::Failed(s) => f.write_str(s),
@@ -28,18 +29,18 @@ impl std::fmt::Display for LevelWriteError {
         }
     }
 }
-impl std::error::Error for LevelWriteError {}
-impl From<DiscoveryError> for LevelWriteError {
+impl std::error::Error for StatusWriteError {}
+impl From<DiscoveryError> for StatusWriteError {
     fn from(error: DiscoveryError) -> Self {
         match error {
             DiscoveryError::OfflineRequired => Self::Offline,
             DiscoveryError::NotReady(s) => Self::NotReady(s.into()),
-            other => Self::Failed(other.to_string()),
+            other => Self::Refused(other.to_string()),
         }
     }
 }
-fn uncertain(error: impl std::fmt::Display) -> LevelWriteError {
-    LevelWriteError::Failed(format!("Level store attempted; readback unconfirmed: {error}"))
+fn uncertain(error: impl std::fmt::Display) -> StatusWriteError {
+    StatusWriteError::Failed(format!("Status store attempted; readback unconfirmed: {error}"))
 }
 
 // The only store boundary. The caller has validated the exact field and retains all graph roots.
@@ -48,8 +49,8 @@ unsafe fn attempt_store<T>(
     object: NonNull<raw::Object>,
     field: NonNull<raw::FieldInfo>,
     value: i32,
-    readback: impl FnOnce() -> Result<T, LevelWriteError>,
-) -> Result<T, LevelWriteError> {
+    readback: impl FnOnce() -> Result<T, StatusWriteError>,
+) -> Result<T, StatusWriteError> {
     // STORE ATTEMPT BOUNDARY: nothing below may return a definite pre-store refusal.
     // SAFETY: the internal caller establishes FieldWriteApi::set_i32's complete contract.
     unsafe { api.set_i32(object, field, value) };
@@ -57,64 +58,68 @@ unsafe fn attempt_store<T>(
 }
 
 impl RuntimeAccess {
-    // Internal caller supplies set_level_requirement's full live-runtime/exclusive-write contract.
-    unsafe fn level_field(&self, graph: &ForgeGraph<'_, '_>, owner: Class) -> Result<NonNull<raw::FieldInfo>, LevelWriteError> {
+    // Internal caller supplies set_status's full live-runtime/exclusive-write contract.
+    unsafe fn status_field(&self, owner: Class, kind: StatusField) -> Result<NonNull<raw::FieldInfo>, StatusWriteError> {
         unsafe {
-            self.exact(&graph.item, owner)?;
-            let field = self.field(owner, c"<LvlReq>k__BackingField")?;
+            let (name, primitive, code) = match kind {
+                StatusField::LevelRequirement => (c"<LvlReq>k__BackingField", c"Int32", 0x08),
+                StatusField::ForgingPotential => (c"forgingPotential", c"Byte", 0x05),
+                StatusField::Corrupted => (c"corrupted", c"Boolean", 0x02),
+                StatusField::Ruined => (c"ruined", c"Boolean", 0x02),
+                _ => return Err(StatusWriteError::Refused("This status field is not supported yet".into())),
+            };
+            let field = self.field(owner, name)?;
             let ty = (self.field_type)(field);
             if ty.is_null()
                 || (self.type_byref)(ty)
-                || (self.type_code)(ty) != 0x08
-                || (self.type_class)(ty) != self.system_class(c"Int32")?
+                || (self.type_code)(ty) != code
+                || (self.type_class)(ty) != self.system_class(primitive)?
                 || (self.field_parent)(field) != owner
                 || (self.field_flags)(field) & 0x70 != 0
                 || !(16..=16384).contains(&(self.field_offset)(field))
             {
-                return Err(LevelWriteError::Refused(
-                    "Level backing field is not the exact mutable ItemDataUnpacked.Int32 instance field".into(),
-                ));
+                return Err(StatusWriteError::Refused("Status field is not the exact mutable instance field".into()));
             }
-            NonNull::new(field.cast()).ok_or_else(|| LevelWriteError::Refused("Missing level field".into()))
+            NonNull::new(field.cast()).ok_or_else(|| StatusWriteError::Refused("Missing status field".into()))
         }
     }
 
     // Uses already validated metadata; no new object is dereferenced from the current statics/edges.
-    unsafe fn level_final_gate(&self, graph: &ForgeGraph<'_, '_>, manager: u64) -> Result<(), LevelWriteError> {
+    unsafe fn status_final_gate(&self, graph: &ForgeGraph<'_, '_>, manager: u64) -> Result<(), StatusWriteError> {
         unsafe {
             let held = target(&graph.manager)?;
             if held.as_ptr() as u64 != manager {
-                return Err(LevelWriteError::Stale("Current manager changed".into()));
+                return Err(StatusWriteError::Stale("Current manager changed".into()));
             }
             let mut current: Ptr = std::ptr::null_mut();
             (self.static_get)(graph.manager_field, (&mut current as *mut Ptr).cast());
             if current != held.as_ptr().cast() {
-                return Err(LevelWriteError::Stale("Current manager changed".into()));
+                return Err(StatusWriteError::Stale("Current manager changed".into()));
             }
             let mut cached = 0_usize;
             (self.field_get)(held.as_ptr(), graph.cached_ptr_field, (&mut cached as *mut usize).cast());
             if cached == 0 {
-                return Err(LevelWriteError::Offline);
+                return Err(StatusWriteError::Offline);
             }
             for &(parent, field, expected) in &graph.links {
                 let mut child: Ptr = std::ptr::null_mut();
                 (self.field_get)(parent.cast(), field, (&mut child as *mut Ptr).cast());
                 if child != expected {
-                    return Err(LevelWriteError::Stale("Current forge item mapping changed".into()));
+                    return Err(StatusWriteError::Stale("Current forge item mapping changed".into()));
                 }
             }
             let mut online = 1_u8;
             (self.static_get)(graph.online_field, (&mut online as *mut u8).cast());
             match online {
                 0 => Ok(()),
-                1 => Err(LevelWriteError::Offline),
-                _ => Err(LevelWriteError::Refused("Noncanonical runtime online Boolean".into())),
+                1 => Err(StatusWriteError::Offline),
+                _ => Err(StatusWriteError::Refused("Noncanonical runtime online Boolean".into())),
             }
         }
     }
 
-    /// Set only the current plain item's level backing field and return a fully matching readback.
-    /// No item constructor, getter, rebuild, delegate or game method is invoked.
+    /// Change one supported status field and copy the complete result. Level uses a
+    /// direct Int32 store; other fields use Byte/Boolean then RebuildID and UpdateEntry.
     ///
     /// # Safety
     /// All `read_forge` runtime/main-thread/nonmoving-GC conditions apply, with exclusive WRITE
@@ -122,49 +127,103 @@ impl RuntimeAccess {
     /// must authorize this exact mutation and exclude callbacks, reentrancy, other writers,
     /// runtime shutdown, native destruction and graph replacement throughout. Both export tables
     /// and attachment must belong to the same initialized source-bound Unity 6000.4 runtime.
-    /// `Field::SetValue` must implement the audited direct Int32 assignment (no managed bodies).
+    /// `Field::SetValue` must implement the direct, metadata-validated scalar assignment.
+    /// For rebuilding edits, `invoke` must describe this same runtime and the
+    /// two refresh methods must be callable synchronously; roots survive managed
+    /// calls, exceptions and GC. Refresh failures are uncertain and never retried.
     /// Expected addresses are opaque comparisons only. After entering the void setter, failures
     /// are uncertain; this API cannot recover an access violation/SEH or guarantee rollback.
-    pub unsafe fn set_level_requirement(
+    #[allow(clippy::too_many_arguments)]
+    pub unsafe fn set_status(
         &self,
         attached: &AttachedThread<'_>,
         write_api: raw::FieldWriteApi,
+        invoke: Option<raw::InvocationApi>,
         expected_manager: u64,
         expected: &ForgeSnapshot,
+        kind: StatusField,
         value: i32,
-    ) -> Result<ForgeSnapshot, LevelWriteError> {
+    ) -> Result<ForgeSnapshot, StatusWriteError> {
         unsafe {
-            if expected_manager == 0 || !(0..=255).contains(&value) || matches!(expected.rarity, 7..=9) {
-                return Err(LevelWriteError::Refused("Level edit requires a plain item and a byte-domain value".into()));
+            if expected_manager == 0
+                || !(0..=255).contains(&value)
+                || !kind.supported()
+                || (matches!(kind, StatusField::LevelRequirement | StatusField::ForgingPotential) && matches!(expected.rarity, 7..=9))
+                || (matches!(kind, StatusField::Corrupted | StatusField::Ruined) && value > 1)
+            {
+                return Err(StatusWriteError::Refused("Unsupported status edit or invalid byte-domain value".into()));
+            }
+            if kind != StatusField::LevelRequirement && expected.affixes.iter().any(|affix| affix.id > 4095) {
+                return Err(StatusWriteError::Refused(
+                    "Rebuilding would truncate an affix ID outside the game's 12-bit save format".into(),
+                ));
             }
             let limits = self.read_item_limits(attached)?;
-            if value > i32::from(limits.level_requirement.maximum) {
-                return Err(LevelWriteError::Refused("Level exceeds the current game's maxLevel".into()));
+            let valid = match kind {
+                StatusField::LevelRequirement => !matches!(expected.rarity, 7..=9) && value <= i32::from(limits.level_requirement.maximum),
+                StatusField::ForgingPotential => {
+                    !matches!(expected.rarity, 7..=9) && (i32::from(limits.forging_potential.minimum)..=i32::from(limits.forging_potential.maximum)).contains(&value)
+                }
+                StatusField::Corrupted | StatusField::Ruined => matches!(value, 0 | 1),
+                _ => false,
+            };
+            if !valid {
+                return Err(StatusWriteError::Refused("Status value or item eligibility is outside the game's rules".into()));
             }
-            let graph = self.forge_graph(attached)?.ok_or_else(|| LevelWriteError::NotReady("Forge has no current item".into()))?;
-            let owner = self.class(&graph.images, c"", c"ItemDataUnpacked")?;
-            let field = self.level_field(&graph, owner)?;
+            let graph = self.forge_graph(attached)?.ok_or_else(|| StatusWriteError::NotReady("Forge has no current item".into()))?;
+            let owner = self.class(&graph.images, c"", if kind == StatusField::LevelRequirement { c"ItemDataUnpacked" } else { c"ItemData" })?;
+            let field = self.status_field(owner, kind)?;
+            // Resolve/bind every refresh before the store. Metadata/signature
+            // failures here are definite pre-store refusals.
+            let context = invoke.map(|api| InvocationContext::new(attached, api));
+            let refresh = if kind == StatusField::LevelRequirement {
+                None
+            } else {
+                let context = context.as_ref().ok_or_else(|| StatusWriteError::Refused("Missing refresh invocation API".into()))?;
+                let item_data = self.class(&graph.images, c"", c"ItemData")?;
+                let entry = self.class(&graph.images, c"", c"ItemContainerEntry")?;
+                let rebuild = context
+                    .bind(NonNull::new(self.method(item_data, c"RebuildID", &[], true)?.cast_mut()).ok_or_else(|| StatusWriteError::Refused("Missing RebuildID".into()))?)
+                    .map_err(|e| StatusWriteError::Refused(e.to_string()))?;
+                let update = context
+                    .bind(NonNull::new(self.method(entry, c"UpdateEntry", &[], true)?.cast_mut()).ok_or_else(|| StatusWriteError::Refused("Missing UpdateEntry".into()))?)
+                    .map_err(|e| StatusWriteError::Refused(e.to_string()))?;
+                Some((rebuild, update))
+            };
             // Metadata/limit validation has finished. Refresh all current graph edges, retaining
             // both graphs' roots until the operation ends, and compare every owned field.
-            let current = self.forge_graph(attached)?.ok_or_else(|| LevelWriteError::Stale("Current item disappeared".into()))?;
+            let current = self.forge_graph(attached)?.ok_or_else(|| StatusWriteError::Stale("Current item disappeared".into()))?;
             let before = self.forge_snapshot(attached, &current)?;
             if before != *expected || target(&graph.item)? != target(&current.item)? {
-                return Err(LevelWriteError::Stale("Complete current item differs from expected".into()));
+                return Err(StatusWriteError::Stale("Complete current item differs from expected".into()));
             }
-            let mut projected = expected.clone();
-            projected.status.level_requirement = value;
-            projected.fingerprint = projected.legacy_fingerprint();
             let object = target(&current.item)?;
-            self.level_final_gate(&current, expected_manager)?;
-            attempt_store(write_api, object, field, value, || {
-                self.level_final_gate(&current, expected_manager)?;
-                let actual = self.forge_snapshot(attached, &current)?;
-                self.level_final_gate(&current, expected_manager)?;
-                if actual != projected {
-                    return Err(LevelWriteError::Failed("Complete readback differs from projected item".into()));
+            self.status_final_gate(&current, expected_manager)?;
+            let readback = || {
+                if let Some((rebuild, update)) = &refresh {
+                    let entry = current._parents.last().ok_or_else(|| StatusWriteError::Failed("Missing retained forge entry".into()))?;
+                    for (method, root) in [(rebuild, &current.item), (update, entry)] {
+                        match method.invoke(Some(root), &mut []).map_err(uncertain)? {
+                            InvocationOutcome::Returned(ReturnValue::Void) => {}
+                            _ => return Err(StatusWriteError::Failed("Game refresh raised an exception or returned an unexpected value".into())),
+                        }
+                        self.status_final_gate(&current, expected_manager)?;
+                    }
                 }
+                self.status_final_gate(&current, expected_manager)?;
+                let actual = self.forge_snapshot(attached, &current)?;
+                self.status_final_gate(&current, expected_manager)?;
+                // A valid differing result is known state. The session performs
+                // its separate read and decides Confirmed versus NotKept.
                 Ok(actual)
-            })
+            };
+            if kind == StatusField::LevelRequirement {
+                attempt_store(write_api, object, field, value, readback)
+            } else {
+                // STORE ATTEMPT BOUNDARY: exact Byte/Boolean field, canonical u8.
+                write_api.set_u8(object, field, value as u8);
+                readback().map_err(uncertain)
+            }
         }
     }
 }
@@ -371,27 +430,27 @@ mod tests {
         let g = unsafe { graph(&attached) };
         // SAFETY: same authored contract throughout this metadata-only validation matrix.
         unsafe {
-            assert!(a.level_field(&g, token(OWNER)).is_ok());
+            assert!(a.status_field(token(OWNER), StatusField::LevelRequirement).is_ok());
             for flag in [0x10, 0x20, 0x40, 0x70] {
                 FLAGS.set(flag);
-                assert!(a.level_field(&g, token(OWNER)).is_err());
+                assert!(a.status_field(token(OWNER), StatusField::LevelRequirement).is_err());
             }
             FLAGS.set(0);
             TYPE_CLASS.set(INT32 + 1);
-            assert!(a.level_field(&g, token(OWNER)).is_err());
+            assert!(a.status_field(token(OWNER), StatusField::LevelRequirement).is_err());
             TYPE_CLASS.set(INT32);
             CODE.set(0x0a);
-            assert!(a.level_field(&g, token(OWNER)).is_err());
+            assert!(a.status_field(token(OWNER), StatusField::LevelRequirement).is_err());
             CODE.set(8);
             BYREF.set(true);
-            assert!(a.level_field(&g, token(OWNER)).is_err());
+            assert!(a.status_field(token(OWNER), StatusField::LevelRequirement).is_err());
             BYREF.set(false);
             DECLARING.set(OWNER + 1);
-            assert!(a.level_field(&g, token(OWNER)).is_err());
+            assert!(a.status_field(token(OWNER), StatusField::LevelRequirement).is_err());
             DECLARING.set(OWNER);
             for p in [0, 15, 16385, usize::MAX] {
                 OFFSET.set(p);
-                assert!(a.level_field(&g, token(OWNER)).is_err());
+                assert!(a.status_field(token(OWNER), StatusField::LevelRequirement).is_err());
             }
         }
         assert_eq!(STORES.get(), 0);
@@ -406,21 +465,21 @@ mod tests {
         let g = unsafe { graph(&attached) };
         // SAFETY: same authored contract for all deliberately changed identity/gate values.
         unsafe {
-            assert!(a.level_final_gate(&g, MANAGER as u64).is_ok());
-            assert!(matches!(a.level_final_gate(&g, u64::MAX), Err(LevelWriteError::Stale(_))));
+            assert!(a.status_final_gate(&g, MANAGER as u64).is_ok());
+            assert!(matches!(a.status_final_gate(&g, u64::MAX), Err(StatusWriteError::Stale(_))));
             CURRENT_MANAGER.set(123);
-            assert!(matches!(a.level_final_gate(&g, MANAGER as u64), Err(LevelWriteError::Stale(_))));
+            assert!(matches!(a.status_final_gate(&g, MANAGER as u64), Err(StatusWriteError::Stale(_))));
             CURRENT_MANAGER.set(MANAGER);
             CURRENT_ITEM.set(321);
-            assert!(matches!(a.level_final_gate(&g, MANAGER as u64), Err(LevelWriteError::Stale(_))));
+            assert!(matches!(a.status_final_gate(&g, MANAGER as u64), Err(StatusWriteError::Stale(_))));
             CURRENT_ITEM.set(ITEM);
             LIVE.set(0);
-            assert!(matches!(a.level_final_gate(&g, MANAGER as u64), Err(LevelWriteError::Offline)));
+            assert!(matches!(a.status_final_gate(&g, MANAGER as u64), Err(StatusWriteError::Offline)));
             LIVE.set(1);
             ONLINE.set(1);
-            assert!(matches!(a.level_final_gate(&g, MANAGER as u64), Err(LevelWriteError::Offline)));
+            assert!(matches!(a.status_final_gate(&g, MANAGER as u64), Err(StatusWriteError::Offline)));
             ONLINE.set(2);
-            assert!(matches!(a.level_final_gate(&g, MANAGER as u64), Err(LevelWriteError::Refused(_))));
+            assert!(matches!(a.status_final_gate(&g, MANAGER as u64), Err(StatusWriteError::Refused(_))));
         }
         assert_eq!(STORES.get(), 0);
         drop(g);
@@ -433,11 +492,11 @@ mod tests {
         // SAFETY: authored graph roots keep both fake object identities alive through each call.
         let g = unsafe { graph(&attached) };
         for error in [
-            LevelWriteError::NotReady("n".into()),
-            LevelWriteError::Stale("s".into()),
-            LevelWriteError::Refused("r".into()),
-            LevelWriteError::Offline,
-            LevelWriteError::Failed("f".into()),
+            StatusWriteError::NotReady("n".into()),
+            StatusWriteError::Stale("s".into()),
+            StatusWriteError::Refused("r".into()),
+            StatusWriteError::Offline,
+            StatusWriteError::Failed("f".into()),
         ] {
             let prior = STORES.get();
             // SAFETY: exact authored field ABI/Int32 destination, with manager+item roots retained.
@@ -450,7 +509,7 @@ mod tests {
                     || Err(error),
                 )
             };
-            assert!(matches!(result, Err(LevelWriteError::Failed(_))));
+            assert!(matches!(result, Err(StatusWriteError::Failed(_))));
             assert_eq!(STORES.get(), prior + 1);
             assert_eq!(VALUE.get(), 37);
         }
@@ -509,8 +568,18 @@ mod tests {
             e.rarity = rarity;
             // SAFETY: invalid requests must return before any unprovided fake metadata export.
             assert!(matches!(
-                unsafe { a.set_level_requirement(&attached, raw::FieldWriteApi { field_set_value: set }, manager, e, value) },
-                Err(LevelWriteError::Refused(_))
+                unsafe {
+                    a.set_status(
+                        &attached,
+                        raw::FieldWriteApi { field_set_value: set },
+                        None,
+                        manager,
+                        e,
+                        StatusField::LevelRequirement,
+                        value,
+                    )
+                },
+                Err(StatusWriteError::Refused(_))
             ));
         }
         assert_eq!(STORES.get(), 0);

@@ -5,13 +5,13 @@ use crate::{
 use eg_game_access::{
     il2cpp::{
         ThreadContext,
-        discovery::{AttackLeechWriteError, DiscoveryError, LevelWriteError, RuntimeAccess},
+        discovery::{AttackLeechWriteError, DiscoveryError, RuntimeAccess, StatusWriteError},
         raw::{self, ExecuteTasks, MethodInfo},
     },
     protocol::{Discovery, DispatcherSpec, Request, Response, ResponseCode},
     rate_write::AttackLeechRateWrite,
     scheduler::{HookError, SchedulerHook},
-    write::LevelRequirementWrite,
+    write::StatusWrite,
 };
 use eg_trainer::dispatch::{Dispatcher, Pending};
 use std::{
@@ -126,7 +126,7 @@ unsafe fn read_status() -> Response {
     }
 }
 
-unsafe fn set_level_requirement(write: &LevelRequirementWrite) -> Response {
+unsafe fn set_status(write: &StatusWrite) -> Response {
     // SAFETY: only the established main thread calls this after original returns.
     // Startup's exact-runtime ownership contract must additionally authorize this
     // particular field mutation and exclude concurrent graph mutation/shutdown.
@@ -137,17 +137,26 @@ unsafe fn set_level_requirement(write: &LevelRequirementWrite) -> Response {
             let module = module().map_err(|error| server::failure(ResponseCode::Failed, error))?;
             let (api, access) = apis(module).map_err(|error| server::failure(ResponseCode::Failed, error))?;
             let writer = raw::FieldWriteApi::resolve(|name| export(module, name)).map_err(|error| server::failure(ResponseCode::Refused, error.to_string()))?;
+            let invoke = raw::InvocationApi::resolve(|name| export(module, name)).map_err(|error| server::failure(ResponseCode::Refused, error.to_string()))?;
             let thread = ThreadContext::new(api);
             let attached = thread.attach().map_err(|error| server::failure(ResponseCode::NotReady, error.to_string()))?;
             let snapshot = access
-                .set_level_requirement(&attached, writer, write.expected_manager(), write.expected(), i32::from(write.value()))
+                .set_status(
+                    &attached,
+                    writer,
+                    Some(invoke),
+                    write.expected_manager(),
+                    write.expected(),
+                    write.field(),
+                    i32::from(write.value()),
+                )
                 .map_err(|error| {
                     let code = match &error {
-                        LevelWriteError::NotReady(_) => ResponseCode::NotReady,
-                        LevelWriteError::Stale(_) => ResponseCode::StaleItem,
-                        LevelWriteError::Refused(_) => ResponseCode::Refused,
-                        LevelWriteError::Offline => ResponseCode::OfflineRequired,
-                        LevelWriteError::Failed(_) => ResponseCode::Failed,
+                        StatusWriteError::NotReady(_) => ResponseCode::NotReady,
+                        StatusWriteError::Stale(_) => ResponseCode::StaleItem,
+                        StatusWriteError::Refused(_) => ResponseCode::Refused,
+                        StatusWriteError::Offline => ResponseCode::OfflineRequired,
+                        StatusWriteError::Failed(_) => ResponseCode::Failed,
                     };
                     server::failure(code, error.to_string())
                 })?;
@@ -395,7 +404,7 @@ fn after_original(state: &Shared) {
                 Request::ReadCatalogPage { kind, cursor, .. } => unsafe { read_catalog_page(kind, cursor) },
                 // SAFETY: the same established thread plus this narrow operation's
                 // explicit exclusive-write/root/metadata contract described above.
-                Request::SetLevelRequirement(write) => unsafe { set_level_requirement(&write) },
+                Request::SetStatus(write) => unsafe { set_status(&write) },
                 Request::SetAttackLeechRate(write) => unsafe { set_attack_leech_rate(&write) },
                 // No feature installation API exists. Empty is the truthful complete feature set.
                 Request::ClearHooks { .. } => Response {

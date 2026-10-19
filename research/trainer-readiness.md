@@ -4,7 +4,7 @@ The objective is the trainer port ready for UI integration, preserving the C# be
 A green interop fixture alone does not establish that. This checklist separates the remaining application and game
 contracts from already validated lower layers; unsupported capabilities must stay explicit until proven.
 
-Current verification uses nightly only. `mise run trainer:verify` runs the release trainer/tier and controller
+Current verification uses pinned `nightly-2026-10-17` (Rust 1.101.0-nightly). `mise run trainer:verify` runs the release trainer/tier and controller
 suites once, followed by workspace checks. Individual test tasks remain available for focused work.
 Earlier compiler matrices below are historical results, not additional gates.
 
@@ -26,6 +26,23 @@ connect the remaining settings/cache actions; hook-engine and feature-family wor
 Validation:530 nightly release trainer/controller cases and56 UI unit tests pass, plus full workspace
 verification and inspected worker/UI captures. The helper build publishes matching debug/release receipts;
 their retained DLL hashes were checked without loading a DLL or accessing a running game.
+
+The next feature increment replaces the level-only request with protocol 29 status operation 10.
+Level, forging potential, corrupted and ruined share `StatusPlan`, worker/session write handling
+and conditional `StatusUndo`. Non-level edits call RebuildID and UpdateEntry; their readback
+allows the derived level to change. Valid same-target native acknowledgements remain provisional,
+including a differing result; the independent read decides Confirmed or NotKept. Refresh exceptions
+after the store remain uncertain. The editor adapter is still read-only, and the three remaining
+status fields, formatting/mapping/previews, other Forge edits and gameplay/field families remain work.
+Helper package metadata is separate from evaluation reports (`passed` is ignored), and trainer
+startup failure is logged/displayed in Settings while Home and Mods keep running.
+The [authored status checkpoint](../tools/trainer-eval/persistent-player/status-write-report.json)
+passes 226 requests/216 commands through the production worker route, with 10 preparations/one
+helper load, GC during rebuild, independent Apply/Undo observations, NotKept, two post-store
+refresh exceptions, restored dispatcher, stopped server and normal exit. Native rebuilding
+also refuses inherited affix IDs outside the 12-bit save format before attempting a store.
+The current `mise run trainer:verify` gate passes 534 trainer/controller tests (five native
+fixture entrypoints stay ignored), workspace Clippy/format/tokens and inspected fake-host captures.
 
 | Requirement | Current evidence and remaining work |
 |---|---|

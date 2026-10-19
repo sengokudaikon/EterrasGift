@@ -46,17 +46,7 @@ pub enum RollTarget {
     Unique = 1,
     Implicit = 2,
 }
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-#[repr(i32)]
-pub enum StatusField {
-    ForgingPotential = 0,
-    LegendaryPotential = 1,
-    WeaversWill = 2,
-    Corrupted = 3,
-    Ruined = 4,
-    LevelRequirement = 5,
-    WeaversTouch = 6,
-}
+pub use eg_game_access::write::StatusField;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct AffixEdit {

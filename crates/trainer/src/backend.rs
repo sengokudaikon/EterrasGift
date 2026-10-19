@@ -40,7 +40,7 @@ use crate::{
     field_writes::{AttackLeechDecision, AttackLeechPlan, AttackLeechTarget, FieldPlanError, RateWriteRecord, RateWriteStatus},
     gate::{self, GateDecision, GatePolicy, GateVerdict, LogSource},
     session::{Cleanup, Session, SessionError},
-    writes::{LevelRequirementPlan, WriteControl, WriteObservation, WriteOutcome, WritePlan, WriteRecord, WriteStatus},
+    writes::{StatusPlan, WriteControl, WriteObservation, WriteOutcome, WritePlan, WriteRecord, WriteStatus},
 };
 
 pub trait ProcessLocator: Send + 'static {
@@ -68,7 +68,7 @@ pub trait BackendConnection: Send + 'static {
     fn write(&mut self, now: Timestamp, plan: &WritePlan, control: &mut dyn WriteControl) -> impl Future<Output = Result<WriteOutcome<WriteObservation>, BackendError>> + Send {
         async move {
             match plan {
-                WritePlan::Forge(plan) => Ok(self.set_level_requirement(now, plan, control).await?.map(WriteObservation::forge)),
+                WritePlan::Forge(plan) => Ok(self.set_status(now, plan, control).await?.map(WriteObservation::forge)),
                 WritePlan::Field(plan) => Ok(self.set_attack_leech_rate(now, plan, control).await?.map(WriteObservation::Field)),
             }
         }
@@ -108,9 +108,12 @@ pub trait BackendConnection: Send + 'static {
     fn supports_level_requirement(&self) -> bool {
         false
     }
+    fn supports_status(&self, field: crate::edits::StatusField) -> bool {
+        field == crate::edits::StatusField::LevelRequirement && self.supports_level_requirement()
+    }
     /// Err must mean submission was not attempted (or carry MayHaveRun). Once
     /// transport is entered, return a certainty-bearing status even on failure.
-    fn set_level_requirement(&mut self, _: Timestamp, _: &LevelRequirementPlan, _: &mut dyn WriteControl) -> impl Future<Output = Result<WriteStatus, BackendError>> + Send {
+    fn set_status(&mut self, _: Timestamp, _: &StatusPlan, _: &mut dyn WriteControl) -> impl Future<Output = Result<WriteStatus, BackendError>> + Send {
         async { Err(BackendError::blocked(ErrorKind::NotReady, "level requirement writes are unavailable")) }
     }
     fn disconnect(&mut self) -> impl Future<Output = Cleanup> + Send;
@@ -158,8 +161,11 @@ impl<T: Transport + Send + 'static, L: LogSource + Send + 'static> BackendConnec
     fn supports_level_requirement(&self) -> bool {
         true
     }
-    async fn set_level_requirement(&mut self, now: Timestamp, plan: &LevelRequirementPlan, control: &mut dyn WriteControl) -> Result<WriteStatus, BackendError> {
-        Ok(Session::set_level_requirement_controlled(self, now, plan, control).await?)
+    fn supports_status(&self, field: crate::edits::StatusField) -> bool {
+        field.supported()
+    }
+    async fn set_status(&mut self, now: Timestamp, plan: &StatusPlan, control: &mut dyn WriteControl) -> Result<WriteStatus, BackendError> {
+        Ok(Session::set_status_controlled(self, now, plan, control).await?)
     }
     async fn disconnect(&mut self) -> Cleanup {
         Session::disconnect(self).await
@@ -302,6 +308,8 @@ pub struct Capabilities {
     /// Operation support on this ready connection. Current item eligibility and
     /// range/observation checks still belong to level_requirement_plan.
     pub level_requirement: bool,
+    /// Per-field status support, independent of the selected item's eligibility.
+    pub status_fields: [bool; 7],
     pub hooks: bool,
     pub fields: bool,
 }
@@ -376,7 +384,7 @@ pub struct BackendSnapshot {
     pub capabilities: Capabilities,
     pub last_write: Option<WriteRecord>,
     pub last_rate_write: Option<RateWriteRecord>,
-    pub undo_level_requirement: Option<crate::undo::LevelUndo>,
+    pub undo_status: Option<crate::undo::StatusUndo>,
 }
 impl BackendSnapshot {
     /// The outcome for this exact submitted plan. Historical certainty survives
@@ -430,7 +438,10 @@ impl BackendSnapshot {
         }
         ExpectedObservation::new(self.generation, target.clone(), data.identity.clone(), snapshot.as_ref().clone())
     }
-    pub fn level_requirement_plan(&self, value: i32) -> Result<LevelRequirementPlan, crate::edits::EditError> {
+    pub fn level_requirement_plan(&self, value: i32) -> Result<StatusPlan, crate::edits::EditError> {
+        self.status_plan(crate::edits::StatusField::LevelRequirement, value)
+    }
+    pub fn status_plan(&self, field: crate::edits::StatusField, value: i32) -> Result<StatusPlan, crate::edits::EditError> {
         use crate::edits::{CatalogProvenance, EditError};
         let expected = self.expected_observation()?;
         let status = self
@@ -438,7 +449,7 @@ impl BackendSnapshot {
             .filter(|status| !status.online && status.manager != 0)
             .ok_or(EditError::OfflineRequired)?;
         let catalog = self.catalog.data().ok_or(EditError::CatalogNotVerified)?;
-        LevelRequirementPlan::new(
+        StatusPlan::new(
             &expected,
             status.manager,
             catalog,
@@ -446,12 +457,13 @@ impl BackendSnapshot {
                 generation: self.generation,
                 process: expected.process().clone(),
             },
+            field,
             value,
         )
     }
-    pub fn level_undo_plan(&self, undo: &crate::undo::LevelUndo) -> Result<LevelRequirementPlan, crate::edits::EditError> {
+    pub fn status_undo_plan(&self, undo: &crate::undo::StatusUndo) -> Result<StatusPlan, crate::edits::EditError> {
         use crate::edits::{CatalogProvenance, EditError};
-        if self.undo_level_requirement.as_ref() != Some(undo) {
+        if self.undo_status.as_ref() != Some(undo) {
             return Err(EditError::IdentityChanged);
         }
         let current = self.expected_observation()?;
@@ -492,9 +504,9 @@ pub enum Command {
     ReadForge,
     ReadAttackLeech,
     Write(WritePlan),
-    ApplyLevelRequirement(Box<LevelRequirementPlan>),
+    ApplyStatus(Box<StatusPlan>),
     SetAttackLeechRate(Box<AttackLeechPlan>),
-    UndoLevelRequirement(Box<crate::undo::LevelUndo>),
+    UndoStatus(Box<crate::undo::StatusUndo>),
     Shutdown,
 }
 impl Command {
@@ -646,7 +658,7 @@ pub fn service<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K
         capabilities: Capabilities::default(),
         last_write: None,
         last_rate_write: None,
-        undo_level_requirement: None,
+        undo_status: None,
     };
     let (sender, commands) = mpsc::channel(32);
     let (snapshots, receiver) = watch::channel(state.clone());
@@ -732,11 +744,11 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
         }) {
             self.state.attack_leech = None;
         }
-        if self.state.undo_level_requirement.as_ref().is_some_and(|undo| {
+        if self.state.undo_status.as_ref().is_some_and(|undo| {
             self.state.expected_observation().as_ref() != Ok(undo.after())
                 || self.state.runtime_status.as_ref().is_none_or(|status| status.online || status.manager != undo.manager())
         }) {
-            self.state.undo_level_requirement = None;
+            self.state.undo_status = None;
         }
         self.state.revision = self.state.revision.wrapping_add(1);
         self.state.capabilities = Capabilities {
@@ -751,6 +763,14 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
             level_requirement: self.state.phase == Phase::Ready
                 && self.state.activity.is_none()
                 && self.connection.as_ref().is_some_and(BackendConnection::supports_level_requirement),
+            status_fields: std::array::from_fn(|index| {
+                self.state.phase == Phase::Ready
+                    && self.state.activity.is_none()
+                    && self
+                        .connection
+                        .as_ref()
+                        .is_some_and(|connection| connection.supports_status(crate::edits::StatusField::from_wire(index as u32).expect("seven status fields")))
+            }),
             ..Capabilities::default()
         };
         self.snapshots.send_replace(self.state.clone());
@@ -860,11 +880,11 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
             Command::RefreshCatalog => self.read(true).await,
             Command::ReadForge => self.read(false).await,
             Command::ReadAttackLeech => self.read_attack_leech().await,
-            Command::Write(WritePlan::Forge(plan)) => self.write_level_requirement(*plan).await,
+            Command::Write(WritePlan::Forge(plan)) => self.write_status(*plan).await,
             Command::Write(WritePlan::Field(plan)) => self.set_attack_leech_rate(*plan).await,
             Command::SetAttackLeechRate(plan) => self.set_attack_leech_rate(*plan).await,
-            Command::ApplyLevelRequirement(plan) => self.write_level_requirement(*plan).await,
-            Command::UndoLevelRequirement(undo) => self.undo_level_requirement(*undo).await,
+            Command::ApplyStatus(plan) => self.write_status(*plan).await,
+            Command::UndoStatus(undo) => self.undo_status(*undo).await,
         }
     }
     async fn poll(&mut self) {
@@ -1156,7 +1176,7 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
     }
     fn release_without_io(&mut self) {
         self.state.attack_leech = None;
-        self.state.undo_level_requirement = None;
+        self.state.undo_status = None;
         if self.connection.take().is_some() {
             self.state.cleanup = Cleanup::Unconfirmed;
         }
