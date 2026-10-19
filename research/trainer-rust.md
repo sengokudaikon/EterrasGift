@@ -346,3 +346,30 @@ explicit selection-lifetime policy or retained helper ticket, beyond per-call ro
 Foundation438 passes stable/nightly release plus ownership/architecture checks; full workspace
 verification and inspected captures pass. [Detailed scope](../tools/trainer-eval/unity-rust-host/numeric-formatter-README.md)
 and [exact evidence](../tools/trainer-eval/unity-rust-host/numeric-formatter-report.json).
+
+
+## Exact-provider parser checkpoint (2026-10-19)
+
+The original language-based display parser remains unchanged. A separate unsafe exact-root
+NumberFormatInfo parser now calls the same checked Double.TryParse overload with style231,
+exact suffix/input bounds and finite-only output. Seven new full-entrypoint fake-runtime
+cases plus four unchanged parser tests pass. Authored stable debug/nightly release x GC0/3ms
+all pass with the exact approved candidate; production changes its first documentation line
+only. The old formatter/parser/Entry/exception/native markers remain in those runs.
+
+Same-name custom NumberFormat data matters: comma-decimal text1,25 parses as1.25 with the
+actual rooted provider but125 through legacy en-US reconstruction; middle-dot text1·25
+parses as1.25 with its custom provider and is refused by the legacy path. The owned fixture
+independently establishes formatter/provider provenance and retains the root after dropping
+managed owners/restoring culture. This does not establish that provenance in Last Epoch.
+
+No context capture, culture synchronization/ABA guarantee, helper formatter/parser request,
+parsed mapping capability, description/localization getter or private item clone is enabled.
+The caller still owns exact runtime/body/main-thread authorization and exclusive provider/
+culture/settings nonmutation. Names, pointers and readonly flags alone are insufficient.
+[Scope and reproduction](../tools/trainer-eval/unity-rust-host/provider-parser-README.md) and
+[retained source/runtime evidence](../tools/trainer-eval/unity-rust-host/provider-parser-report.json).
+
+Root integration repeats all four provider runtime modes with the current FE344 documentation
+revision and passes445 foundation tests on stable/nightly release. The evidence index treats
+these production-source runs as primary and retains the original ABA candidate runs separately.

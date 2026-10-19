@@ -575,3 +575,18 @@ explicit selection-lifetime policy or retained helper ticket, beyond per-call ro
 Foundation438 passes stable/nightly release plus ownership/architecture checks; full workspace
 verification and inspected captures pass. [Detailed scope](../tools/trainer-eval/unity-rust-host/numeric-formatter-README.md)
 and [exact evidence](../tools/trainer-eval/unity-rust-host/numeric-formatter-report.json).
+
+## Exact-provider parsing, 2026-10-19
+
+The reviewed rooted NumberFormatInfo parser is integrated without changing the existing
+language-based parser. All four production-source standalone IL2CPP modes pass, preserving
+all prior formatter, parser, invocation and GC probes. A same-name custom number format
+parses 1,25 as 1.25 where the legacy name-based path yields 125; no fallback hides this
+difference. Seven new full-entrypoint fake-runtime cases bring the foundation to445 stable
+and nightly release. Full workspace verification and inspected captures pass.
+
+This validates exact-provider ABI/root/BCL mechanics under the explicit nonmutation contract;
+provider capture, general text/provider provenance, culture synchronization, parsed mapping
+wire requests and actual-game formatter execution remain unimplemented or unvalidated.
+See [scope and commands](../tools/trainer-eval/unity-rust-host/provider-parser-README.md) and
+[production/candidate evidence](../tools/trainer-eval/unity-rust-host/provider-parser-report.json).
