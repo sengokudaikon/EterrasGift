@@ -47,6 +47,25 @@ enum Fault {
 }
 
 #[derive(Clone, Copy, Debug, Default)]
+enum StoreMode {
+    #[default]
+    Normal,
+    Ignore,
+    OtherBits,
+    Online,
+    MissingManager,
+    ReplacedManager,
+    ManagerNative,
+    DeadManager,
+    ActorEdge,
+    StatsEdge,
+    DeadActor,
+    DeadStats,
+    LostRootTarget,
+    InvalidBoolean,
+}
+
+#[derive(Clone, Copy, Debug, Default)]
 enum Drift {
     #[default]
     None,
@@ -113,6 +132,11 @@ thread_local! {
     static POINTER_READS: Cell<u32> = const { Cell::new(0) };
     static DRIFT: Cell<Drift> = const { Cell::new(Drift::None) };
     static ASSEMBLIES: [Ptr; 1] = const { [std::ptr::without_provenance_mut(9)] };
+    static STORES: Cell<u32> = const { Cell::new(0) };
+    static LAST_STORE: Cell<(usize,u32)> = const { Cell::new((0,0)) };
+    static STORE_MODE: Cell<StoreMode> = const { Cell::new(StoreMode::Normal) };
+    static LOST_TARGET: Cell<usize> = const { Cell::new(0) };
+    static FIELD_CODE_FAULT: Cell<Option<(usize,i32)>> = const { Cell::new(None) };
 }
 
 fn token<T>(id: usize) -> *mut T {
@@ -163,7 +187,8 @@ unsafe extern "C-unwind" fn root(object: *mut raw::Object, pinned: bool) -> Ptr 
 }
 unsafe extern "C-unwind" fn root_target(handle: Ptr) -> *mut raw::Object {
     // SAFETY: handle owns one initialized Box pointer slot until its sole root_free.
-    unsafe { handle.cast::<*mut raw::Object>().read() }
+    let object = unsafe { handle.cast::<*mut raw::Object>().read() };
+    if object as usize == LOST_TARGET.get() { std::ptr::null_mut() } else { object }
 }
 unsafe extern "C-unwind" fn root_free(handle: Ptr) {
     // SAFETY: StrongRoot frees exactly once, after its last target access.
@@ -241,6 +266,20 @@ unsafe extern "C-unwind" fn class_type(class: Class) -> super::super::Type {
     }
 }
 unsafe extern "C-unwind" fn type_code(ty: super::super::Type) -> i32 {
+    if ty as usize >= TYPE_BASE {
+        let field = ty as usize - TYPE_BASE;
+        if let Some((selected, code)) = FIELD_CODE_FAULT.get()
+            && selected == field
+        {
+            return code;
+        }
+        return match field_schema(field).1 {
+            SINGLE => 0x0c,
+            BOOLEAN => 0x02,
+            INTPTR => 0x18,
+            _ => 0x12,
+        };
+    }
     match ty as usize {
         SINGLE => SINGLE_CODE.get(),
         BOOLEAN => BOOLEAN_CODE.get(),
@@ -399,6 +438,11 @@ fn fixture() -> (RuntimeAccess, ThreadContext) {
     RATE_READS.set(0);
     POINTER_READS.set(0);
     DRIFT.set(Drift::None);
+    STORES.set(0);
+    LAST_STORE.set((0, 0));
+    STORE_MODE.set(StoreMode::Normal);
+    LOST_TARGET.set(0);
+    FIELD_CODE_FAULT.set(None);
     let mut api = RuntimeAccess::test_stubs();
     api.domain_get = domain;
     api.assemblies = assemblies;
@@ -645,4 +689,318 @@ fn boolean_intptr_and_single_must_have_exact_value_type_codes_before_any_copy() 
     }
     assert_eq!(POINTER_READS.get(), 0);
     assert_eq!(RATE_READS.get(), 0);
+}
+
+unsafe extern "C-unwind" fn set_rate(object: *mut raw::Object, field: *mut raw::FieldInfo, value: Ptr) {
+    assert_eq!(object as usize, STATS);
+    rooted(MANAGER);
+    rooted(ACTOR);
+    rooted(STATS);
+    ROOTS.with_borrow(|roots| assert_eq!(roots.len(), 3));
+    assert!(fault(field as usize).is_none());
+    assert!([ATTACK, LEECH].contains(&(field as usize)));
+    assert!(FIELD_CODE_FAULT.get().is_none());
+    // SAFETY: the native candidate passes one initialized aligned f32 value slot
+    // after exact mutable Single/R4 validation. No object token is dereferenced.
+    let bits = unsafe { value.cast::<f32>().read().to_bits() };
+    STORES.set(STORES.get() + 1);
+    LAST_STORE.set((field as usize, bits));
+    GRAPH.with_borrow_mut(|graph| {
+        if !matches!(STORE_MODE.get(), StoreMode::Ignore) {
+            if field as usize == ATTACK {
+                graph.attack = bits;
+            } else {
+                graph.leech = bits;
+            }
+        }
+        match STORE_MODE.get() {
+            StoreMode::Normal | StoreMode::Ignore => {}
+            StoreMode::OtherBits => {
+                if field as usize == ATTACK {
+                    graph.leech ^= 1;
+                } else {
+                    graph.attack ^= 1;
+                }
+            }
+            StoreMode::Online => graph.online = 1,
+            StoreMode::MissingManager => graph.manager = 0,
+            StoreMode::ReplacedManager => graph.manager = MANAGER + 0x1000,
+            StoreMode::ManagerNative => graph.native[0] += 8,
+            StoreMode::DeadManager => graph.native[0] = 0,
+            StoreMode::ActorEdge => graph.actor_manager = 0,
+            StoreMode::StatsEdge => graph.stats_actor = 0,
+            StoreMode::DeadActor => graph.native[1] = 0,
+            StoreMode::DeadStats => graph.native[2] = 0,
+            StoreMode::LostRootTarget => LOST_TARGET.set(STATS),
+            StoreMode::InvalidBoolean => graph.online = 2,
+        }
+    });
+}
+
+fn current_observation(api: &RuntimeAccess, thread: &ThreadContext) -> AttackLeechObservation {
+    let AttackLeechRead::Available(observation) = read(api, thread, MANAGER as u64).unwrap() else {
+        panic!("expected available graph")
+    };
+    observation
+}
+
+fn write_rate(
+    api: &RuntimeAccess,
+    thread: &ThreadContext,
+    expected: &AttackLeechObservation,
+    which: AttackLeechTarget,
+    value: f32,
+) -> Result<AttackLeechObservation, AttackLeechWriteError> {
+    let attached = thread.attach().unwrap();
+    // SAFETY: owned same-thread fake graph/runtime, exact typed export behavior,
+    // explicit single current-field mutation authority; no process operations.
+    let result = unsafe { api.set_attack_leech(&attached, raw::FieldWriteApi { field_set_value: set_rate }, expected, which, value) };
+    ROOTS.with_borrow(|roots| assert!(roots.is_empty(), "writer roots leaked"));
+    result
+}
+
+#[test]
+fn full_read_store_full_read_path_changes_exactly_one_f32_with_all_roots_retained() {
+    for (which, field, value) in [
+        (AttackLeechTarget::AttackRate, ATTACK, 1.375_f32),
+        (AttackLeechTarget::IncreasedLeechRate, LEECH, -0.375_f32),
+    ] {
+        let (api, thread) = fixture();
+        let before = current_observation(&api, &thread);
+        let after = write_rate(&api, &thread, &before, which, value).unwrap();
+        assert_eq!(STORES.get(), 1);
+        assert_eq!(LAST_STORE.get(), (field, value.to_bits()));
+        assert_eq!((after.manager, after.actor, after.stats), (before.manager, before.actor, before.stats));
+        if field == ATTACK {
+            assert_eq!(after.attack_rate.raw_bits, value.to_bits());
+            assert_eq!(after.increased_leech_rate, before.increased_leech_rate);
+        } else {
+            assert_eq!(after.increased_leech_rate.raw_bits, value.to_bits());
+            assert_eq!(after.attack_rate, before.attack_rate);
+        }
+        assert_eq!(current_observation(&api, &thread), after);
+        // The old expectation is stale because this store changed its value bits.
+        // This is not a consumed ticket: restoring baseline bits could make an
+        // identical request succeed. The primitive never retries or re-applies.
+        assert!(matches!(write_rate(&api, &thread, &before, which, value), Err(AttackLeechWriteError::Stale(_))));
+        assert_eq!(STORES.get(), 1);
+    }
+}
+
+#[test]
+fn invalid_desired_values_and_exact_noops_refuse_before_any_game_metadata() {
+    let (api, thread) = fixture();
+    let expected = current_observation(&api, &thread);
+    POINTER_READS.set(0);
+    RATE_READS.set(0);
+    for value in [
+        f32::NAN,
+        f32::INFINITY,
+        f32::NEG_INFINITY,
+        0.0,
+        f32::from_bits(0x3c23d709),
+        f32::from_bits(20_f32.to_bits() + 1),
+    ] {
+        assert!(matches!(
+            write_rate(&api, &thread, &expected, AttackLeechTarget::AttackRate, value),
+            Err(AttackLeechWriteError::Refused(_))
+        ));
+    }
+    for value in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY, -1.00001, 100.00001] {
+        assert!(matches!(
+            write_rate(&api, &thread, &expected, AttackLeechTarget::IncreasedLeechRate, value),
+            Err(AttackLeechWriteError::Refused(_))
+        ));
+    }
+    assert!(matches!(
+        write_rate(&api, &thread, &expected, AttackLeechTarget::AttackRate, f32::from_bits(expected.attack_rate.raw_bits)),
+        Err(AttackLeechWriteError::Refused(_))
+    ));
+    assert_eq!((POINTER_READS.get(), RATE_READS.get(), STORES.get()), (0, 0, 0));
+}
+
+#[test]
+fn all_six_expected_tokens_and_both_old_bitpatterns_are_compared_before_store() {
+    let (api, thread) = fixture();
+    let original = current_observation(&api, &thread);
+    for part in 0..8 {
+        let mut expected = original;
+        let identity = match part {
+            0 | 1 => &mut expected.manager,
+            2 | 3 => &mut expected.actor,
+            4 | 5 => &mut expected.stats,
+            _ => &mut expected.manager,
+        };
+        if part < 6 {
+            *identity = ObservedObjectIdentity::new(
+                identity.wrapper_token() ^ if part % 2 == 0 { 8 } else { 0 },
+                identity.native_token() ^ if part % 2 == 1 { 8 } else { 0 },
+            )
+            .unwrap();
+        } else if part == 6 {
+            expected.attack_rate.raw_bits ^= 1;
+        } else {
+            expected.increased_leech_rate.raw_bits ^= 1;
+        }
+        assert!(
+            matches!(
+                write_rate(&api, &thread, &expected, AttackLeechTarget::AttackRate, 2.5),
+                Err(AttackLeechWriteError::Stale(_))
+            ),
+            "part {part}"
+        );
+        assert_eq!(STORES.get(), 0);
+    }
+}
+
+#[test]
+fn readonly_static_literal_byref_wrong_owner_and_wrong_r4_metadata_never_store() {
+    let (api, thread) = fixture();
+    let expected = current_observation(&api, &thread);
+    for (which, field) in [(AttackLeechTarget::AttackRate, ATTACK), (AttackLeechTarget::IncreasedLeechRate, LEECH)] {
+        for failure in [
+            Fault::Flags(0x20),
+            Fault::Flags(0x10),
+            Fault::Flags(0x40),
+            Fault::ByRef,
+            Fault::Type(WRONG_PRIMITIVE),
+            Fault::Parent(OBJECT),
+            Fault::ThreadStatic,
+            Fault::Missing,
+        ] {
+            FAULT.set(Some((field, failure)));
+            assert!(
+                matches!(write_rate(&api, &thread, &expected, which, 2.5), Err(AttackLeechWriteError::Refused(_))),
+                "{which:?}/{failure:?}"
+            );
+            assert_eq!(STORES.get(), 0);
+        }
+        FAULT.set(None);
+        FIELD_CODE_FAULT.set(Some((field, 0x0d)));
+        assert!(matches!(write_rate(&api, &thread, &expected, which, 2.5), Err(AttackLeechWriteError::Refused(_))));
+        FIELD_CODE_FAULT.set(None);
+        assert_eq!(STORES.get(), 0);
+    }
+}
+
+#[test]
+fn prestore_offline_loading_liveness_drift_and_root_failures_are_definite_no_store() {
+    let (api, thread) = fixture();
+    let expected = current_observation(&api, &thread);
+    GRAPH.with_borrow_mut(|graph| graph.online = 1);
+    assert!(matches!(
+        write_rate(&api, &thread, &expected, AttackLeechTarget::AttackRate, 2.5),
+        Err(AttackLeechWriteError::Offline)
+    ));
+    for object in [MANAGER, ACTOR, STATS] {
+        GRAPH.set(Graph::default());
+        FAIL_ROOT.set(object);
+        assert!(matches!(
+            write_rate(&api, &thread, &expected, AttackLeechTarget::AttackRate, 2.5),
+            Err(AttackLeechWriteError::NotReady(_))
+        ));
+    }
+    FAIL_ROOT.set(0);
+    for case in 0..8 {
+        GRAPH.set(Graph::default());
+        GRAPH.with_borrow_mut(|graph| match case {
+            0 => graph.manager = 0,
+            1 => graph.actor = 0,
+            2 => graph.stats = 0,
+            3 => graph.native[0] = 0,
+            4 => graph.native[1] = 0,
+            5 => graph.native[2] = 0,
+            6 => graph.stats_class = SHADOW_CHARACTER,
+            7 => graph.stats_actor = 0,
+            _ => unreachable!(),
+        });
+        assert!(matches!(
+            write_rate(&api, &thread, &expected, AttackLeechTarget::AttackRate, 2.5),
+            Err(AttackLeechWriteError::Offline | AttackLeechWriteError::NotReady(_) | AttackLeechWriteError::Stale(_) | AttackLeechWriteError::Refused(_))
+        ));
+    }
+    for drift in [
+        Drift::Online,
+        Drift::Manager,
+        Drift::ReplacedManager,
+        Drift::ManagerNative,
+        Drift::DeadManager,
+        Drift::Actor,
+        Drift::Stats,
+        Drift::ManagerActor,
+        Drift::ActorManager,
+        Drift::StatsActor,
+        Drift::Native,
+        Drift::Dead,
+    ] {
+        GRAPH.set(Graph::default());
+        DRIFT.set(drift);
+        assert!(matches!(
+            write_rate(&api, &thread, &expected, AttackLeechTarget::AttackRate, 2.5),
+            Err(AttackLeechWriteError::Offline | AttackLeechWriteError::Stale(_) | AttackLeechWriteError::NotReady(_))
+        ));
+    }
+    assert_eq!(STORES.get(), 0);
+}
+
+#[test]
+fn every_postattempt_fault_is_failed_uncertain_with_one_store_and_no_rollback() {
+    for mode in [
+        StoreMode::Ignore,
+        StoreMode::OtherBits,
+        StoreMode::Online,
+        StoreMode::MissingManager,
+        StoreMode::ReplacedManager,
+        StoreMode::ManagerNative,
+        StoreMode::DeadManager,
+        StoreMode::ActorEdge,
+        StoreMode::StatsEdge,
+        StoreMode::DeadActor,
+        StoreMode::DeadStats,
+        StoreMode::LostRootTarget,
+        StoreMode::InvalidBoolean,
+    ] {
+        let (api, thread) = fixture();
+        let expected = current_observation(&api, &thread);
+        STORE_MODE.set(mode);
+        assert!(
+            matches!(
+                write_rate(&api, &thread, &expected, AttackLeechTarget::AttackRate, 2.5),
+                Err(AttackLeechWriteError::Failed(_))
+            ),
+            "{mode:?}"
+        );
+        assert_eq!(STORES.get(), 1);
+        assert_eq!(LAST_STORE.get(), (ATTACK, 2.5_f32.to_bits()));
+        GRAPH.with_borrow(|graph| {
+            assert_eq!(
+                graph.attack,
+                if matches!(mode, StoreMode::Ignore) {
+                    expected.attack_rate.raw_bits
+                } else {
+                    2.5_f32.to_bits()
+                }
+            )
+        });
+    }
+}
+
+#[test]
+fn f32_minimum_signed_zero_nan_repair_and_untouched_nan_bits_are_preserved() {
+    let (api, thread) = fixture();
+    let before = current_observation(&api, &thread);
+    let min = write_rate(&api, &thread, &before, AttackLeechTarget::AttackRate, 0.01_f32).unwrap();
+    assert_eq!(min.attack_rate.raw_bits, 0x3c23d70a);
+    GRAPH.with_borrow_mut(|graph| {
+        graph.attack = 0x7fc12345;
+        graph.leech = 0;
+    });
+    let before = current_observation(&api, &thread);
+    let signed = write_rate(&api, &thread, &before, AttackLeechTarget::IncreasedLeechRate, -0.0).unwrap();
+    assert_eq!(signed.increased_leech_rate.raw_bits, 0x80000000);
+    assert_eq!(signed.attack_rate.raw_bits, 0x7fc12345);
+    let repaired = write_rate(&api, &thread, &signed, AttackLeechTarget::AttackRate, 1.5).unwrap();
+    assert_eq!(repaired.attack_rate.raw_bits, 1.5_f32.to_bits());
+    assert_eq!(repaired.increased_leech_rate.raw_bits, 0x80000000);
+    assert_eq!(STORES.get(), 3);
 }

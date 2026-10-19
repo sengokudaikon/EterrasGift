@@ -189,3 +189,10 @@ pub fn decode(bytes: &[u8]) -> Result<AttackLeechRead, ProtocolError> {
         _ => Err(ProtocolError::InvalidData),
     }
 }
+
+/// TEMP one-field target only; no wire operation is enabled.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AttackLeechTarget {
+    AttackRate,
+    IncreasedLeechRate,
+}

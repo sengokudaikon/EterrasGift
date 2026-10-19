@@ -52,6 +52,23 @@ impl FieldWriteApi {
         // SAFETY: this per-call contract proves the exact destination and four-byte source width.
         unsafe { (self.field_set_value)(object.as_ptr(), field.as_ptr(), (&mut value as *mut i32).cast()) };
     }
+
+    /// One exact System.Single instance-field assignment, no conversion.
+    ///
+    /// # Safety
+    /// This export/table must belong to the same live initialized runtime as the
+    /// rooted object and immutable field metadata. Caller must be attached on the
+    /// authorized engine thread and exclude shutdown, graph mutation and reentrancy.
+    /// The field's validated exact declaring class must be the object's validated
+    /// class or its known assignable ancestor; storage must be a valid mutable,
+    /// nonstatic, nonliteral, nonreadonly, nonbyref core System.Single/R4 field.
+    /// Caller owns exclusive graph write permission, native lifetime and this
+    /// particular store. This passes a fully initialized f32 slot to the void setter;
+    /// entering it is an attempted write even if control later does not return.
+    pub unsafe fn set_f32(&self, object: NonNull<Object>, field: NonNull<FieldInfo>, mut value: f32) {
+        // SAFETY: caller supplies the exact R4 field and exclusive write contract.
+        unsafe { (self.field_set_value)(object.as_ptr(), field.as_ptr(), std::ptr::from_mut(&mut value).cast()) };
+    }
 }
 
 pub type DomainGet = unsafe extern "C-unwind" fn() -> *mut Domain;

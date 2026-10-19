@@ -15,6 +15,7 @@ use std::{
 };
 
 mod attack_leech;
+pub use attack_leech::AttackLeechWriteError;
 mod catalog;
 mod catalog_ailment;
 mod catalog_items;

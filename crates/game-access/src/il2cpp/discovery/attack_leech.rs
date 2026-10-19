@@ -5,13 +5,15 @@ use super::{
     unsupported,
 };
 use crate::{
-    fields::{AttackLeechObservation, AttackLeechRead, AttackLeechUnavailable, ObservedObjectIdentity, ObservedRate},
+    fields::{AttackLeechObservation, AttackLeechRead, AttackLeechTarget, AttackLeechUnavailable, ObservedObjectIdentity, ObservedRate},
     il2cpp::{AttachedThread, raw},
 };
 use std::{ffi::CStr, ptr::NonNull};
 
 #[cfg(test)]
 mod tests;
+mod write;
+pub use write::AttackLeechWriteError;
 
 #[derive(Debug)]
 enum AttackLeechReadError {
@@ -33,6 +35,30 @@ impl From<crate::il2cpp::RuntimeError> for AttackLeechReadError {
 
 fn unavailable(reason: AttackLeechUnavailable) -> AttackLeechReadError {
     AttackLeechReadError::Unavailable(reason)
+}
+
+// Per-call roots only. This graph is not a durable host selection ticket.
+struct AttackGraph<'a, 'r> {
+    manager: Root<'a, 'r>,
+    actor: Root<'a, 'r>,
+    stats: Root<'a, 'r>,
+    manager_identity: ObservedObjectIdentity,
+    actor_identity: ObservedObjectIdentity,
+    stats_identity: ObservedObjectIdentity,
+    online_field: Ptr,
+    manager_field: Ptr,
+    actor_field: Ptr,
+    cached: Ptr,
+    object_class: Class,
+    manager_actor: Ptr,
+    actor_manager: Ptr,
+    actor_stats: Ptr,
+    stats_actor: Ptr,
+    attack_field: Ptr,
+    leech_field: Ptr,
+    single: Class,
+    character_stats: Class,
+    base_stats: Class,
 }
 
 impl RuntimeAccess {
@@ -107,7 +133,11 @@ impl RuntimeAccess {
     /// # Safety
     /// All discover/runtime/attachment contracts apply. The attachment must
     /// belong to this exact runtime and stay owned by this OS thread. Call only on Unity's
-    /// initialized main thread after the original admitted dispatcher returns.
+    /// initialized main thread after the original admitted dispatcher returns, or
+    /// under an independently admitted owned-fixture Unity main-thread Update callback
+    /// satisfying every runtime/static, exclusive graph/scalar and native-lifetime
+    /// condition here, with no jobs, reentrancy or shutdown. Update is not claimed to
+    /// follow ExecuteTasks; production retains the after-original dispatcher route.
     /// Nonmoving GC and public field-get/reference/root ABI must match the
     /// validated runtime. PlayerFinder/GameplayEnvironment static storage must
     /// already be initialized/populated by the game. Caller guarantees exclusive
@@ -130,6 +160,25 @@ impl RuntimeAccess {
     // Internal helpers inherit read_attack_leech's complete graph/runtime contract.
     unsafe fn copy_attack_leech(&self, attached: &AttachedThread<'_>, expected_manager: u64) -> Result<AttackLeechObservation, AttackLeechReadError> {
         unsafe {
+            let graph = self.attack_graph(attached, expected_manager)?;
+            self.attack_graph_snapshot(&graph)
+        }
+    }
+
+    unsafe fn attack_offline(&self, online_field: Ptr) -> Result<(), AttackLeechReadError> {
+        unsafe {
+            let mut online = 1_u8;
+            (self.static_get)(online_field, (&mut online as *mut u8).cast());
+            match online {
+                0 => Ok(()),
+                1 => Err(unavailable(AttackLeechUnavailable::OfflineRequired)),
+                _ => Err(unsupported("attack/leech Boolean representation").into()),
+            }
+        }
+    }
+
+    unsafe fn attack_graph<'a, 'r>(&self, attached: &'a AttachedThread<'r>, expected_manager: u64) -> Result<AttackGraph<'a, 'r>, AttackLeechReadError> {
+        unsafe {
             if !cfg!(target_arch = "x86_64") || std::mem::size_of::<usize>() != 8 || std::mem::size_of::<f32>() != 4 || std::mem::size_of::<u8>() != 1 {
                 return Err(unsupported("attack/leech x64 scalar ABI").into());
             }
@@ -145,18 +194,7 @@ impl RuntimeAccess {
             }
             let environment = self.class(&images, c"EHG.Multiplayer", c"GameplayEnvironment")?;
             let online_field = self.attack_field(environment, c"_isOnlinePlay", boolean, true)?;
-            let offline = || -> Result<(), AttackLeechReadError> {
-                let mut online = 1_u8;
-                (self.static_get)(online_field, (&mut online as *mut u8).cast());
-                if online > 1 {
-                    return Err(unsupported("attack/leech Boolean representation").into());
-                }
-                if online != 0 {
-                    return Err(unavailable(AttackLeechUnavailable::OfflineRequired));
-                }
-                Ok(())
-            };
-            offline()?;
+            self.attack_offline(online_field)?;
             let finder = self.class(&images, c"", c"PlayerFinder")?;
             let manager_class = self.class(&images, c"", c"ItemContainersManager")?;
             let actor_class = self.class(&images, c"", c"Actor")?;
@@ -206,32 +244,70 @@ impl RuntimeAccess {
             if self.attack_pointer(&stats, stats_actor)? != target(&actor)?.as_ptr() {
                 return Err(unavailable(AttackLeechUnavailable::GraphChanged));
             }
-            let attack_rate = self.attack_scalar(&stats, attack_field)?;
-            let increased_leech_rate = self.attack_scalar(&stats, leech_field)?;
-            // These checks detect drift, but do not replace the no-concurrent-
-            // mutation/lifetime contract with an atomic-snapshot claim.
-            offline()?;
-            let current_manager = self.attack_static_pointer(manager_field);
+
+            Ok(AttackGraph {
+                manager,
+                actor,
+                stats,
+                manager_identity,
+                actor_identity,
+                stats_identity,
+                online_field,
+                manager_field,
+                actor_field,
+                cached,
+                object_class,
+                manager_actor,
+                actor_manager,
+                actor_stats,
+                stats_actor,
+                attack_field,
+                leech_field,
+                single,
+                character_stats,
+                base_stats,
+            })
+        }
+    }
+
+    // All references below belong to this rooted per-call graph. Current statics
+    // are only compared; a replacement token is never dereferenced.
+    unsafe fn attack_graph_check(&self, graph: &AttackGraph<'_, '_>) -> Result<(), AttackLeechReadError> {
+        unsafe {
+            self.attack_offline(graph.online_field)?;
+            let current_manager = self.attack_static_pointer(graph.manager_field);
             if current_manager.is_null() {
                 return Err(unavailable(AttackLeechUnavailable::ManagerAbsent));
             }
-            if current_manager != target(&manager)?.as_ptr() || self.attack_live_manager(&manager, object_class, cached)? != manager_identity {
+            if current_manager != target(&graph.manager)?.as_ptr() || self.attack_live_manager(&graph.manager, graph.object_class, graph.cached)? != graph.manager_identity {
                 return Err(unavailable(AttackLeechUnavailable::ManagerChanged));
             }
-            if self.attack_static_pointer(actor_field) != target(&actor)?.as_ptr()
-                || self.attack_pointer(&manager, manager_actor)? != target(&actor)?.as_ptr()
-                || self.attack_pointer(&actor, actor_manager)? != target(&manager)?.as_ptr()
-                || self.attack_pointer(&actor, actor_stats)? != target(&stats)?.as_ptr()
-                || self.attack_pointer(&stats, stats_actor)? != target(&actor)?.as_ptr()
-                || self.attack_alive(&actor, object_class, cached)? != actor_identity
-                || self.attack_alive(&stats, object_class, cached)? != stats_identity
+            if self.attack_static_pointer(graph.actor_field) != target(&graph.actor)?.as_ptr()
+                || self.attack_pointer(&graph.manager, graph.manager_actor)? != target(&graph.actor)?.as_ptr()
+                || self.attack_pointer(&graph.actor, graph.actor_manager)? != target(&graph.manager)?.as_ptr()
+                || self.attack_pointer(&graph.actor, graph.actor_stats)? != target(&graph.stats)?.as_ptr()
+                || self.attack_pointer(&graph.stats, graph.stats_actor)? != target(&graph.actor)?.as_ptr()
+                || self.attack_alive(&graph.actor, graph.object_class, graph.cached)? != graph.actor_identity
+                || self.attack_alive(&graph.stats, graph.object_class, graph.cached)? != graph.stats_identity
             {
                 return Err(unavailable(AttackLeechUnavailable::GraphChanged));
             }
+            Ok(())
+        }
+    }
+
+    unsafe fn attack_graph_snapshot(&self, graph: &AttackGraph<'_, '_>) -> Result<AttackLeechObservation, AttackLeechReadError> {
+        unsafe {
+            self.attack_graph_check(graph)?;
+            let attack_rate = self.attack_scalar(&graph.stats, graph.attack_field)?;
+            let increased_leech_rate = self.attack_scalar(&graph.stats, graph.leech_field)?;
+            // Drift checks do not replace exclusive graph/lifetime ownership or
+            // turn the reads into an atomic snapshot across independent writers.
+            self.attack_graph_check(graph)?;
             Ok(AttackLeechObservation {
-                manager: manager_identity,
-                actor: actor_identity,
-                stats: stats_identity,
+                manager: graph.manager_identity,
+                actor: graph.actor_identity,
+                stats: graph.stats_identity,
                 attack_rate,
                 increased_leech_rate,
             })

@@ -590,3 +590,29 @@ provider capture, general text/provider provenance, culture synchronization, par
 wire requests and actual-game formatter execution remain unimplemented or unvalidated.
 See [scope and commands](../tools/trainer-eval/unity-rust-host/provider-parser-README.md) and
 [production/candidate evidence](../tools/trainer-eval/unity-rust-host/provider-parser-report.json).
+
+## Conditional rate-write primitive, 2026-10-19
+
+The reviewed attack/leech Single-field writer is now integrated as an unsafe primitive.
+It roots the current manager/actor/exact CharacterStats graph, validates the precise mutable
+Single metadata, compares all six identity tokens and both raw values immediately before
+one public field_set_value call, then requires the complete projected observation. Every
+returned failure after entering that void setter is Failed/uncertain; no retry or rollback.
+
+The chosen intent applies conditionally to the CURRENT offline character, matching the
+existing trainer controls. It grants no historical selection, consumed request, replay
+protection or cross-request lifetime guarantee. Roots retain managed wrappers only; caller
+permission, exclusive native lifetime, thread/runtime/static initialization and nonmutation
+remain explicit unsafe obligations. Production after-original scheduling is unchanged.
+
+Four fresh authored Unity6000.4.8 players pass stable debug/nightly release with incremental
+GC off/on:41 cases and13 real setter entries each,164 cases/52 stores total. C# independently
+checks both fields; the harness also checks the returned full Rust projection, rooted GC
+pressure, every pre-store refusal and an uncertain post-store readback fault. The initial
+missing-Serializable evidence failure is retained and excluded from the corrected proof.
+Alternate authored Update admission tests this primitive; it does not prove helper wire,
+scheduler ordering, worker integration, actual-game mutation or persistence.
+
+The combined foundation passes452 stable/nightly release cases plus ownership/architecture
+guards; Clippy and formatting pass. No protocol, helper endpoint, general fields or gameplay
+hook capability is added. See [primitive scope/evidence](../tools/trainer-eval/rate-write-primitive/README.md).
