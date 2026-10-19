@@ -77,6 +77,13 @@ run = "pwsh -NoProfile -File tools/trainer-eval/persistent-player/Build-Helper.p
 description = "Build the isolated authored Unity-player controller; no player launch"
 run = "cargo build --manifest-path tools/trainer-eval/persistent-player/client/Cargo.toml --release --offline"
 
+[tasks."trainer:player:client:test"]
+description = "Pure controller/response-barrier tests on stable and nightly; no player launch"
+run = [
+    "cargo test --manifest-path tools/trainer-eval/persistent-player/client/Cargo.toml --offline",
+    "cargo +nightly test --manifest-path tools/trainer-eval/persistent-player/client/Cargo.toml --release --offline --target-dir target/preparer-worker-nightly",
+]
+
 [tasks."trainer:bootstrap:test"]
 description = "Pure previous-generation bootstrap admission regressions; no process access"
 run = "python tools/trainer-eval/persistent-player/test_bootstrap.py"

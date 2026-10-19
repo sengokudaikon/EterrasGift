@@ -11,7 +11,7 @@ contracts from already validated lower layers; unsupported capabilities must sta
 | Owned forge, locale and limits | Both authored routes and live protocol 24 evidence. |
 | Definitions and resolved names | Protocol 25 authored pages, total/locale/duplicate checks, provenance, separate raw snapshots and bounded cache. Live catalog not yet claimed. |
 | Complete numeric metadata and game formatting | Ordinary properties and all five special selectors pass all four authored routes, including SP43. Text-only formatting, exact-provider parsing and synchronous exact-context composition pass authored four-mode ABI/root proofs under explicit nonmutation. Actual-game arithmetic, generated/localized names, descriptions and tooltip/roll mapping remain open. |
-| Application worker and observable state | Real authored worker level Apply/Undo and conditional rate writes pass all four startup routes, with Pending publication, separate confirmation reads and cleanup barriers. Nonblocking commands, generation-bound state, cache/progress and inert log adapters exist. Worker proofs use the direct verified-child Session connector; full NativePreparer-to-worker and app/UI composition remain open. |
+| Application worker and observable state | Real authored worker level Apply/Undo and conditional rate writes pass all four earlier startup routes. The full NativePreparer/VerifiedTransport/SessionConnector-to-worker route now also passes stable debug and nightly release, including six response-boundary cleanup/gate-loss cases, helper reuse, Pending publication and separate confirmation reads. Nonblocking commands, generation-bound state, cache/progress and inert log adapters exist. Production authority and app/UI composition remain open. |
 | Production helper preparation/bootstrap | `eg-trainer-host` implements the retained HelperPreparer/VerifiedTransport, with explicit unsafe per-target RuntimeAttestation. The fourth authored route reuses one helper across three preparations and a new session after disconnect. Twelve host tests cover admission, no-replay/panic fences, guard retention and exact dispatcher proof. Windows remote start/stop remains validated; a production Last Epoch authority and app composition remain required. |
 | Feature hooks and field editors | All76 descriptors and local intents have compiled C# parity. Explicit attack/leech observations and conditional one-field changes pass native/Session/worker authored proofs. The first unpatched instance-Boolean callback passes forwarding and foreign-unwind fixtures; no physical gameplay hook is supported yet. The other field sets, physical ownership and callback offline cleanup still need implementation. The audit maps68 hooks/74 owners/31 patches/7 field sets. |
 | Forge drafts, apply, readback and undo | One level Apply/Undo path passes real worker execution on all four authored routes: full stale guard, Int32 store, native ACK plus separate ReadForge, retained reverse plan, uncertainty and cleanup. Pure planning exists for seven edit kinds. Other native edits, multi-edit batches and the full draft/Undo workflow remain required. |
@@ -125,3 +125,12 @@ confirms the exact warmed scalar-read mechanism while leaving managed cctor
 completion, meaningful current offline ownership and full writer/transition
 exclusion unproved. class_is_inited is layout warmness only. Existing status()
 requires no active hooks and cannot be reused for gameplay callback admission.
+
+
+The [full preparer/worker checkpoint](../tools/trainer-eval/persistent-player/preparer-worker-README.md)
+closes the authored first-load composition gap on stable debug and nightly release.
+Each run passes 171 requests, 163 main-thread commands, one helper across eight
+preparations and six cleanup/gate-loss boundaries without replay. Worker/dispatcher/
+server shutdown is confirmed separately from scalar rollback; OS-owner death and
+production authority remain untested. Root tool checks and full workspace verification
+pass, with the refreshed combat-rates capture inspected.

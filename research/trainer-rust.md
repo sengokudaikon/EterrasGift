@@ -544,3 +544,16 @@ character/owner/native lifetime and writer/transition exclusion remain separate.
 Current status() contract cannot be reused inside active gameplay hooks. Retained
 22-span/18-source audit adds no callable reader, target execution or production
 code. See tools/trainer-eval/bridge-execution/offline-contract-report.json.
+
+
+## Composed NativePreparer and worker checkpoint, 2026-10-19
+
+The authored first load now goes through SessionConnector/NativePreparer/VerifiedTransport
+and the real BackendWorker. Stable debug and nightly release each pass 171 RPCs / 163 main-thread commands,
+13 narrow setters, 44 Pending observations, eight preparations / one helper and six cleanup/gate-loss
+boundaries. There is no replay, no final scalar rollback claim and no OS-owner-loss or
+production-game authority claim. All 163 ROOT source inputs match the frozen candidate;
+813 retained evidence files and postflight 503 input hashes were independently checked.
+Tool tests 8/8, Clippy/fmt and full workspace verification/captures pass. See
+`tools/trainer-eval/persistent-player/preparer-worker-README.md` and its machine report.
+This is authored fixture composition, not UI wiring or physical gameplay-hook support.

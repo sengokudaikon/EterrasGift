@@ -802,3 +802,35 @@ threads/async continuation affinity or whole-decision transition exclusion.
 Meaningful offline character/native lifetime/owner authority remains independent.
 No production reader/code or target execution was added. REA was unavailable;
 these are ordinary static Mono.Cecil/PE/LLVM observations of retained files.
+
+
+## NativePreparer through the worker, 2026-10-19
+
+The [composed fixture](../tools/trainer-eval/persistent-player/preparer-worker-README.md)
+now uses the actual SessionConnector, NativePreparer, VerifiedTransport and Tokio
+BackendWorker from the first load. The owned locator returns only the newly created
+child identity. Constructors and auto-connect-disabled Enable perform no discovery
+or attachment; an empty authored log refuses before preparation.
+
+Stable debug and nightly release each pass 171 requests / 163 main-thread commands,
+with seven level and six rate setters, 44 Pending observations, eight preparations
+and one retained verified helper generation. The same source-paired player/helper
+is used in both runs. Apply/Undo, dropped receipts, live Undo across a rate change,
+managed GC, field-graph replacement and explicit reconnection pass. Six completed-
+response barriers cover cleanup after ACK/read and log loss after ACK. Uncertain
+writes are not replayed; historical Confirmed after an already completed read never
+publishes data into the superseded generation. Watch observations may coalesce.
+
+Worker shutdown joins before the helper restores its dispatcher entry and stops
+the server; the owned player continues three frames and exits normally. Final
+boundary values intentionally remain until that process exits. Code/server
+restoration is not scalar rollback, and normal Disconnect is not OS-owner death.
+No physical gameplay hooks, production runtime authority or actual-game access
+are added by this experiment.
+
+ROOT independently rechecked all 163 current source inputs against the frozen
+candidate, all 813 retained files, both raw report totals and all 503 common input
+hashes after runtime. Controller tests pass eight cases on stable/nightly release;
+Clippy/format and full workspace lint, format, tokens and captures pass. The fresh
+combat-rates capture was inspected. Exact receipts are in the compact
+[machine report](../tools/trainer-eval/persistent-player/preparer-worker-report.json).
