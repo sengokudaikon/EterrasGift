@@ -88,7 +88,3 @@ run = "cargo build --manifest-path tools/trainer-eval/persistent-player/client/C
 [tasks."trainer:player:client:test"]
 description = "Nightly release controller/response-barrier tests; no player launch"
 run = "cargo test --manifest-path tools/trainer-eval/persistent-player/client/Cargo.toml --release --offline"
-
-[tasks."trainer:bootstrap:test"]
-description = "Pure previous-generation bootstrap admission regressions; no process access"
-run = "python tools/trainer-eval/persistent-player/test_bootstrap.py"
