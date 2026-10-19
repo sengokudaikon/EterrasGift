@@ -10,7 +10,7 @@ contracts from already validated lower layers; unsupported capabilities must sta
 | Offline admission and serialized sessions | Player.log plus independent helper guards, identity binding, no uncertain replay, cancellation and cleanup tests. |
 | Owned forge, locale and limits | Both authored routes and live protocol 24 evidence. |
 | Definitions and resolved names | Protocol 25 authored pages, total/locale/duplicate checks, provenance, separate raw snapshots and bounded cache. Live catalog not yet claimed. |
-| Complete numeric metadata and game formatting | Ordinary properties and all five special selectors pass all four authored routes, including SP43. Text-only formatting and exact-provider parsing pass authored four-mode ABI/root proofs. Context capture/composition, actual-game arithmetic, generated/localized names, descriptions and tooltip/roll mapping remain open. |
+| Complete numeric metadata and game formatting | Ordinary properties and all five special selectors pass all four authored routes, including SP43. Text-only formatting, exact-provider parsing and synchronous exact-context composition pass authored four-mode ABI/root proofs under explicit nonmutation. Actual-game arithmetic, generated/localized names, descriptions and tooltip/roll mapping remain open. |
 | Application worker and observable state | Real authored worker level Apply/Undo and conditional rate writes pass all four startup routes, with Pending publication, separate confirmation reads and cleanup barriers. Nonblocking commands, generation-bound state, cache/progress and inert log adapters exist. Worker proofs use the direct verified-child Session connector; full NativePreparer-to-worker and app/UI composition remain open. |
 | Production helper preparation/bootstrap | `eg-trainer-host` implements the retained HelperPreparer/VerifiedTransport, with explicit unsafe per-target RuntimeAttestation. The fourth authored route reuses one helper across three preparations and a new session after disconnect. Twelve host tests cover admission, no-replay/panic fences, guard retention and exact dispatcher proof. Windows remote start/stop remains validated; a production Last Epoch authority and app composition remain required. |
 | Feature hooks and field editors | All76 descriptors and local intents have compiled C# parity. Explicit attack/leech observations and conditional one-field changes pass native/Session/worker authored proofs. The other field sets and gameplay hooks remain unsupported. The audit maps68 hooks/74 owners/31 patches/7 field sets; physical ownership and callback offline cleanup still need implementation. |
@@ -60,7 +60,7 @@ and nightly release with incremental GC off/on using the existing checked enum/o
 It strips only the exact unit suffix and parses the captured culture through the matching runtime's BCL. Unity
 Mono's own parent-culture fallback remains observable. No host parser fallback or production mapping opcode exists.
 
-## Current conditional-rate checkpoint, 2026-10-19
+## Conditional-rate checkpoint, 2026-10-19
 
 The [rate-write path](../tools/trainer-eval/persistent-player/rate-write-README.md) passes
 all four authored helper routes:750 requests/692 main-thread commands each, with exact
@@ -70,8 +70,26 @@ capability or rate Undo is implied. The source-bound unsafe native-lifetime/main
 contracts still apply; full equality is not historical selection or replay authority.
 
 Foundation490 stable/nightly plus ownership/architecture guards and full workspace
-verification pass. The numeric text/provider adapters are separately validated; exact
-format-context capture is reviewed in TEMP and awaits authored runtime validation.
+verification pass. The numeric text/provider adapters and exact
+format-context capture/composition pass separate four-mode authored standalone proofs.
+Root integration validation is indexed in the context evaluation below.
 The [first gameplay-hook proposal](trainer-first-hook.md) deliberately needs a new ABI,
 physical owner and callback-admission experiment. None of this connects the existing
 Slint stand-ins or establishes actual-game writes.
+
+
+The [numeric-context checkpoint](../tools/trainer-eval/unity-rust-host/numeric-context-report.json)
+retains all 102 reviewed candidate inputs, 58 root-source inputs, both complete
+native builds and four passing root-source modes, with the earlier candidate
+matrix indexed separately.
+Exact Thread/CultureInfo/NFI roots, derived-culture refusal and numInfo consistency
+are available for a single synchronous admitted operation. External exclusion of
+culture/provider/ExecutionContext/AsyncLocal changes remains an unsafe obligation;
+recapture is diagnostic and supplies no synchronization or ABA proof. Framework
+lazy initialization/cache effects are permitted, while GameLocale stays separate.
+No helper formatting/mapping endpoint or actual-game execution is implied.
+
+The integrated context checkpoint passes 498 foundation cases on both toolchains
+(503 stable tests including architecture/doc checks; 499 nightly including docs).
+Host Clippy/formatting and full workspace lint, formatting, tokens and captures
+pass; the combat-rates capture was inspected. This remains authored evidence.

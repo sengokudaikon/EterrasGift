@@ -21,7 +21,9 @@ impl std::fmt::Display for DisplayScalarUnavailable {
 }
 impl std::error::Error for DisplayScalarUnavailable {}
 type Unavailable = DisplayScalarUnavailable;
+mod context;
 mod provider;
+pub use context::{NumericFormatContext, NumericFormatContextPart, NumericFormatContextUnavailable};
 fn scalar_text<'a>(language: &str, display: &'a str, unit: &str) -> Result<&'a str, Unavailable> {
     if [language, display, unit]
         .iter()

@@ -26,7 +26,7 @@ pub use formatter::{NumericDisplay, NumericDisplayUnavailable};
 mod limits;
 mod locale;
 mod parser;
-pub use parser::DisplayScalarUnavailable;
+pub use parser::{DisplayScalarUnavailable, NumericFormatContext, NumericFormatContextPart, NumericFormatContextUnavailable};
 mod write;
 pub use write::LevelWriteError;
 

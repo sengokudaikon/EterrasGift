@@ -428,3 +428,26 @@ See [scope](../tools/trainer-eval/persistent-player/rate-write-README.md) and
 The next [gameplay-hook hypothesis](trainer-first-hook.md) still needs its own authored
 ABI/physical ownership proof. Numeric context capture remains a separately reviewed TEMP
 candidate; no formatter/mapping wire or actual-game formatter calls are enabled.
+
+
+## Exact numeric-format context checkpoint, 2026-10-19
+
+The operation-local numeric context now retains the actual BCL Thread, exact CultureInfo
+and exact NumberFormatInfo under roots. It composes the separately validated formatter
+and provider parser without substituting the culture name or selected game locale.
+Custom en-US providers show why: comma "1,25" parses as 1.25 with the actual provider
+but 125 with the old name-based lookup. Exact getters and CultureInfo.numInfo metadata
+are checked; derived cultures are refused before CurrentInfo virtual dispatch.
+
+This remains one synchronous unsafe admitted span, including external exclusion over
+culture/provider/settings/ExecutionContext changes. Roots and diagnostic rechecks do not
+establish synchronization, detect same-object changes/ABA or authorize later requests.
+Audited lazy framework initialization/cache/globalization effects remain permitted.
+
+Eight new fake cases and both reviewed-candidate and integrated-root authored IL2CPP
+matrices pass stable debug/nightly release with incremental GC off/on. Foundation498
+passes both toolchains (503 stable cases including architecture/ownership guards;
+499 nightly including ownership). Full workspace verification and standalone host
+Clippy/formatting pass, and the combat capture was inspected. No helper opcode,
+mapping/description capability, actual-game execution or UI binding is added.
+See tools/trainer-eval/unity-rust-host/numeric-context-README.md and its report index.

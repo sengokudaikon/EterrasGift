@@ -645,3 +645,36 @@ See [scope](../tools/trainer-eval/persistent-player/rate-write-README.md) and
 The next [gameplay-hook hypothesis](trainer-first-hook.md) still needs its own authored
 ABI/physical ownership proof. Numeric context capture remains a separately reviewed TEMP
 candidate; no formatter/mapping wire or actual-game formatter calls are enabled.
+
+
+## Exact numeric format-context capture, 2026-10-19
+
+The reviewed adapter now captures private operation-local roots for exact corlib
+Thread, CultureInfo and NumberFormatInfo. It rejects a derived culture before
+CurrentInfo can dispatch, validates and roots CultureInfo.numInfo, and offers an
+attachment-first diagnostic recapture. The existing formatter and exact-provider
+parser compose under one synchronous admitted span. The original language parser
+algorithm and formatter/provider/writer bodies remain unchanged.
+
+All four root-source authored standalone modes pass: stable debug/nightly release
+with incremental GC disabled or a 3 ms slice. Eight complete mutable/readonly
+custom-format spans per mode, derived tripwire refusal, wrong attachment, rooted
+collections and recovery pass. All earlier markers and 34 native checks remain.
+Eight new full-entrypoint fake cases plus the 11 existing parser/provider tests
+pass both toolchains. All 102 candidate sources, 58 root-source inputs, complete
+native builds and both sets of four run records are retained. No runtime fixes
+were needed; the pre-execution Unicode correction remains separately recorded.
+
+The integrated 498 foundation cases pass stable and nightly release, plus the
+ownership/architecture checks. Host Clippy/formatting and full workspace lint,
+formatting, tokens and captures pass; the combat-rates capture was inspected.
+
+This proves authored mechanics under an unsafe exclusion contract. The caller
+excludes current/default/ExecutionContext/AsyncLocal/provider/settings mutations,
+reentry and outside actors throughout capture/format/parse/recheck. Lazy framework
+culture/globalization/numInfo cache publication is explicitly permitted at capture.
+Identity, Name and readonly flags cannot prove synchronization or detect ABA.
+GameLocale remains independent. No actual-game formatting, helper wire,
+descriptions, private clones or parsed mapping authority is enabled. See
+[scope](../tools/trainer-eval/unity-rust-host/numeric-context-README.md) and
+[exact evidence](../tools/trainer-eval/unity-rust-host/numeric-context-report.json).
