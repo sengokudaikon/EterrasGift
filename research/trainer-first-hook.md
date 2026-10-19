@@ -171,7 +171,7 @@ restoration remain unvalidated.
 ## Fresh offline-flag read: static contract audit
 
 The [retained offline-read audit](../tools/trainer-eval/bridge-execution/offline-contract-report.json)
-independently binds 22 native spans and 18 SDK/original-app source snapshots.
+independently binds 22 native spans and 18 source/reference snapshots.
 For the exact warm normal-static Boolean path, public static_get copies one byte
 without metadata locking, managed invocation, allocation or explicit GC/profiler
 calls. This is a narrow mechanism under valid stable metadata/storage, not callback
