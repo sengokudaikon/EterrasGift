@@ -21,6 +21,7 @@ use std::{
 
 pub use crate::session::{CaptureControl, CaptureObserver, CaptureOutcome, CaptureProgress};
 use eg_core::game_log::GameReadiness;
+pub use eg_game_access::transport::Delivery;
 pub use eg_game_access::{
     fields::{AttackLeechObservation, AttackLeechRead, AttackLeechUnavailable, ObservedObjectIdentity, ObservedRate, RateUnavailable},
     forge::{AffixSnapshot, ForgeSnapshot, ItemStatus, UniqueIdentity},
@@ -29,7 +30,7 @@ pub use eg_game_access::{
 };
 use eg_game_access::{
     protocol::ResponseCode,
-    transport::{Delivery, Transport, TransportFailure},
+    transport::{Transport, TransportFailure},
 };
 use jiff::Timestamp;
 use tokio::sync::{broadcast, mpsc, oneshot, watch};
@@ -600,6 +601,15 @@ pub struct Pending {
     reply: oneshot::Receiver<Result<(), BackendError>>,
 }
 impl Pending {
+    /// Poll completion without blocking the desktop event loop. A dropped worker
+    /// is a completion failure; accepted writes must still inspect their record.
+    pub fn try_result(&mut self) -> Option<Result<(), BackendError>> {
+        match self.reply.try_recv() {
+            Ok(result) => Some(result),
+            Err(oneshot::error::TryRecvError::Empty) => None,
+            Err(oneshot::error::TryRecvError::Closed) => Some(Err(BackendError::blocked(ErrorKind::Stopped, "backend stopped"))),
+        }
+    }
     pub async fn wait(self) -> Result<(), BackendError> {
         self.reply.await.unwrap_or_else(|_| Err(BackendError::blocked(ErrorKind::Stopped, "backend stopped")))
     }

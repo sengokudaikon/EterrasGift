@@ -2,14 +2,20 @@
 
 The trainer owns the offline gate, artifact profile, serialized control session and owned-command dispatcher.
 `eg-game-access` owns protocol codecs, explicit process identity, the Windows pipe client and unsafe runtime access.
-The desktop now composes one background worker and a read-only Slint forge adapter. The companion remains independent.
+The desktop now composes one background worker and a command-based Slint forge adapter. The companion remains independent.
 
-The read-only path queues Connect/Retry and observes owned worker snapshots. It shows the current
-item, captured names, status values and affix metadata; unavailable formatting/mappings stay explicit.
-It cannot submit edits, and clears the visible item after gate/identity/connection loss. Construction
-does no native work; `--no-connect` skips automatic startup and a later manual Connect starts reads.
-The startup module flag and automatic-connection preference are honored. Live settings/cache actions,
-typed write-editor integration and the shared feature/domain model cleanup remain work.
+The desktop Forge editor now uses worker commands with typed Pending, Confirmed, NotApplied,
+NotKept and Uncertain outcomes. Mixed drafts execute in order, re-read before each edit and stop
+at the first non-confirmation. Undo reverses only confirmed edits. Known mismatch and uncertainty
+clear drafts and Undo; uncertainty never retries automatically. Status, base and identity controls
+use this path; actual-value mapping and remaining edit kinds stay unavailable. Run
+`mise run capture:trainer` for the fake worker-to-Slint route and `cargo test -p eg-ui --lib`
+for delayed editor tests. No actual game is used. See [trainer readiness](../../research/trainer-readiness.md).
+
+Connect/Retry and monitoring use owned worker snapshots. Missing formatting/mappings stay
+explicit; gate, identity and connection loss clear the visible item. Construction does no native
+work. `--no-connect` skips automatic startup, and a later manual Connect starts reads. Live
+settings/cache actions and the remaining shared feature/domain model cleanup are still open.
 
 Source runs prepare the helper with `mise run trainer:helper:build` before connecting. That task publishes
 `eg_trainer_helper.json` beside both debug/release apps, referencing the retained versioned DLL.
@@ -44,7 +50,7 @@ the game's metadata-checked getUnique(UInt16), with a rooted result and a fresh 
 Host and helper share the small status rule function, using their own observed definition data.
 The worker defaults override off, serializes `SetOverride` with writes, and checks the current
 setting before submission and Undo. The desktop supplies the saved startup preference; live
-settings/editor command binding remains part of UI integration. A new Undo is retained only
+settings actions remain separate. A new Undo is retained only
 when a valid reverse plan can be prepared under the current game rules (an above-maximum Will
 reduction may not be reversible); using the token rechecks current permission and observations.
 
@@ -73,7 +79,7 @@ NotKept and refresh failures remain uncertain. The [authored roll checkpoint](..
 records the product route. Unique/implicit roll targets remain refused until native mapping
 queries exist; affix replacement, insertion and removal remain separate work.
 See the [remaining status checkpoint](../../tools/trainer-eval/persistent-player/remaining-status-report.json).
-The read-only adapter is connected; writes through the editor remain the next integration step.
+The editor integration above uses these native operations; formatting, previews and mappings remain separate.
 See the [write-service cleanup checkpoint](../../tools/trainer-eval/persistent-player/write-service-refactor-report.json)
 for the product-test gates and owned Unity route.
 

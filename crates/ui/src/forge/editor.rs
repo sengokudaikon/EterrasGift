@@ -2,10 +2,10 @@
 //! Ctrl+Z order, Apply and Undo apply, the pickers and the action bar's message (spec/item-forge.md). Every value comes from
 //! the game through `ForgeGame`; the editor computes none.
 
-use super::game::{Catalog, ForgeGame, LegendaryType};
+use super::game::{Catalog, EditOutcome, ForgeGame, LegendaryType, WriteOutcome, refused};
 use super::item::{self, AffixDefinition, AffixKind, Category, Compatibility, ForgeItem, ItemEdit, Moves, RollRequest, RollTarget, Seal, StatusField, compatibility};
 use super::rows::{AffixRow, FieldDraft, FieldKind, FieldOption, RollRow, ValueEditor, base_key, base_of};
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 
 pub const OVERRIDE_REQUIRED: &str = "This edit goes past what the game allows. Turn on \"I know what I'm doing\" in Settings to write it. Nothing was applied.";
 const NOTHING_APPLIED: &str = "Nothing was applied.";
@@ -110,6 +110,27 @@ enum StepRow {
     Uniques(Vec<u64>),
     Implicits(Vec<u64>),
     Field(u64),
+    List(String),
+    Undo,
+}
+
+struct WriteBatch {
+    steps: VecDeque<Step>,
+    reverses: Vec<ItemEdit>,
+    completed: usize,
+    total: usize,
+    one_way: bool,
+    undoing: bool,
+    names: Vec<String>,
+}
+
+struct WaitingWrite {
+    step: Step,
+    before: ForgeItem,
+    reverse: Option<ItemEdit>,
+    moves: Moves,
+    summary: String,
+    effect: String,
 }
 
 pub struct ForgeEditor {
@@ -129,6 +150,7 @@ pub struct ForgeEditor {
     draft_order: Vec<RowRef>,
     pub history: Vec<AppliedEntry>,
     applied: Option<Vec<ItemEdit>>,
+    applied_at: Option<ForgeItem>,
     message: String,
     message_kind: MessageKind,
     pub preview_status: String,
@@ -136,6 +158,9 @@ pub struct ForgeEditor {
     pub preview_stale: bool,
     pub picker: Option<Picker>,
     writing: bool,
+    batch: Option<WriteBatch>,
+    waiting: Option<WaitingWrite>,
+    recovery_required: bool,
     next_uid: u64,
     tables: HashMap<String, Result<item::ValueTable, String>>,
     /// The local time a confirmed write is listed with.
@@ -164,6 +189,7 @@ impl ForgeEditor {
             draft_order: Vec::new(),
             history: Vec::new(),
             applied: None,
+            applied_at: None,
             message: String::new(),
             message_kind: MessageKind::Info,
             preview_status: String::new(),
@@ -171,6 +197,9 @@ impl ForgeEditor {
             preview_stale: false,
             picker: None,
             writing: false,
+            batch: None,
+            waiting: None,
+            recovery_required: false,
             next_uid: 1,
             tables: HashMap::new(),
             clock: local_time,
@@ -202,6 +231,10 @@ impl ForgeEditor {
         self.item.is_some()
     }
 
+    pub fn needs_write_recovery(&self) -> bool {
+        self.recovery_required
+    }
+
     pub fn message(&self) -> (&str, MessageKind) {
         if self.message.is_empty()
             && let Some(reason) = self.game.read_only_reason()
@@ -223,8 +256,47 @@ impl ForgeEditor {
 
     /// Reads the forge again: another item clears everything; the same item changed by the game moves the untouched rows.
     pub fn refresh(&mut self) {
+        if self.writing {
+            self.poll_writes();
+            // The command's independent result is applied before monitoring data,
+            // so its own stores never make the remaining drafts appear stale.
+            return;
+        }
         let snapshot = self.game.read();
+        if self.recovery_required && snapshot.is_some() {
+            self.recovery_required = false;
+            self.say("Item read again. The previous write was not retried.", MessageKind::Info);
+        }
+        if self.applied_at.as_ref().is_some_and(|at| Some(at) != snapshot.as_ref()) {
+            self.applied = None;
+            self.applied_at = None;
+        }
         self.update_item(snapshot, None);
+    }
+
+    /// Called on the desktop timer even when the watch revision is unchanged.
+    pub fn poll_writes(&mut self) {
+        if self.writing && self.waiting.is_none() {
+            self.advance_writes();
+            return;
+        }
+        if self.writing
+            && let Some(outcome) = self.game.poll_write()
+        {
+            let uncertain = matches!(outcome, WriteOutcome::Uncertain { .. });
+            self.complete_write(outcome);
+            self.advance_writes();
+            if !self.writing && !uncertain {
+                let snapshot = self.game.read();
+                if snapshot != self.item {
+                    let message = (self.message.clone(), self.message_kind);
+                    self.applied = None;
+                    self.applied_at = None;
+                    self.update_item(snapshot, None);
+                    self.say(message.0, message.1);
+                }
+            }
+        }
     }
 
     // ----- What the rows may do -----
@@ -298,7 +370,15 @@ impl ForgeEditor {
     }
 
     pub fn can_change_identity(&self) -> bool {
-        self.identity.as_ref().is_some_and(FieldDraft::is_editable) && self.can_change_draft() && !self.has_other_drafts()
+        self.identity.as_ref().is_some_and(FieldDraft::is_editable)
+            && self.can_change_draft()
+            && !self.has_other_drafts()
+            && self.game.supports(&ItemEdit::Identity {
+                unique_id: 0,
+                sub_type: 0,
+                rarity: 7,
+                unrestricted: false,
+            })
     }
 
     pub fn identity_tip(&self) -> String {
@@ -481,7 +561,7 @@ impl ForgeEditor {
     }
 
     pub fn can_change_rarity(&self) -> bool {
-        self.is_crafted() && !self.affixes.is_empty() && self.can_mutate()
+        self.is_crafted() && !self.affixes.is_empty() && self.can_change_affix()
     }
 
     pub fn rarity_tip(&self) -> String {
@@ -520,7 +600,13 @@ impl ForgeEditor {
     }
 
     pub fn can_change_base(&self) -> bool {
-        self.base.as_ref().is_some_and(FieldDraft::is_editable) && self.can_mutate() && !self.has_implicit_drafts()
+        self.base.as_ref().is_some_and(FieldDraft::is_editable)
+            && self.can_mutate()
+            && !self.has_implicit_drafts()
+            && self.game.supports(&ItemEdit::Base {
+                sub_type: 0,
+                allow_incompatible: false,
+            })
     }
 
     pub fn base_tip(&self) -> String {
@@ -712,7 +798,7 @@ impl ForgeEditor {
 
     /// Adding and removing write at once, so they wait for drafts to be applied or discarded.
     pub fn can_change_affix_list(&self) -> bool {
-        self.can_mutate() && self.item.is_some() && !self.has_pending_drafts()
+        self.can_mutate() && self.item.is_some() && !self.has_pending_drafts() && self.game.supports(&ItemEdit::Remove { slot: 0, id: 0 })
     }
 
     pub fn add_affix_tip(&self) -> String {
@@ -782,8 +868,24 @@ impl ForgeEditor {
             .unwrap_or_default()
     }
 
+    pub fn can_change_affix(&self) -> bool {
+        self.can_mutate()
+            && self.game.supports(&ItemEdit::Affix {
+                slot: 0,
+                id: 0,
+                tier: 1,
+                roll: 0,
+                seal: Seal::Normal,
+                allow_incompatible: false,
+            })
+    }
+
+    pub fn can_change_field(&self, index: usize) -> bool {
+        self.can_mutate() && self.fields.get(index).is_some_and(|f| f.is_editable() && self.game.supports(&f.read_edit()))
+    }
+
     pub fn pick_tier(&mut self, row: usize, tier: u8) {
-        if !self.can_mutate() {
+        if !self.can_change_affix() {
             return;
         }
         if let Some(affix) = self.affixes.get_mut(row) {
@@ -797,7 +899,7 @@ impl ForgeEditor {
     }
 
     pub fn pick_seal(&mut self, row: usize, seal: Seal) {
-        if !self.can_mutate() {
+        if !self.can_change_affix() {
             return;
         }
         if let Some(affix) = self.affixes.get_mut(row) {
@@ -843,7 +945,14 @@ impl ForgeEditor {
     pub fn can_edit_value(&self, cell: Cell) -> bool {
         let unlocked = match cell {
             Cell::Implicit(..) => self.can_mutate() && !self.is_base_drafted(),
-            Cell::Field(index) => self.can_mutate() && self.fields.get(index).is_some_and(FieldDraft::is_editable),
+            Cell::Field(index) => self.can_change_field(index),
+            Cell::Affix(_) => {
+                self.can_mutate()
+                    && self.game.supports(&ItemEdit::Rolls {
+                        target: RollTarget::Affix,
+                        changes: vec![],
+                    })
+            }
             _ => self.can_mutate(),
         };
         unlocked && self.editor_of(cell).is_some_and(|(editor, _, _)| editor.has_mapping())
@@ -1058,7 +1167,7 @@ impl ForgeEditor {
     // ----- Item fields -----
 
     pub fn toggle_flag(&mut self, index: usize, on: bool) {
-        if !self.can_mutate() {
+        if !self.can_change_field(index) {
             return;
         }
         if let Some(field) = self.fields.get_mut(index)
@@ -1934,7 +2043,7 @@ impl ForgeEditor {
     /// Opens the picker to replace a row's affix: a fresh search, All, nothing chosen.
     pub fn open_replace(&mut self, row: usize) -> bool {
         self.select_affix(Some(row));
-        if !self.can_mutate() || self.selected_affix.is_none() {
+        if !self.can_change_affix() || self.selected_affix.is_none() {
             return false;
         }
         self.picker = Some(Picker::default());
@@ -2179,9 +2288,9 @@ impl ForgeEditor {
     }
 
     fn write_affix_list(&mut self, edit: ItemEdit, name: &str, summary: &str) {
-        let Some(current) = self.item.clone() else {
+        if self.item.is_none() {
             return;
-        };
+        }
         if !self.can_change_affix_list() {
             if self.has_pending_drafts() {
                 self.say(
@@ -2191,24 +2300,14 @@ impl ForgeEditor {
             }
             return;
         }
-        match self.write(&current, &edit) {
-            Ok(after) => {
-                let time = (self.clock)();
-                self.history.insert(
-                    0,
-                    AppliedEntry {
-                        name: name.into(),
-                        summary: summary.into(),
-                        outcome: "Confirmed".into(),
-                        time,
-                        effect: String::new(),
-                    },
-                );
-                self.applied = self.affix_list_reverse(&edit, &current, &after).map(|reverse| vec![reverse]);
-                self.say(format!("{name} confirmed by readback: {summary}."), MessageKind::Confirmed);
-            }
-            Err(message) => self.say(message, MessageKind::Error),
-        }
+        self.start_batch(
+            vec![Step {
+                name: name.into(),
+                edit,
+                row: StepRow::List(summary.into()),
+            }],
+            false,
+        );
     }
 
     fn affix_list_reverse(&self, edit: &ItemEdit, before: &ForgeItem, after: &ForgeItem) -> Option<ItemEdit> {
@@ -2239,24 +2338,18 @@ impl ForgeEditor {
 
     // ----- Apply and Undo apply -----
 
-    /// One write through the session: refused at once when it needs the override while it is off.
-    /// TODO(forge): the session's readback outcomes beyond confirmed and refused (spec §11: EditNotKept forgets Undo apply,
-    /// an uncertain write recovers the item and clears drafts and history).
-    fn write(&mut self, expected: &ForgeItem, edit: &ItemEdit) -> Result<ForgeItem, String> {
+    /// Submit one command. Only a separate, typed completion advances a draft.
+    fn write(&mut self, expected: &ForgeItem, edit: &ItemEdit) -> EditOutcome {
         if !self.game.can_write() {
-            return Err("The session is not ready to write.".into());
+            return refused("The session is not ready to write.");
         }
         if edit.needs_override() && !self.unrestricted() {
-            return Err(OVERRIDE_REQUIRED.into());
+            return refused(OVERRIDE_REQUIRED);
         }
-        let moves = edit.moves(expected);
-        self.writing = true;
-        let result = self.game.write(expected, edit);
-        self.writing = false;
-        if let Ok(after) = &result {
-            self.update_item(Some(after.clone()), Some(&moves));
+        if !self.game.supports(edit) {
+            return refused("This edit is not available in this build. Nothing was applied.");
         }
-        result
+        self.game.write(expected, edit)
     }
 
     /// The writes Apply makes, in order, or why none may be made (the C# `ApplyPlanner`).
@@ -2447,11 +2540,14 @@ impl ForgeEditor {
                 )
             }
             StepRow::Field(uid) => (self.all_fields().find(|f| f.uid == *uid).map(FieldDraft::change_summary).unwrap_or_default(), String::new()),
+            StepRow::List(summary) => (summary.clone(), String::new()),
+            StepRow::Undo => (String::new(), String::new()),
         }
     }
 
     fn clear_applied(&mut self, row: &StepRow) {
         match row {
+            StepRow::List(_) | StepRow::Undo => {}
             StepRow::Affix(uid) => {
                 if let Some(index) = self.affixes.iter().position(|r| r.uid == *uid) {
                     let definition = self.catalog().definition(self.affixes[index].state.id);
@@ -2499,141 +2595,268 @@ impl ForgeEditor {
                 return;
             }
         };
-        let mut reverses: Vec<ItemEdit> = Vec::new();
-        let mut one_way = false;
-        let mut applied = 0;
-        let mut expected = current.clone();
-        let total = steps.len();
-        for step in &steps {
-            let reverse = step.edit.reverse(&expected);
-            let moves = step.edit.moves(&expected);
-            let (summary, effect) = self.step_summary(&step.row);
-            match self.write(&expected, &step.edit) {
-                Ok(after) => {
-                    for kept in &mut reverses {
-                        *kept = kept.follow(&moves);
-                    }
-                    match reverse {
-                        Some(reverse) => reverses.insert(0, reverse),
-                        None => one_way = true,
-                    }
-                    applied += 1;
-                    expected = after;
-                    let time = (self.clock)();
-                    self.history.insert(
-                        0,
-                        AppliedEntry {
-                            name: step.name.clone(),
-                            summary,
-                            outcome: "Confirmed".into(),
-                            time,
-                            effect,
-                        },
-                    );
-                    self.clear_applied(&step.row);
-                }
-                Err(message) => {
-                    if applied > 0 {
-                        self.say(
-                            format!("{applied} of {total} drafts applied and confirmed; {} was not applied. {message}", step.name),
-                            MessageKind::Error,
-                        );
-                    } else {
-                        self.say(message, MessageKind::Error);
-                    }
-                    break;
-                }
-            }
+        if steps.iter().any(|step| !self.game.supports(&step.edit)) {
+            self.say("This draft includes an edit that is not available in this build. Nothing was applied.", MessageKind::Error);
+            return;
         }
-        if applied > 0 {
-            self.applied = if one_way { None } else { Some(reverses) };
-            self.say_preview("", false, false);
-        }
-        if applied == total {
-            let names = steps.iter().map(|step| step.name.clone()).collect::<Vec<_>>().join(", ");
-            let mut message = if total == 1 {
-                format!("Edit readback confirmed: {names}.")
-            } else {
-                format!("{total} drafts applied. Edit readback confirmed for each: {names}.")
-            };
-            if one_way {
-                message.push_str(" This change is one-way: the game would not give the old rarity back, so Undo apply cannot reverse it.");
-            }
-            self.say(message, MessageKind::Confirmed);
-        }
-        self.resolve_tables();
+        self.start_batch(steps, false);
     }
 
-    /// The Undo button: a draft step while one remains, else Undo apply, writing the values from before the last Apply back.
+    /// Draft Undo remains local. Applied reverses run in reverse confirmation order.
     pub fn undo(&mut self) {
         if !self.can_undo() || self.undo_draft_step() {
             return;
         }
-        let (Some(reverses), Some(current)) = (self.applied.clone(), self.item.clone()) else {
+        let Some(reverses) = self.applied.clone() else {
             return;
         };
         if reverses.iter().any(ItemEdit::needs_override) && !self.unrestricted() {
             self.say(OVERRIDE_REQUIRED, MessageKind::Error);
             return;
         }
-        let mut expected = current.clone();
-        let mut restored = 0;
-        let mut at: Moves = current.affixes.iter().map(|affix| (affix.slot, affix.slot)).collect();
-        let mut failure = String::new();
-        for kept in &reverses {
-            let reverse = kept.follow(&at);
-            let moves = reverse.moves(&expected);
-            match self.write(&expected, &reverse) {
-                Ok(after) => {
-                    expected = after;
-                    at = item::then(&at, &moves);
-                    restored += 1;
-                }
-                Err(message) => {
-                    failure = message;
-                    break;
-                }
-            }
-        }
-        self.applied = if restored == reverses.len() {
-            None
-        } else {
-            Some(reverses.iter().skip(restored).map(|reverse| reverse.follow(&at)).collect())
-        };
-        if restored > 0 {
-            for row in &mut self.affixes {
-                row.confirmed = false;
-            }
-            for row in self.uniques.iter_mut().chain(self.implicits.iter_mut()) {
-                row.confirmed = false;
-            }
-            for field in self.fields_mut() {
-                field.confirmed = false;
-            }
-            let summary = if restored == 1 {
-                "Last applied edit restored".to_string()
-            } else {
-                format!("{restored} applied edits restored")
-            };
-            let time = (self.clock)();
-            self.history.insert(
-                0,
-                AppliedEntry {
+        self.start_batch(
+            reverses
+                .into_iter()
+                .map(|edit| Step {
                     name: "Undo".into(),
-                    summary,
-                    outcome: "Restored".into(),
-                    time,
-                    effect: String::new(),
+                    edit,
+                    row: StepRow::Undo,
+                })
+                .collect(),
+            true,
+        );
+    }
+
+    fn start_batch(&mut self, steps: Vec<Step>, undoing: bool) {
+        self.batch = Some(WriteBatch {
+            total: steps.len(),
+            names: steps.iter().map(|s| s.name.clone()).collect(),
+            steps: steps.into(),
+            reverses: Vec::new(),
+            completed: 0,
+            one_way: false,
+            undoing,
+        });
+        self.writing = true;
+        self.advance_writes();
+    }
+
+    fn advance_writes(&mut self) {
+        while self.writing && self.waiting.is_none() {
+            if self.game.is_busy() {
+                return;
+            }
+            let Some(step) = self.batch.as_mut().and_then(|b| b.steps.pop_front()) else {
+                self.finish_batch(None);
+                return;
+            };
+            let Some(before) = self.item.clone() else {
+                self.finish_batch(Some("The forge item is no longer available.".into()));
+                return;
+            };
+            let (summary, effect) = self.step_summary(&step.row);
+            let reverse = if matches!(step.row, StepRow::List(_)) { None } else { step.edit.reverse(&before) };
+            let moves = step.edit.moves(&before);
+            self.waiting = Some(WaitingWrite {
+                step,
+                before,
+                reverse,
+                moves,
+                summary,
+                effect,
+            });
+            self.say("Applying to game… Waiting for independent readback.", MessageKind::Info);
+            let waiting = self.waiting.as_ref().unwrap();
+            let expected = waiting.before.clone();
+            let edit = waiting.step.edit.clone();
+            let outcome = self.write(&expected, &edit);
+            if matches!(outcome, WriteOutcome::Pending) {
+                return;
+            }
+            self.complete_write(outcome);
+        }
+    }
+
+    fn complete_write(&mut self, outcome: EditOutcome) {
+        if matches!(outcome, WriteOutcome::Pending) {
+            return;
+        }
+        let Some(waiting) = self.waiting.take() else {
+            return;
+        };
+        match outcome {
+            WriteOutcome::Confirmed(Some(after)) => {
+                let reverse = if matches!(waiting.step.row, StepRow::List(_)) {
+                    self.affix_list_reverse(&waiting.step.edit, &waiting.before, &after)
+                } else {
+                    waiting.reverse
+                };
+                self.update_item(Some(after), Some(&waiting.moves));
+                let batch = self.batch.as_mut().unwrap();
+                for kept in &mut batch.reverses {
+                    *kept = kept.follow(&waiting.moves);
+                }
+                if batch.undoing {
+                    for step in &mut batch.steps {
+                        step.edit = step.edit.follow(&waiting.moves);
+                    }
+                } else {
+                    match reverse {
+                        Some(reverse) => batch.reverses.insert(0, reverse),
+                        None => batch.one_way = true,
+                    }
+                }
+                batch.completed += 1;
+                if !batch.undoing {
+                    self.history.insert(
+                        0,
+                        AppliedEntry {
+                            name: waiting.step.name,
+                            summary: waiting.summary,
+                            outcome: "Confirmed".into(),
+                            time: (self.clock)(),
+                            effect: waiting.effect,
+                        },
+                    );
+                    self.clear_applied(&waiting.step.row);
+                }
+            }
+            WriteOutcome::NotApplied { message, .. } => {
+                if self.batch.as_ref().is_some_and(|b| b.undoing) {
+                    self.batch.as_mut().unwrap().steps.push_front(waiting.step);
+                }
+                self.finish_batch(Some(message));
+            }
+            WriteOutcome::Confirmed(None) => {
+                let history = std::mem::take(&mut self.history);
+                self.recover_write(None);
+                self.history = history;
+                self.history.insert(
+                    0,
+                    AppliedEntry {
+                        name: waiting.step.name,
+                        summary: waiting.summary,
+                        outcome: "Confirmed".into(),
+                        time: (self.clock)(),
+                        effect: waiting.effect,
+                    },
+                );
+                self.say(
+                    "The edit was confirmed, but its readback cannot be displayed. Remaining drafts and Undo were cleared. Reconnect to read the item again.",
+                    MessageKind::Error,
+                );
+            }
+            WriteOutcome::NotKept(after) => {
+                let displayable = after.is_some();
+                let history = std::mem::take(&mut self.history);
+                self.recover_write(after);
+                self.history = history;
+                self.say(
+                    if displayable {
+                        "The game kept different values. Drafts and Undo were cleared; the observed item is shown."
+                    } else {
+                        "The game kept different values, but the observed item cannot be displayed. Drafts and Undo were cleared."
+                    },
+                    MessageKind::Error,
+                );
+            }
+            WriteOutcome::Uncertain { message } => {
+                self.recover_write(None);
+                self.say(
+                    format!("Write outcome is uncertain. {message} Drafts and Undo were cleared. Reconnect to read the item again; the write will not be retried."),
+                    MessageKind::Error,
+                );
+            }
+            WriteOutcome::Pending => unreachable!(),
+        }
+    }
+
+    fn recover_write(&mut self, item: Option<ForgeItem>) {
+        self.recovery_required = item.is_none();
+        self.batch = None;
+        self.waiting = None;
+        self.writing = false;
+        self.applied = None;
+        self.history.clear();
+        // Rebuild from the observation instead of preserving a draft's old base.
+        self.update_item(None, None);
+        self.update_item(item, None);
+    }
+
+    fn finish_batch(&mut self, failure: Option<String>) {
+        let Some(batch) = self.batch.take() else {
+            return;
+        };
+        self.waiting = None;
+        self.writing = false;
+        if batch.undoing {
+            self.applied = if batch.steps.is_empty() && failure.is_none() {
+                None
+            } else {
+                Some(batch.steps.into_iter().map(|s| s.edit).collect())
+            };
+            // Include a refused reverse, which was removed from the queue on submission.
+            // complete_write restores it before finishing on ordinary refusals.
+            if batch.completed > 0 {
+                for row in &mut self.affixes {
+                    row.confirmed = false;
+                }
+                for row in self.uniques.iter_mut().chain(self.implicits.iter_mut()) {
+                    row.confirmed = false;
+                }
+                for field in self.fields_mut() {
+                    field.confirmed = false;
+                }
+                self.history.insert(
+                    0,
+                    AppliedEntry {
+                        name: "Undo".into(),
+                        summary: if batch.completed == 1 {
+                            "Last applied edit restored".into()
+                        } else {
+                            format!("{} applied edits restored", batch.completed)
+                        },
+                        outcome: "Restored".into(),
+                        time: (self.clock)(),
+                        effect: String::new(),
+                    },
+                );
+            }
+        } else if batch.completed > 0 {
+            self.applied = if batch.one_way { None } else { Some(batch.reverses) };
+        }
+        if let Some(message) = failure {
+            self.say(
+                if batch.completed == 0 {
+                    message
+                } else {
+                    format!(
+                        "{} of {} {}. {message}",
+                        batch.completed,
+                        batch.total,
+                        if batch.undoing { "edits restored" } else { "drafts applied and confirmed" }
+                    )
                 },
+                MessageKind::Error,
             );
-        }
-        if restored == reverses.len() {
+        } else if batch.undoing {
             self.say("Previous values restored; readback confirmed.", MessageKind::Confirmed);
-        } else if restored > 0 {
-            self.say(format!("{restored} of {} edits restored. {failure}", reverses.len()), MessageKind::Error);
         } else {
-            self.say(failure, MessageKind::Error);
+            let names = batch.names.join(", ");
+            let mut message = if batch.total == 1 && self.history.first().is_some_and(|h| h.name == "Add affix" || h.name == "Remove affix") {
+                let entry = &self.history[0];
+                format!("{} confirmed by readback: {}.", entry.name, entry.summary)
+            } else if batch.total == 1 {
+                format!("Edit readback confirmed: {names}.")
+            } else {
+                format!("{} drafts applied. Edit readback confirmed for each: {names}.", batch.total)
+            };
+            if batch.one_way {
+                message.push_str(" This change is one-way: the game would not give the old rarity back, so Undo apply cannot reverse it.");
+            }
+            self.say(message, MessageKind::Confirmed);
         }
+        self.applied_at = self.applied.as_ref().and(self.item.clone());
         self.say_preview("", false, false);
         self.resolve_tables();
     }

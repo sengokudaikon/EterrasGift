@@ -173,16 +173,7 @@ pub struct ItemStatus {
     pub ruined: bool,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum StatusField {
-    ForgingPotential,
-    LegendaryPotential,
-    WeaversWill,
-    WeaversTouch,
-    LevelRequirement,
-    Corrupted,
-    Ruined,
-}
+pub use eg_trainer::edits::StatusField;
 
 impl ItemStatus {
     pub fn read(&self, field: StatusField) -> u8 {

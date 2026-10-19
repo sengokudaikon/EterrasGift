@@ -1,8 +1,20 @@
 //! What the forge asks of the game: the item, the captured game data, value tables, writes and the unique preview. The
-//! production adapter reads owned worker snapshots only. Synchronous write/mapping
-//! methods remain fixture interfaces until the async write editor is connected.
+//! production adapter reads owned snapshots and submits commands to the worker.
+//! Write outcomes are typed; accepted commands are polled without blocking the UI.
 
 use super::item::{AffixDefinition, ForgeItem, ItemEdit, ModifierState, RollRequest, ValueTable};
+pub use eg_trainer::writes::WriteOutcome;
+
+/// An independently observed item can be undisplayable by this editor. That
+/// presentation limitation never downgrades the completed write certainty.
+pub type EditOutcome = WriteOutcome<Option<ForgeItem>>;
+
+pub fn refused(message: impl Into<String>) -> EditOutcome {
+    WriteOutcome::NotApplied {
+        code: eg_trainer::writes::ResponseCode::Refused,
+        message: message.into(),
+    }
+}
 
 /// A base of an item type, from the captured item list.
 #[derive(Clone, Debug, PartialEq)]
@@ -118,11 +130,25 @@ pub trait ForgeGame {
         false
     }
 
+    /// An already running worker read may finish before the next draft step.
+    fn is_busy(&self) -> bool {
+        false
+    }
+
     /// The values a roll takes in its context (spec §6 Mapping). The editor never computes values itself.
     fn resolve(&self, item: &ForgeItem, request: &RollRequest) -> Result<ValueTable, GameError>;
 
     /// Writes one edit to the item the draft was made on and reads it back (spec §11).
-    fn write(&mut self, expected: &ForgeItem, edit: &ItemEdit) -> Result<ForgeItem, GameError>;
+    fn write(&mut self, expected: &ForgeItem, edit: &ItemEdit) -> EditOutcome;
+
+    /// Completion of the single accepted command. None means still pending.
+    fn poll_write(&mut self) -> Option<EditOutcome> {
+        None
+    }
+
+    fn supports(&self, _: &ItemEdit) -> bool {
+        true
+    }
 
     /// The unique modifiers formatted with drafted rolls.
     fn preview_unique(&self, expected: &ForgeItem, edit: &ItemEdit) -> Result<Vec<ModifierState>, GameError>;

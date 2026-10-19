@@ -8,6 +8,7 @@
 #![allow(dead_code)]
 
 use super::forge::game::{BaseDefinition, Catalog, ForgeGame, GameError, ItemLimits, ItemTypeDefinition, LegendaryType, UniqueDefinition};
+use super::forge::game::{EditOutcome, WriteOutcome, refused};
 use super::forge::item::{
     AffixDefinition, AffixKind, AffixState, Category, ForgeItem, ItemEdit, ItemStatus, ModifierState, RollRequest, RollTarget, Seal, TierProperty, UniqueState, ValueSample,
     ValueTable, format_tier_range,
@@ -447,16 +448,16 @@ impl ForgeGame for FixtureGame {
         }
     }
 
-    fn write(&mut self, expected: &ForgeItem, edit: &ItemEdit) -> Result<ForgeItem, GameError> {
+    fn write(&mut self, expected: &ForgeItem, edit: &ItemEdit) -> EditOutcome {
         let mut state = self.state.borrow_mut();
         let Some(item) = state.item.clone() else {
-            return Err("Place an item in the forge before editing.".into());
+            return refused("Place an item in the forge before editing.");
         };
         if item != *expected {
-            return Err("Item changed. Reset edit fields before trying again.".into());
+            return refused("Item changed. Reset edit fields before trying again.");
         }
         if !edit.is_valid(&item) {
-            return Err("The edit could not be confirmed.".into());
+            return refused("The edit could not be confirmed.");
         }
         let mut after = edit.project(&item);
         // The game names the item after its new identity.
@@ -470,7 +471,7 @@ impl ForgeGame for FixtureGame {
         }
         state.writes.push(edit.clone());
         state.item = Some(after.clone());
-        Ok(after)
+        WriteOutcome::Confirmed(Some(after))
     }
 
     fn preview_unique(&self, expected: &ForgeItem, edit: &ItemEdit) -> Result<Vec<ModifierState>, GameError> {

@@ -700,7 +700,7 @@ export component TrainerPage inherits Rectangle {
             compact: root.compact;
         }
 
-        // The item in the game's forge, while the session holds one (TODO(trainer): never yet in the real app).
+        // The owned item observation, while the current session can display it.
         if TrainerState.item-forge && ForgeState.has-item: ItemForge {
             vertical-stretch: 1;
             compact: root.compact;
@@ -710,8 +710,8 @@ export component TrainerPage inherits Rectangle {
 
         if TrainerState.item-forge && !ForgeState.has-item: EmptyState {
             vertical-stretch: 1;
-            title: TrainerState.empty-title;
-            detail: TrainerState.empty-detail;
+            title: ForgeState.write-recovery-required ? "Item readback unavailable" : TrainerState.empty-title;
+            detail: ForgeState.write-recovery-required ? ForgeState.message : TrainerState.empty-detail;
 
             if Connection.show-action: Button {
                 text: Connection.action-text;

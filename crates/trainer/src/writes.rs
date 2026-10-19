@@ -7,7 +7,8 @@ use crate::{
     catalog::GameCatalog,
     edits::{self, CatalogProvenance, EditError, ExpectedObservation, ItemEdit, PreparedEdit, StatusEdit, StatusField},
 };
-use eg_game_access::{fields::AttackLeechObservation, forge::ForgeSnapshot, protocol::ResponseCode};
+pub use eg_game_access::protocol::ResponseCode;
+use eg_game_access::{fields::AttackLeechObservation, forge::ForgeSnapshot};
 
 /// Checked after potentially lengthy local validation and immediately before
 /// entering transport. A false result cancels only work that has not been sent.

@@ -277,3 +277,254 @@ fn the_name_drafts_another_unique_alone_with_the_rarity_the_game_gives() {
     editor.undo();
     assert_eq!(state.borrow().item.as_ref().unwrap().identity_id(), Some(70));
 }
+
+// Delayed command completion exercises the editor between UI event-loop turns.
+// Each request is accepted once; changing the observation never retries it.
+mod async_writes {
+    use super::*;
+    use crate::forge::{
+        game::{Catalog, EditOutcome, ForgeGame, GameError, WriteOutcome, refused},
+        item::{ForgeItem, ItemEdit, ModifierState, RollRequest, ValueTable},
+    };
+    use std::{cell::RefCell, collections::VecDeque, rc::Rc};
+
+    #[derive(Clone, Copy)]
+    enum ResultKind {
+        Confirmed,
+        Refused,
+        NotKept,
+        Uncertain,
+        ConfirmedUnavailable,
+    }
+    struct Control {
+        released: bool,
+        busy: bool,
+        outcomes: VecDeque<ResultKind>,
+        pending: Option<(ForgeItem, ItemEdit)>,
+    }
+    struct Delayed {
+        game: FixtureGame,
+        control: Rc<RefCell<Control>>,
+    }
+    impl ForgeGame for Delayed {
+        fn is_busy(&self) -> bool {
+            self.control.borrow().busy
+        }
+        fn catalog(&self) -> &Catalog {
+            self.game.catalog()
+        }
+        fn read(&self) -> Option<ForgeItem> {
+            self.game.read()
+        }
+        fn unrestricted(&self) -> bool {
+            self.game.unrestricted()
+        }
+        fn resolve(&self, item: &ForgeItem, request: &RollRequest) -> Result<ValueTable, GameError> {
+            self.game.resolve(item, request)
+        }
+        fn preview_unique(&self, item: &ForgeItem, edit: &ItemEdit) -> Result<Vec<ModifierState>, GameError> {
+            self.game.preview_unique(item, edit)
+        }
+        fn write(&mut self, expected: &ForgeItem, edit: &ItemEdit) -> EditOutcome {
+            let mut c = self.control.borrow_mut();
+            assert!(c.pending.is_none());
+            c.pending = Some((expected.clone(), edit.clone()));
+            WriteOutcome::Pending
+        }
+        fn poll_write(&mut self) -> Option<EditOutcome> {
+            let mut c = self.control.borrow_mut();
+            if !c.released {
+                return None;
+            }
+            c.released = false;
+            let (expected, edit) = c.pending.take()?;
+            let result = c.outcomes.pop_front().unwrap_or(ResultKind::Confirmed);
+            Some(match result {
+                ResultKind::Confirmed => self.game.write(&expected, &edit),
+                ResultKind::ConfirmedUnavailable => {
+                    assert!(matches!(self.game.write(&expected, &edit), WriteOutcome::Confirmed(_)));
+                    self.game.state.borrow_mut().item = None;
+                    WriteOutcome::Confirmed(None)
+                }
+                ResultKind::Refused => refused("Refused before any change."),
+                ResultKind::NotKept => WriteOutcome::NotKept(self.game.read()),
+                ResultKind::Uncertain => WriteOutcome::uncertain("Independent readback was lost."),
+            })
+        }
+    }
+    fn editor(outcomes: &[ResultKind]) -> (ForgeEditor, Rc<RefCell<Control>>, Rc<RefCell<fixture::FixtureState>>) {
+        let game = FixtureGame::ring(false);
+        let state = game.state.clone();
+        let control = Rc::new(RefCell::new(Control {
+            released: false,
+            busy: false,
+            outcomes: outcomes.iter().copied().collect(),
+            pending: None,
+        }));
+        (ForgeEditor::new(Box::new(Delayed { game, control: control.clone() })), control, state)
+    }
+    fn release(editor: &mut ForgeEditor, control: &Rc<RefCell<Control>>) {
+        control.borrow_mut().released = true;
+        editor.refresh();
+    }
+    fn draft(editor: &mut ForgeEditor) {
+        editor.begin_input(Cell::Field(0));
+        editor.set_input(Cell::Field(0), "60");
+        assert!(editor.commit_input(Cell::Field(0)));
+        editor.toggle_flag(2, true);
+    }
+    #[test]
+    fn mixed_draft_waits_between_edits_and_undo_reverses_only_confirmed_steps() {
+        let (mut e, c, state) = editor(&[ResultKind::Confirmed, ResultKind::Confirmed]);
+        draft(&mut e);
+        e.apply();
+        assert!(!e.can_apply());
+        assert!(!e.can_discard_all());
+        assert!(!e.can_undo());
+        assert!(state.borrow().writes.is_empty());
+        e.apply();
+        e.undo();
+        e.refresh();
+        assert!(state.borrow().writes.is_empty());
+        release(&mut e, &c);
+        assert_eq!(state.borrow().writes.len(), 1);
+        assert_eq!(e.drafts().len(), 1);
+        let expected = c.borrow().pending.as_ref().unwrap().0.clone();
+        assert_eq!(expected, state.borrow().item.clone().unwrap());
+        release(&mut e, &c);
+        assert!(e.drafts().is_empty());
+        assert_eq!(e.history.len(), 2);
+        assert!(e.can_undo());
+        e.undo();
+        release(&mut e, &c);
+        release(&mut e, &c);
+        assert_eq!(state.borrow().item.as_ref().unwrap().status.unwrap().forging_potential, 30);
+        assert!(!state.borrow().item.as_ref().unwrap().status.unwrap().corrupted);
+        assert!(!e.can_undo());
+    }
+    #[test]
+    fn ordinary_refusal_stops_the_batch_and_preserves_confirmed_undo() {
+        let (mut e, c, state) = editor(&[ResultKind::Confirmed, ResultKind::Refused]);
+        draft(&mut e);
+        e.apply();
+        release(&mut e, &c);
+        release(&mut e, &c);
+        assert_eq!(state.borrow().writes.len(), 1);
+        assert_eq!(e.drafts().len(), 1);
+        assert!(e.message().0.contains("1 of 2"));
+        e.discard_all();
+        assert!(e.undo_writes_to_game());
+        e.undo();
+        release(&mut e, &c);
+        assert!(!e.can_undo());
+        assert_eq!(state.borrow().item.as_ref().unwrap().status.unwrap().forging_potential, 30);
+    }
+    #[test]
+    fn not_kept_and_uncertain_clear_every_draft_and_undo_after_partial_confirmation() {
+        for result in [ResultKind::NotKept, ResultKind::Uncertain] {
+            let (mut e, c, state) = editor(&[ResultKind::Confirmed, result]);
+            draft(&mut e);
+            e.apply();
+            release(&mut e, &c);
+            release(&mut e, &c);
+            assert!(e.drafts().is_empty());
+            if matches!(result, ResultKind::Uncertain) {
+                assert!(e.history.is_empty());
+            } else {
+                assert_eq!(e.history.len(), 1);
+                assert_eq!(e.history[0].outcome, "Confirmed");
+            }
+            assert!(!e.can_undo());
+            assert_eq!(state.borrow().writes.len(), 1);
+            assert_eq!(e.has_item(), matches!(result, ResultKind::NotKept));
+            assert!(e.message().0.contains(if matches!(result, ResultKind::NotKept) { "different values" } else { "uncertain" }));
+        }
+    }
+    #[test]
+    fn undo_refusal_keeps_the_unrestored_reverse_without_replaying_confirmed_reverses() {
+        let (mut e, c, state) = editor(&[ResultKind::Confirmed, ResultKind::Confirmed, ResultKind::Confirmed, ResultKind::Refused]);
+        draft(&mut e);
+        e.apply();
+        release(&mut e, &c);
+        release(&mut e, &c);
+        e.undo();
+        release(&mut e, &c);
+        release(&mut e, &c);
+        assert!(e.undo_writes_to_game());
+        assert_eq!(state.borrow().writes.len(), 3);
+        e.undo();
+        release(&mut e, &c);
+        assert_eq!(state.borrow().writes.len(), 4);
+        assert!(!e.can_undo());
+    }
+    #[test]
+    fn a_monitor_read_between_confirmations_delays_the_next_step_without_refusing_or_replaying() {
+        let (mut e, c, state) = editor(&[ResultKind::Confirmed, ResultKind::Confirmed]);
+        draft(&mut e);
+        e.apply();
+        c.borrow_mut().busy = true;
+        release(&mut e, &c);
+        assert_eq!(state.borrow().writes.len(), 1);
+        assert!(c.borrow().pending.is_none());
+        e.refresh();
+        assert_eq!(state.borrow().writes.len(), 1);
+        assert!(!e.can_apply());
+        c.borrow_mut().busy = false;
+        e.refresh();
+        assert!(c.borrow().pending.is_some());
+        release(&mut e, &c);
+        assert_eq!(state.borrow().writes.len(), 2);
+        assert!(e.drafts().is_empty());
+        assert!(e.undo_writes_to_game());
+    }
+
+    #[test]
+    fn a_confirmed_but_undisplayable_readback_does_not_become_uncertain() {
+        let (mut e, c, state) = editor(&[ResultKind::ConfirmedUnavailable]);
+        draft(&mut e);
+        e.apply();
+        release(&mut e, &c);
+        assert_eq!(state.borrow().writes.len(), 1);
+        assert!(!e.has_item());
+        assert!(e.drafts().is_empty());
+        assert!(!e.can_undo());
+        assert_eq!(e.history[0].outcome, "Confirmed");
+        assert!(e.message().0.contains("edit was confirmed"));
+        assert!(!e.message().0.contains("uncertain"));
+    }
+
+    #[test]
+    fn a_new_observation_invalidates_applied_undo_instead_of_overwriting_external_changes() {
+        let (mut e, c, state) = editor(&[ResultKind::Confirmed]);
+        e.toggle_flag(2, true);
+        e.apply();
+        release(&mut e, &c);
+        assert!(e.undo_writes_to_game());
+        state.borrow_mut().item.as_mut().unwrap().status.as_mut().unwrap().forging_potential = 99;
+        e.refresh();
+        e.undo();
+        assert!(c.borrow().pending.is_none());
+        assert_eq!(state.borrow().writes.len(), 1);
+        assert!(!e.can_undo());
+    }
+
+    #[test]
+    fn override_revocation_between_confirmation_and_undo_refuses_before_submission() {
+        let (mut e, c, state) = editor(&[ResultKind::Confirmed]);
+        state.borrow_mut().unrestricted = true;
+        state.borrow_mut().item.as_mut().unwrap().rarity = forge::item::LEGENDARY;
+        e.refresh();
+        let index = e.fields.iter().position(|f| f.unrestricted).unwrap();
+        e.begin_input(Cell::Field(index));
+        e.set_input(Cell::Field(index), "2");
+        assert!(e.commit_input(Cell::Field(index)));
+        e.apply();
+        release(&mut e, &c);
+        state.borrow_mut().unrestricted = false;
+        e.refresh();
+        e.undo();
+        assert!(c.borrow().pending.is_none());
+        assert_eq!(state.borrow().writes.len(), 1);
+        assert!(e.message().0.contains("I know"));
+    }
+}

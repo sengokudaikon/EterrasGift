@@ -5,7 +5,7 @@ A green interop fixture alone does not establish that. This checklist separates 
 contracts from already validated lower layers; unsupported capabilities must stay explicit until proven.
 
 Current verification uses pinned `nightly-2026-10-17` (Rust 1.101.0-nightly). `mise run trainer:verify` runs the release trainer/tier and controller
-suites once, followed by workspace checks. Individual test tasks remain available for focused work.
+suites once, UI unit tests, then workspace checks. Individual test tasks remain available for focused work.
 Earlier compiler matrices below are historical results, not additional gates.
 
 The shared service now accepts `WritePlan`/`WriteOutcome<T>` through one session submission/readback
@@ -14,16 +14,28 @@ keep healthy sessions, and historical confirmation survives later publication ga
 stale-plan and uncertain-delivery guards remain. The earlier [write-service checkpoint](../tools/trainer-eval/persistent-player/write-service-refactor-report.json)
 records the original consolidation; compiler matrices there are historical.
 
-The desktop now runs the worker on its own Tokio thread and supplies its handle to the Slint forge.
-Manual connection, empty/read-only items, replacement, unsupported display values and offline-gate loss
-have a worker-to-UI fake-session route and captures. Native work and hashing stay off the UI thread;
-write/mapping/preview operations cannot run through this adapter. Helper package lookup is lazy and
-gate-protected, with source-build receipts published beside the app. No new live-game run is claimed.
-Next: carry typed write/recovery results into the editor, merge duplicate models/feature tables and
-connect the remaining settings/cache actions; hook-engine and feature-family work remains after that.
-Validation:530 nightly release trainer/controller cases and56 UI unit tests pass, plus full workspace
-verification and inspected worker/UI captures. The helper build publishes matching debug/release receipts;
-their retained DLL hashes were checked without loading a DLL or accessing a running game.
+The desktop worker is now connected to the editor's command-based `ForgeGame`.
+Apply submits ordered single-edit commands; each obtains a fresh owned read before planning,
+and advances only after independent Confirmed readback. A refusal stops the batch and keeps
+reverses for confirmed steps. Undo reverses those steps in order and retains unrestored
+reverses after an ordinary refusal. NotKept and Uncertain clear every draft and Undo; known
+mismatch keeps the connection and confirmed history; uncertainty clears history, requires explicit
+Retry and never replays the write.
+Override permission is checked again at submission and Undo. Unsupported affix/tier/list and
+mapping controls stay disabled; status, base and identity edits use the worker. Regular affix
+rolls have the same adapter but their value controls still require actual game mapping.
+The shared status-field enum and write outcomes replace duplicate UI types; the remaining
+presentation/domain projection and feature-table consolidation is still open.
+
+`mise run capture:trainer` exercises the real worker, queue, watch and Slint callbacks using an
+owned fake connection: mixed drafts, delayed Pending navigation, confirmation, partial refusal,
+conditional Undo, NotKept, Uncertain, Retry, base/identity pickers and offline loss. Captures include
+confirmed, not-kept and uncertain at standard/narrow sizes. Editor tests also cover delayed
+completion and override revocation. No native code or protocol changed in this UI step; no live
+game was accessed. Feature checks now live in tests and fixture sources; no new per-feature
+report JSON is needed. Historical reports below retain their checkpoint scope.
+Next: prune unused runtime/parser code and redundant plan APIs, then complete each remaining edit
+through native, service and UI together. The hook-backend trial remains separate.
 
 Protocol31 adds base/subtype and unique/set identity edits to `ForgePlan`/`ForgeUndo` and the shared
 worker/session submission path. All destination fields and refresh signatures are checked before

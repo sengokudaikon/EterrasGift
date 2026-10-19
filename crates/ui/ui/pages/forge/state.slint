@@ -1,6 +1,6 @@
 // The Item Forge's state, shared with Rust (crates/ui/src/forge). Rust owns the item and its drafts; these carry them to
-// the view and carry the user's edits back. Until the trainer's session is ported nothing sets `has-item` in the real
-// app, so the Forge page keeps the connection's empty state (TODO(forge)).
+// the view and carry commands back. Writes run on the trainer worker; snapshots
+// and typed outcomes return without blocking the event loop.
 
 import { MessageTone } from "../common.slint";
 
@@ -102,6 +102,7 @@ export struct PickerRowView { name: string, detail: string, reforged: bool }
 
 export global ForgeState {
     in property <bool> has-item;
+    in property <bool> write-recovery-required;
 
     // The header.
     in property <string> item-name;

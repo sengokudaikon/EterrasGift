@@ -65,7 +65,7 @@ impl ForgeHandle {
 }
 
 /// Puts an observation provider behind the window's forge. Production uses owned
-/// read-only snapshots; editing fixtures exercise the remaining editor behavior.
+/// snapshots and command-based writes; fixtures exercise the same editor flow.
 pub fn attach(window: &MainWindow, game: Box<dyn ForgeGame>) -> ForgeHandle {
     let view = Rc::new(View {
         editor: RefCell::new(ForgeEditor::new(game)),
@@ -264,9 +264,7 @@ impl View {
         let state = window.global::<ForgeState>();
         let editor = self.editor.borrow();
         state.set_has_item(editor.has_item());
-        if !editor.has_item() {
-            return;
-        }
+        state.set_write_recovery_required(editor.needs_write_recovery());
         state.set_item_name(editor.item_name().into());
         state.set_has_identity(editor.has_identity());
         state.set_identity_drafted(editor.is_identity_drafted());
@@ -443,7 +441,7 @@ impl View {
                     confirmed: field.confirmed,
                     stale: field.is_stale(),
                     editable: field.is_editable(),
-                    can_edit: field.is_editable() && editor.can_mutate(),
+                    can_edit: editor.can_change_field(index),
                     on_name: field.on_name().into(),
                     off_name: field.off_name().into(),
                     checked: field.value() != 0,
@@ -497,7 +495,7 @@ impl View {
                     sealed: row.seal() != Seal::Normal,
                     seal_drafted: row.is_seal_drafted(),
                     seal_index: row.seal().index() as i32,
-                    can_edit: editor.can_mutate(),
+                    can_edit: editor.can_change_affix(),
                     dirty: row.is_dirty(),
                     pending: row.is_pending(),
                     stale: row.is_stale(),

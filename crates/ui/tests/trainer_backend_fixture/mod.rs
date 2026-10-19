@@ -7,7 +7,10 @@ use eg_trainer::{
         self, BackendConnection, BackendError, BackendHandle, BackendOptions, Command, Connector, ForgeSnapshot, ItemStatus, Phase, ProcessIdentity, ProcessLocator, RuntimeStatus,
         SystemClock,
     },
-    catalog::{AffixDefinition, Availability, CatalogIdentity, EXTRACTION_VERSION, GameCatalog, GameLocale, ItemLimits, ValueRange},
+    catalog::{
+        AffixDefinition, Availability, CatalogIdentity, DefinitionName, DefinitionNameSource, EXTRACTION_VERSION, GameCatalog, GameLocale, ItemLimits, ItemTypeDefinition,
+        SubTypeDefinition, UniqueDefinition, ValueRange,
+    },
     gate::{GatePolicy, LogSource},
     session::Cleanup,
 };
@@ -19,6 +22,10 @@ struct Data {
     online: AtomicBool,
     reads: AtomicUsize,
     connects: AtomicUsize,
+    writes: AtomicUsize,
+    outcome: AtomicUsize,
+    refuse_at: AtomicUsize,
+    expected: Mutex<Vec<ForgeSnapshot>>,
 }
 struct Locator(Arc<Data>);
 impl ProcessLocator for Locator {
@@ -80,8 +87,44 @@ impl BackendConnection for OwnedConnection {
                 weavers_touch: range,
                 level_requirement: range,
             },
-            bases: Default::default(),
-            uniques: Default::default(),
+            bases: [(
+                3,
+                ItemTypeDefinition {
+                    item_type: 3,
+                    name: name("Owned type"),
+                    sub_types: (1..=2)
+                        .map(|sub_type| SubTypeDefinition {
+                            sub_type,
+                            name: name(&format!("Owned base {sub_type}")),
+                            level_requirement: 87,
+                            class_requirement: 0,
+                            cannot_drop: false,
+                            is_corrupted: false,
+                            implicits: Availability::Available(vec![]),
+                        })
+                        .collect(),
+                },
+            )]
+            .into(),
+            uniques: (70..=71)
+                .map(|id| {
+                    (
+                        id,
+                        UniqueDefinition {
+                            id,
+                            name: name(&format!("Owned unique {id}")),
+                            item_type: 3,
+                            sub_types: vec![1, 2],
+                            is_set_item: false,
+                            set_id: 0,
+                            legendary_type: 0,
+                            can_drop_as_legendary: true,
+                            is_pre_corrupted: false,
+                            numeric: Availability::Unavailable { reason: "not formatted".into() },
+                        },
+                    )
+                })
+                .collect(),
             rarities: Default::default(),
             affixes: [(
                 1,
@@ -106,20 +149,57 @@ impl BackendConnection for OwnedConnection {
         self.0.reads.fetch_add(1, Ordering::SeqCst);
         Ok(self.0.item.lock().unwrap().clone())
     }
-    // The service could submit a level write; this read-only adapter must not.
+    fn supports_base_change(&self) -> bool {
+        true
+    }
+    fn supports_identity_change(&self) -> bool {
+        true
+    }
+    fn supports_status(&self, _: eg_trainer::edits::StatusField) -> bool {
+        true
+    }
+    // Owned connection implements independent readback for the editor route.
     fn supports_level_requirement(&self) -> bool {
         true
     }
     async fn edit_forge(
         &mut self,
         _: jiff::Timestamp,
-        _: &eg_trainer::writes::ForgePlan,
+        plan: &eg_trainer::writes::ForgePlan,
         _: &mut dyn eg_trainer::writes::WriteControl,
     ) -> Result<eg_trainer::writes::WriteStatus, BackendError> {
-        panic!("read-only UI submitted a write")
+        use eg_trainer::writes::{ResponseCode, WriteOutcome};
+        let call = self.0.writes.fetch_add(1, Ordering::SeqCst) + 1;
+        self.0.expected.lock().unwrap().push(plan.before().snapshot().clone());
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        let mut item = self.0.item.lock().unwrap();
+        assert_eq!(item.as_ref(), Some(plan.before().snapshot()), "fresh expected state for every step");
+        if self.0.refuse_at.load(Ordering::SeqCst) == call || self.0.outcome.load(Ordering::SeqCst) == 3 {
+            return Ok(WriteOutcome::NotApplied {
+                code: ResponseCode::Refused,
+                message: "Owned pre-store refusal.".into(),
+            });
+        }
+        match self.0.outcome.load(Ordering::SeqCst) {
+            1 => Ok(WriteOutcome::NotKept(item.clone().unwrap())),
+            2 => {
+                *item = Some(plan.projected().clone());
+                Ok(WriteOutcome::uncertain("Owned readback was lost."))
+            }
+            _ => {
+                *item = Some(plan.projected().clone());
+                Ok(WriteOutcome::Confirmed(item.clone().unwrap()))
+            }
+        }
     }
     async fn disconnect(&mut self) -> Cleanup {
         Cleanup::ConfirmedOff
+    }
+}
+fn name(text: &str) -> DefinitionName {
+    DefinitionName {
+        text: text.into(),
+        source: DefinitionNameSource::StoredDisplay,
     }
 }
 fn item(name: &str, id: u32) -> ForgeSnapshot {
@@ -158,6 +238,7 @@ fn item(name: &str, id: u32) -> ForgeSnapshot {
     item.fingerprint = item.legacy_fingerprint();
     item
 }
+#[track_caller]
 fn wait(mut ready: impl FnMut() -> bool) {
     let until = Instant::now() + Duration::from_secs(8);
     while !ready() {
@@ -184,6 +265,10 @@ pub(super) fn capture(session: &Session) {
         online: AtomicBool::new(false),
         reads: AtomicUsize::new(0),
         connects: AtomicUsize::new(0),
+        writes: AtomicUsize::new(0),
+        outcome: AtomicUsize::new(0),
+        refuse_at: AtomicUsize::new(0),
+        expected: Mutex::new(Vec::new()),
     });
     let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
     let (handle, worker) = backend::service(
@@ -235,14 +320,136 @@ pub(super) fn capture(session: &Session) {
     wait(|| ui.global::<eg_ui::ForgeState>().get_has_item());
     assert_eq!(ui.global::<eg_ui::ForgeState>().get_item_name(), "Owned Hatchet Ω");
     assert!(!ui.global::<eg_ui::ForgeState>().get_can_apply());
-    assert!(ui.global::<eg_ui::ForgeState>().get_message().starts_with("Read-only."));
+    assert!(!ui.global::<eg_ui::ForgeState>().get_can_change_affix_list());
+    assert!(!ui.global::<eg_ui::ForgeState>().get_affixes().row_data(0).unwrap().can_edit);
     assert_eq!(ui.global::<eg_ui::ForgeState>().get_affixes().row_count(), 1);
     ui.global::<eg_ui::ForgeState>().invoke_apply();
     assert_eq!(handle.snapshot().last_write, None);
-    session.capture(&ui, "backend-forge-readonly");
+    session.capture(&ui, "backend-forge-ready");
     session.resize(680, 580);
-    session.capture(&ui, "backend-forge-readonly-narrow");
+    session.capture(&ui, "backend-forge-ready-narrow");
     session.resize(1100, 700);
+
+    // A mixed draft runs as ordered single writes. Duplicate Apply/Undo while
+    // Pending does nothing, and navigation stays responsive.
+    let forge = ui.global::<eg_ui::ForgeState>();
+    let field = eg_ui::CellRef {
+        kind: eg_ui::CellKind::Field,
+        row: 0,
+        roll: 0,
+    };
+    assert!(forge.invoke_begin_input(field.clone()));
+    forge.invoke_input_edited(field.clone(), "60".into());
+    assert!(forge.invoke_commit_input(field.clone()));
+    forge.invoke_toggle_flag(2, true);
+    assert_eq!(forge.get_drafts().row_count(), 2);
+    forge.invoke_apply();
+    assert!(!forge.get_can_apply());
+    assert!(!forge.get_can_undo());
+    assert!(!forge.get_can_discard());
+    forge.invoke_apply();
+    forge.invoke_undo();
+    wait(|| data.writes.load(Ordering::SeqCst) == 1);
+    assert!(forge.get_message().contains("Waiting for independent readback"));
+    ui.global::<Nav>().invoke_navigate("settings".into());
+    ui.global::<Nav>().invoke_navigate("forge".into());
+    session.capture(&ui, "backend-forge-pending");
+    wait(|| forge.get_history().row_count() == 2 && forge.get_can_undo());
+    assert_eq!(data.writes.load(Ordering::SeqCst), 2);
+    assert_eq!(data.expected.lock().unwrap()[1].status.forging_potential, 60);
+    assert_eq!(forge.get_drafts().row_count(), 0);
+    session.capture(&ui, "backend-forge-confirmed");
+    forge.invoke_undo();
+    wait(|| data.writes.load(Ordering::SeqCst) == 4 && !forge.get_can_undo() && forge.get_message().contains("Previous values restored"));
+    assert_eq!(data.item.lock().unwrap().as_ref().unwrap().status.forging_potential, 21);
+    assert!(!data.item.lock().unwrap().as_ref().unwrap().status.corrupted);
+
+    // A pre-store refusal after one confirmation stops the draft. Discard the
+    // remaining local draft, then Undo touches only the confirmed field.
+    data.refuse_at.store(6, Ordering::SeqCst);
+    assert!(forge.invoke_begin_input(field.clone()));
+    forge.invoke_input_edited(field.clone(), "60".into());
+    assert!(forge.invoke_commit_input(field.clone()));
+    forge.invoke_toggle_flag(2, true);
+    forge.invoke_apply();
+    wait(|| forge.get_message().contains("1 of 2 drafts applied and confirmed"));
+    assert_eq!(data.writes.load(Ordering::SeqCst), 6);
+    assert_eq!(forge.get_drafts().row_count(), 1);
+    forge.invoke_discard_all();
+    forge.invoke_undo();
+    wait(|| data.writes.load(Ordering::SeqCst) == 7 && forge.get_message().contains("Previous values restored"));
+    data.refuse_at.store(0, Ordering::SeqCst);
+
+    // Known mismatch remains connected but drops all drafts and Undo.
+    data.outcome.store(1, Ordering::SeqCst);
+    assert!(forge.invoke_begin_input(field.clone()));
+    forge.invoke_input_edited(field.clone(), "60".into());
+    assert!(forge.invoke_commit_input(field.clone()));
+    forge.invoke_toggle_flag(2, true);
+    forge.invoke_apply();
+    wait(|| forge.get_message().contains("game kept different values"));
+    assert_eq!(data.writes.load(Ordering::SeqCst), 8);
+    assert_eq!(forge.get_drafts().row_count(), 0);
+    assert!(!forge.get_can_undo());
+    assert_eq!(handle.snapshot().phase, Phase::Ready);
+    session.capture(&ui, "backend-forge-not-kept");
+    session.resize(680, 580);
+    session.capture(&ui, "backend-forge-not-kept-narrow");
+    session.resize(1100, 700);
+
+    // A lost readback has no automatic retry, even when the store ran.
+    data.outcome.store(2, Ordering::SeqCst);
+    assert!(forge.invoke_begin_input(field.clone()));
+    forge.invoke_input_edited(field.clone(), "60".into());
+    assert!(forge.invoke_commit_input(field));
+    forge.invoke_toggle_flag(2, true);
+    forge.invoke_apply();
+    let until = Instant::now() + Duration::from_secs(8);
+    while !forge.get_message().contains("Write outcome is uncertain") {
+        assert!(
+            Instant::now() < until,
+            "uncertain UI: message={:?}, phase={:?}, record={:?}",
+            forge.get_message(),
+            handle.snapshot().phase,
+            handle.snapshot().last_write
+        );
+        std::thread::sleep(Duration::from_millis(5));
+        settle();
+    }
+    assert_eq!(data.writes.load(Ordering::SeqCst), 9);
+    assert_eq!(forge.get_drafts().row_count(), 0);
+    assert!(!forge.get_can_undo());
+    assert_eq!(handle.snapshot().phase, Phase::Blocked);
+    session.capture(&ui, "backend-forge-uncertain");
+    session.resize(680, 580);
+    session.capture(&ui, "backend-forge-uncertain-narrow");
+    session.resize(1100, 700);
+    data.outcome.store(0, Ordering::SeqCst);
+    ui.global::<eg_ui::Connection>().invoke_connect();
+    wait(|| handle.snapshot().phase == Phase::Ready && forge.get_has_item());
+    assert_eq!(data.writes.load(Ordering::SeqCst), 9);
+    assert!(!forge.get_message().contains("uncertain"));
+
+    // Base and identity pickers use the same command and completion path.
+    assert!(forge.get_can_change_base());
+    forge.invoke_pick_base(1);
+    forge.invoke_apply();
+    wait(|| forge.get_can_undo() && data.item.lock().unwrap().as_ref().unwrap().sub_type == 2);
+    forge.invoke_undo();
+    wait(|| !forge.get_can_undo() && data.item.lock().unwrap().as_ref().unwrap().sub_type == 1);
+    let mut unique = item("", 22);
+    unique.rarity = 7;
+    unique.affixes.clear();
+    unique.identity = Some(backend::UniqueIdentity { id: 70, rolls: vec![] });
+    unique.fingerprint = unique.legacy_fingerprint();
+    *data.item.lock().unwrap() = Some(unique);
+    command(&handle, Command::ReadForge, || true);
+    wait(|| forge.get_can_change_identity());
+    forge.invoke_pick_identity(1);
+    forge.invoke_apply();
+    wait(|| forge.get_can_undo() && data.item.lock().unwrap().as_ref().unwrap().identity.as_ref().unwrap().id == 71);
+    forge.invoke_undo();
+    wait(|| !forge.get_can_undo() && data.item.lock().unwrap().as_ref().unwrap().identity.as_ref().unwrap().id == 70);
     *data.item.lock().unwrap() = Some(item("Replaced item", 18));
     command(&handle, Command::ReadForge, || true);
     wait(|| ui.global::<eg_ui::ForgeState>().get_item_name() == "Replaced item");

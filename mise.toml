@@ -33,8 +33,12 @@ run = "cargo xtask tokens --check"
 description = "Headless PNG captures of the real UI on the fake game host, into artifacts/captures"
 run = "cargo capture"
 
+[tasks."ui:test"]
+description = "UI presentation and asynchronous editor tests on fake services"
+run = "cargo test -p eg-ui --lib"
+
 [tasks."capture:trainer"]
-description = "Read-only worker-to-UI integration on owned fake sessions"
+description = "Worker-to-UI reads, ordered drafts, typed write outcomes and Undo on owned fake sessions"
 run = "cargo capture -- --trainer-backend"
 
 [tasks.verify]
@@ -71,7 +75,7 @@ run = "cargo test -p eg-game-access -p eg-trainer -p eg-trainer-helper -p eg-tra
 
 [tasks."trainer:verify"]
 description = "Nightly release trainer/controller tests, then workspace lint, format, tokens and fake-host captures"
-run = ["mise run trainer:test", "mise run trainer:player:client:test", "mise run verify"]
+run = ["mise run trainer:test", "mise run trainer:player:client:test", "mise run ui:test", "mise run verify"]
 
 [tasks."trainer:helper:build"]
 description = "Build and snapshot the retained Rust helper with source/DLL identities; no process access"
