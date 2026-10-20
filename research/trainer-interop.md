@@ -14,11 +14,25 @@ Loaded runtime code and metadata must remain valid while used. The application o
 the engine's publication/lifetime rules nor competing native patchers; types and file hashes
 cannot establish those facts. Unsupported metadata refuses the operation.
 
+Before any remote work, the host reads UnityPlayer.dll's fixed version resource and
+refuses versions outside 6000.4 (also refusing missing/invalid resources). Hashing brackets
+that check and binds the checked disk bytes to the target's loaded module. This selects
+the supported engine family; it does not prove compatibility of every patch or the
+external graph/lifetime assumptions below. Per-operation metadata checks still apply.
+
 Our code controls attachment leases, strong GC roots, copied snapshots, bounded decoding,
 serialized commands and retained helper generations. The control thread owns its attachment;
 a request's roots stay alive through every getter, allocation, refresh and exception boundary.
 Game object pointers and manager IDs in messages are observations, never dereference tickets.
 Native Unity wrappers are checked for a live cached pointer before following the managed graph.
+
+The helper resolves attachment, discovery, invocation and mutation tables together through one
+private Runtime bundle using a single GameAssembly module. Operations no longer resolve an
+independent invocation/write table. Raw unsafe table constructors remain for authored runtimes;
+their caller must still supply valid ABI/export provenance. A thread-local attachment registry
+shares ownership across ThreadContexts for the same export table, so dropping one context's
+last lease cannot detach another context's live leases or roots. Engine-owned attachments
+are never detached. External runtime shutdown/detach remains an unsafe caller obligation.
 
 Startup is load DLL, start outside loader lock, connect. The ExecuteTasks callback forwards the
 original, then compares the current UnitySynchronizationContext's managed main ID with the
@@ -118,6 +132,12 @@ Keep scheduler/threads.rs for byte patches: its census, suspension failure handl
 when a thread is inside the target bytes are product behavior. Do not replace it with an
 unavailable public detour suspension scope. Do not build gameplay hooks on the specialized
 scheduler adapter; the general backend trial finishes before those features.
+
+The suspended section avoids Rust allocations but still calls Win32 context, protection,
+cache and resume wrappers. Only NtQuerySystemInformation's census stub is checked. Other
+wrappers can be instrumented by overlays/security software and wait on a suspended thread's
+lock; deadlock freedom is not established. The unsafe scheduler/start contract excludes such
+instrumentation. Checking a few additional NT stubs would not validate the entire wrapper path.
 
 ## Evidence and archive
 

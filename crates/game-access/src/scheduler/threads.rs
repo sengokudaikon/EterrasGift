@@ -1,4 +1,6 @@
-//! Allocation-free suspended section. NT census layout is the Windows x64 SDK SYSTEM_PROCESS/
+//! No Rust allocations in the suspended section. Other than the checked census stub, Windows
+//! wrappers are called normally; their instrumentation/lock behavior is an external assumption.
+//! NT census layout is the Windows x64 SDK SYSTEM_PROCESS/
 //! SYSTEM_THREAD_INFORMATION layout, validated by bounded offsets and counts before reading IDs.
 use super::{HookError, failure};
 use windows_sys::Win32::Foundation::{CloseHandle, HANDLE};
@@ -60,7 +62,8 @@ impl ThreadSet {
         let query: QuerySystem = unsafe {
             let module = GetModuleHandleW([110u16, 116, 100, 108, 108, 46, 100, 108, 108, 0].as_ptr());
             let function = GetProcAddress(module, c"NtQuerySystemInformation".as_ptr().cast()).ok_or_else(|| failure("system census export"))?;
-            // Reject instrumented/non-native wrappers: the frozen census must not enter user heap
+            // Reject an instrumented/non-native census wrapper: this does not inspect the
+            // protection/context/suspension wrappers used elsewhere. The census must not enter user heap
             // or callback machinery. Only the evaluated x64 native syscall stub is supported.
             let stub = std::slice::from_raw_parts(function as *const u8, 24);
             if stub[..4] != [0x4c, 0x8b, 0xd1, 0xb8] || stub[8..] != [0xf6, 4, 0x25, 8, 3, 0xfe, 0x7f, 1, 0x75, 3, 0x0f, 5, 0xc3, 0xcd, 0x2e, 0xc3] {

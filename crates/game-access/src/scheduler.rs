@@ -241,7 +241,10 @@ impl SchedulerHook {
     /// # Safety
     /// Uphold prepare's exclusive-target/control-flow contract. The current control thread must
     /// not be inside this target or a callback. No runtime calls, allocation or lock acquisition may
-    /// be added to the suspended section. Thread enumeration is a rejection check, not authorization
+    /// be added to the suspended section. The Windows protection, context, cache and resume wrappers
+    /// must not enter instrumentation that waits for a suspended thread or a lock it holds. Only
+    /// the NT census stub is inspected; the other wrappers are not checked for hooks. Thread
+    /// enumeration is a rejection check, not authorization
     /// for arbitrary remote injectors/special APCs. An error after patching may leave the hook installed.
     pub unsafe fn install(&mut self) -> Result<(), HookError> {
         if self.installed {
@@ -277,8 +280,10 @@ impl SchedulerHook {
         if !installing {
             expected[..5].copy_from_slice(&self.patch);
         }
-        // ThreadSet allocates/opens handles before suspending, then performs only bounded native
-        // queries, plain memory work and protection/cache syscalls until every thread is resumed.
+        // ThreadSet allocates/opens handles before suspending. The suspended section calls Win32
+        // context/protection/cache/resume wrappers, not verified direct syscalls. An overlay/EDR
+        // hook in those wrappers can deadlock on a suspended thread; install's external contract
+        // excludes that instrumentation. Checking the census stub does not establish this premise.
         let mut threads = ThreadSet::capture()?;
         let transaction = threads.suspend(self.target.as_ptr() as usize, 11)?;
         // SAFETY: caller keeps this executable entry valid; every enumerated other thread is stopped.
