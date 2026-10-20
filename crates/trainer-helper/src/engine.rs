@@ -4,7 +4,7 @@ use crate::{
 };
 use eg_game_access::{
     il2cpp::{
-        ThreadContext,
+        AttachedThread, ThreadContext,
         discovery::{AttackLeechWriteError, DiscoveryError, ForgeWriteError, RuntimeAccess},
         raw::{self, ExecuteTasks, MethodInfo},
     },
@@ -80,49 +80,52 @@ unsafe fn image_size(module: NonNull<u8>) -> Result<usize, String> {
     }
 }
 
+// All failures here precede the operation body, including every possible store.
+fn prepare_operation<M: Copy, A>(load: impl FnOnce() -> Result<M, String>, resolve: impl FnOnce(M) -> Result<A, String>) -> Result<(M, A), Response> {
+    let module = load().map_err(|error| server::failure(ResponseCode::NotReady, error))?;
+    let api = resolve(module).map_err(|error| server::failure(ResponseCode::Refused, error))?;
+    Ok((module, api))
+}
+/// Resolves and attaches once, before invoking a read or mutation body.
+/// # Safety
+/// Caller supplies the operation's supported, retained runtime/main-thread contract.
+unsafe fn runtime_operation(operation: impl FnOnce(NonNull<u8>, RuntimeAccess, &AttachedThread<'_>) -> Result<Response, Response>) -> Response {
+    unsafe {
+        let result = (|| {
+            let (module, (api, access)) = prepare_operation(|| module(), |module| apis(module))?;
+            let thread = ThreadContext::new(api);
+            let attached = thread.attach().map_err(|error| server::failure(ResponseCode::NotReady, error.to_string()))?;
+            operation(module, access, &attached)
+        })();
+        result.unwrap_or_else(|error| error)
+    }
+}
+
 fn map_discovery(error: DiscoveryError) -> Response {
     let code = match error {
         DiscoveryError::OfflineRequired => ResponseCode::OfflineRequired,
         DiscoveryError::NotReady(_) | DiscoveryError::Runtime(_) => ResponseCode::NotReady,
-        _ => ResponseCode::Failed,
+        _ => ResponseCode::Refused,
     };
     server::failure(code, error.to_string())
 }
 
 unsafe fn read_status() -> Response {
-    // SAFETY: invoked only after original returned on the captured engine main thread. Both
-    // modules/metadata are retained; public field reads use known initialized fixture/game classes.
+    // SAFETY: captured engine thread after original; initialized modules/metadata
+    // remain retained and the status reader rechecks the current offline graph.
     unsafe {
-        let module = match module() {
-            Ok(value) => value,
-            Err(error) => return server::failure(ResponseCode::Failed, error),
-        };
-        let (api, access) = match apis(module) {
-            Ok(value) => value,
-            Err(error) => return server::failure(ResponseCode::Failed, error),
-        };
-        let thread = ThreadContext::new(api);
-        let attached = match thread.attach() {
-            Ok(value) => value,
-            Err(error) => return server::failure(ResponseCode::Failed, error.to_string()),
-        };
-        match access.status(&attached) {
-            Ok(status) => {
-                state().metrics[16].store(status.online as u64, SeqCst);
-                state().metrics[17].store(status.manager, SeqCst);
-                if status.online || status.manager == 0 {
-                    state().metrics[13].fetch_add(1, SeqCst);
-                }
-                match status.encode() {
-                    Ok(bytes) => Response {
-                        code: ResponseCode::Done,
-                        payload: bytes.to_vec(),
-                    },
-                    Err(error) => server::failure(ResponseCode::Failed, error.to_string()),
-                }
+        runtime_operation(|_, access, attached| {
+            let status = access.status(attached).map_err(map_discovery)?;
+            state().metrics[16].store(status.online as u64, SeqCst);
+            state().metrics[17].store(status.manager, SeqCst);
+            if status.online || status.manager == 0 {
+                state().metrics[13].fetch_add(1, SeqCst);
             }
-            Err(error) => map_discovery(error),
-        }
+            Ok(Response {
+                code: ResponseCode::Done,
+                payload: status.encode().map_err(|e| server::failure(ResponseCode::Refused, e.to_string()))?.to_vec(),
+            })
+        })
     }
 }
 
@@ -133,15 +136,11 @@ unsafe fn edit_forge(write: &ForgeWrite) -> Response {
     // RuntimeAccess holds the original graph roots through stale check and store;
     // its typed failures after the store boundary are exclusively Failed.
     unsafe {
-        let result = (|| {
-            let module = module().map_err(|error| server::failure(ResponseCode::Failed, error))?;
-            let (api, access) = apis(module).map_err(|error| server::failure(ResponseCode::Failed, error))?;
+        runtime_operation(|module, access, attached| {
             let writer = raw::FieldWriteApi::resolve(|name| export(module, name)).map_err(|error| server::failure(ResponseCode::Refused, error.to_string()))?;
             let invoke = raw::InvocationApi::resolve(|name| export(module, name)).map_err(|error| server::failure(ResponseCode::Refused, error.to_string()))?;
-            let thread = ThreadContext::new(api);
-            let attached = thread.attach().map_err(|error| server::failure(ResponseCode::NotReady, error.to_string()))?;
             let snapshot = access
-                .edit_forge(&attached, writer, Some(invoke), write.expected_manager(), write.expected(), write.mutation())
+                .edit_forge(attached, writer, Some(invoke), write.expected_manager(), write.expected(), write.mutation())
                 .map_err(|error| {
                     let code = match &error {
                         ForgeWriteError::NotReady(_) => ResponseCode::NotReady,
@@ -157,8 +156,7 @@ unsafe fn edit_forge(write: &ForgeWrite) -> Response {
                 code: ResponseCode::Done,
                 payload,
             })
-        })();
-        result.unwrap_or_else(|error| error)
+        })
     }
 }
 
@@ -170,14 +168,10 @@ unsafe fn set_attack_leech_rate(write: &AttackLeechRateWrite) -> Response {
     // roots the current graph rather than dereferencing them. Its only returned
     // post-setter error is Failed, which never permits retry or rollback.
     unsafe {
-        let result = (|| {
-            let module = module().map_err(|error| server::failure(ResponseCode::NotReady, error))?;
-            let (api, access) = apis(module).map_err(|error| server::failure(ResponseCode::Refused, error))?;
+        runtime_operation(|module, access, attached| {
             let writer = raw::FieldWriteApi::resolve(|name| export(module, name)).map_err(|error| server::failure(ResponseCode::Refused, error.to_string()))?;
-            let thread = ThreadContext::new(api);
-            let attached = thread.attach().map_err(|error| server::failure(ResponseCode::NotReady, error.to_string()))?;
             let observation = access
-                .set_attack_leech(&attached, writer, write.expected(), write.target(), write.desired_value())
+                .set_attack_leech(attached, writer, write.expected(), write.target(), write.desired_value())
                 .map_err(|error| {
                     let code = match &error {
                         AttackLeechWriteError::NotReady(_) => ResponseCode::NotReady,
@@ -192,8 +186,7 @@ unsafe fn set_attack_leech_rate(write: &AttackLeechRateWrite) -> Response {
                 code: ResponseCode::Done,
                 payload: eg_game_access::fields::encode(&eg_game_access::fields::AttackLeechRead::Available(observation)),
             })
-        })();
-        result.unwrap_or_else(|error| error)
+        })
     }
 }
 
@@ -202,19 +195,14 @@ unsafe fn read_forge() -> Response {
     // The bootstrap contract retains modules/metadata and excludes concurrent graph mutation.
     // RuntimeAccess rechecks offline admission and validates/root-copies the entire object graph.
     unsafe {
-        let result = (|| {
-            let module = module().map_err(|error| server::failure(ResponseCode::Failed, error))?;
-            let (api, access) = apis(module).map_err(|error| server::failure(ResponseCode::Failed, error))?;
-            let thread = ThreadContext::new(api);
-            let attached = thread.attach().map_err(|error| server::failure(ResponseCode::NotReady, error.to_string()))?;
-            let snapshot = access.read_forge(&attached).map_err(map_discovery)?;
+        runtime_operation(|_, access, attached| {
+            let snapshot = access.read_forge(attached).map_err(map_discovery)?;
             let payload = eg_game_access::forge::encode(snapshot.as_ref()).map_err(|error| server::failure(ResponseCode::Failed, error.to_string()))?;
             Ok::<_, Response>(Response {
                 code: ResponseCode::Done,
                 payload,
             })
-        })();
-        result.unwrap_or_else(|error| error)
+        })
     }
 }
 
@@ -222,20 +210,15 @@ unsafe fn describe_implicits(query: &eg_game_access::mapping::ForgeDescriptionRe
     // SAFETY: the scheduler supplies the same supported main-thread runtime and
     // synchronous rooted graph span as read_forge, including tooltip allocations.
     unsafe {
-        let result = (|| {
-            let module = module().map_err(|e| server::failure(ResponseCode::Failed, e))?;
-            let (api, access) = apis(module).map_err(|e| server::failure(ResponseCode::Failed, e))?;
+        runtime_operation(|module, access, attached| {
             let invoke = raw::InvocationApi::resolve(|name| export(module, name)).map_err(|e| server::failure(ResponseCode::Refused, e.to_string()))?;
-            let thread = ThreadContext::new(api);
-            let attached = thread.attach().map_err(|e| server::failure(ResponseCode::NotReady, e.to_string()))?;
-            let descriptions = access.describe_implicits(&attached, invoke, query).map_err(map_discovery)?;
+            let descriptions = access.describe_implicits(attached, invoke, query).map_err(map_discovery)?;
             let payload = eg_game_access::mapping::encode_modifiers(&descriptions).map_err(|e| server::failure(ResponseCode::Failed, e.to_string()))?;
             Ok::<_, Response>(Response {
                 code: ResponseCode::Done,
                 payload,
             })
-        })();
-        result.unwrap_or_else(|error| error)
+        })
     }
 }
 
@@ -243,25 +226,20 @@ unsafe fn unique_presentation(query: &eg_game_access::mapping::ForgeDescriptionR
     // SAFETY: scheduler supplies the same supported main-thread runtime/graph
     // span as implicit descriptions; private-copy stores never target the forge.
     unsafe {
-        let result = (|| {
-            let module = module().map_err(|e| server::failure(ResponseCode::Failed, e))?;
-            let (api, access) = apis(module).map_err(|e| server::failure(ResponseCode::Failed, e))?;
+        runtime_operation(|module, access, attached| {
             let invoke = raw::InvocationApi::resolve(|name| export(module, name)).map_err(|e| server::failure(ResponseCode::Refused, e.to_string()))?;
-            let thread = ThreadContext::new(api);
-            let attached = thread.attach().map_err(|e| server::failure(ResponseCode::NotReady, e.to_string()))?;
             let descriptions = if let Some(preview) = preview {
                 let writes = raw::FieldWriteApi::resolve(|name| export(module, name)).map_err(|e| server::failure(ResponseCode::Refused, e.to_string()))?;
-                access.preview_unique(&attached, writes, invoke, preview)
+                access.preview_unique(attached, writes, invoke, preview)
             } else {
-                access.describe_unique(&attached, invoke, query)
+                access.describe_unique(attached, invoke, query)
             }
             .map_err(map_discovery)?;
             Ok::<_, Response>(Response {
                 code: ResponseCode::Done,
                 payload: eg_game_access::mapping::encode_modifiers(&descriptions).map_err(|e| server::failure(ResponseCode::Failed, e.to_string()))?,
             })
-        })();
-        result.unwrap_or_else(|e| e)
+        })
     }
 }
 
@@ -269,21 +247,16 @@ unsafe fn read_affix_mapping(query: &eg_game_access::mapping::AffixMappingQuery)
     // SAFETY: scheduler supplies the supported main-thread runtime and synchronous
     // rooted graph span. Only independent detached objects are mutated for sampling.
     unsafe {
-        let result = (|| {
-            let module = module().map_err(|e| server::failure(ResponseCode::Failed, e))?;
-            let (api, access) = apis(module).map_err(|e| server::failure(ResponseCode::Failed, e))?;
+        runtime_operation(|module, access, attached| {
             let invoke = raw::InvocationApi::resolve(|name| export(module, name)).map_err(|e| server::failure(ResponseCode::Refused, e.to_string()))?;
             let writes = raw::FieldWriteApi::resolve(|name| export(module, name)).map_err(|e| server::failure(ResponseCode::Refused, e.to_string()))?;
-            let thread = ThreadContext::new(api);
-            let attached = thread.attach().map_err(|e| server::failure(ResponseCode::NotReady, e.to_string()))?;
-            let page = access.read_affix_mapping(&attached, writes, invoke, query).map_err(map_discovery)?;
+            let page = access.read_affix_mapping(attached, writes, invoke, query).map_err(map_discovery)?;
             let payload = eg_game_access::mapping::encode_mapping(&page).map_err(|e| server::failure(ResponseCode::Failed, e.to_string()))?;
             Ok::<_, Response>(Response {
                 code: ResponseCode::Done,
                 payload,
             })
-        })();
-        result.unwrap_or_else(|e| e)
+        })
     }
 }
 
@@ -293,18 +266,13 @@ unsafe fn read_attack_leech(expected_manager: u64) -> Response {
     // caches, nonmoving GC and exclusive reference/scalar/native-lifetime access
     // throughout this rooted field copy; no game getter or refresh is called.
     unsafe {
-        let result = (|| {
-            let module = module().map_err(|error| server::failure(ResponseCode::Failed, error))?;
-            let (api, access) = apis(module).map_err(|error| server::failure(ResponseCode::Failed, error))?;
-            let thread = ThreadContext::new(api);
-            let attached = thread.attach().map_err(|error| server::failure(ResponseCode::NotReady, error.to_string()))?;
-            let observation = access.read_attack_leech(&attached, expected_manager).map_err(map_discovery)?;
+        runtime_operation(|_, access, attached| {
+            let observation = access.read_attack_leech(attached, expected_manager).map_err(map_discovery)?;
             Ok::<_, Response>(Response {
                 code: ResponseCode::Done,
                 payload: eg_game_access::fields::encode(&observation),
             })
-        })();
-        result.unwrap_or_else(|error| error)
+        })
     }
 }
 
@@ -313,19 +281,14 @@ unsafe fn read_item_limits() -> Response {
     // callback returned. Runtime/metadata lifetime follows the bootstrap contract;
     // the accessor rechecks offline/native-manager life before reading literal fields.
     unsafe {
-        let result = (|| {
-            let module = module().map_err(|error| server::failure(ResponseCode::Failed, error))?;
-            let (api, access) = apis(module).map_err(|error| server::failure(ResponseCode::Failed, error))?;
-            let thread = ThreadContext::new(api);
-            let attached = thread.attach().map_err(|error| server::failure(ResponseCode::NotReady, error.to_string()))?;
-            let limits = access.read_item_limits(&attached).map_err(map_discovery)?;
+        runtime_operation(|_, access, attached| {
+            let limits = access.read_item_limits(attached).map_err(map_discovery)?;
             let payload = eg_game_access::definitions::encode(&limits).map_err(|error| server::failure(ResponseCode::Failed, error.to_string()))?;
             Ok::<_, Response>(Response {
                 code: ResponseCode::Done,
                 payload,
             })
-        })();
-        result.unwrap_or_else(|error| error)
+        })
     }
 }
 
@@ -338,20 +301,15 @@ unsafe fn read_locale() -> Response {
     // version internal-call cache and native return-buffer allocation/disposal are
     // permitted. Read-only here means no gameplay mutation, not zero side effects.
     unsafe {
-        let result = (|| {
-            let module = module().map_err(|error| server::failure(ResponseCode::Failed, error))?;
-            let (api, access) = apis(module).map_err(|error| server::failure(ResponseCode::Failed, error))?;
+        runtime_operation(|module, access, attached| {
             let invocation = raw::InvocationApi::resolve(|name| export(module, name)).map_err(|error| server::failure(ResponseCode::Failed, error.to_string()))?;
-            let thread = ThreadContext::new(api);
-            let attached = thread.attach().map_err(|error| server::failure(ResponseCode::NotReady, error.to_string()))?;
-            let locale = access.read_game_locale(&attached, invocation).map_err(map_discovery)?;
+            let locale = access.read_game_locale(attached, invocation).map_err(map_discovery)?;
             let payload = eg_game_access::locale::encode(&locale).map_err(|error| server::failure(ResponseCode::Failed, error.to_string()))?;
             Ok::<_, Response>(Response {
                 code: ResponseCode::Done,
                 payload,
             })
-        })();
-        result.unwrap_or_else(|error| error)
+        })
     }
 }
 
@@ -364,20 +322,15 @@ unsafe fn read_catalog_page(kind: eg_game_access::catalog::CatalogKind, cursor: 
     // effects for a ready ailment cache; Entry initializers and dictionary getters are refused.
     // Every pointer stays inside this bounded operation.
     unsafe {
-        let result = (|| {
-            let module = module().map_err(|error| server::failure(ResponseCode::Failed, error))?;
-            let (api, access) = apis(module).map_err(|error| server::failure(ResponseCode::Failed, error))?;
+        runtime_operation(|module, access, attached| {
             let invocation = raw::InvocationApi::resolve(|name| export(module, name)).map_err(|error| server::failure(ResponseCode::Failed, error.to_string()))?;
-            let thread = ThreadContext::new(api);
-            let attached = thread.attach().map_err(|error| server::failure(ResponseCode::NotReady, error.to_string()))?;
-            let page = access.read_catalog_page(&attached, invocation, kind, cursor).map_err(map_discovery)?;
+            let page = access.read_catalog_page(attached, invocation, kind, cursor).map_err(map_discovery)?;
             let payload = eg_game_access::catalog::encode(&page).map_err(|error| server::failure(ResponseCode::Failed, error.to_string()))?;
             Ok::<_, Response>(Response {
                 code: ResponseCode::Done,
                 payload,
             })
-        })();
-        result.unwrap_or_else(|error| error)
+        })
     }
 }
 
@@ -731,6 +684,23 @@ pub extern "C" fn eg_helper_shutdown() -> i32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn setup_failures_cannot_claim_an_operation_or_store_was_attempted() {
+        let mut resolved = false;
+        let result: Result<((), ()), Response> = prepare_operation(
+            || Err("module absent".into()),
+            |_| {
+                resolved = true;
+                Ok(())
+            },
+        );
+        assert_eq!(result.unwrap_err().code, ResponseCode::NotReady);
+        assert!(!resolved);
+        let result: Result<((), ()), Response> = prepare_operation(|| Ok(()), |_| Err("export absent".into()));
+        assert_eq!(result.unwrap_err().code, ResponseCode::Refused);
+        assert_eq!(prepare_operation(|| Ok(7), |module| Ok(module + 1)).unwrap(), (7, 8));
+    }
 
     #[test]
     fn only_a_verified_callback_claims_the_queue_thread() {
