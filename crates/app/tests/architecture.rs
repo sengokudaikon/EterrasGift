@@ -15,6 +15,7 @@ use syn::visit::{self, Visit};
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Tier {
     Shared,
+    Wire,
     Companion,
     Trainer,
     GameAccess,
@@ -26,7 +27,8 @@ fn tier(name: &str) -> Tier {
     match name {
         "eg-core" => Tier::Shared,
         "eg-companion" => Tier::Companion,
-        "eg-trainer" | "eg-trainer-host" | "eg-trainer-helper" | "eg-trainer-wire" => Tier::Trainer,
+        "eg-trainer" | "eg-trainer-host" | "eg-trainer-helper" => Tier::Trainer,
+        "eg-trainer-wire" => Tier::Wire,
         "eg-game-access" => Tier::GameAccess,
         "eg-ui" | "eterras-gift" => Tier::Composition,
         "xtask"
@@ -126,11 +128,11 @@ fn cargo_dependencies_preserve_the_tiers_including_tools() {
             }
             let from = tier(&package.name);
             let to = tier(dependency);
-            assert!(from != Tier::Shared, "{} depends on first-party {dependency}", package.name);
+            assert!(!matches!(from, Tier::Shared | Tier::Wire), "{} depends on first-party {dependency}", package.name);
             assert!(
                 !matches!(
                     (from, to),
-                    (Tier::Companion, Tier::Trainer | Tier::GameAccess) | (Tier::Trainer | Tier::GameAccess, Tier::Companion)
+                    (Tier::Companion, Tier::Trainer | Tier::Wire | Tier::GameAccess) | (Tier::Trainer | Tier::GameAccess, Tier::Companion)
                 ),
                 "{} depends on {dependency}",
                 package.name
@@ -221,7 +223,7 @@ fn source_imports_and_reexports_preserve_feature_boundaries() {
                     !matches!(
                         (area, to),
                         (Tier::Shared, Tier::Companion | Tier::Trainer | Tier::GameAccess | Tier::Composition)
-                            | (Tier::Companion, Tier::Trainer | Tier::GameAccess)
+                            | (Tier::Companion, Tier::Trainer | Tier::Wire | Tier::GameAccess)
                             | (Tier::Trainer, Tier::Companion)
                     ),
                     "{relative}: forbidden import/re-export {}",

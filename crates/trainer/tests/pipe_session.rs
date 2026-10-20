@@ -3,7 +3,6 @@
 use eg_core::game_log::GameLogReader;
 use eg_game_access::{
     pipe::PipeClient,
-    process::ProcessIdentity,
     protocol::{Discovery, DispatcherSpec, REQUEST_SIZE, REQUIRED_KEYS, Request, Response, ResponseCode, RuntimeStatus},
 };
 use eg_trainer::{
