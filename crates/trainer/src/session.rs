@@ -103,10 +103,44 @@ pub enum SessionError {
 }
 impl std::fmt::Display for SessionError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "trainer session: {self:?}")
+        match self {
+            Self::Disabled => f.write_str("The trainer is disabled."),
+            Self::Busy => f.write_str("Wait for the current trainer operation to finish."),
+            Self::NotConnected => f.write_str("Connect before reading or editing an item."),
+            Self::Gate(decision) => {
+                use eg_core::game_log::GameLogStatus;
+                match decision.log_status {
+                    GameLogStatus::Missing => f.write_str("Player.log is missing. Load an offline character before connecting."),
+                    GameLogStatus::Stale => f.write_str("Player.log does not describe this game process. Wait for the game to finish loading."),
+                    GameLogStatus::Unreadable => f.write_str("Player.log could not be read. Check its path and permissions."),
+                    GameLogStatus::Unrecognized => f.write_str("Player.log does not identify an offline character. Reconnect after loading one."),
+                    GameLogStatus::Current => f.write_str(readiness_message(decision.readiness)),
+                }
+            }
+            Self::NotOffline(readiness) => f.write_str(readiness_message(*readiness)),
+            Self::Protocol(error) => write!(f, "The helper returned an invalid response: {error}"),
+            Self::Transport(error) => error.fmt(f),
+            Self::Identity(message) | Self::Mapping(message) | Self::MappingRetryable(message) => f.write_str(message),
+            Self::Helper { message, may_have_run, .. } => {
+                f.write_str(message)?;
+                if *may_have_run {
+                    f.write_str(" The edit may have reached the game; do not automatically retry.")?;
+                }
+                Ok(())
+            }
+        }
     }
 }
 impl std::error::Error for SessionError {}
+
+fn readiness_message(readiness: GameReadiness) -> &'static str {
+    match readiness {
+        GameReadiness::Starting => "Waiting for the game to finish loading.",
+        GameReadiness::NoCharacter => "Load an offline character to continue.",
+        GameReadiness::Online => "The trainer requires an offline character. Online play is not supported.",
+        GameReadiness::Offline => "The offline session could not be verified. Reconnect before continuing.",
+    }
+}
 
 pub struct Session<T, L> {
     target: ProcessIdentity,

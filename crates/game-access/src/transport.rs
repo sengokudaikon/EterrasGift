@@ -26,7 +26,19 @@ pub struct TransportError {
 }
 impl std::fmt::Display for TransportError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "helper transport ({:?}): {:?}", self.delivery, self.failure)
+        match &self.failure {
+            TransportFailure::Io(error) => write!(f, "Communication with the helper failed: {error}"),
+            TransportFailure::Timeout => f.write_str("The helper did not respond in time."),
+            TransportFailure::Busy => f.write_str("The helper is busy. Wait for the current operation to finish."),
+            TransportFailure::Missing => f.write_str("The helper is unavailable. Reconnect before continuing."),
+            TransportFailure::ProcessChanged => f.write_str("The game process changed. Reconnect before continuing."),
+            TransportFailure::WrongServer => f.write_str("The helper connection belongs to another process."),
+            TransportFailure::Protocol(error) => write!(f, "The helper returned an invalid response: {error}"),
+        }?;
+        if self.delivery == Delivery::MayHaveRun {
+            f.write_str(" The request may have reached the game; do not automatically retry.")?;
+        }
+        Ok(())
     }
 }
 impl std::error::Error for TransportError {}
