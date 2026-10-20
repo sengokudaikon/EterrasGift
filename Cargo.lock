@@ -1462,7 +1462,9 @@ dependencies = [
  "eg-trainer",
  "eg-trainer-host",
  "eg-ui",
+ "serde_json",
  "slint",
+ "syn 2.0.119",
  "tempfile",
  "tokio",
 ]
