@@ -9,8 +9,7 @@ use std::path::{Path, PathBuf};
 pub fn write(path: &Path, contents: &[u8]) -> io::Result<()> {
     replace(path, |temporary| {
         let mut file = OpenOptions::new().write(true).create_new(true).open(temporary)?;
-        file.write_all(contents)?;
-        file.flush()
+        file.write_all(contents)
     })
 }
 
@@ -27,7 +26,7 @@ pub fn copy_new(source: &Path, target: &Path) -> io::Result<()> {
         let mut input = File::open(source)?;
         let mut output = OpenOptions::new().write(true).create_new(true).open(&temporary)?;
         io::copy(&mut input, &mut output)?;
-        output.flush()?;
+        output.sync_all()?;
         drop(output);
         move_new(&temporary, target)
     })();
@@ -36,11 +35,14 @@ pub fn copy_new(source: &Path, target: &Path) -> io::Result<()> {
 }
 
 /// Has `write` make the new file at the temporary path it is given, then puts it in place of `path`. A write that
-/// fails (one that checks what it wrote, say) leaves the file as it was.
+/// fails (one that checks what it wrote, say) leaves the file as it was. The callback
+/// must finish/close its writes before returning; this function syncs the completed file before renaming.
 pub fn replace(path: &Path, write: impl FnOnce(&Path) -> io::Result<()>) -> io::Result<()> {
     create_parent(path)?;
     let temporary = temporary(path);
-    let result = write(&temporary).and_then(|()| fs::rename(&temporary, path));
+    let result = write(&temporary)
+        .and_then(|()| OpenOptions::new().write(true).open(&temporary)?.sync_all())
+        .and_then(|()| move_replace(&temporary, path));
     discard(&temporary);
     result
 }
@@ -65,13 +67,30 @@ fn discard(temporary: &Path) {
 }
 
 #[cfg(windows)]
+fn move_replace(from: &Path, to: &Path) -> io::Result<()> {
+    use windows_sys::Win32::Storage::FileSystem::MOVEFILE_REPLACE_EXISTING;
+    move_file(from, to, MOVEFILE_REPLACE_EXISTING)
+}
+#[cfg(not(windows))]
+fn move_replace(from: &Path, to: &Path) -> io::Result<()> {
+    fs::rename(from, to)
+}
+
+#[cfg(windows)]
 fn move_new(from: &Path, to: &Path) -> io::Result<()> {
+    move_file(from, to, 0)
+}
+
+#[cfg(windows)]
+fn move_file(from: &Path, to: &Path, flags: u32) -> io::Result<()> {
     use std::os::windows::ffi::OsStrExt;
-    use windows_sys::Win32::Storage::FileSystem::MoveFileExW;
+    use windows_sys::Win32::Storage::FileSystem::{MOVEFILE_WRITE_THROUGH, MoveFileExW};
     let wide = |path: &Path| path.as_os_str().encode_wide().chain(Some(0)).collect::<Vec<u16>>();
-    // Without MOVEFILE_REPLACE_EXISTING the move fails when the target exists.
-    // SAFETY: both arguments are NUL-terminated wide strings that outlive the call.
-    if unsafe { MoveFileExW(wide(from).as_ptr(), wide(to).as_ptr(), 0) } == 0 {
+    // The completed temporary file is synced before publication. WRITE_THROUGH
+    // also asks Windows to finish the move before returning; it is not a claim
+    // that arbitrary disks/controllers or non-Windows directory metadata are durable.
+    // SAFETY: both NUL-terminated paths outlive this synchronous call.
+    if unsafe { MoveFileExW(wide(from).as_ptr(), wide(to).as_ptr(), flags | MOVEFILE_WRITE_THROUGH) } == 0 {
         Err(io::Error::last_os_error())
     } else {
         Ok(())
@@ -110,6 +129,28 @@ mod tests {
         assert!(failed.is_err());
         assert_eq!(fs::read(&path).unwrap(), b"old");
         assert_eq!(fs::read_dir(temp.path()).unwrap().count(), 1);
+    }
+
+    #[test]
+    fn a_sync_failure_does_not_publish_the_temporary_file() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("settings.json");
+        write(&path, b"old").unwrap();
+        let result = replace(&path, |temporary| {
+            fs::create_dir(temporary)?;
+            Ok(())
+        });
+        assert!(result.is_err());
+        assert_eq!(fs::read(&path).unwrap(), b"old");
+        // An invalid writer created a directory; discard intentionally removes only files.
+        let leftover = fs::read_dir(temp.path())
+            .unwrap()
+            .find_map(|entry| {
+                let path = entry.unwrap().path();
+                path.is_dir().then_some(path)
+            })
+            .unwrap();
+        fs::remove_dir(leftover).unwrap();
     }
 
     #[test]
