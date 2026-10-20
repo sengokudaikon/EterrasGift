@@ -89,8 +89,9 @@ impl Transport for PipeClient {
     }
 }
 
-// Protocol21 helper recreates its one pipe after every response. Listing failures count as present
-// rather than wrongly claiming it died. These looks occur before any request byte is sent.
+// The helper retains one server instance across exchanges. A busy instance is
+// still alive; listing failures also count as present rather than claiming it died.
+// These probes occur before any request byte is sent.
 async fn pipe_exists(name: &str) -> bool {
     let wanted = std::path::Path::new(name).file_name().unwrap_or_default();
     for _ in 0..3 {

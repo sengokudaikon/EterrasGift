@@ -161,11 +161,14 @@ pub async fn run(pid: u32, backend: &mut impl Backend, shared: &Shared) -> Resul
     }
 }
 async fn serve(pid: u32, backend: &mut impl Backend, shared: &Shared) -> Result<(), String> {
-    let mut owner: Option<Owner> = None;
     let name = format!(r"\\.\pipe\eterras-gift-{pid}");
     // Retain the only server handle for the entire service lifetime. Disconnect
     // ends an exchange without relinquishing the pipe name or its DACL.
-    let mut pipe = create(&name, shared).await.map_err(|error| error.to_string())?;
+    let pipe = create(&name, shared).await.map_err(|error| error.to_string())?;
+    serve_pipe(pid, pipe, backend, shared).await
+}
+async fn serve_pipe(pid: u32, mut pipe: NamedPipeServer, backend: &mut impl Backend, shared: &Shared) -> Result<(), String> {
+    let mut owner: Option<Owner> = None;
     let mut connected = false;
     shared.metrics[10].store(1, SeqCst);
     'connections: while !shared.stop.load(SeqCst) {
@@ -191,7 +194,12 @@ async fn serve(pid: u32, backend: &mut impl Backend, shared: &Shared) -> Result<
         loop {
             match wait(pipe.connect(), shared, owner.as_ref(), Duration::from_secs(1)).await {
                 Ok(Ok(())) => break,
-                Ok(Err(error)) if matches!(error.raw_os_error(), Some(109 | 232 | 233)) => continue 'connections,
+                Ok(Err(error)) if matches!(error.raw_os_error(), Some(109 | 232 | 233)) => {
+                    // A peer may attach and close before the first connect is
+                    // polled. Reset that exchange even without a successful accept.
+                    connected = true;
+                    continue 'connections;
+                }
                 Ok(Err(error)) => return Err(error.to_string()),
                 Err(Interrupted::Stop) => return Ok(()),
                 Err(Interrupted::OwnerExited) => reap(&mut owner, shared),
@@ -312,5 +320,61 @@ async fn finish_connection_io(pipe: &mut NamedPipeServer) -> io::Result<()> {
         Ok(_) => Ok(()),
         Err(error) if matches!(error.raw_os_error(), Some(109 | 232 | 233 | 995)) => Ok(()),
         Err(error) => Err(error),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tokio::{net::windows::named_pipe::ClientOptions, time::timeout};
+
+    struct RefusingBackend;
+    impl Backend for RefusingBackend {
+        fn discover(&mut self) -> Result<Discovery, Response> {
+            Err(failure(ResponseCode::NotReady, "authored runtime"))
+        }
+        fn ensure_dispatcher(&mut self, _: &DispatcherSpec) -> Result<(), Response> {
+            panic!("discovery only")
+        }
+        fn submit(&mut self, _: Request) -> Result<Pending<Request, Response>, Response> {
+            panic!("discovery only")
+        }
+        fn restore(&mut self) -> Result<(), String> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn peer_closed_before_first_accept_does_not_strand_the_retained_instance() {
+        tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap().block_on(async {
+            let shared = Shared::default();
+            let name = format!(r"\\.\pipe\eg-first-accept-{}", std::process::id());
+            let pipe = create(&name, &shared).await.unwrap();
+            // No server connect has been polled yet. Force the initial instance
+            // into the closed-client state instead of relying on scheduling luck.
+            drop(ClientOptions::new().open(&name).unwrap());
+            let client = async {
+                let next = loop {
+                    match ClientOptions::new().open(&name) {
+                        Ok(pipe) => break pipe,
+                        Err(error) if error.raw_os_error() == Some(231) => sleep(Duration::from_millis(1)).await,
+                        Err(error) => panic!("next client: {error}"),
+                    }
+                };
+                let mut next = next;
+                next.write_all(&Request::Discover.encode()).await.unwrap();
+                let mut header = [0; 12];
+                next.read_exact(&mut header).await.unwrap();
+                assert_eq!(Response::decode_header(&header).unwrap().0, ResponseCode::NotReady);
+                shared.stop.store(true, SeqCst);
+            };
+            timeout(Duration::from_secs(3), async {
+                let mut backend = RefusingBackend;
+                let (result, ()) = tokio::join!(serve_pipe(std::process::id(), pipe, &mut backend, &shared), client);
+                result.unwrap();
+            })
+            .await
+            .unwrap();
+        });
     }
 }
