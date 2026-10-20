@@ -133,6 +133,43 @@ fn nested_leases_keep_owned_attachment_when_first_lease_drops_first() {
 }
 
 #[test]
+fn separate_contexts_share_owned_attachment_until_the_last_root_and_lease_drop() {
+    let second_context = context(Fake::default());
+    let second;
+    let root;
+    {
+        // SAFETY: same exact fake runtime, without resetting its live thread state.
+        let first_context = unsafe { ThreadContext::new(Api::resolve(symbol).unwrap()) };
+        let first = first_context.attach().unwrap();
+        second = second_context.attach().unwrap();
+        // SAFETY: fake live object, never dereferenced.
+        root = unsafe { second.root(NonNull::new(sentinel()).unwrap()) }.unwrap();
+        drop(first);
+    }
+    assert_eq!(root.target(), NonNull::new(sentinel()));
+    assert_eq!(events(), ["domain", "attach", "root"]);
+    drop(root);
+    drop(second);
+    assert_eq!(events(), ["domain", "attach", "root", "free", "detach"]);
+}
+
+#[test]
+fn separate_contexts_never_detach_an_engine_attachment() {
+    let first_context = context(Fake {
+        attached: true,
+        ..Fake::default()
+    });
+    // SAFETY: same live fake runtime, with an externally owned attachment.
+    let second_context = unsafe { ThreadContext::new(Api::resolve(symbol).unwrap()) };
+    let first = first_context.attach().unwrap();
+    let second = second_context.attach().unwrap();
+    drop(second);
+    drop(first);
+    assert!(events().is_empty());
+    assert!(FAKE.with_borrow(|f| f.attached));
+}
+
+#[test]
 fn a_later_lease_attaches_again_after_the_last_one_drops() {
     let runtime = context(Fake::default());
     drop(runtime.attach().unwrap());

@@ -1,5 +1,5 @@
 use super::raw::{Api, Object, Thread};
-use std::cell::Cell;
+use std::cell::RefCell;
 use std::ffi::c_void;
 use std::marker::PhantomData;
 use std::ptr::NonNull;
@@ -28,9 +28,16 @@ impl std::error::Error for RuntimeError {}
 
 #[derive(Clone, Copy)]
 struct Attachment {
+    runtime: [usize; 7],
     thread: NonNull<Thread>,
     owned: bool,
     leases: usize,
+}
+
+thread_local! {
+    // Contexts on this OS thread share the final-detach decision. Entries exist
+    // only while a lease is alive; no runtime pointer survives the last lease.
+    static ATTACHMENTS: RefCell<Vec<Attachment>> = const { RefCell::new(Vec::new()) };
 }
 
 /// One OS thread's access to one live runtime. Attachment does not imply Unity main-thread access.
@@ -39,7 +46,6 @@ struct Attachment {
 /// A context and all its leases/roots are deliberately neither Send nor Sync.
 pub struct ThreadContext {
     api: Api,
-    attachment: Cell<Option<Attachment>>,
     _thread_affinity: PhantomData<Rc<()>>,
 }
 
@@ -50,52 +56,75 @@ impl ThreadContext {
     /// The table must match a live runtime using pointer-valued GC handles. Its functions must
     /// obey IL2CPP attachment/rooting semantics and remain callable until this context and every
     /// lease/root are finished. They must not reenter this context during attachment transitions.
-    /// On this OS thread there must be no other owner that can detach a thread borrowed by this
-    /// context (including another context), or free its handles. The engine may own an existing
-    /// attachment provided it outlives every lease. Runtime shutdown must be coordinated externally.
+    /// External code must not detach a thread borrowed by this context or free its handles.
+    /// Other ThreadContexts share attachment ownership through a per-OS-thread registry.
+    /// The engine may own an existing attachment provided it outlives every lease.
+    /// Runtime shutdown must be coordinated externally. Attachment transitions must not
+    /// reenter another ThreadContext on this OS thread either.
     pub unsafe fn new(api: Api) -> Self {
         Self {
             api,
-            attachment: Cell::new(None),
             _thread_affinity: PhantomData,
         }
     }
 
     pub fn attach(&self) -> Result<AttachedThread<'_>, RuntimeError> {
-        if let Some(mut active) = self.attachment.get() {
-            active.leases = active.leases.checked_add(1).ok_or(RuntimeError::TooManyAttachments)?;
-            self.attachment.set(Some(active));
-            return Ok(AttachedThread { context: self });
-        }
-        // SAFETY: new's contract keeps the runtime alive on this thread. current/domain/attach
-        // are the bootstrap APIs that may be called before registering a native thread.
-        let current = unsafe { (self.api.thread_current)() };
-        let (thread, owned) = if let Some(thread) = NonNull::new(current) {
-            (thread, false)
-        } else {
-            // SAFETY: same bootstrap contract.
-            let domain = NonNull::new(unsafe { (self.api.domain_get)() }).ok_or(RuntimeError::DomainUnavailable)?;
-            // SAFETY: domain is returned by the live runtime; this is the current OS thread.
-            let thread = NonNull::new(unsafe { (self.api.thread_attach)(domain.as_ptr()) }).ok_or(RuntimeError::AttachFailed)?;
-            (thread, true)
-        };
-        self.attachment.set(Some(Attachment { thread, owned, leases: 1 }));
-        Ok(AttachedThread { context: self })
+        ATTACHMENTS.with_borrow_mut(|attachments| {
+            let runtime = self.runtime_key();
+            if let Some(active) = attachments.iter_mut().find(|active| active.runtime == runtime) {
+                active.leases = active.leases.checked_add(1).ok_or(RuntimeError::TooManyAttachments)?;
+                return Ok(AttachedThread { context: self });
+            }
+            // Reserve before acquiring an owned native attachment.
+            attachments.reserve(1);
+            // SAFETY: new's contract keeps the runtime alive on this thread. current/domain/attach
+            // are the bootstrap APIs that may be called before registering a native thread.
+            let current = unsafe { (self.api.thread_current)() };
+            let (thread, owned) = if let Some(thread) = NonNull::new(current) {
+                (thread, false)
+            } else {
+                // SAFETY: same bootstrap contract.
+                let domain = NonNull::new(unsafe { (self.api.domain_get)() }).ok_or(RuntimeError::DomainUnavailable)?;
+                // SAFETY: domain is returned by the live runtime; this is the current OS thread.
+                let thread = NonNull::new(unsafe { (self.api.thread_attach)(domain.as_ptr()) }).ok_or(RuntimeError::AttachFailed)?;
+                (thread, true)
+            };
+            attachments.push(Attachment {
+                runtime,
+                thread,
+                owned,
+                leases: 1,
+            });
+            Ok(AttachedThread { context: self })
+        })
+    }
+
+    fn runtime_key(&self) -> [usize; 7] {
+        [
+            self.api.domain_get as usize,
+            self.api.thread_current as usize,
+            self.api.thread_attach as usize,
+            self.api.thread_detach as usize,
+            self.api.gchandle_new as usize,
+            self.api.gchandle_free as usize,
+            self.api.gchandle_get_target as usize,
+        ]
     }
 
     fn release(&self) {
-        let Some(mut active) = self.attachment.get() else { return };
-        active.leases -= 1;
-        if active.leases != 0 {
-            self.attachment.set(Some(active));
-        } else {
-            self.attachment.set(None);
-            if active.owned {
-                // SAFETY: this is the final lease for our attachment, on its creating OS thread.
-                // Roots borrow their lease, so none can still be used through that lease.
-                unsafe { (self.api.thread_detach)(active.thread.as_ptr()) };
+        ATTACHMENTS.with_borrow_mut(|attachments| {
+            let index = attachments.iter().position(|active| active.runtime == self.runtime_key()).expect("live attachment lease");
+            let active = &mut attachments[index];
+            active.leases -= 1;
+            if active.leases == 0 {
+                let active = attachments.swap_remove(index);
+                if active.owned {
+                    // SAFETY: this is the final lease for our attachment, on its creating OS thread.
+                    // Roots borrow their lease, so none can still be used through that lease.
+                    unsafe { (self.api.thread_detach)(active.thread.as_ptr()) };
+                }
             }
-        }
+        });
     }
 }
 

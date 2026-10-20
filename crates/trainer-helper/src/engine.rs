@@ -56,13 +56,30 @@ unsafe fn export(module: NonNull<u8>, name: &'static CStr) -> Option<NonNull<c_v
     // SAFETY: caller pins the exact module and selects only declared exports.
     unsafe { GetProcAddress(module.as_ptr().cast(), name.as_ptr().cast()) }.and_then(|value| NonNull::new(value as *const () as *mut c_void))
 }
-unsafe fn apis(module: NonNull<u8>) -> Result<(raw::Api, RuntimeAccess), String> {
-    // SAFETY: caller's exact runtime ABI/lifetime contract covers both public export tables.
-    unsafe {
-        Ok((
-            raw::Api::resolve(|name| export(module, name)).map_err(|e| e.to_string())?,
-            RuntimeAccess::resolve(|name| export(module, name)).map_err(|e| e.to_string())?,
-        ))
+// One resolver binds every table to the same pinned GameAssembly. Keep the
+// tables private: operation closures receive this bundle, never re-resolve them.
+struct Runtime {
+    ownership: raw::Api,
+    access: RuntimeAccess,
+    invocation: raw::InvocationApi,
+    writes: raw::FieldWriteApi,
+}
+impl Runtime {
+    unsafe fn resolve(module: NonNull<u8>) -> Result<Self, String> {
+        // SAFETY: caller retains this exact module and establishes its supported ABI.
+        unsafe {
+            let mut symbol = |name| export(module, name);
+            Ok(Self {
+                ownership: raw::Api::resolve(&mut symbol).map_err(|e| e.to_string())?,
+                access: RuntimeAccess::resolve(&mut symbol).map_err(|e| e.to_string())?,
+                invocation: raw::InvocationApi::resolve(&mut symbol).map_err(|e| e.to_string())?,
+                writes: raw::FieldWriteApi::resolve(&mut symbol).map_err(|e| e.to_string())?,
+            })
+        }
+    }
+    fn thread(&self) -> ThreadContext {
+        // SAFETY: resolve's caller retains the module through every operation and lease.
+        unsafe { ThreadContext::new(self.ownership) }
     }
 }
 unsafe fn image_size(module: NonNull<u8>) -> Result<usize, String> {
@@ -89,13 +106,13 @@ fn prepare_operation<M: Copy, A>(load: impl FnOnce() -> Result<M, String>, resol
 /// Resolves and attaches once, before invoking a read or mutation body.
 /// # Safety
 /// Caller supplies the operation's supported, retained runtime/main-thread contract.
-unsafe fn runtime_operation(operation: impl FnOnce(NonNull<u8>, RuntimeAccess, &AttachedThread<'_>) -> Result<Response, Response>) -> Response {
+unsafe fn runtime_operation(operation: impl FnOnce(&Runtime, RuntimeAccess, &AttachedThread<'_>) -> Result<Response, Response>) -> Response {
     unsafe {
         let result = (|| {
-            let (module, (api, access)) = prepare_operation(|| module(), |module| apis(module))?;
-            let thread = ThreadContext::new(api);
+            let (_, runtime) = prepare_operation(|| module(), |module| Runtime::resolve(module))?;
+            let thread = runtime.thread();
             let attached = thread.attach().map_err(|error| server::failure(ResponseCode::NotReady, error.to_string()))?;
-            operation(module, access, &attached)
+            operation(&runtime, runtime.access, &attached)
         })();
         result.unwrap_or_else(|error| error)
     }
@@ -131,14 +148,14 @@ unsafe fn read_status() -> Response {
 
 unsafe fn edit_forge(write: &ForgeWrite) -> Response {
     // SAFETY: only the established main thread calls this after original returns.
-    // Startup's exact-runtime ownership contract must additionally authorize this
-    // particular field mutation and exclude concurrent graph mutation/shutdown.
+    // The unsafe start contract ASSUMES this mutation is permitted and excludes
+    // concurrent graph mutation/shutdown; startup does not establish those facts.
     // RuntimeAccess holds the original graph roots through stale check and store;
     // its typed failures after the store boundary are exclusively Failed.
     unsafe {
-        runtime_operation(|module, access, attached| {
-            let writer = raw::FieldWriteApi::resolve(|name| export(module, name)).map_err(|error| server::failure(ResponseCode::Refused, error.to_string()))?;
-            let invoke = raw::InvocationApi::resolve(|name| export(module, name)).map_err(|error| server::failure(ResponseCode::Refused, error.to_string()))?;
+        runtime_operation(|runtime, access, attached| {
+            let writer = runtime.writes;
+            let invoke = runtime.invocation;
             let snapshot = access
                 .edit_forge(attached, writer, Some(invoke), write.expected_manager(), write.expected(), write.mutation())
                 .map_err(|error| {
@@ -162,14 +179,15 @@ unsafe fn edit_forge(write: &ForgeWrite) -> Response {
 
 unsafe fn set_attack_leech_rate(write: &AttackLeechRateWrite) -> Response {
     // SAFETY: the admitted engine main thread calls after the original dispatcher.
-    // Startup additionally authorizes this conditional CURRENT-player field change
+    // The unsafe start contract ASSUMES this conditional CURRENT-player mutation
     // and exclusive initialized graph/scalar/native lifetime through full readback.
+    // Startup checks do not establish exclusive game-graph access.
     // Expected wire tokens are comparison data only; RuntimeAccess resolves and
     // roots the current graph rather than dereferencing them. Its only returned
     // post-setter error is Failed, which never permits retry or rollback.
     unsafe {
-        runtime_operation(|module, access, attached| {
-            let writer = raw::FieldWriteApi::resolve(|name| export(module, name)).map_err(|error| server::failure(ResponseCode::Refused, error.to_string()))?;
+        runtime_operation(|runtime, access, attached| {
+            let writer = runtime.writes;
             let observation = access
                 .set_attack_leech(attached, writer, write.expected(), write.target(), write.desired_value())
                 .map_err(|error| {
@@ -192,7 +210,8 @@ unsafe fn set_attack_leech_rate(write: &AttackLeechRateWrite) -> Response {
 
 unsafe fn read_forge() -> Response {
     // SAFETY: called only after the engine original returns on its captured main thread.
-    // The bootstrap contract retains modules/metadata and excludes concurrent graph mutation.
+    // Module pins retain code. Absence of concurrent graph mutation is an external
+    // assumption of unsafe start, not a property established by bootstrap.
     // RuntimeAccess rechecks offline admission and validates/root-copies the entire object graph.
     unsafe {
         runtime_operation(|_, access, attached| {
@@ -210,8 +229,8 @@ unsafe fn describe_implicits(query: &eg_game_access::mapping::ForgeDescriptionRe
     // SAFETY: the scheduler supplies the same supported main-thread runtime and
     // synchronous rooted graph span as read_forge, including tooltip allocations.
     unsafe {
-        runtime_operation(|module, access, attached| {
-            let invoke = raw::InvocationApi::resolve(|name| export(module, name)).map_err(|e| server::failure(ResponseCode::Refused, e.to_string()))?;
+        runtime_operation(|runtime, access, attached| {
+            let invoke = runtime.invocation;
             let descriptions = access.describe_implicits(attached, invoke, query).map_err(map_discovery)?;
             let payload = eg_game_access::mapping::encode_modifiers(&descriptions).map_err(|e| server::failure(ResponseCode::Failed, e.to_string()))?;
             Ok::<_, Response>(Response {
@@ -226,10 +245,10 @@ unsafe fn unique_presentation(query: &eg_game_access::mapping::ForgeDescriptionR
     // SAFETY: scheduler supplies the same supported main-thread runtime/graph
     // span as implicit descriptions; private-copy stores never target the forge.
     unsafe {
-        runtime_operation(|module, access, attached| {
-            let invoke = raw::InvocationApi::resolve(|name| export(module, name)).map_err(|e| server::failure(ResponseCode::Refused, e.to_string()))?;
+        runtime_operation(|runtime, access, attached| {
+            let invoke = runtime.invocation;
             let descriptions = if let Some(preview) = preview {
-                let writes = raw::FieldWriteApi::resolve(|name| export(module, name)).map_err(|e| server::failure(ResponseCode::Refused, e.to_string()))?;
+                let writes = runtime.writes;
                 access.preview_unique(attached, writes, invoke, preview)
             } else {
                 access.describe_unique(attached, invoke, query)
@@ -247,9 +266,9 @@ unsafe fn read_affix_mapping(query: &eg_game_access::mapping::AffixMappingQuery)
     // SAFETY: scheduler supplies the supported main-thread runtime and synchronous
     // rooted graph span. Only independent detached objects are mutated for sampling.
     unsafe {
-        runtime_operation(|module, access, attached| {
-            let invoke = raw::InvocationApi::resolve(|name| export(module, name)).map_err(|e| server::failure(ResponseCode::Refused, e.to_string()))?;
-            let writes = raw::FieldWriteApi::resolve(|name| export(module, name)).map_err(|e| server::failure(ResponseCode::Refused, e.to_string()))?;
+        runtime_operation(|runtime, access, attached| {
+            let invoke = runtime.invocation;
+            let writes = runtime.writes;
             let page = access.read_affix_mapping(attached, writes, invoke, query).map_err(map_discovery)?;
             let payload = eg_game_access::mapping::encode_mapping(&page).map_err(|e| server::failure(ResponseCode::Failed, e.to_string()))?;
             Ok::<_, Response>(Response {
@@ -262,7 +281,7 @@ unsafe fn read_affix_mapping(query: &eg_game_access::mapping::AffixMappingQuery)
 
 unsafe fn read_attack_leech(expected_manager: u64) -> Response {
     // SAFETY: the established engine main thread calls only after the original
-    // dispatcher returns. Startup additionally guarantees initialized static
+    // dispatcher returns. The unsafe start contract additionally ASSUMES initialized
     // caches, nonmoving GC and exclusive reference/scalar/native-lifetime access
     // throughout this rooted field copy; no game getter or refresh is called.
     unsafe {
@@ -301,8 +320,8 @@ unsafe fn read_locale() -> Response {
     // version internal-call cache and native return-buffer allocation/disposal are
     // permitted. Read-only here means no gameplay mutation, not zero side effects.
     unsafe {
-        runtime_operation(|module, access, attached| {
-            let invocation = raw::InvocationApi::resolve(|name| export(module, name)).map_err(|error| server::failure(ResponseCode::Failed, error.to_string()))?;
+        runtime_operation(|runtime, access, attached| {
+            let invocation = runtime.invocation;
             let locale = access.read_game_locale(attached, invocation).map_err(map_discovery)?;
             let payload = eg_game_access::locale::encode(&locale).map_err(|error| server::failure(ResponseCode::Failed, error.to_string()))?;
             Ok::<_, Response>(Response {
@@ -322,8 +341,8 @@ unsafe fn read_catalog_page(kind: eg_game_access::catalog::CatalogKind, cursor: 
     // effects for a ready ailment cache; Entry initializers and dictionary getters are refused.
     // Every pointer stays inside this bounded operation.
     unsafe {
-        runtime_operation(|module, access, attached| {
-            let invocation = raw::InvocationApi::resolve(|name| export(module, name)).map_err(|error| server::failure(ResponseCode::Failed, error.to_string()))?;
+        runtime_operation(|runtime, access, attached| {
+            let invocation = runtime.invocation;
             let page = access.read_catalog_page(attached, invocation, kind, cursor).map_err(map_discovery)?;
             let payload = eg_game_access::catalog::encode(&page).map_err(|error| server::failure(ResponseCode::Failed, error.to_string()))?;
             Ok::<_, Response>(Response {
@@ -368,9 +387,10 @@ unsafe fn check_dispatch_thread() -> Result<bool, String> {
     // initialized runtime. The getters access only its thread-local context.
     unsafe {
         let module = module()?;
-        let (api, access) = apis(module)?;
-        let invocation = raw::InvocationApi::resolve(|name| export(module, name)).map_err(|e| e.to_string())?;
-        let thread = ThreadContext::new(api);
+        let runtime = Runtime::resolve(module)?;
+        let access = runtime.access;
+        let invocation = runtime.invocation;
+        let thread = runtime.thread();
         let attached = thread.attach().map_err(|e| e.to_string())?;
         access.is_dispatcher_thread(&attached, invocation).map_err(|e| e.to_string())
     }
@@ -525,8 +545,9 @@ unsafe fn worker() -> Result<(), String> {
     // SAFETY: start's contract pins an initialized exact runtime before creating this thread.
     unsafe {
         let module = module()?;
-        let (api, access) = apis(module)?;
-        let thread = ThreadContext::new(api);
+        let runtime = Runtime::resolve(module)?;
+        let access = runtime.access;
+        let thread = runtime.thread();
         let attached = thread.attach().map_err(|error| error.to_string())?;
         let mut control = Control {
             module,
@@ -556,6 +577,13 @@ unsafe fn worker() -> Result<(), String> {
 /// # Safety
 /// Caller selects the supported initialized Unity6000.4.8 Windows x64 runtime,
 /// retains helper/runtime modules through game exit and excludes competing patches.
+/// Game-specific assumptions: the collector is nonmoving, queried static caches are
+/// initialized, and each synchronous operation excludes concurrent graph/scalar mutation,
+/// reentrancy and native-object destruction; edits additionally require exclusive write
+/// access. Startup does not establish these assumptions. Callback identity checks and
+/// roots/stale checks do not provide a lock on the game's graph or its native objects.
+/// Windows wrappers called during scheduler suspension must not wait on suspended-thread
+/// locks (including through third-party instrumentation); only the census stub is checked.
 /// Never call under DllMain/loader lock. Per-operation graph checks still apply.
 pub unsafe extern "C" fn eg_helper_start(_legacy_main_tid: u32) -> i32 {
     // SAFETY: caller establishes the supported runtime and module lifetime.
