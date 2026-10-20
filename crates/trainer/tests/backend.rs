@@ -127,6 +127,7 @@ struct Shared {
     unique_lines: Mutex<Option<Vec<backend::ModifierSnapshot>>>,
     preview_errors: Mutex<VecDeque<BackendError>>,
     mapping_errors: Mutex<VecDeque<BackendError>>,
+    mapping_result: Mutex<Option<eg_trainer::mapping::ValueTable>>,
     disconnect_block: Block,
     write_block: Block,
     refresh_block: Block,
@@ -165,6 +166,7 @@ impl Shared {
             unique_lines: Mutex::new(None),
             preview_errors: Mutex::new(VecDeque::new()),
             mapping_errors: Mutex::new(VecDeque::new()),
+            mapping_result: Mutex::new(None),
             disconnect_block: Block::default(),
             write_block: Block::default(),
             refresh_block: Block::default(),
@@ -287,6 +289,9 @@ impl BackendConnection for Connection {
         self.shared.call("mapping", &self.shared.mapping_block).await;
         if let Some(error) = self.shared.mapping_errors.lock().unwrap().pop_front() {
             return Err(error);
+        }
+        if let Some(table) = self.shared.mapping_result.lock().unwrap().take() {
+            return Ok(table);
         }
         mappings::table(expected, request)
     }

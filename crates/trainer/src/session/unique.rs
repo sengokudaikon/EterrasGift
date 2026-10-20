@@ -35,11 +35,7 @@ impl<T: Transport, L: LogSource> Session<T, L> {
         if draft.target != RollTarget::Unique {
             return Err(SessionError::Mapping("Only unique rolls have a tooltip preview.".into()));
         }
-        let identity = expected.catalog_identity();
-        if expected.process() != &self.target
-            || !identity.binary_hash.eq_ignore_ascii_case(self.profile.binary_hash())
-            || !identity.metadata_hash.eq_ignore_ascii_case(self.profile.metadata_hash())
-        {
+        if !self.observation_matches(expected) {
             return Err(SessionError::Mapping("The preview belongs to a different process or catalog.".into()));
         }
         // Reuse the pure preview validator before entering transport.

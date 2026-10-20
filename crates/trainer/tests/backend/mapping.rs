@@ -137,6 +137,32 @@ fn local_mapping_unavailability_is_memoized_but_transport_and_protocol_failures_
         }
     });
 }
+
+#[test]
+fn mapping_from_another_observation_revokes_the_connection_and_is_never_published() {
+    run(async {
+        let shared = shared();
+        let (handle, worker) = start(&shared, options(), None);
+        connected(&handle).await;
+        let before = handle.snapshot();
+        let expected = before.expected_observation().unwrap();
+        let other = ExpectedObservation::new(
+            expected.generation() + 1,
+            expected.process().clone(),
+            expected.catalog_identity().clone(),
+            expected.snapshot().clone(),
+        )
+        .unwrap();
+        *shared.mapping_result.lock().unwrap() = Some(table(&other, &request()).unwrap());
+        let error = command(&handle, command_for(&before)).await.unwrap_err();
+        assert_eq!(error.kind, ErrorKind::Protocol);
+        let after = handle.snapshot();
+        assert!(after.attached.is_none());
+        assert!(after.mappings.is_empty());
+        assert!(after.generation > before.generation);
+        shutdown(&handle, worker).await;
+    });
+}
 async fn wait_for_read(handle: &BackendHandle, after: u64) {
     let mut snapshots = handle.subscribe();
     while snapshots.borrow().forge_read_sequence <= after {

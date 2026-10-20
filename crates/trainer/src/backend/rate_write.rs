@@ -6,16 +6,7 @@ mod tests;
 impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> BackendWorker<P, C, L, K> {
     pub(super) async fn set_attack_leech_rate(&mut self, plan: AttackLeechPlan) -> Result<(), BackendError> {
         let result = self.set_attack_leech_rate_inner(plan).await;
-        if let Err(error) = &result
-            && self.state.phase == Phase::Ready
-            && matches!(
-                error.kind,
-                ErrorKind::Transport | ErrorKind::Protocol | ErrorKind::Identity | ErrorKind::RestartRequired | ErrorKind::Fault
-            )
-        {
-            self.fail(error.clone(), self.state.attached.clone());
-        }
-        result
+        self.check_write_failure(result)
     }
     async fn set_attack_leech_rate_inner(&mut self, plan: AttackLeechPlan) -> Result<(), BackendError> {
         if !self.state.enabled {

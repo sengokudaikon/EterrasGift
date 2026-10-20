@@ -169,6 +169,23 @@ fn preview_refusal_is_optional_and_invalid_drafts_never_reach_transport() {
     assert_eq!(s.state(), SessionState::Ready);
     assert_eq!(wire.requests().len(), 3);
 }
+
+#[test]
+fn obsolete_catalog_previews_are_refused_before_transport_without_releasing_a_healthy_session() {
+    let f = Fixture::new();
+    let current = observation(&f);
+    let mut identity = current.catalog_identity().clone();
+    identity.extraction_version += 1;
+    let before = ExpectedObservation::new(current.generation(), f.target.clone(), identity, item()).unwrap();
+    let evidence = BoundTooltip::new(&before, TooltipKind::Unique, lines()).unwrap();
+    let wire = FakeTransport::new(f.target.clone(), [f.discover(), status(false, 0x1234, 0)]);
+    let mut s = f.session(&wire, &FakeLog::new([offline()]), GatePolicy::Release);
+    s.enable();
+    run(s.connect(now())).unwrap();
+    assert!(matches!(run(s.preview_unique(now(), &before, &draft(), &evidence)), Err(SessionError::Mapping(_))));
+    assert_eq!(wire.requests().len(), 2);
+    assert_eq!(s.state(), SessionState::Ready);
+}
 #[test]
 fn conditional_unique_frames_reject_duplicate_rolls_reserved_data_and_truncation() {
     let f = Fixture::new();

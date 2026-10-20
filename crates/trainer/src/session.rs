@@ -158,6 +158,14 @@ pub struct Session<T, L> {
     last_rate_write: Option<crate::field_writes::RateWriteRecord>,
 }
 impl<T: Transport, L: LogSource> Session<T, L> {
+    fn observation_matches(&self, expected: &crate::edits::ExpectedObservation) -> bool {
+        let identity = expected.catalog_identity();
+        expected.process() == &self.target
+            && identity.binary_hash.eq_ignore_ascii_case(self.profile.binary_hash())
+            && identity.metadata_hash.eq_ignore_ascii_case(self.profile.metadata_hash())
+            && identity.extraction_version == crate::catalog::EXTRACTION_VERSION
+    }
+
     pub fn new(target: ProcessIdentity, transport: T, log: L, profile: BuildProfile, policy: GatePolicy) -> Result<Self, SessionError> {
         if transport.target() != &target {
             return Err(SessionError::Identity("transport belongs to a different process identity".into()));

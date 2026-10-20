@@ -22,11 +22,7 @@ impl<T: Transport, L: LogSource> Session<T, L> {
             return Err(SessionError::Mapping("This roll mapping is unavailable.".into()));
         }
         let identity = expected.catalog_identity();
-        if expected.process() != &self.target
-            || !identity.binary_hash.eq_ignore_ascii_case(self.profile.binary_hash())
-            || !identity.metadata_hash.eq_ignore_ascii_case(self.profile.metadata_hash())
-            || identity.extraction_version != crate::catalog::EXTRACTION_VERSION
-        {
+        if !self.observation_matches(expected) {
             return Err(SessionError::Mapping("The mapping belongs to a different process or catalog.".into()));
         }
         let item = expected.snapshot();

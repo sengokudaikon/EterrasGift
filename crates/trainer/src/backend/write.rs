@@ -20,9 +20,17 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
     }
     async fn execute_forge(&mut self, plan: ForgePlan, undoing: bool) -> Result<(), BackendError> {
         let result = self.write_forge_inner(plan, undoing).await;
+        self.check_write_failure(result)
+    }
+    // Both write families must revoke a failed session even when an error occurs
+    // before submission (for example a failed refresh or exhausted publication counter).
+    pub(super) fn check_write_failure(&mut self, result: Result<(), BackendError>) -> Result<(), BackendError> {
         if let Err(error) = &result
             && self.state.phase == Phase::Ready
-            && matches!(error.kind, ErrorKind::Transport | ErrorKind::Protocol | ErrorKind::Identity | ErrorKind::RestartRequired)
+            && matches!(
+                error.kind,
+                ErrorKind::Transport | ErrorKind::Protocol | ErrorKind::Identity | ErrorKind::RestartRequired | ErrorKind::Fault
+            )
         {
             self.fail(error.clone(), self.state.attached.clone());
         }

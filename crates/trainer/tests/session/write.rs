@@ -6,6 +6,9 @@ use eg_trainer::{
 };
 
 fn plan(fixture: &Fixture) -> ForgePlan {
+    plan_with_version(fixture, EXTRACTION_VERSION)
+}
+fn plan_with_version(fixture: &Fixture, extraction_version: u32) -> ForgePlan {
     let profile = fixture.profile();
     let catalog = GameCatalog {
         identity: CatalogIdentity {
@@ -15,7 +18,7 @@ fn plan(fixture: &Fixture) -> ForgePlan {
                 language: "en".into(),
                 game_version: "authored".into(),
             },
-            extraction_version: EXTRACTION_VERSION,
+            extraction_version,
         },
         limits: item_limits(),
         bases: Default::default(),
@@ -47,6 +50,17 @@ fn ready(fixture: &Fixture, wire: &FakeTransport, log: &FakeLog) -> Session<Fake
     session.enable();
     run(session.connect(now())).unwrap();
     session
+}
+#[test]
+fn obsolete_catalog_write_is_refused_before_submission_without_recording_a_write() {
+    let f = Fixture::new();
+    let plan = plan_with_version(&f, EXTRACTION_VERSION + 1);
+    let wire = FakeTransport::new(f.target.clone(), [f.discover(), status(false, 0x1234, 0)]);
+    let mut s = ready(&f, &wire, &FakeLog::new([offline()]));
+    assert!(matches!(run(s.write(now(), &plan.into())), Err(SessionError::Identity(_))));
+    assert_eq!(wire.requests().len(), 2);
+    assert!(s.last_write().is_none());
+    assert_eq!(s.state(), SessionState::Ready);
 }
 #[test]
 fn explicit_write_requires_exact_readback_and_retains_confirmed_result_after_disconnect() {

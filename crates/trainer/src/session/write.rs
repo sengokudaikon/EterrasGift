@@ -122,11 +122,7 @@ impl<T: Transport, L: LogSource> Session<T, L> {
         match plan {
             WritePlan::Forge(plan) => {
                 let expected = plan.before();
-                if expected.process() != &self.target
-                    || !expected.catalog_identity().binary_hash.eq_ignore_ascii_case(self.profile.binary_hash())
-                    || !expected.catalog_identity().metadata_hash.eq_ignore_ascii_case(self.profile.metadata_hash())
-                    || self.status.as_ref().is_none_or(|status| status.online || status.manager != plan.manager())
-                {
+                if !self.observation_matches(expected) || self.status.as_ref().is_none_or(|status| status.online || status.manager != plan.manager()) {
                     return Err(SessionError::Identity("write belongs to a different runtime, manager or catalog".into()));
                 }
                 let request = ForgeWrite::edit(dispatcher, plan.manager(), expected.snapshot().clone(), plan.mutation()).map_err(SessionError::Protocol)?;

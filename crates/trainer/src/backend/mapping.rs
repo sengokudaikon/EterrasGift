@@ -31,9 +31,11 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
         self.admit(&target)?;
         let (result, retry_on_read) = match result {
             Ok(table) => {
-                table
-                    .recheck(&expected, &request)
-                    .map_err(|error| BackendError::blocked(ErrorKind::MappingUnavailable, error.to_string()))?;
+                if let Err(error) = table.recheck(&expected, &request) {
+                    let error = BackendError::blocked(ErrorKind::Protocol, error.to_string());
+                    self.fail(error.clone(), Some(target));
+                    return Err(error);
+                }
                 (Ok(Arc::new(table)), false)
             }
             Err(error)
