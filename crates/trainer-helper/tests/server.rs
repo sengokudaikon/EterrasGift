@@ -21,13 +21,33 @@ use std::{
 };
 use tokio::{
     io::AsyncWriteExt,
-    net::windows::named_pipe::ClientOptions,
+    net::windows::named_pipe::{ClientOptions, ServerOptions},
     runtime::{Builder, Runtime},
     time::{sleep, timeout},
 };
 
 const LIMIT: Duration = Duration::from_secs(12);
 static SEQUENCE: AtomicU64 = AtomicU64::new(0);
+
+#[test]
+fn server_retains_the_pipe_name_between_exchanges() {
+    let mut fixture = Fixture::spawn("normal");
+    runtime().block_on(async {
+        let mut client = fixture.client();
+        assert_eq!(client.send(&Request::Discover).await.unwrap().code, ResponseCode::Done);
+        for _ in 0..32 {
+            assert_eq!(client.send(&status()).await.unwrap().code, ResponseCode::Done);
+            // Allow the exchange to finish, then attempt to claim the name as a
+            // different server. A retained instance must make this impossible.
+            sleep(Duration::from_millis(2)).await;
+            let result = ServerOptions::new()
+                .first_pipe_instance(true)
+                .create(format!(r"\\.\pipe\eterras-gift-{}", fixture.child.id()));
+            assert!(matches!(result.unwrap_err().raw_os_error(), Some(5 | 231)));
+        }
+    });
+    fixture.finish();
+}
 type Counters = Arc<[AtomicU64; 5]>;
 
 fn runtime() -> Runtime {

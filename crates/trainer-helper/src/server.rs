@@ -1,4 +1,5 @@
 //! One request per local connection; process ownership survives normal connection closure.
+mod security;
 use eg_game_access::{
     protocol::{Discovery, DispatcherSpec, Request, Response, ResponseCode},
     transport::{RequestReadError, read_request},
@@ -121,16 +122,20 @@ fn reap(owner: &mut Option<Owner>, shared: &Shared) {
     }
 }
 async fn create(name: &str, shared: &Shared) -> io::Result<NamedPipeServer> {
+    let security = security::PipeSecurity::current_user()?;
+    let mut attributes = security.attributes();
     let deadline = Instant::now() + Duration::from_secs(3);
     loop {
-        match ServerOptions::new()
-            .first_pipe_instance(true)
-            .max_instances(1)
-            .reject_remote_clients(true)
-            .in_buffer_size(8192)
-            .out_buffer_size(8192)
-            .create(name)
-        {
+        // SAFETY: attributes and its descriptor remain valid through creation.
+        match unsafe {
+            ServerOptions::new()
+                .first_pipe_instance(true)
+                .max_instances(1)
+                .reject_remote_clients(true)
+                .in_buffer_size(8192)
+                .out_buffer_size(8192)
+                .create_with_security_attributes_raw(name, (&raw mut attributes).cast())
+        } {
             Ok(pipe) => return Ok(pipe),
             Err(error) if error.raw_os_error() == Some(231) && !shared.stop.load(SeqCst) && Instant::now() < deadline => sleep(Duration::from_millis(2)).await,
             Err(error) => return Err(error),
@@ -158,21 +163,32 @@ pub async fn run(pid: u32, backend: &mut impl Backend, shared: &Shared) -> Resul
 async fn serve(pid: u32, backend: &mut impl Backend, shared: &Shared) -> Result<(), String> {
     let mut owner: Option<Owner> = None;
     let name = format!(r"\\.\pipe\eterras-gift-{pid}");
+    // Retain the only server handle for the entire service lifetime. Disconnect
+    // ends an exchange without relinquishing the pipe name or its DACL.
+    let mut pipe = create(&name, shared).await.map_err(|error| error.to_string())?;
+    let mut connected = false;
     shared.metrics[10].store(1, SeqCst);
-    while !shared.stop.load(SeqCst) {
+    'connections: while !shared.stop.load(SeqCst) {
         reap(&mut owner, shared);
-        let mut pipe = create(&name, shared).await.map_err(|error| error.to_string())?;
+        if connected
+            && let Err(error) = pipe.disconnect()
+            && error.raw_os_error() != Some(233)
+        {
+            return Err(error.to_string());
+        }
         // Keep process monitoring active even when no client connects. Each wait timeout merely
         // refreshes admission/owner state; it never replays a request.
         loop {
             match wait(pipe.connect(), shared, owner.as_ref(), Duration::from_secs(1)).await {
                 Ok(Ok(())) => break,
+                Ok(Err(error)) if matches!(error.raw_os_error(), Some(109 | 232 | 233)) => continue 'connections,
                 Ok(Err(error)) => return Err(error.to_string()),
                 Err(Interrupted::Stop) => return Ok(()),
                 Err(Interrupted::OwnerExited) => reap(&mut owner, shared),
                 Err(Interrupted::Deadline) => {}
             }
         }
+        connected = true;
         let mut client_pid = 0;
         // SAFETY: connected server pipe with a valid PID output buffer.
         if unsafe { GetNamedPipeClientProcessId(pipe.as_raw_handle(), &raw mut client_pid) } == 0 {
@@ -184,7 +200,7 @@ async fn serve(pid: u32, backend: &mut impl Backend, shared: &Shared) -> Result<
         };
         // One deadline covers header and bounded body. No ownership, scheduler
         // installation or queue admission can follow a header-only write.
-        let received = wait(read_request(&mut pipe), shared, Some(&client), Duration::from_secs(15)).await;
+        let received = wait(read_connection_request(&mut pipe), shared, Some(&client), Duration::from_secs(15)).await;
         let response = match received {
             Ok(Err(RequestReadError::Protocol(_))) => failure(ResponseCode::Refused, "Invalid or unsupported request frame; nothing was run"),
             Ok(Ok(request)) => {
@@ -254,4 +270,18 @@ async fn serve(pid: u32, backend: &mut impl Backend, shared: &Shared) -> Result<
         let _ = wait(pipe.read(&mut [0u8; 1]), shared, owner.as_ref(), Duration::from_secs(2)).await;
     }
     Ok(())
+}
+
+async fn read_connection_request(pipe: &mut NamedPipeServer) -> Result<Request, RequestReadError> {
+    // Mio may have posted a read against the previous peer before disconnect.
+    // Consume at most its one terminal completion, only before any new bytes.
+    // A genuinely closed new peer fails the second read; no request is replayed.
+    let mut first = [0_u8; 1];
+    if let Err(error) = pipe.read_exact(&mut first).await {
+        if error.kind() != io::ErrorKind::UnexpectedEof && !matches!(error.raw_os_error(), Some(109 | 232 | 233)) {
+            return Err(RequestReadError::Io(error));
+        }
+        pipe.read_exact(&mut first).await.map_err(RequestReadError::Io)?;
+    }
+    read_request(&mut first.as_slice().chain(pipe)).await
 }
