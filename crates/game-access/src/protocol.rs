@@ -1,4 +1,4 @@
-//! Pure, bounded codecs for protocol36: control, observations and narrow conditional writes.
+//! Pure, bounded codecs for protocol37: control, observations and narrow conditional writes.
 //!
 //! Decoding establishes wire validity only. Process identity, helper provenance,
 //! dispatcher code, and permission to run a request belong to the session layer.
@@ -15,8 +15,8 @@ use crate::{
 use std::{collections::BTreeMap, error::Error, fmt};
 
 pub const MAGIC: u32 = 0x4546_4735;
-/// Version36 adds detached affix actual-value mapping.
-pub const VERSION: u32 = 36;
+/// Version37 adds unique descriptions and detached roll previews.
+pub const VERSION: u32 = 37;
 pub const ADAPTER: &str = "il2cpp-x64-v1";
 pub const REQUEST_SIZE: usize = 336;
 pub const RESPONSE_HEADER_SIZE: usize = 12;
@@ -76,7 +76,9 @@ pub enum Request {
     },
     /// Explicit mutation; native admission compares the complete expected item.
     EditForge(ForgeWrite),
-    DescribeImplicits(crate::mapping::ImplicitDescriptionRequest),
+    DescribeImplicits(crate::mapping::ForgeDescriptionRequest),
+    DescribeUnique(crate::mapping::ForgeDescriptionRequest),
+    PreviewUnique(crate::mapping::UniquePreviewRequest),
     MapRoll(crate::mapping::AffixMappingQuery),
     /// Conditional CURRENT-player intent; full expected tokens/bits, no lifetime ticket.
     SetAttackLeechRate(AttackLeechRateWrite),
@@ -99,7 +101,8 @@ impl Request {
             | Self::ReadCatalogPage { dispatcher, .. }
             | Self::ReadAttackLeech { dispatcher, .. } => Some(*dispatcher),
             Self::EditForge(write) => Some(write.dispatcher()),
-            Self::DescribeImplicits(query) => Some(query.dispatcher),
+            Self::DescribeImplicits(query) | Self::DescribeUnique(query) => Some(query.dispatcher),
+            Self::PreviewUnique(query) => Some(query.dispatcher()),
             Self::MapRoll(query) => Some(query.dispatcher()),
             Self::SetAttackLeechRate(write) => Some(write.dispatcher()),
         }
@@ -121,6 +124,8 @@ impl Request {
             }
             Self::EditForge(write) => return write.encode(),
             Self::DescribeImplicits(query) => return query.encode().expect("validated description request"),
+            Self::DescribeUnique(query) => return query.encode_operation(4).expect("validated description request"),
+            Self::PreviewUnique(query) => return query.encode(),
             Self::MapRoll(query) => return query.encode(),
             Self::SetAttackLeechRate(write) => return write.encode(),
             Self::ReadAttackLeech { dispatcher, expected_manager } => {
@@ -148,7 +153,9 @@ impl Request {
         let operation = reader.u32()?;
         if !matches!(
             operation,
-            crate::mapping::ImplicitDescriptionRequest::OPERATION
+            crate::mapping::ForgeDescriptionRequest::OPERATION
+                | 4
+                | crate::mapping::UniquePreviewRequest::OPERATION
                 | crate::mapping::AffixMappingQuery::OPERATION
                 | ADD_AFFIX_OPERATION
                 | REMOVE_AFFIX_OPERATION
@@ -164,8 +171,10 @@ impl Request {
         let _value = reader.u32()?;
         let tail_len = reader.u32()? as usize;
         let manager = reader.u64()?;
-        if operation == crate::mapping::ImplicitDescriptionRequest::OPERATION {
-            crate::mapping::ImplicitDescriptionRequest::validate_header(bytes)?;
+        if matches!(operation, 4 | crate::mapping::ForgeDescriptionRequest::OPERATION) {
+            crate::mapping::ForgeDescriptionRequest::validate_header(bytes)?;
+        } else if operation == crate::mapping::UniquePreviewRequest::OPERATION {
+            crate::mapping::UniquePreviewRequest::fields(bytes)?;
         } else if operation == crate::mapping::AffixMappingQuery::OPERATION {
             crate::mapping::AffixMappingQuery::fields(bytes)?;
         } else {
@@ -196,12 +205,24 @@ impl Request {
             bytes: dispatcher.array()?,
         };
         let expected = forge::decode(&bytes[REQUEST_SIZE..])?.ok_or(ProtocolError::InvalidData)?;
-        if u32::from_le_bytes(bytes[4..8].try_into().unwrap()) == crate::mapping::ImplicitDescriptionRequest::OPERATION {
-            return Ok(Self::DescribeImplicits(crate::mapping::ImplicitDescriptionRequest {
+        if u32::from_le_bytes(bytes[4..8].try_into().unwrap()) == crate::mapping::ForgeDescriptionRequest::OPERATION {
+            return Ok(Self::DescribeImplicits(crate::mapping::ForgeDescriptionRequest {
                 dispatcher,
                 manager: expected_manager,
                 expected: Box::new(expected),
             }));
+        }
+        let operation = u32::from_le_bytes(bytes[4..8].try_into().unwrap());
+        if operation == 4 {
+            return Ok(Self::DescribeUnique(crate::mapping::ForgeDescriptionRequest::new(dispatcher, expected_manager, expected)?));
+        }
+        if operation == crate::mapping::UniquePreviewRequest::OPERATION {
+            return Ok(Self::PreviewUnique(crate::mapping::UniquePreviewRequest::new(
+                dispatcher,
+                expected_manager,
+                expected,
+                crate::mapping::UniquePreviewRequest::fields(&bytes[..REQUEST_SIZE])?,
+            )?));
         }
         if u32::from_le_bytes(bytes[4..8].try_into().unwrap()) == crate::mapping::AffixMappingQuery::OPERATION {
             let (slot, start, draft) = crate::mapping::AffixMappingQuery::fields(&bytes[..REQUEST_SIZE])?;

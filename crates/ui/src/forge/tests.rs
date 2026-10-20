@@ -528,3 +528,71 @@ mod async_writes {
         assert!(e.message().0.contains("I know"));
     }
 }
+
+#[test]
+fn pending_unique_preview_preserves_drafts_refreshes_only_current_text_and_clears_on_discard() {
+    use super::{
+        game::{Catalog, EditOutcome, ForgeGame, GameError, PREVIEW_LOADING},
+        item::{ForgeItem, ItemEdit, ModifierState, RollRequest, ValueTable},
+    };
+    use std::{cell::Cell as State, rc::Rc};
+    struct Delayed {
+        inner: FixtureGame,
+        ready: Rc<State<bool>>,
+        pending: Rc<State<bool>>,
+    }
+    impl ForgeGame for Delayed {
+        fn catalog(&self) -> &Catalog {
+            self.inner.catalog()
+        }
+        fn read(&self) -> Option<ForgeItem> {
+            self.inner.read()
+        }
+        fn resolve(&self, item: &ForgeItem, request: &RollRequest) -> Result<ValueTable, GameError> {
+            self.inner.resolve(item, request)
+        }
+        fn write(&mut self, item: &ForgeItem, edit: &ItemEdit) -> EditOutcome {
+            self.inner.write(item, edit)
+        }
+        fn clear_unique_preview(&self) {
+            self.pending.set(false);
+        }
+        fn preview_unique(&self, item: &ForgeItem, edit: &ItemEdit) -> Result<Vec<ModifierState>, GameError> {
+            self.pending.set(true);
+            if !self.ready.get() {
+                return Err(PREVIEW_LOADING.into());
+            }
+            self.inner.preview_unique(item, edit)
+        }
+    }
+    let ready = Rc::new(State::new(false));
+    let pending = Rc::new(State::new(false));
+    let mut editor = ForgeEditor::new(Box::new(Delayed {
+        inner: FixtureGame::unique(),
+        ready: ready.clone(),
+        pending: pending.clone(),
+    }));
+    let cell = Cell::Unique(0, 0);
+    assert!(editor.begin_input(cell));
+    editor.set_input(cell, "24");
+    assert!(editor.commit_input(cell));
+    assert!(pending.get());
+    assert_eq!(editor.preview_status, PREVIEW_LOADING);
+    assert!(!editor.preview_failed);
+    assert_eq!(editor.drafts().len(), 1);
+    editor.refresh();
+    assert_eq!(editor.preview_status, PREVIEW_LOADING);
+    assert_eq!(editor.drafts()[0].summary, "Value 18% → 24%");
+    assert!(editor.begin_input(cell));
+    editor.set_input(cell, "25");
+    assert!(editor.commit_input(cell));
+    ready.set(true);
+    editor.refresh();
+    assert_eq!(editor.preview_status, "Draft preview");
+    assert_eq!(editor.uniques[0].text, "+25% Movement Speed");
+    assert_eq!(editor.uniques[2].text, "Your minions gain 25% Movement Speed");
+    editor.discard_all();
+    assert!(!pending.get());
+    assert_eq!(editor.drafts().len(), 0);
+    assert_eq!(editor.preview_status, "");
+}

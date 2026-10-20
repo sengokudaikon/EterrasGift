@@ -7,9 +7,9 @@ interop assumptions and retained evaluation conclusions are in [trainer-interop.
 |---|---|---|
 | Desktop composition | Worker thread, manual/automatic connection, helper package validation; trainer startup failure leaves Home/Mods running | Final bundle assembly and restart handling |
 | Bootstrap | DLL load/start/connect, callback-local managed main-ID check; process/log/artifact gates and pending-call retention | Actual-game validation of the simplified callback path |
-| Reads | Owned rooted forge snapshots, literal limits, completed locale, catalog subset and names/cache; game-built implicit descriptions and sampled regular-affix values | Unique descriptions, previews, unique/implicit mapping; getter replacements must match readiness behavior |
+| Reads | Owned rooted forge snapshots, literal limits, completed locale, catalog subset and names/cache; game-built implicit/unique descriptions, private-copy unique previews and sampled regular-affix values | Unique/implicit mapping; getter replacements must match readiness behavior |
 | Forge writes | One EditForge request/ForgePlan/WriteOutcome path: seven status fields, base/subtype, unique/set identity, regular affix-roll batches, replacement/tier/seal and add/remove | Unique/implicit rolls |
-| Editor | Ordered single-edit drafts, fresh reads, Pending/Confirmed/refusal/NotKept/Uncertain, conditional reverse Undo; status/base/identity, replacement/tier/seal and immediate add/remove controls connected | Regular-affix Value controls connected through sampled game tables; unique/implicit controls stay disabled |
+| Editor | Ordered single-edit drafts, fresh reads, Pending/Confirmed/refusal/NotKept/Uncertain, conditional reverse Undo; status/base/identity, replacement/tier/seal, add/remove and regular-affix Value controls connected; unique text and asynchronous preview adapter | Unique/implicit value controls and roll writes stay disabled until supported |
 | Other features | Typed attack/leech observations and one conditional rate primitive; original feature descriptors/inventories | UI field integration, other six field sets, all gameplay detours/patches and offline/owner-loss effect cleanup |
 | Hook backend | Existing scheduler and byte-patch suspension code retained; detour 0.10 standalone regressions pass | Authored Unity adapter replacement/cleanup trial before gameplay hooks |
 
@@ -32,7 +32,7 @@ worker-to-Slint route, including mixed drafts, delayed completion, partial refus
 NotKept, Uncertain, Retry and gate loss. Native fixture execution is separate and uses only owned
 children. No current cleanup check accesses Last Epoch.
 
-Next: unique descriptions/preview and sampled unique/implicit values, then their roll operations one at a time
+Next: sampled unique/implicit values and their roll operations one at a time
 through native, service, UI and captures. Consolidate the remaining presentation/domain and
 feature-table duplication as those areas are touched. Keep the hook-engine trial separate.
 Historical reports and ignored artifacts are archived as described in the interop notes;
@@ -87,3 +87,29 @@ aliasing, copy mismatch, producer/refresh exceptions, stale items, fixed/nonmono
 unchanged live roll/write history. UI tests/captures cover loading, displayed values, roll Apply/
 Undo, draft contexts, stale completions and recovery. Last Epoch was not accessed; actual-game
 catalog/formatting behavior still needs separately requested validation.
+
+
+Unique descriptions now use UniqueList.getUnique and the game's per-entry tooltip builder,
+including virtual text/range dispatch and parsed replacement roll associations. Shared IDs are
+deduplicated, fixed lines remain visible and invalid IDs make only their line read-only. The
+worker loads text on demand and retains it for an unchanged full observation; optional refusal
+is shown locally and explicit Refresh permits recovery. Loading is informational, not a warning
+or a claim that the item has zero modifiers.
+
+Unique preview validates the exact draft against current tooltip evidence, copies the item and
+its mutable roll storage, checks that the copy initially formats like the live item, then changes
+only the copy. Every changed index must be backed by an editable tooltip line. The helper checks
+the complete original item/manager and locale before publication; the service/worker bind the
+result to the original observation and exact draft. The editor adapter coalesces drafts for
+150 ms, ignores results for older drafts and clears unsent work when a draft is discarded.
+Accepted reads still drain. Preview never creates write history or Undo and never enables a
+native write. Unique value mappings/writes are still unsupported, so production unique value
+controls remain disabled; this slice exposes real descriptions and supplies the preview path
+for the next roll feature.
+
+Twelve owned Unity cases cover independent managed text oracles, shared/duplicate/invalid parsed
+roll IDs, skipped/fixed/empty lines, GC during getters and virtual calls, stale items, malformed
+text, alias/copy mismatch and preview-only exceptions. Independent post-preview observations
+confirm unchanged live unique values. Worker tests cover cache/refusal recovery and cleanup
+barriers; editor tests cover Pending/current-text/discard behavior, and captures cover real-worker
+unique text/loading/unavailable states at normal and narrow widths. No live game was accessed.

@@ -14,6 +14,8 @@ mod fields;
 mod mappings;
 #[path = "backend/rate_write.rs"]
 mod rate_writes;
+#[path = "backend/unique.rs"]
+mod unique;
 #[path = "backend/write.rs"]
 mod writes;
 use eg_trainer::field_writes::{AttackLeechDecision, AttackLeechPlan, AttackLeechTarget, RateWriteStatus};
@@ -121,6 +123,9 @@ struct Shared {
     capture_block: Block,
     forge_block: Block,
     mapping_block: Block,
+    unique_block: Block,
+    unique_lines: Mutex<Option<Vec<backend::ModifierSnapshot>>>,
+    preview_errors: Mutex<VecDeque<BackendError>>,
     mapping_errors: Mutex<VecDeque<BackendError>>,
     disconnect_block: Block,
     write_block: Block,
@@ -156,6 +161,9 @@ impl Shared {
             capture_block: Block::default(),
             forge_block: Block::default(),
             mapping_block: Block::default(),
+            unique_block: Block::default(),
+            unique_lines: Mutex::new(None),
+            preview_errors: Mutex::new(VecDeque::new()),
             mapping_errors: Mutex::new(VecDeque::new()),
             disconnect_block: Block::default(),
             write_block: Block::default(),
@@ -250,6 +258,25 @@ impl BackendConnection for Connection {
             return Err(error);
         }
         Ok(self.shared.forge_item.lock().unwrap().clone())
+    }
+    async fn describe_unique(&mut self, _: Timestamp, _: &ForgeSnapshot) -> Result<Option<Vec<backend::ModifierSnapshot>>, BackendError> {
+        self.shared.record("unique-description");
+        Ok(self.shared.unique_lines.lock().unwrap().clone())
+    }
+    async fn preview_unique(
+        &mut self,
+        _: Timestamp,
+        expected: &eg_trainer::edits::ExpectedObservation,
+        draft: &eg_trainer::edits::RollEdit,
+        evidence: &eg_trainer::mapping::BoundTooltip,
+    ) -> Result<eg_trainer::mapping::BoundPreview, BackendError> {
+        self.shared.call("unique-preview", &self.shared.unique_block).await;
+        if let Some(error) = self.shared.preview_errors.lock().unwrap().pop_front() {
+            return Err(error);
+        }
+        let mut lines = self.shared.unique_lines.lock().unwrap().clone().unwrap();
+        lines[0].text = format!("Draft {} Ω", draft.changes[0].value);
+        Ok(eg_trainer::mapping::BoundPreview::new(expected, draft.clone(), eg_game_access::mapping::UniqueRollPreview { modifiers: lines }, evidence).unwrap())
     }
     async fn resolve_mapping(
         &mut self,

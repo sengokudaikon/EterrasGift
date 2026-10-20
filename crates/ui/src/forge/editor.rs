@@ -636,7 +636,7 @@ impl ForgeEditor {
             parts.push(format!("Level {}", status.level_requirement));
         }
         let affixes = count(item.affixes.len(), "affix", "affixes");
-        parts.push(if item.unique.is_some() {
+        parts.push(if item.unique.as_ref().is_some_and(|unique| unique.formatting_error.is_empty()) {
             format!("{affixes} · {}", count(self.uniques.len(), "unique modifier", "unique modifiers"))
         } else {
             affixes
@@ -1531,14 +1531,16 @@ impl ForgeEditor {
         self.preview_failed = failed;
         self.preview_stale = stale;
         if status.is_empty() {
+            if self.unique_edit().is_none() {
+                self.game.clear_unique_preview();
+            }
             for row in &mut self.uniques {
                 row.show_preview(None);
             }
         }
     }
 
-    /// The game formats the modifiers with the drafted rolls. TODO(forge): the session answers after a 150 ms pause,
-    /// with "Updating preview…" meanwhile and a newer draft cancelling an older preview.
+    /// The adapter coalesces drafts for 150 ms and publishes only the exact current preview.
     fn refresh_unique_preview(&mut self) {
         self.say_preview("", false, false);
         let (Some(edit), Some(item)) = (self.unique_edit(), self.item.clone()) else {
@@ -1553,6 +1555,7 @@ impl ForgeEditor {
                 }
                 self.preview_status = "Draft preview".into();
             }
+            Err(details) if details == super::game::PREVIEW_LOADING => self.say_preview(super::game::PREVIEW_LOADING, false, false),
             Err(details) => self.say_preview(&format!("Preview unavailable: {details}"), true, false),
         }
     }
@@ -1735,6 +1738,7 @@ impl ForgeEditor {
             );
         }
         self.resolve_tables();
+        self.refresh_unique_preview();
     }
 
     fn update_lines(&mut self, target: RollTarget, states: &[item::ModifierState], rolls: &[u8]) {

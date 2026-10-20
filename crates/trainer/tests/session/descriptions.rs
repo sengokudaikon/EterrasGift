@@ -1,5 +1,5 @@
 use super::*;
-use eg_game_access::mapping::{self, ImplicitDescriptionRequest, ModifierSnapshot};
+use eg_game_access::mapping::{self, ForgeDescriptionRequest, ModifierSnapshot};
 fn line(index: u32, rolls: Vec<u8>) -> ModifierSnapshot {
     ModifierSnapshot {
         index,
@@ -24,7 +24,7 @@ fn implicit_descriptions_bind_complete_expected_item_and_keep_fixed_lines_after_
     assert_eq!(run(session.describe_implicits(now(), &item)).unwrap(), Some(lines));
     assert_eq!(
         wire.requests()[2],
-        Request::DescribeImplicits(ImplicitDescriptionRequest::new(fixture.dispatcher, 0x1234, item).unwrap())
+        Request::DescribeImplicits(ForgeDescriptionRequest::new(fixture.dispatcher, 0x1234, item).unwrap())
     );
     assert_eq!(session.state(), SessionState::Ready);
 }
@@ -97,7 +97,7 @@ fn optional_description_offline_or_transport_failure_still_revokes_admission() {
 #[test]
 fn conditional_description_frame_rejects_reserved_bytes_truncation_and_excess() {
     let fixture = Fixture::new();
-    let request = Request::DescribeImplicits(ImplicitDescriptionRequest::new(fixture.dispatcher, 0x1234, forge_item()).unwrap());
+    let request = Request::DescribeImplicits(ForgeDescriptionRequest::new(fixture.dispatcher, 0x1234, forge_item()).unwrap());
     let frame = request.encode();
     assert_eq!(Request::decode(&frame).unwrap(), request);
     for offset in [8, 24, 36, 47, 72, 80, 335] {

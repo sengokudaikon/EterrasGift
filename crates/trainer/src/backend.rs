@@ -8,6 +8,7 @@
 mod fields;
 mod mapping;
 mod rate_write;
+mod unique;
 mod write;
 
 use std::{
@@ -96,6 +97,18 @@ pub trait BackendConnection: Send + 'static {
     fn describe_implicits(&mut self, _: Timestamp, _: &ForgeSnapshot) -> impl Future<Output = Result<Option<Vec<ModifierSnapshot>>, BackendError>> + Send {
         async { Ok(None) }
     }
+    fn describe_unique(&mut self, _: Timestamp, _: &ForgeSnapshot) -> impl Future<Output = Result<Option<Vec<ModifierSnapshot>>, BackendError>> + Send {
+        async { Ok(None) }
+    }
+    fn preview_unique(
+        &mut self,
+        _: Timestamp,
+        _: &crate::edits::ExpectedObservation,
+        _: &crate::edits::RollEdit,
+        _: &crate::mapping::BoundTooltip,
+    ) -> impl Future<Output = Result<crate::mapping::BoundPreview, BackendError>> + Send {
+        async { Err(BackendError::blocked(ErrorKind::MappingUnavailable, "Unique preview is unavailable.")) }
+    }
     fn resolve_mapping(&mut self, _: Timestamp, _: &crate::edits::ExpectedObservation, _: &MappingRequest) -> impl Future<Output = Result<ValueTable, BackendError>> + Send {
         async { Err(BackendError::blocked(ErrorKind::MappingUnavailable, "Actual values are unavailable for this modifier.")) }
     }
@@ -181,6 +194,18 @@ impl<T: Transport + Send + 'static, L: LogSource + Send + 'static> BackendConnec
     }
     async fn describe_implicits(&mut self, now: Timestamp, expected: &ForgeSnapshot) -> Result<Option<Vec<ModifierSnapshot>>, BackendError> {
         Ok(Session::describe_implicits(self, now, expected).await?)
+    }
+    async fn describe_unique(&mut self, now: Timestamp, expected: &ForgeSnapshot) -> Result<Option<Vec<ModifierSnapshot>>, BackendError> {
+        Ok(Session::describe_unique(self, now, expected).await?)
+    }
+    async fn preview_unique(
+        &mut self,
+        now: Timestamp,
+        expected: &crate::edits::ExpectedObservation,
+        draft: &crate::edits::RollEdit,
+        evidence: &crate::mapping::BoundTooltip,
+    ) -> Result<crate::mapping::BoundPreview, BackendError> {
+        Ok(Session::preview_unique(self, now, expected, draft, evidence).await?)
     }
     async fn resolve_mapping(&mut self, now: Timestamp, expected: &crate::edits::ExpectedObservation, request: &MappingRequest) -> Result<ValueTable, BackendError> {
         Ok(Session::resolve_mapping(self, now, expected, request).await?)
@@ -405,6 +430,7 @@ pub enum ForgeState {
         snapshot: Arc<ForgeSnapshot>,
         resolved_name: Option<ResolvedItemName>,
         implicits: Option<Vec<ModifierSnapshot>>,
+        unique: Option<Result<Vec<ModifierSnapshot>, String>>,
     },
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -452,11 +478,19 @@ pub struct BackendSnapshot {
     /// allows optional display failures to be retried after Refresh, not in a loop.
     pub forge_read_sequence: u64,
     pub mappings: Vec<ResolvedMapping>,
+    pub unique_preview: Option<ResolvedPreview>,
     pub attack_leech: Option<AttackLeechSnapshot>,
     pub capabilities: Capabilities,
     pub last_write: Option<WriteRecord>,
     pub last_rate_write: Option<RateWriteRecord>,
     pub undo_forge: Option<crate::undo::ForgeUndo>,
+}
+/// Latest optional preview; matching requires both the full observation and exact draft.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ResolvedPreview {
+    pub expected: crate::edits::ExpectedObservation,
+    pub draft: crate::edits::RollEdit,
+    pub result: Result<crate::mapping::BoundPreview, String>,
 }
 /// Optional display data for one complete observed item and exact draft query.
 /// Kept in memory only; a changed item, catalog or connection discards it.
@@ -604,6 +638,13 @@ pub enum Command {
     Disconnect,
     RefreshCatalog,
     ReadForge,
+    DescribeUnique {
+        expected: Box<crate::edits::ExpectedObservation>,
+    },
+    PreviewUnique {
+        expected: Box<crate::edits::ExpectedObservation>,
+        draft: crate::edits::RollEdit,
+    },
     ResolveMapping {
         expected: Box<crate::edits::ExpectedObservation>,
         request: MappingRequest,
@@ -774,6 +815,7 @@ pub fn service<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K
         forge: ForgeState::Unobserved,
         forge_read_sequence: 0,
         mappings: vec![],
+        unique_preview: None,
         attack_leech: None,
         capabilities: Capabilities::default(),
         last_write: None,
@@ -856,6 +898,14 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
         self.state
             .mappings
             .retain(|mapping| expected.as_ref().is_some_and(|expected| mapping.expected.matches(expected)));
+        if self
+            .state
+            .unique_preview
+            .as_ref()
+            .is_some_and(|p| expected.as_ref().is_none_or(|current| !p.expected.matches(current)))
+        {
+            self.state.unique_preview = None;
+        }
         if self.state.attack_leech.as_ref().is_some_and(|observation| {
             self.state.phase != Phase::Ready
                 || observation.generation != self.state.generation
@@ -1013,6 +1063,8 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
             }
             Command::RefreshCatalog => self.read(true, true).await,
             Command::ReadForge => self.read(false, true).await,
+            Command::DescribeUnique { expected } => self.describe_unique(*expected).await,
+            Command::PreviewUnique { expected, draft } => self.preview_unique(*expected, draft).await,
             Command::ResolveMapping { expected, request } => self.resolve_mapping(*expected, request).await,
             Command::ReadAttackLeech => self.read_attack_leech().await,
             Command::Write(WritePlan::Forge(plan)) => self.write_forge(*plan).await,
@@ -1159,6 +1211,9 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
                 *observed = implicits;
             }
             self.commit(epoch, |this| {
+                if let ForgeState::Item { unique, .. } = &mut forge {
+                    *unique = None;
+                }
                 this.state.forge = forge;
                 this.state.forge_read_sequence = this.state.forge_read_sequence.wrapping_add(1);
                 this.state.mappings.retain(|mapping| mapping.result.is_ok());
@@ -1191,6 +1246,7 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
     fn check_status(&mut self, status: RuntimeStatus) -> Result<(), BackendError> {
         if self.state.runtime_status.is_some_and(|previous| previous.manager != status.manager) {
             self.state.mappings.clear();
+            self.state.unique_preview = None;
         }
         if self.state.attack_leech.as_ref().is_some_and(|observation| observation.manager != status.manager) {
             self.state.attack_leech = None;
@@ -1259,6 +1315,14 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
                 *observed = implicits;
             }
             self.commit(epoch, |this| {
+                if let ForgeState::Item { unique, .. } = &mut forge
+                    && (capture || retry_optional && unique.as_ref().is_some_and(Result::is_err))
+                {
+                    *unique = None;
+                }
+                if this.state.unique_preview.as_ref().is_some_and(|p| retry_optional && p.result.is_err()) {
+                    this.state.unique_preview = None;
+                }
                 this.state.forge = forge;
                 this.state.forge_read_sequence = this.state.forge_read_sequence.wrapping_add(1);
                 this.state.mappings.retain(|mapping| mapping.result.is_ok() || !retry_optional && !mapping.retry_on_read);
@@ -1297,9 +1361,18 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
                 let resolved_name = catalog.resolve_item_name(&snapshot);
                 ForgeState::Item {
                     generation: self.state.generation,
-                    snapshot: Arc::new(snapshot),
                     resolved_name,
                     implicits: None,
+                    unique: match &self.state.forge {
+                        ForgeState::Item {
+                            generation,
+                            snapshot: old,
+                            unique,
+                            ..
+                        } if *generation == self.state.generation && **old == snapshot => unique.clone(),
+                        _ => None,
+                    },
+                    snapshot: Arc::new(snapshot),
                 }
             }
         }

@@ -1,6 +1,7 @@
 //! Serialized control session, owned observations and explicit guarded writes. No automatic retry.
 mod mapping;
 mod rate_write;
+mod unique;
 mod write;
 use crate::{
     gate::{self, GateDecision, GatePolicy, GateVerdict, LogSource},
@@ -275,7 +276,7 @@ impl<T: Transport, L: LogSource> Session<T, L> {
     pub async fn describe_implicits(&mut self, now: Timestamp, expected: &ForgeSnapshot) -> Result<Option<Vec<eg_game_access::mapping::ModifierSnapshot>>, SessionError> {
         let manager = self.status.filter(|s| !s.online && s.manager != 0).ok_or(SessionError::NotConnected)?.manager;
         let dispatcher = self.discovery.as_ref().ok_or(SessionError::NotConnected)?.dispatcher;
-        let query = eg_game_access::mapping::ImplicitDescriptionRequest::new(dispatcher, manager, expected.clone()).map_err(SessionError::Protocol)?;
+        let query = eg_game_access::mapping::ForgeDescriptionRequest::new(dispatcher, manager, expected.clone()).map_err(SessionError::Protocol)?;
         let result = self.read_owned(now, |_| Request::DescribeImplicits(query), eg_game_access::mapping::decode_modifiers).await;
         match result {
             Ok(modifiers) => {
@@ -542,7 +543,10 @@ impl<T: Transport, L: LogSource> Session<T, L> {
         let status = self.status.take();
         self.state = SessionState::Connecting;
         let request = request(dispatcher);
-        let optional_description = matches!(request, Request::DescribeImplicits(_) | Request::MapRoll(_));
+        let optional_description = matches!(
+            request,
+            Request::DescribeImplicits(_) | Request::DescribeUnique(_) | Request::PreviewUnique(_) | Request::MapRoll(_)
+        );
         let result = self.request(&request).await.and_then(|bytes| decode(&bytes).map_err(SessionError::Protocol));
         match result {
             Ok(snapshot) => {

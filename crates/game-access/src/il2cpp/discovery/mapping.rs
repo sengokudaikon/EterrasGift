@@ -27,7 +27,14 @@ fn context_text(out: &mut Vec<u8>, text: &str) {
 
 impl RuntimeAccess {
     // These helpers inherit read_affix_mapping's single attached-runtime and private-copy span.
-    unsafe fn mapping_method(&self, api: raw::InvocationApi, object: &Root<'_, '_>, name: &CStr, parameters: &[Class], returns: Option<Class>) -> Result<Method, DiscoveryError> {
+    pub(super) unsafe fn mapping_method(
+        &self,
+        api: raw::InvocationApi,
+        object: &Root<'_, '_>,
+        name: &CStr,
+        parameters: &[Class],
+        returns: Option<Class>,
+    ) -> Result<Method, DiscoveryError> {
         unsafe {
             let mut owner = (self.object_class)(target(object)?.as_ptr());
             for _ in 0..256 {
@@ -127,7 +134,7 @@ impl RuntimeAccess {
             Ok(())
         }
     }
-    unsafe fn mapping_copy<'a, 'r>(
+    pub(super) unsafe fn mapping_copy<'a, 'r>(
         &self,
         attached: &'a AttachedThread<'r>,
         writes: raw::FieldWriteApi,

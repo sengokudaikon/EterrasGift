@@ -25,6 +25,8 @@ struct Data {
     writes: AtomicUsize,
     outcome: AtomicUsize,
     descriptions: AtomicUsize,
+    unique_mode: AtomicUsize,
+    unique_calls: AtomicUsize,
     mappings: AtomicUsize,
     mapping_calls: AtomicUsize,
     refuse_at: AtomicUsize,
@@ -182,6 +184,47 @@ impl BackendConnection for OwnedConnection {
                 },
             ]
         }))
+    }
+    async fn describe_unique(&mut self, _: jiff::Timestamp, expected: &ForgeSnapshot) -> Result<Option<Vec<backend::ModifierSnapshot>>, BackendError> {
+        assert_eq!(self.0.item.lock().unwrap().as_ref(), Some(expected));
+        self.0.unique_calls.fetch_add(1, Ordering::SeqCst);
+        let mode = self.0.unique_mode.load(Ordering::SeqCst);
+        if mode == 3 {
+            tokio::time::sleep(Duration::from_millis(600)).await;
+        }
+        if mode == 0 {
+            return Ok(None);
+        }
+        Ok(Some(vec![
+            backend::ModifierSnapshot {
+                index: 0,
+                text: "Game unique +17 Ω".into(),
+                range: "[0 to 255]".into(),
+                roll_ids: vec![0],
+                editable: true,
+            },
+            backend::ModifierSnapshot {
+                index: 1,
+                text: "Shared 17 / 81 🔥".into(),
+                range: "Game parsed range".into(),
+                roll_ids: vec![0, 1],
+                editable: true,
+            },
+            backend::ModifierSnapshot {
+                index: 2,
+                text: "Fixed game text".into(),
+                range: "".into(),
+                roll_ids: vec![],
+                editable: true,
+            },
+            backend::ModifierSnapshot {
+                index: 3,
+                text: "Unsupported game roll".into(),
+                range: "".into(),
+                roll_ids: vec![],
+                editable: false,
+            },
+        ]))
     }
     async fn resolve_mapping(
         &mut self,
@@ -369,6 +412,8 @@ pub(super) fn capture(session: &Session) {
         writes: AtomicUsize::new(0),
         outcome: AtomicUsize::new(0),
         descriptions: AtomicUsize::new(0),
+        unique_mode: AtomicUsize::new(0),
+        unique_calls: AtomicUsize::new(0),
         mappings: AtomicUsize::new(0),
         mapping_calls: AtomicUsize::new(0),
         refuse_at: AtomicUsize::new(0),
@@ -802,6 +847,51 @@ pub(super) fn capture(session: &Session) {
     assert_eq!(forge.get_affixes().row_data(0).unwrap().value.display, "366 Ω");
     assert_eq!(data.mapping_calls.load(Ordering::SeqCst), calls + 1);
     session.capture(&ui, "backend-forge-values-recovered");
+    // Unique tooltip text is an optional asynchronous read. It remains bound to
+    // this item, is cached across equal reads, and never enables unwritten rolls.
+    data.unique_mode.store(3, Ordering::SeqCst);
+    let mut unique_item = item("Owned unique text", 46);
+    unique_item.rarity = 9;
+    unique_item.identity = Some(backend::UniqueIdentity { id: 911, rolls: vec![17, 81] });
+    unique_item.fingerprint = unique_item.legacy_fingerprint();
+    *data.item.lock().unwrap() = Some(unique_item.clone());
+    let calls = data.unique_calls.load(Ordering::SeqCst);
+    command(&handle, Command::ReadForge, || true);
+    wait(|| forge.get_item_name() == "Owned unique text" && forge.get_formatting_loading());
+    session.capture(&ui, "backend-forge-unique-loading");
+    ui.global::<Nav>().invoke_navigate("settings".into());
+    assert_eq!(ui.global::<Nav>().get_current_page(), "settings");
+    ui.global::<Nav>().invoke_navigate("forge".into());
+    wait(|| forge.get_unique_modifiers().row_count() == 4 && !forge.get_formatting_loading());
+    assert_eq!(forge.get_formatting_error(), "");
+    assert_eq!(forge.get_unique_modifiers().row_data(0).unwrap().text, "Game unique +17 Ω");
+    assert_eq!(forge.get_unique_modifiers().row_data(1).unwrap().rolls.row_count(), 2);
+    assert!(!forge.get_unique_modifiers().row_data(0).unwrap().rolls.row_data(0).unwrap().editable);
+    assert!(!forge.get_can_apply());
+    session.capture(&ui, "backend-forge-unique-descriptions");
+    session.resize(680, 580);
+    session.capture(&ui, "backend-forge-unique-descriptions-narrow");
+    session.resize(1100, 700);
+    command(&handle, Command::ReadForge, || true);
+    for _ in 0..6 {
+        settle();
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    assert_eq!(data.unique_calls.load(Ordering::SeqCst), calls + 1);
+    data.unique_mode.store(0, Ordering::SeqCst);
+    unique_item.individual_id = 47;
+    unique_item.fingerprint = unique_item.legacy_fingerprint();
+    *data.item.lock().unwrap() = Some(unique_item);
+    command(&handle, Command::ReadForge, || true);
+    wait(|| forge.get_formatting_error() == "Localized descriptions are unavailable.");
+    assert_eq!(forge.get_unique_modifiers().row_count(), 0);
+    assert_eq!(handle.snapshot().phase, Phase::Ready);
+    session.capture(&ui, "backend-forge-unique-unavailable");
+    data.unique_mode.store(1, Ordering::SeqCst);
+    command(&handle, Command::ReadForge, || true);
+    wait(|| forge.get_unique_modifiers().row_count() == 4);
+    assert_eq!(forge.get_formatting_error(), "");
+    assert_eq!(forge.get_drafts().row_count(), 0);
     let mut unsupported = item("Unsupported status", 19);
     unsupported.status.level_requirement = -1;
     unsupported.fingerprint = unsupported.legacy_fingerprint();

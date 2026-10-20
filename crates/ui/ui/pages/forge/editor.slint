@@ -996,13 +996,13 @@ export component ItemForge inherits Rectangle {
                             width: Tokens.icon-size;
                             height: Tokens.icon-size;
                             image-fit: contain;
-                            source: Tokens.icon-warning;
-                            colorize: Tokens.warning-brush;
+                            source: ForgeState.formatting-loading ? Tokens.icon-info : Tokens.icon-warning;
+                            colorize: ForgeState.formatting-loading ? Tokens.text-muted-brush : Tokens.warning-brush;
                         }
 
                         Text {
                             text: ForgeState.formatting-error;
-                            color: Tokens.warning-brush;
+                            color: ForgeState.formatting-loading ? Tokens.text-muted-brush : Tokens.warning-brush;
                             wrap: word-wrap;
                             horizontal-stretch: 1;
                         }

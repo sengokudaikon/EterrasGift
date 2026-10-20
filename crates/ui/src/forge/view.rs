@@ -355,6 +355,12 @@ impl View {
         state.set_preview_status(editor.preview_status.clone().into());
         state.set_preview_failed(editor.preview_failed);
         state.set_preview_stale(editor.preview_stale);
+        state.set_formatting_loading(
+            editor
+                .item()
+                .and_then(|item| item.unique.as_ref())
+                .is_some_and(|unique| unique.formatting_error == super::game::UNIQUE_LOADING),
+        );
         state.set_formatting_error(
             editor
                 .item()

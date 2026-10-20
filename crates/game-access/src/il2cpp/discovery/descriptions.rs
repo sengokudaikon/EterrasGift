@@ -6,7 +6,7 @@ use super::{
 };
 use crate::{
     il2cpp::{Argument, AttachedThread, InvocationContext, InvocationOutcome, ReturnValue, Scalar, raw},
-    mapping::{ImplicitDescriptionRequest, MAX_TEXT_BYTES, ModifierSnapshot},
+    mapping::{ForgeDescriptionRequest, MAX_TEXT_BYTES, ModifierSnapshot},
 };
 use std::{ffi::CStr, ptr::NonNull};
 
@@ -167,7 +167,7 @@ impl RuntimeAccess {
         &self,
         attached: &AttachedThread<'_>,
         api: raw::InvocationApi,
-        request: &ImplicitDescriptionRequest,
+        request: &ForgeDescriptionRequest,
     ) -> Result<Vec<ModifierSnapshot>, DiscoveryError> {
         unsafe {
             let graph = self.forge_graph(attached)?.ok_or(DiscoveryError::NotReady("forge item absent"))?;

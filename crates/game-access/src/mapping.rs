@@ -105,12 +105,12 @@ pub struct UniqueRollPreview {
 
 /// Conditional presentation read. Tokens are compared against a freshly rooted graph.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct ImplicitDescriptionRequest {
+pub struct ForgeDescriptionRequest {
     pub(crate) dispatcher: crate::protocol::DispatcherSpec,
     pub(crate) manager: u64,
     pub(crate) expected: Box<crate::forge::ForgeSnapshot>,
 }
-impl ImplicitDescriptionRequest {
+impl ForgeDescriptionRequest {
     pub const OPERATION: u32 = 12;
     pub fn new(dispatcher: crate::protocol::DispatcherSpec, manager: u64, expected: crate::forge::ForgeSnapshot) -> Result<Self, ProtocolError> {
         if manager == 0 {
@@ -134,6 +134,9 @@ impl ImplicitDescriptionRequest {
     }
 
     pub fn encode(&self) -> Result<Vec<u8>, ProtocolError> {
+        self.encode_operation(Self::OPERATION)
+    }
+    pub(crate) fn encode_operation(&self, operation: u32) -> Result<Vec<u8>, ProtocolError> {
         use crate::protocol::{MAGIC, REQUEST_SIZE};
         if self.manager == 0 {
             return invalid();
@@ -141,7 +144,7 @@ impl ImplicitDescriptionRequest {
         let tail = crate::forge::encode(Some(&self.expected))?;
         let mut bytes = vec![0; REQUEST_SIZE];
         bytes[..4].copy_from_slice(&MAGIC.to_le_bytes());
-        bytes[4..8].copy_from_slice(&Self::OPERATION.to_le_bytes());
+        bytes[4..8].copy_from_slice(&operation.to_le_bytes());
         bytes[12..16].copy_from_slice(&(tail.len() as u32).to_le_bytes());
         bytes[16..24].copy_from_slice(&self.manager.to_le_bytes());
         bytes[48..56].copy_from_slice(&self.dispatcher.rva.to_le_bytes());
@@ -157,6 +160,75 @@ impl ImplicitDescriptionRequest {
     }
 }
 
+/// Draft unique rolls are applied only to a private item copy for tooltip text.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct UniqueRollChange {
+    pub index: u8,
+    pub value: u8,
+}
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct UniquePreviewRequest {
+    pub(crate) target: ForgeDescriptionRequest,
+    changes: Vec<UniqueRollChange>,
+}
+impl UniquePreviewRequest {
+    pub const OPERATION: u32 = 5;
+    pub fn new(dispatcher: crate::protocol::DispatcherSpec, manager: u64, expected: crate::forge::ForgeSnapshot, changes: Vec<UniqueRollChange>) -> Result<Self, ProtocolError> {
+        if !matches!(expected.rarity, 7 | 9) || changes.is_empty() || changes.len() > 8 {
+            return invalid();
+        }
+        let count = expected.identity.as_ref().ok_or(ProtocolError::InvalidData)?.rolls.len();
+        let mut seen = BTreeSet::new();
+        if changes.iter().any(|c| usize::from(c.index) >= count || !seen.insert(c.index)) {
+            return invalid();
+        }
+        Ok(Self {
+            target: ForgeDescriptionRequest::new(dispatcher, manager, expected)?,
+            changes,
+        })
+    }
+    pub fn dispatcher(&self) -> crate::protocol::DispatcherSpec {
+        self.target.dispatcher()
+    }
+    pub fn expected(&self) -> &crate::forge::ForgeSnapshot {
+        self.target.expected()
+    }
+    pub fn manager(&self) -> u64 {
+        self.target.manager()
+    }
+    pub fn changes(&self) -> &[UniqueRollChange] {
+        &self.changes
+    }
+    pub fn target(&self) -> &ForgeDescriptionRequest {
+        &self.target
+    }
+    pub fn encode(&self) -> Vec<u8> {
+        let mut bytes = self.target.encode_operation(Self::OPERATION).expect("validated preview request");
+        bytes[8..12].copy_from_slice(&(self.changes.len() as u32).to_le_bytes());
+        for (index, change) in self.changes.iter().enumerate() {
+            let offset = 72 + index * 8;
+            bytes[offset..offset + 4].copy_from_slice(&u32::from(change.index).to_le_bytes());
+            bytes[offset + 4..offset + 8].copy_from_slice(&u32::from(change.value).to_le_bytes());
+        }
+        bytes
+    }
+    pub(crate) fn fields(bytes: &[u8]) -> Result<Vec<UniqueRollChange>, ProtocolError> {
+        let count = u32::from_le_bytes(bytes[8..12].try_into().unwrap()) as usize;
+        if !(1..=8).contains(&count) || bytes[24..48].iter().chain(&bytes[72 + count * 8..]).any(|b| *b != 0) {
+            return invalid();
+        }
+        let mut changes = Vec::new();
+        for index in 0..count {
+            let offset = 72 + index * 8;
+            changes.push(UniqueRollChange {
+                index: u8::try_from(u32::from_le_bytes(bytes[offset..offset + 4].try_into().unwrap())).map_err(|_| ProtocolError::InvalidData)?,
+                value: u8::try_from(u32::from_le_bytes(bytes[offset + 4..offset + 8].try_into().unwrap())).map_err(|_| ProtocolError::InvalidData)?,
+            });
+        }
+        Ok(changes)
+    }
+}
+
 /// One affix projected on the detached item, never on the forge item.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct AffixMappingDraft {
@@ -167,7 +239,7 @@ pub struct AffixMappingDraft {
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct AffixMappingQuery {
-    pub(crate) target: ImplicitDescriptionRequest,
+    pub(crate) target: ForgeDescriptionRequest,
     pub(crate) slot: u8,
     pub(crate) start: MappingStart,
     pub(crate) draft: Option<AffixMappingDraft>,
@@ -186,7 +258,7 @@ impl AffixMappingQuery {
             return invalid();
         }
         Ok(Self {
-            target: ImplicitDescriptionRequest::new(dispatcher, manager, expected)?,
+            target: ForgeDescriptionRequest::new(dispatcher, manager, expected)?,
             slot,
             start,
             draft,

@@ -96,7 +96,7 @@ impl RuntimeAccess {
     // The original helper calls UniqueList.getUnique(UInt16). Validate its exact
     // static signature, root the return across GC, then read only its identity
     // and LegendaryType. Never walk the full catalog during an edit.
-    unsafe fn unique_definition<'a, 'r>(
+    pub(super) unsafe fn unique_definition<'a, 'r>(
         &self,
         attached: &'a AttachedThread<'r>,
         graph: &ForgeGraph<'_, '_>,

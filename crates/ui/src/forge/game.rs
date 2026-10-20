@@ -2,6 +2,9 @@
 //! production adapter reads owned snapshots and submits commands to the worker.
 //! Write outcomes are typed; accepted commands are polled without blocking the UI.
 
+pub const UNIQUE_LOADING: &str = "Reading unique descriptions…";
+pub const PREVIEW_LOADING: &str = "Updating preview…";
+
 use super::item::{AffixDefinition, ForgeItem, ItemEdit, ModifierState, RollRequest, ValueTable};
 pub use eg_trainer::writes::WriteOutcome;
 
@@ -155,6 +158,8 @@ pub trait ForgeGame {
         true
     }
 
+    /// Discard an unsubmitted preview when its draft is cleared; accepted work still drains.
+    fn clear_unique_preview(&self) {}
     /// The unique modifiers formatted with drafted rolls.
     fn preview_unique(&self, expected: &ForgeItem, edit: &ItemEdit) -> Result<Vec<ModifierState>, GameError>;
 }

@@ -147,3 +147,24 @@ optional read failures unless process/protocol/identity/offline access is lost. 
 polls retain stable unavailable tables and retry only transient failures after a successful read.
 Explicit Refresh permits another attempt at stable refusal too. No write certainty is inferred
 from successful formatting.
+
+
+Unique tooltip/preview requests share the conditional full-Forge description envelope. Preview
+adds a nonempty, distinct, storage-bounded list of unique-roll byte changes; it is not EditForge
+and never enters write certainty/history. The native reader calls getUnique(UInt16), validates
+and roots its Entry, walks the bounded display order and invokes GetUniqueModifierInfo with the
+actual Int32 slot enum. Both property and preformatted lines use virtual text/range methods.
+Preformatted replacements are a validated closed List of game references; their range and roll
+getters use checked invocation, while the closed-list getter is one narrow raw invoke with an
+immediately rooted return/exception. No host copy of the game's description parser is introduced.
+
+The game's lookup/parser/tooltip cache effects remain supported-target assumptions, as does
+stable culture and no concurrent graph mutation during a synchronous operation. Roots establish
+retention across GC; they do not prove those external behaviors. Preview reuses the existing
+independent-copy path, compares initial text/ranges/associations against the selected item and
+clones roll arrays through the runtime reference barrier before byte stores on the private copy.
+Native publication rechecks the full live graph and locale. The latest worker preview is bound
+to both ExpectedObservation and RollEdit; cleanup/generation/item changes discard it. A replaced
+UI draft never displays an earlier draft's text, and dropping its receipt never cancels accepted
+native work or authorizes replay. Production unique mapping and unique/implicit writes remain
+separate unsupported operations.

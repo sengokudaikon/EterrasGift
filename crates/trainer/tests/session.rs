@@ -7,6 +7,8 @@ mod fields;
 mod mappings;
 #[path = "session/rate_write.rs"]
 mod rate_writes;
+#[path = "session/unique.rs"]
+mod unique;
 #[path = "session/write.rs"]
 mod writes;
 use eg_core::game_log::{GameLogEvent, GameLogState, GameLogStatus, GameReadiness, LoggedCharacter};

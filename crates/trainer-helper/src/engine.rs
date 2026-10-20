@@ -218,7 +218,7 @@ unsafe fn read_forge() -> Response {
     }
 }
 
-unsafe fn describe_implicits(query: &eg_game_access::mapping::ImplicitDescriptionRequest) -> Response {
+unsafe fn describe_implicits(query: &eg_game_access::mapping::ForgeDescriptionRequest) -> Response {
     // SAFETY: the scheduler supplies the same supported main-thread runtime and
     // synchronous rooted graph span as read_forge, including tooltip allocations.
     unsafe {
@@ -236,6 +236,32 @@ unsafe fn describe_implicits(query: &eg_game_access::mapping::ImplicitDescriptio
             })
         })();
         result.unwrap_or_else(|error| error)
+    }
+}
+
+unsafe fn unique_presentation(query: &eg_game_access::mapping::ForgeDescriptionRequest, preview: Option<&eg_game_access::mapping::UniquePreviewRequest>) -> Response {
+    // SAFETY: scheduler supplies the same supported main-thread runtime/graph
+    // span as implicit descriptions; private-copy stores never target the forge.
+    unsafe {
+        let result = (|| {
+            let module = module().map_err(|e| server::failure(ResponseCode::Failed, e))?;
+            let (api, access) = apis(module).map_err(|e| server::failure(ResponseCode::Failed, e))?;
+            let invoke = raw::InvocationApi::resolve(|name| export(module, name)).map_err(|e| server::failure(ResponseCode::Refused, e.to_string()))?;
+            let thread = ThreadContext::new(api);
+            let attached = thread.attach().map_err(|e| server::failure(ResponseCode::NotReady, e.to_string()))?;
+            let descriptions = if let Some(preview) = preview {
+                let writes = raw::FieldWriteApi::resolve(|name| export(module, name)).map_err(|e| server::failure(ResponseCode::Refused, e.to_string()))?;
+                access.preview_unique(&attached, writes, invoke, preview)
+            } else {
+                access.describe_unique(&attached, invoke, query)
+            }
+            .map_err(map_discovery)?;
+            Ok::<_, Response>(Response {
+                code: ResponseCode::Done,
+                payload: eg_game_access::mapping::encode_modifiers(&descriptions).map_err(|e| server::failure(ResponseCode::Failed, e.to_string()))?,
+            })
+        })();
+        result.unwrap_or_else(|e| e)
     }
 }
 
@@ -434,6 +460,8 @@ fn after_original(state: &Shared) {
                 // SAFETY: same main-thread and per-operation graph ownership contract above.
                 Request::ReadForge { .. } => unsafe { read_forge() },
                 Request::DescribeImplicits(query) => unsafe { describe_implicits(&query) },
+                Request::DescribeUnique(query) => unsafe { unique_presentation(&query, None) },
+                Request::PreviewUnique(query) => unsafe { unique_presentation(query.target(), Some(&query)) },
                 Request::MapRoll(query) => unsafe { read_affix_mapping(&query) },
                 Request::ReadAttackLeech { expected_manager, .. } => unsafe { read_attack_leech(expected_manager) },
                 Request::ReadItemLimits { .. } => unsafe { read_item_limits() },

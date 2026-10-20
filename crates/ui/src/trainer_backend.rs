@@ -140,8 +140,11 @@ impl ForgeGame for ObservedGame {
     fn poll_write(&mut self) -> Option<EditOutcome> {
         self.writer.borrow_mut().poll()
     }
-    fn preview_unique(&self, _: &ForgeItem, _: &ItemEdit) -> Result<Vec<ModifierState>, GameError> {
-        Err("Localized descriptions are unavailable.".into())
+    fn clear_unique_preview(&self) {
+        self.writer.borrow_mut().preview = None;
+    }
+    fn preview_unique(&self, item: &ForgeItem, edit: &ItemEdit) -> Result<Vec<ModifierState>, GameError> {
+        self.writer.borrow_mut().preview(item, edit)
     }
 }
 
@@ -152,6 +155,15 @@ struct Writer {
     pending: Option<PendingEdit>,
     mappings: Vec<PendingMapping>,
     mapping_read_sequence: Option<u64>,
+    preview: Option<PendingPreview>,
+    descriptions: Option<(eg_trainer::edits::ExpectedObservation, u64, Pending)>,
+}
+struct PendingPreview {
+    expected: eg_trainer::edits::ExpectedObservation,
+    draft: eg_trainer::edits::RollEdit,
+    starts: Option<std::time::Instant>,
+    receipt: Option<Pending>,
+    error: Option<String>,
 }
 struct PendingMapping {
     expected: eg_trainer::edits::ExpectedObservation,
@@ -167,6 +179,99 @@ struct PendingEdit {
     plan: Option<eg_trainer::writes::ForgePlan>,
 }
 impl Writer {
+    fn poll_descriptions(&mut self) {
+        let state = self.backend.snapshot();
+        let Ok(expected) = state.expected_observation() else {
+            self.descriptions = None;
+            return;
+        };
+        if !matches!(expected.snapshot().rarity, 7 | 9) {
+            self.descriptions = None;
+            return;
+        }
+        if !matches!(&state.forge, ForgeState::Item { unique: None, .. }) {
+            return;
+        }
+        if self
+            .descriptions
+            .as_ref()
+            .is_none_or(|(before, sequence, _)| before != &expected || *sequence != state.forge_read_sequence)
+            && let Ok(receipt) = self.backend.try_submit(Command::DescribeUnique {
+                expected: Box::new(expected.clone()),
+            })
+        {
+            self.descriptions = Some((expected, state.forge_read_sequence, receipt));
+        }
+    }
+
+    fn preview(&mut self, item: &ForgeItem, edit: &ItemEdit) -> Result<Vec<ModifierState>, GameError> {
+        let state = self.backend.snapshot();
+        if self.backend.subscribe().has_changed().is_err() || project_item(&state).ok().flatten().as_ref().is_none_or(|actual| !actual.same_state(item)) {
+            return Err("The item changed before its preview could be read.".into());
+        }
+        let expected = state.expected_observation().map_err(|e| e.to_string())?;
+        let Some(eg_trainer::edits::ItemEdit::Roll(draft)) = canonical_edit(edit, state.override_enabled) else {
+            return Err("This preview draft is unsupported.".into());
+        };
+        if draft.target != eg_trainer::edits::RollTarget::Unique {
+            return Err("Only unique rolls have a tooltip preview.".into());
+        }
+        if let Some(preview) = state.unique_preview.as_ref().filter(|p| p.expected == expected && p.draft == draft) {
+            return preview
+                .result
+                .as_ref()
+                .map(|p| p.preview().modifiers.iter().map(project_modifier).collect())
+                .map_err(Clone::clone);
+        }
+        if self.preview.as_ref().is_none_or(|p| p.expected != expected || p.draft != draft) {
+            self.preview = Some(PendingPreview {
+                expected,
+                draft,
+                starts: Some(std::time::Instant::now() + std::time::Duration::from_millis(150)),
+                receipt: None,
+                error: None,
+            });
+        }
+        if let Some(error) = self.preview.as_ref().and_then(|p| p.error.clone()) {
+            return Err(error);
+        }
+        Err(forge::game::PREVIEW_LOADING.into())
+    }
+    fn poll_preview(&mut self) -> bool {
+        if self
+            .preview
+            .as_ref()
+            .is_some_and(|p| self.backend.snapshot().expected_observation().as_ref() != Ok(&p.expected))
+        {
+            self.preview = None;
+            return false;
+        }
+        let Some(preview) = self.preview.as_mut() else {
+            return false;
+        };
+        if preview.starts.is_some_and(|at| std::time::Instant::now() >= at) && self.pending.is_none() {
+            preview.starts = None;
+            match self.backend.try_submit(Command::PreviewUnique {
+                expected: Box::new(preview.expected.clone()),
+                draft: preview.draft.clone(),
+            }) {
+                Ok(receipt) => preview.receipt = Some(receipt),
+                Err(_) => {
+                    preview.error = Some("The trainer cannot accept another preview request.".into());
+                    return true;
+                }
+            }
+        }
+        if let Some(result) = preview.receipt.as_mut().and_then(Pending::try_result) {
+            preview.receipt = None;
+            if let Err(error) = result {
+                preview.error = Some(error.message);
+            }
+            return true;
+        }
+        false
+    }
+
     fn resolve(&mut self, item: &ForgeItem, request: &RollRequest) -> Result<ValueTable, GameError> {
         use eg_trainer::mapping::{MappingAddress, MappingRequest, MappingTarget};
         if request.target != item::RollTarget::Affix {
@@ -299,6 +404,7 @@ impl Writer {
                         snapshot: Arc::new(actual),
                         resolved_name,
                         implicits: None,
+                        unique: None,
                     };
                     // Keep projection failure explicit; never substitute the
                     // requested presentation for an undisplayable readback.
@@ -478,6 +584,8 @@ pub fn bind(window: &MainWindow, backend: BackendHandle) {
         pending: None,
         mappings: Vec::new(),
         mapping_read_sequence: None,
+        preview: None,
+        descriptions: None,
     }));
     let forge = forge::attach(
         window,
@@ -522,7 +630,9 @@ pub fn bind(window: &MainWindow, backend: BackendHandle) {
 
 impl Binding {
     fn refresh(&self) {
+        self.writer.borrow_mut().poll_descriptions();
         let mappings_completed = self.writer.borrow_mut().poll_mappings();
+        let preview_completed = self.writer.borrow_mut().poll_preview();
         let snapshot = self.backend.snapshot();
         if self.backend.subscribe().has_changed().is_err() && snapshot.phase != Phase::Stopped {
             // An unexpected worker failure must not leave apparently live data.
@@ -544,7 +654,7 @@ impl Binding {
         }
         if self.revision.get() == Some(snapshot.revision) {
             self.forge.edit(|editor| {
-                if mappings_completed {
+                if mappings_completed || preview_completed {
                     editor.refresh();
                 } else {
                     editor.poll_writes();
@@ -713,12 +823,22 @@ fn project_catalog(data: &GameCatalog) -> Catalog {
     }
     catalog
 }
+fn project_modifier(line: &eg_trainer::backend::ModifierSnapshot) -> item::ModifierState {
+    item::ModifierState {
+        index: line.index as usize,
+        text: line.text.clone(),
+        range: line.range.clone(),
+        roll_ids: line.roll_ids.iter().map(|id| usize::from(*id)).collect(),
+        editable: line.editable,
+    }
+}
 fn project_item(state: &BackendSnapshot) -> Result<Option<ForgeItem>, String> {
     let ForgeState::Item {
         generation,
         snapshot,
         resolved_name,
         implicits,
+        unique,
     } = &state.forge
     else {
         return Ok(None);
@@ -753,8 +873,16 @@ fn project_item(state: &BackendSnapshot) -> Result<Option<ForgeItem>, String> {
     let identity = snapshot.identity.as_ref().map(|i| item::UniqueState {
         id: i.id,
         rolls: i.rolls.clone(),
-        modifiers: vec![],
-        formatting_error: "Localized descriptions are unavailable in this build.".into(),
+        modifiers: unique
+            .as_ref()
+            .and_then(|result| result.as_ref().ok())
+            .map(|lines| lines.iter().map(project_modifier).collect())
+            .unwrap_or_default(),
+        formatting_error: match unique {
+            Some(Ok(_)) => String::new(),
+            Some(Err(reason)) => reason.clone(),
+            None => forge::game::UNIQUE_LOADING.into(),
+        },
     });
     let level_requirement = u8::try_from(snapshot.status.level_requirement).map_err(|_| "This item's level requirement is outside the editor's supported range.")?;
     let status = Some(item::ItemStatus {
