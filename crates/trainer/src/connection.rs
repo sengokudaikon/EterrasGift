@@ -7,7 +7,7 @@
 use std::{future::Future, path::PathBuf, time::Instant};
 
 use eg_core::hashes;
-use eg_game_access::{
+use eg_trainer_wire::{
     process::ProcessIdentity,
     transport::{Delivery, Transport},
 };

@@ -1,3 +1,4 @@
+#![cfg(feature = "il2cpp")]
 //! Fake metadata/runtime tests for rejection, storage and rooting; not Unity compatibility evidence.
 use eg_game_access::il2cpp::raw::{self, Api, InvocationApi};
 use eg_game_access::il2cpp::{Argument, CheckedMethod, InvocationContext, InvocationOutcome, InvokeError, ReturnValue, RuntimeError, Scalar, ThreadContext, ValueTypeContract};

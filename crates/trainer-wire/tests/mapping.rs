@@ -1,4 +1,4 @@
-use eg_game_access::{mapping::*, protocol::ProtocolError};
+use eg_trainer_wire::{mapping::*, protocol::ProtocolError};
 
 fn address() -> MappingAddress {
     MappingAddress {
@@ -144,7 +144,7 @@ fn bounded_text_effects_context_and_whole_response() {
     assert!(encode_mapping(&page).is_err());
     page.samples[0].effects = vec!["x".repeat(MAX_TEXT_BYTES); MAX_EFFECTS];
     assert!(encode_mapping(&page).is_err());
-    rejects(&vec![0; eg_game_access::protocol::MAX_RESPONSE_SIZE + 1]);
+    rejects(&vec![0; eg_trainer_wire::protocol::MAX_RESPONSE_SIZE + 1]);
 }
 #[test]
 fn exact_count_each_start_and_unit_consistency() {
@@ -258,7 +258,7 @@ fn modifier_empty_strings_false_and_caps() {
 
 #[test]
 fn detached_mapping_query_rejects_reserved_data_invalid_drafts_and_partial_frames() {
-    use eg_game_access::{
+    use eg_trainer_wire::{
         forge::{AffixSnapshot, ForgeSnapshot, ItemStatus},
         protocol::{DispatcherSpec, REQUEST_SIZE, Request},
     };

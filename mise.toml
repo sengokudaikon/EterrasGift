@@ -71,7 +71,7 @@ env = { SLINT_MCP_PORT = "9315" }
 
 [tasks."trainer:test"]
 description = "Nightly release trainer fixtures and tier checks; no live game"
-run = "cargo test -p eg-game-access -p eg-trainer -p eg-trainer-helper -p eg-trainer-host -p eterras-gift --release --offline"
+run = "cargo test -p eg-trainer-wire -p eg-game-access -p eg-trainer -p eg-trainer-helper -p eg-trainer-host -p eterras-gift --release --offline"
 
 [tasks."trainer:verify"]
 description = "Nightly release trainer/controller tests, then workspace lint, format, tokens and fake-host captures"

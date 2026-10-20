@@ -176,7 +176,7 @@ impl RuntimeAccess {
         // SAFETY: inherits describe_implicits's retained runtime/metadata, attached thread and synchronous rooted graph-access contract.
         unsafe {
             let graph = self.forge_graph(attached)?.ok_or(DiscoveryError::NotReady("forge item absent"))?;
-            if target(&graph.manager)?.as_ptr() as u64 != request.manager || self.forge_snapshot(attached, &graph)? != *request.expected {
+            if target(&graph.manager)?.as_ptr() as u64 != request.manager() || self.forge_snapshot(attached, &graph)? != *request.expected() {
                 return Err(unsupported("forge changed before implicit description"));
             }
             let unpacked = self.class(&graph.images, c"", c"ItemDataUnpacked")?;
@@ -237,8 +237,8 @@ impl RuntimeAccess {
                                 get_data,
                                 Some(&definitions),
                                 &mut [
-                                    Argument::Scalar(Scalar::I32(i32::from(request.expected.item_type))),
-                                    Argument::Scalar(Scalar::I32(i32::from(request.expected.sub_type))),
+                                    Argument::Scalar(Scalar::I32(i32::from(request.expected().item_type))),
+                                    Argument::Scalar(Scalar::I32(i32::from(request.expected().sub_type))),
                                     Argument::Scalar(Scalar::I32(slot as i32)),
                                 ],
                             )?
@@ -266,7 +266,7 @@ impl RuntimeAccess {
                             index: slot as u32,
                             text: self.description_text(attached, api, &info, c"ToModifierString")?,
                             range: self.description_text(attached, api, &info, c"ToRangeString")?,
-                            roll_ids: if slot < request.expected.implicit_rolls.len() && minimum != maximum {
+                            roll_ids: if slot < request.expected().implicit_rolls.len() && minimum != maximum {
                                 vec![slot as u8]
                             } else {
                                 vec![]
@@ -279,7 +279,7 @@ impl RuntimeAccess {
             // Calls may run managed callbacks. Never publish text for an item or
             // graph that changed while producing it, even if its roots survived.
             let current = self.forge_graph(attached)?.ok_or(DiscoveryError::NotReady("forge item removed during formatting"))?;
-            if target(&current.manager)?.as_ptr() as u64 != request.manager || self.forge_snapshot(attached, &current)? != *request.expected {
+            if target(&current.manager)?.as_ptr() as u64 != request.manager() || self.forge_snapshot(attached, &current)? != *request.expected() {
                 return Err(unsupported("forge changed during implicit description"));
             }
             crate::mapping::encode_modifiers(&modifiers).map_err(|e| unsupported(e.to_string()))?;

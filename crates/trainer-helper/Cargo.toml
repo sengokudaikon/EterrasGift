@@ -10,8 +10,8 @@ publish.workspace = true
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-eg-trainer = { path = "../trainer" }
-eg-game-access = { path = "../game-access" }
+eg-trainer-wire = { path = "../trainer-wire" }
+eg-game-access = { path = "../game-access", features = ["il2cpp"] }
 tokio = { workspace = true, features = ["macros"] }
 
 [target.'cfg(windows)'.dependencies]

@@ -26,7 +26,7 @@ fn tier(name: &str) -> Tier {
     match name {
         "eg-core" => Tier::Shared,
         "eg-companion" => Tier::Companion,
-        "eg-trainer" | "eg-trainer-host" | "eg-trainer-helper" => Tier::Trainer,
+        "eg-trainer" | "eg-trainer-host" | "eg-trainer-helper" | "eg-trainer-wire" => Tier::Trainer,
         "eg-game-access" => Tier::GameAccess,
         "eg-ui" | "eterras-gift" => Tier::Composition,
         "xtask"

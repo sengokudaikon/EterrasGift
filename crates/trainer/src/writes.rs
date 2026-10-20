@@ -7,8 +7,8 @@ use crate::{
     catalog::GameCatalog,
     edits::{self, CatalogProvenance, EditError, ExpectedObservation, ItemEdit, PreparedEdit},
 };
-pub use eg_game_access::protocol::ResponseCode;
-use eg_game_access::{fields::AttackLeechObservation, forge::ForgeSnapshot};
+pub use eg_trainer_wire::protocol::ResponseCode;
+use eg_trainer_wire::{fields::AttackLeechObservation, forge::ForgeSnapshot};
 
 /// Checked after potentially lengthy local validation and immediately before
 /// entering transport. A false result cancels only work that has not been sent.
@@ -72,8 +72,8 @@ impl ForgePlan {
     pub fn inspect_readback(&self, actual: Option<&ForgeSnapshot>) -> edits::ReadbackDiagnostics {
         self.prepared.inspect_readback(actual)
     }
-    pub fn mutation(&self) -> eg_game_access::write::ForgeMutation {
-        use eg_game_access::write::ForgeMutation;
+    pub fn mutation(&self) -> eg_trainer_wire::write::ForgeMutation {
+        use eg_trainer_wire::write::ForgeMutation;
         let item = self.projected();
         match self.edit_intent() {
             ItemEdit::AddAffix(edit) => ForgeMutation::AddAffix {
@@ -96,11 +96,11 @@ impl ForgePlan {
                 unrestricted: edit.allow_incompatible,
             },
             ItemEdit::Roll(edit) if edit.target == edits::RollTarget::Affix => ForgeMutation::AffixRolls {
-                rolls: eg_game_access::write::AffixRolls::new(
+                rolls: eg_trainer_wire::write::AffixRolls::new(
                     &edit
                         .changes
                         .iter()
-                        .map(|c| eg_game_access::write::AffixRollChange {
+                        .map(|c| eg_trainer_wire::write::AffixRollChange {
                             slot: c.index as u8,
                             value: c.value as u8,
                         })

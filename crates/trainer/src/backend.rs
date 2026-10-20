@@ -24,15 +24,15 @@ use std::{
 
 pub use crate::session::{CaptureControl, CaptureObserver, CaptureOutcome, CaptureProgress};
 use eg_core::game_log::GameReadiness;
-pub use eg_game_access::transport::Delivery;
-pub use eg_game_access::{
+pub use eg_trainer_wire::transport::Delivery;
+pub use eg_trainer_wire::{
     fields::{AttackLeechObservation, AttackLeechRead, AttackLeechUnavailable, ObservedObjectIdentity, ObservedRate, RateUnavailable},
     forge::{AffixSnapshot, ForgeSnapshot, ItemStatus, UniqueIdentity},
     mapping::ModifierSnapshot,
     process::ProcessIdentity,
     protocol::RuntimeStatus,
 };
-use eg_game_access::{
+use eg_trainer_wire::{
     protocol::ResponseCode,
     transport::{Transport, TransportFailure},
 };

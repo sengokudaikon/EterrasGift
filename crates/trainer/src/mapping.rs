@@ -9,8 +9,8 @@
 mod display;
 use crate::edits::{ExpectedObservation, ItemEdit, MAX_WRITABLE_AFFIX_ID, RollEdit, RollTarget};
 pub use display::CapturedDisplayParser;
-pub use eg_game_access::mapping::{MappingAddress, MappingStart, MappingTarget, RawMappingPage, RawValueSample};
-use eg_game_access::{
+pub use eg_trainer_wire::mapping::{MappingAddress, MappingStart, MappingTarget, RawMappingPage, RawValueSample};
+use eg_trainer_wire::{
     mapping::{self as wire, ModifierSnapshot, UniqueRollPreview},
     protocol::MAX_RESPONSE_SIZE,
 };

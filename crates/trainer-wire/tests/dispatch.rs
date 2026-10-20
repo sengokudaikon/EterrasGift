@@ -1,4 +1,4 @@
-use eg_trainer::dispatch::{Cancellation, Dispatcher, Outcome};
+use eg_trainer_wire::dispatch::{Cancellation, Dispatcher, Outcome};
 use std::sync::{Arc, Barrier};
 
 #[test]

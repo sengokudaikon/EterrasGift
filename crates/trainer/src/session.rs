@@ -8,7 +8,7 @@ use crate::{
     profile::{BuildProfile, ProfileLease},
 };
 use eg_core::game_log::GameReadiness;
-use eg_game_access::{
+use eg_trainer_wire::{
     catalog::{self, CatalogKind, CatalogPage},
     definitions::{self, ItemLimits},
     fields::{self, AttackLeechRead, AttackLeechUnavailable},
@@ -315,15 +315,17 @@ impl<T: Transport, L: LogSource> Session<T, L> {
     }
     /// Optional presentation. A game formatting refusal leaves the session ready;
     /// transport, protocol, process and offline failures still revoke admission.
-    pub async fn describe_implicits(&mut self, now: Timestamp, expected: &ForgeSnapshot) -> Result<Option<Vec<eg_game_access::mapping::ModifierSnapshot>>, SessionError> {
+    pub async fn describe_implicits(&mut self, now: Timestamp, expected: &ForgeSnapshot) -> Result<Option<Vec<eg_trainer_wire::mapping::ModifierSnapshot>>, SessionError> {
         let manager = self.status.filter(|s| !s.online && s.manager != 0).ok_or(SessionError::NotConnected)?.manager;
         let dispatcher = self.discovery.as_ref().ok_or(SessionError::NotConnected)?.dispatcher;
-        let query = eg_game_access::mapping::ForgeDescriptionRequest::new(dispatcher, manager, expected.clone()).map_err(SessionError::Protocol)?;
-        let result = self.read_owned(now, |_| Request::DescribeImplicits(query), eg_game_access::mapping::decode_modifiers).await;
+        let query = eg_trainer_wire::mapping::ForgeDescriptionRequest::new(dispatcher, manager, expected.clone()).map_err(SessionError::Protocol)?;
+        let result = self
+            .read_owned(now, |_| Request::DescribeImplicits(query), eg_trainer_wire::mapping::decode_modifiers)
+            .await;
         match result {
             Ok(modifiers) => {
                 if modifiers.iter().any(|m| {
-                    m.index as usize >= eg_game_access::catalog::MAX_IMPLICITS
+                    m.index as usize >= eg_trainer_wire::catalog::MAX_IMPLICITS
                         || m.roll_ids.len() > 1
                         || m.roll_ids.iter().any(|id| usize::from(*id) >= expected.implicit_rolls.len() || u32::from(*id) != m.index)
                 }) {

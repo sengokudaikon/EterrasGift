@@ -1338,6 +1338,7 @@ name = "eg-game-access"
 version = "0.1.0"
 dependencies = [
  "eg-core",
+ "eg-trainer-wire",
  "static_assertions",
  "tokio",
  "windows-sys 0.61.2",
@@ -1349,6 +1350,7 @@ version = "0.1.0"
 dependencies = [
  "eg-core",
  "eg-game-access",
+ "eg-trainer-wire",
  "jiff",
  "serde_json",
  "tempfile",
@@ -1360,7 +1362,7 @@ name = "eg-trainer-helper"
 version = "0.1.0"
 dependencies = [
  "eg-game-access",
- "eg-trainer",
+ "eg-trainer-wire",
  "sha2",
  "tokio",
  "windows-sys 0.61.2",
@@ -1378,6 +1380,13 @@ dependencies = [
  "tempfile",
  "tokio",
  "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "eg-trainer-wire"
+version = "0.1.0"
+dependencies = [
+ "tokio",
 ]
 
 [[package]]

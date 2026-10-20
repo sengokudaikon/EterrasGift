@@ -6,22 +6,23 @@
 #[cfg(windows)]
 pub mod artifact;
 pub mod bootstrap;
-pub mod catalog;
-pub mod definitions;
-pub mod fields;
-pub mod forge;
+pub use eg_trainer_wire::catalog;
+pub use eg_trainer_wire::definitions;
+pub use eg_trainer_wire::fields;
+pub use eg_trainer_wire::forge;
+#[cfg(feature = "il2cpp")]
 pub mod il2cpp;
-pub mod locale;
-pub mod mapping;
+pub use eg_trainer_wire::locale;
+pub use eg_trainer_wire::mapping;
 pub mod numeric_locale;
 
-#[cfg(all(windows, target_arch = "x86_64"))]
+#[cfg(all(feature = "il2cpp", windows, target_arch = "x86_64"))]
 pub mod scheduler;
 
 #[cfg(windows)]
 pub mod pipe;
 pub mod process;
-pub mod protocol;
-pub mod rate_write;
-pub mod transport;
-pub mod write;
+pub use eg_trainer_wire::protocol;
+pub use eg_trainer_wire::rate_write;
+pub use eg_trainer_wire::transport;
+pub use eg_trainer_wire::write;

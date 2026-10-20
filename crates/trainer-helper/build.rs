@@ -17,7 +17,7 @@ fn collect(path: &Path, paths: &mut Vec<PathBuf>) {
 fn main() {
     let root = PathBuf::from(std::env::var_os("CARGO_MANIFEST_DIR").unwrap()).join("../..").canonicalize().unwrap();
     let mut files = vec![root.join("Cargo.toml"), root.join("Cargo.lock"), root.join("crates/trainer-helper/build.rs")];
-    for name in ["core", "game-access", "trainer", "trainer-helper"] {
+    for name in ["core", "game-access", "trainer-wire", "trainer-helper"] {
         let path = root.join("crates").join(name);
         files.push(path.join("Cargo.toml"));
         collect(&path.join("src"), &mut files);

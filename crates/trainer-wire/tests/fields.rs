@@ -1,4 +1,4 @@
-use eg_game_access::{
+use eg_trainer_wire::{
     fields::{self, AttackLeechObservation, AttackLeechRead, AttackLeechUnavailable, ObservedObjectIdentity, ObservedRate, RateUnavailable},
     protocol::ProtocolError,
 };

@@ -3,7 +3,7 @@ use crate::{
     edits::{ExpectedObservation, ItemEdit, RollTarget},
     mapping::{CapturedDisplayParser, MappingBuilder, MappingError, MappingRequest, ValueTable},
 };
-use eg_game_access::mapping::{self, AffixMappingDraft, AffixMappingQuery, MappingStart, MappingTarget};
+use eg_trainer_wire::mapping::{self, AffixMappingDraft, AffixMappingQuery, MappingStart, MappingTarget};
 
 impl<T: Transport, L: LogSource> Session<T, L> {
     /// Samples the game's exact display on detached items. Each page checks the

@@ -1,4 +1,4 @@
-use eg_game_access::{
+use eg_trainer_wire::{
     definitions::{self, ItemLimits, ValueRange},
     protocol::ProtocolError,
 };

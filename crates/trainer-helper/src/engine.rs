@@ -13,7 +13,7 @@ use eg_game_access::{
     scheduler::{HookError, SchedulerHook},
     write::ForgeWrite,
 };
-use eg_trainer::dispatch::{Dispatcher, Pending};
+use eg_trainer_wire::dispatch::{Dispatcher, Pending};
 use std::{
     ffi::{CStr, c_char, c_void},
     ptr::NonNull,

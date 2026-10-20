@@ -39,7 +39,7 @@ impl ForgeUndoHistory {
     }
     /// Called only for a confirmed step. Refusal retains the stack; NotKept or
     /// Uncertain must clear it. A new batch replaces old Undo on its first confirmation.
-    pub fn confirmed(&mut self, prepared: &crate::edits::PreparedEdit, manager: u64, actual: &eg_game_access::forge::ForgeSnapshot, undoing: bool) -> Result<(), EditError> {
+    pub fn confirmed(&mut self, prepared: &crate::edits::PreparedEdit, manager: u64, actual: &eg_trainer_wire::forge::ForgeSnapshot, undoing: bool) -> Result<(), EditError> {
         if !prepared.inspect_readback(Some(actual)).confirmed() {
             self.clear();
             return Err(EditError::InvalidObservation);
@@ -137,7 +137,7 @@ impl ForgeUndo {
 
     /// Pure reversal from a completed, independently confirmed observation.
     /// Authored sessions use this same domain path as production.
-    pub fn from_prepared(prepared: &crate::edits::PreparedEdit, manager: u64, snapshot: &eg_game_access::forge::ForgeSnapshot) -> Result<Self, EditError> {
+    pub fn from_prepared(prepared: &crate::edits::PreparedEdit, manager: u64, snapshot: &eg_trainer_wire::forge::ForgeSnapshot) -> Result<Self, EditError> {
         if manager == 0 || !prepared.inspect_readback(Some(snapshot)).confirmed() {
             return Err(EditError::InvalidObservation);
         }
@@ -151,7 +151,7 @@ impl ForgeUndo {
     }
 
     /// Pure intent calculation for draft cautions; it creates no accepted history.
-    pub fn reverse_intent(prepared: &crate::edits::PreparedEdit, snapshot: &eg_game_access::forge::ForgeSnapshot) -> Result<ItemEdit, EditError> {
+    pub fn reverse_intent(prepared: &crate::edits::PreparedEdit, snapshot: &eg_trainer_wire::forge::ForgeSnapshot) -> Result<ItemEdit, EditError> {
         if !prepared.inspect_readback(Some(snapshot)).confirmed() {
             return Err(EditError::InvalidObservation);
         }

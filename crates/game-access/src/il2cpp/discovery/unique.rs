@@ -232,7 +232,7 @@ impl RuntimeAccess {
         request: &UniquePreviewRequest,
     ) -> Result<Vec<ModifierSnapshot>, DiscoveryError> {
         // SAFETY: inherits unique_presentation's retained runtime/metadata, attached thread and synchronous rooted graph-access contract.
-        unsafe { self.unique_presentation(attached, Some(writes), api, &request.target, Some(request)) }
+        unsafe { self.unique_presentation(attached, Some(writes), api, request.target(), Some(request)) }
     }
     unsafe fn unique_presentation(
         &self,

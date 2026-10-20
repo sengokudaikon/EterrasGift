@@ -1,11 +1,11 @@
-use eg_game_access::protocol::RequestFrame as FrameAssembler;
-use eg_game_access::write::*;
-use eg_game_access::{
+use eg_trainer_wire::protocol::RequestFrame as FrameAssembler;
+use eg_trainer_wire::write::*;
+use eg_trainer_wire::{
     catalog::CatalogKind,
     forge::{self, AffixSnapshot, ForgeSnapshot, ItemStatus, UniqueIdentity},
     protocol::{DispatcherSpec, MAGIC, ProtocolError, REQUEST_SIZE, Request, Response, ResponseCode},
 };
-fn decode_header(bytes: &[u8]) -> Result<eg_game_access::protocol::RequestHeader, ProtocolError> {
+fn decode_header(bytes: &[u8]) -> Result<eg_trainer_wire::protocol::RequestHeader, ProtocolError> {
     Request::decode_header(bytes)
 }
 fn decode_frame(bytes: &[u8]) -> Result<Request, ProtocolError> {
@@ -244,7 +244,7 @@ fn minimal_schema_bound_is_exact() {
     let request = ForgeWrite::level_requirement(spec(), 1, item, 0).unwrap();
     assert!(decode_frame(&request.encode()).is_ok());
     assert_eq!(REQUEST_SIZE, 336);
-    assert_eq!(eg_game_access::protocol::VERSION, 37);
+    assert_eq!(eg_trainer_wire::protocol::VERSION, 37);
 }
 #[test]
 fn projection_changes_only_requested_level_and_its_legacy_fingerprint() {
@@ -304,7 +304,7 @@ fn override_is_one_explicit_bit_and_all_other_flag_bits_are_rejected() {
 
 #[test]
 fn potential_and_weaver_rules_keep_literal_bounds_identity_and_override_distinct() {
-    use eg_game_access::definitions::{ItemLimits, ValueRange};
+    use eg_trainer_wire::definitions::{ItemLimits, ValueRange};
     let limits = ItemLimits {
         forging_potential: ValueRange { minimum: 3, maximum: 211 },
         legendary_potential: ValueRange { minimum: 1, maximum: 6 },
@@ -402,7 +402,7 @@ fn damaged_or_oversized_done_is_uncertain_after_possible_store() {
         classify_response(
             &Response {
                 code: ResponseCode::Done,
-                payload: vec![0; eg_game_access::protocol::MAX_RESPONSE_SIZE + 1]
+                payload: vec![0; eg_trainer_wire::protocol::MAX_RESPONSE_SIZE + 1]
             },
             &request
         ),
@@ -451,12 +451,12 @@ fn async_reader_does_not_return_request_on_header_only_disconnect() {
     tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap().block_on(async {
         use tokio::io::AsyncWriteExt;
         let (mut writer, mut reader) = tokio::io::duplex(8192);
-        let task = tokio::spawn(async move { eg_game_access::transport::read_request(&mut reader).await });
+        let task = tokio::spawn(async move { eg_trainer_wire::transport::read_request(&mut reader).await });
         writer.write_all(&write().encode()[..336]).await.unwrap();
         tokio::task::yield_now().await;
         assert!(!task.is_finished());
         drop(writer);
-        assert!(matches!(task.await.unwrap(), Err(eg_game_access::transport::RequestReadError::Io(_))));
+        assert!(matches!(task.await.unwrap(), Err(eg_trainer_wire::transport::RequestReadError::Io(_))));
     });
 }
 #[test]
@@ -464,12 +464,12 @@ fn async_reader_rejects_unbounded_header_without_waiting_for_body() {
     tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap().block_on(async {
         use tokio::io::AsyncWriteExt;
         let (mut writer, mut reader) = tokio::io::duplex(8192);
-        let task = tokio::spawn(async move { eg_game_access::transport::read_request(&mut reader).await });
+        let task = tokio::spawn(async move { eg_trainer_wire::transport::read_request(&mut reader).await });
         let mut header = literal()[..336].to_vec();
         set32(&mut header, 12, u32::MAX);
         writer.write_all(&header).await.unwrap();
         let result = tokio::time::timeout(std::time::Duration::from_secs(1), task).await.unwrap().unwrap();
-        assert!(matches!(result, Err(eg_game_access::transport::RequestReadError::Protocol(_))));
+        assert!(matches!(result, Err(eg_trainer_wire::transport::RequestReadError::Protocol(_))));
     });
 }
 

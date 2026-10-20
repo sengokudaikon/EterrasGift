@@ -4,7 +4,7 @@ use eg_game_access::{
     protocol::{Discovery, DispatcherSpec, Request, Response, ResponseCode},
     transport::{RequestReadError, read_request},
 };
-use eg_trainer::dispatch::{Cancellation, Outcome, Pending};
+use eg_trainer_wire::dispatch::{Cancellation, Outcome, Pending};
 use std::{
     future::Future,
     io,

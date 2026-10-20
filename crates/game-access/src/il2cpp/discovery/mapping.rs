@@ -321,10 +321,10 @@ impl RuntimeAccess {
     ) -> Result<(), DiscoveryError> {
         // SAFETY: inherits read_affix_mapping's retained runtime/metadata, attached thread and synchronous rooted graph-access contract.
         unsafe {
-            let Some(draft) = query.draft else {
+            let Some(draft) = query.draft() else {
                 return Ok(());
             };
-            let original = &query.expected().affixes[usize::from(query.slot)];
+            let original = &query.expected().affixes[usize::from(query.slot())];
             if original.id == draft.id && original.tier == u16::from(draft.tier) && original.seal == i32::from(draft.seal) {
                 return Ok(());
             }
@@ -367,12 +367,12 @@ impl RuntimeAccess {
             {
                 return Err(unsupported("draft affix constructor normalized requested shape"));
             }
-            if query.expected().affixes[usize::from(query.slot)].id == draft.id {
+            if query.expected().affixes[usize::from(query.slot())].id == draft.id {
                 let field = self.mutable_field(class, c"affixCountForSetProps", c"Int32", 0x08).map_err(contract)?;
                 writes.set_i32(
                     target(&replacement)?,
                     field,
-                    self.primitive::<i32>(&original[usize::from(query.slot)], c"affixCountForSetProps")?,
+                    self.primitive::<i32>(&original[usize::from(query.slot())], c"affixCountForSetProps")?,
                 );
             }
             let list_class = (self.object_class)(target(&list)?.as_ptr());
@@ -389,7 +389,7 @@ impl RuntimeAccess {
                 return Err(unsupported("detached list Clear threw"));
             }
             for (index, object) in original.iter().enumerate() {
-                let object = if index == usize::from(query.slot) { &replacement } else { object };
+                let object = if index == usize::from(query.slot()) { &replacement } else { object };
                 if !matches!(
                     add.invoke(Some(&list), &mut [Argument::Reference(Some(object))]).map_err(contract)?,
                     InvocationOutcome::Returned(ReturnValue::Void)
@@ -399,7 +399,7 @@ impl RuntimeAccess {
             }
             let mut flags = [false; 3];
             for (index, object) in original.iter().enumerate() {
-                let object = if index == usize::from(query.slot) { &replacement } else { object };
+                let object = if index == usize::from(query.slot()) { &replacement } else { object };
                 let seal = self.enumeration(object, c"sealedAffixType", c"SealedAffixType")?;
                 if (1..=3).contains(&seal) {
                     flags[(seal - 1) as usize] = true;
@@ -442,11 +442,11 @@ impl RuntimeAccess {
             }
             let locale = self.read_game_locale(attached, api)?;
             let copy = self.mapping_copy(attached, writes, api, &graph)?;
-            if self.mapping_effects(attached, api, &graph.images, &graph.item, query.slot)? != self.mapping_effects(attached, api, &graph.images, &copy, query.slot)? {
+            if self.mapping_effects(attached, api, &graph.images, &graph.item, query.slot())? != self.mapping_effects(attached, api, &graph.images, &copy, query.slot())? {
                 return Err(unsupported("detached tooltip context differs from live item"));
             }
             self.mapping_project(attached, writes, api, &graph, &copy, query)?;
-            self.mapping_assign_roll(attached, writes, &graph.images, &copy, query.slot, 0)?;
+            self.mapping_assign_roll(attached, writes, &graph.images, &copy, query.slot(), 0)?;
             let rebuild = self.method(self.class(&graph.images, c"", c"ItemData")?, c"RebuildID", &[], true)?;
             self.mapping_void(attached, api, &copy, rebuild, &mut [])?;
             let serial = self
@@ -457,8 +457,8 @@ impl RuntimeAccess {
             opaque.extend_from_slice(&(serial.len() as u32).to_le_bytes());
             opaque.extend(serial);
             for endpoint in [0, 255] {
-                self.mapping_assign_roll(attached, writes, &graph.images, &copy, query.slot, endpoint)?;
-                let effects = self.mapping_effects(attached, api, &graph.images, &copy, query.slot)?;
+                self.mapping_assign_roll(attached, writes, &graph.images, &copy, query.slot(), endpoint)?;
+                let effects = self.mapping_effects(attached, api, &graph.images, &copy, query.slot())?;
                 opaque.extend_from_slice(&(effects.len() as u32).to_le_bytes());
                 for effect in effects {
                     opaque.extend_from_slice(&effect.value.to_le_bytes());
@@ -471,10 +471,10 @@ impl RuntimeAccess {
                 return Err(unsupported("mapping context exceeds bound"));
             }
             let mut samples = Vec::new();
-            if let MappingStart::Samples(start) = query.start {
+            if let MappingStart::Samples(start) = query.start() {
                 for roll in usize::from(start)..(usize::from(start) + 16).min(256) {
-                    self.mapping_assign_roll(attached, writes, &graph.images, &copy, query.slot, roll as u8)?;
-                    let effects = self.mapping_effects(attached, api, &graph.images, &copy, query.slot)?;
+                    self.mapping_assign_roll(attached, writes, &graph.images, &copy, query.slot(), roll as u8)?;
+                    let effects = self.mapping_effects(attached, api, &graph.images, &copy, query.slot())?;
                     samples.push(RawValueSample {
                         raw_quantity: effects[0].value,
                         display: effects[0].display.clone(),
@@ -495,10 +495,10 @@ impl RuntimeAccess {
                 context: opaque,
                 address: MappingAddress {
                     target: MappingTarget::Affix,
-                    index: query.slot,
+                    index: query.slot(),
                     line: None,
                 },
-                start: query.start,
+                start: query.start(),
                 samples,
             };
             crate::mapping::encode_mapping(&page).map_err(contract)?;

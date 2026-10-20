@@ -1,4 +1,4 @@
-use eg_game_access::{
+use eg_trainer_wire::{
     forge::{self, AffixSnapshot, ForgeSnapshot, ItemStatus, MAX_AFFIXES, MAX_IMPLICIT_ROLLS, MAX_NAME_BYTES, MAX_UNIQUE_ROLLS, UniqueIdentity},
     protocol::{MAX_RESPONSE_SIZE, ProtocolError},
 };

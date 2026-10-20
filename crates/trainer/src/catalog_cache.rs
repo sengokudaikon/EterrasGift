@@ -17,7 +17,7 @@ use std::{
 };
 
 use eg_core::{atomic, hashes};
-use eg_game_access::{
+use eg_trainer_wire::{
     catalog::{self, CatalogEntries, CatalogKind, CatalogPage, MAX_PAGE_ENTRIES},
     definitions,
     locale::GameLocale,

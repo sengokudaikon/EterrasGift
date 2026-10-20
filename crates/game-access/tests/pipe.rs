@@ -88,7 +88,7 @@ impl Fixture {
     }
 
     fn identity(&self) -> ProcessIdentity {
-        ProcessIdentity::capture(self.child.id()).unwrap()
+        eg_game_access::process::capture(self.child.id()).unwrap()
     }
 
     fn wait_for_file(&mut self, name: &str) {
@@ -248,7 +248,7 @@ fn fragmented_responses_use_fresh_connections_to_the_identified_child() {
     let mut fixture = Fixture::spawn("fragmented");
     let identity = fixture.identity();
     assert_ne!(identity.pid, std::process::id());
-    assert_eq!(identity.executable, ProcessIdentity::capture(std::process::id()).unwrap().executable);
+    assert_eq!(identity.executable, eg_game_access::process::capture(std::process::id()).unwrap().executable);
     runtime().block_on(async {
         let mut client = PipeClient::with_timeouts(identity.clone(), LIMIT, LIMIT);
         assert_eq!(client.target(), &identity);

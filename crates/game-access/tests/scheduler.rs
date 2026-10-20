@@ -1,3 +1,4 @@
+#![cfg(feature = "il2cpp")]
 #![cfg(all(windows, target_arch = "x86_64"))]
 //! Owned native target only. Relocation/registered unwind and real suspension/restore tests.
 use eg_game_access::il2cpp::raw::{ExecuteTasks, MethodInfo};

@@ -1,4 +1,4 @@
-use eg_game_access::protocol::{
+use eg_trainer_wire::protocol::{
     ADAPTER, Discovery, DispatcherSpec, HookState, MAGIC, MAX_RESPONSE_SIZE, ProtocolError, REQUEST_SIZE, REQUIRED_KEYS, Request, Response, ResponseCode, RuntimeStatus,
 };
 
@@ -100,7 +100,7 @@ fn attack_leech_request_binds_nonzero_manager_and_has_no_tail() {
 
 #[test]
 fn catalog_query_has_two_bounded_fields_and_no_other_reserved_data() {
-    use eg_game_access::catalog::CatalogKind;
+    use eg_trainer_wire::catalog::CatalogKind;
     for kind in [CatalogKind::Bases, CatalogKind::Affixes, CatalogKind::Uniques, CatalogKind::Rarities] {
         for cursor in [0, 16.min(kind.maximum_total()), kind.maximum_total()] {
             let request = Request::ReadCatalogPage {

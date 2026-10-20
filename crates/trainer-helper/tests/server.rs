@@ -2,12 +2,11 @@
 //! Persistent server tests use a fake backend and explicitly spawned copies of this executable.
 use eg_game_access::{
     pipe::PipeClient,
-    process::ProcessIdentity,
     protocol::{Discovery, DispatcherSpec, REQUIRED_KEYS, Request, Response, ResponseCode, RuntimeStatus},
     transport::Transport,
 };
-use eg_trainer::dispatch::{Dispatcher, Pending};
 use eg_trainer_helper::server::{Backend, Shared, failure};
+use eg_trainer_wire::dispatch::{Dispatcher, Pending};
 use std::{
     fs,
     os::windows::process::CommandExt,
@@ -133,7 +132,7 @@ impl Fixture {
         fixture
     }
     fn client(&self) -> PipeClient {
-        PipeClient::with_timeouts(ProcessIdentity::capture(self.child.id()).unwrap(), Duration::from_secs(3), LIMIT)
+        PipeClient::with_timeouts(eg_game_access::process::capture(self.child.id()).unwrap(), Duration::from_secs(3), LIMIT)
     }
     fn log(&self) -> String {
         fs::read_to_string(self.directory.join("server.log")).unwrap_or_default()
@@ -215,7 +214,7 @@ fn server_fixture_child() {
     runtime().block_on(async {
         if role == "client" {
             let pid = std::env::var("EG_HELPER_TEST_SERVER_PID").unwrap().parse().unwrap();
-            let mut client = PipeClient::with_timeouts(ProcessIdentity::capture(pid).unwrap(), Duration::from_secs(3), LIMIT);
+            let mut client = PipeClient::with_timeouts(eg_game_access::process::capture(pid).unwrap(), Duration::from_secs(3), LIMIT);
             let response = client.send(&Request::Discover).await.unwrap();
             fs::write(directory.join("foreign-code"), (response.code as u32).to_string()).unwrap();
             fs::write(directory.join("foreign-ready"), []).unwrap();

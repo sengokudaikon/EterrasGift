@@ -60,7 +60,7 @@ impl ProcessLocator for GameProcesses {
         while more {
             let end = entry.szExeFile.iter().position(|c| *c == 0).unwrap_or(entry.szExeFile.len());
             if String::from_utf16_lossy(&entry.szExeFile[..end]).eq_ignore_ascii_case(&self.executable_name) {
-                match ProcessIdentity::capture(entry.th32ProcessID) {
+                match eg_game_access::process::capture(entry.th32ProcessID) {
                     Ok(identity) => found.push(identity),
                     Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
                     Err(error) => return Err(BackendError::blocked(ErrorKind::Identity, format!("Could not identify Last Epoch: {error}"))),

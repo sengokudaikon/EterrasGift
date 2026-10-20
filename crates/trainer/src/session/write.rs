@@ -3,7 +3,7 @@ use crate::{
     field_writes::{RateWriteRecord, RateWriteStatus},
     writes::{AllowWrite, ForgePlan, WriteControl, WriteObservation, WriteOutcome, WritePlan, WriteRecord, WriteStatus},
 };
-use eg_game_access::{
+use eg_trainer_wire::{
     rate_write::{AttackLeechRateWrite, RateWriteReply},
     write::{ForgeWrite, WriteReply},
 };
@@ -206,14 +206,14 @@ impl<T: Transport, L: LogSource> Session<T, L> {
     }
 }
 
-fn classify_ack(request: &Request, response: &eg_game_access::protocol::Response) -> WriteOutcome<WriteObservation> {
+fn classify_ack(request: &Request, response: &eg_trainer_wire::protocol::Response) -> WriteOutcome<WriteObservation> {
     match request {
-        Request::EditForge(request) => match eg_game_access::write::classify_response(response, request) {
+        Request::EditForge(request) => match eg_trainer_wire::write::classify_response(response, request) {
             WriteReply::Confirmed(actual) => WriteOutcome::Confirmed(WriteObservation::forge(actual)),
             WriteReply::NotApplied { code, message } => WriteOutcome::NotApplied { code, message },
             WriteReply::Uncertain { reason } => WriteOutcome::uncertain(reason),
         },
-        Request::SetAttackLeechRate(request) => match eg_game_access::rate_write::classify_response(response, request) {
+        Request::SetAttackLeechRate(request) => match eg_trainer_wire::rate_write::classify_response(response, request) {
             RateWriteReply::Confirmed(actual) => WriteOutcome::Confirmed(WriteObservation::Field(actual)),
             RateWriteReply::NotApplied { code, message } => WriteOutcome::NotApplied { code, message },
             RateWriteReply::Uncertain { reason } => WriteOutcome::uncertain(reason),

@@ -1,4 +1,4 @@
-use eg_game_access::{
+use eg_trainer_wire::{
     fields::{self, AttackLeechObservation, AttackLeechRead, AttackLeechTarget, AttackLeechUnavailable, ObservedObjectIdentity, ObservedRate},
     protocol::{DispatcherSpec, MAX_RESPONSE_SIZE, Response, ResponseCode},
     rate_write::{AttackLeechRateWrite, RateWriteReply, classify_response},

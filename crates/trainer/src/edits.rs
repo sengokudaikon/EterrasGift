@@ -12,7 +12,7 @@
 //! the hard 32-affix readable-result bound, even for already malformed layouts.
 
 use crate::catalog::{CatalogIdentity, GameCatalog};
-use eg_game_access::{
+use eg_trainer_wire::{
     catalog::{AffixDefinition, Availability},
     forge::{AffixSnapshot, ForgeSnapshot},
     process::ProcessIdentity,
@@ -68,7 +68,7 @@ pub enum RollTarget {
     Unique = 1,
     Implicit = 2,
 }
-pub use eg_game_access::write::StatusField;
+pub use eg_trainer_wire::write::StatusField;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct AffixEdit {
@@ -249,7 +249,7 @@ pub struct ExpectedObservation {
 }
 impl ExpectedObservation {
     pub fn new(generation: u64, process: ProcessIdentity, catalog: CatalogIdentity, snapshot: ForgeSnapshot) -> Result<Self, EditError> {
-        if generation == 0 || process.pid == 0 || process.created == 0 || !process.executable.is_absolute() || eg_game_access::forge::encode(Some(&snapshot)).is_err() {
+        if generation == 0 || process.pid == 0 || process.created == 0 || !process.executable.is_absolute() || eg_trainer_wire::forge::encode(Some(&snapshot)).is_err() {
             return Err(EditError::InvalidObservation);
         }
         Ok(Self {
@@ -364,8 +364,8 @@ fn affix_values(id: i32, tier: i32, roll: i32) -> Result<(), EditError> {
     Ok(())
 }
 
-pub use eg_game_access::write::LayoutProblem;
-use eg_game_access::write::{affix_order_key, layout_problems};
+pub use eg_trainer_wire::write::LayoutProblem;
+use eg_trainer_wire::write::{affix_order_key, layout_problems};
 fn new_problem(item: &ForgeSnapshot, affixes: &[AffixSnapshot]) -> Result<(), EditError> {
     let old = layout_problems(item, &item.affixes);
     match layout_problems(item, affixes).into_iter().find(|p| !old.contains(p)) {
@@ -576,7 +576,7 @@ pub fn prepare(
             });
             new_problem(before, &ordered)?;
             order(&mut ordered, before.rarity);
-            after.rarity = eg_game_access::write::affix_list_rarity(before, &ordered);
+            after.rarity = eg_trainer_wire::write::affix_list_rarity(before, &ordered);
         }
         ItemEdit::RemoveAffix(e) => {
             let slot = index(before, e.slot)?;
@@ -586,7 +586,7 @@ pub fn prepare(
             ordered.remove(slot);
             new_problem(before, &ordered)?;
             order(&mut ordered, before.rarity);
-            after.rarity = eg_game_access::write::affix_list_rarity(before, &ordered);
+            after.rarity = eg_trainer_wire::write::affix_list_rarity(before, &ordered);
         }
         ItemEdit::Roll(e) => {
             if e.changes.is_empty()
@@ -731,7 +731,7 @@ pub fn prepare(
     {
         return Err(EditError::AffixIdNotSerializable(a.id));
     }
-    if eg_game_access::forge::encode(Some(&after)).is_err() {
+    if eg_trainer_wire::forge::encode(Some(&after)).is_err() {
         return Err(EditError::ProjectedSnapshotOutOfBounds);
     }
     Ok(PreparedEdit {

@@ -1,13 +1,5 @@
 //! Explicit process identity. Capturing it queries identity only, without memory access or injection.
-use std::path::PathBuf;
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct ProcessIdentity {
-    pub pid: u32,
-    /// Windows FILETIME, 100ns since1601. PID reuse is a different identity.
-    pub created: u64,
-    pub executable: PathBuf,
-}
+pub use eg_trainer_wire::process::ProcessIdentity;
 
 #[cfg(windows)]
 mod windows {
@@ -67,11 +59,12 @@ mod windows {
             })
         }
     }
-    impl ProcessIdentity {
-        pub fn capture(pid: u32) -> io::Result<Self> {
-            Process::open(pid)?.identity()
-        }
+    pub fn capture(pid: u32) -> io::Result<ProcessIdentity> {
+        Process::open(pid)?.identity()
     }
 }
 #[cfg(windows)]
 pub(crate) use windows::Process;
+
+#[cfg(windows)]
+pub use windows::capture;

@@ -1,4 +1,4 @@
-use eg_game_access::{
+use eg_trainer_wire::{
     fields::{self, AttackLeechObservation, AttackLeechRead, AttackLeechTarget, ObservedObjectIdentity, ObservedRate},
     forge::{ForgeSnapshot, ItemStatus},
     protocol::{DispatcherSpec, ProtocolError, REQUEST_SIZE, Request, RequestFrame, VERSION},

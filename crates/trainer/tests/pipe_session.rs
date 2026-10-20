@@ -88,7 +88,7 @@ fn actual_log_pipe_and_session_validate_before_status_and_clear_on_disable() {
         );
         std::thread::sleep(Duration::from_millis(5));
     }
-    let target = ProcessIdentity::capture(child.0.id()).unwrap();
+    let target = eg_game_access::process::capture(child.0.id()).unwrap();
     let now = jiff::Timestamp::now();
     fs::write(&log, format!("{now}\tINFO\tShellSceneManager: State transition Login -> CharacterSelect\n{now}\tINFO\tLoading character: Fixture 1 isOnline: False, cycle: Legacy, class: Mage\n{now}\tINFO\tShellSceneManager: State transition CharacterSelect -> None\n")).unwrap();
     let build_id = "A".repeat(64);

@@ -1,4 +1,4 @@
-use eg_game_access::{
+use eg_trainer_wire::{
     locale::{self, GameLocale, MAX_TEXT_BYTES},
     protocol::{MAX_RESPONSE_SIZE, ProtocolError},
 };

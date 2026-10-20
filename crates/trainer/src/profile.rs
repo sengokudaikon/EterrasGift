@@ -1,6 +1,6 @@
 //! Local artifact identity, not fields transmitted by protocol21. No known-build whitelist is implied.
 use eg_core::hashes;
-use eg_game_access::protocol::DispatcherSpec;
+use eg_trainer_wire::protocol::DispatcherSpec;
 use std::{
     fs, io,
     path::{Path, PathBuf},

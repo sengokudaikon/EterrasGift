@@ -4,8 +4,8 @@
 //! The adapter requires definition graphs to remain immutable during a capture.
 //! No partial catalog is published and no name fallback overwrites the raw observation.
 
-use eg_game_access::{catalog, forge::ForgeSnapshot, protocol::ProtocolError};
-pub use eg_game_access::{
+use eg_trainer_wire::{catalog, forge::ForgeSnapshot, protocol::ProtocolError};
+pub use eg_trainer_wire::{
     catalog::{
         AffixDefinition, AffixTier, Availability, CatalogEntries, CatalogKind, CatalogPage, DefinitionName, DefinitionNameSource, ImplicitDefinition, ItemTypeDefinition,
         NumericProperty, RarityDefinition, SubTypeDefinition, UniqueDefinition, UniqueNumericData,
@@ -104,8 +104,8 @@ impl CatalogBuilder {
         if !eg_core::hashes::is_sha256(&identity.binary_hash) || !eg_core::hashes::is_sha256(&identity.metadata_hash) || identity.extraction_version != EXTRACTION_VERSION {
             return Err(ProtocolError::InvalidData);
         }
-        eg_game_access::locale::encode(&identity.locale)?;
-        eg_game_access::definitions::encode(&limits)?;
+        eg_trainer_wire::locale::encode(&identity.locale)?;
+        eg_trainer_wire::definitions::encode(&limits)?;
         Ok(Self {
             catalog: GameCatalog {
                 identity,
