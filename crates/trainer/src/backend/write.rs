@@ -76,6 +76,7 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
         let write_plan = WritePlan::from(plan.clone());
         let (status, failure) = self.submit_write(&write_plan, &mut control).await;
         let status = status.map(WriteObservation::into_forge);
+        self.log_forge_outcome(&plan, &status);
         self.state.last_write = Some(WriteRecord {
             plan: plan.clone(),
             status: status.clone(),

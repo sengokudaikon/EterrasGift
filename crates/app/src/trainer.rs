@@ -1,4 +1,5 @@
 //! One background runtime owns the trainer. The window holds only its queue/watch handle.
+use eg_core::fault::FaultLog;
 use eg_trainer::{
     backend::{self, BackendHandle, BackendOptions, Command, SubmitError, SystemClock},
     catalog_cache::CatalogCache,
@@ -13,7 +14,7 @@ use std::{
 
 pub struct Trainer {
     pub handle: BackendHandle,
-    worker: JoinHandle<()>,
+    worker: JoinHandle<bool>,
 }
 impl Trainer {
     pub fn start(
@@ -21,9 +22,9 @@ impl Trainer {
         player_log: PathBuf,
         cache: PathBuf,
         executable_name: String,
-        auto_connect: bool,
+        options: BackendOptions,
         no_connect: bool,
-        override_enabled: bool,
+        faults: FaultLog,
     ) -> Result<Self, String> {
         let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build().map_err(|e| e.to_string())?;
         let logs = FileLogFactory::new(player_log).map_err(|e| e.to_string())?;
@@ -34,16 +35,23 @@ impl Trainer {
             unsafe { DesktopConnector::new(helper_manifest, logs.clone()) },
             logs.reader(),
             SystemClock,
-            BackendOptions {
-                auto_connect,
-                override_enabled,
-                ..Default::default()
-            },
+            options,
             Some(CatalogCache::new(cache)),
         );
+        let worker = worker.with_fault_log(faults.clone());
         let worker = thread::Builder::new()
             .name("trainer".into())
-            .spawn(move || runtime.block_on(worker.run()))
+            .spawn(move || {
+                run_worker(
+                    || runtime.block_on(worker.run()),
+                    &faults,
+                    || {
+                        let _ = slint::invoke_from_event_loop(|| {
+                            let _ = slint::quit_event_loop();
+                        });
+                    },
+                )
+            })
             .map_err(|e| e.to_string())?;
         // No process lookup or preparation when --no-connect was requested.
         let _ = handle.try_submit(Command::Enable);
@@ -62,6 +70,44 @@ impl Trainer {
                 Err(SubmitError::Full) => thread::sleep(Duration::from_millis(10)),
             }
         }
-        self.worker.join().is_ok()
+        self.worker.join().is_ok_and(|completed| completed)
+    }
+}
+
+/// Unexpected worker panics have the same fatal policy as Mods/Settings. Expected
+/// connection and write failures are typed results and never enter this path.
+fn run_worker(work: impl FnOnce(), faults: &FaultLog, shutdown: impl FnOnce()) -> bool {
+    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(work)) {
+        Ok(()) => true,
+        Err(panic) => {
+            let message = panic
+                .downcast_ref::<String>()
+                .map(String::as_str)
+                .or_else(|| panic.downcast_ref::<&str>().copied())
+                .unwrap_or("Unknown panic payload");
+            faults.write("Trainer worker", Some(message), None, Some("Unexpected worker failure; the app closes with exit code 1."));
+            shutdown();
+            false
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_worker_panic_records_its_fault_and_requests_shutdown() {
+        let directory = tempfile::tempdir().unwrap();
+        let faults = FaultLog::with_fallbacks(directory.path(), Some(directory.path()), vec![]);
+        let mut shutdown = false;
+        assert!(!run_worker(|| panic!("fixture worker fault"), &faults, || shutdown = true));
+        assert!(shutdown);
+        let reports = std::fs::read_dir(directory.path()).unwrap().collect::<Vec<_>>();
+        assert_eq!(reports.len(), 1);
+        let text = std::fs::read_to_string(reports[0].as_ref().unwrap().path()).unwrap();
+        assert!(text.contains("Trainer worker"));
+        assert!(text.contains("fixture worker fault"));
+        assert!(run_worker(|| {}, &faults, || panic!("normal completion must not close the app")));
     }
 }

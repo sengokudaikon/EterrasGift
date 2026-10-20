@@ -66,6 +66,9 @@ impl ForgePlan {
     pub fn edit_intent(&self) -> &ItemEdit {
         self.prepared.edit()
     }
+    pub fn inspect_readback(&self, actual: Option<&ForgeSnapshot>) -> edits::ReadbackDiagnostics {
+        self.prepared.inspect_readback(actual)
+    }
     pub fn mutation(&self) -> eg_game_access::write::ForgeMutation {
         use eg_game_access::write::ForgeMutation;
         let item = self.projected();

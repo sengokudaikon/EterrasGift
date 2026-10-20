@@ -98,13 +98,17 @@ fn main() -> Result<(), slint::PlatformError> {
             folders::player_log(),
             store.paths().module_directory("trainer").join("catalog"),
             process_name,
-            automatic,
+            eg_trainer::backend::BackendOptions {
+                auto_connect: automatic,
+                override_enabled: store
+                    .module_settings(trainer_settings::ID)
+                    .and_then(|v| v.get("iKnowWhatImDoing"))
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false),
+                ..Default::default()
+            },
             arguments.no_connect,
-            store
-                .module_settings(trainer_settings::ID)
-                .and_then(|v| v.get("iKnowWhatImDoing"))
-                .and_then(|v| v.as_bool())
-                .unwrap_or(false),
+            FaultLog::new(&root, Some(&store.paths().log_directory())),
         ) {
             Ok(runtime) => Some(runtime),
             Err(error) => {

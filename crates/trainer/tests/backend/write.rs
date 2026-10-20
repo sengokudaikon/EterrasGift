@@ -3,6 +3,50 @@ use eg_game_access::protocol::ResponseCode;
 use eg_trainer::writes::{WriteObservation, WriteOutcome, WritePlan};
 
 #[test]
+fn failed_write_evidence_is_persisted_without_event_subscribers_even_during_cleanup() {
+    run(async {
+        for uncertain in [false, true] {
+            let directory = tempfile::tempdir().unwrap();
+            let faults = eg_core::fault::FaultLog::with_fallbacks(directory.path(), Some(directory.path()), vec![]);
+            let shared = writable();
+            let (handle, worker) = backend::service(Locator(shared.clone()), Connect(shared.clone()), Logs(shared.clone()), FakeClock, options(), None);
+            let worker = tokio::spawn(worker.with_fault_log(faults).run());
+            connected(&handle).await;
+            let plan = handle.snapshot().level_requirement_plan(17).unwrap();
+            let mut different = plan.projected().clone();
+            different.status.level_requirement = 18;
+            different.fingerprint = different.legacy_fingerprint();
+            *shared.write_result.lock().unwrap() = Some(if uncertain {
+                WriteStatus::uncertain("lost reply")
+            } else {
+                WriteStatus::NotKept(different)
+            });
+            shared.write_block.arm();
+            let receipt = handle.try_submit(Command::Write(plan.into())).unwrap();
+            shared.write_block.wait_started().await;
+            let shutdown = handle.try_submit(Command::Shutdown).unwrap();
+            shared.write_block.finish();
+            assert_eq!(receipt.wait().await.unwrap_err().kind, ErrorKind::Superseded);
+            shutdown.wait().await.unwrap();
+            worker.await.unwrap();
+            let reports = std::fs::read_dir(directory.path())
+                .unwrap()
+                .map(|e| serde_json::from_slice::<serde_json::Value>(&std::fs::read(e.unwrap().path()).unwrap()).unwrap())
+                .collect::<Vec<_>>();
+            assert_eq!(reports.len(), 1);
+            let report = &reports[0];
+            assert_eq!(report["operation"], "Forge write");
+            assert_eq!(report["code"], if uncertain { "WriteUncertain" } else { "EditNotKept" });
+            assert_eq!(report["edit"]["value"], 17);
+            assert!(report["expected"]["item"]["status"].is_object());
+            assert!(report["readback"]["differences"].is_array());
+            assert_eq!(report["readback"]["item"].is_null(), uncertain);
+            assert_eq!(shared.count("write"), 1);
+        }
+    });
+}
+
+#[test]
 fn queued_override_revocation_refuses_old_plans_and_undo_before_io() {
     use eg_trainer::edits::{EditError, StatusEdit, StatusField};
     run(async {

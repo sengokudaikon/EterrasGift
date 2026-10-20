@@ -14,5 +14,8 @@ eg-trainer-host = { path = "../trainer-host" }
 tokio.workspace = true
 slint.workspace = true
 
+[dev-dependencies]
+tempfile.workspace = true
+
 [lints]
 workspace = true

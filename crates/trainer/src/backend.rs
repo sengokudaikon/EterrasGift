@@ -5,6 +5,7 @@
 //! runs to completion; dropping a receipt is not cancellation. Cleanup barriers
 //! suppress publication from an earlier operation, then drain it before cleanup.
 //! Watch snapshots are authoritative; broadcast events can lag and are advisory.
+mod faults;
 mod fields;
 mod mapping;
 mod rate_write;
@@ -783,6 +784,7 @@ where
     command_epoch: u64,
     attack_leech_sequence: u64,
     paused: bool,
+    faults: Option<eg_core::fault::FaultLog>,
 }
 
 pub fn service<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock>(
@@ -852,11 +854,17 @@ pub fn service<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K
             command_epoch: 0,
             attack_leech_sequence: 0,
             paused: false,
+            faults: None,
         },
     )
 }
 
 impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> BackendWorker<P, C, L, K> {
+    /// Persist faults at their source, independently of advisory event delivery.
+    pub fn with_fault_log(mut self, faults: eg_core::fault::FaultLog) -> Self {
+        self.faults = Some(faults);
+        self
+    }
     pub async fn run(mut self) {
         self.load_cache().await;
         let interval = self.options.poll_interval.max(Duration::from_millis(1));
@@ -988,6 +996,9 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
         }
     }
     fn cache_fault(&mut self, message: String) {
+        if let Some(faults) = &self.faults {
+            faults.write("Trainer catalog cache", Some(&message), None, Some("The current session remains available."));
+        }
         self.state.cache_error = Some(message.clone());
         self.event(BackendEvent::CacheFault(message));
     }
@@ -1425,6 +1436,16 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
         self.state.generation = self.state.generation.wrapping_add(1);
     }
     fn fail(&mut self, error: BackendError, target: Option<ProcessIdentity>) {
+        if let Some(faults) = &self.faults
+            && !matches!(error.kind, ErrorKind::WriteUncertain | ErrorKind::WriteNotKept)
+        {
+            faults.write(
+                "Trainer connection",
+                Some(&error.to_string()),
+                None,
+                Some("The session was released. Reconnect before continuing."),
+            );
+        }
         self.release_without_io();
         if error.retryable() {
             self.state.phase = Phase::WaitingForGame;

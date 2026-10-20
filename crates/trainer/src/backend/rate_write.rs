@@ -97,6 +97,7 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
         let write_plan = WritePlan::from(plan.clone());
         let (status, failure) = self.submit_write(&write_plan, &mut control).await;
         let status = status.map(WriteObservation::into_field);
+        self.log_rate_outcome(&plan, &status);
         self.state.activity = None;
         // Retain historical certainty even if cleanup was queued; no older-generation
         // observation may be published. Session already performed independent readback.

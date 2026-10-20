@@ -1350,6 +1350,7 @@ dependencies = [
  "eg-core",
  "eg-game-access",
  "jiff",
+ "serde_json",
  "tempfile",
  "tokio",
 ]
@@ -1462,6 +1463,7 @@ dependencies = [
  "eg-trainer-host",
  "eg-ui",
  "slint",
+ "tempfile",
  "tokio",
 ]
 

@@ -113,3 +113,15 @@ text, alias/copy mismatch and preview-only exceptions. Independent post-preview 
 confirm unchanged live unique values. Worker tests cover cache/refusal recovery and cleanup
 barriers; editor tests cover Pending/current-text/discard behavior, and captures cover real-worker
 unique text/loading/unavailable states at normal and narrow widths. No live game was accessed.
+
+Trainer fault reporting now persists Forge and field NotKept/Uncertain outcomes directly
+from the worker, before publication barriers, including writes drained during shutdown.
+Reports include the expected state, canonical edit, readback or its absence, differences
+and recovery policy. Advisory broadcast events are not the delivery mechanism. Connection
+and catalog-cache faults are logged too. Reporting remains best effort.
+
+The desktop policy follows `spec/trainer.md` §7.3: typed operational failures keep the
+app running; an unexpected Trainer worker panic is logged, closes the event loop and
+produces exit code 1 after shutdown, matching Mods and Settings. An optional Trainer
+startup failure still leaves Home and Mods available. Authored tests cover fault files
+without event subscribers, queued cleanup and fatal worker notification.
