@@ -149,7 +149,7 @@ pub struct UniqueState {
     pub rolls: Vec<u8>,
     pub modifiers: Vec<ModifierState>,
     /// The game could not format its own unique data.
-    pub formatting_error: String,
+    pub formatting: crate::forge::game::Lookup<()>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
@@ -368,7 +368,7 @@ impl ForgeItem {
                     id: i.id,
                     rolls: vec![],
                     modifiers: vec![],
-                    formatting_error: String::new(),
+                    formatting: crate::forge::game::Lookup::Ready(()),
                 });
             view.rolls = i.rolls.clone();
             view
@@ -611,10 +611,10 @@ mod tests {
             id: 7,
             rolls: vec![12],
             modifiers: vec![],
-            formatting_error: String::new(),
+            formatting: crate::forge::game::Lookup::Ready(()),
         });
         let mut error = unique.clone();
-        error.unique.as_mut().unwrap().formatting_error = "unavailable".into();
+        error.unique.as_mut().unwrap().formatting = crate::forge::game::Lookup::Unavailable("unavailable".into());
         assert!(unique.same_state(&error));
         error.unique.as_mut().unwrap().id = 8;
         assert!(!unique.same_state(&error));

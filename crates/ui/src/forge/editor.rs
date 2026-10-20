@@ -2,7 +2,7 @@
 //! Ctrl+Z order, Apply and Undo apply, the pickers and the action bar's message (spec/item-forge.md). Every value comes from
 //! the game through `ForgeGame`; the editor computes none.
 
-use super::game::{Catalog, EditOutcome, ForgeGame, LegendaryType, WriteOutcome, refused};
+use super::game::{Catalog, EditOutcome, ForgeGame, LegendaryType, Lookup, WriteOutcome, refused};
 use super::item::EditPresentation;
 use super::item::{self, AffixDefinition, AffixKind, Category, Compatibility, ForgeItem, ItemEdit, Moves, RollRequest, RollTarget, Seal, StatusField};
 use super::rows::{AffixRow, FieldDraft, FieldKind, FieldOption, RollRow, ValueEditor, base_key, base_of};
@@ -161,7 +161,7 @@ pub struct ForgeEditor {
     waiting: Option<WaitingWrite>,
     recovery_required: bool,
     next_uid: u64,
-    tables: HashMap<String, Result<item::ValueTable, String>>,
+    tables: HashMap<String, Lookup<item::ValueTable>>,
     /// The local time a confirmed write is listed with.
     pub clock: fn() -> String,
 }
@@ -638,11 +638,17 @@ impl ForgeEditor {
             parts.push(format!("Level {}", status.level_requirement));
         }
         let affixes = count(item.affixes.len(), "affix", "affixes");
-        parts.push(if item.unique.as_ref().is_some_and(|unique| unique.formatting_error.is_empty()) {
-            format!("{affixes} · {}", count(self.uniques.len(), "unique modifier", "unique modifiers"))
-        } else {
-            affixes
-        });
+        parts.push(
+            if item
+                .unique
+                .as_ref()
+                .is_some_and(|unique| matches!(unique.formatting, crate::forge::game::Lookup::Ready(())))
+            {
+                format!("{affixes} · {}", count(self.uniques.len(), "unique modifier", "unique modifiers"))
+            } else {
+                affixes
+            },
+        );
         parts.join(" · ")
     }
 
@@ -1551,7 +1557,7 @@ impl ForgeEditor {
             return;
         };
         match self.game.preview_unique(&item, &edit) {
-            Ok(modifiers) => {
+            Lookup::Ready(modifiers) => {
                 for state in modifiers {
                     if let Some(row) = self.uniques.iter_mut().find(|row| row.state.index == state.index) {
                         row.show_preview(Some(&state));
@@ -1559,8 +1565,8 @@ impl ForgeEditor {
                 }
                 self.preview_status = "Draft preview".into();
             }
-            Err(details) if details == super::game::PREVIEW_LOADING => self.say_preview(super::game::PREVIEW_LOADING, false, false),
-            Err(details) => self.say_preview(&format!("Preview unavailable: {details}"), true, false),
+            Lookup::Loading => self.say_preview(super::game::PREVIEW_LOADING, false, false),
+            Lookup::Unavailable(details) => self.say_preview(&format!("Preview unavailable: {details}"), true, false),
         }
     }
 
@@ -1652,12 +1658,12 @@ impl ForgeEditor {
         }
     }
 
-    fn table(&mut self, key: &str, item: &ForgeItem, request: &RollRequest) -> Result<item::ValueTable, String> {
+    fn table(&mut self, key: &str, item: &ForgeItem, request: &RollRequest) -> Lookup<item::ValueTable> {
         if let Some(table) = self.tables.get(key) {
             return table.clone();
         }
         let table = self.game.resolve(item, request);
-        if !matches!(&table, Err(reason) if reason == super::rows::LOADING) {
+        if !matches!(&table, Lookup::Loading) {
             self.tables.insert(key.to_string(), table.clone());
         }
         table

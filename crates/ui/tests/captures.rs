@@ -118,7 +118,25 @@ struct CapturePlatform {
     window: Rc<MinimalSoftwareWindow>,
 }
 
+type UiEvent = Box<dyn FnOnce() + Send>;
+static UI_EVENTS: std::sync::Mutex<std::collections::VecDeque<UiEvent>> = std::sync::Mutex::new(std::collections::VecDeque::new());
+static QUIT_REQUESTED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+struct CaptureEventLoop;
+impl slint::platform::EventLoopProxy for CaptureEventLoop {
+    fn quit_event_loop(&self) -> Result<(), slint::EventLoopError> {
+        QUIT_REQUESTED.store(true, std::sync::atomic::Ordering::SeqCst);
+        Ok(())
+    }
+    fn invoke_from_event_loop(&self, event: UiEvent) -> Result<(), slint::EventLoopError> {
+        UI_EVENTS.lock().unwrap().push_back(event);
+        Ok(())
+    }
+}
+
 impl Platform for CapturePlatform {
+    fn new_event_loop_proxy(&self) -> Option<Box<dyn slint::platform::EventLoopProxy>> {
+        Some(Box::new(CaptureEventLoop))
+    }
     fn create_window_adapter(&self) -> Result<Rc<dyn WindowAdapter>, slint::PlatformError> {
         Ok(self.window.clone())
     }
@@ -370,6 +388,15 @@ impl Session {
 
 fn settle() {
     slint::platform::update_timers_and_animations();
+    for _ in 0..10_000 {
+        let event = UI_EVENTS.lock().unwrap().pop_front();
+        let Some(event) = event else {
+            assert!(!QUIT_REQUESTED.load(std::sync::atomic::Ordering::SeqCst), "capture unexpectedly requested app shutdown");
+            return;
+        };
+        event();
+    }
+    panic!("capture event queue did not settle");
 }
 
 fn running() -> Option<RunningGame> {

@@ -359,13 +359,17 @@ impl View {
             editor
                 .item()
                 .and_then(|item| item.unique.as_ref())
-                .is_some_and(|unique| unique.formatting_error == super::game::UNIQUE_LOADING),
+                .is_some_and(|unique| matches!(unique.formatting, crate::forge::game::Lookup::Loading)),
         );
         state.set_formatting_error(
             editor
                 .item()
                 .and_then(|item| item.unique.as_ref())
-                .map(|unique| unique.formatting_error.clone())
+                .map(|unique| match &unique.formatting {
+                    crate::forge::game::Lookup::Ready(()) => String::new(),
+                    crate::forge::game::Lookup::Loading => super::game::UNIQUE_LOADING.into(),
+                    crate::forge::game::Lookup::Unavailable(reason) => reason.clone(),
+                })
                 .unwrap_or_default()
                 .into(),
         );

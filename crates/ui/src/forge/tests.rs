@@ -390,10 +390,10 @@ mod async_writes {
         fn unrestricted(&self) -> bool {
             self.game.unrestricted()
         }
-        fn resolve(&self, item: &ForgeItem, request: &RollRequest) -> Result<ValueTable, GameError> {
+        fn resolve(&self, item: &ForgeItem, request: &RollRequest) -> crate::forge::game::Lookup<ValueTable> {
             self.game.resolve(item, request)
         }
-        fn preview_unique(&self, item: &ForgeItem, edit: &ItemEdit) -> Result<Vec<ModifierState>, GameError> {
+        fn preview_unique(&self, item: &ForgeItem, edit: &ItemEdit) -> crate::forge::game::Lookup<Vec<ModifierState>> {
             self.game.preview_unique(item, edit)
         }
         fn write(&mut self, expected: &ForgeItem, edit: &ItemEdit) -> EditOutcome {
@@ -596,7 +596,7 @@ mod async_writes {
             id: 70,
             rolls: vec![100, 7],
             modifiers: vec![],
-            formatting_error: String::new(),
+            formatting: crate::forge::game::Lookup::Ready(()),
         });
         e.refresh();
         let index = e.fields.iter().position(|f| f.unrestricted).unwrap();
@@ -617,7 +617,7 @@ mod async_writes {
 #[test]
 fn pending_unique_preview_preserves_drafts_refreshes_only_current_text_and_clears_on_discard() {
     use super::{
-        game::{Catalog, EditOutcome, ForgeGame, GameError, PREVIEW_LOADING},
+        game::{Catalog, EditOutcome, ForgeGame, PREVIEW_LOADING},
         item::{ForgeItem, ItemEdit, ModifierState, RollRequest, ValueTable},
     };
     use std::{cell::Cell as State, rc::Rc};
@@ -625,6 +625,7 @@ fn pending_unique_preview_preserves_drafts_refreshes_only_current_text_and_clear
         inner: FixtureGame,
         ready: Rc<State<bool>>,
         pending: Rc<State<bool>>,
+        failed: Rc<State<bool>>,
     }
     impl ForgeGame for Delayed {
         fn catalog(&self) -> &Catalog {
@@ -633,7 +634,7 @@ fn pending_unique_preview_preserves_drafts_refreshes_only_current_text_and_clear
         fn read(&self) -> Option<ForgeItem> {
             self.inner.read()
         }
-        fn resolve(&self, item: &ForgeItem, request: &RollRequest) -> Result<ValueTable, GameError> {
+        fn resolve(&self, item: &ForgeItem, request: &RollRequest) -> crate::forge::game::Lookup<ValueTable> {
             self.inner.resolve(item, request)
         }
         fn write(&mut self, item: &ForgeItem, edit: &ItemEdit) -> EditOutcome {
@@ -642,20 +643,25 @@ fn pending_unique_preview_preserves_drafts_refreshes_only_current_text_and_clear
         fn clear_unique_preview(&self) {
             self.pending.set(false);
         }
-        fn preview_unique(&self, item: &ForgeItem, edit: &ItemEdit) -> Result<Vec<ModifierState>, GameError> {
+        fn preview_unique(&self, item: &ForgeItem, edit: &ItemEdit) -> crate::forge::game::Lookup<Vec<ModifierState>> {
             self.pending.set(true);
+            if self.failed.get() {
+                return crate::forge::game::Lookup::Unavailable(PREVIEW_LOADING.into());
+            }
             if !self.ready.get() {
-                return Err(PREVIEW_LOADING.into());
+                return crate::forge::game::Lookup::Loading;
             }
             self.inner.preview_unique(item, edit)
         }
     }
     let ready = Rc::new(State::new(false));
     let pending = Rc::new(State::new(false));
+    let failed = Rc::new(State::new(false));
     let mut editor = ForgeEditor::new(Box::new(Delayed {
         inner: FixtureGame::unique(),
         ready: ready.clone(),
         pending: pending.clone(),
+        failed: failed.clone(),
     }));
     let cell = Cell::Unique(0, 0);
     assert!(editor.begin_input(cell));
@@ -676,6 +682,10 @@ fn pending_unique_preview_preserves_drafts_refreshes_only_current_text_and_clear
     assert_eq!(editor.preview_status, "Draft preview");
     assert_eq!(editor.uniques[0].text, "+25% Movement Speed");
     assert_eq!(editor.uniques[2].text, "Your minions gain 25% Movement Speed");
+    failed.set(true);
+    editor.refresh();
+    assert!(editor.preview_failed, "an unavailable reason equal to loading copy is still a terminal failure");
+    assert_eq!(editor.preview_status, format!("Preview unavailable: {PREVIEW_LOADING}"));
     editor.discard_all();
     assert!(!pending.get());
     assert_eq!(editor.drafts().len(), 0);

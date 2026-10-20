@@ -167,6 +167,13 @@ pub enum WriteOutcome<T> {
     },
 }
 impl<T> WriteOutcome<T> {
+    /// Local domain refusal: nothing was submitted. UI callers need no wire response code.
+    pub fn refused(message: impl Into<String>) -> Self {
+        Self::NotApplied {
+            code: ResponseCode::Refused,
+            message: message.into(),
+        }
+    }
     pub fn uncertain(message: impl Into<String>) -> Self {
         Self::Uncertain { message: message.into() }
     }

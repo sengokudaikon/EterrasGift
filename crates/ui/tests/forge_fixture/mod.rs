@@ -233,7 +233,7 @@ impl FixtureGame {
             id: 70,
             rolls: vec![100, 7],
             modifiers: Vec::new(),
-            formatting_error: String::new(),
+            formatting: crate::forge::game::Lookup::Ready(()),
         });
         item.status = Some(ItemStatus::default());
         FixtureGame::new(Some(item), false, true, false)
@@ -510,7 +510,7 @@ pub fn unique_boots() -> ForgeItem {
             id: 77,
             modifiers: format_unique(&rolls, &modifiers),
             rolls,
-            formatting_error: String::new(),
+            formatting: crate::forge::game::Lookup::Ready(()),
         }),
         implicits: None,
         implicit_rolls: vec![80, 90, 100],
@@ -585,38 +585,41 @@ impl ForgeGame for FixtureGame {
         self.state.borrow().unrestricted
     }
 
-    fn resolve(&self, item: &ForgeItem, request: &RollRequest) -> Result<ValueTable, GameError> {
-        let state = self.state.borrow();
-        if state.identity {
-            return Ok(identity());
-        }
-        match request.target {
-            RollTarget::Unique => Ok(match request.index {
-                0 => table("Increased movement speed", 10.0, 25.0, 0, "{v}%", "{v}% increased Movement Speed"),
-                1 => table("Void damage over time", 30.0, 60.0, 0, "{v}%", "{v}% increased Void Damage over Time"),
-                _ => table("Value", 1.0, 5.0, 0, "{v}", ""),
-            }),
-            RollTarget::Implicit => Ok(table("Value", 1.0, 10.0, 0, "{v}", "")),
-            RollTarget::Affix => {
-                let (id, tier) = match request.draft {
-                    Some(ItemEdit::Affix(eg_trainer::edits::AffixEdit { id, tier, .. })) => (id as u16, Some(tier as u8)),
-                    _ => item.affix(request.index).map_or((0, None), |affix| (affix.id, Some(affix.tier))),
-                };
-                if state.unmapped.contains(&id) {
-                    return Err("Actual values are unavailable for this affix.".into());
-                }
-                let (label, min, max, decimals, format, effect) = match id {
-                    25 => ("Added health", 20.0, 36.0, 0, "+{v}", "+{v} Health"),
-                    1148 => ("Health regeneration", 5.0, 9.0, 1, "{v}%", "{v}% increased Health Regen"),
-                    4000 => ("Increased movement speed", 4.0, 8.0, 0, "{v}%", "{v}% increased Movement Speed"),
-                    4001 => ("Fire resistance", 15.0, 25.0, 0, "+{v}%", "+{v}% Fire Resistance"),
-                    _ => ("Value", 1.0, 10.0, 0, "{v}", ""),
-                };
-                // Synthetic tier scaling so a tier draft changes the value, as tiers do in the game.
-                let scale = tier.map_or(1.0, |tier| 0.6 + 0.1 * f64::from(tier));
-                Ok(table(label, min * scale, max * scale, decimals, format, effect))
+    fn resolve(&self, item: &ForgeItem, request: &RollRequest) -> crate::forge::game::Lookup<ValueTable> {
+        let result: Result<ValueTable, GameError> = (|| {
+            let state = self.state.borrow();
+            if state.identity {
+                return Ok(identity());
             }
-        }
+            match request.target {
+                RollTarget::Unique => Ok(match request.index {
+                    0 => table("Increased movement speed", 10.0, 25.0, 0, "{v}%", "{v}% increased Movement Speed"),
+                    1 => table("Void damage over time", 30.0, 60.0, 0, "{v}%", "{v}% increased Void Damage over Time"),
+                    _ => table("Value", 1.0, 5.0, 0, "{v}", ""),
+                }),
+                RollTarget::Implicit => Ok(table("Value", 1.0, 10.0, 0, "{v}", "")),
+                RollTarget::Affix => {
+                    let (id, tier) = match request.draft {
+                        Some(ItemEdit::Affix(eg_trainer::edits::AffixEdit { id, tier, .. })) => (id as u16, Some(tier as u8)),
+                        _ => item.affix(request.index).map_or((0, None), |affix| (affix.id, Some(affix.tier))),
+                    };
+                    if state.unmapped.contains(&id) {
+                        return Err("Actual values are unavailable for this affix.".into());
+                    }
+                    let (label, min, max, decimals, format, effect) = match id {
+                        25 => ("Added health", 20.0, 36.0, 0, "+{v}", "+{v} Health"),
+                        1148 => ("Health regeneration", 5.0, 9.0, 1, "{v}%", "{v}% increased Health Regen"),
+                        4000 => ("Increased movement speed", 4.0, 8.0, 0, "{v}%", "{v}% increased Movement Speed"),
+                        4001 => ("Fire resistance", 15.0, 25.0, 0, "+{v}%", "+{v}% Fire Resistance"),
+                        _ => ("Value", 1.0, 10.0, 0, "{v}", ""),
+                    };
+                    // Synthetic tier scaling so a tier draft changes the value, as tiers do in the game.
+                    let scale = tier.map_or(1.0, |tier| 0.6 + 0.1 * f64::from(tier));
+                    Ok(table(label, min * scale, max * scale, decimals, format, effect))
+                }
+            }
+        })();
+        result.into()
     }
 
     fn write(&mut self, expected: &ForgeItem, edit: &ItemEdit) -> EditOutcome {
@@ -662,10 +665,13 @@ impl ForgeGame for FixtureGame {
         self.apply_edit(expected, &edit, true)
     }
 
-    fn preview_unique(&self, expected: &ForgeItem, edit: &ItemEdit) -> Result<Vec<ModifierState>, GameError> {
-        let after = edit.project(expected).map_err(|e| e.to_string())?;
-        let unique = after.unique.ok_or_else(|| "Preview unavailable.".to_string())?;
-        Ok(format_unique(&unique.rolls, &unique.modifiers))
+    fn preview_unique(&self, expected: &ForgeItem, edit: &ItemEdit) -> crate::forge::game::Lookup<Vec<ModifierState>> {
+        let result: Result<Vec<ModifierState>, GameError> = (|| {
+            let after = edit.project(expected).map_err(|e| e.to_string())?;
+            let unique = after.unique.ok_or_else(|| "Preview unavailable.".to_string())?;
+            Ok(format_unique(&unique.rolls, &unique.modifiers))
+        })();
+        result.into()
     }
 }
 

@@ -5,6 +5,22 @@
 pub const UNIQUE_LOADING: &str = "Reading unique descriptions…";
 pub const PREVIEW_LOADING: &str = "Updating preview…";
 
+/// Optional game data has an explicit pending state; display copy never controls readiness.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Lookup<T> {
+    Ready(T),
+    Loading,
+    Unavailable(String),
+}
+impl<T> From<Result<T, String>> for Lookup<T> {
+    fn from(result: Result<T, String>) -> Self {
+        match result {
+            Ok(value) => Self::Ready(value),
+            Err(reason) => Self::Unavailable(reason),
+        }
+    }
+}
+
 use super::item::{AffixDefinition, ForgeItem, ItemEdit, ModifierState, RollRequest, ValueTable};
 pub use eg_trainer::writes::WriteOutcome;
 
@@ -13,10 +29,7 @@ pub use eg_trainer::writes::WriteOutcome;
 pub type EditOutcome = WriteOutcome<Option<ForgeItem>>;
 
 pub fn refused(message: impl Into<String>) -> EditOutcome {
-    WriteOutcome::NotApplied {
-        code: eg_trainer::writes::ResponseCode::Refused,
-        message: message.into(),
-    }
+    EditOutcome::refused(message)
 }
 
 /// A base of an item type, from the captured item list.
@@ -144,7 +157,7 @@ pub trait ForgeGame {
     }
 
     /// The values a roll takes in its context (spec §6 Mapping). The editor never computes values itself.
-    fn resolve(&self, item: &ForgeItem, request: &RollRequest) -> Result<ValueTable, GameError>;
+    fn resolve(&self, item: &ForgeItem, request: &RollRequest) -> Lookup<ValueTable>;
 
     /// Writes one edit to the item the draft was made on and reads it back (spec §11).
     fn write(&mut self, expected: &ForgeItem, edit: &ItemEdit) -> EditOutcome;
@@ -179,5 +192,5 @@ pub trait ForgeGame {
     /// Discard an unsubmitted preview when its draft is cleared; accepted work still drains.
     fn clear_unique_preview(&self) {}
     /// The unique modifiers formatted with drafted rolls.
-    fn preview_unique(&self, expected: &ForgeItem, edit: &ItemEdit) -> Result<Vec<ModifierState>, GameError>;
+    fn preview_unique(&self, expected: &ForgeItem, edit: &ItemEdit) -> Lookup<Vec<ModifierState>>;
 }

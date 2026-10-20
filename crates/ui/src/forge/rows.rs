@@ -83,30 +83,38 @@ impl ValueEditor {
     }
 
     /// A new table, or why there is none; `game_context` marks a table read for what the game holds.
-    pub fn set_mapping(&mut self, table: Result<ValueTable, String>, game_context: bool) {
+    pub fn set_mapping(&mut self, table: impl Into<super::game::Lookup<ValueTable>>, game_context: bool) {
+        use super::game::Lookup;
+        let table = table.into();
         // Monitoring and other rows' completed mappings can republish the same
         // table while the user types. Only a changed mapping ends that input.
-        if table.as_ref().ok().is_some_and(|table| self.table.as_ref() == Some(table)) {
+        if let Lookup::Ready(value) = &table
+            && self.table.as_ref() == Some(value)
+        {
             if game_context {
-                self.game_table = table.ok();
+                self.game_table = Some(value.clone());
             }
             return;
         }
         match table {
-            Ok(table) if table.is_usable() => {
+            Lookup::Ready(table) if table.is_usable() => {
                 if game_context {
                     self.game_table = Some(table.clone());
                 }
                 self.table = Some(table);
                 self.status.clear();
             }
-            Ok(_) => {
+            Lookup::Ready(_) => {
                 self.table = None;
                 self.status = "Actual values are unavailable for this value.".into();
             }
-            Err(reason) => {
+            Lookup::Loading => {
                 self.table = None;
-                self.status = if reason == LOADING { reason } else { format!("Actual values unavailable: {reason}") };
+                self.status = LOADING.into();
+            }
+            Lookup::Unavailable(reason) => {
+                self.table = None;
+                self.status = format!("Actual values unavailable: {reason}");
             }
         }
         self.typing = false;
@@ -1247,10 +1255,12 @@ mod tests {
         assert_eq!(row.value.input, "37");
         row.value.set_mapping(Ok(table(30.0, 50.0)), false);
         assert!(!row.value.typing);
-        row.value.set_mapping(Err(LOADING.into()), false);
+        row.value.set_mapping(super::super::game::Lookup::Loading, false);
         assert_eq!(row.value.status(), LOADING);
         assert!(!row.value.has_mapping());
         assert!(row.value.game_table.is_some());
+        row.value.set_mapping(super::super::game::Lookup::Unavailable(LOADING.into()), false);
+        assert_eq!(row.value.status(), format!("Actual values unavailable: {LOADING}"));
     }
 
     #[test]
