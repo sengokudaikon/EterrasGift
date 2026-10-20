@@ -1,4 +1,4 @@
-//! Protocol28 conditional CURRENT-player request; no write authority or replay ledger.
+//! Conditional CURRENT-player request; no write authority or replay ledger.
 //! Expected identities are comparison tokens only. Never dereference wire tokens.
 
 #![forbid(unsafe_code)]

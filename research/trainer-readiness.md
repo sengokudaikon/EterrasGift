@@ -3,6 +3,20 @@
 The C# implementation at `../EterrasGift` remains the behavior reference. Current architecture,
 interop assumptions and retained evaluation conclusions are in [trainer-interop.md](trainer-interop.md).
 
+The architecture cleanup separates `eg-trainer-wire` (unsafe forbidden) from the optional
+in-process discovery/scheduler build. The helper no longer pulls in the trainer worker. Host
+artifact/process/platform adapters still live in game-access; the numeric-locale adapter was
+moved there from core. Mapping and previews share catalog-version admission; malformed returned
+mapping provenance revokes the connection, and both write families share fatal-error handling.
+UI optional data is typed, and worker snapshots wake the UI through a watch subscription.
+
+Remaining cleanup: operation-local checked field and managed collection/string views, bounded
+method queries, feature-table/presentation-model duplication, editor file boundaries, shared
+platform utilities, codec/metric normalization and capture/test-fixture organization. Thread
+tokens must describe only checked dispatcher identity; they cannot certify exclusive access
+to game-owned objects. Field flag masks must retain different rules for literals, static fields
+and mutable instance fields. A generic IL2CPP crate is not a prerequisite for those extractions.
+
 | Area | Implemented | Remaining |
 |---|---|---|
 | Desktop composition | Worker thread, manual/automatic connection, helper package validation; trainer startup failure leaves Home/Mods running | Final bundle assembly and restart handling |

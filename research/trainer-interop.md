@@ -7,6 +7,13 @@ This document records the execution assumptions and retained findings. Product r
 
 ## Runtime boundary
 
+`eg-trainer-wire` owns the pure messages, codecs, process identity data, framed I/O and
+owned dispatcher, and forbids unsafe code. `eg-trainer` consumes those contracts directly.
+Compatibility exports in game-access preserve existing harness callers. IL2CPP discovery
+and the scheduler require game-access's explicit `il2cpp` feature: the helper and standalone
+native harness enable it; a desktop-only build does not. The helper depends on wire, not
+the trainer worker/domain crate, and its source identity follows that dependency change.
+
 The supported boundary is Windows x64, initialized IL2CPP and the inspected Unity 6000.4 game
 layout. Authored native fixtures use Unity 6000.4.8f1. Export signatures, metadata storage,
 method ABI and the small object/array/MethodInfo layout adapters must match the selected build.
@@ -47,6 +54,13 @@ ABI declarations, receiver/type checks and foreign exception boundaries still ne
 implementation. Rust panics must not escape a native callback.
 
 ## Product protections
+
+The workspace warns on undocumented unsafe blocks (strict Clippy treats warnings as errors).
+xtask, trainer and wire forbid unsafe; core, companion, UI, app, trainer-host and helper deny
+it except for named platform/interop modules. Existing unsafe blocks document their inherited
+entrypoint obligations; those comments add no runtime proof. Architecture tests use Cargo
+metadata, explicit package tiers including tool workspaces, and recursive Rust import/re-export
+scans, including UI feature areas. They are syntactic checks, not arbitrary macro analysis.
 
 Player.log must identify an offline character in the exact process. Process creation time/path,
 artifact profile, runtime offline state and current manager are rechecked at the relevant I/O
@@ -93,6 +107,12 @@ checks; it is not a raw memory rollback. Mixed UI drafts run ordered single writ
 fresh read per step and advance only on Confirmed. Only confirmed steps can be undone.
 
 ## Read and formatting findings
+
+Optional UI queries return `Lookup::{Ready, Loading, Unavailable}`. Preview, value-table and
+description readiness no longer compares display strings. Worker snapshot publication wakes
+the Slint observer through watch::changed; a lightweight timer polls only while receipts or
+preview debounce remain pending. Capture fixtures supply an event-loop proxy and pump those
+wakes, so they exercise the same subscription path rather than relying on idle UI polling.
 
 Owned rooted reads replace tear-prone remote object walking. Existing field readers remain
 until a replacement getter passes equivalent readiness/refusal tests. In particular, the old

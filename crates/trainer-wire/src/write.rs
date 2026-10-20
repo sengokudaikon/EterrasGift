@@ -1,4 +1,4 @@
-//! Owned protocol34 Forge writes and bounded native acknowledgement decoding.
+//! Owned conditional Forge writes and bounded native acknowledgement decoding.
 //! These codecs grant no process access or write permission. Host generation,
 //! profile, policy and main-thread runtime admission remain independent checks.
 
