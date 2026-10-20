@@ -74,7 +74,6 @@ pub(super) struct AilmentSnapshot<'a, 'r> {
 
 impl RuntimeAccess {
     unsafe fn ailment_key_class(&self, class: Class) -> Result<(), DiscoveryError> {
-        // SAFETY: inherits catalog_ailments's retained runtime/metadata, attached thread and synchronous rooted graph-access contract.
         unsafe {
             // EnumBase must not be called on an arbitrary value type (it may assert).
             if class.is_null() || !(self.class_enum)(class) {
@@ -88,7 +87,6 @@ impl RuntimeAccess {
         }
     }
     unsafe fn ailment_corlib_class(&self, class: Class, namespace: &CStr, name: &CStr) -> Result<(), DiscoveryError> {
-        // SAFETY: inherits catalog_ailments's retained runtime/metadata, attached thread and synchronous rooted graph-access contract.
         unsafe {
             if class.is_null() || (self.class_image)(class) != (self.corlib)() {
                 return Err(unsupported("ailment corlib class image"));
@@ -102,7 +100,6 @@ impl RuntimeAccess {
         }
     }
     unsafe fn ailment_no_cctor(&self, class: Class) -> Result<(), DiscoveryError> {
-        // SAFETY: inherits catalog_ailments's retained runtime/metadata, attached thread and synchronous rooted graph-access contract.
         unsafe {
             let mut iterator = std::ptr::null_mut();
             for _ in 0..100_000 {
@@ -119,7 +116,6 @@ impl RuntimeAccess {
         }
     }
     unsafe fn ailment_array_get(&self, api: &raw::InvocationApi) -> Result<NonNull<raw::MethodInfo>, DiscoveryError> {
-        // SAFETY: inherits catalog_ailments's retained runtime/metadata, attached thread and synchronous rooted graph-access contract.
         unsafe {
             let array = self.system_class(c"Array")?;
             let object = self.system_class(c"Object")?;
@@ -161,7 +157,6 @@ impl RuntimeAccess {
         }
     }
     unsafe fn ailment_array_box<'a, 'r>(&self, method: &CheckedMethod<'_, 'a, 'r>, array: &Root<'_, '_>, index: u32, expected: Class) -> Result<Root<'a, 'r>, DiscoveryError> {
-        // SAFETY: inherits catalog_ailments's retained runtime/metadata, attached thread and synchronous rooted graph-access contract.
         unsafe {
             let mut arguments = [Argument::Scalar(Scalar::I32(index.try_into().map_err(|_| unsupported("array index"))?))];
             let result = method.invoke(Some(array), &mut arguments).map_err(|error| unsupported(error.to_string()))?;
@@ -184,7 +179,6 @@ impl RuntimeAccess {
         images: &Images,
         api: raw::InvocationApi,
     ) -> Result<Availability<AilmentSnapshot<'a, 'r>>, DiscoveryError> {
-        // SAFETY: inherits catalog_ailments's retained runtime/metadata, attached thread and synchronous rooted graph-access contract.
         unsafe {
             let Some(owner) = self.catalog_optional_class(images, c"", c"AilmentList")? else {
                 return Ok(unavailable("Optional ailment dictionary capability is absent"));
@@ -322,7 +316,6 @@ impl RuntimeAccess {
         snapshot: &mut AilmentSnapshot<'_, '_>,
         key: u8,
     ) -> Result<Availability<u8>, DiscoveryError> {
-        // SAFETY: inherits catalog_ailments's retained runtime/metadata, attached thread and synchronous rooted graph-access contract.
         unsafe {
             if let Some(value) = snapshot.effects.get(&key) {
                 return Ok(value.clone());

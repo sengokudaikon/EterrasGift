@@ -13,7 +13,6 @@ impl RuntimeAccess {
     /// The supported CoreModule/BCL getters synchronously expose the current thread
     /// and context; the context's main ID is immutable after Unity initializes it.
     pub unsafe fn is_dispatcher_thread(&self, attached: &AttachedThread<'_>, api: raw::InvocationApi) -> Result<bool, DiscoveryError> {
-        // SAFETY: inherits is_dispatcher_thread's retained runtime/metadata, attached thread and synchronous rooted graph-access contract.
         unsafe {
             let images = self.images()?;
             let context = self.class(&images, c"System.Threading", c"SynchronizationContext")?;

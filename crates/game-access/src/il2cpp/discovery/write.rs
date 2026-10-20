@@ -62,7 +62,6 @@ unsafe fn attempt_store<T>(
 impl RuntimeAccess {
     // Internal caller supplies edit_forge's full live-runtime/exclusive-write contract.
     unsafe fn status_field(&self, owner: Class, kind: StatusField) -> Result<NonNull<raw::FieldInfo>, ForgeWriteError> {
-        // SAFETY: inherits edit_forge's retained runtime/metadata, attached thread and synchronous rooted graph-access contract.
         unsafe {
             let (name, primitive, code) = match kind {
                 StatusField::LevelRequirement => (c"<LvlReq>k__BackingField", c"Int32", 0x08),
@@ -77,7 +76,6 @@ impl RuntimeAccess {
         }
     }
     pub(super) unsafe fn mutable_field(&self, owner: Class, name: &CStr, primitive: &CStr, code: i32) -> Result<NonNull<raw::FieldInfo>, ForgeWriteError> {
-        // SAFETY: inherits edit_forge's retained runtime/metadata, attached thread and synchronous rooted graph-access contract.
         unsafe {
             let field = self.field(owner, name)?;
             let ty = (self.field_type)(field);
@@ -105,7 +103,6 @@ impl RuntimeAccess {
         api: raw::InvocationApi,
         id: u16,
     ) -> Result<Root<'a, 'r>, ForgeWriteError> {
-        // SAFETY: inherits edit_forge's retained runtime/metadata, attached thread and synchronous rooted graph-access contract.
         unsafe {
             let owner = self.class(&graph.images, c"", c"UniqueList")?;
             let entry = self.catalog_nested(owner, c"Entry")?;
@@ -175,7 +172,6 @@ impl RuntimeAccess {
         item_type: u8,
         sub_type: u16,
     ) -> Result<(), ForgeWriteError> {
-        // SAFETY: inherits edit_forge's retained runtime/metadata, attached thread and synchronous rooted graph-access contract.
         unsafe {
             let owner = self.class(&graph.images, c"", c"ItemList")?;
             let context = InvocationContext::new(attached, api);
@@ -214,7 +210,6 @@ impl RuntimeAccess {
     // Mirrors the original validateDefinition: only already-loaded affix IDs
     // and tier counts are needed, without extracting numeric/display catalogs.
     pub(super) unsafe fn validate_affix_definition(&self, attached: &AttachedThread<'_>, graph: &ForgeGraph<'_, '_>, id: u16, tier_value: u16) -> Result<(), ForgeWriteError> {
-        // SAFETY: inherits edit_forge's retained runtime/metadata, attached thread and synchronous rooted graph-access contract.
         unsafe {
             if id > 4095 || !(1..=8).contains(&tier_value) {
                 return Err(ForgeWriteError::Refused("Invalid serialized affix ID/tier".into()));
@@ -252,7 +247,6 @@ impl RuntimeAccess {
     }
 
     unsafe fn has_refresh(&self, owner: Class, name: &CStr) -> Result<bool, ForgeWriteError> {
-        // SAFETY: inherits edit_forge's retained runtime/metadata, attached thread and synchronous rooted graph-access contract.
         unsafe {
             let mut iterator = std::ptr::null_mut();
             for _ in 0..100_000 {
@@ -274,7 +268,6 @@ impl RuntimeAccess {
 
     // Uses already validated metadata; no new object is dereferenced from the current statics/edges.
     unsafe fn status_final_gate(&self, graph: &ForgeGraph<'_, '_>, manager: u64) -> Result<(), ForgeWriteError> {
-        // SAFETY: inherits edit_forge's retained runtime/metadata, attached thread and synchronous rooted graph-access contract.
         unsafe {
             let held = target(&graph.manager)?;
             if held.as_ptr() as u64 != manager {
@@ -337,7 +330,6 @@ impl RuntimeAccess {
         expected: &ForgeSnapshot,
         mutation: ForgeMutation,
     ) -> Result<ForgeSnapshot, ForgeWriteError> {
-        // SAFETY: inherits edit_forge's retained runtime/metadata, attached thread and synchronous rooted graph-access contract.
         unsafe {
             let level = matches!(
                 mutation,

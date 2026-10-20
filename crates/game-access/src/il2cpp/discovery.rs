@@ -6,6 +6,10 @@
 //! Export signatures follow the installed 6000.4.8f1 `il2cpp-api-functions.h`; field and method
 //! contracts follow the original app's `native/runtime-discovery.h` and `native/dispatch.h`.
 
+// Entry-point contracts cover the shared runtime assumptions. Keep local notes
+// for bounds, ownership and ABI details rather than repeating those contracts.
+#![allow(clippy::undocumented_unsafe_blocks)]
+
 use super::{AttachedThread, RuntimeError, raw};
 use crate::protocol::{Discovery, DispatcherSpec, RuntimeStatus};
 use std::{
@@ -188,7 +192,6 @@ struct Images {
 impl RuntimeAccess {
     // SAFETY for internal helpers: called only beneath discover/status's live attached-runtime contract.
     unsafe fn images(&self) -> Result<Images, DiscoveryError> {
-        // SAFETY: inherits the entrypoint's live retained runtime/metadata, attached thread and synchronous rooted graph-access contract.
         unsafe {
             let domain = (self.domain_get)();
             if domain.is_null() {
@@ -224,7 +227,6 @@ impl RuntimeAccess {
     }
 
     unsafe fn class(&self, images: &Images, namespace: &CStr, name: &CStr) -> Result<Class, DiscoveryError> {
-        // SAFETY: inherits the entrypoint's live retained runtime/metadata, attached thread and synchronous rooted graph-access contract.
         unsafe {
             let first = (self.class_from_name)(images.game, namespace.as_ptr(), name.as_ptr());
             if !first.is_null() {
@@ -267,7 +269,6 @@ impl RuntimeAccess {
     }
 
     unsafe fn field(&self, mut class: Class, name: &CStr) -> Result<Ptr, DiscoveryError> {
-        // SAFETY: inherits the entrypoint's live retained runtime/metadata, attached thread and synchronous rooted graph-access contract.
         unsafe {
             for _ in 0..256 {
                 if class.is_null() {
@@ -284,7 +285,6 @@ impl RuntimeAccess {
     }
 
     unsafe fn type_name(&self, ty: Type) -> Result<String, DiscoveryError> {
-        // SAFETY: inherits the entrypoint's live retained runtime/metadata, attached thread and synchronous rooted graph-access contract.
         unsafe {
             if ty.is_null() {
                 return Err(unsupported("null type"));
@@ -300,7 +300,6 @@ impl RuntimeAccess {
     }
 
     unsafe fn static_field(&self, class: Class, name: &CStr, expected: &str) -> Result<Ptr, DiscoveryError> {
-        // SAFETY: inherits the entrypoint's live retained runtime/metadata, attached thread and synchronous rooted graph-access contract.
         unsafe {
             let field = self.field(class, name)?;
             // Literal and thread-static fields are not the process-wide live state this adapter
@@ -320,7 +319,6 @@ impl RuntimeAccess {
         instance: bool,
         api: &raw::InvocationApi,
     ) -> Result<NonNull<raw::MethodInfo>, DiscoveryError> {
-        // SAFETY: inherits the entrypoint's live retained runtime/metadata, attached thread and synchronous rooted graph-access contract.
         unsafe {
             let mut iterator = std::ptr::null_mut();
             let mut found = None;
@@ -356,7 +354,6 @@ impl RuntimeAccess {
     }
 
     unsafe fn method(&self, class: Class, name: &CStr, parameters: &[&str], instance: bool) -> Result<Method, DiscoveryError> {
-        // SAFETY: inherits the entrypoint's live retained runtime/metadata, attached thread and synchronous rooted graph-access contract.
         unsafe {
             let mut iterator = std::ptr::null_mut();
             let mut found = None;
@@ -404,7 +401,6 @@ impl RuntimeAccess {
     /// and the allocation APIs must be valid; public header queries and allocated adapter samples
     /// are cross-checks, not permission to dereference arbitrary or untrusted memory.
     pub unsafe fn discover(&self, attached: &AttachedThread<'_>, build_id: String, module_base: NonNull<u8>, module_size: usize) -> Result<DiscoveredRuntime, DiscoveryError> {
-        // SAFETY: inherits the entrypoint's live retained runtime/metadata, attached thread and synchronous rooted graph-access contract.
         unsafe {
             if build_id.len() != 64 || !build_id.bytes().all(|byte| byte.is_ascii_hexdigit()) {
                 return Err(unsupported("helper build ID"));
@@ -479,7 +475,6 @@ impl RuntimeAccess {
     }
 
     unsafe fn check_allocated_adapters(&self, attached: &AttachedThread<'_>) -> Result<(), DiscoveryError> {
-        // SAFETY: inherits the entrypoint's live retained runtime/metadata, attached thread and synchronous rooted graph-access contract.
         unsafe {
             if (self.object_header_size)() != 16 || (self.array_header_size)() != 32 || (self.array_length_offset)() != 24 || (self.array_bounds_offset)() != 16 {
                 return Err(unsupported("object/array header API"));
@@ -521,7 +516,6 @@ impl RuntimeAccess {
     /// initialized, as required by the admitted game session. No feature hooks may be active in this
     /// control-only helper (the returned active feature count is therefore exactly zero).
     pub unsafe fn status(&self, attached: &AttachedThread<'_>) -> Result<RuntimeStatus, DiscoveryError> {
-        // SAFETY: inherits the entrypoint's live retained runtime/metadata, attached thread and synchronous rooted graph-access contract.
         unsafe {
             let images = self.images()?;
             let online_field = self.static_field(self.class(&images, c"EHG.Multiplayer", c"GameplayEnvironment")?, c"_isOnlinePlay", "System.Boolean")?;
@@ -566,7 +560,6 @@ impl RuntimeAccess {
     }
 
     unsafe fn check_object(&self, expected: Class, object: NonNull<raw::Object>) -> Result<(), DiscoveryError> {
-        // SAFETY: inherits the entrypoint's live retained runtime/metadata, attached thread and synchronous rooted graph-access contract.
         unsafe {
             let actual = (self.object_class)(object.as_ptr());
             if actual.is_null() || !(self.assignable)(expected, actual) {

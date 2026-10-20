@@ -22,7 +22,6 @@ impl RuntimeAccess {
         returns: Option<Class>,
         instance: bool,
     ) -> Result<Method, DiscoveryError> {
-        // SAFETY: inherits describe_implicits's retained runtime/metadata, attached thread and synchronous rooted graph-access contract.
         unsafe {
             let mut iterator = std::ptr::null_mut();
             let mut found = None;
@@ -78,7 +77,6 @@ impl RuntimeAccess {
         receiver: Option<&Root<'_, '_>>,
         args: &mut [Argument<'_, 'a, 'r>],
     ) -> Result<Option<Root<'a, 'r>>, DiscoveryError> {
-        // SAFETY: inherits describe_implicits's retained runtime/metadata, attached thread and synchronous rooted graph-access contract.
         unsafe {
             let context = InvocationContext::new(attached, api);
             let method = context
@@ -91,7 +89,6 @@ impl RuntimeAccess {
         }
     }
     pub(super) unsafe fn description_text(&self, attached: &AttachedThread<'_>, api: raw::InvocationApi, info: &Root<'_, '_>, name: &CStr) -> Result<String, DiscoveryError> {
-        // SAFETY: inherits describe_implicits's retained runtime/metadata, attached thread and synchronous rooted graph-access contract.
         unsafe {
             let string = self.system_class(c"String")?;
             let mut owner = (self.object_class)(target(info)?.as_ptr());
@@ -135,7 +132,6 @@ impl RuntimeAccess {
         }
     }
     pub(super) unsafe fn description_string(&self, text: Option<&Root<'_, '_>>) -> Result<String, DiscoveryError> {
-        // SAFETY: inherits describe_implicits's retained runtime/metadata, attached thread and synchronous rooted graph-access contract.
         unsafe {
             let string = self.system_class(c"String")?;
             let Some(text) = text else {
@@ -173,7 +169,6 @@ impl RuntimeAccess {
         api: raw::InvocationApi,
         request: &ForgeDescriptionRequest,
     ) -> Result<Vec<ModifierSnapshot>, DiscoveryError> {
-        // SAFETY: inherits describe_implicits's retained runtime/metadata, attached thread and synchronous rooted graph-access contract.
         unsafe {
             let graph = self.forge_graph(attached)?.ok_or(DiscoveryError::NotReady("forge item absent"))?;
             if target(&graph.manager)?.as_ptr() as u64 != request.manager() || self.forge_snapshot(attached, &graph)? != *request.expected() {

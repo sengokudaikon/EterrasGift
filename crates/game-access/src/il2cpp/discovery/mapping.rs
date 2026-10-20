@@ -35,7 +35,6 @@ impl RuntimeAccess {
         parameters: &[Class],
         returns: Option<Class>,
     ) -> Result<Method, DiscoveryError> {
-        // SAFETY: inherits read_affix_mapping's retained runtime/metadata, attached thread and synchronous rooted graph-access contract.
         unsafe {
             let mut owner = (self.object_class)(target(object)?.as_ptr());
             for _ in 0..256 {
@@ -73,7 +72,6 @@ impl RuntimeAccess {
         }
     }
     unsafe fn mapping_float(&self, attached: &AttachedThread<'_>, api: raw::InvocationApi, object: &Root<'_, '_>, name: &CStr) -> Result<f32, DiscoveryError> {
-        // SAFETY: inherits read_affix_mapping's retained runtime/metadata, attached thread and synchronous rooted graph-access contract.
         unsafe {
             let method = self.mapping_method(api, object, name, &[], Some(self.system_class(c"Single")?))?;
             let context = InvocationContext::new(attached, api);
@@ -94,7 +92,6 @@ impl RuntimeAccess {
         method: Method,
         args: &mut [Argument<'_, '_, '_>],
     ) -> Result<(), DiscoveryError> {
-        // SAFETY: inherits read_affix_mapping's retained runtime/metadata, attached thread and synchronous rooted graph-access contract.
         unsafe {
             let context = InvocationContext::new(attached, api);
             let method = context
@@ -107,7 +104,6 @@ impl RuntimeAccess {
         }
     }
     unsafe fn mapping_bytes(&self, array: &Root<'_, '_>, maximum: u32) -> Result<Vec<u8>, DiscoveryError> {
-        // SAFETY: inherits read_affix_mapping's retained runtime/metadata, attached thread and synchronous rooted graph-access contract.
         unsafe {
             let count = self.array_count(array, self.system_class(c"Byte")?, maximum)?;
             let start = target(array)?.as_ptr().cast::<u8>().add(32);
@@ -115,7 +111,6 @@ impl RuntimeAccess {
         }
     }
     unsafe fn mapping_clone_bytes<'a, 'r>(&self, attached: &'a AttachedThread<'r>, source: &Root<'_, '_>, maximum: u32) -> Result<Root<'a, 'r>, DiscoveryError> {
-        // SAFETY: inherits read_affix_mapping's retained runtime/metadata, attached thread and synchronous rooted graph-access contract.
         unsafe {
             let bytes = self.mapping_bytes(source, maximum)?;
             let array = NonNull::new((self.array_new)(self.system_class(c"Byte")?, bytes.len())).ok_or_else(|| unsupported("detached byte allocation"))?;
@@ -132,7 +127,6 @@ impl RuntimeAccess {
         api: raw::InvocationApi,
         graph: &ForgeGraph<'_, '_>,
     ) -> Result<Root<'a, 'r>, DiscoveryError> {
-        // SAFETY: inherits read_affix_mapping's retained runtime/metadata, attached thread and synchronous rooted graph-access contract.
         unsafe {
             let serial = self
                 .catalog_reference(attached, &graph.item, c"id")?
@@ -199,7 +193,6 @@ impl RuntimeAccess {
         item: &Root<'_, '_>,
         slot: u8,
     ) -> Result<Vec<Effect>, DiscoveryError> {
-        // SAFETY: inherits read_affix_mapping's retained runtime/metadata, attached thread and synchronous rooted graph-access contract.
         unsafe {
             let affix_class = self.class(images, c"", c"ItemAffix")?;
             let affixes = self.catalog_reference(attached, item, c"affixes")?.ok_or_else(|| unsupported("mapping affixes absent"))?;
@@ -297,7 +290,6 @@ impl RuntimeAccess {
         slot: u8,
         roll: u8,
     ) -> Result<(), DiscoveryError> {
-        // SAFETY: inherits read_affix_mapping's retained runtime/metadata, attached thread and synchronous rooted graph-access contract.
         unsafe {
             let class = self.class(images, c"", c"ItemAffix")?;
             let list = self
@@ -319,7 +311,6 @@ impl RuntimeAccess {
         copy: &Root<'_, '_>,
         query: &AffixMappingQuery,
     ) -> Result<(), DiscoveryError> {
-        // SAFETY: inherits read_affix_mapping's retained runtime/metadata, attached thread and synchronous rooted graph-access contract.
         unsafe {
             let Some(draft) = query.draft() else {
                 return Ok(());
@@ -434,7 +425,6 @@ impl RuntimeAccess {
         api: raw::InvocationApi,
         query: &AffixMappingQuery,
     ) -> Result<RawMappingPage, DiscoveryError> {
-        // SAFETY: inherits read_affix_mapping's retained runtime/metadata, attached thread and synchronous rooted graph-access contract.
         unsafe {
             let graph = self.forge_graph(attached)?.ok_or(DiscoveryError::NotReady("forge item absent"))?;
             if target(&graph.manager)?.as_ptr() as u64 != query.manager() || self.forge_snapshot(attached, &graph)? != *query.expected() {

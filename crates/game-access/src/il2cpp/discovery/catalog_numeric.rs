@@ -136,7 +136,6 @@ impl RuntimeAccess {
         tiers: &[Root<'_, '_>],
         capture: &mut NumericCapture<'a, 'r>,
     ) -> Result<Availability<Vec<AffixTier>>, DiscoveryError> {
-        // SAFETY: inherits read_catalog_page's retained runtime/metadata, attached thread and synchronous rooted graph-access contract.
         unsafe {
             let properties = match &mut capture.properties {
                 Availability::Unavailable { reason } => return Ok(unavailable(reason.clone())),
@@ -205,7 +204,6 @@ impl RuntimeAccess {
         definition: &Root<'_, '_>,
         capture: &mut NumericCapture<'a, 'r>,
     ) -> Result<Availability<UniqueNumericData>, DiscoveryError> {
-        // SAFETY: inherits read_catalog_page's retained runtime/metadata, attached thread and synchronous rooted graph-access contract.
         unsafe {
             let metadata = match &mut capture.properties {
                 Availability::Unavailable { reason } => return Ok(unavailable(reason.clone())),
@@ -258,7 +256,6 @@ impl RuntimeAccess {
     }
 
     pub(super) unsafe fn catalog_properties<'a, 'r>(&self, attached: &'a AttachedThread<'r>, images: &Images) -> Result<Availability<PropertyCatalog<'a, 'r>>, DiscoveryError> {
-        // SAFETY: inherits read_catalog_page's retained runtime/metadata, attached thread and synchronous rooted graph-access contract.
         unsafe {
             let mut owner = (self.class_from_name)(images.game, c"".as_ptr(), c"PropertyList".as_ptr());
             if owner.is_null() {
@@ -333,7 +330,6 @@ impl RuntimeAccess {
         properties: &mut PropertyCatalog<'a, 'r>,
         raw: RawProperty,
     ) -> Result<Availability<NumericProperty>, DiscoveryError> {
-        // SAFETY: inherits read_catalog_page's retained runtime/metadata, attached thread and synchronous rooted graph-access contract.
         unsafe {
             if !raw.minimum.is_finite() || !raw.maximum.is_finite() || !(-1..=7).contains(&raw.roll_id) {
                 return Err(unsupported("numeric property finite range/roll identity"));
@@ -425,7 +421,6 @@ impl RuntimeAccess {
     // Registry storage is inspected lazily, only for a requested special SP. Every selected
     // object is rooted before further metadata/GC calls and stays rooted with its parents.
     pub(super) unsafe fn catalog_optional_class(&self, images: &Images, namespace: &CStr, name: &CStr) -> Result<Option<Class>, DiscoveryError> {
-        // SAFETY: inherits read_catalog_page's retained runtime/metadata, attached thread and synchronous rooted graph-access contract.
         unsafe {
             let mut owner = (self.class_from_name)(images.game, namespace.as_ptr(), name.as_ptr());
             for image in &images.all {
@@ -436,7 +431,6 @@ impl RuntimeAccess {
     }
 
     unsafe fn catalog_ready_registry<'a, 'r>(&self, attached: &'a AttachedThread<'r>, images: &Images, owner: Class) -> Result<Availability<Root<'a, 'r>>, DiscoveryError> {
-        // SAFETY: inherits read_catalog_page's retained runtime/metadata, attached thread and synchronous rooted graph-access contract.
         unsafe {
             let ready = self.static_field(owner, c"instanceFound", "System.Boolean")?;
             if self.field_class(ready)? != self.system_class(c"Boolean")? {
@@ -466,7 +460,6 @@ impl RuntimeAccess {
         images: &Images,
         property: u8,
     ) -> Result<Availability<SpecialRegistry<'a, 'r>>, DiscoveryError> {
-        // SAFETY: inherits read_catalog_page's retained runtime/metadata, attached thread and synchronous rooted graph-access contract.
         unsafe {
             let (owner_name, info_name) = match property {
                 58 => (c"AbilityPropertyList", c"AbilityPropertyInfo"),
@@ -560,7 +553,6 @@ impl RuntimeAccess {
     }
 
     unsafe fn catalog_ability_id(&self, object: &Root<'_, '_>) -> Result<u16, DiscoveryError> {
-        // SAFETY: inherits read_catalog_page's retained runtime/metadata, attached thread and synchronous rooted graph-access contract.
         unsafe {
             let owner = (self.object_class)(target(object)?.as_ptr());
             if owner.is_null() {
@@ -588,7 +580,6 @@ impl RuntimeAccess {
         properties: &mut PropertyCatalog<'a, 'r>,
         raw: RawProperty,
     ) -> Result<Availability<SelectedInfo<'a, 'r>>, DiscoveryError> {
-        // SAFETY: inherits read_catalog_page's retained runtime/metadata, attached thread and synchronous rooted graph-access contract.
         unsafe {
             if raw.property == 43 {
                 let Some(images) = &properties.images else {
@@ -701,7 +692,6 @@ impl RuntimeAccess {
     }
 
     pub(super) unsafe fn catalog_raw_property(&self, object: &Root<'_, '_>, minimum: f32, maximum: f32, unique: bool) -> Result<RawProperty, DiscoveryError> {
-        // SAFETY: inherits read_catalog_page's retained runtime/metadata, attached thread and synchronous rooted graph-access contract.
         unsafe {
             let roll_id = if unique && self.boolean(object, c"canRoll")? {
                 i32::from(self.primitive::<u8>(object, c"rollID")?)

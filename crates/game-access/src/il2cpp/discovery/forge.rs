@@ -74,7 +74,6 @@ impl RuntimeAccess {
         name: &CStr,
         value: &Root<'_, '_>,
     ) -> Result<NonNull<raw::FieldInfo>, DiscoveryError> {
-        // SAFETY: inherits read_forge's retained runtime/metadata, attached thread and synchronous rooted graph-access contract.
         unsafe {
             if !object.belongs_to(attached) || !value.belongs_to(attached) {
                 return Err(unsupported("reference store runtime mismatch"));
@@ -98,7 +97,6 @@ impl RuntimeAccess {
     }
     // All internal unsafe helpers inherit read_forge's live attached-runtime and graph access contract.
     pub(super) unsafe fn system_class(&self, name: &CStr) -> Result<Class, DiscoveryError> {
-        // SAFETY: inherits read_forge's retained runtime/metadata, attached thread and synchronous rooted graph-access contract.
         unsafe {
             let image = (self.corlib)();
             if image.is_null() {
@@ -113,7 +111,6 @@ impl RuntimeAccess {
     }
 
     pub(super) unsafe fn instance_field(&self, object: &Root<'_, '_>, name: &CStr, expected: Class) -> Result<Ptr, DiscoveryError> {
-        // SAFETY: inherits read_forge's retained runtime/metadata, attached thread and synchronous rooted graph-access contract.
         unsafe {
             let object = target(object)?;
             let class = (self.object_class)(object.as_ptr());
@@ -130,7 +127,6 @@ impl RuntimeAccess {
     }
 
     pub(super) unsafe fn field_class(&self, field: Ptr) -> Result<Class, DiscoveryError> {
-        // SAFETY: inherits read_forge's retained runtime/metadata, attached thread and synchronous rooted graph-access contract.
         unsafe {
             let ty = (self.field_type)(field);
             if ty.is_null() || (self.type_byref)(ty) {
@@ -145,7 +141,6 @@ impl RuntimeAccess {
     }
 
     pub(super) unsafe fn primitive<T: Primitive>(&self, object: &Root<'_, '_>, name: &CStr) -> Result<T, DiscoveryError> {
-        // SAFETY: inherits read_forge's retained runtime/metadata, attached thread and synchronous rooted graph-access contract.
         unsafe {
             let class = self.system_class(T::NAME)?;
             let field = self.instance_field(object, name, class)?;
@@ -158,7 +153,6 @@ impl RuntimeAccess {
     }
 
     pub(super) unsafe fn boolean(&self, object: &Root<'_, '_>, name: &CStr) -> Result<bool, DiscoveryError> {
-        // SAFETY: inherits read_forge's retained runtime/metadata, attached thread and synchronous rooted graph-access contract.
         unsafe {
             let class = self.system_class(c"Boolean")?;
             let field = self.instance_field(object, name, class)?;
@@ -173,7 +167,6 @@ impl RuntimeAccess {
     }
 
     pub(super) unsafe fn enumeration(&self, object: &Root<'_, '_>, name: &CStr, enum_name: &CStr) -> Result<i32, DiscoveryError> {
-        // SAFETY: inherits read_forge's retained runtime/metadata, attached thread and synchronous rooted graph-access contract.
         unsafe {
             let object_class = (self.object_class)(target(object)?.as_ptr());
             if object_class.is_null() {
@@ -213,7 +206,6 @@ impl RuntimeAccess {
         name: &CStr,
         declared: Class,
     ) -> Result<Option<Root<'a, 'r>>, DiscoveryError> {
-        // SAFETY: inherits read_forge's retained runtime/metadata, attached thread and synchronous rooted graph-access contract.
         unsafe {
             if declared.is_null() || (self.class_value)(declared) {
                 return Err(unsupported("forge reference field class"));
@@ -232,7 +224,6 @@ impl RuntimeAccess {
     }
 
     pub(super) unsafe fn exact(&self, object: &Root<'_, '_>, expected: Class) -> Result<(), DiscoveryError> {
-        // SAFETY: inherits read_forge's retained runtime/metadata, attached thread and synchronous rooted graph-access contract.
         unsafe {
             if (self.object_class)(target(object)?.as_ptr()) != expected {
                 return Err(unsupported("unexpected forge object type"));
@@ -242,7 +233,6 @@ impl RuntimeAccess {
     }
 
     pub(super) unsafe fn text(&self, attached: &AttachedThread<'_>, object: &Root<'_, '_>, name: &CStr) -> Result<String, DiscoveryError> {
-        // SAFETY: inherits read_forge's retained runtime/metadata, attached thread and synchronous rooted graph-access contract.
         unsafe {
             let class = self.system_class(c"String")?;
             let Some(text) = self.reference(attached, object, name, class)? else {
@@ -267,7 +257,6 @@ impl RuntimeAccess {
     }
 
     pub(super) unsafe fn array_class(&self, class: Class, element: Class) -> Result<(), DiscoveryError> {
-        // SAFETY: inherits read_forge's retained runtime/metadata, attached thread and synchronous rooted graph-access contract.
         unsafe {
             if class.is_null() || (self.class_rank)(class) != 1 || (self.type_code)((self.class_type)(class)) != 0x1d || (self.class_element)(class) != element {
                 return Err(unsupported("forge SZARRAY element/rank"));
@@ -277,7 +266,6 @@ impl RuntimeAccess {
     }
 
     pub(super) unsafe fn array_count(&self, array: &Root<'_, '_>, element: Class, maximum: u32) -> Result<u32, DiscoveryError> {
-        // SAFETY: inherits read_forge's retained runtime/metadata, attached thread and synchronous rooted graph-access contract.
         unsafe {
             let object = target(array)?;
             self.array_class((self.object_class)(object.as_ptr()), element)?;
@@ -293,7 +281,6 @@ impl RuntimeAccess {
     }
 
     unsafe fn roll_array(&self, attached: &AttachedThread<'_>, object: &Root<'_, '_>, name: &CStr, maximum: u32) -> Result<Vec<u8>, DiscoveryError> {
-        // SAFETY: inherits read_forge's retained runtime/metadata, attached thread and synchronous rooted graph-access contract.
         unsafe {
             let byte = self.system_class(c"Byte")?;
             let class = (self.object_class)(target(object)?.as_ptr());
@@ -315,7 +302,6 @@ impl RuntimeAccess {
     }
 
     unsafe fn affixes(&self, attached: &AttachedThread<'_>, images: &Images, item: &Root<'_, '_>) -> Result<Vec<AffixSnapshot>, DiscoveryError> {
-        // SAFETY: inherits read_forge's retained runtime/metadata, attached thread and synchronous rooted graph-access contract.
         unsafe {
             let affix_class = self.class(images, c"", c"ItemAffix")?;
             let item_class = (self.object_class)(target(item)?.as_ptr());
@@ -383,7 +369,6 @@ impl RuntimeAccess {
     /// No root, raw pointer or borrow returned by this operation grants later memory access; the
     /// snapshot's item address is only an ephemeral identity token. Runtime shutdown is excluded.
     pub unsafe fn read_forge(&self, attached: &AttachedThread<'_>) -> Result<Option<ForgeSnapshot>, DiscoveryError> {
-        // SAFETY: inherits read_forge's retained runtime/metadata, attached thread and synchronous rooted graph-access contract.
         unsafe {
             let Some(graph) = self.forge_graph(attached)? else { return Ok(None) };
             self.forge_snapshot(attached, &graph).map(Some)
@@ -392,7 +377,6 @@ impl RuntimeAccess {
 
     // Internal callers inherit read_forge's complete live-runtime/graph contract.
     pub(super) unsafe fn forge_graph<'a, 'r>(&self, attached: &'a AttachedThread<'r>) -> Result<Option<ForgeGraph<'a, 'r>>, DiscoveryError> {
-        // SAFETY: inherits read_forge's retained runtime/metadata, attached thread and synchronous rooted graph-access contract.
         unsafe {
             let images = self.images()?;
             let online = self.static_field(self.class(&images, c"EHG.Multiplayer", c"GameplayEnvironment")?, c"_isOnlinePlay", "System.Boolean")?;
@@ -477,7 +461,6 @@ impl RuntimeAccess {
     }
 
     pub(super) unsafe fn forge_snapshot(&self, attached: &AttachedThread<'_>, graph: &ForgeGraph<'_, '_>) -> Result<ForgeSnapshot, DiscoveryError> {
-        // SAFETY: inherits read_forge's retained runtime/metadata, attached thread and synchronous rooted graph-access contract.
         unsafe {
             let item = &graph.item;
             let rarity: u8 = self.primitive(item, c"rarity")?;

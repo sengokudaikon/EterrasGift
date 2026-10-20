@@ -19,7 +19,6 @@ pub struct NumericModifierDisplay {
 impl RuntimeAccess {
     // Inherits format_numeric_modifier's initialized immutable runtime/metadata contract.
     unsafe fn modifier_field(&self, owner: super::Class, name: &CStr, expected: super::Class, code: i32, readonly: bool) -> Result<super::Ptr, Unavailable> {
-        // SAFETY: inherits format_numeric_modifier's retained runtime/metadata, attached thread and synchronous rooted graph-access contract.
         unsafe {
             let field = self.formatter_field(owner, name, expected, code)?;
             if ((self.field_flags)(field) & 0x20 != 0) != readonly {
@@ -58,7 +57,6 @@ impl RuntimeAccess {
         if !modifier.belongs_to(attached) {
             return Err(Unavailable::Context);
         }
-        // SAFETY: inherits format_numeric_modifier's retained runtime/metadata, attached thread and synchronous rooted graph-access contract.
         unsafe {
             let images = self.images()?;
             let leaf = self.class(&images, c"LE.UI.Tooltips", c"ItemTooltipPropertyModifierInfo")?;

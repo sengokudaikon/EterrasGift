@@ -59,7 +59,6 @@ fn decode(units: &[u16]) -> Result<NumericDisplay, Unavailable> {
 impl RuntimeAccess {
     // All helpers inherit format_numeric_display's live immutable metadata and graph contract.
     unsafe fn formatter_hierarchy(&self, stat: Class, localized: Class, base: Class, entry: Class) -> Result<(), Unavailable> {
-        // SAFETY: inherits format_numeric_display's retained runtime/metadata, attached thread and synchronous rooted graph-access contract.
         unsafe {
             if [stat, localized, base, entry].iter().any(|class| class.is_null())
                 || (self.class_parent)(stat) != localized
@@ -72,7 +71,6 @@ impl RuntimeAccess {
         }
     }
     unsafe fn formatter_core(&self, name: &CStr, code: i32) -> Result<Class, Unavailable> {
-        // SAFETY: inherits format_numeric_display's retained runtime/metadata, attached thread and synchronous rooted graph-access contract.
         unsafe {
             let image = (self.corlib)();
             if image.is_null() {
@@ -87,7 +85,6 @@ impl RuntimeAccess {
         }
     }
     unsafe fn formatter_enum(&self, class: Class, i32_class: Class) -> Result<(), Unavailable> {
-        // SAFETY: inherits format_numeric_display's retained runtime/metadata, attached thread and synchronous rooted graph-access contract.
         unsafe {
             if class.is_null() || !(self.class_enum)(class) || !(self.class_value)(class) {
                 return Err(Unavailable::Contract("exact Int32 enum class"));
@@ -100,7 +97,6 @@ impl RuntimeAccess {
         }
     }
     unsafe fn formatter_field(&self, owner: Class, name: &CStr, expected: Class, code: i32) -> Result<Ptr, Unavailable> {
-        // SAFETY: inherits format_numeric_display's retained runtime/metadata, attached thread and synchronous rooted graph-access contract.
         unsafe {
             let field = self.field(owner, name)?;
             if (self.field_parent)(field) != owner || (self.field_flags)(field) & (0x10 | 0x40) != 0 {
@@ -114,7 +110,6 @@ impl RuntimeAccess {
         }
     }
     unsafe fn formatter_rounding(&self, info: &Root<'_, '_>, owner: Class, name: &CStr, rounding: Class) -> Result<(), Unavailable> {
-        // SAFETY: inherits format_numeric_display's retained runtime/metadata, attached thread and synchronous rooted graph-access contract.
         unsafe {
             let field = self.formatter_field(owner, name, rounding, 0x11)?;
             let object = info.target().ok_or(Unavailable::Context)?;
@@ -128,7 +123,6 @@ impl RuntimeAccess {
         }
     }
     unsafe fn formatter_boolean(&self, info: &Root<'_, '_>, owner: Class, name: &CStr, boolean: Class) -> Result<(), Unavailable> {
-        // SAFETY: inherits format_numeric_display's retained runtime/metadata, attached thread and synchronous rooted graph-access contract.
         unsafe {
             let field = self.formatter_field(owner, name, boolean, 0x02)?;
             let mut value = 0_u8;
@@ -140,7 +134,6 @@ impl RuntimeAccess {
         }
     }
     unsafe fn formatter_method(&self, api: raw::InvocationApi, owner: Class, string: Class, parameters: &[Class; 5]) -> Result<NonNull<raw::MethodInfo>, Unavailable> {
-        // SAFETY: inherits format_numeric_display's retained runtime/metadata, attached thread and synchronous rooted graph-access contract.
         unsafe {
             let mut iterator = std::ptr::null_mut();
             let mut found = None;
@@ -189,7 +182,6 @@ impl RuntimeAccess {
         if !root.belongs_to(attached) {
             return Err(Unavailable::Context);
         }
-        // SAFETY: inherits format_numeric_display's retained runtime/metadata, attached thread and synchronous rooted graph-access contract.
         unsafe {
             let object = root.target().ok_or(Unavailable::Context)?;
             if (self.object_class)(object.as_ptr()) != string {
@@ -243,7 +235,6 @@ impl RuntimeAccess {
         if !property_info.belongs_to(attached) {
             return Err(Unavailable::Context);
         }
-        // SAFETY: inherits format_numeric_display's retained runtime/metadata, attached thread and synchronous rooted graph-access contract.
         unsafe {
             let images = self.images()?;
             let stat = self.class(&images, c"", c"StatPropertyInfo")?;

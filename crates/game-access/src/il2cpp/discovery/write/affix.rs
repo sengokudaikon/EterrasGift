@@ -28,7 +28,6 @@ impl RuntimeAccess {
         expected: &ForgeSnapshot,
         mutation: ForgeMutation,
     ) -> Result<AffixRewrite<'a, 'r>, ForgeWriteError> {
-        // SAFETY: inherits edit_forge's retained runtime/metadata, attached thread and synchronous rooted graph-access contract.
         unsafe {
             let (slot, construction) = match mutation {
                 ForgeMutation::Affix { slot, id, tier, roll, seal, .. } => {
@@ -181,7 +180,6 @@ impl RuntimeAccess {
         takes_element: bool,
         api: raw::InvocationApi,
     ) -> Result<super::super::Method, ForgeWriteError> {
-        // SAFETY: inherits edit_forge's retained runtime/metadata, attached thread and synchronous rooted graph-access contract.
         unsafe {
             let mut iterator = std::ptr::null_mut();
             let mut found = None;
@@ -232,7 +230,6 @@ impl AffixRewrite<'_, '_> {
         api: raw::InvocationApi,
         item: NonNull<raw::Object>,
     ) -> Result<(), ForgeWriteError> {
-        // SAFETY: inherits edit_forge's retained runtime/metadata, attached thread and synchronous rooted graph-access contract.
         unsafe {
             let context = InvocationContext::new(attached, api);
             let failed = |e: crate::il2cpp::InvokeError| ForgeWriteError::Failed(e.to_string());
