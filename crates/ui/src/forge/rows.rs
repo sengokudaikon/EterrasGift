@@ -574,14 +574,14 @@ impl AffixRow {
 
     /// The draft as the write Apply makes for it, in the slot it names now.
     pub fn read_edit(&self, slot: usize, allow_incompatible: bool) -> ItemEdit {
-        ItemEdit::Affix {
-            slot,
-            id: self.draft_id(),
-            tier: self.draft.tier,
-            roll: self.draft.roll,
+        ItemEdit::Affix(eg_trainer::edits::AffixEdit {
+            slot: (slot) as i32,
+            id: (self.draft_id()) as i32,
+            tier: (self.draft.tier) as i32,
+            roll: (self.draft.roll) as i32,
             seal: self.draft.seal,
             allow_incompatible,
-        }
+        })
     }
 }
 
@@ -1152,15 +1152,16 @@ impl FieldDraft {
 
     pub fn read_edit(&self) -> ItemEdit {
         match self.field {
-            Some(field) => ItemEdit::Status {
+            Some(field) => ItemEdit::Status(eg_trainer::edits::StatusEdit {
                 field,
-                value: self.value.clamp(0, 255) as u8,
+                value: (self.value.clamp(0, 255) as u8) as i32,
                 unrestricted: self.unrestricted,
-            },
-            None => ItemEdit::Base {
-                sub_type: base_of(self.value).1,
+            }),
+            None => ItemEdit::BaseType(eg_trainer::edits::BaseTypeEdit {
+                sub_type: (base_of(self.value).1) as i32,
                 allow_incompatible: self.allow_incompatible,
-            },
+                item_type: None,
+            }),
         }
     }
 }

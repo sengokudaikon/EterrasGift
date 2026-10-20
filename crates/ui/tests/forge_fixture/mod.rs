@@ -9,6 +9,7 @@
 
 use super::forge::game::{BaseDefinition, Catalog, ForgeGame, GameError, ItemLimits, ItemTypeDefinition, LegendaryType, UniqueDefinition};
 use super::forge::game::{EditOutcome, WriteOutcome, refused};
+use super::forge::item::EditPresentation;
 use super::forge::item::{
     AffixDefinition, AffixKind, AffixState, Category, ForgeItem, ItemEdit, ItemStatus, ModifierState, RollRequest, RollTarget, Seal, TierProperty, UniqueState, ValueSample,
     ValueTable, format_tier_range,
@@ -30,6 +31,7 @@ pub struct FixtureState {
     pub identity: bool,
     pub unrestricted: bool,
     pub writes: Vec<ItemEdit>,
+    history: eg_trainer::undo::ForgeUndoHistory,
 }
 
 pub struct FixtureGame {
@@ -38,6 +40,172 @@ pub struct FixtureGame {
 }
 
 impl FixtureGame {
+    /// Authored display fixtures carry full canonical planner inputs. They do not
+    /// implement compatibility, projection or edit validation themselves.
+    fn bind(&self, mut item: ForgeItem) -> ForgeItem {
+        use eg_trainer::{backend as native, catalog as data, edits::ExpectedObservation};
+        let name = |text: &str| data::DefinitionName {
+            text: text.into(),
+            source: data::DefinitionNameSource::RuntimeDisplay,
+        };
+        let unavailable = || data::Availability::Unavailable {
+            reason: "Authored fixture has no numeric catalog.".into(),
+        };
+        let pair = |(minimum, maximum)| data::ValueRange { minimum, maximum };
+        let limits = self.catalog.limits.unwrap();
+        let catalog = data::GameCatalog {
+            identity: data::CatalogIdentity {
+                binary_hash: "A".repeat(64),
+                metadata_hash: "B".repeat(64),
+                extraction_version: data::EXTRACTION_VERSION,
+                locale: data::GameLocale {
+                    language: "en".into(),
+                    game_version: "fixture".into(),
+                },
+            },
+            limits: data::ItemLimits {
+                forging_potential: pair(limits.forging_potential),
+                legendary_potential: pair(limits.legendary_potential),
+                weavers_will: pair(limits.weavers_will),
+                weavers_touch: pair(limits.weavers_touch),
+                level_requirement: pair(limits.level_requirement),
+            },
+            bases: self
+                .catalog
+                .item_types
+                .iter()
+                .map(|t| {
+                    (
+                        t.item_type as u8,
+                        data::ItemTypeDefinition {
+                            item_type: t.item_type as u8,
+                            name: name(&t.name),
+                            sub_types: t
+                                .bases
+                                .iter()
+                                .map(|b| data::SubTypeDefinition {
+                                    sub_type: b.sub_type,
+                                    name: name(&b.name),
+                                    level_requirement: i32::from(b.level),
+                                    class_requirement: 0,
+                                    cannot_drop: false,
+                                    is_corrupted: b.corrupted,
+                                    implicits: data::Availability::Available(vec![]),
+                                })
+                                .collect(),
+                        },
+                    )
+                })
+                .collect(),
+            affixes: self
+                .catalog
+                .definitions
+                .iter()
+                .filter(|d| d.verified)
+                .map(|d| {
+                    (
+                        d.id,
+                        data::AffixDefinition {
+                            id: d.id,
+                            raw_name: d.name.clone(),
+                            raw_display_name: d.name.clone(),
+                            game_display_name: data::Availability::Available(d.name.clone()),
+                            kind: d.kind as i32,
+                            special: d.category.as_raw(),
+                            class_requirement: 0,
+                            item_types: Some(d.item_types.iter().map(|t| i32::from(*t)).collect()),
+                            tier_count: u16::from(d.max_tier),
+                            standard_effect: 1.0,
+                            numeric: unavailable(),
+                        },
+                    )
+                })
+                .collect(),
+            uniques: self
+                .catalog
+                .uniques
+                .iter()
+                .map(|u| {
+                    (
+                        u.id,
+                        data::UniqueDefinition {
+                            id: u.id,
+                            name: name(&u.name),
+                            item_type: u.item_type as u8,
+                            sub_types: u.sub_types.iter().map(|t| *t as u8).collect(),
+                            is_set_item: u.is_set,
+                            set_id: 0,
+                            legendary_type: i32::from(u.legendary_type == LegendaryType::WeaversWill),
+                            can_drop_as_legendary: u.can_drop_as_legendary,
+                            is_pre_corrupted: false,
+                            numeric: data::Availability::Unavailable {
+                                reason: "Authored fixture has no unique numeric catalog.".into(),
+                            },
+                        },
+                    )
+                })
+                .collect(),
+            rarities: Default::default(),
+        };
+        let status = item.status.unwrap_or_default();
+        let mut snapshot = native::ForgeSnapshot {
+            item: 1,
+            individual_id: 1,
+            fingerprint: 0,
+            name: item.name.clone(),
+            item_type: item.item_type as u8,
+            sub_type: item.sub_type,
+            rarity: item.rarity,
+            class_requirement: 0,
+            affixes: item
+                .affixes
+                .iter()
+                .map(|a| native::AffixSnapshot {
+                    slot: a.slot as u8,
+                    id: a.id,
+                    tier: u16::from(a.tier),
+                    roll: a.roll,
+                    kind: a.kind as i32,
+                    seal: a.seal as i32,
+                    special: a.category.as_raw(),
+                    name: self.catalog.definition(a.id).name,
+                })
+                .collect(),
+            implicit_rolls: item.implicit_rolls.clone(),
+            identity: item
+                .unique
+                .as_ref()
+                .or(item.set_item.as_ref())
+                .map(|u| native::UniqueIdentity { id: u.id, rolls: u.rolls.clone() }),
+            status: native::ItemStatus {
+                forging_potential: status.forging_potential,
+                forging_potential_type: 0,
+                legendary_potential: status.legendary_potential,
+                weavers_will: status.weavers_will,
+                weavers_touch: status.weavers_touch,
+                level_requirement: i32::from(status.level_requirement),
+                corrupted: status.corrupted,
+                ruined: status.ruined,
+            },
+        };
+        snapshot.fingerprint = snapshot.legacy_fingerprint();
+        let expected = ExpectedObservation::new(
+            1,
+            native::ProcessIdentity {
+                pid: 1,
+                created: 1,
+                executable: std::env::current_exe().unwrap(),
+            },
+            catalog.identity.clone(),
+            snapshot,
+        )
+        .unwrap();
+        item.context = Some(std::sync::Arc::new(super::forge::item::ForgeContext {
+            expected,
+            catalog: std::sync::Arc::new(catalog),
+        }));
+        item
+    }
     /// The showcase session on the fixture's boots: four affixes, value tables scaled by tier.
     pub fn boots(seed_tiers: bool) -> FixtureGame {
         FixtureGame::new(Some(boots()), seed_tiers, false, false)
@@ -270,6 +438,7 @@ fn affix(slot: usize, id: u16, tier: u8, roll: u8, kind: AffixKind, seal: Seal, 
 
 pub fn boots() -> ForgeItem {
     ForgeItem {
+        context: None,
         token: "test-item".into(),
         name: "Wayfarer's Boots".into(),
         item_type: BOOTS,
@@ -328,6 +497,7 @@ pub fn unique_boots() -> ForgeItem {
         modifier(4, "Unresolved modifier", "", &[2], false),
     ];
     ForgeItem {
+        context: None,
         token: "showcase-unique".into(),
         name: "Wayfarer's Boots".into(),
         item_type: BOOTS,
@@ -350,6 +520,7 @@ pub fn unique_boots() -> ForgeItem {
 
 pub fn ring(implicits: bool) -> ForgeItem {
     ForgeItem {
+        context: None,
         token: "ring".into(),
         name: "Gold Ring".into(),
         item_type: RING,
@@ -407,7 +578,7 @@ impl ForgeGame for FixtureGame {
     }
 
     fn read(&self) -> Option<ForgeItem> {
-        self.state.borrow().item.clone()
+        self.state.borrow().item.clone().map(|item| self.bind(item))
     }
 
     fn unrestricted(&self) -> bool {
@@ -428,7 +599,7 @@ impl ForgeGame for FixtureGame {
             RollTarget::Implicit => Ok(table("Value", 1.0, 10.0, 0, "{v}", "")),
             RollTarget::Affix => {
                 let (id, tier) = match request.draft {
-                    Some(ItemEdit::Affix { id, tier, .. }) => (id, Some(tier)),
+                    Some(ItemEdit::Affix(eg_trainer::edits::AffixEdit { id, tier, .. })) => (id as u16, Some(tier as u8)),
                     _ => item.affix(request.index).map_or((0, None), |affix| (affix.id, Some(affix.tier))),
                 };
                 if state.unmapped.contains(&id) {
@@ -449,20 +620,75 @@ impl ForgeGame for FixtureGame {
     }
 
     fn write(&mut self, expected: &ForgeItem, edit: &ItemEdit) -> EditOutcome {
-        let mut state = self.state.borrow_mut();
-        let Some(item) = state.item.clone() else {
+        self.apply_edit(expected, edit, false)
+    }
+    fn begin_batch(&mut self) -> Result<(), GameError> {
+        self.state.borrow_mut().history.begin_batch();
+        Ok(())
+    }
+    fn undo_depth(&self) -> usize {
+        self.state.borrow().history.len()
+    }
+    fn undo_needs_override(&self) -> bool {
+        self.state.borrow().history.needs_override()
+    }
+    fn undo_intent(&self) -> Option<ItemEdit> {
+        let item = self.read()?;
+        let context = item.context.as_ref()?;
+        let state = self.state.borrow();
+        let undo = state.history.current()?;
+        if undo.after() != &context.expected {
+            return None;
+        }
+        match undo.prepare_with_override(
+            &context.expected,
+            1,
+            &context.catalog,
+            &eg_trainer::edits::CatalogProvenance::RuntimeRead {
+                generation: 1,
+                process: context.expected.process().clone(),
+            },
+            state.unrestricted,
+        ) {
+            Ok(plan) => Some(plan.edit_intent().clone()),
+            Err(_) if matches!(undo.reverse_edit(), ItemEdit::Roll(e) if e.target != RollTarget::Affix) => Some(undo.reverse_edit().clone()),
+            Err(_) => None,
+        }
+    }
+    fn undo(&mut self, expected: &ForgeItem) -> EditOutcome {
+        let Some(edit) = self.undo_intent() else {
+            return refused("Undo is unavailable for the current item.");
+        };
+        self.apply_edit(expected, &edit, true)
+    }
+
+    fn preview_unique(&self, expected: &ForgeItem, edit: &ItemEdit) -> Result<Vec<ModifierState>, GameError> {
+        let after = edit.project(expected).map_err(|e| e.to_string())?;
+        let unique = after.unique.ok_or_else(|| "Preview unavailable.".to_string())?;
+        Ok(format_unique(&unique.rolls, &unique.modifiers))
+    }
+}
+
+impl FixtureGame {
+    fn apply_edit(&mut self, expected: &ForgeItem, edit: &ItemEdit, undoing: bool) -> EditOutcome {
+        let Some(item) = self.read() else {
             return refused("Place an item in the forge before editing.");
         };
-        if item != *expected {
+        let mut state = self.state.borrow_mut();
+        if !item.same_state(expected) {
             return refused("Item changed. Reset edit fields before trying again.");
         }
-        if !edit.is_valid(&item) {
-            return refused("The edit could not be confirmed.");
-        }
-        let mut after = edit.project(&item);
+        let prepared = match edit.prepare_view_with_override(&item, state.unrestricted) {
+            Ok(prepared) => prepared,
+            Err(e) => return refused(e.to_string()),
+        };
+        let mut after = match item.with_snapshot(prepared.projected().clone()) {
+            Ok(after) => after,
+            Err(e) => return refused(e.to_string()),
+        };
         // The game names the item after its new identity.
-        if let ItemEdit::Identity { unique_id, .. } = edit
-            && let Some(unique) = self.catalog.unique(*unique_id)
+        if let ItemEdit::UniqueIdentity(eg_trainer::edits::UniqueIdentityEdit { unique_id, .. }) = edit
+            && let Some(unique) = self.catalog.unique(*unique_id as u16)
         {
             after.name = unique.name.clone();
         }
@@ -470,13 +696,29 @@ impl ForgeGame for FixtureGame {
             unique.modifiers = format_unique(&unique.rolls, &unique.modifiers);
         }
         state.writes.push(edit.clone());
+        let after = self.bind(after);
+        let _ = state.history.confirmed(&prepared, 1, after.context.as_ref().unwrap().expected.snapshot(), undoing);
+        if let Some(undo) = state.history.current() {
+            let reverse = undo.reverse_edit();
+            let regular = !matches!(reverse, ItemEdit::Roll(e) if e.target != RollTarget::Affix);
+            if regular
+                && undo
+                    .prepare_with_override(
+                        undo.after(),
+                        1,
+                        &after.context.as_ref().unwrap().catalog,
+                        &eg_trainer::edits::CatalogProvenance::RuntimeRead {
+                            generation: 1,
+                            process: undo.after().process().clone(),
+                        },
+                        state.unrestricted,
+                    )
+                    .is_err()
+            {
+                state.history.clear();
+            }
+        }
         state.item = Some(after.clone());
         WriteOutcome::Confirmed(Some(after))
-    }
-
-    fn preview_unique(&self, expected: &ForgeItem, edit: &ItemEdit) -> Result<Vec<ModifierState>, GameError> {
-        let after = edit.project(expected);
-        let unique = after.unique.ok_or_else(|| "Preview unavailable.".to_string())?;
-        Ok(format_unique(&unique.rolls, &unique.modifiers))
     }
 }

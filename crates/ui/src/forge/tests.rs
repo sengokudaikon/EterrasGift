@@ -19,6 +19,56 @@ fn row(editor: &ForgeEditor, id: u16) -> usize {
 }
 
 #[test]
+fn authored_writes_and_undo_enforce_the_canonical_roll_override_flag() {
+    use super::game::{ForgeGame, WriteOutcome};
+    use eg_trainer::edits::{ItemEdit, RollChange, RollEdit, RollTarget};
+    let mut game = FixtureGame::boots(false);
+    let before = game.read().unwrap();
+    let edit = ItemEdit::Roll(RollEdit {
+        target: RollTarget::Affix,
+        changes: vec![RollChange { index: 0, value: 42 }],
+        allow_incompatible: true,
+    });
+    assert!(matches!(game.write(&before, &edit), WriteOutcome::NotApplied { .. }));
+    assert!(game.state.borrow().writes.is_empty());
+    game.state.borrow_mut().unrestricted = true;
+    assert!(matches!(game.write(&before, &edit), WriteOutcome::Confirmed(_)));
+    let after = game.read().unwrap();
+    game.state.borrow_mut().unrestricted = false;
+    assert!(matches!(game.undo(&after), WriteOutcome::NotApplied { .. }));
+    assert_eq!(game.state.borrow().writes.len(), 1);
+}
+
+#[test]
+fn capture_compatibility_uses_captured_class_requirements() {
+    use super::{
+        game::ForgeGame,
+        item::{Compatibility, Rejection},
+    };
+    use std::sync::Arc;
+    let game = FixtureGame::boots(false);
+    let mut item = game.read().unwrap();
+    let mut context = Arc::unwrap_or_clone(item.context.take().unwrap());
+    let mut catalog = Arc::unwrap_or_clone(context.catalog);
+    catalog.affixes.get_mut(&4002).unwrap().class_requirement = 4;
+    let mut snapshot = context.expected.snapshot().clone();
+    snapshot.class_requirement = 1;
+    context.expected = eg_trainer::edits::ExpectedObservation::new(
+        context.expected.generation(),
+        context.expected.process().clone(),
+        context.expected.catalog_identity().clone(),
+        snapshot,
+    )
+    .unwrap();
+    context.catalog = Arc::new(catalog);
+    item.context = Some(Arc::new(context));
+    assert_eq!(
+        game.compatibility(&item, &game.catalog().definition(4002), None, false),
+        Compatibility::Rejected(Rejection::ClassRequirement)
+    );
+}
+
+#[test]
 fn drafts_at_each_class_read_as_the_game_shows_them() {
     let mut editor = ForgeEditor::new(Box::new(FixtureGame::boots(false)));
     editor.pick_tier(2, 4);
@@ -301,12 +351,33 @@ mod async_writes {
         busy: bool,
         outcomes: VecDeque<ResultKind>,
         pending: Option<(ForgeItem, ItemEdit)>,
+        undoing: bool,
     }
     struct Delayed {
         game: FixtureGame,
         control: Rc<RefCell<Control>>,
     }
     impl ForgeGame for Delayed {
+        fn begin_batch(&mut self) -> Result<(), GameError> {
+            self.game.begin_batch()
+        }
+        fn undo_depth(&self) -> usize {
+            self.game.undo_depth()
+        }
+        fn undo_needs_override(&self) -> bool {
+            self.game.undo_needs_override()
+        }
+        fn undo_intent(&self) -> Option<ItemEdit> {
+            self.game.undo_intent()
+        }
+        fn undo(&mut self, expected: &ForgeItem) -> EditOutcome {
+            let Some(edit) = self.undo_intent() else {
+                return refused("Undo unavailable.");
+            };
+            let result = self.write(expected, &edit);
+            self.control.borrow_mut().undoing = true;
+            result
+        }
         fn is_busy(&self) -> bool {
             self.control.borrow().busy
         }
@@ -339,8 +410,15 @@ mod async_writes {
             c.released = false;
             let (expected, edit) = c.pending.take()?;
             let result = c.outcomes.pop_front().unwrap_or(ResultKind::Confirmed);
+            let undoing = std::mem::take(&mut c.undoing);
             Some(match result {
-                ResultKind::Confirmed => self.game.write(&expected, &edit),
+                ResultKind::Confirmed => {
+                    if undoing {
+                        self.game.undo(&expected)
+                    } else {
+                        self.game.write(&expected, &edit)
+                    }
+                }
                 ResultKind::ConfirmedUnavailable => {
                     assert!(matches!(self.game.write(&expected, &edit), WriteOutcome::Confirmed(_)));
                     self.game.state.borrow_mut().item = None;
@@ -360,6 +438,7 @@ mod async_writes {
             busy: false,
             outcomes: outcomes.iter().copied().collect(),
             pending: None,
+            undoing: false,
         }));
         (ForgeEditor::new(Box::new(Delayed { game, control: control.clone() })), control, state)
     }
@@ -513,6 +592,12 @@ mod async_writes {
         let (mut e, c, state) = editor(&[ResultKind::Confirmed]);
         state.borrow_mut().unrestricted = true;
         state.borrow_mut().item.as_mut().unwrap().rarity = forge::item::LEGENDARY;
+        state.borrow_mut().item.as_mut().unwrap().unique = Some(forge::item::UniqueState {
+            id: 70,
+            rolls: vec![100, 7],
+            modifiers: vec![],
+            formatting_error: String::new(),
+        });
         e.refresh();
         let index = e.fields.iter().position(|f| f.unrestricted).unwrap();
         e.begin_input(Cell::Field(index));

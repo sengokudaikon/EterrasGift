@@ -30,74 +30,6 @@ impl ForgeGame for ObservedGame {
     fn catalog(&self) -> &Catalog {
         &self.catalog
     }
-    fn compatibility(&self, item: &ForgeItem, definition: &AffixDefinition, slot: Option<&AffixState>, unrestricted: bool) -> item::Compatibility {
-        use eg_trainer::edits::{CompatibilityReason, compatibility};
-        use item::{Compatibility, Rejection};
-        let state = self.writer.borrow().backend.snapshot();
-        let Some(data) = state.catalog.data() else {
-            return Compatibility::Unknown;
-        };
-        let Some(definition) = data.affixes.get(&definition.id) else {
-            return Compatibility::Unknown;
-        };
-        let ForgeState::Item { snapshot, .. } = &state.forge else {
-            return Compatibility::Unknown;
-        };
-        if project_item(&state).ok().flatten().is_none_or(|actual| actual.token != item.token) {
-            return Compatibility::Unknown;
-        }
-        // Earlier draft steps may already move/replace affixes in this local
-        // projection. Keep the captured class context and use the domain rules.
-        let mut projected = (**snapshot).clone();
-        let Ok(item_type) = u8::try_from(item.item_type) else {
-            return Compatibility::Unknown;
-        };
-        projected.item_type = item_type;
-        projected.sub_type = item.sub_type;
-        projected.rarity = item.rarity;
-        projected.affixes.clear();
-        for affix in &item.affixes {
-            let Ok(slot) = u8::try_from(affix.slot) else {
-                return Compatibility::Unknown;
-            };
-            projected.affixes.push(eg_trainer::backend::AffixSnapshot {
-                slot,
-                id: affix.id,
-                tier: u16::from(affix.tier),
-                roll: affix.roll,
-                kind: match affix.kind {
-                    AffixKind::Prefix => 0,
-                    AffixKind::Suffix => 1,
-                },
-                special: match affix.category {
-                    Category::Standard => 0,
-                    Category::Experimental => 1,
-                    Category::Personal => 2,
-                    Category::Set => 3,
-                    Category::Corrupted => 6,
-                },
-                seal: affix.seal.index() as i32,
-                name: String::new(),
-            });
-        }
-        let slot = match slot {
-            Some(slot) => match projected.affixes.iter().find(|a| usize::from(a.slot) == slot.slot) {
-                Some(a) => Some(a),
-                None => return Compatibility::Unknown,
-            },
-            None => None,
-        };
-        match compatibility(data, &projected, definition, slot, None, unrestricted).reason {
-            CompatibilityReason::None => Compatibility::Allowed,
-            CompatibilityReason::Override => Compatibility::Override,
-            CompatibilityReason::ClassRequirement => Compatibility::Rejected(Rejection::ClassRequirement),
-            CompatibilityReason::SlotType => Compatibility::Rejected(Rejection::SlotType),
-            CompatibilityReason::EquipmentType => Compatibility::Rejected(Rejection::EquipmentType),
-            CompatibilityReason::SpecialCategory => Compatibility::Rejected(Rejection::SpecialCategory),
-            CompatibilityReason::AlreadyPresent => Compatibility::Rejected(Rejection::AlreadyPresent),
-            CompatibilityReason::MissingMetadata | CompatibilityReason::UnknownGameValue => Compatibility::Unknown,
-        }
-    }
     fn read(&self) -> Option<ForgeItem> {
         let writer = self.writer.borrow();
         if writer.backend.subscribe().has_changed().is_err() {
@@ -135,7 +67,31 @@ impl ForgeGame for ObservedGame {
         self.writer.borrow_mut().resolve(item, request)
     }
     fn write(&mut self, expected: &ForgeItem, edit: &ItemEdit) -> EditOutcome {
-        self.writer.borrow_mut().submit(expected, edit)
+        self.writer.borrow_mut().submit(expected, edit, false)
+    }
+    fn begin_batch(&mut self) -> Result<(), GameError> {
+        self.writer
+            .borrow()
+            .backend
+            .try_submit(Command::BeginForgeBatch)
+            .map(|_| ())
+            .map_err(|_| "The trainer cannot accept another command.".into())
+    }
+    fn undo_depth(&self) -> usize {
+        self.writer.borrow().backend.snapshot().undo_forge_depth
+    }
+    fn undo_needs_override(&self) -> bool {
+        self.writer.borrow().backend.snapshot().undo_forge_needs_override
+    }
+    fn undo_intent(&self) -> Option<ItemEdit> {
+        let state = self.writer.borrow().backend.snapshot();
+        state.forge_undo_plan(state.undo_forge.as_ref()?).ok().map(|plan| plan.edit_intent().clone())
+    }
+    fn undo(&mut self, expected: &ForgeItem) -> EditOutcome {
+        let Some(edit) = self.undo_intent() else {
+            return refused("The confirmed Undo is no longer available. Check the item and override setting.");
+        };
+        self.writer.borrow_mut().submit(expected, &edit, true)
     }
     fn poll_write(&mut self) -> Option<EditOutcome> {
         self.writer.borrow_mut().poll()
@@ -175,6 +131,7 @@ struct PendingEdit {
     receipt: Pending,
     expected: ForgeItem,
     edit: ItemEdit,
+    undoing: bool,
     before: BackendSnapshot,
     plan: Option<eg_trainer::writes::ForgePlan>,
 }
@@ -210,7 +167,7 @@ impl Writer {
             return Err("The item changed before its preview could be read.".into());
         }
         let expected = state.expected_observation().map_err(|e| e.to_string())?;
-        let Some(eg_trainer::edits::ItemEdit::Roll(draft)) = canonical_edit(edit, state.override_enabled) else {
+        let eg_trainer::edits::ItemEdit::Roll(draft) = edit.clone() else {
             return Err("This preview draft is unsupported.".into());
         };
         if draft.target != eg_trainer::edits::RollTarget::Unique {
@@ -295,11 +252,7 @@ impl Writer {
                 index: u8::try_from(request.index).map_err(|_| "This affix slot is unsupported.")?,
                 line: None,
             },
-            draft: request
-                .draft
-                .as_ref()
-                .map(|edit| canonical_edit(edit, state.override_enabled).ok_or("This value draft is unsupported."))
-                .transpose()?,
+            draft: request.draft.clone(),
         };
         if let Some(result) = state.mapping(&expected, &request) {
             return result
@@ -359,7 +312,7 @@ impl Writer {
         });
         completed
     }
-    fn submit(&mut self, expected: &ForgeItem, edit: &ItemEdit) -> EditOutcome {
+    fn submit(&mut self, expected: &ForgeItem, edit: &ItemEdit, undoing: bool) -> EditOutcome {
         if self.pending.is_some() {
             return refused("An item edit is already pending.");
         }
@@ -376,6 +329,7 @@ impl Writer {
                     receipt,
                     expected: expected.clone(),
                     edit: edit.clone(),
+                    undoing,
                     before: state,
                     plan: None,
                 });
@@ -432,15 +386,21 @@ impl Writer {
         {
             return Some(refused("The item changed before submission. Discard the stale draft and edit it again."));
         }
-        let intent = match canonical_edit(&pending.edit, state.override_enabled) {
-            Some(edit) => edit,
-            None => return Some(refused("This edit is unavailable in this build.")),
+        let undo = if pending.undoing { state.undo_forge.clone() } else { None };
+        let planned = if pending.undoing {
+            undo.as_ref().ok_or(eg_trainer::edits::EditError::StaleItem).and_then(|undo| state.forge_undo_plan(undo))
+        } else {
+            state.forge_plan(pending.edit.clone())
         };
-        let plan = match state.forge_plan(intent) {
+        let plan = match planned {
             Ok(plan) => plan,
             Err(error) => return Some(refused(error.to_string())),
         };
-        match self.backend.try_submit(Command::Write(plan.clone().into())) {
+        let command = match undo {
+            Some(undo) => Command::UndoForge(Box::new(undo)),
+            None => Command::Write(plan.clone().into()),
+        };
+        match self.backend.try_submit(command) {
             Ok(receipt) => {
                 pending.receipt = receipt;
                 pending.plan = Some(plan);
@@ -455,114 +415,16 @@ impl Writer {
 
 fn supports(state: &BackendSnapshot, edit: &ItemEdit) -> bool {
     match edit {
-        ItemEdit::Add { .. } | ItemEdit::Remove { .. } => state.capabilities.affix_list,
-        ItemEdit::Affix { .. } => state.capabilities.affix_change,
-        ItemEdit::Status { field, .. } => state.capabilities.status_fields[*field as usize],
-        ItemEdit::Base { .. } => state.capabilities.base_change,
-        ItemEdit::Identity { .. } => state.capabilities.identity_change,
-        ItemEdit::Rolls {
+        ItemEdit::AddAffix(eg_trainer::edits::AddAffixEdit { .. }) | ItemEdit::RemoveAffix(eg_trainer::edits::RemoveAffixEdit { .. }) => state.capabilities.affix_list,
+        ItemEdit::Affix(eg_trainer::edits::AffixEdit { .. }) => state.capabilities.affix_change,
+        ItemEdit::Status(eg_trainer::edits::StatusEdit { field, .. }) => state.capabilities.status_fields[*field as usize],
+        ItemEdit::BaseType(eg_trainer::edits::BaseTypeEdit { .. }) => state.capabilities.base_change,
+        ItemEdit::UniqueIdentity(eg_trainer::edits::UniqueIdentityEdit { .. }) => state.capabilities.identity_change,
+        ItemEdit::Roll(eg_trainer::edits::RollEdit {
             target: item::RollTarget::Affix, ..
-        } => state.capabilities.affix_rolls,
+        }) => state.capabilities.affix_rolls,
         _ => false,
     }
-}
-fn canonical_edit(edit: &ItemEdit, override_enabled: bool) -> Option<eg_trainer::edits::ItemEdit> {
-    use eg_trainer::edits as native;
-    Some(match edit {
-        ItemEdit::Add {
-            id,
-            tier,
-            roll,
-            seal,
-            kind,
-            category,
-            allow_incompatible,
-        } => native::ItemEdit::AddAffix(native::AddAffixEdit {
-            id: i32::from(*id),
-            tier: i32::from(*tier),
-            roll: i32::from(*roll),
-            seal: match seal {
-                Seal::Normal => native::SealState::Normal,
-                Seal::Sealed => native::SealState::Sealed,
-                Seal::Primordial => native::SealState::Primordial,
-                Seal::Corrupted => native::SealState::Corrupted,
-            },
-            kind: match kind {
-                AffixKind::Prefix => native::AffixKind::Prefix,
-                AffixKind::Suffix => native::AffixKind::Suffix,
-            },
-            category: Some(match category {
-                Category::Standard => 0,
-                Category::Experimental => 1,
-                Category::Personal => 2,
-                Category::Set => 3,
-                Category::Corrupted => 6,
-            }),
-            allow_incompatible: *allow_incompatible,
-        }),
-        ItemEdit::Remove { slot, id } => native::ItemEdit::RemoveAffix(native::RemoveAffixEdit {
-            slot: i32::try_from(*slot).ok()?,
-            id: i32::from(*id),
-        }),
-        ItemEdit::Affix {
-            slot,
-            id,
-            tier,
-            roll,
-            seal,
-            allow_incompatible,
-        } => native::ItemEdit::Affix(native::AffixEdit {
-            slot: i32::try_from(*slot).ok()?,
-            id: i32::from(*id),
-            tier: i32::from(*tier),
-            roll: i32::from(*roll),
-            seal: match seal {
-                item::Seal::Normal => native::SealState::Normal,
-                item::Seal::Sealed => native::SealState::Sealed,
-                item::Seal::Primordial => native::SealState::Primordial,
-                item::Seal::Corrupted => native::SealState::Corrupted,
-            },
-            allow_incompatible: *allow_incompatible,
-        }),
-        ItemEdit::Status { field, value, unrestricted } => native::ItemEdit::Status(native::StatusEdit {
-            field: *field,
-            value: i32::from(*value),
-            unrestricted: *unrestricted,
-        }),
-        ItemEdit::Base { sub_type, allow_incompatible } => native::ItemEdit::BaseType(native::BaseTypeEdit {
-            sub_type: i32::from(*sub_type),
-            allow_incompatible: *allow_incompatible,
-            item_type: None,
-        }),
-        ItemEdit::Identity {
-            unique_id,
-            sub_type,
-            rarity,
-            unrestricted,
-        } => native::ItemEdit::UniqueIdentity(native::UniqueIdentityEdit {
-            unique_id: i32::from(*unique_id),
-            sub_type: i32::from(*sub_type),
-            rarity: i32::from(*rarity),
-            unrestricted: *unrestricted,
-        }),
-        ItemEdit::Rolls {
-            target: item::RollTarget::Affix,
-            changes,
-        } => native::ItemEdit::Roll(native::RollEdit {
-            target: native::RollTarget::Affix,
-            changes: changes
-                .iter()
-                .map(|(index, value)| {
-                    Some(native::RollChange {
-                        index: i32::try_from(*index).ok()?,
-                        value: i32::from(*value),
-                    })
-                })
-                .collect::<Option<Vec<_>>>()?,
-            allow_incompatible: override_enabled,
-        }),
-        _ => return None,
-    })
 }
 
 struct Binding {
@@ -895,6 +757,10 @@ fn project_item(state: &BackendSnapshot) -> Result<Option<ForgeItem>, String> {
         ruined: snapshot.status.ruined,
     });
     Ok(Some(ForgeItem {
+        context: Some(Arc::new(item::ForgeContext {
+            expected: state.expected_observation().map_err(|e| e.to_string())?,
+            catalog: state.catalog.data().cloned().ok_or("Catalog unavailable.")?,
+        })),
         token: format!("{}:{}:{}:{}:{}", target.pid, target.created, state.generation, snapshot.item, snapshot.individual_id),
         name: resolved_name
             .as_ref()

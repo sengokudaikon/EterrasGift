@@ -125,3 +125,18 @@ app running; an unexpected Trainer worker panic is logged, closes the event loop
 produces exit code 1 after shutdown, matching Mods and Settings. An optional Trainer
 startup failure still leaves Home and Mods available. Authored tests cover fault files
 without event subscribers, queued cleanup and fatal worker notification.
+
+The Forge UI now re-exports the canonical trainer ItemEdit, RollTarget, SealState and
+AffixKind. Its presentation carries the complete owned observation and captured catalog;
+draft validation/projection, compatibility and reversibility delegate to the trainer.
+The former presentation-to-domain edit conversion and simplified fixture rules are gone.
+Authored sessions use the same planner, including current override permission for writes.
+
+Applied Undo is owned by the worker's confirmed batch history and submitted as UndoForge.
+The editor keeps draft ordering and the number of confirmed steps to restore. Each step
+gets a fresh read; refusal retains the remaining Undo, while NotKept/Uncertain clears it.
+A new Apply replaces prior history only on its first confirmation. Rebuilt names and a
+bijective affix reorder may rebase the previous conditional token; every saved affix value
+and other item field must still match. Foreign changes invalidate the remaining history.
+Tests cover mixed batches, partial refusal, consumed tokens, slot renumbering, class rules,
+override revocation and known/unknown outcomes without accessing Last Epoch.

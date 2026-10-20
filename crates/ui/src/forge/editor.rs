@@ -3,6 +3,7 @@
 //! the game through `ForgeGame`; the editor computes none.
 
 use super::game::{Catalog, EditOutcome, ForgeGame, LegendaryType, WriteOutcome, refused};
+use super::item::EditPresentation;
 use super::item::{self, AffixDefinition, AffixKind, Category, Compatibility, ForgeItem, ItemEdit, Moves, RollRequest, RollTarget, Seal, StatusField};
 use super::rows::{AffixRow, FieldDraft, FieldKind, FieldOption, RollRow, ValueEditor, base_key, base_of};
 use std::collections::{HashMap, VecDeque};
@@ -116,7 +117,6 @@ enum StepRow {
 
 struct WriteBatch {
     steps: VecDeque<Step>,
-    reverses: Vec<ItemEdit>,
     completed: usize,
     total: usize,
     one_way: bool,
@@ -127,7 +127,6 @@ struct WriteBatch {
 struct WaitingWrite {
     step: Step,
     before: ForgeItem,
-    reverse: Option<ItemEdit>,
     moves: Moves,
     summary: String,
     effect: String,
@@ -149,7 +148,7 @@ pub struct ForgeEditor {
     selected_unique: Option<usize>,
     draft_order: Vec<RowRef>,
     pub history: Vec<AppliedEntry>,
-    applied: Option<Vec<ItemEdit>>,
+    applied: Option<usize>,
     applied_at: Option<ForgeItem>,
     message: String,
     message_kind: MessageKind,
@@ -358,7 +357,9 @@ impl ForgeEditor {
         let item = self.item.as_ref()?;
         let identity = self.identity.as_ref().filter(|identity| identity.is_dirty())?;
         match self.identity_edit(item, identity.value() as u16) {
-            ItemEdit::Identity { unique_id, sub_type, rarity, .. } => Some((unique_id, sub_type, rarity)),
+            ItemEdit::UniqueIdentity(eg_trainer::edits::UniqueIdentityEdit { unique_id, sub_type, rarity, .. }) => {
+                Some((u16::try_from(unique_id).ok()?, u16::try_from(sub_type).ok()?, u8::try_from(rarity).ok()?))
+            }
             _ => None,
         }
     }
@@ -375,12 +376,12 @@ impl ForgeEditor {
         self.identity.as_ref().is_some_and(FieldDraft::is_editable)
             && self.can_change_draft()
             && !self.has_other_drafts()
-            && self.game.supports(&ItemEdit::Identity {
+            && self.game.supports(&ItemEdit::UniqueIdentity(eg_trainer::edits::UniqueIdentityEdit {
                 unique_id: 0,
                 sub_type: 0,
                 rarity: 7,
                 unrestricted: false,
-            })
+            }))
     }
 
     pub fn identity_tip(&self) -> String {
@@ -414,12 +415,12 @@ impl ForgeEditor {
         };
         let rarity = item::identity_rarity(item, unique.is_some_and(|unique| unique.is_set));
         let unrestricted = unique.is_some_and(|unique| rarity == item::LEGENDARY && !unique.can_drop_as_legendary);
-        ItemEdit::Identity {
-            unique_id,
-            sub_type,
-            rarity,
+        ItemEdit::UniqueIdentity(eg_trainer::edits::UniqueIdentityEdit {
+            unique_id: (unique_id) as i32,
+            sub_type: (sub_type) as i32,
+            rarity: (rarity) as i32,
             unrestricted,
-        }
+        })
     }
 
     /// The uniques and set items of the item's type, uniques first, each with the rarity it would end with (spec §3.5).
@@ -433,9 +434,9 @@ impl ForgeEditor {
                 let game = Some(unique.id) == item.identity_id();
                 let edit = self.identity_edit(item, unique.id);
                 let (sub_type, rarity, needs) = match edit {
-                    ItemEdit::Identity {
+                    ItemEdit::UniqueIdentity(eg_trainer::edits::UniqueIdentityEdit {
                         sub_type, rarity, unrestricted, ..
-                    } => (sub_type, rarity, unrestricted),
+                    }) => (sub_type as u16, rarity as u8, unrestricted),
                     _ => (item.sub_type, item.rarity, false),
                 };
                 let rarity = if game { item.rarity } else { rarity };
@@ -463,7 +464,7 @@ impl ForgeEditor {
                         detail.push(format!("never legendary in the game{note}"));
                         available = self.unrestricted();
                     }
-                    if edit.reverse(item).is_none() {
+                    if !edit.can_reverse(item) {
                         detail.push("one-way: Undo apply cannot reverse it".into());
                     }
                 }
@@ -605,10 +606,11 @@ impl ForgeEditor {
         self.base.as_ref().is_some_and(FieldDraft::is_editable)
             && self.can_mutate()
             && !self.has_implicit_drafts()
-            && self.game.supports(&ItemEdit::Base {
+            && self.game.supports(&ItemEdit::BaseType(eg_trainer::edits::BaseTypeEdit {
                 sub_type: 0,
                 allow_incompatible: false,
-            })
+                item_type: None,
+            }))
     }
 
     pub fn base_tip(&self) -> String {
@@ -800,7 +802,7 @@ impl ForgeEditor {
 
     /// Adding and removing write at once, so they wait for drafts to be applied or discarded.
     pub fn can_change_affix_list(&self) -> bool {
-        self.can_mutate() && self.item.is_some() && !self.has_pending_drafts() && self.game.supports(&ItemEdit::Remove { slot: 0, id: 0 })
+        self.can_mutate() && self.item.is_some() && !self.has_pending_drafts() && self.game.supports(&ItemEdit::RemoveAffix(eg_trainer::edits::RemoveAffixEdit { slot: 0, id: 0 }))
     }
 
     pub fn add_affix_tip(&self) -> String {
@@ -872,14 +874,14 @@ impl ForgeEditor {
 
     pub fn can_change_affix(&self) -> bool {
         self.can_mutate()
-            && self.game.supports(&ItemEdit::Affix {
+            && self.game.supports(&ItemEdit::Affix(eg_trainer::edits::AffixEdit {
                 slot: 0,
                 id: 0,
                 tier: 1,
                 roll: 0,
                 seal: Seal::Normal,
                 allow_incompatible: false,
-            })
+            }))
     }
 
     pub fn can_change_field(&self, index: usize) -> bool {
@@ -950,10 +952,11 @@ impl ForgeEditor {
             Cell::Field(index) => self.can_change_field(index),
             Cell::Affix(_) => {
                 self.can_mutate()
-                    && self.game.supports(&ItemEdit::Rolls {
+                    && self.game.supports(&ItemEdit::Roll(eg_trainer::edits::RollEdit {
                         target: RollTarget::Affix,
                         changes: vec![],
-                    })
+                        allow_incompatible: self.unrestricted(),
+                    }))
             }
             _ => self.can_mutate(),
         };
@@ -1520,10 +1523,11 @@ impl ForgeEditor {
                 }
             }
         }
-        (!changes.is_empty()).then_some(ItemEdit::Rolls {
+        (!changes.is_empty()).then_some(ItemEdit::Roll(eg_trainer::edits::RollEdit {
             target: RollTarget::Unique,
-            changes,
-        })
+            changes: item::roll_changes(changes),
+            allow_incompatible: self.unrestricted(),
+        }))
     }
 
     fn say_preview(&mut self, status: &str, failed: bool, stale: bool) {
@@ -1596,14 +1600,14 @@ impl ForgeEditor {
             let request = RollRequest {
                 target: RollTarget::Affix,
                 index: slot,
-                draft: (id != row.state.id || tier != row.state.tier || seal != row.state.seal).then_some(ItemEdit::Affix {
-                    slot,
-                    id,
-                    tier,
+                draft: (id != row.state.id || tier != row.state.tier || seal != row.state.seal).then_some(ItemEdit::Affix(eg_trainer::edits::AffixEdit {
+                    slot: (slot) as i32,
+                    id: (id) as i32,
+                    tier: (tier) as i32,
                     roll: 0,
                     seal,
                     allow_incompatible: row.allows_incompatible(),
-                }),
+                })),
                 line: None,
             };
             let game_context = row.game_roll().is_some();
@@ -1611,21 +1615,22 @@ impl ForgeEditor {
             self.affixes[index].value.set_mapping(table, game_context);
         }
         let changes = match self.unique_edit() {
-            Some(ItemEdit::Rolls { changes, .. }) => changes,
+            Some(ItemEdit::Roll(eg_trainer::edits::RollEdit { changes, .. })) => changes,
             _ => Vec::new(),
         };
         for line in 0..self.uniques.len() {
             for position in 0..self.uniques[line].rolls.len() {
                 let index = self.uniques[line].rolls[position].index;
-                let dependencies: Vec<(usize, u8)> = changes.iter().filter(|(other, _)| *other != index).copied().collect();
+                let dependencies: Vec<(usize, u8)> = changes.iter().filter(|c| c.index != index as i32).map(|c| (c.index as usize, c.value as u8)).collect();
                 let key = format!("unique:{index}:line{}:{dependencies:?}", self.uniques[line].state.index);
                 let request = RollRequest {
                     target: RollTarget::Unique,
                     index,
-                    draft: (!dependencies.is_empty()).then_some(ItemEdit::Rolls {
+                    draft: (!dependencies.is_empty()).then_some(ItemEdit::Roll(eg_trainer::edits::RollEdit {
                         target: RollTarget::Unique,
-                        changes: dependencies,
-                    }),
+                        changes: item::roll_changes(dependencies),
+                        allow_incompatible: self.unrestricted(),
+                    })),
                     line: Some(self.uniques[line].state.index),
                 };
                 let table = self.table(&key, &item, &request);
@@ -2201,20 +2206,17 @@ impl ForgeEditor {
                 format!("No free {slot} slot. Adding past the free slots needs \"I know what I'm doing\" in Settings.")
             });
         }
-        let edit = ItemEdit::Add {
-            id: definition.id,
-            tier: 5.min(definition.max_tier.clamp(1, 8)),
+        let edit = ItemEdit::AddAffix(eg_trainer::edits::AddAffixEdit {
+            id: (definition.id) as i32,
+            tier: (5.min(definition.max_tier.clamp(1, 8))) as i32,
             roll: 128,
             seal,
             kind: definition.kind,
-            category: definition.category,
+            category: Some((definition.category).as_raw()),
             allow_incompatible: needs_override,
-        };
-        if edit.is_valid(item) {
-            Ok(edit)
-        } else {
-            Err(item::new_problem(item, &edit.project(item).affixes).unwrap_or_else(|| "This affix cannot be added with these values.".into()))
-        }
+        });
+        edit.prepare_view(item).map_err(|e| e.to_string())?;
+        Ok(edit)
     }
 
     /// The picker's status caption for the chosen entry (spec §16).
@@ -2294,7 +2296,14 @@ impl ForgeEditor {
             return;
         };
         let name = self.affixes[row].original_name();
-        self.write_affix_list(ItemEdit::Remove { slot: state.slot, id: state.id }, "Remove affix", &name);
+        self.write_affix_list(
+            ItemEdit::RemoveAffix(eg_trainer::edits::RemoveAffixEdit {
+                slot: (state.slot) as i32,
+                id: (state.id) as i32,
+            }),
+            "Remove affix",
+            &name,
+        );
     }
 
     fn write_affix_list(&mut self, edit: ItemEdit, name: &str, summary: &str) {
@@ -2318,35 +2327,6 @@ impl ForgeEditor {
             }],
             false,
         );
-    }
-
-    fn affix_list_reverse(&self, edit: &ItemEdit, before: &ForgeItem, after: &ForgeItem) -> Option<ItemEdit> {
-        match edit {
-            ItemEdit::Add { .. } => edit
-                .moves(before)
-                .get(&before.affixes.len())
-                .and_then(|slot| after.affix(*slot))
-                .map(|added| ItemEdit::Remove { slot: added.slot, id: added.id }),
-            ItemEdit::Remove { slot, .. } => before.affix(*slot).and_then(|removed| {
-                let definition = self.catalog().definition(removed.id);
-                if !definition.verified || removed.id > 4095 {
-                    return None;
-                }
-                let compatible = self.game.compatibility(after, &definition, None, self.unrestricted()) == Compatibility::Allowed;
-                let (prefixes, suffixes) = after.free_slots();
-                let free = removed.seal != Seal::Normal || (if removed.kind == AffixKind::Prefix { prefixes } else { suffixes }) > 0;
-                Some(ItemEdit::Add {
-                    id: removed.id,
-                    tier: removed.tier,
-                    roll: removed.roll,
-                    seal: removed.seal,
-                    kind: removed.kind,
-                    category: removed.category,
-                    allow_incompatible: !(compatible && free),
-                })
-            }),
-            _ => None,
-        }
     }
 
     // ----- Apply and Undo apply -----
@@ -2407,8 +2387,9 @@ impl ForgeEditor {
         let mut at: Moves = current.affixes.iter().map(|affix| (affix.slot, affix.slot)).collect();
         let add = |steps: &mut Vec<Step>, projected: &mut ForgeItem, at: &mut Moves, step: Step| {
             *at = item::then(at, &step.edit.moves(projected));
-            *projected = step.edit.project(projected);
+            *projected = step.edit.project(projected).map_err(|e| e.to_string())?;
             steps.push(step);
+            Ok::<(), String>(())
         };
         for row in rows {
             let slot = *at.get(&row.slot()).unwrap_or(&row.slot());
@@ -2419,10 +2400,15 @@ impl ForgeEditor {
                 return Err(refused("That affix is no longer in that slot.".into()));
             };
             let edit = match edit {
-                ItemEdit::Affix { slot, id, tier, roll, seal, .. } if (previous.id, previous.tier, previous.seal) == (id, tier, seal) => ItemEdit::Rolls {
-                    target: RollTarget::Affix,
-                    changes: vec![(slot, roll)],
-                },
+                ItemEdit::Affix(eg_trainer::edits::AffixEdit { slot, id, tier, roll, seal, .. })
+                    if (i32::from(previous.id), i32::from(previous.tier), previous.seal) == (id, tier, seal) =>
+                {
+                    ItemEdit::Roll(eg_trainer::edits::RollEdit {
+                        target: RollTarget::Affix,
+                        changes: vec![eg_trainer::edits::RollChange { index: slot, value: roll }],
+                        allow_incompatible: self.unrestricted(),
+                    })
+                }
                 edit => edit,
             };
             add(
@@ -2434,7 +2420,7 @@ impl ForgeEditor {
                     edit,
                     row: StepRow::Affix(row.uid),
                 },
-            );
+            )?;
         }
         if !uniques.is_empty() {
             match self.unique_edit() {
@@ -2449,16 +2435,17 @@ impl ForgeEditor {
                             edit,
                             row: StepRow::Uniques(rows),
                         },
-                    );
+                    )?;
                 }
                 _ => return Err(refused("Enter integer roll positions from 0 to 255 for mapped unique modifiers.".into())),
             }
         }
         if !implicits.is_empty() {
-            let edit = ItemEdit::Rolls {
+            let edit = ItemEdit::Roll(eg_trainer::edits::RollEdit {
                 target: RollTarget::Implicit,
-                changes: implicits.iter().flat_map(|row| row.changes()).collect(),
-            };
+                changes: item::roll_changes(implicits.iter().flat_map(|row| row.changes())),
+                allow_incompatible: self.unrestricted(),
+            });
             if !edit.is_valid(&projected) {
                 return Err(refused("Enter integer roll positions from 0 to 255 for implicits whose values roll.".into()));
             }
@@ -2472,7 +2459,7 @@ impl ForgeEditor {
                     edit,
                     row: StepRow::Implicits(rows),
                 },
-            );
+            )?;
         }
         for field in fields {
             let edit = if field.kind == FieldKind::Identity {
@@ -2482,10 +2469,12 @@ impl ForgeEditor {
             };
             let problem = match &edit {
                 edit if edit.needs_override() && !self.unrestricted() => Some(OVERRIDE_REQUIRED.to_string()),
-                ItemEdit::Identity { rarity: item::SET, .. } if !projected.affixes.is_empty() => Some("A set item holds no affixes. Remove them first.".into()),
-                ItemEdit::Identity { .. } if !edit.is_valid(&projected) => Some("That unique does not fit this item.".into()),
-                ItemEdit::Status { .. } if !edit.is_valid(&projected) => Some(format!("{} does not apply to this item.", field.name)),
-                ItemEdit::Base { .. } if !edit.is_valid(&projected) => Some("This item's base cannot change.".into()),
+                ItemEdit::UniqueIdentity(eg_trainer::edits::UniqueIdentityEdit { rarity: 8, .. }) if !projected.affixes.is_empty() => {
+                    Some("A set item holds no affixes. Remove them first.".into())
+                }
+                ItemEdit::UniqueIdentity(eg_trainer::edits::UniqueIdentityEdit { .. }) if !edit.is_valid(&projected) => Some("That unique does not fit this item.".into()),
+                ItemEdit::Status(eg_trainer::edits::StatusEdit { .. }) if !edit.is_valid(&projected) => Some(format!("{} does not apply to this item.", field.name)),
+                ItemEdit::BaseType(eg_trainer::edits::BaseTypeEdit { .. }) if !edit.is_valid(&projected) => Some("This item's base cannot change.".into()),
                 _ => None,
             };
             if let Some(problem) = problem {
@@ -2500,7 +2489,7 @@ impl ForgeEditor {
                     edit,
                     row: StepRow::Field(field.uid),
                 },
-            );
+            )?;
         }
         Ok(steps)
     }
@@ -2524,9 +2513,7 @@ impl ForgeEditor {
             return Err(problem);
         }
         let edit = row.read_edit(slot, (allow && !compatibility.is_allowed()) || compatibility == Compatibility::Override);
-        if let Some(problem) = item::new_problem(item, &edit.project(item).affixes) {
-            return Err(problem);
-        }
+        edit.prepare_view(item).map_err(|e| e.to_string())?;
         Ok(edit)
     }
 
@@ -2620,32 +2607,34 @@ impl ForgeEditor {
         if !self.can_undo() || self.undo_draft_step() {
             return;
         }
-        let Some(reverses) = self.applied.clone() else {
+        let Some(total) = self.applied else {
             return;
         };
-        if reverses.iter().any(ItemEdit::needs_override) && !self.unrestricted() {
+        if self.game.undo_needs_override() && !self.unrestricted() {
             self.say(OVERRIDE_REQUIRED, MessageKind::Error);
             return;
         }
-        self.start_batch(
-            reverses
-                .into_iter()
-                .map(|edit| Step {
-                    name: "Undo".into(),
-                    edit,
-                    row: StepRow::Undo,
-                })
-                .collect(),
-            true,
-        );
+        self.batch = Some(WriteBatch {
+            steps: VecDeque::new(),
+            total,
+            names: vec!["Undo".into()],
+            completed: 0,
+            one_way: false,
+            undoing: true,
+        });
+        self.writing = true;
+        self.advance_writes();
     }
 
     fn start_batch(&mut self, steps: Vec<Step>, undoing: bool) {
+        if let Err(error) = self.game.begin_batch() {
+            self.say(error, MessageKind::Error);
+            return;
+        }
         self.batch = Some(WriteBatch {
             total: steps.len(),
             names: steps.iter().map(|s| s.name.clone()).collect(),
             steps: steps.into(),
-            reverses: Vec::new(),
             completed: 0,
             one_way: false,
             undoing,
@@ -2659,7 +2648,25 @@ impl ForgeEditor {
             if self.game.is_busy() {
                 return;
             }
-            let Some(step) = self.batch.as_mut().and_then(|b| b.steps.pop_front()) else {
+            let undoing = self.batch.as_ref().is_some_and(|b| b.undoing);
+            let step = if undoing {
+                let batch = self.batch.as_ref().unwrap();
+                if batch.completed == batch.total {
+                    self.finish_batch(None);
+                    return;
+                }
+                let Some(edit) = self.game.undo_intent() else {
+                    self.finish_batch(Some("Undo is no longer valid for the observed item or current settings.".into()));
+                    return;
+                };
+                Step {
+                    name: "Undo".into(),
+                    edit,
+                    row: StepRow::Undo,
+                }
+            } else if let Some(step) = self.batch.as_mut().and_then(|b| b.steps.pop_front()) {
+                step
+            } else {
                 self.finish_batch(None);
                 return;
             };
@@ -2668,12 +2675,10 @@ impl ForgeEditor {
                 return;
             };
             let (summary, effect) = self.step_summary(&step.row);
-            let reverse = if matches!(step.row, StepRow::List(_)) { None } else { step.edit.reverse(&before) };
             let moves = step.edit.moves(&before);
             self.waiting = Some(WaitingWrite {
                 step,
                 before,
-                reverse,
                 moves,
                 summary,
                 effect,
@@ -2682,7 +2687,7 @@ impl ForgeEditor {
             let waiting = self.waiting.as_ref().unwrap();
             let expected = waiting.before.clone();
             let edit = waiting.step.edit.clone();
-            let outcome = self.write(&expected, &edit);
+            let outcome = if undoing { self.game.undo(&expected) } else { self.write(&expected, &edit) };
             if matches!(outcome, WriteOutcome::Pending) {
                 return;
             }
@@ -2699,25 +2704,10 @@ impl ForgeEditor {
         };
         match outcome {
             WriteOutcome::Confirmed(Some(after)) => {
-                let reverse = if matches!(waiting.step.row, StepRow::List(_)) {
-                    self.affix_list_reverse(&waiting.step.edit, &waiting.before, &after)
-                } else {
-                    waiting.reverse
-                };
                 self.update_item(Some(after), Some(&waiting.moves));
                 let batch = self.batch.as_mut().unwrap();
-                for kept in &mut batch.reverses {
-                    *kept = kept.follow(&waiting.moves);
-                }
-                if batch.undoing {
-                    for step in &mut batch.steps {
-                        step.edit = step.edit.follow(&waiting.moves);
-                    }
-                } else {
-                    match reverse {
-                        Some(reverse) => batch.reverses.insert(0, reverse),
-                        None => batch.one_way = true,
-                    }
+                if !batch.undoing && self.game.undo_depth() < batch.completed + 1 {
+                    batch.one_way = true;
                 }
                 batch.completed += 1;
                 if !batch.undoing {
@@ -2735,9 +2725,6 @@ impl ForgeEditor {
                 }
             }
             WriteOutcome::NotApplied { message, .. } => {
-                if self.batch.as_ref().is_some_and(|b| b.undoing) {
-                    self.batch.as_mut().unwrap().steps.push_front(waiting.step);
-                }
                 self.finish_batch(Some(message));
             }
             WriteOutcome::Confirmed(None) => {
@@ -2803,13 +2790,7 @@ impl ForgeEditor {
         self.waiting = None;
         self.writing = false;
         if batch.undoing {
-            self.applied = if batch.steps.is_empty() && failure.is_none() {
-                None
-            } else {
-                Some(batch.steps.into_iter().map(|s| s.edit).collect())
-            };
-            // Include a refused reverse, which was removed from the queue on submission.
-            // complete_write restores it before finishing on ordinary refusals.
+            self.applied = (batch.completed < batch.total && self.game.undo_depth() > 0).then_some(batch.total - batch.completed);
             if batch.completed > 0 {
                 for row in &mut self.affixes {
                     row.confirmed = false;
@@ -2836,7 +2817,7 @@ impl ForgeEditor {
                 );
             }
         } else if batch.completed > 0 {
-            self.applied = if batch.one_way { None } else { Some(batch.reverses) };
+            self.applied = if batch.one_way { None } else { Some(batch.completed) };
         }
         if let Some(message) = failure {
             self.say(

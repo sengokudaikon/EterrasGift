@@ -60,6 +60,9 @@ impl ForgePlan {
     pub fn before(&self) -> &ExpectedObservation {
         self.prepared.before()
     }
+    pub(crate) fn prepared(&self) -> &PreparedEdit {
+        &self.prepared
+    }
     pub fn manager(&self) -> u64 {
         self.manager
     }

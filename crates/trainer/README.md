@@ -6,16 +6,19 @@ The desktop now composes one background worker and a command-based Slint forge a
 
 The desktop Forge editor now uses worker commands with typed Pending, Confirmed, NotApplied,
 NotKept and Uncertain outcomes. Mixed drafts execute in order, re-read before each edit and stop
-at the first non-confirmation. Undo reverses only confirmed edits. Known mismatch and uncertainty
+at the first non-confirmation. The UI shares the canonical edit type/planner and the worker owns
+confirmed batch history; applied Undo uses `Command::UndoForge`, one freshly guarded step at a time.
+Known mismatch and uncertainty
 clear drafts and Undo; uncertainty never retries automatically. Status, base and identity controls
-use this path; actual-value mapping and remaining edit kinds stay unavailable. Run
+use this path, along with regular affix values, replacement/tier/seal and add/remove. Unique and
+implicit value mapping/roll writes stay unavailable. Run
 `mise run capture:trainer` for the fake worker-to-Slint route and `cargo test -p eg-ui --lib`
 for delayed editor tests. No actual game is used. See [trainer readiness](../../research/trainer-readiness.md).
 
 Connect/Retry and monitoring use owned worker snapshots. Missing formatting/mappings stay
 explicit; gate, identity and connection loss clear the visible item. Construction does no native
 work. `--no-connect` skips automatic startup, and a later manual Connect starts reads. Live
-settings/cache actions and the remaining shared feature/domain model cleanup are still open.
+settings/cache actions and the remaining shared feature catalog cleanup are still open.
 
 Source runs prepare the helper with `mise run trainer:helper:build` before connecting. That task publishes
 `eg_trainer_helper.json` beside both debug/release apps, referencing the retained versioned DLL.

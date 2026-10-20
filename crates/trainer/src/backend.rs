@@ -485,6 +485,8 @@ pub struct BackendSnapshot {
     pub last_write: Option<WriteRecord>,
     pub last_rate_write: Option<RateWriteRecord>,
     pub undo_forge: Option<crate::undo::ForgeUndo>,
+    pub undo_forge_depth: usize,
+    pub undo_forge_needs_override: bool,
 }
 /// Latest optional preview; matching requires both the full observation and exact draft.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -651,6 +653,7 @@ pub enum Command {
         request: MappingRequest,
     },
     ReadAttackLeech,
+    BeginForgeBatch,
     Write(WritePlan),
     ApplyForge(Box<ForgePlan>),
     SetAttackLeechRate(Box<AttackLeechPlan>),
@@ -785,6 +788,7 @@ where
     attack_leech_sequence: u64,
     paused: bool,
     faults: Option<eg_core::fault::FaultLog>,
+    forge_history: crate::undo::ForgeUndoHistory,
 }
 
 pub fn service<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock>(
@@ -823,6 +827,8 @@ pub fn service<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K
         last_write: None,
         last_rate_write: None,
         undo_forge: None,
+        undo_forge_depth: 0,
+        undo_forge_needs_override: false,
     };
     let (sender, commands) = mpsc::channel(32);
     let (snapshots, receiver) = watch::channel(state.clone());
@@ -855,6 +861,7 @@ pub fn service<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K
             attack_leech_sequence: 0,
             paused: false,
             faults: None,
+            forge_history: Default::default(),
         },
     )
 }
@@ -931,7 +938,10 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
                 || self.state.runtime_status.as_ref().is_none_or(|status| status.online || status.manager != undo.manager())
         }) {
             self.state.undo_forge = None;
+            self.forge_history.clear();
         }
+        self.state.undo_forge_depth = if self.state.undo_forge.is_some() { self.forge_history.len() } else { 0 };
+        self.state.undo_forge_needs_override = self.state.undo_forge.is_some() && self.forge_history.needs_override();
         self.state.revision = self.state.revision.wrapping_add(1);
         self.state.capabilities = Capabilities {
             read_forge: self.state.phase == Phase::Ready,
@@ -1074,6 +1084,10 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
             }
             Command::RefreshCatalog => self.read(true, true).await,
             Command::ReadForge => self.read(false, true).await,
+            Command::BeginForgeBatch => {
+                self.forge_history.begin_batch();
+                Ok(())
+            }
             Command::DescribeUnique { expected } => self.describe_unique(*expected).await,
             Command::PreviewUnique { expected, draft } => self.preview_unique(*expected, draft).await,
             Command::ResolveMapping { expected, request } => self.resolve_mapping(*expected, request).await,
@@ -1420,6 +1434,7 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
         }
     }
     fn release_without_io(&mut self) {
+        self.forge_history.clear();
         self.state.attack_leech = None;
         self.state.undo_forge = None;
         if self.connection.take().is_some() {

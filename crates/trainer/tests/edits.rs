@@ -181,6 +181,58 @@ fn replacement() -> ItemEdit {
         allow_incompatible: false,
     })
 }
+
+#[test]
+fn confirmed_undo_rebases_only_slot_order_and_names_never_a_changed_saved_value() {
+    use eg_trainer::undo::ForgeUndoHistory;
+    let catalog = catalog();
+    for changed_level in [false, true] {
+        let mut history = ForgeUndoHistory::default();
+        history.begin_batch();
+        let first = prepared(item(), roll(0, 42));
+        history.confirmed(&first, 1, first.projected(), false).unwrap();
+        let seal = prepared(
+            first.projected().clone(),
+            ItemEdit::Affix(AffixEdit {
+                slot: 1,
+                id: 2,
+                tier: 4,
+                roll: 120,
+                seal: SealState::Sealed,
+                allow_incompatible: false,
+            }),
+        );
+        history.confirmed(&seal, 1, seal.projected(), false).unwrap();
+        let undo = history.current().unwrap();
+        let undo_plan = undo.prepare(undo.after(), 1, &catalog, &provenance()).unwrap();
+        let undo = prepared(undo.after().snapshot().clone(), undo_plan.edit_intent().clone());
+        let mut actual = undo.projected().clone();
+        actual.name = "Rebuilt name".into();
+        for affix in &mut actual.affixes {
+            affix.name = "Refreshed name".into();
+        }
+        if changed_level {
+            actual.status.level_requirement += 1;
+        }
+        refresh(&mut actual);
+        // The ordinary affix readback policy permits a rebuilt level cache.
+        assert!(undo.inspect_readback(Some(&actual)).confirmed());
+        let result = history.confirmed(&undo, 1, &actual, true);
+        if changed_level {
+            assert_eq!(result, Err(EditError::StaleItem));
+            assert!(history.is_empty());
+        } else {
+            result.unwrap();
+            assert_eq!(history.len(), 1);
+            let previous = history.current().unwrap();
+            assert_eq!(previous.after().snapshot(), &actual);
+            assert!(matches!(previous.reverse_edit(), ItemEdit::Roll(e) if e.changes == [RollChange { index: 1, value: 120 }]));
+            let restore = previous.prepare(previous.after(), 1, &catalog, &provenance()).unwrap();
+            assert_eq!(restore.projected().affixes[1].id, 1);
+            assert_eq!(restore.projected().affixes[1].roll, 120);
+        }
+    }
+}
 fn roll(index: i32, value: i32) -> ItemEdit {
     ItemEdit::Roll(RollEdit {
         target: RollTarget::Affix,

@@ -99,28 +99,28 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
                 } else {
                     let data = self.state.catalog.data().cloned().ok_or_else(|| invalid_edit("catalog missing after write"))?;
                     let kept = plan.matches(&snapshot);
-                    let forge = self.forge_state(Some(snapshot), &data);
-                    let undo = if undoing || !kept {
-                        None
+                    if kept {
+                        let _ = self.forge_history.confirmed(plan.prepared(), plan.manager(), &snapshot, undoing);
                     } else {
-                        self.state
-                            .last_write
-                            .as_ref()
-                            .and_then(|record| crate::undo::ForgeUndo::from_confirmed(record).ok())
-                            .filter(|undo| {
-                                undo.prepare_with_override(
-                                    undo.after(),
-                                    plan.manager(),
-                                    &data,
-                                    &crate::edits::CatalogProvenance::RuntimeRead {
-                                        generation: self.state.generation,
-                                        process: target.clone(),
-                                    },
-                                    self.state.override_enabled,
-                                )
-                                .is_ok()
-                            })
-                    };
+                        self.forge_history.clear();
+                    }
+                    let undo = self.forge_history.current().cloned().filter(|undo| {
+                        undo.prepare_with_override(
+                            undo.after(),
+                            plan.manager(),
+                            &data,
+                            &crate::edits::CatalogProvenance::RuntimeRead {
+                                generation: self.state.generation,
+                                process: target.clone(),
+                            },
+                            self.state.override_enabled,
+                        )
+                        .is_ok()
+                    });
+                    if undo.is_none() {
+                        self.forge_history.clear();
+                    }
+                    let forge = self.forge_state(Some(snapshot), &data);
                     self.commit(epoch, |this| {
                         this.state.forge = forge;
                         this.state.undo_forge = undo;
@@ -136,8 +136,14 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
                     }
                 }
             }
-            WriteStatus::NotApplied { message, .. } => Err(write_error(ErrorKind::WriteNotApplied, message, Delivery::NotSent)),
-            WriteStatus::Uncertain { message } => Err(write_error(ErrorKind::WriteUncertain, message, Delivery::MayHaveRun)),
+            WriteStatus::NotApplied { message, .. } => {
+                self.state.undo_forge = self.forge_history.current().cloned();
+                Err(write_error(ErrorKind::WriteNotApplied, message, Delivery::NotSent))
+            }
+            WriteStatus::Uncertain { message } => {
+                self.forge_history.clear();
+                Err(write_error(ErrorKind::WriteUncertain, message, Delivery::MayHaveRun))
+            }
             WriteStatus::Pending => unreachable!(),
         };
         self.finish_write(result, failure, target)

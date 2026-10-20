@@ -115,7 +115,7 @@ pub type GameError = String;
 pub trait ForgeGame {
     fn catalog(&self) -> &Catalog;
 
-    /// Production uses the trainer's captured class, category and idol rules.
+    /// Production and authored captures use the same class, category and idol rules.
     fn compatibility(&self, item: &ForgeItem, definition: &AffixDefinition, slot: Option<&super::item::AffixState>, unrestricted: bool) -> super::item::Compatibility {
         super::item::compatibility(item, definition, slot, unrestricted)
     }
@@ -148,6 +148,24 @@ pub trait ForgeGame {
 
     /// Writes one edit to the item the draft was made on and reads it back (spec §11).
     fn write(&mut self, expected: &ForgeItem, edit: &ItemEdit) -> EditOutcome;
+
+    /// Start a new Apply history only when its first edit is confirmed.
+    fn begin_batch(&mut self) -> Result<(), GameError> {
+        Ok(())
+    }
+    fn undo_depth(&self) -> usize {
+        0
+    }
+    fn undo_needs_override(&self) -> bool {
+        false
+    }
+    fn undo_intent(&self) -> Option<ItemEdit> {
+        None
+    }
+    /// Restore the latest canonical token, never a UI-authored reverse write.
+    fn undo(&mut self, _: &ForgeItem) -> EditOutcome {
+        refused("Undo is unavailable for this observation.")
+    }
 
     /// Completion of the single accepted command. None means still pending.
     fn poll_write(&mut self) -> Option<EditOutcome> {

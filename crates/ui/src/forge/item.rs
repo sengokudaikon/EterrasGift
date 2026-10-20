@@ -1,6 +1,4 @@
-//! The item in the forge as the presentation sees it, and the game's own rules the editor applies before it writes
-//! (spec/item-forge.md §15). TODO(forge): these move to the trainer's domain once it is ported; the editor keeps only
-//! what it shows.
+//! Forge presentation. Edit intents, validation, projection and reversal use the trainer domain.
 
 use std::collections::BTreeMap;
 
@@ -27,45 +25,18 @@ pub fn crafted_name(rarity: u8) -> &'static str {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum AffixKind {
-    Prefix,
-    Suffix,
-}
+pub use eg_trainer::edits::{AffixKind, ItemEdit, RollTarget, SealState as Seal};
+use eg_trainer::{
+    catalog::GameCatalog,
+    edits::{self, ExpectedObservation},
+};
+use std::sync::Arc;
 
-impl AffixKind {
-    pub fn name(self) -> &'static str {
-        match self {
-            AffixKind::Prefix => "Prefix",
-            AffixKind::Suffix => "Suffix",
-        }
-    }
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
-pub enum Seal {
-    Normal,
-    Sealed,
-    Primordial,
-    Corrupted,
-}
-
-impl Seal {
-    /// The seal menu's entries, in the game's order.
-    pub const ALL: [Seal; 4] = [Seal::Normal, Seal::Sealed, Seal::Primordial, Seal::Corrupted];
-
-    pub fn name(self) -> &'static str {
-        match self {
-            Seal::Normal => "Normal",
-            Seal::Sealed => "Sealed",
-            Seal::Primordial => "Primordial",
-            Seal::Corrupted => "Corrupted",
-        }
-    }
-
-    pub fn index(self) -> usize {
-        Seal::ALL.iter().position(|seal| *seal == self).unwrap_or(0)
-    }
+/// Complete owned domain inputs behind this presentation, including fields the UI does not show.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ForgeContext {
+    pub expected: ExpectedObservation,
+    pub catalog: Arc<GameCatalog>,
 }
 
 /// The special category an affix belongs to; a slot keeps its category.
@@ -79,6 +50,25 @@ pub enum Category {
 }
 
 impl Category {
+    pub fn as_raw(self) -> i32 {
+        match self {
+            Self::Standard => 0,
+            Self::Experimental => 1,
+            Self::Personal => 2,
+            Self::Set => 3,
+            Self::Corrupted => 6,
+        }
+    }
+    pub fn from_raw(value: i32) -> Option<Self> {
+        Some(match value {
+            0 => Self::Standard,
+            1 => Self::Experimental,
+            2 => Self::Personal,
+            3 => Self::Set,
+            6 => Self::Corrupted,
+            _ => return None,
+        })
+    }
     pub fn name(self) -> &'static str {
         match self {
             Category::Standard => "",
@@ -187,19 +177,6 @@ impl ItemStatus {
             StatusField::Ruined => u8::from(self.ruined),
         }
     }
-
-    pub fn with(mut self, field: StatusField, value: u8) -> ItemStatus {
-        match field {
-            StatusField::ForgingPotential => self.forging_potential = value,
-            StatusField::LegendaryPotential => self.legendary_potential = value,
-            StatusField::WeaversWill => self.weavers_will = value,
-            StatusField::WeaversTouch => self.weavers_touch = value,
-            StatusField::LevelRequirement => self.level_requirement = value,
-            StatusField::Corrupted => self.corrupted = value != 0,
-            StatusField::Ruined => self.ruined = value != 0,
-        }
-        self
-    }
 }
 
 /// What the forge holds, as one read of the game.
@@ -207,6 +184,7 @@ impl ItemStatus {
 pub struct ForgeItem {
     /// Another token is another item; the same token changed by the game is the same item.
     pub token: String,
+    pub context: Option<Arc<ForgeContext>>,
     pub name: String,
     pub item_type: u16,
     pub sub_type: u16,
@@ -256,78 +234,8 @@ impl ForgeItem {
 
     /// Free prefix and suffix slots as the game's crafting counts them (spec §15.1.8).
     pub fn free_slots(&self) -> (i32, i32) {
-        let each = match self.rarity {
-            UNIQUE | SET => 0,
-            _ if self.idol => 1,
-            _ => 2,
-        };
-        let open = |kind| self.affixes.iter().filter(|affix| affix.seal == Seal::Normal && affix.kind == kind).count() as i32;
-        (each - open(AffixKind::Prefix), each - open(AffixKind::Suffix))
+        self.context.as_ref().map_or((0, 0), |c| edits::free_slots(c.expected.snapshot()))
     }
-}
-
-/// The affixes in the order the game loads them, keeping their slot numbers (spec §15.1.1).
-pub fn load_order(affixes: &[AffixState], rarity: u8) -> Vec<AffixState> {
-    let pick = |test: &dyn Fn(&AffixState) -> bool| affixes.iter().filter(|affix| test(affix)).cloned().collect::<Vec<_>>();
-    if is_unique_backed(rarity) {
-        [pick(&|a| a.seal != Seal::Corrupted), pick(&|a| a.seal == Seal::Corrupted)].concat()
-    } else {
-        [
-            pick(&|a| a.seal == Seal::Sealed),
-            pick(&|a| a.seal == Seal::Corrupted),
-            pick(&|a| !matches!(a.seal, Seal::Sealed | Seal::Corrupted)),
-        ]
-        .concat()
-    }
-}
-
-fn layout_problems(affixes: &[AffixState], rarity: u8, corrupted: bool) -> Vec<String> {
-    let mut problems = Vec::new();
-    let capacity = if is_unique_backed(rarity) { UNIQUE_CAPACITY } else { CAPACITY };
-    let count = |seal| affixes.iter().filter(|affix| affix.seal == seal).count();
-    if affixes.len() > capacity {
-        problems.push(format!("This item holds at most {capacity} affixes."));
-    }
-    if count(Seal::Corrupted) > 0 && matches!(rarity, UNIQUE | SET) {
-        problems.push("Unique and set items do not keep a corrupted affix.".into());
-    }
-    if count(Seal::Corrupted) > 0 && rarity == LEGENDARY && !corrupted {
-        problems.push("A legendary keeps a corrupted affix only while it is corrupted.".into());
-    }
-    if count(Seal::Sealed) > 0 && is_unique_backed(rarity) {
-        problems.push("Unique, set and legendary items have no sealed affix slot.".into());
-    }
-    if count(Seal::Sealed) > 1 {
-        problems.push("An item holds one sealed affix.".into());
-    }
-    if count(Seal::Corrupted) > 1 {
-        problems.push("An item holds one corrupted affix.".into());
-    }
-    if affixes.iter().any(|affix| affix.seal == Seal::Primordial && affix.tier != 8) {
-        problems.push("Only tier 8 affixes are primordial.".into());
-    }
-    if affixes.iter().any(|affix| affix.seal == Seal::Normal && affix.tier == 8) {
-        problems.push("A tier 8 affix is primordial unless it is sealed or corrupted. Choose Primordial.".into());
-    }
-    problems
-}
-
-/// A problem these affixes bring that the item did not already have (spec §15.1.6).
-pub fn new_problem(before: &ForgeItem, after: &[AffixState]) -> Option<String> {
-    let corrupted = before.status.is_none_or(|status| status.corrupted);
-    let existing = layout_problems(&before.affixes, before.rarity, corrupted);
-    layout_problems(after, before.rarity, corrupted).into_iter().find(|problem| !existing.contains(problem))
-}
-
-/// The rarity byte the game sets after adding or removing, below unique rarity (spec §15.1.7).
-pub fn rarity_after(affixes: &[AffixState], rarity: u8) -> u8 {
-    if is_unique_backed(rarity) || rarity > 6 {
-        return rarity;
-    }
-    let mut seals: Vec<Seal> = affixes.iter().map(|affix| affix.seal).filter(|seal| *seal != Seal::Normal).collect();
-    seals.sort();
-    seals.dedup();
-    (affixes.len() as i64 - seals.len() as i64).clamp(0, 4) as u8
 }
 
 /// Where each affix went: old slot to new slot.
@@ -338,337 +246,160 @@ pub fn then(first: &Moves, next: &Moves) -> Moves {
     first.iter().map(|(from, to)| (*from, *next.get(to).unwrap_or(to))).collect()
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum RollTarget {
-    Affix,
-    Unique,
-    Implicit,
-}
-
-/// One write to the game (spec §15.4).
-#[derive(Clone, Debug, PartialEq)]
-pub enum ItemEdit {
-    Affix {
-        slot: usize,
-        id: u16,
-        tier: u8,
-        roll: u8,
-        seal: Seal,
-        allow_incompatible: bool,
-    },
-    Rolls {
-        target: RollTarget,
-        changes: Vec<(usize, u8)>,
-    },
-    Status {
-        field: StatusField,
-        value: u8,
-        unrestricted: bool,
-    },
-    Base {
-        sub_type: u16,
-        allow_incompatible: bool,
-    },
-    Add {
-        id: u16,
-        tier: u8,
-        roll: u8,
-        seal: Seal,
-        kind: AffixKind,
-        category: Category,
-        allow_incompatible: bool,
-    },
-    Remove {
-        slot: usize,
-        id: u16,
-    },
-    /// Makes a unique-backed item another unique or set item, with the rarity the game gives it (spec §15.4.5).
-    Identity {
-        unique_id: u16,
-        sub_type: u16,
-        rarity: u8,
-        unrestricted: bool,
-    },
+pub fn roll_changes(changes: impl IntoIterator<Item = (usize, u8)>) -> Vec<edits::RollChange> {
+    changes
+        .into_iter()
+        .map(|(index, value)| edits::RollChange {
+            index: index as i32,
+            value: i32::from(value),
+        })
+        .collect()
 }
 
 /// The rarity the game gives an item becoming a unique or set item: a set item is a set; with affixes, or already
 /// legendary, a legendary; otherwise a unique.
 pub fn identity_rarity(item: &ForgeItem, set_item: bool) -> u8 {
-    if set_item {
-        SET
-    } else if !item.affixes.is_empty() || item.rarity == LEGENDARY {
-        LEGENDARY
-    } else {
-        UNIQUE
+    item.context.as_ref().map_or(UNIQUE, |context| edits::rarity_for(context.expected.snapshot(), set_item))
+}
+
+/// Presentation adapters call the same planner as the worker. No edit rules live here.
+pub trait EditPresentation {
+    fn prepare_view_with_override(&self, before: &ForgeItem, override_enabled: bool) -> Result<edits::PreparedEdit, edits::EditError>;
+    fn prepare_view(&self, before: &ForgeItem) -> Result<edits::PreparedEdit, edits::EditError> {
+        // Preview an explicit override intent; submission rechecks permission.
+        self.prepare_view_with_override(before, true)
+    }
+    fn project(&self, before: &ForgeItem) -> Result<ForgeItem, edits::EditError>;
+    fn is_valid(&self, before: &ForgeItem) -> bool {
+        self.prepare_view(before).is_ok()
+    }
+    fn can_reverse(&self, before: &ForgeItem) -> bool {
+        self.prepare_view(before)
+            .ok()
+            .and_then(|p| {
+                let reverse = eg_trainer::undo::ForgeUndo::reverse_intent(&p, p.projected()).ok()?;
+                let after = before.with_snapshot(p.projected().clone()).ok()?;
+                Some(reverse.is_valid(&after))
+            })
+            .unwrap_or(false)
+    }
+    fn moves(&self, before: &ForgeItem) -> Moves {
+        self.prepare_view(before)
+            .map(|p| p.moves().iter().map(|(a, b)| (usize::from(*a), usize::from(*b))).collect())
+            .unwrap_or_default()
     }
 }
 
-impl ItemEdit {
-    /// Goes past what the game would make, so it needs "I know what I'm doing".
-    pub fn needs_override(&self) -> bool {
-        match self {
-            ItemEdit::Affix { allow_incompatible, .. } | ItemEdit::Add { allow_incompatible, .. } => *allow_incompatible,
-            ItemEdit::Status { unrestricted, .. } => *unrestricted,
-            ItemEdit::Base { allow_incompatible, .. } => *allow_incompatible,
-            ItemEdit::Identity { unrestricted, .. } => *unrestricted,
-            _ => false,
-        }
-    }
-
-    fn replaced(&self, before: &ForgeItem) -> Vec<AffixState> {
-        match self {
-            ItemEdit::Affix { slot, id, tier, roll, seal, .. } => load_order(
-                &before
-                    .affixes
+impl EditPresentation for ItemEdit {
+    fn prepare_view_with_override(&self, before: &ForgeItem, override_enabled: bool) -> Result<edits::PreparedEdit, edits::EditError> {
+        let context = before.context.as_ref().ok_or(edits::EditError::InvalidObservation)?;
+        let bindings = |lines: Option<&[ModifierState]>| match lines {
+            Some(lines) => eg_trainer::catalog::Availability::Available(
+                lines
                     .iter()
-                    .map(|affix| {
-                        if affix.slot == *slot {
-                            AffixState {
-                                id: *id,
-                                tier: *tier,
-                                roll: *roll,
-                                seal: *seal,
-                                ..affix.clone()
-                            }
-                        } else {
-                            affix.clone()
-                        }
-                    })
-                    .collect::<Vec<_>>(),
-                before.rarity,
-            ),
-            ItemEdit::Add {
-                id,
-                tier,
-                roll,
-                seal,
-                kind,
-                category,
-                ..
-            } => {
-                let mut affixes = before.affixes.clone();
-                affixes.push(AffixState {
-                    slot: before.affixes.len(),
-                    id: *id,
-                    tier: *tier,
-                    roll: *roll,
-                    kind: *kind,
-                    seal: *seal,
-                    category: *category,
-                });
-                load_order(&affixes, before.rarity)
-            }
-            ItemEdit::Remove { slot, .. } => load_order(&before.affixes.iter().filter(|affix| affix.slot != *slot).cloned().collect::<Vec<_>>(), before.rarity),
-            _ => before.affixes.clone(),
-        }
-    }
-
-    pub fn is_valid(&self, item: &ForgeItem) -> bool {
-        match self {
-            ItemEdit::Affix { slot, tier, .. } => {
-                item.affixes.iter().filter(|affix| affix.slot == *slot).count() == 1 && (1..=8).contains(tier) && new_problem(item, &self.replaced(item)).is_none()
-            }
-            ItemEdit::Add { tier, .. } => (1..=8).contains(tier) && new_problem(item, &self.project(item).affixes).is_none(),
-            ItemEdit::Remove { slot, id } => item.affixes.iter().any(|affix| affix.slot == *slot && affix.id == *id),
-            ItemEdit::Rolls { target, changes } => {
-                !changes.is_empty()
-                    && match target {
-                        RollTarget::Affix => changes.iter().all(|(slot, _)| item.affix(*slot).is_some()),
-                        RollTarget::Unique => item.unique.as_ref().is_some_and(|unique| {
-                            matches!(item.rarity, UNIQUE | LEGENDARY)
-                                && changes
-                                    .iter()
-                                    .all(|(index, _)| *index < unique.rolls.len() && unique.modifiers.iter().any(|m| m.editable && m.roll_ids.contains(index)))
-                        }),
-                        RollTarget::Implicit => item.implicits.as_ref().is_some_and(|implicits| {
-                            changes
-                                .iter()
-                                .all(|(index, _)| *index < item.implicit_rolls.len() && implicits.iter().any(|m| m.editable && m.roll_ids == [*index]))
-                        }),
-                    }
-            }
-            ItemEdit::Status { field, .. } => match field {
-                StatusField::ForgingPotential | StatusField::LevelRequirement => item.rarity < UNIQUE,
-                StatusField::LegendaryPotential => item.rarity == UNIQUE && item.status.is_some_and(|status| status.weavers_will == 0),
-                StatusField::WeaversWill => matches!(item.rarity, UNIQUE | LEGENDARY),
-                StatusField::WeaversTouch => item.idol,
-                StatusField::Corrupted | StatusField::Ruined => true,
-            },
-            ItemEdit::Base { sub_type, .. } => !is_unique_backed(item.rarity) && *sub_type != item.sub_type,
-            ItemEdit::Identity { unique_id, rarity, .. } => {
-                let set = *rarity == SET;
-                is_unique_backed(item.rarity) && item.identity_id().is_some_and(|id| id != *unique_id) && *rarity == identity_rarity(item, set) && (!set || item.affixes.is_empty())
-            }
-        }
-    }
-
-    /// The item as the game holds it after this edit, with the affixes in load order.
-    pub fn project(&self, before: &ForgeItem) -> ForgeItem {
-        let mut after = before.clone();
-        match self {
-            ItemEdit::Affix { .. } => {
-                after.affixes = self
-                    .replaced(before)
-                    .into_iter()
-                    .enumerate()
-                    .map(|(index, affix)| AffixState {
-                        slot: before.affixes[index].slot,
-                        ..affix
-                    })
-                    .collect();
-            }
-            ItemEdit::Add { .. } | ItemEdit::Remove { .. } => {
-                after.affixes = self.replaced(before).into_iter().enumerate().map(|(slot, affix)| AffixState { slot, ..affix }).collect();
-                after.rarity = rarity_after(&after.affixes, before.rarity);
-            }
-            ItemEdit::Rolls { target, changes } => {
-                for (index, value) in changes {
-                    match target {
-                        RollTarget::Affix => {
-                            if let Some(affix) = after.affixes.iter_mut().find(|affix| affix.slot == *index) {
-                                affix.roll = *value;
-                            }
-                        }
-                        RollTarget::Unique => {
-                            if let Some(roll) = after.unique.as_mut().and_then(|unique| unique.rolls.get_mut(*index)) {
-                                *roll = *value;
-                            }
-                        }
-                        RollTarget::Implicit => {
-                            if let Some(roll) = after.implicit_rolls.get_mut(*index) {
-                                *roll = *value;
-                            }
-                        }
-                    }
-                }
-            }
-            ItemEdit::Status { field, value, .. } => after.status = before.status.map(|status| status.with(*field, *value)),
-            ItemEdit::Base { sub_type, .. } => after.sub_type = *sub_type,
-            ItemEdit::Identity { unique_id, sub_type, rarity, .. } => {
-                // The rolls move with the item, between the unique and the set side.
-                let rolls = before
-                    .unique
-                    .as_ref()
-                    .or(before.set_item.as_ref())
-                    .map(|identity| identity.rolls.clone())
-                    .unwrap_or_default();
-                let identity = UniqueState {
-                    id: *unique_id,
-                    rolls,
-                    modifiers: Vec::new(),
-                    formatting_error: String::new(),
-                };
-                after.sub_type = *sub_type;
-                after.rarity = *rarity;
-                if *rarity == SET {
-                    after.unique = None;
-                    after.set_item = Some(identity);
-                } else {
-                    after.set_item = None;
-                    after.unique = Some(UniqueState {
-                        modifiers: before.unique.as_ref().map(|unique| unique.modifiers.clone()).unwrap_or_default(),
-                        ..identity
-                    });
-                }
-            }
-        }
-        after
-    }
-
-    /// Where the affixes go: sealing or corrupting moves an affix; adding and removing renumber.
-    pub fn moves(&self, before: &ForgeItem) -> Moves {
-        match self {
-            ItemEdit::Affix { .. } => self
-                .replaced(before)
-                .iter()
-                .enumerate()
-                .map(|(index, affix)| (affix.slot, before.affixes[index].slot))
-                .collect(),
-            ItemEdit::Add { .. } | ItemEdit::Remove { .. } => self.replaced(before).iter().enumerate().map(|(index, affix)| (affix.slot, index)).collect(),
-            _ => before.affixes.iter().map(|affix| (affix.slot, affix.slot)).collect(),
-        }
-    }
-
-    /// The same edit naming the slots where earlier writes moved its affix.
-    pub fn follow(&self, moves: &Moves) -> ItemEdit {
-        let at = |slot: &usize| *moves.get(slot).unwrap_or(slot);
-        match self {
-            ItemEdit::Affix {
-                slot,
-                id,
-                tier,
-                roll,
-                seal,
-                allow_incompatible,
-            } => ItemEdit::Affix {
-                slot: at(slot),
-                id: *id,
-                tier: *tier,
-                roll: *roll,
-                seal: *seal,
-                allow_incompatible: *allow_incompatible,
-            },
-            ItemEdit::Remove { slot, id } => ItemEdit::Remove { slot: at(slot), id: *id },
-            ItemEdit::Rolls {
-                target: RollTarget::Affix,
-                changes,
-            } => ItemEdit::Rolls {
-                target: RollTarget::Affix,
-                changes: changes.iter().map(|(slot, value)| (at(slot), *value)).collect(),
-            },
-            other => other.clone(),
-        }
-    }
-
-    /// The edit that writes the previous values back, or None for one that cannot be reversed.
-    pub fn reverse(&self, before: &ForgeItem) -> Option<ItemEdit> {
-        match self {
-            ItemEdit::Affix { slot, allow_incompatible, .. } => {
-                let previous = before.affix(*slot)?;
-                Some(ItemEdit::Affix {
-                    slot: *self.moves(before).get(slot)?,
-                    id: previous.id,
-                    tier: previous.tier,
-                    roll: previous.roll,
-                    seal: previous.seal,
-                    allow_incompatible: *allow_incompatible,
-                })
-            }
-            ItemEdit::Rolls { target, changes } => Some(ItemEdit::Rolls {
-                target: *target,
-                changes: changes
-                    .iter()
-                    .filter_map(|(index, _)| {
-                        let previous = match target {
-                            RollTarget::Affix => before.affix(*index).map(|affix| affix.roll),
-                            RollTarget::Unique => before.unique.as_ref().and_then(|unique| unique.rolls.get(*index).copied()),
-                            RollTarget::Implicit => before.implicit_rolls.get(*index).copied(),
-                        };
-                        previous.map(|value| (*index, value))
+                    .map(|m| edits::RollBinding {
+                        editable: m.editable,
+                        roll_ids: m.roll_ids.iter().map(|i| *i as i32).collect(),
                     })
                     .collect(),
-            }),
-            ItemEdit::Status { field, unrestricted, .. } => before.status.map(|status| ItemEdit::Status {
-                field: *field,
-                value: status.read(*field),
-                unrestricted: *unrestricted,
-            }),
-            ItemEdit::Base { allow_incompatible, .. } => Some(ItemEdit::Base {
-                sub_type: before.sub_type,
-                allow_incompatible: *allow_incompatible,
-            }),
-            // A reverse the game would refuse (it gives another rarity back) makes the change one-way.
-            ItemEdit::Identity { unrestricted, .. } => {
-                let back = ItemEdit::Identity {
-                    unique_id: before.identity_id()?,
-                    sub_type: before.sub_type,
-                    rarity: before.rarity,
-                    unrestricted: *unrestricted,
-                };
-                back.is_valid(&self.project(before)).then_some(back)
-            }
-            ItemEdit::Add { .. } | ItemEdit::Remove { .. } => None,
+            ),
+            None => eg_trainer::catalog::Availability::Unavailable {
+                reason: "Descriptions unavailable.".into(),
+            },
+        };
+        let evidence = edits::RollEvidence::from_runtime(
+            &context.expected,
+            bindings(before.unique.as_ref().map(|u| u.modifiers.as_slice())),
+            bindings(before.implicits.as_deref()),
+        );
+        edits::prepare(
+            &context.expected,
+            &context.catalog,
+            &edits::CatalogProvenance::RuntimeRead {
+                generation: context.expected.generation(),
+                process: context.expected.process().clone(),
+            },
+            self.clone(),
+            override_enabled,
+            Some(&evidence),
+        )
+    }
+    fn project(&self, before: &ForgeItem) -> Result<ForgeItem, edits::EditError> {
+        let prepared = self.prepare_view(before)?;
+        before.with_snapshot(prepared.projected().clone())
+    }
+}
+
+impl ForgeItem {
+    pub fn with_snapshot(&self, snapshot: eg_trainer::backend::ForgeSnapshot) -> Result<Self, edits::EditError> {
+        let context = self.context.as_ref().ok_or(edits::EditError::InvalidObservation)?;
+        let mut after = self.clone();
+        after.item_type = u16::from(snapshot.item_type);
+        after.sub_type = snapshot.sub_type;
+        after.rarity = snapshot.rarity;
+        after.affixes = snapshot
+            .affixes
+            .iter()
+            .map(|a| {
+                Ok(AffixState {
+                    slot: usize::from(a.slot),
+                    id: a.id,
+                    tier: u8::try_from(a.tier).map_err(|_| edits::EditError::InvalidValues)?,
+                    roll: a.roll,
+                    kind: match a.kind {
+                        0 => AffixKind::Prefix,
+                        1 => AffixKind::Suffix,
+                        _ => return Err(edits::EditError::InvalidValues),
+                    },
+                    seal: *Seal::ALL.get(a.seal as usize).ok_or(edits::EditError::InvalidValues)?,
+                    category: Category::from_raw(a.special).ok_or(edits::EditError::InvalidValues)?,
+                })
+            })
+            .collect::<Result<_, _>>()?;
+        after.implicit_rolls = snapshot.implicit_rolls.clone();
+        let identity = snapshot.identity.as_ref().map(|i| {
+            let mut view = self
+                .unique
+                .as_ref()
+                .or(self.set_item.as_ref())
+                .filter(|old| old.id == i.id)
+                .cloned()
+                .unwrap_or(UniqueState {
+                    id: i.id,
+                    rolls: vec![],
+                    modifiers: vec![],
+                    formatting_error: String::new(),
+                });
+            view.rolls = i.rolls.clone();
+            view
+        });
+        if snapshot.rarity == SET {
+            after.set_item = identity;
+            after.unique = None;
+        } else {
+            after.unique = identity;
+            after.set_item = None;
         }
+        let status = &snapshot.status;
+        after.status = Some(ItemStatus {
+            forging_potential: status.forging_potential,
+            legendary_potential: status.legendary_potential,
+            weavers_will: status.weavers_will,
+            weavers_touch: status.weavers_touch,
+            level_requirement: u8::try_from(status.level_requirement).map_err(|_| edits::EditError::InvalidStatus)?,
+            corrupted: status.corrupted,
+            ruined: status.ruined,
+        });
+        after.context = Some(Arc::new(ForgeContext {
+            expected: ExpectedObservation::new(
+                context.expected.generation(),
+                context.expected.process().clone(),
+                context.expected.catalog_identity().clone(),
+                snapshot,
+            )?,
+            catalog: context.catalog.clone(),
+        }));
+        Ok(after)
     }
 }
 
@@ -701,27 +432,24 @@ impl Compatibility {
     }
 }
 
-/// Whether an affix fits the item, or a slot of it (spec §15.2). TODO(forge): class requirements and the idol rules
-/// (omen and weaver idols) come with the trainer's domain; the fixture has neither.
+/// Both authored fixtures and production evaluate the canonical class/category/idol rules.
 pub fn compatibility(item: &ForgeItem, definition: &AffixDefinition, slot: Option<&AffixState>, unrestricted: bool) -> Compatibility {
-    if !definition.verified {
+    use edits::CompatibilityReason as Reason;
+    let Some(context) = &item.context else { return Compatibility::Unknown };
+    let Some(definition) = context.catalog.affixes.get(&definition.id) else {
         return Compatibility::Unknown;
-    }
-    let strict = if slot.is_some_and(|slot| slot.kind != definition.kind) {
-        Some(Rejection::SlotType)
-    } else if !definition.item_types.contains(&item.item_type) {
-        Some(Rejection::EquipmentType)
-    } else if slot.map_or(Category::Standard, |slot| slot.category) != definition.category {
-        Some(Rejection::SpecialCategory)
-    } else if item.affixes.iter().any(|affix| affix.id == definition.id && Some(affix.slot) != slot.map(|slot| slot.slot)) {
-        Some(Rejection::AlreadyPresent)
-    } else {
-        None
     };
-    match strict {
-        None => Compatibility::Allowed,
-        Some(Rejection::SpecialCategory) if unrestricted => Compatibility::Override,
-        Some(reason) => Compatibility::Rejected(reason),
+    let snapshot = context.expected.snapshot();
+    let slot = slot.and_then(|s| snapshot.affixes.iter().find(|a| usize::from(a.slot) == s.slot));
+    match edits::compatibility(&context.catalog, snapshot, definition, slot, None, unrestricted).reason {
+        Reason::None => Compatibility::Allowed,
+        Reason::Override => Compatibility::Override,
+        Reason::ClassRequirement => Compatibility::Rejected(Rejection::ClassRequirement),
+        Reason::SlotType => Compatibility::Rejected(Rejection::SlotType),
+        Reason::EquipmentType => Compatibility::Rejected(Rejection::EquipmentType),
+        Reason::SpecialCategory => Compatibility::Rejected(Rejection::SpecialCategory),
+        Reason::AlreadyPresent => Compatibility::Rejected(Rejection::AlreadyPresent),
+        Reason::MissingMetadata | Reason::UnknownGameValue => Compatibility::Unknown,
     }
 }
 
@@ -848,6 +576,7 @@ mod tests {
     fn item(affixes: Vec<AffixState>) -> ForgeItem {
         ForgeItem {
             token: "t".into(),
+            context: None,
             name: "Boots".into(),
             item_type: 1,
             sub_type: 0,
@@ -892,63 +621,6 @@ mod tests {
         error = unique.clone();
         error.unique.as_mut().unwrap().rolls[0] = 13;
         assert!(!unique.same_state(&error));
-    }
-
-    #[test]
-    fn uncorrupting_moves_an_affix_where_the_game_loads_it() {
-        // The fixture item is not in load order; an affix write puts the sealed and corrupted affixes first.
-        let boots = item(vec![
-            affix(0, 25, Seal::Normal),
-            affix(1, 1148, Seal::Normal),
-            affix(2, 4000, Seal::Sealed),
-            affix(3, 4001, Seal::Corrupted),
-        ]);
-        let uncorrupt = ItemEdit::Affix {
-            slot: 3,
-            id: 4001,
-            tier: 4,
-            roll: 100,
-            seal: Seal::Normal,
-            allow_incompatible: false,
-        };
-        let after = uncorrupt.project(&boots);
-        assert_eq!(after.affixes.iter().map(|a| a.id).collect::<Vec<_>>(), [4000, 25, 1148, 4001]);
-        assert_eq!(uncorrupt.moves(&boots), Moves::from([(2, 0), (0, 1), (1, 2), (3, 3)]));
-        // Its reverse writes the corrupted seal back where the affix went, and the game loads it second.
-        let back = uncorrupt.reverse(&boots).unwrap();
-        assert_eq!(
-            back,
-            ItemEdit::Affix {
-                slot: 3,
-                id: 4001,
-                tier: 4,
-                roll: 100,
-                seal: Seal::Corrupted,
-                allow_incompatible: false
-            }
-        );
-        assert_eq!(back.project(&after).affixes.iter().map(|a| a.id).collect::<Vec<_>>(), [4000, 4001, 25, 1148]);
-    }
-
-    #[test]
-    fn a_second_sealed_affix_is_a_new_problem() {
-        let boots = item(vec![affix(0, 4000, Seal::Sealed), affix(1, 25, Seal::Normal)]);
-        let seal = ItemEdit::Affix {
-            slot: 1,
-            id: 25,
-            tier: 4,
-            roll: 100,
-            seal: Seal::Sealed,
-            allow_incompatible: false,
-        };
-        assert!(!seal.is_valid(&boots));
-        assert_eq!(new_problem(&boots, &seal.replaced(&boots)).as_deref(), Some("An item holds one sealed affix."));
-    }
-
-    #[test]
-    fn free_slots_count_unsealed_affixes() {
-        let boots = item(vec![affix(0, 25, Seal::Normal), affix(1, 4001, Seal::Corrupted)]);
-        assert_eq!(boots.free_slots(), (2, 1));
     }
 
     #[test]

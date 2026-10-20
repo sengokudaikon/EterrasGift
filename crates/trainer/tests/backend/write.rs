@@ -3,6 +3,72 @@ use eg_game_access::protocol::ResponseCode;
 use eg_trainer::writes::{WriteObservation, WriteOutcome, WritePlan};
 
 #[test]
+fn mixed_batch_undo_is_owned_by_the_worker_and_refusal_retains_only_unrestored_steps() {
+    run(async {
+        let shared = writable();
+        let (handle, worker) = start(&shared, options(), None);
+        connected(&handle).await;
+        command(&handle, Command::BeginForgeBatch).await.unwrap();
+        let plan = handle.snapshot().status_plan(eg_trainer::edits::StatusField::Corrupted, 1).unwrap();
+        command(&handle, Command::Write(plan.into())).await.unwrap();
+        let plan = handle.snapshot().level_requirement_plan(17).unwrap();
+        command(&handle, Command::Write(plan.into())).await.unwrap();
+        assert_eq!(handle.snapshot().undo_forge_depth, 2);
+        let latest = handle.snapshot().undo_forge.clone().unwrap();
+        *shared.write_result.lock().unwrap() = Some(WriteStatus::NotApplied {
+            code: ResponseCode::Refused,
+            message: "No store attempted.".into(),
+        });
+        assert_eq!(
+            command(&handle, Command::UndoForge(Box::new(latest.clone()))).await.unwrap_err().kind,
+            ErrorKind::WriteNotApplied
+        );
+        assert_eq!(handle.snapshot().undo_forge, Some(latest.clone()));
+        assert_eq!(handle.snapshot().undo_forge_depth, 2);
+        command(&handle, Command::UndoForge(Box::new(latest.clone()))).await.unwrap();
+        assert_eq!(handle.snapshot().undo_forge_depth, 1);
+        let restored = handle.snapshot().expected_observation().unwrap();
+        assert_eq!(restored.snapshot().status.level_requirement, 20);
+        assert!(restored.snapshot().status.corrupted);
+        let calls = shared.count("write");
+        assert_eq!(command(&handle, Command::UndoForge(Box::new(latest))).await.unwrap_err().kind, ErrorKind::InvalidEdit);
+        assert_eq!(shared.count("write"), calls);
+        let older = handle.snapshot().undo_forge.clone().unwrap();
+        command(&handle, Command::UndoForge(Box::new(older))).await.unwrap();
+        assert_eq!(handle.snapshot().undo_forge_depth, 0);
+        assert!(!handle.snapshot().expected_observation().unwrap().snapshot().status.corrupted);
+        shutdown(&handle, worker).await;
+    });
+}
+
+#[test]
+fn a_new_batch_replaces_previous_undo_only_after_its_first_confirmation() {
+    run(async {
+        let shared = writable();
+        let (handle, worker) = start(&shared, options(), None);
+        connected(&handle).await;
+        let plan = handle.snapshot().level_requirement_plan(17).unwrap();
+        command(&handle, Command::Write(plan.into())).await.unwrap();
+        let previous = handle.snapshot().undo_forge.clone();
+        command(&handle, Command::BeginForgeBatch).await.unwrap();
+        let plan = handle.snapshot().status_plan(eg_trainer::edits::StatusField::Ruined, 1).unwrap();
+        *shared.write_result.lock().unwrap() = Some(WriteStatus::NotApplied {
+            code: ResponseCode::Refused,
+            message: "No store attempted.".into(),
+        });
+        assert!(command(&handle, Command::Write(plan.clone().into())).await.is_err());
+        assert_eq!(handle.snapshot().undo_forge, previous);
+        command(&handle, Command::Write(plan.into())).await.unwrap();
+        assert_eq!(handle.snapshot().undo_forge_depth, 1);
+        let current = handle.snapshot().undo_forge.clone().unwrap();
+        command(&handle, Command::UndoForge(Box::new(current))).await.unwrap();
+        assert_eq!(handle.snapshot().undo_forge_depth, 0);
+        assert_eq!(handle.snapshot().expected_observation().unwrap().snapshot().status.level_requirement, 17);
+        shutdown(&handle, worker).await;
+    });
+}
+
+#[test]
 fn failed_write_evidence_is_persisted_without_event_subscribers_even_during_cleanup() {
     run(async {
         for uncertain in [false, true] {

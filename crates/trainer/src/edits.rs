@@ -25,7 +25,7 @@ use std::{
 pub const MAX_WRITABLE_AFFIX_ID: i32 = 4095;
 pub const MAX_ROLL_CHANGES: usize = 32;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 #[repr(i32)]
 pub enum SealState {
     Normal = 0,
@@ -33,11 +33,33 @@ pub enum SealState {
     Primordial = 2,
     Corrupted = 3,
 }
+impl SealState {
+    pub const ALL: [Self; 4] = [Self::Normal, Self::Sealed, Self::Primordial, Self::Corrupted];
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Normal => "Normal",
+            Self::Sealed => "Sealed",
+            Self::Primordial => "Primordial",
+            Self::Corrupted => "Corrupted",
+        }
+    }
+    pub fn index(self) -> usize {
+        self as usize
+    }
+}
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(i32)]
 pub enum AffixKind {
     Prefix = 0,
     Suffix = 1,
+}
+impl AffixKind {
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Prefix => "Prefix",
+            Self::Suffix => "Suffix",
+        }
+    }
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(i32)]
@@ -171,7 +193,41 @@ pub enum EditError {
 }
 impl fmt::Display for EditError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{self:?}")
+        f.write_str(match self {
+            Self::InvalidObservation => "The item could not be read reliably. Refresh before editing.",
+            Self::CatalogNotVerified => "Read the game definitions before editing this item.",
+            Self::IdentityChanged => "The process, character or game definitions changed. Refresh before editing.",
+            Self::StaleItem => "The item changed. Discard the stale draft and edit it again.",
+            Self::OfflineRequired => "Load an offline character to continue.",
+            Self::OverrideRequired => "This edit requires \"I know what I'm doing\" in Settings. Nothing was applied.",
+            Self::InvalidValues => "Enter valid item values and integer roll positions from 0 to 255.",
+            Self::MissingDefinition => "This ID has no verified definition in the current build.",
+            Self::Incompatible(reason) => match reason {
+                CompatibilityReason::ClassRequirement => "This affix does not fit the item's class requirement.",
+                CompatibilityReason::SlotType => "This affix does not fit this prefix or suffix slot.",
+                CompatibilityReason::EquipmentType => "This affix does not fit this equipment type.",
+                CompatibilityReason::SpecialCategory => "This affix does not fit this slot's special category.",
+                CompatibilityReason::AlreadyPresent => "This item already holds that affix.",
+                _ => "The game's metadata does not establish compatibility for this affix.",
+            },
+            Self::TierUnavailable => "This affix does not support that tier.",
+            Self::NewLayoutProblem(problem) => match problem {
+                LayoutProblem::Capacity => "This edit exceeds the item's affix capacity.",
+                LayoutProblem::UniqueCorrupted => "Unique and set items do not keep a corrupted affix.",
+                LayoutProblem::LegendaryUncorrupted => "A legendary keeps a corrupted affix only while it is corrupted.",
+                LayoutProblem::UniqueSealed => "Unique, set and legendary items have no sealed affix slot.",
+                LayoutProblem::MultipleSealed => "An item holds one sealed affix.",
+                LayoutProblem::MultipleCorrupted => "An item holds one corrupted affix.",
+                LayoutProblem::PrimordialTier => "Only tier 8 affixes are primordial.",
+                LayoutProblem::NormalTierEight => "A tier 8 affix is primordial unless it is sealed or corrupted. Choose Primordial.",
+            },
+            Self::MissingRollEvidence | Self::InvalidRollMapping => "Actual roll mappings are unavailable for this modifier.",
+            Self::InvalidStatus => "This status value does not apply to the current item or exceeds its allowed range.",
+            Self::InvalidBase => "This base does not fit the current item.",
+            Self::InvalidUniqueIdentity => "That unique or set identity does not fit the current item.",
+            Self::AffixIdNotSerializable(_) => "This item contains an affix ID the game cannot save. Nothing was applied.",
+            Self::ProjectedSnapshotOutOfBounds => "The edited item would exceed the supported item limits.",
+        })
     }
 }
 impl std::error::Error for EditError {}
