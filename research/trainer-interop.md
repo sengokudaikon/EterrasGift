@@ -141,13 +141,16 @@ inventory has 68 feature registrations over 74 owners: 54 detour targets, 31 byt
 7 field sets. Gameplay detours follow the caller's thread, not a universal main-thread rule.
 Offline transitions and owner loss must turn effects off and report actual removal failures.
 
-The [bounded detour 0.10 trial](../tools/trainer-eval/hook-eval/detour-trial.md) passes its exercised
-calls, transactions, concurrent callers and foreign-body exception cleanup in pinned-nightly
-debug and release. Authored Unity adapter replacement is still a separate next step. Missing unwind metadata in a copied prefix remains a deliberate scope
-question, not proof that all trampolines are interchangeable. Its suspension guard is private,
-thread suspension may skip failures, and dropping RawDetour does not provide a safe transaction.
-Keep hook allocations for process lifetime and enable/disable through transactions. Reject
-unsupported copied calls until the chosen engine proves the required exception behavior.
+The [bounded detour 0.10 trial](../tools/trainer-eval/hook-eval/detour-trial.md) exercises
+hand-written native fixtures only. It has not run on Unity or met the product acceptance list.
+Replacement must retain registered trampoline unwind coverage and process-lifetime owners,
+reject copied calls, and use multi-hook transactions with observed recovery on partial failure.
+Stock detour skips suspension failures in Threads::All, ignores rollback/resume errors, and
+has no callback for a final census check after suspending Threads::Only. Pre-suspending around
+commit is unsafe because commit first allocates and acquires its patch lock. A bounded dependency
+change or another backend is needed to preserve fail-closed transaction behavior. The authored
+Unity route must cover a throwing task, owner-exit restoration and injected partial failure
+before retiring the custom adapter.
 
 Keep scheduler/threads.rs for byte patches: its census, suspension failure handling and refusal
 when a thread is inside the target bytes are product behavior. Do not replace it with an
