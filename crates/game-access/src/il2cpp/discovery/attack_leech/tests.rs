@@ -754,7 +754,7 @@ fn write_rate(
     let attached = thread.attach().unwrap();
     // SAFETY: owned same-thread fake graph/runtime, exact typed export behavior,
     // explicit single current-field mutation authority; no process operations.
-    let result = unsafe { api.set_attack_leech(&attached, raw::FieldWriteApi { field_set_value: set_rate }, expected, which, value) };
+    let result = unsafe { api.set_attack_leech(&attached, raw::FieldWriteApi::test_export(set_rate), expected, which, value) };
     ROOTS.with_borrow(|roots| assert!(roots.is_empty(), "writer roots leaked"));
     result
 }

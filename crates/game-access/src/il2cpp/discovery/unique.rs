@@ -261,8 +261,14 @@ impl RuntimeAccess {
                     .catalog_reference(attached, &copy, c"uniqueRolls")?
                     .ok_or_else(|| unsupported("detached unique rolls absent"))?;
                 let count = self.array_count(&rolls, self.system_class(c"Byte")?, 8)? as usize;
-                if count != identity.rolls.len() {
+                if count != identity.rolls.len() || preview.changes().iter().any(|change| usize::from(change.index) >= count) {
                     return Err(unsupported("detached unique roll count changed"));
+                }
+                let live_rolls = self
+                    .catalog_reference(attached, &graph.item, c"uniqueRolls")?
+                    .ok_or_else(|| unsupported("live unique rolls absent"))?;
+                if target(&rolls)? == target(&live_rolls)? || target(&copy)? == target(&graph.item)? {
+                    return Err(unsupported("detached unique preview aliases live storage"));
                 }
                 for change in preview.changes() {
                     target(&rolls)?.as_ptr().cast::<u8>().add(32 + usize::from(change.index)).write(change.value);

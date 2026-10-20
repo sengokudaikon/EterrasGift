@@ -67,6 +67,38 @@ fn decode_text(units: &[u16]) -> Result<String, DiscoveryError> {
 }
 
 impl RuntimeAccess {
+    pub(in crate::il2cpp) unsafe fn reference_store(
+        &self,
+        attached: &AttachedThread<'_>,
+        object: &Root<'_, '_>,
+        name: &CStr,
+        value: &Root<'_, '_>,
+    ) -> Result<(NonNull<raw::Object>, NonNull<raw::FieldInfo>, NonNull<raw::Object>), DiscoveryError> {
+        unsafe {
+            if !object.belongs_to(attached) || !value.belongs_to(attached) {
+                return Err(unsupported("reference store runtime mismatch"));
+            }
+            let actual = (self.object_class)(target(value)?.as_ptr());
+            if actual.is_null() || (self.class_value)(actual) {
+                return Err(unsupported("reference store cannot use a boxed value"));
+            }
+            let field = self.instance_field(object, name, actual)?;
+            let ty = (self.field_type)(field);
+            if (self.field_flags)(field) & 0x70 != 0 || !matches!((self.type_code)(ty), 0x0e | 0x12 | 0x14 | 0x15 | 0x1c | 0x1d) {
+                return Err(unsupported("reference store requires a mutable reference field"));
+            }
+            let owner = (self.field_parent)(field);
+            let receiver = (self.object_class)(target(object)?.as_ptr());
+            if owner.is_null() || receiver.is_null() || !(self.assignable)(owner, receiver) {
+                return Err(unsupported("reference store declaring class"));
+            }
+            Ok((
+                target(object)?,
+                NonNull::new(field.cast()).ok_or_else(|| unsupported("reference field absent"))?,
+                target(value)?,
+            ))
+        }
+    }
     // All internal unsafe helpers inherit read_forge's live attached-runtime and graph access contract.
     pub(super) unsafe fn system_class(&self, name: &CStr) -> Result<Class, DiscoveryError> {
         unsafe {
@@ -505,6 +537,8 @@ mod tests {
         static FLAGS: Cell<i32> = const { Cell::new(0) };
         static BYREF: Cell<bool> = const { Cell::new(false) };
         static GLOBAL_ENUM_LOOKUPS: Cell<usize> = const { Cell::new(0) };
+        static VALUE_CLASS: Cell<bool> = const { Cell::new(false) };
+        static STORES: Cell<usize> = const { Cell::new(0) };
     }
     fn token<T>(address: usize) -> *mut T {
         std::ptr::without_provenance_mut(address)
@@ -570,7 +604,7 @@ mod tests {
         }
     }
     unsafe extern "C-unwind" fn class_value(_: *const raw::Class) -> bool {
-        false
+        VALUE_CLASS.get()
     }
     unsafe extern "C-unwind" fn class_field(class: Class, _: *const std::ffi::c_char) -> Ptr {
         assert_eq!(class as usize, PARENT_CLASS);
@@ -608,9 +642,19 @@ mod tests {
         }
     }
     unsafe extern "C-unwind" fn assignable(expected: Class, actual: Class) -> bool {
-        assert_eq!(expected as usize, CHILD_CLASS);
-        assert_eq!(actual as usize, CHILD_CLASS);
+        assert_eq!(expected, actual);
+        assert!(matches!(expected as usize, CHILD_CLASS | PARENT_CLASS));
         ASSIGNABLE.get()
+    }
+    unsafe extern "C-unwind" fn field_parent(_: Ptr) -> Class {
+        token(PARENT_CLASS)
+    }
+    unsafe extern "C-unwind" fn store_reference(object: *mut raw::Object, field: *mut raw::FieldInfo, value: Ptr) {
+        assert_eq!(object as usize, PARENT);
+        assert_eq!(field as usize, 0x8000);
+        assert_eq!(value as usize, CHILD, "reference ABI requires the object, not a pointer slot");
+        assert_eq!(ROOTS.get(), 2);
+        STORES.set(STORES.get() + 1);
     }
     unsafe extern "C-unwind" fn rank(_: *const raw::Class) -> i32 {
         RANK.get()
@@ -663,6 +707,8 @@ mod tests {
         FLAGS.set(0);
         BYREF.set(false);
         GLOBAL_ENUM_LOOKUPS.set(0);
+        VALUE_CLASS.set(false);
+        STORES.set(0);
         let mut access = RuntimeAccess::test_stubs();
         access.corlib = corlib;
         access.class_from_name = class_from_name;
@@ -672,6 +718,7 @@ mod tests {
         access.field_type = field_type;
         access.type_byref = type_byref;
         access.field_flags = field_flags;
+        access.field_parent = field_parent;
         access.type_class = type_class;
         access.field_get = field_get;
         access.assignable = assignable;
@@ -696,6 +743,58 @@ mod tests {
         // SAFETY: these authored exports implement this test thread's borrowed attachment and
         // Box-backed handles. Their function code outlives all local roots and the context.
         (access, unsafe { ThreadContext::new(api) })
+    }
+
+    #[test]
+    fn reference_store_checks_types_mutability_owner_and_root_origin_before_calling_export() {
+        let (access, context) = fixture();
+        let attached = context.attach().unwrap();
+        // SAFETY: authored object identities and Box-backed GC handles; no game memory.
+        unsafe {
+            let parent = attached.root(NonNull::new(token(PARENT)).unwrap()).unwrap();
+            let child = attached.root(NonNull::new(token(CHILD)).unwrap()).unwrap();
+            let writes = raw::FieldWriteApi::test_export(store_reference);
+            for flags in [0x10, 0x20, 0x40] {
+                FLAGS.set(flags);
+                assert!(writes.set_reference(&access, &attached, &parent, c"child", &child).is_err());
+            }
+            FLAGS.set(0);
+            BYREF.set(true);
+            assert!(writes.set_reference(&access, &attached, &parent, c"child", &child).is_err());
+            BYREF.set(false);
+            VALUE_CLASS.set(true);
+            TYPE_CODE.set(0x11);
+            assert!(writes.set_reference(&access, &attached, &parent, c"child", &child).is_err());
+            VALUE_CLASS.set(false);
+            assert!(writes.set_reference(&access, &attached, &parent, c"child", &child).is_err());
+            TYPE_CODE.set(0x1d);
+            FIELD_CLASS.set(WORD_CLASS);
+            assert!(writes.set_reference(&access, &attached, &parent, c"child", &child).is_err());
+            FIELD_CLASS.set(CHILD_CLASS);
+            ASSIGNABLE.set(false);
+            assert!(writes.set_reference(&access, &attached, &parent, c"child", &child).is_err());
+            ASSIGNABLE.set(true);
+            let other_runtime = {
+                // A distinct context using the same fake exports is still a different
+                // provenance boundary. Construct without resetting the active roots.
+                let api = raw::Api {
+                    domain_get: domain,
+                    thread_current: current,
+                    thread_attach: attach,
+                    thread_detach: detach,
+                    gchandle_new: root_new,
+                    gchandle_free: root_free,
+                    gchandle_get_target: root_target,
+                };
+                ThreadContext::new(api)
+            };
+            let other_attached = other_runtime.attach().unwrap();
+            assert!(writes.set_reference(&access, &other_attached, &parent, c"child", &child).is_err());
+            assert_eq!(STORES.get(), 0);
+            writes.set_reference(&access, &attached, &parent, c"child", &child).unwrap();
+            assert_eq!(STORES.get(), 1);
+        }
+        assert_eq!(ROOTS.get(), 0);
     }
 
     #[test]

@@ -158,6 +158,7 @@ exports! {
     method_instance: "il2cpp_method_is_instance" => raw::MethodIsInstance,
     method_generic: "il2cpp_method_is_generic" => raw::MethodIsGeneric,
     method_inflated: "il2cpp_method_is_inflated" => raw::MethodIsInflated,
+    method_flags: "il2cpp_method_get_flags" => raw::MethodGetFlags,
     corlib: "il2cpp_get_corlib" => unsafe extern "C-unwind" fn() -> Ptr,
     object_new: "il2cpp_object_new" => unsafe extern "C-unwind" fn(Class) -> *mut raw::Object,
     array_new: "il2cpp_array_new" => unsafe extern "C-unwind" fn(Class, usize) -> *mut raw::Object,
@@ -364,10 +365,12 @@ impl RuntimeAccess {
                 if CStr::from_ptr(actual) != name || (self.method_params)(method) as usize != parameters.len() {
                     continue;
                 }
+                let mut implementation_flags = 0;
                 if found.is_some()
                     || (self.method_instance)(method) != instance
                     || (self.method_generic)(method)
                     || (self.method_inflated)(method)
+                    || (self.method_flags)(method, &mut implementation_flags) & 0x2440 != 0
                     || self.type_name((self.method_return)(method))? != "System.Void"
                 {
                     return Err(unsupported(format!("method contract {}", name.to_string_lossy())));
@@ -630,6 +633,67 @@ const REQUIRED_FIELDS: &[(&str, &str, &str, &str)] = &[
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn direct_void_method_refuses_virtual_abstract_and_native_replacements() {
+        unsafe extern "C-unwind" fn methods(owner: Class, iterator: *mut Ptr) -> Method {
+            // SAFETY: method() supplies a live iterator slot; owner points to test flags.
+            unsafe {
+                if (*iterator).is_null() {
+                    *iterator = owner.cast();
+                    owner.cast()
+                } else {
+                    std::ptr::null()
+                }
+            }
+        }
+        unsafe extern "C-unwind" fn name(_: Method) -> *const c_char {
+            c"RebuildID".as_ptr()
+        }
+        unsafe extern "C-unwind" fn count(_: Method) -> u32 {
+            0
+        }
+        unsafe extern "C-unwind" fn yes(_: Method) -> bool {
+            true
+        }
+        unsafe extern "C-unwind" fn no(_: Method) -> bool {
+            false
+        }
+        unsafe extern "C-unwind" fn flags(method: Method, implementation: *mut u32) -> u32 {
+            // SAFETY: test method is a live u32; implementation is a writable caller slot.
+            unsafe {
+                *implementation = 0;
+                method.cast::<u32>().read()
+            }
+        }
+        unsafe extern "C-unwind" fn returns(_: Method) -> Type {
+            NonNull::dangling().as_ptr()
+        }
+        unsafe extern "C-unwind" fn type_name(_: Type) -> *mut c_char {
+            CString::new("System.Void").unwrap().into_raw()
+        }
+        unsafe extern "C-unwind" fn free(value: Ptr) {
+            // SAFETY: allocation comes from type_name and is released once.
+            unsafe {
+                drop(CString::from_raw(value.cast()));
+            }
+        }
+        let mut access = RuntimeAccess::test_stubs();
+        access.class_methods = methods;
+        access.method_name = name;
+        access.method_params = count;
+        access.method_instance = yes;
+        access.method_generic = no;
+        access.method_inflated = no;
+        access.method_flags = flags;
+        access.method_return = returns;
+        access.type_name = type_name;
+        access.runtime_free = free;
+        for mut flags in [0_u32, 0x40, 0x400, 0x2000] {
+            // SAFETY: all metadata queries are exact fake exports over this local flags token.
+            let result = unsafe { access.method((&mut flags as *mut u32).cast(), c"RebuildID", &[], true) };
+            assert_eq!(result.is_ok(), flags == 0);
+        }
+    }
     #[test]
     fn legacy_contract_covers_every_protocol_field_exactly_once() {
         let keys: Vec<_> = REQUIRED_FIELDS.iter().map(|entry| entry.0).collect();

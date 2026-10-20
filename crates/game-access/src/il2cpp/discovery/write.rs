@@ -835,7 +835,7 @@ mod tests {
             // SAFETY: exact authored field ABI/Int32 destination, with manager+item roots retained.
             let result: Result<(), _> = unsafe {
                 attempt_store(
-                    raw::FieldWriteApi { field_set_value: set },
+                    raw::FieldWriteApi::test_export(set),
                     target(&g.item).unwrap(),
                     NonNull::new(token(FIELD)).unwrap(),
                     37,
@@ -849,7 +849,7 @@ mod tests {
         // SAFETY: same validated authored field/root contract; successful readback remains owned.
         let result = unsafe {
             attempt_store(
-                raw::FieldWriteApi { field_set_value: set },
+                raw::FieldWriteApi::test_export(set),
                 target(&g.item).unwrap(),
                 NonNull::new(token(FIELD)).unwrap(),
                 255,
@@ -897,7 +897,7 @@ mod tests {
                 unsafe {
                     a.edit_forge(
                         &attached,
-                        raw::FieldWriteApi { field_set_value: set },
+                        raw::FieldWriteApi::test_export(set),
                         None,
                         manager,
                         e,

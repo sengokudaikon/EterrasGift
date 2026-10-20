@@ -120,20 +120,6 @@ impl RuntimeAccess {
             Ok(array)
         }
     }
-    unsafe fn mapping_set_reference(&self, writes: raw::FieldWriteApi, object: &Root<'_, '_>, name: &CStr, value: &Root<'_, '_>) -> Result<(), DiscoveryError> {
-        unsafe {
-            let class = (self.object_class)(target(value)?.as_ptr());
-            let field = self.instance_field(object, name, class)?;
-            if (self.field_flags)(field) & 0x70 != 0 {
-                return Err(unsupported("detached reference is not mutable"));
-            }
-            // Field::SetValue calls SetValueRaw(..., deref_pointer=false):
-            // reference fields take the DIRECT object pointer, unlike scalar slots.
-            // The rooted private receiver and child survive its GenericStore barrier.
-            (writes.field_set_value)(target(object)?.as_ptr(), field.cast(), target(value)?.as_ptr().cast());
-            Ok(())
-        }
-    }
     pub(super) unsafe fn mapping_copy<'a, 'r>(
         &self,
         attached: &'a AttachedThread<'r>,
@@ -193,7 +179,7 @@ impl RuntimeAccess {
             for name in [c"uniqueRolls", c"implicitRolls"] {
                 if let Some(array) = self.catalog_reference(attached, &graph.item, name)? {
                     let cloned = self.mapping_clone_bytes(attached, &array, 8)?;
-                    self.mapping_set_reference(writes, &copy, name, &cloned)?;
+                    writes.set_reference(self, attached, &copy, name, &cloned)?;
                 }
             }
             Ok(copy)

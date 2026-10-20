@@ -21,10 +21,40 @@ pub type FieldSetValue = unsafe extern "C-unwind" fn(*mut Object, *mut FieldInfo
 /// The mutation export is deliberately separate from read-only runtime access.
 #[derive(Clone, Copy)]
 pub struct FieldWriteApi {
-    pub field_set_value: FieldSetValue,
+    field_set_value: FieldSetValue,
 }
 
 impl FieldWriteApi {
+    #[cfg(test)]
+    pub(crate) fn test_export(field_set_value: FieldSetValue) -> Self {
+        Self { field_set_value }
+    }
+
+    /// Store a non-null reference after checking root provenance and mutable
+    /// reference-field metadata. Exact class identity is required; no conversion.
+    ///
+    /// # Safety
+    /// The set_i32 runtime, thread, lifetime and exclusive mutation obligations
+    /// apply. `access` and `attached` must belong to this export's live runtime.
+    /// Metadata and the rooted graph must remain stable throughout validation/store.
+    pub(crate) unsafe fn set_reference(
+        &self,
+        access: &super::discovery::RuntimeAccess,
+        attached: &super::AttachedThread<'_>,
+        object: &super::StrongRoot<'_, '_>,
+        name: &CStr,
+        value: &super::StrongRoot<'_, '_>,
+    ) -> Result<(), super::discovery::DiscoveryError> {
+        // SAFETY: caller establishes the runtime and graph span. The validator
+        // rejects value types, incompatible roots and immutable/noninstance fields.
+        unsafe {
+            let (object, field, value) = access.reference_store(attached, object, name, value)?;
+            // SetValueRaw(deref_pointer=false) takes the DIRECT object pointer,
+            // rather than the address of a pointer slot used for scalar stores.
+            (self.field_set_value)(object.as_ptr(), field.as_ptr(), value.as_ptr().cast());
+            Ok(())
+        }
+    }
     /// Resolve the exact Unity 6000.4 export without performing a write.
     ///
     /// # Safety
