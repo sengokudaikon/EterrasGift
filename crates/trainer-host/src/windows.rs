@@ -135,16 +135,16 @@ impl<F: LogFactory> NativePreparer<F> {
             };
         }
         let modules = (|| {
-            profile.validate_target(&target.executable)?;
-            let folder = target.executable.parent().ok_or_else(|| io::Error::other("game directory missing"))?;
-            let game = ModuleIdentity::capture(&folder.join("GameAssembly.dll"), profile.binary_hash())?;
+            profile.validate_target(&target.executable).map_err(identity_error)?;
+            let folder = target.executable.parent().ok_or_else(|| identity_error("game directory missing"))?;
+            let game = ModuleIdentity::capture(&folder.join("GameAssembly.dll"), profile.binary_hash()).map_err(game_build_error)?;
             let unity_path = folder.join("UnityPlayer.dll");
-            let unity_hash = eg_core::hashes::of_bytes(&std::fs::read(&unity_path)?);
-            version::check_unity(&unity_path)?;
-            let unity = ModuleIdentity::capture(&unity_path, &unity_hash)?;
-            Ok::<_, BootstrapError>((game, unity))
+            let unity_hash = eg_core::hashes::of_bytes(&std::fs::read(&unity_path).map_err(identity_error)?);
+            version::check_unity(&unity_path).map_err(identity_error)?;
+            let unity = ModuleIdentity::capture(&unity_path, &unity_hash).map_err(identity_error)?;
+            Ok::<_, BackendError>((game, unity))
         })()
-        .map_err(|error| failed(BackendError::blocked(ErrorKind::Identity, error.to_string()), PreparationResidency::NotLoaded))?;
+        .map_err(|error| failed(error, PreparationResidency::NotLoaded))?;
         admission.check().map_err(|error| failed(error, PreparationResidency::NotLoaded))?;
         let index = self.retained.len();
         // Reserve before the synchronous native boundary. An unwind leaves the
@@ -214,6 +214,15 @@ impl<F: LogFactory> HelperPreparer for NativePreparer<F> {
     }
 }
 
+fn identity_error(error: impl std::fmt::Display) -> BackendError {
+    BackendError::blocked(ErrorKind::Identity, error.to_string())
+}
+fn game_build_error(error: BootstrapError) -> BackendError {
+    match error {
+        BootstrapError::Invalid("module hash") => identity_error("This Last Epoch version isn't supported yet."),
+        error => identity_error(error),
+    }
+}
 fn failed(error: BackendError, residency: PreparationResidency) -> PreparationFailure {
     PreparationFailure { error, residency }
 }
@@ -349,6 +358,23 @@ mod tests {
             let denied = native.prepare(&target, &fixture.profile, &mut admission).await.err().unwrap();
             assert_eq!(denied.error.kind, ErrorKind::Gate);
             assert_eq!(denied.residency, PreparationResidency::MayBeLoaded);
+        });
+    }
+
+    #[test]
+    fn changed_game_build_is_readable_and_refused_before_any_remote_work() {
+        support::run(async {
+            let fixture = support::Fixture::new();
+            std::fs::write(fixture.temp.path().join("GameAssembly.dll"), b"new game patch").unwrap();
+            // SAFETY: preflight rejects authored files; no process is opened.
+            let mut native = unsafe { NativePreparer::new(fixture.artifact.clone(), support::Logs::default()) };
+            let mut admission = support::Admission::new(true);
+            let failure = native.prepare(&fixture.target, &fixture.profile, &mut admission).await.err().unwrap();
+            assert_eq!(failure.error.message, "This Last Epoch version isn't supported yet.");
+            assert_eq!(failure.error.kind, ErrorKind::Identity);
+            assert_eq!(failure.residency, PreparationResidency::NotLoaded);
+            assert_eq!(native.retained_targets(), 0);
+            assert!(game_build_error(BootstrapError::Invalid("module file changed")).message.contains("module file changed"));
         });
     }
 

@@ -1452,6 +1452,7 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
     }
     fn fail(&mut self, error: BackendError, target: Option<ProcessIdentity>) {
         if let Some(faults) = &self.faults
+            && !error.retryable()
             && !matches!(error.kind, ErrorKind::WriteUncertain | ErrorKind::WriteNotKept)
         {
             faults.write(

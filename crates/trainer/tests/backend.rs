@@ -942,3 +942,29 @@ fn stopping_refresh_keeps_old_catalog_stale_without_publishing_new_partial_captu
         shutdown(&handle, worker).await;
     });
 }
+
+#[test]
+fn retryable_connection_waits_do_not_write_fault_files_but_fatal_errors_do() {
+    run(async {
+        let directory = tempfile::tempdir().unwrap();
+        let faults = eg_core::fault::FaultLog::with_fallbacks(directory.path(), Some(directory.path()), vec![]);
+        let shared = Shared::new();
+        let (handle, worker) = backend::service(Locator(shared.clone()), Connect(shared.clone()), Logs(shared.clone()), FakeClock, options(), None);
+        let worker = tokio::spawn(worker.with_fault_log(faults).run());
+        command(&handle, Command::Enable).await.unwrap();
+        for kind in [ErrorKind::Transport, ErrorKind::NotReady, ErrorKind::Transport] {
+            shared.connect_errors.lock().unwrap().push_back(BackendError::waiting(kind, "try again later"));
+            assert_eq!(command(&handle, Command::Connect).await.unwrap_err().kind, kind);
+            assert_eq!(handle.snapshot().phase, Phase::WaitingForGame);
+            assert_eq!(std::fs::read_dir(directory.path()).unwrap().count(), 0);
+        }
+        shared.connect_errors.lock().unwrap().push_back(BackendError {
+            delivery: Some(backend::Delivery::MayHaveRun),
+            ..BackendError::waiting(ErrorKind::Transport, "startup reply lost")
+        });
+        assert!(command(&handle, Command::Connect).await.is_err());
+        assert_eq!(handle.snapshot().phase, Phase::Blocked);
+        assert_eq!(std::fs::read_dir(directory.path()).unwrap().count(), 1, "uncertain startup remains a fault");
+        shutdown(&handle, worker).await;
+    });
+}
