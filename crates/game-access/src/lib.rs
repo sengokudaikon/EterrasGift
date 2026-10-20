@@ -11,7 +11,7 @@ pub mod il2cpp;
 pub mod numeric_locale;
 
 #[cfg(all(feature = "il2cpp", windows, target_arch = "x86_64"))]
-pub mod scheduler;
+pub mod hooks;
 
 #[cfg(windows)]
 pub mod pipe;

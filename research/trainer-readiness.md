@@ -25,7 +25,7 @@ and mutable instance fields. A generic IL2CPP crate is not a prerequisite for th
 | Forge writes | One EditForge request/ForgePlan/WriteOutcome path: seven status fields, base/subtype, unique/set identity, regular affix-roll batches, replacement/tier/seal and add/remove | Unique/implicit rolls |
 | Editor | Ordered single-edit drafts, fresh reads, Pending/Confirmed/refusal/NotKept/Uncertain, conditional reverse Undo; status/base/identity, replacement/tier/seal, add/remove and regular-affix Value controls connected; unique text and asynchronous preview adapter | Unique/implicit value controls and roll writes stay disabled until supported |
 | Other features | Typed attack/leech observations and one conditional rate primitive; original feature descriptors/inventories | UI field integration, other six field sets, all gameplay detours/patches and offline/owner-loss effect cleanup |
-| Hook backend | Existing scheduler and byte-patch suspension code retained; detour 0.10 standalone regressions pass | Authored Unity adapter replacement/cleanup trial before gameplay hooks |
+| Hook backend | Stock detour 0.10, retained owners, transaction recovery and registered trampoline unwind tables replace the custom scheduler; authored Unity throwing-task, partial-failure and owner-exit restoration pass | Gameplay-specific ABI/target coverage; accepted best-effort thread suspension remains a limitation |
 
 Ordinary refusal stops the draft and keeps Undo for confirmed steps. Known mismatch clears drafts
 and Undo, keeps confirmed history and may keep the connection. Uncertainty clears drafts/history/
@@ -48,7 +48,7 @@ children. No current cleanup check accesses Last Epoch.
 
 Next: sampled unique/implicit values and their roll operations one at a time
 through native, service, UI and captures. Consolidate the remaining presentation/domain and
-feature-table duplication as those areas are touched. Keep the hook-engine trial separate.
+feature-table duplication as those areas are touched. The hook backend is available for feature-family ports.
 Historical reports and ignored artifacts are archived as described in the interop notes;
 maintain tests and fixture sources instead of adding per-feature report JSON.
 

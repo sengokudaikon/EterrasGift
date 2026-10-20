@@ -24,6 +24,7 @@ fn main() {
     }
     files.sort_by_key(|path| path.strip_prefix(&root).unwrap().to_string_lossy().replace('\\', "/"));
     let mut digest = Sha256::new();
+    digest.update([u8::from(std::env::var_os("CARGO_FEATURE_FIXTURE").is_some())]);
     for file in files {
         println!("cargo:rerun-if-changed={}", file.display());
         let name = file.strip_prefix(&root).unwrap().to_string_lossy().replace('\\', "/");

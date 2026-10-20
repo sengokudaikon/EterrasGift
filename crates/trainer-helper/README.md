@@ -16,13 +16,17 @@ These are legacy discovery checks, including legacy generic-name matching. They 
 future field writes or invocations; those need exact per-operation type, storage and lifetime checks.
 
 The first successful discovery retains pristine dispatcher bytes. Subsequent status/empty-clear
-requests must match this profile, even while the scheduler entry is patched. The existing bounded
-first-party scheduler installs from the control thread. Its callback calls Unity's original first,
+requests must match this profile, even while the scheduler entry is patched. Stock detour 0.10
+installs from the control thread through the retained transaction wrapper in `eg_game_access::hooks`.
+Owners and registered trampoline unwind tables remain for the process lifetime; copied calls are
+refused. Threads::All uses best-effort suspension, with the limits recorded in the interop notes.
+Its callback calls Unity's original first,
 with no Rust lock or catch around that call. After a normal return, the first accepted callback
 checks the current UnitySynchronizationContext main managed ID against Thread.CurrentThread.ManagedThreadId.
 Only a matching callback establishes the Windows thread ID used for subsequent dispatch; other threads
 forward the original without taking a command. There is no pre-bootstrap main-thread nomination. Rust panics in this post-call work close admission;
-native/managed unwind recovery is not promised. Independently, the callback observes runtime status
+native/managed exceptions continue to their native caller, with the callback scope cleaned up.
+The authored Unity throwing-task route checks this behavior. Independently, the callback observes runtime status
 at most once per second while an owner is present.
 
 Status roots the manager wrapper, checks assignability and reads its metadata-validated Unity
@@ -78,7 +82,8 @@ runtime-offline/owner-loss cleanup must run and acknowledge completion on the en
 The local pipe is `eterras-gift-<PID>`, one strict 336-byte request per connection. The first valid
 Discover claims ownership using the kernel-reported client PID and a retained process handle/start
 time. Normal per-request EOF preserves ownership. Other living processes receive Refused without
-reaching the backend; process death relinquishes ownership. This strengthens the original helper's
+reaching the backend; process death restores the dispatcher before relinquishing ownership. A
+restoration error stops the server rather than handing off an unconfirmed entry. This strengthens the original helper's
 ownership model. The protocol has no nonce or authentication against code in the same process.
 
 Admission and request waits observe shutdown/process death. A five-second main-thread deadline or

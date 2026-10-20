@@ -1139,6 +1139,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "detour"
+version = "0.10.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "dce5cddbcd859c57d86857037117a4fe98532af49980090bef00309871e6b813"
+dependencies = [
+ "iced-x86",
+ "libc",
+ "mach2",
+ "region",
+ "windows-sys 0.61.2",
+]
+
+[[package]]
 name = "digest"
 version = "0.11.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1337,8 +1350,10 @@ dependencies = [
 name = "eg-game-access"
 version = "0.1.0"
 dependencies = [
+ "detour",
  "eg-core",
  "eg-trainer-wire",
+ "iced-x86",
  "static_assertions",
  "tokio",
  "windows-sys 0.61.2",
@@ -3109,6 +3124,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "mach2"
+version = "0.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b0d28e293f2b8c9d2b2d1c0193bd3c1cbdc0d2cf396888dc01162f7cf9d6c3f3"
+
+[[package]]
 name = "md-5"
 version = "0.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4281,6 +4302,18 @@ name = "regex-syntax"
 version = "0.8.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d6f6ff9a378485b298a5286656da665ba74413d36db0979633275d2e708145d4"
+
+[[package]]
+name = "region"
+version = "4.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9bc10200af9f8297cb52df7e0e1db8d9ad3e8782981d69b25eedf858f5455ca2"
+dependencies = [
+ "bitflags 2.13.2",
+ "libc",
+ "mach2",
+ "windows-sys 0.61.2",
+]
 
 [[package]]
 name = "renderdoc-sys"

@@ -47,7 +47,7 @@ impl Drop for Thread {
     }
 }
 
-pub(super) struct ThreadSet {
+pub struct ThreadSet {
     threads: Vec<Thread>,
     system: Vec<u64>,
     ids: Vec<u32>,
@@ -57,7 +57,7 @@ pub(super) struct ThreadSet {
 }
 
 impl ThreadSet {
-    pub(super) fn capture() -> Result<Self, HookError> {
+    pub fn capture() -> Result<Self, HookError> {
         // SAFETY: fixed terminated module/export names; ntdll is retained by Windows until exit.
         let query: QuerySystem = unsafe {
             let module = GetModuleHandleW([110u16, 116, 100, 108, 108, 46, 100, 108, 108, 0].as_ptr());
@@ -151,7 +151,7 @@ impl ThreadSet {
         }
     }
 
-    pub(super) fn suspend(&mut self, entry: usize, length: usize) -> Result<Suspended<'_>, HookError> {
+    pub fn suspend(&mut self, entry: usize, length: usize) -> Result<Suspended<'_>, HookError> {
         let suspended = Suspended { set: self };
         let validation = (|| {
             for thread in &mut suspended.set.threads {
@@ -187,7 +187,7 @@ impl ThreadSet {
     }
 }
 
-pub(super) struct Suspended<'set> {
+pub struct Suspended<'set> {
     set: &'set mut ThreadSet,
 }
 impl Suspended<'_> {
@@ -212,7 +212,7 @@ impl Suspended<'_> {
         }
         result
     }
-    pub(super) fn resume(mut self) -> Result<(), HookError> {
+    pub fn resume(mut self) -> Result<(), HookError> {
         self.release()
     }
 }

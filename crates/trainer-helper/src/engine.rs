@@ -3,12 +3,12 @@ use crate::{
     server::{self, Backend, Shared},
 };
 use eg_game_access::{
+    hooks::{self, HookState, RetainedHook},
     il2cpp::{
         AttachedThread, ThreadContext,
         discovery::{AttackLeechWriteError, DiscoveryError, ForgeWriteError, RuntimeAccess},
         raw::{self, ExecuteTasks, MethodInfo},
     },
-    scheduler::{HookError, SchedulerHook},
 };
 use eg_trainer_wire::dispatch::{Dispatcher, Pending};
 use eg_trainer_wire::{
@@ -23,7 +23,6 @@ use std::{
         OnceLock,
         atomic::{AtomicBool, AtomicPtr, AtomicU64, Ordering::SeqCst},
     },
-    time::{Duration, Instant},
 };
 use windows_sys::Win32::System::{
     Diagnostics::Debug::RtlLookupFunctionEntry,
@@ -36,6 +35,11 @@ static STARTED: AtomicBool = AtomicBool::new(false);
 static STATE: OnceLock<Shared> = OnceLock::new();
 static QUEUE: OnceLock<Dispatcher<Request, Response>> = OnceLock::new();
 static ORIGINAL: AtomicPtr<u8> = AtomicPtr::new(std::ptr::null_mut());
+#[cfg(feature = "fixture")]
+static FIXTURE_HOOK: AtomicPtr<RetainedHook> = AtomicPtr::new(std::ptr::null_mut());
+#[cfg(feature = "fixture")]
+mod fixture;
+
 static NEXT_POLL: AtomicU64 = AtomicU64::new(0);
 
 fn state() -> &'static Shared {
@@ -356,8 +360,15 @@ unsafe fn read_catalog_page(kind: eg_trainer_wire::catalog::CatalogKind, cursor:
     }
 }
 
+struct CallbackScope<'a>(&'a Shared);
+impl Drop for CallbackScope<'_> {
+    fn drop(&mut self) {
+        self.0.metrics[18].fetch_add(1, SeqCst);
+    }
+}
 unsafe extern "C-unwind" fn callback(method: *const MethodInfo) {
     let state = state();
+    let _scope = CallbackScope(state);
     state.metrics[2].fetch_add(1, SeqCst);
     // SAFETY: original is published before any patch and retained for process lifetime.
     let original: ExecuteTasks = unsafe { std::mem::transmute(ORIGINAL.load(SeqCst)) };
@@ -478,7 +489,7 @@ struct Control<'a> {
     access: RuntimeAccess,
     attached: &'a eg_game_access::il2cpp::AttachedThread<'a>,
     discovery: Option<Discovery>,
-    hook: Option<SchedulerHook>,
+    hook: Option<&'static RetainedHook>,
 }
 impl Backend for Control<'_> {
     fn discover(&mut self) -> Result<Discovery, Response> {
@@ -511,15 +522,19 @@ impl Backend for Control<'_> {
                 if std::slice::from_raw_parts(target, 16) != expected.bytes {
                     return Err(server::failure(ResponseCode::RestartRequired, "Dispatcher bytes changed; nothing ran"));
                 }
-                let original = std::slice::from_raw_parts(target, 11).try_into().unwrap();
-                let hook = SchedulerHook::prepare(NonNull::new(target).unwrap(), callback, original, (*entry).EndAddress - (*entry).BeginAddress)
+                let hook = RetainedHook::prepare(NonNull::new(target).unwrap(), callback as *const (), &expected.bytes)
                     .map_err(|error| server::failure(ResponseCode::RestartRequired, error.to_string()))?;
-                ORIGINAL.store(hook.original() as *const () as *mut u8, SeqCst);
+                let hook = Box::leak(Box::new(hook));
+                ORIGINAL.store(hook.trampoline() as *mut u8, SeqCst);
+                #[cfg(feature = "fixture")]
+                FIXTURE_HOOK.store(hook, SeqCst);
                 self.hook = Some(hook); // Retain before entry publication, including post-write failure.
             }
-            let hook = self.hook.as_mut().unwrap();
-            if !hook.is_installed() {
-                retry(|| hook.install()).map_err(|error| server::failure(ResponseCode::RestartRequired, error.to_string()))?;
+            let hook = self.hook.unwrap();
+            match hook.state() {
+                HookState::Disabled => hooks::commit(&[(hook, true)]).map_err(|error| server::failure(ResponseCode::RestartRequired, error.to_string()))?,
+                HookState::Enabled => {}
+                HookState::Unknown => return Err(server::failure(ResponseCode::RestartRequired, "Dispatcher entry ownership is unknown")),
             }
         }
         Ok(())
@@ -537,22 +552,14 @@ impl Backend for Control<'_> {
     fn restore(&mut self) -> Result<(), String> {
         // SAFETY: admission is closed, control thread owns its patch; all code/global state retained.
         unsafe {
-            if let Some(hook) = &mut self.hook
-                && hook.is_installed()
+            if let Some(hook) = self.hook
+                && hook.state() != HookState::Disabled
             {
-                retry(|| hook.restore_entry()).map_err(|error| error.to_string())?;
+                hooks::commit(&[(hook, false)]).map_err(|error| error.to_string())?;
+                state().metrics[19].fetch_add(1, SeqCst);
             }
         }
         Ok(())
-    }
-}
-fn retry(mut operation: impl FnMut() -> Result<(), HookError>) -> Result<(), HookError> {
-    let end = Instant::now() + Duration::from_secs(1);
-    loop {
-        match operation() {
-            Err(HookError::ThreadInEntry | HookError::ThreadsChanged) if Instant::now() < end => std::thread::sleep(Duration::from_millis(2)),
-            result => return result,
-        }
     }
 }
 
@@ -580,7 +587,7 @@ unsafe fn worker() -> Result<(), String> {
             .build()
             .map_err(|error| error.to_string())?;
         let result = runtime.block_on(server::run(std::process::id(), &mut control, state()));
-        // Dropping the Rust owner never frees published code; SchedulerHook retains its page/table.
+        // Dropping the control owner never frees the retained detour or its registered unwind table.
         // Module pins and global callback/queue state also remain through process exit.
         result
     }

@@ -1,8 +1,8 @@
 #![cfg(feature = "il2cpp")]
 #![cfg(all(windows, target_arch = "x86_64"))]
 //! Owned native target only. Relocation/registered unwind and real suspension/restore tests.
+use eg_game_access::hooks::{self, HookError, HookState, RetainedHook};
 use eg_game_access::il2cpp::raw::{ExecuteTasks, MethodInfo};
-use eg_game_access::scheduler::{HookError, SchedulerHook};
 use std::ptr::NonNull;
 use std::sync::atomic::{AtomicBool, AtomicPtr, AtomicUsize, Ordering::SeqCst};
 use std::sync::{Arc, Mutex};
@@ -37,6 +37,28 @@ eg_handler_dispatch:
     .long 0
     .text
     .seh_endproc
+    .p2align 4
+    .global eg_batch_dispatch
+    .seh_proc eg_batch_dispatch
+eg_batch_dispatch:
+    sub rsp,40
+    .seh_stackalloc 40
+    .seh_endprologue
+    cmp byte ptr [rip + eg_owned_flag],0
+    add rsp,40
+    ret
+    .seh_endproc
+    .p2align 4
+    .global eg_call_dispatch
+    .seh_proc eg_call_dispatch
+eg_call_dispatch:
+    sub rsp,40
+    .seh_stackalloc 40
+    .seh_endprologue
+    call eg_batch_dispatch
+    add rsp,40
+    ret
+    .seh_endproc
 eg_owned_handler:
     mov eax,1
     ret
@@ -48,6 +70,8 @@ eg_owned_flag:
 unsafe extern "C-unwind" {
     fn eg_owned_dispatch(method: *const MethodInfo);
     fn eg_handler_dispatch(method: *const MethodInfo);
+    fn eg_batch_dispatch(method: *const MethodInfo);
+    fn eg_call_dispatch(method: *const MethodInfo);
 }
 static SERIAL: Mutex<()> = Mutex::new(());
 static ORIGINAL: AtomicPtr<u8> = AtomicPtr::new(std::ptr::null_mut());
@@ -73,78 +97,51 @@ unsafe extern "C-unwind" fn callback(method: *const MethodInfo) {
     // SAFETY: this authored target ignores but correctly forwards its argument.
     unsafe { original(method) };
 }
-fn prepare() -> SchedulerHook {
+fn original(hook: &RetainedHook) -> ExecuteTasks {
+    // SAFETY: these owned fixture hooks all have the exact ExecuteTasks ABI.
+    unsafe { std::mem::transmute(hook.trampoline()) }
+}
+fn prepare() -> RetainedHook {
     let target = eg_owned_dispatch as *const () as *mut u8;
     // SAFETY: compiled owned target has the exact assembly/signature/unwind above. Serialized
     // tests exclusively own its patch, and no other thread enters it or manipulates contexts.
     unsafe {
-        let bytes = std::slice::from_raw_parts(target, 11).try_into().unwrap();
-        SchedulerHook::prepare(NonNull::new(target).unwrap(), callback, bytes, 16).unwrap()
+        let bytes: [u8; 11] = std::slice::from_raw_parts(target, 11).try_into().unwrap();
+        RetainedHook::prepare(NonNull::new(target).unwrap(), callback as *const (), &bytes).unwrap()
     }
 }
 
-/// The test harness itself creates/finishes threads while another test holds SERIAL.
-/// A changed census rejects before commit, after all acquired suspensions have been
-/// released (a failed resume overrides that rejection with its own fatal error).
-/// Only this exact precommit outcome permits another bounded transaction attempt.
-fn commit_with_stable_census(hook: &mut SchedulerHook, installing: bool) {
-    let target = eg_owned_dispatch as *const () as *const u8;
-    let was_installed = hook.is_installed();
-    assert_ne!(was_installed, installing);
-    // SAFETY: SERIAL protects this authored target; all transaction callers are owned.
-    let before: [u8; 11] = unsafe { std::slice::from_raw_parts(target, 11) }.try_into().unwrap();
-    for attempt in 0..64 {
-        // SAFETY: same exclusive private target/retained callback contract as each caller;
-        // no target calls run here and every previous attempt has fully released suspension.
-        let result = unsafe { if installing { hook.install() } else { hook.restore_entry() } };
-        match result {
-            Ok(()) => {
-                assert_eq!(hook.is_installed(), installing);
-                return;
-            }
-            Err(HookError::ThreadsChanged) => {
-                assert_eq!(hook.is_installed(), was_installed, "rejected census attempt {attempt} changed installed state");
-                // SAFETY: ThreadsChanged is returned before patching and after successful resume.
-                assert_eq!(
-                    // SAFETY: ThreadsChanged is returned before patching and after successful resume.
-                    unsafe { std::slice::from_raw_parts(target, 11) },
-                    before,
-                    "rejected census attempt {attempt} changed entry bytes"
-                );
-                std::thread::sleep(std::time::Duration::from_millis(1));
-            }
-            Err(error) => panic!("unexpected transaction failure, never retried: {error}"),
-        }
-    }
-    panic!("thread census did not stabilize within 64 precommit attempts");
+fn toggle(hook: &RetainedHook, installing: bool) {
+    // SAFETY: SERIAL protects the owned target; original/callback/unwind storage stays retained.
+    unsafe { hooks::commit(&[(hook, installing)]) }.unwrap();
 }
 
 #[test]
 fn real_transaction_installs_forwards_restores_and_retains_the_original() {
     let _guard = SERIAL.lock().unwrap();
     CALLED.store(0, SeqCst);
-    let mut hook = prepare();
-    ORIGINAL.store(hook.original() as *const () as *mut u8, SeqCst);
-    commit_with_stable_census(&mut hook, true);
-    assert!(hook.is_installed());
+    let hook = prepare();
+    ORIGINAL.store(original(&hook) as *const () as *mut u8, SeqCst);
+    toggle(&hook, true);
+    assert!(hook.state() == HookState::Enabled);
     // SAFETY: authored target and callback implement the exact declared C-unwind signature.
     unsafe { eg_owned_dispatch(std::ptr::null()) };
     assert_eq!(CALLED.load(SeqCst), 1);
-    commit_with_stable_census(&mut hook, false);
+    toggle(&hook, false);
     // SAFETY: restored authored original and retained trampoline remain executable.
     unsafe {
         eg_owned_dispatch(std::ptr::null());
-        (hook.original())(std::ptr::null());
+        (original(&hook))(std::ptr::null());
     }
     assert_eq!(CALLED.load(SeqCst), 1);
-    assert!(!hook.is_installed());
+    assert_eq!(hook.state(), HookState::Disabled);
 }
 
 #[test]
 fn every_relocated_instruction_boundary_unwinds_for_both_branch_outcomes() {
     let _guard = SERIAL.lock().unwrap();
     let hook = prepare();
-    let body = hook.trampoline_address() as u64;
+    let body = hook.trampoline() as u64;
     let mut image_base = 0;
     // SAFETY: registered immutable table and process-retained code prepared by the adapter.
     let entry = unsafe { RtlLookupFunctionEntry(body, &raw mut image_base, std::ptr::null_mut()) };
@@ -184,28 +181,28 @@ fn stale_expected_bytes_are_rejected_without_changing_the_entry() {
     let mut stale = original;
     stale[6] ^= 1;
     // SAFETY: valid owned metadata/code; intentional stale snapshot must be rejected before patching.
-    let rejected = unsafe { SchedulerHook::prepare(NonNull::new(target).unwrap(), callback, stale, 16) };
+    let rejected = unsafe { RetainedHook::prepare(NonNull::new(target).unwrap(), callback as *const (), &stale) };
     assert!(matches!(rejected, Err(HookError::OwnershipLost)));
     // SAFETY: still the same live owned target.
     assert_eq!(unsafe { std::slice::from_raw_parts(target, 11) }, original);
 }
 
 #[test]
-fn handler_unwind_is_rejected_before_allocating_or_patching() {
+fn handler_unwind_is_refused_without_changing_the_entry() {
     let _guard = SERIAL.lock().unwrap();
     let target = eg_handler_dispatch as *const () as *mut u8;
     // SAFETY: valid owned function with authentic handler-bearing unwind metadata; never invoked.
     let bytes: [u8; 11] = unsafe { std::slice::from_raw_parts(target, 11) }.try_into().unwrap();
     // SAFETY: live owned target, expected prefix/ABI; unsupported handler record must be rejected.
-    let result = unsafe { SchedulerHook::prepare(NonNull::new(target).unwrap(), callback, bytes, 16) };
+    let result = unsafe { RetainedHook::prepare(NonNull::new(target).unwrap(), callback as *const (), &bytes) };
     assert!(matches!(result, Err(HookError::UnsupportedUnwind)));
 }
 
 #[test]
 fn concurrent_known_callers_survive_repeated_transactions_and_join_before_cleanup() {
     let _guard = SERIAL.lock().unwrap();
-    let mut hook = prepare();
-    ORIGINAL.store(hook.original() as *const () as *mut u8, SeqCst);
+    let hook = prepare();
+    ORIGINAL.store(original(&hook) as *const () as *mut u8, SeqCst);
     let running = Arc::new(AtomicBool::new(true));
     let mut callers = Callers {
         running: running.clone(),
@@ -221,24 +218,69 @@ fn concurrent_known_callers_survive_repeated_transactions_and_join_before_cleanu
             }
         }));
     }
-    let mut committed = 0;
     for _ in 0..40 {
         // SAFETY: exclusive target, explicit joined caller set, retained published code; no special
         // APC/context restoration, other patchers or outside actors can enter this private target.
-        let result = unsafe { if hook.is_installed() { hook.restore_entry() } else { hook.install() } };
-        match result {
-            Ok(()) => committed += 1,
-            Err(HookError::ThreadInEntry | HookError::ThreadsChanged) => {}
-            Err(error) => panic!("unexpected transaction failure: {error}"),
+        unsafe {
+            if hook.state() == HookState::Enabled {
+                hooks::commit(&[(&hook, false)])
+            } else {
+                hooks::commit(&[(&hook, true)])
+            }
         }
+        .unwrap();
     }
     running.store(false, SeqCst);
     for worker in callers.workers.drain(..) {
         worker.join().unwrap();
     }
-    if hook.is_installed() {
+    if hook.state() == HookState::Enabled {
         // Known callers have joined; unrelated test-harness threads may still finish.
-        commit_with_stable_census(&mut hook, false);
+        toggle(&hook, false);
     }
-    assert!(committed >= 2, "must actually exercise both installation and restoration");
+}
+
+#[test]
+fn copied_call_is_refused_before_a_hook_can_be_published() {
+    let _guard = SERIAL.lock().unwrap();
+    let target = eg_call_dispatch as *const () as *mut u8;
+    // SAFETY: immutable owned assembly and matching callback ABI, never called through a refused hook.
+    let bytes: [u8; 14] = unsafe { std::slice::from_raw_parts(target, 14) }.try_into().unwrap();
+    // SAFETY: module-owned fixture; SERIAL excludes every writer.
+    let result = unsafe { RetainedHook::prepare(NonNull::new(target).unwrap(), callback as *const (), &bytes) };
+    assert!(matches!(result, Err(HookError::UnsupportedPrefix)));
+    // SAFETY: same live fixture, still exclusively owned.
+    assert_eq!(unsafe { std::slice::from_raw_parts(target, 14) }, bytes);
+}
+
+#[test]
+fn batch_failure_restores_the_first_hook_and_reports_the_unknown_second_entry() {
+    use windows_sys::Win32::System::{
+        Diagnostics::Debug::FlushInstructionCache,
+        Memory::{PAGE_EXECUTE_READWRITE, VirtualProtect},
+        Threading::GetCurrentProcess,
+    };
+    let _guard = SERIAL.lock().unwrap();
+    let first = prepare();
+    let address = eg_batch_dispatch as *const () as *mut u8;
+    // SAFETY: immutable assembly-owned second target under SERIAL.
+    let bytes: [u8; 11] = unsafe { std::slice::from_raw_parts(address, 11) }.try_into().unwrap();
+    // SAFETY: owned target/callback have the same declared ABI.
+    let second = unsafe { RetainedHook::prepare(NonNull::new(address).unwrap(), callback as *const (), &bytes) }.unwrap();
+    // SAFETY: no caller enters this private second target. A forged byte causes
+    // failure after the first hook has been written in the stock transaction.
+    let error = unsafe {
+        let mut old = 0;
+        assert_ne!(VirtualProtect(address.cast(), 1, PAGE_EXECUTE_READWRITE, &raw mut old), 0);
+        address.write_volatile(0xcc);
+        let result = hooks::commit(&[(&first, true), (&second, true)]);
+        address.write_volatile(bytes[0]);
+        assert_ne!(FlushInstructionCache(GetCurrentProcess(), address.cast(), 1), 0);
+        let mut ignored = 0;
+        assert_ne!(VirtualProtect(address.cast(), 1, old, &raw mut ignored), 0);
+        result.unwrap_err()
+    };
+    assert_eq!(first.state(), HookState::Disabled);
+    assert_eq!(second.state(), HookState::Disabled);
+    assert!(matches!(error,HookError::Transaction {error:detour::Error::TargetModified,recovery} if !recovery.is_empty()));
 }

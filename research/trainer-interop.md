@@ -136,31 +136,39 @@ all 256 sampled values; they do not establish every possible culture/provider co
 
 ## Hook work remains separate
 
-The existing custom scheduler stays until a replacement passes its regressions. The original
+The custom scheduler has been replaced by stock `detour = 0.10.0`. The original
 inventory has 68 feature registrations over 74 owners: 54 detour targets, 31 byte patches and
 7 field sets. Gameplay detours follow the caller's thread, not a universal main-thread rule.
 Offline transitions and owner loss must turn effects off and report actual removal failures.
 
-The [bounded detour 0.10 trial](../tools/trainer-eval/hook-eval/detour-trial.md) exercises
-hand-written native fixtures only. It has not run on Unity or met the product acceptance list.
-Replacement must retain registered trampoline unwind coverage and process-lifetime owners,
-reject copied calls, and use multi-hook transactions with observed recovery on partial failure.
-Stock detour skips suspension failures in Threads::All, ignores rollback/resume errors, and
-has no callback for a final census check after suspending Threads::Only. Pre-suspending around
-commit is unsafe because commit first allocates and acquires its patch lock. A bounded dependency
-change or another backend is needed to preserve fail-closed transaction behavior. The authored
-Unity route must cover a throwing task, owner-exit restoration and injected partial failure
-before retiring the custom adapter.
+The [detour trial and product checks](../tools/trainer-eval/hook-eval/detour-trial.md) include
+the authored Unity ExecuteTasks route: a throwing task with one Rust cleanup, subsequent task
+progress, injected second-target failure with dispatcher recovery, owner-exit restoration and
+reinstallation by a new owner. No actual-game execution or gameplay-specific ABI proof is claimed.
 
-Keep scheduler/threads.rs for byte patches: its census, suspension failure handling and refusal
-when a thread is inside the target bytes are product behavior. Do not replace it with an
-unavailable public detour suspension scope. Do not build gameplay hooks on the specialized
-scheduler adapter; the general backend trial finishes before those features.
+`hooks::RetainedHook` pins modules and leaks each RawDetour immediately. It exposes no direct
+enable/disable/drop path. Transactions verify entry bytes/state, attempt explicit recovery to
+each prior state on failure, and report recovery errors or unknown state. Copied calls and other
+control flow are rejected. Original unwind codes cover unchanged relocated instruction offsets;
+the old adapter's two conditional jump-back instructions preserve unwind coverage at the tail.
+Simply registering metadata over the stock unconditional jump failed the retained virtual-unwind
+test at that jump. Detour still owns allocation, relocation, target patching and thread contexts.
+
+The accepted product policy is stock Threads::All best-effort suspension, matching the original
+MinHook policy. OpenThread/SuspendThread can fail for reasons other than exit; skipped threads
+remain a patch-time risk. The dependency also ignores resume and internal rollback errors. Our
+wrapper verifies hook recovery but cannot guarantee atomicity under arbitrary OS failures or
+prove every caller was suspended. These limits do not require another backend or dependency fork
+under the chosen scope. Handler/chained unwind records remain refused pending an actual target.
+
+The former scheduler/threads.rs is retained as hooks/threads.rs for byte patches: its census,
+suspension failure handling and refusal when a thread is inside the target bytes are unchanged.
+Detour has no public suspension scope for arbitrary stores.
 
 The suspended section avoids Rust allocations but still calls Win32 context, protection,
 cache and resume wrappers. Only NtQuerySystemInformation's census stub is checked. Other
 wrappers can be instrumented by overlays/security software and wait on a suspended thread's
-lock; deadlock freedom is not established. The unsafe scheduler/start contract excludes such
+lock; deadlock freedom is not established. The unsafe hook/start contract excludes such
 instrumentation. Checking a few additional NT stubs would not validate the entire wrapper path.
 
 ## Evidence and archive
@@ -171,7 +179,7 @@ verification with fake-host captures. Native fixture execution remains an explic
 owned-child check. No live-game access is authorized by a passing fixture.
 
 Retained tools: persistent-player; standalone unity-rust-host with its unity-fixture builder;
-native-inspect/inspect_pe.py; native-abi; and hook-eval until the backend decision. The original
+native-inspect/inspect_pe.py; native-abi; and hook-eval for focused ABI regressions. The original
 hook/ABI inventories stay in hooks-fields-audit. One-off loader, bridge, debugger, parser,
 main-thread identity and assembly-repair experiments are archived.
 

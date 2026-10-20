@@ -112,14 +112,16 @@ async fn wait<F: Future>(future: F, shared: &Shared, owner: Option<&Owner>, dura
     }
 }
 
-fn reap(owner: &mut Option<Owner>, shared: &Shared) {
+fn reap(owner: &mut Option<Owner>, backend: &mut impl Backend, shared: &Shared) -> Result<(), String> {
     if owner.as_ref().is_some_and(|owner| !owner.alive()) {
+        // Keep ownership fenced until removal is confirmed. Published callback
+        // storage remains retained even if the departing owner had running work.
+        backend.restore()?;
         owner.take();
         shared.metrics[11].store(0, SeqCst);
         shared.metrics[12].fetch_add(1, SeqCst);
-        // This slice cannot install gameplay features. Future effect owners must clear them on the
-        // engine thread and acknowledge that before allowing another client's takeover.
     }
+    Ok(())
 }
 async fn create(name: &str, shared: &Shared) -> io::Result<NamedPipeServer> {
     let security = security::PipeSecurity::current_user()?;
@@ -172,7 +174,7 @@ async fn serve_pipe(pid: u32, mut pipe: NamedPipeServer, backend: &mut impl Back
     let mut connected = false;
     shared.metrics[10].store(1, SeqCst);
     'connections: while !shared.stop.load(SeqCst) {
-        reap(&mut owner, shared);
+        reap(&mut owner, backend, shared)?;
         if connected {
             if let Err(error) = pipe.disconnect()
                 && error.raw_os_error() != Some(233)
@@ -202,7 +204,7 @@ async fn serve_pipe(pid: u32, mut pipe: NamedPipeServer, backend: &mut impl Back
                 }
                 Ok(Err(error)) => return Err(error.to_string()),
                 Err(Interrupted::Stop) => return Ok(()),
-                Err(Interrupted::OwnerExited) => reap(&mut owner, shared),
+                Err(Interrupted::OwnerExited) => reap(&mut owner, backend, shared)?,
                 Err(Interrupted::Deadline) => {}
             }
         }
@@ -222,7 +224,7 @@ async fn serve_pipe(pid: u32, mut pipe: NamedPipeServer, backend: &mut impl Back
         let response = match received {
             Ok(Err(RequestReadError::Protocol(_))) => failure(ResponseCode::Refused, "Invalid or unsupported request frame; nothing was run"),
             Ok(Ok(request)) => {
-                reap(&mut owner, shared);
+                reap(&mut owner, backend, shared)?;
                 if owner.as_ref().is_some_and(|owner| owner.pid != client.pid || owner.created != client.created) {
                     failure(ResponseCode::Refused, "Another live application owns this helper; nothing was run")
                 } else if owner.is_none() && request != Request::Discover {

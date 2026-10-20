@@ -119,6 +119,7 @@ impl Backend for FakeBackend {
 struct Fixture {
     child: Child,
     directory: PathBuf,
+    expected_restores: u64,
 }
 impl Fixture {
     fn spawn(mode: &str) -> Self {
@@ -127,7 +128,11 @@ impl Fixture {
         let directory = std::env::temp_dir().join(format!("eg-helper-server-{}-{nonce}-{sequence}", std::process::id()));
         fs::create_dir(&directory).unwrap();
         let child = spawn_child("server", mode, &directory, 0);
-        let mut fixture = Self { child, directory };
+        let mut fixture = Self {
+            child,
+            directory,
+            expected_restores: 1,
+        };
         fixture.wait_file("ready");
         fixture
     }
@@ -167,7 +172,7 @@ impl Fixture {
         loop {
             if let Some(status) = self.child.try_wait().unwrap() {
                 assert!(status.success(), "server failed: {}", self.log());
-                assert_eq!(self.counters()[4], 1, "restore must run once");
+                assert_eq!(self.counters()[4], self.expected_restores, "shutdown/owner-exit restoration count");
                 return;
             }
             assert!(Instant::now() < deadline, "server did not stop: {}", self.log());
@@ -293,8 +298,9 @@ fn owner_survives_connections_and_rejects_foreign_pid_before_backend() {
 }
 
 #[test]
-fn exited_owner_allows_discovery_by_another_process() {
+fn exited_owner_restores_before_discovery_by_another_process() {
     let mut fixture = Fixture::spawn("normal");
+    fixture.expected_restores = 2;
     let mut foreign = spawn_child("client", "hold", &fixture.directory, fixture.child.id());
     fixture.wait_file("foreign-ready");
     assert_eq!(fs::read_to_string(fixture.directory.join("foreign-code")).unwrap(), "0");
