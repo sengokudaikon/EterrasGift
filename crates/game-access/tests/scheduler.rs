@@ -105,6 +105,7 @@ fn commit_with_stable_census(hook: &mut SchedulerHook, installing: bool) {
                 assert_eq!(hook.is_installed(), was_installed, "rejected census attempt {attempt} changed installed state");
                 // SAFETY: ThreadsChanged is returned before patching and after successful resume.
                 assert_eq!(
+                    // SAFETY: ThreadsChanged is returned before patching and after successful resume.
                     unsafe { std::slice::from_raw_parts(target, 11) },
                     before,
                     "rejected census attempt {attempt} changed entry bytes"
@@ -157,6 +158,7 @@ fn every_relocated_instruction_boundary_unwinds_for_both_branch_outcomes() {
             // SAFETY: initialized Windows context and sufficiently large owned synthetic stack.
             #[repr(C, align(16))]
             struct Aligned(CONTEXT);
+            // SAFETY: initialized Windows context and sufficiently large owned synthetic stack.
             let mut storage = Aligned(unsafe { std::mem::zeroed() });
             let context = &mut storage.0;
             context.Rip = body + offset;

@@ -78,6 +78,7 @@ impl ThreadSet {
             query,
             // SAFETY: local identity queries take no arguments.
             process: unsafe { GetCurrentProcessId() },
+            // SAFETY: argument-free current Windows thread identity query.
             current: unsafe { GetCurrentThreadId() },
         };
         set.census()?;

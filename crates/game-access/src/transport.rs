@@ -1,4 +1,6 @@
 //! One-request transport and explicit uncertainty. Dropping a send future cannot retract submitted work.
+#![forbid(unsafe_code)]
+
 use crate::protocol::{ProtocolError, REQUEST_SIZE, RESPONSE_HEADER_SIZE, Request, RequestFrame, Response};
 use std::{future::Future, io};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};

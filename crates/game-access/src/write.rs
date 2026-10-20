@@ -2,6 +2,8 @@
 //! These codecs grant no process access or write permission. Host generation,
 //! profile, policy and main-thread runtime admission remain independent checks.
 
+#![forbid(unsafe_code)]
+
 use crate::{
     forge::{self, AffixSnapshot, ForgeSnapshot},
     protocol::{DispatcherSpec, MAGIC, MAX_RESPONSE_SIZE, ProtocolError, REQUEST_SIZE, Response, ResponseCode},

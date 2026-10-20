@@ -2,6 +2,8 @@
 //! (`crates/ui/ui/tokens.slint`) and one SVG per icon (`crates/ui/ui/icons/`). With `--check` it writes nothing and
 //! fails when the generated files are out of date.
 
+#![forbid(unsafe_code)]
+
 use serde_json::{Map, Value};
 use std::fmt::Write as _;
 use std::fs;

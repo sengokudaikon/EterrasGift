@@ -59,6 +59,7 @@ fn decode(units: &[u16]) -> Result<NumericDisplay, Unavailable> {
 impl RuntimeAccess {
     // All helpers inherit format_numeric_display's live immutable metadata and graph contract.
     unsafe fn formatter_hierarchy(&self, stat: Class, localized: Class, base: Class, entry: Class) -> Result<(), Unavailable> {
+        // SAFETY: inherits format_numeric_display's retained runtime/metadata, attached thread and synchronous rooted graph-access contract.
         unsafe {
             if [stat, localized, base, entry].iter().any(|class| class.is_null())
                 || (self.class_parent)(stat) != localized
@@ -71,6 +72,7 @@ impl RuntimeAccess {
         }
     }
     unsafe fn formatter_core(&self, name: &CStr, code: i32) -> Result<Class, Unavailable> {
+        // SAFETY: inherits format_numeric_display's retained runtime/metadata, attached thread and synchronous rooted graph-access contract.
         unsafe {
             let image = (self.corlib)();
             if image.is_null() {
@@ -85,6 +87,7 @@ impl RuntimeAccess {
         }
     }
     unsafe fn formatter_enum(&self, class: Class, i32_class: Class) -> Result<(), Unavailable> {
+        // SAFETY: inherits format_numeric_display's retained runtime/metadata, attached thread and synchronous rooted graph-access contract.
         unsafe {
             if class.is_null() || !(self.class_enum)(class) || !(self.class_value)(class) {
                 return Err(Unavailable::Contract("exact Int32 enum class"));
@@ -97,6 +100,7 @@ impl RuntimeAccess {
         }
     }
     unsafe fn formatter_field(&self, owner: Class, name: &CStr, expected: Class, code: i32) -> Result<Ptr, Unavailable> {
+        // SAFETY: inherits format_numeric_display's retained runtime/metadata, attached thread and synchronous rooted graph-access contract.
         unsafe {
             let field = self.field(owner, name)?;
             if (self.field_parent)(field) != owner || (self.field_flags)(field) & (0x10 | 0x40) != 0 {
@@ -110,6 +114,7 @@ impl RuntimeAccess {
         }
     }
     unsafe fn formatter_rounding(&self, info: &Root<'_, '_>, owner: Class, name: &CStr, rounding: Class) -> Result<(), Unavailable> {
+        // SAFETY: inherits format_numeric_display's retained runtime/metadata, attached thread and synchronous rooted graph-access contract.
         unsafe {
             let field = self.formatter_field(owner, name, rounding, 0x11)?;
             let object = info.target().ok_or(Unavailable::Context)?;
@@ -123,6 +128,7 @@ impl RuntimeAccess {
         }
     }
     unsafe fn formatter_boolean(&self, info: &Root<'_, '_>, owner: Class, name: &CStr, boolean: Class) -> Result<(), Unavailable> {
+        // SAFETY: inherits format_numeric_display's retained runtime/metadata, attached thread and synchronous rooted graph-access contract.
         unsafe {
             let field = self.formatter_field(owner, name, boolean, 0x02)?;
             let mut value = 0_u8;
@@ -134,6 +140,7 @@ impl RuntimeAccess {
         }
     }
     unsafe fn formatter_method(&self, api: raw::InvocationApi, owner: Class, string: Class, parameters: &[Class; 5]) -> Result<NonNull<raw::MethodInfo>, Unavailable> {
+        // SAFETY: inherits format_numeric_display's retained runtime/metadata, attached thread and synchronous rooted graph-access contract.
         unsafe {
             let mut iterator = std::ptr::null_mut();
             let mut found = None;
@@ -182,6 +189,7 @@ impl RuntimeAccess {
         if !root.belongs_to(attached) {
             return Err(Unavailable::Context);
         }
+        // SAFETY: inherits format_numeric_display's retained runtime/metadata, attached thread and synchronous rooted graph-access contract.
         unsafe {
             let object = root.target().ok_or(Unavailable::Context)?;
             if (self.object_class)(object.as_ptr()) != string {
@@ -235,6 +243,7 @@ impl RuntimeAccess {
         if !property_info.belongs_to(attached) {
             return Err(Unavailable::Context);
         }
+        // SAFETY: inherits format_numeric_display's retained runtime/metadata, attached thread and synchronous rooted graph-access contract.
         unsafe {
             let images = self.images()?;
             let stat = self.class(&images, c"", c"StatPropertyInfo")?;
@@ -502,6 +511,7 @@ mod tests {
     unsafe extern "C-unwind" fn methods(_: Class, iter: *mut Ptr) -> *const raw::MethodInfo {
         // SAFETY: bounded iterator storage supplied by formatter_method.
         let index = unsafe { *iter } as usize;
+        // SAFETY: caller owns this writable metadata iterator slot; the stored next index is only a sentinel.
         unsafe { *iter = ptr(index + 1) };
         if index == 0 {
             ptr(METHOD)
@@ -618,6 +628,7 @@ mod tests {
         let other_attached = other.attach().unwrap();
         // SAFETY: different context must refuse before opaque metadata is accessed.
         assert!(matches!(
+            // SAFETY: different context must refuse before opaque metadata is accessed.
             unsafe { a.format_numeric_display(&other_attached, api(), &r, 1.0, 0, 2) },
             Err(Unavailable::Context)
         ));
@@ -673,6 +684,7 @@ mod tests {
         let r = unsafe { attached.root(nn(99)) }.unwrap();
         MODE.set(20);
         assert!(matches!(
+            // SAFETY: fake field metadata specifies one byte; noncanonical Boolean data is rejected before use.
             unsafe { a.formatter_boolean(&r, ptr(OWNER), c"flag", ptr(EXPECTED)) },
             Err(Unavailable::Contract("Boolean representation"))
         ));
@@ -697,17 +709,21 @@ mod tests {
         let attached = ctx.attach().unwrap();
         // SAFETY: fake root keeps immutable authored UTF16 storage live.
         let r = unsafe { attached.root(nn(99)) }.unwrap();
+        // SAFETY: fake roots retain immutable authored UTF-16 storage; wrong context/class/bounds must refuse before character access.
         assert_eq!(unsafe { a.formatter_string(&attached, &r, ptr(STRING)) }.unwrap().display, "12,5🌿");
         MODE.set(40);
+        // SAFETY: fake roots retain immutable authored UTF-16 storage; wrong context/class/bounds must refuse before character access.
         assert!(unsafe { a.formatter_string(&attached, &r, ptr(STRING)) }.is_err());
         assert_eq!(LENGTHS.get(), 1, "wrong class refuses before length/chars");
         for mode in [41, 42, 43] {
             MODE.set(mode);
+            // SAFETY: fake roots retain immutable authored UTF-16 storage; wrong context/class/bounds must refuse before character access.
             assert!(unsafe { a.formatter_string(&attached, &r, ptr(STRING)) }.is_err());
         }
         let other = context();
         let foreign = other.attach().unwrap();
         let lengths = LENGTHS.get();
+        // SAFETY: fake roots retain immutable authored UTF-16 storage; wrong context/class/bounds must refuse before character access.
         assert!(matches!(unsafe { a.formatter_string(&foreign, &r, ptr(STRING)) }, Err(Unavailable::Context)));
         assert_eq!(LENGTHS.get(), lengths);
         FAIL_ROOT.set(true);

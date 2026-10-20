@@ -1,6 +1,8 @@
 //! Protocol28 conditional CURRENT-player request; no write authority or replay ledger.
 //! Expected identities are comparison tokens only. Never dereference wire tokens.
 
+#![forbid(unsafe_code)]
+
 use crate::{
     fields::{AttackLeechObservation, AttackLeechTarget, ObservedObjectIdentity, ObservedRate},
     protocol::{DispatcherSpec, MAGIC, ProtocolError, REQUEST_SIZE},

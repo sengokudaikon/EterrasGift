@@ -5,6 +5,8 @@
 //! and level requirement. Values must fit a byte and minimum must not exceed
 //! maximum. This intentionally excludes locale, game version and rarity names.
 
+#![forbid(unsafe_code)]
+
 use crate::protocol::ProtocolError;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

@@ -24,6 +24,7 @@ fn completed(handle_version: i32, operation_version: i32, status: i32, reference
 impl RuntimeAccess {
     // All internal helpers inherit read_game_locale's attached-runtime and exclusive graph contract.
     unsafe fn locale_system(&self, name: &CStr) -> Result<Class, DiscoveryError> {
+        // SAFETY: inherits read_game_locale's retained runtime/metadata, attached thread and synchronous rooted graph-access contract.
         unsafe {
             let image = (self.corlib)();
             if image.is_null() {
@@ -36,6 +37,7 @@ impl RuntimeAccess {
     }
 
     unsafe fn locale_field_class(&self, field: Ptr) -> Result<Class, DiscoveryError> {
+        // SAFETY: inherits read_game_locale's retained runtime/metadata, attached thread and synchronous rooted graph-access contract.
         unsafe {
             let ty = (self.field_type)(field);
             if ty.is_null() || (self.type_byref)(ty) {
@@ -46,6 +48,7 @@ impl RuntimeAccess {
     }
 
     unsafe fn locale_field(&self, owner: Class, name: &CStr, expected: Class) -> Result<Ptr, DiscoveryError> {
+        // SAFETY: inherits read_game_locale's retained runtime/metadata, attached thread and synchronous rooted graph-access contract.
         unsafe {
             let field = self.field(owner, name)?;
             if (self.field_flags)(field) & 0x10 != 0 || self.locale_field_class(field)? != expected {
@@ -56,6 +59,7 @@ impl RuntimeAccess {
     }
 
     unsafe fn locale_named_class(&self, class: Class, namespace: &CStr, name: &CStr, value: bool) -> Result<(), DiscoveryError> {
+        // SAFETY: inherits read_game_locale's retained runtime/metadata, attached thread and synchronous rooted graph-access contract.
         unsafe {
             if class.is_null() {
                 return Err(unsupported("locale named class"));
@@ -75,6 +79,7 @@ impl RuntimeAccess {
     }
 
     unsafe fn locale_i32(&self, object: &Root<'_, '_>, owner: Class, name: &CStr) -> Result<i32, DiscoveryError> {
+        // SAFETY: inherits read_game_locale's retained runtime/metadata, attached thread and synchronous rooted graph-access contract.
         unsafe {
             self.check_object(owner, target(object)?)?;
             let field = self.locale_field(owner, name, self.locale_system(c"Int32")?)?;
@@ -92,6 +97,7 @@ impl RuntimeAccess {
         name: &CStr,
         expected: Class,
     ) -> Result<Option<Root<'a, 'r>>, DiscoveryError> {
+        // SAFETY: inherits read_game_locale's retained runtime/metadata, attached thread and synchronous rooted graph-access contract.
         unsafe {
             self.check_object(owner, target(object)?)?;
             if expected.is_null() || (self.class_value)(expected) {
@@ -109,6 +115,7 @@ impl RuntimeAccess {
     }
 
     unsafe fn locale_no_cctor(&self, class: Class) -> Result<(), DiscoveryError> {
+        // SAFETY: inherits read_game_locale's retained runtime/metadata, attached thread and synchronous rooted graph-access contract.
         unsafe {
             let mut iterator = std::ptr::null_mut();
             for _ in 0..100_000 {
@@ -133,6 +140,7 @@ impl RuntimeAccess {
         name: &CStr,
         expected: Class,
     ) -> Result<Root<'a, 'r>, DiscoveryError> {
+        // SAFETY: inherits read_game_locale's retained runtime/metadata, attached thread and synchronous rooted graph-access contract.
         unsafe {
             self.check_object(owner, target(object)?)?;
             let field = self.locale_field(owner, name, expected)?;
@@ -152,6 +160,7 @@ impl RuntimeAccess {
     }
 
     unsafe fn locale_alive(&self, object: &Root<'_, '_>, owner: Class) -> Result<(), DiscoveryError> {
+        // SAFETY: inherits read_game_locale's retained runtime/metadata, attached thread and synchronous rooted graph-access contract.
         unsafe {
             self.check_object(owner, target(object)?)?;
             let field = self.locale_field(owner, c"m_CachedPtr", self.locale_system(c"IntPtr")?)?;
@@ -165,6 +174,7 @@ impl RuntimeAccess {
     }
 
     unsafe fn locale_state_class(&self, class: Class) -> Result<(), DiscoveryError> {
+        // SAFETY: inherits read_game_locale's retained runtime/metadata, attached thread and synchronous rooted graph-access contract.
         unsafe {
             self.locale_named_class(class, c"UnityEngine.ResourceManagement.AsyncOperations", c"AsyncOperationStatus", true)?;
             if !(self.class_enum)(class) {
@@ -179,6 +189,7 @@ impl RuntimeAccess {
     }
 
     unsafe fn locale_text(&self, root: Option<&Root<'_, '_>>, string_class: Class) -> Result<String, DiscoveryError> {
+        // SAFETY: inherits read_game_locale's retained runtime/metadata, attached thread and synchronous rooted graph-access contract.
         unsafe {
             let Some(root) = root else {
                 return Ok(String::new());
@@ -224,6 +235,7 @@ impl RuntimeAccess {
     /// Metadata cannot establish those body permissions.
     /// Handle generic fields are boxed/read through public APIs; no Rust struct layout is copied.
     pub unsafe fn read_game_locale(&self, attached: &AttachedThread<'_>, api: raw::InvocationApi) -> Result<GameLocale, DiscoveryError> {
+        // SAFETY: inherits read_game_locale's retained runtime/metadata, attached thread and synchronous rooted graph-access contract.
         unsafe {
             let status = self.status(attached)?;
             if status.online || status.manager == 0 {

@@ -167,9 +167,11 @@ struct Module {
 fn inventory(pid: u32) -> Result<Vec<Module>> {
     // SAFETY: read-only module metadata snapshot; x64 identity is established by preflight.
     let snapshot = owned(unsafe { CreateToolhelp32Snapshot(TH32CS_SNAPMODULE, pid) })?;
+    // SAFETY: zero initialization is valid for the SDK module record; dwSize is set before use.
     let mut entry: MODULEENTRY32W = unsafe { std::mem::zeroed() };
     entry.dwSize = std::mem::size_of::<MODULEENTRY32W>() as u32;
     let mut modules = Vec::new();
+    // SAFETY: owned snapshot and initialized size-tagged output stay alive through enumeration.
     let mut more = unsafe { Module32FirstW(snapshot.as_raw_handle(), &mut entry) };
     while more != 0 {
         if modules.len() >= 4096 {
@@ -184,8 +186,10 @@ fn inventory(pid: u32) -> Result<Vec<Module>> {
             size: entry.modBaseSize,
             path: canonical(Path::new(&OsString::from_wide(&entry.szExePath[..len])))?,
         });
+        // SAFETY: same owned snapshot and initialized output as Module32FirstW.
         more = unsafe { Module32NextW(snapshot.as_raw_handle(), &mut entry) };
     }
+    // SAFETY: argument-free thread-local error query immediately follows failed enumeration.
     if unsafe { GetLastError() } != ERROR_NO_MORE_FILES {
         return Err(last());
     }
@@ -230,6 +234,7 @@ fn reject_helpers(modules: &[Module], artifact: &HelperArtifact) -> Result<()> {
     Ok(())
 }
 fn policies(process: &OwnedHandle) -> Result<()> {
+    // SAFETY: owned query-capable process handle and correctly sized local mitigation-policy buffers.
     unsafe {
         let mut process_machine = 0;
         let mut native_machine = 0;
@@ -481,12 +486,14 @@ fn call(process: Arc<ProcessLease>, address: u64, input: &[u8], config: Option<B
         consumed: false,
     };
     let mut written = 0;
+    // SAFETY: PendingCall owns process/allocation; the initialized input bytes live through this bounded synchronous copy.
     if unsafe { WriteProcessMemory(pending.process.handle.as_raw_handle(), allocation, input.as_ptr().cast(), input.len(), &mut written) } == 0 || written != input.len() {
         return Err(last());
     }
     // SAFETY: the unsafe start/stop caller establishes this exact system/helper remote entry ABI.
     // The input remains owned even if the thread starts before CreateRemoteThread returns.
     let entry: unsafe extern "system" fn(*mut c_void) -> u32 = unsafe { std::mem::transmute(address as usize) };
+    // SAFETY: validated remote entry and ABI; PendingCall retains process, allocation and input through remote completion.
     let thread = owned(unsafe {
         CreateRemoteThread(
             pending.process.handle.as_raw_handle(),
@@ -506,6 +513,7 @@ fn call(process: Arc<ProcessLease>, address: u64, input: &[u8], config: Option<B
 fn resolve_loader(modules: &[Module]) -> Result<(u64, ModuleIdentity, Vec<u8>)> {
     // Resolve the ordinary system export, then identify the module that actually contains the
     // resolved address. Forwarding and different remote ASLR bases are handled explicitly.
+    // SAFETY: read-only local system export/module lookup; remote ASLR and module identity are checked before use.
     unsafe {
         let kernel = GetModuleHandleW(windows_sys::core::w!("kernel32.dll"));
         if kernel.is_null() {
@@ -602,6 +610,7 @@ impl RemoteHelper {
     ) -> std::result::Result<Self, RemoteFailure> {
         let mut sent = false;
         let prepare = (|| {
+            // SAFETY: argument-free local process ID query used to refuse self-injection.
             if target.pid == 0 || target.pid == unsafe { GetCurrentProcessId() } || timeout.is_zero() || timeout > Duration::from_secs(30) {
                 return invalid("bootstrap target or timeout");
             }
@@ -625,6 +634,7 @@ impl RemoteHelper {
             artifact.verify_unchanged()?;
             let (loader, loader_identity, loader_bytes) = resolve_loader(&inventory)?;
             admit()?;
+            // SAFETY: validated target PID and explicit noninheritable bootstrap rights; the returned handle is immediately owned.
             let handle = owned(unsafe {
                 OpenProcess(
                     PROCESS_QUERY_INFORMATION

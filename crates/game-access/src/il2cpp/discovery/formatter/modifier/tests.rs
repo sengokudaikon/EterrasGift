@@ -228,6 +228,7 @@ unsafe extern "C-unwind" fn free(handle: Ptr) {
     });
 }
 fn context() -> ThreadContext {
+    // SAFETY: fake exports implement the declared ABI and static code lifetime for this owned thread-local runtime.
     unsafe {
         ThreadContext::new(raw::Api {
             domain_get: domain,
@@ -242,6 +243,7 @@ fn context() -> ThreadContext {
 }
 unsafe extern "C-unwind" fn assemblies(_: *const raw::Domain, count: *mut usize) -> *const Ptr {
     metadata();
+    // SAFETY: caller supplies the correctly typed writable metadata output slot.
     unsafe { *count = 1 };
     static VALUES: [usize; 1] = [GAME];
     VALUES.as_ptr().cast()
@@ -255,10 +257,12 @@ unsafe extern "C-unwind" fn corlib() -> Ptr {
     ptr(CORLIB)
 }
 unsafe extern "C-unwind" fn api_corlib() -> *const c_void {
+    // SAFETY: forward valid fake metadata/name tokens without dereferencing sentinel pointers.
     unsafe { corlib().cast() }
 }
 unsafe extern "C-unwind" fn from_name(image: Ptr, ns: *const c_char, name: *const c_char) -> Class {
     metadata();
+    // SAFETY: caller supplies live NUL-terminated metadata names for the duration of this fake export.
     let (ns, name) = unsafe { (CStr::from_ptr(ns).to_bytes(), CStr::from_ptr(name).to_bytes()) };
     let id = if image as usize == CORLIB {
         assert_eq!(ns, b"System");
@@ -288,6 +292,7 @@ unsafe extern "C-unwind" fn from_name(image: Ptr, ns: *const c_char, name: *cons
     class(id)
 }
 unsafe extern "C-unwind" fn api_from_name(image: *const c_void, ns: *const c_char, name: *const c_char) -> Class {
+    // SAFETY: forward valid fake metadata/name tokens without dereferencing sentinel pointers.
     unsafe { from_name(image.cast_mut().cast(), ns, name) }
 }
 unsafe extern "C-unwind" fn parent(value: Class) -> Class {
@@ -315,7 +320,9 @@ unsafe extern "C-unwind" fn parent(value: Class) -> Class {
 }
 unsafe extern "C-unwind" fn nested(value: Class, iter: *mut Ptr) -> Class {
     metadata();
+    // SAFETY: iterator is one caller-owned writable pointer slot; sentinel values are only compared, never dereferenced.
     let index = unsafe { *iter } as usize;
+    // SAFETY: iterator is one caller-owned writable pointer slot; sentinel values are only compared, never dereferenced.
     unsafe { *iter = ptr(index + 1) };
     if index > 0 {
         return std::ptr::null_mut();
@@ -353,6 +360,7 @@ unsafe extern "C-unwind" fn class_image(value: Class) -> Ptr {
 }
 unsafe extern "C-unwind" fn get_field(value: Class, name: *const c_char) -> Ptr {
     metadata();
+    // SAFETY: caller supplies live NUL-terminated metadata names for the duration of this fake export.
     let name = unsafe { CStr::from_ptr(name).to_bytes() };
     let f = match (ci(value), name) {
         (BASE, b"<Value>k__BackingField") => VALUE,
@@ -467,12 +475,14 @@ unsafe extern "C-unwind" fn is_enum(value: *const raw::Class) -> bool {
 }
 unsafe extern "C-unwind" fn enum_base(value: Class) -> *const raw::Type {
     metadata();
+    // SAFETY: forward valid fake metadata/name tokens without dereferencing sentinel pointers.
     assert!(unsafe { is_enum(value) });
     S.with_borrow_mut(|s| s.enum_bases += 1);
     ty(if fault() == Fault::EnumBase && ci(value) == MOD { BYTE } else { I32 })
 }
 unsafe extern "C-unwind" fn value_size(_: Class, alignment: *mut u32) -> i32 {
     metadata();
+    // SAFETY: caller supplies the correctly typed writable metadata output slot.
     unsafe { *alignment = 4 };
     4
 }
@@ -535,6 +545,7 @@ unsafe extern "C-unwind" fn get(value: *mut raw::Object, field: Ptr, out: Ptr) {
     rooted(value as usize);
     let f = fi(field);
     S.with_borrow_mut(|s| s.reads.push(f));
+    // SAFETY: the fixture field token selects the exact scalar/reference width written into the caller's output slot.
     unsafe {
         match f {
             PROPERTY_FIELD => {
@@ -567,7 +578,9 @@ unsafe extern "C-unwind" fn get(value: *mut raw::Object, field: Ptr, out: Ptr) {
 unsafe extern "C-unwind" fn methods(value: Class, iter: *mut Ptr) -> *const raw::MethodInfo {
     metadata();
     assert_eq!(ci(value), FORMATTER);
+    // SAFETY: iterator is one caller-owned writable pointer slot; sentinel values are only compared, never dereferenced.
     let i = unsafe { *iter } as usize;
+    // SAFETY: iterator is one caller-owned writable pointer slot; sentinel values are only compared, never dereferenced.
     unsafe { *iter = ptr(i + 1) };
     if i == 0 { ptr(METHOD) } else { std::ptr::null() }
 }
@@ -606,6 +619,7 @@ unsafe extern "C-unwind" fn invoke(method: *const raw::MethodInfo, receiver: Ptr
     for o in [INPUT, PROPERTY_OBJECT, LIST_OBJECT, ENTRY1, ENTRY2] {
         rooted(o)
     }
+    // SAFETY: checked invocation supplies five initialized f32/reference/Int32/bool/bool arguments with writable exception output.
     unsafe {
         let args = std::slice::from_raw_parts(args, 5);
         assert_eq!(*args[0].cast::<f32>(), S.with_borrow(|s| s.values[0]));
@@ -618,6 +632,7 @@ unsafe extern "C-unwind" fn invoke(method: *const raw::MethodInfo, receiver: Ptr
     match fault() {
         Fault::NullReturn => std::ptr::null_mut(),
         Fault::Exception => {
+            // SAFETY: checked invocation supplies one writable exception pointer; EXCEPTION is a live fake object token.
             unsafe { *error = ptr(EXCEPTION) };
             std::ptr::null_mut()
         }
@@ -712,6 +727,7 @@ fn fixture() -> (RuntimeAccess, raw::InvocationApi) {
 fn run(a: &RuntimeAccess, api: raw::InvocationApi, f: impl FnOnce(&AttachedThread<'_>, &StrongRoot<'_, '_>)) {
     let ctx = context();
     let attached = ctx.attach().unwrap();
+    // SAFETY: INPUT is a live object token accepted by this thread-local fake; its lease outlives the root.
     let input = unsafe { attached.root(nn(INPUT)) }.unwrap();
     f(&attached, &input);
     drop(input);
@@ -725,6 +741,7 @@ fn full_entry_keeps_all_graph_roots_and_passes_exact_values_for_every_modifier()
     run(&a, api, |attached, input| {
         for modifier in 0..=3 {
             S.with_borrow_mut(|s| s.modifier = modifier);
+            // SAFETY: the authored fake owns rooted input/storage; injected metadata/input failures must refuse before invalid access.
             let out = unsafe { a.format_numeric_modifier(attached, api, input) }.unwrap();
             assert_eq!(out.value_bits, 1.25_f32.to_bits());
             assert_eq!(out.minimum_bits, 0_f32.to_bits());
@@ -748,6 +765,7 @@ fn full_entry_preserves_inverted_ranges_and_signed_zero_comparison_without_norma
     run(&a, api, |attached, input| {
         for (minimum, maximum, varying) in [(3_f32, -2_f32, true), (-0_f32, 0_f32, false), (2_f32, 2_f32, false)] {
             S.with_borrow_mut(|s| s.values = [100.0, minimum, maximum]);
+            // SAFETY: the authored fake owns rooted input/storage; injected metadata/input failures must refuse before invalid access.
             let out = unsafe { a.format_numeric_modifier(attached, api, input) }.unwrap();
             assert_eq!(out.value_bits, 100_f32.to_bits());
             assert_eq!(out.minimum_bits, minimum.to_bits());
@@ -761,9 +779,11 @@ fn full_entry_refuses_foreign_attachment_before_metadata_or_field_copy() {
     let (a, api) = fixture();
     let ctx = context();
     let attached = ctx.attach().unwrap();
+    // SAFETY: INPUT is a live object token accepted by this thread-local fake; its lease outlives the root.
     let input = unsafe { attached.root(nn(INPUT)) }.unwrap();
     let ctx2 = context();
     let attached2 = ctx2.attach().unwrap();
+    // SAFETY: the authored fake owns rooted input/storage; injected metadata/input failures must refuse before invalid access.
     assert!(matches!(unsafe { a.format_numeric_modifier(&attached2, api, &input) }, Err(Unavailable::Context)));
     S.with_borrow(|s| {
         assert_eq!(s.metadata, 0);
@@ -785,6 +805,7 @@ fn full_entry_requires_exact_modifier_identity_hierarchy_closed_reference_and_im
     ] {
         let (a, api) = fixture();
         S.with_borrow_mut(|s| s.fault = fault);
+        // SAFETY: the authored fake owns rooted input/storage; injected metadata/input failures must refuse before invalid access.
         run(&a, api, |attached, input| assert!(unsafe { a.format_numeric_modifier(attached, api, input) }.is_err()));
         S.with_borrow(|s| {
             assert!(s.reads.is_empty());
@@ -811,6 +832,7 @@ fn full_entry_checks_every_destination_before_copy_wrong_owner_flags_width_ident
                 s.field = f;
             });
             run(&a, api, |attached, input| {
+                // SAFETY: the authored fake owns rooted input/storage; injected metadata/input failures must refuse before invalid access.
                 assert!(unsafe { a.format_numeric_modifier(attached, api, input) }.is_err(), "{f} {fault:?}")
             });
             S.with_borrow(|s| {
@@ -825,6 +847,7 @@ fn full_entry_requires_exact_int32_enum_and_never_queries_base_for_nonenum() {
     for fault in [Fault::NonEnum, Fault::EnumBase] {
         let (a, api) = fixture();
         S.with_borrow_mut(|s| s.fault = fault);
+        // SAFETY: the authored fake owns rooted input/storage; injected metadata/input failures must refuse before invalid access.
         run(&a, api, |attached, input| assert!(unsafe { a.format_numeric_modifier(attached, api, input) }.is_err()));
         S.with_borrow(|s| {
             assert!(s.reads.is_empty());
@@ -838,6 +861,7 @@ fn full_entry_roots_child_immediately_and_refuses_null_derived_or_failed_handle_
     for fault in [Fault::NullProperty, Fault::DerivedProperty, Fault::ChildRoot] {
         let (a, api) = fixture();
         S.with_borrow_mut(|s| s.fault = fault);
+        // SAFETY: the authored fake owns rooted input/storage; injected metadata/input failures must refuse before invalid access.
         run(&a, api, |attached, input| assert!(unsafe { a.format_numeric_modifier(attached, api, input) }.is_err()));
         S.with_borrow(|s| {
             assert_eq!(s.reads, [PROPERTY_FIELD]);
@@ -853,6 +877,7 @@ fn full_entry_refuses_every_nonfinite_endpoint_and_unknown_modtype_before_format
             let (a, api) = fixture();
             S.with_borrow_mut(|s| s.values[index] = value);
             run(&a, api, |attached, input| {
+                // SAFETY: the authored fake owns rooted input/storage; injected metadata/input failures must refuse before invalid access.
                 assert!(matches!(unsafe { a.format_numeric_modifier(attached, api, input) }, Err(Unavailable::Input)))
             });
             assert_eq!(S.with_borrow(|s| s.invokes), 0);
@@ -862,6 +887,7 @@ fn full_entry_refuses_every_nonfinite_endpoint_and_unknown_modtype_before_format
         let (a, api) = fixture();
         S.with_borrow_mut(|s| s.modifier = modifier);
         run(&a, api, |attached, input| {
+            // SAFETY: the authored fake owns rooted input/storage; injected metadata/input failures must refuse before invalid access.
             assert!(matches!(unsafe { a.format_numeric_modifier(attached, api, input) }, Err(Unavailable::Input)))
         });
         assert_eq!(S.with_borrow(|s| s.invokes), 0);
@@ -876,6 +902,7 @@ fn full_entry_reuses_complete_formatter_graph_and_signature_refusals_before_body
                 s.fault = fault;
                 s.modifier = modifier
             });
+            // SAFETY: the authored fake owns rooted input/storage; injected metadata/input failures must refuse before invalid access.
             run(&a, api, |attached, input| assert!(unsafe { a.format_numeric_modifier(attached, api, input) }.is_err()));
             assert_eq!(S.with_borrow(|s| s.invokes), 0);
         }
@@ -895,6 +922,7 @@ fn full_entry_keeps_roots_and_reports_bounded_text_exception_or_result_root_fail
             }
         });
         run(&a, api, |attached, input| {
+            // SAFETY: the authored fake owns rooted input/storage; injected metadata/input failures must refuse before invalid access.
             assert!(unsafe { a.format_numeric_modifier(attached, api, input) }.is_err(), "{fault:?}")
         });
         assert_eq!(S.with_borrow(|s| s.invokes), 1);
@@ -902,6 +930,7 @@ fn full_entry_keeps_roots_and_reports_bounded_text_exception_or_result_root_fail
     let (a, api) = fixture();
     S.with_borrow_mut(|s| s.text = "12.5%".encode_utf16().collect());
     run(&a, api, |attached, input| {
+        // SAFETY: the authored fake owns rooted input/storage; injected metadata/input failures must refuse before invalid access.
         let out = unsafe { a.format_numeric_modifier(attached, api, input) }.unwrap();
         assert_eq!(out.formatted.unit, "%");
     });

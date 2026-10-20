@@ -6,6 +6,8 @@
 //! the original GameDataIdentity. Whitespace/casing and unknown language codes are
 //! preserved. The reader's runtime admission/initialization policy is separate.
 
+#![forbid(unsafe_code)]
+
 use crate::protocol::{MAX_RESPONSE_SIZE, ProtocolError};
 
 pub const MAX_TEXT_BYTES: usize = 4096;

@@ -89,6 +89,7 @@ impl RuntimeAccess {
     /// state write is authorized. All raw metadata pointers belong to this admitted runtime;
     /// the validated nonmoving x64 array data offset is 32. Returned values own their contents.
     pub unsafe fn read_catalog_page(&self, attached: &AttachedThread<'_>, api: raw::InvocationApi, kind: CatalogKind, cursor: u32) -> Result<CatalogPage, DiscoveryError> {
+        // SAFETY: inherits read_catalog_page's retained runtime/metadata, attached thread and synchronous rooted graph-access contract.
         unsafe {
             let status = self.status(attached)?;
             if status.online || status.manager == 0 {
@@ -122,6 +123,7 @@ impl RuntimeAccess {
     }
 
     unsafe fn catalog_bases(&self, attached: &AttachedThread<'_>, images: &Images, cursor: u32) -> Result<(u32, CatalogEntries), DiscoveryError> {
+        // SAFETY: inherits read_catalog_page's retained runtime/metadata, attached thread and synchronous rooted graph-access contract.
         unsafe {
             let list_class = self.class(images, c"", c"ItemList")?;
             let base_class = self.catalog_nested(list_class, c"BaseEquipmentItem")?;
@@ -216,6 +218,7 @@ impl RuntimeAccess {
     // access contract of its catalog operation. All child references remain in rooted parents
     // until their own roots have been acquired; Unity native object lifetime is checked separately.
     pub(super) unsafe fn catalog_nested(&self, parent: Class, name: &CStr) -> Result<Class, DiscoveryError> {
+        // SAFETY: inherits read_catalog_page's retained runtime/metadata, attached thread and synchronous rooted graph-access contract.
         unsafe {
             if parent.is_null() {
                 return Err(unsupported("catalog nested owner"));
@@ -251,6 +254,7 @@ impl RuntimeAccess {
         name: &CStr,
         expected: Class,
     ) -> Result<Option<Root<'a, 'r>>, DiscoveryError> {
+        // SAFETY: inherits read_catalog_page's retained runtime/metadata, attached thread and synchronous rooted graph-access contract.
         unsafe {
             if expected.is_null() || (self.class_value)(expected) {
                 return Err(unsupported("catalog static reference class"));
@@ -272,6 +276,7 @@ impl RuntimeAccess {
     }
 
     pub(super) unsafe fn catalog_reference<'a, 'r>(&self, attached: &'a AttachedThread<'r>, parent: &Root<'_, '_>, name: &CStr) -> Result<Option<Root<'a, 'r>>, DiscoveryError> {
+        // SAFETY: inherits read_catalog_page's retained runtime/metadata, attached thread and synchronous rooted graph-access contract.
         unsafe {
             let owner = (self.object_class)(target(parent)?.as_ptr());
             if owner.is_null() {
@@ -289,6 +294,7 @@ impl RuntimeAccess {
         element: Class,
         maximum: u32,
     ) -> Result<Vec<Option<Root<'a, 'r>>>, DiscoveryError> {
+        // SAFETY: inherits read_catalog_page's retained runtime/metadata, attached thread and synchronous rooted graph-access contract.
         unsafe {
             if element.is_null() || (self.class_value)(element) || maximum > 65536 {
                 return Err(unsupported("catalog reference array element/bound"));
@@ -319,6 +325,7 @@ impl RuntimeAccess {
         element: Class,
         maximum: u32,
     ) -> Result<(Root<'a, 'r>, usize), DiscoveryError> {
+        // SAFETY: inherits read_catalog_page's retained runtime/metadata, attached thread and synchronous rooted graph-access contract.
         unsafe {
             if element.is_null() || maximum > 65536 {
                 return Err(unsupported("catalog list element/bound"));
@@ -352,6 +359,7 @@ impl RuntimeAccess {
         element: Class,
         maximum: u32,
     ) -> Result<Vec<Root<'a, 'r>>, DiscoveryError> {
+        // SAFETY: inherits read_catalog_page's retained runtime/metadata, attached thread and synchronous rooted graph-access contract.
         unsafe {
             if element.is_null() || (self.class_value)(element) {
                 return Err(unsupported("catalog reference List element"));
@@ -374,6 +382,7 @@ impl RuntimeAccess {
     }
 
     pub(super) unsafe fn catalog_values<T: Primitive>(&self, attached: &AttachedThread<'_>, list: &Root<'_, '_>, element: Class, maximum: u32) -> Result<Vec<T>, DiscoveryError> {
+        // SAFETY: inherits read_catalog_page's retained runtime/metadata, attached thread and synchronous rooted graph-access contract.
         unsafe {
             let expected = self.system_class(T::NAME)?;
             if element.is_null() {
@@ -398,6 +407,7 @@ impl RuntimeAccess {
     }
 
     pub(super) unsafe fn catalog_enum_u8(&self, object: &Root<'_, '_>, name: &CStr, enum_name: &CStr) -> Result<u8, DiscoveryError> {
+        // SAFETY: inherits read_catalog_page's retained runtime/metadata, attached thread and synchronous rooted graph-access contract.
         unsafe {
             let owner = (self.object_class)(target(object)?.as_ptr());
             if owner.is_null() {
@@ -420,6 +430,7 @@ impl RuntimeAccess {
     }
 
     pub(super) unsafe fn catalog_live(&self, attached: &AttachedThread<'_>, images: &Images, object: &Root<'_, '_>) -> Result<bool, DiscoveryError> {
+        // SAFETY: inherits read_catalog_page's retained runtime/metadata, attached thread and synchronous rooted graph-access contract.
         unsafe {
             let _ = attached;
             let unity_object = self.class(images, c"UnityEngine", c"Object")?;

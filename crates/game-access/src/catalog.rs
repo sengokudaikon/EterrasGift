@@ -10,6 +10,8 @@
 //! locale/total and reject duplicate identities across pages of one capture.
 //! This schema preserves unknown enum/flag values and signed/reversed ranges.
 
+#![forbid(unsafe_code)]
+
 use std::collections::BTreeSet;
 
 use crate::{

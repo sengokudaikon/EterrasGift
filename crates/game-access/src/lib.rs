@@ -13,6 +13,7 @@ pub mod forge;
 pub mod il2cpp;
 pub mod locale;
 pub mod mapping;
+pub mod numeric_locale;
 
 #[cfg(all(windows, target_arch = "x86_64"))]
 pub mod scheduler;

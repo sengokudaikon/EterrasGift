@@ -15,6 +15,8 @@
 //! Unknown enum values remain signed integers; interpreting them belongs to the
 //! domain layer. The legacy fingerprint detects stale observations, not forgery.
 
+#![forbid(unsafe_code)]
+
 use crate::protocol::{MAX_RESPONSE_SIZE, ProtocolError};
 
 pub const MAX_AFFIXES: usize = 32;

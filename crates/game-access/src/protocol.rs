@@ -3,6 +3,8 @@
 //! Decoding establishes wire validity only. Process identity, helper provenance,
 //! dispatcher code, and permission to run a request belong to the session layer.
 
+#![forbid(unsafe_code)]
+
 use crate::{
     catalog::CatalogKind,
     forge,

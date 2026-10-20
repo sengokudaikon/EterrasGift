@@ -13,6 +13,7 @@ use std::{collections::BTreeSet, ffi::CStr, ptr::NonNull};
 impl RuntimeAccess {
     // Inherits describe_unique's attached, synchronous supported-runtime span.
     unsafe fn unique_scalar(&self, attached: &AttachedThread<'_>, api: raw::InvocationApi, object: &Root<'_, '_>, name: &CStr, returns: &CStr) -> Result<Scalar, DiscoveryError> {
+        // SAFETY: inherits unique_presentation's retained runtime/metadata, attached thread and synchronous rooted graph-access contract.
         unsafe {
             let method = self.mapping_method(api, object, name, &[], Some(self.system_class(returns)?))?;
             let context = InvocationContext::new(attached, api);
@@ -34,6 +35,7 @@ impl RuntimeAccess {
         images: &Images,
         parsed: &Root<'_, '_>,
     ) -> Result<Vec<Root<'a, 'r>>, DiscoveryError> {
+        // SAFETY: inherits unique_presentation's retained runtime/metadata, attached thread and synchronous rooted graph-access contract.
         unsafe {
             let method = self.mapping_method(api, parsed, c"get_Replacements", &[], None)?;
             let list_class = (self.type_class)((self.method_return)(method));
@@ -79,6 +81,7 @@ impl RuntimeAccess {
         definition: &Root<'_, '_>,
         roll_count: usize,
     ) -> Result<Vec<ModifierSnapshot>, DiscoveryError> {
+        // SAFETY: inherits unique_presentation's retained runtime/metadata, attached thread and synchronous rooted graph-access contract.
         unsafe {
             let entry_class = (self.object_class)(target(definition)?.as_ptr());
             let tooltip_class = self.class(images, c"", c"UniqueModDisplayListEntry")?;
@@ -214,6 +217,7 @@ impl RuntimeAccess {
         api: raw::InvocationApi,
         request: &ForgeDescriptionRequest,
     ) -> Result<Vec<ModifierSnapshot>, DiscoveryError> {
+        // SAFETY: inherits unique_presentation's retained runtime/metadata, attached thread and synchronous rooted graph-access contract.
         unsafe { self.unique_presentation(attached, None, api, request, None) }
     }
     /// Formats drafted rolls on an independent item copy. No live item store.
@@ -227,6 +231,7 @@ impl RuntimeAccess {
         api: raw::InvocationApi,
         request: &UniquePreviewRequest,
     ) -> Result<Vec<ModifierSnapshot>, DiscoveryError> {
+        // SAFETY: inherits unique_presentation's retained runtime/metadata, attached thread and synchronous rooted graph-access contract.
         unsafe { self.unique_presentation(attached, Some(writes), api, &request.target, Some(request)) }
     }
     unsafe fn unique_presentation(
@@ -237,6 +242,7 @@ impl RuntimeAccess {
         request: &ForgeDescriptionRequest,
         preview: Option<&UniquePreviewRequest>,
     ) -> Result<Vec<ModifierSnapshot>, DiscoveryError> {
+        // SAFETY: inherits unique_presentation's retained runtime/metadata, attached thread and synchronous rooted graph-access contract.
         unsafe {
             let graph = self.forge_graph(attached)?.ok_or(DiscoveryError::NotReady("forge item absent"))?;
             if target(&graph.manager)?.as_ptr() as u64 != request.manager() || self.forge_snapshot(attached, &graph)? != *request.expected() {

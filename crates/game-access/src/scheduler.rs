@@ -53,6 +53,7 @@ fn failure(operation: &'static str) -> HookError {
     // SAFETY: thread-local Windows error query.
     HookError::Win32 {
         operation,
+        // SAFETY: thread-local Windows error query.
         code: unsafe { GetLastError() },
     }
 }

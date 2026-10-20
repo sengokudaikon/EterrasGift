@@ -10,6 +10,8 @@
 //! Unlike the old permissive decoder, malformed UTF-8 and flag values other
 //! than 0/1 fail. Different modifier lines may share a roll ID.
 
+#![forbid(unsafe_code)]
+
 use crate::protocol::{MAX_RESPONSE_SIZE, ProtocolError};
 use std::collections::BTreeSet;
 

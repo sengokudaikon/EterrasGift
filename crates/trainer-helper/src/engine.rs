@@ -107,6 +107,7 @@ fn prepare_operation<M: Copy, A>(load: impl FnOnce() -> Result<M, String>, resol
 /// # Safety
 /// Caller supplies the operation's supported, retained runtime/main-thread contract.
 unsafe fn runtime_operation(operation: impl FnOnce(&Runtime, RuntimeAccess, &AttachedThread<'_>) -> Result<Response, Response>) -> Response {
+    // SAFETY: caller supplies the supported retained runtime/thread contract; all exports resolve before attachment/operation.
     unsafe {
         let result = (|| {
             let (_, runtime) = prepare_operation(|| module(), |module| Runtime::resolve(module))?;
@@ -359,6 +360,7 @@ unsafe extern "C-unwind" fn callback(method: *const MethodInfo) {
     // SAFETY: original is published before any patch and retained for process lifetime.
     let original: ExecuteTasks = unsafe { std::mem::transmute(ORIGINAL.load(SeqCst)) };
     // Never put this original call inside a Rust catch or hold any Rust lock across it.
+    // SAFETY: original is the published retained trampoline with the unchanged ExecuteTasks ABI; no Rust lock/catch spans the call.
     unsafe { original(method) };
     state.metrics[3].fetch_add(1, SeqCst);
     // Contain Rust failures in our own post-call work. The engine's original call above must
@@ -402,6 +404,7 @@ fn after_original(state: &Shared) {
     }
     // SAFETY: process-local identity query and callback-local initialized runtime.
     let tid = unsafe { GetCurrentThreadId() } as u64;
+    // SAFETY: after the original call, only current-thread runtime context is inspected under the unsafe start contract.
     match claim_dispatch_thread(&state.metrics[1], tid, || unsafe { check_dispatch_thread() }) {
         Ok(true) => {}
         Ok(false) => {
@@ -422,6 +425,7 @@ fn after_original(state: &Shared) {
     let tick = unsafe { GetTickCount64() };
     if tick >= NEXT_POLL.load(SeqCst) && state.metrics[11].load(SeqCst) != 0 {
         NEXT_POLL.store(tick.saturating_add(1000), SeqCst);
+        // SAFETY: the dispatcher thread check succeeded; unsafe start assumes a stable initialized graph for this synchronous copy.
         let _ = unsafe { read_status() };
     }
     if let Some(queue) = QUEUE.get() {
@@ -432,17 +436,26 @@ fn after_original(state: &Shared) {
                 Request::Status { .. } => unsafe { read_status() },
                 // SAFETY: same main-thread and per-operation graph ownership contract above.
                 Request::ReadForge { .. } => unsafe { read_forge() },
+                // SAFETY: verified callback thread and the rooted tooltip graph span assumed by unsafe start.
                 Request::DescribeImplicits(query) => unsafe { describe_implicits(&query) },
+                // SAFETY: verified callback thread and the rooted tooltip graph span assumed by unsafe start.
                 Request::DescribeUnique(query) => unsafe { unique_presentation(&query, None) },
+                // SAFETY: verified callback thread; preview changes only a checked independent copy within its rooted span.
                 Request::PreviewUnique(query) => unsafe { unique_presentation(query.target(), Some(&query)) },
+                // SAFETY: verified callback thread; mapping changes only checked detached copies within the rooted graph span.
                 Request::MapRoll(query) => unsafe { read_affix_mapping(&query) },
+                // SAFETY: verified callback thread and the stable player/stat graph span assumed by unsafe start.
                 Request::ReadAttackLeech { expected_manager, .. } => unsafe { read_attack_leech(expected_manager) },
+                // SAFETY: verified callback thread and the retained literal metadata required by the unsafe start contract.
                 Request::ReadItemLimits { .. } => unsafe { read_item_limits() },
+                // SAFETY: verified callback thread and the completed locale/trusted-getter assumptions of unsafe start.
                 Request::ReadLocale { .. } => unsafe { read_locale() },
+                // SAFETY: verified callback thread and initialized published catalog/runtime graph assumed by unsafe start.
                 Request::ReadCatalogPage { kind, cursor, .. } => unsafe { read_catalog_page(kind, cursor) },
                 // SAFETY: the same established thread plus this narrow operation's
                 // explicit exclusive-write/root/metadata contract described above.
                 Request::EditForge(write) => unsafe { edit_forge(&write) },
+                // SAFETY: verified callback thread and exclusive current-player scalar mutation span assumed by unsafe start.
                 Request::SetAttackLeechRate(write) => unsafe { set_attack_leech_rate(&write) },
                 // No feature installation API exists. Empty is the truthful complete feature set.
                 Request::ClearHooks { .. } => Response {
@@ -664,6 +677,7 @@ pub unsafe extern "system" fn eg_helper_bootstrap(parameter: *mut c_void) -> u32
         // SAFETY: process-local OS queries; runtime use remains on the worker created below.
         if config.magic != 0x4547_4253
             || config.size != 112
+            // SAFETY: process-local OS queries; runtime use remains on the worker created below.
             || config.pid != unsafe { GetCurrentProcessId() }
             || config.build_id != BUILD_ID.as_bytes()
             || config.reserved != [0; 24]

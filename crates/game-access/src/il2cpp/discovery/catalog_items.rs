@@ -20,6 +20,7 @@ impl RuntimeAccess {
         cursor: u32,
         api: raw::InvocationApi,
     ) -> Result<(u32, CatalogEntries), DiscoveryError> {
+        // SAFETY: inherits read_catalog_page's retained runtime/metadata, attached thread and synchronous rooted graph-access contract.
         unsafe {
             let owner = self.class(images, c"", c"AffixList")?;
             let globals = self.class(images, c"LE.AssetManagement", c"GlobalAssets")?;
@@ -89,6 +90,7 @@ impl RuntimeAccess {
         cursor: u32,
         api: raw::InvocationApi,
     ) -> Result<(u32, CatalogEntries), DiscoveryError> {
+        // SAFETY: inherits read_catalog_page's retained runtime/metadata, attached thread and synchronous rooted graph-access contract.
         unsafe {
             let owner = self.class(images, c"", c"UniqueList")?;
             let master = self
@@ -133,6 +135,7 @@ impl RuntimeAccess {
     }
 
     pub(super) unsafe fn catalog_stored_name(&self, attached: &AttachedThread<'_>, object: &Root<'_, '_>) -> Result<DefinitionName, DiscoveryError> {
+        // SAFETY: inherits read_catalog_page's retained runtime/metadata, attached thread and synchronous rooted graph-access contract.
         unsafe {
             // UniqueList.Entry.getDisplayName (current audited native body) chooses displayName
             // unless null/empty, then name. SubItem uses the same rule. Preserve whitespace.

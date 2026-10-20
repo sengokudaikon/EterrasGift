@@ -833,6 +833,7 @@ fn explicit_box_contracts_reject_bad_size_alignment_class_and_duplicates_before_
         };
         // SAFETY: only the declared expectations are wrong; all metadata pointers are valid.
         assert!(
+            // SAFETY: only the declared expectations are wrong; all metadata pointers are valid.
             unsafe { context.bind_with_value_types(metadata, &[contract]) }.is_err(),
             "size {size}, alignment {alignment}"
         );
@@ -969,6 +970,7 @@ fn enum_contract_checks_base_identity_flags_width_and_alignment_before_invocatio
         });
         // SAFETY: the fake runtime contract is intentionally invalid only for binding checks.
         assert!(
+            // SAFETY: the fake runtime contract is intentionally invalid only for binding checks.
             unsafe { context.bind_with_value_types(metadata, &[enum_contract(ENUM)]) }.is_err(),
             "invalid enum contract {invalid}"
         );
@@ -990,6 +992,7 @@ fn default_bind_still_rejects_enums_and_explicit_contracts_do_not_enable_generic
     change_method(generic, |method| method.generic = true);
     // SAFETY: generic method metadata is valid but deliberately not supported by this adapter.
     assert!(matches!(
+        // SAFETY: generic method metadata is valid but deliberately not supported by this adapter.
         unsafe { context.bind_with_value_types(generic, &[enum_contract(ENUM)]) },
         Err(InvokeError::GenericMethod)
     ));
@@ -1018,6 +1021,7 @@ fn nongeneric_object_return_keeps_a_closed_generic_value_box_rooted_without_payl
     });
     // SAFETY: the receiver and method are live objects/metadata from this fake engine.
     let array_root = unsafe { attached.root(array) }.unwrap();
+    // SAFETY: live MethodInfo and the explicitly authorized body belong to this owned fake runtime.
     let method = unsafe { context.bind(metadata) }.unwrap();
     let result = method.invoke(Some(&array_root), &mut [Argument::Scalar(Scalar::I32(0))]).unwrap();
     let InvocationOutcome::Returned(ReturnValue::Reference(Some(entry_root))) = result else {

@@ -208,6 +208,7 @@ mod tests {
         // SAFETY: owned writable file handle, synchronous FSCTL_SET_SPARSE with
         // null input/output buffers, live byte-count output, and no OVERLAPPED.
         assert_ne!(
+            // SAFETY: owned writable file handle, synchronous FSCTL_SET_SPARSE with
             unsafe {
                 DeviceIoControl(
                     file.as_raw_handle(),

@@ -2,17 +2,21 @@
 //! behind them: navigation, Home, Settings, Eterra's decorations, and the Windows settings the design reacts to. What is not ported yet is
 //! stubbed (`stubs`).
 
+#![deny(unsafe_code)]
+
 slint::include_modules!();
 
 pub mod background;
 pub mod decorations;
 pub mod forge;
 pub mod home;
+#[allow(unsafe_code)] // Windows/FFI boundary; the rest of the crate denies unsafe.
 pub mod mods;
 pub mod preparation;
 pub mod settings;
 pub mod shell;
 pub mod stubs;
+#[allow(unsafe_code)] // Windows/FFI boundary; the rest of the crate denies unsafe.
 pub mod system;
 pub mod trainer;
 pub mod trainer_backend;

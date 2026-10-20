@@ -36,6 +36,7 @@ mod windows {
             }
             // SAFETY: uniquely owned valid process handle, closed by OwnedHandle.
             Ok(Self {
+                // SAFETY: uniquely owned valid process handle, closed by OwnedHandle.
                 handle: unsafe { OwnedHandle::from_raw_handle(handle) },
                 pid,
             })
@@ -54,6 +55,7 @@ mod windows {
             let mut length = path.len() as u32;
             // SAFETY: query-only owned handle and correctly sized output storage.
             if unsafe { GetProcessTimes(self.handle.as_raw_handle(), &raw mut created, &raw mut exited, &raw mut kernel, &raw mut user) } == 0
+                // SAFETY: owned query handle, correctly sized local output slots and bounded writable path buffer; the query retains no pointers.
                 || unsafe { QueryFullProcessImageNameW(self.handle.as_raw_handle(), 0, path.as_mut_ptr(), &raw mut length) } == 0
             {
                 return Err(io::Error::last_os_error());

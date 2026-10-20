@@ -1,6 +1,8 @@
 #![windows_subsystem = "windows"]
+#![deny(unsafe_code)]
 //! Eterra's Gift: the composition. It finds the checkout or install it belongs to, opens the settings, builds the
 //! companion's services and the window, and runs it (`spec/architecture.md` §5).
+#[allow(unsafe_code)] // Composition of the explicitly unsafe native trainer adapter.
 mod trainer;
 
 use eg_companion::host::FileGameHost;

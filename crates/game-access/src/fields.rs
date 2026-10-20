@@ -7,6 +7,8 @@
 //! All integers are little endian. No process identity, generation, labels,
 //! interpreted float, write authority or fallback value comes from this wire.
 
+#![forbid(unsafe_code)]
+
 use crate::protocol::ProtocolError;
 
 pub const MAGIC: u32 = 0x45474631;
