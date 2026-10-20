@@ -112,9 +112,10 @@ impl<F: LogFactory + Clone> Connector for DesktopConnector<F> {
             })?;
             let (dll, hash, source_id) = package(&bytes, &self.manifest)?;
             let artifact = Arc::new(HelperArtifact::capture(&dll, &hash, &source_id).map_err(|e| BackendError::blocked(ErrorKind::Identity, e.to_string()))?);
-            // SAFETY: the desktop selects the supported Last Epoch executable. The
-            // game-specific runtime and callback assumptions are those documented by
-            // NativePreparer; per-target metadata/offline/identity checks remain active.
+            // SAFETY: game-specific graph/lifecycle and wrapper-instrumentation assumptions
+            // are documented by NativePreparer; they are not established by this constructor.
+            // prepare checks the engine version and module identity before remote work,
+            // followed by per-operation callback/metadata/offline checks in the helper.
             let preparer = unsafe { NativePreparer::new(artifact.clone(), self.logs.clone()) };
             self.session = Some(SessionConnector::new(preparer, self.logs.clone(), artifact.source_id(), GatePolicy::Release)?);
         }

@@ -14,7 +14,7 @@ serde_json.workspace = true
 tokio.workspace = true
 
 [target.'cfg(windows)'.dependencies]
-windows-sys = { workspace = true, features = ["Win32_Foundation", "Win32_System_Diagnostics_ToolHelp"] }
+windows-sys = { workspace = true, features = ["Win32_Foundation", "Win32_System_Diagnostics_ToolHelp", "Win32_Storage_FileSystem"] }
 
 [dev-dependencies]
 tempfile.workspace = true

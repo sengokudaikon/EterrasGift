@@ -2,6 +2,8 @@
 //! Native work is serialized by the trainer worker; no main-thread nomination or
 //! pre-bootstrap runtime certification is required. Drop never stops/unloads code.
 
+mod version;
+
 use eg_game_access::{
     bootstrap::{
         BootstrapError, HelperArtifact,
@@ -69,8 +71,14 @@ impl<F: LogFactory> NativePreparer<F> {
     /// x64 game (or an owned matching fixture), with its modern nonmoving IL2CPP
     /// runtime. No competing patcher may modify the scheduler during installation.
     /// Game runtime/module shutdown is excluded while callbacks access the runtime.
+    /// Each synchronous graph operation assumes no concurrent graph/scalar mutation,
+    /// reentrancy or native-object destruction; edits assume exclusive write access.
+    /// The scheduler's Win32 wrappers must not enter instrumentation that waits on
+    /// locks owned by suspended threads. No startup check establishes these premises.
     /// These are game-specific interoperability assumptions, not facts certified by
-    /// a host-side authority object. Offline/identity/artifact checks run in prepare;
+    /// a host-side authority object. prepare checks UnityPlayer's fixed file version
+    /// (6000.4), then binds the same disk bytes to the loaded module by hash.
+    /// Offline/identity/artifact checks run in prepare;
     /// the helper checks callback thread and each operation's metadata/current graph.
     pub unsafe fn new(artifact: Arc<HelperArtifact>, logs: F) -> Self {
         Self {
@@ -132,6 +140,7 @@ impl<F: LogFactory> NativePreparer<F> {
             let game = ModuleIdentity::capture(&folder.join("GameAssembly.dll"), profile.binary_hash())?;
             let unity_path = folder.join("UnityPlayer.dll");
             let unity_hash = eg_core::hashes::of_bytes(&std::fs::read(&unity_path)?);
+            version::check_unity(&unity_path)?;
             let unity = ModuleIdentity::capture(&unity_path, &unity_hash)?;
             Ok::<_, BootstrapError>((game, unity))
         })()

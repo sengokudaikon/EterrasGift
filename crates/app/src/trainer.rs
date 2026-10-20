@@ -30,8 +30,9 @@ impl Trainer {
         let logs = FileLogFactory::new(player_log).map_err(|e| e.to_string())?;
         let (handle, worker) = backend::service(
             GameProcesses::new(executable_name),
-            // SAFETY: this is the supported Last Epoch desktop composition, with
-            // NativePreparer's game-specific runtime and lifecycle assumptions.
+            // SAFETY: NativePreparer's game-specific graph/lifecycle and instrumentation
+            // assumptions apply to this desktop composition. Engine version and module
+            // identity are checked during preparation, before remote work.
             unsafe { DesktopConnector::new(helper_manifest, logs.clone()) },
             logs.reader(),
             SystemClock,
