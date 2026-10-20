@@ -1579,7 +1579,6 @@ impl ForgeEditor {
     // ----- Value tables -----
 
     /// Asks the game for each cell's table in its draft's context; a context already asked is not asked again.
-    /// TODO(forge): the session answers asynchronously, keeping a usable table on screen meanwhile (spec §6 Mapping).
     fn resolve_tables(&mut self) {
         if self.writing {
             return;
@@ -1594,13 +1593,13 @@ impl ForgeEditor {
             let request = RollRequest {
                 target: RollTarget::Affix,
                 index: slot,
-                draft: Some(ItemEdit::Affix {
+                draft: (id != row.state.id || tier != row.state.tier || seal != row.state.seal).then_some(ItemEdit::Affix {
                     slot,
                     id,
                     tier,
                     roll: 0,
                     seal,
-                    allow_incompatible: false,
+                    allow_incompatible: row.allows_incompatible(),
                 }),
                 line: None,
             };
@@ -1650,7 +1649,9 @@ impl ForgeEditor {
             return table.clone();
         }
         let table = self.game.resolve(item, request);
-        self.tables.insert(key.to_string(), table.clone());
+        if !matches!(&table, Err(reason) if reason == super::rows::LOADING) {
+            self.tables.insert(key.to_string(), table.clone());
+        }
         table
     }
 

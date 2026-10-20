@@ -10,6 +10,8 @@ use std::{
 };
 #[path = "backend/fields.rs"]
 mod fields;
+#[path = "backend/mapping.rs"]
+mod mappings;
 #[path = "backend/rate_write.rs"]
 mod rate_writes;
 #[path = "backend/write.rs"]
@@ -118,6 +120,8 @@ struct Shared {
     connect_block: Block,
     capture_block: Block,
     forge_block: Block,
+    mapping_block: Block,
+    mapping_errors: Mutex<VecDeque<BackendError>>,
     disconnect_block: Block,
     write_block: Block,
     refresh_block: Block,
@@ -151,6 +155,8 @@ impl Shared {
             connect_block: Block::default(),
             capture_block: Block::default(),
             forge_block: Block::default(),
+            mapping_block: Block::default(),
+            mapping_errors: Mutex::new(VecDeque::new()),
             disconnect_block: Block::default(),
             write_block: Block::default(),
             refresh_block: Block::default(),
@@ -244,6 +250,18 @@ impl BackendConnection for Connection {
             return Err(error);
         }
         Ok(self.shared.forge_item.lock().unwrap().clone())
+    }
+    async fn resolve_mapping(
+        &mut self,
+        _: Timestamp,
+        expected: &eg_trainer::edits::ExpectedObservation,
+        request: &eg_trainer::mapping::MappingRequest,
+    ) -> Result<eg_trainer::mapping::ValueTable, BackendError> {
+        self.shared.call("mapping", &self.shared.mapping_block).await;
+        if let Some(error) = self.shared.mapping_errors.lock().unwrap().pop_front() {
+            return Err(error);
+        }
+        mappings::table(expected, request)
     }
     fn supports_level_requirement(&self) -> bool {
         self.shared.write_enabled.load(Ordering::SeqCst)

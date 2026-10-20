@@ -27,6 +27,7 @@ mod formatter;
 pub use formatter::{NumericDisplay, NumericDisplayUnavailable, NumericModifierDisplay};
 mod limits;
 mod locale;
+mod mapping;
 mod write;
 pub use write::ForgeWriteError;
 

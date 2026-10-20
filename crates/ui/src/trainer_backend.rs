@@ -131,8 +131,8 @@ impl ForgeGame for ObservedGame {
             && !state.capabilities.affix_list)
             .then_some(READ_ONLY)
     }
-    fn resolve(&self, _: &ForgeItem, _: &RollRequest) -> Result<ValueTable, GameError> {
-        Err("Actual values are unavailable until game formatting is connected.".into())
+    fn resolve(&self, item: &ForgeItem, request: &RollRequest) -> Result<ValueTable, GameError> {
+        self.writer.borrow_mut().resolve(item, request)
     }
     fn write(&mut self, expected: &ForgeItem, edit: &ItemEdit) -> EditOutcome {
         self.writer.borrow_mut().submit(expected, edit)
@@ -150,6 +150,14 @@ impl ForgeGame for ObservedGame {
 struct Writer {
     backend: BackendHandle,
     pending: Option<PendingEdit>,
+    mappings: Vec<PendingMapping>,
+    mapping_read_sequence: Option<u64>,
+}
+struct PendingMapping {
+    expected: eg_trainer::edits::ExpectedObservation,
+    request: eg_trainer::mapping::MappingRequest,
+    receipt: Pending,
+    error: Option<String>,
 }
 struct PendingEdit {
     receipt: Pending,
@@ -159,6 +167,93 @@ struct PendingEdit {
     plan: Option<eg_trainer::writes::ForgePlan>,
 }
 impl Writer {
+    fn resolve(&mut self, item: &ForgeItem, request: &RollRequest) -> Result<ValueTable, GameError> {
+        use eg_trainer::mapping::{MappingAddress, MappingRequest, MappingTarget};
+        if request.target != item::RollTarget::Affix {
+            return Err("Actual values for this modifier are unavailable in this build.".into());
+        }
+        let state = self.backend.snapshot();
+        if self.backend.subscribe().has_changed().is_err() || project_item(&state).ok().flatten().as_ref().is_none_or(|actual| !actual.same_state(item)) {
+            return Err("The item changed before its values could be read.".into());
+        }
+        self.poll_mappings();
+        if self.mapping_read_sequence != Some(state.forge_read_sequence) {
+            // A fresh owned read permits another optional read attempt. Merely
+            // republishing a mapping result must never create a retry loop.
+            self.mapping_read_sequence = Some(state.forge_read_sequence);
+            self.mappings.retain(|pending| pending.error.is_none());
+        }
+        let expected = state.expected_observation().map_err(|error| error.to_string())?;
+        let request = MappingRequest {
+            address: MappingAddress {
+                target: MappingTarget::Affix,
+                index: u8::try_from(request.index).map_err(|_| "This affix slot is unsupported.")?,
+                line: None,
+            },
+            draft: request
+                .draft
+                .as_ref()
+                .map(|edit| canonical_edit(edit, state.override_enabled).ok_or("This value draft is unsupported."))
+                .transpose()?,
+        };
+        if let Some(result) = state.mapping(&expected, &request) {
+            return result
+                .as_ref()
+                .map(|table| ValueTable {
+                    label: "Value".into(),
+                    samples: table
+                        .samples()
+                        .iter()
+                        .map(|sample| item::ValueSample {
+                            value: sample.value,
+                            display: sample.display.clone(),
+                            effects: sample.effects.clone(),
+                        })
+                        .collect(),
+                })
+                .map_err(Clone::clone);
+        }
+        self.mappings.retain(|pending| pending.expected == expected);
+        if let Some(error) = self.mappings.iter().find(|pending| pending.request == request).and_then(|pending| pending.error.clone()) {
+            return Err(error);
+        }
+        if !self.mappings.iter().any(|pending| pending.expected == expected && pending.request == request) && self.pending.is_none() {
+            let receipt = self
+                .backend
+                .try_submit(Command::ResolveMapping {
+                    expected: Box::new(expected.clone()),
+                    request: request.clone(),
+                })
+                .map_err(|_| "The trainer cannot accept another value request.")?;
+            self.mappings.push(PendingMapping {
+                expected,
+                request,
+                receipt,
+                error: None,
+            });
+        }
+        Err(forge::rows::LOADING.into())
+    }
+    fn poll_mappings(&mut self) -> bool {
+        let mut completed = false;
+        self.mappings.retain_mut(|pending| {
+            if pending.error.is_some() {
+                return true;
+            }
+            let Some(result) = pending.receipt.try_result() else {
+                return true;
+            };
+            completed = true;
+            match result {
+                Ok(()) => false,
+                Err(error) => {
+                    pending.error = Some(error.message);
+                    true
+                }
+            }
+        });
+        completed
+    }
     fn submit(&mut self, expected: &ForgeItem, edit: &ItemEdit) -> EditOutcome {
         if self.pending.is_some() {
             return refused("An item edit is already pending.");
@@ -381,6 +476,8 @@ pub fn bind(window: &MainWindow, backend: BackendHandle) {
     let writer = Rc::new(RefCell::new(Writer {
         backend: backend.clone(),
         pending: None,
+        mappings: Vec::new(),
+        mapping_read_sequence: None,
     }));
     let forge = forge::attach(
         window,
@@ -425,6 +522,7 @@ pub fn bind(window: &MainWindow, backend: BackendHandle) {
 
 impl Binding {
     fn refresh(&self) {
+        let mappings_completed = self.writer.borrow_mut().poll_mappings();
         let snapshot = self.backend.snapshot();
         if self.backend.subscribe().has_changed().is_err() && snapshot.phase != Phase::Stopped {
             // An unexpected worker failure must not leave apparently live data.
@@ -445,7 +543,13 @@ impl Binding {
             return;
         }
         if self.revision.get() == Some(snapshot.revision) {
-            self.forge.edit(|editor| editor.poll_writes());
+            self.forge.edit(|editor| {
+                if mappings_completed {
+                    editor.refresh();
+                } else {
+                    editor.poll_writes();
+                }
+            });
             return;
         }
         self.revision.set(Some(snapshot.revision));

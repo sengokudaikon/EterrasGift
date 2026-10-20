@@ -6,9 +6,12 @@
 //! context, language and unit. Failed pushes poison it; no partial table escapes.
 //! Sources: original RollMapping.cs and GameDataService.ResolveAsync at e1c1ed4.
 
+mod display;
 use crate::edits::{ExpectedObservation, ItemEdit, MAX_WRITABLE_AFFIX_ID, RollEdit, RollTarget};
+pub use display::CapturedDisplayParser;
+pub use eg_game_access::mapping::{MappingAddress, MappingStart, MappingTarget, RawMappingPage, RawValueSample};
 use eg_game_access::{
-    mapping::{self as wire, MappingAddress, MappingStart, MappingTarget, ModifierSnapshot, RawMappingPage, UniqueRollPreview},
+    mapping::{self as wire, ModifierSnapshot, UniqueRollPreview},
     protocol::MAX_RESPONSE_SIZE,
 };
 use std::{collections::BTreeSet, fmt};

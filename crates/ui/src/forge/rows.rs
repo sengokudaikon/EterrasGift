@@ -84,6 +84,14 @@ impl ValueEditor {
 
     /// A new table, or why there is none; `game_context` marks a table read for what the game holds.
     pub fn set_mapping(&mut self, table: Result<ValueTable, String>, game_context: bool) {
+        // Monitoring and other rows' completed mappings can republish the same
+        // table while the user types. Only a changed mapping ends that input.
+        if table.as_ref().ok().is_some_and(|table| self.table.as_ref() == Some(table)) {
+            if game_context {
+                self.game_table = table.ok();
+            }
+            return;
+        }
         match table {
             Ok(table) if table.is_usable() => {
                 if game_context {
@@ -98,7 +106,7 @@ impl ValueEditor {
             }
             Err(reason) => {
                 self.table = None;
-                self.status = format!("Actual values unavailable: {reason}");
+                self.status = if reason == LOADING { reason } else { format!("Actual values unavailable: {reason}") };
             }
         }
         self.typing = false;
@@ -1226,6 +1234,22 @@ mod tests {
         let mut row = AffixRow::new(1, state, definition);
         row.value.set_mapping(Ok(table(22.0, 39.6)), true);
         row
+    }
+
+    #[test]
+    fn an_unchanged_mapping_preserves_value_input() {
+        let mut row = health();
+        row.value.typing = true;
+        row.value.input = "37".into();
+        row.value.set_mapping(Ok(table(22.0, 39.6)), true);
+        assert!(row.value.typing);
+        assert_eq!(row.value.input, "37");
+        row.value.set_mapping(Ok(table(30.0, 50.0)), false);
+        assert!(!row.value.typing);
+        row.value.set_mapping(Err(LOADING.into()), false);
+        assert_eq!(row.value.status(), LOADING);
+        assert!(!row.value.has_mapping());
+        assert!(row.value.game_table.is_some());
     }
 
     #[test]

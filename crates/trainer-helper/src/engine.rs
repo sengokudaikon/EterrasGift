@@ -239,6 +239,28 @@ unsafe fn describe_implicits(query: &eg_game_access::mapping::ImplicitDescriptio
     }
 }
 
+unsafe fn read_affix_mapping(query: &eg_game_access::mapping::AffixMappingQuery) -> Response {
+    // SAFETY: scheduler supplies the supported main-thread runtime and synchronous
+    // rooted graph span. Only independent detached objects are mutated for sampling.
+    unsafe {
+        let result = (|| {
+            let module = module().map_err(|e| server::failure(ResponseCode::Failed, e))?;
+            let (api, access) = apis(module).map_err(|e| server::failure(ResponseCode::Failed, e))?;
+            let invoke = raw::InvocationApi::resolve(|name| export(module, name)).map_err(|e| server::failure(ResponseCode::Refused, e.to_string()))?;
+            let writes = raw::FieldWriteApi::resolve(|name| export(module, name)).map_err(|e| server::failure(ResponseCode::Refused, e.to_string()))?;
+            let thread = ThreadContext::new(api);
+            let attached = thread.attach().map_err(|e| server::failure(ResponseCode::NotReady, e.to_string()))?;
+            let page = access.read_affix_mapping(&attached, writes, invoke, query).map_err(map_discovery)?;
+            let payload = eg_game_access::mapping::encode_mapping(&page).map_err(|e| server::failure(ResponseCode::Failed, e.to_string()))?;
+            Ok::<_, Response>(Response {
+                code: ResponseCode::Done,
+                payload,
+            })
+        })();
+        result.unwrap_or_else(|e| e)
+    }
+}
+
 unsafe fn read_attack_leech(expected_manager: u64) -> Response {
     // SAFETY: the established engine main thread calls only after the original
     // dispatcher returns. Startup additionally guarantees initialized static
@@ -412,6 +434,7 @@ fn after_original(state: &Shared) {
                 // SAFETY: same main-thread and per-operation graph ownership contract above.
                 Request::ReadForge { .. } => unsafe { read_forge() },
                 Request::DescribeImplicits(query) => unsafe { describe_implicits(&query) },
+                Request::MapRoll(query) => unsafe { read_affix_mapping(&query) },
                 Request::ReadAttackLeech { expected_manager, .. } => unsafe { read_attack_leech(expected_manager) },
                 Request::ReadItemLimits { .. } => unsafe { read_item_limits() },
                 Request::ReadLocale { .. } => unsafe { read_locale() },

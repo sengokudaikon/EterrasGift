@@ -7,11 +7,11 @@ interop assumptions and retained evaluation conclusions are in [trainer-interop.
 |---|---|---|
 | Desktop composition | Worker thread, manual/automatic connection, helper package validation; trainer startup failure leaves Home/Mods running | Final bundle assembly and restart handling |
 | Bootstrap | DLL load/start/connect, callback-local managed main-ID check; process/log/artifact gates and pending-call retention | Actual-game validation of the simplified callback path |
-| Reads | Owned rooted forge snapshots, literal limits, completed locale, catalog subset and names/cache; game-built implicit descriptions | Unique descriptions, previews, mapping; getter replacements must match readiness behavior |
+| Reads | Owned rooted forge snapshots, literal limits, completed locale, catalog subset and names/cache; game-built implicit descriptions and sampled regular-affix values | Unique descriptions, previews, unique/implicit mapping; getter replacements must match readiness behavior |
 | Forge writes | One EditForge request/ForgePlan/WriteOutcome path: seven status fields, base/subtype, unique/set identity, regular affix-roll batches, replacement/tier/seal and add/remove | Unique/implicit rolls |
-| Editor | Ordered single-edit drafts, fresh reads, Pending/Confirmed/refusal/NotKept/Uncertain, conditional reverse Undo; status/base/identity, replacement/tier/seal and immediate add/remove controls connected | Actual-value mapping; unsupported controls stay disabled |
+| Editor | Ordered single-edit drafts, fresh reads, Pending/Confirmed/refusal/NotKept/Uncertain, conditional reverse Undo; status/base/identity, replacement/tier/seal and immediate add/remove controls connected | Regular-affix Value controls connected through sampled game tables; unique/implicit controls stay disabled |
 | Other features | Typed attack/leech observations and one conditional rate primitive; original feature descriptors/inventories | UI field integration, other six field sets, all gameplay detours/patches and offline/owner-loss effect cleanup |
-| Hook backend | Existing scheduler and byte-patch suspension code retained; independent candidate regressions | Finish the general backend trial before gameplay hooks |
+| Hook backend | Existing scheduler and byte-patch suspension code retained; detour 0.10 standalone regressions pass | Authored Unity adapter replacement/cleanup trial before gameplay hooks |
 
 Ordinary refusal stops the draft and keeps Undo for confirmed steps. Known mismatch clears drafts
 and Undo, keeps confirmed history and may keep the connection. Uncertainty clears drafts/history/
@@ -32,7 +32,7 @@ worker-to-Slint route, including mixed drafts, delayed completion, partial refus
 NotKept, Uncertain, Retry and gate loss. Native fixture execution is separate and uses only owned
 children. No current cleanup check accesses Last Epoch.
 
-Next: complete sampled actual-value mapping, then unique/implicit roll operations one at a time
+Next: unique descriptions/preview and sampled unique/implicit values, then their roll operations one at a time
 through native, service, UI and captures. Consolidate the remaining presentation/domain and
 feature-table duplication as those areas are touched. Keep the hook-engine trial separate.
 Historical reports and ignored artifacts are archived as described in the interop notes;
@@ -63,9 +63,27 @@ entire expected Forge item and manager before and after formatting; all intermed
 remain rooted across GC. Fixed lines beyond roll storage remain visible. Formatting refusal
 clears optional descriptions while preserving the admitted session; malformed protocol data,
 transport loss and offline failure still revoke it. These are read-only descriptions, not
-sampled value tables: implicit/unique roll writes and actual-value controls remain unavailable.
+sampled implicit/unique value tables: those roll writes and actual-value controls remain unavailable.
 
 Tooltip text and formatting availability are presentation, matching the original StateEquals
 rules. Their arrival/loss does not invalidate ordered drafts or confirmed Undo. The UI adapter
 still compares the complete native ExpectedObservation before each write, including fields
 absent from its presentation model. Unit and worker-to-Slint tests cover this distinction.
+
+
+Regular-affix values now sample all 256 roll bytes through the game's tooltip producer and virtual
+formatter on a detached deserialized item. Native code rejects shared lists/affix objects, clones
+roll arrays, preserves set-count context, and compares the selected item/manager and locale before
+and after each page. Host parsing uses the captured locale's standard numeric symbols; raw numeric
+quantities are never substituted for display values. Tables are bound to the full observation and
+draft, cached in the serialized worker, and shown/edited by the real Forge page. Fixed or
+nonmonotonic mappings stay unavailable without a polling loop. Transient formatting failures can
+retry after a successful read, while explicit Refresh retries stable refusals too. Mapping does
+not create write history or discard confirmed Undo.
+
+The owned Unity route checks 256 samples against independent managed display/value oracles in
+en-US, de-DE and fr-FR, for both existing and replacement/tier draft contexts. It also checks
+aliasing, copy mismatch, producer/refresh exceptions, stale items, fixed/nonmonotonic tables and
+unchanged live roll/write history. UI tests/captures cover loading, displayed values, roll Apply/
+Undo, draft contexts, stale completions and recovery. Last Epoch was not accessed; actual-game
+catalog/formatting behavior still needs separately requested validation.

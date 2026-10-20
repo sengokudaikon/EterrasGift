@@ -429,7 +429,7 @@ impl ForgeGame for FixtureGame {
             RollTarget::Affix => {
                 let (id, tier) = match request.draft {
                     Some(ItemEdit::Affix { id, tier, .. }) => (id, Some(tier)),
-                    _ => (item.affix(request.index).map_or(0, |affix| affix.id), None),
+                    _ => item.affix(request.index).map_or((0, None), |affix| (affix.id, Some(affix.tier))),
                 };
                 if state.unmapped.contains(&id) {
                     return Err("Actual values are unavailable for this affix.".into());

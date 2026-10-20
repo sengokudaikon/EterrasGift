@@ -7,6 +7,7 @@ pub mod bloom;
 pub mod fault;
 pub mod game_log;
 pub mod hashes;
+pub mod numeric_locale;
 pub mod operations;
 pub mod paths;
 pub mod settings;

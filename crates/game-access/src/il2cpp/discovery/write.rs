@@ -75,7 +75,7 @@ impl RuntimeAccess {
             self.mutable_field(owner, name, primitive, code)
         }
     }
-    unsafe fn mutable_field(&self, owner: Class, name: &CStr, primitive: &CStr, code: i32) -> Result<NonNull<raw::FieldInfo>, ForgeWriteError> {
+    pub(super) unsafe fn mutable_field(&self, owner: Class, name: &CStr, primitive: &CStr, code: i32) -> Result<NonNull<raw::FieldInfo>, ForgeWriteError> {
         unsafe {
             let field = self.field(owner, name)?;
             let ty = (self.field_type)(field);
@@ -209,7 +209,7 @@ impl RuntimeAccess {
 
     // Mirrors the original validateDefinition: only already-loaded affix IDs
     // and tier counts are needed, without extracting numeric/display catalogs.
-    unsafe fn validate_affix_definition(&self, attached: &AttachedThread<'_>, graph: &ForgeGraph<'_, '_>, id: u16, tier_value: u16) -> Result<(), ForgeWriteError> {
+    pub(super) unsafe fn validate_affix_definition(&self, attached: &AttachedThread<'_>, graph: &ForgeGraph<'_, '_>, id: u16, tier_value: u16) -> Result<(), ForgeWriteError> {
         unsafe {
             if id > 4095 || !(1..=8).contains(&tier_value) {
                 return Err(ForgeWriteError::Refused("Invalid serialized affix ID/tier".into()));

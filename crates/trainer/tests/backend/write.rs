@@ -195,7 +195,7 @@ fn forge_confirmation_survives_later_gate_loss_without_publishing_a_live_item() 
     });
 }
 
-fn writable() -> Arc<Shared> {
+pub(super) fn writable() -> Arc<Shared> {
     use eg_trainer::backend::ItemStatus;
     let shared = Shared::new();
     shared.write_enabled.store(true, Ordering::SeqCst);

@@ -255,3 +255,79 @@ fn modifier_empty_strings_false_and_caps() {
     });
     assert!(encode_modifiers(&excess).is_err());
 }
+
+#[test]
+fn detached_mapping_query_rejects_reserved_data_invalid_drafts_and_partial_frames() {
+    use eg_game_access::{
+        forge::{AffixSnapshot, ForgeSnapshot, ItemStatus},
+        protocol::{DispatcherSpec, REQUEST_SIZE, Request},
+    };
+    let mut expected = ForgeSnapshot {
+        item: 17,
+        individual_id: 3,
+        fingerprint: 0,
+        name: "Owned Ω".into(),
+        item_type: 4,
+        sub_type: 2,
+        rarity: 1,
+        class_requirement: 0,
+        affixes: vec![AffixSnapshot {
+            slot: 0,
+            id: 2,
+            tier: 4,
+            roll: 37,
+            kind: 0,
+            seal: 0,
+            name: String::new(),
+            special: 0,
+        }],
+        implicit_rolls: vec![],
+        identity: None,
+        status: ItemStatus {
+            forging_potential: 12,
+            forging_potential_type: 0,
+            legendary_potential: 0,
+            weavers_will: 0,
+            weavers_touch: 0,
+            corrupted: false,
+            ruined: false,
+            level_requirement: 1,
+        },
+    };
+    expected.fingerprint = expected.legacy_fingerprint();
+    let dispatcher = DispatcherSpec { rva: 23, bytes: [7; 16] };
+    let query = AffixMappingQuery::new(
+        dispatcher,
+        41,
+        expected.clone(),
+        0,
+        MappingStart::Samples(240),
+        Some(AffixMappingDraft {
+            id: 1004,
+            tier: 4,
+            roll: 17,
+            seal: 1,
+        }),
+    )
+    .unwrap();
+    let request = Request::MapRoll(query);
+    let frame = request.encode();
+    assert_eq!(Request::decode(&frame), Ok(request));
+    for (at, value) in [(8, 32u32), (24, 4096), (28, 0), (28, 9), (32, 4), (36, 256), (40, 256), (44, 1), (72, 1), (332, 1)] {
+        let mut bad = frame.clone();
+        bad[at..at + 4].copy_from_slice(&value.to_le_bytes());
+        assert!(Request::decode(&bad).is_err(), "offset {at}");
+    }
+    assert!(Request::decode(&frame[..frame.len() - 1]).is_err());
+    let mut excess = frame.clone();
+    excess.push(0);
+    assert!(Request::decode(&excess).is_err());
+    let query = AffixMappingQuery::new(dispatcher, 41, expected.clone(), 0, MappingStart::ContextOnly, None).unwrap();
+    let mut frame = query.encode();
+    assert_eq!(frame[36..40], u32::MAX.to_le_bytes());
+    assert_eq!(Request::decode(&frame), Ok(Request::MapRoll(query)));
+    frame[28] = 1;
+    assert!(Request::decode_header(&frame[..REQUEST_SIZE]).is_err());
+    assert!(AffixMappingQuery::new(dispatcher, 0, expected.clone(), 0, MappingStart::ContextOnly, None).is_err());
+    assert!(AffixMappingQuery::new(dispatcher, 41, expected, 1, MappingStart::ContextOnly, None).is_err());
+}

@@ -161,7 +161,14 @@ impl RuntimeAccess {
     // Deliberately narrow unsafe adapter for these two closed List<ItemAffix> methods.
     // CheckedMethod continues rejecting generic/inflated classes everywhere else.
     // Interface implementations may be final virtual; the receiver is the exact closed List.
-    unsafe fn affix_list_method(&self, class: Class, element: Class, name: &CStr, takes_element: bool, api: raw::InvocationApi) -> Result<super::super::Method, ForgeWriteError> {
+    pub(in super::super) unsafe fn affix_list_method(
+        &self,
+        class: Class,
+        element: Class,
+        name: &CStr,
+        takes_element: bool,
+        api: raw::InvocationApi,
+    ) -> Result<super::super::Method, ForgeWriteError> {
         unsafe {
             let mut iterator = std::ptr::null_mut();
             let mut found = None;

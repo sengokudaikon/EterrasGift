@@ -1,4 +1,5 @@
 //! Serialized control session, owned observations and explicit guarded writes. No automatic retry.
+mod mapping;
 mod rate_write;
 mod write;
 use crate::{
@@ -95,6 +96,8 @@ pub enum SessionError {
     Protocol(ProtocolError),
     Transport(TransportError),
     Identity(String),
+    Mapping(String),
+    MappingRetryable(String),
     Helper { code: ResponseCode, message: String, may_have_run: bool },
 }
 impl std::fmt::Display for SessionError {
@@ -539,7 +542,7 @@ impl<T: Transport, L: LogSource> Session<T, L> {
         let status = self.status.take();
         self.state = SessionState::Connecting;
         let request = request(dispatcher);
-        let optional_description = matches!(request, Request::DescribeImplicits(_));
+        let optional_description = matches!(request, Request::DescribeImplicits(_) | Request::MapRoll(_));
         let result = self.request(&request).await.and_then(|bytes| decode(&bytes).map_err(SessionError::Protocol));
         match result {
             Ok(snapshot) => {

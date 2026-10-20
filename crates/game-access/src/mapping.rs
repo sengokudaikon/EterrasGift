@@ -1,4 +1,4 @@
-//! Pure legacy response codecs, staged without enabling a helper operation.
+//! Conditional presentation requests and bounded tooltip/mapping response codecs.
 //! Mapping f64 is a raw game quantity, NOT the displayed scalar. The host must
 //! parse the exact display/unit using the captured language; guessing is unsafe.
 //! Source: NativeGameData.DecodeMappingPage, NativeBridge.ReadModifiers, and
@@ -154,6 +154,111 @@ impl ImplicitDescriptionRequest {
             return invalid();
         }
         Ok(())
+    }
+}
+
+/// One affix projected on the detached item, never on the forge item.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct AffixMappingDraft {
+    pub id: u16,
+    pub tier: u8,
+    pub roll: u8,
+    pub seal: u8,
+}
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AffixMappingQuery {
+    pub(crate) target: ImplicitDescriptionRequest,
+    pub(crate) slot: u8,
+    pub(crate) start: MappingStart,
+    pub(crate) draft: Option<AffixMappingDraft>,
+}
+impl AffixMappingQuery {
+    pub const OPERATION: u32 = 9;
+    pub fn new(
+        dispatcher: crate::protocol::DispatcherSpec,
+        manager: u64,
+        expected: crate::forge::ForgeSnapshot,
+        slot: u8,
+        start: MappingStart,
+        draft: Option<AffixMappingDraft>,
+    ) -> Result<Self, ProtocolError> {
+        if usize::from(slot) >= expected.affixes.len() || slot >= 32 || draft.is_some_and(|d| d.id > 4095 || !(1..=8).contains(&d.tier) || d.seal > 3) {
+            return invalid();
+        }
+        Ok(Self {
+            target: ImplicitDescriptionRequest::new(dispatcher, manager, expected)?,
+            slot,
+            start,
+            draft,
+        })
+    }
+    pub fn dispatcher(&self) -> crate::protocol::DispatcherSpec {
+        self.target.dispatcher
+    }
+    pub fn slot(&self) -> u8 {
+        self.slot
+    }
+    pub fn start(&self) -> MappingStart {
+        self.start
+    }
+    pub fn draft(&self) -> Option<AffixMappingDraft> {
+        self.draft
+    }
+    pub fn expected(&self) -> &crate::forge::ForgeSnapshot {
+        &self.target.expected
+    }
+    pub fn manager(&self) -> u64 {
+        self.target.manager
+    }
+    pub fn encode(&self) -> Vec<u8> {
+        let mut bytes = self.target.encode().expect("validated mapping target");
+        bytes[4..8].copy_from_slice(&Self::OPERATION.to_le_bytes());
+        bytes[8..12].copy_from_slice(&u32::from(self.slot).to_le_bytes());
+        bytes[24..28].copy_from_slice(&self.draft.map_or(u32::MAX, |d| u32::from(d.id)).to_le_bytes());
+        if let Some(draft) = self.draft {
+            bytes[28..32].copy_from_slice(&u32::from(draft.tier).to_le_bytes());
+            bytes[32..36].copy_from_slice(&u32::from(draft.seal).to_le_bytes());
+            bytes[40..44].copy_from_slice(&u32::from(draft.roll).to_le_bytes());
+        }
+        bytes[36..40].copy_from_slice(
+            &match self.start {
+                MappingStart::ContextOnly => u32::MAX,
+                MappingStart::Samples(start) => u32::from(start),
+            }
+            .to_le_bytes(),
+        );
+        bytes
+    }
+    pub(crate) fn fields(bytes: &[u8]) -> Result<(u8, MappingStart, Option<AffixMappingDraft>), ProtocolError> {
+        if bytes[44..48].iter().chain(&bytes[72..]).any(|b| *b != 0) {
+            return invalid();
+        }
+        let value = |at| u32::from_le_bytes(bytes[at..at + 4].try_into().unwrap());
+        let slot = u8::try_from(value(8)).map_err(|_| ProtocolError::InvalidData)?;
+        if slot >= 32 {
+            return invalid();
+        }
+        let start = if value(36) == u32::MAX {
+            MappingStart::ContextOnly
+        } else {
+            MappingStart::Samples(u8::try_from(value(36)).map_err(|_| ProtocolError::InvalidData)?)
+        };
+        let draft = if value(24) == u32::MAX {
+            if value(28) != 0 || value(32) != 0 || value(40) != 0 {
+                return invalid();
+            }
+            None
+        } else {
+            let id = u16::try_from(value(24)).map_err(|_| ProtocolError::InvalidData)?;
+            let tier = u8::try_from(value(28)).map_err(|_| ProtocolError::InvalidData)?;
+            let roll = u8::try_from(value(40)).map_err(|_| ProtocolError::InvalidData)?;
+            let seal = u8::try_from(value(32)).map_err(|_| ProtocolError::InvalidData)?;
+            if id > 4095 || !(1..=8).contains(&tier) || seal > 3 {
+                return invalid();
+            }
+            Some(AffixMappingDraft { id, tier, roll, seal })
+        };
+        Ok((slot, start, draft))
     }
 }
 

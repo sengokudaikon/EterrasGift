@@ -1,0 +1,107 @@
+use super::*;
+use crate::{
+    edits::{ExpectedObservation, ItemEdit, RollTarget},
+    mapping::{CapturedDisplayParser, MappingBuilder, MappingError, MappingRequest, ValueTable},
+};
+use eg_game_access::mapping::{self, AffixMappingDraft, AffixMappingQuery, MappingStart, MappingTarget};
+
+impl<T: Transport, L: LogSource> Session<T, L> {
+    /// Samples the game's exact display on detached items. Each page checks the
+    /// full selected item/manager; all pages must have one captured locale and
+    /// opaque context before a table is exposed. This never records a write.
+    pub async fn resolve_mapping(&mut self, now: Timestamp, expected: &ExpectedObservation, request: &MappingRequest) -> Result<ValueTable, SessionError> {
+        if matches!(self.state, SessionState::Connecting | SessionState::Closing) {
+            return Err(SessionError::Busy);
+        }
+        self.gate(now)?;
+        if self.state != SessionState::Ready {
+            return Err(SessionError::NotConnected);
+        }
+        request.validate(expected, None).map_err(unavailable)?;
+        if request.address.target != MappingTarget::Affix {
+            return Err(SessionError::Mapping("This roll mapping is unavailable.".into()));
+        }
+        let identity = expected.catalog_identity();
+        if expected.process() != &self.target
+            || !identity.binary_hash.eq_ignore_ascii_case(self.profile.binary_hash())
+            || !identity.metadata_hash.eq_ignore_ascii_case(self.profile.metadata_hash())
+            || identity.extraction_version != crate::catalog::EXTRACTION_VERSION
+        {
+            return Err(SessionError::Mapping("The mapping belongs to a different process or catalog.".into()));
+        }
+        let item = expected.snapshot();
+        let draft = match request.draft.as_ref() {
+            None => None,
+            Some(ItemEdit::Affix(edit)) => Some(AffixMappingDraft {
+                id: u16::try_from(edit.id).map_err(|_| unavailable(MappingError::InvalidQuery))?,
+                tier: u8::try_from(edit.tier).map_err(|_| unavailable(MappingError::InvalidQuery))?,
+                roll: u8::try_from(edit.roll).map_err(|_| unavailable(MappingError::InvalidQuery))?,
+                seal: edit.seal as u8,
+            }),
+            // A roll only changes the sample cursor itself; it cannot change
+            // another modifier's context without a corresponding native draft.
+            Some(ItemEdit::Roll(edit)) if edit.target == RollTarget::Affix && edit.changes.len() == 1 && edit.changes[0].index == i32::from(request.address.index) => None,
+            _ => return Err(unavailable(MappingError::InvalidQuery)),
+        };
+        let manager = self
+            .status
+            .filter(|status| !status.online && status.manager != 0)
+            .ok_or(SessionError::NotConnected)?
+            .manager;
+        let dispatcher = self.discovery.as_ref().ok_or(SessionError::NotConnected)?.dispatcher;
+        let elapsed = std::time::Instant::now();
+        let lease = match self.profile.capture_lease(&dispatcher) {
+            Ok(lease) => lease,
+            Err(error) => {
+                self.release_without_io();
+                self.state = SessionState::Blocked;
+                return Err(SessionError::Identity(error.to_string()));
+            }
+        };
+        let query = |start| {
+            AffixMappingQuery::new(dispatcher, manager, item.clone(), request.address.index, start, draft)
+                .map(Request::MapRoll)
+                .map_err(SessionError::Protocol)
+        };
+        let context = self.mapping_page(advanced(now, elapsed)?, query(MappingStart::ContextOnly)?, &lease).await?;
+        let mut builder = MappingBuilder::new(expected.clone(), request.clone(), context, None).map_err(unavailable)?;
+        let mut parser = CapturedDisplayParser::new(&identity.locale.language).map_err(SessionError::Mapping)?;
+        while let Some(start) = builder.next_start() {
+            let page = self.mapping_page(advanced(now, elapsed)?, query(MappingStart::Samples(start))?, &lease).await?;
+            builder.push(expected, request, page, &mut parser).map_err(unavailable)?;
+        }
+        builder.finish().map_err(unavailable)
+    }
+    async fn mapping_page(&mut self, now: Timestamp, request: Request, lease: &ProfileLease) -> Result<mapping::RawMappingPage, SessionError> {
+        let Request::MapRoll(query) = &request else {
+            return Err(SessionError::Protocol(ProtocolError::InvalidData));
+        };
+        let address = mapping::MappingAddress {
+            target: MappingTarget::Affix,
+            index: query.slot(),
+            line: None,
+        };
+        let start = query.start();
+        match self
+            .read_owned_control(now, |_| request, |bytes| mapping::decode_mapping(bytes, address, start), Some(lease), None)
+            .await
+        {
+            Err(SessionError::Helper {
+                code: ResponseCode::Refused,
+                message,
+                ..
+            }) if self.state == SessionState::Ready => Err(SessionError::Mapping(message)),
+            Err(SessionError::Helper {
+                code: ResponseCode::Failed | ResponseCode::NotReady | ResponseCode::StaleItem,
+                message,
+                ..
+            }) if self.state == SessionState::Ready => Err(SessionError::MappingRetryable(message)),
+            Ok(OwnedRead::Complete(page)) => Ok(page),
+            Ok(OwnedRead::Stopped) => Err(SessionError::Busy),
+            Err(error) => Err(error),
+        }
+    }
+}
+fn unavailable(error: MappingError) -> SessionError {
+    SessionError::Mapping(error.to_string())
+}

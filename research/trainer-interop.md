@@ -76,7 +76,11 @@ the same scale as display text. None of those mechanisms provides a producer, de
 preview or roll-mapping operation by itself. Implicit descriptions now use the game tooltip
 builder directly and resolve virtual text/range methods; they do not use the staged numeric
 field adapter or infer display values from numeric fields. The unused in-game display parser/provider/context
-modules were removed. Future host parsing follows the captured locale as the original app did.
+modules were removed. Host parsing now follows the captured locale as the original app did: explicitly named Windows
+numeric symbols without user overrides, finite Float/AllowThousands-style display parsing and
+exact unit removal. Standard CultureInfo for the captured language is the supported assumption;
+custom game NumberFormatInfo remains unsupported. en-US/de-DE/fr-FR authored comparisons cover
+all 256 sampled values; they do not establish every possible culture/provider combination.
 
 ## Hook work remains separate
 
@@ -85,8 +89,9 @@ inventory has 68 feature registrations over 74 owners: 54 detour targets, 31 byt
 7 field sets. Gameplay detours follow the caller's thread, not a universal main-thread rule.
 Offline transitions and owner loss must turn effects off and report actual removal failures.
 
-The retained detour 0.10 evaluation passed its exercised calls, transactions and foreign-body
-exception cleanup. Missing unwind metadata in a copied prefix remains a deliberate scope
+The [bounded detour 0.10 trial](../tools/trainer-eval/hook-eval/detour-trial.md) passes its exercised
+calls, transactions, concurrent callers and foreign-body exception cleanup in pinned-nightly
+debug and release. Authored Unity adapter replacement is still a separate next step. Missing unwind metadata in a copied prefix remains a deliberate scope
 question, not proof that all trampolines are interchangeable. Its suspension guard is private,
 thread suspension may skip failures, and dropping RawDetour does not provide a safe transaction.
 Keep hook allocations for process lifetime and enable/disable through transactions. Reject
@@ -121,3 +126,24 @@ artifacts; rebuild receipts are local diagnostics, never a runtime `passed` cert
 Affix list changes call managed Clear/Add for reference barriers. Constructor refusal precedes
 the rewrite; failure after Clear, including the game rarity method, remains Uncertain. The host
 rarity projection is an expectation checked by independent readback; it is not the native writer.
+
+
+Regular-affix mappings use one conditional request shape for context and sixteen sample pages,
+with one operation-scoped artifact lease. Each page deserializes an owned item copy, rejects
+cross-aliasing of live/copy list storage and affixes, clones unique/implicit arrays, preserves
+set-count fields, and checks the original numeric context before projecting a draft. Only the
+private copy is mutated. The game tooltip producer/virtual formatter supplies exact display and
+effect text; a varying secondary modifier may become the primary numeric effect. The context
+includes serialized draft state and endpoint effects; every page must agree before publication.
+No endpoint interpolation or raw-quantity fallback supplies displayed values.
+
+IL2CPP reference Field::SetValue takes the direct object pointer, unlike scalar setters that
+take an address of the scalar slot (installed runtime Field.cpp, deref_pointer=false). The detached
+array replacement uses that reference barrier; rooted receivers/children survive managed calls.
+Constructor/tooltip/culture behavior and absence of concurrent external graph changes are explicit
+supported-target assumptions, tested with owned fixtures rather than advertised as universal Rust
+safety guarantees. Tables remain full-observation/draft bound in the worker; mapping failures are
+optional read failures unless process/protocol/identity/offline access is lost. Normal monitor
+polls retain stable unavailable tables and retry only transient failures after a successful read.
+Explicit Refresh permits another attempt at stable refusal too. No write certainty is inferred
+from successful formatting.

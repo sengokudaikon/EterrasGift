@@ -13,7 +13,7 @@ use std::{ffi::CStr, ptr::NonNull};
 impl RuntimeAccess {
     // Exact supported-game call signatures. Closed List<T> is admitted only by the
     // get_Implicits adapter below, without broadening the shared invocation API.
-    unsafe fn description_method(
+    pub(super) unsafe fn description_method(
         &self,
         api: raw::InvocationApi,
         owner: Class,
@@ -37,6 +37,13 @@ impl RuntimeAccess {
                 if CStr::from_ptr(actual) != name || (self.method_params)(method) as usize != parameters.len() {
                     continue;
                 }
+                let parameters_match = parameters.iter().enumerate().all(|(index, expected)| {
+                    let ty = (self.method_param)(method, index as u32);
+                    !ty.is_null() && !(self.type_byref)(ty) && (self.type_class)(ty) == *expected
+                });
+                if !parameters_match {
+                    continue;
+                }
                 let result = (self.method_return)(method);
                 if found.is_some()
                     || (api.method_get_class)(method) != owner
@@ -46,7 +53,7 @@ impl RuntimeAccess {
                     || (api.method_get_flags)(method, std::ptr::null_mut()) & 0x2400 != 0
                     || result.is_null()
                     || (self.type_byref)(result)
-                    || !matches!((self.type_code)(result), 0x0e | 0x12 | 0x15)
+                    || returns.is_none() && !matches!((self.type_code)(result), 0x0e | 0x12 | 0x15)
                     || returns.is_some_and(|expected| (self.type_class)(result) != expected)
                 {
                     return Err(unsupported("tooltip method signature"));
@@ -62,7 +69,7 @@ impl RuntimeAccess {
             Err(unsupported("tooltip method enumeration bound"))
         }
     }
-    unsafe fn description_call<'a, 'r>(
+    pub(super) unsafe fn description_call<'a, 'r>(
         &self,
         attached: &'a AttachedThread<'r>,
         api: raw::InvocationApi,
@@ -81,7 +88,7 @@ impl RuntimeAccess {
             }
         }
     }
-    unsafe fn description_text(&self, attached: &AttachedThread<'_>, api: raw::InvocationApi, info: &Root<'_, '_>, name: &CStr) -> Result<String, DiscoveryError> {
+    pub(super) unsafe fn description_text(&self, attached: &AttachedThread<'_>, api: raw::InvocationApi, info: &Root<'_, '_>, name: &CStr) -> Result<String, DiscoveryError> {
         unsafe {
             let string = self.system_class(c"String")?;
             let mut owner = (self.object_class)(target(info)?.as_ptr());
@@ -121,11 +128,17 @@ impl RuntimeAccess {
                 }
             }
             let text = self.description_call(attached, api, method, Some(info), &mut [Argument::Scalar(Scalar::Boolean(false))])?;
+            self.description_string(text.as_ref())
+        }
+    }
+    pub(super) unsafe fn description_string(&self, text: Option<&Root<'_, '_>>) -> Result<String, DiscoveryError> {
+        unsafe {
+            let string = self.system_class(c"String")?;
             let Some(text) = text else {
                 return Ok(String::new());
             };
-            self.exact(&text, string)?;
-            let object = target(&text)?;
+            self.exact(text, string)?;
+            let object = target(text)?;
             let length = (self.string_length)(object.as_ptr());
             if !(0..=MAX_TEXT_BYTES as i32).contains(&length) {
                 return Err(unsupported("tooltip text length"));

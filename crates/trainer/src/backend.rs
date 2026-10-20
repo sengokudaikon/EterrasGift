@@ -6,6 +6,7 @@
 //! suppress publication from an earlier operation, then drain it before cleanup.
 //! Watch snapshots are authoritative; broadcast events can lag and are advisory.
 mod fields;
+mod mapping;
 mod rate_write;
 mod write;
 
@@ -41,6 +42,7 @@ use crate::{
     catalog_cache::CatalogCache,
     field_writes::{AttackLeechDecision, AttackLeechPlan, AttackLeechTarget, FieldPlanError, RateWriteRecord, RateWriteStatus},
     gate::{self, GateDecision, GatePolicy, GateVerdict, LogSource},
+    mapping::{MappingRequest, ValueTable},
     session::{Cleanup, Session, SessionError},
     writes::{ForgePlan, WriteControl, WriteObservation, WriteOutcome, WritePlan, WriteRecord, WriteStatus},
 };
@@ -93,6 +95,9 @@ pub trait BackendConnection: Send + 'static {
     fn read_forge(&mut self, now: Timestamp) -> impl Future<Output = Result<Option<ForgeSnapshot>, BackendError>> + Send;
     fn describe_implicits(&mut self, _: Timestamp, _: &ForgeSnapshot) -> impl Future<Output = Result<Option<Vec<ModifierSnapshot>>, BackendError>> + Send {
         async { Ok(None) }
+    }
+    fn resolve_mapping(&mut self, _: Timestamp, _: &crate::edits::ExpectedObservation, _: &MappingRequest) -> impl Future<Output = Result<ValueTable, BackendError>> + Send {
+        async { Err(BackendError::blocked(ErrorKind::MappingUnavailable, "Actual values are unavailable for this modifier.")) }
     }
     fn supports_read_attack_leech(&self) -> bool {
         false
@@ -177,6 +182,9 @@ impl<T: Transport + Send + 'static, L: LogSource + Send + 'static> BackendConnec
     async fn describe_implicits(&mut self, now: Timestamp, expected: &ForgeSnapshot) -> Result<Option<Vec<ModifierSnapshot>>, BackendError> {
         Ok(Session::describe_implicits(self, now, expected).await?)
     }
+    async fn resolve_mapping(&mut self, now: Timestamp, expected: &crate::edits::ExpectedObservation, request: &MappingRequest) -> Result<ValueTable, BackendError> {
+        Ok(Session::resolve_mapping(self, now, expected, request).await?)
+    }
     async fn read_forge(&mut self, now: Timestamp) -> Result<Option<ForgeSnapshot>, BackendError> {
         Ok(Session::read_forge(self, now).await?)
     }
@@ -249,6 +257,8 @@ pub enum ErrorKind {
     WriteNotApplied,
     WriteNotKept,
     WriteUncertain,
+    MappingUnavailable,
+    MappingRetryable,
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct BackendError {
@@ -294,6 +304,8 @@ impl From<SessionError> for BackendError {
             SessionError::Gate(_) | SessionError::NotOffline(_) => (ErrorKind::Gate, None, true),
             SessionError::Identity(_) => (ErrorKind::Identity, None, false),
             SessionError::Protocol(_) => (ErrorKind::Protocol, None, false),
+            SessionError::Mapping(_) => (ErrorKind::MappingUnavailable, None, false),
+            SessionError::MappingRetryable(_) => (ErrorKind::MappingRetryable, None, false),
             SessionError::Helper {
                 code: ResponseCode::NotReady,
                 may_have_run: false,
@@ -436,13 +448,34 @@ pub struct BackendSnapshot {
     pub cache_error: Option<String>,
     pub catalog: CatalogState,
     pub forge: ForgeState,
+    /// Successful owned reads/captures, independent of item equality. This
+    /// allows optional display failures to be retried after Refresh, not in a loop.
+    pub forge_read_sequence: u64,
+    pub mappings: Vec<ResolvedMapping>,
     pub attack_leech: Option<AttackLeechSnapshot>,
     pub capabilities: Capabilities,
     pub last_write: Option<WriteRecord>,
     pub last_rate_write: Option<RateWriteRecord>,
     pub undo_forge: Option<crate::undo::ForgeUndo>,
 }
+/// Optional display data for one complete observed item and exact draft query.
+/// Kept in memory only; a changed item, catalog or connection discards it.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ResolvedMapping {
+    pub expected: crate::edits::ExpectedObservation,
+    pub request: MappingRequest,
+    pub result: Result<Arc<ValueTable>, String>,
+    /// Unclassified/transient helper refusal may be retried after the next
+    /// successful owned read. Stable capability failures survive monitor polls.
+    pub retry_on_read: bool,
+}
 impl BackendSnapshot {
+    pub fn mapping(&self, expected: &crate::edits::ExpectedObservation, request: &MappingRequest) -> Option<&Result<Arc<ValueTable>, String>> {
+        self.mappings
+            .iter()
+            .find(|mapping| mapping.expected.matches(expected) && &mapping.request == request)
+            .map(|mapping| &mapping.result)
+    }
     /// The outcome for this exact submitted plan. Historical certainty survives
     /// connection loss; publishing its observation still requires current scope.
     pub fn write_outcome(&self, plan: &WritePlan) -> Option<WriteOutcome<WriteObservation>> {
@@ -571,6 +604,10 @@ pub enum Command {
     Disconnect,
     RefreshCatalog,
     ReadForge,
+    ResolveMapping {
+        expected: Box<crate::edits::ExpectedObservation>,
+        request: MappingRequest,
+    },
     ReadAttackLeech,
     Write(WritePlan),
     ApplyForge(Box<ForgePlan>),
@@ -735,6 +772,8 @@ pub fn service<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K
         cache_error: None,
         catalog: CatalogState::Missing,
         forge: ForgeState::Unobserved,
+        forge_read_sequence: 0,
+        mappings: vec![],
         attack_leech: None,
         capabilities: Capabilities::default(),
         last_write: None,
@@ -813,6 +852,10 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
         }
     }
     fn publish(&mut self) {
+        let expected = self.state.expected_observation().ok();
+        self.state
+            .mappings
+            .retain(|mapping| expected.as_ref().is_some_and(|expected| mapping.expected.matches(expected)));
         if self.state.attack_leech.as_ref().is_some_and(|observation| {
             self.state.phase != Phase::Ready
                 || observation.generation != self.state.generation
@@ -968,8 +1011,9 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
                 self.close(true, true).await;
                 Ok(())
             }
-            Command::RefreshCatalog => self.read(true).await,
-            Command::ReadForge => self.read(false).await,
+            Command::RefreshCatalog => self.read(true, true).await,
+            Command::ReadForge => self.read(false, true).await,
+            Command::ResolveMapping { expected, request } => self.resolve_mapping(*expected, request).await,
             Command::ReadAttackLeech => self.read_attack_leech().await,
             Command::Write(WritePlan::Forge(plan)) => self.write_forge(*plan).await,
             Command::Write(WritePlan::Field(plan)) => self.set_attack_leech_rate(*plan).await,
@@ -983,7 +1027,7 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
             return;
         }
         if self.connection.is_some() {
-            let _ = self.read(false).await;
+            let _ = self.read(false, false).await;
         } else if self.state.auto_connect && tokio::time::Instant::now() >= self.next_discovery {
             self.next_discovery = tokio::time::Instant::now() + self.options.discovery_interval.max(Duration::from_millis(1));
             let _ = self.connect().await;
@@ -1025,7 +1069,7 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
     }
     async fn connect(&mut self) -> Result<(), BackendError> {
         if self.connection.is_some() {
-            return self.read(false).await;
+            return self.read(false, true).await;
         }
         let epoch = self.command_epoch;
         self.superseded(epoch)?;
@@ -1116,6 +1160,8 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
             }
             self.commit(epoch, |this| {
                 this.state.forge = forge;
+                this.state.forge_read_sequence = this.state.forge_read_sequence.wrapping_add(1);
+                this.state.mappings.retain(|mapping| mapping.result.is_ok());
                 this.state.catalog = CatalogState::Current {
                     generation: this.state.generation,
                     data: data.clone(),
@@ -1143,6 +1189,9 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
         result
     }
     fn check_status(&mut self, status: RuntimeStatus) -> Result<(), BackendError> {
+        if self.state.runtime_status.is_some_and(|previous| previous.manager != status.manager) {
+            self.state.mappings.clear();
+        }
         if self.state.attack_leech.as_ref().is_some_and(|observation| observation.manager != status.manager) {
             self.state.attack_leech = None;
         }
@@ -1158,7 +1207,7 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
             Ok(())
         }
     }
-    async fn read(&mut self, capture: bool) -> Result<(), BackendError> {
+    async fn read(&mut self, capture: bool, retry_optional: bool) -> Result<(), BackendError> {
         if !self.state.enabled {
             return Err(BackendError::blocked(ErrorKind::Disabled, "trainer disabled"));
         }
@@ -1211,6 +1260,8 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
             }
             self.commit(epoch, |this| {
                 this.state.forge = forge;
+                this.state.forge_read_sequence = this.state.forge_read_sequence.wrapping_add(1);
+                this.state.mappings.retain(|mapping| mapping.result.is_ok() || !retry_optional && !mapping.retry_on_read);
                 this.state.catalog = CatalogState::Current {
                     generation: this.state.generation,
                     data: data.clone(),

@@ -25,6 +25,8 @@ struct Data {
     writes: AtomicUsize,
     outcome: AtomicUsize,
     descriptions: AtomicUsize,
+    mappings: AtomicUsize,
+    mapping_calls: AtomicUsize,
     refuse_at: AtomicUsize,
     expected: Mutex<Vec<ForgeSnapshot>>,
 }
@@ -181,6 +183,67 @@ impl BackendConnection for OwnedConnection {
             ]
         }))
     }
+    async fn resolve_mapping(
+        &mut self,
+        _: jiff::Timestamp,
+        expected: &eg_trainer::edits::ExpectedObservation,
+        request: &eg_trainer::mapping::MappingRequest,
+    ) -> Result<eg_trainer::mapping::ValueTable, BackendError> {
+        use eg_trainer::mapping::{DisplayScalarParser, MappingBuilder, MappingStart, RawMappingPage, RawValueSample};
+        let mode = self.0.mappings.load(Ordering::SeqCst);
+        if mode == 0 || mode == 3 {
+            self.0.mapping_calls.fetch_add(1, Ordering::SeqCst);
+            let kind = if mode == 3 {
+                backend::ErrorKind::MappingRetryable
+            } else {
+                backend::ErrorKind::MappingUnavailable
+            };
+            return Err(BackendError::blocked(kind, "Owned formatting is unavailable."));
+        }
+        assert_eq!(self.0.item.lock().unwrap().as_ref(), Some(expected.snapshot()));
+        self.0.mapping_calls.fetch_add(1, Ordering::SeqCst);
+        tokio::time::sleep(Duration::from_millis(if mode == 2 { 500 } else { 20 })).await;
+        let affix = &expected.snapshot().affixes[usize::from(request.address.index)];
+        let (id, tier) = match &request.draft {
+            Some(eg_trainer::edits::ItemEdit::Affix(edit)) => (edit.id, edit.tier),
+            _ => (i32::from(affix.id), i32::from(affix.tier)),
+        };
+        let minimum = id * 100 + tier * 10 + expected.snapshot().individual_id as i32;
+        let context = format!("{}:{id}:{tier}", expected.snapshot().individual_id).into_bytes();
+        let page = |start, samples| RawMappingPage {
+            language: "en".into(),
+            context: context.clone(),
+            address: request.address,
+            start,
+            samples,
+        };
+        struct Parser;
+        impl DisplayScalarParser for Parser {
+            fn parse(&mut self, language: &str, display: &str, unit: &str) -> Result<f64, String> {
+                assert_eq!(language, "en");
+                display.strip_suffix(unit).unwrap().parse().map_err(|error: std::num::ParseFloatError| error.to_string())
+            }
+        }
+        let mut builder = MappingBuilder::new(expected.clone(), request.clone(), page(MappingStart::ContextOnly, vec![]), None).unwrap();
+        while let Some(start) = builder.next_start() {
+            let samples = (start..=start + 15)
+                .map(|roll| {
+                    let value = minimum + i32::from(roll);
+                    RawValueSample {
+                        raw_quantity: f64::from(value),
+                        display: format!("{value} Ω"),
+                        unit: " Ω".into(),
+                        effects: vec![format!("Owned effect {value}")],
+                    }
+                })
+                .collect();
+            builder.push(expected, request, page(MappingStart::Samples(start), samples), &mut Parser).unwrap();
+        }
+        Ok(builder.finish().unwrap())
+    }
+    fn supports_affix_rolls(&self) -> bool {
+        true
+    }
     fn supports_affix_list(&self) -> bool {
         true
     }
@@ -306,6 +369,8 @@ pub(super) fn capture(session: &Session) {
         writes: AtomicUsize::new(0),
         outcome: AtomicUsize::new(0),
         descriptions: AtomicUsize::new(0),
+        mappings: AtomicUsize::new(0),
+        mapping_calls: AtomicUsize::new(0),
         refuse_at: AtomicUsize::new(0),
         expected: Mutex::new(Vec::new()),
     });
@@ -646,6 +711,97 @@ pub(super) fn capture(session: &Session) {
     assert!(forge.get_can_change_affix_list());
     assert_eq!(handle.snapshot().phase, Phase::Ready);
     session.capture(&ui, "backend-forge-implicit-unavailable");
+    // Real worker mapping commands fill the previously empty affix value cell.
+    // Captures use a deterministic authored table; production uses game samples.
+    data.mappings.store(1, Ordering::SeqCst);
+    *data.item.lock().unwrap() = Some(item("Mapped values", 42));
+    command(&handle, Command::ReadForge, || true);
+    wait(|| forge.get_item_name() == "Mapped values" && forge.get_affixes().row_data(0).unwrap().value.mapped);
+    let value = forge.get_affixes().row_data(0).unwrap().value;
+    assert_eq!(value.display, "363 Ω"); // id 1, tier 5, item 42, roll 171
+    assert!(value.editable);
+    session.capture(&ui, "backend-forge-values");
+    session.resize(680, 580);
+    session.capture(&ui, "backend-forge-values-narrow");
+    session.resize(1100, 700);
+    let affix_cell = eg_ui::CellRef {
+        kind: eg_ui::CellKind::Affix,
+        row: 0,
+        roll: 0,
+    };
+    forge.invoke_step_to_end(affix_cell.clone(), true);
+    assert_eq!(forge.get_affixes().row_data(0).unwrap().value.display, "447 Ω");
+    assert_eq!(forge.get_drafts().row_count(), 1);
+    session.capture(&ui, "backend-forge-roll-draft");
+    forge.invoke_apply();
+    wait(|| forge.get_can_undo() && data.item.lock().unwrap().as_ref().unwrap().affixes[0].roll == 255);
+    wait(|| forge.get_affixes().row_data(0).unwrap().value.mapped);
+    session.capture(&ui, "backend-forge-roll-confirmed");
+    forge.invoke_undo();
+    wait(|| !forge.get_can_undo() && forge.get_can_change_affix_list() && data.item.lock().unwrap().as_ref().unwrap().affixes[0].roll == 171);
+    wait(|| forge.get_affixes().row_data(0).unwrap().value.display == "363 Ω");
+    // Tier and replacement drafts resolve in their own context. Unrelated watch
+    // publications preserve both local drafts and a value currently being typed.
+    forge.invoke_pick_tier(0, 2);
+    wait(|| forge.get_affixes().row_data(0).unwrap().value.mapped);
+    assert_eq!(forge.get_affixes().row_data(0).unwrap().value.display, "343 Ω");
+    assert_eq!(forge.get_drafts().row_count(), 1);
+    session.capture(&ui, "backend-forge-tier-values");
+    assert!(forge.invoke_open_replace(0));
+    forge.invoke_picker_search_edited("Vitality".into());
+    forge.invoke_picker_select(0);
+    forge.invoke_use_picker();
+    wait(|| forge.get_affixes().row_data(0).unwrap().value.mapped);
+    assert_eq!(forge.get_affixes().row_data(0).unwrap().value.display, "443 Ω");
+    session.capture(&ui, "backend-forge-replacement-values");
+    forge.invoke_discard_all();
+    wait(|| forge.get_affixes().row_data(0).unwrap().value.mapped);
+    assert!(forge.invoke_begin_input(affix_cell.clone()));
+    forge.invoke_input_edited(affix_cell.clone(), "400".into());
+    command(&handle, Command::ReadForge, || true);
+    assert!(forge.invoke_commit_input(affix_cell.clone()));
+    assert_eq!(forge.get_affixes().row_data(0).unwrap().value.display, "400 Ω");
+    forge.invoke_discard_all();
+    // An old completion cannot leak values to a replacement item; navigation
+    // remains responsive while the worker is awaiting a delayed response.
+    data.mappings.store(2, Ordering::SeqCst);
+    let calls = data.mapping_calls.load(Ordering::SeqCst);
+    *data.item.lock().unwrap() = Some(item("Delayed mapping", 43));
+    command(&handle, Command::ReadForge, || true);
+    wait(|| data.mapping_calls.load(Ordering::SeqCst) > calls);
+    assert!(!forge.get_affixes().row_data(0).unwrap().value.mapped);
+    assert!(forge.get_affixes().row_data(0).unwrap().value.tip.contains("Loading actual values"));
+    ui.global::<Nav>().invoke_navigate("settings".into());
+    assert_eq!(ui.global::<Nav>().get_current_page(), "settings");
+    ui.global::<Nav>().invoke_navigate("forge".into());
+    session.capture(&ui, "backend-forge-values-loading");
+    *data.item.lock().unwrap() = Some(item("New mapping context", 44));
+    let _read = handle.try_submit(Command::ReadForge).unwrap();
+    wait(|| forge.get_item_name() == "New mapping context");
+    assert!(!forge.get_affixes().row_data(0).unwrap().value.mapped);
+    wait(|| forge.get_affixes().row_data(0).unwrap().value.mapped);
+    assert_eq!(forge.get_affixes().row_data(0).unwrap().value.display, "365 Ω");
+    assert_eq!(forge.get_drafts().row_count(), 0);
+    data.mappings.store(3, Ordering::SeqCst);
+    *data.item.lock().unwrap() = Some(item("Unavailable mapping", 45));
+    command(&handle, Command::ReadForge, || true);
+    wait(|| forge.get_item_name() == "Unavailable mapping" && forge.get_affixes().row_data(0).unwrap().value.tip.contains("Owned formatting is unavailable"));
+    assert!(!forge.get_affixes().row_data(0).unwrap().value.mapped);
+    assert!(!forge.get_affixes().row_data(0).unwrap().value.editable);
+    assert_eq!(handle.snapshot().phase, Phase::Ready);
+    session.capture(&ui, "backend-forge-values-unavailable");
+    let calls = data.mapping_calls.load(Ordering::SeqCst);
+    for _ in 0..20 {
+        settle();
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    assert_eq!(data.mapping_calls.load(Ordering::SeqCst), calls, "failed reads never form a retry loop");
+    data.mappings.store(1, Ordering::SeqCst);
+    command(&handle, Command::ReadForge, || true);
+    wait(|| forge.get_affixes().row_data(0).unwrap().value.mapped);
+    assert_eq!(forge.get_affixes().row_data(0).unwrap().value.display, "366 Ω");
+    assert_eq!(data.mapping_calls.load(Ordering::SeqCst), calls + 1);
+    session.capture(&ui, "backend-forge-values-recovered");
     let mut unsupported = item("Unsupported status", 19);
     unsupported.status.level_requirement = -1;
     unsupported.fingerprint = unsupported.legacy_fingerprint();
