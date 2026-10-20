@@ -1,7 +1,7 @@
 use super::*;
-use eg_game_access::fields::{AttackLeechObservation, AttackLeechRead, ObservedObjectIdentity, ObservedRate};
 use eg_trainer::backend::Activity;
 use eg_trainer::writes::{WriteObservation, WriteOutcome, WritePlan};
+use eg_trainer_wire::fields::{AttackLeechObservation, AttackLeechRead, ObservedObjectIdentity, ObservedRate};
 
 #[test]
 fn field_write_faults_keep_raw_expected_and_readback_bits_without_an_event_consumer() {
@@ -394,9 +394,9 @@ fn mismatched_or_pending_connection_results_are_uncertain_and_not_sent_is_defini
                 }),
                 _ => Ok(RateWriteStatus::NotApplied {
                     code: if fault == 4 {
-                        eg_game_access::protocol::ResponseCode::Failed
+                        eg_trainer_wire::protocol::ResponseCode::Failed
                     } else {
-                        eg_game_access::protocol::ResponseCode::Done
+                        eg_trainer_wire::protocol::ResponseCode::Done
                     },
                     message: "invalid alleged refusal".into(),
                 }),

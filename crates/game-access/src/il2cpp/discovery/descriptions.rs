@@ -4,10 +4,8 @@ use super::{
     forge::{Root, target},
     unsupported,
 };
-use crate::{
-    il2cpp::{Argument, AttachedThread, InvocationContext, InvocationOutcome, ReturnValue, Scalar, raw},
-    mapping::{ForgeDescriptionRequest, MAX_TEXT_BYTES, ModifierSnapshot},
-};
+use crate::il2cpp::{Argument, AttachedThread, InvocationContext, InvocationOutcome, ReturnValue, Scalar, raw};
+use eg_trainer_wire::mapping::{ForgeDescriptionRequest, MAX_TEXT_BYTES, ModifierSnapshot};
 use std::{ffi::CStr, ptr::NonNull};
 
 impl RuntimeAccess {
@@ -209,7 +207,7 @@ impl RuntimeAccess {
             let mut modifiers = Vec::new();
             if let Some(list) = value {
                 self.exact(&list, list_class)?;
-                let implicits = self.catalog_list(attached, &list, element, crate::catalog::MAX_IMPLICITS as u32)?;
+                let implicits = self.catalog_list(attached, &list, element, eg_trainer_wire::catalog::MAX_IMPLICITS as u32)?;
                 if !implicits.is_empty() {
                     let item_list = self.class(&graph.images, c"", c"ItemList")?;
                     let data_class = self.catalog_nested(item_list, c"EquipmentImplicit")?;
@@ -277,7 +275,7 @@ impl RuntimeAccess {
             if target(&current.manager)?.as_ptr() as u64 != request.manager() || self.forge_snapshot(attached, &current)? != *request.expected() {
                 return Err(unsupported("forge changed during implicit description"));
             }
-            crate::mapping::encode_modifiers(&modifiers).map_err(|e| unsupported(e.to_string()))?;
+            eg_trainer_wire::mapping::encode_modifiers(&modifiers).map_err(|e| unsupported(e.to_string()))?;
             Ok(modifiers)
         }
     }

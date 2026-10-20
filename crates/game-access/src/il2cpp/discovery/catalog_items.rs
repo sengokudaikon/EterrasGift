@@ -5,10 +5,8 @@
 //! Raw display fields retain their provenance and do not stand in for generated text.
 
 use super::{DiscoveryError, Images, RuntimeAccess, catalog::page_bounds, forge::Root, unsupported};
-use crate::{
-    catalog::{AffixDefinition, Availability, CatalogEntries, DefinitionName, DefinitionNameSource, RarityDefinition, UniqueDefinition},
-    il2cpp::{AttachedThread, raw},
-};
+use crate::il2cpp::{AttachedThread, raw};
+use eg_trainer_wire::catalog::{AffixDefinition, Availability, CatalogEntries, DefinitionName, DefinitionNameSource, RarityDefinition, UniqueDefinition};
 
 impl RuntimeAccess {
     // These helpers inherit read_catalog_page's main-thread, nonmoving-GC, initialized-runtime,
@@ -54,7 +52,7 @@ impl RuntimeAccess {
                 let definition = &definitions[index];
                 let item_types = self
                     .catalog_reference(attached, definition, c"canRollOn")?
-                    .map(|list| self.catalog_values::<i32>(attached, &list, equipment, crate::catalog::MAX_EQUIPMENT_TYPES as u32))
+                    .map(|list| self.catalog_values::<i32>(attached, &list, equipment, eg_trainer_wire::catalog::MAX_EQUIPMENT_TYPES as u32))
                     .transpose()?;
                 let tiers = self
                     .catalog_reference(attached, definition, c"tiers")?
@@ -119,7 +117,7 @@ impl RuntimeAccess {
                     id: self.primitive(definition, c"uniqueID")?,
                     name: self.catalog_stored_name(attached, definition)?,
                     item_type: self.primitive(definition, c"baseType")?,
-                    sub_types: self.catalog_values(attached, &sub_types, self.system_class(c"Byte")?, crate::catalog::MAX_UNIQUE_SUB_TYPES as u32)?,
+                    sub_types: self.catalog_values(attached, &sub_types, self.system_class(c"Byte")?, eg_trainer_wire::catalog::MAX_UNIQUE_SUB_TYPES as u32)?,
                     is_set_item: self.boolean(definition, c"isSetItem")?,
                     set_id: self.primitive(definition, c"setID")?,
                     legendary_type: self.enumeration(definition, c"legendaryType", c"LegendaryType")?,

@@ -6,9 +6,9 @@ use super::{
     Class, DiscoveryError, Ptr, RuntimeAccess,
     forge::{ForgeGraph, Root, target},
 };
-use crate::{
+use crate::il2cpp::{Argument, AttachedThread, InvocationContext, InvocationOutcome, ReturnValue, Scalar, raw};
+use eg_trainer_wire::{
     forge::ForgeSnapshot,
-    il2cpp::{Argument, AttachedThread, InvocationContext, InvocationOutcome, ReturnValue, Scalar, raw},
     write::{ForgeMutation, StatusField},
 };
 use std::{ffi::CStr, ptr::NonNull};
@@ -878,7 +878,7 @@ mod tests {
             affixes: vec![],
             implicit_rolls: vec![],
             identity: None,
-            status: crate::forge::ItemStatus {
+            status: eg_trainer_wire::forge::ItemStatus {
                 forging_potential: 0,
                 forging_potential_type: 0,
                 legendary_potential: 0,

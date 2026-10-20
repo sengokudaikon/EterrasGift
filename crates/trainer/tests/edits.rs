@@ -1,13 +1,13 @@
-use eg_game_access::{
+use eg_trainer::{
+    catalog::{CatalogIdentity, EXTRACTION_VERSION, GameCatalog},
+    edits::*,
+};
+use eg_trainer_wire::{
     catalog::{AffixDefinition, Availability, DefinitionName, DefinitionNameSource, ItemTypeDefinition, SubTypeDefinition, UniqueDefinition},
     definitions::{ItemLimits, ValueRange},
     forge::{AffixSnapshot, ForgeSnapshot, ItemStatus, UniqueIdentity},
     locale::GameLocale,
     process::ProcessIdentity,
-};
-use eg_trainer::{
-    catalog::{CatalogIdentity, EXTRACTION_VERSION, GameCatalog},
-    edits::*,
 };
 use std::{collections::BTreeMap, path::PathBuf};
 
@@ -931,11 +931,11 @@ fn forge_plans_refuse_unimplemented_edits_and_set_identity_changes_are_stale() {
 
 #[test]
 fn forge_affix_roll_batch_and_reverse_keep_unselected_state_and_reject_stale_targets() {
-    use eg_game_access::write::ForgeMutation;
     use eg_trainer::{
         undo::ForgeUndo,
         writes::{ForgePlan, WriteRecord, WriteStatus},
     };
+    use eg_trainer_wire::write::ForgeMutation;
     let c = catalog();
     let before = item();
     let expected = observation(before.clone(), &c);

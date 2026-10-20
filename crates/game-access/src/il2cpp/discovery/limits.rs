@@ -1,10 +1,8 @@
 //! Literal metadata only: item status bounds from the original helper's appendItemConstants.
 
 use super::{Class, DiscoveryError, RuntimeAccess, unsupported};
-use crate::{
-    definitions::{ItemLimits, ValueRange},
-    il2cpp::AttachedThread,
-};
+use crate::il2cpp::AttachedThread;
+use eg_trainer_wire::definitions::{ItemLimits, ValueRange};
 use std::ffi::CStr;
 
 fn range(minimum: u8, maximum: u8) -> Result<ValueRange, DiscoveryError> {

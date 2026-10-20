@@ -12,7 +12,12 @@ mod unique;
 #[path = "session/write.rs"]
 mod writes;
 use eg_core::game_log::{GameLogEvent, GameLogState, GameLogStatus, GameReadiness, LoggedCharacter};
-use eg_game_access::{
+use eg_trainer::{
+    gate::{GatePolicy, GateVerdict, LogSource},
+    profile::BuildProfile,
+    session::{Cleanup, Session, SessionError, SessionState},
+};
+use eg_trainer_wire::{
     catalog::{self, CatalogEntries, CatalogKind, CatalogPage, DefinitionName, DefinitionNameSource, ItemTypeDefinition},
     definitions::{self, ItemLimits, ValueRange},
     forge::{self, AffixSnapshot, ForgeSnapshot, ItemStatus},
@@ -20,11 +25,6 @@ use eg_game_access::{
     process::ProcessIdentity,
     protocol::{Discovery, DispatcherSpec, ProtocolError, REQUIRED_KEYS, Request, Response, ResponseCode, RuntimeStatus},
     transport::{Delivery, Transport, TransportError, TransportFailure},
-};
-use eg_trainer::{
-    gate::{GatePolicy, GateVerdict, LogSource},
-    profile::BuildProfile,
-    session::{Cleanup, Session, SessionError, SessionState},
 };
 use jiff::{SignedDuration, Timestamp};
 use std::{

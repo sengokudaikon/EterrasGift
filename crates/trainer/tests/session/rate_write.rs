@@ -1,10 +1,10 @@
 use super::*;
-use eg_game_access::fields::{self, AttackLeechObservation, AttackLeechRead, AttackLeechUnavailable, ObservedObjectIdentity, ObservedRate};
 use eg_trainer::{
     backend::AttackLeechSnapshot,
     field_writes::{AttackLeechDecision, AttackLeechPlan, AttackLeechTarget, RateWriteStatus},
     writes::{WriteControl, WriteObservation, WriteOutcome},
 };
+use eg_trainer_wire::fields::{self, AttackLeechObservation, AttackLeechRead, AttackLeechUnavailable, ObservedObjectIdentity, ObservedRate};
 
 fn observation() -> AttackLeechObservation {
     AttackLeechObservation {

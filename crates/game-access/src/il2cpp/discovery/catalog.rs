@@ -5,12 +5,10 @@ use super::{
     forge::{Primitive, Root, target},
     unsupported,
 };
-use crate::{
-    catalog::{
-        Availability, CatalogEntries, CatalogKind, CatalogPage, DefinitionName, DefinitionNameSource, ImplicitDefinition, ItemTypeDefinition, MAX_IMPLICITS, MAX_PAGE_ENTRIES,
-        MAX_SUB_TYPES, SubTypeDefinition,
-    },
-    il2cpp::{AttachedThread, raw},
+use crate::il2cpp::{AttachedThread, raw};
+use eg_trainer_wire::catalog::{
+    Availability, CatalogEntries, CatalogKind, CatalogPage, DefinitionName, DefinitionNameSource, ImplicitDefinition, ItemTypeDefinition, MAX_IMPLICITS, MAX_PAGE_ENTRIES,
+    MAX_SUB_TYPES, SubTypeDefinition,
 };
 use std::{ffi::CStr, ptr::NonNull};
 
@@ -43,7 +41,7 @@ impl CopyBudget {
         self.used = self
             .used
             .checked_add(bytes)
-            .filter(|used| *used <= crate::protocol::MAX_RESPONSE_SIZE)
+            .filter(|used| *used <= eg_trainer_wire::protocol::MAX_RESPONSE_SIZE)
             .ok_or_else(|| unsupported("catalog base page exceeds conservative 1 MiB copy budget"))?;
         Ok(())
     }
@@ -647,7 +645,7 @@ mod tests {
     #[test]
     fn aggregate_budget_stops_before_large_graph_materialization_or_integer_wrap() {
         let mut budget = CopyBudget::new();
-        budget.charge(crate::protocol::MAX_RESPONSE_SIZE - 16384).unwrap();
+        budget.charge(eg_trainer_wire::protocol::MAX_RESPONSE_SIZE - 16384).unwrap();
         assert!(budget.charge(1).is_err());
         assert!(CopyBudget::new().charge(usize::MAX).is_err());
         let mut budget = CopyBudget::new();

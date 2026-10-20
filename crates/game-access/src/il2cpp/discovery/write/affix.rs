@@ -1,9 +1,9 @@
 //! Game-specific affix list edits: construct, validate, then rewrite through List<T>'s barriers.
 
 use super::*;
-use crate::{
+use crate::il2cpp::ValueTypeContract;
+use eg_trainer_wire::{
     forge::AffixSnapshot,
-    il2cpp::ValueTypeContract,
     write::{affix_order_key, layout_problems},
 };
 

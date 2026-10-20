@@ -1,13 +1,14 @@
 //! Desktop composition: process identities, a lazily opened helper package and
 //! the existing preparer/session. No discovery or injection during construction.
 use crate::windows::{NativePreparer, VerifiedTransport};
-use eg_game_access::{bootstrap::HelperArtifact, process::ProcessIdentity};
+use eg_game_access::bootstrap::HelperArtifact;
 use eg_trainer::{
     backend::{BackendError, Connector, ErrorKind, ProcessLocator},
     connection::{LogFactory, SessionConnector},
     gate::{self, GatePolicy, GateVerdict, LogSource},
     session::Session,
 };
+use eg_trainer_wire::process::ProcessIdentity;
 use jiff::Timestamp;
 use std::{
     path::{Path, PathBuf},

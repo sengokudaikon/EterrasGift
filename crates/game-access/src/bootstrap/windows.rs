@@ -2,8 +2,8 @@
 //! No automatic stop, unload, remote-thread termination, or operation replay is performed.
 
 use super::{BootstrapConfig, BootstrapError, BootstrapOperation, BootstrapReply, HelperArtifact, metric_offsets};
-use crate::{process::ProcessIdentity, protocol::DispatcherSpec};
 use eg_core::hashes;
+use eg_trainer_wire::{process::ProcessIdentity, protocol::DispatcherSpec};
 use std::{
     ffi::{OsString, c_void},
     fs::File,

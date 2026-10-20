@@ -4,14 +4,14 @@ use std::{
     time::{Duration, SystemTime},
 };
 
-use eg_game_access::{
-    catalog::{Availability, DefinitionName, DefinitionNameSource, ItemTypeDefinition, RarityDefinition, SubTypeDefinition},
-    definitions::{ItemLimits, ValueRange},
-    locale::GameLocale,
-};
 use eg_trainer::{
     catalog::{CatalogIdentity, EXTRACTION_VERSION, GameCatalog, MAX_CATALOG_BYTES},
     catalog_cache::{CATALOG_FILE, CacheError, CatalogCache, KEPT_BUILDS, POINTER_FILE, identity_key},
+};
+use eg_trainer_wire::{
+    catalog::{Availability, DefinitionName, DefinitionNameSource, ItemTypeDefinition, RarityDefinition, SubTypeDefinition},
+    definitions::{ItemLimits, ValueRange},
+    locale::GameLocale,
 };
 
 fn catalog() -> GameCatalog {

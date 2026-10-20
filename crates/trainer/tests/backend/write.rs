@@ -1,6 +1,6 @@
 use super::*;
-use eg_game_access::protocol::ResponseCode;
 use eg_trainer::writes::{WriteObservation, WriteOutcome, WritePlan};
+use eg_trainer_wire::protocol::ResponseCode;
 
 #[test]
 fn mixed_batch_undo_is_owned_by_the_worker_and_refusal_retains_only_unrestored_steps() {
@@ -162,7 +162,7 @@ fn reducing_above_limit_legendary_will_does_not_offer_an_illegal_increase_as_und
             let mut item = shared.forge_item.lock().unwrap();
             let item = item.as_mut().unwrap();
             item.rarity = 9;
-            item.identity = Some(eg_game_access::forge::UniqueIdentity { id: 911, rolls: vec![] });
+            item.identity = Some(eg_trainer_wire::forge::UniqueIdentity { id: 911, rolls: vec![] });
             item.status.weavers_will = 255;
             item.fingerprint = item.legacy_fingerprint();
         }
@@ -462,7 +462,7 @@ fn mismatched_connection_confirmation_is_uncertain_even_if_legacy_hash_matches()
 #[test]
 fn success_or_failure_code_cannot_be_reported_as_definite_level_nonexecution() {
     run(async {
-        for code in [eg_game_access::protocol::ResponseCode::Done, eg_game_access::protocol::ResponseCode::Failed] {
+        for code in [eg_trainer_wire::protocol::ResponseCode::Done, eg_trainer_wire::protocol::ResponseCode::Failed] {
             let shared = writable();
             let (handle, worker) = start(&shared, options(), None);
             connected(&handle).await;

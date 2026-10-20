@@ -5,10 +5,8 @@ use super::{
     forge::{Root, target},
     unsupported,
 };
-use crate::{
-    catalog::{AffixTier, Availability, MAX_DESCRIPTIONS, MAX_DISPLAY_ORDER, MAX_PROPERTIES, NumericProperty, UniqueNumericData},
-    il2cpp::{AttachedThread, raw},
-};
+use crate::il2cpp::{AttachedThread, raw};
+use eg_trainer_wire::catalog::{AffixTier, Availability, MAX_DESCRIPTIONS, MAX_DISPLAY_ORDER, MAX_PROPERTIES, NumericProperty, UniqueNumericData};
 use std::{collections::BTreeMap, ffi::CStr};
 
 #[derive(Clone, Copy)]
@@ -74,14 +72,14 @@ impl NumericBudget {
         // Conservatively covers locale/framing and three maximum-sized raw name strings per
         // page entry; names are copied by the surrounding identity reader.
         Self {
-            used: 16384 + 3 * crate::catalog::MAX_TEXT_BYTES * crate::catalog::MAX_PAGE_ENTRIES,
+            used: 16384 + 3 * eg_trainer_wire::catalog::MAX_TEXT_BYTES * eg_trainer_wire::catalog::MAX_PAGE_ENTRIES,
         }
     }
     pub(super) fn charge(&mut self, bytes: usize) -> Result<(), DiscoveryError> {
         self.used = self
             .used
             .checked_add(bytes)
-            .filter(|used| *used <= crate::protocol::MAX_RESPONSE_SIZE)
+            .filter(|used| *used <= eg_trainer_wire::protocol::MAX_RESPONSE_SIZE)
             .ok_or_else(|| unsupported("catalog numeric page exceeds conservative 1 MiB copy budget"))?;
         Ok(())
     }
@@ -1349,7 +1347,7 @@ mod tests {
     fn numeric_copy_budget_reserves_names_and_rejects_aggregate_or_integer_overflow() {
         let mut budget = NumericBudget::new();
         assert!(budget.used > 16384);
-        budget.charge(crate::protocol::MAX_RESPONSE_SIZE - budget.used).unwrap();
+        budget.charge(eg_trainer_wire::protocol::MAX_RESPONSE_SIZE - budget.used).unwrap();
         assert!(budget.charge(1).is_err());
         assert!(NumericBudget::new().charge(usize::MAX).is_err());
     }

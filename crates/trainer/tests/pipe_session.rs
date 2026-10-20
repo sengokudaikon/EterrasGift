@@ -1,15 +1,13 @@
 #![cfg(all(windows, target_arch = "x86_64"))]
 //! Session + actual Player.log reader + real local pipe. All data is authored; no game is selected.
 use eg_core::game_log::GameLogReader;
-use eg_game_access::{
-    pipe::PipeClient,
-    protocol::{Discovery, DispatcherSpec, REQUEST_SIZE, REQUIRED_KEYS, Request, Response, ResponseCode, RuntimeStatus},
-};
+use eg_game_access::pipe::PipeClient;
 use eg_trainer::{
     gate::GatePolicy,
     profile::BuildProfile,
     session::{Cleanup, Session, SessionState},
 };
+use eg_trainer_wire::protocol::{Discovery, DispatcherSpec, REQUEST_SIZE, REQUIRED_KEYS, Request, Response, ResponseCode, RuntimeStatus};
 use std::{
     fs,
     os::windows::process::CommandExt,

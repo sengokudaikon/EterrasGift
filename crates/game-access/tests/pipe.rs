@@ -2,9 +2,9 @@
 //! Actual local pipes in disposable copies of this test executable. Never selects an existing process.
 
 use eg_game_access::pipe::PipeClient;
-use eg_game_access::process::ProcessIdentity;
-use eg_game_access::protocol::{DispatcherSpec, MAGIC, MAX_RESPONSE_SIZE, REQUEST_SIZE, Request, Response, ResponseCode};
-use eg_game_access::transport::{Delivery, Transport, TransportFailure};
+use eg_trainer_wire::process::ProcessIdentity;
+use eg_trainer_wire::protocol::{DispatcherSpec, MAGIC, MAX_RESPONSE_SIZE, REQUEST_SIZE, Request, Response, ResponseCode};
+use eg_trainer_wire::transport::{Delivery, Transport, TransportFailure};
 use std::fs;
 use std::io;
 use std::os::windows::process::CommandExt;

@@ -12,17 +12,17 @@ use std::{
 };
 
 use eg_core::game_log::{GameLogState, GameLogStatus, GameReadiness};
-use eg_game_access::{
-    process::ProcessIdentity,
-    protocol::{Discovery, DispatcherSpec, REQUIRED_KEYS, Request, Response, ResponseCode, RuntimeStatus},
-    transport::{Delivery, Transport, TransportError},
-};
 use eg_trainer::{
     backend::{BackendError, Connector, ErrorKind},
     connection::{AdmissionCheck, AttemptOutcome, HelperPreparer, LogFactory, PreparationFailure, PreparationResidency, PreparedHelper, SessionConnector},
     gate::{GatePolicy, LogSource},
     profile::BuildProfile,
     session::SessionState,
+};
+use eg_trainer_wire::{
+    process::ProcessIdentity,
+    protocol::{Discovery, DispatcherSpec, REQUIRED_KEYS, Request, Response, ResponseCode, RuntimeStatus},
+    transport::{Delivery, Transport, TransportError},
 };
 use jiff::Timestamp;
 use tokio::sync::Notify;

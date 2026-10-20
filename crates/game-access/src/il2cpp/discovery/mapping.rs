@@ -4,10 +4,8 @@ use super::{
     forge::{ForgeGraph, Root, target},
     unsupported,
 };
-use crate::{
-    il2cpp::{Argument, AttachedThread, InvocationContext, InvocationOutcome, ReturnValue, Scalar, ValueTypeContract, raw},
-    mapping::{AffixMappingQuery, MAX_CONTEXT_BYTES, MappingAddress, MappingStart, MappingTarget, RawMappingPage, RawValueSample},
-};
+use crate::il2cpp::{Argument, AttachedThread, InvocationContext, InvocationOutcome, ReturnValue, Scalar, ValueTypeContract, raw};
+use eg_trainer_wire::mapping::{AffixMappingQuery, MAX_CONTEXT_BYTES, MappingAddress, MappingStart, MappingTarget, RawMappingPage, RawValueSample};
 use std::{collections::BTreeSet, ffi::CStr, ptr::NonNull};
 #[derive(PartialEq)]
 struct Effect {
@@ -491,7 +489,7 @@ impl RuntimeAccess {
                 start: query.start(),
                 samples,
             };
-            crate::mapping::encode_mapping(&page).map_err(contract)?;
+            eg_trainer_wire::mapping::encode_mapping(&page).map_err(contract)?;
             Ok(page)
         }
     }

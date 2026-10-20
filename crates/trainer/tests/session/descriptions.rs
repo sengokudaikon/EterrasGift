@@ -1,5 +1,5 @@
 use super::*;
-use eg_game_access::mapping::{self, ForgeDescriptionRequest, ModifierSnapshot};
+use eg_trainer_wire::mapping::{self, ForgeDescriptionRequest, ModifierSnapshot};
 fn line(index: u32, rolls: Vec<u8>) -> ModifierSnapshot {
     ModifierSnapshot {
         index,

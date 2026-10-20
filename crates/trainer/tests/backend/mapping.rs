@@ -1,9 +1,9 @@
 use super::*;
-use eg_game_access::mapping::{MappingAddress, MappingStart, MappingTarget, RawMappingPage, RawValueSample};
 use eg_trainer::{
     edits::ExpectedObservation,
     mapping::{CapturedDisplayParser, MappingBuilder, MappingRequest, ValueTable},
 };
+use eg_trainer_wire::mapping::{MappingAddress, MappingStart, MappingTarget, RawMappingPage, RawValueSample};
 
 pub(super) fn table(expected: &ExpectedObservation, request: &MappingRequest) -> Result<ValueTable, BackendError> {
     let page = |start| RawMappingPage {

@@ -1,9 +1,7 @@
 //! Explicit process identity. Capturing it queries identity only, without memory access or injection.
-pub use eg_trainer_wire::process::ProcessIdentity;
-
 #[cfg(windows)]
 mod windows {
-    use super::ProcessIdentity;
+    use eg_trainer_wire::process::ProcessIdentity;
     use std::io;
     use std::os::windows::ffi::OsStringExt;
     use std::os::windows::io::{AsRawHandle, FromRawHandle, OwnedHandle};

@@ -1,7 +1,8 @@
 //! Explicit local pipe client. Never discovers, loads or unloads a helper, or opens game memory.
-use crate::process::{Process, ProcessIdentity};
-use crate::protocol::{Request, Response};
-use crate::transport::{Delivery, Transport, TransportError, TransportFailure, exchange};
+use crate::process::Process;
+use eg_trainer_wire::process::ProcessIdentity;
+use eg_trainer_wire::protocol::{Request, Response};
+use eg_trainer_wire::transport::{Delivery, Transport, TransportError, TransportFailure, exchange};
 use std::{io, os::windows::io::AsRawHandle, time::Duration};
 use tokio::{
     net::windows::named_pipe::ClientOptions,

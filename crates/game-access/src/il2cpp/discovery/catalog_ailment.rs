@@ -6,10 +6,8 @@ use super::{
     forge::{Root, target},
     unsupported,
 };
-use crate::{
-    catalog::Availability,
-    il2cpp::{Argument, AttachedThread, CheckedMethod, InvocationContext, InvocationOutcome, ReturnValue, Scalar, raw},
-};
+use crate::il2cpp::{Argument, AttachedThread, CheckedMethod, InvocationContext, InvocationOutcome, ReturnValue, Scalar, raw};
+use eg_trainer_wire::catalog::Availability;
 use std::{collections::BTreeMap, ffi::CStr, ptr::NonNull};
 
 fn unavailable<T>(reason: impl Into<String>) -> Availability<T> {

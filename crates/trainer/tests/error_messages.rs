@@ -1,9 +1,9 @@
 use eg_core::game_log::GameReadiness;
-use eg_game_access::{
+use eg_trainer::session::SessionError;
+use eg_trainer_wire::{
     protocol::ResponseCode,
     transport::{Delivery, TransportError, TransportFailure},
 };
-use eg_trainer::session::SessionError;
 
 #[test]
 fn session_messages_explain_the_fault_without_debug_enum_wrappers() {

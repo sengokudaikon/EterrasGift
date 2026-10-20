@@ -1,10 +1,8 @@
 //! Observe an already completed locale operation. Initialization/selection getters are never called.
 
 use super::{Class, DiscoveryError, Ptr, RuntimeAccess, unsupported};
-use crate::{
-    il2cpp::{AttachedThread, InvocationContext, InvocationOutcome, ReturnValue, StrongRoot, ValueTypeContract, raw},
-    locale::GameLocale,
-};
+use crate::il2cpp::{AttachedThread, InvocationContext, InvocationOutcome, ReturnValue, StrongRoot, ValueTypeContract, raw};
+use eg_trainer_wire::locale::GameLocale;
 use std::{ffi::CStr, ptr::NonNull};
 
 type Root<'a, 'r> = StrongRoot<'a, 'r>;

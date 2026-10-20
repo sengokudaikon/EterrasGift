@@ -22,12 +22,6 @@ use eg_trainer::field_writes::{AttackLeechDecision, AttackLeechPlan, AttackLeech
 use eg_trainer::writes::{ForgePlan, WriteControl, WriteStatus};
 
 use eg_core::game_log::{GameLogState, GameLogStatus, GameReadiness};
-use eg_game_access::catalog::CatalogKind;
-use eg_game_access::{
-    definitions::{ItemLimits, ValueRange},
-    locale::GameLocale,
-    transport::Delivery,
-};
 use eg_trainer::backend::{CaptureControl, CaptureObserver, CaptureOutcome, CaptureProgress};
 use eg_trainer::{
     backend::{
@@ -38,6 +32,12 @@ use eg_trainer::{
     catalog_cache::CatalogCache,
     gate::{GatePolicy, LogSource},
     session::Cleanup,
+};
+use eg_trainer_wire::catalog::CatalogKind;
+use eg_trainer_wire::{
+    definitions::{ItemLimits, ValueRange},
+    locale::GameLocale,
+    transport::Delivery,
 };
 use jiff::Timestamp;
 use tokio::sync::Notify;
@@ -138,7 +138,7 @@ struct Shared {
     rate_write_result: Mutex<Option<Result<RateWriteStatus, BackendError>>>,
     write_enabled: AtomicBool,
     attack_leech_enabled: AtomicBool,
-    attack_leech_read: Mutex<eg_game_access::fields::AttackLeechRead>,
+    attack_leech_read: Mutex<eg_trainer_wire::fields::AttackLeechRead>,
     attack_leech_block: Block,
     forge_item: Mutex<Option<ForgeSnapshot>>,
     write_result: Mutex<Option<WriteStatus>>,
@@ -178,8 +178,8 @@ impl Shared {
             rate_write_result: Mutex::new(None),
             write_enabled: AtomicBool::new(false),
             attack_leech_enabled: AtomicBool::new(false),
-            attack_leech_read: Mutex::new(eg_game_access::fields::AttackLeechRead::Unavailable(
-                eg_game_access::fields::AttackLeechUnavailable::StatsAbsent,
+            attack_leech_read: Mutex::new(eg_trainer_wire::fields::AttackLeechRead::Unavailable(
+                eg_trainer_wire::fields::AttackLeechUnavailable::StatsAbsent,
             )),
             attack_leech_block: Block::default(),
             forge_item: Mutex::new(None),
@@ -286,7 +286,7 @@ impl BackendConnection for Connection {
         }
         let mut lines = self.shared.unique_lines.lock().unwrap().clone().unwrap();
         lines[0].text = format!("Draft {} Ω", draft.changes[0].value);
-        Ok(eg_trainer::mapping::BoundPreview::new(expected, draft.clone(), eg_game_access::mapping::UniqueRollPreview { modifiers: lines }, evidence).unwrap())
+        Ok(eg_trainer::mapping::BoundPreview::new(expected, draft.clone(), eg_trainer_wire::mapping::UniqueRollPreview { modifiers: lines }, evidence).unwrap())
     }
     async fn resolve_mapping(
         &mut self,
@@ -312,7 +312,7 @@ impl BackendConnection for Connection {
     fn supports_read_attack_leech(&self) -> bool {
         self.shared.attack_leech_enabled.load(Ordering::SeqCst)
     }
-    async fn read_attack_leech(&mut self, _: Timestamp) -> Result<eg_game_access::fields::AttackLeechRead, BackendError> {
+    async fn read_attack_leech(&mut self, _: Timestamp) -> Result<eg_trainer_wire::fields::AttackLeechRead, BackendError> {
         self.shared.call("attack-leech", &self.shared.attack_leech_block).await;
         Ok(*self.shared.attack_leech_read.lock().unwrap())
     }
@@ -334,7 +334,7 @@ impl BackendConnection for Connection {
         if let Ok(RateWriteStatus::Confirmed(actual) | RateWriteStatus::NotKept(actual)) = &result {
             // Scripted connection only: model Session's ACK/fresh-read boundary;
             // this does not claim native ACK or actual IL2CPP execution.
-            *self.shared.attack_leech_read.lock().unwrap() = eg_game_access::fields::AttackLeechRead::Available(*actual);
+            *self.shared.attack_leech_read.lock().unwrap() = eg_trainer_wire::fields::AttackLeechRead::Available(*actual);
             self.shared.record("rate-ack");
             if !control.allowed() {
                 return Ok(RateWriteStatus::uncertain("cleanup after ACK before independent read"));

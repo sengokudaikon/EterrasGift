@@ -1,11 +1,12 @@
 use eg_core::game_log::{GameLogState, GameLogStatus, GameReadiness};
-use eg_game_access::{bootstrap::HelperArtifact, process::ProcessIdentity};
+use eg_game_access::bootstrap::HelperArtifact;
 use eg_trainer::{
     backend::{BackendError, ErrorKind},
     connection::{AdmissionCheck, LogFactory},
     gate::LogSource,
     profile::BuildProfile,
 };
+use eg_trainer_wire::process::ProcessIdentity;
 use std::{
     future::Future,
     sync::{

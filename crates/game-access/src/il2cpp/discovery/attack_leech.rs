@@ -4,10 +4,8 @@ use super::{
     forge::{Root, target},
     unsupported,
 };
-use crate::{
-    fields::{AttackLeechObservation, AttackLeechRead, AttackLeechTarget, AttackLeechUnavailable, ObservedObjectIdentity, ObservedRate},
-    il2cpp::{AttachedThread, raw},
-};
+use crate::il2cpp::{AttachedThread, raw};
+use eg_trainer_wire::fields::{AttackLeechObservation, AttackLeechRead, AttackLeechTarget, AttackLeechUnavailable, ObservedObjectIdentity, ObservedRate};
 use std::{ffi::CStr, ptr::NonNull};
 
 #[cfg(test)]

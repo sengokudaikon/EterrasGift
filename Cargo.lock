@@ -1375,6 +1375,7 @@ dependencies = [
  "eg-core",
  "eg-game-access",
  "eg-trainer",
+ "eg-trainer-wire",
  "jiff",
  "serde_json",
  "tempfile",

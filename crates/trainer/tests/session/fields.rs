@@ -1,5 +1,5 @@
 use super::*;
-use eg_game_access::fields::{self, AttackLeechObservation, AttackLeechRead, AttackLeechUnavailable, ObservedObjectIdentity, ObservedRate};
+use eg_trainer_wire::fields::{self, AttackLeechObservation, AttackLeechRead, AttackLeechUnavailable, ObservedObjectIdentity, ObservedRate};
 
 fn available(manager: u64) -> AttackLeechRead {
     AttackLeechRead::Available(AttackLeechObservation {

@@ -8,12 +8,14 @@ use eg_game_access::{
         discovery::{AttackLeechWriteError, DiscoveryError, ForgeWriteError, RuntimeAccess},
         raw::{self, ExecuteTasks, MethodInfo},
     },
-    protocol::{Discovery, DispatcherSpec, Request, Response, ResponseCode},
-    rate_write::AttackLeechRateWrite,
     scheduler::{HookError, SchedulerHook},
-    write::ForgeWrite,
 };
 use eg_trainer_wire::dispatch::{Dispatcher, Pending};
+use eg_trainer_wire::{
+    protocol::{Discovery, DispatcherSpec, Request, Response, ResponseCode},
+    rate_write::AttackLeechRateWrite,
+    write::ForgeWrite,
+};
 use std::{
     ffi::{CStr, c_char, c_void},
     ptr::NonNull,
@@ -169,7 +171,7 @@ unsafe fn edit_forge(write: &ForgeWrite) -> Response {
                     };
                     server::failure(code, error.to_string())
                 })?;
-            let payload = eg_game_access::forge::encode(Some(&snapshot)).map_err(|error| server::failure(ResponseCode::Failed, error.to_string()))?;
+            let payload = eg_trainer_wire::forge::encode(Some(&snapshot)).map_err(|error| server::failure(ResponseCode::Failed, error.to_string()))?;
             Ok::<_, Response>(Response {
                 code: ResponseCode::Done,
                 payload,
@@ -203,7 +205,7 @@ unsafe fn set_attack_leech_rate(write: &AttackLeechRateWrite) -> Response {
                 })?;
             Ok::<_, Response>(Response {
                 code: ResponseCode::Done,
-                payload: eg_game_access::fields::encode(&eg_game_access::fields::AttackLeechRead::Available(observation)),
+                payload: eg_trainer_wire::fields::encode(&eg_trainer_wire::fields::AttackLeechRead::Available(observation)),
             })
         })
     }
@@ -217,7 +219,7 @@ unsafe fn read_forge() -> Response {
     unsafe {
         runtime_operation(|_, access, attached| {
             let snapshot = access.read_forge(attached).map_err(map_discovery)?;
-            let payload = eg_game_access::forge::encode(snapshot.as_ref()).map_err(|error| server::failure(ResponseCode::Failed, error.to_string()))?;
+            let payload = eg_trainer_wire::forge::encode(snapshot.as_ref()).map_err(|error| server::failure(ResponseCode::Failed, error.to_string()))?;
             Ok::<_, Response>(Response {
                 code: ResponseCode::Done,
                 payload,
@@ -226,14 +228,14 @@ unsafe fn read_forge() -> Response {
     }
 }
 
-unsafe fn describe_implicits(query: &eg_game_access::mapping::ForgeDescriptionRequest) -> Response {
+unsafe fn describe_implicits(query: &eg_trainer_wire::mapping::ForgeDescriptionRequest) -> Response {
     // SAFETY: the scheduler supplies the same supported main-thread runtime and
     // synchronous rooted graph span as read_forge, including tooltip allocations.
     unsafe {
         runtime_operation(|runtime, access, attached| {
             let invoke = runtime.invocation;
             let descriptions = access.describe_implicits(attached, invoke, query).map_err(map_discovery)?;
-            let payload = eg_game_access::mapping::encode_modifiers(&descriptions).map_err(|e| server::failure(ResponseCode::Failed, e.to_string()))?;
+            let payload = eg_trainer_wire::mapping::encode_modifiers(&descriptions).map_err(|e| server::failure(ResponseCode::Failed, e.to_string()))?;
             Ok::<_, Response>(Response {
                 code: ResponseCode::Done,
                 payload,
@@ -242,7 +244,7 @@ unsafe fn describe_implicits(query: &eg_game_access::mapping::ForgeDescriptionRe
     }
 }
 
-unsafe fn unique_presentation(query: &eg_game_access::mapping::ForgeDescriptionRequest, preview: Option<&eg_game_access::mapping::UniquePreviewRequest>) -> Response {
+unsafe fn unique_presentation(query: &eg_trainer_wire::mapping::ForgeDescriptionRequest, preview: Option<&eg_trainer_wire::mapping::UniquePreviewRequest>) -> Response {
     // SAFETY: scheduler supplies the same supported main-thread runtime/graph
     // span as implicit descriptions; private-copy stores never target the forge.
     unsafe {
@@ -257,13 +259,13 @@ unsafe fn unique_presentation(query: &eg_game_access::mapping::ForgeDescriptionR
             .map_err(map_discovery)?;
             Ok::<_, Response>(Response {
                 code: ResponseCode::Done,
-                payload: eg_game_access::mapping::encode_modifiers(&descriptions).map_err(|e| server::failure(ResponseCode::Failed, e.to_string()))?,
+                payload: eg_trainer_wire::mapping::encode_modifiers(&descriptions).map_err(|e| server::failure(ResponseCode::Failed, e.to_string()))?,
             })
         })
     }
 }
 
-unsafe fn read_affix_mapping(query: &eg_game_access::mapping::AffixMappingQuery) -> Response {
+unsafe fn read_affix_mapping(query: &eg_trainer_wire::mapping::AffixMappingQuery) -> Response {
     // SAFETY: scheduler supplies the supported main-thread runtime and synchronous
     // rooted graph span. Only independent detached objects are mutated for sampling.
     unsafe {
@@ -271,7 +273,7 @@ unsafe fn read_affix_mapping(query: &eg_game_access::mapping::AffixMappingQuery)
             let invoke = runtime.invocation;
             let writes = runtime.writes;
             let page = access.read_affix_mapping(attached, writes, invoke, query).map_err(map_discovery)?;
-            let payload = eg_game_access::mapping::encode_mapping(&page).map_err(|e| server::failure(ResponseCode::Failed, e.to_string()))?;
+            let payload = eg_trainer_wire::mapping::encode_mapping(&page).map_err(|e| server::failure(ResponseCode::Failed, e.to_string()))?;
             Ok::<_, Response>(Response {
                 code: ResponseCode::Done,
                 payload,
@@ -290,7 +292,7 @@ unsafe fn read_attack_leech(expected_manager: u64) -> Response {
             let observation = access.read_attack_leech(attached, expected_manager).map_err(map_discovery)?;
             Ok::<_, Response>(Response {
                 code: ResponseCode::Done,
-                payload: eg_game_access::fields::encode(&observation),
+                payload: eg_trainer_wire::fields::encode(&observation),
             })
         })
     }
@@ -303,7 +305,7 @@ unsafe fn read_item_limits() -> Response {
     unsafe {
         runtime_operation(|_, access, attached| {
             let limits = access.read_item_limits(attached).map_err(map_discovery)?;
-            let payload = eg_game_access::definitions::encode(&limits).map_err(|error| server::failure(ResponseCode::Failed, error.to_string()))?;
+            let payload = eg_trainer_wire::definitions::encode(&limits).map_err(|error| server::failure(ResponseCode::Failed, error.to_string()))?;
             Ok::<_, Response>(Response {
                 code: ResponseCode::Done,
                 payload,
@@ -324,7 +326,7 @@ unsafe fn read_locale() -> Response {
         runtime_operation(|runtime, access, attached| {
             let invocation = runtime.invocation;
             let locale = access.read_game_locale(attached, invocation).map_err(map_discovery)?;
-            let payload = eg_game_access::locale::encode(&locale).map_err(|error| server::failure(ResponseCode::Failed, error.to_string()))?;
+            let payload = eg_trainer_wire::locale::encode(&locale).map_err(|error| server::failure(ResponseCode::Failed, error.to_string()))?;
             Ok::<_, Response>(Response {
                 code: ResponseCode::Done,
                 payload,
@@ -333,7 +335,7 @@ unsafe fn read_locale() -> Response {
     }
 }
 
-unsafe fn read_catalog_page(kind: eg_game_access::catalog::CatalogKind, cursor: u32) -> Response {
+unsafe fn read_catalog_page(kind: eg_trainer_wire::catalog::CatalogKind, cursor: u32) -> Response {
     // SAFETY: same captured main-thread/runtime ownership as read_locale. Catalog capture
     // copies only the audited, already-published definition graphs; it never starts asset
     // loading, invokes item builders, or changes gameplay state. Locale getter effects are
@@ -345,7 +347,7 @@ unsafe fn read_catalog_page(kind: eg_game_access::catalog::CatalogKind, cursor: 
         runtime_operation(|runtime, access, attached| {
             let invocation = runtime.invocation;
             let page = access.read_catalog_page(attached, invocation, kind, cursor).map_err(map_discovery)?;
-            let payload = eg_game_access::catalog::encode(&page).map_err(|error| server::failure(ResponseCode::Failed, error.to_string()))?;
+            let payload = eg_trainer_wire::catalog::encode(&page).map_err(|error| server::failure(ResponseCode::Failed, error.to_string()))?;
             Ok::<_, Response>(Response {
                 code: ResponseCode::Done,
                 payload,

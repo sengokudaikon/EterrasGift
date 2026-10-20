@@ -6,6 +6,7 @@ rust-version.workspace = true
 publish.workspace = true
 
 [dependencies]
+eg-trainer-wire = { path = "../trainer-wire" }
 eg-core.workspace = true
 eg-game-access = { path = "../game-access" }
 eg-trainer = { path = "../trainer" }

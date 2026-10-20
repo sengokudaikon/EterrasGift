@@ -1,12 +1,12 @@
 #![cfg(all(windows, target_arch = "x86_64"))]
 //! Persistent server tests use a fake backend and explicitly spawned copies of this executable.
-use eg_game_access::{
-    pipe::PipeClient,
+use eg_game_access::pipe::PipeClient;
+use eg_trainer_helper::server::{Backend, Shared, failure};
+use eg_trainer_wire::dispatch::{Dispatcher, Pending};
+use eg_trainer_wire::{
     protocol::{Discovery, DispatcherSpec, REQUIRED_KEYS, Request, Response, ResponseCode, RuntimeStatus},
     transport::Transport,
 };
-use eg_trainer_helper::server::{Backend, Shared, failure};
-use eg_trainer_wire::dispatch::{Dispatcher, Pending};
 use std::{
     fs,
     os::windows::process::CommandExt,
@@ -483,7 +483,7 @@ fn client_disconnect_during_running_work_keeps_slot_until_completion() {
 }
 
 fn level_write() -> Request {
-    use eg_game_access::{
+    use eg_trainer_wire::{
         forge::{ForgeSnapshot, ItemStatus},
         write::ForgeWrite,
     };
@@ -521,7 +521,7 @@ fn incomplete_or_invalid_expected_tail_never_reaches_scheduler_or_queue() {
         let mut client = fixture.client();
         assert_eq!(client.send(&Request::Discover).await.unwrap().code, ResponseCode::Done);
         let frame = level_write().encode();
-        for prefix in [eg_game_access::protocol::REQUEST_SIZE, frame.len() - 1] {
+        for prefix in [eg_trainer_wire::protocol::REQUEST_SIZE, frame.len() - 1] {
             let mut pipe = open_raw(fixture.child.id()).await;
             pipe.write_all(&frame[..prefix]).await.unwrap();
             sleep(Duration::from_millis(100)).await;

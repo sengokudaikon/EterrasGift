@@ -1,10 +1,8 @@
 //! Main-thread copies of the current forge graph. No managed/game method is invoked.
 
 use super::{Class, DiscoveryError, Images, Ptr, RuntimeAccess, unsupported};
-use crate::{
-    forge::{AffixSnapshot, ForgeSnapshot, ItemStatus, UniqueIdentity},
-    il2cpp::{AttachedThread, StrongRoot, raw},
-};
+use crate::il2cpp::{AttachedThread, StrongRoot, raw};
+use eg_trainer_wire::forge::{AffixSnapshot, ForgeSnapshot, ItemStatus, UniqueIdentity};
 use std::{ffi::CStr, ptr::NonNull};
 
 pub(super) struct ForgeGraph<'a, 'r> {

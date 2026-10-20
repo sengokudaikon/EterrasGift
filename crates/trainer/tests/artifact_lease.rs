@@ -4,20 +4,20 @@ use eg_core::{
     game_log::{GameLogState, GameLogStatus, GameReadiness},
     hashes,
 };
-use eg_game_access::{
-    artifact::ReadLease,
+use eg_game_access::artifact::ReadLease;
+use eg_trainer::session::{CaptureControl, CaptureObserver, CaptureOutcome, CaptureProgress, Cleanup};
+use eg_trainer::{
+    gate::{GatePolicy, LogSource},
+    profile::BuildProfile,
+    session::{Session, SessionError, SessionState},
+};
+use eg_trainer_wire::{
     catalog::{self, CatalogEntries, CatalogKind, CatalogPage, DefinitionName, DefinitionNameSource, ItemTypeDefinition},
     definitions::{self, ItemLimits, ValueRange},
     locale::{self, GameLocale},
     process::ProcessIdentity,
     protocol::{Discovery, DispatcherSpec, REQUIRED_KEYS, Request, Response, ResponseCode, RuntimeStatus},
     transport::{Transport, TransportError},
-};
-use eg_trainer::session::{CaptureControl, CaptureObserver, CaptureOutcome, CaptureProgress, Cleanup};
-use eg_trainer::{
-    gate::{GatePolicy, LogSource},
-    profile::BuildProfile,
-    session::{Session, SessionError, SessionState},
 };
 use jiff::Timestamp;
 use std::{

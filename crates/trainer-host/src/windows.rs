@@ -10,15 +10,17 @@ use eg_game_access::{
         windows::{DispatcherProof, ModuleIdentity, RemoteDelivery, RemoteFailure, RemoteHelper},
     },
     pipe::PipeClient,
-    process::ProcessIdentity,
-    protocol::{Discovery, DispatcherSpec, Request, Response, ResponseCode},
-    transport::{Delivery, Transport, TransportError, TransportFailure},
 };
 use eg_trainer::{
     backend::{BackendError, ErrorKind},
     connection::{AdmissionCheck, HelperPreparer, LogFactory, PreparationFailure, PreparationResidency, PreparedHelper},
     gate::{self, GatePolicy, GateVerdict, LogSource},
     profile::BuildProfile,
+};
+use eg_trainer_wire::{
+    process::ProcessIdentity,
+    protocol::{Discovery, DispatcherSpec, Request, Response, ResponseCode},
+    transport::{Delivery, Transport, TransportError, TransportFailure},
 };
 use std::{
     io,

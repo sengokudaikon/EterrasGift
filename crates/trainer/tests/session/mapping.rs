@@ -1,6 +1,6 @@
 use super::*;
-use eg_game_access::mapping::{self, MappingAddress, MappingStart, MappingTarget, RawMappingPage, RawValueSample};
 use eg_trainer::{edits::ExpectedObservation, mapping::MappingRequest};
+use eg_trainer_wire::mapping::{self, MappingAddress, MappingStart, MappingTarget, RawMappingPage, RawValueSample};
 
 fn expected(fixture: &Fixture) -> ExpectedObservation {
     let profile = fixture.profile();

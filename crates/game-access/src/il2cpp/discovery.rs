@@ -11,7 +11,7 @@
 #![allow(clippy::undocumented_unsafe_blocks)]
 
 use super::{AttachedThread, RuntimeError, raw};
-use crate::protocol::{Discovery, DispatcherSpec, RuntimeStatus};
+use eg_trainer_wire::protocol::{Discovery, DispatcherSpec, RuntimeStatus};
 use std::{
     collections::BTreeMap,
     ffi::{CStr, CString, c_char, c_void},
@@ -701,7 +701,7 @@ mod tests {
     #[test]
     fn legacy_contract_covers_every_protocol_field_exactly_once() {
         let keys: Vec<_> = REQUIRED_FIELDS.iter().map(|entry| entry.0).collect();
-        assert_eq!(keys, crate::protocol::REQUIRED_KEYS);
+        assert_eq!(keys, eg_trainer_wire::protocol::REQUIRED_KEYS);
     }
     #[test]
     fn type_contract_accepts_nested_names_and_checks_affix_element() {

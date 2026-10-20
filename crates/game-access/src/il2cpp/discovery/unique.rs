@@ -4,10 +4,8 @@ use super::{
     forge::{Root, target},
     unsupported,
 };
-use crate::{
-    il2cpp::{Argument, AttachedThread, InvocationContext, InvocationOutcome, ReturnValue, Scalar, ValueTypeContract, raw},
-    mapping::{ForgeDescriptionRequest, MAX_MODIFIERS, ModifierSnapshot, UniquePreviewRequest},
-};
+use crate::il2cpp::{Argument, AttachedThread, InvocationContext, InvocationOutcome, ReturnValue, Scalar, ValueTypeContract, raw};
+use eg_trainer_wire::mapping::{ForgeDescriptionRequest, MAX_MODIFIERS, ModifierSnapshot, UniquePreviewRequest};
 use std::{collections::BTreeSet, ffi::CStr, ptr::NonNull};
 
 impl RuntimeAccess {
@@ -198,7 +196,7 @@ impl RuntimeAccess {
                     editable,
                 });
             }
-            crate::mapping::encode_modifiers(&result).map_err(|e| unsupported(e.to_string()))?;
+            eg_trainer_wire::mapping::encode_modifiers(&result).map_err(|e| unsupported(e.to_string()))?;
             Ok(result)
         }
     }

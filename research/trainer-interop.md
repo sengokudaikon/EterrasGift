@@ -9,9 +9,9 @@ This document records the execution assumptions and retained findings. Product r
 
 `eg-trainer-wire` owns the pure messages, codecs, process identity data, framed I/O and
 owned dispatcher, and forbids unsafe code. `eg-trainer` consumes those contracts directly.
-Compatibility exports in game-access preserve existing harness callers. IL2CPP discovery
-and the scheduler require game-access's explicit `il2cpp` feature: the helper and standalone
-native harness enable it; a desktop-only build does not. The helper depends on wire, not
+Callers, including the retained harnesses, import wire directly; game-access no longer
+re-exports these modules. IL2CPP discovery and the scheduler require game-access's explicit
+`il2cpp` feature: the helper and standalone native harness enable it; a desktop-only build does not. The helper depends on wire, not
 the trainer worker/domain crate, and its source identity follows that dependency change.
 
 The supported boundary is Windows x64, initialized IL2CPP and the inspected Unity 6000.4 game
@@ -57,9 +57,10 @@ implementation. Rust panics must not escape a native callback.
 
 The workspace warns on undocumented unsafe blocks (strict Clippy treats warnings as errors).
 xtask, trainer and wire forbid unsafe; core, companion, UI, app, trainer-host and helper deny
-it except for named platform/interop modules. Existing unsafe blocks document their inherited
-entrypoint obligations; those comments add no runtime proof. Architecture tests use Cargo
-metadata, explicit package tiers including tool workspaces, and recursive Rust import/re-export
+it except for named platform/interop modules. IL2CPP discovery opts out of the per-block
+safety-comment lint: entrypoints document shared runtime assumptions, and local notes explain
+specific bounds, ownership and ABI details. Explicit unsafe blocks remain required. Architecture tests
+use Cargo metadata, explicit package tiers including tool workspaces, and recursive Rust import/re-export
 scans, including UI feature areas. They are syntactic checks, not arbitrary macro analysis.
 
 Player.log must identify an offline character in the exact process. Process creation time/path,

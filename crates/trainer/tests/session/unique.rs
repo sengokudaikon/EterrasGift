@@ -1,11 +1,11 @@
 use super::*;
-use eg_game_access::{
-    forge::UniqueIdentity,
-    mapping::{self, ForgeDescriptionRequest, ModifierSnapshot, UniquePreviewRequest, UniqueRollChange},
-};
 use eg_trainer::{
     edits::{ExpectedObservation, RollChange, RollEdit, RollTarget},
     mapping::{BoundTooltip, TooltipKind},
+};
+use eg_trainer_wire::{
+    forge::UniqueIdentity,
+    mapping::{self, ForgeDescriptionRequest, ModifierSnapshot, UniquePreviewRequest, UniqueRollChange},
 };
 fn item() -> ForgeSnapshot {
     let mut item = forge_item();

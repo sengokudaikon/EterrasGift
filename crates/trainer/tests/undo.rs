@@ -1,15 +1,15 @@
-use eg_game_access::{
-    definitions::{ItemLimits, ValueRange},
-    forge::{AffixSnapshot, ForgeSnapshot, ItemStatus, UniqueIdentity},
-    locale::GameLocale,
-    process::ProcessIdentity,
-    protocol::ResponseCode,
-};
 use eg_trainer::{
     catalog::{CatalogIdentity, EXTRACTION_VERSION, GameCatalog},
     edits::{CatalogProvenance, EditError, ExpectedObservation, ItemEdit, StatusEdit, StatusField},
     undo::ForgeUndo,
     writes::{ForgePlan, WriteRecord, WriteStatus},
+};
+use eg_trainer_wire::{
+    definitions::{ItemLimits, ValueRange},
+    forge::{AffixSnapshot, ForgeSnapshot, ItemStatus, UniqueIdentity},
+    locale::GameLocale,
+    process::ProcessIdentity,
+    protocol::ResponseCode,
 };
 use std::collections::BTreeMap;
 

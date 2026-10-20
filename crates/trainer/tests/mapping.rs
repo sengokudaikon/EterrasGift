@@ -1,13 +1,13 @@
-use eg_game_access::{
-    forge::{AffixSnapshot, ForgeSnapshot, ItemStatus, UniqueIdentity},
-    locale::GameLocale,
-    mapping::*,
-    process::ProcessIdentity,
-};
 use eg_trainer::{
     catalog::{CatalogIdentity, EXTRACTION_VERSION},
     edits::*,
     mapping::*,
+};
+use eg_trainer_wire::{
+    forge::{AffixSnapshot, ForgeSnapshot, ItemStatus, UniqueIdentity},
+    locale::GameLocale,
+    mapping::*,
+    process::ProcessIdentity,
 };
 use std::path::PathBuf;
 fn identity() -> CatalogIdentity {

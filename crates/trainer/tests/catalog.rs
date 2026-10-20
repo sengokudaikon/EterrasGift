@@ -1,10 +1,10 @@
-use eg_game_access::{
+use eg_trainer::catalog::{CatalogBuilder, CatalogIdentity, EXTRACTION_VERSION, ItemNameSource};
+use eg_trainer_wire::{
     catalog::{Availability, CatalogEntries, CatalogKind, CatalogPage, DefinitionName, DefinitionNameSource, ItemTypeDefinition, SubTypeDefinition, UniqueDefinition},
     definitions::{ItemLimits, ValueRange},
     forge::{ForgeSnapshot, ItemStatus, UniqueIdentity},
     locale::GameLocale,
 };
-use eg_trainer::catalog::{CatalogBuilder, CatalogIdentity, EXTRACTION_VERSION, ItemNameSource};
 
 fn locale() -> GameLocale {
     GameLocale {
