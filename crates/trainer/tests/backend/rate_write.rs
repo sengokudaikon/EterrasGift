@@ -4,6 +4,42 @@ use eg_trainer::backend::Activity;
 use eg_trainer::writes::{WriteObservation, WriteOutcome, WritePlan};
 
 #[test]
+fn field_write_faults_keep_raw_expected_and_readback_bits_without_an_event_consumer() {
+    run(async {
+        for uncertain in [false, true] {
+            let directory = tempfile::tempdir().unwrap();
+            let faults = eg_core::fault::FaultLog::with_fallbacks(directory.path(), Some(directory.path()), vec![]);
+            let shared = writable();
+            let (handle, worker) = backend::service(Locator(shared.clone()), Connect(shared.clone()), Logs(shared.clone()), FakeClock, options(), None);
+            let worker = tokio::spawn(worker.with_fault_log(faults).run());
+            connected(&handle).await;
+            let plan = prepare(&handle, AttackLeechTarget::AttackRate, 1.1).await;
+            let mut actual = *plan.projected();
+            actual.attack_rate.raw_bits = 1.2_f32.to_bits();
+            *shared.rate_write_result.lock().unwrap() = Some(Ok(if uncertain {
+                RateWriteStatus::uncertain("lost field readback")
+            } else {
+                RateWriteStatus::NotKept(actual)
+            }));
+            assert!(command(&handle, Command::Write(plan.into())).await.is_err());
+            shutdown(&handle, worker).await;
+            let reports = std::fs::read_dir(directory.path())
+                .unwrap()
+                .map(|e| serde_json::from_slice::<serde_json::Value>(&std::fs::read(e.unwrap().path()).unwrap()).unwrap())
+                .collect::<Vec<_>>();
+            assert_eq!(reports.len(), 1);
+            let report = &reports[0];
+            assert_eq!(report["operation"], "Trainer field write");
+            assert_eq!(report["expected"]["observation"]["attackRateBits"], 0x7fc12345_u32);
+            assert_eq!(report["readback"]["observation"].is_null(), uncertain);
+            if !uncertain {
+                assert_eq!(report["readback"]["observation"]["attackRateBits"], 1.2_f32.to_bits());
+            }
+        }
+    });
+}
+
+#[test]
 fn generic_field_write_publishes_all_actual_bits_and_advances_sequence_without_reconnect() {
     run(async {
         let shared = writable();
