@@ -84,12 +84,18 @@ struct FakeBackend {
     dispatcher: Dispatcher<Request, Response>,
     counters: Counters,
     retry_discovery: bool,
+    large_reply: bool,
 }
 impl Backend for FakeBackend {
     fn discover(&mut self) -> Result<Discovery, Response> {
         let attempt = self.counters[0].fetch_add(1, SeqCst);
         if self.retry_discovery && attempt == 0 {
-            return Err(failure(ResponseCode::NotReady, "authored runtime is starting"));
+            let message = if self.large_reply {
+                "authored runtime is starting".repeat(10_000)
+            } else {
+                "authored runtime is starting".to_owned()
+            };
+            return Err(failure(ResponseCode::NotReady, message));
         }
         Ok(discovery())
     }
@@ -230,7 +236,8 @@ fn server_fixture_child() {
         let mut backend = FakeBackend {
             dispatcher: dispatcher.clone(),
             counters: Arc::clone(&counters),
-            retry_discovery: mode == "retry",
+            retry_discovery: matches!(mode.as_str(), "retry" | "large-reply"),
+            large_reply: mode == "large-reply",
         };
         let worker_shared = Arc::clone(&shared);
         let worker_counters = Arc::clone(&counters);
@@ -317,6 +324,53 @@ async fn open_raw(pid: u32) -> tokio::net::windows::named_pipe::NamedPipeClient 
     })
     .await
     .unwrap()
+}
+
+#[test]
+fn unread_response_is_discarded_before_the_next_peer_connects() {
+    let mut fixture = Fixture::spawn("large-reply");
+    runtime().block_on(async {
+        use tokio::io::AsyncReadExt;
+        let mut pipe = open_raw(fixture.child.id()).await;
+        pipe.write_all(&Request::Discover.encode()).await.unwrap();
+        // Observe its header, leaving a body larger than the pipe/Mio buffers
+        // unread. This proves the first response started before disconnection.
+        let mut header = [0; 12];
+        timeout(LIMIT, pipe.read_exact(&mut header)).await.unwrap().unwrap();
+        assert_eq!(Response::decode_header(&header).unwrap().0, ResponseCode::NotReady);
+        drop(pipe);
+        let mut client = fixture.client();
+        assert_eq!(client.send(&Request::Discover).await.unwrap().code, ResponseCode::Done);
+        assert_eq!(client.send(&status()).await.unwrap().code, ResponseCode::Done);
+    });
+    fixture.finish();
+    assert_eq!(fixture.counters()[..4], [2, 1, 1, 1]);
+}
+
+#[test]
+fn buffered_suffix_of_a_closed_connection_cannot_become_the_next_request() {
+    let mut fixture = Fixture::spawn("normal");
+    runtime().block_on(async {
+        use tokio::io::AsyncReadExt;
+        let mut client = fixture.client();
+        assert_eq!(client.send(&Request::Discover).await.unwrap().code, ResponseCode::Done);
+        let mut pipe = open_raw(fixture.child.id()).await;
+        let mut malformed = Request::Discover.encode();
+        malformed[335] = 1;
+        // More than one Mio buffer, including complete valid requests. Only the
+        // invalid first frame belongs to this exchange; all its suffix must go.
+        for _ in 0..24 {
+            malformed.extend_from_slice(&status().encode());
+        }
+        pipe.write_all(&malformed).await.unwrap();
+        let mut header = [0; 12];
+        timeout(LIMIT, pipe.read_exact(&mut header)).await.unwrap().unwrap();
+        assert_eq!(Response::decode_header(&header).unwrap().0, ResponseCode::Refused);
+        drop(pipe);
+        assert_eq!(client.send(&Request::Discover).await.unwrap().code, ResponseCode::Done);
+    });
+    fixture.finish();
+    assert_eq!(fixture.counters()[..4], [2, 0, 0, 0]);
 }
 
 #[test]

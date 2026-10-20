@@ -170,11 +170,21 @@ async fn serve(pid: u32, backend: &mut impl Backend, shared: &Shared) -> Result<
     shared.metrics[10].store(1, SeqCst);
     'connections: while !shared.stop.load(SeqCst) {
         reap(&mut owner, shared);
-        if connected
-            && let Err(error) = pipe.disconnect()
-            && error.raw_os_error() != Some(233)
-        {
-            return Err(error.to_string());
+        if connected {
+            if let Err(error) = pipe.disconnect()
+                && error.raw_os_error() != Some(233)
+            {
+                return Err(error.to_string());
+            }
+            // Disconnect discards kernel data, but Mio can still hold buffered
+            // bytes or an outstanding read from this peer. Drain it before a
+            // new peer is admitted, so exchanges cannot share buffered input.
+            match wait(finish_connection_io(&mut pipe), shared, None, Duration::from_secs(3)).await {
+                Ok(Ok(())) => {}
+                Ok(Err(error)) => return Err(error.to_string()),
+                Err(Interrupted::Stop) => return Ok(()),
+                Err(_) => return Err("Previous pipe I/O did not finish after disconnect".into()),
+            }
         }
         // Keep process monitoring active even when no client connects. Each wait timeout merely
         // refreshes admission/owner state; it never replays a request.
@@ -284,4 +294,23 @@ async fn read_connection_request(pipe: &mut NamedPipeServer) -> Result<Request, 
         pipe.read_exact(&mut first).await.map_err(RequestReadError::Io)?;
     }
     read_request(&mut first.as_slice().chain(pipe)).await
+}
+
+async fn finish_connection_io(pipe: &mut NamedPipeServer) -> io::Result<()> {
+    let mut bytes = [0; 4096];
+    loop {
+        match pipe.read(&mut bytes).await {
+            Ok(0) => break,
+            Ok(_) => {}
+            Err(error) if matches!(error.raw_os_error(), Some(109 | 232 | 233 | 995)) => break,
+            Err(error) => return Err(error),
+        }
+    }
+    // Mio accepts a buffered write before its kernel completion. Settle any
+    // previous write/error while still disconnected, without sending any bytes.
+    match pipe.write(&[]).await {
+        Ok(_) => Ok(()),
+        Err(error) if matches!(error.raw_os_error(), Some(109 | 232 | 233 | 995)) => Ok(()),
+        Err(error) => Err(error),
+    }
 }
