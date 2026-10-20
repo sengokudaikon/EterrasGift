@@ -48,6 +48,7 @@ impl DragStep {
 #[derive(Clone, Debug)]
 pub struct ValueEditor {
     table: Option<ValueTable>,
+    loading: bool,
     status: String,
     /// The last usable table read in the game's own context (same affix and tier), so the game's value stays readable
     /// while a tier draft switches this editor to another table.
@@ -64,6 +65,7 @@ impl ValueEditor {
     pub fn new(label: Option<String>) -> ValueEditor {
         ValueEditor {
             table: None,
+            loading: true,
             status: LOADING.into(),
             game_table: None,
             label,
@@ -75,11 +77,11 @@ impl ValueEditor {
     }
 
     pub fn has_mapping(&self) -> bool {
-        self.table.as_ref().is_some_and(ValueTable::is_usable)
+        !self.loading && self.table.as_ref().is_some_and(ValueTable::is_usable)
     }
 
     pub fn table(&self) -> Option<&ValueTable> {
-        self.table.as_ref().filter(|table| table.is_usable())
+        self.table.as_ref().filter(|table| !self.loading && table.is_usable())
     }
 
     /// A new table, or why there is none; `game_context` marks a table read for what the game holds.
@@ -89,6 +91,7 @@ impl ValueEditor {
         // Monitoring and other rows' completed mappings can republish the same
         // table while the user types. Only a changed mapping ends that input.
         if let Lookup::Ready(value) = &table
+            && !self.loading
             && self.table.as_ref() == Some(value)
         {
             if game_context {
@@ -96,6 +99,7 @@ impl ValueEditor {
             }
             return;
         }
+        self.loading = matches!(table, Lookup::Loading);
         match table {
             Lookup::Ready(table) if table.is_usable() => {
                 if game_context {
@@ -109,7 +113,9 @@ impl ValueEditor {
                 self.status = "Actual values are unavailable for this value.".into();
             }
             Lookup::Loading => {
-                self.table = None;
+                // Keep the last display while replacement samples arrive. Its
+                // stale scale cannot authorize typing, stepping or dragging.
+                self.dragging = false;
                 self.status = LOADING.into();
             }
             Lookup::Unavailable(reason) => {
@@ -136,7 +142,10 @@ impl ValueEditor {
     }
 
     pub fn display(&self, roll: u8) -> String {
-        self.sample_at(roll).map_or_else(|| "—".into(), |sample| sample.display.clone())
+        self.table
+            .as_ref()
+            .filter(|table| table.is_usable())
+            .map_or_else(|| "—".into(), |table| table.samples[roll as usize].display.clone())
     }
 
     pub fn effects(&self, roll: u8) -> String {
@@ -212,6 +221,9 @@ impl ValueEditor {
 
     /// Reads a typed value the way the game shows it ("+20%", "1,5"); the first reading inside the range wins.
     pub fn parse(&self, text: &str) -> Option<f64> {
+        if !self.has_mapping() {
+            return None;
+        }
         let trimmed: String = text.chars().filter(|c| !c.is_whitespace()).collect();
         let trimmed = trimmed.replace('−', "-");
         let trimmed = trimmed.trim_start_matches('+').trim_end_matches('%');
@@ -1255,10 +1267,18 @@ mod tests {
         assert_eq!(row.value.input, "37");
         row.value.set_mapping(Ok(table(30.0, 50.0)), false);
         assert!(!row.value.typing);
+        let previous = row.value.display(171);
         row.value.set_mapping(super::super::game::Lookup::Loading, false);
+        assert_eq!(row.value.display(171), previous);
+        assert!(row.value.table().is_none());
+        assert!(row.value.nearest(37.0, 171).is_none());
+        assert!(row.value.parse("37").is_none());
         assert_eq!(row.value.status(), LOADING);
         assert!(!row.value.has_mapping());
         assert!(row.value.game_table.is_some());
+        row.value.set_mapping(Ok(table(30.0, 50.0)), false);
+        assert!(row.value.has_mapping(), "an identical table becomes editable again after reload");
+        assert_eq!(row.value.status(), "");
         row.value.set_mapping(super::super::game::Lookup::Unavailable(LOADING.into()), false);
         assert_eq!(row.value.status(), format!("Actual values unavailable: {LOADING}"));
     }
