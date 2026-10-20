@@ -9,7 +9,7 @@ use crate::{
     },
 };
 use eg_trainer::{
-    backend::{Activity, BackendHandle, BackendSnapshot, CatalogState, Command, ForgeState, Pending, Phase},
+    backend::{Activity, BackendHandle, BackendSnapshot, CatalogState, Command, ForgeState, MappingRead, Pending, Phase},
     catalog::{Availability, GameCatalog},
 };
 use slint::{ComponentHandle, Timer, TimerMode};
@@ -65,6 +65,9 @@ impl ForgeGame for ObservedGame {
     }
     fn resolve(&self, item: &ForgeItem, request: &RollRequest) -> crate::forge::game::Lookup<ValueTable> {
         self.writer.borrow_mut().resolve(item, request)
+    }
+    fn retain_mappings(&self, requests: &[RollRequest]) {
+        self.writer.borrow_mut().retain_mappings(requests);
     }
     fn write(&mut self, expected: &ForgeItem, edit: &ItemEdit) -> EditOutcome {
         self.writer.borrow_mut().submit(expected, edit, false)
@@ -124,7 +127,7 @@ struct PendingPreview {
 struct PendingMapping {
     expected: eg_trainer::edits::ExpectedObservation,
     request: eg_trainer::mapping::MappingRequest,
-    receipt: Pending,
+    receipt: MappingRead,
     error: Option<String>,
 }
 struct PendingEdit {
@@ -264,6 +267,8 @@ impl Writer {
                 },
                 draft: request.draft.clone(),
             };
+            self.mappings
+                .retain(|pending| pending.expected == expected && (pending.request.address != request.address || pending.request == request));
             if let Some(result) = state.mapping(&expected, &request) {
                 return result
                     .as_ref()
@@ -289,10 +294,7 @@ impl Writer {
             if !self.mappings.iter().any(|pending| pending.expected == expected && pending.request == request) && self.pending.is_none() {
                 let receipt = self
                     .backend
-                    .try_submit(Command::ResolveMapping {
-                        expected: Box::new(expected.clone()),
-                        request: request.clone(),
-                    })
+                    .try_resolve_mapping(expected.clone(), request.clone())
                     .map_err(|_| "The trainer cannot accept another value request.")?;
                 self.mappings.push(PendingMapping {
                     expected,
@@ -304,6 +306,18 @@ impl Writer {
             Ok(crate::forge::game::Lookup::Loading)
         })();
         result.unwrap_or_else(crate::forge::game::Lookup::Unavailable)
+    }
+    fn retain_mappings(&mut self, requests: &[RollRequest]) {
+        let expected = self.backend.snapshot().expected_observation().ok();
+        self.mappings.retain(|pending| {
+            expected.as_ref() == Some(&pending.expected)
+                && requests.iter().any(|request| {
+                    request.target == item::RollTarget::Affix
+                        && request.index == usize::from(pending.request.address.index)
+                        && request.draft == pending.request.draft
+                        && request.line == pending.request.address.line.and_then(|line| usize::try_from(line).ok())
+                })
+        });
     }
     fn poll_mappings(&mut self) -> bool {
         let mut completed = false;
@@ -329,6 +343,7 @@ impl Writer {
         if self.pending.is_some() {
             return refused("An item edit is already pending.");
         }
+        self.mappings.clear();
         let state = self.backend.snapshot();
         if !supports(&state, edit) {
             return refused("This edit is unavailable in this build.");

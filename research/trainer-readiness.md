@@ -93,7 +93,11 @@ quantities are never substituted for display values. Tables are bound to the ful
 draft, cached in the serialized worker, and shown/edited by the real Forge page. Fixed or
 nonmonotonic mappings stay unavailable without a polling loop. Transient formatting failures can
 retry after a successful read, while explicit Refresh retries stable refusals too. Mapping does
-not create write history or discard confirmed Undo.
+not create write history or discard confirmed Undo. The worker rechecks locale before cache
+reuse and during monitoring, recapturing localized definitions and invalidating old formatting
+on a language change. Disposable draft mapping reads stop between completed pages; ordinary
+write receipts never cancel accepted writes. Reloading keeps the prior value visible with
+editing disabled until the replacement table arrives.
 
 The owned Unity route checks 256 samples against independent managed display/value oracles in
 en-US, de-DE and fr-FR, for both existing and replacement/tier draft contexts. It also checks
@@ -132,7 +136,8 @@ Trainer fault reporting now persists Forge and field NotKept/Uncertain outcomes 
 from the worker, before publication barriers, including writes drained during shutdown.
 Reports include the expected state, canonical edit, readback or its absence, differences
 and recovery policy. Advisory broadcast events are not the delivery mechanism. Connection
-and catalog-cache faults are logged too. Reporting remains best effort.
+and catalog-cache faults are logged too; retryable connection waits do not emit a file on each
+retry. Reporting remains best effort.
 
 The desktop policy follows `spec/trainer.md` §7.3: typed operational failures keep the
 app running; an unexpected Trainer worker panic is logged, closes the event loop and

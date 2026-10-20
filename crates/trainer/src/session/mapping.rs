@@ -10,6 +10,20 @@ impl<T: Transport, L: LogSource> Session<T, L> {
     /// full selected item/manager; all pages must have one captured locale and
     /// opaque context before a table is exposed. This never records a write.
     pub async fn resolve_mapping(&mut self, now: Timestamp, expected: &ExpectedObservation, request: &MappingRequest) -> Result<ValueTable, SessionError> {
+        self.resolve_mapping_observed(now, expected, request, &mut ContinueCapture).await
+    }
+    /// Stop only before or after a completed RPC; never abandon pipe I/O or its
+    /// artifact lease when the editor moves to a different draft.
+    pub async fn resolve_mapping_observed(
+        &mut self,
+        now: Timestamp,
+        expected: &ExpectedObservation,
+        request: &MappingRequest,
+        observer: &mut dyn CaptureObserver,
+    ) -> Result<ValueTable, SessionError> {
+        if observer.control() == CaptureControl::Stop {
+            return Err(SessionError::Busy);
+        }
         if matches!(self.state, SessionState::Connecting | SessionState::Closing) {
             return Err(SessionError::Busy);
         }
@@ -59,16 +73,16 @@ impl<T: Transport, L: LogSource> Session<T, L> {
                 .map(Request::MapRoll)
                 .map_err(SessionError::Protocol)
         };
-        let context = self.mapping_page(advanced(now, elapsed)?, query(MappingStart::ContextOnly)?, &lease).await?;
+        let context = self.mapping_page(advanced(now, elapsed)?, query(MappingStart::ContextOnly)?, &lease, observer).await?;
         let mut builder = MappingBuilder::new(expected.clone(), request.clone(), context, None).map_err(unavailable)?;
         let mut parser = CapturedDisplayParser::new(&identity.locale.language).map_err(SessionError::Mapping)?;
         while let Some(start) = builder.next_start() {
-            let page = self.mapping_page(advanced(now, elapsed)?, query(MappingStart::Samples(start))?, &lease).await?;
+            let page = self.mapping_page(advanced(now, elapsed)?, query(MappingStart::Samples(start))?, &lease, observer).await?;
             builder.push(expected, request, page, &mut parser).map_err(unavailable)?;
         }
         builder.finish().map_err(unavailable)
     }
-    async fn mapping_page(&mut self, now: Timestamp, request: Request, lease: &ProfileLease) -> Result<mapping::RawMappingPage, SessionError> {
+    async fn mapping_page(&mut self, now: Timestamp, request: Request, lease: &ProfileLease, observer: &mut dyn CaptureObserver) -> Result<mapping::RawMappingPage, SessionError> {
         let Request::MapRoll(query) = &request else {
             return Err(SessionError::Protocol(ProtocolError::InvalidData));
         };
@@ -79,7 +93,7 @@ impl<T: Transport, L: LogSource> Session<T, L> {
         };
         let start = query.start();
         match self
-            .read_owned_control(now, |_| request, |bytes| mapping::decode_mapping(bytes, address, start), Some(lease), None)
+            .read_owned_control(now, |_| request, |bytes| mapping::decode_mapping(bytes, address, start), Some(lease), Some(observer))
             .await
         {
             Err(SessionError::Helper {
@@ -99,5 +113,8 @@ impl<T: Transport, L: LogSource> Session<T, L> {
     }
 }
 fn unavailable(error: MappingError) -> SessionError {
-    SessionError::Mapping(error.to_string())
+    match error {
+        MappingError::WrongContext => SessionError::MappingRetryable(error.to_string()),
+        error => SessionError::Mapping(error.to_string()),
+    }
 }

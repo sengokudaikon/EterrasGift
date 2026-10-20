@@ -34,6 +34,9 @@ impl BackendConnection for Connection {
     async fn refresh(&mut self, _: Timestamp) -> Result<RuntimeStatus, BackendError> {
         panic!("overflow must precede refresh")
     }
+    async fn read_locale(&mut self, _: Timestamp) -> Result<crate::catalog::GameLocale, BackendError> {
+        panic!("no locale")
+    }
     async fn capture_catalog(&mut self, _: Timestamp) -> Result<GameCatalog, BackendError> {
         panic!("no capture")
     }
@@ -105,6 +108,9 @@ fn default_rate_capability_is_false_and_default_submission_is_preflight_only() {
         }
         async fn refresh(&mut self, _: Timestamp) -> Result<RuntimeStatus, BackendError> {
             panic!("no refresh")
+        }
+        async fn read_locale(&mut self, _: Timestamp) -> Result<crate::catalog::GameLocale, BackendError> {
+            panic!("no locale")
         }
         async fn capture_catalog(&mut self, _: Timestamp) -> Result<GameCatalog, BackendError> {
             panic!("no capture")

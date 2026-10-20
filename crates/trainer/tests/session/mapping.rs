@@ -139,7 +139,7 @@ fn mapping_display_context_and_optional_helper_failures_stay_local() {
         let wire = FakeTransport::new(fixture.target.clone(), steps);
         let mut session = ready(&fixture, &wire, &FakeLog::new([offline()]));
         let failure = run(session.resolve_mapping(now(), &observation, &request()));
-        if (1..=3).contains(&fault) {
+        if matches!(fault, 1..=4 | 6) {
             assert!(matches!(failure, Err(SessionError::MappingRetryable(_))), "{fault}");
         } else {
             assert!(matches!(failure, Err(SessionError::Mapping(_))), "{fault}");
@@ -240,4 +240,50 @@ fn canceled_mapping_never_replays_and_artifact_change_between_pages_blocks() {
         assert!(run(session.resolve_mapping(now(), &observation, &request)).is_err());
         assert_eq!(wire.requests().len(), 4);
     }
+}
+
+#[test]
+fn obsolete_mapping_stops_between_pages_and_keeps_the_drained_session_ready() {
+    use eg_trainer::session::{CaptureControl, CaptureObserver};
+    use std::sync::atomic::{AtomicBool, Ordering};
+    struct Stop(Arc<AtomicBool>);
+    impl CaptureObserver for Stop {
+        fn control(&mut self) -> CaptureControl {
+            if self.0.load(Ordering::SeqCst) {
+                CaptureControl::Stop
+            } else {
+                CaptureControl::Continue
+            }
+        }
+    }
+    let fixture = Fixture::new();
+    let canceled = Arc::new(AtomicBool::new(false));
+    let stop = canceled.clone();
+    let wire = FakeTransport::new(
+        fixture.target.clone(),
+        [
+            fixture.discover(),
+            status(false, 0x1234, 0),
+            done(mapping::encode_mapping(&page(MappingStart::ContextOnly)).unwrap()),
+            Step::Action(
+                Box::new(move || stop.store(true, Ordering::SeqCst)),
+                Response {
+                    code: ResponseCode::Done,
+                    payload: mapping::encode_mapping(&page(MappingStart::Samples(0))).unwrap(),
+                },
+            ),
+            done(forge::encode(Some(expected(&fixture).snapshot())).unwrap()),
+        ],
+    );
+    let mut session = ready(&fixture, &wire, &FakeLog::new([offline()]));
+    let mut observer = Stop(canceled);
+    let result = run(session.resolve_mapping_observed(now(), &expected(&fixture), &request(), &mut observer));
+    assert!(matches!(result, Err(SessionError::Busy)));
+    assert_eq!(session.state(), SessionState::Ready);
+    assert_eq!(wire.requests().len(), 4, "the next fifteen pages were not submitted");
+    assert!(session.last_write().is_none());
+    assert!(run(session.read_forge(now())).unwrap().is_some());
+    let count = wire.requests().len();
+    assert!(run(session.resolve_mapping_observed(now(), &expected(&fixture), &request(), &mut observer)).is_err());
+    assert_eq!(wire.requests().len(), count, "already-canceled reads do no I/O");
 }

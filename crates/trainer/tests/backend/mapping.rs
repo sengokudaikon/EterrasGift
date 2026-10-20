@@ -283,3 +283,140 @@ fn mapping_result_cannot_reopen_an_offline_gate_lost_while_sampling() {
         shutdown(&handle, worker).await;
     });
 }
+
+#[test]
+fn language_change_invalidates_successes_and_failures_before_cached_lookup() {
+    run(async {
+        for cached_failure in [false, true] {
+            let shared = shared();
+            let (handle, worker) = start(&shared, options(), None);
+            connected(&handle).await;
+            if cached_failure {
+                shared
+                    .mapping_errors
+                    .lock()
+                    .unwrap()
+                    .push_back(BackendError::blocked(ErrorKind::MappingUnavailable, "old language failure"));
+            }
+            let old = handle.snapshot();
+            command(&handle, command_for(&old)).await.unwrap();
+            assert_eq!(handle.snapshot().mappings.len(), 1);
+            shared.locale.lock().unwrap().language = "fr".into();
+            assert_eq!(command(&handle, command_for(&old)).await.unwrap_err().kind, ErrorKind::MappingRetryable);
+            let fresh = handle.snapshot();
+            assert_eq!(fresh.phase, Phase::Ready);
+            assert_eq!(fresh.generation, old.generation);
+            assert_eq!(fresh.expected_observation().unwrap().catalog_identity().locale.language, "fr");
+            assert!(fresh.mappings.is_empty());
+            command(&handle, command_for(&fresh)).await.unwrap();
+            assert!(handle.snapshot().mappings[0].result.is_ok());
+            assert_eq!(shared.count("mapping"), 2);
+            assert_eq!(shared.count("connect"), 1);
+            shutdown(&handle, worker).await;
+        }
+    });
+}
+
+#[test]
+fn monitor_refreshes_locale_even_when_no_new_value_requests_are_submitted() {
+    run(async {
+        let shared = shared();
+        let (handle, worker) = start(&shared, options(), None);
+        connected(&handle).await;
+        command(&handle, command_for(&handle.snapshot())).await.unwrap();
+        let old = handle.snapshot();
+        shared.locale.lock().unwrap().language = "fr".into();
+        command(&handle, Command::StartMonitoring).await.unwrap();
+        wait_for_read(&handle, old.forge_read_sequence).await;
+        let fresh = handle.snapshot();
+        assert_eq!(fresh.expected_observation().unwrap().catalog_identity().locale.language, "fr");
+        assert!(fresh.mappings.is_empty());
+        assert_eq!(shared.count("mapping"), 1);
+        assert_eq!(shared.count("connect"), 1);
+        shutdown(&handle, worker).await;
+    });
+}
+
+#[test]
+fn context_change_mid_sample_refreshes_locale_without_caching_the_old_failure() {
+    run(async {
+        let shared = shared();
+        let (handle, worker) = start(&shared, options(), None);
+        connected(&handle).await;
+        shared.mapping_block.arm();
+        shared
+            .mapping_errors
+            .lock()
+            .unwrap()
+            .push_back(BackendError::blocked(ErrorKind::MappingRetryable, "WrongContext"));
+        let old = handle.snapshot();
+        let pending = handle.try_submit(command_for(&old)).unwrap();
+        shared.mapping_block.wait_started().await;
+        shared.locale.lock().unwrap().language = "fr".into();
+        shared.mapping_block.finish();
+        assert_eq!(pending.wait().await.unwrap_err().kind, ErrorKind::MappingRetryable);
+        let fresh = handle.snapshot();
+        assert!(fresh.mappings.is_empty());
+        assert_eq!(fresh.phase, Phase::Ready);
+        assert_eq!(fresh.expected_observation().unwrap().catalog_identity().locale.language, "fr");
+        command(&handle, command_for(&fresh)).await.unwrap();
+        assert!(handle.snapshot().mappings[0].result.is_ok());
+        shutdown(&handle, worker).await;
+    });
+}
+
+#[test]
+fn disposable_mapping_receipts_cancel_queued_and_running_reads_without_canceling_writes() {
+    run(async {
+        for queued in [false, true] {
+            let shared = shared();
+            let (handle, worker) = start(&shared, options(), None);
+            connected(&handle).await;
+            let expected = handle.snapshot().expected_observation().unwrap();
+            shared.mapping_block.arm();
+            let first = handle.try_resolve_mapping(expected.clone(), request()).unwrap();
+            shared.mapping_block.wait_started().await;
+            if queued {
+                let second = handle.try_resolve_mapping(expected, request()).unwrap();
+                drop(second);
+            }
+            drop(first);
+            shared.mapping_block.finish();
+            command(&handle, Command::SetOverride(false)).await.unwrap();
+            assert!(handle.snapshot().mappings.is_empty());
+            assert_eq!(shared.count("mapping"), 1, "a canceled queued read never reaches the connection");
+            assert_eq!(handle.snapshot().phase, Phase::Ready);
+            assert_eq!(shared.aborted.load(Ordering::SeqCst), 0, "in-flight I/O drained normally");
+            let plan = handle.snapshot().level_requirement_plan(17).unwrap();
+            drop(handle.try_submit(Command::Write(plan.into())).unwrap());
+            command(&handle, Command::SetOverride(false)).await.unwrap();
+            assert_eq!(shared.count("write"), 1, "dropping an ordinary write receipt still cannot cancel it");
+            assert!(matches!(handle.snapshot().last_write.as_ref().unwrap().status, WriteStatus::Confirmed(_)));
+            shutdown(&handle, worker).await;
+        }
+    });
+}
+
+#[test]
+fn canceling_a_value_request_does_not_hide_fatal_connection_errors() {
+    run(async {
+        let shared = shared();
+        let (handle, worker) = start(&shared, options(), None);
+        connected(&handle).await;
+        shared
+            .mapping_errors
+            .lock()
+            .unwrap()
+            .push_back(BackendError::blocked(ErrorKind::Protocol, "malformed page"));
+        shared.mapping_block.arm();
+        let read = handle.try_resolve_mapping(handle.snapshot().expected_observation().unwrap(), request()).unwrap();
+        shared.mapping_block.wait_started().await;
+        drop(read);
+        shared.mapping_block.finish();
+        command(&handle, Command::SetOverride(false)).await.unwrap();
+        assert_eq!(handle.snapshot().phase, Phase::Blocked);
+        assert_eq!(handle.snapshot().error.as_ref().unwrap().kind, ErrorKind::Protocol);
+        assert!(handle.snapshot().attached.is_none());
+        shutdown(&handle, worker).await;
+    });
+}

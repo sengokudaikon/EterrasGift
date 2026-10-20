@@ -29,6 +29,7 @@ struct Data {
     unique_calls: AtomicUsize,
     mappings: AtomicUsize,
     mapping_calls: AtomicUsize,
+    mapping_release: AtomicBool,
     refuse_at: AtomicUsize,
     expected: Mutex<Vec<ForgeSnapshot>>,
 }
@@ -71,6 +72,12 @@ impl BackendConnection for OwnedConnection {
             online: false,
             manager: 12,
             features_on: 0,
+        })
+    }
+    async fn read_locale(&mut self, _: jiff::Timestamp) -> Result<eg_trainer::catalog::GameLocale, BackendError> {
+        Ok(GameLocale {
+            language: "en".into(),
+            game_version: "owned-ui".into(),
         })
     }
     async fn capture_catalog(&mut self, _: jiff::Timestamp) -> Result<GameCatalog, BackendError> {
@@ -245,6 +252,9 @@ impl BackendConnection for OwnedConnection {
         }
         assert_eq!(self.0.item.lock().unwrap().as_ref(), Some(expected.snapshot()));
         self.0.mapping_calls.fetch_add(1, Ordering::SeqCst);
+        while mode == 4 && !self.0.mapping_release.load(Ordering::SeqCst) {
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
         tokio::time::sleep(Duration::from_millis(if mode == 2 { 500 } else { 20 })).await;
         let affix = &expected.snapshot().affixes[usize::from(request.address.index)];
         let (id, tier) = match &request.draft {
@@ -416,6 +426,7 @@ pub(super) fn capture(session: &Session) {
         unique_calls: AtomicUsize::new(0),
         mappings: AtomicUsize::new(0),
         mapping_calls: AtomicUsize::new(0),
+        mapping_release: AtomicBool::new(false),
         refuse_at: AtomicUsize::new(0),
         expected: Mutex::new(Vec::new()),
     });
@@ -784,7 +795,32 @@ pub(super) fn capture(session: &Session) {
     session.capture(&ui, "backend-forge-roll-confirmed");
     forge.invoke_undo();
     wait(|| !forge.get_can_undo() && forge.get_can_change_affix_list() && data.item.lock().unwrap().as_ref().unwrap().affixes[0].roll == 171);
-    wait(|| forge.get_affixes().row_data(0).unwrap().value.display == "363 Ω");
+    wait(|| {
+        let value = forge.get_affixes().row_data(0).unwrap().value;
+        value.mapped && value.display == "363 Ω"
+    });
+    // Keep the last value readable while a draft table loads, and discard
+    // queued requests when the user returns to an already cached draft.
+    data.mapping_release.store(false, Ordering::SeqCst);
+    data.mappings.store(4, Ordering::SeqCst);
+    let calls = data.mapping_calls.load(Ordering::SeqCst);
+    forge.invoke_pick_tier(0, 1);
+    wait(|| data.mapping_calls.load(Ordering::SeqCst) > calls);
+    let loading = forge.get_affixes().row_data(0).unwrap().value;
+    assert_eq!(loading.display, "363 Ω");
+    assert!(!loading.mapped && !loading.editable);
+    assert!(loading.tip.contains("Loading actual values"));
+    session.capture(&ui, "backend-forge-values-reloading");
+    forge.invoke_pick_tier(0, 2);
+    forge.invoke_pick_tier(0, 3);
+    forge.invoke_discard_all();
+    data.mapping_release.store(true, Ordering::SeqCst);
+    command(&handle, Command::SetOverride(false), || true);
+    wait(|| forge.get_affixes().row_data(0).unwrap().value.mapped);
+    assert_eq!(forge.get_affixes().row_data(0).unwrap().value.display, "363 Ω");
+    assert_eq!(data.mapping_calls.load(Ordering::SeqCst), calls + 1, "obsolete queued drafts do not sample the game");
+    assert!(handle.snapshot().mappings.iter().all(|mapping| mapping.request.draft.is_none()));
+    data.mappings.store(1, Ordering::SeqCst);
     // Tier and replacement drafts resolve in their own context. Unrelated watch
     // publications preserve both local drafts and a value currently being typed.
     forge.invoke_pick_tier(0, 2);

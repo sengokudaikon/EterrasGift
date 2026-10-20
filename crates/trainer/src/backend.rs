@@ -2,7 +2,8 @@
 //!
 //! Construction does not spawn, discover, or access files/processes. The owner
 //! explicitly runs the worker on a background Tokio runtime. All accepted work
-//! runs to completion; dropping a receipt is not cancellation. Cleanup barriers
+//! runs to completion; dropping an ordinary receipt is not cancellation. Optional
+//! mapping reads have a separate disposable receipt and stop between RPCs. Cleanup barriers
 //! suppress publication from an earlier operation, then drain it before cleanup.
 //! Watch snapshots are authoritative; broadcast events can lag and are advisory.
 mod faults;
@@ -17,7 +18,7 @@ use std::{
     future::Future,
     sync::{
         Arc, Mutex,
-        atomic::{AtomicUsize, Ordering},
+        atomic::{AtomicBool, AtomicUsize, Ordering},
     },
     time::Duration,
 };
@@ -80,6 +81,7 @@ pub trait BackendConnection: Send + 'static {
         }
     }
     fn refresh(&mut self, now: Timestamp) -> impl Future<Output = Result<RuntimeStatus, BackendError>> + Send;
+    fn read_locale(&mut self, now: Timestamp) -> impl Future<Output = Result<crate::catalog::GameLocale, BackendError>> + Send;
     fn capture_catalog(&mut self, now: Timestamp) -> impl Future<Output = Result<GameCatalog, BackendError>> + Send;
     fn capture_catalog_observed(&mut self, now: Timestamp, observer: &mut dyn CaptureObserver) -> impl Future<Output = Result<CaptureOutcome, BackendError>> + Send {
         async move {
@@ -112,6 +114,22 @@ pub trait BackendConnection: Send + 'static {
     }
     fn resolve_mapping(&mut self, _: Timestamp, _: &crate::edits::ExpectedObservation, _: &MappingRequest) -> impl Future<Output = Result<ValueTable, BackendError>> + Send {
         async { Err(BackendError::blocked(ErrorKind::MappingUnavailable, "Actual values are unavailable for this modifier.")) }
+    }
+    /// Optional reads may stop between completed exchanges. Implementations
+    /// must drain an in-flight exchange and preserve fatal transport failures.
+    fn resolve_mapping_observed(
+        &mut self,
+        now: Timestamp,
+        expected: &crate::edits::ExpectedObservation,
+        request: &MappingRequest,
+        observer: &mut dyn CaptureObserver,
+    ) -> impl Future<Output = Result<ValueTable, BackendError>> + Send {
+        async move {
+            if observer.control() == CaptureControl::Stop {
+                return Err(BackendError::blocked(ErrorKind::Superseded, "Value request canceled."));
+            }
+            self.resolve_mapping(now, expected, request).await
+        }
     }
     fn supports_read_attack_leech(&self) -> bool {
         false
@@ -187,6 +205,9 @@ impl<T: Transport + Send + 'static, L: LogSource + Send + 'static> BackendConnec
             .copied()
             .ok_or_else(|| BackendError::blocked(ErrorKind::Protocol, "missing runtime status"))
     }
+    async fn read_locale(&mut self, now: Timestamp) -> Result<crate::catalog::GameLocale, BackendError> {
+        Ok(Session::read_locale(self, now).await?)
+    }
     async fn capture_catalog(&mut self, now: Timestamp) -> Result<GameCatalog, BackendError> {
         Ok(Session::capture_catalog(self, now).await?)
     }
@@ -210,6 +231,15 @@ impl<T: Transport + Send + 'static, L: LogSource + Send + 'static> BackendConnec
     }
     async fn resolve_mapping(&mut self, now: Timestamp, expected: &crate::edits::ExpectedObservation, request: &MappingRequest) -> Result<ValueTable, BackendError> {
         Ok(Session::resolve_mapping(self, now, expected, request).await?)
+    }
+    async fn resolve_mapping_observed(
+        &mut self,
+        now: Timestamp,
+        expected: &crate::edits::ExpectedObservation,
+        request: &MappingRequest,
+        observer: &mut dyn CaptureObserver,
+    ) -> Result<ValueTable, BackendError> {
+        Ok(Session::resolve_mapping_observed(self, now, expected, request, observer).await?)
     }
     async fn read_forge(&mut self, now: Timestamp) -> Result<Option<ForgeSnapshot>, BackendError> {
         Ok(Session::read_forge(self, now).await?)
@@ -690,6 +720,7 @@ struct Envelope {
     command: Command,
     epoch: u64,
     reply: oneshot::Sender<Result<(), BackendError>>,
+    read_cancel: Option<Arc<AtomicBool>>,
 }
 pub struct BackendHandle {
     commands: mpsc::Sender<Envelope>,
@@ -720,6 +751,23 @@ impl Pending {
         self.reply.await.unwrap_or_else(|_| Err(BackendError::blocked(ErrorKind::Stopped, "backend stopped")))
     }
 }
+/// Receipt for an explicitly disposable value lookup. Dropping it requests
+/// cancellation between RPCs. Ordinary Pending receipts, including all writes,
+/// keep their existing drain-to-completion behavior.
+pub struct MappingRead {
+    pending: Pending,
+    cancel: Arc<AtomicBool>,
+}
+impl MappingRead {
+    pub fn try_result(&mut self) -> Option<Result<(), BackendError>> {
+        self.pending.try_result()
+    }
+}
+impl Drop for MappingRead {
+    fn drop(&mut self) {
+        self.cancel.store(true, Ordering::Release);
+    }
+}
 impl BackendHandle {
     pub fn snapshot(&self) -> BackendSnapshot {
         self.snapshots.borrow().clone()
@@ -731,14 +779,35 @@ impl BackendHandle {
         self.events.subscribe()
     }
     pub fn try_submit(&self, command: Command) -> Result<Pending, SubmitError> {
+        self.submit(command, None)
+    }
+    pub fn try_resolve_mapping(&self, expected: crate::edits::ExpectedObservation, request: MappingRequest) -> Result<MappingRead, SubmitError> {
+        let cancel = Arc::new(AtomicBool::new(false));
+        let pending = self.submit(
+            Command::ResolveMapping {
+                expected: Box::new(expected),
+                request,
+            },
+            Some(cancel.clone()),
+        )?;
+        Ok(MappingRead { pending, cancel })
+    }
+    fn submit(&self, command: Command, read_cancel: Option<Arc<AtomicBool>>) -> Result<Pending, SubmitError> {
         let barrier = command.barrier();
         let (reply, receiver) = oneshot::channel();
         let mut epoch = self.intent.lock().unwrap_or_else(|p| p.into_inner());
         let accepted = if barrier { epoch.wrapping_add(1) } else { *epoch };
-        self.commands.try_send(Envelope { command, epoch: accepted, reply }).map_err(|e| match e {
-            mpsc::error::TrySendError::Full(_) => SubmitError::Full,
-            mpsc::error::TrySendError::Closed(_) => SubmitError::Stopped,
-        })?;
+        self.commands
+            .try_send(Envelope {
+                command,
+                epoch: accepted,
+                reply,
+                read_cancel,
+            })
+            .map_err(|e| match e {
+                mpsc::error::TrySendError::Full(_) => SubmitError::Full,
+                mpsc::error::TrySendError::Closed(_) => SubmitError::Stopped,
+            })?;
         *epoch = accepted;
         Ok(Pending { reply: receiver })
     }
@@ -785,6 +854,7 @@ where
     blocked: Option<ProcessIdentity>,
     next_discovery: tokio::time::Instant,
     command_epoch: u64,
+    read_cancel: Option<Arc<AtomicBool>>,
     attack_leech_sequence: u64,
     paused: bool,
     faults: Option<eg_core::fault::FaultLog>,
@@ -858,6 +928,7 @@ pub fn service<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K
             blocked: None,
             next_discovery: tokio::time::Instant::now(),
             command_epoch: 0,
+            read_cancel: None,
             attack_leech_sequence: 0,
             paused: false,
             faults: None,
@@ -881,7 +952,9 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
                 Ok(Some(envelope)) => {
                     let stop = envelope.command == Command::Shutdown;
                     self.command_epoch = envelope.epoch;
+                    self.read_cancel = envelope.read_cancel;
                     let result = self.command(envelope.command).await;
+                    self.read_cancel = None;
                     let _ = envelope.reply.send(result);
                     if stop {
                         break;
@@ -1314,7 +1387,11 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
                 .await?;
             self.superseded(epoch)?;
             self.check_status(status)?;
-            let data = if capture {
+            // Successful value tables can be reused without another mapping
+            // command. Poll locale here too, so even those tables expire when
+            // the game changes language while the editor is idle.
+            let locale_changed = !capture && self.locale_changed(epoch, &target).await?;
+            let data = if capture || locale_changed {
                 let data = self.capture_observed(epoch).await?;
                 self.superseded(epoch)?;
                 Arc::new(data)
@@ -1341,7 +1418,7 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
             }
             self.commit(epoch, |this| {
                 if let ForgeState::Item { unique, .. } = &mut forge
-                    && (capture || retry_optional && unique.as_ref().is_some_and(Result::is_err))
+                    && (capture || locale_changed || retry_optional && unique.as_ref().is_some_and(Result::is_err))
                 {
                     *unique = None;
                 }
@@ -1362,7 +1439,7 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
             self.event(BackendEvent::ReadPublished {
                 generation: self.state.generation,
             });
-            if capture {
+            if capture || locale_changed {
                 self.save_cache(data).await;
                 self.publish_if_current(epoch)?;
             }

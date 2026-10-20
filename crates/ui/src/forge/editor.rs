@@ -1597,8 +1597,10 @@ impl ForgeEditor {
             return;
         }
         let Some(item) = self.item.clone() else {
+            self.game.retain_mappings(&[]);
             return;
         };
+        let mut requests = Vec::new();
         for index in 0..self.affixes.len() {
             let row = &self.affixes[index];
             let (slot, id, tier, seal) = (row.slot(), row.draft_id(), row.tier(), row.seal());
@@ -1617,6 +1619,7 @@ impl ForgeEditor {
                 line: None,
             };
             let game_context = row.game_roll().is_some();
+            requests.push(request.clone());
             let table = self.table(&key, &item, &request);
             self.affixes[index].value.set_mapping(table, game_context);
         }
@@ -1639,6 +1642,7 @@ impl ForgeEditor {
                     })),
                     line: Some(self.uniques[line].state.index),
                 };
+                requests.push(request.clone());
                 let table = self.table(&key, &item, &request);
                 self.uniques[line].rolls[position].editor.set_mapping(table, true);
             }
@@ -1652,10 +1656,12 @@ impl ForgeEditor {
                     draft: None,
                     line: None,
                 };
+                requests.push(request.clone());
                 let table = self.table(&format!("implicit:{index}"), &item, &request);
                 self.implicits[line].rolls[position].editor.set_mapping(table, true);
             }
         }
+        self.game.retain_mappings(&requests);
     }
 
     fn table(&mut self, key: &str, item: &ForgeItem, request: &RollRequest) -> Lookup<item::ValueTable> {

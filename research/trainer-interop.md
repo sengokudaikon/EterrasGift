@@ -202,8 +202,19 @@ supported-target assumptions, tested with owned fixtures rather than advertised 
 safety guarantees. Tables remain full-observation/draft bound in the worker; mapping failures are
 optional read failures unless process/protocol/identity/offline access is lost. Normal monitor
 polls retain stable unavailable tables and retry only transient failures after a successful read.
-Explicit Refresh permits another attempt at stable refusal too. No write certainty is inferred
-from successful formatting.
+Explicit Refresh permits another attempt at stable refusal too. Before a mapping cache hit,
+the worker reads the completed locale; monitoring checks it as well, so idle cached tables
+expire on the next poll. A change recaptures localized definitions and atomically invalidates
+old mappings, descriptions and previews. WrongContext is retryable and rechecks locale rather
+than memoizing a failure under the old language. No write certainty is inferred from formatting.
+
+The UI's disposable MappingRead receipt stops obsolete draft lookups before submission or
+between completed sample pages. An in-flight RPC always drains and fatal errors still revoke
+the connection. Ordinary receipts, including writes, retain their completion semantics. The
+editor reports all current requests, including its cached tables, so returning to a cached
+draft cancels unused queued work. Reloading keeps the last value text visible, but its stale
+table cannot authorize typing or scrubbing. Retryable connection waits remain visible in
+snapshots/events without writing a fault file on each automatic retry.
 
 
 Unique tooltip/preview requests share the conditional full-Forge description envelope. Preview

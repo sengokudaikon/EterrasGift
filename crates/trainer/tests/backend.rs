@@ -128,6 +128,7 @@ struct Shared {
     preview_errors: Mutex<VecDeque<BackendError>>,
     mapping_errors: Mutex<VecDeque<BackendError>>,
     mapping_result: Mutex<Option<eg_trainer::mapping::ValueTable>>,
+    locale: Mutex<eg_trainer::catalog::GameLocale>,
     disconnect_block: Block,
     write_block: Block,
     refresh_block: Block,
@@ -167,6 +168,7 @@ impl Shared {
             preview_errors: Mutex::new(VecDeque::new()),
             mapping_errors: Mutex::new(VecDeque::new()),
             mapping_result: Mutex::new(None),
+            locale: Mutex::new(catalog().identity.locale),
             disconnect_block: Block::default(),
             write_block: Block::default(),
             refresh_block: Block::default(),
@@ -250,9 +252,15 @@ impl BackendConnection for Connection {
         }
         Ok(*self.shared.status.lock().unwrap())
     }
+    async fn read_locale(&mut self, _: Timestamp) -> Result<eg_trainer::catalog::GameLocale, BackendError> {
+        self.shared.record("locale");
+        Ok(self.shared.locale.lock().unwrap().clone())
+    }
     async fn capture_catalog(&mut self, _: Timestamp) -> Result<GameCatalog, BackendError> {
         self.shared.call("capture", &self.shared.capture_block).await;
-        Ok(catalog())
+        let mut data = catalog();
+        data.identity.locale = self.shared.locale.lock().unwrap().clone();
+        Ok(data)
     }
     async fn read_forge(&mut self, _: Timestamp) -> Result<Option<ForgeSnapshot>, BackendError> {
         self.shared.call("forge", &self.shared.forge_block).await;
@@ -828,6 +836,9 @@ impl BackendConnection for PagedConnection {
     }
     async fn refresh(&mut self, now: Timestamp) -> Result<RuntimeStatus, BackendError> {
         self.0.refresh(now).await
+    }
+    async fn read_locale(&mut self, now: Timestamp) -> Result<eg_trainer::catalog::GameLocale, BackendError> {
+        self.0.read_locale(now).await
     }
     async fn capture_catalog(&mut self, now: Timestamp) -> Result<GameCatalog, BackendError> {
         self.0.capture_catalog(now).await

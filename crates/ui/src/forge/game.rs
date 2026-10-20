@@ -159,6 +159,10 @@ pub trait ForgeGame {
     /// The values a roll takes in its context (spec §6 Mapping). The editor never computes values itself.
     fn resolve(&self, item: &ForgeItem, request: &RollRequest) -> Lookup<ValueTable>;
 
+    /// Current draft requests, including tables the editor already cached.
+    /// Disposable value reads outside this set no longer need to run.
+    fn retain_mappings(&self, _: &[RollRequest]) {}
+
     /// Writes one edit to the item the draft was made on and reads it back (spec §11).
     fn write(&mut self, expected: &ForgeItem, edit: &ItemEdit) -> EditOutcome;
 
