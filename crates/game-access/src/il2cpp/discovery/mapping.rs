@@ -369,22 +369,24 @@ impl RuntimeAccess {
             let list_class = (self.object_class)(target(&list)?.as_ptr());
             let clear = self.affix_list_method(list_class, class, c"Clear", false, api).map_err(contract)?;
             let add = self.affix_list_method(list_class, class, c"Add", true, api).map_err(contract)?;
-            let invoke = |method, args: &mut [super::Ptr]| -> Result<(), DiscoveryError> {
-                let mut exception = std::ptr::null_mut();
-                let returned = (api.runtime_invoke)(method, target(&list)?.as_ptr().cast(), args.as_mut_ptr(), &mut exception);
-                if let Some(exception) = NonNull::new(exception) {
-                    let _exception = attached.root(exception.cast())?;
-                    return Err(unsupported("detached list rewrite threw"));
-                }
-                if !returned.is_null() {
-                    return Err(unsupported("detached list rewrite return"));
-                }
-                Ok(())
-            };
-            invoke(clear, &mut [])?;
+            let list_class = NonNull::new(list_class).ok_or_else(|| unsupported("detached list class"))?;
+            let clear = context
+                .bind_with_closed_references(NonNull::new(clear.cast_mut()).ok_or_else(|| unsupported("detached Clear"))?, &[list_class])
+                .map_err(contract)?;
+            let add = context
+                .bind_with_closed_references(NonNull::new(add.cast_mut()).ok_or_else(|| unsupported("detached Add"))?, &[list_class])
+                .map_err(contract)?;
+            if !matches!(clear.invoke(Some(&list), &mut []).map_err(contract)?, InvocationOutcome::Returned(ReturnValue::Void)) {
+                return Err(unsupported("detached list Clear threw"));
+            }
             for (index, object) in original.iter().enumerate() {
                 let object = if index == usize::from(query.slot) { &replacement } else { object };
-                invoke(add, &mut [target(object)?.as_ptr().cast()])?;
+                if !matches!(
+                    add.invoke(Some(&list), &mut [Argument::Reference(Some(object))]).map_err(contract)?,
+                    InvocationOutcome::Returned(ReturnValue::Void)
+                ) {
+                    return Err(unsupported("detached list Add threw"));
+                }
             }
             let mut flags = [false; 3];
             for (index, object) in original.iter().enumerate() {

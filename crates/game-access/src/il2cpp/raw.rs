@@ -48,7 +48,9 @@ impl FieldWriteApi {
         // SAFETY: caller establishes the runtime and graph span. The validator
         // rejects value types, incompatible roots and immutable/noninstance fields.
         unsafe {
-            let (object, field, value) = access.reference_store(attached, object, name, value)?;
+            let field = access.reference_field(attached, object, name, value)?;
+            let object = object.target().ok_or(super::discovery::DiscoveryError::NotReady("reference receiver unavailable"))?;
+            let value = value.target().ok_or(super::discovery::DiscoveryError::NotReady("reference value unavailable"))?;
             // SetValueRaw(deref_pointer=false) takes the DIRECT object pointer,
             // rather than the address of a pointer slot used for scalar stores.
             (self.field_set_value)(object.as_ptr(), field.as_ptr(), value.as_ptr().cast());

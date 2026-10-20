@@ -384,6 +384,126 @@ fn handles() -> usize {
 }
 
 #[test]
+fn closed_list_calls_check_receiver_argument_and_runtime_origin_before_invocation() {
+    let runtime = context();
+    let attached = runtime.attach().unwrap();
+    let metadata = method(&[(0x12, false)], (1, false));
+    FAKE.with_borrow_mut(|f| {
+        f.classes.get_mut(&OWNER).unwrap().inflated = true;
+        let parameter = f.methods[&metadata.as_ptr().addr()].parameters[0];
+        f.types.get_mut(&parameter).unwrap().class = ELEMENT;
+    });
+    let value = object(ELEMENT, 0);
+    change_method(metadata, |m| {
+        m.instance = true;
+        m.inflated = true;
+        m.action = Action::ExpectObject(value.as_ptr().addr());
+    });
+    // SAFETY: exact fake closed class and registered reference-only method body.
+    unsafe {
+        let context = InvocationContext::new(&attached, invocation_api());
+        assert!(matches!(context.bind(metadata), Err(InvokeError::GenericMethod)));
+        let method = context.bind_with_closed_references(metadata, &[NonNull::new(pointer(OWNER)).unwrap()]).unwrap();
+        let receiver = attached.root(object(OWNER, 0)).unwrap();
+        let wrong = attached.root(object(OTHER, 0)).unwrap();
+        let value = attached.root(value).unwrap();
+        assert!(matches!(
+            method.invoke(Some(&wrong), &mut [Argument::Reference(Some(&value))]),
+            Err(InvokeError::ObjectTypeMismatch)
+        ));
+        assert!(matches!(
+            method.invoke(Some(&receiver), &mut [Argument::Reference(Some(&wrong))]),
+            Err(InvokeError::ObjectTypeMismatch)
+        ));
+        let other_runtime = ThreadContext::new(api());
+        let other_attached = other_runtime.attach().unwrap();
+        let foreign = other_attached.root(object(ELEMENT, 0)).unwrap();
+        assert!(matches!(
+            method.invoke(Some(&receiver), &mut [Argument::Reference(Some(&foreign))]),
+            Err(InvokeError::ContextMismatch)
+        ));
+        assert!(matches!(
+            method.invoke(Some(&receiver), &mut [Argument::Scalar(Scalar::I32(0))]),
+            Err(InvokeError::ArgumentType { index: 0 })
+        ));
+        assert_eq!(calls(), 0);
+        assert!(matches!(
+            method.invoke(Some(&receiver), &mut [Argument::Reference(Some(&value))]).unwrap(),
+            InvocationOutcome::Returned(ReturnValue::Void)
+        ));
+        assert_eq!(calls(), 1);
+    }
+    assert_eq!(handles(), 0);
+}
+
+#[test]
+fn closed_reference_returns_are_rooted_and_checked_against_the_exact_allowlist() {
+    let runtime = context();
+    let attached = runtime.attach().unwrap();
+    FAKE.with_borrow_mut(|f| f.classes.get_mut(&OTHER).unwrap().inflated = true);
+    let good = method(&[], (0x15, false));
+    let bad = method(&[], (0x15, false));
+    let result = object(OTHER, 0);
+    let wrong = object(ELEMENT, 0);
+    for (metadata, result) in [(good, result), (bad, wrong)] {
+        change_method(metadata, |m| m.result = result.as_ptr().addr());
+        FAKE.with_borrow_mut(|f| {
+            let returns = f.methods[&metadata.as_ptr().addr()].returns;
+            f.types.get_mut(&returns).unwrap().class = OTHER;
+        });
+    }
+    // SAFETY: fake closed reference return identities and no-op bodies; no payload layouts.
+    unsafe {
+        let context = InvocationContext::new(&attached, invocation_api());
+        assert!(matches!(context.bind(good), Err(InvokeError::UnsupportedType { .. })));
+        assert!(matches!(context.bind_with_closed_references(good, &[]), Err(InvokeError::UnsupportedType { .. })));
+        let allowed = [NonNull::new(pointer(OTHER)).unwrap()];
+        let good = context.bind_with_closed_references(good, &allowed).unwrap();
+        let outcome = good.invoke(None, &mut []).unwrap();
+        assert!(matches!(outcome, InvocationOutcome::Returned(ReturnValue::Reference(Some(_)))));
+        assert_eq!(handles(), 1);
+        drop(outcome);
+        assert_eq!(handles(), 0);
+        let bad = context.bind_with_closed_references(bad, &allowed).unwrap();
+        assert!(matches!(bad.invoke(None, &mut []), Err(InvokeError::ObjectTypeMismatch)));
+        assert_eq!(handles(), 0);
+        assert_eq!(calls(), 2);
+    }
+}
+
+#[test]
+fn closed_reference_opt_in_rejects_open_generics_values_and_reference_byrefs() {
+    let runtime = context();
+    let attached = runtime.attach().unwrap();
+    FAKE.with_borrow_mut(|f| {
+        f.classes.get_mut(&OTHER).unwrap().generic = true;
+        f.classes.get_mut(&STRUCT).unwrap().inflated = true;
+        f.classes.get_mut(&OWNER).unwrap().inflated = true;
+    });
+    let metadata = method(&[], (1, false));
+    let byref = method(&[(0x15, true)], (1, false));
+    FAKE.with_borrow_mut(|f| {
+        let parameter = f.methods[&byref.as_ptr().addr()].parameters[0];
+        f.types.get_mut(&parameter).unwrap().class = OWNER;
+    });
+    // SAFETY: live fake metadata and queried-only no-op bodies.
+    unsafe {
+        let context = InvocationContext::new(&attached, invocation_api());
+        for class in [OTHER, STRUCT, ELEMENT] {
+            assert!(matches!(
+                context.bind_with_closed_references(metadata, &[NonNull::new(pointer(class)).unwrap()]),
+                Err(InvokeError::InvalidClosedReference)
+            ));
+        }
+        assert!(matches!(
+            context.bind_with_closed_references(byref, &[NonNull::new(pointer(OWNER)).unwrap()]),
+            Err(InvokeError::UnsupportedType { .. })
+        ));
+    }
+    assert_eq!(calls(), 0);
+}
+
+#[test]
 fn rejects_unsupported_metadata_before_invocation() {
     let runtime = context();
     let attached = runtime.attach().unwrap();

@@ -105,6 +105,7 @@ pub enum InvokeError {
     AbstractMethod,
     GenericDeclaringType,
     InvalidValueTypeContract,
+    InvalidClosedReference,
     TooManyParameters,
     UnsupportedType { position: SignaturePosition, type_code: i32, by_ref: bool },
     ArgumentCount { expected: usize, actual: usize },
@@ -208,7 +209,7 @@ impl<'attachment, 'runtime> InvocationContext<'attachment, 'runtime> {
     pub unsafe fn bind(&self, method: NonNull<MethodInfo>) -> Result<CheckedMethod<'_, 'attachment, 'runtime>, InvokeError> {
         // SAFETY: the caller supplies the same method/runtime permissions as bind_checked. Empty
         // contracts preserve the original primitive/reference-only signature support.
-        unsafe { self.bind_checked(method, &[]) }
+        unsafe { self.bind_checked(method, &[], &[]) }
     }
 
     /// Authorize exact boxed value returns and/or exact Int32 enum signatures in addition to the
@@ -232,7 +233,29 @@ impl<'attachment, 'runtime> InvocationContext<'attachment, 'runtime> {
         // SAFETY: the caller establishes all metadata identities and method-body permissions.
         unsafe {
             self.validate_value_types(&contracts)?;
-            self.bind_checked(method, &contracts)
+            self.bind_checked(method, &contracts, &[])
+        }
+    }
+
+    /// Opt in to exact closed reference classes (for example List<ItemAffix>) as
+    /// receivers, parameters or returns. Ordinary bind still rejects all generics.
+    /// This permits inflated methods only on the explicitly listed declaring classes.
+    /// Open generic classes, value types and byref references remain unsupported.
+    ///
+    /// # Safety
+    /// All bind obligations apply. Every listed class must be immutable metadata
+    /// from this runtime, with its concrete type arguments independently established.
+    /// The exact method body, including an inflated body, must be authorized by the
+    /// caller; membership in the allowlist grants no method-body safety guarantee.
+    pub unsafe fn bind_with_closed_references(&self, method: NonNull<MethodInfo>, classes: &[NonNull<Class>]) -> Result<CheckedMethod<'_, 'attachment, 'runtime>, InvokeError> {
+        // SAFETY: caller supplies live metadata identities from this context's runtime.
+        unsafe {
+            for class in classes {
+                if (self.api.class_is_valuetype)(class.as_ptr()) || (self.api.class_is_generic)(class.as_ptr()) || !(self.api.class_is_inflated)(class.as_ptr()) {
+                    return Err(InvokeError::InvalidClosedReference);
+                }
+            }
+            self.bind_checked(method, &[], classes)
         }
     }
 
@@ -291,19 +314,27 @@ impl<'attachment, 'runtime> InvocationContext<'attachment, 'runtime> {
         }
     }
 
-    unsafe fn bind_checked(&self, method: NonNull<MethodInfo>, contracts: &[ValueTypeContract]) -> Result<CheckedMethod<'_, 'attachment, 'runtime>, InvokeError> {
+    unsafe fn bind_checked(
+        &self,
+        method: NonNull<MethodInfo>,
+        contracts: &[ValueTypeContract],
+        closed_references: &[NonNull<Class>],
+    ) -> Result<CheckedMethod<'_, 'attachment, 'runtime>, InvokeError> {
         let api = &self.api;
         // SAFETY: caller provides live metadata from the runtime bound by new.
         unsafe {
-            if (api.method_is_generic)(method.as_ptr()) || (api.method_is_inflated)(method.as_ptr()) {
+            if (api.method_is_generic)(method.as_ptr()) {
+                return Err(InvokeError::GenericMethod);
+            }
+            let class = NonNull::new((api.method_get_class)(method.as_ptr())).ok_or(InvokeError::InvalidMetadata)?;
+            if (api.method_is_inflated)(method.as_ptr()) && !closed_references.contains(&class) {
                 return Err(InvokeError::GenericMethod);
             }
             let mut implementation_flags = 0;
             if (api.method_get_flags)(method.as_ptr(), &raw mut implementation_flags) & 0x0400 != 0 {
                 return Err(InvokeError::AbstractMethod);
             }
-            let class = NonNull::new((api.method_get_class)(method.as_ptr())).ok_or(InvokeError::InvalidMetadata)?;
-            if (api.class_is_generic)(class.as_ptr()) || (api.class_is_inflated)(class.as_ptr()) {
+            if (api.class_is_generic)(class.as_ptr()) || ((api.class_is_inflated)(class.as_ptr()) && !closed_references.contains(&class)) {
                 return Err(InvokeError::GenericDeclaringType);
             }
             let count = (api.method_get_param_count)(method.as_ptr()) as usize;
@@ -311,9 +342,16 @@ impl<'attachment, 'runtime> InvocationContext<'attachment, 'runtime> {
             if count > 64 {
                 return Err(InvokeError::TooManyParameters);
             }
-            let returns = self.signature_type((api.method_get_return_type)(method.as_ptr()), SignaturePosition::Return, contracts)?;
+            let returns = self.signature_type((api.method_get_return_type)(method.as_ptr()), SignaturePosition::Return, contracts, closed_references)?;
             let parameters = (0..count)
-                .map(|index| self.signature_type((api.method_get_param)(method.as_ptr(), index as u32), SignaturePosition::Parameter(index), contracts))
+                .map(|index| {
+                    self.signature_type(
+                        (api.method_get_param)(method.as_ptr(), index as u32),
+                        SignaturePosition::Parameter(index),
+                        contracts,
+                        closed_references,
+                    )
+                })
                 .collect::<Result<Vec<_>, _>>()?;
             Ok(CheckedMethod {
                 context: self,
@@ -327,7 +365,13 @@ impl<'attachment, 'runtime> InvocationContext<'attachment, 'runtime> {
         }
     }
 
-    unsafe fn signature_type(&self, metadata: *const Type, position: SignaturePosition, contracts: &[ValueTypeContract]) -> Result<SignatureType, InvokeError> {
+    unsafe fn signature_type(
+        &self,
+        metadata: *const Type,
+        position: SignaturePosition,
+        contracts: &[ValueTypeContract],
+        closed_references: &[NonNull<Class>],
+    ) -> Result<SignatureType, InvokeError> {
         if metadata.is_null() {
             return Err(InvokeError::InvalidMetadata);
         }
@@ -348,7 +392,9 @@ impl<'attachment, 'runtime> InvocationContext<'attachment, 'runtime> {
                 ValueKind::Void
             } else if let Some(scalar) = ScalarKind::from_code(code) {
                 ValueKind::Scalar(scalar)
-            } else if matches!(code, 0x0e | 0x12 | 0x14 | 0x1c | 0x1d) && !by_ref {
+            } else if !by_ref
+                && (matches!(code, 0x0e | 0x12 | 0x14 | 0x1c | 0x1d) || (code == 0x15 && closed_references.iter().any(|class| class.as_ptr() == (api.class_from_type)(metadata))))
+            {
                 ValueKind::Reference
             } else if code == 0x11 && !by_ref && !contracts.is_empty() {
                 let class = NonNull::new((api.class_from_type)(metadata)).ok_or(InvokeError::InvalidMetadata)?;
@@ -366,7 +412,7 @@ impl<'attachment, 'runtime> InvocationContext<'attachment, 'runtime> {
                 None
             } else {
                 let class = NonNull::new((api.class_from_type)(metadata)).ok_or(InvokeError::InvalidMetadata)?;
-                if (api.class_is_generic)(class.as_ptr()) || (api.class_is_inflated)(class.as_ptr()) {
+                if (api.class_is_generic)(class.as_ptr()) || ((api.class_is_inflated)(class.as_ptr()) && !closed_references.contains(&class)) {
                     return Err(unsupported());
                 }
                 if matches!(kind, ValueKind::Reference) && (api.class_is_valuetype)(class.as_ptr()) {

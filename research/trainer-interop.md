@@ -40,6 +40,23 @@ and mutation boundaries. The named-pipe server has one owner; a new client does 
 unfinished work. Unfinished remote calls retain their thread/process handles and input buffers.
 A helper generation is reused rather than unloading executing code or reinjecting over it.
 
+The helper retains one pipe instance through disconnect/reconnect, with a protected DACL
+granting access only to the game process's user and SYSTEM. The client still verifies server
+PID; the server still binds ownership to client PID and creation time. Buffered input and
+unfinished buffered output are settled before accepting the next peer. Authored child-process
+tests cover name retention, malformed suffixes, unread replies and owner recovery. Windows'
+[default pipe DACL](https://learn.microsoft.com/en-us/windows/win32/ipc/named-pipe-security-and-access-rights)
+also permits Everyone/anonymous read access, so it is not used here.
+
+Reference field stores keep the raw export private and check both roots' runtime origin,
+reference class/type code, mutability and declaring-class compatibility before the barrier.
+Detached unique previews repeat bounds and live-alias checks at the byte-write site. Direct
+refresh lookup rejects virtual/abstract/native replacements before mutation; read-side virtual
+getters resolve their implementation explicitly. Closed List<T> calls use CheckedMethod with
+an explicit concrete reference-class allowlist, preserving receiver/argument/result checks;
+ordinary binding still refuses generics. These checks do not establish the external graph and
+runtime lifetime assumptions documented above.
+
 Every Forge edit validates all destinations before its first mutation and checks the complete
 expected snapshot, including fields omitted by the legacy fingerprint. This prevents a late
 validation refusal after an earlier store. A managed refresh may still fail after mutation;

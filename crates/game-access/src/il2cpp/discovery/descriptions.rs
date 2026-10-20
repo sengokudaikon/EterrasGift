@@ -11,8 +11,8 @@ use crate::{
 use std::{ffi::CStr, ptr::NonNull};
 
 impl RuntimeAccess {
-    // Exact supported-game call signatures. Closed List<T> is admitted only by the
-    // get_Implicits adapter below, without broadening the shared invocation API.
+    // Exact supported-game call signatures. Closed List<T> returns require an
+    // explicit class allowlist when bound below.
     pub(super) unsafe fn description_method(
         &self,
         api: raw::InvocationApi,
@@ -175,7 +175,7 @@ impl RuntimeAccess {
                 return Err(unsupported("forge changed before implicit description"));
             }
             let unpacked = self.class(&graph.images, c"", c"ItemDataUnpacked")?;
-            let getter = self.description_method(api, unpacked, c"get_Implicits", &[], None, true)?;
+            let getter = self.mapping_method(api, &graph.item, c"get_Implicits", &[], None)?;
             let list_class = (self.type_class)((self.method_return)(getter));
             if list_class.is_null()
                 || (self.class_value)(list_class)
@@ -195,17 +195,19 @@ impl RuntimeAccess {
                 return Err(unsupported("implicit getter game reference element"));
             }
             self.array_class(array_class, element)?;
-            // The only raw call: exact zero-argument instance getter returning a
-            // validated closed List<game-reference>. Root result/exception immediately.
-            let mut exception = std::ptr::null_mut();
-            let value = (api.runtime_invoke)(getter, target(&graph.item)?.as_ptr().cast(), std::ptr::null_mut(), &mut exception);
-            if let Some(exception) = NonNull::new(exception) {
-                let _exception = attached.root(exception.cast())?;
-                return Err(unsupported("implicit getter threw"));
-            }
+            let context = InvocationContext::new(attached, api);
+            let getter = context
+                .bind_with_closed_references(
+                    NonNull::new(getter.cast_mut()).ok_or_else(|| unsupported("implicit getter"))?,
+                    &[NonNull::new(list_class).ok_or_else(|| unsupported("implicit list class"))?],
+                )
+                .map_err(|e| unsupported(e.to_string()))?;
+            let value = match getter.invoke(Some(&graph.item), &mut []).map_err(|e| unsupported(e.to_string()))? {
+                InvocationOutcome::Returned(ReturnValue::Reference(list)) => list,
+                _ => return Err(unsupported("implicit getter threw or returned a non-reference")),
+            };
             let mut modifiers = Vec::new();
-            if let Some(value) = NonNull::new(value) {
-                let list = attached.root(value)?;
+            if let Some(list) = value {
                 self.exact(&list, list_class)?;
                 let implicits = self.catalog_list(attached, &list, element, crate::catalog::MAX_IMPLICITS as u32)?;
                 if !implicits.is_empty() {

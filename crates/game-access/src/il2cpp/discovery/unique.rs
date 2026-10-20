@@ -26,7 +26,7 @@ impl RuntimeAccess {
         }
     }
     // The preformatted producer returns a closed List<game reference>. Validate
-    // its layout/element before this one raw invoke; shared binding stays narrow.
+    // its layout/element before opting this exact class into checked binding.
     unsafe fn unique_replacements<'a, 'r>(
         &self,
         attached: &'a AttachedThread<'r>,
@@ -55,13 +55,17 @@ impl RuntimeAccess {
                 return Err(unsupported("unique replacement element"));
             }
             self.array_class(array, element)?;
-            let mut exception = std::ptr::null_mut();
-            let value = (api.runtime_invoke)(method, target(parsed)?.as_ptr().cast(), std::ptr::null_mut(), &mut exception);
-            if let Some(exception) = NonNull::new(exception) {
-                let _exception = attached.root(exception.cast())?;
-                return Err(unsupported("unique replacement getter threw"));
-            }
-            let list = attached.root(NonNull::new(value).ok_or_else(|| unsupported("unique replacements absent"))?)?;
+            let context = InvocationContext::new(attached, api);
+            let method = context
+                .bind_with_closed_references(
+                    NonNull::new(method.cast_mut()).ok_or_else(|| unsupported("unique replacement getter"))?,
+                    &[NonNull::new(list_class).ok_or_else(|| unsupported("unique replacement list"))?],
+                )
+                .map_err(|e| unsupported(e.to_string()))?;
+            let list = match method.invoke(Some(parsed), &mut []).map_err(|e| unsupported(e.to_string()))? {
+                InvocationOutcome::Returned(ReturnValue::Reference(Some(list))) => list,
+                _ => return Err(unsupported("unique replacement getter threw or returned no list")),
+            };
             self.exact(&list, list_class)?;
             self.catalog_list(attached, &list, element, MAX_MODIFIERS as u32)
         }

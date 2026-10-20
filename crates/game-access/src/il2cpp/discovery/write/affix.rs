@@ -12,6 +12,7 @@ pub(super) struct AffixRewrite<'a, 'r> {
     // All old objects remain rooted across Clear, Add, refresh, GC and exceptions.
     _original: Vec<Root<'a, 'r>>,
     next: Vec<Root<'a, 'r>>,
+    list_class: NonNull<raw::Class>,
     clear: super::super::Method,
     add: super::super::Method,
     flags: Vec<(NonNull<raw::FieldInfo>, u8)>,
@@ -61,6 +62,15 @@ impl RuntimeAccess {
             let list_class = (self.object_class)(target(&list)?.as_ptr());
             let clear = self.affix_list_method(list_class, class, c"Clear", false, api)?;
             let add = self.affix_list_method(list_class, class, c"Add", true, api)?;
+            let list_class = NonNull::new(list_class).ok_or_else(|| ForgeWriteError::Refused("Missing affix-list class".into()))?;
+            let context = InvocationContext::new(attached, api);
+            // Finish checked binding before the live mutation boundary. Metadata
+            // stays immutable through apply, which repeats binding before Clear.
+            for method in [clear, add] {
+                context
+                    .bind_with_closed_references(NonNull::new(method.cast_mut()).expect("resolved list method"), &[list_class])
+                    .map_err(|e| ForgeWriteError::Refused(e.to_string()))?;
+            }
             let owner = self.class(&graph.images, c"", c"ItemData")?;
             let flag_fields = [c"hasSealedRegularAffix", c"hasSealedPrimordialAffix", c"hasSealedAffixFromCorruption"]
                 .map(|name| self.mutable_field(owner, name, c"Boolean", 0x02))
@@ -151,6 +161,7 @@ impl RuntimeAccess {
                 list,
                 _original: original,
                 next,
+                list_class,
                 clear,
                 add,
                 flags,
@@ -158,8 +169,8 @@ impl RuntimeAccess {
         }
     }
 
-    // Deliberately narrow unsafe adapter for these two closed List<ItemAffix> methods.
-    // CheckedMethod continues rejecting generic/inflated classes everywhere else.
+    // Game-specific discovery for these two closed List<ItemAffix> methods.
+    // CheckedMethod validates the receiver/arguments at each invocation too.
     // Interface implementations may be final virtual; the receiver is the exact closed List.
     pub(in super::super) unsafe fn affix_list_method(
         &self,
@@ -220,21 +231,24 @@ impl AffixRewrite<'_, '_> {
         item: NonNull<raw::Object>,
     ) -> Result<(), ForgeWriteError> {
         unsafe {
-            let call = |method, args: &mut [Ptr]| {
-                let mut exception = std::ptr::null_mut();
-                let returned = (api.runtime_invoke)(method, target(&self.list)?.as_ptr().cast(), args.as_mut_ptr(), &mut exception);
-                if let Some(exception) = NonNull::new(exception) {
-                    let _exception = attached.root(exception.cast()).map_err(DiscoveryError::from)?;
-                    return Err(ForgeWriteError::Failed("Affix-list rewrite raised an exception".into()));
-                }
-                if !returned.is_null() {
-                    return Err(ForgeWriteError::Failed("Affix-list rewrite returned a value".into()));
-                }
-                Ok(())
-            };
-            call(self.clear, &mut [])?;
+            let context = InvocationContext::new(attached, api);
+            let failed = |e: crate::il2cpp::InvokeError| ForgeWriteError::Failed(e.to_string());
+            let clear = context
+                .bind_with_closed_references(NonNull::new(self.clear.cast_mut()).expect("prepared Clear"), &[self.list_class])
+                .map_err(failed)?;
+            let add = context
+                .bind_with_closed_references(NonNull::new(self.add.cast_mut()).expect("prepared Add"), &[self.list_class])
+                .map_err(failed)?;
+            if !matches!(clear.invoke(Some(&self.list), &mut []).map_err(failed)?, InvocationOutcome::Returned(ReturnValue::Void)) {
+                return Err(ForgeWriteError::Failed("Affix-list Clear raised an exception".into()));
+            }
             for root in &self.next {
-                call(self.add, &mut [target(root)?.as_ptr().cast()])?;
+                if !matches!(
+                    add.invoke(Some(&self.list), &mut [Argument::Reference(Some(root))]).map_err(failed)?,
+                    InvocationOutcome::Returned(ReturnValue::Void)
+                ) {
+                    return Err(ForgeWriteError::Failed("Affix-list Add raised an exception".into()));
+                }
             }
             // Managed Clear/Add perform all reference stores with runtime barriers.
             for &(field, value) in &self.flags {

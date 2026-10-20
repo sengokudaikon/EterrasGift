@@ -67,13 +67,13 @@ fn decode_text(units: &[u16]) -> Result<String, DiscoveryError> {
 }
 
 impl RuntimeAccess {
-    pub(in crate::il2cpp) unsafe fn reference_store(
+    pub(in crate::il2cpp) unsafe fn reference_field(
         &self,
         attached: &AttachedThread<'_>,
         object: &Root<'_, '_>,
         name: &CStr,
         value: &Root<'_, '_>,
-    ) -> Result<(NonNull<raw::Object>, NonNull<raw::FieldInfo>, NonNull<raw::Object>), DiscoveryError> {
+    ) -> Result<NonNull<raw::FieldInfo>, DiscoveryError> {
         unsafe {
             if !object.belongs_to(attached) || !value.belongs_to(attached) {
                 return Err(unsupported("reference store runtime mismatch"));
@@ -92,11 +92,7 @@ impl RuntimeAccess {
             if owner.is_null() || receiver.is_null() || !(self.assignable)(owner, receiver) {
                 return Err(unsupported("reference store declaring class"));
             }
-            Ok((
-                target(object)?,
-                NonNull::new(field.cast()).ok_or_else(|| unsupported("reference field absent"))?,
-                target(value)?,
-            ))
+            NonNull::new(field.cast()).ok_or_else(|| unsupported("reference field absent"))
         }
     }
     // All internal unsafe helpers inherit read_forge's live attached-runtime and graph access contract.
