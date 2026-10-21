@@ -8,10 +8,7 @@
 !/research/trainer-interop.md
 !/research/trainer-first-hook.md
 /spec/
-# design/ holds build inputs (fonts, Eterra band images, tokens.json and its export script); only the C# reference captures stay local.
+# design/ is local reference material (C# captures and theme sources), except the token source xtask reads.
 /design/*
-!/design/fonts/
-!/design/eterra/
-!/design/source/
 !/design/tokens.json
 /.idea/

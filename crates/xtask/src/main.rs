@@ -80,7 +80,7 @@ fn slint_tokens(json: &Value) -> Result<String, String> {
     for (_, font) in section(json, "fonts")? {
         for file in font.get("files").and_then(Value::as_array).into_iter().flatten() {
             let file = file.as_str().ok_or("font file is not a string")?;
-            out.line(&format!("import \"../../../design/{file}\";"));
+            out.line(&format!("import \"{file}\";"));
         }
     }
     out.blank();

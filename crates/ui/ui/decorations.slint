@@ -20,10 +20,10 @@ export struct Mote {
 export global Eterra {
     // The painted keyframes in bloom order. Rust reads their pixels for the reveal and for how far their twigs hang.
     out property <[image]> keyframes: [
-        @image-url("../../../design/eterra/band-1-wilted.png"),
-        @image-url("../../../design/eterra/band-2-budding.png"),
-        @image-url("../../../design/eterra/band-3-opening.png"),
-        @image-url("../../../design/eterra/band-4-bloom.png"),
+        @image-url("images/band-1-wilted.png"),
+        @image-url("images/band-2-budding.png"),
+        @image-url("images/band-3-opening.png"),
+        @image-url("images/band-4-bloom.png"),
     ];
     // Image rows: the lowest twig in any keyframe, and `reach[c]`, the lowest within c columns either side of the eye.
     in property <int> deepest;
