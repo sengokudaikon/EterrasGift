@@ -712,6 +712,8 @@ pub struct BackendOptions {
     pub override_enabled: bool,
     pub poll_interval: Duration,
     pub discovery_interval: Duration,
+    /// How often the monitor asks the game for its language; a command always asks.
+    pub locale_interval: Duration,
     /// The game data service, the catalog's only source. Without it the trainer does not open.
     pub game_data: Option<GameDataHandle>,
 }
@@ -723,6 +725,7 @@ impl Default for BackendOptions {
             override_enabled: false,
             poll_interval: Duration::from_millis(250),
             discovery_interval: Duration::from_secs(1),
+            locale_interval: Duration::from_secs(2),
             game_data: None,
         }
     }
@@ -870,6 +873,7 @@ where
     connection: Option<C::Connection>,
     blocked: Option<ProcessIdentity>,
     next_discovery: tokio::time::Instant,
+    next_locale_check: tokio::time::Instant,
     command_epoch: u64,
     read_cancel: Option<Arc<AtomicBool>>,
     attack_leech_sequence: u64,
@@ -944,6 +948,7 @@ pub fn service<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K
             connection: None,
             blocked: None,
             next_discovery: tokio::time::Instant::now(),
+            next_locale_check: tokio::time::Instant::now(),
             command_epoch: 0,
             read_cancel: None,
             attack_leech_sequence: 0,
@@ -1473,8 +1478,13 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
             self.check_status(status)?;
             // Successful value tables can be reused without another mapping
             // command. Poll locale here too, so even those tables expire when
-            // the game changes language while the editor is idle.
-            let locale_changed = !reload && self.locale_changed(epoch, &target).await?;
+            // the game changes language while the editor is idle; the monitor
+            // asks every `locale_interval`, not on every tick.
+            let check_locale = !reload && (!monitor || tokio::time::Instant::now() >= self.next_locale_check);
+            let locale_changed = check_locale && self.locale_changed(epoch, &target).await?;
+            if check_locale {
+                self.next_locale_check = tokio::time::Instant::now() + self.options.locale_interval;
+            }
             let data = if reload || locale_changed {
                 Arc::new(self.catalog_for(epoch, &target, catalog == CatalogRead::ReadFilesAgain).await?)
             } else {
@@ -1488,9 +1498,21 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
             let forge = self.connection.as_mut().unwrap().read_forge(self.clock.now()).await?;
             self.superseded(epoch)?;
             self.admit(&target)?;
-            let implicits = match &forge {
-                Some(item) => self.connection.as_mut().unwrap().describe_implicits(self.clock.now(), item).await?,
-                None => None,
+            // The game builds an item's implicit text with its tooltip code on its main thread: the monitor keeps the
+            // text it has for an item that has not changed, under the same catalog.
+            let kept = match (&forge, &self.state.forge) {
+                (
+                    Some(item),
+                    ForgeState::Item {
+                        generation, snapshot, implicits, ..
+                    },
+                ) if monitor && !locale_changed && *generation == self.state.generation && **snapshot == *item => Some(implicits.clone()),
+                _ => None,
+            };
+            let implicits = match (&forge, kept) {
+                (_, Some(kept)) => kept,
+                (Some(item), None) => self.connection.as_mut().unwrap().describe_implicits(self.clock.now(), item).await?,
+                (None, None) => None,
             };
             self.superseded(epoch)?;
             self.admit(&target)?;

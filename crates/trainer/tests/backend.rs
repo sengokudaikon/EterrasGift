@@ -267,6 +267,10 @@ impl BackendConnection for Connection {
         }
         Ok(self.shared.forge_item.lock().unwrap().clone())
     }
+    async fn describe_implicits(&mut self, _: Timestamp, _: &ForgeSnapshot) -> Result<Option<Vec<backend::ModifierSnapshot>>, BackendError> {
+        self.shared.record("implicits");
+        Ok(None)
+    }
     async fn describe_unique(&mut self, _: Timestamp, _: &ForgeSnapshot) -> Result<Option<Vec<backend::ModifierSnapshot>>, BackendError> {
         self.shared.record("unique-description");
         Ok(self.shared.unique_lines.lock().unwrap().clone())
@@ -395,6 +399,8 @@ fn options() -> BackendOptions {
         auto_connect: false,
         poll_interval: Duration::from_millis(5),
         discovery_interval: Duration::from_millis(10),
+        // Every monitor read asks, as these tests change the language between reads.
+        locale_interval: Duration::ZERO,
         game_data: Some(GameDataHandle::fixed(GameData::Ready(Arc::new(FileCatalog::restore(catalog(), "build".into(), vec![]))))),
     }
 }
@@ -785,6 +791,36 @@ fn current_read_activity_does_not_emit_a_disconnected_phase_and_manual_disconnec
         tokio::time::sleep(Duration::from_millis(30)).await;
         assert_eq!(shared.count("connect"), count);
         assert_eq!(handle.snapshot().phase, Phase::Disconnected);
+        shutdown(&handle, worker).await;
+    });
+}
+
+#[test]
+fn the_monitor_asks_the_game_only_for_what_may_have_changed() {
+    run(async {
+        let shared = writes::writable();
+        let mut options = options();
+        options.locale_interval = Duration::from_secs(3600);
+        let (handle, worker) = start(&shared, options);
+        connected(&handle).await;
+        let locales = shared.count("locale");
+        assert_eq!(shared.count("implicits"), 1, "the connect describes the item");
+        command(&handle, Command::StartMonitoring).await.unwrap();
+        let reads = shared.count("forge");
+        while shared.count("forge") < reads + 5 {
+            tokio::time::sleep(Duration::from_millis(1)).await;
+        }
+        // The item's text runs the game's tooltip code on its main thread; the language changes rarely.
+        assert_eq!(shared.count("implicits"), 1, "an unchanged item keeps its text");
+        assert_eq!(shared.count("locale"), locales + 1, "the language is asked once per interval");
+        shared.forge_item.lock().unwrap().as_mut().unwrap().name = "changed in the game".into();
+        while shared.count("implicits") < 2 {
+            tokio::time::sleep(Duration::from_millis(1)).await;
+        }
+        let locales = shared.count("locale");
+        command(&handle, Command::ReadForge).await.unwrap();
+        assert_eq!(shared.count("implicits"), 3, "Read again asks for the text");
+        assert_eq!(shared.count("locale"), locales + 1, "and for the language");
         shutdown(&handle, worker).await;
     });
 }
