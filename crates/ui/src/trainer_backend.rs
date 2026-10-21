@@ -44,30 +44,32 @@ impl ForgeGame for ObservedGame {
         }
         project_item(&writer.backend.snapshot()).ok().flatten()
     }
+    // The editor asks these per row, option and cell: they read the snapshot in place rather than copy it each time.
     fn can_write(&self) -> bool {
         let writer = self.writer.borrow();
-        let state = writer.backend.snapshot();
-        writer.backend.subscribe().has_changed().is_ok() && state.phase == Phase::Ready && state.activity.is_none() && writer.pending.is_none()
+        writer.backend.subscribe().has_changed().is_ok()
+            && writer.pending.is_none()
+            && writer.backend.peek(|state| state.phase == Phase::Ready && state.activity.is_none())
     }
     fn unrestricted(&self) -> bool {
-        self.writer.borrow().backend.snapshot().override_enabled
+        self.writer.borrow().backend.peek(|state| state.override_enabled)
     }
     fn is_busy(&self) -> bool {
-        let state = self.writer.borrow().backend.snapshot();
-        self.writer.borrow().backend.subscribe().has_changed().is_ok() && state.phase == Phase::Ready && state.activity.is_some()
+        let writer = self.writer.borrow();
+        writer.backend.subscribe().has_changed().is_ok() && writer.backend.peek(|state| state.phase == Phase::Ready && state.activity.is_some())
     }
     fn supports(&self, edit: &ItemEdit) -> bool {
         let writer = self.writer.borrow();
-        writer.backend.subscribe().has_changed().is_ok() && supports(&writer.backend.snapshot(), edit)
+        writer.backend.subscribe().has_changed().is_ok() && writer.backend.peek(|state| supports(state, edit))
     }
     fn read_only_reason(&self) -> Option<&str> {
-        let state = self.writer.borrow().backend.snapshot();
-        (!state.capabilities.status_fields.iter().any(|s| *s)
-            && !state.capabilities.base_change
-            && !state.capabilities.identity_change
-            && !state.capabilities.affix_rolls
-            && !state.capabilities.affix_change
-            && !state.capabilities.affix_list)
+        let capabilities = self.writer.borrow().backend.peek(|state| state.capabilities);
+        (!capabilities.status_fields.iter().any(|s| *s)
+            && !capabilities.base_change
+            && !capabilities.identity_change
+            && !capabilities.affix_rolls
+            && !capabilities.affix_change
+            && !capabilities.affix_list)
             .then_some(READ_ONLY)
     }
     fn resolve(&self, item: &ForgeItem, request: &RollRequest) -> crate::forge::game::Lookup<ValueTable> {
@@ -88,10 +90,10 @@ impl ForgeGame for ObservedGame {
             .map_err(|_| "The trainer cannot accept another command.".into())
     }
     fn undo_depth(&self) -> usize {
-        self.writer.borrow().backend.snapshot().undo_forge_depth
+        self.writer.borrow().backend.peek(|state| state.undo_forge_depth)
     }
     fn undo_needs_override(&self) -> bool {
-        self.writer.borrow().backend.snapshot().undo_forge_needs_override
+        self.writer.borrow().backend.peek(|state| state.undo_forge_needs_override)
     }
     fn undo_intent(&self) -> Option<ItemEdit> {
         let state = self.writer.borrow().backend.snapshot();

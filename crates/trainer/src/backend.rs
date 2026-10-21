@@ -799,6 +799,12 @@ impl Drop for MappingRead {
     }
 }
 impl BackendHandle {
+    /// Reads the current snapshot in place, without copying it, for a question of a field or two. `read` must not call
+    /// back into a handle: the worker publishes under the command lock, so submitting while the snapshot is borrowed would
+    /// deadlock.
+    pub fn peek<R>(&self, read: impl FnOnce(&BackendSnapshot) -> R) -> R {
+        read(&self.snapshots.borrow())
+    }
     pub fn snapshot(&self) -> BackendSnapshot {
         self.snapshots.borrow().clone()
     }
