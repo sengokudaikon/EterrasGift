@@ -3,9 +3,8 @@
 xtask = "run --quiet -p xtask --"
 # Warnings are errors, as in the C# repo.
 lint = "clippy --workspace --all-targets -- -D warnings"
-# Headless PNG captures of the real UI into artifacts/captures: the app's pages, and the launcher's preparation window
-# driven by its supervisor.
-capture = "test -p eg-ui -p eterras-gift-launcher --test captures"
+# Headless PNG captures of the real UI into artifacts/captures.
+capture = "test -p eg-ui --test captures"
 
 [unstable]
 # Artifact dependencies: the desktop embeds the trainer helper DLL (crates/app). Nightly-only, as the pinned toolchain is.

@@ -198,9 +198,8 @@ impl Location {
     }
 }
 
-/// Settings' Restart now, as the app's composition reads it once the window has closed: the app then exits with
-/// `eg_core::hosting::REQUESTED_EXIT_CODE` for its launcher to prepare and start it again (the C# `ShutdownCoordinator`
-/// with 42). Offered only under the launcher (`--supervised`).
+/// Settings' Restart now, as the app's composition reads it once the window has closed: the app then starts itself again
+/// (the C# `ShutdownCoordinator` with 42, for a launcher this app does not have).
 #[derive(Clone, Debug, Default)]
 pub struct RestartRequest(Rc<Cell<bool>>);
 
@@ -226,7 +225,6 @@ pub struct SettingsPage {
     placeholders: [String; 6],
     message: String,
     kind: MessageKind,
-    can_restart_at_all: bool,
     restart: RestartRequest,
     edits: [u64; 6],
     location_save: Option<(u64, [u64; 6])>,
@@ -239,7 +237,7 @@ pub struct SettingsPage {
 }
 
 impl SettingsPage {
-    pub fn new(service: SettingsService, modules: Vec<ModuleChoice>, found_game: Option<PathBuf>, found_dotnet: Option<PathBuf>, can_restart: bool) -> Self {
+    pub fn new(service: SettingsService, modules: Vec<ModuleChoice>, found_game: Option<PathBuf>, found_dotnet: Option<PathBuf>) -> Self {
         let snapshot = service.snapshot();
         let store = &snapshot.store;
         let modules = modules
@@ -286,7 +284,6 @@ impl SettingsPage {
                 MessageKind::Saved
             },
             message: message.clone(),
-            can_restart_at_all: can_restart,
             restart: RestartRequest::default(),
             edits: [0; 6],
             location_save: None,
@@ -339,7 +336,7 @@ impl SettingsPage {
     }
     /// Stays while a save runs, as in the C# page; Restart now waits for the save (`View::restart_when_saved`).
     pub fn can_restart(&self) -> bool {
-        self.kind == MessageKind::RestartRequired && self.can_restart_at_all
+        self.kind == MessageKind::RestartRequired
     }
     pub fn saving(&self) -> bool {
         self.service.is_saving()
@@ -792,8 +789,8 @@ impl View {
             return;
         }
         self.restarting.set(false);
-        // The window closes through the ordinary drain, as a close does (and waits as it waits); the app then exits
-        // with 42 for the launcher (`RestartRequest`).
+        // The window closes through the ordinary drain, as a close does (and waits as it waits); the app then starts
+        // itself again (`RestartRequest`).
         self.page.borrow().restart.request();
         self.closing.set(true);
     }
@@ -983,7 +980,7 @@ mod tests {
         let root = temp.join("app");
         fs::create_dir_all(&root).unwrap();
         let store = SettingsStore::open(&root, &temp.join("settings.json"), &[]);
-        SettingsPage::new(SettingsService::inline(store), vec![trainer(true)], None, None, true)
+        SettingsPage::new(SettingsService::inline(store), vec![trainer(true)], None, None)
     }
 
     /// Records what the page asks of a running module.
@@ -1013,7 +1010,7 @@ mod tests {
         let store = SettingsStore::open(&temp.path().join("app"), &file, &[]);
         let link = Rc::new(FakeLink::default());
         let mut page =
-            SettingsPage::new(SettingsService::inline(store), vec![crate::trainer_settings::descriptor(true)], None, None, false).link(crate::trainer_settings::ID, link.clone());
+            SettingsPage::new(SettingsService::inline(store), vec![crate::trainer_settings::descriptor(true)], None, None).link(crate::trainer_settings::ID, link.clone());
         page.flip_setting(0, 0, false);
         assert_eq!(*link.switched.borrow(), [("autoConnect".to_owned(), false)]);
         // A save that fails still leaves the session with the choice, as the C# section sets it before saving.
@@ -1033,7 +1030,7 @@ mod tests {
         let store = SettingsStore::open(&temp.path().join("app"), &temp.path().join("settings.json"), &[]);
         let link = Rc::new(FakeLink::default());
         let mut page =
-            SettingsPage::new(SettingsService::inline(store), vec![crate::trainer_settings::descriptor(false)], None, None, false).link(crate::trainer_settings::ID, link.clone());
+            SettingsPage::new(SettingsService::inline(store), vec![crate::trainer_settings::descriptor(false)], None, None).link(crate::trainer_settings::ID, link.clone());
         page.flip_setting(0, 0, false);
         assert!(link.switched.borrow().is_empty());
     }
@@ -1057,7 +1054,7 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let store = SettingsStore::open(&temp.path().join("app"), &temp.path().join("settings.json"), &[]);
         let service = SettingsService::new(store);
-        let mut page = SettingsPage::new(service.clone(), vec![trainer(true)], None, None, true);
+        let mut page = SettingsPage::new(service.clone(), vec![trainer(true)], None, None);
         page.flip_module(0, false);
         service.wait(service.snapshot().submitted);
         page.refresh();
@@ -1164,7 +1161,7 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let store = SettingsStore::open(&temp.path().join("app"), &temp.path().join("settings.json"), &[]);
         let service = SettingsService::new(store);
-        let mut page = SettingsPage::new(service.clone(), vec![trainer(true)], None, None, true);
+        let mut page = SettingsPage::new(service.clone(), vec![trainer(true)], None, None);
         let (entered, started) = std::sync::mpsc::channel();
         let (release, waiting) = std::sync::mpsc::channel();
         service
@@ -1230,7 +1227,7 @@ mod tests {
         let service = SettingsService::inline(SettingsStore::open(&temp.path().join("app"), &file, &[]));
         let mut second = crate::trainer_settings::descriptor(true);
         second.id = "second";
-        let mut page = SettingsPage::new(service.clone(), vec![crate::trainer_settings::descriptor(true), second], None, None, false);
+        let mut page = SettingsPage::new(service.clone(), vec![crate::trainer_settings::descriptor(true), second], None, None);
         assert!(page.module_problem(0).is_some());
         assert!(!page.modules[0].enabled_at_start);
         assert!(page.modules[1].enabled_at_start);
@@ -1266,7 +1263,7 @@ mod tests {
             let temp = tempfile::tempdir().unwrap();
             let file = temp.path().join("settings.json");
             let service = SettingsService::new(SettingsStore::open(&temp.path().join("app"), &file, &[]));
-            let mut page = SettingsPage::new(service.clone(), vec![trainer(true)], None, None, false);
+            let mut page = SettingsPage::new(service.clone(), vec![trainer(true)], None, None);
             if fails {
                 fs::create_dir(&file).unwrap();
             }

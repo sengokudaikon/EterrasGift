@@ -538,7 +538,7 @@ pub(super) fn capture(session: &Session) {
             mods: None,
             trainer: true,
             trainer_backend: Some(handle.clone()),
-            settings: SettingsPage::new(SettingsService::inline(store), vec![eg_ui::trainer_settings::descriptor(true)], None, None, true),
+            settings: SettingsPage::new(SettingsService::inline(store), vec![eg_ui::trainer_settings::descriptor(true)], None, None),
             start: Page::Forge,
         },
     );
@@ -1185,7 +1185,7 @@ pub(super) fn capture_waiting(session: &Session) {
             mods: None,
             trainer: true,
             trainer_backend: Some(handle.clone()),
-            settings: SettingsPage::new(SettingsService::inline(store), vec![eg_ui::trainer_settings::descriptor(true)], None, None, true),
+            settings: SettingsPage::new(SettingsService::inline(store), vec![eg_ui::trainer_settings::descriptor(true)], None, None),
             start: Page::Forge,
         },
     );

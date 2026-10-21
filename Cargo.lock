@@ -1506,22 +1506,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "eterras-gift-launcher"
-version = "0.1.0"
-dependencies = [
- "eg-core",
- "eg-ui",
- "image",
- "jiff",
- "serde_json",
- "sha2",
- "slint",
- "tempfile",
- "uuid",
- "windows-sys 0.61.2",
-]
-
-[[package]]
 name = "euclid"
 version = "0.22.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"

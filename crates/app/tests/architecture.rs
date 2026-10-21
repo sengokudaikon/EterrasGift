@@ -22,9 +22,6 @@ enum Tier {
     Trainer,
     GameAccess,
     Composition,
-    /// A host beside the app: the launcher prepares and supervises it, and reaches only the shared kernel and the UI's
-    /// preparation window.
-    Launcher,
     Tool,
 }
 
@@ -37,7 +34,6 @@ fn tier(name: &str) -> Tier {
         "eg-game-files" => Tier::GameFiles,
         "eg-game-access" => Tier::GameAccess,
         "eg-ui" | "eterras-gift" => Tier::Composition,
-        "eterras-gift-launcher" => Tier::Launcher,
         "xtask" | "eg-eval-unity-rust-host" | "eg-persistent-player-client" | "eg-eval-native-abi" | "eg-eval-hooks" | "eg-eval-generated-invoker" => Tier::Tool,
         _ => panic!("Assign the new package {name:?} an explicit architecture tier"),
     }
@@ -64,7 +60,8 @@ fn workspace() -> &'static Workspace {
     static WORKSPACE: OnceLock<Workspace> = OnceLock::new();
     WORKSPACE.get_or_init(|| {
         let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..").canonicalize().unwrap();
-        // Git excludes ignored build/artifact trees, but includes new source packages.
+        // Git excludes ignored build/artifact trees, but includes new source packages; a file deleted but not yet staged
+        // is still listed, so only what is on disk counts.
         let files = output(
             "git",
             &["ls-files", "-z", "--cached", "--others", "--exclude-standard", "--", "Cargo.toml", "crates", "tools"],
@@ -74,6 +71,7 @@ fn workspace() -> &'static Workspace {
             .split(|b| *b == 0)
             .filter(|b| !b.is_empty())
             .map(|b| root.join(std::str::from_utf8(b).unwrap()))
+            .filter(|p| p.is_file())
             .collect();
         let sources = files.iter().filter(|p| p.extension().is_some_and(|e| e == "rs")).cloned().collect();
         let mut packages = BTreeMap::new();
@@ -144,12 +142,6 @@ fn cargo_dependencies_preserve_the_tiers_including_tools() {
             if to == Tier::GameAccess {
                 assert!(matches!(from, Tier::Trainer | Tier::Tool), "{} directly reaches game access", package.name);
             }
-            // The launcher builds and starts the app, never its features; and nothing depends on a host.
-            if from == Tier::Launcher {
-                assert!(matches!(to, Tier::Shared | Tier::Composition), "the launcher depends on {dependency}");
-                assert!(dependency != "eterras-gift", "the launcher depends on the app's composition");
-            }
-            assert!(to != Tier::Launcher, "{} depends on the launcher", package.name);
         }
     }
 }
@@ -214,7 +206,7 @@ fn source_imports_and_reexports_preserve_feature_boundaries() {
         } else {
             tier(&package.name)
         };
-        if !matches!(area, Tier::Shared | Tier::Companion | Tier::Trainer | Tier::Launcher) {
+        if !matches!(area, Tier::Shared | Tier::Companion | Tier::Trainer) {
             continue;
         }
         let aliases: BTreeMap<_, _> = package
@@ -235,7 +227,6 @@ fn source_imports_and_reexports_preserve_feature_boundaries() {
                         (Tier::Shared, Tier::Companion | Tier::Trainer | Tier::GameAccess | Tier::Composition)
                             | (Tier::Companion, Tier::Trainer | Tier::Wire | Tier::GameAccess)
                             | (Tier::Trainer, Tier::Companion)
-                            | (Tier::Launcher, Tier::Companion | Tier::Trainer | Tier::Wire | Tier::GameAccess)
                     ),
                     "{relative}: forbidden import/re-export {}",
                     path.join("::")
@@ -257,7 +248,7 @@ fn source_imports_and_reexports_preserve_feature_boundaries() {
 #[test]
 fn the_desktop_links_no_il2cpp_code() {
     // The helper is an artifact dependency built for its own target, so its `il2cpp` feature stays in the DLL it
-    // embeds. Built alone, as the launcher builds it, nothing the desktop links may have the feature. (`cargo tree`
+    // embeds. Built alone, as an install builds it, nothing the desktop links may have the feature. (`cargo tree`
     // cannot resolve artifact dependencies yet; the unit graph can.)
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
     let cargo = std::env::var("CARGO").unwrap_or_else(|_| "cargo".into());

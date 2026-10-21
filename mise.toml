@@ -9,14 +9,6 @@ run = "cargo build"
 description = "Run the app: real settings, real game host"
 run = "cargo run -p eterras-gift"
 
-[tasks.launch]
-description = "The launcher from the checkout: prepares a generation (a release build when the source changed), then runs the app supervised. Real settings and game host: never click Play"
-run = "cargo run -p eterras-gift-launcher"
-
-[tasks."prepare-check"]
-description = "Console preparation: build or reuse a generation in artifacts/preparation-verification, print it and exit; nothing starts"
-run = "cargo run -p eterras-gift-launcher -- prepare --root ."
-
 [tasks.lint]
 description = "Clippy over every target, warnings as errors"
 run = "cargo lint"

@@ -5,10 +5,10 @@ edition.workspace = true
 rust-version.workspace = true
 publish.workspace = true
 
-# The app beside the launcher (crates/launcher, eterras-gift.exe), as the C# EterrasGift.Desktop.exe is beside
-# EterrasGift.exe; eg_core::paths::EXECUTABLE names it.
+# The app is an install's entry, as the C# EterrasGift.exe was (with no launcher before it);
+# eg_core::paths::EXECUTABLE names it.
 [[bin]]
-name = "eterras-gift-desktop"
+name = "eterras-gift"
 path = "src/main.rs"
 
 [dependencies]

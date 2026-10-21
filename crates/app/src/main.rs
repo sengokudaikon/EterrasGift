@@ -14,9 +14,9 @@ use eg_companion::mods::{
 };
 use eg_companion::{dotnet, folders};
 use eg_core::fault::FaultLog;
+use eg_core::paths;
 use eg_core::settings::SettingsStore;
 use eg_core::settings_service::{SaveOutcome, SettingsService};
-use eg_core::{hosting, paths};
 use eg_ui::settings::SettingsPage;
 use eg_ui::shell::Page;
 use eg_ui::trainer_settings;
@@ -31,14 +31,10 @@ use std::time::Duration;
 struct Arguments {
     /// The checkout or install the app belongs to.
     root: Option<PathBuf>,
-    /// Run by the launcher, so Settings' Restart now can work.
-    supervised: bool,
     /// Open on Settings.
     settings: bool,
     /// Do not begin trainer discovery or automatic connection.
     no_connect: bool,
-    /// The generation the launcher prepared this from; an unsupervised start checks it is whole.
-    generation: Option<String>,
 }
 
 impl Arguments {
@@ -47,21 +43,13 @@ impl Arguments {
         while let Some(argument) = arguments.next() {
             match argument.as_str() {
                 "--root" => parsed.root = arguments.next().map(PathBuf::from),
-                "--supervised" => parsed.supervised = true,
                 "--settings" => parsed.settings = true,
                 "--no-connect" => parsed.no_connect = true,
-                "--generation" => parsed.generation = arguments.next(),
                 _ => {}
             }
         }
         parsed
     }
-}
-
-/// Run by cargo (`mise run run`, `mise run live`): the C# app's "a debugger is attached", so it runs itself rather than
-/// handing the start to a launcher that cargo also put in the target folder.
-fn run_by_cargo() -> bool {
-    std::env::var_os("CARGO").is_some() || std::env::var_os("CARGO_PKG_NAME").is_some()
 }
 
 fn main() -> Result<(), slint::PlatformError> {
@@ -71,27 +59,8 @@ fn main() -> Result<(), slint::PlatformError> {
     let folder = executable.parent().unwrap_or(&executable).to_path_buf();
     let root = arguments.root.clone().unwrap_or_else(|| paths::find_root(&folder));
 
-    // Every normal start goes through the launcher (`spec/architecture.md` §1.2): started directly, the app starts the
-    // launcher beside it with its own arguments and ends.
-    let launcher_executable = folder.join(hosting::LAUNCHER_EXECUTABLE);
-    if !arguments.supervised && !run_by_cargo() && launcher_executable.is_file() {
-        if let Err(error) = std::process::Command::new(&launcher_executable).args(&command_line).spawn() {
-            FaultLog::new(&root, None).write("Application startup or lifetime", Some(&error.to_string()), None, None);
-            std::process::exit(1);
-        }
-        return Ok(());
-    }
-    // The supervising launcher hashed this generation just before starting it; only an unsupervised start checks it
-    // here, and an incomplete one asks for a restart, which prepares it again.
-    if !arguments.supervised
-        && let Some(key) = &arguments.generation
-        && !hosting::valid(&folder, key, &[paths::EXECUTABLE])
-    {
-        std::process::exit(hosting::REQUESTED_EXIT_CODE);
-    }
-
-    // A panic anywhere is a fault: reported before the process ends with a non-zero code, so a launcher never
-    // restarts after it.
+    // A panic anywhere is a fault: reported before the process ends with a non-zero code, so the app never starts
+    // itself again after it.
     let early_faults = FaultLog::new(&root, None);
     std::panic::set_hook(Box::new(move |panic| {
         if trainer::catches_panic() {
@@ -105,7 +74,7 @@ fn main() -> Result<(), slint::PlatformError> {
     // other's and race on the mods. A restart hands over within the wait. A folder that can't hold the lock doesn't keep
     // the app from starting.
     let settings_file = SettingsStore::default_file();
-    let _instance = match eg_core::instance::acquire(&settings_file, Duration::from_secs(5)) {
+    let instance = match eg_core::instance::acquire(&settings_file, Duration::from_secs(5)) {
         Ok(None) => {
             eg_ui::system::tell("Eterra's Gift", "Eterra's Gift is already running.");
             return Ok(());
@@ -189,8 +158,8 @@ fn main() -> Result<(), slint::PlatformError> {
         Page::Home
     };
     let service = SettingsService::new(store);
-    // Under the launcher, Settings offers Restart now: the app then exits with 42 and is prepared and started again.
-    let settings = SettingsPage::new(service.clone(), vec![trainer], found_game, found_dotnet, arguments.supervised);
+    // Settings offers Restart now when a choice waits for one: the app then starts itself again as it closes.
+    let settings = SettingsPage::new(service.clone(), vec![trainer], found_game, found_dotnet);
     let restart = settings.restart_request();
 
     eg_ui::install(
@@ -222,12 +191,18 @@ fn main() -> Result<(), slint::PlatformError> {
     let settings = service.close();
     // Stops a start with mods that still waits for MelonLoader, so its proxy is set aside before the app exits.
     launcher.stop();
-    // A fault outranks a restart request, which outranks a plain close: the launcher never restarts after a fault.
+    // A fault outranks a restart request, which outranks a plain close: the app never starts itself again after a fault.
     if !trainer_closed || background_fault || mods.faulted() || matches!(settings.outcome, SaveOutcome::Faulted(_)) {
         std::process::exit(1);
     }
     if result.is_ok() && restart.requested() {
-        std::process::exit(hosting::REQUESTED_EXIT_CODE);
+        // Everything that wrote is closed, so the lock goes first and the new app takes it without waiting. It starts
+        // from this same exe with this run's arguments: a checkout's new build is cargo's to make, before a start.
+        drop(instance);
+        if let Err(error) = std::process::Command::new(&executable).args(&command_line).spawn() {
+            FaultLog::new(&root, Some(&settings.store.paths().log_directory())).write("Restarting Eterra's Gift", Some(&error.to_string()), None, None);
+            std::process::exit(1);
+        }
     }
     result
 }

@@ -226,7 +226,7 @@ impl Session {
             App {
                 launcher: None,
                 mods: None,
-                settings: SettingsPage::new(service, vec![eg_ui::trainer_settings::descriptor(true)], None, None, false),
+                settings: SettingsPage::new(service, vec![eg_ui::trainer_settings::descriptor(true)], None, None),
                 trainer: true,
                 trainer_backend: None,
                 start: Page::Settings,
@@ -250,7 +250,7 @@ impl Session {
             App {
                 launcher: None,
                 mods: None,
-                settings: SettingsPage::new(service, vec![eg_ui::trainer_settings::descriptor(true)], None, None, false).link(eg_ui::trainer_settings::ID, link),
+                settings: SettingsPage::new(service, vec![eg_ui::trainer_settings::descriptor(true)], None, None).link(eg_ui::trainer_settings::ID, link),
                 trainer: true,
                 trainer_backend: None,
                 start: Page::Settings,
@@ -269,7 +269,7 @@ impl Session {
         let folder = self.folder();
         let store = SettingsStore::open(&folder.join("app"), &folder.join("settings.json"), &[]);
         let found = host.find_install().map(|install| install.executable);
-        let settings = SettingsPage::new(SettingsService::inline(store), vec![eg_ui::trainer_settings::descriptor(trainer_on)], found, None, true);
+        let settings = SettingsPage::new(SettingsService::inline(store), vec![eg_ui::trainer_settings::descriptor(trainer_on)], found, None);
         let ui = MainWindow::new().expect("create MainWindow");
         let app = App {
             launcher: Some(Arc::new(GameLauncher::new(host))),
@@ -359,7 +359,7 @@ impl Session {
                     settings: fixture.settings.clone(),
                     sources: fixture.sources.clone(),
                 }),
-                settings: SettingsPage::new(fixture.settings.clone(), vec![], fixture.host.find_install().map(|install| install.executable), None, false),
+                settings: SettingsPage::new(fixture.settings.clone(), vec![], fixture.host.find_install().map(|install| install.executable), None),
                 trainer: false,
                 trainer_backend: None,
                 start: Page::Mods,
@@ -684,7 +684,7 @@ fn main() {
         App {
             launcher: None,
             mods: None,
-            settings: SettingsPage::new(service, vec![eg_ui::trainer_settings::descriptor(true)], None, None, false),
+            settings: SettingsPage::new(service, vec![eg_ui::trainer_settings::descriptor(true)], None, None),
             trainer: true,
             trainer_backend: None,
             start: Page::Home,
@@ -713,11 +713,11 @@ fn main() {
     settle();
     session.capture(&ui, "settings-location-refused");
 
-    // Under the launcher, Restart now closes the window through the ordinary drain and leaves the request for the app
-    // to exit with 42 (crates/app/src/main.rs).
+    // Restart now closes the window through the ordinary drain and leaves the request for the app to start itself again
+    // (crates/app/src/main.rs).
     let folder = session.folder();
     let service = SettingsService::inline(SettingsStore::open(&folder.join("app"), &folder.join("settings.json"), &[]));
-    let settings = SettingsPage::new(service, vec![eg_ui::trainer_settings::descriptor(true)], None, None, true);
+    let settings = SettingsPage::new(service, vec![eg_ui::trainer_settings::descriptor(true)], None, None);
     let restart = settings.restart_request();
     let ui = MainWindow::new().expect("create MainWindow");
     eg_ui::install(
@@ -737,7 +737,7 @@ fn main() {
     settle();
     ui.global::<SettingsState>().invoke_module_toggled(0, false);
     settle();
-    assert!(ui.global::<SettingsState>().get_can_restart(), "supervised, a saved switch offers Restart now");
+    assert!(ui.global::<SettingsState>().get_can_restart(), "a saved switch offers Restart now");
     ui.global::<SettingsState>().invoke_restart();
     for _ in 0..100 {
         if !ui.window().is_visible() {

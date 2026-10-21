@@ -13,7 +13,6 @@ pub mod home;
 mod models;
 #[allow(unsafe_code)] // Windows/FFI boundary; the rest of the crate denies unsafe.
 pub mod mods;
-pub mod preparation;
 pub mod settings;
 pub mod shell;
 pub mod stubs;
@@ -70,7 +69,7 @@ pub fn install(window: &MainWindow, app: App) {
 
 /// Windows says nothing when "Animation effects" or high contrast changes, and Slint surfaces no window activation to
 /// read them again on (the C# app's moment), so they are read again every few seconds: two cheap system calls. Captures
-/// hold their own settings, so the app and the launcher's preparation window start this and they do not.
+/// hold their own settings, so the app starts this and they do not.
 pub fn follow_system_settings<C>(window: &C)
 where
     C: ComponentHandle + 'static,
