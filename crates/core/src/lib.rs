@@ -11,6 +11,7 @@ pub mod fault;
 pub mod game_log;
 pub mod hashes;
 pub mod hosting;
+pub mod instance;
 pub mod operations;
 pub mod paths;
 pub mod settings;
