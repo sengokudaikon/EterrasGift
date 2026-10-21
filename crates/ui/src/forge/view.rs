@@ -752,14 +752,19 @@ fn stable<T: Clone + PartialEq + 'static>(models: &mut Vec<Rc<VecModel<T>>>, ind
     ModelRc::from(models[index].clone())
 }
 
+/// Rows are slots: the rows both lists have are updated in place and only the rest come or go, so a cell being dragged
+/// or typed in keeps going while the game adds or takes away a row elsewhere (one remade under the pointer never hears
+/// its release). A cell that now shows another value ends its gesture by that value's `uid`.
 fn update<T: Clone + PartialEq + 'static>(model: &VecModel<T>, rows: Vec<T>) {
-    if model.row_count() != rows.len() {
-        model.set_vec(rows);
-    } else {
-        for (index, row) in rows.into_iter().enumerate() {
-            if model.row_data(index).as_ref() != Some(&row) {
-                model.set_row_data(index, row);
-            }
+    while model.row_count() > rows.len() {
+        model.remove(model.row_count() - 1);
+    }
+    let kept = model.row_count();
+    for (index, row) in rows.into_iter().enumerate() {
+        if index >= kept {
+            model.push(row);
+        } else if model.row_data(index).as_ref() != Some(&row) {
+            model.set_row_data(index, row);
         }
     }
 }

@@ -2217,6 +2217,35 @@ fn forge_captures(session: &Session) {
     let drafts = forge.ui.global::<ForgeState>().get_drafts();
     assert_eq!(drafts.row_count(), 1);
     assert!(drafts.row_data(0).unwrap().summary.starts_with("Value +34 → +"));
+    // The game takes an affix away during a drag: the rows that stay are the same rows, so the drag goes on and its
+    // release ends it. A second drag is then an Undo step of its own; one Ctrl+Z takes back only that one.
+    let forge = open(session, FixtureGame::boots(true), 1100, 700);
+    let drag = |from: f32, steps: usize, release: bool| {
+        pointer(&forge, from, row_y(0) - 6.0, "move");
+        pointer(&forge, from, row_y(0) - 6.0, "down");
+        for step in 1..=steps {
+            pointer(&forge, from + 12.0 * step as f32, row_y(0) - 6.0, "move");
+        }
+        if release {
+            pointer(&forge, from + 12.0 * steps as f32, row_y(0) - 6.0, "up");
+        }
+    };
+    drag(VALUE_X, 3, false);
+    forge.game.borrow_mut().item.as_mut().unwrap().affixes.pop();
+    forge.handle.edit(|editor| editor.refresh());
+    settle();
+    assert_eq!(forge.ui.global::<ForgeState>().get_affixes().row_count(), 3);
+    pointer(&forge, VALUE_X + 36.0, row_y(0) - 6.0, "up");
+    let first = forge.ui.global::<ForgeState>().get_affixes().row_data(0).unwrap().value.display;
+    drag(VALUE_X + 36.0, 3, true);
+    assert_ne!(forge.ui.global::<ForgeState>().get_affixes().row_data(0).unwrap().value.display, first);
+    forge.handle.edit(|editor| editor.undo_draft_only());
+    settle();
+    assert_eq!(
+        forge.ui.global::<ForgeState>().get_affixes().row_data(0).unwrap().value.display,
+        first,
+        "Ctrl+Z takes back the second drag only"
+    );
 
     // The row menu at the pointer (`row-menu`).
     pointer(&forge, NAME_X, row_y(0), "move");
