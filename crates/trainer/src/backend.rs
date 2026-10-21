@@ -696,8 +696,15 @@ pub enum Command {
     Shutdown,
 }
 impl Command {
-    fn barrier(&self) -> bool {
-        matches!(self, Self::Disable | Self::Disconnect | Self::Shutdown | Self::SetAutoConnect(false))
+    /// Whether it supersedes the work queued and in flight before it. Turning automatic connection off stops a connection
+    /// being made, but leaves one that is made alone: a write in it would otherwise lose its confirmation (the session
+    /// skips the readback of a superseded write and lets the helper go) while the session went on looking Ready.
+    fn barrier(&self, phase: Phase) -> bool {
+        match self {
+            Self::Disable | Self::Disconnect | Self::Shutdown => true,
+            Self::SetAutoConnect(false) => phase != Phase::Ready,
+            _ => false,
+        }
     }
 }
 
@@ -816,7 +823,7 @@ impl BackendHandle {
         Ok(MappingRead { pending, cancel })
     }
     fn submit(&self, command: Command, read_cancel: Option<Arc<AtomicBool>>) -> Result<Pending, SubmitError> {
-        let barrier = command.barrier();
+        let barrier = command.barrier(self.snapshots.borrow().phase);
         let (reply, receiver) = oneshot::channel();
         let mut epoch = self.intent.lock().unwrap_or_else(|p| p.into_inner());
         let accepted = if barrier { epoch.wrapping_add(1) } else { *epoch };

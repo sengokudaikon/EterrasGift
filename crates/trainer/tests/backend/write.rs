@@ -282,6 +282,29 @@ fn ordinary_forge_refusals_keep_the_connection_but_runtime_refusals_release_it()
 }
 
 #[test]
+fn turning_automatic_connection_off_leaves_a_write_in_a_ready_session_alone() {
+    run(async {
+        let shared = writable();
+        let (handle, worker) = start(&shared, options(), None);
+        connected(&handle).await;
+        let plan = WritePlan::from(handle.snapshot().level_requirement_plan(17).unwrap());
+        shared.write_block.arm();
+        let receipt = handle.try_submit(Command::Write(plan.clone())).unwrap();
+        shared.write_block.wait_started().await;
+        let switch = handle.try_submit(Command::SetAutoConnect(false)).unwrap();
+        shared.write_block.finish();
+        receipt.wait().await.unwrap();
+        switch.wait().await.unwrap();
+        let state = handle.snapshot();
+        assert_eq!(state.write_outcome(&plan), Some(WriteOutcome::Confirmed(plan.projected())));
+        assert!(matches!(state.forge, ForgeState::Item { .. }), "the confirmed item is published");
+        assert_eq!((state.phase, state.auto_connect), (Phase::Ready, false));
+        assert_eq!(shared.count("disconnect"), 0);
+        shutdown(&handle, worker).await;
+    });
+}
+
+#[test]
 fn forge_confirmation_survives_later_gate_loss_without_publishing_a_live_item() {
     run(async {
         let shared = writable();
