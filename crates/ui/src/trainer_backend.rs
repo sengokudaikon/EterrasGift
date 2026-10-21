@@ -47,9 +47,7 @@ impl ForgeGame for ObservedGame {
     // The editor asks these per row, option and cell: they read the snapshot in place rather than copy it each time.
     fn can_write(&self) -> bool {
         let writer = self.writer.borrow();
-        writer.backend.subscribe().has_changed().is_ok()
-            && writer.pending.is_none()
-            && writer.backend.peek(|state| state.phase == Phase::Ready && state.activity.is_none())
+        writer.backend.subscribe().has_changed().is_ok() && writer.pending.is_none() && writer.backend.peek(|state| state.phase == Phase::Ready && state.activity.is_none())
     }
     fn unrestricted(&self) -> bool {
         self.writer.borrow().backend.peek(|state| state.override_enabled)
