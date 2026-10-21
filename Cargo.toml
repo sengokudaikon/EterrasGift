@@ -24,6 +24,8 @@ uuid = { version = "1.28.0", features = ["v4"] }
 rfd = { version = "0.17.2", default-features = false }
 tempfile = "3.27.0"
 tokio = { version = "=1.53.3", features = ["rt", "net", "io-util", "time", "sync"] }
+# LZ4 blocks in Unity bundles; pure Rust, no unsafe in the decoder.
+lz4_flex = { version = "0.14.0", default-features = false, features = ["std", "safe-decode", "safe-encode", "checked-decode"] }
 
 eg-core = { path = "crates/core" }
 eg-companion = { path = "crates/companion" }

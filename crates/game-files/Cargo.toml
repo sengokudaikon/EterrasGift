@@ -1,0 +1,16 @@
+[package]
+name = "eg-game-files"
+description = "Reads Last Epoch's shipped data files (Unity bundles, serialized files, type trees) into owned game data. Files only: no process, no injection."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+lz4_flex.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+
+[lints]
+workspace = true

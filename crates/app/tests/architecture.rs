@@ -16,6 +16,8 @@ use syn::visit::{self, Visit};
 enum Tier {
     Shared,
     Wire,
+    /// The game's shipped data files, read without the game: a leaf, like the kernel and the wire.
+    GameFiles,
     Companion,
     Trainer,
     GameAccess,
@@ -29,6 +31,7 @@ fn tier(name: &str) -> Tier {
         "eg-companion" => Tier::Companion,
         "eg-trainer" | "eg-trainer-host" | "eg-trainer-helper" => Tier::Trainer,
         "eg-trainer-wire" => Tier::Wire,
+        "eg-game-files" => Tier::GameFiles,
         "eg-game-access" => Tier::GameAccess,
         "eg-ui" | "eterras-gift" => Tier::Composition,
         "xtask"
@@ -128,7 +131,11 @@ fn cargo_dependencies_preserve_the_tiers_including_tools() {
             }
             let from = tier(&package.name);
             let to = tier(dependency);
-            assert!(!matches!(from, Tier::Shared | Tier::Wire), "{} depends on first-party {dependency}", package.name);
+            assert!(
+                !matches!(from, Tier::Shared | Tier::Wire | Tier::GameFiles),
+                "{} depends on first-party {dependency}",
+                package.name
+            );
             assert!(
                 !matches!(
                     (from, to),

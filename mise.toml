@@ -69,6 +69,10 @@ description = "slint-viewer with its MCP server on 127.0.0.1:9315 (opens a windo
 run = "slint-viewer {{arg(name='file', default='crates/ui/ui/app.slint')}}"
 env = { SLINT_MCP_PORT = "9315" }
 
+[tasks."game-files:install"]
+description = "Read the game data from a real install named by EG_LAST_EPOCH (the game folder); files only, no game process"
+run = "cargo test -p eg-game-files --release --test install -- --ignored --nocapture"
+
 [tasks."trainer:test"]
 description = "Nightly release trainer fixtures and tier checks; no live game"
 run = "cargo test -p eg-trainer-wire -p eg-game-access -p eg-trainer -p eg-trainer-helper -p eg-trainer-host -p eterras-gift --release --offline"
