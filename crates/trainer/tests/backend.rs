@@ -797,6 +797,36 @@ fn current_read_activity_does_not_emit_a_disconnected_phase_and_manual_disconnec
 }
 
 #[test]
+fn an_idle_monitor_reads_quietly_and_publishes_only_what_changed() {
+    run(async {
+        let shared = Shared::new();
+        let (handle, worker) = start(&shared, options(), None);
+        connected(&handle).await;
+        command(&handle, Command::StartMonitoring).await.unwrap();
+        let before = handle.snapshot();
+        let mut snapshots = handle.subscribe();
+        snapshots.mark_unchanged();
+        let reads = shared.count("forge");
+        while shared.count("forge") < reads + 5 {
+            tokio::time::sleep(Duration::from_millis(1)).await;
+        }
+        // No Refreshing in between, which took every action away four times a second, and no wake for the same state.
+        assert!(!snapshots.has_changed().unwrap(), "reads that see nothing new publish nothing");
+        assert_eq!(
+            (handle.snapshot().revision, handle.snapshot().forge_read_sequence),
+            (before.revision, before.forge_read_sequence)
+        );
+        assert!(handle.snapshot().activity.is_none());
+        // What a read does see is published.
+        shared.status.lock().unwrap().features_on = 1;
+        tokio::time::timeout(Duration::from_secs(1), snapshots.changed()).await.unwrap().unwrap();
+        assert_eq!(handle.snapshot().runtime_status.map(|status| status.features_on), Some(1));
+        assert!(handle.snapshot().revision > before.revision);
+        shutdown(&handle, worker).await;
+    });
+}
+
+#[test]
 fn cache_startup_is_saved_only_and_cache_save_fault_is_nonfatal() {
     run(async {
         let temp = tempfile::tempdir().unwrap();

@@ -469,10 +469,15 @@ fn wait(mut ready: impl FnMut() -> bool) {
     }
     settle();
 }
+#[track_caller]
 fn command(handle: &BackendHandle, command: Command, ready: impl Fn() -> bool) {
-    let revision = handle.snapshot().revision;
-    drop(handle.try_submit(command).unwrap());
-    wait(|| handle.snapshot().revision > revision && ready());
+    // Done when the worker answers: a command that changes nothing publishes nothing.
+    let mut pending = handle.try_submit(command).unwrap();
+    let mut done = false;
+    wait(|| {
+        done = done || pending.try_result().is_some();
+        done && ready()
+    });
 }
 pub(super) fn capture(session: &Session) {
     let folder = session.folder();

@@ -1042,7 +1042,6 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
         }
         self.state.undo_forge_depth = if self.state.undo_forge.is_some() { self.forge_history.len() } else { 0 };
         self.state.undo_forge_needs_override = self.state.undo_forge.is_some() && self.forge_history.needs_override();
-        self.state.revision = self.state.revision.wrapping_add(1);
         self.state.capabilities = Capabilities {
             read_forge: self.state.phase == Phase::Ready,
             read_attack_leech: self.state.phase == Phase::Ready
@@ -1068,7 +1067,27 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
                         .is_some_and(|connection| connection.supports_status(crate::edits::StatusField::from_wire(index as u32).expect("seven status fields")))
             }),
         };
+        // An unchanged state is not sent again: every observer would wake to redraw the same thing (the monitor reads four
+        // times a second).
+        if self.same_as_published(true) {
+            return;
+        }
+        self.state.revision = self.snapshots.borrow().revision.wrapping_add(1);
         self.snapshots.send_replace(self.state.clone());
+    }
+    /// Whether the state is what was last published, apart from its revision (and its read sequence unless
+    /// `sequence_too`).
+    fn same_as_published(&mut self, sequence_too: bool) -> bool {
+        let published = self.snapshots.borrow();
+        let (revision, sequence) = (self.state.revision, self.state.forge_read_sequence);
+        self.state.revision = published.revision;
+        if !sequence_too {
+            self.state.forge_read_sequence = published.forge_read_sequence;
+        }
+        let same = *published == self.state;
+        self.state.revision = revision;
+        self.state.forge_read_sequence = sequence;
+        same
     }
     fn publish_if_current(&mut self, epoch: u64) -> Result<(), BackendError> {
         let intent = self.intent.clone();
@@ -1503,8 +1522,13 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
         self.superseded(epoch)?;
         let result: Result<(), BackendError> = async {
             self.admit(&target)?;
-            self.state.activity = Some(if capture { Activity::CapturingCatalog } else { Activity::Refreshing });
-            self.publish_if_current(epoch)?;
+            // The monitor's own reads run quietly: saying Refreshing four times a second would take every action away
+            // (capabilities need no activity) and give it back a moment later. Commands wait for the worker regardless.
+            let monitor = !capture && !retry_optional;
+            if !monitor {
+                self.state.activity = Some(if capture { Activity::CapturingCatalog } else { Activity::Refreshing });
+                self.publish_if_current(epoch)?;
+            }
             let status = self
                 .connection
                 .as_mut()
@@ -1558,7 +1582,6 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
                     this.state.unique_preview = None;
                 }
                 this.state.forge = forge;
-                this.state.forge_read_sequence = this.state.forge_read_sequence.wrapping_add(1);
                 this.state.mappings.retain(|mapping| mapping.result.is_ok() || !retry_optional && !mapping.retry_on_read);
                 this.state.catalog = CatalogState::Current {
                     generation: this.state.generation,
@@ -1567,6 +1590,11 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
                 this.state.activity = None;
                 this.state.capture_progress = None;
                 this.state.error = None;
+                // A fresh read lets the view ask again for what failed; a monitor read that saw nothing new is not one,
+                // so it publishes nothing.
+                if !monitor || capture || locale_changed || !this.same_as_published(false) {
+                    this.state.forge_read_sequence = this.state.forge_read_sequence.wrapping_add(1);
+                }
             })?;
             self.event(BackendEvent::ReadPublished {
                 generation: self.state.generation,

@@ -185,8 +185,11 @@ fn monitor_polls_keep_stable_mapping_failures_until_explicit_refresh() {
             let initial = handle.snapshot();
             command(&handle, Command::StartMonitoring).await.unwrap();
             for _ in 0..3 {
-                let sequence = handle.snapshot().forge_read_sequence;
-                wait_for_read(&handle, sequence).await;
+                // The monitor's reads see nothing new, so they publish nothing: wait for the game to be read instead.
+                let reads = shared.count("forge");
+                while shared.count("forge") <= reads {
+                    tokio::time::sleep(Duration::from_millis(1)).await;
+                }
                 assert_eq!(handle.snapshot().mapping(&initial.expected_observation().unwrap(), &request()), Some(&Err(reason.into())));
                 command(&handle, command_for(&handle.snapshot())).await.unwrap();
             }
