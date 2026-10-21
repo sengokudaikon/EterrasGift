@@ -207,6 +207,21 @@ impl HelperLayout {
         let pe = Pe::parse(bytes)?;
         let bootstrap_rva = pe.export(b"eg_helper_bootstrap")?;
         pe.at(bootstrap_rva, 16, true)?;
+        if Self::source_id_in(&pe)? != expected_source_id {
+            return invalid("compiled source ID");
+        }
+        Ok(Self {
+            bootstrap_rva,
+            image_size: pe.image_size,
+        })
+    }
+
+    /// The source ID a helper DLL was compiled with, read from its image without loading it.
+    pub fn compiled_source_id(bytes: &[u8]) -> Result<String> {
+        Self::source_id_in(&Pe::parse(bytes)?)
+    }
+
+    fn source_id_in(pe: &Pe<'_>) -> Result<String> {
         // The evaluated getter is a leaf `lea rax,[rip+disp32]; ret`. Decode its target
         // instead of executing a candidate DLL or finding an unrelated 64-byte hex string.
         let getter_rva = pe.export(b"eg_helper_build_id")?;
@@ -217,13 +232,8 @@ impl HelperLayout {
         let delta = i32::from_le_bytes(getter[3..7].try_into().unwrap());
         let source_rva = i64::from(getter_rva) + 7 + i64::from(delta);
         let source = pe.at(source_rva.try_into().map_err(|_| BootstrapError::Invalid("source getter target"))?, 65, false)?;
-        if source[..64] != *expected_source_id.as_bytes() || source[64] != 0 {
-            return invalid("compiled source ID");
-        }
-        Ok(Self {
-            bootstrap_rva,
-            image_size: pe.image_size,
-        })
+        let id = std::str::from_utf8(&source[..64]).ok().filter(|id| source[64] == 0 && source_id_valid(id));
+        id.map(str::to_owned).ok_or(BootstrapError::Invalid("compiled source ID"))
     }
 }
 

@@ -164,9 +164,10 @@ pub fn try_delete(directory: &Path) {
     }
 }
 
-/// The manifest's required files, as the app checks them too (`crates/app/src/main.rs`).
-pub fn required_files() -> [&'static str; 2] {
-    [paths::EXECUTABLE, crate::HELPER_MANIFEST]
+/// The manifest's required files, as the app checks them too (`crates/app/src/main.rs`). The trainer helper is in
+/// the executable.
+pub fn required_files() -> [&'static str; 1] {
+    [paths::EXECUTABLE]
 }
 
 /// Whether `directory` holds the key's generation, whole.

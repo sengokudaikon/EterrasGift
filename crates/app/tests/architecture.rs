@@ -253,3 +253,35 @@ fn source_imports_and_reexports_preserve_feature_boundaries() {
         }
     }
 }
+
+#[test]
+fn the_desktop_links_no_il2cpp_code() {
+    // The helper is an artifact dependency built for its own target, so its `il2cpp` feature stays in the DLL it
+    // embeds. Built alone, as the launcher builds it, nothing the desktop links may have the feature. (`cargo tree`
+    // cannot resolve artifact dependencies yet; the unit graph can.)
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let cargo = std::env::var("CARGO").unwrap_or_else(|_| "cargo".into());
+    let graph = output(&cargo, &["build", "-p", "eterras-gift", "--release", "--unit-graph", "-Z", "unstable-options"], &root);
+    let graph: Value = serde_json::from_slice(&graph).unwrap();
+    let units = graph["units"].as_array().unwrap();
+    let kind = |unit: &Value, kind: &str| unit["target"]["kind"].as_array().unwrap().iter().any(|k| k == kind);
+    let features = |unit: &Value| unit["features"].as_array().unwrap().iter().filter_map(Value::as_str).map(str::to_owned).collect::<Vec<_>>();
+    let (mut linked, mut helper, mut seen) = (Vec::new(), Vec::new(), BTreeSet::new());
+    let mut pending: Vec<(u64, bool)> = graph["roots"].as_array().unwrap().iter().map(|r| (r.as_u64().unwrap(), false)).collect();
+    while let Some((index, in_helper)) = pending.pop() {
+        if !seen.insert((index, in_helper)) {
+            continue;
+        }
+        let unit = &units[index as usize];
+        let in_helper = in_helper || kind(unit, "cdylib");
+        if unit["target"]["name"] == "eg_game_access" {
+            (if in_helper { &mut helper } else { &mut linked }).push(features(unit));
+        }
+        pending.extend(unit["dependencies"].as_array().unwrap().iter().map(|d| (d["index"].as_u64().unwrap(), in_helper)));
+    }
+    assert!(
+        !linked.is_empty() && linked.iter().all(|f| !f.iter().any(|f| f == "il2cpp")),
+        "the desktop links {linked:?}"
+    );
+    assert!(helper.iter().any(|f| f.iter().any(|f| f == "il2cpp")), "the embedded helper has {helper:?}");
+}

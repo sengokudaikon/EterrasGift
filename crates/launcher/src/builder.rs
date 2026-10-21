@@ -1,19 +1,18 @@
 //! Builds immutable generations from a checkout with cargo, into a [`GenerationStore`] (the C# `GenerationBuilder`).
 //! Failed or cancelled builds never become active.
 //!
-//! Translated from the C# launcher: `dotnet publish` of the desktop becomes `cargo build --release -p eterras-gift`, and
-//! the CMake/MSVC native helper becomes `cargo build --release -p eg-trainer-helper` (two runs, so the desktop never
-//! gets the helper's features unified into it). The pinned toolchain's identity is `rustc -Vv`. cargo's target folder
-//! is the build cache the C# store kept under `components\`.
+//! Translated from the C# launcher: `dotnet publish` of the desktop becomes `cargo build --release -p eterras-gift`. The
+//! trainer helper the C# launcher built with CMake/MSVC is an artifact dependency of the desktop, embedded in its exe,
+//! so one build makes both. The pinned toolchain's identity is `rustc -Vv`. cargo's target folder is the build cache
+//! the C# store kept under `components\`.
 
 use crate::process::{Failure, Output, ProcessRequest, ProcessRunner};
 use crate::store::{self, GenerationStore};
-use crate::{HELPER_MANIFEST, HELPER_PREFIX};
 use eg_core::hosting::{self, Manifest};
 use eg_core::operations::Cancellation;
 use eg_core::{hashes, paths};
 use eg_ui::preparation::Stage;
-use serde_json::{Value, json};
+use serde_json::Value;
 use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
 use std::fs;
@@ -52,14 +51,7 @@ impl<R: ProcessRunner> GenerationBuilder<R> {
     fn build(&self, root: &Path, key: &str, tools: &str, staging: &Path, output: Output<'_>, cancel: &Cancellation) -> Result<PathBuf, Failure> {
         let app = staging.join("app");
         fs::create_dir_all(&app)?;
-        // The helper first, as the C# launcher builds the native helper before the app.
-        let messages = self.cargo(
-            root,
-            &["build", "--release", "-p", "eg-trainer-helper", "--message-format=json-render-diagnostics"],
-            output,
-            cancel,
-        )?;
-        let (dll, build_id) = helper_artifact(&messages)?;
+        // The desktop builds its trainer helper too, and carries it in its exe.
         let messages = self.cargo(
             root,
             &["build", "--release", "-p", "eterras-gift", "--message-format=json-render-diagnostics"],
@@ -68,15 +60,6 @@ impl<R: ProcessRunner> GenerationBuilder<R> {
         )?;
         let executable = desktop_artifact(&messages)?;
         fs::copy(&executable, app.join(paths::EXECUTABLE))?;
-        // Each helper build has a file name of its own: a loaded helper stays in the game until it exits.
-        let helper = format!("{HELPER_PREFIX}-{build_id}.dll");
-        fs::copy(&dll, app.join(&helper))?;
-        let helper_manifest = json!({
-            "dll": helper,
-            "dll_sha256": hosting::hash_file(&app.join(&helper))?,
-            "helper_build_id": build_id,
-        });
-        fs::write(app.join(HELPER_MANIFEST), serde_json::to_string_pretty(&helper_manifest).unwrap_or_default())?;
         if key != input_key(root, tools, cancel)? {
             return Err(Failure::Failed("Source changed during preparation. Retry to build the new source.".into()));
         }
@@ -143,34 +126,6 @@ impl<R: ProcessRunner> Preparer for GenerationBuilder<R> {
                 Err(failure)
             }
         }
-    }
-}
-
-/// The helper DLL cargo built and the source identity its build script computed (as `trainer:helper:build` reads them).
-fn helper_artifact(messages: &str) -> Result<(PathBuf, String), Failure> {
-    let mut dll = None;
-    let mut build_id = None;
-    for message in messages.lines().filter_map(|line| serde_json::from_str::<Value>(line).ok()) {
-        match message["reason"].as_str() {
-            Some("build-script-executed") if message["package_id"].as_str().is_some_and(|id| id.contains("#eg-trainer-helper@")) => {
-                let out = PathBuf::from(message["out_dir"].as_str().unwrap_or_default());
-                build_id = fs::read_to_string(out.join("build-id.txt")).ok().map(|id| id.trim().to_owned());
-            }
-            Some("compiler-artifact") if message["target"]["name"] == "eg_trainer_helper" => {
-                dll = message["filenames"]
-                    .as_array()
-                    .into_iter()
-                    .flatten()
-                    .filter_map(Value::as_str)
-                    .find(|file| file.ends_with(".dll"))
-                    .map(PathBuf::from);
-            }
-            _ => {}
-        }
-    }
-    match (dll, build_id) {
-        (Some(dll), Some(id)) if id.len() == 64 && id.bytes().all(|byte| byte.is_ascii_hexdigit()) => Ok((dll, id)),
-        _ => Err(Failure::Failed("The trainer helper build did not report its DLL and source identity.".into())),
     }
 }
 

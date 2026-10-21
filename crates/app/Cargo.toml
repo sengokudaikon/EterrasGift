@@ -17,6 +17,9 @@ eg-companion.workspace = true
 eg-ui.workspace = true
 eg-trainer = { path = "../trainer" }
 eg-trainer-host = { path = "../trainer-host" }
+# The trainer helper DLL, embedded in the exe. Built for its explicit target so the desktop never takes the helper's
+# `il2cpp` feature (an artifact dependency on the implicit target merges features with the desktop's own).
+eg-trainer-helper = { path = "../trainer-helper", artifact = "cdylib", target = "x86_64-pc-windows-msvc" }
 tokio.workspace = true
 slint.workspace = true
 

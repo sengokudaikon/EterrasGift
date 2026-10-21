@@ -16,11 +16,8 @@ mod screen;
 pub mod store;
 pub mod supervisor;
 
-/// The trainer helper's manifest beside the app's executable, as the app looks for it (`crates/app/src/main.rs`) and
-/// `mise run trainer:helper:build` writes it for a cargo build.
-pub const HELPER_MANIFEST: &str = "eg_trainer_helper.json";
-
-/// How the trainer helper's DLL is named in a generation: `eg_trainer_helper-<source identity>.dll`.
+/// How the trainer helper's DLL was named in generations before the desktop embedded it
+/// (`eg_trainer_helper-<source identity>.dll`): a game may still hold one, so the store leaves such a generation alone.
 pub const HELPER_PREFIX: &str = "eg_trainer_helper";
 
 /// `prepare --root R` (the C# launcher's console mode): builds or reuses a generation in the checkout's own

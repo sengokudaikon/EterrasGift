@@ -90,7 +90,7 @@ description = "Nightly release trainer/controller tests, then workspace lint, fo
 run = ["mise run trainer:test", "mise run trainer:player:client:test", "mise run ui:test", "mise run verify"]
 
 [tasks."trainer:helper:build"]
-description = "Build and snapshot the retained Rust helper with source/DLL identities; no process access"
+description = "Build and snapshot the Rust helper with source/DLL identities, for the fixture player; no process access. The desktop embeds its own"
 run = "pwsh -NoProfile -File tools/trainer-eval/persistent-player/Build-Helper.ps1"
 
 [tasks."trainer:player:client:build"]

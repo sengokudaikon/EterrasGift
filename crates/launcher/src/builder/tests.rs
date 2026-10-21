@@ -1,4 +1,5 @@
 use super::*;
+use serde_json::json;
 use std::sync::Mutex;
 
 /// A checkout with one crate, and build output and data beside its sources.
@@ -56,22 +57,10 @@ impl ProcessRunner for &FakeCargo {
             return Ok("rustc 1.101.0-nightly\nhost: x86_64-pc-windows-msvc".into());
         }
         assert!(request.quiet_output, "cargo's JSON is read, not shown");
-        assert!(
-            !call.contains("-p eg-trainer-helper -p") && !call.contains("-p eterras-gift -p"),
-            "one package per build: {call}"
-        );
+        assert!(!call.contains("-p eg-trainer-helper"), "the desktop builds its helper itself: {call}");
         output("   Compiling eg-core v0.1.0");
         let release = self.target.join("release");
         fs::create_dir_all(&release).unwrap();
-        if call.contains("-p eg-trainer-helper") {
-            let out = self.target.join("out");
-            fs::create_dir_all(&out).unwrap();
-            fs::write(out.join("build-id.txt"), "ab".repeat(32)).unwrap();
-            fs::write(release.join("eg_trainer_helper.dll"), "helper").unwrap();
-            let script = json!({"reason": "build-script-executed", "package_id": "path+file:///C:/r/crates/trainer-helper#eg-trainer-helper@0.1.0", "out_dir": out});
-            let artifact = json!({"reason": "compiler-artifact", "target": {"name": "eg_trainer_helper"}, "filenames": [release.join("eg_trainer_helper.dll.lib"), release.join("eg_trainer_helper.dll")]});
-            return Ok(format!("{script}\n{artifact}"));
-        }
         if let Some(file) = &self.edit_during_build {
             fs::write(file, "edited while it built").unwrap();
         }
@@ -149,7 +138,7 @@ fn a_checkout_builds_once_and_then_reuses_its_generation() {
     let first = prepare(&cargo, root, &runtime);
     let prepared = first.result.unwrap();
     assert!(prepared.built);
-    assert_eq!(cargo.builds(), 2, "the helper, then the app");
+    assert_eq!(cargo.builds(), 1, "the app, which builds and embeds its helper");
     assert_eq!(
         first.stages,
         [
@@ -162,18 +151,13 @@ fn a_checkout_builds_once_and_then_reuses_its_generation() {
     assert!(first.lines.iter().all(|line| !line.starts_with('{')), "cargo's JSON is not");
     assert_eq!(prepared.directory, runtime.join(&prepared.key));
     assert!(store::valid(&prepared.directory, &prepared.key));
-    let helper = format!("{HELPER_PREFIX}-{}.dll", "ab".repeat(32));
-    let manifest: Value = serde_json::from_str(&fs::read_to_string(prepared.directory.join(HELPER_MANIFEST)).unwrap()).unwrap();
-    assert_eq!(manifest["dll"], helper.as_str(), "relative, beside the app");
-    assert_eq!(manifest["helper_build_id"], "ab".repeat(32).as_str());
-    assert_eq!(manifest["dll_sha256"], hashes::of_text("helper").as_str());
     let files = Manifest::read(&prepared.directory).unwrap().files;
-    assert_eq!(files.keys().map(String::as_str).collect::<Vec<_>>(), [helper.as_str(), HELPER_MANIFEST, paths::EXECUTABLE]);
+    assert_eq!(files.keys().map(String::as_str).collect::<Vec<_>>(), [paths::EXECUTABLE]);
     assert_eq!(GenerationStore::new(&runtime).active_directory(), Some(prepared.directory.clone()));
 
     let second = prepare(&cargo, root, &runtime);
     assert_eq!(second.result.as_ref().unwrap(), &Prepared { built: false, ..prepared.clone() });
-    assert_eq!(cargo.builds(), 2, "nothing built again");
+    assert_eq!(cargo.builds(), 1, "nothing built again");
     assert_eq!(second.stages.last().unwrap(), &(Stage::Ready, "Using prepared application components".into()));
 
     // A changed source is a new generation; the previous stays beside it.
@@ -277,7 +261,6 @@ fn a_second_preparation_waits_for_the_build_lock() {
 #[test]
 fn cargo_messages_name_the_artifacts() {
     let helper = r#"{"reason":"compiler-artifact","target":{"name":"eg_trainer_helper"},"filenames":["C:/t/eg_trainer_helper.dll"]}"#;
-    assert!(helper_artifact(helper).is_err(), "no source identity");
     assert!(desktop_artifact(helper).is_err());
     let desktop = r#"{"reason":"compiler-artifact","target":{"name":"eterras-gift-desktop"},"executable":"C:/t/eterras-gift-desktop.exe"}"#;
     assert_eq!(desktop_artifact(desktop).unwrap(), PathBuf::from("C:/t/eterras-gift-desktop.exe"));

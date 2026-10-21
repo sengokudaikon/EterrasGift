@@ -5,13 +5,22 @@ use eg_trainer::{
     catalog_cache::CatalogCache,
     sources::FileLogFactory,
 };
-use eg_trainer_host::desktop::{DesktopConnector, GameProcesses};
+use eg_trainer_host::desktop::{DesktopConnector, GameProcesses, HelperPackage};
 use std::{
     cell::Cell,
     path::PathBuf,
     thread::{self, JoinHandle},
     time::Duration,
 };
+
+/// The trainer helper DLL, built with the app (an artifact dependency) and written out only when a game connects. Cargo
+/// names the variable after the dependency and, as the package and library names differ, the library too.
+static HELPER: &[u8] = include_bytes!(env!("CARGO_CDYLIB_FILE_EG_TRAINER_HELPER_eg_trainer_helper"));
+
+/// The embedded helper, known by its content and the source ID compiled into it.
+fn helper() -> Result<HelperPackage, String> {
+    HelperPackage::new(HELPER)
+}
 
 thread_local! {
     static WORKER_CATCHES_PANIC: Cell<bool> = const { Cell::new(false) };
@@ -26,20 +35,14 @@ pub struct Trainer {
     worker: JoinHandle<bool>,
 }
 impl Trainer {
-    pub fn start(
-        helper_manifest: PathBuf,
-        player_log: PathBuf,
-        cache: PathBuf,
-        executable_name: String,
-        options: BackendOptions,
-        no_connect: bool,
-        faults: FaultLog,
-    ) -> Result<Self, String> {
+    /// The helper is in the exe; it is written under the app's local folder only when a game connects.
+    pub fn start(player_log: PathBuf, cache: PathBuf, executable_name: String, options: BackendOptions, no_connect: bool, faults: FaultLog) -> Result<Self, String> {
+        let helper = helper()?;
         let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build().map_err(|e| e.to_string())?;
         let logs = FileLogFactory::new(player_log).map_err(|e| e.to_string())?;
         let (handle, worker) = backend::service(
             GameProcesses::new(executable_name),
-            DesktopConnector::new(helper_manifest, logs.clone()),
+            DesktopConnector::new(helper, eg_core::paths::local_directory().join("helpers"), logs.clone()),
             logs.reader(),
             SystemClock,
             options,
@@ -105,6 +108,13 @@ fn run_worker(work: impl FnOnce(), faults: &FaultLog, shutdown: impl FnOnce()) -
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_embedded_helper_names_the_source_it_was_built_from() {
+        // In every profile the app is built in: the session checks this ID against what the loaded helper reports.
+        let helper = helper().unwrap();
+        assert_eq!(helper.source_id().len(), 64);
+    }
 
     #[test]
     fn a_worker_panic_records_its_fault_and_requests_shutdown() {

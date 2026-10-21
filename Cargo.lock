@@ -1495,6 +1495,7 @@ dependencies = [
  "eg-companion",
  "eg-core",
  "eg-trainer",
+ "eg-trainer-helper",
  "eg-trainer-host",
  "eg-ui",
  "serde_json",

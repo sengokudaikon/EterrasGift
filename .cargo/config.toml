@@ -6,3 +6,7 @@ lint = "clippy --workspace --all-targets -- -D warnings"
 # Headless PNG captures of the real UI into artifacts/captures: the app's pages, and the launcher's preparation window
 # driven by its supervisor.
 capture = "test -p eg-ui -p eterras-gift-launcher --test captures"
+
+[unstable]
+# Artifact dependencies: the desktop embeds the trainer helper DLL (crates/app). Nightly-only, as the pinned toolchain is.
+bindeps = true

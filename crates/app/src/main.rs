@@ -25,10 +25,6 @@ use slint::ComponentHandle;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-/// The trainer helper's manifest beside the executable: written by `mise run trainer:helper:build` for a cargo build,
-/// and by the launcher into each generation (`eterras_gift_launcher::HELPER_MANIFEST`), which checks it is there.
-const HELPER_MANIFEST: &str = "eg_trainer_helper.json";
-
 /// The app's command line (`spec/shell-and-settings.md` §1).
 #[derive(Debug, Default)]
 struct Arguments {
@@ -88,7 +84,7 @@ fn main() -> Result<(), slint::PlatformError> {
     // here, and an incomplete one asks for a restart, which prepares it again.
     if !arguments.supervised
         && let Some(key) = &arguments.generation
-        && !hosting::valid(&folder, key, &[paths::EXECUTABLE, HELPER_MANIFEST])
+        && !hosting::valid(&folder, key, &[paths::EXECUTABLE])
     {
         std::process::exit(hosting::REQUESTED_EXIT_CODE);
     }
@@ -153,7 +149,6 @@ fn main() -> Result<(), slint::PlatformError> {
             .and_then(|p| p.file_name())
             .map_or_else(|| "Last Epoch.exe".into(), |name| name.to_string_lossy().into_owned());
         match trainer::Trainer::start(
-            executable.with_file_name(HELPER_MANIFEST),
             folders::player_log(),
             store.paths().module_directory("trainer").join("catalog"),
             process_name,
