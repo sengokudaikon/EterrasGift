@@ -91,8 +91,9 @@ pub(crate) struct Image {
     attribute_count: usize,
 }
 
+/// What the file says, parsed. Of its bytes (some 36 MB) only the two sections read later are kept: attribute data and
+/// default values.
 pub(crate) struct Metadata {
-    bytes: Vec<u8>,
     pub(crate) types: Vec<TypeDefinition>,
     pub(crate) fields: Vec<FieldDefinition>,
     /// Each method's declaring type, all a custom attribute needs of its constructor.
@@ -100,11 +101,11 @@ pub(crate) struct Metadata {
     /// Each generic parameter's position in its owner.
     generic_positions: Vec<u16>,
     pub(crate) images: Vec<Image>,
-    attribute_data: Section,
+    attribute_data: Vec<u8>,
     attribute_ranges: Vec<(u32, u32)>,
     /// Literal fields' default values: field index → (type index, offset into the default value data).
     defaults: std::collections::HashMap<u32, (u32, usize)>,
-    default_data: Section,
+    default_data: Vec<u8>,
 }
 
 fn width(count: usize) -> usize {
@@ -125,8 +126,32 @@ fn index(reader: &mut Reader<'_>, width: usize) -> Result<Option<u32>> {
 }
 
 impl Metadata {
+    /// Reads the file a section at a time, only the sections it uses: some 24 of its 36 MB, never more than one large
+    /// section and the names at once.
+    pub(crate) fn open(path: &std::path::Path) -> Result<Metadata> {
+        let file = std::fs::File::open(path).map_err(|e| Error::io(path, e))?;
+        let length = file.metadata().map_err(|e| Error::io(path, e))?.len();
+        let length = usize::try_from(length).map_err(|_| Error::unsupported("global-metadata.dat too large"))?;
+        Self::read(length, |offset, size| {
+            let mut out = vec![0; size];
+            crate::serialized::read_at(&file, offset as u64, &mut out).map_err(|e| Error::io(path, e))?;
+            Ok(out)
+        })
+    }
+
+    #[cfg(test)]
     pub(crate) fn parse(bytes: Vec<u8>) -> Result<Metadata> {
-        let mut reader = Reader::new(&bytes, Endian::Little);
+        Self::read(bytes.len(), |offset, size| Ok(bytes[offset..offset + size].to_vec()))
+    }
+
+    /// The metadata of a file `length` long, whose bytes at an offset `read` gives (always within the file).
+    fn read(length: usize, read: impl Fn(usize, usize) -> Result<Vec<u8>>) -> Result<Metadata> {
+        let header = 8 + 12 * SECTIONS.len();
+        if length < header {
+            return Err(Error::malformed("not IL2CPP metadata"));
+        }
+        let header = read(0, header)?;
+        let mut reader = Reader::new(&header, Endian::Little);
         if reader.u32()? != MAGIC {
             return Err(Error::malformed("not IL2CPP metadata"));
         }
@@ -140,7 +165,7 @@ impl Metadata {
             let (Ok(offset), Ok(size), Ok(count)) = (usize::try_from(offset), usize::try_from(size), usize::try_from(count)) else {
                 return Err(Error::malformed(format!("section {name} has a negative field")));
             };
-            if offset.checked_add(size).is_none_or(|end| end > bytes.len()) {
+            if offset.checked_add(size).is_none_or(|end| end > length) {
                 return Err(Error::malformed(format!("section {name} runs past the end")));
             }
             sections.insert(name, Section { offset, size, count });
@@ -156,7 +181,7 @@ impl Metadata {
         let container_width = width(section("genericContainers").count);
         let parameter_width = width(section("parameters").count);
 
-        let records = |name: &str, record: usize| -> Result<(Section, Reader<'_>)> {
+        let records = |name: &str, record: usize| -> Result<(Section, Vec<u8>)> {
             let s = section(name);
             if s.size != s.count * record {
                 return Err(Error::unsupported(format!(
@@ -164,19 +189,19 @@ impl Metadata {
                     s.size, s.count
                 )));
             }
-            let mut r = Reader::new(&bytes[..s.offset + s.size], Endian::Little);
-            r.seek(s.offset)?;
-            Ok((s, r))
+            Ok((s, read(s.offset, s.size)?))
         };
-        let strings = section("string");
+        let kept = |s: Section| read(s.offset, s.size);
+        let strings = kept(section("string"))?;
         let text = |index: i32| -> Result<String> {
             let at = usize::try_from(index).map_err(|_| Error::malformed("negative string index"))?;
-            let mut r = Reader::new(&bytes[strings.offset..strings.offset + strings.size], Endian::Little);
+            let mut r = Reader::new(&strings, Endian::Little);
             r.seek(at)?;
             r.cstring()
         };
 
-        let (s, mut r) = records("typeDefinitions", 8 + 3 * type_width + container_width + 4 + 32 + 16 + 8)?;
+        let (s, data) = records("typeDefinitions", 8 + 3 * type_width + container_width + 4 + 32 + 16 + 8)?;
+        let mut r = Reader::new(&data, Endian::Little);
         let mut types = Vec::with_capacity(s.count);
         for _ in 0..s.count {
             let (name, namespace) = (text(r.i32()?)?, text(r.i32()?)?);
@@ -207,7 +232,9 @@ impl Metadata {
             });
         }
 
-        let (s, mut r) = records("fields", 8 + type_width)?;
+        drop(data);
+        let (s, data) = records("fields", 8 + type_width)?;
+        let mut r = Reader::new(&data, Endian::Little);
         let mut fields = Vec::with_capacity(s.count);
         for _ in 0..s.count {
             let name = text(r.i32()?)?;
@@ -224,7 +251,9 @@ impl Metadata {
             }
         }
 
-        let (s, mut r) = records("methods", 4 + definition_width + type_width + 4 + parameter_width + container_width + 4 + 8)?;
+        drop(data);
+        let (s, data) = records("methods", 4 + definition_width + type_width + 4 + parameter_width + container_width + 4 + 8)?;
+        let mut r = Reader::new(&data, Endian::Little);
         let mut method_owners = Vec::with_capacity(s.count);
         for _ in 0..s.count {
             r.i32()?;
@@ -232,7 +261,9 @@ impl Metadata {
             r.take(type_width + 4 + parameter_width + container_width + 4 + 8)?;
         }
 
-        let (s, mut r) = records("genericParameters", container_width + 12)?;
+        drop(data);
+        let (s, data) = records("genericParameters", container_width + 12)?;
+        let mut r = Reader::new(&data, Endian::Little);
         let mut generic_positions = Vec::with_capacity(s.count);
         for _ in 0..s.count {
             r.take(container_width + 8)?;
@@ -240,7 +271,9 @@ impl Metadata {
             r.u16()?;
         }
 
-        let (s, mut r) = records("images", 8 + 2 * definition_width + 4 + 4 + 4 + 4 + 8)?;
+        drop(data);
+        let (s, data) = records("images", 8 + 2 * definition_width + 4 + 4 + 4 + 4 + 8)?;
+        let mut r = Reader::new(&data, Endian::Little);
         let mut images = Vec::with_capacity(s.count);
         for _ in 0..s.count {
             let name = text(r.i32()?)?;
@@ -258,15 +291,19 @@ impl Metadata {
             });
         }
 
-        let (s, mut r) = records("attributeDataRange", 8)?;
+        drop(data);
+        let (s, data) = records("attributeDataRange", 8)?;
+        let mut r = Reader::new(&data, Endian::Little);
         let mut attribute_ranges = Vec::with_capacity(s.count);
         for _ in 0..s.count {
             attribute_ranges.push((r.u32()?, r.u32()?));
         }
-        let attribute_data = section("attributeData");
+        let attribute_data = kept(section("attributeData"))?;
 
         // Field and data indices stay 4 bytes until format 106.
-        let (s, mut r) = records("fieldDefaultValues", 8 + type_width)?;
+        drop(data);
+        let (s, data) = records("fieldDefaultValues", 8 + type_width)?;
+        let mut r = Reader::new(&data, Endian::Little);
         let mut defaults = std::collections::HashMap::with_capacity(s.count);
         for _ in 0..s.count {
             let field = r.u32()?;
@@ -276,7 +313,7 @@ impl Metadata {
                 defaults.insert(field, (type_index, data));
             }
         }
-        let default_data = section("fieldAndParameterDefaultValueData");
+        let default_data = kept(section("fieldAndParameterDefaultValueData"))?;
         Ok(Metadata {
             defaults,
             default_data,
@@ -287,7 +324,6 @@ impl Metadata {
             images,
             attribute_data,
             attribute_ranges,
-            bytes,
         })
     }
 
@@ -316,13 +352,10 @@ impl Metadata {
     /// (how format 29+ stores `Int32` constants).
     pub(crate) fn int_default(&self, field: u32) -> Result<(u32, i32)> {
         let (type_index, offset) = *self.defaults.get(&field).ok_or_else(|| Error::data(format!("field {field} has no default value")))?;
-        if offset >= self.default_data.size {
+        if offset >= self.default_data.len() {
             return Err(Error::malformed(format!("default value of field {field} out of range")));
         }
-        let mut r = Reader::new(
-            &self.bytes[self.default_data.offset + offset..self.default_data.offset + self.default_data.size],
-            Endian::Little,
-        );
+        let mut r = Reader::new(&self.default_data[offset..], Endian::Little);
         let raw = compressed_u32(&mut r)?;
         let value = if raw == u32::MAX {
             i32::MIN
@@ -355,11 +388,11 @@ impl Metadata {
         };
         let position = image.attribute_start + found;
         let start = self.attribute_ranges[position].1 as usize;
-        let stop = self.attribute_ranges.get(position + 1).map_or(self.attribute_data.size, |(_, s)| *s as usize);
-        if start > stop || stop > self.attribute_data.size {
+        let stop = self.attribute_ranges.get(position + 1).map_or(self.attribute_data.len(), |(_, s)| *s as usize);
+        if start > stop || stop > self.attribute_data.len() {
             return Err(Error::malformed(format!("attribute data for token {token:#x} out of range")));
         }
-        let blob = &self.bytes[self.attribute_data.offset + start..self.attribute_data.offset + stop];
+        let blob = &self.attribute_data[start..stop];
         let mut r = Reader::new(blob, Endian::Little);
         let count = compressed_u32(&mut r)? as usize;
         (0..count)

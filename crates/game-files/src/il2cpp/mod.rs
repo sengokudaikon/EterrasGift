@@ -59,8 +59,7 @@ pub(crate) struct Il2Cpp {
 
 impl Il2Cpp {
     pub(crate) fn open(game_assembly: &Path, metadata: &Path) -> Result<Il2Cpp> {
-        let bytes = std::fs::read(metadata).map_err(|e| Error::io(metadata, e))?;
-        let metadata = Metadata::parse(bytes).map_err(|e| e.context("global-metadata.dat"))?;
+        let metadata = Metadata::open(metadata).map_err(|e| e.context("global-metadata.dat"))?;
         let binary = Binary::open(game_assembly, metadata.types.len()).map_err(|e| e.context("GameAssembly.dll"))?;
         Ok(Il2Cpp { metadata, binary })
     }

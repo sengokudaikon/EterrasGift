@@ -134,20 +134,27 @@ impl Install {
         })
     }
 
-    fn string_table_bundles(&self) -> Result<Vec<PathBuf>> {
-        Ok(bundles_in(&self.addressables())?
+    /// The locale codes the game ships text for (`en`, `de`, `es-ES`…), each with its bundle.
+    pub fn locales(&self) -> Result<BTreeMap<String, PathBuf>> {
+        let mut archive = Archive::open(bundles_in(&self.addressables())?)?;
+        Ok(Self::locales_in(&mut archive)?
             .into_iter()
-            .filter(|p| p.file_name().and_then(|n| n.to_str()).is_some_and(|n| n.starts_with(STRING_TABLE_BUNDLES)))
+            .map(|(code, index)| (code, archive.bundles()[index].path().to_path_buf()))
             .collect())
     }
 
-    /// The locale codes the game ships text for (`en`, `de`, `es-ES`…), each with its bundle.
-    pub fn locales(&self) -> Result<BTreeMap<String, PathBuf>> {
-        let candidates = self.string_table_bundles()?;
-        let mut archive = Archive::open(bundles_in(&self.addressables())?)?;
+    /// The locales in the archive of every addressable bundle, each with its bundle's index: the folder is listed once,
+    /// so a bundle that comes or goes meanwhile (a Steam update) cannot leave a name without its bundle.
+    fn locales_in(archive: &mut Archive) -> Result<BTreeMap<String, usize>> {
+        let candidates: Vec<usize> = (0..archive.bundles().len())
+            .filter(|&index| {
+                let path = archive.bundles()[index].path();
+                path.file_name().and_then(|n| n.to_str()).is_some_and(|n| n.starts_with(STRING_TABLE_BUNDLES))
+            })
+            .collect();
         let mut locales = BTreeMap::new();
-        for path in candidates {
-            let index = archive.bundles().iter().position(|b| b.path() == path).expect("opened above");
+        for index in candidates {
+            let path = archive.bundles()[index].path().to_path_buf();
             let file = archive.main_file(index)?;
             let tables = archive.behaviours(&file, None, STRING_TABLE, "m_LocaleId")?;
             let codes = tables
@@ -156,8 +163,12 @@ impl Install {
                 .collect::<Result<std::collections::BTreeSet<_>>>()?;
             match codes.into_iter().collect::<Vec<_>>().as_slice() {
                 [code] => {
-                    if let Some(other) = locales.insert(code.clone(), path.clone()) {
-                        return Err(Error::data(format!("locale {code} is in {} and {}", other.display(), path.display())));
+                    if let Some(other) = locales.insert(code.clone(), index) {
+                        return Err(Error::data(format!(
+                            "locale {code} is in {} and {}",
+                            archive.bundles()[other].path().display(),
+                            path.display()
+                        )));
                     }
                 }
                 codes => return Err(Error::data(format!("{} holds tables for {} locales", path.display(), codes.len()))),
@@ -168,12 +179,10 @@ impl Install {
 
     /// Every string table for one locale code, as the game's settings name it.
     pub fn strings(&self, locale: &str) -> Result<Strings> {
-        let path = self
-            .locales()?
+        let mut archive = Archive::open(bundles_in(&self.addressables())?)?;
+        let index = Self::locales_in(&mut archive)?
             .remove(locale)
             .ok_or_else(|| Error::data(format!("the game ships no text for locale {locale}")))?;
-        let mut archive = Archive::open(bundles_in(&self.addressables())?)?;
-        let index = archive.bundles().iter().position(|b| b.path() == path).expect("listed above");
         let file = archive.main_file(index)?;
         let (mut tables, mut unkeyed, mut shadowed) = (BTreeMap::new(), 0, 0);
         for (object, _) in archive.behaviours(&file, None, STRING_TABLE, "m_Name")? {

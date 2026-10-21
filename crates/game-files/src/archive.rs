@@ -3,7 +3,7 @@
 
 use crate::bundle::Bundle;
 use crate::error::{Error, Result};
-use crate::serialized::{MONO_BEHAVIOUR, MONO_SCRIPT, Object, SerializedFile};
+use crate::serialized::{MONO_BEHAVIOUR, MONO_SCRIPT, Object, SerializedFile, Source};
 use crate::value::Value;
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -28,10 +28,31 @@ fn is_serialized(name: &str) -> bool {
     !name.ends_with(".resS") && !name.ends_with(".resource")
 }
 
+/// A file's MonoBehaviours from one pass over them: a file holds tens of thousands, so each is kept small.
+type Heads = Rc<Vec<Head>>;
+
+struct Head {
+    /// Its index in the file's objects.
+    object: u32,
+    /// Its name's hash, if it has a name: a match is then read again to compare the name itself.
+    name: Option<u64>,
+    /// Its `m_Script`, unless that does not read.
+    script: Option<(i32, i64)>,
+}
+
+fn name_hash(name: &str) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::hash::DefaultHasher::new();
+    name.hash(&mut hasher);
+    hasher.finish()
+}
+
 pub(crate) struct Archive {
     bundles: Vec<Bundle>,
     files: HashMap<String, Rc<SerializedFile>>,
-    scripts: HashMap<(String, i64), Script>,
+    /// By the file the `MonoScript` is in (its address: files stay open as long as the archive) and its path ID.
+    scripts: HashMap<(usize, i64), Script>,
+    heads: HashMap<usize, Heads>,
 }
 
 impl Archive {
@@ -41,6 +62,7 @@ impl Archive {
             bundles,
             files: HashMap::new(),
             scripts: HashMap::new(),
+            heads: HashMap::new(),
         })
     }
 
@@ -71,7 +93,7 @@ impl Archive {
             .iter()
             .find(|b| b.entry(name).is_some())
             .ok_or_else(|| Error::data(format!("no bundle here holds {name}")))?;
-        let file = Rc::new(SerializedFile::parse(bundle.read(name)?).map_err(|e| e.context(format!("{}, {name}", bundle.path().display())))?);
+        let file = Rc::new(SerializedFile::open(Source::Bundle(bundle.stream(name)?)).map_err(|e| e.context(format!("{}, {name}", bundle.path().display())))?);
         self.files.insert(name.to_owned(), file.clone());
         Ok(file)
     }
@@ -93,12 +115,16 @@ impl Archive {
 
     /// The script of a decoded MonoBehaviour.
     pub(crate) fn script(&mut self, from: &Rc<SerializedFile>, behaviour: &Value) -> Result<Script> {
-        let pointer = behaviour.field("m_Script", Value::as_pptr)?;
-        let key = (from.external(pointer.0)?.map_or_else(String::new, |e| e.file_name().to_owned()), pointer.1);
+        self.script_at(from, behaviour.field("m_Script", Value::as_pptr)?)
+    }
+
+    /// The script an `m_Script` in `from` points at.
+    fn script_at(&mut self, from: &Rc<SerializedFile>, pointer: (i32, i64)) -> Result<Script> {
+        let (file, object) = self.resolve(from, pointer)?;
+        let key = (Rc::as_ptr(&file) as usize, pointer.1);
         if let Some(script) = self.scripts.get(&key) {
             return Ok(script.clone());
         }
-        let (file, object) = self.resolve(from, pointer)?;
         if object.class_id != MONO_SCRIPT {
             return Err(Error::data(format!("m_Script points at class {}, not a MonoScript", object.class_id)));
         }
@@ -116,18 +142,45 @@ impl Archive {
     /// decoded. Only the leading fields are read, so this is cheap even over a file of thousands of objects.
     pub(crate) fn behaviours(&mut self, file: &Rc<SerializedFile>, name: Option<&str>, script: (&str, &str, &str), last: &str) -> Result<Vec<(Object, Value)>> {
         let mut found = Vec::new();
-        for object in file.objects().iter().filter(|o| o.class_id == MONO_BEHAVIOUR) {
-            let head = file.decode_prefix(object, "m_Name")?;
-            if name.is_some_and(|name| head.get("m_Name").and_then(Value::as_str).ok() != Some(name)) {
+        let wanted = name.map(name_hash);
+        for head in self.heads(file)?.iter() {
+            if wanted.is_some_and(|wanted| head.name != Some(wanted)) {
                 continue;
             }
-            if !self.script(file, &head)?.is(script.0, script.1, script.2) {
+            let object = &file.objects()[head.object as usize];
+            let leading = file.decode_prefix(object, "m_Name")?;
+            if name.is_some_and(|name| leading.get("m_Name").and_then(Value::as_str).ok() != Some(name)) {
                 continue;
             }
-            let head = if last == "m_Name" { head } else { file.decode_prefix(object, last)? };
-            found.push((*object, head));
+            // One with no readable `m_Script` says why when it is asked about.
+            let pointer = match head.script {
+                Some(pointer) => pointer,
+                None => leading.field("m_Script", Value::as_pptr)?,
+            };
+            if self.script_at(file, pointer)?.is(script.0, script.1, script.2) {
+                found.push((*object, if last == "m_Name" { leading } else { file.decode_prefix(object, last)? }));
+            }
         }
         Ok(found)
+    }
+
+    /// Every MonoBehaviour's name and script, read once a file: a lookup by name reads no other object again.
+    fn heads(&mut self, file: &Rc<SerializedFile>) -> Result<Heads> {
+        if let Some(heads) = self.heads.get(&(Rc::as_ptr(file) as usize)) {
+            return Ok(heads.clone());
+        }
+        let mut heads = Vec::with_capacity(file.objects().iter().filter(|o| o.class_id == MONO_BEHAVIOUR).count());
+        for (index, object) in file.objects().iter().enumerate().filter(|(_, o)| o.class_id == MONO_BEHAVIOUR) {
+            let leading = file.decode_prefix(object, "m_Name")?;
+            heads.push(Head {
+                object: u32::try_from(index).map_err(|_| Error::unsupported("more than 4 billion objects"))?,
+                name: leading.get("m_Name").and_then(Value::as_str).ok().map(name_hash),
+                script: leading.field("m_Script", Value::as_pptr).ok(),
+            });
+        }
+        let heads = Rc::new(heads);
+        self.heads.insert(Rc::as_ptr(file) as usize, heads.clone());
+        Ok(heads)
     }
 
     /// The one MonoBehaviour with this name and script, decoded whole. Any other count is refused.

@@ -1,12 +1,19 @@
 //! UnityFS asset bundles (format 6–8, as Unity 2019–6000 writes them): a header, a block table and a directory, then
 //! the files the bundle holds, stored as a run of blocks that are each uncompressed or LZ4-compressed. Opening reads
-//! only the header and the tables; reading a file decompresses only the blocks that cover it.
+//! only the header and the tables; reading a file decompresses only the blocks that cover it, and a [`Stream`] reads
+//! any part of one while holding only the few blocks read last.
 
 use crate::error::{Error, Result};
 use crate::reader::{Endian, Reader};
+use std::cell::RefCell;
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
+use std::rc::Rc;
+
+/// How many unpacked blocks a stream keeps (Unity writes 128 KiB blocks): enough for objects read in file order, as a
+/// scan of a file's objects reads them.
+const KEPT_BLOCKS: usize = 8;
 
 /// Larger than anything the game ships (its largest serialized file is ~90 MB); a guard against a bad size field.
 const MAX_ENTRY_BYTES: u64 = 1 << 30;
@@ -44,20 +51,27 @@ pub struct Bundle {
 }
 
 fn decompress(compression: u32, packed: &[u8], unpacked: u32) -> Result<Vec<u8>> {
+    let mut out = vec![0; unpacked as usize];
+    decompress_into(compression, packed, &mut out)?;
+    Ok(out)
+}
+
+/// Unpacks a block into `out`, which is its unpacked size.
+fn decompress_into(compression: u32, packed: &[u8], out: &mut [u8]) -> Result<()> {
     match compression {
         0 => {
-            if packed.len() != unpacked as usize {
-                return Err(Error::malformed(format!("stored block of {} bytes declares {unpacked}", packed.len())));
+            if packed.len() != out.len() {
+                return Err(Error::malformed(format!("stored block of {} bytes declares {}", packed.len(), out.len())));
             }
-            Ok(packed.to_vec())
+            out.copy_from_slice(packed);
+            Ok(())
         }
         2 | 3 => {
-            let mut out = vec![0; unpacked as usize];
-            let written = lz4_flex::block::decompress_into(packed, &mut out).map_err(|e| Error::malformed(format!("LZ4 block: {e}")))?;
+            let written = lz4_flex::block::decompress_into(packed, out).map_err(|e| Error::malformed(format!("LZ4 block: {e}")))?;
             if written != out.len() {
-                return Err(Error::malformed(format!("LZ4 block unpacked to {written} bytes, not {unpacked}")));
+                return Err(Error::malformed(format!("LZ4 block unpacked to {written} bytes, not {}", out.len())));
             }
-            Ok(out)
+            Ok(())
         }
         1 => Err(Error::unsupported("LZMA-compressed bundle blocks")),
         other => Err(Error::unsupported(format!("bundle compression type {other}"))),
@@ -185,24 +199,110 @@ impl Bundle {
 
     /// The bytes of one file in the bundle.
     pub fn read(&self, name: &str) -> Result<Vec<u8>> {
+        let stream = self.stream(name)?;
+        let mut out = vec![0; stream.len() as usize];
+        stream.read_at(0, &mut out)?;
+        Ok(out)
+    }
+
+    /// One file in the bundle, read in parts as they are asked for.
+    pub fn stream(&self, name: &str) -> Result<Stream> {
         let entry = self.entry(name).ok_or_else(|| Error::data(format!("{} holds no {name}", self.path.display())))?;
         if entry.size > MAX_ENTRY_BYTES {
             return Err(Error::unsupported(format!("{name} is {} bytes", entry.size)));
         }
         let (start, end) = (entry.offset, entry.offset + entry.size);
-        let mut file = File::open(&self.path).map_err(|e| Error::io(&self.path, e))?;
-        let mut out = Vec::with_capacity(entry.size as usize);
-        for block in self.blocks.iter().filter(|b| b.stream_offset < end && b.stream_offset + u64::from(b.unpacked) > start) {
-            let mut packed = vec![0; block.packed as usize];
-            file.seek(SeekFrom::Start(block.file_offset)).map_err(|e| Error::io(&self.path, e))?;
-            file.read_exact(&mut packed).map_err(|e| Error::io(&self.path, e))?;
-            let unpacked = decompress(u32::from(block.flags) & COMPRESSION_MASK, &packed, block.unpacked).map_err(|e| e.context(format!("{}, {name}", self.path.display())))?;
-            let from = start.saturating_sub(block.stream_offset) as usize;
-            let to = (end - block.stream_offset).min(u64::from(block.unpacked)) as usize;
-            out.extend_from_slice(&unpacked[from..to]);
+        let blocks = self
+            .blocks
+            .iter()
+            .filter(|b| b.stream_offset < end && b.stream_offset + u64::from(b.unpacked) > start)
+            .copied()
+            .collect();
+        Ok(Stream {
+            file: RefCell::new(File::open(&self.path).map_err(|e| Error::io(&self.path, e))?),
+            label: format!("{}, {name}", self.path.display()),
+            start,
+            size: entry.size,
+            blocks,
+            kept: RefCell::new(Vec::new()),
+            packed: RefCell::new(Vec::new()),
+        })
+    }
+}
+
+/// One file in a bundle: any part of it, unpacking only the blocks that part lies in.
+pub struct Stream {
+    file: RefCell<File>,
+    label: String,
+    /// Where the file starts in the bundle's unpacked stream, and its size.
+    start: u64,
+    size: u64,
+    blocks: Vec<Block>,
+    /// The blocks unpacked last, by index into `blocks`, most recent last.
+    kept: RefCell<Vec<(usize, Rc<Vec<u8>>)>>,
+    /// Scratch for a block's packed bytes.
+    packed: RefCell<Vec<u8>>,
+}
+
+impl Stream {
+    pub fn len(&self) -> u64 {
+        self.size
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.size == 0
+    }
+
+    /// Fills `out` from `at` in the file.
+    pub fn read_at(&self, at: u64, out: &mut [u8]) -> Result<()> {
+        if at.checked_add(out.len() as u64).is_none_or(|end| end > self.size) {
+            return Err(Error::malformed(format!("{}: {} bytes at {at} run past its {} bytes", self.label, out.len(), self.size)));
         }
-        debug_assert_eq!(out.len() as u64, entry.size);
-        Ok(out)
+        let (mut position, mut written) = (self.start + at, 0);
+        let first = self.blocks.partition_point(|b| b.stream_offset + u64::from(b.unpacked) <= position);
+        for index in first..self.blocks.len() {
+            if written == out.len() {
+                break;
+            }
+            let block = self.blocks[index];
+            let unpacked = self.block(index)?;
+            let from = (position - block.stream_offset) as usize;
+            let count = (unpacked.len() - from).min(out.len() - written);
+            out[written..written + count].copy_from_slice(&unpacked[from..from + count]);
+            written += count;
+            position += count as u64;
+        }
+        if written != out.len() {
+            return Err(Error::malformed(format!("{}: its blocks end before its {} bytes", self.label, self.size)));
+        }
+        Ok(())
+    }
+
+    fn block(&self, index: usize) -> Result<Rc<Vec<u8>>> {
+        let mut kept = self.kept.borrow_mut();
+        if let Some(at) = kept.iter().position(|(kept, _)| *kept == index) {
+            let entry = kept.remove(at);
+            let block = entry.1.clone();
+            kept.push(entry);
+            return Ok(block);
+        }
+        let block = self.blocks[index];
+        let mut packed = self.packed.borrow_mut();
+        packed.resize(block.packed as usize, 0);
+        let mut file = self.file.borrow_mut();
+        file.seek(SeekFrom::Start(block.file_offset))
+            .map_err(|e| Error::malformed(format!("{}: {e}", self.label)))?;
+        file.read_exact(&mut packed).map_err(|e| Error::malformed(format!("{}: {e}", self.label)))?;
+        // A block that fell out of use lends its buffer to the next one.
+        let mut unpacked = match kept.len() {
+            KEPT_BLOCKS => Rc::try_unwrap(kept.remove(0).1).unwrap_or_default(),
+            _ => Vec::new(),
+        };
+        unpacked.resize(block.unpacked as usize, 0);
+        decompress_into(u32::from(block.flags) & COMPRESSION_MASK, &packed, &mut unpacked).map_err(|e| e.context(&self.label))?;
+        let unpacked = Rc::new(unpacked);
+        kept.push((index, unpacked.clone()));
+        Ok(unpacked)
     }
 }
 
@@ -230,6 +330,17 @@ mod tests {
             assert_eq!(bundle.read("CAB-one").unwrap(), first);
             assert_eq!(bundle.read("CAB-two").unwrap(), second);
             assert!(matches!(bundle.read("CAB-three"), Err(Error::Data(_))));
+            // Any part, across block edges, in any order; nothing past the end.
+            let stream = bundle.stream("CAB-one").unwrap();
+            for (at, length) in [(290, 10), (0, 300), (63, 2), (128, 70), (1, 0), (299, 1)] {
+                let mut part = vec![0; length];
+                stream.read_at(at as u64, &mut part).unwrap();
+                assert_eq!(part, first[at..at + length], "{at}+{length}");
+            }
+            assert!(stream.read_at(295, &mut [0; 6]).is_err());
+            let mut tail = [0; 3];
+            bundle.stream("CAB-two").unwrap().read_at(8, &mut tail).unwrap();
+            assert_eq!(&tail, b"ile");
         }
     }
 
