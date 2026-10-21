@@ -188,14 +188,17 @@ fn stale_expected_bytes_are_rejected_without_changing_the_entry() {
 }
 
 #[test]
-fn handler_unwind_is_refused_without_changing_the_entry() {
+fn handler_unwind_keeps_the_stock_trampoline_without_registering_partial_metadata() {
     let _guard = SERIAL.lock().unwrap();
     let target = eg_handler_dispatch as *const () as *mut u8;
     // SAFETY: valid owned function with authentic handler-bearing unwind metadata; never invoked.
     let bytes: [u8; 11] = unsafe { std::slice::from_raw_parts(target, 11) }.try_into().unwrap();
-    // SAFETY: live owned target, expected prefix/ABI; unsupported handler record must be rejected.
-    let result = unsafe { RetainedHook::prepare(NonNull::new(target).unwrap(), callback as *const (), &bytes) };
-    assert!(matches!(result, Err(HookError::UnsupportedUnwind)));
+    // SAFETY: live owned target and callback have the declared ABI; neither runs during preparation.
+    let hook = unsafe { RetainedHook::prepare(NonNull::new(target).unwrap(), callback as *const (), &bytes) }.unwrap();
+    assert_eq!(hook.state(), HookState::Disabled);
+    let mut image_base = 0;
+    // SAFETY: query the retained trampoline address; the output base is a live local slot.
+    assert!(unsafe { RtlLookupFunctionEntry(hook.trampoline() as u64, &raw mut image_base, std::ptr::null_mut()) }.is_null());
 }
 
 #[test]

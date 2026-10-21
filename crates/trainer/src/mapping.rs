@@ -104,6 +104,13 @@ fn valid_roll_draft(expected: &ExpectedObservation, edit: &RollEdit, tooltip: Op
     if edit.changes.is_empty() || edit.changes.len() > maximum || edit.changes.iter().map(|c| c.index).collect::<BTreeSet<_>>().len() != edit.changes.len() {
         return Err(MappingError::InvalidQuery);
     }
+    if edit.target == RollTarget::Unique {
+        let evidence = tooltip.ok_or(MappingError::MissingTooltipEvidence)?;
+        evidence.recheck(expected)?;
+        if evidence.kind != TooltipKind::Unique {
+            return Err(MappingError::InvalidQuery);
+        }
+    }
     for change in &edit.changes {
         if !(0..=255).contains(&change.value) {
             return Err(MappingError::InvalidQuery);
@@ -118,8 +125,7 @@ fn valid_roll_draft(expected: &ExpectedObservation, edit: &RollEdit, tooltip: Op
             }
             RollTarget::Unique => {
                 let evidence = tooltip.ok_or(MappingError::MissingTooltipEvidence)?;
-                evidence.recheck(expected)?;
-                if evidence.kind != TooltipKind::Unique || !evidence.rolling(index) {
+                if !evidence.rolling(index) {
                     return Err(MappingError::InvalidQuery);
                 }
             }
@@ -182,16 +188,23 @@ pub struct BoundPreview {
 }
 impl BoundPreview {
     pub fn new(expected: &ExpectedObservation, draft: RollEdit, preview: UniqueRollPreview, evidence: &BoundTooltip) -> Result<Self, MappingError> {
+        Self::prepare(expected, draft, evidence)?.with_reply(preview)
+    }
+    pub(crate) fn prepare(expected: &ExpectedObservation, draft: RollEdit, evidence: &BoundTooltip) -> Result<Self, MappingError> {
         if draft.target != RollTarget::Unique {
             return Err(MappingError::InvalidQuery);
         }
         valid_roll_draft(expected, &draft, Some(evidence), 32)?;
-        BoundTooltip::new(expected, TooltipKind::Unique, preview.modifiers.clone())?;
         Ok(Self {
             expected: expected.clone(),
             draft,
-            preview,
+            preview: UniqueRollPreview { modifiers: vec![] },
         })
+    }
+    pub(crate) fn with_reply(mut self, preview: UniqueRollPreview) -> Result<Self, MappingError> {
+        BoundTooltip::new(&self.expected, TooltipKind::Unique, preview.modifiers.clone())?;
+        self.preview = preview;
+        Ok(self)
     }
     pub fn preview(&self) -> &UniqueRollPreview {
         &self.preview

@@ -1,5 +1,6 @@
 //! Observe an already completed locale operation. Initialization/selection getters are never called.
 
+use super::metadata_text;
 use super::{Class, DiscoveryError, Ptr, RuntimeAccess, unsupported};
 use crate::il2cpp::{AttachedThread, InvocationContext, InvocationOutcome, ReturnValue, StrongRoot, ValueTypeContract, raw};
 use eg_trainer_wire::locale::GameLocale;
@@ -22,6 +23,7 @@ fn completed(handle_version: i32, operation_version: i32, status: i32, reference
 impl RuntimeAccess {
     // All internal helpers inherit read_game_locale's attached-runtime and exclusive graph contract.
     unsafe fn locale_system(&self, name: &CStr) -> Result<Class, DiscoveryError> {
+        // SAFETY: Corlib and the requested System class belong to retained runtime metadata.
         unsafe {
             let image = (self.corlib)();
             if image.is_null() {
@@ -34,6 +36,7 @@ impl RuntimeAccess {
     }
 
     unsafe fn locale_field_class(&self, field: Ptr) -> Result<Class, DiscoveryError> {
+        // SAFETY: The field descriptor is retained metadata; its type and class are checked for null before use.
         unsafe {
             let ty = (self.field_type)(field);
             if ty.is_null() || (self.type_byref)(ty) {
@@ -44,6 +47,7 @@ impl RuntimeAccess {
     }
 
     unsafe fn locale_field(&self, owner: Class, name: &CStr, expected: Class) -> Result<Ptr, DiscoveryError> {
+        // SAFETY: The rooted graph's owner is retained metadata; expected field class and instance storage are validated before reading.
         unsafe {
             let field = self.field(owner, name)?;
             if (self.field_flags)(field) & 0x10 != 0 || self.locale_field_class(field)? != expected {
@@ -54,6 +58,7 @@ impl RuntimeAccess {
     }
 
     unsafe fn locale_named_class(&self, class: Class, namespace: &CStr, name: &CStr, value: bool) -> Result<(), DiscoveryError> {
+        // SAFETY: The class descriptor and its name/namespace strings belong to retained immutable metadata.
         unsafe {
             if class.is_null() {
                 return Err(unsupported("locale named class"));
@@ -62,8 +67,8 @@ impl RuntimeAccess {
             let actual_namespace = (self.class_namespace)(class);
             if actual_name.is_null()
                 || actual_namespace.is_null()
-                || CStr::from_ptr(actual_name) != name
-                || CStr::from_ptr(actual_namespace) != namespace
+                || metadata_text(actual_name) != name
+                || metadata_text(actual_namespace) != namespace
                 || (self.class_value)(class) != value
             {
                 return Err(unsupported("locale named class identity"));
@@ -73,6 +78,7 @@ impl RuntimeAccess {
     }
 
     unsafe fn locale_i32(&self, object: &Root<'_, '_>, owner: Class, name: &CStr) -> Result<i32, DiscoveryError> {
+        // SAFETY: Exact Int32 field metadata fixes the local copy width; the rooted receiver remains live.
         unsafe {
             self.check_object(owner, target(object)?)?;
             let field = self.locale_field(owner, name, self.locale_system(c"Int32")?)?;
@@ -90,6 +96,7 @@ impl RuntimeAccess {
         name: &CStr,
         expected: Class,
     ) -> Result<Option<Root<'a, 'r>>, DiscoveryError> {
+        // SAFETY: The receiver is rooted and reference storage is validated; each copied reference is rooted before inspection.
         unsafe {
             self.check_object(owner, target(object)?)?;
             if expected.is_null() || (self.class_value)(expected) {
@@ -107,19 +114,15 @@ impl RuntimeAccess {
     }
 
     unsafe fn locale_no_cctor(&self, class: Class) -> Result<(), DiscoveryError> {
+        // SAFETY: The retained value class's methods are inspected without executing a managed initializer.
         unsafe {
-            let mut iterator = std::ptr::null_mut();
-            for _ in 0..100_000 {
-                let method = (self.class_methods)(class, &mut iterator);
-                if method.is_null() {
-                    return Ok(());
-                }
+            for method in self.methods(class)? {
                 let name = (self.method_name)(method);
-                if name.is_null() || CStr::from_ptr(name) == c".cctor" {
+                if name.is_null() || metadata_text(name) == c".cctor" {
                     return Err(unsupported("locale boxing class initializer"));
                 }
             }
-            Err(unsupported("locale boxing method enumeration limit"))
+            Ok(())
         }
     }
 
@@ -131,6 +134,7 @@ impl RuntimeAccess {
         name: &CStr,
         expected: Class,
     ) -> Result<Root<'a, 'r>, DiscoveryError> {
+        // SAFETY: The receiver remains rooted; exact field metadata and absence of a class initializer precede boxing and rooting the result.
         unsafe {
             self.check_object(owner, target(object)?)?;
             let field = self.locale_field(owner, name, expected)?;
@@ -150,6 +154,7 @@ impl RuntimeAccess {
     }
 
     unsafe fn locale_alive(&self, object: &Root<'_, '_>, owner: Class) -> Result<(), DiscoveryError> {
+        // SAFETY: The rooted Unity wrapper has exact IntPtr storage; the copied native address is never dereferenced.
         unsafe {
             self.check_object(owner, target(object)?)?;
             let field = self.locale_field(owner, c"m_CachedPtr", self.locale_system(c"IntPtr")?)?;
@@ -163,46 +168,17 @@ impl RuntimeAccess {
     }
 
     unsafe fn locale_state_class(&self, class: Class) -> Result<(), DiscoveryError> {
+        // SAFETY: The operation class comes from retained metadata; the exact closed generic result type is checked before traversal.
         unsafe {
             self.locale_named_class(class, c"UnityEngine.ResourceManagement.AsyncOperations", c"AsyncOperationStatus", true)?;
-            if !(self.class_enum)(class) {
-                return Err(unsupported("locale operation status enum"));
-            }
-            let ty = (self.enum_base)(class);
-            if ty.is_null() || (self.type_byref)(ty) || (self.type_code)(ty) != 0x08 || (self.type_class)(ty) != self.locale_system(c"Int32")? {
-                return Err(unsupported("locale operation status enum"));
-            }
+            self.enum_storage(class, c"Int32", 0x08)?;
             Ok(())
         }
     }
 
     unsafe fn locale_text(&self, root: Option<&Root<'_, '_>>, string_class: Class) -> Result<String, DiscoveryError> {
-        unsafe {
-            let Some(root) = root else {
-                return Ok(String::new());
-            };
-            let object = target(root)?;
-            if (self.object_class)(object.as_ptr()) != string_class {
-                return Err(unsupported("locale string class"));
-            }
-            let length = (self.string_length)(object.as_ptr());
-            if !(0..=4096).contains(&length) {
-                return Err(unsupported("locale text length"));
-            }
-            let chars = (self.string_chars)(object.as_ptr());
-            if chars.is_null() && length != 0 {
-                return Err(unsupported("locale string characters"));
-            }
-            let mut units = Vec::with_capacity(length as usize);
-            for index in 0..length as usize {
-                units.push(chars.add(index).read());
-            }
-            let value = String::from_utf16(&units).map_err(|_| unsupported("locale UTF-16"))?;
-            if value.len() > 4096 {
-                return Err(unsupported("locale UTF-8 length"));
-            }
-            Ok(value)
-        }
+        // SAFETY: The string object remains rooted through a bounded owned UTF-16 copy after exact class validation.
+        unsafe { self.owned_text(root, string_class, 4096) }
     }
 
     /// Observe the language of an already completed selected-locale operation and Application.version.
@@ -214,14 +190,15 @@ impl RuntimeAccess {
     /// and native Settings/Locale destruction until this entire copy completes. Parent roots retain
     /// unchanged strong references until each child is rooted. Instance-field boxing and getters
     /// must obey the evaluated nonmoving-GC semantics. The caller independently authorizes only
-    /// this artifact's audited Locale.get_Identifier (16-byte/two-reference value), Identifier.get_Code
+    /// this artifact's Locale.get_Identifier (16-byte/two-reference value), Identifier.get_Code
     /// (reference load), and Application.get_version (Unity engine version internal call), including
-    /// its audited Application .cctor (CancellationTokenSource allocation/static store/write barrier),
+    /// its Application .cctor (CancellationTokenSource allocation/static store/write barrier),
     /// internal-call cache population, native-buffer/managed-string allocation and buffer cleanup,
     /// and runtime callbacks. This is read-only with respect to gameplay, not a zero-side-effect call.
     /// Metadata cannot establish those body permissions.
     /// Handle generic fields are boxed/read through public APIs; no Rust struct layout is copied.
     pub unsafe fn read_game_locale(&self, attached: &AttachedThread<'_>, api: raw::InvocationApi) -> Result<GameLocale, DiscoveryError> {
+        // SAFETY: The caller supplies the immutable main-thread locale span; operation versions and readiness precede checked getter calls.
         unsafe {
             let status = self.status(attached)?;
             if status.online || status.manager == 0 {

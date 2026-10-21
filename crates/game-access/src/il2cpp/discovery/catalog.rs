@@ -1,5 +1,6 @@
 //! Bounded, rooted catalog graph copies. Singleton getters and formatter bodies are not invoked.
 
+use super::metadata_text;
 use super::{
     Class, DiscoveryError, Images, RuntimeAccess,
     forge::{Primitive, Root, target},
@@ -27,7 +28,7 @@ pub(super) fn page_bounds(total: u32, cursor: u32) -> Result<std::ops::Range<usi
     Ok(cursor as usize..cursor.saturating_add(MAX_PAGE_ENTRIES as u32).min(total) as usize)
 }
 
-const IMPLICIT_TEXT_REASON: &str = "Game implicit formatter has not been audited for this capture";
+const IMPLICIT_TEXT_REASON: &str = "Catalog definitions do not include implicit descriptions";
 
 struct CopyBudget {
     used: usize,
@@ -74,9 +75,9 @@ impl RuntimeAccess {
     /// never invoked, so absent or destroyed definition storage reports `NotReady`.
     ///
     /// # Safety
-    /// The complete `read_game_locale` contract applies, including the exact audited locale and
+    /// The complete `read_game_locale` contract applies, including the exact locale and
     /// Application.version framework getter bodies and their permitted initialization/allocation
-    /// effects. SP43 capture also authorizes this artifact's audited corlib
+    /// effects. Catalog capture also invokes this runtime's corlib
     /// System.Array.GetValue(Int32) body: rank/bounds/reflection checks, runtime type caches,
     /// metadata setup, allocation/boxing and GC/profiler callbacks. Dictionary Entry class
     /// initializers are rejected before boxing; no game dictionary getter or cache fill is called.
@@ -87,6 +88,7 @@ impl RuntimeAccess {
     /// state write is authorized. All raw metadata pointers belong to this admitted runtime;
     /// the validated nonmoving x64 array data offset is 32. Returned values own their contents.
     pub unsafe fn read_catalog_page(&self, attached: &AttachedThread<'_>, api: raw::InvocationApi, kind: CatalogKind, cursor: u32) -> Result<CatalogPage, DiscoveryError> {
+        // SAFETY: The caller supplies the immutable definition-asset span; offline admission precedes rooted, bounded page extraction.
         unsafe {
             let status = self.status(attached)?;
             if status.online || status.manager == 0 {
@@ -120,6 +122,7 @@ impl RuntimeAccess {
     }
 
     unsafe fn catalog_bases(&self, attached: &AttachedThread<'_>, images: &Images, cursor: u32) -> Result<(u32, CatalogEntries), DiscoveryError> {
+        // SAFETY: The retained registry and its arrays stay rooted; lengths and exact element classes are checked before copying.
         unsafe {
             let list_class = self.class(images, c"", c"ItemList")?;
             let base_class = self.catalog_nested(list_class, c"BaseEquipmentItem")?;
@@ -214,6 +217,7 @@ impl RuntimeAccess {
     // access contract of its catalog operation. All child references remain in rooted parents
     // until their own roots have been acquired; Unity native object lifetime is checked separately.
     pub(super) unsafe fn catalog_nested(&self, parent: Class, name: &CStr) -> Result<Class, DiscoveryError> {
+        // SAFETY: The parent is retained class metadata; nested descriptors and names are inspected within a bounded enumeration.
         unsafe {
             if parent.is_null() {
                 return Err(unsupported("catalog nested owner"));
@@ -231,7 +235,7 @@ impl RuntimeAccess {
                 if actual.is_null() {
                     return Err(unsupported("catalog nested name"));
                 }
-                if CStr::from_ptr(actual) == name {
+                if metadata_text(actual) == name {
                     if !found.is_null() && found != class {
                         return Err(unsupported("catalog ambiguous nested class"));
                     }
@@ -249,6 +253,7 @@ impl RuntimeAccess {
         name: &CStr,
         expected: Class,
     ) -> Result<Option<Root<'a, 'r>>, DiscoveryError> {
+        // SAFETY: The validated static reference field writes one pointer-sized local, which is rooted before inspection.
         unsafe {
             if expected.is_null() || (self.class_value)(expected) {
                 return Err(unsupported("catalog static reference class"));
@@ -270,6 +275,7 @@ impl RuntimeAccess {
     }
 
     pub(super) unsafe fn catalog_reference<'a, 'r>(&self, attached: &'a AttachedThread<'r>, parent: &Root<'_, '_>, name: &CStr) -> Result<Option<Root<'a, 'r>>, DiscoveryError> {
+        // SAFETY: The receiver is rooted and the reference field has validated storage and expected target class.
         unsafe {
             let owner = (self.object_class)(target(parent)?.as_ptr());
             if owner.is_null() {
@@ -287,6 +293,7 @@ impl RuntimeAccess {
         element: Class,
         maximum: u32,
     ) -> Result<Vec<Option<Root<'a, 'r>>>, DiscoveryError> {
+        // SAFETY: The array is rooted; exact reference element type and bounded length precede every element pointer copy.
         unsafe {
             if element.is_null() || (self.class_value)(element) || maximum > 65536 {
                 return Err(unsupported("catalog reference array element/bound"));
@@ -294,12 +301,13 @@ impl RuntimeAccess {
             let count = self.array_count(array, element, maximum)?;
             let mut entries = Vec::with_capacity(count as usize);
             for index in 0..count as usize {
-                let pointer = target(array)?
-                    .as_ptr()
-                    .cast::<u8>()
-                    .add(32 + index * std::mem::size_of::<usize>())
-                    .cast::<*mut raw::Object>()
-                    .read();
+                let pointer = super::read_value(
+                    target(array)?
+                        .as_ptr()
+                        .cast::<u8>()
+                        .add(32 + index * std::mem::size_of::<usize>())
+                        .cast::<*mut raw::Object>(),
+                );
                 let root = NonNull::new(pointer).map(|pointer| attached.root(pointer)).transpose()?;
                 if let Some(root) = &root {
                     self.check_object(element, target(root)?)?;
@@ -317,19 +325,13 @@ impl RuntimeAccess {
         element: Class,
         maximum: u32,
     ) -> Result<(Root<'a, 'r>, usize), DiscoveryError> {
+        // SAFETY: The list is rooted; its metadata-validated backing array and size are rooted and bounded before iteration.
         unsafe {
             if element.is_null() || maximum > 65536 {
                 return Err(unsupported("catalog list element/bound"));
             }
             let class = (self.object_class)(target(list)?.as_ptr());
-            if class.is_null() || (self.class_value)(class) || (self.class_image)(class) != (self.corlib)() || (self.type_code)((self.class_type)(class)) != 0x15 {
-                return Err(unsupported("catalog closed List class"));
-            }
-            let name = (self.class_name)(class);
-            let namespace = (self.class_namespace)(class);
-            if name.is_null() || namespace.is_null() || CStr::from_ptr(name) != c"List`1" || CStr::from_ptr(namespace) != c"System.Collections.Generic" {
-                return Err(unsupported("catalog List definition"));
-            }
+            self.list_class(class)?;
             let count: i32 = self.primitive(list, c"_size")?;
             let array_field = self.field(class, c"_items")?;
             let array_class = self.field_class(array_field)?;
@@ -350,6 +352,7 @@ impl RuntimeAccess {
         element: Class,
         maximum: u32,
     ) -> Result<Vec<Root<'a, 'r>>, DiscoveryError> {
+        // SAFETY: The validated list's rooted backing array remains live while bounded element references are copied and rooted.
         unsafe {
             if element.is_null() || (self.class_value)(element) {
                 return Err(unsupported("catalog reference List element"));
@@ -357,12 +360,13 @@ impl RuntimeAccess {
             let (array, count) = self.catalog_list_storage(attached, list, element, maximum)?;
             let mut values = Vec::with_capacity(count);
             for index in 0..count {
-                let pointer = target(&array)?
-                    .as_ptr()
-                    .cast::<u8>()
-                    .add(32 + index * std::mem::size_of::<usize>())
-                    .cast::<*mut raw::Object>()
-                    .read();
+                let pointer = super::read_value(
+                    target(&array)?
+                        .as_ptr()
+                        .cast::<u8>()
+                        .add(32 + index * std::mem::size_of::<usize>())
+                        .cast::<*mut raw::Object>(),
+                );
                 let root = attached.root(NonNull::new(pointer).ok_or_else(|| unsupported("catalog null List entry"))?)?;
                 self.check_object(element, target(&root)?)?;
                 values.push(root);
@@ -372,6 +376,7 @@ impl RuntimeAccess {
     }
 
     pub(super) unsafe fn catalog_values<T: Primitive>(&self, attached: &AttachedThread<'_>, list: &Root<'_, '_>, element: Class, maximum: u32) -> Result<Vec<T>, DiscoveryError> {
+        // SAFETY: The rooted value array has exact primitive element width and a bounded count before reading its elements.
         unsafe {
             let expected = self.system_class(T::NAME)?;
             if element.is_null() {
@@ -387,15 +392,12 @@ impl RuntimeAccess {
                 }
             }
             let (array, count) = self.catalog_list_storage(attached, list, element, maximum)?;
-            let mut values = Vec::with_capacity(count);
-            for index in 0..count {
-                values.push(target(&array)?.as_ptr().cast::<u8>().add(32 + index * std::mem::size_of::<T>()).cast::<T>().read());
-            }
-            Ok(values)
+            Ok(super::copy_values(target(&array)?.as_ptr().cast::<u8>().add(32).cast::<T>(), count))
         }
     }
 
     pub(super) unsafe fn catalog_enum_u8(&self, object: &Root<'_, '_>, name: &CStr, enum_name: &CStr) -> Result<u8, DiscoveryError> {
+        // SAFETY: The rooted receiver's field is verified as an enum with Byte underlying storage before its byte is copied.
         unsafe {
             let owner = (self.object_class)(target(object)?.as_ptr());
             if owner.is_null() {
@@ -404,13 +406,10 @@ impl RuntimeAccess {
             let field = self.field(owner, name)?;
             let class = self.field_class(field)?;
             let actual = (self.class_name)(class);
-            if (self.field_flags)(field) & 0x10 != 0 || actual.is_null() || CStr::from_ptr(actual) != enum_name || !(self.class_enum)(class) {
+            if (self.field_flags)(field) & 0x10 != 0 || actual.is_null() || metadata_text(actual) != enum_name {
                 return Err(unsupported("catalog Byte enum identity/storage"));
             }
-            let base = (self.enum_base)(class);
-            if base.is_null() || (self.type_byref)(base) || (self.type_code)(base) != 0x05 || (self.type_class)(base) != self.system_class(c"Byte")? {
-                return Err(unsupported("catalog Byte enum underlying type"));
-            }
+            self.enum_storage(class, c"Byte", 0x05)?;
             let mut value = 0_u8;
             (self.field_get)(target(object)?.as_ptr(), field, (&mut value as *mut u8).cast());
             Ok(value)
@@ -418,6 +417,7 @@ impl RuntimeAccess {
     }
 
     pub(super) unsafe fn catalog_live(&self, attached: &AttachedThread<'_>, images: &Images, object: &Root<'_, '_>) -> Result<bool, DiscoveryError> {
+        // SAFETY: The rooted Unity wrapper's validated native pointer is copied and compared without dereferencing the native address.
         unsafe {
             let _ = attached;
             let unity_object = self.class(images, c"UnityEngine", c"Object")?;

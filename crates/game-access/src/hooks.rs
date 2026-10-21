@@ -155,7 +155,7 @@ fn copied_prefix(bytes: &[u8], address: u64) -> Result<usize, HookError> {
     }
     Ok(decoder.position())
 }
-unsafe fn pin(address: *const u8) -> Result<(), HookError> {
+fn pin(address: *const u8) -> Result<(), HookError> {
     let mut module = std::ptr::null_mut();
     // SAFETY: prepare requires loaded module-owned code; FROM_ADDRESS never reads a string.
     if unsafe { GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_PIN, address.cast(), &raw mut module) } == 0 {

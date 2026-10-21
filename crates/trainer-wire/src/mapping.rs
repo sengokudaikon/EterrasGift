@@ -110,20 +110,18 @@ pub struct UniqueRollPreview {
 pub struct ForgeDescriptionRequest {
     pub(crate) dispatcher: crate::protocol::DispatcherSpec,
     pub(crate) manager: u64,
-    pub(crate) expected: Box<crate::forge::ForgeSnapshot>,
+    pub(crate) expected: crate::forge::CheckedSnapshot,
 }
 impl ForgeDescriptionRequest {
     pub const OPERATION: u32 = 12;
     pub fn new(dispatcher: crate::protocol::DispatcherSpec, manager: u64, expected: crate::forge::ForgeSnapshot) -> Result<Self, ProtocolError> {
+        Self::from_checked(dispatcher, manager, crate::forge::CheckedSnapshot::new(expected)?)
+    }
+    pub(crate) fn from_checked(dispatcher: crate::protocol::DispatcherSpec, manager: u64, expected: crate::forge::CheckedSnapshot) -> Result<Self, ProtocolError> {
         if manager == 0 {
             return invalid();
         }
-        crate::forge::encode(Some(&expected))?;
-        Ok(Self {
-            dispatcher,
-            manager,
-            expected: Box::new(expected),
-        })
+        Ok(Self { dispatcher, manager, expected })
     }
     pub fn dispatcher(&self) -> crate::protocol::DispatcherSpec {
         self.dispatcher
@@ -136,29 +134,7 @@ impl ForgeDescriptionRequest {
     }
 
     pub fn encode(&self) -> Result<Vec<u8>, ProtocolError> {
-        self.encode_operation(Self::OPERATION)
-    }
-    pub(crate) fn encode_operation(&self, operation: u32) -> Result<Vec<u8>, ProtocolError> {
-        use crate::protocol::{MAGIC, REQUEST_SIZE};
-        if self.manager == 0 {
-            return invalid();
-        }
-        let tail = crate::forge::encode(Some(&self.expected))?;
-        let mut bytes = vec![0; REQUEST_SIZE];
-        bytes[..4].copy_from_slice(&MAGIC.to_le_bytes());
-        bytes[4..8].copy_from_slice(&operation.to_le_bytes());
-        bytes[12..16].copy_from_slice(&(tail.len() as u32).to_le_bytes());
-        bytes[16..24].copy_from_slice(&self.manager.to_le_bytes());
-        bytes[48..56].copy_from_slice(&self.dispatcher.rva.to_le_bytes());
-        bytes[56..72].copy_from_slice(&self.dispatcher.bytes);
-        bytes.extend(tail);
-        Ok(bytes)
-    }
-    pub(crate) fn validate_header(bytes: &[u8]) -> Result<(), ProtocolError> {
-        if bytes[8..12].iter().chain(&bytes[24..48]).chain(&bytes[72..]).any(|b| *b != 0) {
-            return invalid();
-        }
-        Ok(())
+        Ok(crate::protocol::Request::DescribeImplicits(self.clone()).encode())
     }
 }
 
@@ -176,6 +152,10 @@ pub struct UniquePreviewRequest {
 impl UniquePreviewRequest {
     pub const OPERATION: u32 = 5;
     pub fn new(dispatcher: crate::protocol::DispatcherSpec, manager: u64, expected: crate::forge::ForgeSnapshot, changes: Vec<UniqueRollChange>) -> Result<Self, ProtocolError> {
+        Self::from_target(ForgeDescriptionRequest::new(dispatcher, manager, expected)?, changes)
+    }
+    pub(crate) fn from_target(target: ForgeDescriptionRequest, changes: Vec<UniqueRollChange>) -> Result<Self, ProtocolError> {
+        let expected = target.expected();
         if !matches!(expected.rarity, 7 | 9) || changes.is_empty() || changes.len() > 8 {
             return invalid();
         }
@@ -184,10 +164,7 @@ impl UniquePreviewRequest {
         if changes.iter().any(|c| usize::from(c.index) >= count || !seen.insert(c.index)) {
             return invalid();
         }
-        Ok(Self {
-            target: ForgeDescriptionRequest::new(dispatcher, manager, expected)?,
-            changes,
-        })
+        Ok(Self { target, changes })
     }
     pub fn dispatcher(&self) -> crate::protocol::DispatcherSpec {
         self.target.dispatcher()
@@ -205,29 +182,7 @@ impl UniquePreviewRequest {
         &self.target
     }
     pub fn encode(&self) -> Vec<u8> {
-        let mut bytes = self.target.encode_operation(Self::OPERATION).expect("validated preview request");
-        bytes[8..12].copy_from_slice(&(self.changes.len() as u32).to_le_bytes());
-        for (index, change) in self.changes.iter().enumerate() {
-            let offset = 72 + index * 8;
-            bytes[offset..offset + 4].copy_from_slice(&u32::from(change.index).to_le_bytes());
-            bytes[offset + 4..offset + 8].copy_from_slice(&u32::from(change.value).to_le_bytes());
-        }
-        bytes
-    }
-    pub(crate) fn fields(bytes: &[u8]) -> Result<Vec<UniqueRollChange>, ProtocolError> {
-        let count = u32::from_le_bytes(bytes[8..12].try_into().unwrap()) as usize;
-        if !(1..=8).contains(&count) || bytes[24..48].iter().chain(&bytes[72 + count * 8..]).any(|b| *b != 0) {
-            return invalid();
-        }
-        let mut changes = Vec::new();
-        for index in 0..count {
-            let offset = 72 + index * 8;
-            changes.push(UniqueRollChange {
-                index: u8::try_from(u32::from_le_bytes(bytes[offset..offset + 4].try_into().unwrap())).map_err(|_| ProtocolError::InvalidData)?,
-                value: u8::try_from(u32::from_le_bytes(bytes[offset + 4..offset + 8].try_into().unwrap())).map_err(|_| ProtocolError::InvalidData)?,
-            });
-        }
-        Ok(changes)
+        crate::protocol::Request::PreviewUnique(self.clone()).encode()
     }
 }
 
@@ -256,15 +211,14 @@ impl AffixMappingQuery {
         start: MappingStart,
         draft: Option<AffixMappingDraft>,
     ) -> Result<Self, ProtocolError> {
+        Self::from_target(ForgeDescriptionRequest::new(dispatcher, manager, expected)?, slot, start, draft)
+    }
+    pub(crate) fn from_target(target: ForgeDescriptionRequest, slot: u8, start: MappingStart, draft: Option<AffixMappingDraft>) -> Result<Self, ProtocolError> {
+        let expected = target.expected();
         if usize::from(slot) >= expected.affixes.len() || slot >= 32 || draft.is_some_and(|d| d.id > 4095 || !(1..=8).contains(&d.tier) || d.seal > 3) {
             return invalid();
         }
-        Ok(Self {
-            target: ForgeDescriptionRequest::new(dispatcher, manager, expected)?,
-            slot,
-            start,
-            draft,
-        })
+        Ok(Self { target, slot, start, draft })
     }
     pub fn dispatcher(&self) -> crate::protocol::DispatcherSpec {
         self.target.dispatcher
@@ -285,54 +239,7 @@ impl AffixMappingQuery {
         self.target.manager
     }
     pub fn encode(&self) -> Vec<u8> {
-        let mut bytes = self.target.encode().expect("validated mapping target");
-        bytes[4..8].copy_from_slice(&Self::OPERATION.to_le_bytes());
-        bytes[8..12].copy_from_slice(&u32::from(self.slot).to_le_bytes());
-        bytes[24..28].copy_from_slice(&self.draft.map_or(u32::MAX, |d| u32::from(d.id)).to_le_bytes());
-        if let Some(draft) = self.draft {
-            bytes[28..32].copy_from_slice(&u32::from(draft.tier).to_le_bytes());
-            bytes[32..36].copy_from_slice(&u32::from(draft.seal).to_le_bytes());
-            bytes[40..44].copy_from_slice(&u32::from(draft.roll).to_le_bytes());
-        }
-        bytes[36..40].copy_from_slice(
-            &match self.start {
-                MappingStart::ContextOnly => u32::MAX,
-                MappingStart::Samples(start) => u32::from(start),
-            }
-            .to_le_bytes(),
-        );
-        bytes
-    }
-    pub(crate) fn fields(bytes: &[u8]) -> Result<(u8, MappingStart, Option<AffixMappingDraft>), ProtocolError> {
-        if bytes[44..48].iter().chain(&bytes[72..]).any(|b| *b != 0) {
-            return invalid();
-        }
-        let value = |at| u32::from_le_bytes(bytes[at..at + 4].try_into().unwrap());
-        let slot = u8::try_from(value(8)).map_err(|_| ProtocolError::InvalidData)?;
-        if slot >= 32 {
-            return invalid();
-        }
-        let start = if value(36) == u32::MAX {
-            MappingStart::ContextOnly
-        } else {
-            MappingStart::Samples(u8::try_from(value(36)).map_err(|_| ProtocolError::InvalidData)?)
-        };
-        let draft = if value(24) == u32::MAX {
-            if value(28) != 0 || value(32) != 0 || value(40) != 0 {
-                return invalid();
-            }
-            None
-        } else {
-            let id = u16::try_from(value(24)).map_err(|_| ProtocolError::InvalidData)?;
-            let tier = u8::try_from(value(28)).map_err(|_| ProtocolError::InvalidData)?;
-            let roll = u8::try_from(value(40)).map_err(|_| ProtocolError::InvalidData)?;
-            let seal = u8::try_from(value(32)).map_err(|_| ProtocolError::InvalidData)?;
-            if id > 4095 || !(1..=8).contains(&tier) || seal > 3 {
-                return invalid();
-            }
-            Some(AffixMappingDraft { id, tier, roll, seal })
-        };
-        Ok((slot, start, draft))
+        crate::protocol::Request::MapRoll(self.clone()).encode()
     }
 }
 

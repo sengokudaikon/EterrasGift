@@ -1,7 +1,7 @@
 use eg_trainer_wire::{
     fields::{self, AttackLeechObservation, AttackLeechRead, AttackLeechTarget, ObservedObjectIdentity, ObservedRate},
     forge::{ForgeSnapshot, ItemStatus},
-    protocol::{DispatcherSpec, ProtocolError, REQUEST_SIZE, Request, RequestFrame, VERSION},
+    protocol::{DispatcherSpec, ProtocolError, REQUEST_HEADER_SIZE, Request, RequestFrame},
     rate_write::AttackLeechRateWrite,
     write::ForgeWrite,
 };
@@ -28,15 +28,12 @@ fn write() -> AttackLeechRateWrite {
 /// Independently specified prefix, authored as literal bytes rather than calling
 /// the encoder or copying its field assembly; remaining240 reserved bytes are0.
 fn golden() -> Vec<u8> {
-    let mut bytes = vec![
-        0x35, 0x47, 0x46, 0x45, 0x18, 0, 0, 0, 1, 0, 0, 0, 0x0a, 0xd7, 0x23, 0x3c, 8, 7, 6, 5, 4, 3, 2, 1, 0x18, 0x17, 0x16, 0x15, 0x14, 0x13, 0x12, 0x11, 0x28, 0x27, 0x26, 0x25,
-        0x24, 0x23, 0x22, 0x21, 0x38, 0x37, 0x36, 0x35, 0x34, 0x33, 0x32, 0x31, 0x80, 0x70, 0x60, 0x50, 0x40, 0x30, 0x20, 0x10, b'f', b'i', b'x', b't', b'u', b'r', b'e', b'-',
-        b'p', b'r', b'o', b'o', b'f', b'-', b'1', b'6', 0x48, 0x47, 0x46, 0x45, 0x44, 0x43, 0x42, 0x41, 0x58, 0x57, 0x56, 0x55, 0x54, 0x53, 0x52, 0x51, 0x45, 0x23, 0xc1, 0x7f, 0,
+    vec![
+        0x35, 0x47, 0x46, 0x45, 24, 0, 0, 0, 85, 0, 0, 0, 0x80, 0x70, 0x60, 0x50, 0x40, 0x30, 0x20, 0x10, b'f', b'i', b'x', b't', b'u', b'r', b'e', b'-', b'p', b'r', b'o', b'o',
+        b'f', b'-', b'1', b'6', 1, 0x0a, 0xd7, 0x23, 0x3c, 8, 7, 6, 5, 4, 3, 2, 1, 0x18, 0x17, 0x16, 0x15, 0x14, 0x13, 0x12, 0x11, 0x28, 0x27, 0x26, 0x25, 0x24, 0x23, 0x22, 0x21,
+        0x38, 0x37, 0x36, 0x35, 0x34, 0x33, 0x32, 0x31, 0x48, 0x47, 0x46, 0x45, 0x44, 0x43, 0x42, 0x41, 0x58, 0x57, 0x56, 0x55, 0x54, 0x53, 0x52, 0x51, 0x45, 0x23, 0xc1, 0x7f, 0,
         0, 0, 0x80,
-    ];
-    assert_eq!(bytes.len(), 96);
-    bytes.resize(336, 0);
-    bytes
+    ]
 }
 fn patch32(bytes: &mut [u8], offset: usize, value: u32) {
     bytes[offset..offset + 4].copy_from_slice(&value.to_le_bytes());
@@ -44,7 +41,7 @@ fn patch32(bytes: &mut [u8], offset: usize, value: u32) {
 fn invalid(bytes: &[u8]) {
     assert!(AttackLeechRateWrite::decode(bytes).is_err());
     assert!(Request::decode(bytes).is_err());
-    if bytes.len() == REQUEST_SIZE {
+    if bytes.len() == REQUEST_HEADER_SIZE {
         assert!(Request::decode_header(bytes).is_err());
         assert!(RequestFrame::new(bytes).is_err());
     }
@@ -54,7 +51,6 @@ fn invalid(bytes: &[u8]) {
 fn independent_packed_golden_and_full_projection() {
     let write = write();
     let bytes = golden();
-    assert_eq!(VERSION, 37);
     assert_eq!(write.encode(), bytes);
     assert_eq!(AttackLeechRateWrite::decode(&bytes).unwrap(), write);
     let request = Request::SetAttackLeechRate(write.clone());
@@ -71,54 +67,45 @@ fn independent_packed_golden_and_full_projection() {
 }
 
 #[test]
-fn every_reserved_byte_rejected_before_header_or_frame_admission() {
-    for offset in 96..336 {
+fn declared_lengths_cannot_hide_extra_or_missing_data() {
+    for length in [0, 23, 84, 86, u32::MAX] {
         let mut bytes = golden();
-        bytes[offset] = 1;
-        invalid(&bytes);
+        patch32(&mut bytes, 8, length);
+        assert!(Request::decode(&bytes).is_err());
     }
 }
 
 #[test]
 fn unknown_target_zero_identities_and_wrong_operation_rejected() {
-    for tag in [0, 3, 24, u32::MAX] {
+    for tag in [0, 3, 24, 255] {
         let mut bytes = golden();
-        patch32(&mut bytes, 8, tag);
+        bytes[36] = tag;
         invalid(&bytes);
     }
-    for offset in [16, 24, 32, 40, 72, 80] {
+    for at in [41, 49, 57, 65, 73, 81] {
         let mut bytes = golden();
-        bytes[offset..offset + 8].fill(0);
+        bytes[at..at + 8].fill(0);
         invalid(&bytes);
     }
     let mut bytes = golden();
     patch32(&mut bytes, 4, 25);
     invalid(&bytes);
-    let mut bytes = golden();
-    bytes[0] ^= 1;
-    assert_eq!(AttackLeechRateWrite::decode(&bytes), Err(ProtocolError::IncompatibleVersion));
-    invalid(&bytes);
+    bytes = golden();
+    bytes[0] = 0;
+    assert_eq!(AttackLeechRateWrite::decode(&bytes), Err(ProtocolError::InvalidMagic));
 }
 
 #[test]
 fn all_truncations_and_excess_rejected_and_frame_cannot_grow() {
-    let golden = golden();
-    for length in 0..336 {
-        invalid(&golden[..length]);
-        assert!(Request::decode_header(&golden[..length]).is_err());
+    let bytes = golden();
+    for end in 0..bytes.len() {
+        assert!(Request::decode(&bytes[..end]).is_err());
     }
-    for extra in [1, 16, 1024] {
-        let mut bytes = golden.clone();
-        bytes.resize(336 + extra, 0);
-        invalid(&bytes);
-    }
-    let header = Request::decode_header(&golden).unwrap();
-    assert_eq!(header.tail_len(), 0);
-    assert_eq!(header.total_len(), 336);
-    let frame = RequestFrame::new(&golden).unwrap();
-    assert_eq!(frame.remaining(), 0);
+    let mut frame = RequestFrame::new(&bytes[..REQUEST_HEADER_SIZE]).unwrap();
+    assert!(frame.push(&bytes[REQUEST_HEADER_SIZE..]).is_ok());
     assert_eq!(frame.finish().unwrap(), Request::SetAttackLeechRate(write()));
-    let mut frame = RequestFrame::new(&golden).unwrap();
+    let mut frame = RequestFrame::new(&bytes[..REQUEST_HEADER_SIZE]).unwrap();
+    assert!(frame.push(&bytes[REQUEST_HEADER_SIZE..]).is_ok());
     assert!(frame.push(&[0]).is_err());
     assert!(frame.finish().is_err());
 }
@@ -129,8 +116,8 @@ fn desired_f32_domains_boundaries_and_nonfinite_patterns_are_strict() {
         for bits in [0x7f800000, 0xff800000, 0x7fc00001, 0x7f800001, 0xffc12345] {
             assert!(AttackLeechRateWrite::new(dispatcher(), observation(), target, bits).is_err());
             let mut bytes = golden();
-            patch32(&mut bytes, 8, if target == AttackLeechTarget::AttackRate { 1 } else { 2 });
-            patch32(&mut bytes, 12, bits);
+            bytes[36] = if target == AttackLeechTarget::AttackRate { 1 } else { 2 };
+            patch32(&mut bytes, 37, bits);
             invalid(&bytes);
         }
     }
@@ -170,7 +157,7 @@ fn old_raw_patterns_are_never_normalized_and_noop_means_bit_identical() {
     expected.attack_rate.raw_bits = 1_f32.to_bits();
     assert!(AttackLeechRateWrite::new(dispatcher(), expected, AttackLeechTarget::AttackRate, 1_f32.to_bits()).is_err());
     let mut bytes = golden();
-    patch32(&mut bytes, 88, 0x3c23d70a);
+    patch32(&mut bytes, 89, 0x3c23d70a);
     invalid(&bytes);
     let signed = AttackLeechRateWrite::new(dispatcher(), observation(), AttackLeechTarget::IncreasedLeechRate, 0).unwrap();
     assert_eq!(signed.projected().increased_leech_rate.raw_bits, 0);
@@ -190,12 +177,12 @@ fn dispatcher_is_exact_caller_proof_data_not_an_admission_assertion() {
     assert_eq!(request.dispatcher(), Some(dispatcher()));
     assert_eq!(Request::Discover.dispatcher(), None);
     let mut bytes = golden();
-    bytes[48..72].fill(0);
+    bytes[12..36].fill(0);
     let request = Request::decode(&bytes).unwrap();
     assert_eq!(request.dispatcher(), Some(DispatcherSpec { rva: 0, bytes: [0; 16] }));
     // Structurally valid zero/mismatched proof is left to the source-bound host
     // and helper admission checks; wire decoding must not claim runtime authority.
-    for offset in 48..72 {
+    for offset in 12..36 {
         let mut bytes = golden();
         bytes[offset] ^= 0x80;
         assert_eq!(Request::decode(&bytes).unwrap().encode(), bytes);
@@ -203,15 +190,15 @@ fn dispatcher_is_exact_caller_proof_data_not_an_admission_assertion() {
 }
 
 #[test]
-fn existing_op23_and_read_response_v1_remain_literal_byte_compatible() {
+fn read_messages_keep_typed_observations_with_a_compact_request() {
     let request = Request::ReadAttackLeech {
         dispatcher: dispatcher(),
         expected_manager: 7,
     };
     let bytes = request.encode();
-    assert_eq!(bytes.len(), 336);
+    assert_eq!(bytes.len(), 44);
     assert_eq!(&bytes[4..8], &23_u32.to_le_bytes());
-    assert!(bytes[16..48].iter().chain(&bytes[72..]).all(|b| *b == 0));
+    assert_eq!(&bytes[36..44], &7u64.to_le_bytes());
     assert_eq!(Request::decode(&bytes).unwrap(), request);
     let bytes = fields::encode(&AttackLeechRead::Available(observation()));
     assert_eq!(bytes.len(), 64);
@@ -247,11 +234,11 @@ fn status_bounded_tail_header_cannot_submit_without_complete_expected_item() {
     forge.fingerprint = forge.legacy_fingerprint();
     let request = Request::EditForge(ForgeWrite::level_requirement(dispatcher(), 7, forge, 2).unwrap());
     let bytes = request.encode();
-    let header = Request::decode_header(&bytes[..336]).unwrap();
-    assert!(header.tail_len() > 0);
-    assert!(Request::decode(&bytes[..336]).is_err());
-    assert!(RequestFrame::new(&bytes[..336]).unwrap().finish().is_err());
-    let mut frame = RequestFrame::new(&bytes[..336]).unwrap();
-    frame.push(&bytes[336..]).unwrap();
+    let header = Request::decode_header(&bytes[..REQUEST_HEADER_SIZE]).unwrap();
+    assert!(header.body_len() > 0);
+    assert!(Request::decode(&bytes[..REQUEST_HEADER_SIZE]).is_err());
+    assert!(RequestFrame::new(&bytes[..REQUEST_HEADER_SIZE]).unwrap().finish().is_err());
+    let mut frame = RequestFrame::new(&bytes[..REQUEST_HEADER_SIZE]).unwrap();
+    frame.push(&bytes[REQUEST_HEADER_SIZE..]).unwrap();
     assert_eq!(frame.finish().unwrap(), request);
 }

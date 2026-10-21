@@ -66,7 +66,7 @@ fn malformed_or_cross_slot_implicit_mapping_revokes_connection_without_retry() {
         session.enable();
         run(session.connect(now())).unwrap();
         assert!(matches!(run(session.describe_implicits(now(), &forge_item())), Err(SessionError::Protocol(_))));
-        assert_eq!(session.state(), SessionState::Blocked);
+        assert_eq!(session.state(), SessionState::Disconnected);
         assert_eq!(wire.requests().len(), 3);
     }
 }
@@ -100,9 +100,9 @@ fn conditional_description_frame_rejects_reserved_bytes_truncation_and_excess() 
     let request = Request::DescribeImplicits(ForgeDescriptionRequest::new(fixture.dispatcher, 0x1234, forge_item()).unwrap());
     let frame = request.encode();
     assert_eq!(Request::decode(&frame).unwrap(), request);
-    for offset in [8, 24, 36, 47, 72, 80, 335] {
+    for offset in [0, 4, 8, 44, 45, 46, 47] {
         let mut bad = frame.clone();
-        bad[offset] = 1;
+        bad[offset] ^= 0xff;
         assert!(Request::decode(&bad).is_err());
     }
     assert!(Request::decode(&frame[..frame.len() - 1]).is_err());
@@ -111,33 +111,6 @@ fn conditional_description_frame_rejects_reserved_bytes_truncation_and_excess() 
     assert!(Request::decode(&bad).is_err());
 }
 
-#[test]
-fn optional_formatter_failure_cannot_restore_admission_after_log_gate_loss() {
-    let fixture = Fixture::new();
-    let log = FakeLog::new([offline()]);
-    let changed = log.clone();
-    let wire = FakeTransport::new(
-        fixture.target.clone(),
-        [
-            fixture.discover(),
-            status(false, 0x1234, 0),
-            Step::Action(
-                Box::new(move || changed.set(online())),
-                Response {
-                    code: ResponseCode::Failed,
-                    payload: b"formatter threw".to_vec(),
-                },
-            ),
-        ],
-    );
-    let mut session = fixture.session(&wire, &log, GatePolicy::Release);
-    session.enable();
-    run(session.connect(now())).unwrap();
-    assert!(matches!(run(session.describe_implicits(now(), &forge_item())), Err(SessionError::Gate(_))));
-    assert_ne!(session.state(), SessionState::Ready);
-    assert_eq!(session.runtime_status(), None);
-    assert_eq!(wire.requests().len(), 3);
-}
 #[test]
 fn canceled_description_does_not_replay_or_leave_ready() {
     let fixture = Fixture::new();

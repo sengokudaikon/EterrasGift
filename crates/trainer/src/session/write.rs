@@ -5,10 +5,11 @@ use crate::{
 };
 use eg_trainer_wire::{
     rate_write::{AttackLeechRateWrite, RateWriteReply},
+    transport::Delivery,
     write::{ForgeWrite, WriteReply},
 };
 
-impl<T: Transport, L: LogSource> Session<T, L> {
+impl<T: Transport> Session<T> {
     pub fn last_write(&self) -> Option<&WriteRecord> {
         self.last_write.as_ref()
     }
@@ -26,18 +27,17 @@ impl<T: Transport, L: LogSource> Session<T, L> {
     pub async fn write(&mut self, now: Timestamp, plan: &WritePlan) -> Result<WriteOutcome<WriteObservation>, SessionError> {
         self.write_controlled(now, plan, &mut AllowWrite).await
     }
-    pub async fn write_controlled(&mut self, now: Timestamp, plan: &WritePlan, control: &mut dyn WriteControl) -> Result<WriteOutcome<WriteObservation>, SessionError> {
+    pub async fn write_controlled(&mut self, _now: Timestamp, plan: &WritePlan, control: &mut dyn WriteControl) -> Result<WriteOutcome<WriteObservation>, SessionError> {
         if matches!(self.state, SessionState::Connecting | SessionState::Closing) {
             return Err(SessionError::Busy);
         }
-        self.write_gate(now)?;
+        self.require_enabled()?;
         if self.state != SessionState::Ready {
             return Err(SessionError::NotConnected);
         }
         let dispatcher = self.discovery.as_ref().ok_or(SessionError::NotConnected)?.dispatcher;
         let (request, readback) = self.prepare_write(plan, dispatcher)?;
-        let elapsed = std::time::Instant::now();
-        self.write_provenance(now, elapsed, &dispatcher)?;
+        self.write_provenance(&dispatcher)?;
         if !control.allowed() {
             return Err(SessionError::Busy);
         }
@@ -63,7 +63,7 @@ impl<T: Transport, L: LogSource> Session<T, L> {
         };
         // A trusted pre-store refusal stays definitive after admission loss.
         // No further native I/O follows a failed gate or changed artifact.
-        if let Err(error) = self.write_provenance(now, elapsed, &dispatcher) {
+        if let Err(error) = self.write_provenance(&dispatcher) {
             healthy = false;
             if matches!(result, WriteOutcome::Confirmed(_)) {
                 result = WriteOutcome::uncertain(format!("write reply lost confirmation provenance: {error}"));
@@ -79,7 +79,7 @@ impl<T: Transport, L: LogSource> Session<T, L> {
                     Err(error) => WriteOutcome::uncertain(format!("write sent but independent readback failed: {error}")),
                 };
                 if matches!(result, WriteOutcome::Confirmed(_) | WriteOutcome::NotKept(_))
-                    && let Err(error) = self.write_provenance(now, elapsed, &dispatcher)
+                    && let Err(error) = self.write_provenance(&dispatcher)
                 {
                     result = WriteOutcome::uncertain(format!("independent readback lost confirmation provenance: {error}"));
                 }
@@ -101,17 +101,7 @@ impl<T: Transport, L: LogSource> Session<T, L> {
         } else {
             self.release_without_io();
             if self.state == SessionState::Connecting {
-                self.state = if matches!(
-                    result,
-                    WriteOutcome::NotApplied {
-                        code: ResponseCode::OfflineRequired,
-                        ..
-                    }
-                ) {
-                    SessionState::WaitingForCharacter
-                } else {
-                    SessionState::Blocked
-                };
+                self.state = SessionState::Disconnected;
             }
         }
         self.record_write(plan, result.clone());
@@ -151,14 +141,13 @@ impl<T: Transport, L: LogSource> Session<T, L> {
             }
         }
     }
-    fn write_provenance(&mut self, now: Timestamp, elapsed: std::time::Instant, dispatcher: &DispatcherSpec) -> Result<(), SessionError> {
-        self.write_gate(advanced(now, elapsed)?)?;
-        if let Err(error) = self.profile.validate(dispatcher) {
+    fn write_provenance(&mut self, dispatcher: &DispatcherSpec) -> Result<(), SessionError> {
+        if let Err(error) = self.validate_profile(dispatcher) {
             self.release_without_io();
-            self.state = SessionState::Blocked;
+            self.state = SessionState::Disconnected;
             return Err(SessionError::Identity(error.to_string()));
         }
-        self.write_gate(advanced(now, elapsed)?)
+        Ok(())
     }
     fn record_write(&mut self, plan: &WritePlan, status: WriteOutcome<WriteObservation>) {
         match plan {
@@ -175,22 +164,6 @@ impl<T: Transport, L: LogSource> Session<T, L> {
                 })
             }
         }
-    }
-    pub(super) fn write_gate(&mut self, now: Timestamp) -> Result<(), SessionError> {
-        if !self.enabled {
-            return Err(SessionError::Disabled);
-        }
-        let decision = gate::evaluate(&self.log.read(self.started), self.started, now, GatePolicy::Release);
-        if decision.verdict == GateVerdict::Allow {
-            return Ok(());
-        }
-        self.release_without_io();
-        self.state = if decision.verdict == GateVerdict::Refuse {
-            SessionState::Blocked
-        } else {
-            SessionState::WaitingForCharacter
-        };
-        Err(SessionError::Gate(decision))
     }
     pub(super) fn abandon_pending_write(&mut self) {
         if let Some(record) = &mut self.last_write

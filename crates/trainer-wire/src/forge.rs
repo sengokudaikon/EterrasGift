@@ -138,6 +138,43 @@ impl ForgeSnapshot {
     }
 }
 
+/// Immutable request snapshot, validated once when constructed or decoded.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct CheckedSnapshot {
+    value: Box<ForgeSnapshot>,
+    bytes: Vec<u8>,
+}
+impl std::ops::Deref for CheckedSnapshot {
+    type Target = ForgeSnapshot;
+    fn deref(&self) -> &Self::Target {
+        &self.value
+    }
+}
+impl CheckedSnapshot {
+    fn check_length(length: usize) -> Result<(), ProtocolError> {
+        if !(crate::write::MIN_EXPECTED_BYTES..=crate::write::MAX_EXPECTED_BYTES).contains(&length) {
+            return Err(ProtocolError::InvalidData);
+        }
+        Ok(())
+    }
+    pub(crate) fn new(value: ForgeSnapshot) -> Result<Self, ProtocolError> {
+        let bytes = encode(Some(&value))?;
+        Self::check_length(bytes.len())?;
+        Ok(Self { value: Box::new(value), bytes })
+    }
+    pub(crate) fn decode(bytes: &[u8]) -> Result<Self, ProtocolError> {
+        Self::check_length(bytes.len())?;
+        let value = decode(bytes)?.ok_or(ProtocolError::InvalidData)?;
+        Ok(Self {
+            value: Box::new(value),
+            bytes: bytes.to_vec(),
+        })
+    }
+    pub(crate) fn bytes(&self) -> &[u8] {
+        &self.bytes
+    }
+}
+
 pub fn encode(snapshot: Option<&ForgeSnapshot>) -> Result<Vec<u8>, ProtocolError> {
     let Some(snapshot) = snapshot else { return Ok(vec![0]) };
     snapshot.validate()?;

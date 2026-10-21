@@ -16,6 +16,7 @@ impl RuntimeAccess {
     /// Read an immutable literal through its metadata default, never through guessed field storage.
     /// Internal caller must hold read_item_limits's live-runtime/metadata contract.
     unsafe fn limit_constant(&self, owner: Class, name: &CStr) -> Result<u8, DiscoveryError> {
+        // SAFETY: The class and field descriptors are retained metadata; literal/static flags and exact Int32 storage precede the local copy.
         unsafe {
             if owner.is_null() {
                 return Err(unsupported("item constant owner"));
@@ -73,6 +74,7 @@ impl RuntimeAccess {
     /// ExperienceTracker.maxLevel are exact System.Int32 literals; level minimum 0 is the original
     /// helper's defined domain bound, rather than a nonexistent guessed metadata constant.
     pub unsafe fn read_item_limits(&self, attached: &AttachedThread<'_>) -> Result<ItemLimits, DiscoveryError> {
+        // SAFETY: The caller supplies the admitted main-thread runtime span; literal metadata checks precede every constant copy.
         unsafe {
             let status = self.status(attached)?;
             if status.online || status.manager == 0 {

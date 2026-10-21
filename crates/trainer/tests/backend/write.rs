@@ -344,7 +344,6 @@ fn only_explicit_write_is_submitted_and_full_confirmation_is_published() {
         connected(&handle).await;
         let state = handle.snapshot();
         assert!(state.capabilities.level_requirement);
-        assert!(!state.capabilities.write_forge);
         let plan = state.level_requirement_plan(17).unwrap();
         assert_eq!(shared.count("write"), 0);
         command(&handle, Command::ApplyForge(Box::new(plan.clone()))).await.unwrap();

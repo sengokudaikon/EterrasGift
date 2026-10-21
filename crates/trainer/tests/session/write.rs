@@ -1,7 +1,7 @@
 use super::*;
 use eg_trainer::{
     catalog::{CatalogIdentity, EXTRACTION_VERSION, GameCatalog},
-    edits::{CatalogProvenance, EditError, ExpectedObservation, ItemEdit, StatusEdit, StatusField},
+    edits::{EditError, ExpectedObservation, ItemEdit, StatusEdit, StatusField},
     writes::{ForgePlan, WriteControl, WriteObservation, WriteOutcome, WriteStatus},
 };
 
@@ -27,15 +27,10 @@ fn plan_with_version(fixture: &Fixture, extraction_version: u32) -> ForgePlan {
         rarities: Default::default(),
     };
     let expected = ExpectedObservation::new(1, fixture.target.clone(), catalog.identity.clone(), forge_item()).unwrap();
-    let provenance = CatalogProvenance::RuntimeRead {
-        generation: 1,
-        process: fixture.target.clone(),
-    };
     ForgePlan::edit(
         &expected,
         0x1234,
         &catalog,
-        &provenance,
         ItemEdit::Status(StatusEdit {
             field: StatusField::LevelRequirement,
             value: 17,
@@ -45,7 +40,7 @@ fn plan_with_version(fixture: &Fixture, extraction_version: u32) -> ForgePlan {
     )
     .unwrap()
 }
-fn ready(fixture: &Fixture, wire: &FakeTransport, log: &FakeLog) -> Session<FakeTransport, FakeLog> {
+fn ready(fixture: &Fixture, wire: &FakeTransport, log: &FakeLog) -> Session<FakeTransport> {
     let mut session = fixture.session(wire, log, GatePolicy::Release);
     session.enable();
     run(session.connect(now())).unwrap();
@@ -110,7 +105,7 @@ fn readback_of_a_replaced_forge_item_is_unknown_even_with_equal_values() {
         );
         let mut session = ready(&f, &wire, &FakeLog::new([offline()]));
         assert!(matches!(run(session.write(now(), &plan.into())).unwrap(), WriteOutcome::Uncertain { .. }));
-        assert_eq!(session.state(), SessionState::Blocked);
+        assert_eq!(session.state(), SessionState::Disconnected);
         assert_eq!(wire.requests().len(), 4);
     }
 }
@@ -146,7 +141,7 @@ fn malformed_replaced_or_failed_write_is_uncertain_and_never_replayed() {
         let wire = FakeTransport::new(f.target.clone(), [f.discover(), status(false, 0x1234, 0), Step::Reply(Ok(response))]);
         let mut session = ready(&f, &wire, &FakeLog::new([offline()]));
         assert!(matches!(run(session.edit_forge(now(), &plan)).unwrap(), WriteStatus::Uncertain { .. }));
-        assert_eq!(session.state(), SessionState::Blocked);
+        assert_eq!(session.state(), SessionState::Disconnected);
         assert!(run(session.edit_forge(now(), &plan)).is_err());
         assert_eq!(wire.requests().len(), 3);
     }
@@ -211,13 +206,12 @@ fn delivery_and_trusted_prestore_refusals_preserve_certainty_without_retry() {
     }
 }
 #[test]
-fn successful_reply_after_log_or_artifact_loss_is_uncertain_without_more_process_io() {
+fn successful_reply_after_artifact_loss_is_uncertain_without_more_process_io() {
     for change_file in [false, true] {
-        let f = Fixture::new();
+        let f = Fixture::rehashing();
         let plan = plan(&f);
         let log = FakeLog::new([offline()]);
-        let changed_log = log.clone();
-        let metadata = f.metadata.clone();
+        let metadata = if change_file { f.binary.clone() } else { f.metadata.clone() };
         let wire = FakeTransport::new(
             f.target.clone(),
             [
@@ -225,11 +219,7 @@ fn successful_reply_after_log_or_artifact_loss_is_uncertain_without_more_process
                 status(false, 0x1234, 0),
                 Step::Action(
                     Box::new(move || {
-                        if change_file {
-                            fs::write(metadata, b"changed while write was pending").unwrap();
-                        } else {
-                            changed_log.set(online());
-                        }
+                        fs::write(metadata, b"changed while write was pending").unwrap();
                     }),
                     Response {
                         code: ResponseCode::Done,
@@ -247,8 +237,8 @@ fn successful_reply_after_log_or_artifact_loss_is_uncertain_without_more_process
 #[test]
 fn preflight_refuses_wrong_runtime_manager_or_artifacts_without_write_submission() {
     for fault in 0..3 {
-        let f = Fixture::new();
-        let plan = if fault == 0 { plan(&Fixture::new()) } else { plan(&f) };
+        let f = Fixture::rehashing();
+        let plan = if fault == 0 { plan(&Fixture::rehashing()) } else { plan(&f) };
         let wire = FakeTransport::new(f.target.clone(), [f.discover(), status(false, if fault == 1 { 0x5678 } else { 0x1234 }, 0)]);
         let mut session = ready(&f, &wire, &FakeLog::new([offline()]));
         if fault == 2 {
@@ -259,20 +249,7 @@ fn preflight_refuses_wrong_runtime_manager_or_artifacts_without_write_submission
         assert!(session.last_write().is_none());
     }
 }
-#[test]
-fn development_probe_permission_cannot_write_and_disabled_session_does_not_read_log() {
-    let f = Fixture::new();
-    let plan = plan(&f);
-    let log = FakeLog::new([GameLogState::missing()]);
-    let wire = FakeTransport::new(f.target.clone(), [f.discover(), status(false, 0x1234, 0)]);
-    let mut session = f.session(&wire, &log, GatePolicy::Development);
-    assert!(matches!(run(session.edit_forge(now(), &plan)), Err(SessionError::Disabled)));
-    assert!(log.reads().is_empty());
-    session.enable();
-    run(session.connect(now())).unwrap();
-    assert!(matches!(run(session.edit_forge(now(), &plan)), Err(SessionError::Gate(_))));
-    assert_eq!(wire.requests().len(), 2);
-}
+
 #[test]
 fn abandoned_write_remains_pending_and_busy_until_cleanup_records_uncertainty() {
     let f = Fixture::new();
@@ -364,13 +341,12 @@ fn separate_readback_retains_known_drift_but_malformed_missing_or_failed_reads_a
     }
 }
 #[test]
-fn separate_readback_cannot_confirm_after_its_log_or_artifacts_change() {
+fn separate_readback_cannot_confirm_after_either_artifact_changes() {
     for change_file in [false, true] {
-        let f = Fixture::new();
+        let f = Fixture::rehashing();
         let plan = plan(&f);
         let log = FakeLog::new([offline()]);
-        let changed_log = log.clone();
-        let metadata = f.metadata.clone();
+        let metadata = if change_file { f.binary.clone() } else { f.metadata.clone() };
         let reply = forge::encode(Some(plan.projected())).unwrap();
         let wire = FakeTransport::new(
             f.target.clone(),
@@ -380,11 +356,7 @@ fn separate_readback_cannot_confirm_after_its_log_or_artifacts_change() {
                 done(reply.clone()),
                 Step::Action(
                     Box::new(move || {
-                        if change_file {
-                            fs::write(metadata, b"changed during separate readback").unwrap();
-                        } else {
-                            changed_log.set(online());
-                        }
+                        fs::write(metadata, b"changed during separate readback").unwrap();
                     }),
                     Response {
                         code: ResponseCode::Done,

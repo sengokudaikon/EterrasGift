@@ -43,7 +43,7 @@ fn run<T>(future: impl std::future::Future<Output = T>) -> T {
 #[test]
 fn offline_admission_precedes_local_helper_manifest_access() {
     // SAFETY: all calls are refused before reaching the native preparer.
-    let mut connector = unsafe { DesktopConnector::new(std::env::temp_dir().join("missing-helper-for-online-preflight.json"), Logs(false)) };
+    let mut connector = DesktopConnector::new(std::env::temp_dir().join("missing-helper-for-online-preflight.json"), Logs(false));
     let error = run(connector.connect(target(), Timestamp::now())).err().unwrap();
     assert_eq!(error.kind, ErrorKind::Gate);
 }
@@ -52,7 +52,7 @@ fn missing_package_can_be_retried_but_incomplete_package_is_blocked() {
     let folder = tempfile::tempdir().unwrap();
     let manifest = folder.path().join("helper.json");
     // SAFETY: missing/invalid manifest cases never enter native preparation.
-    let mut connector = unsafe { DesktopConnector::new(manifest.clone(), Logs(true)) };
+    let mut connector = DesktopConnector::new(manifest.clone(), Logs(true));
     let missing = run(connector.connect(target(), Timestamp::now())).err().unwrap();
     assert_eq!(missing.kind, ErrorKind::NotReady);
     assert!(!missing.retry_when_waiting);

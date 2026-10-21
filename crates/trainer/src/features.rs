@@ -11,7 +11,7 @@ use std::fmt;
 mod catalog;
 pub use catalog::{DESCRIPTORS, PAGES, SOURCE_COMMIT, SOURCE_FILES};
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum TrainerArea {
     Character,
     Stash,

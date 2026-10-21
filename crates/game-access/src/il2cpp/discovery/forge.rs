@@ -1,5 +1,6 @@
 //! Main-thread copies of the current forge graph. No managed/game method is invoked.
 
+use super::metadata_text;
 use super::{Class, DiscoveryError, Images, Ptr, RuntimeAccess, unsupported};
 use crate::il2cpp::{AttachedThread, StrongRoot, raw};
 use eg_trainer_wire::forge::{AffixSnapshot, ForgeSnapshot, ItemStatus, UniqueIdentity};
@@ -53,12 +54,12 @@ fn bounded_count(count: i32, capacity: u32) -> Result<usize, DiscoveryError> {
     }
 }
 
-fn decode_text(units: &[u16]) -> Result<String, DiscoveryError> {
-    if units.len() > 4096 {
+fn decode_text(units: &[u16], maximum: usize) -> Result<String, DiscoveryError> {
+    if units.len() > maximum {
         return Err(unsupported("forge text length"));
     }
     let text = String::from_utf16(units).map_err(|_| unsupported("forge text UTF-16"))?;
-    if text.len() > 4096 {
+    if text.len() > maximum {
         return Err(unsupported("forge text UTF-8 length"));
     }
     Ok(text)
@@ -72,6 +73,7 @@ impl RuntimeAccess {
         name: &CStr,
         value: &Root<'_, '_>,
     ) -> Result<NonNull<raw::FieldInfo>, DiscoveryError> {
+        // SAFETY: The receiver and value are rooted; exact mutable reference storage and declaring-class compatibility are checked before returning the field.
         unsafe {
             if !object.belongs_to(attached) || !value.belongs_to(attached) {
                 return Err(unsupported("reference store runtime mismatch"));
@@ -95,6 +97,7 @@ impl RuntimeAccess {
     }
     // All internal unsafe helpers inherit read_forge's live attached-runtime and graph access contract.
     pub(super) unsafe fn system_class(&self, name: &CStr) -> Result<Class, DiscoveryError> {
+        // SAFETY: Corlib and the named class descriptor belong to retained initialized runtime metadata.
         unsafe {
             let image = (self.corlib)();
             if image.is_null() {
@@ -109,6 +112,7 @@ impl RuntimeAccess {
     }
 
     pub(super) unsafe fn instance_field(&self, object: &Root<'_, '_>, name: &CStr, expected: Class) -> Result<Ptr, DiscoveryError> {
+        // SAFETY: The receiver is rooted; its field type, instance storage and expected class are checked before returning metadata.
         unsafe {
             let object = target(object)?;
             let class = (self.object_class)(object.as_ptr());
@@ -125,6 +129,7 @@ impl RuntimeAccess {
     }
 
     pub(super) unsafe fn field_class(&self, field: Ptr) -> Result<Class, DiscoveryError> {
+        // SAFETY: The field descriptor is retained metadata; nonnull non-byref type metadata is checked before resolving its class.
         unsafe {
             let ty = (self.field_type)(field);
             if ty.is_null() || (self.type_byref)(ty) {
@@ -139,6 +144,7 @@ impl RuntimeAccess {
     }
 
     pub(super) unsafe fn primitive<T: Primitive>(&self, object: &Root<'_, '_>, name: &CStr) -> Result<T, DiscoveryError> {
+        // SAFETY: The receiver is rooted; exact primitive class validation fixes the stack destination's width before FieldGet.
         unsafe {
             let class = self.system_class(T::NAME)?;
             let field = self.instance_field(object, name, class)?;
@@ -151,6 +157,7 @@ impl RuntimeAccess {
     }
 
     pub(super) unsafe fn boolean(&self, object: &Root<'_, '_>, name: &CStr) -> Result<bool, DiscoveryError> {
+        // SAFETY: The rooted receiver's exact Boolean field is copied into one byte and validated before conversion to bool.
         unsafe {
             let class = self.system_class(c"Boolean")?;
             let field = self.instance_field(object, name, class)?;
@@ -165,6 +172,7 @@ impl RuntimeAccess {
     }
 
     pub(super) unsafe fn enumeration(&self, object: &Root<'_, '_>, name: &CStr, enum_name: &CStr) -> Result<i32, DiscoveryError> {
+        // SAFETY: The rooted receiver's enum name and underlying Int32 metadata are checked before copying into an i32 local.
         unsafe {
             let object_class = (self.object_class)(target(object)?.as_ptr());
             if object_class.is_null() {
@@ -176,21 +184,10 @@ impl RuntimeAccess {
             // The field itself identifies its enum, including a nested or namespaced enum that
             // cannot be resolved by class_from_name(image, "", simpleName). Recheck both the
             // accepted semantic name and the enum storage before copying into an i32 slot.
-            if (self.field_flags)(field) & 0x10 != 0
-                || actual_name.is_null()
-                || CStr::from_ptr(actual_name) != enum_name
-                || !super::field_type_matches(&self.type_name((self.field_type)(field))?, &enum_name.to_string_lossy(), false)
-            {
+            if (self.field_flags)(field) & 0x10 != 0 || actual_name.is_null() || metadata_text(actual_name) != enum_name {
                 return Err(unsupported("forge enum field name/storage"));
             }
-            let base = self.system_class(c"Int32")?;
-            if !(self.class_enum)(class) {
-                return Err(unsupported("forge enum storage"));
-            }
-            let enum_base = (self.enum_base)(class);
-            if enum_base.is_null() || (self.type_class)(enum_base) != base {
-                return Err(unsupported("forge enum storage"));
-            }
+            self.enum_storage(class, c"Int32", 0x08)?;
             let mut value = 0_i32;
             (self.field_get)(target(object)?.as_ptr(), field, (&mut value as *mut i32).cast());
             Ok(value)
@@ -204,6 +201,7 @@ impl RuntimeAccess {
         name: &CStr,
         declared: Class,
     ) -> Result<Option<Root<'a, 'r>>, DiscoveryError> {
+        // SAFETY: The rooted receiver's reference field is validated; the copied object is rooted before checking assignability.
         unsafe {
             if declared.is_null() || (self.class_value)(declared) {
                 return Err(unsupported("forge reference field class"));
@@ -222,6 +220,7 @@ impl RuntimeAccess {
     }
 
     pub(super) unsafe fn exact(&self, object: &Root<'_, '_>, expected: Class) -> Result<(), DiscoveryError> {
+        // SAFETY: The object is rooted and both class descriptors belong to this retained runtime.
         unsafe {
             if (self.object_class)(target(object)?.as_ptr()) != expected {
                 return Err(unsupported("unexpected forge object type"));
@@ -231,30 +230,68 @@ impl RuntimeAccess {
     }
 
     pub(super) unsafe fn text(&self, attached: &AttachedThread<'_>, object: &Root<'_, '_>, name: &CStr) -> Result<String, DiscoveryError> {
+        // SAFETY: The string object is rooted; class, length and character storage are checked before the bounded UTF-16 copy.
         unsafe {
             let class = self.system_class(c"String")?;
             let Some(text) = self.reference(attached, object, name, class)? else {
                 return Ok(String::new());
             };
-            self.exact(&text, class)?;
-            let text = target(&text)?;
-            let length = (self.string_length)(text.as_ptr());
-            if !(0..=4096).contains(&length) {
-                return Err(unsupported("forge text length"));
+            self.owned_text(Some(&text), class, 4096)
+        }
+    }
+
+    pub(super) unsafe fn owned_text(&self, text: Option<&Root<'_, '_>>, class: Class, maximum: usize) -> Result<String, DiscoveryError> {
+        // SAFETY: the caller retains the runtime and root; exact String class and bounded
+        // public length are checked before copying its initialized UTF-16 buffer.
+        unsafe {
+            let Some(text) = text else {
+                return Ok(String::new());
+            };
+            self.exact(text, class)?;
+            let object = target(text)?;
+            let length = usize::try_from((self.string_length)(object.as_ptr())).map_err(|_| unsupported("negative string length"))?;
+            if length > maximum {
+                return Err(unsupported("string length"));
             }
-            let chars = (self.string_chars)(text.as_ptr());
+            let chars = (self.string_chars)(object.as_ptr());
             if chars.is_null() && length != 0 {
-                return Err(unsupported("forge string characters"));
+                return Err(unsupported("string characters"));
             }
-            let mut units = Vec::with_capacity(length as usize);
-            for index in 0..length as usize {
-                units.push(chars.add(index).read());
+            decode_text(&super::copy_values(chars, length), maximum)
+        }
+    }
+    pub(super) unsafe fn list_class(&self, class: Class) -> Result<(), DiscoveryError> {
+        // SAFETY: class is retained metadata; all dependent exports are queried only
+        // after its null check. This validates a closed framework List before field access.
+        unsafe {
+            if class.is_null() || (self.class_value)(class) || (self.class_image)(class) != (self.corlib)() || (self.type_code)((self.class_type)(class)) != 0x15 {
+                return Err(unsupported("closed List class"));
             }
-            decode_text(&units)
+            let name = (self.class_name)(class);
+            let namespace = (self.class_namespace)(class);
+            if name.is_null() || namespace.is_null() || metadata_text(name) != c"List`1" || metadata_text(namespace) != c"System.Collections.Generic" {
+                return Err(unsupported("framework List identity"));
+            }
+            Ok(())
+        }
+    }
+    pub(super) unsafe fn enum_storage(&self, class: Class, primitive: &CStr, code: i32) -> Result<(), DiscoveryError> {
+        // SAFETY: both classes belong to retained metadata; the enum's exact non-byref
+        // underlying primitive is established before any field copy into a local slot.
+        unsafe {
+            if class.is_null() || !(self.class_enum)(class) {
+                return Err(unsupported("enum class"));
+            }
+            let base = (self.enum_base)(class);
+            if base.is_null() || (self.type_byref)(base) || (self.type_code)(base) != code || (self.type_class)(base) != self.system_class(primitive)? {
+                return Err(unsupported("enum underlying storage"));
+            }
+            Ok(())
         }
     }
 
     pub(super) unsafe fn array_class(&self, class: Class, element: Class) -> Result<(), DiscoveryError> {
+        // SAFETY: The rooted array's runtime class and exact element class are checked through retained metadata exports.
         unsafe {
             if class.is_null() || (self.class_rank)(class) != 1 || (self.type_code)((self.class_type)(class)) != 0x1d || (self.class_element)(class) != element {
                 return Err(unsupported("forge SZARRAY element/rank"));
@@ -264,6 +301,7 @@ impl RuntimeAccess {
     }
 
     pub(super) unsafe fn array_count(&self, array: &Root<'_, '_>, element: Class, maximum: u32) -> Result<u32, DiscoveryError> {
+        // SAFETY: The rooted array's public length is cross-checked against the supported header before bounded element reads.
         unsafe {
             let object = target(array)?;
             self.array_class((self.object_class)(object.as_ptr()), element)?;
@@ -279,6 +317,7 @@ impl RuntimeAccess {
     }
 
     unsafe fn roll_array(&self, attached: &AttachedThread<'_>, object: &Root<'_, '_>, name: &CStr, maximum: u32) -> Result<Vec<u8>, DiscoveryError> {
+        // SAFETY: The rooted array has exact Byte element storage and bounded length before its owned byte copy.
         unsafe {
             let byte = self.system_class(c"Byte")?;
             let class = (self.object_class)(target(object)?.as_ptr());
@@ -291,32 +330,18 @@ impl RuntimeAccess {
             self.exact(&array, array_class)?;
             let count = self.array_count(&array, byte, maximum)?;
             let start = target(&array)?.as_ptr().cast::<u8>().add(32);
-            let mut values = Vec::with_capacity(count as usize);
-            for index in 0..count as usize {
-                values.push(start.add(index).read());
-            }
-            Ok(values)
+            Ok(super::copy_values(start, count as usize))
         }
     }
 
     unsafe fn affixes(&self, attached: &AttachedThread<'_>, images: &Images, item: &Root<'_, '_>) -> Result<Vec<AffixSnapshot>, DiscoveryError> {
+        // SAFETY: The rooted list and backing array are bounded; each affix is rooted and type-checked before field copying.
         unsafe {
             let affix_class = self.class(images, c"", c"ItemAffix")?;
             let item_class = (self.object_class)(target(item)?.as_ptr());
             let list_field = self.field(item_class, c"affixes")?;
             let list_class = self.field_class(list_field)?;
-            if list_class.is_null()
-                || (self.class_value)(list_class)
-                || (self.type_code)((self.class_type)(list_class)) != 0x15
-                || (self.class_image)(list_class) != (self.corlib)()
-            {
-                return Err(unsupported("forge closed List<ItemAffix> class"));
-            }
-            let list_name = (self.class_name)(list_class);
-            let list_namespace = (self.class_namespace)(list_class);
-            if list_name.is_null() || list_namespace.is_null() || CStr::from_ptr(list_name) != c"List`1" || CStr::from_ptr(list_namespace) != c"System.Collections.Generic" {
-                return Err(unsupported("forge list definition"));
-            }
+            self.list_class(list_class)?;
             let list = self
                 .reference(attached, item, c"affixes", list_class)?
                 .ok_or_else(|| unsupported("forge affix list missing"))?;
@@ -334,7 +359,7 @@ impl RuntimeAccess {
             let mut values = Vec::with_capacity(count);
             for slot in 0..count {
                 let array = target(&array)?;
-                let pointer = array.as_ptr().cast::<u8>().add(32 + slot * std::mem::size_of::<Ptr>()).cast::<*mut raw::Object>().read();
+                let pointer = super::read_value(array.as_ptr().cast::<u8>().add(32 + slot * std::mem::size_of::<Ptr>()).cast::<*mut raw::Object>());
                 let pointer = NonNull::new(pointer).ok_or_else(|| unsupported("forge null affix"))?;
                 let affix = attached.root(pointer)?;
                 self.exact(&affix, affix_class)?;
@@ -367,6 +392,7 @@ impl RuntimeAccess {
     /// No root, raw pointer or borrow returned by this operation grants later memory access; the
     /// snapshot's item address is only an ephemeral identity token. Runtime shutdown is excluded.
     pub unsafe fn read_forge(&self, attached: &AttachedThread<'_>) -> Result<Option<ForgeSnapshot>, DiscoveryError> {
+        // SAFETY: The caller supplies the documented main-thread graph span; all objects remain rooted through the owned snapshot.
         unsafe {
             let Some(graph) = self.forge_graph(attached)? else { return Ok(None) };
             self.forge_snapshot(attached, &graph).map(Some)
@@ -375,6 +401,7 @@ impl RuntimeAccess {
 
     // Internal callers inherit read_forge's complete live-runtime/graph contract.
     pub(super) unsafe fn forge_graph<'a, 'r>(&self, attached: &'a AttachedThread<'r>) -> Result<Option<ForgeGraph<'a, 'r>>, DiscoveryError> {
+        // SAFETY: The caller excludes graph changes; static manager and every graph edge are rooted and class-checked before traversal.
         unsafe {
             let images = self.images()?;
             let online = self.static_field(self.class(&images, c"EHG.Multiplayer", c"GameplayEnvironment")?, c"_isOnlinePlay", "System.Boolean")?;
@@ -459,6 +486,7 @@ impl RuntimeAccess {
     }
 
     pub(super) unsafe fn forge_snapshot(&self, attached: &AttachedThread<'_>, graph: &ForgeGraph<'_, '_>) -> Result<ForgeSnapshot, DiscoveryError> {
+        // SAFETY: Existing graph roots retain the selected item and arrays while exact typed fields are copied.
         unsafe {
             let item = &graph.item;
             let rarity: u8 = self.primitive(item, c"rarity")?;
@@ -527,6 +555,7 @@ mod tests {
         static ENUM_NAME: Cell<&'static CStr> = const { Cell::new(c"ClassRequirement") };
         static ENUM_TYPE_NAME: Cell<&'static CStr> = const { Cell::new(c"Fixture.Owner/ClassRequirement") };
         static IS_ENUM: Cell<bool> = const { Cell::new(true) };
+        static ENUM_BASE_CODE: Cell<i32> = const { Cell::new(0x08) };
         static ENUM_BASE_CLASS: Cell<usize> = const { Cell::new(INT_CLASS) };
         static FLAGS: Cell<i32> = const { Cell::new(0) };
         static BYREF: Cell<bool> = const { Cell::new(false) };
@@ -656,8 +685,8 @@ mod tests {
     unsafe extern "C-unwind" fn class_type(_: Class) -> super::super::Type {
         token(0x9000)
     }
-    unsafe extern "C-unwind" fn type_code(_: super::super::Type) -> i32 {
-        TYPE_CODE.get()
+    unsafe extern "C-unwind" fn type_code(ty: super::super::Type) -> i32 {
+        if ty as usize == ENUM_BASE_TYPE { ENUM_BASE_CODE.get() } else { TYPE_CODE.get() }
     }
     unsafe extern "C-unwind" fn class_element(_: Class) -> Class {
         token(ELEMENT.get())
@@ -698,6 +727,7 @@ mod tests {
         ENUM_TYPE_NAME.set(c"Fixture.Owner/ClassRequirement");
         IS_ENUM.set(true);
         ENUM_BASE_CLASS.set(INT_CLASS);
+        ENUM_BASE_CODE.set(0x08);
         FLAGS.set(0);
         BYREF.set(false);
         GLOBAL_ENUM_LOOKUPS.set(0);
@@ -886,7 +916,7 @@ mod tests {
                 0 => ENUM_NAME.set(c"OtherEnum"),
                 1 => IS_ENUM.set(false),
                 2 => ENUM_BASE_CLASS.set(WORD_CLASS),
-                3 => ENUM_TYPE_NAME.set(c"Fixture.NotClassRequirement"),
+                3 => ENUM_BASE_CODE.set(0x05),
                 4 => FLAGS.set(0x10),
                 5 => BYREF.set(true),
                 _ => unreachable!(),
@@ -926,11 +956,11 @@ mod tests {
     }
     #[test]
     fn strict_text_checks_both_encodings() {
-        assert_eq!(decode_text(&[0x41, 0xd83d, 0xde00]).unwrap(), "A😀");
-        assert!(decode_text(&[0xd800]).is_err());
-        assert!(decode_text(&[0xdc00]).is_err());
-        assert!(decode_text(&vec![0x41; 4097]).is_err());
-        assert!(decode_text(&vec![0x4e00; 1366]).is_err());
-        assert!(decode_text(&vec![0x41; 4096]).is_ok());
+        assert_eq!(decode_text(&[0x41, 0xd83d, 0xde00], 4096).unwrap(), "A😀");
+        assert!(decode_text(&[0xd800], 4096).is_err());
+        assert!(decode_text(&[0xdc00], 4096).is_err());
+        assert!(decode_text(&vec![0x41; 4097], 4096).is_err());
+        assert!(decode_text(&vec![0x4e00; 1366], 4096).is_err());
+        assert!(decode_text(&vec![0x41; 4096], 4096).is_ok());
     }
 }

@@ -27,7 +27,6 @@ use std::{
 use windows_sys::Win32::System::{
     Diagnostics::Debug::RtlLookupFunctionEntry,
     LibraryLoader::{GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS, GET_MODULE_HANDLE_EX_FLAG_PIN, GetModuleHandleExW, GetModuleHandleW, GetProcAddress},
-    SystemInformation::GetTickCount64,
     Threading::{GetCurrentProcessId, GetCurrentThreadId},
 };
 
@@ -40,12 +39,10 @@ static FIXTURE_HOOK: AtomicPtr<RetainedHook> = AtomicPtr::new(std::ptr::null_mut
 #[cfg(feature = "fixture")]
 mod fixture;
 
-static NEXT_POLL: AtomicU64 = AtomicU64::new(0);
-
 fn state() -> &'static Shared {
     STATE.get_or_init(Shared::default)
 }
-unsafe fn pin(address: *const u8) -> Result<(), String> {
+fn pin(address: *const u8) -> Result<(), String> {
     let mut module = std::ptr::null_mut();
     // SAFETY: caller identifies loaded code; FROM_ADDRESS interprets address, never a string.
     if unsafe { GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_PIN, address.cast(), &raw mut module) } == 0 {
@@ -71,6 +68,17 @@ struct Runtime {
     writes: raw::FieldWriteApi,
 }
 impl Runtime {
+    unsafe fn retained(module: NonNull<u8>) -> Result<&'static Self, String> {
+        static RUNTIME: OnceLock<Runtime> = OnceLock::new();
+        if let Some(runtime) = RUNTIME.get() {
+            return Ok(runtime);
+        }
+        // SAFETY: startup pins GameAssembly before creating the worker; every lookup
+        // uses that same module, whose immutable metadata survives until process exit.
+        let runtime = unsafe { Self::resolve(module) }?;
+        let _ = RUNTIME.set(runtime);
+        Ok(RUNTIME.get().unwrap())
+    }
     unsafe fn resolve(module: NonNull<u8>) -> Result<Self, String> {
         // SAFETY: caller retains this exact module and establishes its supported ABI.
         unsafe {
@@ -116,10 +124,10 @@ unsafe fn runtime_operation(operation: impl FnOnce(&Runtime, RuntimeAccess, &Att
     // SAFETY: caller supplies the supported retained runtime/thread contract; all exports resolve before attachment/operation.
     unsafe {
         let result = (|| {
-            let (_, runtime) = prepare_operation(|| module(), |module| Runtime::resolve(module))?;
+            let (_, runtime) = prepare_operation(|| module(), |module| Runtime::retained(module))?;
             let thread = runtime.thread();
             let attached = thread.attach().map_err(|error| server::failure(ResponseCode::NotReady, error.to_string()))?;
-            operation(&runtime, runtime.access, &attached)
+            operation(runtime, runtime.access, &attached)
         })();
         result.unwrap_or_else(|error| error)
     }
@@ -140,11 +148,6 @@ unsafe fn read_status() -> Response {
     unsafe {
         runtime_operation(|_, access, attached| {
             let status = access.status(attached).map_err(map_discovery)?;
-            state().metrics[16].store(status.online as u64, SeqCst);
-            state().metrics[17].store(status.manager, SeqCst);
-            if status.online || status.manager == 0 {
-                state().metrics[13].fetch_add(1, SeqCst);
-            }
             Ok(Response {
                 code: ResponseCode::Done,
                 payload: status.encode().map_err(|e| server::failure(ResponseCode::Refused, e.to_string()))?.to_vec(),
@@ -322,7 +325,7 @@ unsafe fn read_locale() -> Response {
     // SAFETY: captured Unity main thread, after the original callback returned. The
     // bootstrap retains the initialized runtime and trusted method implementations.
     // RuntimeAccess first gates offline/native-manager life, then requires an already
-    // completed locale selection. Only audited identifier/code/version getters run;
+    // completed locale selection. Only identifier/code/version getters run;
     // metadata setup, GC allocation, Application's framework .cctor/CTS store, the
     // version internal-call cache and native return-buffer allocation/disposal are
     // permitted. Read-only here means no gameplay mutation, not zero side effects.
@@ -341,7 +344,7 @@ unsafe fn read_locale() -> Response {
 
 unsafe fn read_catalog_page(kind: eg_trainer_wire::catalog::CatalogKind, cursor: u32) -> Response {
     // SAFETY: same captured main-thread/runtime ownership as read_locale. Catalog capture
-    // copies only the audited, already-published definition graphs; it never starts asset
+    // copies only already-published definition graphs; it never starts asset
     // loading, invokes item builders, or changes gameplay state. Locale getter effects are
     // covered by read_locale's contract. The admitted catalog contract also permits the exact
     // corlib Array.GetValue(Int32) reflection/type-cache, allocation/boxing and GC/profiler
@@ -360,26 +363,16 @@ unsafe fn read_catalog_page(kind: eg_trainer_wire::catalog::CatalogKind, cursor:
     }
 }
 
-struct CallbackScope<'a>(&'a Shared);
-impl Drop for CallbackScope<'_> {
-    fn drop(&mut self) {
-        self.0.metrics[18].fetch_add(1, SeqCst);
-    }
-}
 unsafe extern "C-unwind" fn callback(method: *const MethodInfo) {
     let state = state();
-    let _scope = CallbackScope(state);
-    state.metrics[2].fetch_add(1, SeqCst);
     // SAFETY: original is published before any patch and retained for process lifetime.
     let original: ExecuteTasks = unsafe { std::mem::transmute(ORIGINAL.load(SeqCst)) };
     // Never put this original call inside a Rust catch or hold any Rust lock across it.
     // SAFETY: original is the published retained trampoline with the unchanged ExecuteTasks ABI; no Rust lock/catch spans the call.
     unsafe { original(method) };
-    state.metrics[3].fetch_add(1, SeqCst);
     // Contain Rust failures in our own post-call work. The engine's original call above must
     // retain its native/managed unwind behavior and is deliberately outside this boundary.
     if std::panic::catch_unwind(|| after_original(state)).is_err() {
-        state.metrics[0].store(30, SeqCst);
         state.stop.store(true, SeqCst);
     }
 }
@@ -402,7 +395,7 @@ unsafe fn check_dispatch_thread() -> Result<bool, String> {
     // initialized runtime. The getters access only its thread-local context.
     unsafe {
         let module = module()?;
-        let runtime = Runtime::resolve(module)?;
+        let runtime = Runtime::retained(module)?;
         let access = runtime.access;
         let invocation = runtime.invocation;
         let thread = runtime.thread();
@@ -418,33 +411,20 @@ fn after_original(state: &Shared) {
     // SAFETY: process-local identity query and callback-local initialized runtime.
     let tid = unsafe { GetCurrentThreadId() } as u64;
     // SAFETY: after the original call, only current-thread runtime context is inspected under the unsafe start contract.
-    match claim_dispatch_thread(&state.metrics[1], tid, || unsafe { check_dispatch_thread() }) {
+    match claim_dispatch_thread(&state.main_thread, tid, || unsafe { check_dispatch_thread() }) {
         Ok(true) => {}
         Ok(false) => {
-            state.metrics[14].fetch_add(1, SeqCst);
             return;
         }
         Err(error) => {
             eprintln!("EG_HELPER_DISPATCH_THREAD {error}");
-            state.metrics[0].store(31, SeqCst);
             state.stop.store(true, SeqCst);
             return;
         }
     }
-    // Independent runtime observation continues while the owning app is alive. There are no
-    // persistent gameplay hooks in this slice. Completed explicit field writes are
-    // retained; offline/owner loss does not initiate restoration or reapplication.
-    // SAFETY: time query and known main-thread status contracts above.
-    let tick = unsafe { GetTickCount64() };
-    if tick >= NEXT_POLL.load(SeqCst) && state.metrics[11].load(SeqCst) != 0 {
-        NEXT_POLL.store(tick.saturating_add(1000), SeqCst);
-        // SAFETY: the dispatcher thread check succeeded; unsafe start assumes a stable initialized graph for this synchronous copy.
-        let _ = unsafe { read_status() };
-    }
     if let Some(queue) = QUEUE.get() {
         queue.execute_one(|request| {
-            state.metrics[8].store(tid, SeqCst);
-            let response = match request {
+            match request {
                 // SAFETY: correct-thread gate and initialized exact-runtime contract above.
                 Request::Status { .. } => unsafe { read_status() },
                 // SAFETY: same main-thread and per-operation graph ownership contract above.
@@ -476,9 +456,7 @@ fn after_original(state: &Shared) {
                     payload: 0i32.to_le_bytes().to_vec(),
                 },
                 Request::Discover => server::failure(ResponseCode::Refused, "Discovery belongs on the control thread"),
-            };
-            state.metrics[4].fetch_add(1, SeqCst);
-            response
+            }
         });
     }
 }
@@ -556,7 +534,6 @@ impl Backend for Control<'_> {
                 && hook.state() != HookState::Disabled
             {
                 hooks::commit(&[(hook, false)]).map_err(|error| error.to_string())?;
-                state().metrics[19].fetch_add(1, SeqCst);
             }
         }
         Ok(())
@@ -567,7 +544,7 @@ unsafe fn worker() -> Result<(), String> {
     // SAFETY: start's contract pins an initialized exact runtime before creating this thread.
     unsafe {
         let module = module()?;
-        let runtime = Runtime::resolve(module)?;
+        let runtime = Runtime::retained(module)?;
         let access = runtime.access;
         let thread = runtime.thread();
         let attached = thread.attach().map_err(|error| error.to_string())?;
@@ -593,34 +570,13 @@ unsafe fn worker() -> Result<(), String> {
     }
 }
 
-#[unsafe(no_mangle)]
-/// Start once after loader initialization, from either an engine or native control thread.
-/// The legacy argument is ignored; only the verified callback establishes the main TID.
-/// # Safety
-/// Caller selects the supported initialized Unity6000.4.8 Windows x64 runtime,
-/// retains helper/runtime modules through game exit and excludes competing patches.
-/// Game-specific assumptions: the collector is nonmoving, queried static caches are
-/// initialized, and each synchronous operation excludes concurrent graph/scalar mutation,
-/// reentrancy and native-object destruction; edits additionally require exclusive write
-/// access. Startup does not establish these assumptions. Callback identity checks and
-/// roots/stale checks do not provide a lock on the game's graph or its native objects.
-/// Windows wrappers called during scheduler suspension must not wait on suspended-thread
-/// locks (including through third-party instrumentation); only the census stub is checked.
-/// Never call under DllMain/loader lock. Per-operation graph checks still apply.
-pub unsafe extern "C" fn eg_helper_start(_legacy_main_tid: u32) -> i32 {
-    // SAFETY: caller establishes the supported runtime and module lifetime.
-    unsafe { start_authorized() }
-}
-
 unsafe fn start_authorized() -> i32 {
-    let state = state();
     if STARTED.compare_exchange(false, true, SeqCst, SeqCst).is_err() {
         return 1;
     }
     // SAFETY: exact modules identified by caller; pin before publishing persistent work.
-    if let Err(error) = unsafe { pin(eg_helper_start as *const u8).and_then(|_| module()).and_then(|module| pin(module.as_ptr())) } {
+    if let Err(error) = unsafe { pin(eg_helper_bootstrap as *const u8).and_then(|_| module()).and_then(|module| pin(module.as_ptr())) } {
         eprintln!("EG_HELPER_START {error}");
-        state.metrics[0].store(10, SeqCst);
         return 10;
     }
     let _ = QUEUE.set(Dispatcher::default());
@@ -628,16 +584,13 @@ unsafe fn start_authorized() -> i32 {
         // SAFETY: inherited start contract; this dedicated OS thread owns all runtime leases.
         let outcome = std::panic::catch_unwind(|| unsafe { worker() });
         if !matches!(outcome, Ok(Ok(()))) {
-            crate::engine::state().metrics[0].store(20, SeqCst);
             crate::engine::state().stop.store(true, SeqCst);
-            crate::engine::state().metrics[10].store(0, SeqCst);
             eprintln!("EG_HELPER_WORKER {outcome:?}");
         }
     }) {
         Ok(_) => 0,
         Err(error) => {
             eprintln!("EG_HELPER_THREAD {error}");
-            state.metrics[0].store(11, SeqCst);
             11
         }
     }
@@ -648,72 +601,37 @@ struct BootstrapConfig {
     magic: u32,
     size: u32,
     pid: u32,
-    _legacy_main_tid: u32,
-    operation: u32,
     status: i32,
     build_id: [u8; 64],
-    reserved: [u8; 24],
 }
-const _: () = assert!(
-    std::mem::size_of::<BootstrapConfig>() == 112
-        && std::mem::offset_of!(BootstrapConfig, status) == 20
-        && std::mem::offset_of!(BootstrapConfig, build_id) == 24
-        && std::mem::offset_of!(BootstrapConfig, reserved) == 88
-);
+const _: () = assert!(std::mem::size_of::<BootstrapConfig>() == 80 && std::mem::offset_of!(BootstrapConfig, status) == 12 && std::mem::offset_of!(BootstrapConfig, build_id) == 16);
 
 #[unsafe(no_mangle)]
-/// Explicit Win32 remote-thread bootstrap after LoadLibrary returns. Operation 1 starts once;
-/// operation 2 accepts asynchronous shutdown and returns three retained read-only counter
-/// addresses (metrics 9/10/0) in the initially-zero reserved area. Poll those with process reads,
-/// without creating threads during restoration. Operation 3 copies their values for a helper
-/// already proven stopped. This never unloads code.
+/// Starts the retained helper once, after LoadLibrary returns.
 ///
 /// # Safety
-/// `parameter` must point to aligned, initialized, exclusively writable 112-byte BootstrapConfig
-/// storage retained until this thread exits. Caller establishes every `eg_helper_start` runtime,
-/// offline, exclusive-patching and retained-lifetime obligation, except that execution is on a
-/// dedicated native thread outside loader lock. The legacy TID slot is ignored;
-/// callback-local synchronization-context validation establishes the execution thread.
+/// `parameter` points to aligned, initialized, exclusively writable 80-byte configuration
+/// storage until this thread exits. The caller selects the supported initialized Unity
+/// runtime, outside loader lock. The collector must be nonmoving, queried caches initialized,
+/// and synchronous operations must exclude graph mutation, reentrancy and native destruction.
+/// Edits require exclusive write access. Helper/runtime modules remain loaded through exit;
+/// competing patches are excluded. Callback context checks establish the execution thread.
 pub unsafe extern "system" fn eg_helper_bootstrap(parameter: *mut c_void) -> u32 {
     if parameter.is_null() {
         return 60;
     }
     // SAFETY: the caller supplies aligned, nonaliased configuration memory for this thread.
     let config = unsafe { &mut *parameter.cast::<BootstrapConfig>() };
-    // Configuration has no shared Rust invariants: on panic status becomes 99 and the caller
-    // must ignore partial telemetry. No pointer into it is retained by the started worker.
-    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        // SAFETY: process-local OS queries; runtime use remains on the worker created below.
-        if config.magic != 0x4547_4253
-            || config.size != 112
-            // SAFETY: process-local OS queries; runtime use remains on the worker created below.
-            || config.pid != unsafe { GetCurrentProcessId() }
-            || config.build_id != BUILD_ID.as_bytes()
-            || config.reserved != [0; 24]
-            || !matches!(config.operation, 1..=3)
+    let result = std::panic::catch_unwind(|| {
+        if config.magic != 0x4547_4253 || config.size != 80
+            // SAFETY: argument-free process identity query.
+            || config.pid != unsafe { GetCurrentProcessId() } || config.build_id != BUILD_ID.as_bytes()
         {
             return 60;
         }
-        if config.operation == 1 {
-            // SAFETY: validated bootstrap identity plus the caller's exact runtime contract.
-            unsafe { start_authorized() }
-        } else if STARTED.load(SeqCst) {
-            if config.operation == 2 {
-                for (slot, metric) in [9, 10, 0].into_iter().enumerate() {
-                    let address = state().metrics[metric].as_ptr() as usize as u64;
-                    config.reserved[slot * 8..slot * 8 + 8].copy_from_slice(&address.to_le_bytes());
-                }
-                eg_helper_shutdown()
-            } else {
-                for (slot, metric) in [9, 10, 0].into_iter().enumerate() {
-                    config.reserved[slot * 8..slot * 8 + 8].copy_from_slice(&state().metrics[metric].load(SeqCst).to_le_bytes());
-                }
-                0
-            }
-        } else {
-            61
-        }
-    }))
+        // SAFETY: validated configuration and the caller's supported runtime contract.
+        unsafe { start_authorized() }
+    })
     .unwrap_or(99);
     config.status = result;
     result as u32
@@ -722,16 +640,6 @@ pub unsafe extern "system" fn eg_helper_bootstrap(parameter: *mut c_void) -> u32
 pub extern "C" fn eg_helper_build_id() -> *const c_char {
     BUILD_ID_C.as_ptr().cast()
 }
-#[unsafe(no_mangle)]
-pub extern "C" fn eg_helper_metrics(selector: u32) -> u64 {
-    state().metrics.get(selector as usize).map_or(u64::MAX, |value| value.load(SeqCst))
-}
-#[unsafe(no_mangle)]
-pub extern "C" fn eg_helper_shutdown() -> i32 {
-    state().stop.store(true, SeqCst);
-    0
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -769,32 +677,26 @@ mod tests {
     fn bootstrap_rejects_bad_admission_without_starting_a_worker() {
         // SAFETY: the null path returns without accessing configuration or runtime state.
         assert_eq!(unsafe { eg_helper_bootstrap(std::ptr::null_mut()) }, 60);
-        for invalid in 0..7 {
+        for invalid in 0..4 {
             let mut config = BootstrapConfig {
                 magic: 0x4547_4253,
-                size: 112,
+                size: 80,
                 // SAFETY: local identity query, no game runtime involved.
                 pid: unsafe { GetCurrentProcessId() },
-                _legacy_main_tid: u32::MAX,
-                operation: 1,
                 status: -1,
                 build_id: BUILD_ID.as_bytes().try_into().unwrap(),
-                reserved: [0; 24],
             };
             match invalid {
                 0 => config.magic = 0,
-                1 => config.size = 111,
+                1 => config.size = 79,
                 2 => config.pid = 0,
-                3 => config.operation = 0,
-                4 => config.operation = 4,
-                5 => config.build_id = [0; 64],
-                _ => config.reserved[23] = 1,
+                _ => config.build_id = [0; 64],
             }
             // SAFETY: full aligned exclusively-owned storage. Every case fails before any
             // runtime lookup/start, so no initialized IL2CPP or engine-thread contract is used.
             assert_eq!(unsafe { eg_helper_bootstrap((&raw mut config).cast()) }, 60);
             assert_eq!(config.status, 60);
         }
-        assert_eq!(STATE.get().map(|shared| shared.metrics[1].load(SeqCst)), None);
+        assert!(!STARTED.load(SeqCst));
     }
 }

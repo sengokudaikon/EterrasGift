@@ -1,7 +1,7 @@
 //! One-request transport and explicit uncertainty. Dropping a send future cannot retract submitted work.
 #![forbid(unsafe_code)]
 
-use crate::protocol::{ProtocolError, REQUEST_SIZE, RESPONSE_HEADER_SIZE, Request, RequestFrame, Response};
+use crate::protocol::{ProtocolError, REQUEST_HEADER_SIZE, RESPONSE_HEADER_SIZE, Request, RequestFrame, Response};
 use std::{future::Future, io};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
@@ -72,7 +72,7 @@ impl std::error::Error for RequestReadError {}
 /// Following stream data is not part of this frame. A server can separately
 /// refuse already buffered excess before submission, never undo accepted work.
 pub async fn read_request<S: AsyncRead + Unpin>(stream: &mut S) -> Result<Request, RequestReadError> {
-    let mut header = [0; REQUEST_SIZE];
+    let mut header = [0; REQUEST_HEADER_SIZE];
     stream.read_exact(&mut header).await.map_err(RequestReadError::Io)?;
     let mut frame = RequestFrame::new(&header).map_err(RequestReadError::Protocol)?;
     let mut chunk = [0; 8192];

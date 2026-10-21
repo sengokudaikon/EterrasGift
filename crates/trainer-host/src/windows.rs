@@ -13,8 +13,7 @@ use eg_game_access::{
 };
 use eg_trainer::{
     backend::{BackendError, ErrorKind},
-    connection::{AdmissionCheck, HelperPreparer, LogFactory, PreparationFailure, PreparationResidency, PreparedHelper},
-    gate::{self, GatePolicy, GateVerdict, LogSource},
+    connection::{AdmissionCheck, HelperPreparer, PreparationFailure, PreparationResidency, PreparedHelper},
     profile::BuildProfile,
 };
 use eg_trainer_wire::{
@@ -59,33 +58,18 @@ impl Retained {
 /// A possibly submitted load is never repeated in the same process generation.
 /// Process birth/path are part of the key; there is no arbitrary eight-game limit.
 /// Published helper code stays resident until game exit, independently of this owner.
-pub struct NativePreparer<F> {
+pub struct NativePreparer {
     artifact: Arc<HelperArtifact>,
-    logs: F,
     retained: Vec<Retained>,
     timeout: Duration,
 }
-impl<F: LogFactory> NativePreparer<F> {
+impl NativePreparer {
     /// Compose the supported-game Windows adapter without opening a process.
     ///
-    /// # Safety
-    /// Targets later supplied to prepare must be the supported Unity6000.4 Windows
-    /// x64 game (or an owned matching fixture), with its modern nonmoving IL2CPP
-    /// runtime. No competing patcher may modify the scheduler during installation.
-    /// Game runtime/module shutdown is excluded while callbacks access the runtime.
-    /// Each synchronous graph operation assumes no concurrent graph/scalar mutation,
-    /// reentrancy or native-object destruction; edits assume exclusive write access.
-    /// The scheduler's Win32 wrappers must not enter instrumentation that waits on
-    /// locks owned by suspended threads. No startup check establishes these premises.
-    /// These are game-specific interoperability assumptions, not facts certified by
-    /// a host-side authority object. prepare checks UnityPlayer's fixed file version
-    /// (6000.4), then binds the same disk bytes to the loaded module by hash.
-    /// Offline/identity/artifact checks run in prepare;
-    /// the helper checks callback thread and each operation's metadata/current graph.
-    pub unsafe fn new(artifact: Arc<HelperArtifact>, logs: F) -> Self {
+    /// Runtime compatibility is checked during preparation and by the helper.
+    pub fn new(artifact: Arc<HelperArtifact>) -> Self {
         Self {
             artifact,
-            logs,
             retained: Vec::new(),
             timeout: Duration::from_secs(10),
         }
@@ -139,11 +123,14 @@ impl<F: LogFactory> NativePreparer<F> {
         let modules = (|| {
             profile.validate_target(&target.executable).map_err(identity_error)?;
             let folder = target.executable.parent().ok_or_else(|| identity_error("game directory missing"))?;
-            let game = ModuleIdentity::capture(&folder.join("GameAssembly.dll"), profile.binary_hash()).map_err(game_build_error)?;
+            let game = match profile.binary_lease() {
+                Some(lease) => ModuleIdentity::from_lease(lease),
+                None => ModuleIdentity::capture(&folder.join("GameAssembly.dll"), profile.binary_hash()),
+            }
+            .map_err(game_build_error)?;
             let unity_path = folder.join("UnityPlayer.dll");
-            let unity_hash = eg_core::hashes::of_bytes(&std::fs::read(&unity_path).map_err(identity_error)?);
+            let unity = ModuleIdentity::open(&unity_path).map_err(identity_error)?;
             version::check_unity(&unity_path).map_err(identity_error)?;
-            let unity = ModuleIdentity::capture(&unity_path, &unity_hash).map_err(identity_error)?;
             Ok::<_, BackendError>((game, unity))
         })()
         .map_err(|error| failed(error, PreparationResidency::NotLoaded))?;
@@ -156,17 +143,13 @@ impl<F: LogFactory> NativePreparer<F> {
             profile: profile.clone(),
             state: RetainedState::Attempting,
         });
-        // SAFETY: new binds this adapter to the supported game's runtime assumptions.
-        // RemoteHelper performs process/artifact checks and owns all remote calls.
-        let result = unsafe {
-            RemoteHelper::start(
-                target.clone(),
-                self.artifact.clone(),
-                &[modules.0.clone(), modules.1],
-                &mut || admission.check().map_err(bootstrap_error),
-                self.timeout,
-            )
-        };
+        let result = RemoteHelper::start(
+            target.clone(),
+            self.artifact.clone(),
+            &[modules.0.clone(), modules.1],
+            &mut || admission.check().map_err(bootstrap_error),
+            self.timeout,
+        );
         match result {
             Ok(helper) => {
                 let record = Arc::new(Mutex::new(RuntimeRecord {
@@ -180,7 +163,19 @@ impl<F: LogFactory> NativePreparer<F> {
                 Ok(record)
             }
             Err(failure) => {
-                let error = BackendError::blocked(ErrorKind::Transport, failure.to_string());
+                let error = match &failure.error {
+                    BootstrapError::Admission { message, retry_when_waiting } => BackendError {
+                        kind: ErrorKind::Gate,
+                        message: message.clone(),
+                        delivery: Some(if failure.delivery == RemoteDelivery::NotSent {
+                            Delivery::NotSent
+                        } else {
+                            Delivery::MayHaveRun
+                        }),
+                        retry_when_waiting: *retry_when_waiting,
+                    },
+                    _ => BackendError::blocked(ErrorKind::Transport, failure.to_string()),
+                };
                 if failure.delivery == RemoteDelivery::NotSent {
                     self.retained.remove(index);
                     Err(failed(error, PreparationResidency::NotLoaded))
@@ -192,8 +187,23 @@ impl<F: LogFactory> NativePreparer<F> {
         }
     }
 }
-impl<F: LogFactory> HelperPreparer for NativePreparer<F> {
-    type Transport = VerifiedTransport<F::Log>;
+impl HelperPreparer for NativePreparer {
+    type Transport = VerifiedTransport;
+    fn reap_exited(&mut self) -> Vec<ProcessIdentity> {
+        let mut exited = Vec::new();
+        self.retained.retain(|entry| {
+            let dead = match &entry.state {
+                RetainedState::Loaded(record) => record.lock().unwrap_or_else(|p| p.into_inner()).helper.process_exited(),
+                RetainedState::Uncertain(failure) => failure.process_exited(),
+                RetainedState::Attempting => false,
+            };
+            if dead {
+                exited.push(entry.target.clone());
+            }
+            !dead
+        });
+        exited
+    }
     async fn prepare(
         &mut self,
         target: &ProcessIdentity,
@@ -201,8 +211,6 @@ impl<F: LogFactory> HelperPreparer for NativePreparer<F> {
         admission: &mut dyn AdmissionCheck,
     ) -> Result<PreparedHelper<Self::Transport>, PreparationFailure> {
         let runtime = self.prepare_once(target, profile, admission)?;
-        let log = self.logs.create(target).map_err(|error| failed(error, PreparationResidency::Loaded))?;
-        let admission = FreshAdmission::new(target, log).map_err(|error| failed(error, PreparationResidency::Loaded))?;
         Ok(PreparedHelper {
             target: target.clone(),
             helper_build_id: self.artifact.source_id().into(),
@@ -210,7 +218,6 @@ impl<F: LogFactory> HelperPreparer for NativePreparer<F> {
             transport: VerifiedTransport {
                 pipe: PipeClient::new(target.clone()),
                 runtime,
-                admission,
             },
         })
     }
@@ -229,7 +236,14 @@ fn failed(error: BackendError, residency: PreparationResidency) -> PreparationFa
     PreparationFailure { error, residency }
 }
 fn bootstrap_error(error: BackendError) -> BootstrapError {
-    io::Error::other(error.to_string()).into()
+    if error.kind == ErrorKind::Gate {
+        BootstrapError::Admission {
+            message: error.message,
+            retry_when_waiting: error.retry_when_waiting,
+        }
+    } else {
+        io::Error::other(error.to_string()).into()
+    }
 }
 fn transport_error(error: impl std::fmt::Display, delivery: Delivery) -> TransportError {
     TransportError {
@@ -249,40 +263,17 @@ fn require_request_proof(request: &Request, known: Option<DispatcherSpec>, has_p
     Ok(())
 }
 
-struct FreshAdmission<L> {
-    log: L,
-    started: jiff::Timestamp,
-}
-
-impl<L: LogSource> FreshAdmission<L> {
-    fn new(target: &ProcessIdentity, log: L) -> Result<Self, BackendError> {
-        let started = jiff::Timestamp::from_nanosecond((i128::from(target.created) - 116_444_736_000_000_000) * 100)
-            .map_err(|error| BackendError::blocked(ErrorKind::Identity, error.to_string()))?;
-        Ok(Self { log, started })
-    }
-    fn check(&mut self) -> Result<(), BootstrapError> {
-        let decision = gate::evaluate(&self.log.read(self.started), self.started, jiff::Timestamp::now(), GatePolicy::Release);
-        if decision.verdict == GateVerdict::Allow {
-            Ok(())
-        } else {
-            Err(BootstrapError::Invalid("fresh Release offline admission refused native transport access"))
-        }
-    }
-}
-
 /// Session transport keeps native residency/evidence alive independently of its
 /// preparer, and checks full pristine code before its first scheduler install.
-pub struct VerifiedTransport<L> {
+pub struct VerifiedTransport {
     pipe: PipeClient,
     runtime: Arc<Mutex<RuntimeRecord>>,
-    admission: FreshAdmission<L>,
 }
-impl<L: LogSource + Send> Transport for VerifiedTransport<L> {
+impl Transport for VerifiedTransport {
     fn target(&self) -> &ProcessIdentity {
         self.pipe.target()
     }
     async fn send(&mut self, request: &Request) -> Result<Response, TransportError> {
-        self.admission.check().map_err(|error| transport_error(error, Delivery::NotSent))?;
         {
             let record = self.runtime.lock().unwrap_or_else(|poison| poison.into_inner());
             record.helper.artifact().verify_unchanged().map_err(|error| transport_error(error, Delivery::NotSent))?;
@@ -291,13 +282,9 @@ impl<L: LogSource + Send> Transport for VerifiedTransport<L> {
             }
             require_request_proof(request, record.dispatcher, record.proof.is_some()).map_err(|error| transport_error(error, Delivery::NotSent))?;
         }
-        // Artifact verification may have taken time. Recheck policy immediately
-        // before the pipe client performs its process/server checks and exchange.
-        self.admission.check().map_err(|error| transport_error(error, Delivery::NotSent))?;
         let response = self.pipe.send(request).await?;
         if matches!(request, Request::Discover) && response.code == ResponseCode::Done {
             let proof_result = (|| {
-                self.admission.check()?;
                 let mut record = self.runtime.lock().unwrap_or_else(|poison| poison.into_inner());
                 let discovery = Discovery::decode(&response.payload, self.pipe.target().pid).map_err(|error| io::Error::other(error.to_string()))?;
                 if !discovery.build_id.eq_ignore_ascii_case(record.helper.artifact().source_id()) {
@@ -309,7 +296,7 @@ impl<L: LogSource + Send> Transport for VerifiedTransport<L> {
                     }
                 } else {
                     let proof = DispatcherProof::capture(record.game.clone(), &discovery.dispatcher)?;
-                    record.helper.verify_pristine(&proof, &mut || self.admission.check())?;
+                    record.helper.verify_pristine(&proof, &mut || Ok(()))?;
                     record.dispatcher = Some(discovery.dispatcher);
                     record.proof = Some(proof);
                 }
@@ -337,7 +324,7 @@ mod tests {
         support::run(async {
             let fixture = support::Fixture::new();
             // SAFETY: only authored replay records are inspected; no target is opened.
-            let mut native = unsafe { NativePreparer::new(fixture.artifact.clone(), support::Logs::default()) };
+            let mut native = NativePreparer::new(fixture.artifact.clone());
             for pid in 1..=12 {
                 native.retained.push(Retained {
                     target: ProcessIdentity { pid, ..fixture.target.clone() },
@@ -369,7 +356,7 @@ mod tests {
             let fixture = support::Fixture::new();
             std::fs::write(fixture.temp.path().join("GameAssembly.dll"), b"new game patch").unwrap();
             // SAFETY: preflight rejects authored files; no process is opened.
-            let mut native = unsafe { NativePreparer::new(fixture.artifact.clone(), support::Logs::default()) };
+            let mut native = NativePreparer::new(fixture.artifact.clone());
             let mut admission = support::Admission::new(true);
             let failure = native.prepare(&fixture.target, &fixture.profile, &mut admission).await.err().unwrap();
             assert_eq!(failure.error.message, "This Last Epoch version isn't supported yet.");

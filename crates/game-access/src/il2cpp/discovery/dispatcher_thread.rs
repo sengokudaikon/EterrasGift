@@ -1,4 +1,5 @@
 //! Callback-local check using the same synchronization context as ExecuteTasks.
+use super::metadata_text;
 use super::{Class, DiscoveryError, RuntimeAccess, unsupported};
 use crate::il2cpp::{AttachedThread, InvocationContext, InvocationOutcome, ReturnValue, Scalar, raw};
 use std::{ffi::CStr, ptr::NonNull};
@@ -13,6 +14,7 @@ impl RuntimeAccess {
     /// The supported CoreModule/BCL getters synchronously expose the current thread
     /// and context; the context's main ID is immutable after Unity initializes it.
     pub unsafe fn is_dispatcher_thread(&self, attached: &AttachedThread<'_>, api: raw::InvocationApi) -> Result<bool, DiscoveryError> {
+        // SAFETY: The original callback returned on an attached runtime thread; checked getters expose only its current thread-local context.
         unsafe {
             let images = self.images()?;
             let context = self.class(&images, c"System.Threading", c"SynchronizationContext")?;
@@ -20,18 +22,13 @@ impl RuntimeAccess {
             let thread = self.class(&images, c"System.Threading", c"Thread")?;
             let int32 = self.system_class(c"Int32")?;
             let getter = |owner: Class, name: &CStr, returns: Class, instance: bool| -> Result<NonNull<raw::MethodInfo>, DiscoveryError> {
-                let mut iterator = std::ptr::null_mut();
                 let mut found = None;
-                for _ in 0..4096 {
-                    let method = (self.class_methods)(owner, &mut iterator);
-                    if method.is_null() {
-                        return found.ok_or_else(|| unsupported("dispatcher thread getter missing"));
-                    }
+                for method in self.methods(owner)? {
                     let actual = (self.method_name)(method);
                     if actual.is_null() {
                         return Err(unsupported("dispatcher getter name"));
                     }
-                    if CStr::from_ptr(actual) != name || (api.method_get_param_count)(method) != 0 {
+                    if metadata_text(actual) != name || (api.method_get_param_count)(method) != 0 {
                         continue;
                     }
                     let ty = (api.method_get_return_type)(method);
@@ -46,7 +43,7 @@ impl RuntimeAccess {
                     }
                     found = NonNull::new(method.cast_mut());
                 }
-                Err(unsupported("dispatcher getter enumeration limit"))
+                found.ok_or_else(|| unsupported("dispatcher thread getter missing"))
             };
             let calls = InvocationContext::new(attached, api);
             let current = calls.bind(getter(context, c"get_Current", context, false)?).map_err(|e| unsupported(e.to_string()))?;

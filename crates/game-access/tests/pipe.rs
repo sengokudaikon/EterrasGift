@@ -3,7 +3,7 @@
 
 use eg_game_access::pipe::PipeClient;
 use eg_trainer_wire::process::ProcessIdentity;
-use eg_trainer_wire::protocol::{DispatcherSpec, MAGIC, MAX_RESPONSE_SIZE, REQUEST_SIZE, Request, Response, ResponseCode};
+use eg_trainer_wire::protocol::{DispatcherSpec, MAGIC, MAX_RESPONSE_SIZE, REQUEST_HEADER_SIZE, Request, Response, ResponseCode};
 use eg_trainer_wire::transport::{Delivery, Transport, TransportFailure};
 use std::fs;
 use std::io;
@@ -150,8 +150,12 @@ fn reply(index: usize) -> Response {
 }
 
 async fn read_request(server: &mut NamedPipeServer, directory: &Path, index: usize) -> Vec<u8> {
-    let mut request = vec![0; REQUEST_SIZE];
+    let mut request = vec![0; REQUEST_HEADER_SIZE];
     timeout(LIMIT, server.read_exact(&mut request)).await.unwrap().unwrap();
+    let body_len = u32::from_le_bytes(request[8..12].try_into().unwrap()) as usize;
+    assert!(body_len <= 65536);
+    request.resize(REQUEST_HEADER_SIZE + body_len, 0);
+    timeout(LIMIT, server.read_exact(&mut request[REQUEST_HEADER_SIZE..])).await.unwrap().unwrap();
     fs::write(directory.join(format!("request-{index}.bin")), &request).unwrap();
     request
 }

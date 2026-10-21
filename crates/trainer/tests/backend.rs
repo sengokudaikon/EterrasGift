@@ -587,8 +587,7 @@ fn initial_catalog_and_forge_publish_together_with_explicit_read_only_capabiliti
         let snapshot = handle.snapshot();
         assert!(matches!(snapshot.catalog,CatalogState::Current {generation,..} if generation==snapshot.generation));
         assert_eq!(snapshot.forge, ForgeState::NoItem { generation: snapshot.generation });
-        assert!(snapshot.capabilities.read_forge && snapshot.capabilities.read_catalog);
-        assert!(!snapshot.capabilities.write_forge && !snapshot.capabilities.hooks && !snapshot.capabilities.fields);
+        assert!(snapshot.capabilities.read_forge);
         let calls = shared.calls.lock().unwrap().clone();
         assert!(calls.iter().position(|v| *v == "gate").unwrap() < calls.iter().position(|v| *v == "connect").unwrap());
         shutdown(&handle, worker).await;

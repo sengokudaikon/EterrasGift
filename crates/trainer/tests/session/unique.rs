@@ -139,7 +139,7 @@ fn optional_unique_failures_keep_ready_but_bad_frames_and_global_failures_revoke
         s.enable();
         run(s.connect(now())).unwrap();
         assert!(run(s.describe_unique(now(), &item())).is_err());
-        assert_eq!(s.state(), SessionState::Blocked);
+        assert_eq!(s.state(), SessionState::Disconnected);
     }
 }
 #[test]
@@ -203,9 +203,9 @@ fn conditional_unique_frames_reject_duplicate_rolls_reserved_data_and_truncation
     ] {
         let frame = request.encode();
         assert_eq!(Request::decode(&frame), Ok(request.clone()));
-        for offset in [24, 32, 47, 136, 335] {
+        for offset in [0, 4, 8] {
             let mut bad = frame.clone();
-            bad[offset] = 1;
+            bad[offset] ^= 0xff;
             assert!(Request::decode(&bad).is_err(), "{offset}");
         }
         assert!(Request::decode(&frame[..frame.len() - 1]).is_err());
@@ -213,9 +213,10 @@ fn conditional_unique_frames_reject_duplicate_rolls_reserved_data_and_truncation
         excess.push(0);
         assert!(Request::decode(&excess).is_err());
         if matches!(request, Request::PreviewUnique(_)) {
-            for (offset, value) in [(8, 0), (8, 9), (72, 8), (76, 256), (80, 0)] {
+            // Count and indices are consecutive bytes after the manager token.
+            for (offset, value) in [(44, 0), (44, 9), (45, 8), (47, 0)] {
                 let mut bad = frame.clone();
-                bad[offset..offset + 4].copy_from_slice(&u32::to_le_bytes(value));
+                bad[offset] = value;
                 assert!(Request::decode(&bad).is_err(), "{offset}");
             }
         }

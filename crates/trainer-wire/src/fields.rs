@@ -159,7 +159,7 @@ pub fn decode(bytes: &[u8]) -> Result<AttackLeechRead, ProtocolError> {
         return Err(ProtocolError::InvalidData);
     }
     if bytes[4..6] != VERSION.to_le_bytes() {
-        return Err(ProtocolError::IncompatibleVersion);
+        return Err(ProtocolError::InvalidMagic);
     }
     if bytes[7] != 0 {
         return Err(ProtocolError::InvalidData);

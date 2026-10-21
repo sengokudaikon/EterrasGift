@@ -1,4 +1,5 @@
 //! Detached affix sampling through the game's own tooltip producer and formatter.
+use super::metadata_text;
 use super::{
     Class, DiscoveryError, Images, Method, RuntimeAccess,
     forge::{ForgeGraph, Root, target},
@@ -33,24 +34,20 @@ impl RuntimeAccess {
         parameters: &[Class],
         returns: Option<Class>,
     ) -> Result<Method, DiscoveryError> {
+        // SAFETY: The retained owner metadata is scanned with exact parameter/return classes before binding a method.
         unsafe {
             let mut owner = (self.object_class)(target(object)?.as_ptr());
             for _ in 0..256 {
                 if owner.is_null() {
                     break;
                 }
-                let mut iterator = std::ptr::null_mut();
                 let mut found = false;
-                for _ in 0..100_000 {
-                    let method = (self.class_methods)(owner, &mut iterator);
-                    if method.is_null() {
-                        break;
-                    }
+                for method in self.methods(owner)? {
                     let actual = (self.method_name)(method);
                     if actual.is_null() {
                         return Err(unsupported("mapping method name"));
                     }
-                    if CStr::from_ptr(actual) == name && (self.method_params)(method) as usize == parameters.len() {
+                    if metadata_text(actual) == name && (self.method_params)(method) as usize == parameters.len() {
                         found = true;
                         break;
                     }
@@ -70,6 +67,7 @@ impl RuntimeAccess {
         }
     }
     unsafe fn mapping_float(&self, attached: &AttachedThread<'_>, api: raw::InvocationApi, object: &Root<'_, '_>, name: &CStr) -> Result<f32, DiscoveryError> {
+        // SAFETY: The checked method and rooted receiver remain live while the exact scalar result is unboxed.
         unsafe {
             let method = self.mapping_method(api, object, name, &[], Some(self.system_class(c"Single")?))?;
             let context = InvocationContext::new(attached, api);
@@ -90,6 +88,7 @@ impl RuntimeAccess {
         method: Method,
         args: &mut [Argument<'_, '_, '_>],
     ) -> Result<(), DiscoveryError> {
+        // SAFETY: The method was signature-checked and the rooted receiver remains live throughout this synchronous invocation.
         unsafe {
             let context = InvocationContext::new(attached, api);
             let method = context
@@ -102,19 +101,21 @@ impl RuntimeAccess {
         }
     }
     unsafe fn mapping_bytes(&self, array: &Root<'_, '_>, maximum: u32) -> Result<Vec<u8>, DiscoveryError> {
+        // SAFETY: The caller supplies the main-thread copy span; array allocation uses the exact retained Byte class and is immediately rooted.
         unsafe {
             let count = self.array_count(array, self.system_class(c"Byte")?, maximum)?;
             let start = target(array)?.as_ptr().cast::<u8>().add(32);
-            Ok((0..count as usize).map(|index| start.add(index).read()).collect())
+            Ok(super::copy_values(start, count as usize))
         }
     }
     unsafe fn mapping_clone_bytes<'a, 'r>(&self, attached: &'a AttachedThread<'r>, source: &Root<'_, '_>, maximum: u32) -> Result<Root<'a, 'r>, DiscoveryError> {
+        // SAFETY: The source array is rooted and validated; the new array is independently rooted before copying its bounded bytes.
         unsafe {
             let bytes = self.mapping_bytes(source, maximum)?;
             let array = NonNull::new((self.array_new)(self.system_class(c"Byte")?, bytes.len())).ok_or_else(|| unsupported("detached byte allocation"))?;
             let array = attached.root(array)?;
             self.array_count(&array, self.system_class(c"Byte")?, maximum)?;
-            std::ptr::copy_nonoverlapping(bytes.as_ptr(), target(&array)?.as_ptr().cast::<u8>().add(32), bytes.len());
+            super::write_bytes(target(&array)?.as_ptr().cast::<u8>().add(32), &bytes);
             Ok(array)
         }
     }
@@ -125,6 +126,7 @@ impl RuntimeAccess {
         api: raw::InvocationApi,
         graph: &ForgeGraph<'_, '_>,
     ) -> Result<Root<'a, 'r>, DiscoveryError> {
+        // SAFETY: The selected graph stays rooted; constructor/copy methods are checked and every mutable array is independently cloned.
         unsafe {
             let serial = self
                 .catalog_reference(attached, &graph.item, c"id")?
@@ -191,21 +193,17 @@ impl RuntimeAccess {
         item: &Root<'_, '_>,
         slot: u8,
     ) -> Result<Vec<Effect>, DiscoveryError> {
+        // SAFETY: The detached item, builder and resulting tooltip objects remain rooted throughout checked invocations and owned copying.
         unsafe {
             let affix_class = self.class(images, c"", c"ItemAffix")?;
             let affixes = self.catalog_reference(attached, item, c"affixes")?.ok_or_else(|| unsupported("mapping affixes absent"))?;
             let values = self.catalog_list(attached, &affixes, affix_class, 32)?;
             let affix = values.get(usize::from(slot)).ok_or_else(|| unsupported("mapping slot absent"))?;
             let builder = self.class(images, c"LE.UI.Tooltips", c"ItemTooltipContentBuilder")?;
-            let mut iterator = std::ptr::null_mut();
             let mut slot_type = None;
-            for _ in 0..100_000 {
-                let method = (self.class_methods)(builder, &mut iterator);
-                if method.is_null() {
-                    break;
-                }
+            for method in self.methods(builder)? {
                 let name = (self.method_name)(method);
-                if !name.is_null() && CStr::from_ptr(name) == c"GetItemAffixInfo" && (self.method_params)(method) == 3 {
+                if !name.is_null() && metadata_text(name) == c"GetItemAffixInfo" && (self.method_params)(method) == 3 {
                     if slot_type.is_some() {
                         return Err(unsupported("ambiguous affix tooltip builder"));
                     }
@@ -288,6 +286,7 @@ impl RuntimeAccess {
         slot: u8,
         roll: u8,
     ) -> Result<(), DiscoveryError> {
+        // SAFETY: The caller supplies a detached rooted item; exact Byte field metadata is checked before storing its sample roll.
         unsafe {
             let class = self.class(images, c"", c"ItemAffix")?;
             let list = self
@@ -309,6 +308,7 @@ impl RuntimeAccess {
         copy: &Root<'_, '_>,
         query: &AffixMappingQuery,
     ) -> Result<(), DiscoveryError> {
+        // SAFETY: Only the validated detached copy is changed; the selected item remains rooted for independent stale checks.
         unsafe {
             let Some(draft) = query.draft() else {
                 return Ok(());
@@ -423,6 +423,7 @@ impl RuntimeAccess {
         api: raw::InvocationApi,
         query: &AffixMappingQuery,
     ) -> Result<RawMappingPage, DiscoveryError> {
+        // SAFETY: The caller supplies the main-thread immutable graph span; selected and detached items stay rooted across each sampled call.
         unsafe {
             let graph = self.forge_graph(attached)?.ok_or(DiscoveryError::NotReady("forge item absent"))?;
             if target(&graph.manager)?.as_ptr() as u64 != query.manager() || self.forge_snapshot(attached, &graph)? != *query.expected() {

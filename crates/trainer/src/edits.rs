@@ -232,14 +232,6 @@ impl fmt::Display for EditError {
 }
 impl std::error::Error for EditError {}
 
-/// Cache bytes can inform a display but cannot prove a definition was read in
-/// this runtime. The integration layer must supply this explicit provenance.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum CatalogProvenance {
-    CachedOnly,
-    RuntimeRead { generation: u64, process: ProcessIdentity },
-}
-
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ExpectedObservation {
     generation: u64,
@@ -283,7 +275,7 @@ pub struct RollBinding {
 }
 /// Actual tooltip/implicit mappings, bound to the entire observation. Catalog
 /// endpoints alone do not supply this evidence. Construction performs no query;
-/// a future audited reader is responsible for runtime provenance.
+/// the connected session binds the returned descriptions to this observation.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RollEvidence {
     observation: ExpectedObservation,
@@ -530,17 +522,12 @@ fn validate_affix(catalog: &GameCatalog, item: &ForgeSnapshot, id: i32, tier: i3
 pub fn prepare(
     expected: &ExpectedObservation,
     catalog: &GameCatalog,
-    provenance: &CatalogProvenance,
     edit: ItemEdit,
     override_enabled: bool,
     roll_evidence: Option<&RollEvidence>,
 ) -> Result<PreparedEdit, EditError> {
     if catalog.identity != expected.catalog {
         return Err(EditError::IdentityChanged);
-    }
-    match provenance {
-        CatalogProvenance::RuntimeRead { generation, process } if *generation == expected.generation && *process == expected.process => {}
-        _ => return Err(EditError::CatalogNotVerified),
     }
     if edit.needs_override() && !override_enabled {
         return Err(EditError::OverrideRequired);

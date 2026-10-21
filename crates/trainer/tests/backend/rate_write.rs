@@ -124,7 +124,6 @@ fn only_explicit_narrow_command_writes_and_full_confirmed_observation_gets_next_
             let plan = prepare(&handle, target, value).await;
             let state = handle.snapshot();
             assert!(state.capabilities.attack_leech_rate);
-            assert!(!state.capabilities.fields && !state.capabilities.hooks && !state.capabilities.write_forge);
             assert_eq!(shared.count("rate-write"), 0);
             command(&handle, Command::SetAttackLeechRate(Box::new(plan.clone()))).await.unwrap();
             let state = handle.snapshot();
@@ -254,12 +253,11 @@ fn new_publication_with_equal_bits_and_reconnect_invalidate_prior_plan_before_io
     });
 }
 #[test]
-fn release_gate_blocks_development_permission_before_refresh_and_online_status_blocks_write() {
+fn missing_log_blocks_refresh_and_online_status_blocks_write() {
     run(async {
         for fault in 0..3 {
             let shared = writable();
-            let mut config = options();
-            config.policy = GatePolicy::Development;
+            let config = options();
             let (handle, worker) = start(&shared, config, None);
             connected(&handle).await;
             let plan = prepare(&handle, AttackLeechTarget::AttackRate, 1.1).await;

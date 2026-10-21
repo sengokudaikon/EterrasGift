@@ -15,13 +15,11 @@ impl LogSource for GameLogReader {
 pub enum GatePolicy {
     #[default]
     Release,
-    Development,
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum GateVerdict {
     Allow,
     Wait,
-    Probe,
     Refuse,
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -31,7 +29,7 @@ pub struct GateDecision {
     pub log_status: GameLogStatus,
 }
 
-pub fn evaluate(log: &GameLogState, started: Timestamp, now: Timestamp, policy: GatePolicy) -> GateDecision {
+pub fn evaluate(log: &GameLogState, started: Timestamp, now: Timestamp, _policy: GatePolicy) -> GateDecision {
     let starting = now.as_nanosecond() - started.as_nanosecond() < 60_000_000_000;
     let (verdict, readiness) = if log.status == GameLogStatus::Current && (log.shell_state.is_some() || starting) {
         (
@@ -45,10 +43,7 @@ pub fn evaluate(log: &GameLogState, started: Timestamp, now: Timestamp, policy: 
     } else if starting {
         (GateVerdict::Wait, GameReadiness::Starting)
     } else {
-        (
-            if policy == GatePolicy::Development { GateVerdict::Probe } else { GateVerdict::Refuse },
-            GameReadiness::Starting,
-        )
+        (GateVerdict::Refuse, GameReadiness::Starting)
     };
     GateDecision {
         verdict,

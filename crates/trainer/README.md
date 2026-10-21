@@ -1,111 +1,44 @@
-# Trainer control sessions
+# Trainer service
 
-The trainer owns the offline gate, artifact profile, serialized control session and owned-command dispatcher.
-`eg-game-access` owns protocol codecs, explicit process identity, the Windows pipe client and unsafe runtime access.
-The desktop now composes one background worker and a command-based Slint forge adapter. The companion remains independent.
+`eg-trainer` owns offline admission, game catalogs, edit planning, conditional Undo and the
+serialized background worker. `eg-trainer-wire` owns the bounded messages and codecs;
+`eg-game-access` owns platform adapters and runtime access. The companion remains independent.
 
-The desktop Forge editor now uses worker commands with typed Pending, Confirmed, NotApplied,
-NotKept and Uncertain outcomes. Mixed drafts execute in order, re-read before each edit and stop
-at the first non-confirmation. The UI shares the canonical edit type/planner and the worker owns
-confirmed batch history; applied Undo uses `Command::UndoForge`, one freshly guarded step at a time.
-Known mismatch and uncertainty
-clear drafts and Undo; uncertainty never retries automatically. Status, base and identity controls
-use this path, along with regular affix values, replacement/tier/seal and add/remove. Unique and
-implicit value mapping/roll writes stay unavailable. Run
-`mise run capture:trainer` for the fake worker-to-Slint route and `cargo test -p eg-ui --lib`
-for delayed editor tests. No actual game is used. See [trainer readiness](../../research/trainer-readiness.md).
+The backend reads Player.log before accessing a selected process and before publishing results.
+Preparation opens read-only leases on the game assembly and metadata, hashes each once, and
+shares the assembly lease with native preparation. A connected session keeps those leases;
+requests validate file identities without reading their contents again. Platforms or share modes
+that cannot provide leases use explicit full-content validation. Native module leases are
+released after their retained process handle signals exit, including while monitoring is off.
 
-Connect/Retry and monitoring use owned worker snapshots. Missing formatting/mappings stay
-explicit; gate, identity and connection loss clear the visible item. Construction does no native
-work. `--no-connect` skips automatic startup, and a later manual Connect starts reads. Live
-settings/cache actions and the remaining shared feature catalog cleanup are still open.
+The session transports requests and decodes owned responses. Its lifecycle prevents reusing an
+abandoned exchange. It does not repeat Player.log admission. The helper checks the current
+offline graph on Unity's main thread before reading or writing it.
 
-Source runs prepare the helper with `mise run trainer:helper:build` before connecting. That task publishes
-`eg_trainer_helper.json` beside both debug/release apps, referencing the retained versioned DLL.
-The connector opens and validates it only after Release admission. Missing/invalid packages show a
-reason and Retry. Final bundle assembly remains separate. UI integration tests use fake connections
-and FakeGameHost only; this is not a new live-game validation claim.
+Requests have a 12-byte signature/operation/body-length header and sequential bounded bodies.
+The helper build ID identifies compatible code. Discovery returns the dispatcher and build ID;
+field offsets and separate protocol/adapter versions are not transmitted.
 
-The current [native preparer](../trainer-host/README.md) uses a small unsafe supported-game boundary,
-with callback-local thread validation instead of pre-bootstrap RuntimeAttestation. Historical checkpoint
-notes below describe their original implementation. `mise run trainer:verify` runs the trainer tests and
-workspace verification; native fixtures remain a separate gate.
+The desktop Forge editor submits ordered mixed drafts. Supported edits include status fields,
+base and unique identity, affix rolls, replacement/tier/seal and add/remove. Regular affix values
+come from game tooltip sampling on detached copies. Implicit and unique descriptions and private
+unique previews are connected; unique/implicit value mapping and roll writes remain unavailable.
+Attack/leech rates have typed read and conditional write commands. Gameplay hooks remain unavailable.
 
-The current write service accepts `Command::Write(WritePlan)` and `Session::write` for both
-forge edits and field changes. `WriteOutcome<T>` represents Pending, Confirmed, NotApplied,
-NotKept (a complete independent observation of the same target), or Uncertain. Native ACKs
-remain provisional until the separate read completes under renewed admission. A missing,
-malformed or replaced target cannot become NotKept. `BackendSnapshot::write_outcome(&plan)`
-exposes the retained typed result independently of connection readiness; receipts report
-command completion and diagnostics, while watch snapshots carry write certainty.
+A write remains Pending through its native acknowledgement and independent readback. Confirmed,
+NotApplied, NotKept and Uncertain have distinct behavior. Nothing retries a mutation automatically.
+Uncertainty stops a draft batch and preserves its earlier confirmed history in the editor; fresh
+admission and observation are required before further work. Conditional Undo checks the complete
+item, manager, process, catalog and connection generation.
 
-Ordinary pre-store refusals and NotKept preserve a healthy connection. NotKept publishes the
-actual observation, advances field observation sequences and creates no Undo. Transport,
-protocol, identity, restart or offline failures release the connection. Later publication
-gate loss suppresses live data without downgrading an already independently confirmed
-historical result. Nothing retries a mutation. Protocol32 carries all seven status fields and an
-explicit override bit through operation 10. `ForgePlan`/`ForgeUndo` cover
-level requirement, forging/legendary potential, Weaver's Will/Touch, corrupted and ruined;
-`status_fields` advertises support separately from item eligibility. Rebuilding fields use the
-game's RebuildID/UpdateEntry methods and accept its derived level requirement under the existing readback rules. A managed refresh failure after
-the store is uncertain, with no automatic retry or implicit rollback. Unique eligibility calls
-the game's metadata-checked getUnique(UInt16), with a rooted result and a fresh full stale check.
-Host and helper share the small status rule function, using their own observed definition data.
-Plan construction has one entry point, `ForgePlan::edit(..., override_enabled)`, and
-revalidation always receives the current override setting. `edits::inspect_readback` is the
-single readback policy for both pure and submitted plans. The direct level-cache store expects
-an exact complete snapshot, including names and fingerprint, because it does not rebuild the
-item. Rebuilding status and roll edits allow derived names and level to change; base/identity
-edits also allow the game's derived class requirement. Their other guards remain unchanged.
-The worker defaults override off, serializes `SetOverride` with writes, and checks the current
-setting before submission and Undo. The desktop supplies the saved startup preference; live
-settings actions remain separate. A new Undo is retained only
-when a valid reverse plan can be prepared under the current game rules (an above-maximum Will
-reduction may not be reversible); using the token rechecks current permission and observations.
+Feature descriptions come from one shared registry. UI row presentation does not claim native
+implementation; connected pages obtain availability from the backend. Settings changes reach the
+worker immediately, and their persistence is handled separately.
 
-Base changes (op 11) and unique/set identity changes (op 17) now use the same plans, submission,
-certainty and Undo lifecycle. `forge_plan(ItemEdit)` admits these implemented edit kinds only;
-`base_change` and `identity_change` advertise their availability. The helper independently calls
-ItemList.get() or getUnique(UInt16) and checks the returned definitions, item eligibility and full
-expected snapshot before the first store. It validates all destinations and refresh signatures
-first, then calls AfterIDChange, optional MakeFullName for identity, RebuildID and UpdateEntry.
-Game-derived names, level and class changes follow the existing edit readback policies; meaningful
-collateral drift is NotKept. All failures after the first store remain uncertain, including partial
-multi-field changes. Undo is a freshly validated reverse edit, not raw memory restoration. Idol
-type changes and unrestricted identities recheck the current override before Apply and Undo.
-The archived authored checkpoint
-records owned Unity validation; actual-game writes remain unvalidated.
+Run `mise run trainer:verify` for release trainer/controller tests, UI tests and workspace
+verification. Captures and product tests use fixtures and fake hosts. Native fixture execution
+is separate; the real game is tested only when requested.
 
-Affix roll batches (op 2, affix target only) now share this path too. `forge_plan(ItemEdit::Roll)`
-accepts one to 32 distinct current slots and byte roll values; `affix_rolls` advertises support.
-Host planning checks the captured compatibility/tier rules and current override. The helper
-independently checks the whole expected item, every selected current definition/tier and every
-exact mutable Byte destination before the first store, retaining the affixes across refresh/GC.
-The helper stores only selected roll bytes, leaving affix reconstruction to the game. RebuildID
-and UpdateEntry run once per batch. A reverse plan restores the selected original rolls, with
-fresh stale/override checks. Native ACKs still need separate readback; game normalization is
-NotKept and refresh failures remain uncertain. Unique/implicit roll targets remain refused until native mapping
-queries exist.
-The editor integration above uses these native operations; formatting, previews and mappings remain separate.
-
-
-Historical per-feature reports are preserved at `archive/trainer-evaluations-2026-10-19`.
-Current assumptions, test gates and archive location are in
-[trainer-interop.md](../../research/trainer-interop.md).
-
-Affix replacement, tier and seal changes (op 1, protocol33) use the same plan/outcome and editor
-command path. `affix_change` advertises support. The native helper invokes the game's exact
-ItemAffix(UInt16, Byte, Byte, Byte itemType, SealedAffixType) constructor, roots its result and
-validates the resulting layout before changing the existing list through managed Clear/Add.
-Seal flags and refresh signatures are prevalidated. Constructor normalization is observed through
-independent readback; refresh/rewrite exceptions are uncertain. Undo reconstructs the prior affix
-at its moved slot and rechecks override permission. The original strict-affix set-identity
-readback omission is fixed. Actual-value mapping controls remain disabled.
-
-Add/remove (ops 13/14, protocol34, `affix_list`) are connected through the same service and editor.
-They reuse the managed list rewrite and seal flags, then invoke the game rarity method for items
-without unique backing before RebuildID/UpdateEntry. All these signatures are checked before the
-first mutation; any later exception is uncertain, with no automatic rollback or retry. Removal
-checks the slot and ID against the full expected observation, can remove an unserializable ID,
-and never offers to reconstruct such an ID. Conditional Undo otherwise follows current catalog
-and override rules. Inserted duplicate IDs are identified by their resulting slot for Undo.
+See [current scope](../../research/trainer-readiness.md),
+[runtime assumptions](../../research/trainer-interop.md), and
+[helper implementation](../trainer-helper/README.md).

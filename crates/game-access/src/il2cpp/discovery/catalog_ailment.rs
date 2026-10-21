@@ -1,6 +1,7 @@
-//! Ready ailment cache snapshot through audited System.Array.GetValue boxes.
+//! Ready ailment cache snapshot through System.Array.GetValue boxes.
 //! No generic/outref invocation, native struct layout, singleton getter or dictionary mutation.
 
+use super::metadata_text;
 use super::{
     Class, DiscoveryError, Images, RuntimeAccess,
     forge::{Root, target},
@@ -72,6 +73,7 @@ pub(super) struct AilmentSnapshot<'a, 'r> {
 
 impl RuntimeAccess {
     unsafe fn ailment_key_class(&self, class: Class) -> Result<(), DiscoveryError> {
+        // SAFETY: The descriptor comes from the retained dictionary metadata; generic class identity is checked before use.
         unsafe {
             // EnumBase must not be called on an arbitrary value type (it may assert).
             if class.is_null() || !(self.class_enum)(class) {
@@ -85,51 +87,44 @@ impl RuntimeAccess {
         }
     }
     unsafe fn ailment_corlib_class(&self, class: Class, namespace: &CStr, name: &CStr) -> Result<(), DiscoveryError> {
+        // SAFETY: The class descriptor is live metadata; its nonnull name and namespace identify the expected corlib type.
         unsafe {
             if class.is_null() || (self.class_image)(class) != (self.corlib)() {
                 return Err(unsupported("ailment corlib class image"));
             }
             let actual_name = (self.class_name)(class);
             let actual_namespace = (self.class_namespace)(class);
-            if actual_name.is_null() || actual_namespace.is_null() || CStr::from_ptr(actual_name) != name || CStr::from_ptr(actual_namespace) != namespace {
+            if actual_name.is_null() || actual_namespace.is_null() || metadata_text(actual_name) != name || metadata_text(actual_namespace) != namespace {
                 return Err(unsupported("ailment corlib class name"));
             }
             Ok(())
         }
     }
     unsafe fn ailment_no_cctor(&self, class: Class) -> Result<(), DiscoveryError> {
+        // SAFETY: The retained class's bounded method enumeration is inspected without invoking an initializer.
         unsafe {
-            let mut iterator = std::ptr::null_mut();
-            for _ in 0..100_000 {
-                let method = (self.class_methods)(class, &mut iterator);
-                if method.is_null() {
-                    return Ok(());
-                }
+            for method in self.methods(class)? {
                 let name = (self.method_name)(method);
-                if name.is_null() || CStr::from_ptr(name) == c".cctor" {
+                if name.is_null() || metadata_text(name) == c".cctor" {
                     return Err(unsupported("ailment Entry boxing initializer"));
                 }
             }
-            Err(unsupported("ailment Entry method enumeration limit"))
+            Ok(())
         }
     }
     unsafe fn ailment_array_get(&self, api: &raw::InvocationApi) -> Result<NonNull<raw::MethodInfo>, DiscoveryError> {
+        // SAFETY: Array and primitive descriptors are retained metadata; the exact GetValue(Int32) signature is validated before binding.
         unsafe {
             let array = self.system_class(c"Array")?;
             let object = self.system_class(c"Object")?;
             let integer = self.system_class(c"Int32")?;
-            let mut iterator = std::ptr::null_mut();
             let mut found = None;
-            for _ in 0..100_000 {
-                let method = (self.class_methods)(array, &mut iterator);
-                if method.is_null() {
-                    return found.ok_or_else(|| unsupported("System.Array.GetValue(Int32) missing"));
-                }
+            for method in self.methods(array)? {
                 let name = (self.method_name)(method);
                 if name.is_null() {
                     return Err(unsupported("array method name"));
                 }
-                if CStr::from_ptr(name) != c"GetValue" || (api.method_get_param_count)(method) != 1 {
+                if metadata_text(name) != c"GetValue" || (api.method_get_param_count)(method) != 1 {
                     continue;
                 }
                 let parameter = (api.method_get_param)(method, 0);
@@ -151,10 +146,11 @@ impl RuntimeAccess {
                 }
                 found = NonNull::new(method.cast_mut());
             }
-            Err(unsupported("array method enumeration bound"))
+            found.ok_or_else(|| unsupported("System.Array.GetValue(Int32) missing"))
         }
     }
     unsafe fn ailment_array_box<'a, 'r>(&self, method: &CheckedMethod<'_, 'a, 'r>, array: &Root<'_, '_>, index: u32, expected: Class) -> Result<Root<'a, 'r>, DiscoveryError> {
+        // SAFETY: The checked Array getter roots its boxed result; exact class validation precedes reading it.
         unsafe {
             let mut arguments = [Argument::Scalar(Scalar::I32(index.try_into().map_err(|_| unsupported("array index"))?))];
             let result = method.invoke(Some(array), &mut arguments).map_err(|error| unsupported(error.to_string()))?;
@@ -177,6 +173,7 @@ impl RuntimeAccess {
         images: &Images,
         api: raw::InvocationApi,
     ) -> Result<Availability<AilmentSnapshot<'a, 'r>>, DiscoveryError> {
+        // SAFETY: The caller excludes definition changes; registry, arrays and boxed entries stay rooted throughout bounded extraction.
         unsafe {
             let Some(owner) = self.catalog_optional_class(images, c"", c"AilmentList")? else {
                 return Ok(unavailable("Optional ailment dictionary capability is absent"));
@@ -228,7 +225,7 @@ impl RuntimeAccess {
             let entry_name = (self.class_name)(entry_class);
             if (self.class_image)(entry_class) != (self.corlib)()
                 || entry_name.is_null()
-                || CStr::from_ptr(entry_name) != c"Entry"
+                || metadata_text(entry_name) != c"Entry"
                 || !(self.class_value)(entry_class)
                 || (self.class_enum)(entry_class)
                 || (api.class_is_generic)(entry_class)
@@ -314,6 +311,7 @@ impl RuntimeAccess {
         snapshot: &mut AilmentSnapshot<'_, '_>,
         key: u8,
     ) -> Result<Availability<u8>, DiscoveryError> {
+        // SAFETY: The rooted entry's field metadata determines exact primitive and reference storage before copying.
         unsafe {
             if let Some(value) = snapshot.effects.get(&key) {
                 return Ok(value.clone());

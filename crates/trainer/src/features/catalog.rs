@@ -1,4 +1,4 @@
-//! Literal port of TrainerCatalog.cs and audited native feature ownership.
+//! Literal port of TrainerCatalog.cs and native feature ownership.
 // Values and descriptions are data only; source Ported:true is not a Rust capability.
 use super::*;
 pub const SOURCE_COMMIT: &str = "e1c1ed4e9e0ab6404574113f2dcf1179b2113629";

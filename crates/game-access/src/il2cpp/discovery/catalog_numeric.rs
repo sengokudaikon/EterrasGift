@@ -1,5 +1,6 @@
-//! Source-bound numeric capture from ready registries; only audited framework boxing is invoked.
+//! Source-bound numeric capture from ready registries; only framework boxing is invoked.
 
+use super::metadata_text;
 use super::{
     Class, DiscoveryError, Images, RuntimeAccess,
     forge::{Root, target},
@@ -134,6 +135,7 @@ impl RuntimeAccess {
         tiers: &[Root<'_, '_>],
         capture: &mut NumericCapture<'a, 'r>,
     ) -> Result<Availability<Vec<AffixTier>>, DiscoveryError> {
+        // SAFETY: The rooted affix and validated tier/property arrays remain immutable during bounded numeric extraction.
         unsafe {
             let properties = match &mut capture.properties {
                 Availability::Unavailable { reason } => return Ok(unavailable(reason.clone())),
@@ -202,6 +204,7 @@ impl RuntimeAccess {
         definition: &Root<'_, '_>,
         capture: &mut NumericCapture<'a, 'r>,
     ) -> Result<Availability<UniqueNumericData>, DiscoveryError> {
+        // SAFETY: The rooted unique definition and property arrays remain immutable while their typed numeric fields are copied.
         unsafe {
             let metadata = match &mut capture.properties {
                 Availability::Unavailable { reason } => return Ok(unavailable(reason.clone())),
@@ -254,6 +257,7 @@ impl RuntimeAccess {
     }
 
     pub(super) unsafe fn catalog_properties<'a, 'r>(&self, attached: &'a AttachedThread<'r>, images: &Images) -> Result<Availability<PropertyCatalog<'a, 'r>>, DiscoveryError> {
+        // SAFETY: The caller retains the immutable property graph; arrays and runtime tags are checked before each typed copy.
         unsafe {
             let mut owner = (self.class_from_name)(images.game, c"".as_ptr(), c"PropertyList".as_ptr());
             if owner.is_null() {
@@ -328,6 +332,7 @@ impl RuntimeAccess {
         properties: &mut PropertyCatalog<'a, 'r>,
         raw: RawProperty,
     ) -> Result<Availability<NumericProperty>, DiscoveryError> {
+        // SAFETY: The rooted property object has validated field widths and enum storage before numeric values are copied.
         unsafe {
             if !raw.minimum.is_finite() || !raw.maximum.is_finite() || !(-1..=7).contains(&raw.roll_id) {
                 return Err(unsupported("numeric property finite range/roll identity"));
@@ -419,6 +424,7 @@ impl RuntimeAccess {
     // Registry storage is inspected lazily, only for a requested special SP. Every selected
     // object is rooted before further metadata/GC calls and stays rooted with its parents.
     pub(super) unsafe fn catalog_optional_class(&self, images: &Images, namespace: &CStr, name: &CStr) -> Result<Option<Class>, DiscoveryError> {
+        // SAFETY: The image set and optional class name come from retained runtime metadata; no object is dereferenced.
         unsafe {
             let mut owner = (self.class_from_name)(images.game, namespace.as_ptr(), name.as_ptr());
             for image in &images.all {
@@ -429,6 +435,7 @@ impl RuntimeAccess {
     }
 
     unsafe fn catalog_ready_registry<'a, 'r>(&self, attached: &'a AttachedThread<'r>, images: &Images, owner: Class) -> Result<Availability<Root<'a, 'r>>, DiscoveryError> {
+        // SAFETY: The initialized static registry is rooted before inspecting its validated fields; no lazy getter is invoked.
         unsafe {
             let ready = self.static_field(owner, c"instanceFound", "System.Boolean")?;
             if self.field_class(ready)? != self.system_class(c"Boolean")? {
@@ -458,6 +465,7 @@ impl RuntimeAccess {
         images: &Images,
         property: u8,
     ) -> Result<Availability<SpecialRegistry<'a, 'r>>, DiscoveryError> {
+        // SAFETY: The caller retains the immutable registry graph; exact reference classes and bounded collections precede traversal.
         unsafe {
             let (owner_name, info_name) = match property {
                 58 => (c"AbilityPropertyList", c"AbilityPropertyInfo"),
@@ -551,6 +559,7 @@ impl RuntimeAccess {
     }
 
     unsafe fn catalog_ability_id(&self, object: &Root<'_, '_>) -> Result<u16, DiscoveryError> {
+        // SAFETY: The rooted receiver's enum field and UInt16 underlying storage are verified before copying its ID.
         unsafe {
             let owner = (self.object_class)(target(object)?.as_ptr());
             if owner.is_null() {
@@ -559,13 +568,10 @@ impl RuntimeAccess {
             let field = self.field(owner, c"abilityID")?;
             let class = self.field_class(field)?;
             let name = (self.class_name)(class);
-            if (self.field_flags)(field) & 0x10 != 0 || name.is_null() || CStr::from_ptr(name) != c"AbilityID" || !(self.class_enum)(class) {
+            if (self.field_flags)(field) & 0x10 != 0 || name.is_null() || metadata_text(name) != c"AbilityID" {
                 return Err(unsupported("numeric UInt16 AbilityID enum storage/identity"));
             }
-            let base = (self.enum_base)(class);
-            if base.is_null() || (self.type_byref)(base) || (self.type_code)(base) != 0x07 || (self.type_class)(base) != self.system_class(c"UInt16")? {
-                return Err(unsupported("numeric AbilityID UInt16 enum underlying type"));
-            }
+            self.enum_storage(class, c"UInt16", 0x07)?;
             let mut value = 0_u16;
             (self.field_get)(target(object)?.as_ptr(), field, (&mut value as *mut u16).cast());
             Ok(value)
@@ -578,6 +584,7 @@ impl RuntimeAccess {
         properties: &mut PropertyCatalog<'a, 'r>,
         raw: RawProperty,
     ) -> Result<Availability<SelectedInfo<'a, 'r>>, DiscoveryError> {
+        // SAFETY: The caller retains the immutable special-definition graph; selected entries are rooted before exact field reads.
         unsafe {
             if raw.property == 43 {
                 let Some(images) = &properties.images else {
@@ -690,6 +697,7 @@ impl RuntimeAccess {
     }
 
     pub(super) unsafe fn catalog_raw_property(&self, object: &Root<'_, '_>, minimum: f32, maximum: f32, unique: bool) -> Result<RawProperty, DiscoveryError> {
+        // SAFETY: The rooted property and exact field metadata determine the stack output's type and width.
         unsafe {
             let roll_id = if unique && self.boolean(object, c"canRoll")? {
                 i32::from(self.primitive::<u8>(object, c"rollID")?)
@@ -859,8 +867,12 @@ mod tests {
             c"PropertyRounding".as_ptr()
         }
     }
-    unsafe extern "C-unwind" fn type_code(_: Type) -> i32 {
-        ENUM_CODE.get()
+    unsafe extern "C-unwind" fn type_code(ty: Type) -> i32 {
+        if ty as usize == BASE_TYPE && BASE_CLASS.get() == INT_CLASS {
+            0x08
+        } else {
+            ENUM_CODE.get()
+        }
     }
     unsafe extern "C-unwind" fn is_enum(_: *const raw::Class) -> bool {
         IS_ENUM.get()
@@ -1032,7 +1044,7 @@ mod tests {
         let attached = context.attach().unwrap();
         // SAFETY: authored rooted immutable property graph and exact Bool fields.
         let mut catalog = unsafe { catalog(&attached) };
-        // SAFETY: INCREASED's audited branch returns literal Hundredth0.
+        // SAFETY: INCREASED's branch returns literal Hundredth0.
         let Availability::Available(value) = unsafe { access.catalog_numeric_property(&attached, &mut catalog, raw(6, 1)) }.unwrap() else {
             panic!("expected numeric");
         };
@@ -1069,9 +1081,9 @@ mod tests {
         // SAFETY: valid fake reference metadata supplies null for the actual required override list.
         let mut catalog = unsafe { catalog(&attached) };
         for _ in 0..2 {
-            // SAFETY: MORE's audited native getter would throw on null list, so numeric remains unknown.
+            // SAFETY: MORE's native getter would throw on null list, so numeric remains unknown.
             assert!(matches!(
-                // SAFETY: MORE's audited native getter would throw on null list, so numeric remains unknown.
+                // SAFETY: MORE's native getter would throw on null list, so numeric remains unknown.
                 unsafe { access.catalog_numeric_property(&attached, &mut catalog, raw(6, 2)) }.unwrap(),
                 Availability::Unavailable { .. }
             ));

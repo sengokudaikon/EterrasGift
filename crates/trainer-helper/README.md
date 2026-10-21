@@ -1,19 +1,16 @@
 # Retained Rust control helper
 
 `eg-trainer-helper` is the explicitly started, in-process side of the trainer. It builds a Windows
-x64 DLL with explicit startup outside loader lock; the desktop connects through the trainer worker. The authored Unity player calls
-`eg_helper_start(legacy_tid)` after initialization; that legacy argument is ignored. The evaluation controller
-also tests the explicit `eg_helper_bootstrap` native-thread entry after standard DLL loading.
-The caller must satisfy the unsafe startup contract; this is not a generic Unity-version adapter.
+x64 DLL with explicit startup outside loader lock. The desktop connects through the trainer worker.
+`eg_helper_bootstrap` starts the helper once using an 80-byte configuration containing the process
+ID, helper build ID and returned status. Both the native preparer and the authored player use it.
+The supported runtime assumptions are listed in [trainer-interop.md](../../research/trainer-interop.md).
 
-The dedicated control OS thread owns its IL2CPP attachment and a current-thread Tokio runtime.
-Discovery resolves public exports, validates all 37 legacy layout keys, field types, static fields,
-selected method signatures and modern x64 header adapters. It allocates rooted byte/string samples
-to cross-check the adapters. It does not invoke arbitrary game methods. The exact Unity 6000.4.8
-`MethodInfo.methodPointer` position remains an explicit unsafe layout contract. Unsupported metadata
-fails the entire profile; no partial discovery is published.
-These are legacy discovery checks, including legacy generic-name matching. They do not authorize
-future field writes or invocations; those need exact per-operation type, storage and lifetime checks.
+The control OS thread owns its IL2CPP attachment and current-thread Tokio runtime. Discovery
+checks the dispatcher method and modern x64 header adapters with rooted byte/string samples.
+Field and invocation contracts are checked by the operations that use them. No offset table is
+sent to the controller. `MethodInfo.methodPointer` at offset zero remains a supported-runtime
+layout assumption.
 
 The first successful discovery retains pristine dispatcher bytes. Subsequent status/empty-clear
 requests must match this profile, even while the scheduler entry is patched. Stock detour 0.10
@@ -25,16 +22,15 @@ with no Rust lock or catch around that call. After a normal return, the first ac
 checks the current UnitySynchronizationContext main managed ID against Thread.CurrentThread.ManagedThreadId.
 Only a matching callback establishes the Windows thread ID used for subsequent dispatch; other threads
 forward the original without taking a command. There is no pre-bootstrap main-thread nomination. Rust panics in this post-call work close admission;
-native/managed exceptions continue to their native caller, with the callback scope cleaned up.
-The authored Unity throwing-task route checks this behavior. Independently, the callback observes runtime status
-at most once per second while an owner is present.
+native/managed exceptions continue to their caller. The authored Unity throwing-task route checks
+that later queued tasks still run. Game graph reads occur only for requested operations.
 
 Status roots the manager wrapper, checks assignability and reads its metadata-validated Unity
 `m_CachedPtr`. A retained managed wrapper whose native object was destroyed reports no character.
 It also reads the independent runtime online flag. No native Unity-object pointer is dereferenced.
 Returned manager addresses are ephemeral observations, never managed-object ownership tokens.
 
-Protocol32 supports owned forge, limits, completed locale, catalog and attack/leech reads.
+The helper supports owned forge, limits, completed locale, catalog and attack/leech reads.
 EditForge carries status, base/identity and regular affix-roll changes through the shared
 submission/readback path. The helper validates the complete expected state and every destination
 before the first store. It roots the selected graph through managed refreshes. A failure after
@@ -51,7 +47,7 @@ declaring ownership, type, non-byref storage and literal/static flags before cop
 All five ranges must satisfy `0 <= minimum <= maximum <= 255`; level minimum zero follows the
 original helper. Runtime offline/native-manager admission runs first, independently of Session.
 The returned owned ranges omit localization, rarity names and the rest of the definitions catalog.
-Their exact 40-byte codec is `eg-game-access::definitions`. Older protocol versions are rejected.
+Their exact 40-byte codec is `eg-game-access::definitions`. A stale helper is rejected by its build ID.
 
 `ReadLocale` observes `LocalizationSettings.s_Instance` and its already completed selected-locale operation.
 The generic handle is boxed through the public field API and rooted; its operation must have matching versions,
@@ -60,7 +56,7 @@ Locale wrappers must both have live native pointers. Uninitialized, pending, sta
 return NotReady, without invoking settings/selection/initialization/waiting methods. Metadata/layout failures fail
 the whole read. All objects, including the handle and returned identifier box, stay rooted through copying.
 
-Only the audited Locale.Identifier, LocaleIdentifier.Code and Application.version getters run. The real identifier
+Only the Locale.Identifier, LocaleIdentifier.Code and Application.version getters run. The real identifier
 has **two references, 16-byte payload and 8-byte alignment**; the earlier one-field invocation fixture was not its
 layout. The version getter may initialize Application's framework CancellationTokenSource, cache an internal call,
 allocate/convert strings and dispose a native buffer. These are explicitly authorized effects; read-only means no
@@ -79,7 +75,7 @@ The complete hook feature set is currently empty:
 stat or gameplay field writes remain unavailable. Before adding effects, their
 runtime-offline/owner-loss cleanup must run and acknowledge completion on the engine thread.
 
-The local pipe is `eterras-gift-<PID>`, one strict 336-byte request per connection. The first valid
+The local pipe is `eterras-gift-<PID>`, one bounded request per connection: a 12-byte header and a sequential operation body. The first valid
 Discover claims ownership using the kernel-reported client PID and a retained process handle/start
 time. Normal per-request EOF preserves ownership. Other living processes receive Refused without
 reaching the backend; process death restores the dispatcher before relinquishing ownership. A
@@ -91,13 +87,10 @@ disconnect cancels pending work when possible. Once started, the request retains
 slot and failures report uncertain execution. Nothing is replayed automatically. Malformed requests
 never reach discovery or dispatch. Slow clients have a separate bounded read/write deadline.
 
-`eg_helper_shutdown()` accepts an asynchronous stop request. The worker closes admission, attempts
-entry restoration, releases its attachment and stops the server. Metrics 9=1 and 10=0 confirm entry
-restoration and server stop; they do not prove all callbacks have drained. Published trampoline,
-unwind table, helper module and GameAssembly remain retained until process exit. No unload is allowed,
-including after failure. A worker panic may leave the entry installed with a stop-only forwarding
-callback; cleanup then remains unconfirmed. The public server future must be driven to completion:
-dropping it cannot run asynchronous shutdown/restoration.
+The helper has no stop or telemetry protocol. Controller death restores the dispatcher before a
+new owner can connect. Internal server failure closes admission and attempts restoration.
+Published trampolines, optional unwind tables and module pins remain until process exit. The
+server future must be driven to completion so it can restore its owned dispatcher entry.
 
 `eg_helper_build_id()` returns 64 lowercase ASCII hex characters plus NUL. The build script hashes
 relative paths and contents of the manifests, lockfile and Rust sources of core, game access, trainer

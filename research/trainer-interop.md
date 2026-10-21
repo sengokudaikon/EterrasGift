@@ -69,6 +69,12 @@ and mutation boundaries. The named-pipe server has one owner; a new client does 
 unfinished work. Unfinished remote calls retain their thread/process handles and input buffers.
 A helper generation is reused rather than unloading executing code or reinjecting over it.
 
+The connected session retains its game binary/metadata read lease across polling, catalog
+capture, mapping and writes, releasing it on disconnect or lost admission. Windows helper
+and module verification also check retained file identity without rereading content. The
+profile's full-hash fallback remains for platforms/storage or existing writers that prevent
+a lease; it still validates each operation rather than trusting an unpinned hash.
+
 The helper retains one pipe instance through disconnect/reconnect, with a protected DACL
 granting access only to the game process's user and SYSTEM. The client still verifies server
 PID; the server still binds ownership to client PID and creation time. Buffered input and
@@ -122,7 +128,7 @@ locale operation, then calls the audited identifier/code/version getters. Its id
 two references, a 16-byte payload and 8-byte alignment. Empty cached item names are also accepted
 by the original C# reader; they are not evidence that field walking is inherently wrong.
 
-The isolated numeric formatter is retained with its tests. Virtual dispatch must use the exact
+The unused numeric formatter and its probes are archived at `%USERPROFILE%/Developer/EterrasGiftRS-archive/2026-10-20-trainer-evaluations/unused-formatters`. Virtual dispatch must use the exact
 resolved override; culture and provider affect text. Raw numeric quantities do not always have
 the same scale as display text. None of those mechanisms provides a producer, description,
 preview or roll-mapping operation by itself. Implicit descriptions now use the game tooltip
@@ -198,7 +204,7 @@ rarity projection is an expectation checked by independent readback; it is not t
 
 
 Regular-affix mappings use one conditional request shape for context and sixteen sample pages,
-with one operation-scoped artifact lease. Each page deserializes an owned item copy, rejects
+with the artifact lease retained for the connected session. Each page deserializes an owned item copy, rejects
 cross-aliasing of live/copy list storage and affixes, clones unique/implicit arrays, preserves
 set-count fields, and checks the original numeric context before projecting a draft. Only the
 private copy is mutated. The game tooltip producer/virtual formatter supplies exact display and

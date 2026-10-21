@@ -6,7 +6,7 @@
 
 use crate::{
     catalog::GameCatalog,
-    edits::{BaseTypeEdit, CatalogProvenance, EditError, ExpectedObservation, ItemEdit, RollChange, RollEdit, StatusEdit, UniqueIdentityEdit},
+    edits::{BaseTypeEdit, EditError, ExpectedObservation, ItemEdit, RollChange, RollEdit, StatusEdit, UniqueIdentityEdit},
     writes::{ForgePlan, WriteRecord, WriteStatus},
 };
 
@@ -101,7 +101,7 @@ impl ForgeUndoHistory {
                 self.steps.clear();
             }
             self.begin = false;
-            match ForgeUndo::from_prepared(prepared, manager, actual) {
+            match ForgeUndo::from_checked(prepared, manager, actual) {
                 Ok(undo) => self.steps.push(undo),
                 Err(error) => {
                     self.clear();
@@ -121,17 +121,13 @@ pub struct ForgeUndo {
 }
 
 impl ForgeUndo {
-    /// Capture a confirmed result under the edit's readback policy. The record's status is a
-    /// caller-supplied fact, not a certificate of transport/runtime execution.
+    /// Validate the retained readback and derive a conditional reverse edit.
     /// Current literal ranges are checked later against the fresh catalog; the
     /// original plan retains their identity but not their complete values.
     pub fn from_confirmed(record: &WriteRecord) -> Result<Self, EditError> {
         let WriteStatus::Confirmed(snapshot) = &record.status else {
             return Err(EditError::InvalidObservation);
         };
-        if !record.plan.matches(snapshot) {
-            return Err(EditError::InvalidObservation);
-        }
         Self::from_prepared(record.plan.prepared(), record.plan.manager(), snapshot)
     }
 
@@ -141,7 +137,10 @@ impl ForgeUndo {
         if manager == 0 || !prepared.inspect_readback(Some(snapshot)).confirmed() {
             return Err(EditError::InvalidObservation);
         }
-        let reverse = Self::reverse_intent(prepared, snapshot)?;
+        Self::from_checked(prepared, manager, snapshot)
+    }
+    fn from_checked(prepared: &crate::edits::PreparedEdit, manager: u64, snapshot: &eg_trainer_wire::forge::ForgeSnapshot) -> Result<Self, EditError> {
+        let reverse = Self::reverse_checked(prepared, snapshot)?;
         let before = prepared.before();
         Ok(Self {
             after: ExpectedObservation::new(before.generation(), before.process().clone(), before.catalog_identity().clone(), snapshot.clone())?,
@@ -155,6 +154,9 @@ impl ForgeUndo {
         if !prepared.inspect_readback(Some(snapshot)).confirmed() {
             return Err(EditError::InvalidObservation);
         }
+        Self::reverse_checked(prepared, snapshot)
+    }
+    fn reverse_checked(prepared: &crate::edits::PreparedEdit, snapshot: &eg_trainer_wire::forge::ForgeSnapshot) -> Result<ItemEdit, EditError> {
         let before = prepared.before();
         let item = before.snapshot();
         let reverse = match prepared.edit() {
@@ -264,19 +266,12 @@ impl ForgeUndo {
 
     /// Build a new conditional write from the exact confirmed after-state.
     /// Full equality includes fields omitted from the legacy fingerprint. A
-    /// cache or an older generation cannot establish fresh catalog provenance.
+    /// changed process, generation or catalog invalidates the token.
     /// Failure leaves this pure token unchanged and never retries a submission.
-    pub fn prepare(&self, current: &ExpectedObservation, manager: u64, catalog: &GameCatalog, provenance: &CatalogProvenance) -> Result<ForgePlan, EditError> {
-        self.prepare_with_override(current, manager, catalog, provenance, false)
+    pub fn prepare(&self, current: &ExpectedObservation, manager: u64, catalog: &GameCatalog) -> Result<ForgePlan, EditError> {
+        self.prepare_with_override(current, manager, catalog, false)
     }
-    pub fn prepare_with_override(
-        &self,
-        current: &ExpectedObservation,
-        manager: u64,
-        catalog: &GameCatalog,
-        provenance: &CatalogProvenance,
-        override_enabled: bool,
-    ) -> Result<ForgePlan, EditError> {
+    pub fn prepare_with_override(&self, current: &ExpectedObservation, manager: u64, catalog: &GameCatalog, override_enabled: bool) -> Result<ForgePlan, EditError> {
         if manager != self.manager
             || current.generation() != self.after.generation()
             || current.process() != self.after.process()
@@ -288,7 +283,7 @@ impl ForgeUndo {
             return Err(EditError::StaleItem);
         }
         // This rechecks actual current literal limits, field eligibility,
-        // exact catalog identity and fresh RuntimeRead provenance. Retain the
+        // exact catalog identity. Retain the
         // original edit's flag and recheck the current override permission.
         let mut reverse = self.reverse.clone();
         if let ItemEdit::AddAffix(add) = &mut reverse {
@@ -298,6 +293,6 @@ impl ForgeUndo {
             let free = add.seal != crate::edits::SealState::Normal || (if add.kind == crate::edits::AffixKind::Prefix { prefixes } else { suffixes }) > 0;
             add.allow_incompatible = !(compatible && free);
         }
-        ForgePlan::edit(current, manager, catalog, provenance, reverse, override_enabled)
+        ForgePlan::edit(current, manager, catalog, reverse, override_enabled)
     }
 }

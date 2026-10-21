@@ -27,13 +27,13 @@ use windows_sys::Win32::{
 
 pub struct Shared {
     pub stop: AtomicBool,
-    pub metrics: [AtomicU64; 20],
+    pub main_thread: AtomicU64,
 }
 impl Default for Shared {
     fn default() -> Self {
         Self {
             stop: AtomicBool::new(false),
-            metrics: [const { AtomicU64::new(0) }; 20],
+            main_thread: AtomicU64::new(0),
         }
     }
 }
@@ -112,14 +112,12 @@ async fn wait<F: Future>(future: F, shared: &Shared, owner: Option<&Owner>, dura
     }
 }
 
-fn reap(owner: &mut Option<Owner>, backend: &mut impl Backend, shared: &Shared) -> Result<(), String> {
+fn reap(owner: &mut Option<Owner>, backend: &mut impl Backend) -> Result<(), String> {
     if owner.as_ref().is_some_and(|owner| !owner.alive()) {
         // Keep ownership fenced until removal is confirmed. Published callback
         // storage remains retained even if the departing owner had running work.
         backend.restore()?;
         owner.take();
-        shared.metrics[11].store(0, SeqCst);
-        shared.metrics[12].fetch_add(1, SeqCst);
     }
     Ok(())
 }
@@ -152,11 +150,6 @@ pub async fn run(pid: u32, backend: &mut impl Backend, shared: &Shared) -> Resul
     shared.stop.store(true, SeqCst);
     // Backend keeps every published callback/trampoline owner retained even when restore fails.
     let restored = backend.restore();
-    shared.metrics[11].store(0, SeqCst);
-    shared.metrics[10].store(0, SeqCst);
-    if restored.is_ok() {
-        shared.metrics[9].store(1, SeqCst);
-    }
     match (result, restored) {
         (Err(server), Err(restore)) => Err(format!("{server}; entry restoration failed: {restore}")),
         (Ok(()), result) | (result, Ok(())) => result,
@@ -172,9 +165,8 @@ async fn serve(pid: u32, backend: &mut impl Backend, shared: &Shared) -> Result<
 async fn serve_pipe(pid: u32, mut pipe: NamedPipeServer, backend: &mut impl Backend, shared: &Shared) -> Result<(), String> {
     let mut owner: Option<Owner> = None;
     let mut connected = false;
-    shared.metrics[10].store(1, SeqCst);
     'connections: while !shared.stop.load(SeqCst) {
-        reap(&mut owner, backend, shared)?;
+        reap(&mut owner, backend)?;
         if connected {
             if let Err(error) = pipe.disconnect()
                 && error.raw_os_error() != Some(233)
@@ -204,7 +196,7 @@ async fn serve_pipe(pid: u32, mut pipe: NamedPipeServer, backend: &mut impl Back
                 }
                 Ok(Err(error)) => return Err(error.to_string()),
                 Err(Interrupted::Stop) => return Ok(()),
-                Err(Interrupted::OwnerExited) => reap(&mut owner, backend, shared)?,
+                Err(Interrupted::OwnerExited) => reap(&mut owner, backend)?,
                 Err(Interrupted::Deadline) => {}
             }
         }
@@ -224,17 +216,15 @@ async fn serve_pipe(pid: u32, mut pipe: NamedPipeServer, backend: &mut impl Back
         let response = match received {
             Ok(Err(RequestReadError::Protocol(_))) => failure(ResponseCode::Refused, "Invalid or unsupported request frame; nothing was run"),
             Ok(Ok(request)) => {
-                reap(&mut owner, backend, shared)?;
+                reap(&mut owner, backend)?;
                 if owner.as_ref().is_some_and(|owner| owner.pid != client.pid || owner.created != client.created) {
                     failure(ResponseCode::Refused, "Another live application owns this helper; nothing was run")
                 } else if owner.is_none() && request != Request::Discover {
                     failure(ResponseCode::Refused, "Discover before using the helper; nothing was run")
                 } else {
                     if owner.is_none() {
-                        shared.metrics[11].store(client.pid as u64, SeqCst);
                         owner = Some(client);
                     }
-                    shared.metrics[15].fetch_add(1, SeqCst);
                     match request {
                         Request::Discover => match backend.discover() {
                             Ok(discovery) => match discovery.encode(pid) {

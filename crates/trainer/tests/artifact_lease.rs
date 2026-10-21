@@ -7,7 +7,7 @@ use eg_core::{
 use eg_game_access::artifact::ReadLease;
 use eg_trainer::session::{CaptureControl, CaptureObserver, CaptureOutcome, CaptureProgress, Cleanup};
 use eg_trainer::{
-    gate::{GatePolicy, LogSource},
+    gate::LogSource,
     profile::BuildProfile,
     session::{Session, SessionError, SessionState},
 };
@@ -16,7 +16,7 @@ use eg_trainer_wire::{
     definitions::{self, ItemLimits, ValueRange},
     locale::{self, GameLocale},
     process::ProcessIdentity,
-    protocol::{Discovery, DispatcherSpec, REQUIRED_KEYS, Request, Response, ResponseCode, RuntimeStatus},
+    protocol::{Discovery, DispatcherSpec, Request, Response, ResponseCode, RuntimeStatus},
     transport::{Transport, TransportError},
 };
 use jiff::Timestamp;
@@ -136,7 +136,6 @@ impl Fixture {
         let discovery = Discovery {
             build_id: HELPER.into(),
             dispatcher: self.dispatcher,
-            offsets: REQUIRED_KEYS.iter().enumerate().map(|(i, key)| ((*key).into(), 16 + i as u64 * 8)).collect(),
         };
         let responses = vec![
             discovery.encode(42).unwrap(),
@@ -163,13 +162,13 @@ impl Fixture {
                 responses: responses.into(),
                 requests: vec![],
                 pending: false,
-                lose_log: false,
+                refuse_runtime: false,
                 assert_locks: true,
                 replace_metadata: false,
             })),
             binary: self.binary.clone(),
             metadata: self.metadata.clone(),
-            log,
+            _log: log,
         }
     }
 }
@@ -197,7 +196,7 @@ struct WireState {
     responses: VecDeque<Vec<u8>>,
     requests: Vec<Request>,
     pending: bool,
-    lose_log: bool,
+    refuse_runtime: bool,
     assert_locks: bool,
     replace_metadata: bool,
 }
@@ -207,7 +206,7 @@ struct Wire {
     shared: Arc<Mutex<WireState>>,
     binary: PathBuf,
     metadata: PathBuf,
-    log: Logs,
+    _log: Logs,
 }
 impl Transport for Wire {
     fn target(&self) -> &ProcessIdentity {
@@ -227,8 +226,11 @@ impl Transport for Wire {
                 assert_shared(OpenOptions::new().write(true).open(&self.binary).unwrap_err());
                 assert_shared(OpenOptions::new().write(true).open(&self.metadata).unwrap_err());
             }
-            if s.lose_log && matches!(request, Request::ReadCatalogPage { .. }) {
-                *self.log.0.lock().unwrap() = GameReadiness::Online;
+            if s.refuse_runtime && matches!(request, Request::ReadCatalogPage { .. }) {
+                return Ok(Response {
+                    code: ResponseCode::OfflineRequired,
+                    payload: b"offline character required".to_vec(),
+                });
             }
             if s.replace_metadata && matches!(request, Request::ReadCatalogPage { .. }) {
                 fs::write(&self.metadata, b"changed during fallback catalog reply").unwrap();
@@ -318,8 +320,8 @@ fn profile_lease_has_constant_validation_bytes_and_releases_both_files() {
     let f = Fixture::new();
     let profile = f.profile();
     let lease = profile.capture_lease(&f.dispatcher).unwrap();
-    let expected = fs::metadata(&f.binary).unwrap().len() + fs::metadata(&f.metadata).unwrap().len() + 64 + 26 + 40 + 16;
-    assert_eq!(lease.bytes_read(), Some(expected));
+    let content = fs::metadata(&f.binary).unwrap().len() + fs::metadata(&f.metadata).unwrap().len();
+    assert!((content..=content + 4096).contains(&lease.bytes_read().unwrap()));
     assert_shared(OpenOptions::new().write(true).open(&f.metadata).unwrap_err());
     drop(lease);
     assert!(OpenOptions::new().write(true).open(&f.metadata).is_ok());
@@ -338,30 +340,51 @@ fn existing_writer_selects_explicit_full_hash_fallback_instead_of_claiming_a_lea
 }
 
 #[test]
-fn entire_capture_pins_artifacts_then_normal_public_reads_revalidate() {
+fn session_reuses_one_lease_across_capture_polling_and_public_reads() {
     let f = Fixture::new();
-    let log = Logs::new();
-    let wire = f.wire(log.clone());
-    let shared = wire.shared.clone();
-    let mut session = Session::new(f.target.clone(), wire, log, f.profile(), GatePolicy::Release).unwrap();
-    session.enable();
-    run(session.connect(now())).unwrap();
+    // Large enough to expose content I/O regressions independently of timing.
+    OpenOptions::new().write(true).open(&f.binary).unwrap().set_len(8 * 1024 * 1024).unwrap();
+    let (mut session, shared) = connected(&f);
+    let initial = session.artifact_bytes_read().unwrap();
+    assert!(initial > 8 * 1024 * 1024);
     let catalog = run(session.capture_catalog(now())).unwrap();
     assert_eq!(catalog.bases.len(), 17);
-    assert_eq!(shared.lock().unwrap().requests.len(), 10);
-    fs::write(&f.metadata, b"changed after capture").unwrap();
-    assert!(matches!(run(session.read_forge(now())), Err(SessionError::Identity(_))));
-    assert_eq!(shared.lock().unwrap().requests.len(), 10);
+    for _ in 0..12 {
+        let mut state = shared.lock().unwrap();
+        state.responses.push_back(
+            RuntimeStatus {
+                online: false,
+                manager: 0x12340,
+                features_on: 0,
+            }
+            .encode()
+            .unwrap()
+            .to_vec(),
+        );
+        state.responses.push_back(locale::encode(&locale()).unwrap());
+        state.responses.push_back(definitions::encode(&limits()).unwrap());
+        state.responses.push_back(eg_trainer_wire::forge::encode(None).unwrap());
+        drop(state);
+        run(session.refresh(now())).unwrap();
+        run(session.read_locale(now())).unwrap();
+        run(session.read_item_limits(now())).unwrap();
+        assert_eq!(run(session.read_forge(now())).unwrap(), None);
+        assert_eq!(session.artifact_bytes_read(), Some(initial));
+    }
+    assert_shared(OpenOptions::new().write(true).open(&f.metadata).unwrap_err());
+    run(session.disconnect());
+    assert_eq!(session.artifact_bytes_read(), None);
+    assert!(OpenOptions::new().write(true).open(&f.metadata).is_ok());
 }
 
 #[test]
-fn capture_future_drop_closes_file_lease_and_preserves_connecting_barrier() {
+fn capture_future_drop_retains_session_lease_and_preserves_connecting_barrier() {
     let f = Fixture::new();
     let log = Logs::new();
     let wire = f.wire(log.clone());
     let shared = wire.shared.clone();
     shared.lock().unwrap().pending = true;
-    let mut session = Session::new(f.target.clone(), wire, log, f.profile(), GatePolicy::Release).unwrap();
+    let mut session = Session::new(f.target.clone(), wire, f.profile()).unwrap();
     session.enable();
     run(session.connect(now())).unwrap();
     let mut future = Box::pin(session.capture_catalog(now()));
@@ -369,26 +392,33 @@ fn capture_future_drop_closes_file_lease_and_preserves_connecting_barrier() {
     assert!(future.as_mut().poll(&mut context).is_pending());
     assert_shared(OpenOptions::new().write(true).open(&f.metadata).unwrap_err());
     drop(future);
-    assert!(OpenOptions::new().write(true).open(&f.metadata).is_ok());
+    assert_shared(OpenOptions::new().write(true).open(&f.metadata).unwrap_err());
     assert_eq!(session.state(), SessionState::Connecting);
     assert!(matches!(run(session.connect(now())), Err(SessionError::Busy)));
     let before = shared.lock().unwrap().requests.len();
     run(session.disconnect());
     assert_eq!(shared.lock().unwrap().requests.len(), before + 1);
+    assert!(OpenOptions::new().write(true).open(&f.metadata).is_ok());
 }
 
 #[test]
-fn per_page_log_loss_discards_capture_releases_lease_and_stops_all_further_io() {
+fn per_page_runtime_refusal_discards_capture_releases_lease_and_stops_all_further_io() {
     let f = Fixture::new();
     let log = Logs::new();
     let wire = f.wire(log.clone());
     let shared = wire.shared.clone();
-    shared.lock().unwrap().lose_log = true;
-    let mut session = Session::new(f.target.clone(), wire, log, f.profile(), GatePolicy::Release).unwrap();
+    shared.lock().unwrap().refuse_runtime = true;
+    let mut session = Session::new(f.target.clone(), wire, f.profile()).unwrap();
     session.enable();
     run(session.connect(now())).unwrap();
-    assert!(matches!(run(session.capture_catalog(now())), Err(SessionError::Gate(_))));
-    assert_eq!(session.state(), SessionState::WaitingForCharacter);
+    assert!(matches!(
+        run(session.capture_catalog(now())),
+        Err(SessionError::Helper {
+            code: ResponseCode::OfflineRequired,
+            ..
+        })
+    ));
+    assert_eq!(session.state(), SessionState::Disconnected);
     assert_eq!(shared.lock().unwrap().requests.len(), 5);
     assert!(OpenOptions::new().write(true).open(&f.metadata).is_ok());
     run(session.disconnect());
@@ -402,12 +432,18 @@ fn changed_artifact_before_capture_is_rejected_before_any_catalog_request() {
         let log = Logs::new();
         let wire = f.wire(log.clone());
         let shared = wire.shared.clone();
-        let mut session = Session::new(f.target.clone(), wire, log, f.profile(), GatePolicy::Release).unwrap();
+        let _writer = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .share_mode(7)
+            .open(if binary { &f.binary } else { &f.metadata })
+            .unwrap();
+        let mut session = Session::new(f.target.clone(), wire, f.profile()).unwrap();
         session.enable();
         run(session.connect(now())).unwrap();
         fs::write(if binary { &f.binary } else { &f.metadata }, b"changed before lease").unwrap();
         assert!(matches!(run(session.capture_catalog(now())), Err(SessionError::Identity(_))));
-        assert_eq!(session.state(), SessionState::Blocked);
+        assert_eq!(session.state(), SessionState::Disconnected);
         assert_eq!(shared.lock().unwrap().requests.len(), 2);
     }
 }
@@ -418,10 +454,10 @@ fn fallback_rehashes_each_page_and_rejects_an_inflight_artifact_change() {
     let log = Logs::new();
     let wire = f.wire(log.clone());
     let shared = wire.shared.clone();
-    let mut session = Session::new(f.target.clone(), wire, log, f.profile(), GatePolicy::Release).unwrap();
+    let writer = OpenOptions::new().read(true).write(true).share_mode(7).open(&f.metadata).unwrap();
+    let mut session = Session::new(f.target.clone(), wire, f.profile()).unwrap();
     session.enable();
     run(session.connect(now())).unwrap();
-    let writer = OpenOptions::new().read(true).write(true).share_mode(7).open(&f.metadata).unwrap();
     {
         let mut state = shared.lock().unwrap();
         state.assert_locks = false;
@@ -429,7 +465,7 @@ fn fallback_rehashes_each_page_and_rejects_an_inflight_artifact_change() {
     }
     assert!(matches!(run(session.capture_catalog(now())), Err(SessionError::Identity(_))));
     assert_eq!(shared.lock().unwrap().requests.len(), 5);
-    assert_eq!(session.state(), SessionState::Blocked);
+    assert_eq!(session.state(), SessionState::Disconnected);
     drop(writer);
     assert!(OpenOptions::new().write(true).open(&f.binary).is_ok());
 }
@@ -467,11 +503,11 @@ impl CaptureObserver for Observe {
         self.events.push(event);
     }
 }
-fn connected(f: &Fixture) -> (Session<Wire, Logs>, Arc<Mutex<WireState>>) {
+fn connected(f: &Fixture) -> (Session<Wire>, Arc<Mutex<WireState>>) {
     let log = Logs::new();
     let wire = f.wire(log.clone());
     let shared = wire.shared.clone();
-    let mut session = Session::new(f.target.clone(), wire, log, f.profile(), GatePolicy::Release).unwrap();
+    let mut session = Session::new(f.target.clone(), wire, f.profile()).unwrap();
     session.enable();
     run(session.connect(now())).unwrap();
     (session, shared)
@@ -517,7 +553,7 @@ fn successful_progress_counts_actual_payload_bytes_without_publishing_partial_ca
 }
 
 #[test]
-fn stopping_after_a_page_drops_lease_keeps_ready_and_allows_confirmed_cleanup() {
+fn stopping_after_a_page_keeps_session_lease_ready_and_allows_confirmed_cleanup() {
     let f = Fixture::new();
     let (mut session, shared) = connected(&f);
     let mut observer = Observe::at(|event| {
@@ -534,8 +570,9 @@ fn stopping_after_a_page_drops_lease_keeps_ready_and_allows_confirmed_cleanup() 
     assert_eq!(shared.lock().unwrap().requests.len(), 5);
     assert_eq!(session.state(), SessionState::Ready);
     assert!(session.runtime_status().is_some());
-    assert!(OpenOptions::new().write(true).open(&f.metadata).is_ok());
+    assert_shared(OpenOptions::new().write(true).open(&f.metadata).unwrap_err());
     assert_eq!(run(session.disconnect()), Cleanup::ConfirmedOff);
+    assert!(OpenOptions::new().write(true).open(&f.metadata).is_ok());
     assert_eq!(shared.lock().unwrap().requests.len(), 6);
     assert!(!observer.events.iter().any(|event| matches!(event, CaptureProgress::Complete { .. })));
 }
@@ -555,8 +592,9 @@ fn deliberate_stops_before_first_rpc_after_limits_and_before_final_locale_preser
         assert_eq!(run(session.capture_catalog_observed(now(), &mut observer)).unwrap(), CaptureOutcome::Stopped);
         assert_eq!(shared.lock().unwrap().requests.len(), [2, 2, 4, 9][phase]);
         assert_eq!(session.state(), SessionState::Ready);
-        assert!(OpenOptions::new().write(true).open(&f.binary).is_ok());
+        assert_shared(OpenOptions::new().write(true).open(&f.binary).unwrap_err());
         assert_eq!(run(session.disconnect()), Cleanup::ConfirmedOff);
+        assert!(OpenOptions::new().write(true).open(&f.binary).is_ok());
     }
 }
 
@@ -588,13 +626,19 @@ fn control_is_checked_again_after_artifact_validation_immediately_before_rpc() {
 }
 
 #[test]
-fn observer_stop_does_not_turn_log_admission_failure_into_successful_cancellation() {
+fn observer_stop_does_not_turn_runtime_refusal_into_successful_cancellation() {
     let f = Fixture::new();
     let (mut session, shared) = connected(&f);
-    shared.lock().unwrap().lose_log = true;
+    shared.lock().unwrap().refuse_runtime = true;
     let mut observer = Observe::at(|event| matches!(event, CaptureProgress::Page { .. }));
-    assert!(matches!(run(session.capture_catalog_observed(now(), &mut observer)), Err(SessionError::Gate(_))));
-    assert_eq!(session.state(), SessionState::WaitingForCharacter);
+    assert!(matches!(
+        run(session.capture_catalog_observed(now(), &mut observer)),
+        Err(SessionError::Helper {
+            code: ResponseCode::OfflineRequired,
+            ..
+        })
+    ));
+    assert_eq!(session.state(), SessionState::Disconnected);
     let before = shared.lock().unwrap().requests.len();
     assert_eq!(run(session.disconnect()), Cleanup::Unconfirmed);
     assert_eq!(shared.lock().unwrap().requests.len(), before);

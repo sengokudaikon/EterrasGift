@@ -2,6 +2,7 @@
 
 mod affix;
 
+use super::metadata_text;
 use super::{
     Class, DiscoveryError, Ptr, RuntimeAccess,
     forge::{ForgeGraph, Root, target},
@@ -62,6 +63,7 @@ unsafe fn attempt_store<T>(
 impl RuntimeAccess {
     // Internal caller supplies edit_forge's full live-runtime/exclusive-write contract.
     unsafe fn status_field(&self, owner: Class, kind: StatusField) -> Result<NonNull<raw::FieldInfo>, ForgeWriteError> {
+        // SAFETY: The owner is retained metadata; the selected status kind fixes the required primitive class and storage width.
         unsafe {
             let (name, primitive, code) = match kind {
                 StatusField::LevelRequirement => (c"<LvlReq>k__BackingField", c"Int32", 0x08),
@@ -76,6 +78,7 @@ impl RuntimeAccess {
         }
     }
     pub(super) unsafe fn mutable_field(&self, owner: Class, name: &CStr, primitive: &CStr, code: i32) -> Result<NonNull<raw::FieldInfo>, ForgeWriteError> {
+        // SAFETY: The owner is retained metadata; exact type, flags and declaring-class checks precede returning a writable field.
         unsafe {
             let field = self.field(owner, name)?;
             let ty = (self.field_type)(field);
@@ -103,23 +106,17 @@ impl RuntimeAccess {
         api: raw::InvocationApi,
         id: u16,
     ) -> Result<Root<'a, 'r>, ForgeWriteError> {
+        // SAFETY: The registry metadata and exact lookup signature are checked; the returned definition is rooted before identity validation.
         unsafe {
             let owner = self.class(&graph.images, c"", c"UniqueList")?;
             let entry = self.catalog_nested(owner, c"Entry")?;
-            let mut iterator = std::ptr::null_mut();
             let mut found = None;
-            let mut complete = false;
-            for _ in 0..100_000 {
-                let method = (self.class_methods)(owner, &mut iterator);
-                if method.is_null() {
-                    complete = true;
-                    break;
-                }
+            for method in self.methods(owner)? {
                 let name = (self.method_name)(method);
                 if name.is_null() {
                     return Err(ForgeWriteError::Refused("Missing unique lookup method name".into()));
                 }
-                if CStr::from_ptr(name) != c"getUnique" || (self.method_params)(method) != 1 {
+                if metadata_text(name) != c"getUnique" || (self.method_params)(method) != 1 {
                     continue;
                 }
                 let parameter = (self.method_param)(method, 0);
@@ -139,9 +136,6 @@ impl RuntimeAccess {
                     return Err(ForgeWriteError::Refused("Unique lookup signature differs from getUnique(UInt16) -> Entry".into()));
                 }
                 found = NonNull::new(method.cast_mut());
-            }
-            if !complete {
-                return Err(ForgeWriteError::Refused("Unique lookup method enumeration limit".into()));
             }
             let method = found.ok_or_else(|| ForgeWriteError::Refused("Missing getUnique(UInt16)".into()))?;
             let context = InvocationContext::new(attached, api);
@@ -172,6 +166,7 @@ impl RuntimeAccess {
         item_type: u8,
         sub_type: u16,
     ) -> Result<(), ForgeWriteError> {
+        // SAFETY: The selected graph and registry entries remain rooted while exact destination identity and compatibility are checked.
         unsafe {
             let owner = self.class(&graph.images, c"", c"ItemList")?;
             let context = InvocationContext::new(attached, api);
@@ -210,6 +205,7 @@ impl RuntimeAccess {
     // Mirrors the original validateDefinition: only already-loaded affix IDs
     // and tier counts are needed, without extracting numeric/display catalogs.
     pub(super) unsafe fn validate_affix_definition(&self, attached: &AttachedThread<'_>, graph: &ForgeGraph<'_, '_>, id: u16, tier_value: u16) -> Result<(), ForgeWriteError> {
+        // SAFETY: The selected graph and affix definition stay rooted during exact type, slot and compatibility validation.
         unsafe {
             if id > 4095 || !(1..=8).contains(&tier_value) {
                 return Err(ForgeWriteError::Refused("Invalid serialized affix ID/tier".into()));
@@ -247,27 +243,24 @@ impl RuntimeAccess {
     }
 
     unsafe fn has_refresh(&self, owner: Class, name: &CStr) -> Result<bool, ForgeWriteError> {
+        // SAFETY: The owner is retained class metadata; bounded method inspection checks signatures without executing refresh.
         unsafe {
-            let mut iterator = std::ptr::null_mut();
-            for _ in 0..100_000 {
-                let method = (self.class_methods)(owner, &mut iterator);
-                if method.is_null() {
-                    return Ok(false);
-                }
+            for method in self.methods(owner)? {
                 let actual = (self.method_name)(method);
                 if actual.is_null() {
                     return Err(ForgeWriteError::Refused("Missing refresh method name".into()));
                 }
-                if CStr::from_ptr(actual) == name && (self.method_params)(method) == 0 {
+                if metadata_text(actual) == name && (self.method_params)(method) == 0 {
                     return Ok(true);
                 }
             }
-            Err(ForgeWriteError::Refused("Refresh method enumeration limit".into()))
+            Ok(false)
         }
     }
 
     // Uses already validated metadata; no new object is dereferenced from the current statics/edges.
     unsafe fn status_final_gate(&self, graph: &ForgeGraph<'_, '_>, manager: u64) -> Result<(), ForgeWriteError> {
+        // SAFETY: The caller retains the selected graph; fresh manager/item/native tokens are compared before the first store.
         unsafe {
             let held = target(&graph.manager)?;
             if held.as_ptr() as u64 != manager {
@@ -330,6 +323,7 @@ impl RuntimeAccess {
         expected: &ForgeSnapshot,
         mutation: ForgeMutation,
     ) -> Result<ForgeSnapshot, ForgeWriteError> {
+        // SAFETY: The caller supplies exclusive main-thread graph access; all destinations are prevalidated and rooted through stores and readback.
         unsafe {
             let level = matches!(
                 mutation,

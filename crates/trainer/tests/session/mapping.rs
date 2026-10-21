@@ -55,7 +55,7 @@ fn pages() -> Vec<Step> {
         .map(|start| done(mapping::encode_mapping(&page(start)).unwrap()))
         .collect()
 }
-fn ready(fixture: &Fixture, wire: &FakeTransport, log: &FakeLog) -> Session<FakeTransport, FakeLog> {
+fn ready(fixture: &Fixture, wire: &FakeTransport, log: &FakeLog) -> Session<FakeTransport> {
     let mut session = fixture.session(wire, log, GatePolicy::Release);
     session.enable();
     run(session.connect(now())).unwrap();
@@ -69,7 +69,9 @@ fn complete_sampled_mapping_uses_exact_display_and_full_conditional_queries() {
     steps.extend(pages());
     let wire = FakeTransport::new(fixture.target.clone(), steps);
     let mut session = ready(&fixture, &wire, &FakeLog::new([offline()]));
+    let bytes_read = session.artifact_bytes_read();
     let table = run(session.resolve_mapping(now(), &observation, &request())).unwrap();
+    assert_eq!(session.artifact_bytes_read(), bytes_read);
     assert_eq!(table.samples().len(), 256);
     assert_eq!(table.sample(99).value, 1099.);
     assert_eq!(table.sample(99).raw_quantity, 99. / 255.);
@@ -150,7 +152,7 @@ fn mapping_display_context_and_optional_helper_failures_stay_local() {
 }
 #[test]
 fn mapping_offline_transport_and_malformed_wire_failures_revoke_without_replay() {
-    for failure in 0..4 {
+    for failure in 0..3 {
         let fixture = Fixture::new();
         let log = FakeLog::new([offline()]);
         let changed = log.clone();
@@ -194,7 +196,7 @@ fn mapping_offline_transport_and_malformed_wire_failures_revoke_without_replay()
 #[test]
 fn canceled_mapping_never_replays_and_artifact_change_between_pages_blocks() {
     for cancel in [true, false] {
-        let fixture = Fixture::new();
+        let fixture = Fixture::rehashing();
         let final_step = if cancel {
             Step::Pending
         } else {
@@ -217,15 +219,6 @@ fn canceled_mapping_never_replays_and_artifact_change_between_pages_blocks() {
             ],
         );
         let mut session = ready(&fixture, &wire, &FakeLog::new([offline()]));
-        #[cfg(windows)]
-        let _writer = if !cancel {
-            // Exercise the supported rehash fallback rather than attempting to
-            // write through the Windows read-only artifact lease.
-            use std::os::windows::fs::OpenOptionsExt;
-            Some(fs::OpenOptions::new().read(true).write(true).share_mode(7).open(&fixture.metadata).unwrap())
-        } else {
-            None
-        };
         let observation = expected(&fixture);
         let request = request();
         if cancel {
@@ -235,7 +228,7 @@ fn canceled_mapping_never_replays_and_artifact_change_between_pages_blocks() {
             assert_eq!(session.state(), SessionState::Connecting);
         } else {
             assert!(matches!(run(session.resolve_mapping(now(), &observation, &request)), Err(SessionError::Identity(_))));
-            assert_eq!(session.state(), SessionState::Blocked);
+            assert_eq!(session.state(), SessionState::Disconnected);
         }
         assert!(run(session.resolve_mapping(now(), &observation, &request)).is_err());
         assert_eq!(wire.requests().len(), 4);

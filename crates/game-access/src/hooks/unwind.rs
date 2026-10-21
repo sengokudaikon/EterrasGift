@@ -1,8 +1,8 @@
 //! Registers the copied prefix and stock near jump using the original function's
 //! unwind codes. The stock jump-back is replaced with the old adapter's two
 //! conditional near jumps, preserving flags/registers without epilogue detection.
-//! Relocated instruction offsets must remain unchanged. Handler/
-//! chained records are refused rather than fabricating exception-handler coverage.
+//! Relocated instruction offsets must remain unchanged. Functions with handler or
+//! chained records keep the backend's ordinary trampoline without registration.
 use super::{HookError, failure};
 use iced_x86::{Decoder, DecoderOptions};
 use windows_sys::Win32::System::{
@@ -37,6 +37,9 @@ pub(super) unsafe fn register(target: *const u8, trampoline: *const u8, expected
             }
             let address = (image_base + u64::from((*entry).Anonymous.UnwindData)) as *const u8;
             let header = std::slice::from_raw_parts(address, 4);
+            if header[0] & 7 == 1 && header[0] >> 3 != 0 {
+                return Ok(());
+            }
             if header[0] != 1 || header[2] > 64 {
                 return Err(HookError::UnsupportedUnwind);
             }

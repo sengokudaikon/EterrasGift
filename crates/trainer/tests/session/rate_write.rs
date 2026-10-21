@@ -31,7 +31,7 @@ fn plan(f: &Fixture, target: AttackLeechTarget, value: f64) -> AttackLeechPlan {
 fn ack(plan: &AttackLeechPlan) -> Step {
     done(fields::encode(&AttackLeechRead::Available(*plan.projected())))
 }
-fn ready(f: &Fixture, wire: &FakeTransport, log: &FakeLog) -> Session<FakeTransport, FakeLog> {
+fn ready(f: &Fixture, wire: &FakeTransport, log: &FakeLog) -> Session<FakeTransport> {
     let mut session = f.session(wire, log, GatePolicy::Release);
     session.enable();
     run(session.connect(now())).unwrap();
@@ -113,7 +113,7 @@ fn malformed_unavailable_and_every_full_ack_drift_are_uncertain_without_independ
         let wire = FakeTransport::new(f.target.clone(), [f.discover(), status(false, 0x1234, 0), done(bytes)]);
         let mut session = ready(&f, &wire, &FakeLog::new([offline()]));
         assert!(matches!(run(session.set_attack_leech_rate(now(), &p)).unwrap(), RateWriteStatus::Uncertain { .. }));
-        assert_eq!(session.state(), SessionState::Blocked);
+        assert_eq!(session.state(), SessionState::Disconnected);
         assert!(run(session.set_attack_leech_rate(now(), &p)).is_err());
         assert_eq!(wire.requests().len(), 3);
     }
@@ -211,28 +211,21 @@ fn independent_rate_drift_is_known_but_changed_identity_or_failed_reads_are_unce
             assert_eq!(session.state(), SessionState::Ready);
         } else {
             assert!(matches!(result, RateWriteStatus::Uncertain { .. }));
-            assert_eq!(session.state(), SessionState::Blocked);
+            assert_eq!(session.state(), SessionState::Disconnected);
         }
         assert_eq!(wire.requests().len(), 4);
     }
 }
 #[test]
-fn log_or_artifact_loss_at_either_reply_withholds_confirmation_and_stops_further_io() {
+fn artifact_loss_at_either_reply_withholds_confirmation_and_stops_further_io() {
     for readback in [false, true] {
         for artifact in [false, true] {
-            let f = Fixture::new();
+            let f = Fixture::rehashing();
             let p = plan(&f, AttackLeechTarget::AttackRate, 1.1);
             let log = FakeLog::new([offline()]);
-            let changed = log.clone();
-            let metadata = f.metadata.clone();
+            let metadata = if artifact { f.binary.clone() } else { f.metadata.clone() };
             let action = Step::Action(
-                Box::new(move || {
-                    if artifact {
-                        fs::write(metadata, b"artifact replaced").unwrap()
-                    } else {
-                        changed.set(online())
-                    }
-                }),
+                Box::new(move || fs::write(metadata, b"artifact replaced").unwrap()),
                 Response {
                     code: ResponseCode::Done,
                     payload: fields::encode(&AttackLeechRead::Available(*p.projected())),
@@ -254,9 +247,9 @@ fn log_or_artifact_loss_at_either_reply_withholds_confirmation_and_stops_further
 #[test]
 fn preflight_wrong_process_manager_or_changed_artifact_has_no_rate_record_or_rpc() {
     for fault in 0..3 {
-        let f = Fixture::new();
+        let f = Fixture::rehashing();
         let p = if fault == 0 {
-            plan(&Fixture::new(), AttackLeechTarget::AttackRate, 1.1)
+            plan(&Fixture::rehashing(), AttackLeechTarget::AttackRate, 1.1)
         } else {
             plan(&f, AttackLeechTarget::AttackRate, 1.1)
         };
@@ -270,21 +263,7 @@ fn preflight_wrong_process_manager_or_changed_artifact_has_no_rate_record_or_rpc
         assert_eq!(wire.requests().len(), 2);
     }
 }
-#[test]
-fn release_gate_is_required_even_for_development_and_disabled_does_not_read_log() {
-    let f = Fixture::new();
-    let p = plan(&f, AttackLeechTarget::AttackRate, 1.1);
-    let log = FakeLog::new([GameLogState::missing()]);
-    let wire = FakeTransport::new(f.target.clone(), [f.discover(), status(false, 0x1234, 0)]);
-    let mut session = f.session(&wire, &log, GatePolicy::Development);
-    assert!(matches!(run(session.set_attack_leech_rate(now(), &p)), Err(SessionError::Disabled)));
-    assert!(log.reads().is_empty());
-    session.enable();
-    run(session.connect(now())).unwrap();
-    assert!(matches!(run(session.set_attack_leech_rate(now(), &p)), Err(SessionError::Gate(_))));
-    assert!(session.last_rate_write().is_none());
-    assert_eq!(wire.requests().len(), 2);
-}
+
 #[test]
 fn abandonment_at_send_or_read_keeps_pending_and_busy_until_disconnect_makes_uncertain() {
     for readback in [false, true] {
@@ -339,46 +318,15 @@ fn cleanup_control_cancels_only_before_unsent_rpcs() {
             assert_eq!(session.state(), SessionState::Ready);
         } else {
             assert!(matches!(outcome.unwrap(), RateWriteStatus::Uncertain { .. }));
-            assert_eq!(session.state(), SessionState::Blocked);
+            assert_eq!(session.state(), SessionState::Disconnected);
         }
         assert_eq!(wire.requests().len(), 2 + limit);
     }
 }
-#[test]
-fn definitive_refusal_stays_not_applied_after_simultaneous_log_loss() {
-    let f = Fixture::new();
-    let p = plan(&f, AttackLeechTarget::AttackRate, 1.1);
-    let log = FakeLog::new([offline()]);
-    let changed = log.clone();
-    let wire = FakeTransport::new(
-        f.target.clone(),
-        [
-            f.discover(),
-            status(false, 0x1234, 0),
-            Step::Action(
-                Box::new(move || changed.set(online())),
-                Response {
-                    code: ResponseCode::StaleItem,
-                    payload: b"guard failed before setter".to_vec(),
-                },
-            ),
-        ],
-    );
-    let mut session = ready(&f, &wire, &log);
-    assert!(matches!(
-        run(session.set_attack_leech_rate(now(), &p)).unwrap(),
-        RateWriteStatus::NotApplied {
-            code: ResponseCode::StaleItem,
-            ..
-        }
-    ));
-    assert_eq!(wire.requests().len(), 3);
-    assert_ne!(session.state(), SessionState::Ready);
-}
 
 use eg_trainer::{
     catalog::{CatalogIdentity, EXTRACTION_VERSION, GameCatalog},
-    edits::{CatalogProvenance, ExpectedObservation, ItemEdit, StatusEdit, StatusField},
+    edits::{ExpectedObservation, ItemEdit, StatusEdit, StatusField},
     writes::{ForgePlan, WriteStatus},
 };
 fn forge_plan(fixture: &Fixture) -> ForgePlan {
@@ -400,15 +348,10 @@ fn forge_plan(fixture: &Fixture) -> ForgePlan {
         rarities: Default::default(),
     };
     let expected = ExpectedObservation::new(1, fixture.target.clone(), catalog.identity.clone(), forge_item()).unwrap();
-    let provenance = CatalogProvenance::RuntimeRead {
-        generation: 1,
-        process: fixture.target.clone(),
-    };
     ForgePlan::edit(
         &expected,
         0x1234,
         &catalog,
-        &provenance,
         ItemEdit::Status(StatusEdit {
             field: StatusField::LevelRequirement,
             value: 17,

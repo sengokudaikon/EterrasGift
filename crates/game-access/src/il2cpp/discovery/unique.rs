@@ -1,4 +1,5 @@
 //! Unique tooltip lines and private-copy draft previews, using the game's producers.
+use super::metadata_text;
 use super::{
     DiscoveryError, Images, RuntimeAccess,
     forge::{Root, target},
@@ -11,6 +12,7 @@ use std::{collections::BTreeSet, ffi::CStr, ptr::NonNull};
 impl RuntimeAccess {
     // Inherits describe_unique's attached, synchronous supported-runtime span.
     unsafe fn unique_scalar(&self, attached: &AttachedThread<'_>, api: raw::InvocationApi, object: &Root<'_, '_>, name: &CStr, returns: &CStr) -> Result<Scalar, DiscoveryError> {
+        // SAFETY: The rooted modifier and checked zero-argument getter retain the exact boxed scalar class through unboxing.
         unsafe {
             let method = self.mapping_method(api, object, name, &[], Some(self.system_class(returns)?))?;
             let context = InvocationContext::new(attached, api);
@@ -32,21 +34,11 @@ impl RuntimeAccess {
         images: &Images,
         parsed: &Root<'_, '_>,
     ) -> Result<Vec<Root<'a, 'r>>, DiscoveryError> {
+        // SAFETY: The validated property definition remains rooted while its exact List and boxed replacement entries are inspected.
         unsafe {
             let method = self.mapping_method(api, parsed, c"get_Replacements", &[], None)?;
             let list_class = (self.type_class)((self.method_return)(method));
-            if list_class.is_null()
-                || (self.class_value)(list_class)
-                || (self.class_image)(list_class) != (self.corlib)()
-                || (self.type_code)((self.class_type)(list_class)) != 0x15
-            {
-                return Err(unsupported("unique replacement List return"));
-            }
-            let name = (self.class_name)(list_class);
-            let ns = (self.class_namespace)(list_class);
-            if name.is_null() || ns.is_null() || CStr::from_ptr(name) != c"List`1" || CStr::from_ptr(ns) != c"System.Collections.Generic" {
-                return Err(unsupported("unique replacement List identity"));
-            }
+            self.list_class(list_class)?;
             let array = self.field_class(self.field(list_class, c"_items")?)?;
             let element = (self.class_element)(array);
             if element.is_null() || (self.class_value)(element) || (self.class_image)(element) != images.game {
@@ -77,6 +69,7 @@ impl RuntimeAccess {
         definition: &Root<'_, '_>,
         roll_count: usize,
     ) -> Result<Vec<ModifierSnapshot>, DiscoveryError> {
+        // SAFETY: The detached item and validated builder stay rooted across calls; returned modifier lists are bounded before copying.
         unsafe {
             let entry_class = (self.object_class)(target(definition)?.as_ptr());
             let tooltip_class = self.class(images, c"", c"UniqueModDisplayListEntry")?;
@@ -90,15 +83,10 @@ impl RuntimeAccess {
             let entries = self.catalog_list(attached, &entries, tooltip_class, MAX_MODIFIERS as u32)?;
             let mods = self.catalog_list(attached, &mods, mod_class, MAX_MODIFIERS as u32)?;
             let builder = self.class(images, c"LE.UI.Tooltips", c"ItemTooltipContentBuilder")?;
-            let mut iterator = std::ptr::null_mut();
             let mut slot_type = None;
-            for _ in 0..100_000 {
-                let method = (self.class_methods)(builder, &mut iterator);
-                if method.is_null() {
-                    break;
-                }
+            for method in self.methods(builder)? {
                 let name = (self.method_name)(method);
-                if !name.is_null() && CStr::from_ptr(name) == c"GetUniqueModifierInfo" && (self.method_params)(method) == 4 {
+                if !name.is_null() && metadata_text(name) == c"GetUniqueModifierInfo" && (self.method_params)(method) == 4 {
                     if slot_type.is_some() {
                         return Err(unsupported("ambiguous unique tooltip builder"));
                     }
@@ -146,7 +134,7 @@ impl RuntimeAccess {
                 }
                 let mut ids = BTreeSet::new();
                 let mut editable = true;
-                if CStr::from_ptr(name) == c"ItemTooltipPreformattedUniqueModifierInfo" {
+                if metadata_text(name) == c"ItemTooltipPreformattedUniqueModifierInfo" {
                     let parsed = self
                         .catalog_reference(attached, &info, c"_parsedUniqueMod")?
                         .ok_or_else(|| unsupported("parsed unique modifier absent"))?;
@@ -156,7 +144,7 @@ impl RuntimeAccess {
                         if name.is_null() {
                             return Err(unsupported("unique replacement runtime class"));
                         }
-                        if CStr::from_ptr(name) != c"UniqueModRollRangeReplacement" {
+                        if metadata_text(name) != c"UniqueModRollRangeReplacement" {
                             continue;
                         }
                         match self.unique_scalar(attached, api, &replacement, c"get_HasRange", c"Boolean")? {
@@ -212,6 +200,7 @@ impl RuntimeAccess {
         api: raw::InvocationApi,
         request: &ForgeDescriptionRequest,
     ) -> Result<Vec<ModifierSnapshot>, DiscoveryError> {
+        // SAFETY: The caller supplies the documented main-thread tooltip span; this path performs no item stores.
         unsafe { self.unique_presentation(attached, None, api, request, None) }
     }
     /// Formats drafted rolls on an independent item copy. No live item store.
@@ -225,6 +214,7 @@ impl RuntimeAccess {
         api: raw::InvocationApi,
         request: &UniquePreviewRequest,
     ) -> Result<Vec<ModifierSnapshot>, DiscoveryError> {
+        // SAFETY: The caller supplies the documented preview span; stores target only the validated independent copy.
         unsafe { self.unique_presentation(attached, Some(writes), api, request.target(), Some(request)) }
     }
     unsafe fn unique_presentation(
@@ -235,6 +225,7 @@ impl RuntimeAccess {
         request: &ForgeDescriptionRequest,
         preview: Option<&UniquePreviewRequest>,
     ) -> Result<Vec<ModifierSnapshot>, DiscoveryError> {
+        // SAFETY: The caller excludes graph changes; roots retain the selected item, private copy and tooltip results across calls.
         unsafe {
             let graph = self.forge_graph(attached)?.ok_or(DiscoveryError::NotReady("forge item absent"))?;
             if target(&graph.manager)?.as_ptr() as u64 != request.manager() || self.forge_snapshot(attached, &graph)? != *request.expected() {
@@ -273,7 +264,7 @@ impl RuntimeAccess {
                     return Err(unsupported("detached unique preview aliases live storage"));
                 }
                 for change in preview.changes() {
-                    target(&rolls)?.as_ptr().cast::<u8>().add(32 + usize::from(change.index)).write(change.value);
+                    super::write_bytes(target(&rolls)?.as_ptr().cast::<u8>().add(32 + usize::from(change.index)), &[change.value]);
                 }
                 self.unique_modifiers(attached, api, &graph.images, &copy, &definition, identity.rolls.len())?
             } else {

@@ -4,7 +4,7 @@ use crate::{
     writes::{AllowWrite, WriteControl, WriteObservation},
 };
 
-impl<T: Transport, L: LogSource> Session<T, L> {
+impl<T: Transport> Session<T> {
     pub fn last_rate_write(&self) -> Option<&RateWriteRecord> {
         self.last_rate_write.as_ref()
     }

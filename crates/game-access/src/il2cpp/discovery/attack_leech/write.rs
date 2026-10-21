@@ -86,6 +86,7 @@ unsafe fn attempt_attack_store<T>(
 impl RuntimeAccess {
     // Internal caller inherits set_attack_leech's exact mutation/runtime contract.
     unsafe fn attack_mutable_field(&self, graph: &AttackGraph<'_, '_>, target: AttackLeechTarget) -> Result<NonNull<raw::FieldInfo>, AttackLeechWriteError> {
+        // SAFETY: The owner is retained metadata; exact Single type, declaring class and writable storage are checked before use.
         unsafe {
             let (owner, name, read_field) = match target {
                 AttackLeechTarget::AttackRate => (graph.character_stats, c"attackRate", graph.attack_field),
@@ -117,7 +118,7 @@ impl RuntimeAccess {
     /// tables belong to the same initialized source-bound runtime. Caller explicitly
     /// authorizes this one selected current-graph mutation, and excludes all other
     /// writers, graph/native lifetime changes, reentrancy, shutdown and callbacks.
-    /// Field::SetValue must implement the source-audited direct R4 assignment with
+    /// Field::SetValue must implement the source-direct R4 assignment with
     /// no conversion, managed body, or retained argument pointer. Root/metadata/field
     /// runtime APIs obey their existing contracts throughout.
     /// Owned-fixture admission may independently establish an initialized Unity main
@@ -146,6 +147,7 @@ impl RuntimeAccess {
         value: f32,
     ) -> Result<AttackLeechObservation, AttackLeechWriteError> {
         let projected = project(expected, target, value)?;
+        // SAFETY: The caller supplies the exclusive main-thread graph span; rooted token checks precede the single store and readback.
         unsafe {
             let graph = self.attack_graph(attached, expected.manager.wrapper_token())?;
             let field = self.attack_mutable_field(&graph, target)?;

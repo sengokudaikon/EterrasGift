@@ -7,10 +7,10 @@
 //! is not the same decimal that the user typed (e.g. 1.1 or the 0.01 lower bound). Neither display text
 //! nor widened decimal equality replaces raw-bit observation comparisons.
 //!
-//! A future executor must independently admit the exact process/helper and offline main thread,
+//! The backend and helper independently admit the exact process/helper and offline main thread,
 //! re-resolve and root the manager/actor/stats graph, recheck every wrapper/native token and both
 //! raw rates immediately before one validated f32 store, and perform a fresh read for confirmation.
-//! This plan is neither that proof nor an Undo token. An uncertain future write must never be retried.
+//! This plan is not an Undo token. Uncertain writes are never retried.
 //! Equality detects observed drift, not ABA between reads: wrappers can die and addresses can be
 //! reused. Process/generation/sequence and token equality are not durable selection or lifetime
 //! authority across a UI wait. This layer creates no retained-root ticket.
@@ -84,7 +84,7 @@ pub enum AttackLeechDecision {
 }
 
 /// An immutable local projection, not permission to dereference tokens or execute a native store.
-/// A publicly constructible snapshot is input data, not a runtime attestation.
+/// A publicly constructible snapshot is input data, not runtime admission.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct AttackLeechPlan {
     before: Box<AttackLeechSnapshot>,

@@ -21,7 +21,7 @@ use eg_trainer::{
 };
 use eg_trainer_wire::{
     process::ProcessIdentity,
-    protocol::{Discovery, DispatcherSpec, REQUIRED_KEYS, Request, Response, ResponseCode, RuntimeStatus},
+    protocol::{Discovery, DispatcherSpec, Request, Response, ResponseCode, RuntimeStatus},
     transport::{Delivery, Transport, TransportError},
 };
 use jiff::Timestamp;
@@ -105,7 +105,6 @@ impl Fixture {
             payload: Discovery {
                 build_id: HELPER.into(),
                 dispatcher: self.dispatcher,
-                offsets: REQUIRED_KEYS.iter().enumerate().map(|(i, key)| ((*key).into(), 16 + i as u64 * 8)).collect(),
             }
             .encode(self.target.pid)
             .unwrap(),
@@ -285,7 +284,7 @@ fn construction_has_no_file_log_or_preparation_activity() {
 }
 
 #[test]
-fn independent_process_bound_log_cursors_and_case_insensitive_helper_id_connect() {
+fn one_process_bound_admission_reader_and_case_insensitive_helper_id_connect() {
     run(async {
         let fixture = Fixture::new();
         let shared = fixture.shared();
@@ -295,9 +294,8 @@ fn independent_process_bound_log_cursors_and_case_insensitive_helper_id_connect(
         assert_eq!(session.target(), &fixture.target);
         assert_eq!(*shared.requests.lock().unwrap(), [Request::Discover, Request::Status { dispatcher: fixture.dispatcher }]);
         let readers = shared.readers.lock().unwrap();
-        assert_eq!(readers.len(), 2);
+        assert_eq!(readers.len(), 1);
         assert!(readers[0].len() >= 5);
-        assert!(readers[1].len() >= 2);
         assert!(readers.iter().flatten().all(|time| *time == started()));
         let attempt = connector.last_attempt().unwrap();
         assert_eq!(attempt.residency, PreparationResidency::Loaded);
@@ -374,25 +372,24 @@ fn online_loss_after_preparer_completes_never_sends_discover() {
         let mut connector = connector(&shared, GatePolicy::Release);
         let error = connector.connect(fixture.target, now()).await.err().unwrap();
         assert_eq!(error.kind, ErrorKind::Gate);
-        assert_eq!(error.delivery, Some(Delivery::MayHaveRun));
-        assert!(!error.retry_when_waiting);
+        assert_eq!(error.delivery, Some(Delivery::NotSent));
+        assert!(error.retry_when_waiting);
         assert_eq!(connector.last_attempt().unwrap().residency, PreparationResidency::Loaded);
         assert_eq!(shared.count("pipe"), 0);
     });
 }
 
 #[test]
-fn session_uses_fresh_log_cursor_and_refuses_before_pipe_even_if_preparation_log_allowed() {
+fn session_does_not_create_a_second_admission_reader() {
     run(async {
         let fixture = Fixture::new();
         let shared = fixture.shared();
         *shared.session_log.lock().unwrap() = Some(log(GameReadiness::Online));
         let mut connector = connector(&shared, GatePolicy::Release);
-        let error = connector.connect(fixture.target, now()).await.err().unwrap();
-        assert_eq!(error.kind, ErrorKind::Gate);
-        assert_eq!(error.delivery, Some(Delivery::MayHaveRun));
-        assert_eq!(shared.count("log-created"), 2);
-        assert_eq!(shared.count("pipe"), 0);
+        let session = connector.connect(fixture.target, now()).await.unwrap();
+        assert_eq!(session.state(), SessionState::Ready);
+        assert_eq!(shared.count("log-created"), 1);
+        assert_eq!(shared.count("pipe"), 2);
     });
 }
 
@@ -423,6 +420,14 @@ fn prepared_identity_transport_source_and_residency_are_bound_before_any_pipe_io
 fn artifact_change_after_preparation_is_rejected_before_status_and_not_replayed() {
     run(async {
         let fixture = Fixture::new();
+        let mut options = fs::OpenOptions::new();
+        options.read(true).write(true);
+        #[cfg(windows)]
+        {
+            use std::os::windows::fs::OpenOptionsExt;
+            options.share_mode(7);
+        }
+        let _writer = options.open(&fixture.metadata).unwrap();
         let shared = fixture.shared();
         *shared.mode.lock().unwrap() = Mode::ChangeMetadata;
         let mut connector = connector(&shared, GatePolicy::Release);
@@ -511,30 +516,16 @@ fn preparation_wait_rechecks_log_after_await_and_records_in_progress_uncertainty
 }
 
 #[test]
-fn explicit_development_probe_still_requires_runtime_offline_status() {
+fn missing_log_never_probes_the_runtime() {
     run(async {
-        for online in [false, true] {
-            let fixture = Fixture::new();
-            let shared = fixture.shared();
-            *shared.log.lock().unwrap() = GameLogState::missing();
-            shared.responses.lock().unwrap()[1].payload = RuntimeStatus {
-                online,
-                manager: 0x1234,
-                features_on: 0,
-            }
-            .encode()
-            .unwrap()
-            .to_vec();
-            let mut connector = connector(&shared, GatePolicy::Development);
-            let result = connector.connect(fixture.target, now()).await;
-            assert_eq!(result.is_ok(), !online);
-            if let Err(error) = result {
-                assert_eq!(error.kind, ErrorKind::Gate);
-                assert_eq!(error.delivery, Some(Delivery::MayHaveRun));
-            }
-            assert_eq!(shared.count("prepare"), 1);
-            assert_eq!(shared.count("pipe"), 2);
-        }
+        let fixture = Fixture::new();
+        let shared = fixture.shared();
+        *shared.log.lock().unwrap() = GameLogState::missing();
+        let mut connector = connector(&shared, GatePolicy::Release);
+        let error = connector.connect(fixture.target, now()).await.err().unwrap();
+        assert_eq!(error.kind, ErrorKind::Gate);
+        assert_eq!(shared.count("prepare"), 0);
+        assert_eq!(shared.count("pipe"), 0);
     });
 }
 

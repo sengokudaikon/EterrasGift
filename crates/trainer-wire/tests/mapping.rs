@@ -260,7 +260,7 @@ fn modifier_empty_strings_false_and_caps() {
 fn detached_mapping_query_rejects_reserved_data_invalid_drafts_and_partial_frames() {
     use eg_trainer_wire::{
         forge::{AffixSnapshot, ForgeSnapshot, ItemStatus},
-        protocol::{DispatcherSpec, REQUEST_SIZE, Request},
+        protocol::{DispatcherSpec, Request},
     };
     let mut expected = ForgeSnapshot {
         item: 17,
@@ -313,10 +313,10 @@ fn detached_mapping_query_rejects_reserved_data_invalid_drafts_and_partial_frame
     let request = Request::MapRoll(query);
     let frame = request.encode();
     assert_eq!(Request::decode(&frame), Ok(request));
-    for (at, value) in [(8, 32u32), (24, 4096), (28, 0), (28, 9), (32, 4), (36, 256), (40, 256), (44, 1), (72, 1), (332, 1)] {
+    for (at, value) in [(44, 32u8), (45, 2), (47, 2), (50, 0), (50, 9), (52, 4)] {
         let mut bad = frame.clone();
-        bad[at..at + 4].copy_from_slice(&value.to_le_bytes());
-        assert!(Request::decode(&bad).is_err(), "offset {at}");
+        bad[at] = value;
+        assert!(Request::decode(&bad).is_err());
     }
     assert!(Request::decode(&frame[..frame.len() - 1]).is_err());
     let mut excess = frame.clone();
@@ -324,10 +324,10 @@ fn detached_mapping_query_rejects_reserved_data_invalid_drafts_and_partial_frame
     assert!(Request::decode(&excess).is_err());
     let query = AffixMappingQuery::new(dispatcher, 41, expected.clone(), 0, MappingStart::ContextOnly, None).unwrap();
     let mut frame = query.encode();
-    assert_eq!(frame[36..40], u32::MAX.to_le_bytes());
+    assert_eq!(frame[45..47], [0, 0]);
     assert_eq!(Request::decode(&frame), Ok(Request::MapRoll(query)));
-    frame[28] = 1;
-    assert!(Request::decode_header(&frame[..REQUEST_SIZE]).is_err());
+    frame[45] = 2;
+    assert!(Request::decode(&frame).is_err());
     assert!(AffixMappingQuery::new(dispatcher, 0, expected.clone(), 0, MappingStart::ContextOnly, None).is_err());
     assert!(AffixMappingQuery::new(dispatcher, 41, expected, 1, MappingStart::ContextOnly, None).is_err());
 }

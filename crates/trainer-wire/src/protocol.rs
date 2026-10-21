@@ -1,4 +1,4 @@
-//! Pure, bounded codecs for protocol37: control, observations and narrow conditional writes.
+//! Bounded message codecs for control, observations and conditional writes.
 //!
 //! Decoding establishes wire validity only. Process identity, helper provenance,
 //! dispatcher code, and permission to run a request belong to the session layer.
@@ -11,16 +11,14 @@ use crate::{
     rate_write::{AttackLeechRateWrite, SET_ATTACK_LEECH_RATE_OPERATION},
     write::{
         ADD_AFFIX_OPERATION, CHANGE_AFFIX_OPERATION, CHANGE_AFFIX_ROLLS_OPERATION, CHANGE_BASE_OPERATION, CHANGE_IDENTITY_OPERATION, ForgeMutation, ForgeWrite, MAX_EXPECTED_BYTES,
-        MIN_EXPECTED_BYTES, REMOVE_AFFIX_OPERATION, SET_STATUS_OPERATION,
+        REMOVE_AFFIX_OPERATION, SET_STATUS_OPERATION,
     },
 };
-use std::{collections::BTreeMap, error::Error, fmt};
+use std::{error::Error, fmt};
 
 pub const MAGIC: u32 = 0x4546_4735;
-/// Version37 adds unique descriptions and detached roll previews.
-pub const VERSION: u32 = 37;
-pub const ADAPTER: &str = "il2cpp-x64-v1";
-pub const REQUEST_SIZE: usize = 336;
+pub const REQUEST_HEADER_SIZE: usize = 12;
+mod request;
 pub const RESPONSE_HEADER_SIZE: usize = 12;
 /// Maximum payload size, excluding the response header, as in NativeBridge.
 pub const MAX_RESPONSE_SIZE: usize = 1024 * 1024;
@@ -28,14 +26,14 @@ pub const MAX_RESPONSE_SIZE: usize = 1024 * 1024;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ProtocolError {
     InvalidData,
-    IncompatibleVersion,
+    InvalidMagic,
 }
 
 impl fmt::Display for ProtocolError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter.write_str(match self {
             Self::InvalidData => "invalid helper protocol data",
-            Self::IncompatibleVersion => "incompatible helper protocol or adapter",
+            Self::InvalidMagic => "invalid helper message signature",
         })
     }
 }
@@ -109,200 +107,21 @@ impl Request {
             Self::SetAttackLeechRate(write) => Some(write.dispatcher()),
         }
     }
-    pub fn encode(&self) -> Vec<u8> {
-        let mut bytes = vec![0; REQUEST_SIZE];
-        bytes[..4].copy_from_slice(&MAGIC.to_le_bytes());
-        let (operation, dispatcher) = match self {
-            Self::Discover => (6_u32, None),
-            Self::Status { dispatcher } => (7, Some(dispatcher)),
-            Self::ClearHooks { dispatcher } => (15, Some(dispatcher)),
-            Self::ReadForge { dispatcher } => (18, Some(dispatcher)),
-            Self::ReadItemLimits { dispatcher } => (19, Some(dispatcher)),
-            Self::ReadLocale { dispatcher } => (20, Some(dispatcher)),
-            Self::ReadCatalogPage { dispatcher, kind, cursor } => {
-                bytes[8..12].copy_from_slice(&(*kind as u32).to_le_bytes());
-                bytes[12..16].copy_from_slice(&cursor.to_le_bytes());
-                (21, Some(dispatcher))
-            }
-            Self::EditForge(write) => return write.encode(),
-            Self::DescribeImplicits(query) => return query.encode().expect("validated description request"),
-            Self::DescribeUnique(query) => return query.encode_operation(4).expect("validated description request"),
-            Self::PreviewUnique(query) => return query.encode(),
-            Self::MapRoll(query) => return query.encode(),
-            Self::SetAttackLeechRate(write) => return write.encode(),
-            Self::ReadAttackLeech { dispatcher, expected_manager } => {
-                bytes[8..16].copy_from_slice(&expected_manager.to_le_bytes());
-                (23, Some(dispatcher))
-            }
-        };
-        bytes[4..8].copy_from_slice(&operation.to_le_bytes());
-        if let Some(dispatcher) = dispatcher {
-            bytes[48..56].copy_from_slice(&dispatcher.rva.to_le_bytes());
-            bytes[56..72].copy_from_slice(&dispatcher.bytes);
-        }
-        bytes
-    }
-
-    /// A bounded read plan only, never an executable request or ownership claim.
-    pub fn decode_header(bytes: &[u8]) -> Result<RequestHeader, ProtocolError> {
-        if bytes.len() != REQUEST_SIZE {
-            return Err(ProtocolError::InvalidData);
-        }
-        let mut reader = Reader::new(bytes);
-        if reader.u32()? != MAGIC {
-            return Err(ProtocolError::IncompatibleVersion);
-        }
-        let operation = reader.u32()?;
-        if !matches!(
-            operation,
-            crate::mapping::ForgeDescriptionRequest::OPERATION
-                | 4
-                | crate::mapping::UniquePreviewRequest::OPERATION
-                | crate::mapping::AffixMappingQuery::OPERATION
-                | ADD_AFFIX_OPERATION
-                | REMOVE_AFFIX_OPERATION
-                | CHANGE_AFFIX_OPERATION
-                | SET_STATUS_OPERATION
-                | CHANGE_BASE_OPERATION
-                | CHANGE_IDENTITY_OPERATION
-                | CHANGE_AFFIX_ROLLS_OPERATION
-        ) {
-            Self::decode_fixed(bytes)?;
-            return Ok(RequestHeader { tail_len: 0 });
-        }
-        let _value = reader.u32()?;
-        let tail_len = reader.u32()? as usize;
-        let manager = reader.u64()?;
-        if matches!(operation, 4 | crate::mapping::ForgeDescriptionRequest::OPERATION) {
-            crate::mapping::ForgeDescriptionRequest::validate_header(bytes)?;
-        } else if operation == crate::mapping::UniquePreviewRequest::OPERATION {
-            crate::mapping::UniquePreviewRequest::fields(bytes)?;
-        } else if operation == crate::mapping::AffixMappingQuery::OPERATION {
-            crate::mapping::AffixMappingQuery::fields(bytes)?;
-        } else {
-            ForgeMutation::decode_header(bytes)?;
-        }
-        if manager == 0 || !(MIN_EXPECTED_BYTES..=MAX_EXPECTED_BYTES).contains(&tail_len) {
-            return Err(ProtocolError::InvalidData);
-        }
-        Ok(RequestHeader { tail_len })
-    }
-    /// Accepts exactly one complete frame, including all reserved bytes and the
-    /// write's entire strict expected-state tail. A header alone cannot submit it.
-    pub fn decode(bytes: &[u8]) -> Result<Self, ProtocolError> {
-        let header = Self::decode_header(bytes.get(..REQUEST_SIZE).ok_or(ProtocolError::InvalidData)?)?;
-        if bytes.len() != header.total_len() {
-            return Err(ProtocolError::InvalidData);
-        }
-        if header.tail_len == 0 {
-            return Self::decode_fixed(bytes);
-        }
-        let mut fields = Reader::new(&bytes[8..24]);
-        let _value = fields.u32()?;
-        let _tail_len = fields.u32()?;
-        let expected_manager = fields.u64()?;
-        let mut dispatcher = Reader::new(&bytes[48..72]);
-        let dispatcher = DispatcherSpec {
-            rva: dispatcher.u64()?,
-            bytes: dispatcher.array()?,
-        };
-        let expected = forge::decode(&bytes[REQUEST_SIZE..])?.ok_or(ProtocolError::InvalidData)?;
-        if u32::from_le_bytes(bytes[4..8].try_into().unwrap()) == crate::mapping::ForgeDescriptionRequest::OPERATION {
-            return Ok(Self::DescribeImplicits(crate::mapping::ForgeDescriptionRequest {
-                dispatcher,
-                manager: expected_manager,
-                expected: Box::new(expected),
-            }));
-        }
-        let operation = u32::from_le_bytes(bytes[4..8].try_into().unwrap());
-        if operation == 4 {
-            return Ok(Self::DescribeUnique(crate::mapping::ForgeDescriptionRequest::new(dispatcher, expected_manager, expected)?));
-        }
-        if operation == crate::mapping::UniquePreviewRequest::OPERATION {
-            return Ok(Self::PreviewUnique(crate::mapping::UniquePreviewRequest::new(
-                dispatcher,
-                expected_manager,
-                expected,
-                crate::mapping::UniquePreviewRequest::fields(&bytes[..REQUEST_SIZE])?,
-            )?));
-        }
-        if u32::from_le_bytes(bytes[4..8].try_into().unwrap()) == crate::mapping::AffixMappingQuery::OPERATION {
-            let (slot, start, draft) = crate::mapping::AffixMappingQuery::fields(&bytes[..REQUEST_SIZE])?;
-            return Ok(Self::MapRoll(crate::mapping::AffixMappingQuery::new(
-                dispatcher,
-                expected_manager,
-                expected,
-                slot,
-                start,
-                draft,
-            )?));
-        }
-        let mutation = ForgeMutation::decode_header(&bytes[..REQUEST_SIZE])?;
-        Ok(Self::EditForge(ForgeWrite::edit(dispatcher, expected_manager, expected, mutation)?))
-    }
-
-    fn decode_fixed(bytes: &[u8]) -> Result<Self, ProtocolError> {
-        if bytes.len() != REQUEST_SIZE {
-            return Err(ProtocolError::InvalidData);
-        }
-        let mut reader = Reader::new(bytes);
-        if reader.u32()? != MAGIC {
-            return Err(ProtocolError::IncompatibleVersion);
-        }
-        let operation = reader.u32()?;
-        if operation == SET_ATTACK_LEECH_RATE_OPERATION {
-            return Ok(Self::SetAttackLeechRate(AttackLeechRateWrite::decode(bytes)?));
-        }
-        let reserved_start = if matches!(operation, 21 | 23) { 16 } else { 8 };
-        if bytes[reserved_start..48].iter().chain(&bytes[72..]).any(|byte| *byte != 0) {
-            return Err(ProtocolError::InvalidData);
-        }
-        let mut dispatcher_reader = Reader::new(&bytes[48..72]);
-        let dispatcher = DispatcherSpec {
-            rva: dispatcher_reader.u64()?,
-            bytes: dispatcher_reader.array()?,
-        };
-        match operation {
-            6 if dispatcher.rva == 0 && dispatcher.bytes == [0; 16] => Ok(Self::Discover),
-            7 => Ok(Self::Status { dispatcher }),
-            15 => Ok(Self::ClearHooks { dispatcher }),
-            18 => Ok(Self::ReadForge { dispatcher }),
-            19 => Ok(Self::ReadItemLimits { dispatcher }),
-            20 => Ok(Self::ReadLocale { dispatcher }),
-            23 => {
-                let mut query = Reader::new(&bytes[8..16]);
-                let expected_manager = query.u64()?;
-                if expected_manager == 0 {
-                    return Err(ProtocolError::InvalidData);
-                }
-                Ok(Self::ReadAttackLeech { dispatcher, expected_manager })
-            }
-            21 => {
-                let mut query = Reader::new(&bytes[8..16]);
-                let kind = CatalogKind::try_from(query.u32()?)?;
-                let cursor = query.u32()?;
-                if cursor > kind.maximum_total() {
-                    return Err(ProtocolError::InvalidData);
-                }
-                Ok(Self::ReadCatalogPage { dispatcher, kind, cursor })
-            }
-            _ => Err(ProtocolError::InvalidData),
-        }
-    }
 }
 
 /// A bounded frame length, not a decoded request. Read the complete tail before
 /// assigning helper ownership, installing a dispatcher or submitting any work.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct RequestHeader {
-    tail_len: usize,
+    operation: u32,
+    body_len: usize,
 }
 impl RequestHeader {
-    pub fn tail_len(self) -> usize {
-        self.tail_len
+    pub fn body_len(self) -> usize {
+        self.body_len
     }
     pub fn total_len(self) -> usize {
-        REQUEST_SIZE + self.tail_len
+        REQUEST_HEADER_SIZE + self.body_len
     }
 }
 
@@ -342,7 +161,7 @@ impl RequestFrame {
         if self.poisoned || self.remaining() != 0 {
             return Err(ProtocolError::InvalidData);
         }
-        Request::decode(&self.bytes)
+        Request::decode_body(self.header.operation, &self.bytes[REQUEST_HEADER_SIZE..])
     }
 }
 
@@ -401,7 +220,7 @@ impl Response {
         }
         let mut reader = Reader::new(header);
         if reader.u32()? != MAGIC {
-            return Err(ProtocolError::IncompatibleVersion);
+            return Err(ProtocolError::InvalidMagic);
         }
         let code = reader.u32()?.try_into()?;
         let length = reader.u32()? as usize;
@@ -424,122 +243,39 @@ impl Response {
     }
 }
 
-/// Exact field names in `RuntimeDiscovery.RequiredKeys` and `requiredFields`.
-pub const REQUIRED_KEYS: [&str; 37] = [
-    "ItemContainersManager.CraftingOffset",
-    "CraftingContainers.MainOffset",
-    "OneSlotItemContainer.ContentOffset",
-    "ItemContainerEntry.DataOffset",
-    "ItemDataUnpacked.SerializationOffset",
-    "ItemDataUnpacked.IndividualIdOffset",
-    "ItemDataUnpacked.ItemTypeOffset",
-    "ItemDataUnpacked.SubTypeOffset",
-    "ItemDataUnpacked.RarityOffset",
-    "ItemDataUnpacked.UniqueIdOffset",
-    "ItemDataUnpacked.ImplicitRollsOffset",
-    "ItemDataUnpacked.UniqueRollsOffset",
-    "ItemDataUnpacked.AffixesOffset",
-    "ItemDataUnpacked.ClassRequirementOffset",
-    "ItemDataUnpacked.FullNameOffset",
-    "ItemDataUnpacked.SealedRegularOffset",
-    "ItemDataUnpacked.SealedPrimordialOffset",
-    "ItemDataUnpacked.SealedCorruptionOffset",
-    "ItemDataUnpacked.ForgingPotentialOffset",
-    "ItemDataUnpacked.ForgingPotentialTypeOffset",
-    "ItemDataUnpacked.LegendaryPotentialOffset",
-    "ItemDataUnpacked.WeaversWillOffset",
-    "ItemDataUnpacked.WeaversTouchOffset",
-    "ItemDataUnpacked.CorruptedOffset",
-    "ItemDataUnpacked.RuinedOffset",
-    "ItemDataUnpacked.LevelRequirementOffset",
-    "ItemAffix.IdOffset",
-    "ItemAffix.TierOffset",
-    "ItemAffix.RollOffset",
-    "ItemAffix.TypeOffset",
-    "ItemAffix.SpecialAffixTypeOffset",
-    "ItemAffix.NameOffset",
-    "ItemAffix.SealOffset",
-    "AffixList.SingleAffixesOffset",
-    "AffixList.MultiAffixesOffset",
-    "AffixDefinition.IdOffset",
-    "AffixDefinition.TiersOffset",
-];
-
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Discovery {
     pub build_id: String,
     pub dispatcher: DispatcherSpec,
-    pub offsets: BTreeMap<String, u64>,
 }
 
 impl Discovery {
     pub fn decode(payload: &[u8], expected_pid: u32) -> Result<Self, ProtocolError> {
-        if payload.len() > MAX_RESPONSE_SIZE {
+        let mut reader = Reader::new(payload);
+        let build_id = reader.text()?.to_owned();
+        if reader.u32()? != expected_pid {
             return Err(ProtocolError::InvalidData);
         }
-        let mut reader = Reader::new(payload);
-        let version = reader.u32()?;
-        let build_id = reader.text()?.to_owned();
-        let adapter = reader.text()?;
-        let pid = reader.u32()?;
         let dispatcher = DispatcherSpec {
             rva: reader.u64()?,
             bytes: reader.array()?,
         };
-        let count = reader.u32()? as usize;
-        if version != VERSION || adapter != ADAPTER {
-            return Err(ProtocolError::IncompatibleVersion);
-        }
-        if pid != expected_pid || !(1..=128).contains(&count) {
-            return Err(ProtocolError::InvalidData);
-        }
-        let mut offsets = BTreeMap::new();
-        for _ in 0..count {
-            let key = reader.text()?.to_owned();
-            let offset = reader.u64()?;
-            if offsets.insert(key, offset).is_some() {
-                return Err(ProtocolError::InvalidData);
-            }
-        }
         reader.finish()?;
-        let discovery = Self { build_id, dispatcher, offsets };
+        let discovery = Self { build_id, dispatcher };
         discovery.validate()?;
         Ok(discovery)
     }
-
-    /// Useful for authored helper fixtures; applies the same bounds as decoding.
     pub fn encode(&self, pid: u32) -> Result<Vec<u8>, ProtocolError> {
         self.validate()?;
         let mut out = Vec::new();
-        out.extend_from_slice(&VERSION.to_le_bytes());
         append_text(&mut out, &self.build_id)?;
-        append_text(&mut out, ADAPTER)?;
         out.extend_from_slice(&pid.to_le_bytes());
         out.extend_from_slice(&self.dispatcher.rva.to_le_bytes());
         out.extend_from_slice(&self.dispatcher.bytes);
-        out.extend_from_slice(&(self.offsets.len() as u32).to_le_bytes());
-        for (key, offset) in &self.offsets {
-            append_text(&mut out, key)?;
-            out.extend_from_slice(&offset.to_le_bytes());
-        }
-        if out.len() > MAX_RESPONSE_SIZE {
-            return Err(ProtocolError::InvalidData);
-        }
         Ok(out)
     }
-
     fn validate(&self) -> Result<(), ProtocolError> {
-        if self.build_id.len() != 64 || !self.build_id.bytes().all(|byte| byte.is_ascii_hexdigit()) || !(1..=128).contains(&self.offsets.len()) {
-            return Err(ProtocolError::InvalidData);
-        }
-        for key in REQUIRED_KEYS {
-            if !self.offsets.get(key).is_some_and(|offset| (16..=16384).contains(offset)) {
-                return Err(ProtocolError::InvalidData);
-            }
-        }
-        // C# validates offsets used by the current schema. Extra keys are forward
-        // compatible, but their names still obey the handshake text bounds.
-        if self.offsets.keys().any(|key| key.is_empty() || key.len() > 4096) {
+        if self.build_id.len() != 64 || !self.build_id.bytes().all(|byte| byte.is_ascii_hexdigit()) {
             return Err(ProtocolError::InvalidData);
         }
         Ok(())

@@ -63,6 +63,7 @@ impl RuntimeAccess {
     // Helpers inherit the complete read_attack_leech contract. Resolve from the
     // known declaring owner, reject inherited substitution and derived shadowing.
     unsafe fn attack_field(&self, owner: Class, name: &CStr, expected: Class, is_static: bool) -> Result<Ptr, DiscoveryError> {
+        // SAFETY: Owner metadata is live; storage flags and the exact primitive class determine the output width.
         unsafe {
             let field = self.field(owner, name)?;
             let ty = (self.field_type)(field);
@@ -80,6 +81,7 @@ impl RuntimeAccess {
     }
 
     unsafe fn attack_static_pointer(&self, field: Ptr) -> *mut raw::Object {
+        // SAFETY: The validated static reference field writes one pointer-sized local slot before rooting.
         unsafe {
             let mut value = std::ptr::null_mut::<raw::Object>();
             (self.static_get)(field, (&mut value as *mut *mut raw::Object).cast());
@@ -88,6 +90,7 @@ impl RuntimeAccess {
     }
 
     unsafe fn attack_pointer(&self, object: &Root<'_, '_>, field: Ptr) -> Result<*mut raw::Object, DiscoveryError> {
+        // SAFETY: The rooted receiver and validated reference field remain live through the pointer copy.
         unsafe {
             let mut value = std::ptr::null_mut::<raw::Object>();
             (self.field_get)(target(object)?.as_ptr(), field, (&mut value as *mut *mut raw::Object).cast());
@@ -96,6 +99,7 @@ impl RuntimeAccess {
     }
 
     unsafe fn attack_alive(&self, root: &Root<'_, '_>, object_class: Class, cached: Ptr) -> Result<ObservedObjectIdentity, AttackLeechReadError> {
+        // SAFETY: The rooted Unity wrapper has a metadata-validated IntPtr field; its native address is compared, never dereferenced.
         unsafe {
             let object = target(root)?;
             self.check_object(object_class, object)?;
@@ -109,6 +113,7 @@ impl RuntimeAccess {
     }
 
     unsafe fn attack_scalar(&self, stats: &Root<'_, '_>, field: Ptr) -> Result<ObservedRate, DiscoveryError> {
+        // SAFETY: The rooted receiver's validated Single field writes exactly one f32 local.
         unsafe {
             let mut value = 0_f32;
             (self.field_get)(target(stats)?.as_ptr(), field, (&mut value as *mut f32).cast());
@@ -157,6 +162,7 @@ impl RuntimeAccess {
 
     // Internal helpers inherit read_attack_leech's complete graph/runtime contract.
     unsafe fn copy_attack_leech(&self, attached: &AttachedThread<'_>, expected_manager: u64) -> Result<AttackLeechObservation, AttackLeechReadError> {
+        // SAFETY: The caller excludes graph mutation while roots retain the validated actor and stats objects.
         unsafe {
             let graph = self.attack_graph(attached, expected_manager)?;
             self.attack_graph_snapshot(&graph)
@@ -164,6 +170,7 @@ impl RuntimeAccess {
     }
 
     unsafe fn attack_offline(&self, online_field: Ptr) -> Result<(), AttackLeechReadError> {
+        // SAFETY: The initialized runtime's validated static Boolean is copied into a byte, then checked for canonical representation.
         unsafe {
             let mut online = 1_u8;
             (self.static_get)(online_field, (&mut online as *mut u8).cast());
@@ -176,6 +183,7 @@ impl RuntimeAccess {
     }
 
     unsafe fn attack_graph<'a, 'r>(&self, attached: &'a AttachedThread<'r>, expected_manager: u64) -> Result<AttackGraph<'a, 'r>, AttackLeechReadError> {
+        // SAFETY: The caller excludes graph destruction; every returned reference is rooted before its class or fields are inspected.
         unsafe {
             if !cfg!(target_arch = "x86_64") || std::mem::size_of::<usize>() != 8 || std::mem::size_of::<f32>() != 4 || std::mem::size_of::<u8>() != 1 {
                 return Err(unsupported("attack/leech x64 scalar ABI").into());
@@ -271,6 +279,7 @@ impl RuntimeAccess {
     // All references below belong to this rooted per-call graph. Current statics
     // are only compared; a replacement token is never dereferenced.
     unsafe fn attack_graph_check(&self, graph: &AttackGraph<'_, '_>) -> Result<(), AttackLeechReadError> {
+        // SAFETY: Existing graph roots remain live; fresh static references and native tokens are comparison data only.
         unsafe {
             self.attack_offline(graph.online_field)?;
             let current_manager = self.attack_static_pointer(graph.manager_field);
@@ -295,6 +304,7 @@ impl RuntimeAccess {
     }
 
     unsafe fn attack_graph_snapshot(&self, graph: &AttackGraph<'_, '_>) -> Result<AttackLeechObservation, AttackLeechReadError> {
+        // SAFETY: Validated graph roots retain the exact scalar storage throughout this synchronous copy.
         unsafe {
             self.attack_graph_check(graph)?;
             let attack_rate = self.attack_scalar(&graph.stats, graph.attack_field)?;

@@ -1,16 +1,16 @@
 //! Explicit Windows x64 remote bootstrap. Artifact validation does not prove runtime readiness.
 //! No automatic stop, unload, remote-thread termination, or operation replay is performed.
 
-use super::{BootstrapConfig, BootstrapError, BootstrapOperation, BootstrapReply, HelperArtifact, metric_offsets};
+use super::{BootstrapConfig, BootstrapError, BootstrapReply, HelperArtifact};
 use eg_core::hashes;
 use eg_trainer_wire::{process::ProcessIdentity, protocol::DispatcherSpec};
+#[cfg(test)]
+use std::fs::File;
 use std::{
     ffi::{OsString, c_void},
-    fs::File,
-    io::{self, Read},
+    io,
     os::windows::{
         ffi::{OsStrExt, OsStringExt},
-        fs::OpenOptionsExt,
         io::{AsRawHandle, FromRawHandle, OwnedHandle},
     },
     path::{Path, PathBuf},
@@ -19,7 +19,6 @@ use std::{
 };
 use windows_sys::Win32::{
     Foundation::{ERROR_NO_MORE_FILES, FILETIME, GetLastError, HANDLE, INVALID_HANDLE_VALUE},
-    Storage::FileSystem::FILE_SHARE_READ,
     System::{
         Diagnostics::{
             Debug::{ReadProcessMemory, WriteProcessMemory},
@@ -68,26 +67,14 @@ fn canonical(path: &Path) -> Result<PathBuf> {
 fn same_path(a: &Path, b: &Path) -> bool {
     a.as_os_str().to_string_lossy().eq_ignore_ascii_case(&b.as_os_str().to_string_lossy())
 }
-fn bounded_file(file: &File) -> Result<Vec<u8>> {
-    const LIMIT: u64 = 2 * 1024 * 1024 * 1024;
-    if file.metadata()?.len() > LIMIT {
-        return invalid("module file size");
-    }
-    let mut bytes = Vec::new();
-    file.take(LIMIT + 1).read_to_end(&mut bytes)?;
-    if bytes.len() as u64 > LIMIT {
-        return invalid("module file size");
-    }
-    Ok(bytes)
-}
-
 /// A canonical, hash-checked module file with a Windows write/delete-denying lease.
 #[derive(Clone, Debug)]
 pub struct ModuleIdentity {
     path: PathBuf,
     sha256: String,
     image_size: u32,
-    file: Arc<File>,
+    lease: Arc<crate::artifact::ReadLease>,
+    layout: Arc<crate::pe::Layout>,
 }
 impl ModuleIdentity {
     pub fn capture(path: &Path, expected_sha256: &str) -> Result<Self> {
@@ -95,19 +82,38 @@ impl ModuleIdentity {
             return invalid("module file identity");
         }
         let path = canonical(path)?;
-        let file = File::options().read(true).share_mode(FILE_SHARE_READ).open(path)?;
-        let bytes = bounded_file(&file)?;
-        if !hashes::of_bytes(&bytes).eq_ignore_ascii_case(expected_sha256) {
-            return invalid("module hash");
+        let lease = crate::artifact::ReadLease::capture(&path, expected_sha256).map_err(|error| {
+            if error.kind() == io::ErrorKind::InvalidData {
+                BootstrapError::Invalid("module hash")
+            } else {
+                error.into()
+            }
+        })?;
+        Self::from_lease(Arc::new(lease))
+    }
+    pub fn open(path: &Path) -> Result<Self> {
+        let path = canonical(path)?;
+        Self::from_lease(Arc::new(crate::artifact::ReadLease::open(&path)?))
+    }
+    pub fn from_lease(lease: Arc<crate::artifact::ReadLease>) -> Result<Self> {
+        lease.verify_path()?;
+        let layout = crate::pe::Layout::read(lease.len(), |at, output| lease.read_exact_at(at, output))?;
+        if !layout.dll || layout.image_size == 0 || layout.image_size > 512 * 1024 * 1024 {
+            return invalid("Windows x64 module image size/header");
         }
-        let image_size = super::Pe::parse(&bytes)?.image_size;
-        let path = super::opened_path(&file)?;
         Ok(Self {
-            path,
-            sha256: expected_sha256.to_ascii_uppercase(),
-            image_size,
-            file: Arc::new(file),
+            path: lease.path().to_owned(),
+            sha256: lease.sha256().to_ascii_uppercase(),
+            image_size: layout.image_size,
+            lease,
+            layout: Arc::new(layout),
         })
+    }
+    fn bytes(&self, rva: u32, length: usize, executable: bool) -> Result<Vec<u8>> {
+        let at = self.layout.file_offset(u64::from(rva), length, executable)?;
+        let mut bytes = vec![0; length];
+        self.lease.read_exact_at(at, &mut bytes)?;
+        Ok(bytes)
     }
     pub fn path(&self) -> &Path {
         &self.path
@@ -116,10 +122,7 @@ impl ModuleIdentity {
         &self.sha256
     }
     pub fn verify_unchanged(&self) -> Result<()> {
-        let file = File::open(&self.path)?;
-        if file.metadata()?.len() != self.file.metadata()?.len() || hashes::of_bytes(&bounded_file(&file)?) != self.sha256 {
-            return invalid("module file changed");
-        }
+        self.lease.verify_path()?;
         Ok(())
     }
 }
@@ -261,7 +264,7 @@ fn policies(process: &OwnedHandle) -> Result<()> {
             if GetProcessMitigationPolicy(process.as_raw_handle(), policy, (&mut flags as *mut u32).cast(), 4) == 0 {
                 return Err(last());
             }
-            if flags != expected {
+            if flags & !expected != 0 {
                 return invalid("unsupported target mitigation profile");
             }
         }
@@ -278,6 +281,14 @@ struct ProcessLease {
     fake: Option<Arc<FakeIo>>,
 }
 impl ProcessLease {
+    fn has_exited(&self) -> bool {
+        #[cfg(test)]
+        if let Some(fake) = &self.fake {
+            return fake.process_exited.load(std::sync::atomic::Ordering::SeqCst);
+        }
+        // SAFETY: query the retained process handle; no target memory is accessed.
+        unsafe { WaitForSingleObject(self.handle.as_raw_handle(), 0) == 0 }
+    }
     fn verify(&self) -> Result<()> {
         #[cfg(test)]
         if self.fake.is_some() {
@@ -347,6 +358,9 @@ impl std::fmt::Display for RemoteFailure {
 }
 impl std::error::Error for RemoteFailure {}
 impl RemoteFailure {
+    pub fn process_exited(&self) -> bool {
+        self.pending.as_ref().is_some_and(|pending| pending.process.has_exited())
+    }
     pub fn pending_mut(&mut self) -> Option<&mut PendingCall> {
         self.pending.as_deref_mut()
     }
@@ -408,17 +422,9 @@ impl PendingCall {
         }
         Ok(code)
     }
-    pub fn poll(&mut self, admit: Admission<'_>) -> Result<Option<CallCompletion>> {
+    fn finish(&mut self, admit: Admission<'_>) -> Result<Option<CallCompletion>> {
         if self.consumed {
             return invalid("remote operation completion already consumed");
-        }
-        // SAFETY: a live owned thread handle is queried; no new target thread is created.
-        let wait = self.wait_status(0)?;
-        if wait == 0x102 {
-            return Ok(None);
-        }
-        if wait != 0 {
-            return Err(last());
         }
         // A signaled thread is the ownership proof required before freeing input storage.
         self.complete = true;
@@ -445,11 +451,14 @@ impl PendingCall {
         if wait != 0 {
             return Err(last());
         }
-        self.poll(admit)
+        self.finish(admit)
     }
 }
 impl Drop for PendingCall {
     fn drop(&mut self) {
+        if self.process.has_exited() {
+            return;
+        }
         if !self.complete {
             if let Some(thread) = self.thread.take() {
                 std::mem::forget(thread)
@@ -536,16 +545,14 @@ fn resolve_loader(modules: &[Module]) -> Result<(u64, ModuleIdentity, Vec<u8>)> 
             return invalid("system loader containing-module path");
         }
         let path: PathBuf = OsString::from_wide(&path[..len as usize]).into();
-        let bytes = std::fs::read(&path)?;
-        let identity = ModuleIdentity::capture(&path, &hashes::of_bytes(&bytes))?;
-        let pe = super::Pe::parse(&bytes)?;
+        let identity = ModuleIdentity::open(&path)?;
         let offset = address
             .checked_sub(containing as usize)
             .and_then(|offset| u32::try_from(offset).ok())
             .ok_or(BootstrapError::Invalid("system loader RVA"))?;
-        pe.at(offset, 16, true)?;
+        identity.layout.file_offset(u64::from(offset), 16, true)?;
         let remote = module(modules, &identity)?;
-        if remote.size != pe.image_size {
+        if remote.size != identity.image_size {
             return invalid("system loader image size");
         }
         // Both the file-backed executable span and pinned containing local module prove the
@@ -588,20 +595,16 @@ pub struct RemoteHelper {
     artifact: Arc<HelperArtifact>,
     loaded: Module,
     modules: Vec<ModuleIdentity>,
-    stop_attempted: bool,
-    metrics: Option<[u32; 3]>,
 }
 impl RemoteHelper {
+    pub fn process_exited(&self) -> bool {
+        self.process.has_exited()
+    }
     /// Load the exact helper and explicitly run its one-shot bootstrap.
     ///
-    /// # Safety
-    /// The caller selects a supported offline Unity6000.4 Windows x64 game with the
-    /// modern nonmoving IL2CPP ABI. The helper and game modules remain resident;
-    /// no competing patcher may modify the dispatcher during installation. Runtime
-    /// graph access happens only in the verified ExecuteTasks callback, under each
-    /// operation's own checks. Bootstrap does not nominate or discover a main TID.
-    /// `admit` freshly enforces offline policy before process access and mutation.
-    pub unsafe fn start(
+    /// Self-injection is refused. Process, module and offline identity are checked
+    /// before each remote stage; uncertain calls retain their input storage.
+    pub fn start(
         target: ProcessIdentity,
         artifact: Arc<HelperArtifact>,
         modules: &[ModuleIdentity],
@@ -704,8 +707,7 @@ impl RemoteHelper {
             Ok(loaded)
         })()
         .map_err(|error| failure("loaded module validation", RemoteDelivery::MayHaveRun, error))?;
-        let config =
-            BootstrapConfig::new(target.pid, artifact.source_id(), BootstrapOperation::Start).map_err(|e| failure("start configuration", RemoteDelivery::MayHaveRun, e))?;
+        let config = BootstrapConfig::new(target.pid, artifact.source_id()).map_err(|e| failure("start configuration", RemoteDelivery::MayHaveRun, e))?;
         let start = (|| {
             admit()?;
             process.verify()?;
@@ -730,8 +732,6 @@ impl RemoteHelper {
             artifact,
             loaded: after,
             modules: modules.to_vec(),
-            stop_attempted: false,
-            metrics: None,
         })
     }
     pub fn target(&self) -> &ProcessIdentity {
@@ -742,68 +742,6 @@ impl RemoteHelper {
     }
     pub fn artifact(&self) -> &HelperArtifact {
         &self.artifact
-    }
-    /// Submit operation2 exactly once. This authorizes shutdown, not completed restoration.
-    /// Any error after submission may have run and must never cause automatic replay.
-    pub fn request_stop(&mut self, admit: Admission<'_>, timeout: Duration) -> std::result::Result<(), RemoteFailure> {
-        if self.stop_attempted {
-            return Err(failure("stop", RemoteDelivery::NotSent, BootstrapError::Invalid("stop already attempted; do not replay")));
-        }
-        let pending = (|| {
-            if timeout.is_zero() || timeout > Duration::from_secs(30) {
-                return invalid("stop timeout");
-            }
-            admit()?;
-            self.process.verify()?;
-            self.artifact.verify_unchanged()?;
-            let address = module_span(self.loaded.base, self.loaded.size, self.artifact.bootstrap_rva(), 16)?;
-            if self.process.read(address, 16)? != self.artifact.code_bytes(self.artifact.bootstrap_rva(), 16)? {
-                return invalid("helper bootstrap entry changed before stop");
-            }
-            let config = BootstrapConfig::new(self.process.target.pid, self.artifact.source_id(), BootstrapOperation::Stop)?;
-            self.stop_attempted = true;
-            call(Arc::clone(&self.process), address, config.bytes(), Some(config.clone()), Arc::clone(&self.artifact))
-        })()
-        .map_err(|error| failure("stop submission", RemoteDelivery::NotSent, error))?;
-        let result = wait_call(pending, timeout, "helper stop acceptance", admit)?;
-        self.accept_stop(result.reply).map_err(|error| failure("stop telemetry", RemoteDelivery::MayHaveRun, error))
-    }
-    fn accept_stop(&mut self, reply: Option<BootstrapReply>) -> Result<()> {
-        let Some(BootstrapReply::StopAccepted { metric_addresses }) = reply else {
-            return invalid("unexpected stop reply");
-        };
-        self.metrics = Some(metric_offsets(self.loaded.base, self.loaded.size, metric_addresses)?);
-        Ok(())
-    }
-    /// Complete a previously uncertain op2 using its retained thread handle; creates no thread.
-    pub fn poll_pending_stop(&mut self, pending: &mut PendingCall, admit: Admission<'_>) -> Result<bool> {
-        if !self.stop_attempted || !Arc::ptr_eq(&self.process, &pending.process) || pending.config.as_ref().is_none_or(|c| c.bytes()[16..20] != 2u32.to_le_bytes()) {
-            return invalid("pending stop identity");
-        }
-        if let Some(completion) = pending.poll(admit)? {
-            self.accept_stop(completion.reply)?;
-            Ok(true)
-        } else {
-            Ok(false)
-        }
-    }
-    /// Poll retained counters using RPM only. A true result additionally proves full original
-    /// dispatcher body, runtime-function table entry and unwind bytes match the admitted file.
-    pub fn poll_stopped(&self, proof: &DispatcherProof, admit: Admission<'_>) -> Result<bool> {
-        let offsets = self.metrics.ok_or(BootstrapError::Invalid("stop telemetry not accepted"))?;
-        let mut values = [0u64; 3];
-        for (i, offset) in offsets.into_iter().enumerate() {
-            admit()?;
-            values[i] = u64::from_le_bytes(self.process.read(self.loaded.base + u64::from(offset), 8)?.try_into().unwrap());
-        }
-        if values[0] > 1 || values[1] > 1 || values[2] != 0 {
-            return invalid("helper shutdown telemetry failure");
-        }
-        if values[0] != 1 || values[1] != 0 {
-            return Ok(false);
-        }
-        self.verify_pristine(proof, admit)?;
-        Ok(true)
     }
     pub fn verify_pristine(&self, proof: &DispatcherProof, admit: Admission<'_>) -> Result<()> {
         admit()?;
@@ -832,22 +770,15 @@ pub struct DispatcherProof {
 impl DispatcherProof {
     pub fn capture(module: ModuleIdentity, dispatcher: &DispatcherSpec) -> Result<Self> {
         module.verify_unchanged()?;
-        let bytes = bounded_file(&File::open(module.path())?)?;
-        let pe = super::Pe::parse(&bytes)?;
         let rva = u32::try_from(dispatcher.rva).map_err(|_| BootstrapError::Invalid("dispatcher RVA width"))?;
-        if pe.at(rva, 16, true)? != dispatcher.bytes {
+        if module.bytes(rva, 16, true)? != dispatcher.bytes {
             return invalid("dispatcher prefix differs from admitted file");
         }
-        let nt = super::dword(&bytes, 0x3c)? as usize;
-        if super::dword(&bytes, nt + 24 + 108)? < 4 {
-            return invalid("exception directory absent");
-        }
-        let table = super::dword(&bytes, nt + 24 + 112 + 3 * 8)?;
-        let size = super::dword(&bytes, nt + 24 + 116 + 3 * 8)?;
+        let (table, size) = module.layout.exceptions.ok_or(BootstrapError::Invalid("exception directory absent"))?;
         if size == 0 || size % 12 != 0 || size > 16 * 1024 * 1024 {
             return invalid("runtime function table bounds");
         }
-        let table_bytes = pe.at(table, size as usize, false)?;
+        let table_bytes = module.bytes(table, size as usize, false)?;
         let mut found = None;
         for (index, record) in table_bytes.as_chunks::<12>().0.iter().enumerate() {
             let begin = super::dword(record, 0)?;
@@ -857,13 +788,22 @@ impl DispatcherProof {
                     return invalid("dispatcher function boundary");
                 }
                 let unwind = super::dword(record, 8)?;
-                let header = pe.at(unwind, 4, false)?;
-                if header[0] != 1 || header[2] > 64 {
+                let header = module.bytes(unwind, 4, false)?;
+                let flags = header[0] >> 3;
+                if header[0] & 7 != 1 || flags & !7 != 0 || flags & 4 != 0 && flags & 3 != 0 || header[2] > 64 {
                     return invalid("dispatcher unwind version/flags/count");
                 }
-                let length = 4 + ((usize::from(header[2]) + 1) & !1) * 2;
-                let body = pe.at(begin, (end - begin) as usize, true)?.to_vec();
-                let unwind_bytes = pe.at(unwind, length, false)?.to_vec();
+                let length = 4
+                    + ((usize::from(header[2]) + 1) & !1) * 2
+                    + if flags & 4 != 0 {
+                        12
+                    } else if flags & 3 != 0 {
+                        4
+                    } else {
+                        0
+                    };
+                let body = module.bytes(begin, (end - begin) as usize, true)?;
+                let unwind_bytes = module.bytes(unwind, length, false)?;
                 found = Some(vec![(begin, body), (table + (index as u32) * 12, record.to_vec()), (unwind, unwind_bytes)]);
             }
         }
@@ -877,6 +817,7 @@ impl DispatcherProof {
 #[cfg(test)]
 #[derive(Debug)]
 struct FakeIo {
+    process_exited: std::sync::atomic::AtomicBool,
     wait: std::sync::atomic::AtomicU32,
     freed: std::sync::atomic::AtomicUsize,
     reads: std::sync::atomic::AtomicUsize,
@@ -904,10 +845,11 @@ mod tests {
         owned(unsafe { CreateEventW(std::ptr::null(), 1, 0, std::ptr::null()) }).unwrap()
     }
     fn pending(wait: u32, status: i32) -> (PendingCall, Arc<FakeIo>) {
-        let config = BootstrapConfig::new(11, SOURCE, BootstrapOperation::Start).unwrap();
+        let config = BootstrapConfig::new(11, SOURCE).unwrap();
         let mut response = config.bytes().to_vec();
-        response[20..24].copy_from_slice(&status.to_le_bytes());
+        response[12..16].copy_from_slice(&status.to_le_bytes());
         let fake = Arc::new(FakeIo {
+            process_exited: std::sync::atomic::AtomicBool::new(false),
             wait: AtomicU32::new(wait),
             freed: AtomicUsize::new(0),
             reads: AtomicUsize::new(0),
@@ -950,10 +892,20 @@ mod tests {
         }
     }
     #[test]
+    fn exited_process_releases_pending_owners_without_reading_or_freeing_remote_storage() {
+        let (call, fake) = pending(0x102, 0);
+        let process = call.process.clone();
+        fake.process_exited.store(true, SeqCst);
+        drop(call);
+        assert_eq!(Arc::strong_count(&process), 1);
+        assert_eq!(fake.reads.load(SeqCst), 0);
+        assert_eq!(fake.freed.load(SeqCst), 0);
+    }
+    #[test]
     fn timeout_and_failed_wait_retain_input_without_remote_reads_or_free() {
         for wait in [0x102, u32::MAX] {
             let (mut pending, fake) = pending(wait, 0);
-            let result = pending.poll(&mut || Ok(()));
+            let result = pending.wait(Duration::ZERO, &mut || Ok(()));
             if wait == 0x102 {
                 assert!(result.unwrap().is_none());
             } else {
@@ -968,13 +920,13 @@ mod tests {
     fn proven_exit_allows_exactly_one_read_and_one_free_even_for_rejected_reply() {
         for status in [0, 1] {
             let (mut pending, fake) = pending(0, status);
-            let result = pending.poll(&mut || Ok(()));
+            let result = pending.wait(Duration::ZERO, &mut || Ok(()));
             if status == 0 {
                 assert_eq!(result.unwrap().unwrap().reply, Some(BootstrapReply::Started));
             } else {
                 assert!(matches!(result, Err(BootstrapError::Rejected { .. })));
             }
-            assert!(pending.poll(&mut || Ok(())).is_err());
+            assert!(pending.wait(Duration::ZERO, &mut || Ok(())).is_err());
             assert_eq!(fake.reads.load(SeqCst), 1);
             assert_eq!(fake.freed.load(SeqCst), 0);
             drop(pending);
@@ -986,7 +938,7 @@ mod tests {
         let (mut pending, fake) = pending(0x102, 0);
         assert!(pending.wait(Duration::from_millis(1), &mut || Ok(())).unwrap().is_none());
         fake.wait.store(0, SeqCst);
-        assert!(pending.poll(&mut || Ok(())).unwrap().is_some());
+        assert!(pending.wait(Duration::ZERO, &mut || Ok(())).unwrap().is_some());
         drop(pending);
         assert_eq!(fake.reads.load(SeqCst), 1);
         assert_eq!(fake.freed.load(SeqCst), 1);
@@ -994,11 +946,11 @@ mod tests {
     #[test]
     fn lost_admission_after_exit_prevents_reply_reads_and_allows_only_explicit_later_poll() {
         let (mut pending, fake) = pending(0, 0);
-        assert!(pending.poll(&mut || invalid("admission revoked")).is_err());
+        assert!(pending.wait(Duration::ZERO, &mut || invalid("admission revoked")).is_err());
         assert!(pending.exit_proven());
         assert_eq!(fake.reads.load(SeqCst), 0);
         assert_eq!(fake.freed.load(SeqCst), 0);
-        assert!(pending.poll(&mut || Ok(())).unwrap().is_some());
+        assert!(pending.wait(Duration::ZERO, &mut || Ok(())).unwrap().is_some());
         assert_eq!(fake.reads.load(SeqCst), 1);
         drop(pending);
         assert_eq!(fake.freed.load(SeqCst), 1);
@@ -1086,6 +1038,38 @@ mod tests {
         assert_eq!(&proof.spans[2].1[6..], &[0x55, 0x66]);
     }
     #[test]
+    fn module_verification_reuses_shared_lease_without_content_reads() {
+        let (mut bytes, _) = image();
+        bytes.resize(8 * 1024 * 1024, 0);
+        let file = TempDll::new(&bytes);
+        let module = file.identity(&bytes);
+        let shared = module.clone();
+        let initial = module.lease.bytes_read();
+        for _ in 0..20 {
+            shared.verify_unchanged().unwrap();
+        }
+        assert_eq!(module.lease.bytes_read(), initial);
+        assert!(File::options().write(true).open(&file.path).is_err());
+        drop(module);
+        assert!(File::options().write(true).open(&file.path).is_err());
+        drop(shared);
+        assert!(File::options().write(true).open(&file.path).is_ok());
+    }
+    #[test]
+    fn dispatcher_proof_reads_handler_and_chained_records_without_rehashing_the_module() {
+        for flags in [1, 2, 3, 4] {
+            let (mut bytes, spec) = image();
+            bytes[0x800] = 1 | flags << 3;
+            bytes.resize(8 * 1024 * 1024, 0);
+            let file = TempDll::new(&bytes);
+            let module = file.identity(&bytes);
+            let before = module.lease.bytes_read();
+            let proof = DispatcherProof::capture(module.clone(), &spec).unwrap();
+            assert_eq!(proof.spans[2].1.len(), if flags == 4 { 20 } else { 12 });
+            assert!(module.lease.bytes_read() - before < 4096, "proof reads bounded spans, never the DLL body");
+        }
+    }
+    #[test]
     fn malformed_runtime_boundaries_flags_and_unwind_never_authorize_pristine_proof() {
         for fault in 0..9 {
             let (mut bytes, mut spec) = image();
@@ -1100,7 +1084,7 @@ mod tests {
                 }
                 4 => set32(&mut bytes, 0x700, 0x1001),
                 5 => set32(&mut bytes, 0x704, 0x100f),
-                6 => bytes[0x800] = 9,
+                6 => bytes[0x800] = 2,
                 7 => bytes[0x802] = 65,
                 8 => set32(&mut bytes, 0x708, 0x2500),
                 _ => unreachable!(),

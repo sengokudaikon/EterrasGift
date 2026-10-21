@@ -6,7 +6,7 @@
 
 use crate::{
     forge::{self, AffixSnapshot, ForgeSnapshot},
-    protocol::{DispatcherSpec, MAGIC, MAX_RESPONSE_SIZE, ProtocolError, REQUEST_SIZE, Response, ResponseCode},
+    protocol::{DispatcherSpec, MAX_RESPONSE_SIZE, ProtocolError, REQUEST_HEADER_SIZE, Response, ResponseCode},
 };
 
 pub const CHANGE_AFFIX_OPERATION: u32 = 1;
@@ -168,107 +168,20 @@ impl ForgeMutation {
         }
         item.fingerprint = item.legacy_fingerprint();
     }
-    /// Validates fixed fields before a tail can be allocated or submitted.
-    pub(crate) fn header(operation: u32, value: u32, selector: u32, flags: u32, extra: u32) -> Result<Self, ProtocolError> {
-        if flags > 1 {
-            return invalid();
-        }
-        let unrestricted = flags == 1;
-        match operation {
-            ADD_AFFIX_OPERATION if value <= 4095 && selector == 0 && (1..=8).contains(&(extra & 255)) && (extra >> 16) <= 3 => Ok(Self::AddAffix {
-                id: value as u16,
-                tier: extra as u8,
-                roll: (extra >> 8) as u8,
-                seal: (extra >> 16) as u8,
-                unrestricted,
-            }),
-            REMOVE_AFFIX_OPERATION if value <= 65535 && selector < 32 && flags == 0 && extra == 0 => Ok(Self::RemoveAffix {
-                slot: selector as u8,
-                id: value as u16,
-            }),
-            CHANGE_AFFIX_OPERATION if value <= 4095 && selector < 32 && (1..=8).contains(&(extra & 255)) && (extra >> 16) <= 3 => Ok(Self::Affix {
-                slot: selector as u8,
-                id: value as u16,
-                tier: extra as u8,
-                roll: (extra >> 8) as u8,
-                seal: (extra >> 16) as u8,
-                unrestricted,
-            }),
-            SET_STATUS_OPERATION if value <= 255 && extra == 0 => {
-                let field = StatusField::from_wire(selector)?;
-                if matches!(field, StatusField::Corrupted | StatusField::Ruined) && value > 1 {
-                    return invalid();
-                }
-                Ok(Self::Status {
-                    field,
-                    value: value as u8,
-                    unrestricted,
-                })
-            }
-            CHANGE_BASE_OPERATION if value <= 65535 && selector <= 255 && extra == 0 => Ok(Self::Base {
-                item_type: selector as u8,
-                sub_type: value as u16,
-                unrestricted,
-            }),
-            CHANGE_IDENTITY_OPERATION if value <= 65535 && selector <= 255 && matches!(extra, 7..=9) => Ok(Self::Identity {
-                id: value as u16,
-                sub_type: selector as u8,
-                rarity: extra as u8,
-                unrestricted,
-            }),
-            _ => invalid(),
-        }
-    }
-    pub(crate) fn decode_header(bytes: &[u8]) -> Result<Self, ProtocolError> {
-        if bytes.len() != REQUEST_SIZE {
-            return invalid();
-        }
-        let read = |at| u32::from_le_bytes(bytes[at..at + 4].try_into().expect("fixed request header"));
-        if bytes[36..48].iter().chain(&bytes[72..80]).any(|byte| *byte != 0) {
-            return invalid();
-        }
-        if read(4) == CHANGE_AFFIX_ROLLS_OPERATION {
-            let count = read(8) as usize;
-            if !(1..=32).contains(&count) || read(24) != 0 || read(28) > 1 || read(32) != 0 || bytes[80 + count * 8..].iter().any(|byte| *byte != 0) {
-                return invalid();
-            }
-            let mut changes = Vec::with_capacity(count);
-            for index in 0..count {
-                let slot = read(80 + index * 8);
-                let value = read(84 + index * 8);
-                if slot >= 32 || value > 255 {
-                    return invalid();
-                }
-                changes.push(AffixRollChange {
-                    slot: slot as u8,
-                    value: value as u8,
-                });
-            }
-            return Ok(Self::AffixRolls {
-                rolls: AffixRolls::new(&changes)?,
-                unrestricted: read(28) == 1,
-            });
-        }
-        if bytes[80..].iter().any(|byte| *byte != 0) {
-            return invalid();
-        }
-        Self::header(read(4), read(8), read(24), read(28), read(32))
-    }
-    fn header_fields(self) -> (u32, u32, u32, u32) {
-        match self {
-            Self::AddAffix { id, tier, roll, seal, .. } => (ADD_AFFIX_OPERATION, u32::from(id), 0, u32::from(tier) | (u32::from(roll) << 8) | (u32::from(seal) << 16)),
-            Self::RemoveAffix { slot, id } => (REMOVE_AFFIX_OPERATION, u32::from(id), u32::from(slot), 0),
-            Self::Affix { slot, id, tier, roll, seal, .. } => (
-                CHANGE_AFFIX_OPERATION,
-                u32::from(id),
-                u32::from(slot),
-                u32::from(tier) | (u32::from(roll) << 8) | (u32::from(seal) << 16),
-            ),
-            Self::AffixRolls { rolls, .. } => (CHANGE_AFFIX_ROLLS_OPERATION, u32::from(rolls.len), 0, 0),
-            Self::Status { field, value, .. } => (SET_STATUS_OPERATION, u32::from(value), field as u32, 0),
-            Self::Base { item_type, sub_type, .. } => (CHANGE_BASE_OPERATION, u32::from(sub_type), u32::from(item_type), 0),
-            Self::Identity { id, sub_type, rarity, .. } => (CHANGE_IDENTITY_OPERATION, u32::from(id), u32::from(sub_type), u32::from(rarity)),
-        }
+    fn validate(self) -> Result<(), ProtocolError> {
+        let valid = match self {
+            Self::AddAffix { id, tier, seal, .. } => id <= 4095 && (1..=8).contains(&tier) && seal <= 3,
+            Self::Affix { slot, id, tier, seal, .. } => slot < 32 && id <= 4095 && (1..=8).contains(&tier) && seal <= 3,
+            Self::RemoveAffix { slot, .. } => slot < 32,
+            Self::Status {
+                field: StatusField::Corrupted | StatusField::Ruined,
+                value,
+                ..
+            } => value <= 1,
+            Self::Identity { rarity, .. } => matches!(rarity, 7..=9),
+            _ => true,
+        };
+        if valid { Ok(()) } else { invalid() }
     }
 }
 
@@ -362,7 +275,7 @@ pub const MAX_ERROR_TEXT: usize = 4096;
 /// This is a versioned schema limit, not an arbitrary caller-provided allocation.
 pub const MAX_EXPECTED_BYTES: usize = 48 + forge::MAX_NAME_BYTES + forge::MAX_AFFIXES * (20 + forge::MAX_NAME_BYTES) + forge::MAX_IMPLICIT_ROLLS + 3 + forge::MAX_UNIQUE_ROLLS;
 pub const MIN_EXPECTED_BYTES: usize = 48;
-pub const MAX_REQUEST_BYTES: usize = REQUEST_SIZE + MAX_EXPECTED_BYTES;
+pub const MAX_REQUEST_BYTES: usize = REQUEST_HEADER_SIZE + MAX_EXPECTED_BYTES + 256;
 fn invalid<T>() -> Result<T, ProtocolError> {
     Err(ProtocolError::InvalidData)
 }
@@ -371,9 +284,8 @@ fn invalid<T>() -> Result<T, ProtocolError> {
 pub struct ForgeWrite {
     dispatcher: DispatcherSpec,
     expected_manager: u64,
-    expected: Box<ForgeSnapshot>,
+    expected: forge::CheckedSnapshot,
     mutation: ForgeMutation,
-    canonical_expected: Vec<u8>,
 }
 impl ForgeWrite {
     /// Validates/copies the complete expected item before any transport operation.
@@ -397,23 +309,18 @@ impl ForgeWrite {
         Self::edit(dispatcher, expected_manager, expected, ForgeMutation::Status { field, value, unrestricted })
     }
     pub fn edit(dispatcher: DispatcherSpec, expected_manager: u64, expected: ForgeSnapshot, mutation: ForgeMutation) -> Result<Self, ProtocolError> {
-        let (op, value, selector, extra) = mutation.header_fields();
-        if !matches!(mutation, ForgeMutation::AffixRolls { .. }) {
-            ForgeMutation::header(op, value, selector, u32::from(mutation.unrestricted()), extra)?;
-        }
+        Self::from_checked(dispatcher, expected_manager, forge::CheckedSnapshot::new(expected)?, mutation)
+    }
+    pub(crate) fn from_checked(dispatcher: DispatcherSpec, expected_manager: u64, expected: forge::CheckedSnapshot, mutation: ForgeMutation) -> Result<Self, ProtocolError> {
+        mutation.validate()?;
         if expected_manager == 0 {
-            return invalid();
-        }
-        let canonical_expected = forge::encode(Some(&expected))?;
-        if !(MIN_EXPECTED_BYTES..=MAX_EXPECTED_BYTES).contains(&canonical_expected.len()) {
             return invalid();
         }
         Ok(Self {
             dispatcher,
             expected_manager,
-            expected: Box::new(expected),
+            expected,
             mutation,
-            canonical_expected,
         })
     }
     pub fn expected(&self) -> &ForgeSnapshot {
@@ -439,26 +346,10 @@ impl ForgeWrite {
     /// Infallible apart from allocation: all fields and canonical tail are owned,
     /// immutable and validated by construction. No encoder unwrap of caller data.
     pub fn encode(&self) -> Vec<u8> {
-        let mut frame = vec![0; REQUEST_SIZE];
-        frame[..4].copy_from_slice(&MAGIC.to_le_bytes());
-        let (op, value, selector, extra) = self.mutation.header_fields();
-        frame[4..8].copy_from_slice(&op.to_le_bytes());
-        frame[8..12].copy_from_slice(&value.to_le_bytes());
-        frame[12..16].copy_from_slice(&(self.canonical_expected.len() as u32).to_le_bytes());
-        frame[16..24].copy_from_slice(&self.expected_manager.to_le_bytes());
-        frame[24..28].copy_from_slice(&selector.to_le_bytes());
-        frame[28..32].copy_from_slice(&u32::from(self.unrestricted()).to_le_bytes());
-        frame[32..36].copy_from_slice(&extra.to_le_bytes());
-        frame[48..56].copy_from_slice(&self.dispatcher.rva.to_le_bytes());
-        frame[56..72].copy_from_slice(&self.dispatcher.bytes);
-        if let ForgeMutation::AffixRolls { rolls, .. } = self.mutation {
-            for (index, change) in rolls.changes().iter().enumerate() {
-                frame[80 + index * 8..84 + index * 8].copy_from_slice(&u32::from(change.slot).to_le_bytes());
-                frame[84 + index * 8..88 + index * 8].copy_from_slice(&u32::from(change.value).to_le_bytes());
-            }
-        }
-        frame.extend_from_slice(&self.canonical_expected);
-        frame
+        crate::protocol::Request::EditForge(self.clone()).encode()
+    }
+    pub(crate) fn expected_bytes(&self) -> &[u8] {
+        self.expected.bytes()
     }
 }
 

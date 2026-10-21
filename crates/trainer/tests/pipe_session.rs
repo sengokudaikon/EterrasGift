@@ -1,13 +1,11 @@
 #![cfg(all(windows, target_arch = "x86_64"))]
 //! Session + actual Player.log reader + real local pipe. All data is authored; no game is selected.
-use eg_core::game_log::GameLogReader;
 use eg_game_access::pipe::PipeClient;
 use eg_trainer::{
-    gate::GatePolicy,
     profile::BuildProfile,
     session::{Cleanup, Session, SessionState},
 };
-use eg_trainer_wire::protocol::{Discovery, DispatcherSpec, REQUEST_SIZE, REQUIRED_KEYS, Request, Response, ResponseCode, RuntimeStatus};
+use eg_trainer_wire::protocol::{Discovery, DispatcherSpec, REQUEST_HEADER_SIZE, Request, Response, ResponseCode, RuntimeStatus};
 use std::{
     fs,
     os::windows::process::CommandExt,
@@ -93,7 +91,7 @@ fn actual_log_pipe_and_session_validate_before_status_and_clear_on_disable() {
     let runtime = tokio::runtime::Builder::new_current_thread().enable_io().enable_time().build().unwrap();
     runtime.block_on(async {
         let client = PipeClient::with_timeouts(target.clone(), Duration::from_secs(3), Duration::from_secs(3));
-        let mut session = Session::new(target, client, GameLogReader::new(&log), profile, GatePolicy::Release).unwrap();
+        let mut session = Session::new(target, client, profile).unwrap();
         assert_eq!(session.state(), SessionState::Disabled);
         session.enable();
         timeout(Duration::from_secs(5), session.connect(now)).await.unwrap().unwrap();
@@ -129,11 +127,7 @@ fn pipe_session_child() {
     let root = PathBuf::from(std::env::var_os("EG_SESSION_PIPE_FIXTURE").expect("owned fixture directory required"));
     let build_id = "A".repeat(64);
     let dispatcher = dispatcher();
-    let discovery = Discovery {
-        build_id,
-        dispatcher,
-        offsets: REQUIRED_KEYS.into_iter().map(|key| (key.to_owned(), 16)).collect(),
-    };
+    let discovery = Discovery { build_id, dispatcher };
     let pid = std::process::id();
     let runtime = tokio::runtime::Builder::new_current_thread().enable_io().enable_time().build().unwrap();
     runtime.block_on(async {
@@ -176,8 +170,12 @@ fn pipe_session_child() {
                     .unwrap(),
                 };
                 pipe.connect().await.unwrap();
-                let mut bytes = [0; REQUEST_SIZE];
+                let mut bytes = vec![0; REQUEST_HEADER_SIZE];
                 pipe.read_exact(&mut bytes).await.unwrap();
+                let body_len = u32::from_le_bytes(bytes[8..12].try_into().unwrap()) as usize;
+                assert!(body_len <= 65536);
+                bytes.resize(REQUEST_HEADER_SIZE + body_len, 0);
+                timeout(Duration::from_secs(3), pipe.read_exact(&mut bytes[REQUEST_HEADER_SIZE..])).await.unwrap().unwrap();
                 assert_eq!(Request::decode(&bytes).unwrap(), request);
                 let frame = Response {
                     code: ResponseCode::Done,

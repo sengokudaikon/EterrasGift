@@ -28,8 +28,8 @@ and mutable instance fields. A generic IL2CPP crate is not a prerequisite for th
 | Hook backend | Stock detour 0.10, retained owners, transaction recovery and registered trampoline unwind tables replace the custom scheduler; authored Unity throwing-task, partial-failure and owner-exit restoration pass | Gameplay-specific ABI/target coverage; accepted best-effort thread suspension remains a limitation |
 
 Ordinary refusal stops the draft and keeps Undo for confirmed steps. Known mismatch clears drafts
-and Undo, keeps confirmed history and may keep the connection. Uncertainty clears drafts/history/
-Undo, never retries the write and requires explicit recovery. A confirmed native ACK still needs
+and Undo, keeps confirmed history and may keep the connection. Uncertainty clears drafts and
+Undo, preserves confirmed history, never retries the write and requires explicit recovery. A confirmed native ACK still needs
 independent readback. A completed confirmation is not downgraded by later connection loss.
 
 `ForgePlan::edit(..., override_enabled)` is the only plan constructor. Its explicit recheck takes

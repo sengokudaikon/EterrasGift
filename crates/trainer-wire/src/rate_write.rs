@@ -4,8 +4,8 @@
 #![forbid(unsafe_code)]
 
 use crate::{
-    fields::{AttackLeechObservation, AttackLeechTarget, ObservedObjectIdentity, ObservedRate},
-    protocol::{DispatcherSpec, MAGIC, ProtocolError, REQUEST_SIZE},
+    fields::{AttackLeechObservation, AttackLeechTarget, ObservedRate},
+    protocol::{DispatcherSpec, ProtocolError},
 };
 
 pub const SET_ATTACK_LEECH_RATE_OPERATION: u32 = 24;
@@ -77,57 +77,16 @@ impl AttackLeechRateWrite {
 
     /// Infallible apart from allocation: no unvalidated caller fields remain.
     pub fn encode(&self) -> Vec<u8> {
-        let mut frame = vec![0; REQUEST_SIZE];
-        frame[0..4].copy_from_slice(&MAGIC.to_le_bytes());
-        frame[4..8].copy_from_slice(&SET_ATTACK_LEECH_RATE_OPERATION.to_le_bytes());
-        let target: u32 = match self.target {
-            AttackLeechTarget::AttackRate => 1,
-            AttackLeechTarget::IncreasedLeechRate => 2,
-        };
-        frame[8..12].copy_from_slice(&target.to_le_bytes());
-        frame[12..16].copy_from_slice(&self.desired_bits.to_le_bytes());
-        for (offset, identity) in [(16, self.expected.manager), (32, self.expected.actor), (72, self.expected.stats)] {
-            frame[offset..offset + 8].copy_from_slice(&identity.wrapper_token().to_le_bytes());
-            frame[offset + 8..offset + 16].copy_from_slice(&identity.native_token().to_le_bytes());
-        }
-        frame[48..56].copy_from_slice(&self.dispatcher.rva.to_le_bytes());
-        frame[56..72].copy_from_slice(&self.dispatcher.bytes);
-        frame[88..92].copy_from_slice(&self.expected.attack_rate.raw_bits.to_le_bytes());
-        frame[92..96].copy_from_slice(&self.expected.increased_leech_rate.raw_bits.to_le_bytes());
-        frame
+        crate::protocol::Request::SetAttackLeechRate(self.clone()).encode()
     }
 
     /// Full fixed frame validation must precede helper ownership/dispatcher/queue
     /// admission. This decoder performs no I/O, float arithmetic or pointer access.
     pub fn decode(frame: &[u8]) -> Result<Self, ProtocolError> {
-        if frame.len() != REQUEST_SIZE {
-            return Err(ProtocolError::InvalidData);
+        match crate::protocol::Request::decode(frame)? {
+            crate::protocol::Request::SetAttackLeechRate(write) => Ok(write),
+            _ => Err(ProtocolError::InvalidData),
         }
-        let u32_at = |offset| u32::from_le_bytes(frame[offset..offset + 4].try_into().expect("fixed checked frame"));
-        let u64_at = |offset| u64::from_le_bytes(frame[offset..offset + 8].try_into().expect("fixed checked frame"));
-        if u32_at(0) != MAGIC {
-            return Err(ProtocolError::IncompatibleVersion);
-        }
-        if u32_at(4) != SET_ATTACK_LEECH_RATE_OPERATION || frame[96..].iter().any(|byte| *byte != 0) {
-            return Err(ProtocolError::InvalidData);
-        }
-        let target = match u32_at(8) {
-            1 => AttackLeechTarget::AttackRate,
-            2 => AttackLeechTarget::IncreasedLeechRate,
-            _ => return Err(ProtocolError::InvalidData),
-        };
-        let expected = AttackLeechObservation {
-            manager: ObservedObjectIdentity::new(u64_at(16), u64_at(24))?,
-            actor: ObservedObjectIdentity::new(u64_at(32), u64_at(40))?,
-            stats: ObservedObjectIdentity::new(u64_at(72), u64_at(80))?,
-            attack_rate: ObservedRate { raw_bits: u32_at(88) },
-            increased_leech_rate: ObservedRate { raw_bits: u32_at(92) },
-        };
-        let dispatcher = DispatcherSpec {
-            rva: u64_at(48),
-            bytes: frame[56..72].try_into().expect("fixed checked dispatcher"),
-        };
-        Self::new(dispatcher, expected, target, u32_at(12))
     }
 }
 

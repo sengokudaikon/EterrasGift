@@ -65,13 +65,6 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
         if status.manager != expected.manager {
             return Err(BackendError::blocked(ErrorKind::Identity, "character manager changed before rate write"));
         }
-        plan.recheck(
-            self.state
-                .attack_leech
-                .as_ref()
-                .ok_or_else(|| super::write::invalid_edit("current rate observation released"))?,
-        )
-        .map_err(super::write::invalid_edit)?;
         self.admit_using_policy(&target, GatePolicy::Release)?;
         self.commit(epoch, |this| {
             this.state.activity = Some(Activity::WritingAttackLeech);

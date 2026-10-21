@@ -77,28 +77,27 @@ impl ProcessLocator for GameProcesses {
 pub struct DesktopConnector<F: LogFactory> {
     manifest: PathBuf,
     logs: F,
-    session: Option<SessionConnector<NativePreparer<F>, F>>,
+    session: Option<SessionConnector<NativePreparer, F>>,
 }
 impl<F: LogFactory + Clone> DesktopConnector<F> {
     /// The manifest is shipped beside the app; source builds publish it with
     /// trainer:helper:build. Opening it is deferred until Release admission.
-    /// # Safety
-    /// Targets passed to connect must satisfy NativePreparer's supported-game
-    /// runtime/lifecycle assumptions. A manifest or process name cannot prove them.
-    pub unsafe fn new(manifest: PathBuf, logs: F) -> Self {
+    pub fn new(manifest: PathBuf, logs: F) -> Self {
         Self { manifest, logs, session: None }
     }
 }
 impl<F: LogFactory + Clone> Connector for DesktopConnector<F> {
-    type Connection = Session<VerifiedTransport<F::Log>, F::Log>;
+    type Connection = Session<VerifiedTransport>;
+    fn reap_exited(&mut self) -> Vec<ProcessIdentity> {
+        self.session.as_mut().map_or_else(Vec::new, Connector::reap_exited)
+    }
     async fn connect(&mut self, target: ProcessIdentity, now: Timestamp) -> Result<Self::Connection, BackendError> {
         if target.pid == 0 || target.created == 0 || !target.executable.is_absolute() {
             return Err(BackendError::blocked(ErrorKind::Identity, "Invalid game process identity."));
         }
         // Repeat the gate before opening even local helper inputs. SessionConnector
         // repeats it around preparation and transport as usual.
-        let started =
-            Timestamp::from_nanosecond((i128::from(target.created) - 116_444_736_000_000_000) * 100).map_err(|e| BackendError::blocked(ErrorKind::Identity, e.to_string()))?;
+        let started = eg_core::time::from_filetime(target.created).map_err(|e| BackendError::blocked(ErrorKind::Identity, e.to_string()))?;
         let decision = gate::evaluate(&self.logs.create(&target)?.read(started), started, now, GatePolicy::Release);
         if decision.verdict != GateVerdict::Allow {
             return Err(BackendError::waiting(ErrorKind::Gate, "Load an offline character to connect."));
@@ -113,11 +112,7 @@ impl<F: LogFactory + Clone> Connector for DesktopConnector<F> {
             })?;
             let (dll, hash, source_id) = package(&bytes, &self.manifest)?;
             let artifact = Arc::new(HelperArtifact::capture(&dll, &hash, &source_id).map_err(|e| BackendError::blocked(ErrorKind::Identity, e.to_string()))?);
-            // SAFETY: game-specific graph/lifecycle and wrapper-instrumentation assumptions
-            // are documented by NativePreparer; they are not established by this constructor.
-            // prepare checks the engine version and module identity before remote work,
-            // followed by per-operation callback/metadata/offline checks in the helper.
-            let preparer = unsafe { NativePreparer::new(artifact.clone(), self.logs.clone()) };
+            let preparer = NativePreparer::new(artifact.clone());
             self.session = Some(SessionConnector::new(preparer, self.logs.clone(), artifact.source_id(), GatePolicy::Release)?);
         }
         self.session.as_mut().unwrap().connect(target, now).await

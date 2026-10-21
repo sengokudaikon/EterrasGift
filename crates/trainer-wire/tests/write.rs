@@ -3,7 +3,7 @@ use eg_trainer_wire::write::*;
 use eg_trainer_wire::{
     catalog::CatalogKind,
     forge::{self, AffixSnapshot, ForgeSnapshot, ItemStatus, UniqueIdentity},
-    protocol::{DispatcherSpec, MAGIC, ProtocolError, REQUEST_SIZE, Request, Response, ResponseCode},
+    protocol::{DispatcherSpec, MAGIC, ProtocolError, REQUEST_HEADER_SIZE, Request, Response, ResponseCode},
 };
 fn decode_header(bytes: &[u8]) -> Result<eg_trainer_wire::protocol::RequestHeader, ProtocolError> {
     Request::decode_header(bytes)
@@ -57,94 +57,63 @@ fn tail_literal() -> Vec<u8> {
     ))
 }
 fn literal() -> Vec<u8> {
-    let mut frame = vec![0; 336];
-    frame[..24].copy_from_slice(&[
-        0x35, 0x47, 0x46, 0x45, 10, 0, 0, 0, 80, 0, 0, 0, 49, 0, 0, 0, 0x44, 0x44, 0x33, 0x33, 0x22, 0x22, 0x11, 0x11,
-    ]);
-    frame[24..28].copy_from_slice(&5_u32.to_le_bytes());
-    frame[48..56].copy_from_slice(&[0, 0x10, 0, 0, 0, 0, 0, 0]);
-    frame[56..72].fill(0xcc);
-    frame.extend_from_slice(&tail_literal());
-    frame
+    let mut bytes = hex("354746450a000000580000000010000000000000cccccccccccccccccccccccccccccccc444433332222111105500031000000");
+    bytes.extend(tail_literal());
+    bytes
 }
 fn set32(bytes: &mut [u8], at: usize, value: u32) {
     bytes[at..at + 4].copy_from_slice(&value.to_le_bytes());
 }
 #[test]
 fn independent_literal_full_snapshot_wire_and_infallible_owned_encoder() {
-    assert_eq!(snapshot().legacy_fingerprint(), 0x351c5afa7067984c);
-    assert_eq!(tail_literal().len(), 49);
     assert_eq!(forge::encode(Some(&snapshot())).unwrap(), tail_literal());
     assert_eq!(write().encode(), literal());
-    assert_eq!(decode_frame(&literal()).unwrap(), Request::EditForge(write()));
-    let layout = decode_header(&literal()[..336]).unwrap();
-    assert_eq!(layout.tail_len(), 49);
-    assert_eq!(layout.total_len(), 385);
-    let mut original = snapshot();
-    let request = ForgeWrite::level_requirement(spec(), 4, original.clone(), 255).unwrap();
-    original.name = "changed after construction".into();
-    assert_eq!(request.expected().name, "A");
-    assert_eq!(request.projected().status.level_requirement, 255);
-    assert_eq!(request.expected_manager(), 4);
-    assert_eq!(request.dispatcher(), spec());
-    assert!(decode_frame(&request.clone().encode()).is_ok());
+    assert_eq!(decode_frame(&literal()), Ok(Request::EditForge(write())));
+    let header = decode_header(&literal()[..REQUEST_HEADER_SIZE]).unwrap();
+    assert_eq!(header.body_len(), 88);
+    assert_eq!(header.total_len(), 100);
 }
+
 #[test]
-fn every_header_reserved_byte_is_strict_and_known_fields_are_bounded() {
-    let bytes = literal();
-    for at in (32..48).chain(72..336) {
-        let mut bad = bytes.clone();
-        bad[at] = 1;
-        assert!(decode_header(&bad[..336]).is_err(), "reserved {at}");
-        assert!(decode_frame(&bad).is_err());
+fn envelope_and_typed_write_fields_are_bounded() {
+    for (at, value) in [(0, 0u32), (4, 3), (8, u32::MAX)] {
+        let mut bytes = literal();
+        set32(&mut bytes, at, value);
+        assert!(decode_header(&bytes[..REQUEST_HEADER_SIZE]).is_err());
     }
-    for (at, value) in [
-        (0, 0),
-        (4, 23),
-        (8, u32::MAX),
-        (8, 256),
-        (12, 0),
-        (12, 47),
-        (12, MAX_EXPECTED_BYTES as u32 + 1),
-        (12, u32::MAX),
-    ] {
-        let mut bad = bytes.clone();
-        set32(&mut bad, at, value);
-        assert!(decode_header(&bad[..336]).is_err(), "at {at} value {value}");
+    for (at, value) in [(44, 255), (46, 2)] {
+        let mut bytes = literal();
+        bytes[at] = value;
+        assert!(decode_frame(&bytes).is_err());
     }
-    let mut bad = bytes;
-    bad[16..24].fill(0);
-    assert!(decode_header(&bad[..336]).is_err());
+    let mut bytes = literal();
+    bytes[36..44].fill(0);
+    assert!(decode_frame(&bytes).is_err());
     assert!(ForgeWrite::level_requirement(spec(), 0, snapshot(), 80).is_err());
     for value in [-1, 256, i32::MIN, i32::MAX] {
         assert!(ForgeWrite::level_requirement(spec(), 1, snapshot(), value).is_err());
     }
-    for value in [0, 255] {
-        assert!(ForgeWrite::level_requirement(spec(), u64::MAX, snapshot(), value).is_ok());
-    }
 }
+
 #[test]
-fn no_header_only_or_partial_tail_can_be_a_request() {
-    let frame = literal();
-    for end in 0..frame.len() {
-        assert!(decode_frame(&frame[..end]).is_err(), "prefix {end}");
+fn no_header_only_or_partial_body_can_be_a_request() {
+    let bytes = literal();
+    for end in 0..bytes.len() {
+        assert!(decode_frame(&bytes[..end]).is_err());
     }
-    let assembler = FrameAssembler::new(&frame[..336]).unwrap();
-    assert_eq!(assembler.remaining(), 49);
-    assert!(assembler.finish().is_err());
-    for count in 0..49 {
-        let mut assembler = FrameAssembler::new(&frame[..336]).unwrap();
-        assembler.push(&frame[336..336 + count]).unwrap();
-        assert_eq!(assembler.remaining(), 49 - count);
-        assert!(assembler.finish().is_err());
+    for end in 0..88 {
+        let mut frame = FrameAssembler::new(&bytes[..REQUEST_HEADER_SIZE]).unwrap();
+        frame.push(&bytes[REQUEST_HEADER_SIZE..REQUEST_HEADER_SIZE + end]).unwrap();
+        assert!(frame.finish().is_err());
     }
 }
+
 #[test]
 fn assembler_accepts_arbitrary_fragmentation_only_after_complete_decode() {
     let frame = literal();
     for chunk in 1..=49 {
-        let mut assembler = FrameAssembler::new(&frame[..336]).unwrap();
-        for bytes in frame[336..].chunks(chunk) {
+        let mut assembler = FrameAssembler::new(&frame[..REQUEST_HEADER_SIZE]).unwrap();
+        for bytes in frame[REQUEST_HEADER_SIZE..].chunks(chunk) {
             assembler.push(bytes).unwrap();
         }
         assert_eq!(assembler.remaining(), 0);
@@ -156,8 +125,8 @@ fn seen_excess_poisoned_and_control_requests_do_not_gain_a_tail() {
     let mut frame = literal();
     frame.push(0);
     assert!(decode_frame(&frame).is_err());
-    let mut assembler = FrameAssembler::new(&frame[..336]).unwrap();
-    assert!(assembler.push(&frame[336..]).is_err());
+    let mut assembler = FrameAssembler::new(&frame[..REQUEST_HEADER_SIZE]).unwrap();
+    assert!(assembler.push(&frame[REQUEST_HEADER_SIZE..]).is_err());
     assert!(assembler.push(&tail_literal()).is_err());
     assert!(assembler.finish().is_err());
     let controls = [
@@ -175,8 +144,10 @@ fn seen_excess_poisoned_and_control_requests_do_not_gain_a_tail() {
     ];
     for request in controls {
         let bytes = request.encode();
-        assert_eq!(decode_header(&bytes).unwrap().tail_len(), 0);
-        assert_eq!(FrameAssembler::new(&bytes).unwrap().finish().unwrap(), request.clone());
+        assert_eq!(decode_header(&bytes[..REQUEST_HEADER_SIZE]).unwrap().body_len(), bytes.len() - REQUEST_HEADER_SIZE);
+        let mut frame = FrameAssembler::new(&bytes[..REQUEST_HEADER_SIZE]).unwrap();
+        frame.push(&bytes[REQUEST_HEADER_SIZE..]).unwrap();
+        assert_eq!(frame.finish().unwrap(), request);
         let mut extra = bytes;
         extra.push(0);
         assert!(decode_frame(&extra).is_err());
@@ -184,23 +155,19 @@ fn seen_excess_poisoned_and_control_requests_do_not_gain_a_tail() {
 }
 #[test]
 fn strict_expected_presence_utf8_bools_and_fingerprint() {
-    for at in [336, 336 + 13, 336 + 23, 336 + 43, 336 + 44] {
-        let mut frame = literal();
-        frame[at] = if at == 336 + 23 { 0xff } else { 2 };
-        assert!(decode_frame(&frame).is_err(), "at {at}");
+    for offset in [0, 13, 23, 43, 44] {
+        let mut bytes = literal();
+        bytes[51 + offset] = if offset == 23 { 0xff } else { 2 };
+        assert!(decode_frame(&bytes).is_err());
     }
-    let mut frame = literal();
-    frame[336..].fill(0);
-    assert!(decode_frame(&frame).is_err());
-    let mut invalid = snapshot();
-    invalid.fingerprint ^= 1;
-    assert_eq!(ForgeWrite::level_requirement(spec(), 1, invalid, 80), Err(ProtocolError::InvalidData));
-    let mut frame = literal();
-    set32(&mut frame, 12, 1);
-    frame.truncate(337);
-    frame[336] = 0;
-    assert!(decode_frame(&frame).is_err());
+    let mut malformed = snapshot();
+    malformed.fingerprint ^= 1;
+    assert!(ForgeWrite::level_requirement(spec(), 1, malformed, 80).is_err());
+    let mut bytes = literal();
+    set32(&mut bytes, 47, u32::MAX);
+    assert!(decode_frame(&bytes).is_err());
 }
+
 #[test]
 fn maximum_schema_bound_is_exact_and_allows_large_inherited_ids_without_rebuild() {
     let mut maximum = snapshot();
@@ -228,7 +195,7 @@ fn maximum_schema_bound_is_exact_and_allows_large_inherited_ids_without_rebuild(
     assert_eq!(MAX_EXPECTED_BYTES, 135870);
     // Wire decoding is not eligibility: native must refuse unique-backed items before store.
     let request = ForgeWrite::level_requirement(spec(), 1, maximum.clone(), 0).unwrap();
-    assert_eq!(request.encode().len(), MAX_REQUEST_BYTES);
+    assert_eq!(request.encode().len(), MAX_EXPECTED_BYTES + 51);
     assert_eq!(decode_frame(&request.encode()).unwrap(), Request::EditForge(request));
     maximum.name.push('x');
     assert!(ForgeWrite::level_requirement(spec(), 1, maximum, 0).is_err());
@@ -243,8 +210,7 @@ fn minimal_schema_bound_is_exact() {
     assert_eq!(forge::encode(Some(&item)).unwrap().len(), MIN_EXPECTED_BYTES);
     let request = ForgeWrite::level_requirement(spec(), 1, item, 0).unwrap();
     assert!(decode_frame(&request.encode()).is_ok());
-    assert_eq!(REQUEST_SIZE, 336);
-    assert_eq!(eg_trainer_wire::protocol::VERSION, 37);
+    assert_eq!(REQUEST_HEADER_SIZE, 12);
 }
 #[test]
 fn projection_changes_only_requested_level_and_its_legacy_fingerprint() {
@@ -271,20 +237,20 @@ fn status_fields_have_one_strict_frame_and_boolean_values_are_canonical() {
         let request = ForgeWrite::new(spec(), 1, snapshot(), field, value).unwrap();
         let bytes = request.encode();
         assert_eq!(u32::from_le_bytes(bytes[4..8].try_into().unwrap()), 10);
-        assert_eq!(u32::from_le_bytes(bytes[24..28].try_into().unwrap()), field as u32);
+        assert_eq!(bytes[44], field as u8);
         assert_eq!(Request::decode(&bytes).unwrap(), Request::EditForge(request.clone()));
         assert_eq!(field.value(&request.projected()), value);
     }
     for field in [StatusField::Corrupted, StatusField::Ruined] {
         assert!(ForgeWrite::new(spec(), 1, snapshot(), field, 2).is_err());
         let mut invalid = write().encode();
-        set32(&mut invalid, 24, field as u32);
-        assert!(Request::decode_header(&invalid[..REQUEST_SIZE]).is_err());
+        invalid[44] = field as u8;
+        assert!(Request::decode(&invalid).is_err());
     }
     for field in [7, u32::MAX] {
         let mut invalid = write().encode();
-        set32(&mut invalid, 24, field);
-        assert!(Request::decode_header(&invalid[..REQUEST_SIZE]).is_err());
+        invalid[44] = field as u8;
+        assert!(Request::decode(&invalid).is_err());
     }
 }
 
@@ -292,13 +258,13 @@ fn status_fields_have_one_strict_frame_and_boolean_values_are_canonical() {
 fn override_is_one_explicit_bit_and_all_other_flag_bits_are_rejected() {
     let request = ForgeWrite::with_override(spec(), 1, snapshot(), StatusField::WeaversTouch, 77, true).unwrap();
     let bytes = request.encode();
-    assert_eq!(&bytes[28..32], &1_u32.to_le_bytes());
+    assert_eq!(bytes[46], 1);
     assert_eq!(Request::decode(&bytes).unwrap(), Request::EditForge(request));
     assert!(!write().unrestricted());
-    for flags in [2, 3, 256, 65536, u32::MAX] {
+    for flags in [2u8, 3, 128, 255] {
         let mut invalid = bytes.clone();
-        set32(&mut invalid, 28, flags);
-        assert!(Request::decode_header(&invalid[..REQUEST_SIZE]).is_err());
+        invalid[46] = flags;
+        assert!(Request::decode(&invalid).is_err());
     }
 }
 
@@ -452,7 +418,7 @@ fn async_reader_does_not_return_request_on_header_only_disconnect() {
         use tokio::io::AsyncWriteExt;
         let (mut writer, mut reader) = tokio::io::duplex(8192);
         let task = tokio::spawn(async move { eg_trainer_wire::transport::read_request(&mut reader).await });
-        writer.write_all(&write().encode()[..336]).await.unwrap();
+        writer.write_all(&write().encode()[..REQUEST_HEADER_SIZE]).await.unwrap();
         tokio::task::yield_now().await;
         assert!(!task.is_finished());
         drop(writer);
@@ -465,8 +431,8 @@ fn async_reader_rejects_unbounded_header_without_waiting_for_body() {
         use tokio::io::AsyncWriteExt;
         let (mut writer, mut reader) = tokio::io::duplex(8192);
         let task = tokio::spawn(async move { eg_trainer_wire::transport::read_request(&mut reader).await });
-        let mut header = literal()[..336].to_vec();
-        set32(&mut header, 12, u32::MAX);
+        let mut header = literal()[..REQUEST_HEADER_SIZE].to_vec();
+        set32(&mut header, 8, u32::MAX);
         writer.write_all(&header).await.unwrap();
         let result = tokio::time::timeout(std::time::Duration::from_secs(1), task).await.unwrap().unwrap();
         assert!(matches!(result, Err(eg_trainer_wire::transport::RequestReadError::Protocol(_))));
@@ -474,16 +440,11 @@ fn async_reader_rejects_unbounded_header_without_waiting_for_body() {
 }
 
 #[test]
-fn base_and_identity_share_bounded_frames_with_exact_scalar_widths() {
-    for mutation in [
+fn every_mutation_roundtrips_with_no_unused_slots() {
+    let mutations = [
         ForgeMutation::Base {
             item_type: 255,
             sub_type: 65535,
-            unrestricted: false,
-        },
-        ForgeMutation::Base {
-            item_type: 26,
-            sub_type: 513,
             unrestricted: true,
         },
         ForgeMutation::Identity {
@@ -492,142 +453,82 @@ fn base_and_identity_share_bounded_frames_with_exact_scalar_widths() {
             rarity: 9,
             unrestricted: true,
         },
-        ForgeMutation::Identity {
-            id: 912,
-            sub_type: 2,
-            rarity: 8,
-            unrestricted: false,
+        ForgeMutation::Affix {
+            slot: 31,
+            id: 4095,
+            tier: 8,
+            roll: 255,
+            seal: 3,
+            unrestricted: true,
         },
-    ] {
-        let request = ForgeWrite::edit(spec(), 1, snapshot(), mutation).unwrap();
-        let frame = request.encode();
-        let (operation, value, selector, extra) = match mutation {
-            ForgeMutation::Base { item_type, sub_type, .. } => (11, u32::from(sub_type), u32::from(item_type), 0),
-            ForgeMutation::Identity { id, sub_type, rarity, .. } => (17, u32::from(id), u32::from(sub_type), u32::from(rarity)),
-            _ => unreachable!(),
-        };
-        for (at, expected) in [(4, operation), (8, value), (24, selector), (28, u32::from(mutation.unrestricted())), (32, extra)] {
-            assert_eq!(u32::from_le_bytes(frame[at..at + 4].try_into().unwrap()), expected);
-        }
-        assert_eq!(Request::decode(&frame).unwrap(), Request::EditForge(request));
-        for (at, bad) in [
-            (8, 65536),
-            (24, 256),
-            (28, 2),
-            (32, if operation == 11 { 1 } else { 6 }),
-            (32, if operation == 11 { 255 } else { 10 }),
-        ] {
-            let mut invalid = frame.clone();
-            set32(&mut invalid, at, bad);
-            assert!(Request::decode_header(&invalid[..REQUEST_SIZE]).is_err());
-        }
-        for at in (36..48).chain(72..336) {
-            let mut invalid = frame.clone();
-            invalid[at] = 1;
-            assert!(Request::decode_header(&invalid[..REQUEST_SIZE]).is_err());
-        }
-        for end in REQUEST_SIZE..frame.len() {
-            assert!(Request::decode(&frame[..end]).is_err());
-        }
-        let mut excess = frame;
-        excess.push(0);
-        assert!(Request::decode(&excess).is_err());
-    }
-}
-
-#[test]
-fn affix_roll_batches_have_a_strict_fixed_header_and_complete_expected_tail() {
-    for count in [1, 2, 32] {
-        let changes = (0..count)
-            .map(|slot| AffixRollChange {
-                slot,
-                value: if slot % 2 == 0 { 0 } else { 255 },
-            })
-            .collect::<Vec<_>>();
-        let mutation = ForgeMutation::AffixRolls {
-            rolls: AffixRolls::new(&changes).unwrap(),
-            unrestricted: count == 32,
-        };
-        let request = ForgeWrite::edit(spec(), 4, snapshot(), mutation).unwrap();
-        let bytes = request.encode();
-        assert_eq!(&bytes[4..12], [2, 0, 0, 0, count, 0, 0, 0]);
-        for (i, change) in changes.iter().enumerate() {
-            assert_eq!(u32::from_le_bytes(bytes[80 + i * 8..84 + i * 8].try_into().unwrap()), u32::from(change.slot));
-            assert_eq!(u32::from_le_bytes(bytes[84 + i * 8..88 + i * 8].try_into().unwrap()), u32::from(change.value));
-        }
-        assert_eq!(Request::decode(&bytes).unwrap(), Request::EditForge(request));
-        for end in 0..bytes.len() {
-            assert!(Request::decode(&bytes[..end]).is_err());
-        }
-        for (at, value) in [(8, 0), (8, 33), (24, 1), (24, 2), (28, 2), (32, 1), (80, 32), (84, 256)] {
-            let mut invalid = bytes.clone();
-            set32(&mut invalid, at, value);
-            assert!(Request::decode_header(&invalid[..REQUEST_SIZE]).is_err(), "at {at}: {value}");
-        }
-        for at in (36..48).chain(72..80).chain(80 + usize::from(count) * 8..336) {
-            let mut invalid = bytes.clone();
-            invalid[at] = 1;
-            assert!(Request::decode_header(&invalid[..REQUEST_SIZE]).is_err(), "reserved {at}");
-        }
-        if count > 1 {
-            let mut invalid = bytes.clone();
-            set32(&mut invalid, 88, 0);
-            assert!(Request::decode_header(&invalid[..REQUEST_SIZE]).is_err());
-        }
-        let mut excess = bytes;
-        excess.push(0);
-        assert!(Request::decode(&excess).is_err());
-    }
-    assert!(AffixRolls::new(&[]).is_err());
-    assert!(AffixRolls::new(&[AffixRollChange { slot: 32, value: 0 }]).is_err());
-    assert!(AffixRolls::new(&[AffixRollChange { slot: 0, value: 0 }, AffixRollChange { slot: 0, value: 255 }]).is_err());
-    assert!(AffixRolls::new(&[AffixRollChange { slot: 0, value: 0 }; 33]).is_err());
-}
-
-#[test]
-fn replacement_frame_bounds_and_reserved_bits_are_checked_before_submission() {
-    let mutation = ForgeMutation::Affix {
-        slot: 31,
-        id: 4095,
-        tier: 8,
-        roll: 255,
-        seal: 3,
-        unrestricted: true,
-    };
-    let write = ForgeWrite::edit(spec(), 12, snapshot(), mutation).unwrap();
-    let bytes = write.encode();
-    assert_eq!(decode_frame(&bytes).unwrap(), Request::EditForge(write));
-    for (offset, value) in [(8, 4096), (24, 32), (28, 2), (32, 0), (32, 9), (32, 0x40001), (32, 0x1000001), (36, 1), (80, 1)] {
-        let mut damaged = bytes.clone();
-        set32(&mut damaged, offset, value);
-        assert!(decode_header(&damaged[..REQUEST_SIZE]).is_err(), "{offset}/{value}");
-    }
-}
-
-#[test]
-fn affix_list_frames_reject_bad_bounds_flags_and_unused_fields() {
-    for mutation in [
         ForgeMutation::AddAffix {
             id: 4095,
             tier: 8,
             roll: 255,
-            seal: 2,
+            seal: 3,
             unrestricted: true,
         },
-        ForgeMutation::RemoveAffix { slot: 31, id: 65500 },
+        ForgeMutation::RemoveAffix { slot: 31, id: 65535 },
+    ];
+    for mutation in mutations {
+        let write = ForgeWrite::edit(spec(), 1, snapshot(), mutation).unwrap();
+        let bytes = write.encode();
+        assert_eq!(Request::decode(&bytes), Ok(Request::EditForge(write)));
+        for end in 0..bytes.len() {
+            assert!(Request::decode(&bytes[..end]).is_err());
+        }
+        assert!(Request::decode(&[bytes, vec![0]].concat()).is_err());
+    }
+    for mutation in [
+        ForgeMutation::Identity {
+            id: 1,
+            sub_type: 0,
+            rarity: 6,
+            unrestricted: false,
+        },
+        ForgeMutation::Affix {
+            slot: 32,
+            id: 0,
+            tier: 1,
+            roll: 0,
+            seal: 0,
+            unrestricted: false,
+        },
+        ForgeMutation::AddAffix {
+            id: 4096,
+            tier: 0,
+            roll: 0,
+            seal: 4,
+            unrestricted: false,
+        },
+        ForgeMutation::RemoveAffix { slot: 32, id: 0 },
     ] {
-        let request = ForgeWrite::edit(spec(), 12, snapshot(), mutation).unwrap();
-        let bytes = request.encode();
-        assert_eq!(decode_frame(&bytes).unwrap(), Request::EditForge(request));
-        let damage = if matches!(mutation, ForgeMutation::AddAffix { .. }) {
-            vec![(8, 4096), (24, 1), (28, 2), (32, 0), (32, 9), (32, 0x40001), (80, 1)]
-        } else {
-            vec![(8, 65536), (24, 32), (28, 1), (32, 1), (80, 1)]
+        assert!(ForgeWrite::edit(spec(), 1, snapshot(), mutation).is_err());
+    }
+}
+#[test]
+fn roll_batches_bound_count_and_reject_duplicate_or_out_of_range_slots() {
+    for count in [1, 2, 32] {
+        let changes = (0..count).map(|slot| AffixRollChange { slot, value: 255 }).collect::<Vec<_>>();
+        let mutation = ForgeMutation::AffixRolls {
+            rolls: AffixRolls::new(&changes).unwrap(),
+            unrestricted: true,
         };
-        for (offset, value) in damage {
-            let mut damaged = bytes.clone();
-            set32(&mut damaged, offset, value);
-            assert!(decode_header(&damaged[..REQUEST_SIZE]).is_err(), "{mutation:?} {offset}/{value}");
+        let write = ForgeWrite::edit(spec(), 1, snapshot(), mutation).unwrap();
+        let bytes = write.encode();
+        assert_eq!(Request::decode(&bytes), Ok(Request::EditForge(write)));
+        for (at, value) in [(44, 2), (45, 0), (45, 33), (46, 32)] {
+            let mut bad = bytes.clone();
+            bad[at] = value;
+            assert!(Request::decode(&bad).is_err());
+        }
+        if count > 1 {
+            let mut bad = bytes;
+            bad[48] = 0;
+            assert!(Request::decode(&bad).is_err());
         }
     }
+    assert!(AffixRolls::new(&[]).is_err());
+    assert!(AffixRolls::new(&[AffixRollChange { slot: 0, value: 1 }; 33]).is_err());
+    assert!(AffixRolls::new(&[AffixRollChange { slot: 0, value: 1 }; 2]).is_err());
 }

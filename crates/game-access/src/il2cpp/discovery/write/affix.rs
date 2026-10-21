@@ -1,5 +1,6 @@
 //! Game-specific affix list edits: construct, validate, then rewrite through List<T>'s barriers.
 
+use super::metadata_text;
 use super::*;
 use crate::il2cpp::ValueTypeContract;
 use eg_trainer_wire::{
@@ -28,6 +29,7 @@ impl RuntimeAccess {
         expected: &ForgeSnapshot,
         mutation: ForgeMutation,
     ) -> Result<AffixRewrite<'a, 'r>, ForgeWriteError> {
+        // SAFETY: The selected graph and definition remain rooted; exact destination fields and constructor signatures are checked before any store.
         unsafe {
             let (slot, construction) = match mutation {
                 ForgeMutation::Affix { slot, id, tier, roll, seal, .. } => {
@@ -180,19 +182,15 @@ impl RuntimeAccess {
         takes_element: bool,
         api: raw::InvocationApi,
     ) -> Result<super::super::Method, ForgeWriteError> {
+        // SAFETY: The owner is retained closed List metadata; exact element and parameter classes are checked before binding.
         unsafe {
-            let mut iterator = std::ptr::null_mut();
             let mut found = None;
-            for _ in 0..100_000 {
-                let method = (self.class_methods)(class, &mut iterator);
-                if method.is_null() {
-                    return found.ok_or_else(|| ForgeWriteError::Refused("Missing closed affix-list method".into()));
-                }
+            for method in self.methods(class)? {
                 let actual = (self.method_name)(method);
                 if actual.is_null() {
                     return Err(ForgeWriteError::Refused("Missing list method name".into()));
                 }
-                if CStr::from_ptr(actual) != name || (self.method_params)(method) != u32::from(takes_element) {
+                if metadata_text(actual) != name || (self.method_params)(method) != u32::from(takes_element) {
                     continue;
                 }
                 let returns = (self.method_return)(method);
@@ -216,7 +214,7 @@ impl RuntimeAccess {
                 }
                 found = Some(method);
             }
-            Err(ForgeWriteError::Refused("Affix-list method enumeration limit".into()))
+            found.ok_or_else(|| ForgeWriteError::Refused("Missing closed affix-list method".into()))
         }
     }
 }
@@ -230,6 +228,7 @@ impl AffixRewrite<'_, '_> {
         api: raw::InvocationApi,
         item: NonNull<raw::Object>,
     ) -> Result<(), ForgeWriteError> {
+        // SAFETY: Prepared metadata fixes every field and method signature; the caller retains exclusive rooted destinations through stores and refresh.
         unsafe {
             let context = InvocationContext::new(attached, api);
             let failed = |e: crate::il2cpp::InvokeError| ForgeWriteError::Failed(e.to_string());

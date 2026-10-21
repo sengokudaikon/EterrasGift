@@ -11,9 +11,9 @@ mod rate_writes;
 mod unique;
 #[path = "session/write.rs"]
 mod writes;
-use eg_core::game_log::{GameLogEvent, GameLogState, GameLogStatus, GameReadiness, LoggedCharacter};
+use eg_core::game_log::{GameLogEvent, GameLogState, GameReadiness, LoggedCharacter};
 use eg_trainer::{
-    gate::{GatePolicy, GateVerdict, LogSource},
+    gate::{GatePolicy, LogSource},
     profile::BuildProfile,
     session::{Cleanup, Session, SessionError, SessionState},
 };
@@ -23,7 +23,7 @@ use eg_trainer_wire::{
     forge::{self, AffixSnapshot, ForgeSnapshot, ItemStatus},
     locale::{self, GameLocale},
     process::ProcessIdentity,
-    protocol::{Discovery, DispatcherSpec, ProtocolError, REQUIRED_KEYS, Request, Response, ResponseCode, RuntimeStatus},
+    protocol::{Discovery, DispatcherSpec, ProtocolError, Request, Response, ResponseCode, RuntimeStatus},
     transport::{Delivery, Transport, TransportError, TransportFailure},
 };
 use jiff::{SignedDuration, Timestamp};
@@ -145,7 +145,7 @@ fn catalog_page_binds_response_to_query_and_never_replays_or_recovers_implicitly
         session.enable();
         run(session.connect(now())).unwrap();
         assert!(run(session.read_catalog_page(now(), CatalogKind::Bases, 0)).is_err());
-        assert_eq!(session.state(), SessionState::Blocked);
+        assert_eq!(session.state(), SessionState::Disconnected);
         assert!(session.runtime_status().is_none());
         assert!(run(session.capture_catalog(now())).is_err());
         assert_eq!(wire.requests().len(), 3);
@@ -202,7 +202,7 @@ fn catalog_capture_rejects_midpage_drift_and_discards_complete_capture_after_lan
         session.enable();
         run(session.connect(now())).unwrap();
         assert!(matches!(run(session.capture_catalog(now())), Err(SessionError::Protocol(_))));
-        assert_eq!(session.state(), SessionState::Blocked);
+        assert_eq!(session.state(), SessionState::Disconnected);
         let count = wire.requests().len();
         assert!(run(session.capture_catalog(now())).is_err());
         assert_eq!(wire.requests().len(), count);
@@ -210,10 +210,9 @@ fn catalog_capture_rejects_midpage_drift_and_discards_complete_capture_after_lan
 }
 
 #[test]
-fn catalog_read_preserves_gate_artifact_and_cancellation_barriers() {
-    for fault in 0..3 {
-        let fixture = Fixture::new();
-        let page = catalog_page(CatalogKind::Bases, 0, 1);
+fn catalog_read_preserves_artifact_and_cancellation_barriers() {
+    for fault in [0, 2] {
+        let fixture = Fixture::rehashing();
         let log = FakeLog::new([offline()]);
         let wire = FakeTransport::new(fixture.target.clone(), [fixture.discover(), status(false, 0x1234, 0)]);
         let mut session = fixture.session(&wire, &log, GatePolicy::Release);
@@ -221,16 +220,6 @@ fn catalog_read_preserves_gate_artifact_and_cancellation_barriers() {
         run(session.connect(now())).unwrap();
         if fault == 0 {
             fs::write(&fixture.metadata, b"changed catalog metadata").unwrap();
-        }
-        if fault == 1 {
-            let changed = log.clone();
-            wire.push(Step::Action(
-                Box::new(move || changed.set(online())),
-                Response {
-                    code: ResponseCode::Done,
-                    payload: catalog::encode(&page).unwrap(),
-                },
-            ));
         }
         if fault == 2 {
             wire.push(Step::Pending);
@@ -271,10 +260,6 @@ fn online() -> GameLogState {
     state.readiness = GameReadiness::Online;
     state.character.as_mut().unwrap().online = true;
     state
-}
-
-fn menu() -> GameLogState {
-    GameLogState::started().apply(GameLogEvent::ShellStateChanged("CharacterSelect".into()))
 }
 
 fn done(payload: Vec<u8>) -> Step {
@@ -433,6 +418,7 @@ impl LogSource for FakeLog {
 }
 
 struct Fixture {
+    _writers: Vec<fs::File>,
     _temp: tempfile::TempDir,
     binary: PathBuf,
     metadata: PathBuf,
@@ -481,11 +467,27 @@ impl Fixture {
         let target = ProcessIdentity { pid: 42, created, executable };
         Self {
             _temp: temp,
+            _writers: vec![],
             binary,
             metadata,
             target,
             dispatcher,
         }
+    }
+
+    // Keep compatible writers open before connecting to exercise the full-hash
+    // fallback. The ordinary fixture instead pins files for the session.
+    fn rehashing() -> Self {
+        #[allow(unused_mut)]
+        let mut fixture = Self::new();
+        #[cfg(windows)]
+        {
+            use std::os::windows::fs::OpenOptionsExt;
+            for path in [&fixture.binary, &fixture.metadata] {
+                fixture._writers.push(fs::OpenOptions::new().read(true).write(true).share_mode(7).open(path).unwrap());
+            }
+        }
+        fixture
     }
 
     fn profile(&self) -> BuildProfile {
@@ -496,7 +498,6 @@ impl Fixture {
         Discovery {
             build_id: HELPER_ID.to_ascii_uppercase(),
             dispatcher: self.dispatcher,
-            offsets: REQUIRED_KEYS.iter().enumerate().map(|(index, key)| ((*key).into(), 16 + index as u64 * 8)).collect(),
         }
     }
 
@@ -504,8 +505,8 @@ impl Fixture {
         done(self.discovery().encode(42).unwrap())
     }
 
-    fn session(&self, wire: &FakeTransport, log: &FakeLog, policy: GatePolicy) -> Session<FakeTransport, FakeLog> {
-        Session::new(self.target.clone(), wire.clone(), log.clone(), self.profile(), policy).unwrap()
+    fn session(&self, wire: &FakeTransport, _log: &FakeLog, _policy: GatePolicy) -> Session<FakeTransport> {
+        Session::new(self.target.clone(), wire.clone(), self.profile()).unwrap()
     }
 }
 
@@ -514,23 +515,17 @@ fn run<F: Future>(future: F) -> F::Output {
 }
 
 #[test]
-fn disabled_by_default_and_release_gate_precedes_all_transport_io() {
+fn session_is_inert_until_enabled_and_connected() {
     let fixture = Fixture::new();
-    let wire = FakeTransport::new(fixture.target.clone(), []);
-    let log = FakeLog::new([offline()]);
+    let log = FakeLog::new([online()]);
+    let wire = FakeTransport::new(fixture.target.clone(), [fixture.discover(), status(false, 0x1234, 0)]);
     let mut session = fixture.session(&wire, &log, GatePolicy::Release);
-    assert_eq!(session.state(), SessionState::Disabled);
     assert!(matches!(run(session.connect(now())), Err(SessionError::Disabled)));
     assert!(wire.requests().is_empty());
-    assert!(log.reads().is_empty());
     session.enable();
-    assert_eq!(session.state(), SessionState::Disconnected);
-    for state in [GameLogState::missing(), GameLogState::stale(), online(), menu()] {
-        log.set(state);
-        assert!(matches!(run(session.connect(now())), Err(SessionError::Gate(_))));
-        assert!(wire.requests().is_empty());
-    }
-    assert!(log.reads().iter().all(|stamp| *stamp == started()));
+    run(session.connect(now())).unwrap();
+    assert_eq!(session.state(), SessionState::Ready);
+    assert!(log.reads().is_empty(), "Player.log admission belongs to the backend");
 }
 
 #[test]
@@ -553,7 +548,7 @@ fn session_rejects_a_transport_bound_to_another_process_identity_before_io() {
     ] {
         let wire = FakeTransport::new(other, []);
         assert!(matches!(
-            Session::new(fixture.target.clone(), wire.clone(), log.clone(), fixture.profile(), GatePolicy::Release),
+            Session::new(fixture.target.clone(), wire.clone(), fixture.profile()),
             Err(SessionError::Identity(_))
         ));
         assert!(wire.requests().is_empty());
@@ -580,34 +575,14 @@ fn session_rejects_identical_artifacts_outside_the_target_installation_before_io
         assert_eq!(unrelated.helper_build_id(), expected.helper_build_id());
         let wire = FakeTransport::new(fixture.target.clone(), []);
         let log = FakeLog::new([offline()]);
-        assert!(matches!(
-            Session::new(fixture.target.clone(), wire.clone(), log.clone(), unrelated, GatePolicy::Release),
-            Err(SessionError::Identity(_))
-        ));
+        assert!(matches!(Session::new(fixture.target.clone(), wire.clone(), unrelated), Err(SessionError::Identity(_))));
         assert!(wire.requests().is_empty());
         assert!(log.reads().is_empty());
     }
 }
 
 #[test]
-fn startup_grace_blocks_probes_then_development_can_check_runtime() {
-    let fixture = Fixture::new();
-    let wire = FakeTransport::new(fixture.target.clone(), [fixture.discover(), status(false, 0x10000, 0), clear()]);
-    let log = FakeLog::new([GameLogState::missing()]);
-    let mut session = fixture.session(&wire, &log, GatePolicy::Development);
-    session.enable();
-    let early = started() + SignedDuration::from_secs(59);
-    assert!(matches!(run(session.connect(early)), Err(SessionError::Gate(decision)) if decision.verdict == GateVerdict::Wait));
-    assert_eq!(session.state(), SessionState::WaitingForGame);
-    assert!(wire.requests().is_empty());
-    run(session.connect(started() + SignedDuration::from_secs(60))).unwrap();
-    assert_eq!(session.state(), SessionState::Ready);
-    assert_eq!(run(session.disable()), Cleanup::ConfirmedOff);
-    assert_eq!(session.state(), SessionState::Disabled);
-}
-
-#[test]
-fn successful_handshake_rechecks_log_and_clears_hooks_on_disable() {
+fn successful_handshake_clears_hooks_on_disable() {
     let fixture = Fixture::new();
     let wire = FakeTransport::new(fixture.target.clone(), [fixture.discover(), status(false, 0x1234, 2), clear()]);
     let log = FakeLog::new([offline()]);
@@ -617,7 +592,7 @@ fn successful_handshake_rechecks_log_and_clears_hooks_on_disable() {
     assert_eq!(session.state(), SessionState::Ready);
     assert_eq!(session.target(), &fixture.target);
     assert_eq!(session.runtime_status().unwrap().features_on, 2);
-    assert_eq!(log.reads(), [started(), started()]);
+    assert!(log.reads().is_empty());
     assert_eq!(run(session.disable()), Cleanup::ConfirmedOff);
     assert_eq!(session.state(), SessionState::Disabled);
     assert_eq!(session.runtime_status(), None);
@@ -686,7 +661,7 @@ fn helper_offline_required_releases_attachment_without_cleanup_afterward() {
                 ..
             })
         ));
-        assert_eq!(session.state(), SessionState::WaitingForCharacter);
+        assert_eq!(session.state(), SessionState::Disconnected);
         assert_eq!(session.runtime_status(), None);
         assert_eq!(session.cleanup(), Cleanup::Unconfirmed);
         let before_disconnect = wire.requests();
@@ -700,26 +675,11 @@ fn helper_offline_required_releases_attachment_without_cleanup_afterward() {
 }
 
 #[test]
-fn log_changing_during_discovery_prevents_the_first_status() {
-    for next in [online(), menu(), GameLogState::missing()] {
-        let fixture = Fixture::new();
-        let wire = FakeTransport::new(fixture.target.clone(), [fixture.discover()]);
-        let log = FakeLog::new([offline(), next]);
-        let mut session = fixture.session(&wire, &log, GatePolicy::Release);
-        session.enable();
-        assert!(matches!(run(session.connect(now())), Err(SessionError::Gate(_))));
-        assert_ne!(session.state(), SessionState::Ready);
-        assert_eq!(wire.requests(), [Request::Discover]);
-        assert_eq!(log.reads(), [started(), started()]);
-    }
-}
-
-#[test]
 fn incompatible_discovery_is_rejected_before_status() {
     let fixture = Fixture::new();
     let valid = fixture.discovery().encode(42).unwrap();
-    let mut wrong_version = valid.clone();
-    wrong_version[..4].copy_from_slice(&20_u32.to_le_bytes());
+    let mut wrong_length = valid.clone();
+    wrong_length[..4].copy_from_slice(&20_u32.to_le_bytes());
     let wrong_pid = fixture.discovery().encode(43).unwrap();
     let mut wrong_build = fixture.discovery();
     wrong_build.build_id = "f".repeat(64);
@@ -727,29 +687,24 @@ fn incompatible_discovery_is_rejected_before_status() {
     let mut wrong_bytes = fixture.discovery();
     wrong_bytes.dispatcher.bytes[0] ^= 1;
     let wrong_bytes = wrong_bytes.encode(42).unwrap();
-    let mut missing_field = valid.clone();
-    let key_position = missing_field
-        .windows(REQUIRED_KEYS[0].len())
-        .position(|value| value == REQUIRED_KEYS[0].as_bytes())
-        .unwrap();
-    missing_field[key_position] = b'X';
-    for payload in [wrong_version, wrong_pid, wrong_build, wrong_bytes, missing_field] {
+    let missing_field = valid[..valid.len() - 1].to_vec();
+    for payload in [wrong_length, wrong_pid, wrong_build, wrong_bytes, missing_field] {
         let wire = FakeTransport::new(fixture.target.clone(), [done(payload)]);
         let log = FakeLog::new([offline()]);
         let mut session = fixture.session(&wire, &log, GatePolicy::Release);
         session.enable();
         assert!(run(session.connect(now())).is_err());
-        assert_eq!(session.state(), SessionState::Blocked);
+        assert_eq!(session.state(), SessionState::Disconnected);
         assert_eq!(session.runtime_status(), None);
         assert_eq!(wire.requests(), [Request::Discover]);
-        assert_eq!(log.reads().len(), 1);
+        assert!(log.reads().is_empty());
     }
 }
 
 #[test]
 fn artifacts_changed_while_discovery_is_in_flight_prevent_status() {
     for change_binary in [false, true] {
-        let fixture = Fixture::new();
+        let fixture = Fixture::rehashing();
         let changed = if change_binary { fixture.binary.clone() } else { fixture.metadata.clone() };
         let payload = fixture.discovery().encode(42).unwrap();
         let wire = FakeTransport::new(
@@ -783,35 +738,9 @@ fn runtime_online_or_absent_character_releases_attachment_without_further_calls(
         let mut session = fixture.session(&wire, &log, GatePolicy::Release);
         session.enable();
         assert!(matches!(run(session.connect(now())), Err(SessionError::NotOffline(actual)) if actual == readiness));
-        assert_eq!(session.state(), SessionState::WaitingForCharacter);
+        assert_eq!(session.state(), SessionState::Disconnected);
         assert_eq!(session.cleanup(), Cleanup::Unconfirmed);
         assert_eq!(session.runtime_status(), None);
-        assert_eq!(run(session.disconnect()), Cleanup::Unconfirmed);
-        assert_eq!(wire.requests(), [Request::Discover, Request::Status { dispatcher: fixture.dispatcher }]);
-    }
-}
-
-#[test]
-fn refresh_losing_offline_log_releases_attachment_without_further_calls() {
-    for unavailable in [false, true] {
-        let fixture = Fixture::new();
-        let wire = FakeTransport::new(fixture.target.clone(), [fixture.discover(), status(false, 0x1234, 1)]);
-        let log = FakeLog::new([offline()]);
-        let mut session = fixture.session(&wire, &log, GatePolicy::Release);
-        session.enable();
-        run(session.connect(now())).unwrap();
-        log.set(if unavailable {
-            GameLogState {
-                status: GameLogStatus::Unreadable,
-                ..offline()
-            }
-        } else {
-            online()
-        });
-        assert!(matches!(run(session.refresh(now())), Err(SessionError::Gate(_))));
-        assert_ne!(session.state(), SessionState::Ready);
-        assert_eq!(session.runtime_status(), None);
-        assert_eq!(session.cleanup(), Cleanup::Unconfirmed);
         assert_eq!(run(session.disconnect()), Cleanup::Unconfirmed);
         assert_eq!(wire.requests(), [Request::Discover, Request::Status { dispatcher: fixture.dispatcher }]);
     }
@@ -826,7 +755,7 @@ fn refresh_observing_runtime_online_revokes_readiness_without_further_calls() {
     session.enable();
     run(session.connect(now())).unwrap();
     assert!(matches!(run(session.refresh(now())), Err(SessionError::NotOffline(GameReadiness::Online))));
-    assert_eq!(session.state(), SessionState::WaitingForCharacter);
+    assert_eq!(session.state(), SessionState::Disconnected);
     assert_eq!(session.cleanup(), Cleanup::Unconfirmed);
     assert_eq!(session.runtime_status(), None);
     assert_eq!(run(session.disable()), Cleanup::Unconfirmed);
@@ -970,9 +899,9 @@ fn helper_failure_codes_preserve_uncertainty_and_do_not_replay_requests() {
         assert_eq!(
             session.state(),
             match code {
-                ResponseCode::NotReady => SessionState::WaitingForGame,
-                ResponseCode::OfflineRequired => SessionState::WaitingForCharacter,
-                _ => SessionState::Blocked,
+                ResponseCode::NotReady => SessionState::Disconnected,
+                ResponseCode::OfflineRequired => SessionState::Disconnected,
+                _ => SessionState::Disconnected,
             }
         );
         assert_eq!(wire.requests(), [Request::Discover, Request::Status { dispatcher: fixture.dispatcher }]);
@@ -997,7 +926,7 @@ fn transport_loss_is_not_replayed_and_retains_delivery_information() {
         let mut session = fixture.session(&wire, &log, GatePolicy::Release);
         session.enable();
         assert!(matches!(run(session.connect(now())), Err(SessionError::Transport(error)) if error.delivery == delivery));
-        assert_eq!(session.state(), SessionState::Blocked);
+        assert_eq!(session.state(), SessionState::Disconnected);
         assert_eq!(session.runtime_status(), None);
         assert_eq!(wire.requests().len(), 2);
     }
@@ -1011,7 +940,7 @@ fn malformed_status_does_not_become_ready_or_trigger_a_replay() {
     let mut session = fixture.session(&wire, &log, GatePolicy::Release);
     session.enable();
     assert!(matches!(run(session.connect(now())), Err(SessionError::Protocol(ProtocolError::InvalidData))));
-    assert_eq!(session.state(), SessionState::Blocked);
+    assert_eq!(session.state(), SessionState::Disconnected);
     assert_eq!(wire.requests().len(), 2);
 }
 
@@ -1045,11 +974,6 @@ fn forge_read_requires_enabled_ready_and_offline_admission_before_io() {
     assert!(log.reads().is_empty());
     session.enable();
     assert!(matches!(run(session.read_forge(now())), Err(SessionError::NotConnected)));
-    for denied in [GameLogState::missing(), GameLogState::stale(), menu(), online()] {
-        log.set(denied);
-        assert!(matches!(run(session.read_forge(now())), Err(SessionError::Gate(_))));
-        assert_eq!(session.runtime_status(), None);
-    }
     assert!(wire.requests().is_empty());
 }
 
@@ -1098,7 +1022,7 @@ fn forge_read_returns_owned_item_then_empty_without_losing_readiness() {
 #[test]
 fn changed_artifacts_prevent_forge_io_and_release_the_session() {
     for change_binary in [false, true] {
-        let fixture = Fixture::new();
+        let fixture = Fixture::rehashing();
         let wire = FakeTransport::new(fixture.target.clone(), [fixture.discover(), status(false, 0x1234, 0)]);
         let log = FakeLog::new([offline()]);
         let mut session = fixture.session(&wire, &log, GatePolicy::Release);
@@ -1106,65 +1030,10 @@ fn changed_artifacts_prevent_forge_io_and_release_the_session() {
         run(session.connect(now())).unwrap();
         fs::write(if change_binary { &fixture.binary } else { &fixture.metadata }, b"changed before forge read").unwrap();
         assert!(matches!(run(session.read_forge(now())), Err(SessionError::Identity(_))));
-        assert_eq!(session.state(), SessionState::Blocked);
+        assert_eq!(session.state(), SessionState::Disconnected);
         assert_eq!(session.runtime_status(), None);
         assert_eq!(run(session.disconnect()), Cleanup::Unconfirmed);
         assert_eq!(wire.requests(), [Request::Discover, Request::Status { dispatcher: fixture.dispatcher }]);
-    }
-}
-
-#[test]
-fn lost_log_admission_prevents_forge_io_even_after_artifact_validation() {
-    for lose_on_second_check in [false, true] {
-        let fixture = Fixture::new();
-        let wire = FakeTransport::new(fixture.target.clone(), [fixture.discover(), status(false, 0x1234, 0)]);
-        let states = if lose_on_second_check {
-            vec![offline(), offline(), offline(), online()]
-        } else {
-            vec![offline(), offline(), online()]
-        };
-        let log = FakeLog::new(states);
-        let mut session = fixture.session(&wire, &log, GatePolicy::Release);
-        session.enable();
-        run(session.connect(now())).unwrap();
-        assert!(matches!(run(session.read_forge(now())), Err(SessionError::Gate(_))));
-        assert_ne!(session.state(), SessionState::Ready);
-        assert_eq!(session.runtime_status(), None);
-        assert_eq!(run(session.disconnect()), Cleanup::Unconfirmed);
-        assert_eq!(wire.requests(), [Request::Discover, Request::Status { dispatcher: fixture.dispatcher }]);
-    }
-}
-
-#[test]
-fn log_lost_while_forge_reply_is_in_flight_discards_snapshot_without_more_io() {
-    for denied in [online(), menu(), GameLogState::missing(), GameLogState::stale()] {
-        let fixture = Fixture::new();
-        let log = FakeLog::new([offline()]);
-        let changed_log = log.clone();
-        let reply = Response {
-            code: ResponseCode::Done,
-            payload: forge::encode(Some(&forge_item())).unwrap(),
-        };
-        let wire = FakeTransport::new(
-            fixture.target.clone(),
-            [fixture.discover(), status(false, 0x1234, 0), Step::Action(Box::new(move || changed_log.set(denied)), reply)],
-        );
-        let mut session = fixture.session(&wire, &log, GatePolicy::Release);
-        session.enable();
-        run(session.connect(now())).unwrap();
-        assert!(matches!(run(session.read_forge(now())), Err(SessionError::Gate(_))));
-        assert_ne!(session.state(), SessionState::Ready);
-        assert_eq!(session.runtime_status(), None);
-        assert_eq!(run(session.disconnect()), Cleanup::Unconfirmed);
-        assert_eq!(run(session.disable()), Cleanup::Unconfirmed);
-        assert_eq!(
-            wire.requests(),
-            [
-                Request::Discover,
-                Request::Status { dispatcher: fixture.dispatcher },
-                Request::ReadForge { dispatcher: fixture.dispatcher }
-            ]
-        );
     }
 }
 
@@ -1213,7 +1082,7 @@ fn rejected_forge_reply_blocks_without_replay_and_requires_an_explicit_new_hands
             )),
             _ => unreachable!(),
         }
-        assert_eq!(session.state(), SessionState::Blocked);
+        assert_eq!(session.state(), SessionState::Disconnected);
         assert_eq!(session.runtime_status(), None);
         assert_eq!(session.cleanup(), Cleanup::Unconfirmed);
         session.enable();
@@ -1266,13 +1135,13 @@ fn forge_runtime_offline_refusal_waits_without_io_until_an_explicit_connect() {
             ..
         })
     ));
-    assert_eq!(session.state(), SessionState::WaitingForCharacter);
+    assert_eq!(session.state(), SessionState::Disconnected);
     assert_eq!(session.runtime_status(), None);
     assert_eq!(session.cleanup(), Cleanup::Unconfirmed);
     session.enable();
     assert!(matches!(run(session.read_forge(now())), Err(SessionError::NotConnected)));
     assert!(matches!(run(session.refresh(now())), Err(SessionError::NotConnected)));
-    assert_eq!(session.state(), SessionState::WaitingForCharacter);
+    assert_eq!(session.state(), SessionState::Disconnected);
     assert_eq!(wire.requests().len(), 3);
     wire.push(fixture.discover());
     wire.push(status(false, 0x5678, 0));
@@ -1342,8 +1211,6 @@ fn literal_limits_require_admission_and_keep_owned_results_across_forge_reads() 
     assert_eq!(session.runtime_status(), Some(&initial_status));
     assert_eq!(session.state(), SessionState::Ready);
     assert_eq!(wire.requests()[2], Request::ReadItemLimits { dispatcher: fixture.dispatcher });
-    log.set(online());
-    assert!(matches!(run(session.read_item_limits(now())), Err(SessionError::Gate(_))));
     assert_eq!(wire.requests().len(), 4);
     drop(session);
     assert_eq!(limits, item_limits());
@@ -1352,22 +1219,22 @@ fn literal_limits_require_admission_and_keep_owned_results_across_forge_reads() 
 #[test]
 fn literal_limits_fail_closed_on_malformed_reply_runtime_refusal_and_transport_uncertainty() {
     for (reply, state) in [
-        (done(vec![0; 39]), SessionState::Blocked),
-        (done(vec![0; 41]), SessionState::Blocked),
-        (done([256_i32.to_le_bytes().as_slice(), &[0; 36]].concat()), SessionState::Blocked),
+        (done(vec![0; 39]), SessionState::Disconnected),
+        (done(vec![0; 41]), SessionState::Disconnected),
+        (done([256_i32.to_le_bytes().as_slice(), &[0; 36]].concat()), SessionState::Disconnected),
         (
             Step::Reply(Ok(Response {
                 code: ResponseCode::OfflineRequired,
                 payload: b"runtime went online".to_vec(),
             })),
-            SessionState::WaitingForCharacter,
+            SessionState::Disconnected,
         ),
         (
             Step::Reply(Err(TransportError {
                 delivery: Delivery::MayHaveRun,
                 failure: TransportFailure::Timeout,
             })),
-            SessionState::Blocked,
+            SessionState::Disconnected,
         ),
     ] {
         let fixture = Fixture::new();
@@ -1387,37 +1254,18 @@ fn literal_limits_fail_closed_on_malformed_reply_runtime_refusal_and_transport_u
 }
 
 #[test]
-fn literal_limits_recheck_artifacts_and_discard_replies_after_lost_log_admission() {
-    for change_artifact in [false, true] {
-        let fixture = Fixture::new();
-        let log = FakeLog::new([offline()]);
-        let changed_log = log.clone();
-        let wire = FakeTransport::new(
-            fixture.target.clone(),
-            [
-                fixture.discover(),
-                status(false, 0x1234, 0),
-                Step::Action(
-                    Box::new(move || changed_log.set(online())),
-                    Response {
-                        code: ResponseCode::Done,
-                        payload: definitions::encode(&item_limits()).unwrap(),
-                    },
-                ),
-            ],
-        );
-        let mut session = fixture.session(&wire, &log, GatePolicy::Release);
+fn literal_limits_reject_either_changed_artifact_before_rpc() {
+    for binary in [false, true] {
+        let fixture = Fixture::rehashing();
+        let wire = FakeTransport::new(fixture.target.clone(), [fixture.discover(), status(false, 0x1234, 0)]);
+        let mut session = fixture.session(&wire, &FakeLog::new([offline()]), GatePolicy::Release);
         session.enable();
         run(session.connect(now())).unwrap();
-        if change_artifact {
-            fs::write(&fixture.metadata, b"changed before literal read").unwrap();
-            assert!(matches!(run(session.read_item_limits(now())), Err(SessionError::Identity(_))));
-        } else {
-            assert!(matches!(run(session.read_item_limits(now())), Err(SessionError::Gate(_))));
-        }
-        assert_eq!(session.state(), if change_artifact { SessionState::Blocked } else { SessionState::WaitingForCharacter });
+        fs::write(if binary { &fixture.binary } else { &fixture.metadata }, b"changed before read").unwrap();
+        assert!(matches!(run(session.read_item_limits(now())), Err(SessionError::Identity(_))));
+        assert_eq!(session.state(), SessionState::Disconnected);
         assert_eq!(session.runtime_status(), None);
-        assert_eq!(wire.requests().len(), if change_artifact { 2 } else { 3 });
+        assert_eq!(wire.requests().len(), 2);
     }
 }
 
@@ -1523,42 +1371,18 @@ fn unready_or_malformed_locale_requires_explicit_reconnect_without_replay() {
 }
 
 #[test]
-fn locale_discards_inflight_reply_after_admission_loss_and_rechecks_artifacts() {
-    for change_artifact in [false, true] {
-        let fixture = Fixture::new();
-        let log = FakeLog::new([offline()]);
-        let changed_log = log.clone();
-        let wire = FakeTransport::new(
-            fixture.target.clone(),
-            [
-                fixture.discover(),
-                status(false, 0x1234, 0),
-                Step::Action(
-                    Box::new(move || changed_log.set(online())),
-                    Response {
-                        code: ResponseCode::Done,
-                        payload: locale::encode(&GameLocale {
-                            language: "en-US".into(),
-                            game_version: "1.5".into(),
-                        })
-                        .unwrap(),
-                    },
-                ),
-            ],
-        );
-        let mut session = fixture.session(&wire, &log, GatePolicy::Release);
+fn locale_rejects_either_changed_artifact_before_rpc() {
+    for binary in [false, true] {
+        let fixture = Fixture::rehashing();
+        let wire = FakeTransport::new(fixture.target.clone(), [fixture.discover(), status(false, 0x1234, 0)]);
+        let mut session = fixture.session(&wire, &FakeLog::new([offline()]), GatePolicy::Release);
         session.enable();
         run(session.connect(now())).unwrap();
-        if change_artifact {
-            fs::write(&fixture.binary, b"changed before locale read").unwrap();
-            assert!(matches!(run(session.read_locale(now())), Err(SessionError::Identity(_))));
-        } else {
-            assert!(matches!(run(session.read_locale(now())), Err(SessionError::Gate(_))));
-        }
+        fs::write(if binary { &fixture.binary } else { &fixture.metadata }, b"changed before read").unwrap();
+        assert!(matches!(run(session.read_locale(now())), Err(SessionError::Identity(_))));
+        assert_eq!(session.state(), SessionState::Disconnected);
         assert_eq!(session.runtime_status(), None);
-        assert_eq!(wire.requests().len(), if change_artifact { 2 } else { 3 });
-        assert!(run(session.read_locale(now())).is_err());
-        assert_eq!(wire.requests().len(), if change_artifact { 2 } else { 3 });
+        assert_eq!(wire.requests().len(), 2);
     }
 }
 

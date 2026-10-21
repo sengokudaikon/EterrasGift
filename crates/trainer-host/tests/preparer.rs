@@ -8,10 +8,10 @@ use eg_trainer_host::windows::NativePreparer;
 use std::sync::atomic::Ordering;
 use support::{Admission, Fixture, Logs};
 
-fn preparer(fixture: &Fixture, logs: Logs) -> NativePreparer<Logs> {
+fn preparer(fixture: &Fixture, _logs: Logs) -> NativePreparer {
     // SAFETY: these tests supply inert authored files and refuse before loading
     // any process. No helper/runtime ABI or callback is exercised.
-    unsafe { NativePreparer::new(fixture.artifact.clone(), logs) }
+    NativePreparer::new(fixture.artifact.clone())
 }
 
 #[test]

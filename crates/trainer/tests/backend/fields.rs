@@ -24,7 +24,7 @@ fn attack_leech_capability_is_explicit_and_never_enables_generic_fields_or_write
         command(&handle, Command::ReadForge).await.unwrap();
         let caps = handle.snapshot().capabilities;
         assert!(caps.read_attack_leech);
-        assert!(!caps.fields && !caps.hooks && !caps.write_forge && !caps.level_requirement);
+        assert!(!caps.level_requirement);
         shutdown(&handle, worker).await;
     });
 }

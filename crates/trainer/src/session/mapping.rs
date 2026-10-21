@@ -5,7 +5,7 @@ use crate::{
 };
 use eg_trainer_wire::mapping::{self, AffixMappingDraft, AffixMappingQuery, MappingStart, MappingTarget};
 
-impl<T: Transport, L: LogSource> Session<T, L> {
+impl<T: Transport> Session<T> {
     /// Samples the game's exact display on detached items. Each page checks the
     /// full selected item/manager; all pages must have one captured locale and
     /// opaque context before a table is exposed. This never records a write.
@@ -27,7 +27,7 @@ impl<T: Transport, L: LogSource> Session<T, L> {
         if matches!(self.state, SessionState::Connecting | SessionState::Closing) {
             return Err(SessionError::Busy);
         }
-        self.gate(now)?;
+        self.require_enabled()?;
         if self.state != SessionState::Ready {
             return Err(SessionError::NotConnected);
         }
@@ -59,30 +59,21 @@ impl<T: Transport, L: LogSource> Session<T, L> {
             .ok_or(SessionError::NotConnected)?
             .manager;
         let dispatcher = self.discovery.as_ref().ok_or(SessionError::NotConnected)?.dispatcher;
-        let elapsed = std::time::Instant::now();
-        let lease = match self.profile.capture_lease(&dispatcher) {
-            Ok(lease) => lease,
-            Err(error) => {
-                self.release_without_io();
-                self.state = SessionState::Blocked;
-                return Err(SessionError::Identity(error.to_string()));
-            }
-        };
         let query = |start| {
             AffixMappingQuery::new(dispatcher, manager, item.clone(), request.address.index, start, draft)
                 .map(Request::MapRoll)
                 .map_err(SessionError::Protocol)
         };
-        let context = self.mapping_page(advanced(now, elapsed)?, query(MappingStart::ContextOnly)?, &lease, observer).await?;
+        let context = self.mapping_page(now, query(MappingStart::ContextOnly)?, observer).await?;
         let mut builder = MappingBuilder::new(expected.clone(), request.clone(), context, None).map_err(unavailable)?;
         let mut parser = CapturedDisplayParser::new(&identity.locale.language).map_err(SessionError::Mapping)?;
         while let Some(start) = builder.next_start() {
-            let page = self.mapping_page(advanced(now, elapsed)?, query(MappingStart::Samples(start))?, &lease, observer).await?;
+            let page = self.mapping_page(now, query(MappingStart::Samples(start))?, observer).await?;
             builder.push(expected, request, page, &mut parser).map_err(unavailable)?;
         }
         builder.finish().map_err(unavailable)
     }
-    async fn mapping_page(&mut self, now: Timestamp, request: Request, lease: &ProfileLease, observer: &mut dyn CaptureObserver) -> Result<mapping::RawMappingPage, SessionError> {
+    async fn mapping_page(&mut self, now: Timestamp, request: Request, observer: &mut dyn CaptureObserver) -> Result<mapping::RawMappingPage, SessionError> {
         let Request::MapRoll(query) = &request else {
             return Err(SessionError::Protocol(ProtocolError::InvalidData));
         };
@@ -93,7 +84,7 @@ impl<T: Transport, L: LogSource> Session<T, L> {
         };
         let start = query.start();
         match self
-            .read_owned_control(now, |_| request, |bytes| mapping::decode_mapping(bytes, address, start), Some(lease), Some(observer))
+            .read_owned_control(now, |_| request, |bytes| mapping::decode_mapping(bytes, address, start), Some(observer))
             .await
         {
             Err(SessionError::Helper {

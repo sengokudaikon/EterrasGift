@@ -1,4 +1,4 @@
-use eg_game_access::bootstrap::{BootstrapConfig, BootstrapOperation, BootstrapReply, CONFIG_SIZE, HelperArtifact, HelperLayout, metric_offsets};
+use eg_game_access::bootstrap::{BootstrapConfig, BootstrapReply, CONFIG_SIZE, HelperArtifact, HelperLayout};
 
 const SOURCE: &str = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
 fn set16(bytes: &mut [u8], at: usize, v: u16) {
@@ -51,45 +51,27 @@ fn image() -> Vec<u8> {
 
 #[test]
 fn configuration_matches_independent_native_layout_and_strict_reply_contract() {
-    let config = BootstrapConfig::new(0x11223344, SOURCE, BootstrapOperation::Start).unwrap();
-    let mut expected = [0; 112];
-    expected[..24].copy_from_slice(&[0x53, 0x42, 0x47, 0x45, 112, 0, 0, 0, 0x44, 0x33, 0x22, 0x11, 0, 0, 0, 0, 1, 0, 0, 0, 255, 255, 255, 255]);
-    expected[24..88].copy_from_slice(SOURCE.as_bytes());
+    let config = BootstrapConfig::new(0x11223344, SOURCE).unwrap();
+    let mut expected = [0; 80];
+    expected[..16].copy_from_slice(&[0x53, 0x42, 0x47, 0x45, 80, 0, 0, 0, 0x44, 0x33, 0x22, 0x11, 255, 255, 255, 255]);
+    expected[16..80].copy_from_slice(SOURCE.as_bytes());
     assert_eq!(config.bytes(), &expected);
-    expected[20..24].fill(0);
+    expected[12..16].fill(0);
     assert_eq!(config.decode_reply(0, &expected).unwrap(), BootstrapReply::Started);
-    for at in (0..20).chain(24..112) {
+    for at in (0..12).chain(16..80) {
         let mut bad = expected;
         bad[at] ^= 1;
         assert!(config.decode_reply(0, &bad).is_err(), "byte {at}")
     }
     assert!(config.decode_reply(1, &expected).is_err());
-    expected[20] = 1;
+    expected[12] = 1;
     assert!(config.decode_reply(0, &expected).is_err());
     for len in 0..CONFIG_SIZE {
         assert!(config.decode_reply(0, &expected[..len]).is_err())
     }
     for (pid, id) in [(0, SOURCE), (1, "abc"), (1, "G123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef")] {
-        assert!(BootstrapConfig::new(pid, id, BootstrapOperation::Start).is_err())
+        assert!(BootstrapConfig::new(pid, id).is_err())
     }
-}
-
-#[test]
-fn stop_telemetry_is_validated_as_a_complete_distinct_aligned_bounded_set() {
-    for operation in [BootstrapOperation::Stop, BootstrapOperation::InspectStopped] {
-        let config = BootstrapConfig::new(1, SOURCE, operation).unwrap();
-        let mut bytes = *config.bytes();
-        bytes[20..24].fill(0);
-        for (i, value) in [0x1000_u64, 0x1008, 0x1010].into_iter().enumerate() {
-            bytes[88 + i * 8..96 + i * 8].copy_from_slice(&value.to_le_bytes())
-        }
-        assert!(config.decode_reply(0, &bytes).is_ok());
-    }
-    assert_eq!(metric_offsets(0x1000, 0x100, [0x1000, 0x1008, 0x10f8]).unwrap(), [0, 8, 0xf8]);
-    for values in [[0x1000, 0x1000, 0x1010], [0x1001, 0x1008, 0x1010], [0xff8, 0x1008, 0x1010], [0x1000, 0x1008, 0x1100]] {
-        assert!(metric_offsets(0x1000, 0x100, values).is_err());
-    }
-    assert!(metric_offsets(u64::MAX - 4, 16, [0, 8, 16]).is_err());
 }
 
 #[test]

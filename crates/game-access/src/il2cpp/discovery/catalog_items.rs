@@ -1,7 +1,7 @@
 //! Affix and unique identity capture from already-loaded definition assets.
 //!
 //! Numeric presentation is copied from ready PropertyList/special registries. Ailment dictionary
-//! entries use audited framework Array.GetValue boxing; game formatters remain explicit unknowns.
+//! entries use framework Array.GetValue boxing; game formatters remain explicit unknowns.
 //! Raw display fields retain their provenance and do not stand in for generated text.
 
 use super::{DiscoveryError, Images, RuntimeAccess, catalog::page_bounds, forge::Root, unsupported};
@@ -10,7 +10,7 @@ use eg_trainer_wire::catalog::{AffixDefinition, Availability, CatalogEntries, De
 
 impl RuntimeAccess {
     // These helpers inherit read_catalog_page's main-thread, nonmoving-GC, initialized-runtime,
-    // exclusive immutable graph and no-shutdown contract, including its audited framework boxing.
+    // exclusive immutable graph and no-shutdown contract, including its framework boxing.
     pub(super) unsafe fn catalog_affixes(
         &self,
         attached: &AttachedThread<'_>,
@@ -18,6 +18,7 @@ impl RuntimeAccess {
         cursor: u32,
         api: raw::InvocationApi,
     ) -> Result<(u32, CatalogEntries), DiscoveryError> {
+        // SAFETY: The immutable affix registry and definitions stay rooted; each array, field and enum is validated before copying.
         unsafe {
             let owner = self.class(images, c"", c"AffixList")?;
             let globals = self.class(images, c"LE.AssetManagement", c"GlobalAssets")?;
@@ -87,6 +88,7 @@ impl RuntimeAccess {
         cursor: u32,
         api: raw::InvocationApi,
     ) -> Result<(u32, CatalogEntries), DiscoveryError> {
+        // SAFETY: The immutable unique registry and entries stay rooted through exact metadata checks and bounded page extraction.
         unsafe {
             let owner = self.class(images, c"", c"UniqueList")?;
             let master = self
@@ -131,8 +133,9 @@ impl RuntimeAccess {
     }
 
     pub(super) unsafe fn catalog_stored_name(&self, attached: &AttachedThread<'_>, object: &Root<'_, '_>) -> Result<DefinitionName, DiscoveryError> {
+        // SAFETY: The rooted definition's selected string field is validated before its owned text is copied.
         unsafe {
-            // UniqueList.Entry.getDisplayName (current audited native body) chooses displayName
+            // UniqueList.Entry.getDisplayName (current native body) chooses displayName
             // unless null/empty, then name. SubItem uses the same rule. Preserve whitespace.
             let display = self.text(attached, object, c"displayName")?;
             if !display.is_empty() {
@@ -149,7 +152,7 @@ impl RuntimeAccess {
         }
     }
 
-    pub(super) unsafe fn catalog_rarities(&self, cursor: u32) -> Result<(u32, CatalogEntries), DiscoveryError> {
+    pub(super) fn catalog_rarities(&self, cursor: u32) -> Result<(u32, CatalogEntries), DiscoveryError> {
         let entries = page_bounds(10, cursor)?
             .map(|id| RarityDefinition {
                 id: id as u8,

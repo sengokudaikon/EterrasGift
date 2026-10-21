@@ -66,7 +66,6 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
         if status.manager != plan.manager() {
             return Err(BackendError::blocked(ErrorKind::Identity, "character manager changed before write"));
         }
-        plan.recheck(&current, status.manager, self.state.override_enabled).map_err(invalid_edit)?;
         self.admit_using_policy(&target, GatePolicy::Release)?;
         self.commit(epoch, |this| {
             this.state.activity = Some(Activity::WritingForge);
@@ -98,6 +97,7 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
                 "write drained before queued cleanup; inspect its retained outcome",
             ));
         }
+        let kept = matches!(&status, WriteStatus::Confirmed(_));
         let result = match status {
             WriteStatus::Confirmed(snapshot) | WriteStatus::NotKept(snapshot) => {
                 if let Err(error) = self.admit_using_policy(&target, GatePolicy::Release) {
@@ -106,25 +106,16 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
                     Err(error)
                 } else {
                     let data = self.state.catalog.data().cloned().ok_or_else(|| invalid_edit("catalog missing after write"))?;
-                    let kept = plan.matches(&snapshot);
                     if kept {
                         let _ = self.forge_history.confirmed(plan.prepared(), plan.manager(), &snapshot, undoing);
                     } else {
                         self.forge_history.clear();
                     }
-                    let undo = self.forge_history.current().cloned().filter(|undo| {
-                        undo.prepare_with_override(
-                            undo.after(),
-                            plan.manager(),
-                            &data,
-                            &crate::edits::CatalogProvenance::RuntimeRead {
-                                generation: self.state.generation,
-                                process: target.clone(),
-                            },
-                            self.state.override_enabled,
-                        )
-                        .is_ok()
-                    });
+                    let undo = self
+                        .forge_history
+                        .current()
+                        .cloned()
+                        .filter(|undo| undo.prepare_with_override(undo.after(), plan.manager(), &data, self.state.override_enabled).is_ok());
                     if undo.is_none() {
                         self.forge_history.clear();
                     }

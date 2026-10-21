@@ -4,7 +4,7 @@ use eg_game_access::pipe::PipeClient;
 use eg_trainer_helper::server::{Backend, Shared, failure};
 use eg_trainer_wire::dispatch::{Dispatcher, Pending};
 use eg_trainer_wire::{
-    protocol::{Discovery, DispatcherSpec, REQUIRED_KEYS, Request, Response, ResponseCode, RuntimeStatus},
+    protocol::{Discovery, DispatcherSpec, Request, Response, ResponseCode, RuntimeStatus},
     transport::Transport,
 };
 use std::{
@@ -62,7 +62,6 @@ fn discovery() -> Discovery {
     Discovery {
         build_id: "A".repeat(64),
         dispatcher: spec(),
-        offsets: REQUIRED_KEYS.into_iter().map(|key| (key.to_owned(), 16)).collect(),
     }
 }
 fn done() -> Response {
@@ -361,10 +360,10 @@ fn buffered_suffix_of_a_closed_connection_cannot_become_the_next_request() {
         assert_eq!(client.send(&Request::Discover).await.unwrap().code, ResponseCode::Done);
         let mut pipe = open_raw(fixture.child.id()).await;
         let mut malformed = Request::Discover.encode();
-        malformed[335] = 1;
+        malformed[8] = 1;
         // More than one Mio buffer, including complete valid requests. Only the
         // invalid first frame belongs to this exchange; all its suffix must go.
-        for _ in 0..24 {
+        for _ in 0..160 {
             malformed.extend_from_slice(&status().encode());
         }
         pipe.write_all(&malformed).await.unwrap();
@@ -385,7 +384,7 @@ fn malformed_requests_never_reach_backend_and_shutdown_interrupts_partial_header
         use tokio::io::AsyncReadExt;
         let mut pipe = open_raw(fixture.child.id()).await;
         let mut malformed = Request::Discover.encode();
-        malformed[335] = 1;
+        malformed[8] = 1;
         pipe.write_all(&malformed).await.unwrap();
         let mut header = [0; 12];
         timeout(LIMIT, pipe.read_exact(&mut header)).await.unwrap().unwrap();
@@ -527,7 +526,7 @@ fn incomplete_or_invalid_expected_tail_never_reaches_scheduler_or_queue() {
         let mut client = fixture.client();
         assert_eq!(client.send(&Request::Discover).await.unwrap().code, ResponseCode::Done);
         let frame = level_write().encode();
-        for prefix in [eg_trainer_wire::protocol::REQUEST_SIZE, frame.len() - 1] {
+        for prefix in [eg_trainer_wire::protocol::REQUEST_HEADER_SIZE, frame.len() - 1] {
             let mut pipe = open_raw(fixture.child.id()).await;
             pipe.write_all(&frame[..prefix]).await.unwrap();
             sleep(Duration::from_millis(100)).await;
@@ -536,7 +535,7 @@ fn incomplete_or_invalid_expected_tail_never_reaches_scheduler_or_queue() {
             sleep(Duration::from_millis(100)).await;
         }
         let mut malformed = frame;
-        malformed[336 + 23] = 0xff;
+        malformed[51 + 23] = 0xff;
         let mut pipe = open_raw(fixture.child.id()).await;
         pipe.write_all(&malformed).await.unwrap();
         let mut header = [0; 12];

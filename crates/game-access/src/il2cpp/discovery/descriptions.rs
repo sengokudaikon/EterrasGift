@@ -1,4 +1,5 @@
 //! Optional implicit text from the same game methods used by the original tooltip.
+use super::metadata_text;
 use super::{
     Class, DiscoveryError, Method, RuntimeAccess,
     forge::{Root, target},
@@ -20,19 +21,15 @@ impl RuntimeAccess {
         returns: Option<Class>,
         instance: bool,
     ) -> Result<Method, DiscoveryError> {
+        // SAFETY: Owner and method descriptors belong to retained metadata; parameter and return classes are checked before binding.
         unsafe {
-            let mut iterator = std::ptr::null_mut();
             let mut found = None;
-            for _ in 0..100_000 {
-                let method = (self.class_methods)(owner, &mut iterator);
-                if method.is_null() {
-                    return found.ok_or_else(|| unsupported(format!("missing tooltip method {}", name.to_string_lossy())));
-                }
+            for method in self.methods(owner)? {
                 let actual = (self.method_name)(method);
                 if actual.is_null() {
                     return Err(unsupported("tooltip method name"));
                 }
-                if CStr::from_ptr(actual) != name || (self.method_params)(method) as usize != parameters.len() {
+                if metadata_text(actual) != name || (self.method_params)(method) as usize != parameters.len() {
                     continue;
                 }
                 let parameters_match = parameters.iter().enumerate().all(|(index, expected)| {
@@ -64,7 +61,7 @@ impl RuntimeAccess {
                 }
                 found = Some(method);
             }
-            Err(unsupported("tooltip method enumeration bound"))
+            found.ok_or_else(|| unsupported(format!("missing tooltip method {}", name.to_string_lossy())))
         }
     }
     pub(super) unsafe fn description_call<'a, 'r>(
@@ -75,6 +72,7 @@ impl RuntimeAccess {
         receiver: Option<&Root<'_, '_>>,
         args: &mut [Argument<'_, 'a, 'r>],
     ) -> Result<Option<Root<'a, 'r>>, DiscoveryError> {
+        // SAFETY: The method was signature-checked; InvocationContext roots the receiver, arguments and returned reference across the call.
         unsafe {
             let context = InvocationContext::new(attached, api);
             let method = context
@@ -87,6 +85,7 @@ impl RuntimeAccess {
         }
     }
     pub(super) unsafe fn description_text(&self, attached: &AttachedThread<'_>, api: raw::InvocationApi, info: &Root<'_, '_>, name: &CStr) -> Result<String, DiscoveryError> {
+        // SAFETY: The rooted receiver and checked getter stay live until its rooted string result is copied.
         unsafe {
             let string = self.system_class(c"String")?;
             let mut owner = (self.object_class)(target(info)?.as_ptr());
@@ -97,17 +96,12 @@ impl RuntimeAccess {
                 if owner.is_null() {
                     break;
                 }
-                let mut iterator = std::ptr::null_mut();
-                for _ in 0..100_000 {
-                    let candidate = (self.class_methods)(owner, &mut iterator);
-                    if candidate.is_null() {
-                        break;
-                    }
+                for candidate in self.methods(owner)? {
                     let actual = (self.method_name)(candidate);
                     if actual.is_null() {
                         return Err(unsupported("tooltip formatter name"));
                     }
-                    if CStr::from_ptr(actual) == name && (self.method_params)(candidate) == 1 {
+                    if metadata_text(actual) == name && (self.method_params)(candidate) == 1 {
                         method = Some(owner);
                         break;
                     }
@@ -130,27 +124,10 @@ impl RuntimeAccess {
         }
     }
     pub(super) unsafe fn description_string(&self, text: Option<&Root<'_, '_>>) -> Result<String, DiscoveryError> {
+        // SAFETY: The rooted string has validated class and bounded length; its character buffer remains live for the owned copy.
         unsafe {
             let string = self.system_class(c"String")?;
-            let Some(text) = text else {
-                return Ok(String::new());
-            };
-            self.exact(text, string)?;
-            let object = target(text)?;
-            let length = (self.string_length)(object.as_ptr());
-            if !(0..=MAX_TEXT_BYTES as i32).contains(&length) {
-                return Err(unsupported("tooltip text length"));
-            }
-            let chars = (self.string_chars)(object.as_ptr());
-            if chars.is_null() && length != 0 {
-                return Err(unsupported("tooltip characters"));
-            }
-            let units = (0..length as usize).map(|index| chars.add(index).read()).collect::<Vec<_>>();
-            let text = String::from_utf16(&units).map_err(|_| unsupported("tooltip UTF-16"))?;
-            if text.len() > MAX_TEXT_BYTES {
-                return Err(unsupported("tooltip UTF-8 length"));
-            }
-            Ok(text)
+            self.owned_text(text, string, MAX_TEXT_BYTES)
         }
     }
 
@@ -167,6 +144,7 @@ impl RuntimeAccess {
         api: raw::InvocationApi,
         request: &ForgeDescriptionRequest,
     ) -> Result<Vec<ModifierSnapshot>, DiscoveryError> {
+        // SAFETY: The caller supplies the main-thread immutable graph span; selected and detached items stay rooted across tooltip calls.
         unsafe {
             let graph = self.forge_graph(attached)?.ok_or(DiscoveryError::NotReady("forge item absent"))?;
             if target(&graph.manager)?.as_ptr() as u64 != request.manager() || self.forge_snapshot(attached, &graph)? != *request.expected() {
@@ -175,18 +153,7 @@ impl RuntimeAccess {
             let unpacked = self.class(&graph.images, c"", c"ItemDataUnpacked")?;
             let getter = self.mapping_method(api, &graph.item, c"get_Implicits", &[], None)?;
             let list_class = (self.type_class)((self.method_return)(getter));
-            if list_class.is_null()
-                || (self.class_value)(list_class)
-                || (self.type_code)((self.class_type)(list_class)) != 0x15
-                || (self.class_image)(list_class) != (self.corlib)()
-            {
-                return Err(unsupported("implicit getter closed List return"));
-            }
-            let name = (self.class_name)(list_class);
-            let namespace = (self.class_namespace)(list_class);
-            if name.is_null() || namespace.is_null() || CStr::from_ptr(name) != c"List`1" || CStr::from_ptr(namespace) != c"System.Collections.Generic" {
-                return Err(unsupported("implicit getter List identity"));
-            }
+            self.list_class(list_class)?;
             let array_class = self.field_class(self.field(list_class, c"_items")?)?;
             let element = (self.class_element)(array_class);
             if element.is_null() || (self.class_value)(element) || (self.class_image)(element) != graph.images.game {

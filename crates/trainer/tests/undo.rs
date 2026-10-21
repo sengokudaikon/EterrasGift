@@ -1,6 +1,6 @@
 use eg_trainer::{
     catalog::{CatalogIdentity, EXTRACTION_VERSION, GameCatalog},
-    edits::{CatalogProvenance, EditError, ExpectedObservation, ItemEdit, StatusEdit, StatusField},
+    edits::{EditError, ExpectedObservation, ItemEdit, StatusEdit, StatusField},
     undo::ForgeUndo,
     writes::{ForgePlan, WriteRecord, WriteStatus},
 };
@@ -46,13 +46,6 @@ fn process() -> ProcessIdentity {
         pid: 19,
         created: 23,
         executable: std::env::temp_dir().join("AuthoredPlayer.exe"),
-    }
-}
-
-fn provenance() -> CatalogProvenance {
-    CatalogProvenance::RuntimeRead {
-        generation: GENERATION,
-        process: process(),
     }
 }
 
@@ -104,7 +97,6 @@ fn record(old: i32) -> WriteRecord {
         &observation(snapshot(old)),
         MANAGER,
         &catalog(),
-        &provenance(),
         ItemEdit::Status(StatusEdit {
             field: StatusField::LevelRequirement,
             value: 17,
@@ -125,7 +117,7 @@ fn fresh_exact_after_observation_prepares_only_the_original_level_with_full_iden
     assert!(matches!(token.reverse_edit(), eg_trainer::edits::ItemEdit::Status(edit) if edit.value == 87));
     assert_eq!(token.after().snapshot(), confirmed.plan.projected());
     let current = observation(confirmed.plan.projected().clone());
-    let plan = token.prepare(&current, MANAGER, &catalog(), &provenance()).unwrap();
+    let plan = token.prepare(&current, MANAGER, &catalog()).unwrap();
     assert_eq!(plan.before(), &current);
     assert_eq!(plan.projected(), confirmed.plan.before().snapshot());
     assert_eq!(plan.projected().status.level_requirement, 87);
@@ -181,7 +173,7 @@ fn fields_outside_legacy_fingerprint_still_make_undo_stale() {
         let mut current = token.after().snapshot().clone();
         alter(&mut current);
         assert_eq!(current.legacy_fingerprint(), token.after().snapshot().fingerprint);
-        assert_eq!(token.prepare(&observation(current), MANAGER, &catalog(), &provenance()), Err(EditError::StaleItem));
+        assert_eq!(token.prepare(&observation(current), MANAGER, &catalog()), Err(EditError::StaleItem));
     }
 }
 
@@ -198,7 +190,7 @@ fn same_id_replacement_and_other_item_changes_cannot_be_restored_by_old_token() 
         let mut changed = token.after().snapshot().clone();
         alter(&mut changed);
         changed.fingerprint = changed.legacy_fingerprint();
-        assert_eq!(token.prepare(&observation(changed), MANAGER, &catalog(), &provenance()), Err(EditError::StaleItem));
+        assert_eq!(token.prepare(&observation(changed), MANAGER, &catalog()), Err(EditError::StaleItem));
     }
 }
 
@@ -206,10 +198,10 @@ fn same_id_replacement_and_other_item_changes_cannot_be_restored_by_old_token() 
 fn manager_and_generation_changes_invalidate_the_undo_identity() {
     let token = ForgeUndo::from_confirmed(&record(87)).unwrap();
     for manager in [0, MANAGER + 16] {
-        assert_eq!(token.prepare(token.after(), manager, &catalog(), &provenance()), Err(EditError::IdentityChanged));
+        assert_eq!(token.prepare(token.after(), manager, &catalog()), Err(EditError::IdentityChanged));
     }
     let current = ExpectedObservation::new(GENERATION + 1, process(), catalog().identity, token.after().snapshot().clone()).unwrap();
-    assert_eq!(token.prepare(&current, MANAGER, &catalog(), &provenance()), Err(EditError::IdentityChanged));
+    assert_eq!(token.prepare(&current, MANAGER, &catalog()), Err(EditError::IdentityChanged));
 }
 
 #[test]
@@ -223,12 +215,12 @@ fn process_creation_image_or_pid_change_cannot_reuse_undo() {
         let mut target = process();
         alter(&mut target);
         let current = ExpectedObservation::new(GENERATION, target, catalog().identity, token.after().snapshot().clone()).unwrap();
-        assert_eq!(token.prepare(&current, MANAGER, &catalog(), &provenance()), Err(EditError::IdentityChanged));
+        assert_eq!(token.prepare(&current, MANAGER, &catalog()), Err(EditError::IdentityChanged));
     }
 }
 
 #[test]
-fn changed_catalog_identity_or_a_cached_catalog_cannot_authorize_restore() {
+fn changed_catalog_identity_cannot_authorize_restore() {
     let token = ForgeUndo::from_confirmed(&record(87)).unwrap();
     for alter in [
         |c: &mut CatalogIdentity| c.binary_hash = "c".repeat(64),
@@ -239,36 +231,23 @@ fn changed_catalog_identity_or_a_cached_catalog_cannot_authorize_restore() {
     ] {
         let mut changed = catalog();
         alter(&mut changed.identity);
-        assert_eq!(token.prepare(token.after(), MANAGER, &changed, &provenance()), Err(EditError::IdentityChanged));
+        assert_eq!(token.prepare(token.after(), MANAGER, &changed), Err(EditError::IdentityChanged));
         let current = ExpectedObservation::new(GENERATION, process(), changed.identity.clone(), token.after().snapshot().clone()).unwrap();
-        assert_eq!(token.prepare(&current, MANAGER, &changed, &provenance()), Err(EditError::IdentityChanged));
-    }
-    for provenance in [
-        CatalogProvenance::CachedOnly,
-        CatalogProvenance::RuntimeRead {
-            generation: GENERATION + 1,
-            process: process(),
-        },
-        CatalogProvenance::RuntimeRead {
-            generation: GENERATION,
-            process: ProcessIdentity { pid: 29, ..process() },
-        },
-    ] {
-        assert_eq!(token.prepare(token.after(), MANAGER, &catalog(), &provenance), Err(EditError::CatalogNotVerified));
+        assert_eq!(token.prepare(&current, MANAGER, &changed), Err(EditError::IdentityChanged));
     }
 }
 
 #[test]
 fn old_level_outside_current_literal_range_is_unavailable_without_override() {
     let token = ForgeUndo::from_confirmed(&record(138)).unwrap();
-    assert_eq!(token.prepare(token.after(), MANAGER, &catalog(), &provenance()), Err(EditError::InvalidStatus));
+    assert_eq!(token.prepare(token.after(), MANAGER, &catalog()), Err(EditError::InvalidStatus));
     for old in [-1, 256, 0x01000057] {
         assert_eq!(ForgeUndo::from_confirmed(&record(old)), Err(EditError::InvalidStatus));
     }
     let token = ForgeUndo::from_confirmed(&record(87)).unwrap();
     let mut narrower = catalog();
     narrower.limits.level_requirement.maximum = 86;
-    assert_eq!(token.prepare(token.after(), MANAGER, &narrower, &provenance()), Err(EditError::InvalidStatus));
+    assert_eq!(token.prepare(token.after(), MANAGER, &narrower), Err(EditError::InvalidStatus));
 }
 
 #[test]
@@ -276,11 +255,11 @@ fn literal_endpoints_can_be_restored_and_the_prior_token_is_stale_after_restore(
     for old in [0, 137] {
         let confirmed = record(old);
         let token = ForgeUndo::from_confirmed(&confirmed).unwrap();
-        let restored = token.prepare(token.after(), MANAGER, &catalog(), &provenance()).unwrap();
+        let restored = token.prepare(token.after(), MANAGER, &catalog()).unwrap();
         assert_eq!(restored.projected().status.level_requirement, old);
         assert_eq!(restored.projected(), confirmed.plan.before().snapshot());
         let current = observation(restored.projected().clone());
-        assert_eq!(token.prepare(&current, MANAGER, &catalog(), &provenance()), Err(EditError::StaleItem));
+        assert_eq!(token.prepare(&current, MANAGER, &catalog()), Err(EditError::StaleItem));
     }
 }
 
@@ -293,13 +272,12 @@ fn unique_set_or_legendary_drift_is_stale_and_cannot_create_an_original_level_pl
         changed.identity = Some(UniqueIdentity { id: 911, rolls: vec![0, 255] });
         changed.fingerprint = changed.legacy_fingerprint();
         let current = observation(changed);
-        assert_eq!(token.prepare(&current, MANAGER, &catalog(), &provenance()), Err(EditError::StaleItem));
+        assert_eq!(token.prepare(&current, MANAGER, &catalog()), Err(EditError::StaleItem));
         assert_eq!(
             ForgePlan::edit(
                 &current,
                 MANAGER,
                 &catalog(),
-                &provenance(),
                 ItemEdit::Status(StatusEdit {
                     field: StatusField::LevelRequirement,
                     value: 87,
@@ -318,13 +296,10 @@ fn pure_preparation_failure_preserves_the_owned_token_and_never_changes_the_reco
     let saved = record.clone();
     let token = ForgeUndo::from_confirmed(&record).unwrap();
     let saved_token = token.clone();
-    assert_eq!(
-        token.prepare(token.after(), MANAGER, &catalog(), &CatalogProvenance::CachedOnly),
-        Err(EditError::CatalogNotVerified)
-    );
+    assert_eq!(token.prepare(token.after(), 0, &catalog()), Err(EditError::IdentityChanged));
     assert_eq!(token, saved_token);
     assert_eq!(record, saved);
-    let next = token.prepare(token.after(), MANAGER, &catalog(), &provenance()).unwrap();
+    let next = token.prepare(token.after(), MANAGER, &catalog()).unwrap();
     assert_eq!(next.projected().status.level_requirement, 87);
     assert_eq!(record, saved);
 }
@@ -371,7 +346,6 @@ fn affix_undo_follows_the_reordered_slot_and_rechecks_override() {
         &observation(before),
         MANAGER,
         &data,
-        &provenance(),
         ItemEdit::Affix(AffixEdit {
             slot: 1,
             id: 2,
@@ -390,8 +364,8 @@ fn affix_undo_follows_the_reordered_slot_and_rechecks_override() {
     })
     .unwrap();
     assert!(matches!(token.reverse_edit(), ItemEdit::Affix(e) if e.slot==0 && e.id==1 && e.tier==2 && e.roll==11 && e.seal==SealState::Normal));
-    assert_eq!(token.prepare(token.after(), MANAGER, &data, &provenance()), Err(EditError::OverrideRequired));
-    let reverse = token.prepare_with_override(token.after(), MANAGER, &data, &provenance(), true).unwrap();
+    assert_eq!(token.prepare(token.after(), MANAGER, &data), Err(EditError::OverrideRequired));
+    let reverse = token.prepare_with_override(token.after(), MANAGER, &data, true).unwrap();
     assert_eq!(
         reverse.projected().affixes.iter().map(|a| (a.id, a.roll, a.seal)).collect::<Vec<_>>(),
         vec![(1, 11, 0), (1, 10, 0)]

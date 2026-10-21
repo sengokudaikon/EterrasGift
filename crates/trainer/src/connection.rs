@@ -48,7 +48,7 @@ pub struct PreparationFailure {
 }
 impl PreparationFailure {
     fn into_error(mut self) -> BackendError {
-        if self.residency != PreparationResidency::NotLoaded {
+        if self.residency != PreparationResidency::NotLoaded && (self.error.kind != ErrorKind::Gate || !self.error.retry_when_waiting) {
             self.error.delivery = Some(Delivery::MayHaveRun);
             self.error.retry_when_waiting = false;
         }
@@ -58,6 +58,9 @@ impl PreparationFailure {
 
 pub trait HelperPreparer: Send + 'static {
     type Transport: Transport + Send + 'static;
+    fn reap_exited(&mut self) -> Vec<ProcessIdentity> {
+        Vec::new()
+    }
     /// A successful Loaded result asserts only helper preparation, not runtime
     /// offline readiness. Reusing an existing matching server is permitted;
     /// reinjecting a loaded generation is not. This future must bound its remote
@@ -115,7 +118,7 @@ impl<P: HelperPreparer, F: LogFactory> SessionConnector<P, F> {
         self.last_attempt.as_ref()
     }
 
-    async fn connect_once(&mut self, target: &ProcessIdentity, now: Timestamp) -> Result<Session<P::Transport, F::Log>, BackendError> {
+    async fn connect_once(&mut self, target: &ProcessIdentity, now: Timestamp) -> Result<Session<P::Transport>, BackendError> {
         let started = process_start(target)?;
         let log = self.logs.create(target)?;
         let mut admission = Admission {
@@ -126,7 +129,7 @@ impl<P: HelperPreparer, F: LogFactory> SessionConnector<P, F> {
             policy: self.policy,
         };
         admission.check()?;
-        let profile = capture_profile(target, &self.helper_build_id)?;
+        let (profile, _files) = capture_profile(target, &self.helper_build_id)?;
         admission.check()?;
         // Mark uncertainty before awaiting: even a caller that drops this future
         // cannot mistake a partially executed preparer for an unloaded helper.
@@ -149,8 +152,7 @@ impl<P: HelperPreparer, F: LogFactory> SessionConnector<P, F> {
         if prepared.residency != PreparationResidency::Loaded || !prepared.helper_build_id.eq_ignore_ascii_case(profile.helper_build_id()) {
             return Err(BackendError::blocked(ErrorKind::Identity, "prepared helper source build or residency mismatch"));
         }
-        let session_log = self.logs.create(target)?;
-        let mut session = Session::new(target.clone(), prepared.transport, session_log, profile, self.policy)?;
+        let mut session = Session::new(target.clone(), prepared.transport, profile)?;
         session.enable();
         session.connect(admission.time()?).await?;
         Ok(session)
@@ -158,7 +160,10 @@ impl<P: HelperPreparer, F: LogFactory> SessionConnector<P, F> {
 }
 
 impl<P: HelperPreparer, F: LogFactory> Connector for SessionConnector<P, F> {
-    type Connection = Session<P::Transport, F::Log>;
+    type Connection = Session<P::Transport>;
+    fn reap_exited(&mut self) -> Vec<ProcessIdentity> {
+        self.preparer.reap_exited()
+    }
     async fn connect(&mut self, target: ProcessIdentity, now: Timestamp) -> Result<Self::Connection, BackendError> {
         self.last_attempt = Some(BootstrapAttempt {
             target: target.clone(),
@@ -180,8 +185,8 @@ impl<P: HelperPreparer, F: LogFactory> Connector for SessionConnector<P, F> {
                 }
                 .into_error();
                 // No automatic return to preparation after a handshake failure.
-                // The retained server is owned until game exit or explicit drain.
-                if attempt.residency != PreparationResidency::NotLoaded {
+                // The retained server remains loaded until game exit.
+                if attempt.residency != PreparationResidency::NotLoaded && error.kind != ErrorKind::Gate {
                     error.retry_when_waiting = false;
                 }
                 attempt.outcome = AttemptOutcome::Failed(error.clone());
@@ -208,7 +213,7 @@ impl<L: LogSource + Send> AdmissionCheck for Admission<L> {
     fn check(&mut self) -> Result<(), BackendError> {
         let decision = gate::evaluate(&self.log.read(self.started), self.started, self.time()?, self.policy);
         match decision.verdict {
-            GateVerdict::Allow | GateVerdict::Probe => Ok(()),
+            GateVerdict::Allow => Ok(()),
             GateVerdict::Wait | GateVerdict::Refuse => Err(BackendError {
                 kind: ErrorKind::Gate,
                 message: format!("offline admission before preparation: {:?} ({:?})", decision.readiness, decision.log_status),
@@ -222,10 +227,9 @@ fn process_start(target: &ProcessIdentity) -> Result<Timestamp, BackendError> {
     if target.pid == 0 || target.created == 0 || !target.executable.is_absolute() {
         return Err(BackendError::blocked(ErrorKind::Identity, "invalid process identity"));
     }
-    Timestamp::from_nanosecond((i128::from(target.created) - 116_444_736_000_000_000) * 100)
-        .map_err(|_| BackendError::blocked(ErrorKind::Identity, "invalid process creation time"))
+    eg_core::time::from_filetime(target.created).map_err(|_| BackendError::blocked(ErrorKind::Identity, "invalid process creation time"))
 }
-fn capture_profile(target: &ProcessIdentity, helper_build_id: &str) -> Result<BuildProfile, BackendError> {
+fn capture_profile(target: &ProcessIdentity, helper_build_id: &str) -> Result<(BuildProfile, Option<std::sync::Arc<crate::profile::ConnectionFiles>>), BackendError> {
     let executable = std::fs::canonicalize(&target.executable).map_err(|e| BackendError::blocked(ErrorKind::Identity, e.to_string()))?;
     let parent = executable
         .parent()
@@ -237,9 +241,9 @@ fn capture_profile(target: &ProcessIdentity, helper_build_id: &str) -> Result<Bu
     data.push("_Data");
     let binary = parent.join("GameAssembly.dll");
     let metadata: PathBuf = parent.join(data).join("il2cpp_data/Metadata/global-metadata.dat");
-    let profile = BuildProfile::capture(&binary, &metadata, helper_build_id).map_err(|e| BackendError::blocked(ErrorKind::Identity, e.to_string()))?;
+    let (profile, files) = BuildProfile::capture_connection(&binary, &metadata, helper_build_id).map_err(|e| BackendError::blocked(ErrorKind::Identity, e.to_string()))?;
     profile
         .validate_target(&target.executable)
         .map_err(|e| BackendError::blocked(ErrorKind::Identity, e.to_string()))?;
-    Ok(profile)
+    Ok((profile, files))
 }

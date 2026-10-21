@@ -57,6 +57,10 @@ pub trait ProcessLocator: Send + 'static {
 
 pub trait Connector: Send + 'static {
     type Connection: BackendConnection;
+    /// Release local resources for processes whose exit was proved, without remote I/O.
+    fn reap_exited(&mut self) -> Vec<ProcessIdentity> {
+        Vec::new()
+    }
     /// Called only after the backend's process-bound log gate allows access.
     /// Implementations must repeat admission after preparation and bind the exact
     /// identity/build/helper. Existing retained modules must never be reinjected.
@@ -194,7 +198,7 @@ pub trait BackendConnection: Send + 'static {
     // drops it directly, without asking the helper to perform cleanup.
 }
 
-impl<T: Transport + Send + 'static, L: LogSource + Send + 'static> BackendConnection for Session<T, L> {
+impl<T: Transport + Send + 'static> BackendConnection for Session<T> {
     fn target(&self) -> &ProcessIdentity {
         self.target()
     }
@@ -365,7 +369,7 @@ impl From<SessionError> for BackendError {
             SessionError::Disabled => (ErrorKind::Disabled, None, false),
             SessionError::Busy => (ErrorKind::NotReady, None, false),
             SessionError::NotConnected => (ErrorKind::NotConnected, None, false),
-            SessionError::Gate(_) | SessionError::NotOffline(_) => (ErrorKind::Gate, None, true),
+            SessionError::NotOffline(_) => (ErrorKind::Gate, None, true),
             SessionError::Identity(_) => (ErrorKind::Identity, None, false),
             SessionError::Protocol(_) => (ErrorKind::Protocol, None, false),
             SessionError::Mapping(_) => (ErrorKind::MappingUnavailable, None, false),
@@ -425,11 +429,9 @@ pub enum Activity {
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Capabilities {
     pub read_forge: bool,
-    pub read_catalog: bool,
     pub read_attack_leech: bool,
     /// Narrow operation support, not current observation eligibility or lifetime authority.
     pub attack_leech_rate: bool,
-    pub write_forge: bool,
     /// Operation support on this ready connection. Current item eligibility and
     /// range/observation checks still belong to level_requirement_plan.
     pub level_requirement: bool,
@@ -440,8 +442,6 @@ pub struct Capabilities {
     pub affix_rolls: bool,
     pub affix_change: bool,
     pub affix_list: bool,
-    pub hooks: bool,
-    pub fields: bool,
 }
 #[derive(Clone, Debug, PartialEq)]
 pub enum CatalogState {
@@ -632,27 +632,17 @@ impl BackendSnapshot {
         self.forge_plan(crate::edits::ItemEdit::Status(edit))
     }
     pub fn forge_plan(&self, edit: crate::edits::ItemEdit) -> Result<ForgePlan, crate::edits::EditError> {
-        use crate::edits::{CatalogProvenance, EditError};
+        use crate::edits::EditError;
         let expected = self.expected_observation()?;
         let status = self
             .runtime_status
             .filter(|status| !status.online && status.manager != 0)
             .ok_or(EditError::OfflineRequired)?;
         let catalog = self.catalog.data().ok_or(EditError::CatalogNotVerified)?;
-        ForgePlan::edit(
-            &expected,
-            status.manager,
-            catalog,
-            &CatalogProvenance::RuntimeRead {
-                generation: self.generation,
-                process: expected.process().clone(),
-            },
-            edit,
-            self.override_enabled,
-        )
+        ForgePlan::edit(&expected, status.manager, catalog, edit, self.override_enabled)
     }
     pub fn forge_undo_plan(&self, undo: &crate::undo::ForgeUndo) -> Result<ForgePlan, crate::edits::EditError> {
-        use crate::edits::{CatalogProvenance, EditError};
+        use crate::edits::EditError;
         if self.undo_forge.as_ref() != Some(undo) {
             return Err(EditError::IdentityChanged);
         }
@@ -661,16 +651,7 @@ impl BackendSnapshot {
             .runtime_status
             .filter(|status| !status.online && status.manager != 0)
             .ok_or(EditError::OfflineRequired)?;
-        undo.prepare_with_override(
-            &current,
-            status.manager,
-            self.catalog.data().ok_or(EditError::CatalogNotVerified)?,
-            &CatalogProvenance::RuntimeRead {
-                generation: self.generation,
-                process: current.process().clone(),
-            },
-            self.override_enabled,
-        )
+        undo.prepare_with_override(&current, status.manager, self.catalog.data().ok_or(EditError::CatalogNotVerified)?, self.override_enabled)
     }
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -1064,7 +1045,6 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
         self.state.revision = self.state.revision.wrapping_add(1);
         self.state.capabilities = Capabilities {
             read_forge: self.state.phase == Phase::Ready,
-            read_catalog: self.state.phase == Phase::Ready,
             read_attack_leech: self.state.phase == Phase::Ready
                 && self.state.activity.is_none()
                 && self.connection.as_ref().is_some_and(BackendConnection::supports_read_attack_leech),
@@ -1087,7 +1067,6 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
                         .as_ref()
                         .is_some_and(|connection| connection.supports_status(crate::edits::StatusField::from_wire(index as u32).expect("seven status fields")))
             }),
-            ..Capabilities::default()
         };
         self.snapshots.send_replace(self.state.clone());
     }
@@ -1304,6 +1283,12 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
     }
     async fn poll(&mut self) {
         self.settle_files(false).await;
+        let exited = self.connector.reap_exited();
+        if self.connection.as_ref().is_some_and(|connection| exited.contains(connection.target())) {
+            self.release_without_io();
+            self.state.phase = Phase::WaitingForGame;
+            self.publish();
+        }
         if !self.state.enabled || !self.state.monitoring || self.paused {
             return;
         }
@@ -1318,15 +1303,14 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
         self.admit_using_policy(target, self.options.policy)
     }
     fn admit_using_policy(&mut self, target: &ProcessIdentity, policy: GatePolicy) -> Result<(), BackendError> {
-        let started = Timestamp::from_nanosecond((i128::from(target.created) - 116_444_736_000_000_000) * 100)
-            .map_err(|_| BackendError::blocked(ErrorKind::Identity, "invalid process creation time"))?;
+        let started = eg_core::time::from_filetime(target.created).map_err(|_| BackendError::blocked(ErrorKind::Identity, "invalid process creation time"))?;
         if target.pid == 0 || target.created == 0 || !target.executable.is_absolute() {
             return Err(BackendError::blocked(ErrorKind::Identity, "invalid process identity"));
         }
         let decision = gate::evaluate(&self.log.read(started), started, self.clock.now(), policy);
         self.state.gate = Some(decision);
         match decision.verdict {
-            GateVerdict::Allow | GateVerdict::Probe => Ok(()),
+            GateVerdict::Allow => Ok(()),
             GateVerdict::Wait | GateVerdict::Refuse => {
                 self.release_without_io();
                 self.state.phase = if decision.verdict == GateVerdict::Refuse {

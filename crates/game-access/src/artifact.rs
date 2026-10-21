@@ -32,19 +32,32 @@ struct Identity {
     file: [u8; 16],
 }
 
+#[derive(Debug)]
 pub struct ReadLease {
     file: File,
     path: PathBuf,
     identity: Identity,
     length: u64,
     bytes_read: AtomicU64,
+    sha256: String,
 }
 impl ReadLease {
     /// Capture and hash the same retained read-only file object. `path` must be
     /// canonical; following a changed reparse target is rejected before hashing.
     pub fn capture(path: &Path, expected_sha256: &str) -> io::Result<Self> {
-        if !hashes::is_sha256(expected_sha256) || !path.is_absolute() || fs::canonicalize(path)? != path {
-            return Err(invalid("artifact path or expected hash"));
+        if !hashes::is_sha256(expected_sha256) {
+            return Err(invalid("expected artifact hash"));
+        }
+        let lease = Self::open(path)?;
+        if !lease.sha256.eq_ignore_ascii_case(expected_sha256) {
+            return Err(invalid("artifact content changed"));
+        }
+        Ok(lease)
+    }
+    /// Open one immutable file object and compute its identity once.
+    pub fn open(path: &Path) -> io::Result<Self> {
+        if !path.is_absolute() || fs::canonicalize(path)? != path {
+            return Err(invalid("artifact path"));
         }
         local_disk(path)?;
         let mut file = open(path)?;
@@ -62,7 +75,7 @@ impl ReadLease {
         let length = metadata.len();
         let mut counted = Counted { reader: &mut file, bytes: 0 };
         let digest = hashes::of_reader((&mut counted).take(MAX_ARTIFACT_BYTES + 1))?;
-        if counted.bytes != length || !digest.eq_ignore_ascii_case(expected_sha256) {
+        if counted.bytes != length {
             return Err(invalid("artifact content changed"));
         }
         let bytes_read = AtomicU64::new(counted.bytes);
@@ -72,6 +85,7 @@ impl ReadLease {
             identity,
             length,
             bytes_read,
+            sha256: digest,
         };
         lease.verify_path()?;
         Ok(lease)
@@ -84,6 +98,12 @@ impl ReadLease {
             return Err(invalid("artifact path no longer identifies retained object"));
         }
         Ok(())
+    }
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
+    pub fn sha256(&self) -> &str {
+        &self.sha256
     }
     pub fn len(&self) -> u64 {
         self.length

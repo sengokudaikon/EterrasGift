@@ -74,7 +74,7 @@ fn strict_header_version_reserved_tags_and_full_lengths() {
     for version in [0_u16, 2, u16::MAX] {
         let mut invalid = AVAILABLE;
         invalid[4..6].copy_from_slice(&version.to_le_bytes());
-        assert_eq!(fields::decode(&invalid), Err(ProtocolError::IncompatibleVersion));
+        assert_eq!(fields::decode(&invalid), Err(ProtocolError::InvalidMagic));
     }
     for tag in [0, 2, 255] {
         let mut invalid = AVAILABLE;

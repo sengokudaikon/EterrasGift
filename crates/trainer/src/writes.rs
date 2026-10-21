@@ -5,7 +5,7 @@
 use crate::field_writes::AttackLeechPlan;
 use crate::{
     catalog::GameCatalog,
-    edits::{self, CatalogProvenance, EditError, ExpectedObservation, ItemEdit, PreparedEdit},
+    edits::{self, EditError, ExpectedObservation, ItemEdit, PreparedEdit},
 };
 pub use eg_trainer_wire::protocol::ResponseCode;
 use eg_trainer_wire::{fields::AttackLeechObservation, forge::ForgeSnapshot};
@@ -28,14 +28,7 @@ pub struct ForgePlan {
     manager: u64,
 }
 impl ForgePlan {
-    pub fn edit(
-        expected: &ExpectedObservation,
-        manager: u64,
-        catalog: &GameCatalog,
-        provenance: &CatalogProvenance,
-        edit: ItemEdit,
-        override_enabled: bool,
-    ) -> Result<Self, EditError> {
+    pub fn edit(expected: &ExpectedObservation, manager: u64, catalog: &GameCatalog, edit: ItemEdit, override_enabled: bool) -> Result<Self, EditError> {
         if manager == 0 {
             return Err(EditError::InvalidObservation);
         }
@@ -54,7 +47,7 @@ impl ForgePlan {
         ) {
             return Err(EditError::InvalidValues);
         }
-        let prepared = edits::prepare(expected, catalog, provenance, edit, override_enabled, None)?;
+        let prepared = edits::prepare(expected, catalog, edit, override_enabled, None)?;
         Ok(Self { prepared, manager })
     }
     pub fn before(&self) -> &ExpectedObservation {

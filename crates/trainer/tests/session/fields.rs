@@ -53,7 +53,7 @@ fn attack_leech_global_refusals_revoke_admission_but_local_graph_reasons_remain_
             reason,
             AttackLeechUnavailable::OfflineRequired | AttackLeechUnavailable::ManagerAbsent | AttackLeechUnavailable::ManagerChanged
         );
-        assert_eq!(session.state(), if global { SessionState::WaitingForCharacter } else { SessionState::Ready });
+        assert_eq!(session.state(), if global { SessionState::Disconnected } else { SessionState::Ready });
         assert_eq!(session.runtime_status().is_none(), global);
         if global {
             assert!(matches!(run(session.read_attack_leech(now())), Err(SessionError::NotConnected)));
@@ -71,7 +71,7 @@ fn attack_leech_rejects_malformed_or_wrong_manager_without_retry() {
         session.enable();
         run(session.connect(now())).unwrap();
         assert!(matches!(run(session.read_attack_leech(now())), Err(SessionError::Protocol(_))));
-        assert_eq!(session.state(), SessionState::Blocked);
+        assert_eq!(session.state(), SessionState::Disconnected);
         assert!(session.runtime_status().is_none());
         assert!(run(session.read_attack_leech(now())).is_err());
         assert_eq!(wire.requests().len(), 3);
@@ -80,8 +80,8 @@ fn attack_leech_rejects_malformed_or_wrong_manager_without_retry() {
 
 #[test]
 fn attack_leech_rechecks_log_and_artifacts_after_reply_and_artifacts_before_io() {
-    for fault in 0..3 {
-        let fixture = Fixture::new();
+    for fault in 1..3 {
+        let fixture = Fixture::rehashing();
         let log = FakeLog::new([offline()]);
         let changed_log = log.clone();
         let changed_metadata = fixture.metadata.clone();
@@ -106,7 +106,7 @@ fn attack_leech_rechecks_log_and_artifacts_after_reply_and_artifacts_before_io()
             fs::write(&fixture.metadata, b"changed before read").unwrap();
         }
         let error = run(session.read_attack_leech(now())).unwrap_err();
-        assert!(matches!(error, SessionError::Gate(_) | SessionError::Identity(_)));
+        assert!(matches!(error, SessionError::Identity(_)));
         assert!(session.runtime_status().is_none());
         assert_ne!(session.state(), SessionState::Ready);
         assert_eq!(wire.requests().len(), if fault == 2 { 2 } else { 3 });

@@ -161,15 +161,9 @@ fn process() -> ProcessIdentity {
 fn observation(item: ForgeSnapshot, catalog: &GameCatalog) -> ExpectedObservation {
     ExpectedObservation::new(1, process(), catalog.identity.clone(), item).unwrap()
 }
-fn provenance() -> CatalogProvenance {
-    CatalogProvenance::RuntimeRead {
-        generation: 1,
-        process: process(),
-    }
-}
 fn prepared(item: ForgeSnapshot, edit: ItemEdit) -> PreparedEdit {
     let c = catalog();
-    prepare(&observation(item, &c), &c, &provenance(), edit, true, None).unwrap()
+    prepare(&observation(item, &c), &c, edit, true, None).unwrap()
 }
 fn replacement() -> ItemEdit {
     ItemEdit::Affix(AffixEdit {
@@ -204,7 +198,7 @@ fn confirmed_undo_rebases_only_slot_order_and_names_never_a_changed_saved_value(
         );
         history.confirmed(&seal, 1, seal.projected(), false).unwrap();
         let undo = history.current().unwrap();
-        let undo_plan = undo.prepare(undo.after(), 1, &catalog, &provenance()).unwrap();
+        let undo_plan = undo.prepare(undo.after(), 1, &catalog).unwrap();
         let undo = prepared(undo.after().snapshot().clone(), undo_plan.edit_intent().clone());
         let mut actual = undo.projected().clone();
         actual.name = "Rebuilt name".into();
@@ -227,7 +221,7 @@ fn confirmed_undo_rebases_only_slot_order_and_names_never_a_changed_saved_value(
             let previous = history.current().unwrap();
             assert_eq!(previous.after().snapshot(), &actual);
             assert!(matches!(previous.reverse_edit(), ItemEdit::Roll(e) if e.changes == [RollChange { index: 1, value: 120 }]));
-            let restore = previous.prepare(previous.after(), 1, &catalog, &provenance()).unwrap();
+            let restore = previous.prepare(previous.after(), 1, &catalog).unwrap();
             assert_eq!(restore.projected().affixes[1].id, 1);
             assert_eq!(restore.projected().affixes[1].roll, 120);
         }
@@ -265,22 +259,18 @@ fn construction_requires_structural_snapshot_not_just_a_pointer() {
     assert_eq!(ExpectedObservation::new(1, p, c.identity, item()), Err(EditError::InvalidObservation));
 }
 #[test]
-fn cached_definitions_cannot_prepare_a_write_and_catalog_identity_is_pinned() {
+fn catalog_identity_is_pinned_when_preparing_a_write() {
     let mut c = catalog();
     let expected = observation(item(), &c);
-    assert_eq!(
-        prepare(&expected, &c, &CatalogProvenance::CachedOnly, roll(0, 42), true, None),
-        Err(EditError::CatalogNotVerified)
-    );
     c.identity.locale.language = "de".into();
-    assert_eq!(prepare(&expected, &c, &provenance(), roll(0, 42), true, None), Err(EditError::IdentityChanged));
+    assert_eq!(prepare(&expected, &c, roll(0, 42), true, None), Err(EditError::IdentityChanged));
 }
 #[test]
 fn full_expected_state_detects_names_categories_and_set_identity_outside_legacy_fnv() {
     let c = catalog();
     let before = unique(item(), 8, 912);
     let expected = observation(before.clone(), &c);
-    let p = prepare(&expected, &c, &provenance(), status(StatusField::Corrupted, 1, false), false, None).unwrap();
+    let p = prepare(&expected, &c, status(StatusField::Corrupted, 1, false), false, None).unwrap();
     for field in 0..4 {
         let mut changed = before.clone();
         match field {
@@ -305,7 +295,7 @@ fn submission_identity_binds_generation_creation_time_and_catalog_even_for_equal
     let c = catalog();
     let before = item();
     let expected = observation(before.clone(), &c);
-    let p = prepare(&expected, &c, &provenance(), roll(0, 42), false, None).unwrap();
+    let p = prepare(&expected, &c, roll(0, 42), false, None).unwrap();
     let other = ExpectedObservation::new(2, process(), c.identity.clone(), before.clone()).unwrap();
     assert_eq!(p.recheck(&other, true, false), Err(EditError::IdentityChanged));
     let mut pid_reuse = process();
@@ -345,11 +335,11 @@ fn replacing_affix_requires_save_id_display_tier_valid_roll_and_current_definiti
             seal: SealState::Normal,
             allow_incompatible: true,
         });
-        assert_eq!(prepare(&expected, &c, &provenance(), e, true, None), Err(error));
+        assert_eq!(prepare(&expected, &c, e, true, None), Err(error));
     }
     let mut c = catalog();
     c.affixes.get_mut(&1).unwrap().tier_count = 3;
-    assert_eq!(prepare(&expected, &c, &provenance(), roll(0, 42), true, None), Err(EditError::TierUnavailable));
+    assert_eq!(prepare(&expected, &c, roll(0, 42), true, None), Err(EditError::TierUnavailable));
 }
 #[test]
 fn high_readable_ids_are_read_only_when_rebuild_would_truncate_twelve_bit_serialization() {
@@ -358,17 +348,14 @@ fn high_readable_ids_are_read_only_when_rebuild_would_truncate_twelve_bit_serial
     i.affixes[0].id = 65500;
     refresh(&mut i);
     let expected = observation(i.clone(), &c);
+    assert_eq!(prepare(&expected, &c, roll(0, 42), false, None), Err(EditError::AffixIdNotSerializable(65500)));
     assert_eq!(
-        prepare(&expected, &c, &provenance(), roll(0, 42), false, None),
-        Err(EditError::AffixIdNotSerializable(65500))
-    );
-    assert_eq!(
-        prepare(&expected, &c, &provenance(), status(StatusField::Corrupted, 1, false), false, None),
+        prepare(&expected, &c, status(StatusField::Corrupted, 1, false), false, None),
         Err(EditError::AffixIdNotSerializable(65500))
     );
     // The source's level edit is a direct Int32 write and does not rebuild ID.
-    assert!(prepare(&expected, &c, &provenance(), status(StatusField::LevelRequirement, 80, false), false, None).is_ok());
-    assert!(prepare(&expected, &c, &provenance(), ItemEdit::RemoveAffix(RemoveAffixEdit { slot: 0, id: 65500 }), false, None).is_ok());
+    assert!(prepare(&expected, &c, status(StatusField::LevelRequirement, 80, false), false, None).is_ok());
+    assert!(prepare(&expected, &c, ItemEdit::RemoveAffix(RemoveAffixEdit { slot: 0, id: 65500 }), false, None).is_ok());
 }
 #[test]
 fn new_layout_problems_are_rejected_but_existing_problems_stay_editable() {
@@ -384,13 +371,13 @@ fn new_layout_problems_are_rejected_but_existing_problems_stay_editable() {
         allow_incompatible: false,
     });
     assert_eq!(
-        prepare(&expected, &c, &provenance(), normal_eight, false, None),
+        prepare(&expected, &c, normal_eight, false, None),
         Err(EditError::NewLayoutProblem(LayoutProblem::NormalTierEight))
     );
     let mut before = before;
     before.affixes[0].tier = 8;
     refresh(&mut before);
-    assert!(prepare(&observation(before, &c), &c, &provenance(), roll(0, 0), false, None).is_ok());
+    assert!(prepare(&observation(before, &c), &c, roll(0, 0), false, None).is_ok());
     let before = unique(item(), 9, 911);
     let expected = observation(before, &c);
     let corrupted = ItemEdit::Affix(AffixEdit {
@@ -402,7 +389,7 @@ fn new_layout_problems_are_rejected_but_existing_problems_stay_editable() {
         allow_incompatible: false,
     });
     assert_eq!(
-        prepare(&expected, &c, &provenance(), corrupted, false, None),
+        prepare(&expected, &c, corrupted, false, None),
         Err(EditError::NewLayoutProblem(LayoutProblem::LegendaryUncorrupted))
     );
 }
@@ -432,10 +419,7 @@ fn existing_unique_capacity_problem_never_escapes_hard_wire_bound_32() {
         category: Some(0),
         allow_incompatible: true,
     });
-    assert_eq!(
-        prepare(&observation(before, &c), &c, &provenance(), add, true, None),
-        Err(EditError::ProjectedSnapshotOutOfBounds)
-    );
+    assert_eq!(prepare(&observation(before, &c), &c, add, true, None), Err(EditError::ProjectedSnapshotOutOfBounds));
 }
 #[test]
 fn add_remove_compute_rarity_and_refuse_removing_shifted_id() {
@@ -457,14 +441,7 @@ fn add_remove_compute_rarity_and_refuse_removing_shifted_id() {
     assert_eq!(p.projected().affixes[0].slot, 0);
     let c = catalog();
     assert_eq!(
-        prepare(
-            &observation(before, &c),
-            &c,
-            &provenance(),
-            ItemEdit::RemoveAffix(RemoveAffixEdit { slot: 0, id: 2 }),
-            false,
-            None
-        ),
+        prepare(&observation(before, &c), &c, ItemEdit::RemoveAffix(RemoveAffixEdit { slot: 0, id: 2 }), false, None),
         Err(EditError::InvalidValues)
     );
 }
@@ -480,19 +457,16 @@ fn override_is_two_distinct_inputs_and_unknown_definition_never_bypasses() {
         seal: SealState::Normal,
         allow_incompatible: true,
     };
-    assert_eq!(
-        prepare(&expected, &c, &provenance(), ItemEdit::Affix(e.clone()), false, None),
-        Err(EditError::OverrideRequired)
-    );
-    assert!(prepare(&expected, &c, &provenance(), ItemEdit::Affix(e.clone()), true, None).is_ok());
+    assert_eq!(prepare(&expected, &c, ItemEdit::Affix(e.clone()), false, None), Err(EditError::OverrideRequired));
+    assert!(prepare(&expected, &c, ItemEdit::Affix(e.clone()), true, None).is_ok());
     e.allow_incompatible = false;
     assert_eq!(
-        prepare(&expected, &c, &provenance(), ItemEdit::Affix(e.clone()), true, None),
+        prepare(&expected, &c, ItemEdit::Affix(e.clone()), true, None),
         Err(EditError::Incompatible(CompatibilityReason::SlotType))
     );
     e.allow_incompatible = true;
     e.id = 999;
-    assert_eq!(prepare(&expected, &c, &provenance(), ItemEdit::Affix(e), true, None), Err(EditError::MissingDefinition));
+    assert_eq!(prepare(&expected, &c, ItemEdit::Affix(e), true, None), Err(EditError::MissingDefinition));
 }
 #[test]
 fn compatibility_preserves_class_category_equipment_duplicate_and_omen_rules() {
@@ -533,7 +507,6 @@ fn roll_changes_are_bounded_distinct_and_unique_or_implicit_require_full_bound_e
             prepare(
                 &expected,
                 &c,
-                &provenance(),
                 ItemEdit::Roll(RollEdit {
                     target: RollTarget::Affix,
                     changes,
@@ -550,7 +523,7 @@ fn roll_changes_are_bounded_distinct_and_unique_or_implicit_require_full_bound_e
         changes: vec![RollChange { index: 0, value: 255 }],
         allow_incompatible: false,
     });
-    assert_eq!(prepare(&expected, &c, &provenance(), implicit.clone(), false, None), Err(EditError::MissingRollEvidence));
+    assert_eq!(prepare(&expected, &c, implicit.clone(), false, None), Err(EditError::MissingRollEvidence));
     let absent = || Availability::Unavailable {
         reason: "No audited tooltip".into(),
     };
@@ -562,7 +535,7 @@ fn roll_changes_are_bounded_distinct_and_unique_or_implicit_require_full_bound_e
             roll_ids: vec![0],
         }]),
     );
-    let p = prepare(&expected, &c, &provenance(), implicit.clone(), false, Some(&valid)).unwrap();
+    let p = prepare(&expected, &c, implicit.clone(), false, Some(&valid)).unwrap();
     assert_eq!(p.projected().implicit_rolls, [255, 20]);
     let invalid = RollEvidence::from_runtime(
         &expected,
@@ -572,10 +545,7 @@ fn roll_changes_are_bounded_distinct_and_unique_or_implicit_require_full_bound_e
             roll_ids: vec![0, 1],
         }]),
     );
-    assert_eq!(
-        prepare(&expected, &c, &provenance(), implicit.clone(), false, Some(&invalid)),
-        Err(EditError::InvalidRollMapping)
-    );
+    assert_eq!(prepare(&expected, &c, implicit.clone(), false, Some(&invalid)), Err(EditError::InvalidRollMapping));
     let mut different = item();
     different.name.push('x');
     let stale = RollEvidence::from_runtime(
@@ -586,7 +556,7 @@ fn roll_changes_are_bounded_distinct_and_unique_or_implicit_require_full_bound_e
             roll_ids: vec![0],
         }]),
     );
-    assert_eq!(prepare(&expected, &c, &provenance(), implicit, false, Some(&stale)), Err(EditError::MissingRollEvidence));
+    assert_eq!(prepare(&expected, &c, implicit, false, Some(&stale)), Err(EditError::MissingRollEvidence));
 }
 #[test]
 fn unique_shared_rolls_need_every_mapping_in_range_and_set_rolls_stay_noneditable() {
@@ -603,7 +573,7 @@ fn unique_shared_rolls_need_every_mapping_in_range_and_set_rolls_stay_noneditabl
             Availability::Available(vec![RollBinding { editable: true, roll_ids: ids }]),
             Availability::Available(vec![]),
         );
-        let result = prepare(&expected, &c, &provenance(), edit.clone(), false, Some(&evidence));
+        let result = prepare(&expected, &c, edit.clone(), false, Some(&evidence));
         assert_eq!(result.is_ok(), ok);
     }
 }
@@ -618,21 +588,21 @@ fn status_uses_game_limits_and_native_unique_rules_instead_of_ui_byte_limits() {
         (StatusField::LevelRequirement, 138, false),
         (StatusField::Corrupted, 2, false),
     ] {
-        assert_eq!(prepare(&expected, &c, &provenance(), status(field, value, false), false, None).is_ok(), ok);
+        assert_eq!(prepare(&expected, &c, status(field, value, false), false, None).is_ok(), ok);
     }
     let expected = observation(unique(item(), 7, 911), &c);
-    assert!(prepare(&expected, &c, &provenance(), status(StatusField::LegendaryPotential, 6, false), false, None).is_ok());
+    assert!(prepare(&expected, &c, status(StatusField::LegendaryPotential, 6, false), false, None).is_ok());
     assert_eq!(
-        prepare(&expected, &c, &provenance(), status(StatusField::WeaversWill, 10, false), false, None),
+        prepare(&expected, &c, status(StatusField::WeaversWill, 10, false), false, None),
         Err(EditError::InvalidStatus)
     );
-    assert!(prepare(&expected, &c, &provenance(), status(StatusField::WeaversWill, 10, true), true, None).is_ok());
+    assert!(prepare(&expected, &c, status(StatusField::WeaversWill, 10, true), true, None).is_ok());
     let mut i = unique(item(), 9, 911);
     i.status.legendary_potential = 1;
     refresh(&mut i);
     let expected = observation(i, &c);
     assert_eq!(
-        prepare(&expected, &c, &provenance(), status(StatusField::WeaversWill, 10, true), true, None),
+        prepare(&expected, &c, status(StatusField::WeaversWill, 10, true), true, None),
         Err(EditError::InvalidStatus)
     );
     let mut i = unique(item(), 9, 911);
@@ -640,8 +610,8 @@ fn status_uses_game_limits_and_native_unique_rules_instead_of_ui_byte_limits() {
     i.status.legendary_potential = 1;
     refresh(&mut i);
     let expected = observation(i, &c);
-    assert!(prepare(&expected, &c, &provenance(), status(StatusField::WeaversWill, 80, true), true, None).is_ok());
-    assert!(prepare(&expected, &c, &provenance(), status(StatusField::WeaversWill, 81, true), true, None).is_err());
+    assert!(prepare(&expected, &c, status(StatusField::WeaversWill, 80, true), true, None).is_ok());
+    assert!(prepare(&expected, &c, status(StatusField::WeaversWill, 81, true), true, None).is_err());
 }
 #[test]
 fn idol_type_changes_need_override_and_identity_changes_follow_game_rarity() {
@@ -651,7 +621,6 @@ fn idol_type_changes_need_override_and_identity_changes_follow_game_rarity() {
         prepare(
             &expected,
             &c,
-            &provenance(),
             ItemEdit::BaseType(BaseTypeEdit {
                 sub_type: 1,
                 allow_incompatible: true,
@@ -671,8 +640,8 @@ fn idol_type_changes_need_override_and_identity_changes_follow_game_rarity() {
         allow_incompatible: false,
         item_type: Some(26),
     });
-    assert_eq!(prepare(&expected, &c, &provenance(), edit.clone(), false, None), Err(EditError::OverrideRequired));
-    assert!(prepare(&expected, &c, &provenance(), edit, true, None).is_ok());
+    assert_eq!(prepare(&expected, &c, edit.clone(), false, None), Err(EditError::OverrideRequired));
+    assert!(prepare(&expected, &c, edit, true, None).is_ok());
     let expected = observation(unique(item(), 7, 911), &c);
     let set = ItemEdit::UniqueIdentity(UniqueIdentityEdit {
         unique_id: 912,
@@ -680,11 +649,10 @@ fn idol_type_changes_need_override_and_identity_changes_follow_game_rarity() {
         rarity: 8,
         unrestricted: true,
     });
-    assert_eq!(prepare(&expected, &c, &provenance(), set, true, None), Err(EditError::InvalidUniqueIdentity));
+    assert_eq!(prepare(&expected, &c, set, true, None), Err(EditError::InvalidUniqueIdentity));
     let p = prepare(
         &expected,
         &c,
-        &provenance(),
         ItemEdit::UniqueIdentity(UniqueIdentityEdit {
             unique_id: 913,
             sub_type: 1,
@@ -799,7 +767,6 @@ fn strict_affix_readback_and_preflight_both_include_set_identity() {
     let p = prepare(
         &observation(i, &c),
         &c,
-        &provenance(),
         ItemEdit::Affix(AffixEdit {
             slot: 0,
             id: 3,
@@ -865,7 +832,7 @@ fn forge_base_and_identity_plans_preserve_conditional_reverse_rules() {
         ),
     ] {
         let expected = observation(before.clone(), &c);
-        let plan = ForgePlan::edit(&expected, 17, &c, &provenance(), edit, override_enabled).unwrap();
+        let plan = ForgePlan::edit(&expected, 17, &c, edit, override_enabled).unwrap();
         let mut after = plan.projected().clone();
         after.name = "new game name".into();
         after.class_requirement = 6;
@@ -881,22 +848,19 @@ fn forge_base_and_identity_plans_preserve_conditional_reverse_rules() {
         })
         .unwrap();
         let current = observation(after.clone(), &c);
-        let reverse = undo.prepare_with_override(&current, 17, &c, &provenance(), override_enabled).unwrap();
+        let reverse = undo.prepare_with_override(&current, 17, &c, override_enabled).unwrap();
         assert_eq!(reverse.projected().item_type, before.item_type);
         assert_eq!(reverse.projected().sub_type, before.sub_type);
         assert_eq!(reverse.projected().rarity, before.rarity);
         assert_eq!(reverse.projected().identity, before.identity);
         if override_enabled {
             assert_eq!(plan.recheck(&expected, 17, false), Err(EditError::OverrideRequired));
-            assert_eq!(undo.prepare_with_override(&current, 17, &c, &provenance(), false), Err(EditError::OverrideRequired));
+            assert_eq!(undo.prepare_with_override(&current, 17, &c, false), Err(EditError::OverrideRequired));
         }
         after.status.forging_potential += 1;
         refresh(&mut after);
         assert!(!plan.matches(&after));
-        assert_eq!(
-            undo.prepare_with_override(&observation(after, &c), 17, &c, &provenance(), override_enabled),
-            Err(EditError::StaleItem)
-        );
+        assert_eq!(undo.prepare_with_override(&observation(after, &c), 17, &c, override_enabled), Err(EditError::StaleItem));
     }
 }
 #[test]
@@ -904,7 +868,7 @@ fn forge_plans_refuse_unimplemented_edits_and_set_identity_changes_are_stale() {
     use eg_trainer::writes::ForgePlan;
     let c = catalog();
     let expected = observation(item(), &c);
-    assert!(ForgePlan::edit(&expected, 17, &c, &provenance(), replacement(), true).is_ok());
+    assert!(ForgePlan::edit(&expected, 17, &c, replacement(), true).is_ok());
     let mut set = unique(item(), 8, 912);
     refresh(&mut set);
     let expected = observation(set.clone(), &c);
@@ -912,7 +876,6 @@ fn forge_plans_refuse_unimplemented_edits_and_set_identity_changes_are_stale() {
         &expected,
         17,
         &c,
-        &provenance(),
         ItemEdit::UniqueIdentity(UniqueIdentityEdit {
             unique_id: 911,
             sub_type: 1,
@@ -944,7 +907,7 @@ fn forge_affix_roll_batch_and_reverse_keep_unselected_state_and_reject_stale_tar
         changes: vec![RollChange { index: 1, value: 255 }, RollChange { index: 0, value: 0 }],
         allow_incompatible: false,
     });
-    let plan = ForgePlan::edit(&expected, 17, &c, &provenance(), edit.clone(), false).unwrap();
+    let plan = ForgePlan::edit(&expected, 17, &c, edit.clone(), false).unwrap();
     let ForgeMutation::AffixRolls { rolls, .. } = plan.mutation() else {
         panic!("affix rolls required")
     };
@@ -959,26 +922,23 @@ fn forge_affix_roll_batch_and_reverse_keep_unselected_state_and_reject_stale_tar
         status: WriteStatus::Confirmed(after.clone()),
     })
     .unwrap();
-    let reverse = undo.prepare(&observation(after.clone(), &c), 17, &c, &provenance()).unwrap();
+    let reverse = undo.prepare(&observation(after.clone(), &c), 17, &c).unwrap();
     assert_eq!(reverse.projected().affixes, before.affixes);
     after.affixes[0].roll = 13;
     refresh(&mut after);
     assert!(!plan.matches(&after));
-    assert_eq!(undo.prepare(&observation(after, &c), 17, &c, &provenance()), Err(EditError::StaleItem));
+    assert_eq!(undo.prepare(&observation(after, &c), 17, &c), Err(EditError::StaleItem));
     for target in [RollTarget::Unique, RollTarget::Implicit] {
         let ItemEdit::Roll(mut edit) = edit.clone() else { unreachable!() };
         edit.target = target;
-        assert_eq!(
-            ForgePlan::edit(&expected, 17, &c, &provenance(), ItemEdit::Roll(edit), false),
-            Err(EditError::InvalidValues)
-        );
+        assert_eq!(ForgePlan::edit(&expected, 17, &c, ItemEdit::Roll(edit), false), Err(EditError::InvalidValues));
     }
     let bad = ItemEdit::Roll(RollEdit {
         target: RollTarget::Affix,
         changes: vec![RollChange { index: 0, value: 1 }, RollChange { index: 2, value: 1 }],
         allow_incompatible: false,
     });
-    assert_eq!(ForgePlan::edit(&expected, 17, &c, &provenance(), bad, false), Err(EditError::InvalidValues));
+    assert_eq!(ForgePlan::edit(&expected, 17, &c, bad, false), Err(EditError::InvalidValues));
 }
 
 #[test]
@@ -987,8 +947,8 @@ fn level_cache_readback_uses_the_same_exact_rule_in_pure_and_submittable_plans()
     let c = catalog();
     let expected = observation(item(), &c);
     let intent = status(StatusField::LevelRequirement, 80, false);
-    let pure = prepare(&expected, &c, &provenance(), intent.clone(), false, None).unwrap();
-    let plan = ForgePlan::edit(&expected, 17, &c, &provenance(), intent.clone(), false).unwrap();
+    let pure = prepare(&expected, &c, intent.clone(), false, None).unwrap();
+    let plan = ForgePlan::edit(&expected, 17, &c, intent.clone(), false).unwrap();
     assert!(plan.matches(pure.projected()));
     assert_eq!(pure.inspect_readback(Some(pure.projected())).policy, ReadbackPolicy::LevelRequirement);
     for fault in 0..4 {
@@ -1002,7 +962,7 @@ fn level_cache_readback_uses_the_same_exact_rule_in_pure_and_submittable_plans()
         assert!(!pure.inspect_readback(Some(&actual)).confirmed());
         assert!(!plan.matches(&actual));
     }
-    assert_eq!(ForgePlan::edit(&expected, 0, &c, &provenance(), intent, false), Err(EditError::InvalidObservation));
+    assert_eq!(ForgePlan::edit(&expected, 0, &c, intent, false), Err(EditError::InvalidObservation));
 }
 
 #[test]
@@ -1023,7 +983,7 @@ fn inserted_sealed_affix_is_undone_at_its_new_slot_even_when_id_already_exists()
         category: Some(0),
         allow_incompatible: true,
     });
-    let plan = ForgePlan::edit(&expected, 17, &c, &provenance(), edit, true).unwrap();
+    let plan = ForgePlan::edit(&expected, 17, &c, edit, true).unwrap();
     assert_eq!((plan.projected().affixes[0].id, plan.projected().affixes[0].seal), (1, 1));
     let token = ForgeUndo::from_confirmed(&WriteRecord {
         status: WriteStatus::Confirmed(plan.projected().clone()),
@@ -1031,12 +991,12 @@ fn inserted_sealed_affix_is_undone_at_its_new_slot_even_when_id_already_exists()
     })
     .unwrap();
     assert!(matches!(token.reverse_edit(),ItemEdit::RemoveAffix(e) if e.slot==0 && e.id==1));
-    let reverse = token.prepare(token.after(), 17, &c, &provenance()).unwrap();
+    let reverse = token.prepare(token.after(), 17, &c).unwrap();
     assert_eq!(reverse.projected().affixes, before.affixes);
     let mut changed = token.after().snapshot().clone();
     changed.affixes[0].roll += 1;
     refresh(&mut changed);
-    assert_eq!(token.prepare(&observation(changed, &c), 17, &c, &provenance()), Err(EditError::StaleItem));
+    assert_eq!(token.prepare(&observation(changed, &c), 17, &c), Err(EditError::StaleItem));
 }
 #[test]
 fn removed_affix_restore_uses_current_catalog_and_can_require_override() {
@@ -1046,16 +1006,16 @@ fn removed_affix_restore_uses_current_catalog_and_can_require_override() {
     };
     let mut c = catalog();
     let expected = observation(item(), &c);
-    let plan = ForgePlan::edit(&expected, 17, &c, &provenance(), ItemEdit::RemoveAffix(RemoveAffixEdit { slot: 0, id: 1 }), false).unwrap();
+    let plan = ForgePlan::edit(&expected, 17, &c, ItemEdit::RemoveAffix(RemoveAffixEdit { slot: 0, id: 1 }), false).unwrap();
     let token = ForgeUndo::from_confirmed(&WriteRecord {
         status: WriteStatus::Confirmed(plan.projected().clone()),
         plan,
     })
     .unwrap();
-    assert!(token.prepare(token.after(), 17, &c, &provenance()).is_ok());
+    assert!(token.prepare(token.after(), 17, &c).is_ok());
     c.affixes.get_mut(&1).unwrap().special = 1;
-    assert_eq!(token.prepare(token.after(), 17, &c, &provenance()), Err(EditError::OverrideRequired));
-    assert!(token.prepare_with_override(token.after(), 17, &c, &provenance(), true).unwrap().unrestricted());
+    assert_eq!(token.prepare(token.after(), 17, &c), Err(EditError::OverrideRequired));
+    assert!(token.prepare_with_override(token.after(), 17, &c, true).unwrap().unrestricted());
 }
 #[test]
 fn removing_the_only_unserializable_id_can_repair_an_item_but_cannot_offer_undo() {
@@ -1067,15 +1027,7 @@ fn removing_the_only_unserializable_id_can_repair_an_item_but_cannot_offer_undo(
     let mut before = item();
     before.affixes[0].id = 65500;
     refresh(&mut before);
-    let plan = ForgePlan::edit(
-        &observation(before, &c),
-        17,
-        &c,
-        &provenance(),
-        ItemEdit::RemoveAffix(RemoveAffixEdit { slot: 0, id: 65500 }),
-        false,
-    )
-    .unwrap();
+    let plan = ForgePlan::edit(&observation(before, &c), 17, &c, ItemEdit::RemoveAffix(RemoveAffixEdit { slot: 0, id: 65500 }), false).unwrap();
     assert!(plan.projected().affixes.iter().all(|a| a.id <= 4095));
     assert_eq!(
         ForgeUndo::from_confirmed(&WriteRecord {

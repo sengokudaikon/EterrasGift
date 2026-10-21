@@ -3,10 +3,7 @@ mod mapping;
 mod rate_write;
 mod unique;
 mod write;
-use crate::{
-    gate::{self, GateDecision, GatePolicy, GateVerdict, LogSource},
-    profile::{BuildProfile, ProfileLease},
-};
+use crate::profile::{BuildProfile, ProfileLease};
 use eg_core::game_log::GameReadiness;
 use eg_trainer_wire::{
     catalog::{self, CatalogKind, CatalogPage},
@@ -16,7 +13,7 @@ use eg_trainer_wire::{
     locale::{self, GameLocale},
     process::ProcessIdentity,
     protocol::{Discovery, DispatcherSpec, HookState, ProtocolError, Request, ResponseCode, RuntimeStatus},
-    transport::{Delivery, Transport, TransportError, TransportFailure},
+    transport::{Transport, TransportError},
 };
 use jiff::Timestamp;
 
@@ -24,12 +21,9 @@ use jiff::Timestamp;
 pub enum SessionState {
     Disabled,
     Disconnected,
-    WaitingForGame,
-    WaitingForCharacter,
     Connecting,
     Closing,
     Ready,
-    Blocked,
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Cleanup {
@@ -92,7 +86,6 @@ pub enum SessionError {
     Disabled,
     Busy,
     NotConnected,
-    Gate(GateDecision),
     NotOffline(GameReadiness),
     Protocol(ProtocolError),
     Transport(TransportError),
@@ -107,16 +100,6 @@ impl std::fmt::Display for SessionError {
             Self::Disabled => f.write_str("The trainer is disabled."),
             Self::Busy => f.write_str("Wait for the current trainer operation to finish."),
             Self::NotConnected => f.write_str("Connect before reading or editing an item."),
-            Self::Gate(decision) => {
-                use eg_core::game_log::GameLogStatus;
-                match decision.log_status {
-                    GameLogStatus::Missing => f.write_str("Player.log is missing. Load an offline character before connecting."),
-                    GameLogStatus::Stale => f.write_str("Player.log does not describe this game process. Wait for the game to finish loading."),
-                    GameLogStatus::Unreadable => f.write_str("Player.log could not be read. Check its path and permissions."),
-                    GameLogStatus::Unrecognized => f.write_str("Player.log does not identify an offline character. Reconnect after loading one."),
-                    GameLogStatus::Current => f.write_str(readiness_message(decision.readiness)),
-                }
-            }
             Self::NotOffline(readiness) => f.write_str(readiness_message(*readiness)),
             Self::Protocol(error) => write!(f, "The helper returned an invalid response: {error}"),
             Self::Transport(error) => error.fmt(f),
@@ -142,14 +125,11 @@ fn readiness_message(readiness: GameReadiness) -> &'static str {
     }
 }
 
-pub struct Session<T, L> {
+pub struct Session<T> {
     target: ProcessIdentity,
-    started: Timestamp,
     transport: T,
-    log: L,
     profile: BuildProfile,
-    policy: GatePolicy,
-    enabled: bool,
+    lease: Option<ProfileLease>,
     state: SessionState,
     discovery: Option<Discovery>,
     status: Option<RuntimeStatus>,
@@ -157,7 +137,7 @@ pub struct Session<T, L> {
     last_write: Option<crate::writes::WriteRecord>,
     last_rate_write: Option<crate::field_writes::RateWriteRecord>,
 }
-impl<T: Transport, L: LogSource> Session<T, L> {
+impl<T: Transport> Session<T> {
     fn observation_matches(&self, expected: &crate::edits::ExpectedObservation) -> bool {
         let identity = expected.catalog_identity();
         expected.process() == &self.target
@@ -171,7 +151,7 @@ impl<T: Transport, L: LogSource> Session<T, L> {
         &self.profile
     }
 
-    pub fn new(target: ProcessIdentity, transport: T, log: L, profile: BuildProfile, policy: GatePolicy) -> Result<Self, SessionError> {
+    pub fn new(target: ProcessIdentity, transport: T, profile: BuildProfile) -> Result<Self, SessionError> {
         if transport.target() != &target {
             return Err(SessionError::Identity("transport belongs to a different process identity".into()));
         }
@@ -179,15 +159,11 @@ impl<T: Transport, L: LogSource> Session<T, L> {
             return Err(SessionError::Identity("invalid process identity".into()));
         }
         profile.validate_target(&target.executable).map_err(|e| SessionError::Identity(e.to_string()))?;
-        let started = Timestamp::from_nanosecond((i128::from(target.created) - 116_444_736_000_000_000) * 100).map_err(|e| SessionError::Identity(e.to_string()))?;
         Ok(Self {
             target,
-            started,
             transport,
-            log,
             profile,
-            policy,
-            enabled: false,
+            lease: None,
             state: SessionState::Disabled,
             discovery: None,
             status: None,
@@ -205,34 +181,23 @@ impl<T: Transport, L: LogSource> Session<T, L> {
     pub fn runtime_status(&self) -> Option<&RuntimeStatus> {
         self.status.as_ref()
     }
+    /// Content bytes read by the retained artifact lease, for I/O diagnostics.
+    /// None when disconnected or when the platform requires full revalidation.
+    pub fn artifact_bytes_read(&self) -> Option<u64> {
+        self.lease.as_ref().and_then(ProfileLease::bytes_read)
+    }
     pub fn cleanup(&self) -> Cleanup {
         self.cleanup
     }
     pub fn enable(&mut self) {
-        self.enabled = true;
         if self.state == SessionState::Disabled {
             self.state = SessionState::Disconnected;
         }
     }
-    fn gate(&mut self, now: Timestamp) -> Result<(), SessionError> {
-        if !self.enabled {
-            return Err(SessionError::Disabled);
-        }
-        let decision = gate::evaluate(&self.log.read(self.started), self.started, now, self.policy);
-        match decision.verdict {
-            GateVerdict::Allow | GateVerdict::Probe => Ok(()),
-            GateVerdict::Wait | GateVerdict::Refuse => {
-                self.release_without_io();
-                self.state = if decision.verdict == GateVerdict::Refuse {
-                    SessionState::Blocked
-                } else if decision.readiness == GameReadiness::Starting {
-                    SessionState::WaitingForGame
-                } else {
-                    SessionState::WaitingForCharacter
-                };
-                Err(SessionError::Gate(decision))
-            }
-        }
+    // Player.log admission belongs to the serialized backend. The session owns only
+    // transport lifecycle; the helper checks the current runtime graph on its main thread.
+    fn require_enabled(&self) -> Result<(), SessionError> {
+        if self.state == SessionState::Disabled { Err(SessionError::Disabled) } else { Ok(()) }
     }
     /// Leaves Connecting if this future is dropped: call disconnect before another attachment.
     pub async fn connect(&mut self, now: Timestamp) -> Result<(), SessionError> {
@@ -242,72 +207,40 @@ impl<T: Transport, L: LogSource> Session<T, L> {
         if self.state == SessionState::Ready {
             return self.refresh(now).await;
         }
-        self.gate(now)?;
+        self.require_enabled()?;
         self.state = SessionState::Connecting;
         self.status = None;
-        let elapsed = std::time::Instant::now();
-        let result = self.attach(now, elapsed).await;
-        if let Err(error) = &result
-            && self.state == SessionState::Connecting
-        {
-            self.state = match error {
-                SessionError::Helper { code: ResponseCode::NotReady, .. }
-                | SessionError::Transport(TransportError {
-                    delivery: Delivery::NotSent,
-                    failure: TransportFailure::Busy,
-                    ..
-                }) => SessionState::WaitingForGame,
-                SessionError::Helper {
-                    code: ResponseCode::OfflineRequired,
-                    ..
-                } => SessionState::WaitingForCharacter,
-                _ => SessionState::Blocked,
-            };
+        let result = self.attach().await;
+        if result.is_err() && self.state == SessionState::Connecting {
+            self.state = SessionState::Disconnected;
         }
         result
     }
-    async fn attach(&mut self, now: Timestamp, elapsed: std::time::Instant) -> Result<(), SessionError> {
+    async fn attach(&mut self) -> Result<(), SessionError> {
         let payload = self.request(&Request::Discover).await?;
         let discovery = Discovery::decode(&payload, self.target.pid).map_err(SessionError::Protocol)?;
         if !discovery.build_id.eq_ignore_ascii_case(self.profile.helper_build_id()) {
             return Err(SessionError::Identity("loaded helper source build ID differs; restart required".into()));
         }
-        self.profile.validate(&discovery.dispatcher).map_err(|e| SessionError::Identity(e.to_string()))?;
+        self.lease = Some(self.profile.capture_lease(&discovery.dispatcher).map_err(|e| SessionError::Identity(e.to_string()))?);
         self.discovery = Some(discovery);
         // A prior cleanup acknowledgement does not describe a newly attached helper session.
         self.cleanup = Cleanup::Unconfirmed;
-        // Discovery may have taken seconds; read Player.log again before Status can install anything.
-        let rechecked_at = Timestamp::from_nanosecond(now.as_nanosecond() + elapsed.elapsed().as_nanos() as i128).map_err(|e| SessionError::Identity(e.to_string()))?;
-        self.gate(rechecked_at)?;
         self.read_status().await
     }
-    pub async fn refresh(&mut self, now: Timestamp) -> Result<(), SessionError> {
+    pub async fn refresh(&mut self, _now: Timestamp) -> Result<(), SessionError> {
         if matches!(self.state, SessionState::Connecting | SessionState::Closing) {
             return Err(SessionError::Busy);
         }
-        self.gate(now)?;
+        self.require_enabled()?;
         if self.discovery.is_none() {
             return Err(SessionError::NotConnected);
         }
         self.status = None;
         self.state = SessionState::Connecting;
         let result = self.read_status().await;
-        if let Err(error) = &result
-            && self.state == SessionState::Connecting
-        {
-            self.state = match error {
-                SessionError::Helper { code: ResponseCode::NotReady, .. }
-                | SessionError::Transport(TransportError {
-                    delivery: Delivery::NotSent,
-                    failure: TransportFailure::Busy,
-                    ..
-                }) => SessionState::WaitingForGame,
-                SessionError::Helper {
-                    code: ResponseCode::OfflineRequired,
-                    ..
-                } => SessionState::WaitingForCharacter,
-                _ => SessionState::Blocked,
-            };
+        if result.is_err() && self.state == SessionState::Connecting {
+            self.state = SessionState::Disconnected;
         }
         result
     }
@@ -335,7 +268,7 @@ impl<T: Transport, L: LogSource> Session<T, L> {
                         || m.roll_ids.iter().any(|id| usize::from(*id) >= expected.implicit_rolls.len() || u32::from(*id) != m.index)
                 }) {
                     self.release_without_io();
-                    self.state = SessionState::Blocked;
+                    self.state = SessionState::Disconnected;
                     return Err(SessionError::Protocol(ProtocolError::InvalidData));
                 }
                 Ok(Some(modifiers))
@@ -347,14 +280,14 @@ impl<T: Transport, L: LogSource> Session<T, L> {
             Err(error) => Err(error),
         }
     }
-    /// Observe the two audited actor-stat fields. Identity tokens and raw float bits convey no
+    /// Observe the two actor-stat fields. Identity tokens and raw float bits convey no
     /// write authority. Feature-local graph unavailability leaves the admitted session ready;
     /// runtime offline/manager refusal revokes admission even though its typed reason is returned.
     pub async fn read_attack_leech(&mut self, now: Timestamp) -> Result<AttackLeechRead, SessionError> {
         if matches!(self.state, SessionState::Connecting | SessionState::Closing) {
             return Err(SessionError::Busy);
         }
-        self.gate(now)?;
+        self.require_enabled()?;
         if self.state != SessionState::Ready {
             return Err(SessionError::NotConnected);
         }
@@ -364,7 +297,6 @@ impl<T: Transport, L: LogSource> Session<T, L> {
             .ok_or(SessionError::NotConnected)?
             .manager;
         let dispatcher = self.discovery.as_ref().ok_or(SessionError::NotConnected)?.dispatcher;
-        let elapsed = std::time::Instant::now();
         let read = match self
             .read_owned_control(
                 now,
@@ -377,32 +309,30 @@ impl<T: Transport, L: LogSource> Session<T, L> {
                     Ok(read)
                 },
                 None,
-                None,
             )
             .await?
         {
             OwnedRead::Complete(read) => read,
             OwnedRead::Stopped => return Err(SessionError::Protocol(ProtocolError::InvalidData)),
         };
-        // This read also verifies the profile after I/O, rather than retaining an earlier match.
-        if let Err(error) = self.profile.validate(&dispatcher) {
+        if let Err(error) = self.validate_profile(&dispatcher) {
             self.release_without_io();
-            self.state = SessionState::Blocked;
+            self.state = SessionState::Disconnected;
             return Err(SessionError::Identity(error.to_string()));
         }
-        self.gate(advanced(now, elapsed)?)?;
+        self.require_enabled()?;
         if matches!(
             read,
             AttackLeechRead::Unavailable(AttackLeechUnavailable::OfflineRequired | AttackLeechUnavailable::ManagerAbsent | AttackLeechUnavailable::ManagerChanged)
         ) {
             self.release_without_io();
-            self.state = SessionState::WaitingForCharacter;
+            self.state = SessionState::Disconnected;
         }
         Ok(read)
     }
     /// Copy the game's literal item ranges. This carries no locale, rarity names or
     /// claim that the rest of the definitions catalog has been captured. The build
-    /// profile is revalidated on every read, and the helper independently gates it.
+    /// profile lease is checked on every read, and the helper independently gates it.
     pub async fn read_item_limits(&mut self, now: Timestamp) -> Result<ItemLimits, SessionError> {
         self.read_owned(now, |dispatcher| Request::ReadItemLimits { dispatcher }, definitions::decode).await
     }
@@ -412,15 +342,12 @@ impl<T: Transport, L: LogSource> Session<T, L> {
         self.read_owned(now, |dispatcher| Request::ReadLocale { dispatcher }, locale::decode).await
     }
     pub async fn read_catalog_page(&mut self, now: Timestamp, kind: CatalogKind, cursor: u32) -> Result<CatalogPage, SessionError> {
-        self.read_catalog_page_with_lease(now, kind, cursor, None).await
-    }
-    async fn read_catalog_page_with_lease(&mut self, now: Timestamp, kind: CatalogKind, cursor: u32, lease: Option<&ProfileLease>) -> Result<CatalogPage, SessionError> {
         let page = self
-            .read_owned_with_lease(now, |dispatcher| Request::ReadCatalogPage { dispatcher, kind, cursor }, catalog::decode, lease)
+            .read_owned(now, |dispatcher| Request::ReadCatalogPage { dispatcher, kind, cursor }, catalog::decode)
             .await?;
         if page.kind != kind || page.cursor != cursor {
             self.release_without_io();
-            self.state = SessionState::Blocked;
+            self.state = SessionState::Disconnected;
             return Err(SessionError::Protocol(ProtocolError::InvalidData));
         }
         Ok(page)
@@ -434,19 +361,18 @@ impl<T: Transport, L: LogSource> Session<T, L> {
         }
     }
     pub async fn capture_catalog_observed(&mut self, now: Timestamp, observer: &mut dyn CaptureObserver) -> Result<CaptureOutcome, SessionError> {
-        let elapsed = std::time::Instant::now();
-        let result = self.capture_catalog_inner(now, elapsed, observer).await;
+        let result = self.capture_catalog_inner(now, observer).await;
         if result.is_err() && self.state == SessionState::Ready {
             self.release_without_io();
-            self.state = SessionState::Blocked;
+            self.state = SessionState::Disconnected;
         }
         result
     }
-    async fn capture_catalog_inner(&mut self, now: Timestamp, elapsed: std::time::Instant, observer: &mut dyn CaptureObserver) -> Result<CaptureOutcome, SessionError> {
+    async fn capture_catalog_inner(&mut self, now: Timestamp, observer: &mut dyn CaptureObserver) -> Result<CaptureOutcome, SessionError> {
         if matches!(self.state, SessionState::Connecting | SessionState::Closing) {
             return Err(SessionError::Busy);
         }
-        self.gate(advanced(now, elapsed)?)?;
+        self.require_enabled()?;
         if self.state != SessionState::Ready {
             return Err(SessionError::NotConnected);
         }
@@ -455,10 +381,10 @@ impl<T: Transport, L: LogSource> Session<T, L> {
         }
         observer.progress(CaptureProgress::Starting);
         let dispatcher = self.discovery.as_ref().ok_or(SessionError::NotConnected)?.dispatcher;
-        // This local guard closes on every success, error, and future drop. It is
-        // never retained in Session or reused by an unrelated public read.
-        let lease = self.profile.capture_lease(&dispatcher).map_err(|error| SessionError::Identity(error.to_string()))?;
-        observer.progress(CaptureProgress::LeaseVerified { bytes_read: lease.bytes_read() });
+        self.validate_profile(&dispatcher).map_err(|error| SessionError::Identity(error.to_string()))?;
+        observer.progress(CaptureProgress::LeaseVerified {
+            bytes_read: self.artifact_bytes_read(),
+        });
         macro_rules! copied {
             ($future:expr) => {
                 match $future.await? {
@@ -467,21 +393,9 @@ impl<T: Transport, L: LogSource> Session<T, L> {
                 }
             };
         }
-        let locale = copied!(self.read_owned_control(
-            advanced(now, elapsed)?,
-            |dispatcher| Request::ReadLocale { dispatcher },
-            locale::decode,
-            Some(&lease),
-            Some(observer)
-        ));
+        let locale = copied!(self.read_owned_control(now, |dispatcher| Request::ReadLocale { dispatcher }, locale::decode, Some(observer)));
         observer.progress(CaptureProgress::LocaleRead);
-        let limits = copied!(self.read_owned_control(
-            advanced(now, elapsed)?,
-            |dispatcher| Request::ReadItemLimits { dispatcher },
-            definitions::decode,
-            Some(&lease),
-            Some(observer),
-        ));
+        let limits = copied!(self.read_owned_control(now, |dispatcher| Request::ReadItemLimits { dispatcher }, definitions::decode, Some(observer),));
         observer.progress(CaptureProgress::LimitsRead);
         let identity = crate::catalog::CatalogIdentity {
             binary_hash: self.profile.binary_hash().into(),
@@ -495,10 +409,9 @@ impl<T: Transport, L: LogSource> Session<T, L> {
         for kind in [CatalogKind::Bases, CatalogKind::Affixes, CatalogKind::Uniques, CatalogKind::Rarities] {
             while let Some(cursor) = builder.next_cursor(kind) {
                 let (page, length) = copied!(self.read_owned_control(
-                    advanced(now, elapsed)?,
+                    now,
                     |dispatcher| Request::ReadCatalogPage { dispatcher, kind, cursor },
                     |payload| Ok((catalog::decode(payload)?, payload.len())),
-                    Some(&lease),
                     Some(observer)
                 ));
                 if page.kind != kind || page.cursor != cursor {
@@ -520,19 +433,10 @@ impl<T: Transport, L: LogSource> Session<T, L> {
             }
         }
         observer.progress(CaptureProgress::VerifyingLocale { pages, bytes });
-        if copied!(self.read_owned_control(
-            advanced(now, elapsed)?,
-            |dispatcher| Request::ReadLocale { dispatcher },
-            locale::decode,
-            Some(&lease),
-            Some(observer)
-        )) != locale
-        {
+        if copied!(self.read_owned_control(now, |dispatcher| Request::ReadLocale { dispatcher }, locale::decode, Some(observer))) != locale {
             return Err(SessionError::Protocol(ProtocolError::InvalidData));
         }
-        self.profile
-            .validate_lease(&dispatcher, &lease)
-            .map_err(|error| SessionError::Identity(error.to_string()))?;
+        self.validate_profile(&dispatcher).map_err(|error| SessionError::Identity(error.to_string()))?;
         let catalog = builder.finish().map_err(SessionError::Protocol)?;
         observer.progress(CaptureProgress::Complete { pages, bytes });
         if observer.control() == CaptureControl::Stop {
@@ -541,32 +445,22 @@ impl<T: Transport, L: LogSource> Session<T, L> {
         Ok(CaptureOutcome::Complete(Box::new(catalog)))
     }
     async fn read_owned<R>(&mut self, now: Timestamp, request: impl FnOnce(DispatcherSpec) -> Request, decode: fn(&[u8]) -> Result<R, ProtocolError>) -> Result<R, SessionError> {
-        self.read_owned_with_lease(now, request, decode, None).await
-    }
-    async fn read_owned_with_lease<R>(
-        &mut self,
-        now: Timestamp,
-        request: impl FnOnce(DispatcherSpec) -> Request,
-        decode: fn(&[u8]) -> Result<R, ProtocolError>,
-        lease: Option<&ProfileLease>,
-    ) -> Result<R, SessionError> {
-        match self.read_owned_control(now, request, decode, lease, None).await? {
+        match self.read_owned_control(now, request, decode, None).await? {
             OwnedRead::Complete(value) => Ok(value),
             OwnedRead::Stopped => Err(SessionError::Protocol(ProtocolError::InvalidData)),
         }
     }
     async fn read_owned_control<R>(
         &mut self,
-        now: Timestamp,
+        _now: Timestamp,
         request: impl FnOnce(DispatcherSpec) -> Request,
         decode: impl FnOnce(&[u8]) -> Result<R, ProtocolError>,
-        lease: Option<&ProfileLease>,
         mut observer: Option<&mut dyn CaptureObserver>,
     ) -> Result<OwnedRead<R>, SessionError> {
         if matches!(self.state, SessionState::Connecting | SessionState::Closing) {
             return Err(SessionError::Busy);
         }
-        self.gate(now)?;
+        self.require_enabled()?;
         if self.state != SessionState::Ready {
             return Err(SessionError::NotConnected);
         }
@@ -574,18 +468,11 @@ impl<T: Transport, L: LogSource> Session<T, L> {
             return Ok(OwnedRead::Stopped);
         }
         let dispatcher = self.discovery.as_ref().ok_or(SessionError::NotConnected)?.dispatcher;
-        let elapsed = std::time::Instant::now();
-        let validation = match lease {
-            Some(lease) => self.profile.validate_lease(&dispatcher, lease),
-            None => self.profile.validate(&dispatcher),
-        };
-        if let Err(error) = validation {
+        if let Err(error) = self.validate_profile(&dispatcher) {
             self.release_without_io();
-            self.state = SessionState::Blocked;
+            self.state = SessionState::Disconnected;
             return Err(SessionError::Identity(error.to_string()));
         }
-        // File verification can take time. Admission must still hold immediately before I/O.
-        self.gate(advanced(now, elapsed)?)?;
         if observer.as_mut().is_some_and(|observer| observer.control() == CaptureControl::Stop) {
             return Ok(OwnedRead::Stopped);
         }
@@ -599,16 +486,11 @@ impl<T: Transport, L: LogSource> Session<T, L> {
         let result = self.request(&request).await.and_then(|bytes| decode(&bytes).map_err(SessionError::Protocol));
         match result {
             Ok(snapshot) => {
-                if let Some(lease) = lease
-                    && let Err(error) = self.profile.validate_lease(&dispatcher, lease)
-                {
+                if let Err(error) = self.validate_profile(&dispatcher) {
                     self.release_without_io();
-                    self.state = SessionState::Blocked;
+                    self.state = SessionState::Disconnected;
                     return Err(SessionError::Identity(error.to_string()));
                 }
-                // The helper independently checks runtime offline/native-manager life in the
-                // same main-thread operation, before reading data. Recheck the log too.
-                self.gate(advanced(now, elapsed)?)?;
                 self.status = status;
                 self.state = SessionState::Ready;
                 if observer.as_mut().is_some_and(|observer| observer.control() == CaptureControl::Stop) {
@@ -626,21 +508,29 @@ impl<T: Transport, L: LogSource> Session<T, L> {
                         }
                     )
                 {
-                    self.gate(advanced(now, elapsed)?)?;
                     self.status = status;
                     self.state = SessionState::Ready;
                     return Err(error);
                 }
                 self.release_without_io();
                 if self.state == SessionState::Connecting {
-                    self.state = SessionState::Blocked;
+                    self.state = SessionState::Disconnected;
                 }
                 Err(error)
             }
         }
     }
+    fn validate_profile(&self, dispatcher: &DispatcherSpec) -> std::io::Result<()> {
+        let lease = self.lease.as_ref().ok_or_else(|| std::io::Error::other("session artifact lease missing"))?;
+        self.profile.validate_lease(dispatcher, lease)
+    }
     async fn read_status(&mut self) -> Result<(), SessionError> {
         let dispatcher = self.discovery.as_ref().ok_or(SessionError::NotConnected)?.dispatcher;
+        if let Err(error) = self.validate_profile(&dispatcher) {
+            self.release_without_io();
+            self.state = SessionState::Disconnected;
+            return Err(SessionError::Identity(error.to_string()));
+        }
         let bytes = self.request(&Request::Status { dispatcher }).await?;
         let status = RuntimeStatus::decode(&bytes).map_err(SessionError::Protocol)?;
         let readiness = if status.manager == 0 {
@@ -653,7 +543,7 @@ impl<T: Transport, L: LogSource> Session<T, L> {
         self.status = Some(status);
         if readiness != GameReadiness::Offline {
             self.release_without_io();
-            self.state = SessionState::WaitingForCharacter;
+            self.state = SessionState::Disconnected;
             return Err(SessionError::NotOffline(readiness));
         }
         self.state = SessionState::Ready;
@@ -666,7 +556,7 @@ impl<T: Transport, L: LogSource> Session<T, L> {
         }
         if response.code == ResponseCode::OfflineRequired {
             self.release_without_io();
-            self.state = SessionState::WaitingForCharacter;
+            self.state = SessionState::Disconnected;
         }
         Err(SessionError::Helper {
             code: response.code,
@@ -679,6 +569,7 @@ impl<T: Transport, L: LogSource> Session<T, L> {
             self.cleanup = Cleanup::Unconfirmed;
         }
         self.status = None;
+        self.lease = None;
         // Once offline admission is lost, there is no more client process/pipe access. The helper
         // must independently remove gameplay features on its main-thread callback.
     }
@@ -697,21 +588,20 @@ impl<T: Transport, L: LogSource> Session<T, L> {
     }
     /// Explicit asynchronous cleanup; dropping Session never claims to turn effects off or unload code.
     pub async fn disconnect(&mut self) -> Cleanup {
+        let was_disabled = self.state == SessionState::Disabled;
         self.abandon_pending_write();
         self.status = None;
         self.state = SessionState::Closing;
         // Best effort, as in HookSync.TurnOffAsync. Cancellation never proves a submitted clear ran.
         let _ = tokio::time::timeout(std::time::Duration::from_secs(3), self.clear_hooks()).await;
         self.discovery = None;
-        self.state = if self.enabled { SessionState::Disconnected } else { SessionState::Disabled };
+        self.lease = None;
+        self.state = if was_disabled { SessionState::Disabled } else { SessionState::Disconnected };
         self.cleanup
     }
     pub async fn disable(&mut self) -> Cleanup {
-        self.enabled = false;
-        self.disconnect().await
+        let cleanup = self.disconnect().await;
+        self.state = SessionState::Disabled;
+        cleanup
     }
-}
-
-fn advanced(now: Timestamp, elapsed: std::time::Instant) -> Result<Timestamp, SessionError> {
-    Timestamp::from_nanosecond(now.as_nanosecond() + elapsed.elapsed().as_nanos() as i128).map_err(|error| SessionError::Identity(error.to_string()))
 }
