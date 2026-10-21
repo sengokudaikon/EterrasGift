@@ -41,10 +41,29 @@ pub fn replace(path: &Path, write: impl FnOnce(&Path) -> io::Result<()>) -> io::
     create_parent(path)?;
     let temporary = temporary(path);
     let result = write(&temporary)
+        .and_then(|()| writable(&temporary))
         .and_then(|()| OpenOptions::new().write(true).open(&temporary)?.sync_all())
         .and_then(|()| move_replace(&temporary, path));
     discard(&temporary);
     result
+}
+
+/// A copy carries its source's read-only attribute (a read-only DLL in Mods, say), and a read-only file can be neither
+/// opened to sync it nor replaced later, so the new file is always left writable.
+#[cfg(windows)]
+fn writable(path: &Path) -> io::Result<()> {
+    let mut permissions = fs::metadata(path)?.permissions();
+    if permissions.readonly() {
+        // On Windows this clears only FILE_ATTRIBUTE_READONLY; the lint's concern is Unix mode bits.
+        #[allow(clippy::permissions_set_readonly_false)]
+        permissions.set_readonly(false);
+        fs::set_permissions(path, permissions)?;
+    }
+    Ok(())
+}
+#[cfg(not(windows))]
+fn writable(_path: &Path) -> io::Result<()> {
+    Ok(())
 }
 
 fn create_parent(path: &Path) -> io::Result<()> {
@@ -151,6 +170,25 @@ mod tests {
             })
             .unwrap();
         fs::remove_dir(leftover).unwrap();
+    }
+
+    #[test]
+    #[cfg(windows)]
+    fn a_read_only_source_copies_and_the_copy_is_writable() {
+        let temp = tempfile::tempdir().unwrap();
+        let source = temp.path().join("Mod.dll");
+        let target = temp.path().join("library").join("Mod.dll");
+        fs::write(&source, b"mod").unwrap();
+        let mut permissions = fs::metadata(&source).unwrap().permissions();
+        permissions.set_readonly(true);
+        fs::set_permissions(&source, permissions).unwrap();
+        // As the mod library's copy_verified does: a plain copy, then the replace's sync.
+        replace(&target, |temporary| fs::copy(&source, temporary).map(drop)).unwrap();
+        assert_eq!(fs::read(&target).unwrap(), b"mod");
+        assert!(!fs::metadata(&target).unwrap().permissions().readonly());
+        // So a later copy can replace it.
+        copy(&source, &target).unwrap();
+        assert_eq!(fs::read_dir(target.parent().unwrap()).unwrap().count(), 1);
     }
 
     #[test]
