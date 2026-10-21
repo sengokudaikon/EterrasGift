@@ -5,15 +5,12 @@ use eg_core::{
     hashes,
 };
 use eg_game_access::artifact::ReadLease;
-use eg_trainer::session::{CaptureControl, CaptureObserver, CaptureOutcome, CaptureProgress, Cleanup};
 use eg_trainer::{
     gate::LogSource,
     profile::BuildProfile,
     session::{Session, SessionError, SessionState},
 };
 use eg_trainer_wire::{
-    catalog::{self, CatalogEntries, CatalogKind, CatalogPage, DefinitionName, DefinitionNameSource, ItemTypeDefinition},
-    definitions::{self, ItemLimits, ValueRange},
     locale::{self, GameLocale},
     process::ProcessIdentity,
     protocol::{Discovery, DispatcherSpec, Request, Response, ResponseCode, RuntimeStatus},
@@ -46,42 +43,6 @@ fn locale() -> GameLocale {
         game_version: "owned-lease".into(),
     }
 }
-fn limits() -> ItemLimits {
-    let r = ValueRange { minimum: 0, maximum: 255 };
-    ItemLimits {
-        forging_potential: r,
-        legendary_potential: r,
-        weavers_will: r,
-        weavers_touch: r,
-        level_requirement: r,
-    }
-}
-fn page(kind: CatalogKind, cursor: u32, total: u32) -> CatalogPage {
-    CatalogPage {
-        locale: locale(),
-        kind,
-        cursor,
-        total,
-        entries: match kind {
-            CatalogKind::Bases => CatalogEntries::Bases(
-                (cursor..total.min(cursor + 16))
-                    .map(|id| ItemTypeDefinition {
-                        item_type: id as u8,
-                        name: DefinitionName {
-                            text: format!("Base {id}"),
-                            source: DefinitionNameSource::StoredDisplay,
-                        },
-                        sub_types: vec![],
-                    })
-                    .collect(),
-            ),
-            CatalogKind::Affixes => CatalogEntries::Affixes(vec![]),
-            CatalogKind::Uniques => CatalogEntries::Uniques(vec![]),
-            CatalogKind::Rarities => CatalogEntries::Rarities(vec![]),
-        },
-    }
-}
-
 struct Fixture {
     _temp: tempfile::TempDir,
     binary: PathBuf,
@@ -147,13 +108,6 @@ impl Fixture {
             .encode()
             .unwrap()
             .to_vec(),
-            locale::encode(&locale()).unwrap(),
-            definitions::encode(&limits()).unwrap(),
-            catalog::encode(&page(CatalogKind::Bases, 0, 17)).unwrap(),
-            catalog::encode(&page(CatalogKind::Bases, 16, 17)).unwrap(),
-            catalog::encode(&page(CatalogKind::Affixes, 0, 0)).unwrap(),
-            catalog::encode(&page(CatalogKind::Uniques, 0, 0)).unwrap(),
-            catalog::encode(&page(CatalogKind::Rarities, 0, 0)).unwrap(),
             locale::encode(&locale()).unwrap(),
         ];
         Wire {
@@ -226,16 +180,16 @@ impl Transport for Wire {
                 assert_shared(OpenOptions::new().write(true).open(&self.binary).unwrap_err());
                 assert_shared(OpenOptions::new().write(true).open(&self.metadata).unwrap_err());
             }
-            if s.refuse_runtime && matches!(request, Request::ReadCatalogPage { .. }) {
+            if s.refuse_runtime && matches!(request, Request::ReadLocale { .. }) {
                 return Ok(Response {
                     code: ResponseCode::OfflineRequired,
                     payload: b"offline character required".to_vec(),
                 });
             }
-            if s.replace_metadata && matches!(request, Request::ReadCatalogPage { .. }) {
-                fs::write(&self.metadata, b"changed during fallback catalog reply").unwrap();
+            if s.replace_metadata && matches!(request, Request::ReadLocale { .. }) {
+                fs::write(&self.metadata, b"changed during fallback reply").unwrap();
             }
-            let wait = s.pending && matches!(request, Request::ReadCatalogPage { .. });
+            let wait = s.pending && matches!(request, Request::ReadLocale { .. });
             (wait, if wait { vec![] } else { s.responses.pop_front().expect("unexpected request") })
         };
         if wait {
@@ -340,15 +294,14 @@ fn existing_writer_selects_explicit_full_hash_fallback_instead_of_claiming_a_lea
 }
 
 #[test]
-fn session_reuses_one_lease_across_capture_polling_and_public_reads() {
+fn session_reuses_one_lease_across_polling_and_public_reads() {
     let f = Fixture::new();
     // Large enough to expose content I/O regressions independently of timing.
     OpenOptions::new().write(true).open(&f.binary).unwrap().set_len(8 * 1024 * 1024).unwrap();
     let (mut session, shared) = connected(&f);
     let initial = session.artifact_bytes_read().unwrap();
     assert!(initial > 8 * 1024 * 1024);
-    let catalog = run(session.capture_catalog(now())).unwrap();
-    assert_eq!(catalog.bases.len(), 17);
+    assert_eq!(run(session.read_locale(now())).unwrap(), locale());
     for _ in 0..12 {
         let mut state = shared.lock().unwrap();
         state.responses.push_back(
@@ -362,12 +315,10 @@ fn session_reuses_one_lease_across_capture_polling_and_public_reads() {
             .to_vec(),
         );
         state.responses.push_back(locale::encode(&locale()).unwrap());
-        state.responses.push_back(definitions::encode(&limits()).unwrap());
         state.responses.push_back(eg_trainer_wire::forge::encode(None).unwrap());
         drop(state);
         run(session.refresh(now())).unwrap();
         run(session.read_locale(now())).unwrap();
-        run(session.read_item_limits(now())).unwrap();
         assert_eq!(run(session.read_forge(now())).unwrap(), None);
         assert_eq!(session.artifact_bytes_read(), Some(initial));
     }
@@ -378,7 +329,7 @@ fn session_reuses_one_lease_across_capture_polling_and_public_reads() {
 }
 
 #[test]
-fn capture_future_drop_retains_session_lease_and_preserves_connecting_barrier() {
+fn read_future_drop_retains_session_lease_and_preserves_connecting_barrier() {
     let f = Fixture::new();
     let log = Logs::new();
     let wire = f.wire(log.clone());
@@ -387,7 +338,7 @@ fn capture_future_drop_retains_session_lease_and_preserves_connecting_barrier() 
     let mut session = Session::new(f.target.clone(), wire, f.profile()).unwrap();
     session.enable();
     run(session.connect(now())).unwrap();
-    let mut future = Box::pin(session.capture_catalog(now()));
+    let mut future = Box::pin(session.read_locale(now()));
     let mut context = Context::from_waker(Waker::noop());
     assert!(future.as_mut().poll(&mut context).is_pending());
     assert_shared(OpenOptions::new().write(true).open(&f.metadata).unwrap_err());
@@ -402,7 +353,7 @@ fn capture_future_drop_retains_session_lease_and_preserves_connecting_barrier() 
 }
 
 #[test]
-fn per_page_runtime_refusal_discards_capture_releases_lease_and_stops_all_further_io() {
+fn runtime_refusal_releases_lease_and_stops_all_further_io() {
     let f = Fixture::new();
     let log = Logs::new();
     let wire = f.wire(log.clone());
@@ -412,21 +363,21 @@ fn per_page_runtime_refusal_discards_capture_releases_lease_and_stops_all_furthe
     session.enable();
     run(session.connect(now())).unwrap();
     assert!(matches!(
-        run(session.capture_catalog(now())),
+        run(session.read_locale(now())),
         Err(SessionError::Helper {
             code: ResponseCode::OfflineRequired,
             ..
         })
     ));
     assert_eq!(session.state(), SessionState::Disconnected);
-    assert_eq!(shared.lock().unwrap().requests.len(), 5);
+    assert_eq!(shared.lock().unwrap().requests.len(), 3);
     assert!(OpenOptions::new().write(true).open(&f.metadata).is_ok());
     run(session.disconnect());
-    assert_eq!(shared.lock().unwrap().requests.len(), 5);
+    assert_eq!(shared.lock().unwrap().requests.len(), 3);
 }
 
 #[test]
-fn changed_artifact_before_capture_is_rejected_before_any_catalog_request() {
+fn changed_artifact_before_a_read_is_rejected_before_its_request() {
     for binary in [true, false] {
         let f = Fixture::new();
         let log = Logs::new();
@@ -442,7 +393,7 @@ fn changed_artifact_before_capture_is_rejected_before_any_catalog_request() {
         session.enable();
         run(session.connect(now())).unwrap();
         fs::write(if binary { &f.binary } else { &f.metadata }, b"changed before lease").unwrap();
-        assert!(matches!(run(session.capture_catalog(now())), Err(SessionError::Identity(_))));
+        assert!(matches!(run(session.read_locale(now())), Err(SessionError::Identity(_))));
         assert_eq!(session.state(), SessionState::Disconnected);
         assert_eq!(shared.lock().unwrap().requests.len(), 2);
     }
@@ -456,8 +407,8 @@ fn fallback_hashes_unchanged_artifacts_once_rather_than_on_every_read() {
     // No lease holds the files against writes: the fallback is what this checks.
     shared.lock().unwrap().assert_locks = false;
     assert_eq!(session.artifact_bytes_read(), None, "another writer selects the fallback");
-    run(session.capture_catalog(now())).unwrap();
-    // Connecting and every catalog page checked the files; the content was read once.
+    assert_eq!(run(session.read_locale(now())).unwrap(), locale());
+    // Connecting and the read checked the files; the content was read once.
     let after_connect = session.artifact_full_validations().unwrap();
     assert_eq!(after_connect, 1);
     for _ in 0..12 {
@@ -485,7 +436,7 @@ fn fallback_hashes_unchanged_artifacts_once_rather_than_on_every_read() {
 }
 
 #[test]
-fn fallback_rehashes_each_page_and_rejects_an_inflight_artifact_change() {
+fn fallback_rehashes_each_read_and_rejects_an_inflight_artifact_change() {
     let f = Fixture::new();
     let log = Logs::new();
     let wire = f.wire(log.clone());
@@ -499,46 +450,13 @@ fn fallback_rehashes_each_page_and_rejects_an_inflight_artifact_change() {
         state.assert_locks = false;
         state.replace_metadata = true;
     }
-    assert!(matches!(run(session.capture_catalog(now())), Err(SessionError::Identity(_))));
-    assert_eq!(shared.lock().unwrap().requests.len(), 5);
+    assert!(matches!(run(session.read_locale(now())), Err(SessionError::Identity(_))));
+    assert_eq!(shared.lock().unwrap().requests.len(), 3);
     assert_eq!(session.state(), SessionState::Disconnected);
     drop(writer);
     assert!(OpenOptions::new().write(true).open(&f.binary).is_ok());
 }
 
-struct Observe {
-    events: Vec<CaptureProgress>,
-    stop: bool,
-    when: fn(&CaptureProgress) -> bool,
-    calls: usize,
-    stop_on_control: Option<usize>,
-}
-impl Observe {
-    fn at(when: fn(&CaptureProgress) -> bool) -> Self {
-        Self {
-            events: vec![],
-            stop: false,
-            when,
-            calls: 0,
-            stop_on_control: None,
-        }
-    }
-}
-impl CaptureObserver for Observe {
-    fn control(&mut self) -> CaptureControl {
-        self.calls += 1;
-        if self.stop || self.stop_on_control == Some(self.calls) {
-            self.stop = true;
-            CaptureControl::Stop
-        } else {
-            CaptureControl::Continue
-        }
-    }
-    fn progress(&mut self, event: CaptureProgress) {
-        self.stop |= (self.when)(&event);
-        self.events.push(event);
-    }
-}
 fn connected(f: &Fixture) -> (Session<Wire>, Arc<Mutex<WireState>>) {
     let log = Logs::new();
     let wire = f.wire(log.clone());
@@ -547,135 +465,4 @@ fn connected(f: &Fixture) -> (Session<Wire>, Arc<Mutex<WireState>>) {
     session.enable();
     run(session.connect(now())).unwrap();
     (session, shared)
-}
-
-#[test]
-fn successful_progress_counts_actual_payload_bytes_without_publishing_partial_catalogs() {
-    let f = Fixture::new();
-    let (mut session, shared) = connected(&f);
-    let mut observer = Observe::at(|_| false);
-    let outcome = run(session.capture_catalog_observed(now(), &mut observer)).unwrap();
-    assert!(matches!(outcome,CaptureOutcome::Complete(catalog) if catalog.bases.len()==17));
-    let copied: Vec<_> = observer
-        .events
-        .iter()
-        .filter_map(|event| match event {
-            CaptureProgress::Page {
-                kind,
-                cursor,
-                total,
-                count,
-                pages,
-                bytes,
-            } => Some((*kind, *cursor, *total, *count, *pages, *bytes)),
-            _ => None,
-        })
-        .collect();
-    let expected = [
-        (CatalogKind::Bases, 0, 17, 16),
-        (CatalogKind::Bases, 16, 17, 1),
-        (CatalogKind::Affixes, 0, 0, 0),
-        (CatalogKind::Uniques, 0, 0, 0),
-        (CatalogKind::Rarities, 0, 0, 0),
-    ];
-    let mut bytes = 0;
-    for (index, (kind, cursor, total, count)) in expected.into_iter().enumerate() {
-        bytes += catalog::encode(&page(kind, cursor, total)).unwrap().len() as u64;
-        assert_eq!(copied[index], (kind, cursor, total, count, index as u32 + 1, bytes));
-    }
-    assert_eq!(observer.events.last(), Some(&CaptureProgress::Complete { pages: 5, bytes }));
-    assert_eq!(session.state(), SessionState::Ready);
-    assert_eq!(shared.lock().unwrap().requests.len(), 10);
-}
-
-#[test]
-fn stopping_after_a_page_keeps_session_lease_ready_and_allows_confirmed_cleanup() {
-    let f = Fixture::new();
-    let (mut session, shared) = connected(&f);
-    let mut observer = Observe::at(|event| {
-        matches!(
-            event,
-            CaptureProgress::Page {
-                kind: CatalogKind::Bases,
-                cursor: 0,
-                ..
-            }
-        )
-    });
-    assert_eq!(run(session.capture_catalog_observed(now(), &mut observer)).unwrap(), CaptureOutcome::Stopped);
-    assert_eq!(shared.lock().unwrap().requests.len(), 5);
-    assert_eq!(session.state(), SessionState::Ready);
-    assert!(session.runtime_status().is_some());
-    assert_shared(OpenOptions::new().write(true).open(&f.metadata).unwrap_err());
-    assert_eq!(run(session.disconnect()), Cleanup::ConfirmedOff);
-    assert!(OpenOptions::new().write(true).open(&f.metadata).is_ok());
-    assert_eq!(shared.lock().unwrap().requests.len(), 6);
-    assert!(!observer.events.iter().any(|event| matches!(event, CaptureProgress::Complete { .. })));
-}
-
-#[test]
-fn deliberate_stops_before_first_rpc_after_limits_and_before_final_locale_preserve_cleanup() {
-    for phase in 0..4 {
-        let f = Fixture::new();
-        let (mut session, shared) = connected(&f);
-        let mut observer = Observe::at(match phase {
-            0 => |_| false,
-            1 => |event| matches!(event, CaptureProgress::LeaseVerified { .. }),
-            2 => |event| matches!(event, CaptureProgress::LimitsRead),
-            _ => |event| matches!(event, CaptureProgress::VerifyingLocale { .. }),
-        });
-        observer.stop = phase == 0;
-        assert_eq!(run(session.capture_catalog_observed(now(), &mut observer)).unwrap(), CaptureOutcome::Stopped);
-        assert_eq!(shared.lock().unwrap().requests.len(), [2, 2, 4, 9][phase]);
-        assert_eq!(session.state(), SessionState::Ready);
-        assert_shared(OpenOptions::new().write(true).open(&f.binary).unwrap_err());
-        assert_eq!(run(session.disconnect()), Cleanup::ConfirmedOff);
-        assert!(OpenOptions::new().write(true).open(&f.binary).is_ok());
-    }
-}
-
-#[test]
-fn stop_after_final_validation_discards_even_a_complete_local_catalog() {
-    let f = Fixture::new();
-    let (mut session, shared) = connected(&f);
-    let mut observer = Observe::at(|event| matches!(event, CaptureProgress::Complete { .. }));
-    assert_eq!(run(session.capture_catalog_observed(now(), &mut observer)).unwrap(), CaptureOutcome::Stopped);
-    assert_eq!(shared.lock().unwrap().requests.len(), 10);
-    assert_eq!(session.state(), SessionState::Ready);
-    assert_eq!(run(session.disconnect()), Cleanup::ConfirmedOff);
-}
-
-#[test]
-fn control_is_checked_again_after_artifact_validation_immediately_before_rpc() {
-    let f = Fixture::new();
-    let (mut session, shared) = connected(&f);
-    let mut observer = Observe::at(|_| false);
-    observer.stop_on_control = Some(6);
-    assert_eq!(run(session.capture_catalog_observed(now(), &mut observer)).unwrap(), CaptureOutcome::Stopped);
-    assert_eq!(
-        shared.lock().unwrap().requests.len(),
-        3,
-        "locale finished; limits stopped after file validation before send"
-    );
-    assert_eq!(session.state(), SessionState::Ready);
-    assert_eq!(run(session.disconnect()), Cleanup::ConfirmedOff);
-}
-
-#[test]
-fn observer_stop_does_not_turn_runtime_refusal_into_successful_cancellation() {
-    let f = Fixture::new();
-    let (mut session, shared) = connected(&f);
-    shared.lock().unwrap().refuse_runtime = true;
-    let mut observer = Observe::at(|event| matches!(event, CaptureProgress::Page { .. }));
-    assert!(matches!(
-        run(session.capture_catalog_observed(now(), &mut observer)),
-        Err(SessionError::Helper {
-            code: ResponseCode::OfflineRequired,
-            ..
-        })
-    ));
-    assert_eq!(session.state(), SessionState::Disconnected);
-    let before = shared.lock().unwrap().requests.len();
-    assert_eq!(run(session.disconnect()), Cleanup::Unconfirmed);
-    assert_eq!(shared.lock().unwrap().requests.len(), before);
 }

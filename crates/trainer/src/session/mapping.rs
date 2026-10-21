@@ -10,7 +10,7 @@ impl<T: Transport> Session<T> {
     /// full selected item/manager; all pages must have one captured locale and
     /// opaque context before a table is exposed. This never records a write.
     pub async fn resolve_mapping(&mut self, now: Timestamp, expected: &ExpectedObservation, request: &MappingRequest) -> Result<ValueTable, SessionError> {
-        self.resolve_mapping_observed(now, expected, request, &mut ContinueCapture).await
+        self.resolve_mapping_observed(now, expected, request, &mut ContinueRead).await
     }
     /// Stop only before or after a completed RPC; never abandon pipe I/O or its
     /// artifact lease when the editor moves to a different draft.
@@ -19,9 +19,9 @@ impl<T: Transport> Session<T> {
         now: Timestamp,
         expected: &ExpectedObservation,
         request: &MappingRequest,
-        observer: &mut dyn CaptureObserver,
+        observer: &mut dyn ReadObserver,
     ) -> Result<ValueTable, SessionError> {
-        if observer.control() == CaptureControl::Stop {
+        if observer.control() == ReadControl::Stop {
             return Err(SessionError::Busy);
         }
         if matches!(self.state, SessionState::Connecting | SessionState::Closing) {
@@ -73,7 +73,7 @@ impl<T: Transport> Session<T> {
         }
         builder.finish().map_err(unavailable)
     }
-    async fn mapping_page(&mut self, now: Timestamp, request: Request, observer: &mut dyn CaptureObserver) -> Result<mapping::RawMappingPage, SessionError> {
+    async fn mapping_page(&mut self, now: Timestamp, request: Request, observer: &mut dyn ReadObserver) -> Result<mapping::RawMappingPage, SessionError> {
         let Request::MapRoll(query) = &request else {
             return Err(SessionError::Protocol(ProtocolError::InvalidData));
         };

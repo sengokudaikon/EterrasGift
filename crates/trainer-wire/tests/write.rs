@@ -1,7 +1,6 @@
 use eg_trainer_wire::protocol::RequestFrame as FrameAssembler;
 use eg_trainer_wire::write::*;
 use eg_trainer_wire::{
-    catalog::CatalogKind,
     forge::{self, AffixSnapshot, ForgeSnapshot, ItemStatus, UniqueIdentity},
     protocol::{DispatcherSpec, MAGIC, ProtocolError, REQUEST_HEADER_SIZE, Request, Response, ResponseCode},
 };
@@ -134,13 +133,7 @@ fn seen_excess_poisoned_and_control_requests_do_not_gain_a_tail() {
         Request::Status { dispatcher: spec() },
         Request::ClearHooks { dispatcher: spec() },
         Request::ReadForge { dispatcher: spec() },
-        Request::ReadItemLimits { dispatcher: spec() },
         Request::ReadLocale { dispatcher: spec() },
-        Request::ReadCatalogPage {
-            dispatcher: spec(),
-            kind: CatalogKind::Affixes,
-            cursor: 16,
-        },
     ];
     for request in controls {
         let bytes = request.encode();

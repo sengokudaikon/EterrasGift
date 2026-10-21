@@ -26,7 +26,6 @@ fn compact_control_requests_have_only_their_sequential_body() {
         (7, Request::Status { dispatcher: dispatcher() }),
         (15, Request::ClearHooks { dispatcher: dispatcher() }),
         (18, Request::ReadForge { dispatcher: dispatcher() }),
-        (19, Request::ReadItemLimits { dispatcher: dispatcher() }),
         (20, Request::ReadLocale { dispatcher: dispatcher() }),
     ] {
         let golden = envelope(operation, &proof());
@@ -68,32 +67,12 @@ fn attack_leech_request_compares_nonzero_manager() {
     assert!(Request::decode(&golden).is_err());
 }
 #[test]
-fn catalog_cursor_and_kind_bounds_survive_the_short_header() {
-    use eg_trainer_wire::catalog::CatalogKind;
-    for kind in [CatalogKind::Bases, CatalogKind::Affixes, CatalogKind::Uniques, CatalogKind::Rarities] {
-        for cursor in [0, kind.maximum_total()] {
-            let request = Request::ReadCatalogPage {
-                dispatcher: dispatcher(),
-                kind,
-                cursor,
-            };
-            let mut body = proof();
-            body.extend((kind as u32).to_le_bytes());
-            body.extend(cursor.to_le_bytes());
-            assert_eq!(request.encode(), envelope(21, &body));
-            assert_eq!(Request::decode(&request.encode()), Ok(request));
-        }
-        assert!(
-            Request::decode(
-                &Request::ReadCatalogPage {
-                    dispatcher: dispatcher(),
-                    kind,
-                    cursor: kind.maximum_total() + 1
-                }
-                .encode()
-            )
-            .is_err()
-        );
+fn retired_catalog_operations_are_refused() {
+    // 19 (item limits) and 21 (catalog pages) captured definitions from the game; they come from its files now.
+    for (operation, tail) in [(19, vec![]), (21, [0_u32.to_le_bytes(), 0_u32.to_le_bytes()].concat())] {
+        let mut body = proof();
+        body.extend(tail);
+        assert!(Request::decode(&envelope(operation, &body)).is_err(), "operation {operation}");
     }
 }
 

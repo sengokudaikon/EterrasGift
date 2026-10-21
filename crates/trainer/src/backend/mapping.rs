@@ -14,7 +14,7 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
             epoch,
             cancel: self.read_cancel.clone(),
         };
-        if control.control() == CaptureControl::Stop {
+        if control.control() == ReadControl::Stop {
             return Err(BackendError::blocked(ErrorKind::Superseded, "Value request canceled."));
         }
         if self.state.expected_observation().as_ref() != Ok(&expected) {
@@ -57,7 +57,7 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
                     ErrorKind::MappingUnavailable | ErrorKind::MappingRetryable | ErrorKind::NotReady | ErrorKind::Superseded
                 )
             });
-        if control.control() == CaptureControl::Stop && optional_result && self.connection.as_ref().is_some_and(BackendConnection::is_ready) {
+        if control.control() == ReadControl::Stop && optional_result && self.connection.as_ref().is_some_and(BackendConnection::is_ready) {
             return Err(BackendError::blocked(ErrorKind::Superseded, "Value request canceled."));
         }
         // Context may also change midway through the paged sample. Refresh the
@@ -135,12 +135,12 @@ struct MappingControl {
     epoch: u64,
     cancel: Option<Arc<AtomicBool>>,
 }
-impl CaptureObserver for MappingControl {
-    fn control(&mut self) -> CaptureControl {
+impl ReadObserver for MappingControl {
+    fn control(&mut self) -> ReadControl {
         if *self.intent.lock().unwrap_or_else(|p| p.into_inner()) != self.epoch || self.cancel.as_ref().is_some_and(|cancel| cancel.load(Ordering::Acquire)) {
-            CaptureControl::Stop
+            ReadControl::Stop
         } else {
-            CaptureControl::Continue
+            ReadControl::Continue
         }
     }
 }

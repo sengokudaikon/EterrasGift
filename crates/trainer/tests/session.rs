@@ -18,8 +18,7 @@ use eg_trainer::{
     session::{Cleanup, Session, SessionError, SessionState},
 };
 use eg_trainer_wire::{
-    catalog::{self, CatalogEntries, CatalogKind, CatalogPage, DefinitionName, DefinitionNameSource, ItemTypeDefinition},
-    definitions::{self, ItemLimits, ValueRange},
+    definitions::{ItemLimits, ValueRange},
     forge::{self, AffixSnapshot, ForgeSnapshot, ItemStatus},
     locale::{self, GameLocale},
     process::ProcessIdentity,
@@ -42,175 +41,8 @@ fn started() -> Timestamp {
     "2026-10-18T10:00:00Z".parse().unwrap()
 }
 
-fn catalog_page(kind: CatalogKind, cursor: u32, total: u32) -> CatalogPage {
-    CatalogPage {
-        locale: GameLocale {
-            language: "en-fixture".into(),
-            game_version: "fixture-version".into(),
-        },
-        kind,
-        cursor,
-        total,
-        entries: match kind {
-            CatalogKind::Bases => CatalogEntries::Bases(
-                (cursor..total.min(cursor + 16))
-                    .map(|id| ItemTypeDefinition {
-                        item_type: id as u8,
-                        name: DefinitionName {
-                            text: format!("Base {id}"),
-                            source: DefinitionNameSource::StoredDisplay,
-                        },
-                        sub_types: vec![],
-                    })
-                    .collect(),
-            ),
-            CatalogKind::Affixes => CatalogEntries::Affixes(vec![]),
-            CatalogKind::Uniques => CatalogEntries::Uniques(vec![]),
-            CatalogKind::Rarities => CatalogEntries::Rarities(vec![]),
-        },
-    }
-}
-
 #[test]
-fn catalog_capture_pins_identity_and_publishes_only_after_all_pages_and_final_locale() {
-    let fixture = Fixture::new();
-    let first = catalog_page(CatalogKind::Bases, 0, 17);
-    let wire = FakeTransport::new(
-        fixture.target.clone(),
-        [
-            fixture.discover(),
-            status(false, 0x1234, 0),
-            done(locale::encode(&first.locale).unwrap()),
-            done(definitions::encode(&item_limits()).unwrap()),
-            done(catalog::encode(&first).unwrap()),
-            done(catalog::encode(&catalog_page(CatalogKind::Bases, 16, 17)).unwrap()),
-            done(catalog::encode(&catalog_page(CatalogKind::Affixes, 0, 0)).unwrap()),
-            done(catalog::encode(&catalog_page(CatalogKind::Uniques, 0, 0)).unwrap()),
-            done(catalog::encode(&catalog_page(CatalogKind::Rarities, 0, 0)).unwrap()),
-            done(locale::encode(&first.locale).unwrap()),
-        ],
-    );
-    let log = FakeLog::new([offline()]);
-    let mut session = fixture.session(&wire, &log, GatePolicy::Release);
-    session.enable();
-    run(session.connect(now())).unwrap();
-    let catalog = run(session.capture_catalog(now())).unwrap();
-    assert_eq!(catalog.bases.len(), 17);
-    assert_eq!(catalog.identity.locale, first.locale);
-    assert_eq!(catalog.identity.binary_hash, fixture.profile().binary_hash());
-    assert_eq!(catalog.limits, item_limits());
-    assert_eq!(session.state(), SessionState::Ready);
-    assert_eq!(
-        wire.requests()[4],
-        Request::ReadCatalogPage {
-            dispatcher: fixture.dispatcher,
-            kind: CatalogKind::Bases,
-            cursor: 0
-        }
-    );
-    assert_eq!(
-        wire.requests()[5],
-        Request::ReadCatalogPage {
-            dispatcher: fixture.dispatcher,
-            kind: CatalogKind::Bases,
-            cursor: 16
-        }
-    );
-    assert_eq!(wire.requests().len(), 10);
-}
-
-#[test]
-fn catalog_page_binds_response_to_query_and_never_replays_or_recovers_implicitly() {
-    for fault in 0..4 {
-        let fixture = Fixture::new();
-        let log = FakeLog::new([offline()]);
-        let mut page = catalog_page(CatalogKind::Bases, 0, 17);
-        match fault {
-            0 => page = catalog_page(CatalogKind::Bases, 16, 17),
-            1 => page = catalog_page(CatalogKind::Affixes, 0, 0),
-            _ => {}
-        }
-        let reply = if fault == 2 {
-            done(vec![0xff])
-        } else if fault == 3 {
-            Step::Reply(Err(TransportError {
-                delivery: Delivery::MayHaveRun,
-                failure: TransportFailure::Timeout,
-            }))
-        } else {
-            done(catalog::encode(&page).unwrap())
-        };
-        let wire = FakeTransport::new(fixture.target.clone(), [fixture.discover(), status(false, 0x1234, 0), reply]);
-        let mut session = fixture.session(&wire, &log, GatePolicy::Release);
-        session.enable();
-        run(session.connect(now())).unwrap();
-        assert!(run(session.read_catalog_page(now(), CatalogKind::Bases, 0)).is_err());
-        assert_eq!(session.state(), SessionState::Disconnected);
-        assert!(session.runtime_status().is_none());
-        assert!(run(session.capture_catalog(now())).is_err());
-        assert_eq!(wire.requests().len(), 3);
-    }
-}
-
-#[test]
-fn catalog_capture_rejects_midpage_drift_and_discards_complete_capture_after_language_change() {
-    for fault in 0..4 {
-        let fixture = Fixture::new();
-        let first = catalog_page(CatalogKind::Bases, 0, 17);
-        let mut second = catalog_page(CatalogKind::Bases, 16, 17);
-        match fault {
-            0 => second.total = 18,
-            1 => second.locale.language = "sr-Latn-RS".into(),
-            2 => {
-                if let CatalogEntries::Bases(entries) = &mut second.entries {
-                    entries[0].item_type = 0;
-                }
-            }
-            _ => {}
-        }
-        if fault == 0
-            && let CatalogEntries::Bases(entries) = &mut second.entries
-        {
-            entries.push(ItemTypeDefinition {
-                item_type: 17,
-                name: DefinitionName {
-                    text: "new base".into(),
-                    source: DefinitionNameSource::StoredDisplay,
-                },
-                sub_types: vec![],
-            });
-        }
-        let mut steps = vec![
-            fixture.discover(),
-            status(false, 0x1234, 0),
-            done(locale::encode(&first.locale).unwrap()),
-            done(definitions::encode(&item_limits()).unwrap()),
-            done(catalog::encode(&first).unwrap()),
-            done(catalog::encode(&second).unwrap()),
-        ];
-        if fault == 3 {
-            for kind in [CatalogKind::Affixes, CatalogKind::Uniques, CatalogKind::Rarities] {
-                steps.push(done(catalog::encode(&catalog_page(kind, 0, 0)).unwrap()));
-            }
-            let mut changed = first.locale.clone();
-            changed.language = "sr-Latn-RS".into();
-            steps.push(done(locale::encode(&changed).unwrap()));
-        }
-        let wire = FakeTransport::new(fixture.target.clone(), steps);
-        let log = FakeLog::new([offline()]);
-        let mut session = fixture.session(&wire, &log, GatePolicy::Release);
-        session.enable();
-        run(session.connect(now())).unwrap();
-        assert!(matches!(run(session.capture_catalog(now())), Err(SessionError::Protocol(_))));
-        assert_eq!(session.state(), SessionState::Disconnected);
-        let count = wire.requests().len();
-        assert!(run(session.capture_catalog(now())).is_err());
-        assert_eq!(wire.requests().len(), count);
-    }
-}
-
-#[test]
-fn catalog_read_preserves_artifact_and_cancellation_barriers() {
+fn owned_reads_preserve_artifact_and_cancellation_barriers() {
     for fault in [0, 2] {
         let fixture = Fixture::rehashing();
         let log = FakeLog::new([offline()]);
@@ -219,18 +51,18 @@ fn catalog_read_preserves_artifact_and_cancellation_barriers() {
         session.enable();
         run(session.connect(now())).unwrap();
         if fault == 0 {
-            fs::write(&fixture.metadata, b"changed catalog metadata").unwrap();
+            fs::write(&fixture.metadata, b"changed metadata").unwrap();
         }
         if fault == 2 {
             wire.push(Step::Pending);
-            let mut future = Box::pin(session.read_catalog_page(now(), CatalogKind::Bases, 0));
+            let mut future = Box::pin(session.read_locale(now()));
             let mut context = Context::from_waker(Waker::noop());
             assert!(future.as_mut().poll(&mut context).is_pending());
             drop(future);
             assert_eq!(session.state(), SessionState::Connecting);
-            assert!(matches!(run(session.capture_catalog(now())), Err(SessionError::Busy)));
+            assert!(matches!(run(session.read_forge(now())), Err(SessionError::Busy)));
         } else {
-            assert!(run(session.read_catalog_page(now(), CatalogKind::Bases, 0)).is_err());
+            assert!(run(session.read_locale(now())).is_err());
             assert_eq!(wire.requests().len(), if fault == 0 { 2 } else { 3 });
             assert_ne!(session.state(), SessionState::Ready);
         }
@@ -1189,108 +1021,6 @@ fn canceled_forge_read_remains_busy_until_explicit_disconnect_without_replay() {
 }
 
 #[test]
-fn literal_limits_require_admission_and_keep_owned_results_across_forge_reads() {
-    let fixture = Fixture::new();
-    let wire = FakeTransport::new(fixture.target.clone(), []);
-    let log = FakeLog::new([offline()]);
-    let mut session = fixture.session(&wire, &log, GatePolicy::Release);
-    assert!(matches!(run(session.read_item_limits(now())), Err(SessionError::Disabled)));
-    assert!(log.reads().is_empty());
-    session.enable();
-    assert!(matches!(run(session.read_item_limits(now())), Err(SessionError::NotConnected)));
-    assert!(wire.requests().is_empty());
-    wire.push(fixture.discover());
-    wire.push(status(false, 0x1234, 0));
-    wire.push(done(definitions::encode(&item_limits()).unwrap()));
-    wire.push(done(forge::encode(None).unwrap()));
-    run(session.connect(now())).unwrap();
-    let initial_status = *session.runtime_status().unwrap();
-    let limits = run(session.read_item_limits(now())).unwrap();
-    assert_eq!(limits, item_limits());
-    assert_eq!(run(session.read_forge(now())).unwrap(), None);
-    assert_eq!(session.runtime_status(), Some(&initial_status));
-    assert_eq!(session.state(), SessionState::Ready);
-    assert_eq!(wire.requests()[2], Request::ReadItemLimits { dispatcher: fixture.dispatcher });
-    assert_eq!(wire.requests().len(), 4);
-    drop(session);
-    assert_eq!(limits, item_limits());
-}
-
-#[test]
-fn literal_limits_fail_closed_on_malformed_reply_runtime_refusal_and_transport_uncertainty() {
-    for (reply, state) in [
-        (done(vec![0; 39]), SessionState::Disconnected),
-        (done(vec![0; 41]), SessionState::Disconnected),
-        (done([256_i32.to_le_bytes().as_slice(), &[0; 36]].concat()), SessionState::Disconnected),
-        (
-            Step::Reply(Ok(Response {
-                code: ResponseCode::OfflineRequired,
-                payload: b"runtime went online".to_vec(),
-            })),
-            SessionState::Disconnected,
-        ),
-        (
-            Step::Reply(Err(TransportError {
-                delivery: Delivery::MayHaveRun,
-                failure: TransportFailure::Timeout,
-            })),
-            SessionState::Disconnected,
-        ),
-    ] {
-        let fixture = Fixture::new();
-        let wire = FakeTransport::new(fixture.target.clone(), [fixture.discover(), status(false, 0x1234, 0), reply]);
-        let log = FakeLog::new([offline()]);
-        let mut session = fixture.session(&wire, &log, GatePolicy::Release);
-        session.enable();
-        run(session.connect(now())).unwrap();
-        assert!(run(session.read_item_limits(now())).is_err());
-        assert_eq!(session.state(), state);
-        assert_eq!(session.runtime_status(), None);
-        assert_eq!(session.cleanup(), Cleanup::Unconfirmed);
-        assert!(matches!(run(session.read_item_limits(now())), Err(SessionError::NotConnected)));
-        assert!(matches!(run(session.read_forge(now())), Err(SessionError::NotConnected)));
-        assert_eq!(wire.requests().len(), 3);
-    }
-}
-
-#[test]
-fn literal_limits_reject_either_changed_artifact_before_rpc() {
-    for binary in [false, true] {
-        let fixture = Fixture::rehashing();
-        let wire = FakeTransport::new(fixture.target.clone(), [fixture.discover(), status(false, 0x1234, 0)]);
-        let mut session = fixture.session(&wire, &FakeLog::new([offline()]), GatePolicy::Release);
-        session.enable();
-        run(session.connect(now())).unwrap();
-        fs::write(if binary { &fixture.binary } else { &fixture.metadata }, b"changed before read").unwrap();
-        assert!(matches!(run(session.read_item_limits(now())), Err(SessionError::Identity(_))));
-        assert_eq!(session.state(), SessionState::Disconnected);
-        assert_eq!(session.runtime_status(), None);
-        assert_eq!(wire.requests().len(), 2);
-    }
-}
-
-#[test]
-fn canceled_literal_limits_read_blocks_both_read_operations_until_explicit_disconnect() {
-    let fixture = Fixture::new();
-    let wire = FakeTransport::new(fixture.target.clone(), [fixture.discover(), status(false, 0x1234, 0), Step::Pending, clear()]);
-    let log = FakeLog::new([offline()]);
-    let mut session = fixture.session(&wire, &log, GatePolicy::Release);
-    session.enable();
-    run(session.connect(now())).unwrap();
-    let mut reading = Box::pin(session.read_item_limits(now()));
-    assert!(matches!(reading.as_mut().poll(&mut Context::from_waker(Waker::noop())), Poll::Pending));
-    drop(reading);
-    assert_eq!(session.state(), SessionState::Connecting);
-    assert_eq!(session.runtime_status(), None);
-    assert!(matches!(run(session.read_item_limits(now())), Err(SessionError::Busy)));
-    assert!(matches!(run(session.read_forge(now())), Err(SessionError::Busy)));
-    assert_eq!(wire.requests().len(), 3);
-    assert_eq!(run(session.disconnect()), Cleanup::ConfirmedOff);
-    assert_eq!(session.state(), SessionState::Disconnected);
-    assert_eq!(wire.requests()[3], Request::ClearHooks { dispatcher: fixture.dispatcher });
-}
-
-#[test]
 fn locale_requires_ready_and_returns_owned_changed_language_with_stable_version() {
     let fixture = Fixture::new();
     let first = GameLocale {
@@ -1399,7 +1129,6 @@ fn canceled_locale_read_preserves_shared_busy_barrier_until_disconnect() {
     drop(reading);
     assert_eq!(session.state(), SessionState::Connecting);
     assert!(matches!(run(session.read_locale(now())), Err(SessionError::Busy)));
-    assert!(matches!(run(session.read_item_limits(now())), Err(SessionError::Busy)));
     assert!(matches!(run(session.read_forge(now())), Err(SessionError::Busy)));
     assert_eq!(wire.requests().len(), 3);
     assert_eq!(run(session.disconnect()), Cleanup::ConfirmedOff);

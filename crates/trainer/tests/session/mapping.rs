@@ -237,16 +237,12 @@ fn canceled_mapping_never_replays_and_artifact_change_between_pages_blocks() {
 
 #[test]
 fn obsolete_mapping_stops_between_pages_and_keeps_the_drained_session_ready() {
-    use eg_trainer::session::{CaptureControl, CaptureObserver};
+    use eg_trainer::session::{ReadControl, ReadObserver};
     use std::sync::atomic::{AtomicBool, Ordering};
     struct Stop(Arc<AtomicBool>);
-    impl CaptureObserver for Stop {
-        fn control(&mut self) -> CaptureControl {
-            if self.0.load(Ordering::SeqCst) {
-                CaptureControl::Stop
-            } else {
-                CaptureControl::Continue
-            }
+    impl ReadObserver for Stop {
+        fn control(&mut self) -> ReadControl {
+            if self.0.load(Ordering::SeqCst) { ReadControl::Stop } else { ReadControl::Continue }
         }
     }
     let fixture = Fixture::new();
@@ -279,4 +275,70 @@ fn obsolete_mapping_stops_between_pages_and_keeps_the_drained_session_ready() {
     let count = wire.requests().len();
     assert!(run(session.resolve_mapping_observed(now(), &expected(&fixture), &request(), &mut observer)).is_err());
     assert_eq!(wire.requests().len(), count, "already-canceled reads do no I/O");
+}
+
+/// Stops from its `stop_at`th control check on. A lookup checks on entry, then for each page before and after the
+/// artifact check (the second immediately before the request) and after the reply.
+struct StopAt {
+    calls: usize,
+    stop_at: usize,
+}
+impl eg_trainer::session::ReadObserver for StopAt {
+    fn control(&mut self) -> eg_trainer::session::ReadControl {
+        self.calls += 1;
+        if self.calls >= self.stop_at {
+            eg_trainer::session::ReadControl::Stop
+        } else {
+            eg_trainer::session::ReadControl::Continue
+        }
+    }
+}
+
+#[test]
+fn a_stop_at_each_check_around_the_first_page_keeps_the_session_and_its_files_for_cleanup() {
+    // On entry, before the artifact check, after it (immediately before the request): nothing is sent. After the
+    // reply: the page was received, and nothing more is sent.
+    for (stop_at, sent) in [(1, 2), (2, 2), (3, 2), (4, 3)] {
+        let fixture = Fixture::new();
+        let mut steps = vec![fixture.discover(), status(false, 0x1234, 0)];
+        if sent == 3 {
+            steps.push(done(mapping::encode_mapping(&page(MappingStart::ContextOnly)).unwrap()));
+        }
+        steps.push(clear());
+        let wire = FakeTransport::new(fixture.target.clone(), steps);
+        let mut session = ready(&fixture, &wire, &FakeLog::new([offline()]));
+        let mut observer = StopAt { calls: 0, stop_at };
+        let result = run(session.resolve_mapping_observed(now(), &expected(&fixture), &request(), &mut observer));
+        assert!(matches!(result, Err(SessionError::Busy)), "stop at {stop_at}: {result:?}");
+        assert_eq!(session.state(), SessionState::Ready);
+        assert!(session.runtime_status().is_some());
+        assert_eq!(wire.requests().len(), sent, "stop at {stop_at}");
+        assert!(fs::OpenOptions::new().write(true).open(&fixture.metadata).is_err(), "the session still holds its files");
+        assert_eq!(run(session.disconnect()), Cleanup::ConfirmedOff);
+        assert_eq!(wire.requests()[sent], Request::ClearHooks { dispatcher: fixture.dispatcher });
+        assert!(fs::OpenOptions::new().write(true).open(&fixture.metadata).is_ok());
+    }
+}
+
+#[test]
+fn an_observer_stop_does_not_turn_a_runtime_refusal_into_a_cancellation() {
+    let fixture = Fixture::new();
+    let refusal = Step::Reply(Ok(Response {
+        code: ResponseCode::OfflineRequired,
+        payload: b"offline character required".to_vec(),
+    }));
+    let wire = FakeTransport::new(fixture.target.clone(), [fixture.discover(), status(false, 0x1234, 0), refusal]);
+    let mut session = ready(&fixture, &wire, &FakeLog::new([offline()]));
+    // It would stop once the reply is in: the refusal must still be reported as one.
+    let mut observer = StopAt { calls: 0, stop_at: 4 };
+    assert!(matches!(
+        run(session.resolve_mapping_observed(now(), &expected(&fixture), &request(), &mut observer)),
+        Err(SessionError::Helper {
+            code: ResponseCode::OfflineRequired,
+            ..
+        })
+    ));
+    assert_eq!(session.state(), SessionState::Disconnected);
+    assert_eq!(run(session.disconnect()), Cleanup::Unconfirmed);
+    assert_eq!(wire.requests().len(), 3, "no cleanup I/O after the refusal");
 }

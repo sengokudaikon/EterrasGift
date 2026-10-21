@@ -305,22 +305,6 @@ unsafe fn read_attack_leech(expected_manager: u64) -> Response {
     }
 }
 
-unsafe fn read_item_limits() -> Response {
-    // SAFETY: the dispatcher authorizes the captured main thread after the original
-    // callback returned. Runtime/metadata lifetime follows the bootstrap contract;
-    // the accessor rechecks offline/native-manager life before reading literal fields.
-    unsafe {
-        runtime_operation(|_, access, attached| {
-            let limits = access.read_item_limits(attached).map_err(map_discovery)?;
-            let payload = eg_trainer_wire::definitions::encode(&limits).map_err(|error| server::failure(ResponseCode::Failed, error.to_string()))?;
-            Ok::<_, Response>(Response {
-                code: ResponseCode::Done,
-                payload,
-            })
-        })
-    }
-}
-
 unsafe fn read_locale() -> Response {
     // SAFETY: captured Unity main thread, after the original callback returned. The
     // bootstrap retains the initialized runtime and trusted method implementations.
@@ -334,27 +318,6 @@ unsafe fn read_locale() -> Response {
             let invocation = runtime.invocation;
             let locale = access.read_game_locale(attached, invocation).map_err(map_discovery)?;
             let payload = eg_trainer_wire::locale::encode(&locale).map_err(|error| server::failure(ResponseCode::Failed, error.to_string()))?;
-            Ok::<_, Response>(Response {
-                code: ResponseCode::Done,
-                payload,
-            })
-        })
-    }
-}
-
-unsafe fn read_catalog_page(kind: eg_trainer_wire::catalog::CatalogKind, cursor: u32) -> Response {
-    // SAFETY: same captured main-thread/runtime ownership as read_locale. Catalog capture
-    // copies only already-published definition graphs; it never starts asset
-    // loading, invokes item builders, or changes gameplay state. Locale getter effects are
-    // covered by read_locale's contract. The admitted catalog contract also permits the exact
-    // corlib Array.GetValue(Int32) reflection/type-cache, allocation/boxing and GC/profiler
-    // effects for a ready ailment cache; Entry initializers and dictionary getters are refused.
-    // Every pointer stays inside this bounded operation.
-    unsafe {
-        runtime_operation(|runtime, access, attached| {
-            let invocation = runtime.invocation;
-            let page = access.read_catalog_page(attached, invocation, kind, cursor).map_err(map_discovery)?;
-            let payload = eg_trainer_wire::catalog::encode(&page).map_err(|error| server::failure(ResponseCode::Failed, error.to_string()))?;
             Ok::<_, Response>(Response {
                 code: ResponseCode::Done,
                 payload,
@@ -439,12 +402,8 @@ fn after_original(state: &Shared) {
                 Request::MapRoll(query) => unsafe { read_affix_mapping(&query) },
                 // SAFETY: verified callback thread and the stable player/stat graph span assumed by unsafe start.
                 Request::ReadAttackLeech { expected_manager, .. } => unsafe { read_attack_leech(expected_manager) },
-                // SAFETY: verified callback thread and the retained literal metadata required by the unsafe start contract.
-                Request::ReadItemLimits { .. } => unsafe { read_item_limits() },
                 // SAFETY: verified callback thread and the completed locale/trusted-getter assumptions of unsafe start.
                 Request::ReadLocale { .. } => unsafe { read_locale() },
-                // SAFETY: verified callback thread and initialized published catalog/runtime graph assumed by unsafe start.
-                Request::ReadCatalogPage { kind, cursor, .. } => unsafe { read_catalog_page(kind, cursor) },
                 // SAFETY: the same established thread plus this narrow operation's
                 // explicit exclusive-write/root/metadata contract described above.
                 Request::EditForge(write) => unsafe { edit_forge(&write) },

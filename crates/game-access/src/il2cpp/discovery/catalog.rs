@@ -1,4 +1,6 @@
-//! Bounded, rooted catalog graph copies. Singleton getters and formatter bodies are not invoked.
+//! Bounded, rooted reads of game definition graphs (lists, arrays, nested classes, statics), shared by writes,
+//! value mappings, unique and implicit descriptions. Singleton getters and formatter bodies are not invoked. The
+//! catalog itself comes from the game's files (`eg-trainer`'s game data), never from these reads.
 
 use super::metadata_text;
 use super::{
@@ -7,10 +9,6 @@ use super::{
     unsupported,
 };
 use crate::il2cpp::{AttachedThread, raw};
-use eg_trainer_wire::catalog::{
-    Availability, CatalogEntries, CatalogKind, CatalogPage, DefinitionName, DefinitionNameSource, ImplicitDefinition, ItemTypeDefinition, MAX_IMPLICITS, MAX_PAGE_ENTRIES,
-    MAX_SUB_TYPES, SubTypeDefinition,
-};
 use std::{ffi::CStr, ptr::NonNull};
 
 fn collection_count(count: i32, capacity: u32, maximum: u32) -> Result<usize, DiscoveryError> {
@@ -21,198 +19,7 @@ fn collection_count(count: i32, capacity: u32, maximum: u32) -> Result<usize, Di
     Ok(count as usize)
 }
 
-pub(super) fn page_bounds(total: u32, cursor: u32) -> Result<std::ops::Range<usize>, DiscoveryError> {
-    if cursor > total {
-        return Err(unsupported("catalog cursor exceeds definitions"));
-    }
-    Ok(cursor as usize..cursor.saturating_add(MAX_PAGE_ENTRIES as u32).min(total) as usize)
-}
-
-const IMPLICIT_TEXT_REASON: &str = "Catalog definitions do not include implicit descriptions";
-
-struct CopyBudget {
-    used: usize,
-}
-impl CopyBudget {
-    fn new() -> Self {
-        // Covers the page envelope, both maximum-sized locale strings and fixed framing.
-        Self { used: 16384 }
-    }
-    fn charge(&mut self, bytes: usize) -> Result<(), DiscoveryError> {
-        self.used = self
-            .used
-            .checked_add(bytes)
-            .filter(|used| *used <= eg_trainer_wire::protocol::MAX_RESPONSE_SIZE)
-            .ok_or_else(|| unsupported("catalog base page exceeds conservative 1 MiB copy budget"))?;
-        Ok(())
-    }
-}
-
-fn unavailable_text() -> Availability<String> {
-    Availability::Unavailable {
-        reason: IMPLICIT_TEXT_REASON.into(),
-    }
-}
-
-fn subtype_name(display: String, internal: String) -> DefinitionName {
-    if display.is_empty() {
-        DefinitionName {
-            text: internal,
-            source: DefinitionNameSource::InternalName,
-        }
-    } else {
-        DefinitionName {
-            text: display,
-            source: DefinitionNameSource::StoredDisplay,
-        }
-    }
-}
-
 impl RuntimeAccess {
-    /// Capture one bounded catalog page from already loaded game definition objects.
-    /// Names retain their actual source. Implicit numbers are raw game definitions; formatted
-    /// tooltip text remains explicitly unavailable. Singleton getters and game formatters are
-    /// never invoked, so absent or destroyed definition storage reports `NotReady`.
-    ///
-    /// # Safety
-    /// The complete `read_game_locale` contract applies, including the exact locale and
-    /// Application.version framework getter bodies and their permitted initialization/allocation
-    /// effects. Catalog capture also invokes this runtime's corlib
-    /// System.Array.GetValue(Int32) body: rank/bounds/reflection checks, runtime type caches,
-    /// metadata setup, allocation/boxing and GC/profiler callbacks. Dictionary Entry class
-    /// initializers are rejected before boxing; no game dictionary getter or cache fill is called.
-    /// The current thread must be the Unity main thread after its original dispatcher.
-    /// Runtime code and metadata remain initialized/loaded, and every definition graph, collection,
-    /// string and Unity native object's lifetime must remain unchanged throughout this copy.
-    /// Definition singleton static references must already be populated by the game. No gameplay
-    /// state write is authorized. All raw metadata pointers belong to this admitted runtime;
-    /// the validated nonmoving x64 array data offset is 32. Returned values own their contents.
-    pub unsafe fn read_catalog_page(&self, attached: &AttachedThread<'_>, api: raw::InvocationApi, kind: CatalogKind, cursor: u32) -> Result<CatalogPage, DiscoveryError> {
-        // SAFETY: The caller supplies the immutable definition-asset span; offline admission precedes rooted, bounded page extraction.
-        unsafe {
-            let status = self.status(attached)?;
-            if status.online || status.manager == 0 {
-                return Err(DiscoveryError::OfflineRequired);
-            }
-            if cursor > kind.maximum_total() {
-                return Err(unsupported("catalog cursor bound"));
-            }
-            let locale = self.read_game_locale(attached, api)?;
-            let images = self.images()?;
-            let (total, entries) = match kind {
-                CatalogKind::Bases => self.catalog_bases(attached, &images, cursor)?,
-                CatalogKind::Affixes => self.catalog_affixes(attached, &images, cursor, api)?,
-                CatalogKind::Uniques => self.catalog_uniques(attached, &images, cursor, api)?,
-                CatalogKind::Rarities => self.catalog_rarities(cursor)?,
-            };
-            if total == 0 {
-                return Err(DiscoveryError::NotReady("game definitions are empty"));
-            }
-            if total > kind.maximum_total() {
-                return Err(unsupported("catalog total bound"));
-            }
-            Ok(CatalogPage {
-                locale,
-                kind,
-                cursor,
-                total,
-                entries,
-            })
-        }
-    }
-
-    unsafe fn catalog_bases(&self, attached: &AttachedThread<'_>, images: &Images, cursor: u32) -> Result<(u32, CatalogEntries), DiscoveryError> {
-        // SAFETY: The retained registry and its arrays stay rooted; lengths and exact element classes are checked before copying.
-        unsafe {
-            let list_class = self.class(images, c"", c"ItemList")?;
-            let base_class = self.catalog_nested(list_class, c"BaseEquipmentItem")?;
-            let base_parent = self.catalog_nested(list_class, c"BaseItem")?;
-            let sub_class = self.catalog_nested(list_class, c"EquipmentItem")?;
-            let sub_parent = self.catalog_nested(list_class, c"SubItem")?;
-            let implicit_class = self.catalog_nested(list_class, c"EquipmentImplicit")?;
-            if (self.class_parent)(base_class) != base_parent || (self.class_parent)(sub_class) != sub_parent {
-                return Err(unsupported("catalog equipment class hierarchy"));
-            }
-            let storage = self
-                .catalog_static(
-                    attached,
-                    self.class(images, c"LE.AssetManagement", c"GlobalAssets")?,
-                    c"_storage_MasterItemsList",
-                    list_class,
-                )?
-                .ok_or(DiscoveryError::NotReady("master item definitions are not initialized"))?;
-            self.exact(&storage, list_class)?;
-            if !self.catalog_live(attached, images, &storage)? {
-                return Err(DiscoveryError::NotReady("master item definitions are destroyed"));
-            }
-            let array = self
-                .catalog_reference(attached, &storage, c"EquippableItems")?
-                .ok_or(DiscoveryError::NotReady("equipment definitions are not initialized"))?;
-            let bases = self.catalog_array(attached, &array, base_class, 256)?.into_iter().flatten().collect::<Vec<_>>();
-            let total = bases.len() as u32;
-            let mut entries = Vec::new();
-            let mut budget = CopyBudget::new();
-            for index in page_bounds(total, cursor)? {
-                let base = &bases[index];
-                self.exact(base, base_class)?;
-                let id: i32 = self.primitive(base, c"baseTypeID")?;
-                let item_type = u8::try_from(id).map_err(|_| unsupported("catalog base type ID range"))?;
-                let name = DefinitionName {
-                    text: self.text(attached, base, c"displayName")?,
-                    source: DefinitionNameSource::StoredDisplay,
-                };
-                budget.charge(16 + name.text.len())?;
-                let mut sub_types = Vec::new();
-                if let Some(list) = self.catalog_reference(attached, base, c"subItems")? {
-                    for sub in self.catalog_list(attached, &list, sub_class, MAX_SUB_TYPES as u32)? {
-                        self.exact(&sub, sub_class)?;
-                        let id: i32 = self.primitive(&sub, c"subTypeID")?;
-                        let sub_type = u16::try_from(id).map_err(|_| unsupported("catalog subtype ID range"))?;
-                        let display = self.text(attached, &sub, c"displayName")?;
-                        let internal = if display.is_empty() { self.text(attached, &sub, c"name")? } else { String::new() };
-                        let name = subtype_name(display, internal);
-                        budget.charge(32 + name.text.len())?;
-                        let mut implicits = Vec::new();
-                        if let Some(list) = self.catalog_reference(attached, &sub, c"implicits")? {
-                            for implicit in self.catalog_list(attached, &list, implicit_class, MAX_IMPLICITS as u32)? {
-                                // Charge before copying or allocating this entry's two reason strings.
-                                budget.charge(64 + 2 * IMPLICIT_TEXT_REASON.len())?;
-                                self.exact(&implicit, implicit_class)?;
-                                let minimum: f32 = self.primitive(&implicit, c"implicitValue")?;
-                                let maximum: f32 = self.primitive(&implicit, c"implicitMaxValue")?;
-                                if !minimum.is_finite() || !maximum.is_finite() {
-                                    return Err(unsupported("catalog nonfinite implicit range"));
-                                }
-                                implicits.push(ImplicitDefinition {
-                                    property: self.catalog_enum_u8(&implicit, c"property", c"SP")?,
-                                    tags: self.enumeration(&implicit, c"tags", c"AT")?,
-                                    special_tag: self.primitive(&implicit, c"specialTag")?,
-                                    extra_tag: self.primitive(&implicit, c"extraTag")?,
-                                    modifier_type: self.enumeration(&implicit, c"type", c"ModType")?,
-                                    minimum,
-                                    maximum,
-                                    minimum_text: unavailable_text(),
-                                    maximum_text: unavailable_text(),
-                                });
-                            }
-                        }
-                        sub_types.push(SubTypeDefinition {
-                            sub_type,
-                            name,
-                            level_requirement: self.primitive(&sub, c"levelRequirement")?,
-                            class_requirement: self.enumeration(&sub, c"classRequirement", c"ClassRequirement")?,
-                            cannot_drop: self.boolean(&sub, c"cannotDrop")?,
-                            is_corrupted: self.boolean(&sub, c"isCorruptedSubtype")?,
-                            implicits: Availability::Available(implicits),
-                        });
-                    }
-                }
-                entries.push(ItemTypeDefinition { item_type, name, sub_types });
-            }
-            Ok((total, CatalogEntries::Bases(entries)))
-        }
-    }
-
     // Every helper inherits the admitted main-thread, initialized metadata and exclusive graph
     // access contract of its catalog operation. All child references remain in rooted parents
     // until their own roots have been acquired; Unity native object lifetime is checked separately.
@@ -393,26 +200,6 @@ impl RuntimeAccess {
             }
             let (array, count) = self.catalog_list_storage(attached, list, element, maximum)?;
             Ok(super::copy_values(target(&array)?.as_ptr().cast::<u8>().add(32).cast::<T>(), count))
-        }
-    }
-
-    pub(super) unsafe fn catalog_enum_u8(&self, object: &Root<'_, '_>, name: &CStr, enum_name: &CStr) -> Result<u8, DiscoveryError> {
-        // SAFETY: The rooted receiver's field is verified as an enum with Byte underlying storage before its byte is copied.
-        unsafe {
-            let owner = (self.object_class)(target(object)?.as_ptr());
-            if owner.is_null() {
-                return Err(unsupported("catalog enum owner"));
-            }
-            let field = self.field(owner, name)?;
-            let class = self.field_class(field)?;
-            let actual = (self.class_name)(class);
-            if (self.field_flags)(field) & 0x10 != 0 || actual.is_null() || metadata_text(actual) != enum_name {
-                return Err(unsupported("catalog Byte enum identity/storage"));
-            }
-            self.enum_storage(class, c"Byte", 0x05)?;
-            let mut value = 0_u8;
-            (self.field_get)(target(object)?.as_ptr(), field, (&mut value as *mut u8).cast());
-            Ok(value)
         }
     }
 
@@ -634,37 +421,6 @@ mod tests {
     }
 
     #[test]
-    fn pages_cover_filtered_definitions_without_cursor_wrap() {
-        assert_eq!(page_bounds(17, 0).unwrap(), 0..16);
-        assert_eq!(page_bounds(17, 16).unwrap(), 16..17);
-        assert_eq!(page_bounds(17, 17).unwrap(), 17..17);
-        assert!(page_bounds(17, 18).is_err());
-        assert!(page_bounds(17, u32::MAX).is_err());
-    }
-
-    #[test]
-    fn aggregate_budget_stops_before_large_graph_materialization_or_integer_wrap() {
-        let mut budget = CopyBudget::new();
-        budget.charge(eg_trainer_wire::protocol::MAX_RESPONSE_SIZE - 16384).unwrap();
-        assert!(budget.charge(1).is_err());
-        assert!(CopyBudget::new().charge(usize::MAX).is_err());
-        let mut budget = CopyBudget::new();
-        let mut accepted = 0;
-        while budget.charge(4096 + 32).is_ok() {
-            accepted += 1;
-        }
-        assert!(accepted < 256, "a full maximum-sized subtype list must stop early");
-    }
-
-    #[test]
-    fn subtype_selection_matches_game_getter_including_whitespace() {
-        assert_eq!(subtype_name(" ".into(), "internal".into()).source, DefinitionNameSource::StoredDisplay);
-        let selected = subtype_name(String::new(), "internal".into());
-        assert_eq!(selected.text, "internal");
-        assert_eq!(selected.source, DefinitionNameSource::InternalName);
-    }
-
-    #[test]
     fn static_metadata_refuses_literal_instance_and_wrong_width_before_copy() {
         for case in 0..3 {
             let (access, context) = fixture();
@@ -678,36 +434,6 @@ mod tests {
             assert!(unsafe { access.catalog_static(&attached, token(0xc000), c"storage", token(CHILD_CLASS)) }.is_err());
             assert_eq!(READS.get(), 0);
             assert_eq!(ROOTS.get(), 0);
-        }
-    }
-
-    #[test]
-    fn byte_enum_requires_enum_and_exact_underlying_width_before_write() {
-        for case in 0..4 {
-            let (access, context) = fixture();
-            let attached = context.attach().unwrap();
-            FIELD_CLASS.set(ENUM_CLASS);
-            FLAGS.set(0);
-            // SAFETY: this immutable fake identity is recognized by our Box-backed root API.
-            let object = unsafe { attached.root(NonNull::new(token(CHILD)).unwrap()) }.unwrap();
-            match case {
-                0 => IS_ENUM.set(false),
-                1 => BASE_CLASS.set(CHILD_CLASS),
-                2 => FLAGS.set(0x10),
-                _ => {}
-            }
-            // SAFETY: fake metadata either proves Byte storage or deliberately rejects it before writing.
-            let result = unsafe { access.catalog_enum_u8(&object, c"property", c"SP") };
-            if case == 3 {
-                assert_eq!(result.unwrap(), 255);
-                assert_eq!(READS.get(), 1);
-            } else {
-                assert!(result.is_err());
-                assert_eq!(READS.get(), 0);
-            }
-            if case == 0 || case == 2 {
-                assert_eq!(ENUM_BASE_CALLS.get(), 0);
-            }
         }
     }
 

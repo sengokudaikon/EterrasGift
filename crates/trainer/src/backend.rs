@@ -24,7 +24,7 @@ use std::{
     time::Duration,
 };
 
-pub use crate::session::{CaptureControl, CaptureObserver, CaptureOutcome, CaptureProgress};
+pub use crate::session::{ReadControl, ReadObserver};
 use eg_core::game_log::GameReadiness;
 pub use eg_trainer_wire::transport::Delivery;
 pub use eg_trainer_wire::{
@@ -116,10 +116,10 @@ pub trait BackendConnection: Send + 'static {
         now: Timestamp,
         expected: &crate::edits::ExpectedObservation,
         request: &MappingRequest,
-        observer: &mut dyn CaptureObserver,
+        observer: &mut dyn ReadObserver,
     ) -> impl Future<Output = Result<ValueTable, BackendError>> + Send {
         async move {
-            if observer.control() == CaptureControl::Stop {
+            if observer.control() == ReadControl::Stop {
                 return Err(BackendError::blocked(ErrorKind::Superseded, "Value request canceled."));
             }
             self.resolve_mapping(now, expected, request).await
@@ -228,7 +228,7 @@ impl<T: Transport + Send + 'static> BackendConnection for Session<T> {
         now: Timestamp,
         expected: &crate::edits::ExpectedObservation,
         request: &MappingRequest,
-        observer: &mut dyn CaptureObserver,
+        observer: &mut dyn ReadObserver,
     ) -> Result<ValueTable, BackendError> {
         Ok(Session::resolve_mapping_observed(self, now, expected, request, observer).await?)
     }

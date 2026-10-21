@@ -6,8 +6,6 @@ mod write;
 use crate::profile::{BuildProfile, ProfileLease};
 use eg_core::game_log::GameReadiness;
 use eg_trainer_wire::{
-    catalog::{self, CatalogKind, CatalogPage},
-    definitions::{self, ItemLimits},
     fields::{self, AttackLeechRead, AttackLeechUnavailable},
     forge::{self, ForgeSnapshot},
     locale::{self, GameLocale},
@@ -33,50 +31,20 @@ pub enum Cleanup {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum CaptureControl {
+pub enum ReadControl {
     Continue,
     Stop,
 }
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum CaptureProgress {
-    Starting,
-    LeaseVerified {
-        bytes_read: Option<u64>,
-    },
-    LocaleRead,
-    LimitsRead,
-    Page {
-        kind: CatalogKind,
-        cursor: u32,
-        total: u32,
-        count: u32,
-        pages: u32,
-        bytes: u64,
-    },
-    VerifyingLocale {
-        pages: u32,
-        bytes: u64,
-    },
-    Complete {
-        pages: u32,
-        bytes: u64,
-    },
-}
 /// Called only between completed synchronous work/RPCs, never to abort an
 /// exchange. Returning Stop leaves Ready and discovery available for cleanup.
-pub trait CaptureObserver: Send {
-    fn control(&mut self) -> CaptureControl {
-        CaptureControl::Continue
+pub trait ReadObserver: Send {
+    fn control(&mut self) -> ReadControl {
+        ReadControl::Continue
     }
-    fn progress(&mut self, _: CaptureProgress) {}
 }
-struct ContinueCapture;
-impl CaptureObserver for ContinueCapture {}
-#[derive(Clone, Debug, PartialEq)]
-pub enum CaptureOutcome {
-    Complete(Box<crate::catalog::GameCatalog>),
-    Stopped,
-}
+/// An observer that never stops a read.
+struct ContinueRead;
+impl ReadObserver for ContinueRead {}
 enum OwnedRead<R> {
     Complete(R),
     Stopped,
@@ -334,119 +302,10 @@ impl<T: Transport> Session<T> {
         }
         Ok(read)
     }
-    /// Copy the game's literal item ranges. This carries no locale, rarity names or
-    /// claim that the rest of the definitions catalog has been captured. The build
-    /// profile lease is checked on every read, and the helper independently gates it.
-    pub async fn read_item_limits(&mut self, now: Timestamp) -> Result<ItemLimits, SessionError> {
-        self.read_owned(now, |dispatcher| Request::ReadItemLimits { dispatcher }, definitions::decode).await
-    }
     /// Read only an already-completed runtime locale selection and the game application version.
     /// This does not start localization or wait for its asynchronous initialization.
     pub async fn read_locale(&mut self, now: Timestamp) -> Result<GameLocale, SessionError> {
         self.read_owned(now, |dispatcher| Request::ReadLocale { dispatcher }, locale::decode).await
-    }
-    pub async fn read_catalog_page(&mut self, now: Timestamp, kind: CatalogKind, cursor: u32) -> Result<CatalogPage, SessionError> {
-        let page = self
-            .read_owned(now, |dispatcher| Request::ReadCatalogPage { dispatcher, kind, cursor }, catalog::decode)
-            .await?;
-        if page.kind != kind || page.cursor != cursor {
-            self.release_without_io();
-            self.state = SessionState::Disconnected;
-            return Err(SessionError::Protocol(ProtocolError::InvalidData));
-        }
-        Ok(page)
-    }
-    /// Capture all definition kinds without publishing partial results. Locale/version and each
-    /// population are pinned. This relies on immutable game definition assets, not a snapshot lock.
-    pub async fn capture_catalog(&mut self, now: Timestamp) -> Result<crate::catalog::GameCatalog, SessionError> {
-        match self.capture_catalog_observed(now, &mut ContinueCapture).await? {
-            CaptureOutcome::Complete(catalog) => Ok(*catalog),
-            CaptureOutcome::Stopped => Err(SessionError::Protocol(ProtocolError::InvalidData)),
-        }
-    }
-    pub async fn capture_catalog_observed(&mut self, now: Timestamp, observer: &mut dyn CaptureObserver) -> Result<CaptureOutcome, SessionError> {
-        let result = self.capture_catalog_inner(now, observer).await;
-        if result.is_err() && self.state == SessionState::Ready {
-            self.release_without_io();
-            self.state = SessionState::Disconnected;
-        }
-        result
-    }
-    async fn capture_catalog_inner(&mut self, now: Timestamp, observer: &mut dyn CaptureObserver) -> Result<CaptureOutcome, SessionError> {
-        if matches!(self.state, SessionState::Connecting | SessionState::Closing) {
-            return Err(SessionError::Busy);
-        }
-        self.require_enabled()?;
-        if self.state != SessionState::Ready {
-            return Err(SessionError::NotConnected);
-        }
-        if observer.control() == CaptureControl::Stop {
-            return Ok(CaptureOutcome::Stopped);
-        }
-        observer.progress(CaptureProgress::Starting);
-        let dispatcher = self.discovery.as_ref().ok_or(SessionError::NotConnected)?.dispatcher;
-        self.validate_profile(&dispatcher).map_err(|error| SessionError::Identity(error.to_string()))?;
-        observer.progress(CaptureProgress::LeaseVerified {
-            bytes_read: self.artifact_bytes_read(),
-        });
-        macro_rules! copied {
-            ($future:expr) => {
-                match $future.await? {
-                    OwnedRead::Complete(value) => value,
-                    OwnedRead::Stopped => return Ok(CaptureOutcome::Stopped),
-                }
-            };
-        }
-        let locale = copied!(self.read_owned_control(now, |dispatcher| Request::ReadLocale { dispatcher }, locale::decode, Some(observer)));
-        observer.progress(CaptureProgress::LocaleRead);
-        let limits = copied!(self.read_owned_control(now, |dispatcher| Request::ReadItemLimits { dispatcher }, definitions::decode, Some(observer),));
-        observer.progress(CaptureProgress::LimitsRead);
-        let identity = crate::catalog::CatalogIdentity {
-            binary_hash: self.profile.binary_hash().into(),
-            metadata_hash: self.profile.metadata_hash().into(),
-            locale: locale.clone(),
-            extraction_version: crate::catalog::EXTRACTION_VERSION,
-        };
-        let mut builder = crate::catalog::CatalogBuilder::new(identity, limits).map_err(SessionError::Protocol)?;
-        let mut pages = 0;
-        let mut bytes = 0u64;
-        for kind in [CatalogKind::Bases, CatalogKind::Affixes, CatalogKind::Uniques, CatalogKind::Rarities] {
-            while let Some(cursor) = builder.next_cursor(kind) {
-                let (page, length) = copied!(self.read_owned_control(
-                    now,
-                    |dispatcher| Request::ReadCatalogPage { dispatcher, kind, cursor },
-                    |payload| Ok((catalog::decode(payload)?, payload.len())),
-                    Some(observer)
-                ));
-                if page.kind != kind || page.cursor != cursor {
-                    return Err(SessionError::Protocol(ProtocolError::InvalidData));
-                }
-                let count = page.entries.len() as u32;
-                let total = page.total;
-                builder.push(page).map_err(SessionError::Protocol)?;
-                pages += 1;
-                bytes += length as u64;
-                observer.progress(CaptureProgress::Page {
-                    kind,
-                    cursor,
-                    total,
-                    count,
-                    pages,
-                    bytes,
-                });
-            }
-        }
-        observer.progress(CaptureProgress::VerifyingLocale { pages, bytes });
-        if copied!(self.read_owned_control(now, |dispatcher| Request::ReadLocale { dispatcher }, locale::decode, Some(observer))) != locale {
-            return Err(SessionError::Protocol(ProtocolError::InvalidData));
-        }
-        self.validate_profile(&dispatcher).map_err(|error| SessionError::Identity(error.to_string()))?;
-        let catalog = builder.finish().map_err(SessionError::Protocol)?;
-        observer.progress(CaptureProgress::Complete { pages, bytes });
-        if observer.control() == CaptureControl::Stop {
-            return Ok(CaptureOutcome::Stopped);
-        }
-        Ok(CaptureOutcome::Complete(Box::new(catalog)))
     }
     async fn read_owned<R>(&mut self, now: Timestamp, request: impl FnOnce(DispatcherSpec) -> Request, decode: fn(&[u8]) -> Result<R, ProtocolError>) -> Result<R, SessionError> {
         match self.read_owned_control(now, request, decode, None).await? {
@@ -459,7 +318,7 @@ impl<T: Transport> Session<T> {
         _now: Timestamp,
         request: impl FnOnce(DispatcherSpec) -> Request,
         decode: impl FnOnce(&[u8]) -> Result<R, ProtocolError>,
-        mut observer: Option<&mut dyn CaptureObserver>,
+        mut observer: Option<&mut dyn ReadObserver>,
     ) -> Result<OwnedRead<R>, SessionError> {
         if matches!(self.state, SessionState::Connecting | SessionState::Closing) {
             return Err(SessionError::Busy);
@@ -468,7 +327,7 @@ impl<T: Transport> Session<T> {
         if self.state != SessionState::Ready {
             return Err(SessionError::NotConnected);
         }
-        if observer.as_mut().is_some_and(|observer| observer.control() == CaptureControl::Stop) {
+        if observer.as_mut().is_some_and(|observer| observer.control() == ReadControl::Stop) {
             return Ok(OwnedRead::Stopped);
         }
         let dispatcher = self.discovery.as_ref().ok_or(SessionError::NotConnected)?.dispatcher;
@@ -477,7 +336,7 @@ impl<T: Transport> Session<T> {
             self.state = SessionState::Disconnected;
             return Err(SessionError::Identity(error.to_string()));
         }
-        if observer.as_mut().is_some_and(|observer| observer.control() == CaptureControl::Stop) {
+        if observer.as_mut().is_some_and(|observer| observer.control() == ReadControl::Stop) {
             return Ok(OwnedRead::Stopped);
         }
         let status = self.status.take();
@@ -497,7 +356,7 @@ impl<T: Transport> Session<T> {
                 }
                 self.status = status;
                 self.state = SessionState::Ready;
-                if observer.as_mut().is_some_and(|observer| observer.control() == CaptureControl::Stop) {
+                if observer.as_mut().is_some_and(|observer| observer.control() == ReadControl::Stop) {
                     return Ok(OwnedRead::Stopped);
                 }
                 Ok(OwnedRead::Complete(snapshot))

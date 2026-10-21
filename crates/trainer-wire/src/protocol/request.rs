@@ -63,13 +63,8 @@ impl Request {
             Self::Status { .. } => 7,
             Self::ClearHooks { .. } => 15,
             Self::ReadForge { .. } => 18,
-            Self::ReadItemLimits { .. } => 19,
+            // 19 (item limits) and 21 (catalog pages) are retired: the definitions come from the game's files.
             Self::ReadLocale { .. } => 20,
-            Self::ReadCatalogPage { kind, cursor, .. } => {
-                body.u32(*kind as u32);
-                body.u32(*cursor);
-                21
-            }
             Self::ReadAttackLeech { expected_manager, .. } => {
                 body.u64(*expected_manager);
                 23
@@ -251,16 +246,7 @@ impl Request {
             7 => Self::Status { dispatcher },
             15 => Self::ClearHooks { dispatcher },
             18 => Self::ReadForge { dispatcher },
-            19 => Self::ReadItemLimits { dispatcher },
             20 => Self::ReadLocale { dispatcher },
-            21 => {
-                let kind = CatalogKind::try_from(body.u32()?)?;
-                let cursor = body.u32()?;
-                if cursor > kind.maximum_total() {
-                    return Err(ProtocolError::InvalidData);
-                }
-                Self::ReadCatalogPage { dispatcher, kind, cursor }
-            }
             23 => {
                 let expected_manager = body.u64()?;
                 if expected_manager == 0 {

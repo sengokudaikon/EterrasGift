@@ -6,7 +6,6 @@
 #![forbid(unsafe_code)]
 
 use crate::{
-    catalog::CatalogKind,
     forge,
     rate_write::{AttackLeechRateWrite, SET_ATTACK_LEECH_RATE_OPERATION},
     write::{
@@ -60,19 +59,9 @@ pub enum Request {
     ReadForge {
         dispatcher: DispatcherSpec,
     },
-    /// Reads literal metadata ranges; it does not capture a localized game-data catalog.
-    ReadItemLimits {
-        dispatcher: DispatcherSpec,
-    },
     /// Reads the completed locale selection and application version, without starting selection.
     ReadLocale {
         dispatcher: DispatcherSpec,
-    },
-    /// Copies at most sixteen definitions, with locale and total repeated on every page.
-    ReadCatalogPage {
-        dispatcher: DispatcherSpec,
-        kind: CatalogKind,
-        cursor: u32,
     },
     /// Explicit mutation; native admission compares the complete expected item.
     EditForge(ForgeWrite),
@@ -96,9 +85,7 @@ impl Request {
             Self::Status { dispatcher }
             | Self::ClearHooks { dispatcher }
             | Self::ReadForge { dispatcher }
-            | Self::ReadItemLimits { dispatcher }
             | Self::ReadLocale { dispatcher }
-            | Self::ReadCatalogPage { dispatcher, .. }
             | Self::ReadAttackLeech { dispatcher, .. } => Some(*dispatcher),
             Self::EditForge(write) => Some(write.dispatcher()),
             Self::DescribeImplicits(query) | Self::DescribeUnique(query) => Some(query.dispatcher),

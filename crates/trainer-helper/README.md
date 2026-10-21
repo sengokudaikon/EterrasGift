@@ -30,7 +30,9 @@ Status roots the manager wrapper, checks assignability and reads its metadata-va
 It also reads the independent runtime online flag. No native Unity-object pointer is dereferenced.
 Returned manager addresses are ephemeral observations, never managed-object ownership tokens.
 
-The helper supports owned forge, limits, completed locale, catalog and attack/leech reads.
+The helper supports owned forge, completed locale and attack/leech reads. It reads no definitions catalog: the app
+reads the definitions from the game's files (`eg-trainer`'s game data), and the catalog and item-limits operations (21
+and 19) are retired.
 EditForge carries status, base/identity and regular affix-roll changes through the shared
 submission/readback path. The helper validates the complete expected state and every destination
 before the first store. It roots the selected graph through managed refreshes. A failure after
@@ -41,13 +43,10 @@ Forge reads copy bounded rooted graphs into owned snapshots: exact storage/eleme
 nested enum metadata and strict string decoding. Roots do not exclude concurrent game writes
 or native-manager destruction; the synchronous supported-game boundary remains explicit.
 
-`ReadItemLimits` reads the eight exact `System.Int32` static literal fields on `ItemData` and
-`ExperienceTracker.maxLevel`, using the public static getter's metadata-default branch. It checks
-declaring ownership, type, non-byref storage and literal/static flags before copying each constant.
-All five ranges must satisfy `0 <= minimum <= maximum <= 255`; level minimum zero follows the
-original helper. Runtime offline/native-manager admission runs first, independently of Session.
-The returned owned ranges omit localization, rarity names and the rest of the definitions catalog.
-Their exact 40-byte codec is `eg-game-access::definitions`. A stale helper is rejected by its build ID.
+The level-cache write still reads the item limits in the game, to check its destination: the eight exact
+`System.Int32` static literal fields on `ItemData` and `ExperienceTracker.maxLevel`, through the public static
+getter's metadata-default branch. It checks declaring ownership, type, non-byref storage and literal/static flags
+before copying each constant, and all five ranges must satisfy `0 <= minimum <= maximum <= 255`.
 
 `ReadLocale` observes `LocalizationSettings.s_Instance` and its already completed selected-locale operation.
 The generic handle is boxed through the public field API and rooted; its operation must have matching versions,
@@ -62,7 +61,7 @@ layout. The version getter may initialize Application's framework CancellationTo
 allocate/convert strings and dispose a native buffer. These are explicitly authorized effects; read-only means no
 gameplay mutation. Body permissions and immutable runtime/graph/native-object lifetimes remain unsafe obligations.
 The owned language/version payload uses two bounded strict UTF-8 texts (`eg-game-access::locale`). There is no
-fallback to the project default locale and no locale/catalog disk cache yet.
+fallback to the project default locale.
 
 The EditForge level-cache operation accepts a full bounded expected snapshot and opaque manager token. It roots the current
 graph, compares every owned field and manager identity, validates the exact mutable Int32 backing field,
