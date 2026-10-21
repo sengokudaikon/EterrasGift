@@ -1156,6 +1156,11 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
     /// The file catalog, for the connected game if it is the same build, with the game's locale.
     async fn catalog_from_files(&mut self, epoch: u64, target: &ProcessIdentity) -> Result<Option<GameCatalog>, BackendError> {
         self.settle_files(true).await;
+        // The game updated since the files were read: read them again rather than capture.
+        if matches!(&self.files, FilesTask::Ready(files) if !files.is_current()) {
+            self.start_files();
+            self.settle_files(true).await;
+        }
         let FilesTask::Ready(files) = &self.files else {
             return Ok(None);
         };

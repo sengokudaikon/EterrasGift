@@ -16,7 +16,8 @@ use eg_game_files::definitions::{Ailment, Definitions};
 use eg_game_files::uniques::{PlayerDefinitions, Property, PropertyInfo};
 use eg_trainer_wire::catalog::MAX_PAGE_ENTRIES;
 use eg_trainer_wire::protocol::ProtocolError;
-use std::path::Path;
+use std::path::{Path, PathBuf};
+use std::time::SystemTime;
 
 /// The live capture's own reasons, so a file-built catalog reads the same where data is missing.
 const AFFIX_NAME_REASON: &str = "The generated affix display-name formatter has not been validated";
@@ -34,6 +35,15 @@ pub struct FileCatalog {
     affixes: Vec<AffixDefinition>,
     uniques: Vec<UniqueDefinition>,
     rarities: Vec<RarityDefinition>,
+    /// Every file read, with its size and modification time when reading began.
+    sources: Vec<(PathBuf, Option<Fingerprint>)>,
+}
+
+type Fingerprint = (u64, SystemTime);
+
+fn fingerprint(path: &Path) -> Option<Fingerprint> {
+    let metadata = std::fs::metadata(path).ok()?;
+    Some((metadata.len(), metadata.modified().ok()?))
 }
 
 fn hash(path: &Path) -> Result<String, String> {
@@ -44,12 +54,19 @@ fn hash(path: &Path) -> Result<String, String> {
 /// Reads and builds the catalog for the game in `folder` (the one holding `Last Epoch.exe`).
 pub fn read(folder: &Path) -> Result<FileCatalog, String> {
     let install = eg_game_files::Install::at(folder).map_err(|e| e.to_string())?;
+    // Taken first, so a file that changes while it is read reads as changed afterwards.
+    let mut paths = install.definition_sources();
+    paths.extend(install.player_sources());
+    paths.push(install.data_folder().join("build_hash.txt"));
+    let sources = paths.into_iter().map(|path| (fingerprint(&path), path)).map(|(print, path)| (path, print)).collect();
     let binary_hash = hash(&folder.join("GameAssembly.dll"))?;
     let metadata_hash = hash(&install.data_folder().join("il2cpp_data").join("Metadata").join("global-metadata.dat"))?;
     let definitions = install.definitions().map_err(|e| e.to_string())?;
     let player = install.player_definitions().map_err(|e| e.to_string())?;
     let build = install.build_hash().unwrap_or_default();
-    build_catalog(binary_hash, metadata_hash, build, &definitions, &player)
+    let mut catalog = build_catalog(binary_hash, metadata_hash, build, &definitions, &player)?;
+    catalog.sources = sources;
+    Ok(catalog)
 }
 
 /// Builds the catalog from definitions already read.
@@ -89,6 +106,7 @@ pub fn build_catalog(binary_hash: String, metadata_hash: String, build: String, 
         affixes,
         uniques,
         rarities,
+        sources: Vec::new(),
     };
     // Validate now, with a placeholder locale, so a catalog that is built is one that a session can use.
     catalog
@@ -103,6 +121,11 @@ pub fn build_catalog(binary_hash: String, metadata_hash: String, build: String, 
 impl FileCatalog {
     pub fn affix_count(&self) -> usize {
         self.affixes.len()
+    }
+
+    /// Whether every file it was read from is as it was then (a Steam update while the app runs changes them).
+    pub fn is_current(&self) -> bool {
+        self.sources.iter().all(|(path, print)| fingerprint(path) == *print)
     }
 
     /// Whether this catalog was read from the build a session runs.
@@ -442,4 +465,38 @@ fn unique(unique: &eg_game_files::uniques::Unique, presentation: &Presentation<'
         is_pre_corrupted: unique.is_pre_corrupted,
         numeric,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_catalog_is_current_until_a_file_it_read_changes() {
+        let folder = tempfile::tempdir().unwrap();
+        let file = folder.path().join("GameAssembly.dll");
+        std::fs::write(&file, b"build one").unwrap();
+        let catalog = FileCatalog {
+            binary_hash: "A".repeat(64),
+            metadata_hash: "B".repeat(64),
+            build: String::new(),
+            limits: ItemLimits {
+                forging_potential: ValueRange { minimum: 0, maximum: 255 },
+                legendary_potential: ValueRange { minimum: 0, maximum: 4 },
+                weavers_will: ValueRange { minimum: 5, maximum: 28 },
+                weavers_touch: ValueRange { minimum: 5, maximum: 14 },
+                level_requirement: ValueRange { minimum: 0, maximum: 100 },
+            },
+            bases: vec![],
+            affixes: vec![],
+            uniques: vec![],
+            rarities: vec![],
+            sources: vec![(file.clone(), fingerprint(&file))],
+        };
+        assert!(catalog.is_current());
+        std::fs::write(&file, b"build two, longer").unwrap();
+        assert!(!catalog.is_current(), "a Steam update rewrites the files");
+        std::fs::remove_file(&file).unwrap();
+        assert!(!catalog.is_current(), "a file that is gone is not as it was");
+    }
 }
