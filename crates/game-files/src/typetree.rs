@@ -144,6 +144,15 @@ pub fn decode_prefix(root: &Node, bytes: &[u8], last: &str, references: &[Refere
 }
 
 fn read(node: &Node, reader: &mut Reader<'_>, references: &[ReferenceType]) -> Result<Value> {
+    // A node with an `Array` child is a collection whatever it is called: Unity names some after their element
+    // (`SingleAffix singleAffixes`), and an element can be a primitive. Strings keep their own reading.
+    if let Some(array) = node.array().filter(|_| &*node.type_name != "string") {
+        let value = read_array(node, array, reader, references)?;
+        if node.aligned() {
+            reader.align(4)?;
+        }
+        return Ok(value);
+    }
     let value = match &*node.type_name {
         "SInt8" => Value::Int(reader.i8()?.into()),
         "UInt8" | "char" => Value::UInt(reader.u8()?.into()),
@@ -174,11 +183,11 @@ fn read(node: &Node, reader: &mut Reader<'_>, references: &[ReferenceType]) -> R
         "ReferencedObject" => read_reference(node, reader, references)?,
         "ReferencedObjectData" => return Err(Error::malformed(format!("reference data {} outside a ReferencedObject", node.name))),
         _ => match node.array() {
-            Some(array) => read_array(node, array, reader, references)?,
+            Some(_) => unreachable!("collections are read above"),
             None => Value::Object(
                 node.children
                     .iter()
-                    .map(|child| Ok((child.name.clone(), read(child, reader, references)?)))
+                    .map(|child| Ok((child.name.clone(), read(child, reader, references).map_err(|e| e.context(&child.name))?)))
                     .collect::<Result<_>>()?,
             ),
         },
@@ -230,8 +239,8 @@ fn read_array(node: &Node, array: &Node, reader: &mut Reader<'_>, references: &[
         _ => {
             let count = reader.count(element_floor(element))?;
             let mut items = Vec::with_capacity(count);
-            for _ in 0..count {
-                items.push(read(element, reader, references)?);
+            for index in 0..count {
+                items.push(read(element, reader, references).map_err(|e| e.context(format!("[{index}]")))?);
             }
             Value::Array(items)
         }
@@ -317,6 +326,20 @@ mod tests {
         let prefix = decode_prefix(&tree, &bytes[..40], "m_Name", &[]).unwrap();
         assert_eq!(prefix.get("m_Name").unwrap().as_str().unwrap(), "Health");
         assert!(decode_prefix(&tree, &bytes, "missing", &[]).is_err());
+    }
+
+    #[test]
+    fn a_collection_named_after_its_primitive_element_is_still_a_collection() {
+        // Unity's naming (and the rebuilt layouts') can call a `List<byte>` node `UInt8`.
+        let mut tree = TreeBuilder::new("UniqueItem", "Base");
+        tree.vector_of("subTypes", "UInt8", 1).field("UInt8", "baseType", 1, ALIGN);
+        let mut tree = tree.build();
+        tree.children[0].type_name = "UInt8".into();
+        let mut w = Writer::default();
+        w.i32(2).u8(5).u8(6).align().u8(9).align();
+        let value = decode(&tree, &w.bytes, &[]).unwrap();
+        assert_eq!(value.get("subTypes").unwrap(), &Value::Bytes(vec![5, 6]));
+        assert_eq!(value.get("baseType").unwrap().as_i64().unwrap(), 9);
     }
 
     #[test]

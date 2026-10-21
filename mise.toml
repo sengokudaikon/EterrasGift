@@ -70,8 +70,8 @@ run = "slint-viewer {{arg(name='file', default='crates/ui/ui/app.slint')}}"
 env = { SLINT_MCP_PORT = "9315" }
 
 [tasks."game-files:install"]
-description = "Read the game data from a real install named by EG_LAST_EPOCH (the game folder); files only, no game process"
-run = "cargo test -p eg-game-files --release --test install -- --ignored --nocapture"
+description = "Read the game data from a real install named by EG_LAST_EPOCH (the game folder), and check the rebuilt layouts against every shipped type tree; files only, no game process"
+run = "cargo test -p eg-game-files --release -- --ignored --nocapture"
 
 [tasks."trainer:test"]
 description = "Nightly release trainer fixtures and tier checks; no live game"

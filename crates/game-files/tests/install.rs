@@ -1,5 +1,5 @@
 //! Reads a real Last Epoch install. Files only: nothing starts, opens or touches the game process.
-//! `EG_LAST_EPOCH=<game folder> cargo test -p eg-game-files --release -- --ignored --nocapture` (`mise run game-files:install`).
+//! `EG_LAST_EPOCH=<game folder> mise run game-files:install`, which also checks the rebuilt layouts (`src/layout.rs`).
 
 use eg_game_files::Install;
 use std::time::Instant;
@@ -52,4 +52,25 @@ fn reads_text_for_every_shipped_locale() {
     assert_eq!(strings.get("Item_Affixes", "Item_Affix_25_DisplayName"), Some("Health"));
     assert_eq!(strings.get("Item_Names", "Item_BaseType_Name_0"), Some("Helmet"));
     assert!(install.strings("xx").is_err());
+}
+
+#[test]
+#[ignore = "reads a Last Epoch install named by EG_LAST_EPOCH"]
+fn reads_uniques_properties_and_sets_from_the_player_data() {
+    let install = install();
+    let started = Instant::now();
+    let player = install.player_definitions().unwrap();
+    println!(
+        "{} uniques, {} properties, {} set bonuses in {:.2?}",
+        player.uniques.len(),
+        player.properties.len(),
+        player.set_bonuses.len(),
+        started.elapsed()
+    );
+    let revenge = player.uniques.iter().find(|u| u.id == 5).expect("unique 5");
+    assert_eq!((revenge.name.as_str(), revenge.is_set_item, revenge.set_id), ("IsadoraRevenge", true, 1));
+    assert!(revenge.mods.iter().any(|m| m.property == 59 && m.can_roll));
+    let isadora = player.set_bonuses.iter().find(|s| s.id == 1).expect("set 1");
+    assert_eq!((isadora.name.as_str(), isadora.items.as_slice()), ("Isadora's", &[5u16, 16, 26][..]));
+    assert!(player.properties.iter().any(|p| p.id == 31 && p.display_added_as_percentage));
 }

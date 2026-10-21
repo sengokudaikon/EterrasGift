@@ -203,6 +203,16 @@ impl SerializedFile {
         typetree::decode_prefix(self.tree(object)?, self.bytes(object), last, &self.references).map_err(|e| e.context(format!("object {}", object.path_id)))
     }
 
+    /// The whole object read with a layout from elsewhere (for files written without type trees).
+    pub fn decode_with(&self, object: &Object, tree: &Node) -> Result<Value> {
+        typetree::decode(tree, self.bytes(object), &self.references).map_err(|e| e.context(format!("object {}", object.path_id)))
+    }
+
+    /// The object's leading fields through `last`, read with a layout from elsewhere.
+    pub fn decode_prefix_with(&self, object: &Object, tree: &Node, last: &str) -> Result<Value> {
+        typetree::decode_prefix(tree, self.bytes(object), last, &self.references).map_err(|e| e.context(format!("object {}", object.path_id)))
+    }
+
     /// The file a `PPtr`'s file ID names: `None` for this file, else the external.
     pub fn external(&self, file_id: i32) -> Result<Option<&External>> {
         match file_id {

@@ -3,7 +3,9 @@
 use crate::archive::Archive;
 use crate::definitions::{self, Definitions};
 use crate::error::{Error, Result};
+use crate::player::PlayerData;
 use crate::strings::{self, SHARED_TABLE, STRING_TABLE, Strings};
+use crate::uniques::{self, PlayerDefinitions};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
@@ -72,6 +74,29 @@ impl Install {
         Ok(Definitions {
             affixes: definitions::affixes(&affixes).map_err(|e| e.context("MasterAffixesList"))?,
             item_types: definitions::item_types(&items).map_err(|e| e.context("MasterItemsList"))?,
+        })
+    }
+
+    /// The files [`Install::player_definitions`] reads.
+    pub fn player_sources(&self) -> Vec<PathBuf> {
+        let game = self.data.parent().unwrap_or(&self.data);
+        vec![
+            game.join("GameAssembly.dll"),
+            self.data.join("il2cpp_data").join("Metadata").join("global-metadata.dat"),
+            self.data.join("resources.assets"),
+            self.data.join("globalgamemanagers.assets"),
+            self.bundles().join("monoscripts.bundle"),
+        ]
+    }
+
+    /// Uniques, properties and set bonuses, from the player data Unity stores without type trees. Needs a game build
+    /// whose IL2CPP metadata this reader knows (format 39); any other is refused as unsupported.
+    pub fn player_definitions(&self) -> Result<PlayerDefinitions> {
+        let player = PlayerData::open(self.data.parent().unwrap_or(&self.data), &self.data)?;
+        Ok(PlayerDefinitions {
+            uniques: uniques::uniques(&player.behaviour("UniqueList", ("LE", "", "UniqueList"))?).map_err(|e| e.context("UniqueList"))?,
+            properties: uniques::properties(&player.behaviour("MasterPropertyList", ("LE", "", "PropertyList"))?).map_err(|e| e.context("MasterPropertyList"))?,
+            set_bonuses: uniques::set_bonuses(&player.behaviour("SetBonusesList", ("LE", "", "SetBonusesList"))?).map_err(|e| e.context("SetBonusesList"))?,
         })
     }
 
