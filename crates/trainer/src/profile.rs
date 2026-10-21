@@ -4,7 +4,8 @@ use eg_trainer_wire::protocol::DispatcherSpec;
 use std::{
     fs, io,
     path::{Path, PathBuf},
-    sync::{Arc, Weak},
+    sync::{Arc, Mutex, Weak},
+    time::SystemTime,
 };
 
 #[derive(Clone, Debug)]
@@ -37,7 +38,8 @@ pub(crate) struct ConnectionFiles {
 
 /// Session-scoped validation authority. Construction is checked; fields and
 /// retained handles are private. A cloned equal profile may use the same lease.
-/// Windows pins read-only objects; other platforms rehash on every validation.
+/// Windows pins read-only objects; where it can't (and on other platforms) the
+/// files are hashed again whenever their size or times differ from the last check.
 pub struct ProfileLease {
     profile: BuildProfile,
     dispatcher: DispatcherSpec,
@@ -49,14 +51,45 @@ enum LeaseStorage {
         binary: Arc<eg_game_access::artifact::ReadLease>,
         metadata: Arc<eg_game_access::artifact::ReadLease>,
     },
-    Rehash,
+    Rehash(Mutex<Rehashed>),
+}
+/// What the fallback last proved: both files' fingerprints when their content last hashed to the profile's.
+#[derive(Default)]
+struct Rehashed {
+    proven: Option<(Fingerprint, Fingerprint)>,
+    full: u64,
+}
+/// What changes when a file is written or replaced (a Steam update, say): its size and its times.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct Fingerprint {
+    len: u64,
+    modified: SystemTime,
+    #[cfg(windows)]
+    created: u64,
+}
+fn fingerprint(path: &Path) -> io::Result<Fingerprint> {
+    let metadata = fs::metadata(path)?;
+    Ok(Fingerprint {
+        len: metadata.len(),
+        modified: metadata.modified()?,
+        #[cfg(windows)]
+        created: std::os::windows::fs::MetadataExt::creation_time(&metadata),
+    })
 }
 impl ProfileLease {
     pub fn bytes_read(&self) -> Option<u64> {
         match &self.storage {
             #[cfg(windows)]
             LeaseStorage::Held { binary, metadata } => Some(binary.bytes_read() + metadata.bytes_read()),
-            LeaseStorage::Rehash => None,
+            LeaseStorage::Rehash(_) => None,
+        }
+    }
+    /// With the fallback, how often both files were read and hashed whole; `None` for a held lease.
+    pub fn full_validations(&self) -> Option<u64> {
+        match &self.storage {
+            #[cfg(windows)]
+            LeaseStorage::Held { .. } => None,
+            LeaseStorage::Rehash(rehashed) => Some(rehashed.lock().unwrap_or_else(|p| p.into_inner()).full),
         }
     }
 }
@@ -158,18 +191,12 @@ impl BuildProfile {
         })() {
             Ok(storage) => storage,
             // A capability/share-mode limitation is not proof that an artifact
-            // changed. Preserve the existing full-per-read validation fallback.
-            Err(error) if error.kind() == io::ErrorKind::Unsupported || matches!(error.raw_os_error(), Some(32 | 33)) => {
-                self.validate(dispatcher)?;
-                LeaseStorage::Rehash
-            }
+            // changed. Fall back to hashing the files, checked again by every read.
+            Err(error) if error.kind() == io::ErrorKind::Unsupported || matches!(error.raw_os_error(), Some(32 | 33)) => LeaseStorage::Rehash(Mutex::default()),
             Err(error) => return Err(error),
         };
         #[cfg(not(windows))]
-        let storage = {
-            self.validate(dispatcher)?;
-            LeaseStorage::Rehash
-        };
+        let storage = LeaseStorage::Rehash(Mutex::default());
         let lease = ProfileLease {
             profile: self.clone(),
             dispatcher: *dispatcher,
@@ -189,7 +216,23 @@ impl BuildProfile {
                 metadata.verify_path()?;
                 Ok(())
             }
-            LeaseStorage::Rehash => self.validate(dispatcher),
+            LeaseStorage::Rehash(rehashed) => {
+                // Reading and hashing both files (some 130 MB) for each of the several requests of every poll pegged
+                // the worker. Content is proven again whenever a file's size or times move, which any write does.
+                let mut rehashed = rehashed.lock().unwrap_or_else(|p| p.into_inner());
+                let before = (fingerprint(&self.binary)?, fingerprint(&self.metadata)?);
+                if rehashed.proven.as_ref() == Some(&before) {
+                    return Ok(());
+                }
+                rehashed.proven = None;
+                rehashed.full += 1;
+                self.validate(dispatcher)?;
+                // A write while the files were read is caught by the next check, which then hashes them again.
+                if (fingerprint(&self.binary)?, fingerprint(&self.metadata)?) == before {
+                    rehashed.proven = Some(before);
+                }
+                Ok(())
+            }
         }
     }
 }

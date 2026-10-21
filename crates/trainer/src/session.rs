@@ -186,6 +186,10 @@ impl<T: Transport> Session<T> {
     pub fn artifact_bytes_read(&self) -> Option<u64> {
         self.lease.as_ref().and_then(ProfileLease::bytes_read)
     }
+    /// With the hashing fallback, how often the artifacts were read whole.
+    pub fn artifact_full_validations(&self) -> Option<u64> {
+        self.lease.as_ref().and_then(ProfileLease::full_validations)
+    }
     pub fn cleanup(&self) -> Cleanup {
         self.cleanup
     }

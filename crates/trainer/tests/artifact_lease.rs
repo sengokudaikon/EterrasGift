@@ -449,6 +449,42 @@ fn changed_artifact_before_capture_is_rejected_before_any_catalog_request() {
 }
 
 #[test]
+fn fallback_hashes_unchanged_artifacts_once_rather_than_on_every_read() {
+    let f = Fixture::new();
+    let writer = OpenOptions::new().read(true).write(true).share_mode(7).open(&f.metadata).unwrap();
+    let (mut session, shared) = connected(&f);
+    // No lease holds the files against writes: the fallback is what this checks.
+    shared.lock().unwrap().assert_locks = false;
+    assert_eq!(session.artifact_bytes_read(), None, "another writer selects the fallback");
+    run(session.capture_catalog(now())).unwrap();
+    // Connecting and every catalog page checked the files; the content was read once.
+    let after_connect = session.artifact_full_validations().unwrap();
+    assert_eq!(after_connect, 1);
+    for _ in 0..12 {
+        let mut state = shared.lock().unwrap();
+        state.responses.push_back(
+            RuntimeStatus {
+                online: false,
+                manager: 0x12340,
+                features_on: 0,
+            }
+            .encode()
+            .unwrap()
+            .to_vec(),
+        );
+        state.responses.push_back(locale::encode(&locale()).unwrap());
+        state.responses.push_back(eg_trainer_wire::forge::encode(None).unwrap());
+        drop(state);
+        run(session.refresh(now())).unwrap();
+        run(session.read_locale(now())).unwrap();
+        assert_eq!(run(session.read_forge(now())).unwrap(), None);
+    }
+    assert_eq!(session.artifact_full_validations(), Some(after_connect), "unchanged files are not read again");
+    run(session.disconnect());
+    drop(writer);
+}
+
+#[test]
 fn fallback_rehashes_each_page_and_rejects_an_inflight_artifact_change() {
     let f = Fixture::new();
     let log = Logs::new();
