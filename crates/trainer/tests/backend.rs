@@ -129,6 +129,7 @@ struct Shared {
     mapping_errors: Mutex<VecDeque<BackendError>>,
     mapping_result: Mutex<Option<eg_trainer::mapping::ValueTable>>,
     locale: Mutex<eg_trainer::catalog::GameLocale>,
+    hashes: Mutex<Option<(String, String)>>,
     disconnect_block: Block,
     write_block: Block,
     refresh_block: Block,
@@ -169,6 +170,7 @@ impl Shared {
             mapping_errors: Mutex::new(VecDeque::new()),
             mapping_result: Mutex::new(None),
             locale: Mutex::new(catalog().identity.locale),
+            hashes: Mutex::new(None),
             disconnect_block: Block::default(),
             write_block: Block::default(),
             refresh_block: Block::default(),
@@ -255,6 +257,9 @@ impl BackendConnection for Connection {
     async fn read_locale(&mut self, _: Timestamp) -> Result<eg_trainer::catalog::GameLocale, BackendError> {
         self.shared.record("locale");
         Ok(self.shared.locale.lock().unwrap().clone())
+    }
+    fn build_hashes(&self) -> Option<(String, String)> {
+        self.shared.hashes.lock().unwrap().clone()
     }
     async fn capture_catalog(&mut self, _: Timestamp) -> Result<GameCatalog, BackendError> {
         self.shared.call("capture", &self.shared.capture_block).await;
@@ -397,7 +402,95 @@ fn options() -> BackendOptions {
         auto_connect: false,
         poll_interval: Duration::from_millis(5),
         discovery_interval: Duration::from_millis(10),
+        game_files: None,
     }
+}
+
+/// A catalog built from minimal game-file definitions: one base, one single affix (25, property 7, 5 to 15).
+fn file_catalog() -> Arc<eg_trainer::files::FileCatalog> {
+    use eg_game_files::definitions::{Affix, AffixProperty, AffixTier, Definitions, ItemType, Roll};
+    use eg_game_files::uniques::{AbilityRegistry, ItemConstants, PlayerDefinitions, Property, PropertyInfo, PropertyRegistry};
+    let info = PropertyInfo {
+        rounding_for_added: 0,
+        rounding_for_more: 0,
+        display_added_as_percentage: false,
+        display_added_as_tenth: false,
+        less_is_better: false,
+    };
+    let property = |id| Property {
+        id,
+        name: "Health".into(),
+        text_key: String::new(),
+        rounding_for_added: 0,
+        rounding_for_more: 0,
+        display_added_as_percentage: false,
+        display_added_as_tenth: false,
+        display_as_percentage_of: false,
+        display_as_added_to: false,
+        dont_display_plus: false,
+        less_is_better: false,
+        hide_modifier_value: false,
+        name_includes_modifier: false,
+        default_alt_text: String::new(),
+        more_rounding_overrides: vec![],
+    };
+    let definitions = Definitions {
+        affixes: vec![Affix {
+            id: 25,
+            name: "Added Health".into(),
+            display_name: String::new(),
+            title: "of Life".into(),
+            kind: 1,
+            special: 0,
+            class_specificity: 0,
+            level_requirement: 0,
+            rolls_on: 0,
+            item_types: vec![3],
+            standard_effect: 0.0,
+            group: 0,
+            weighting: 1.0,
+            use_generated_name: true,
+            multi: false,
+            properties: vec![AffixProperty {
+                property: 7,
+                special_tag: 0,
+                tags: 0,
+                extra_tag: 0,
+                modifier_type: 0,
+                set_property: false,
+            }],
+            tiers: vec![AffixTier {
+                rolls: vec![Roll { min: 5.0, max: 15.0 }],
+            }],
+        }],
+        item_types: vec![ItemType {
+            id: 3,
+            name: "Boots".into(),
+            display_name: "Boots".into(),
+            maximum_affixes: 4,
+            is_weapon: false,
+            sub_types: vec![],
+        }],
+        idol_altar: PropertyRegistry { list: vec![], default: info },
+        ailments: vec![],
+    };
+    let player = PlayerDefinitions {
+        uniques: vec![],
+        properties: vec![property(7)],
+        default_property: property(0),
+        abilities: AbilityRegistry { list: vec![], default: info },
+        player: PropertyRegistry { list: vec![], default: info },
+        tracker: PropertyRegistry { list: vec![], default: info },
+        set_bonuses: vec![],
+        constants: ItemConstants {
+            forging_potential: (0, 255),
+            legendary_potential: (0, 4),
+            weavers_will: (5, 28),
+            weavers_touch: (5, 14),
+            max_level: 100,
+        },
+    };
+    Arc::new(eg_trainer::files::build_catalog("A".repeat(64), "B".repeat(64), "build".into(), &definitions, &player).unwrap())
 }
 fn start(shared: &Arc<Shared>, options: BackendOptions, cache: Option<CatalogCache>) -> (BackendHandle, tokio::task::JoinHandle<()>) {
     let (handle, worker) = backend::service(Locator(shared.clone()), Connect(shared.clone()), Logs(shared.clone()), FakeClock, options, cache);
@@ -976,6 +1069,68 @@ fn retryable_connection_waits_do_not_write_fault_files_but_fatal_errors_do() {
         assert!(command(&handle, Command::Connect).await.is_err());
         assert_eq!(handle.snapshot().phase, Phase::Blocked);
         assert_eq!(std::fs::read_dir(directory.path()).unwrap().count(), 1, "uncertain startup remains a fault");
+        shutdown(&handle, worker).await;
+    });
+}
+
+#[test]
+fn a_game_file_catalog_of_the_running_build_replaces_the_capture() {
+    run(async {
+        let shared = Shared::new();
+        *shared.hashes.lock().unwrap() = Some(("a".repeat(64), "b".repeat(64)));
+        let mut options = options();
+        options.game_files = Some(backend::GameFilesSource::Read(file_catalog()));
+        let (handle, worker) = start(&shared, options, None);
+        let mut receiver = handle.subscribe();
+        while receiver.borrow().game_files == backend::GameFiles::NotConfigured {
+            receiver.changed().await.unwrap();
+        }
+        assert_eq!(
+            handle.snapshot().game_files,
+            backend::GameFiles::Ready {
+                affixes: 1,
+                build: "build".into()
+            }
+        );
+        connected(&handle).await;
+        assert_eq!(shared.count("capture"), 0, "definitions came from the files");
+        let snapshot = handle.snapshot();
+        let CatalogState::Current { data, .. } = &snapshot.catalog else {
+            panic!("current catalog")
+        };
+        assert_eq!(data.identity.locale, *shared.locale.lock().unwrap(), "the session's locale");
+        assert_eq!(data.identity.binary_hash, "A".repeat(64));
+        assert!(data.affixes.contains_key(&25));
+        shutdown(&handle, worker).await;
+    });
+}
+
+#[test]
+fn another_build_still_captures_from_the_game() {
+    run(async {
+        let shared = Shared::new();
+        *shared.hashes.lock().unwrap() = Some(("C".repeat(64), "B".repeat(64)));
+        let mut options = options();
+        options.game_files = Some(backend::GameFilesSource::Read(file_catalog()));
+        let (handle, worker) = start(&shared, options, None);
+        connected(&handle).await;
+        assert_eq!(shared.count("capture"), 1);
+        shutdown(&handle, worker).await;
+    });
+}
+
+#[test]
+fn unreadable_game_files_are_reported_and_capture_takes_over() {
+    run(async {
+        let shared = Shared::new();
+        *shared.hashes.lock().unwrap() = Some(("A".repeat(64), "B".repeat(64)));
+        let folder = tempfile::tempdir().unwrap();
+        let mut options = options();
+        options.game_files = Some(backend::GameFilesSource::Folder(folder.path().join("no game here")));
+        let (handle, worker) = start(&shared, options, None);
+        connected(&handle).await;
+        assert!(matches!(handle.snapshot().game_files, backend::GameFiles::Unavailable(ref reason) if reason.contains("Last Epoch_Data")));
+        assert_eq!(shared.count("capture"), 1);
         shutdown(&handle, worker).await;
     });
 }

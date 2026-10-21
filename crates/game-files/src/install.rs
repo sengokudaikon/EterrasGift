@@ -6,12 +6,14 @@ use crate::error::{Error, Result};
 use crate::player::PlayerData;
 use crate::strings::{self, SHARED_TABLE, STRING_TABLE, Strings};
 use crate::uniques::{self, PlayerDefinitions};
+use crate::value::Value;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 pub const DATA_FOLDER: &str = "Last Epoch_Data";
 const AFFIX_LIST: (&str, &str, &str) = ("LE", "", "AffixList");
 const ITEM_LIST: (&str, &str, &str) = ("LE", "", "ItemList");
+const AILMENT_LIST: (&str, &str, &str) = ("LE", "", "AilmentList");
 /// Unity Localization's default Addressables group naming, one bundle per locale.
 const STRING_TABLE_BUNDLES: &str = "localization-string-tables-";
 
@@ -71,9 +73,23 @@ impl Install {
         let masters = archive.main_file(0)?;
         let affixes = archive.behaviour(&masters, "MasterAffixesList", AFFIX_LIST)?;
         let items = archive.behaviour(&masters, "MasterItemsList", ITEM_LIST)?;
+        let (file, altar) = archive.resolve(&masters, items.field("idolAltarPropertyList", Value::as_pptr)?)?;
+        let idol_altar = uniques::registry(&file.decode(&altar)?).map_err(|e| e.context("idolAltarPropertyList"))?;
+        let list = archive.behaviour(&masters, "AilmentList", AILMENT_LIST)?;
+        let mut ailments = Vec::new();
+        for pointer in list.field("list", |l| l.as_array()?.iter().map(Value::as_pptr).collect::<Result<Vec<_>>>())? {
+            let (file, object) = archive.resolve(&masters, pointer)?;
+            let ailment = file.decode(&object)?;
+            ailments.push(definitions::Ailment {
+                id: ailment.field("id", Value::int)?,
+                effect_of_increased_effectiveness: ailment.field("effectOfIncreasedEffectiveness", Value::int)?,
+            });
+        }
         Ok(Definitions {
             affixes: definitions::affixes(&affixes).map_err(|e| e.context("MasterAffixesList"))?,
             item_types: definitions::item_types(&items).map_err(|e| e.context("MasterItemsList"))?,
+            idol_altar,
+            ailments,
         })
     }
 
@@ -93,10 +109,28 @@ impl Install {
     /// whose IL2CPP metadata this reader knows (format 39); any other is refused as unsupported.
     pub fn player_definitions(&self) -> Result<PlayerDefinitions> {
         let player = PlayerData::open(self.data.parent().unwrap_or(&self.data), &self.data)?;
+        let properties = player.behaviour("MasterPropertyList", ("LE", "", "PropertyList"))?;
+        let registry = |name: &str| player.behaviour(name, ("LE", "", name)).and_then(|v| uniques::registry(&v)).map_err(|e| e.context(name));
+        let constant = |class: &str, field: &str| player.il2cpp().int_constant("LE", "", class, field);
+        let pair = |name: &str| -> Result<(i32, i32)> { Ok((constant("ItemData", &format!("Min{name}"))?, constant("ItemData", &format!("Max{name}"))?)) };
         Ok(PlayerDefinitions {
             uniques: uniques::uniques(&player.behaviour("UniqueList", ("LE", "", "UniqueList"))?).map_err(|e| e.context("UniqueList"))?,
-            properties: uniques::properties(&player.behaviour("MasterPropertyList", ("LE", "", "PropertyList"))?).map_err(|e| e.context("MasterPropertyList"))?,
+            properties: uniques::properties(&properties).map_err(|e| e.context("MasterPropertyList"))?,
+            default_property: uniques::default_property(&properties).map_err(|e| e.context("MasterPropertyList"))?,
+            abilities: player
+                .behaviour("AbilityPropertyList", ("LE", "", "AbilityPropertyList"))
+                .and_then(|v| uniques::abilities(&v))
+                .map_err(|e| e.context("AbilityPropertyList"))?,
+            player: registry("PlayerPropertyList")?,
+            tracker: registry("TrackerPropertyList")?,
             set_bonuses: uniques::set_bonuses(&player.behaviour("SetBonusesList", ("LE", "", "SetBonusesList"))?).map_err(|e| e.context("SetBonusesList"))?,
+            constants: uniques::ItemConstants {
+                forging_potential: pair("ForgingPotential")?,
+                legendary_potential: pair("LegendaryPotential")?,
+                weavers_will: pair("WeaversWill")?,
+                weavers_touch: pair("WeaversTouch")?,
+                max_level: constant("ExperienceTracker", "maxLevel")?,
+            },
         })
     }
 

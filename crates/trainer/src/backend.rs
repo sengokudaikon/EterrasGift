@@ -82,6 +82,11 @@ pub trait BackendConnection: Send + 'static {
     }
     fn refresh(&mut self, now: Timestamp) -> impl Future<Output = Result<RuntimeStatus, BackendError>> + Send;
     fn read_locale(&mut self, now: Timestamp) -> impl Future<Output = Result<crate::catalog::GameLocale, BackendError>> + Send;
+    /// The running build's binary and metadata hashes, when known: a catalog read from files with the same hashes
+    /// describes this game, and is used instead of a capture.
+    fn build_hashes(&self) -> Option<(String, String)> {
+        None
+    }
     fn capture_catalog(&mut self, now: Timestamp) -> impl Future<Output = Result<GameCatalog, BackendError>> + Send;
     fn capture_catalog_observed(&mut self, now: Timestamp, observer: &mut dyn CaptureObserver) -> impl Future<Output = Result<CaptureOutcome, BackendError>> + Send {
         async move {
@@ -207,6 +212,9 @@ impl<T: Transport + Send + 'static, L: LogSource + Send + 'static> BackendConnec
     }
     async fn read_locale(&mut self, now: Timestamp) -> Result<crate::catalog::GameLocale, BackendError> {
         Ok(Session::read_locale(self, now).await?)
+    }
+    fn build_hashes(&self) -> Option<(String, String)> {
+        Some((self.profile().binary_hash().to_owned(), self.profile().metadata_hash().to_owned()))
     }
     async fn capture_catalog(&mut self, now: Timestamp) -> Result<GameCatalog, BackendError> {
         Ok(Session::capture_catalog(self, now).await?)
@@ -484,6 +492,21 @@ pub struct AttackLeechSnapshot {
     pub manager: u64,
     pub read: AttackLeechRead,
 }
+/// The catalog read from the game's files at start (`crate::files`). A session of the same build uses it on connect
+/// instead of capturing definitions from the game.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum GameFiles {
+    /// No game folder was given.
+    NotConfigured,
+    Reading,
+    Ready {
+        affixes: usize,
+        build: String,
+    },
+    /// Reading failed; sessions capture from the game as before.
+    Unavailable(String),
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct BackendSnapshot {
     pub revision: u64,
@@ -504,6 +527,7 @@ pub struct BackendSnapshot {
     pub error: Option<BackendError>,
     pub cache_error: Option<String>,
     pub catalog: CatalogState,
+    pub game_files: GameFiles,
     pub forge: ForgeState,
     /// Successful owned reads/captures, independent of item equality. This
     /// allows optional display failures to be retried after Refresh, not in a loop.
@@ -703,6 +727,16 @@ pub struct BackendOptions {
     pub override_enabled: bool,
     pub poll_interval: Duration,
     pub discovery_interval: Duration,
+    /// Where the catalog comes from before a game connects; `None` keeps capturing from the game.
+    pub game_files: Option<GameFilesSource>,
+}
+
+#[derive(Clone, Debug)]
+pub enum GameFilesSource {
+    /// The game folder, read on a blocking thread when the worker starts.
+    Folder(std::path::PathBuf),
+    /// A catalog already read (tests, tools).
+    Read(Arc<crate::files::FileCatalog>),
 }
 impl Default for BackendOptions {
     fn default() -> Self {
@@ -712,8 +746,16 @@ impl Default for BackendOptions {
             override_enabled: false,
             poll_interval: Duration::from_millis(250),
             discovery_interval: Duration::from_secs(1),
+            game_files: None,
         }
     }
+}
+
+/// The file catalog's read, off the worker thread.
+enum FilesTask {
+    None,
+    Reading(tokio::task::JoinHandle<Result<crate::files::FileCatalog, String>>),
+    Ready(Arc<crate::files::FileCatalog>),
 }
 
 struct Envelope {
@@ -859,6 +901,7 @@ where
     paused: bool,
     faults: Option<eg_core::fault::FaultLog>,
     forge_history: crate::undo::ForgeUndoHistory,
+    files: FilesTask,
 }
 
 pub fn service<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock>(
@@ -888,6 +931,7 @@ pub fn service<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K
         error: None,
         cache_error: None,
         catalog: CatalogState::Missing,
+        game_files: GameFiles::NotConfigured,
         forge: ForgeState::Unobserved,
         forge_read_sequence: 0,
         mappings: vec![],
@@ -933,6 +977,7 @@ pub fn service<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K
             paused: false,
             faults: None,
             forge_history: Default::default(),
+            files: FilesTask::None,
         },
     )
 }
@@ -945,6 +990,7 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
     }
     pub async fn run(mut self) {
         self.load_cache().await;
+        self.start_files();
         let interval = self.options.poll_interval.max(Duration::from_millis(1));
         let mut tick = tokio::time::Instant::now() + interval;
         loop {
@@ -1078,6 +1124,90 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
             self.publish();
         }
     }
+    fn start_files(&mut self) {
+        match self.options.game_files.clone() {
+            None => return,
+            Some(GameFilesSource::Folder(folder)) => {
+                self.files = FilesTask::Reading(tokio::task::spawn_blocking(move || crate::files::read(&folder)));
+                self.state.game_files = GameFiles::Reading;
+            }
+            Some(GameFilesSource::Read(catalog)) => {
+                self.state.game_files = GameFiles::Ready {
+                    affixes: catalog.affix_count(),
+                    build: catalog.build.clone(),
+                };
+                self.files = FilesTask::Ready(catalog);
+            }
+        }
+        self.publish();
+    }
+    /// Takes a finished read's result; with `wait`, waits for one still running (a connect would rather wait a moment
+    /// than capture definitions it is about to have).
+    async fn settle_files(&mut self, wait: bool) {
+        match &self.files {
+            FilesTask::Reading(handle) if wait || handle.is_finished() => {}
+            _ => return,
+        }
+        let FilesTask::Reading(handle) = std::mem::replace(&mut self.files, FilesTask::None) else {
+            unreachable!("matched above");
+        };
+        let outcome = handle.await.map_err(|e| e.to_string()).and_then(|r| r);
+        match outcome {
+            Ok(catalog) => {
+                self.state.game_files = GameFiles::Ready {
+                    affixes: catalog.affix_count(),
+                    build: catalog.build.clone(),
+                };
+                self.files = FilesTask::Ready(Arc::new(catalog));
+            }
+            Err(reason) => {
+                if let Some(faults) = &self.faults {
+                    faults.write(
+                        "Reading game data from the game files",
+                        Some(&reason),
+                        None,
+                        Some("Game definitions are read from the game when it connects."),
+                    );
+                }
+                self.state.game_files = GameFiles::Unavailable(reason);
+            }
+        }
+        self.publish();
+    }
+    /// The file catalog, for the connected game if it is the same build, with the game's locale.
+    async fn catalog_from_files(&mut self, epoch: u64, target: &ProcessIdentity) -> Result<Option<GameCatalog>, BackendError> {
+        self.settle_files(true).await;
+        let FilesTask::Ready(files) = &self.files else {
+            return Ok(None);
+        };
+        let files = files.clone();
+        let connection = self
+            .connection
+            .as_mut()
+            .ok_or_else(|| BackendError::blocked(ErrorKind::NotConnected, "connection released"))?;
+        let Some((binary, metadata)) = connection.build_hashes() else {
+            return Ok(None);
+        };
+        if !files.matches(&binary, &metadata) {
+            return Ok(None);
+        }
+        self.admit(target)?;
+        let locale = self
+            .connection
+            .as_mut()
+            .ok_or_else(|| BackendError::blocked(ErrorKind::NotConnected, "connection released"))?
+            .read_locale(self.clock.now())
+            .await?;
+        self.superseded(epoch)?;
+        self.admit(target)?;
+        match files.catalog(locale) {
+            Ok(catalog) => Ok(Some(catalog)),
+            Err(error) => {
+                self.cache_fault(format!("the game-file catalog was refused for this session: {error:?}"));
+                Ok(None)
+            }
+        }
+    }
     fn cache_fault(&mut self, message: String) {
         if let Some(faults) = &self.faults {
             faults.write("Trainer catalog cache", Some(&message), None, Some("The current session remains available."));
@@ -1173,6 +1303,7 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
         }
     }
     async fn poll(&mut self) {
+        self.settle_files(false).await;
         if !self.state.enabled || !self.state.monitoring || self.paused {
             return;
         }
@@ -1287,10 +1418,16 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
             let status = self.connection.as_mut().unwrap().refresh(self.clock.now()).await?;
             self.superseded(epoch)?;
             self.check_status(status)?;
-            self.state.activity = Some(Activity::CapturingCatalog);
-            self.publish_if_current(epoch)?;
-            let catalog = self.capture_observed(epoch).await?;
-            self.superseded(epoch)?;
+            let catalog = match self.catalog_from_files(epoch, target).await? {
+                Some(catalog) => catalog,
+                None => {
+                    self.state.activity = Some(Activity::CapturingCatalog);
+                    self.publish_if_current(epoch)?;
+                    let catalog = self.capture_observed(epoch).await?;
+                    self.superseded(epoch)?;
+                    catalog
+                }
+            };
             self.admit(target)?;
             self.state.activity = Some(Activity::ReadingForge);
             self.publish_if_current(epoch)?;
@@ -1392,9 +1529,15 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
             // the game changes language while the editor is idle.
             let locale_changed = !capture && self.locale_changed(epoch, &target).await?;
             let data = if capture || locale_changed {
-                let data = self.capture_observed(epoch).await?;
-                self.superseded(epoch)?;
-                Arc::new(data)
+                let from_files = if capture { None } else { self.catalog_from_files(epoch, &target).await? };
+                match from_files {
+                    Some(catalog) => Arc::new(catalog),
+                    None => {
+                        let data = self.capture_observed(epoch).await?;
+                        self.superseded(epoch)?;
+                        Arc::new(data)
+                    }
+                }
             } else {
                 self.state
                     .catalog

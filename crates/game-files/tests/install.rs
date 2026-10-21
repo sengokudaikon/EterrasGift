@@ -27,6 +27,9 @@ fn reads_definitions_from_the_install() {
     assert_eq!((health.name.as_str(), health.kind, health.multi), ("Added Health", 1, false));
     assert_eq!((health.tiers[0].rolls[0].min, health.tiers[0].rolls[0].max), (5.0, 15.0));
     assert!(definitions.affixes.iter().any(|a| a.multi && a.properties.len() > 1));
+    println!("{} ailments, {} idol altar properties", definitions.ailments.len(), definitions.idol_altar.list.len());
+    assert!(definitions.ailments.iter().any(|a| a.effect_of_increased_effectiveness == 1));
+    assert!(!definitions.idol_altar.list.is_empty());
     let helmets = definitions.item_types.iter().find(|t| t.id == 0).expect("item type 0");
     assert_eq!(helmets.name, "Helmets");
     assert!(!helmets.sub_types.is_empty());
@@ -73,4 +76,13 @@ fn reads_uniques_properties_and_sets_from_the_player_data() {
     let isadora = player.set_bonuses.iter().find(|s| s.id == 1).expect("set 1");
     assert_eq!((isadora.name.as_str(), isadora.items.as_slice()), ("Isadora's", &[5u16, 16, 26][..]));
     assert!(player.properties.iter().any(|p| p.id == 31 && p.display_added_as_percentage));
+    println!(
+        "constants {:?}; {} ability entries, {} player, {} tracker",
+        player.constants,
+        player.abilities.list.len(),
+        player.player.list.len(),
+        player.tracker.list.len()
+    );
+    assert!(player.constants.max_level > 0 && player.constants.forging_potential.0 <= player.constants.forging_potential.1);
+    assert!(!player.abilities.list.is_empty() && !player.player.list.is_empty());
 }

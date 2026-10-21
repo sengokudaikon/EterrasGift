@@ -164,6 +164,11 @@ fn main() -> Result<(), slint::PlatformError> {
                     .and_then(|v| v.get("iKnowWhatImDoing"))
                     .and_then(|v| v.as_bool())
                     .unwrap_or(false),
+                // Definitions come from the game's files when the connected game is the same build.
+                game_files: found_game
+                    .as_ref()
+                    .and_then(|exe| exe.parent())
+                    .map(|folder| eg_trainer::backend::GameFilesSource::Folder(folder.to_path_buf())),
                 ..Default::default()
             },
             arguments.no_connect,

@@ -10,6 +10,7 @@ pub mod dispatch;
 pub mod edits;
 pub mod features;
 pub mod field_writes;
+pub mod files;
 
 pub mod gate;
 pub mod mapping;

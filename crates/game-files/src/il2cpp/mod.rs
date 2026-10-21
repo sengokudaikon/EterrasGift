@@ -162,6 +162,28 @@ impl Il2Cpp {
         self.metadata.attribute_types(image, token)?.into_iter().map(|owner| self.full_name(owner)).collect()
     }
 
+    /// The value of an `Int32` constant (`const int`) of `assembly`'s `namespace.class`, from its metadata default.
+    pub(crate) fn int_constant(&self, assembly: &str, namespace: &str, class: &str, field: &str) -> Result<i32> {
+        let found = self.find(assembly, namespace, class);
+        let [index] = found.as_slice() else {
+            return Err(Error::data(format!("{} definitions of {namespace}.{class} in {assembly}", found.len())));
+        };
+        let definition = self.definition(*index)?;
+        let field_index = self
+            .metadata
+            .field_index(definition, field)
+            .ok_or_else(|| Error::data(format!("{class} has no field {field}")))?;
+        let raw = self.binary.type_at(self.metadata.fields[field_index as usize].type_index)?;
+        if raw.kind != kind::I4 || raw.attributes & field_attributes::LITERAL == 0 || raw.attributes & field_attributes::STATIC == 0 {
+            return Err(Error::data(format!("{class}.{field} is not a const int")));
+        }
+        let (type_index, value) = self.metadata.int_default(field_index)?;
+        if self.binary.type_at(type_index)?.kind != kind::I4 {
+            return Err(Error::data(format!("{class}.{field}'s default is not an Int32")));
+        }
+        Ok(value)
+    }
+
     /// The type definitions named `namespace.name` (not nested) in the image `assembly`.dll.
     pub(crate) fn find(&self, assembly: &str, namespace: &str, name: &str) -> Vec<u32> {
         // MonoScripts name most assemblies bare (`LE`), some with their extension (`DOTweenPro.dll`).

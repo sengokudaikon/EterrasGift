@@ -8,8 +8,55 @@ use std::collections::BTreeSet;
 #[derive(Clone, Debug, PartialEq)]
 pub struct PlayerDefinitions {
     pub uniques: Vec<Unique>,
+    /// `PropertyList`: the stat properties in list order (the game takes the first match), and its default.
     pub properties: Vec<Property>,
+    pub default_property: Property,
+    /// The registries special properties draw their presentation from: abilities (58), player (98) and
+    /// trackers (123). Idol altars (130) and ailments (43) are in the bundles' [`crate::Definitions`].
+    pub abilities: AbilityRegistry,
+    pub player: PropertyRegistry,
+    pub tracker: PropertyRegistry,
     pub set_bonuses: Vec<SetBonus>,
+    pub constants: ItemConstants,
+}
+
+/// The `const int`s an item's editable values are bounded by (`ItemData`, `ExperienceTracker.maxLevel`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ItemConstants {
+    pub forging_potential: (i32, i32),
+    pub legendary_potential: (i32, i32),
+    pub weavers_will: (i32, i32),
+    pub weavers_touch: (i32, i32),
+    pub max_level: i32,
+}
+
+/// How a property's values are shown: what every property-info class shares.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PropertyInfo {
+    pub rounding_for_added: i32,
+    pub rounding_for_more: i32,
+    pub display_added_as_percentage: bool,
+    pub display_added_as_tenth: bool,
+    pub less_is_better: bool,
+}
+
+/// A registry indexed by position (players, trackers, idol altars), with the default it falls back to.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PropertyRegistry {
+    pub list: Vec<PropertyInfo>,
+    pub default: PropertyInfo,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AbilityRegistry {
+    pub list: Vec<AbilityProperties>,
+    pub default: PropertyInfo,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AbilityProperties {
+    pub ability_id: u16,
+    pub properties: Vec<PropertyInfo>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -72,6 +119,20 @@ pub struct Property {
     pub hide_modifier_value: bool,
     pub name_includes_modifier: bool,
     pub default_alt_text: String,
+    /// `roundingForMore` per special tag (the game matches the tag only).
+    pub more_rounding_overrides: Vec<(u8, i32)>,
+}
+
+impl Property {
+    pub fn info(&self) -> PropertyInfo {
+        PropertyInfo {
+            rounding_for_added: self.rounding_for_added,
+            rounding_for_more: self.rounding_for_more,
+            display_added_as_percentage: self.display_added_as_percentage,
+            display_added_as_tenth: self.display_added_as_tenth,
+            less_is_better: self.less_is_better,
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -176,9 +237,46 @@ fn property(v: &Value) -> Result<Property> {
             hide_modifier_value: v.field("hideModifierValue", Value::as_bool)?,
             name_includes_modifier: v.field("nameIncludesModifier", Value::as_bool)?,
             default_alt_text: v.field("defaultAltText", text)?,
+            more_rounding_overrides: list(v, "moreRoundingOverrides", |o| {
+                Ok((o.field("specialTag", Value::int)?, o.field("roundingForMore", Value::int)?))
+            })?,
         })
     };
     read().map_err(|e| e.context(format!("property {id}")))
+}
+
+fn info(v: &Value) -> Result<PropertyInfo> {
+    Ok(PropertyInfo {
+        rounding_for_added: v.field("roundingForAdded", Value::int)?,
+        rounding_for_more: v.field("roundingForMore", Value::int)?,
+        display_added_as_percentage: v.field("displayAddedAsPercentage", Value::as_bool)?,
+        display_added_as_tenth: v.field("displayAddedAsTenthOfValue", Value::as_bool)?,
+        less_is_better: v.field("lessIsBetter", Value::as_bool)?,
+    })
+}
+
+/// A registry with a `list` of property infos and a `defaultProperty`.
+pub(crate) fn registry(v: &Value) -> Result<PropertyRegistry> {
+    Ok(PropertyRegistry {
+        list: list(v, "list", info)?,
+        default: v.field("defaultProperty", info)?,
+    })
+}
+
+pub(crate) fn abilities(v: &Value) -> Result<AbilityRegistry> {
+    Ok(AbilityRegistry {
+        list: list(v, "list", |entry| {
+            Ok(AbilityProperties {
+                ability_id: entry.field("abilityID", Value::int)?,
+                properties: list(entry, "properties", info)?,
+            })
+        })?,
+        default: v.field("defaultProperty", info)?,
+    })
+}
+
+pub(crate) fn default_property(list_value: &Value) -> Result<Property> {
+    list_value.field("defaultProperty", property)
 }
 
 fn set_mod(v: &Value) -> Result<SetMod> {
@@ -224,10 +322,9 @@ pub(crate) fn uniques(list_value: &Value) -> Result<Vec<Unique>> {
     Ok(uniques)
 }
 
+/// The stat properties in list order. An ID listed twice is kept: the game takes the first.
 pub(crate) fn properties(list_value: &Value) -> Result<Vec<Property>> {
-    let properties = list(list_value, "propertyInfoList", property)?;
-    unique_ids(properties.iter().map(|p| p.id), "property")?;
-    Ok(properties)
+    list(list_value, "propertyInfoList", property)
 }
 
 pub(crate) fn set_bonuses(list_value: &Value) -> Result<Vec<SetBonus>> {

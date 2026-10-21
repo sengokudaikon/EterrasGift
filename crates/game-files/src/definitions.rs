@@ -9,6 +9,17 @@ use std::collections::BTreeSet;
 pub struct Definitions {
     pub affixes: Vec<Affix>,
     pub item_types: Vec<ItemType>,
+    /// The idol altar property registry (`ItemList.idolAltarPropertyList`), for special property 130.
+    pub idol_altar: crate::uniques::PropertyRegistry,
+    /// Every ailment in `AilmentList` order, for special property 43.
+    pub ailments: Vec<Ailment>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Ailment {
+    pub id: u8,
+    /// `effectOfIncreasedEffectiveness`.
+    pub effect_of_increased_effectiveness: i32,
 }
 
 #[derive(Clone, Debug, PartialEq)]

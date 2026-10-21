@@ -102,6 +102,9 @@ pub(crate) struct Metadata {
     pub(crate) images: Vec<Image>,
     attribute_data: Section,
     attribute_ranges: Vec<(u32, u32)>,
+    /// Literal fields' default values: field index → (type index, offset into the default value data).
+    defaults: std::collections::HashMap<u32, (u32, usize)>,
+    default_data: Section,
 }
 
 fn width(count: usize) -> usize {
@@ -261,7 +264,22 @@ impl Metadata {
             attribute_ranges.push((r.u32()?, r.u32()?));
         }
         let attribute_data = section("attributeData");
+
+        // Field and data indices stay 4 bytes until format 106.
+        let (s, mut r) = records("fieldDefaultValues", 8 + type_width)?;
+        let mut defaults = std::collections::HashMap::with_capacity(s.count);
+        for _ in 0..s.count {
+            let field = r.u32()?;
+            let type_index = index(&mut r, type_width)?.ok_or_else(|| Error::malformed("default value without a type"))?;
+            let data = r.i32()?;
+            if let Ok(data) = usize::try_from(data) {
+                defaults.insert(field, (type_index, data));
+            }
+        }
+        let default_data = section("fieldAndParameterDefaultValueData");
         Ok(Metadata {
+            defaults,
+            default_data,
             types,
             fields,
             method_owners,
@@ -286,6 +304,34 @@ impl Metadata {
         } else {
             &self.fields[start..start + usize::from(definition.field_count)]
         }
+    }
+
+    /// The global index of a type definition's field.
+    pub(crate) fn field_index(&self, definition: &TypeDefinition, name: &str) -> Option<u32> {
+        let found = self.fields_of(definition).iter().position(|f| f.name == name)?;
+        Some(definition.first_field + found as u32)
+    }
+
+    /// A literal field's default: the type index it was written as, and the value as a compressed signed integer
+    /// (how format 29+ stores `Int32` constants).
+    pub(crate) fn int_default(&self, field: u32) -> Result<(u32, i32)> {
+        let (type_index, offset) = *self.defaults.get(&field).ok_or_else(|| Error::data(format!("field {field} has no default value")))?;
+        if offset >= self.default_data.size {
+            return Err(Error::malformed(format!("default value of field {field} out of range")));
+        }
+        let mut r = Reader::new(
+            &self.bytes[self.default_data.offset + offset..self.default_data.offset + self.default_data.size],
+            Endian::Little,
+        );
+        let raw = compressed_u32(&mut r)?;
+        let value = if raw == u32::MAX {
+            i32::MIN
+        } else if raw & 1 == 1 {
+            -((raw >> 1) as i32) - 1
+        } else {
+            (raw >> 1) as i32
+        };
+        Ok((type_index, value))
     }
 
     pub(crate) fn generic_position(&self, parameter: u32) -> Result<u16> {
@@ -357,6 +403,13 @@ mod tests {
         ] {
             assert_eq!(compressed_u32(&mut Reader::new(bytes, Endian::Little)).unwrap(), value, "{bytes:?}");
         }
+    }
+
+    #[test]
+    fn signed_constants_decode_as_the_runtime_does() {
+        // ReadCompressedInt32: the low bit is the sign, the rest the magnitude.
+        let decode = |raw: u32| if raw & 1 == 1 { -((raw >> 1) as i32) - 1 } else { (raw >> 1) as i32 };
+        assert_eq!((decode(56), decode(57), decode(0)), (28, -29, 0));
     }
 
     #[test]

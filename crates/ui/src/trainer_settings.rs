@@ -4,7 +4,7 @@
 
 use crate::settings::{LiveStatus, ModuleChoice, ModuleLink, ModuleSection};
 use eg_core::settings::LegacyModuleSettings;
-use eg_trainer::backend::{Activity, BackendHandle, BackendSnapshot, CaptureProgress, CatalogState, Command, Phase};
+use eg_trainer::backend::{Activity, BackendHandle, BackendSnapshot, CaptureProgress, CatalogState, Command, GameFiles, Phase};
 use std::rc::Rc;
 
 pub const ID: &str = "trainer";
@@ -47,7 +47,7 @@ pub fn descriptor(development: bool) -> ModuleChoice {
             },
             ModuleSection::Status {
                 title: "Game definitions",
-                description: "Affix and unique definitions captured from the game on first connection, keyed by game build and language.",
+                description: "Affix and unique definitions read from the game's files, or captured from the game on first connection when the files cannot be read; keyed by game build and language.",
                 text: NO_CACHE,
                 action: "Refresh from game",
                 tip: "Capture the definitions again from the connected game",
@@ -105,7 +105,7 @@ pub fn game_data(snapshot: &BackendSnapshot, running: bool) -> LiveStatus {
     // The C# command runs while the session can write (connected to an offline character); a capture under way only
     // greys the button, as `IsRefreshingGameData` does.
     LiveStatus {
-        text: describe(snapshot.capture_progress, &snapshot.catalog),
+        text: describe(snapshot.capture_progress, &snapshot.catalog, &snapshot.game_files),
         can_act: running && snapshot.phase == Phase::Ready,
         busy: capturing,
     }
@@ -118,16 +118,19 @@ fn captured_at(cache: &eg_trainer::catalog_cache::CatalogCache, identity: &eg_tr
     Some(timestamp.to_zoned(jiff::tz::TimeZone::system()))
 }
 
-fn describe(progress: Option<CaptureProgress>, catalog: &CatalogState) -> String {
-    match (progress, catalog) {
+fn describe(progress: Option<CaptureProgress>, catalog: &CatalogState, files: &GameFiles) -> String {
+    match (progress, catalog, files) {
         // As C#'s `GameDataDescription`: the count while pages load, else what the cache holds.
-        (Some(CaptureProgress::Page { cursor, total, .. }), _) => format!("Loading game definitions: {cursor}/{total}"),
-        (_, CatalogState::Missing) => NO_CACHE.into(),
-        (_, CatalogState::Saved(data)) => {
+        (Some(CaptureProgress::Page { cursor, total, .. }), _, _) => format!("Loading game definitions: {cursor}/{total}"),
+        (_, CatalogState::Current { data, .. } | CatalogState::Stale(data), _) => format!("Current game data · {} affixes", data.affixes.len()),
+        // Before a session, the definitions read from the game's files (not in the C# app, which only captured).
+        (_, _, GameFiles::Ready { affixes, .. }) => format!("Game files · {affixes} affixes"),
+        (_, _, GameFiles::Reading) => "Reading game files".into(),
+        (_, CatalogState::Missing, _) => NO_CACHE.into(),
+        (_, CatalogState::Saved(data), _) => {
             let hash: String = data.identity.binary_hash.chars().take(12).collect();
             format!("Saved game data · {hash} · {}", data.identity.locale.language)
         }
-        (_, CatalogState::Current { data, .. } | CatalogState::Stale(data)) => format!("Current game data · {} affixes", data.affixes.len()),
     }
 }
 
@@ -138,7 +141,8 @@ mod tests {
 
     #[test]
     fn game_definitions_say_what_the_capture_is_doing_else_what_is_loaded() {
-        assert_eq!(describe(None, &CatalogState::Missing), "No game-data cache loaded");
+        let none = GameFiles::NotConfigured;
+        assert_eq!(describe(None, &CatalogState::Missing, &none), "No game-data cache loaded");
         let page = CaptureProgress::Page {
             kind: CatalogKind::Affixes,
             cursor: 120,
@@ -147,11 +151,27 @@ mod tests {
             pages: 3,
             bytes: 4096,
         };
-        assert_eq!(describe(Some(page), &CatalogState::Missing), "Loading game definitions: 120/960");
-        assert_eq!(describe(Some(CaptureProgress::LocaleRead), &CatalogState::Missing), "No game-data cache loaded");
+        assert_eq!(describe(Some(page), &CatalogState::Missing, &none), "Loading game definitions: 120/960");
+        assert_eq!(describe(Some(CaptureProgress::LocaleRead), &CatalogState::Missing, &none), "No game-data cache loaded");
         assert_eq!(
-            describe(Some(CaptureProgress::Complete { pages: 3, bytes: 4096 }), &CatalogState::Missing),
+            describe(Some(CaptureProgress::Complete { pages: 3, bytes: 4096 }), &CatalogState::Missing, &none),
             "No game-data cache loaded"
+        );
+    }
+
+    #[test]
+    fn before_a_session_the_game_files_say_what_they_hold() {
+        let ready = GameFiles::Ready {
+            affixes: 1156,
+            build: "8dfd6929".into(),
+        };
+        assert_eq!(describe(None, &CatalogState::Missing, &GameFiles::Reading), "Reading game files");
+        assert_eq!(describe(None, &CatalogState::Missing, &ready), "Game files · 1156 affixes");
+        let unreadable = GameFiles::Unavailable("no Last Epoch_Data".into());
+        assert_eq!(
+            describe(None, &CatalogState::Missing, &unreadable),
+            "No game-data cache loaded",
+            "a failed read leaves the old wording"
         );
     }
 

@@ -1373,6 +1373,7 @@ version = "0.1.0"
 dependencies = [
  "eg-core",
  "eg-game-access",
+ "eg-game-files",
  "eg-trainer-wire",
  "jiff",
  "serde_json",

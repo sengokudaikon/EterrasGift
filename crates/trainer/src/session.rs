@@ -166,6 +166,11 @@ impl<T: Transport, L: LogSource> Session<T, L> {
             && identity.extraction_version == crate::catalog::EXTRACTION_VERSION
     }
 
+    /// The build this session runs: the hashes its catalog must carry.
+    pub fn profile(&self) -> &BuildProfile {
+        &self.profile
+    }
+
     pub fn new(target: ProcessIdentity, transport: T, log: L, profile: BuildProfile, policy: GatePolicy) -> Result<Self, SessionError> {
         if transport.target() != &target {
             return Err(SessionError::Identity("transport belongs to a different process identity".into()));

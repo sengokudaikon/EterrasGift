@@ -42,6 +42,10 @@ impl PlayerData {
         })
     }
 
+    pub(crate) fn il2cpp(&self) -> &Il2Cpp {
+        &self.il2cpp
+    }
+
     /// The one MonoBehaviour in `resources.assets` named `name` whose script is `assembly`'s `namespace.class`,
     /// decoded whole with the class's rebuilt layout.
     pub(crate) fn behaviour(&self, name: &str, (assembly, namespace, class): (&str, &str, &str)) -> Result<Value> {
