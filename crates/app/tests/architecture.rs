@@ -43,9 +43,7 @@ fn tier(name: &str) -> Tier {
         | "eg-persistent-player-client"
         | "eg-eval-native-abi"
         | "eg-eval-hooks"
-        | "eg-hook-mitigation-audit"
-        | "eg-eval-generated-invoker"
-        | "eg-eval-neohook" => Tier::Tool,
+        | "eg-eval-generated-invoker" => Tier::Tool,
         _ => panic!("Assign the new package {name:?} an explicit architecture tier"),
     }
 }

@@ -4,14 +4,9 @@
 /.claude/
 /.impeccable/
 /research/*
-!/research/trainer-rust.md
-!/research/trainer-evaluations.md
-!/research/trainer-validation.md
 !/research/trainer-readiness.md
 !/research/trainer-interop.md
 !/research/trainer-first-hook.md
 /spec/
 /design/
-/history/
-/archive/
 /.idea/
