@@ -22,18 +22,17 @@ use eg_trainer::field_writes::{AttackLeechDecision, AttackLeechPlan, AttackLeech
 use eg_trainer::writes::{ForgePlan, WriteControl, WriteStatus};
 
 use eg_core::game_log::{GameLogState, GameLogStatus, GameReadiness};
-use eg_trainer::backend::{CaptureControl, CaptureObserver, CaptureOutcome, CaptureProgress};
+use eg_trainer::files::FileCatalog;
+use eg_trainer::game_data::{GameData, GameDataHandle};
 use eg_trainer::{
     backend::{
         self, BackendConnection, BackendError, BackendHandle, BackendOptions, CatalogState, Clock, Command, Connector, ErrorKind, ForgeSnapshot, ForgeState, Phase,
         ProcessIdentity, ProcessLocator, RuntimeStatus,
     },
     catalog::{CatalogIdentity, EXTRACTION_VERSION, GameCatalog},
-    catalog_cache::CatalogCache,
     gate::{GatePolicy, LogSource},
     session::Cleanup,
 };
-use eg_trainer_wire::catalog::CatalogKind;
 use eg_trainer_wire::{
     definitions::{ItemLimits, ValueRange},
     locale::GameLocale,
@@ -120,7 +119,7 @@ struct Shared {
     connect_errors: Mutex<VecDeque<BackendError>>,
     read_errors: Mutex<VecDeque<BackendError>>,
     connect_block: Block,
-    capture_block: Block,
+    locale_block: Block,
     forge_block: Block,
     mapping_block: Block,
     unique_block: Block,
@@ -129,7 +128,7 @@ struct Shared {
     mapping_errors: Mutex<VecDeque<BackendError>>,
     mapping_result: Mutex<Option<eg_trainer::mapping::ValueTable>>,
     locale: Mutex<eg_trainer::catalog::GameLocale>,
-    hashes: Mutex<Option<(String, String)>>,
+    hashes: Mutex<(String, String)>,
     disconnect_block: Block,
     write_block: Block,
     refresh_block: Block,
@@ -161,7 +160,7 @@ impl Shared {
             connect_errors: Mutex::new(VecDeque::new()),
             read_errors: Mutex::new(VecDeque::new()),
             connect_block: Block::default(),
-            capture_block: Block::default(),
+            locale_block: Block::default(),
             forge_block: Block::default(),
             mapping_block: Block::default(),
             unique_block: Block::default(),
@@ -170,7 +169,7 @@ impl Shared {
             mapping_errors: Mutex::new(VecDeque::new()),
             mapping_result: Mutex::new(None),
             locale: Mutex::new(catalog().identity.locale),
-            hashes: Mutex::new(None),
+            hashes: Mutex::new(("A".repeat(64), "B".repeat(64))),
             disconnect_block: Block::default(),
             write_block: Block::default(),
             refresh_block: Block::default(),
@@ -255,17 +254,11 @@ impl BackendConnection for Connection {
         Ok(*self.shared.status.lock().unwrap())
     }
     async fn read_locale(&mut self, _: Timestamp) -> Result<eg_trainer::catalog::GameLocale, BackendError> {
-        self.shared.record("locale");
+        self.shared.call("locale", &self.shared.locale_block).await;
         Ok(self.shared.locale.lock().unwrap().clone())
     }
-    fn build_hashes(&self) -> Option<(String, String)> {
+    fn build_hashes(&self) -> (String, String) {
         self.shared.hashes.lock().unwrap().clone()
-    }
-    async fn capture_catalog(&mut self, _: Timestamp) -> Result<GameCatalog, BackendError> {
-        self.shared.call("capture", &self.shared.capture_block).await;
-        let mut data = catalog();
-        data.identity.locale = self.shared.locale.lock().unwrap().clone();
-        Ok(data)
     }
     async fn read_forge(&mut self, _: Timestamp) -> Result<Option<ForgeSnapshot>, BackendError> {
         self.shared.call("forge", &self.shared.forge_block).await;
@@ -402,7 +395,7 @@ fn options() -> BackendOptions {
         auto_connect: false,
         poll_interval: Duration::from_millis(5),
         discovery_interval: Duration::from_millis(10),
-        game_files: None,
+        game_data: Some(GameDataHandle::fixed(GameData::Ready(Arc::new(FileCatalog::restore(catalog(), "build".into(), vec![]))))),
     }
 }
 
@@ -492,8 +485,8 @@ fn file_catalog() -> Arc<eg_trainer::files::FileCatalog> {
     };
     Arc::new(eg_trainer::files::build_catalog("A".repeat(64), "B".repeat(64), "build".into(), &definitions, &player).unwrap())
 }
-fn start(shared: &Arc<Shared>, options: BackendOptions, cache: Option<CatalogCache>) -> (BackendHandle, tokio::task::JoinHandle<()>) {
-    let (handle, worker) = backend::service(Locator(shared.clone()), Connect(shared.clone()), Logs(shared.clone()), FakeClock, options, cache);
+fn start(shared: &Arc<Shared>, options: BackendOptions) -> (BackendHandle, tokio::task::JoinHandle<()>) {
+    let (handle, worker) = backend::service(Locator(shared.clone()), Connect(shared.clone()), Logs(shared.clone()), FakeClock, options);
     (handle, tokio::spawn(worker.run()))
 }
 async fn command(handle: &BackendHandle, command: Command) -> Result<(), BackendError> {
@@ -519,13 +512,13 @@ async fn wait_phase(handle: &BackendHandle, phase: Phase) {
 fn constructors_and_disabled_or_unmonitored_services_do_not_discover() {
     run(async {
         let shared = Shared::new();
-        let (handle, worker) = backend::service(Locator(shared.clone()), Connect(shared.clone()), Logs(shared.clone()), FakeClock, options(), None);
+        let (handle, worker) = backend::service(Locator(shared.clone()), Connect(shared.clone()), Logs(shared.clone()), FakeClock, options());
         assert!(shared.calls.lock().unwrap().is_empty());
         assert_eq!(handle.snapshot().phase, Phase::Disabled);
         drop(worker);
         drop(handle);
         assert!(shared.calls.lock().unwrap().is_empty());
-        let (handle, worker) = start(&shared, options(), None);
+        let (handle, worker) = start(&shared, options());
         command(&handle, Command::StartMonitoring).await.unwrap();
         tokio::time::sleep(Duration::from_millis(20)).await;
         assert_eq!(shared.count("find"), 0);
@@ -535,7 +528,7 @@ fn constructors_and_disabled_or_unmonitored_services_do_not_discover() {
         shutdown(&handle, worker).await;
         let mut automatic = options();
         automatic.auto_connect = true;
-        let (handle, worker) = start(&shared, automatic, None);
+        let (handle, worker) = start(&shared, automatic);
         command(&handle, Command::Enable).await.unwrap();
         tokio::time::sleep(Duration::from_millis(20)).await;
         assert_eq!(shared.count("find"), 0, "monitoring not started");
@@ -550,7 +543,7 @@ fn release_log_gate_precedes_connector_and_ambiguous_processes_never_connect() {
     run(async {
         let shared = Shared::new();
         *shared.log.lock().unwrap() = log(GameReadiness::Online);
-        let (handle, worker) = start(&shared, options(), None);
+        let (handle, worker) = start(&shared, options());
         command(&handle, Command::Enable).await.unwrap();
         assert_eq!(command(&handle, Command::Connect).await.unwrap_err().kind, ErrorKind::Gate);
         assert_eq!(shared.count("connect"), 0);
@@ -573,7 +566,7 @@ fn initial_catalog_and_forge_publish_together_with_explicit_read_only_capabiliti
     run(async {
         let shared = Shared::new();
         shared.forge_block.arm();
-        let (handle, worker) = start(&shared, options(), None);
+        let (handle, worker) = start(&shared, options());
         command(&handle, Command::Enable).await.unwrap();
         let pending = handle.try_submit(Command::Connect).unwrap();
         shared.forge_block.wait_started().await;
@@ -598,14 +591,14 @@ fn initial_catalog_and_forge_publish_together_with_explicit_read_only_capabiliti
 fn accepted_disable_drains_capture_skips_late_reads_and_suppresses_old_generation() {
     run(async {
         let shared = Shared::new();
-        shared.capture_block.arm();
-        let (handle, worker) = start(&shared, options(), None);
+        shared.locale_block.arm();
+        let (handle, worker) = start(&shared, options());
         command(&handle, Command::Enable).await.unwrap();
         let connect = handle.try_submit(Command::Connect).unwrap();
-        shared.capture_block.wait_started().await;
+        shared.locale_block.wait_started().await;
         let disable = handle.try_submit(Command::Disable).unwrap();
         assert_eq!(shared.count("disconnect"), 0);
-        shared.capture_block.finish();
+        shared.locale_block.finish();
         assert_eq!(connect.wait().await.unwrap_err().kind, ErrorKind::Superseded);
         disable.wait().await.unwrap();
         let snapshot = handle.snapshot();
@@ -625,7 +618,7 @@ fn cleanup_queued_during_connector_wait_prevents_status_capture_and_publication(
     run(async {
         let shared = Shared::new();
         shared.connect_block.arm();
-        let (handle, worker) = start(&shared, options(), None);
+        let (handle, worker) = start(&shared, options());
         command(&handle, Command::Enable).await.unwrap();
         let connect = handle.try_submit(Command::Connect).unwrap();
         shared.connect_block.wait_started().await;
@@ -634,7 +627,7 @@ fn cleanup_queued_during_connector_wait_prevents_status_capture_and_publication(
         assert_eq!(connect.wait().await.unwrap_err().kind, ErrorKind::Superseded);
         disconnect.wait().await.unwrap();
         assert_eq!(shared.count("refresh"), 0);
-        assert_eq!(shared.count("capture"), 0);
+        assert_eq!(shared.count("locale"), 0, "no catalog was read");
         assert_eq!(shared.count("disconnect"), 1);
         assert_eq!(handle.snapshot().phase, Phase::Disconnected);
         shutdown(&handle, worker).await;
@@ -646,7 +639,7 @@ fn dropping_receipts_never_aborts_submitted_io_and_shutdown_waits_for_cleanup() 
     run(async {
         let shared = Shared::new();
         shared.forge_block.arm();
-        let (handle, worker) = start(&shared, options(), None);
+        let (handle, worker) = start(&shared, options());
         command(&handle, Command::Enable).await.unwrap();
         let connect = handle.try_submit(Command::Connect).unwrap();
         shared.forge_block.wait_started().await;
@@ -670,15 +663,15 @@ fn dropping_receipts_never_aborts_submitted_io_and_shutdown_waits_for_cleanup() 
 fn dropping_last_handle_during_io_drains_without_publishing_connection() {
     run(async {
         let shared = Shared::new();
-        shared.capture_block.arm();
-        let (handle, worker) = start(&shared, options(), None);
+        shared.locale_block.arm();
+        let (handle, worker) = start(&shared, options());
         let receiver = handle.subscribe();
         command(&handle, Command::Enable).await.unwrap();
         let pending = handle.try_submit(Command::Connect).unwrap();
-        shared.capture_block.wait_started().await;
+        shared.locale_block.wait_started().await;
         drop(handle);
         drop(pending);
-        shared.capture_block.finish();
+        shared.locale_block.finish();
         worker.await.unwrap();
         assert_eq!(receiver.borrow().phase, Phase::Stopped);
         assert_eq!(shared.count("forge"), 0);
@@ -699,7 +692,7 @@ fn uncertain_connector_failure_never_replays_until_explicit_retry() {
         });
         let mut auto = options();
         auto.auto_connect = true;
-        let (handle, worker) = start(&shared, auto, None);
+        let (handle, worker) = start(&shared, auto);
         command(&handle, Command::Enable).await.unwrap();
         command(&handle, Command::StartMonitoring).await.unwrap();
         wait_phase(&handle, Phase::Blocked).await;
@@ -724,7 +717,7 @@ fn definite_not_sent_wait_can_retry_and_new_process_identity_unblocks_failure() 
             .lock()
             .unwrap()
             .push_back(BackendError::waiting(ErrorKind::NotReady, "pipe not available"));
-        let (handle, worker) = start(&shared, options(), None);
+        let (handle, worker) = start(&shared, options());
         command(&handle, Command::Enable).await.unwrap();
         assert!(command(&handle, Command::Connect).await.is_err());
         assert_eq!(handle.snapshot().phase, Phase::WaitingForGame);
@@ -748,7 +741,7 @@ fn online_or_gate_loss_clears_live_data_without_helper_cleanup_io() {
     run(async {
         for loss in 0..3 {
             let shared = Shared::new();
-            let (handle, worker) = start(&shared, options(), None);
+            let (handle, worker) = start(&shared, options());
             connected(&handle).await;
             match loss {
                 0 => *shared.log.lock().unwrap() = log(GameReadiness::Online),
@@ -777,7 +770,7 @@ fn current_read_activity_does_not_emit_a_disconnected_phase_and_manual_disconnec
         let shared = Shared::new();
         let mut auto = options();
         auto.auto_connect = true;
-        let (handle, worker) = start(&shared, auto, None);
+        let (handle, worker) = start(&shared, auto);
         connected(&handle).await;
         command(&handle, Command::StartMonitoring).await.unwrap();
         shared.forge_block.arm();
@@ -800,7 +793,7 @@ fn current_read_activity_does_not_emit_a_disconnected_phase_and_manual_disconnec
 fn an_idle_monitor_reads_quietly_and_publishes_only_what_changed() {
     run(async {
         let shared = Shared::new();
-        let (handle, worker) = start(&shared, options(), None);
+        let (handle, worker) = start(&shared, options());
         connected(&handle).await;
         command(&handle, Command::StartMonitoring).await.unwrap();
         let before = handle.snapshot();
@@ -827,43 +820,16 @@ fn an_idle_monitor_reads_quietly_and_publishes_only_what_changed() {
 }
 
 #[test]
-fn cache_startup_is_saved_only_and_cache_save_fault_is_nonfatal() {
-    run(async {
-        let temp = tempfile::tempdir().unwrap();
-        let cache = CatalogCache::new(temp.path());
-        cache.save(&catalog()).unwrap();
-        let shared = Shared::new();
-        let (handle, worker) = start(&shared, options(), Some(cache));
-        command(&handle, Command::StartMonitoring).await.unwrap();
-        assert!(matches!(handle.snapshot().catalog, CatalogState::Saved(_)));
-        assert_eq!(handle.snapshot().phase, Phase::Disabled);
-        assert!(!handle.snapshot().capabilities.read_forge);
-        assert_eq!(shared.count("find"), 0);
-        shutdown(&handle, worker).await;
-        let temp = tempfile::tempdir().unwrap();
-        let path = temp.path().join("not-a-directory");
-        std::fs::write(&path, "blocked").unwrap();
-        let shared = Shared::new();
-        let (handle, worker) = start(&shared, options(), Some(CatalogCache::new(path)));
-        connected(&handle).await;
-        assert!(handle.snapshot().cache_error.is_some());
-        assert_eq!(handle.snapshot().phase, Phase::Ready);
-        assert!(matches!(handle.snapshot().catalog, CatalogState::Current { .. }));
-        shutdown(&handle, worker).await;
-    });
-}
-
-#[test]
 fn disabling_automatic_connection_during_attach_drains_and_releases_without_publishing() {
     run(async {
         let shared = Shared::new();
-        shared.capture_block.arm();
-        let (handle, worker) = start(&shared, options(), None);
+        shared.locale_block.arm();
+        let (handle, worker) = start(&shared, options());
         command(&handle, Command::Enable).await.unwrap();
         let connect = handle.try_submit(Command::Connect).unwrap();
-        shared.capture_block.wait_started().await;
+        shared.locale_block.wait_started().await;
         let pause = handle.try_submit(Command::SetAutoConnect(false)).unwrap();
-        shared.capture_block.finish();
+        shared.locale_block.finish();
         assert_eq!(connect.wait().await.unwrap_err().kind, ErrorKind::Superseded);
         pause.wait().await.unwrap();
         assert_eq!(handle.snapshot().phase, Phase::Disconnected);
@@ -879,7 +845,7 @@ fn failed_first_forge_read_never_publishes_partial_catalog_or_ready() {
     run(async {
         let shared = Shared::new();
         shared.forge_block.arm();
-        let (handle, worker) = start(&shared, options(), None);
+        let (handle, worker) = start(&shared, options());
         command(&handle, Command::Enable).await.unwrap();
         let connect = handle.try_submit(Command::Connect).unwrap();
         shared.forge_block.wait_started().await;
@@ -898,12 +864,12 @@ fn failed_first_forge_read_never_publishes_partial_catalog_or_ready() {
 fn last_handle_barrier_survives_concurrent_clone_drops() {
     run(async {
         let shared = Shared::new();
-        shared.capture_block.arm();
-        let (handle, worker) = start(&shared, options(), None);
+        shared.locale_block.arm();
+        let (handle, worker) = start(&shared, options());
         let snapshot = handle.subscribe();
         command(&handle, Command::Enable).await.unwrap();
         let connect = handle.try_submit(Command::Connect).unwrap();
-        shared.capture_block.wait_started().await;
+        shared.locale_block.wait_started().await;
         let other = handle.clone();
         let barrier = Arc::new(std::sync::Barrier::new(2));
         let clone_barrier = barrier.clone();
@@ -914,7 +880,7 @@ fn last_handle_barrier_survives_concurrent_clone_drops() {
         barrier.wait();
         drop(handle);
         dropper.join().unwrap();
-        shared.capture_block.finish();
+        shared.locale_block.finish();
         assert_eq!(connect.wait().await.unwrap_err().kind, ErrorKind::Superseded);
         worker.await.unwrap();
         assert_eq!(snapshot.borrow().phase, Phase::Stopped);
@@ -927,7 +893,7 @@ fn last_handle_barrier_survives_concurrent_clone_drops() {
 fn failed_new_preparation_cannot_reuse_an_old_cleanup_acknowledgement() {
     run(async {
         let shared = Shared::new();
-        let (handle, worker) = start(&shared, options(), None);
+        let (handle, worker) = start(&shared, options());
         connected(&handle).await;
         command(&handle, Command::Disconnect).await.unwrap();
         assert_eq!(handle.snapshot().cleanup, Cleanup::ConfirmedOff);
@@ -944,131 +910,22 @@ fn failed_new_preparation_cannot_reuse_an_old_cleanup_acknowledgement() {
     });
 }
 
-struct PagedConnect(Arc<Shared>);
-struct PagedConnection(Connection);
-impl Connector for PagedConnect {
-    type Connection = PagedConnection;
-    async fn connect(&mut self, target: ProcessIdentity, _: Timestamp) -> Result<PagedConnection, BackendError> {
-        Ok(PagedConnection(Connection { shared: self.0.clone(), target }))
-    }
-}
-impl BackendConnection for PagedConnection {
-    fn target(&self) -> &ProcessIdentity {
-        self.0.target()
-    }
-    async fn refresh(&mut self, now: Timestamp) -> Result<RuntimeStatus, BackendError> {
-        self.0.refresh(now).await
-    }
-    async fn read_locale(&mut self, now: Timestamp) -> Result<eg_trainer::catalog::GameLocale, BackendError> {
-        self.0.read_locale(now).await
-    }
-    async fn capture_catalog(&mut self, now: Timestamp) -> Result<GameCatalog, BackendError> {
-        self.0.capture_catalog(now).await
-    }
-    async fn read_forge(&mut self, now: Timestamp) -> Result<Option<ForgeSnapshot>, BackendError> {
-        self.0.read_forge(now).await
-    }
-    async fn disconnect(&mut self) -> Cleanup {
-        self.0.disconnect().await
-    }
-    async fn capture_catalog_observed(&mut self, _: Timestamp, observer: &mut dyn CaptureObserver) -> Result<CaptureOutcome, BackendError> {
-        for index in 0..3 {
-            if observer.control() == CaptureControl::Stop {
-                return Ok(CaptureOutcome::Stopped);
-            }
-            self.0.shared.call("page", &self.0.shared.capture_block).await;
-            if observer.control() == CaptureControl::Stop {
-                return Ok(CaptureOutcome::Stopped);
-            }
-            observer.progress(CaptureProgress::Page {
-                kind: CatalogKind::Bases,
-                cursor: index * 16,
-                total: 48,
-                count: 16,
-                pages: index + 1,
-                bytes: u64::from(index + 1) * 100,
-            });
-        }
-        Ok(CaptureOutcome::Complete(Box::new(catalog())))
-    }
-}
-fn start_paged(shared: &Arc<Shared>) -> (BackendHandle, tokio::task::JoinHandle<()>) {
-    let (handle, worker) = backend::service(Locator(shared.clone()), PagedConnect(shared.clone()), Logs(shared.clone()), FakeClock, options(), None);
-    (handle, tokio::spawn(worker.run()))
-}
-
 #[test]
-fn queued_cleanup_finishes_inflight_page_stops_before_next_page_and_cleans_once() {
+fn stopping_refresh_keeps_old_catalog_stale_without_publishing_a_new_one() {
     run(async {
         let shared = Shared::new();
-        shared.capture_block.arm();
-        let (handle, worker) = start_paged(&shared);
-        command(&handle, Command::Enable).await.unwrap();
-        let connect = handle.try_submit(Command::Connect).unwrap();
-        shared.capture_block.wait_started().await;
-        let disable = handle.try_submit(Command::Disable).unwrap();
-        shared.capture_block.finish();
-        assert_eq!(connect.wait().await.unwrap_err().kind, ErrorKind::Superseded);
-        disable.wait().await.unwrap();
-        assert_eq!(shared.count("page"), 1);
-        assert_eq!(shared.count("forge"), 0);
-        assert_eq!(shared.count("disconnect"), 1);
-        assert_eq!(shared.aborted.load(Ordering::SeqCst), 0);
-        assert_eq!(handle.snapshot().phase, Phase::Disabled);
-        assert_eq!(handle.snapshot().capture_progress, None);
-        assert!(matches!(handle.snapshot().catalog, CatalogState::Missing));
-        shutdown(&handle, worker).await;
-    });
-}
-
-#[test]
-fn watch_reports_capture_progress_without_current_data_before_first_forge() {
-    run(async {
-        let shared = Shared::new();
-        shared.forge_block.arm();
-        let (handle, worker) = start_paged(&shared);
-        command(&handle, Command::Enable).await.unwrap();
-        let connect = handle.try_submit(Command::Connect).unwrap();
-        shared.forge_block.wait_started().await;
-        let state = handle.snapshot();
-        assert_eq!(state.phase, Phase::Connecting);
-        assert!(matches!(state.catalog, CatalogState::Missing));
-        assert_eq!(
-            state.capture_progress,
-            Some(CaptureProgress::Page {
-                kind: CatalogKind::Bases,
-                cursor: 32,
-                total: 48,
-                count: 16,
-                pages: 3,
-                bytes: 300
-            })
-        );
-        shared.forge_block.finish();
-        connect.wait().await.unwrap();
-        assert_eq!(handle.snapshot().phase, Phase::Ready);
-        assert_eq!(handle.snapshot().capture_progress, None);
-        shutdown(&handle, worker).await;
-    });
-}
-
-#[test]
-fn stopping_refresh_keeps_old_catalog_stale_without_publishing_new_partial_capture() {
-    run(async {
-        let shared = Shared::new();
-        let (handle, worker) = start_paged(&shared);
+        let (handle, worker) = start(&shared, options());
         connected(&handle).await;
         let old = handle.snapshot().catalog.data().unwrap().clone();
-        shared.capture_block.arm();
+        shared.locale_block.arm();
         let refresh = handle.try_submit(Command::RefreshCatalog).unwrap();
-        shared.capture_block.wait_started().await;
+        shared.locale_block.wait_started().await;
         let stop = handle.try_submit(Command::Disconnect).unwrap();
-        shared.capture_block.finish();
+        shared.locale_block.finish();
         assert_eq!(refresh.wait().await.unwrap_err().kind, ErrorKind::Superseded);
         stop.wait().await.unwrap();
         let state = handle.snapshot();
         assert!(matches!(&state.catalog,CatalogState::Stale(data) if Arc::ptr_eq(data,&old)));
-        assert_eq!(shared.count("page"), 4);
         assert_eq!(shared.count("forge"), 1);
         assert_eq!(shared.count("disconnect"), 1);
         assert_eq!(shared.aborted.load(Ordering::SeqCst), 0);
@@ -1082,7 +939,7 @@ fn retryable_connection_waits_do_not_write_fault_files_but_fatal_errors_do() {
         let directory = tempfile::tempdir().unwrap();
         let faults = eg_core::fault::FaultLog::with_fallbacks(directory.path(), Some(directory.path()), vec![]);
         let shared = Shared::new();
-        let (handle, worker) = backend::service(Locator(shared.clone()), Connect(shared.clone()), Logs(shared.clone()), FakeClock, options(), None);
+        let (handle, worker) = backend::service(Locator(shared.clone()), Connect(shared.clone()), Logs(shared.clone()), FakeClock, options());
         let worker = tokio::spawn(worker.with_fault_log(faults).run());
         command(&handle, Command::Enable).await.unwrap();
         for kind in [ErrorKind::Transport, ErrorKind::NotReady, ErrorKind::Transport] {
@@ -1103,17 +960,13 @@ fn retryable_connection_waits_do_not_write_fault_files_but_fatal_errors_do() {
 }
 
 #[test]
-fn a_game_file_catalog_of_the_running_build_replaces_the_capture() {
+fn the_catalog_comes_from_the_game_files_of_the_running_build() {
     run(async {
         let shared = Shared::new();
-        *shared.hashes.lock().unwrap() = Some(("a".repeat(64), "b".repeat(64)));
+        *shared.hashes.lock().unwrap() = ("a".repeat(64), "b".repeat(64));
         let mut options = options();
-        options.game_files = Some(backend::GameFilesSource::Read(file_catalog()));
-        let (handle, worker) = start(&shared, options, None);
-        let mut receiver = handle.subscribe();
-        while receiver.borrow().game_files == backend::GameFiles::NotConfigured {
-            receiver.changed().await.unwrap();
-        }
+        options.game_data = Some(GameDataHandle::fixed(GameData::Ready(file_catalog())));
+        let (handle, worker) = start(&shared, options);
         assert_eq!(
             handle.snapshot().game_files,
             backend::GameFiles::Ready {
@@ -1122,7 +975,6 @@ fn a_game_file_catalog_of_the_running_build_replaces_the_capture() {
             }
         );
         connected(&handle).await;
-        assert_eq!(shared.count("capture"), 0, "definitions came from the files");
         let snapshot = handle.snapshot();
         let CatalogState::Current { data, .. } = &snapshot.catalog else {
             panic!("current catalog")
@@ -1135,31 +987,51 @@ fn a_game_file_catalog_of_the_running_build_replaces_the_capture() {
 }
 
 #[test]
-fn another_build_still_captures_from_the_game() {
+fn a_game_of_another_build_than_its_files_is_refused() {
     run(async {
+        // The files changed after the game started: an update it has not restarted for.
         let shared = Shared::new();
-        *shared.hashes.lock().unwrap() = Some(("C".repeat(64), "B".repeat(64)));
-        let mut options = options();
-        options.game_files = Some(backend::GameFilesSource::Read(file_catalog()));
-        let (handle, worker) = start(&shared, options, None);
-        connected(&handle).await;
-        assert_eq!(shared.count("capture"), 1);
+        *shared.hashes.lock().unwrap() = ("C".repeat(64), "B".repeat(64));
+        let (handle, worker) = start(&shared, options());
+        command(&handle, Command::Enable).await.unwrap();
+        let error = command(&handle, Command::Connect).await.unwrap_err();
+        assert_eq!(error.kind, ErrorKind::Identity);
+        assert!(error.message.contains("Restart the game"), "{error:?}");
+        assert_eq!(handle.snapshot().phase, Phase::Blocked);
+        assert_eq!(handle.snapshot().catalog, CatalogState::Missing);
         shutdown(&handle, worker).await;
     });
 }
 
 #[test]
-fn unreadable_game_files_are_reported_and_capture_takes_over() {
+fn unreadable_game_files_keep_the_trainer_closed_and_say_why() {
+    run(async {
+        // A real service, asked for the fake game's folder, which holds no game.
+        let shared = Shared::new();
+        let mut options = options();
+        options.game_data = Some(eg_trainer::game_data::start(None, None, None).unwrap());
+        let (handle, worker) = start(&shared, options);
+        assert_eq!(handle.snapshot().game_files, backend::GameFiles::NotConfigured);
+        command(&handle, Command::Enable).await.unwrap();
+        let error = command(&handle, Command::Connect).await.unwrap_err();
+        assert_eq!(error.kind, ErrorKind::NotReady);
+        assert!(error.message.contains("could not be read from the game's files"), "{error:?}");
+        assert!(matches!(handle.snapshot().game_files, backend::GameFiles::Unavailable(ref reason) if reason.contains("Last Epoch_Data")));
+        assert_eq!(shared.count("locale"), 0, "nothing was asked of the game");
+        shutdown(&handle, worker).await;
+    });
+}
+
+#[test]
+fn read_again_reads_the_files_without_a_connection() {
     run(async {
         let shared = Shared::new();
-        *shared.hashes.lock().unwrap() = Some(("A".repeat(64), "B".repeat(64)));
-        let folder = tempfile::tempdir().unwrap();
         let mut options = options();
-        options.game_files = Some(backend::GameFilesSource::Folder(folder.path().join("no game here")));
-        let (handle, worker) = start(&shared, options, None);
-        connected(&handle).await;
-        assert!(matches!(handle.snapshot().game_files, backend::GameFiles::Unavailable(ref reason) if reason.contains("Last Epoch_Data")));
-        assert_eq!(shared.count("capture"), 1);
+        options.game_data = Some(eg_trainer::game_data::start(None, None, None).unwrap());
+        let (handle, worker) = start(&shared, options);
+        command(&handle, Command::RefreshCatalog).await.unwrap();
+        assert_eq!(handle.snapshot().game_files, backend::GameFiles::NotConfigured, "no folder yet: nothing to read");
+        assert!(shared.calls.lock().unwrap().is_empty(), "and the game is not touched");
         shutdown(&handle, worker).await;
     });
 }

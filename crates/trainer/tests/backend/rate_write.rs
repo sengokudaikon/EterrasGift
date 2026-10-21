@@ -10,7 +10,7 @@ fn field_write_faults_keep_raw_expected_and_readback_bits_without_an_event_consu
             let directory = tempfile::tempdir().unwrap();
             let faults = eg_core::fault::FaultLog::with_fallbacks(directory.path(), Some(directory.path()), vec![]);
             let shared = writable();
-            let (handle, worker) = backend::service(Locator(shared.clone()), Connect(shared.clone()), Logs(shared.clone()), FakeClock, options(), None);
+            let (handle, worker) = backend::service(Locator(shared.clone()), Connect(shared.clone()), Logs(shared.clone()), FakeClock, options());
             let worker = tokio::spawn(worker.with_fault_log(faults).run());
             connected(&handle).await;
             let plan = prepare(&handle, AttackLeechTarget::AttackRate, 1.1).await;
@@ -43,7 +43,7 @@ fn field_write_faults_keep_raw_expected_and_readback_bits_without_an_event_consu
 fn generic_field_write_publishes_all_actual_bits_and_advances_sequence_without_reconnect() {
     run(async {
         let shared = writable();
-        let (handle, worker) = start(&shared, options(), None);
+        let (handle, worker) = start(&shared, options());
         connected(&handle).await;
         let plan = prepare(&handle, AttackLeechTarget::AttackRate, 1.1).await;
         let mut actual = *plan.projected();
@@ -72,7 +72,7 @@ fn not_kept_label_cannot_publish_another_player_or_an_exact_success() {
     run(async {
         for wrong_identity in [false, true] {
             let shared = writable();
-            let (handle, worker) = start(&shared, options(), None);
+            let (handle, worker) = start(&shared, options());
             connected(&handle).await;
             let plan = prepare(&handle, AttackLeechTarget::AttackRate, 1.1).await;
             let mut actual = *plan.projected();
@@ -119,7 +119,7 @@ fn only_explicit_narrow_command_writes_and_full_confirmed_observation_gets_next_
     run(async {
         for (target, value) in [(AttackLeechTarget::AttackRate, 1.1), (AttackLeechTarget::IncreasedLeechRate, 0.0)] {
             let shared = writable();
-            let (handle, worker) = start(&shared, options(), None);
+            let (handle, worker) = start(&shared, options());
             connected(&handle).await;
             let plan = prepare(&handle, target, value).await;
             let state = handle.snapshot();
@@ -151,7 +151,7 @@ fn only_explicit_narrow_command_writes_and_full_confirmed_observation_gets_next_
 fn unavailable_capability_and_noop_intent_do_not_perform_status_or_write_io() {
     run(async {
         let shared = writable();
-        let (handle, worker) = start(&shared, options(), None);
+        let (handle, worker) = start(&shared, options());
         connected(&handle).await;
         let plan = prepare(&handle, AttackLeechTarget::AttackRate, 1.1).await;
         shared.rate_write_enabled.store(false, Ordering::SeqCst);
@@ -174,7 +174,7 @@ fn every_stale_snapshot_component_rejects_before_status_or_write_io() {
     run(async {
         for part in 0..14 {
             let shared = writable();
-            let (handle, worker) = start(&shared, options(), None);
+            let (handle, worker) = start(&shared, options());
             connected(&handle).await;
             command(&handle, Command::ReadAttackLeech).await.unwrap();
             let mut before = handle.snapshot().attack_leech.unwrap();
@@ -230,7 +230,7 @@ fn every_stale_snapshot_component_rejects_before_status_or_write_io() {
 fn new_publication_with_equal_bits_and_reconnect_invalidate_prior_plan_before_io() {
     run(async {
         let shared = writable();
-        let (handle, worker) = start(&shared, options(), None);
+        let (handle, worker) = start(&shared, options());
         connected(&handle).await;
         let plan = prepare(&handle, AttackLeechTarget::AttackRate, 1.1).await;
         command(&handle, Command::ReadAttackLeech).await.unwrap();
@@ -258,7 +258,7 @@ fn missing_log_blocks_refresh_and_online_status_blocks_write() {
         for fault in 0..3 {
             let shared = writable();
             let config = options();
-            let (handle, worker) = start(&shared, config, None);
+            let (handle, worker) = start(&shared, config);
             connected(&handle).await;
             let plan = prepare(&handle, AttackLeechTarget::AttackRate, 1.1).await;
             let n = shared.count("refresh");
@@ -285,7 +285,7 @@ fn missing_log_blocks_refresh_and_online_status_blocks_write() {
 fn pending_watch_remains_pending_through_ack_and_independent_confirmation_read() {
     run(async {
         let shared = writable();
-        let (handle, worker) = start(&shared, options(), None);
+        let (handle, worker) = start(&shared, options());
         connected(&handle).await;
         let plan = prepare(&handle, AttackLeechTarget::AttackRate, 1.1).await;
         shared.rate_write_block.arm();
@@ -313,7 +313,7 @@ fn queued_cleanup_drains_once_retains_uncertainty_after_ack_and_suppresses_new_o
     run(async {
         for during_read in [false, true] {
             let shared = writable();
-            let (handle, worker) = start(&shared, options(), None);
+            let (handle, worker) = start(&shared, options());
             connected(&handle).await;
             let plan = prepare(&handle, AttackLeechTarget::AttackRate, 1.1).await;
             let block = if during_read { &shared.rate_readback_block } else { &shared.rate_write_block };
@@ -345,7 +345,7 @@ fn queued_cleanup_drains_once_retains_uncertainty_after_ack_and_suppresses_new_o
 fn dropped_receipt_drains_uncertainty_blocks_and_monitor_retry_never_replays() {
     run(async {
         let shared = writable();
-        let (handle, worker) = start(&shared, options(), None);
+        let (handle, worker) = start(&shared, options());
         connected(&handle).await;
         let plan = prepare(&handle, AttackLeechTarget::AttackRate, 1.1).await;
         *shared.rate_write_result.lock().unwrap() = Some(Ok(RateWriteStatus::uncertain("reply lost")));
@@ -369,7 +369,7 @@ fn mismatched_or_pending_connection_results_are_uncertain_and_not_sent_is_defini
     run(async {
         for fault in 0..7 {
             let shared = writable();
-            let (handle, worker) = start(&shared, options(), None);
+            let (handle, worker) = start(&shared, options());
             connected(&handle).await;
             let plan = prepare(&handle, AttackLeechTarget::AttackRate, 1.1).await;
             let mut wrong = *plan.projected();
@@ -419,7 +419,7 @@ fn mismatched_or_pending_connection_results_are_uncertain_and_not_sent_is_defini
 fn log_loss_after_confirmation_withholds_publication_and_retains_historical_confirmation() {
     run(async {
         let shared = writable();
-        let (handle, worker) = start(&shared, options(), None);
+        let (handle, worker) = start(&shared, options());
         connected(&handle).await;
         let plan = prepare(&handle, AttackLeechTarget::AttackRate, 1.1).await;
         shared.rate_readback_block.arm();
@@ -440,7 +440,7 @@ fn fresh_status_failure_or_cleanup_barrier_prevents_submission_and_releases_old_
     run(async {
         for barrier in [false, true] {
             let shared = writable();
-            let (handle, worker) = start(&shared, options(), None);
+            let (handle, worker) = start(&shared, options());
             connected(&handle).await;
             let plan = prepare(&handle, AttackLeechTarget::AttackRate, 1.1).await;
             if barrier {
@@ -504,7 +504,7 @@ fn independent_forge_and_rate_records_survive_success_and_uncertainty_in_either_
     run(async {
         for rate_first in [false, true] {
             let shared = both_writable();
-            let (handle, worker) = start(&shared, options(), None);
+            let (handle, worker) = start(&shared, options());
             connected(&handle).await;
             if rate_first {
                 let rate = prepare(&handle, AttackLeechTarget::AttackRate, 1.1).await;

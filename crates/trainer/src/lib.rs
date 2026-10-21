@@ -11,6 +11,7 @@ pub mod edits;
 pub mod features;
 pub mod field_writes;
 pub mod files;
+pub mod game_data;
 
 pub mod gate;
 pub mod mapping;

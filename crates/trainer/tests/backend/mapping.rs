@@ -69,7 +69,7 @@ fn shared() -> Arc<Shared> {
 fn optional_mapping_is_observation_bound_and_never_changes_write_or_undo_history() {
     run(async {
         let shared = shared();
-        let (handle, worker) = start(&shared, options(), None);
+        let (handle, worker) = start(&shared, options());
         connected(&handle).await;
         let plan = handle.snapshot().level_requirement_plan(17).unwrap();
         command(&handle, Command::Write(plan.into())).await.unwrap();
@@ -106,7 +106,7 @@ fn local_mapping_unavailability_is_memoized_but_transport_and_protocol_failures_
             ErrorKind::Gate,
         ] {
             let shared = shared();
-            let (handle, worker) = start(&shared, options(), None);
+            let (handle, worker) = start(&shared, options());
             connected(&handle).await;
             shared.mapping_errors.lock().unwrap().push_back(BackendError::blocked(kind, "mapping fault"));
             let before = handle.snapshot();
@@ -142,7 +142,7 @@ fn local_mapping_unavailability_is_memoized_but_transport_and_protocol_failures_
 fn mapping_from_another_observation_revokes_the_connection_and_is_never_published() {
     run(async {
         let shared = shared();
-        let (handle, worker) = start(&shared, options(), None);
+        let (handle, worker) = start(&shared, options());
         connected(&handle).await;
         let before = handle.snapshot();
         let expected = before.expected_observation().unwrap();
@@ -174,7 +174,7 @@ fn monitor_polls_keep_stable_mapping_failures_until_explicit_refresh() {
     run(async {
         for reason in ["Fixed value", "Non-monotonic display", "Game refused this numeric capability"] {
             let shared = shared();
-            let (handle, worker) = start(&shared, options(), None);
+            let (handle, worker) = start(&shared, options());
             connected(&handle).await;
             shared
                 .mapping_errors
@@ -210,7 +210,7 @@ fn monitor_polls_keep_stable_mapping_failures_until_explicit_refresh() {
 fn transient_mapping_failure_retries_only_after_a_successful_owned_monitor_read() {
     run(async {
         let shared = shared();
-        let (handle, worker) = start(&shared, options(), None);
+        let (handle, worker) = start(&shared, options());
         connected(&handle).await;
         shared
             .mapping_errors
@@ -241,7 +241,7 @@ fn cleanup_waits_for_mapping_but_suppresses_old_publication_and_receipt_disposal
     run(async {
         for cleanup in [true, false] {
             let shared = shared();
-            let (handle, worker) = start(&shared, options(), None);
+            let (handle, worker) = start(&shared, options());
             connected(&handle).await;
             shared.mapping_block.arm();
             let pending = handle.try_submit(command_for(&handle.snapshot())).unwrap();
@@ -272,7 +272,7 @@ fn cleanup_waits_for_mapping_but_suppresses_old_publication_and_receipt_disposal
 fn mapping_result_cannot_reopen_an_offline_gate_lost_while_sampling() {
     run(async {
         let shared = shared();
-        let (handle, worker) = start(&shared, options(), None);
+        let (handle, worker) = start(&shared, options());
         connected(&handle).await;
         shared.mapping_block.arm();
         let pending = handle.try_submit(command_for(&handle.snapshot())).unwrap();
@@ -292,7 +292,7 @@ fn language_change_invalidates_successes_and_failures_before_cached_lookup() {
     run(async {
         for cached_failure in [false, true] {
             let shared = shared();
-            let (handle, worker) = start(&shared, options(), None);
+            let (handle, worker) = start(&shared, options());
             connected(&handle).await;
             if cached_failure {
                 shared
@@ -324,7 +324,7 @@ fn language_change_invalidates_successes_and_failures_before_cached_lookup() {
 fn monitor_refreshes_locale_even_when_no_new_value_requests_are_submitted() {
     run(async {
         let shared = shared();
-        let (handle, worker) = start(&shared, options(), None);
+        let (handle, worker) = start(&shared, options());
         connected(&handle).await;
         command(&handle, command_for(&handle.snapshot())).await.unwrap();
         let old = handle.snapshot();
@@ -344,7 +344,7 @@ fn monitor_refreshes_locale_even_when_no_new_value_requests_are_submitted() {
 fn context_change_mid_sample_refreshes_locale_without_caching_the_old_failure() {
     run(async {
         let shared = shared();
-        let (handle, worker) = start(&shared, options(), None);
+        let (handle, worker) = start(&shared, options());
         connected(&handle).await;
         shared.mapping_block.arm();
         shared
@@ -373,7 +373,7 @@ fn disposable_mapping_receipts_cancel_queued_and_running_reads_without_canceling
     run(async {
         for queued in [false, true] {
             let shared = shared();
-            let (handle, worker) = start(&shared, options(), None);
+            let (handle, worker) = start(&shared, options());
             connected(&handle).await;
             let expected = handle.snapshot().expected_observation().unwrap();
             shared.mapping_block.arm();
@@ -404,7 +404,7 @@ fn disposable_mapping_receipts_cancel_queued_and_running_reads_without_canceling
 fn canceling_a_value_request_does_not_hide_fatal_connection_errors() {
     run(async {
         let shared = shared();
-        let (handle, worker) = start(&shared, options(), None);
+        let (handle, worker) = start(&shared, options());
         connected(&handle).await;
         shared
             .mapping_errors

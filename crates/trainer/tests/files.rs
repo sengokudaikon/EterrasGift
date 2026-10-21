@@ -43,3 +43,23 @@ fn builds_the_catalog_from_the_install() {
     assert_eq!((tiers[0].properties[0].minimum, tiers[0].properties[0].maximum), (5.0, 15.0));
     assert_eq!(catalog.limits.forging_potential.maximum, 255);
 }
+
+#[test]
+#[ignore = "reads a Last Epoch install named by EG_LAST_EPOCH"]
+fn a_second_start_loads_the_saved_catalog_instead_of_reading_the_files() {
+    use eg_trainer::game_data::{self, GameData};
+    let folder = std::path::PathBuf::from(std::env::var_os("EG_LAST_EPOCH").expect("set EG_LAST_EPOCH to the game folder"));
+    let store = tempfile::tempdir().unwrap();
+    let runtime = tokio::runtime::Builder::new_current_thread().build().unwrap();
+    let mut catalogs = Vec::new();
+    for start in ["first start, reads the files", "second start, loads the saved catalog"] {
+        let started = Instant::now();
+        let service = game_data::start(None, Some(store.path().to_path_buf()), None).unwrap();
+        let GameData::Ready(catalog) = runtime.block_on(service.for_folder(&folder)) else {
+            panic!("{start}: {:?}", service.current());
+        };
+        println!("{start}: {:.2?}", started.elapsed());
+        catalogs.push(catalog.saved().unwrap());
+    }
+    assert_eq!(catalogs[0], catalogs[1]);
+}

@@ -2,6 +2,8 @@
 //! preparer, process lookup, real settings, game host or pipe can be reached here.
 use super::*;
 use eg_core::game_log::GameLogStatus;
+use eg_trainer::files::FileCatalog;
+use eg_trainer::game_data::{GameData, GameDataHandle};
 use eg_trainer::{
     backend::{
         self, BackendConnection, BackendError, BackendHandle, BackendOptions, Command, Connector, ForgeSnapshot, ItemStatus, Phase, ProcessIdentity, ProcessLocator, RuntimeStatus,
@@ -97,104 +99,8 @@ impl BackendConnection for OwnedConnection {
             game_version: "owned-ui".into(),
         })
     }
-    async fn capture_catalog(&mut self, _: jiff::Timestamp) -> Result<GameCatalog, BackendError> {
-        let range = ValueRange { minimum: 0, maximum: 100 };
-        Ok(GameCatalog {
-            identity: CatalogIdentity {
-                binary_hash: "a".repeat(64),
-                metadata_hash: "b".repeat(64),
-                extraction_version: EXTRACTION_VERSION,
-                locale: GameLocale {
-                    language: "en".into(),
-                    game_version: "owned-ui".into(),
-                },
-            },
-            limits: ItemLimits {
-                forging_potential: range,
-                legendary_potential: range,
-                weavers_will: range,
-                weavers_touch: range,
-                level_requirement: range,
-            },
-            bases: [(
-                3,
-                ItemTypeDefinition {
-                    item_type: 3,
-                    name: name("Owned type"),
-                    sub_types: (1..=2)
-                        .map(|sub_type| SubTypeDefinition {
-                            sub_type,
-                            name: name(&format!("Owned base {sub_type}")),
-                            level_requirement: 87,
-                            class_requirement: 0,
-                            cannot_drop: false,
-                            is_corrupted: false,
-                            // The first base grants none, so the item's own reads stay as they are; the second grants
-                            // one with the game's text at both ends and one without it (C# `ForgeChoices.ImplicitLine`).
-                            implicits: Availability::Available(if sub_type == 2 {
-                                vec![
-                                    implicit(Availability::Available("+10 Armour Ω".into()), Availability::Available("+16 Armour Ω".into())),
-                                    implicit(
-                                        Availability::Unavailable { reason: "not formatted".into() },
-                                        Availability::Unavailable { reason: "not formatted".into() },
-                                    ),
-                                ]
-                            } else {
-                                vec![]
-                            }),
-                        })
-                        .collect(),
-                },
-            )]
-            .into(),
-            uniques: (70..=71)
-                .map(|id| {
-                    (
-                        id,
-                        UniqueDefinition {
-                            id,
-                            name: name(&format!("Owned unique {id}")),
-                            item_type: 3,
-                            sub_types: vec![1, 2],
-                            is_set_item: false,
-                            set_id: 0,
-                            legendary_type: 0,
-                            can_drop_as_legendary: true,
-                            is_pre_corrupted: false,
-                            numeric: Availability::Unavailable { reason: "not formatted".into() },
-                        },
-                    )
-                })
-                .collect(),
-            rarities: Default::default(),
-            affixes: (1..=5)
-                .map(|id| {
-                    (
-                        id,
-                        AffixDefinition {
-                            id,
-                            raw_name: "Health".into(),
-                            raw_display_name: match id {
-                                1 => "Health Ω",
-                                2 => "Vitality Ω",
-                                3 => "Class restricted",
-                                4 => "Resistance",
-                                _ => "Resistance II",
-                            }
-                            .into(),
-                            game_display_name: Availability::Unavailable { reason: "not formatted".into() },
-                            kind: i32::from(id >= 4),
-                            special: 0,
-                            class_requirement: if id == 3 { 2 } else { 0 },
-                            item_types: Some(vec![3]),
-                            tier_count: 8,
-                            standard_effect: 0.0,
-                            numeric: Availability::Unavailable { reason: "not mapped".into() },
-                        },
-                    )
-                })
-                .collect(),
-        })
+    fn build_hashes(&self) -> (String, String) {
+        ("a".repeat(64), "b".repeat(64))
     }
     async fn read_forge(&mut self, _: jiff::Timestamp) -> Result<Option<ForgeSnapshot>, BackendError> {
         self.0.reads.fetch_add(1, Ordering::SeqCst);
@@ -404,6 +310,106 @@ impl BackendConnection for OwnedConnection {
         Cleanup::ConfirmedOff
     }
 }
+/// The definitions the fixture's game files hold.
+fn fixture_catalog() -> GameCatalog {
+    let range = ValueRange { minimum: 0, maximum: 100 };
+    GameCatalog {
+        identity: CatalogIdentity {
+            binary_hash: "a".repeat(64),
+            metadata_hash: "b".repeat(64),
+            extraction_version: EXTRACTION_VERSION,
+            locale: GameLocale {
+                language: "en".into(),
+                game_version: "owned-ui".into(),
+            },
+        },
+        limits: ItemLimits {
+            forging_potential: range,
+            legendary_potential: range,
+            weavers_will: range,
+            weavers_touch: range,
+            level_requirement: range,
+        },
+        bases: [(
+            3,
+            ItemTypeDefinition {
+                item_type: 3,
+                name: name("Owned type"),
+                sub_types: (1..=2)
+                    .map(|sub_type| SubTypeDefinition {
+                        sub_type,
+                        name: name(&format!("Owned base {sub_type}")),
+                        level_requirement: 87,
+                        class_requirement: 0,
+                        cannot_drop: false,
+                        is_corrupted: false,
+                        // The first base grants none, so the item's own reads stay as they are; the second grants
+                        // one with the game's text at both ends and one without it (C# `ForgeChoices.ImplicitLine`).
+                        implicits: Availability::Available(if sub_type == 2 {
+                            vec![
+                                implicit(Availability::Available("+10 Armour Ω".into()), Availability::Available("+16 Armour Ω".into())),
+                                implicit(
+                                    Availability::Unavailable { reason: "not formatted".into() },
+                                    Availability::Unavailable { reason: "not formatted".into() },
+                                ),
+                            ]
+                        } else {
+                            vec![]
+                        }),
+                    })
+                    .collect(),
+            },
+        )]
+        .into(),
+        uniques: (70..=71)
+            .map(|id| {
+                (
+                    id,
+                    UniqueDefinition {
+                        id,
+                        name: name(&format!("Owned unique {id}")),
+                        item_type: 3,
+                        sub_types: vec![1, 2],
+                        is_set_item: false,
+                        set_id: 0,
+                        legendary_type: 0,
+                        can_drop_as_legendary: true,
+                        is_pre_corrupted: false,
+                        numeric: Availability::Unavailable { reason: "not formatted".into() },
+                    },
+                )
+            })
+            .collect(),
+        rarities: Default::default(),
+        affixes: (1..=5)
+            .map(|id| {
+                (
+                    id,
+                    AffixDefinition {
+                        id,
+                        raw_name: "Health".into(),
+                        raw_display_name: match id {
+                            1 => "Health Ω",
+                            2 => "Vitality Ω",
+                            3 => "Class restricted",
+                            4 => "Resistance",
+                            _ => "Resistance II",
+                        }
+                        .into(),
+                        game_display_name: Availability::Unavailable { reason: "not formatted".into() },
+                        kind: i32::from(id >= 4),
+                        special: 0,
+                        class_requirement: if id == 3 { 2 } else { 0 },
+                        item_types: Some(vec![3]),
+                        tier_count: 8,
+                        standard_effect: 0.0,
+                        numeric: Availability::Unavailable { reason: "not mapped".into() },
+                    },
+                )
+            })
+            .collect(),
+    }
+}
 fn implicit(minimum_text: Availability<String>, maximum_text: Availability<String>) -> ImplicitDefinition {
     ImplicitDefinition {
         property: 0,
@@ -514,9 +520,13 @@ pub(super) fn capture(session: &Session) {
             policy: GatePolicy::Release,
             auto_connect: false,
             poll_interval: Duration::from_secs(60),
+            game_data: Some(GameDataHandle::fixed(GameData::Ready(Arc::new(FileCatalog::restore(
+                fixture_catalog(),
+                "owned".into(),
+                vec![],
+            ))))),
             ..Default::default()
         },
-        None,
     );
     let worker = std::thread::spawn(move || runtime.block_on(worker.run()));
     let ui = MainWindow::new().unwrap();
@@ -1164,7 +1174,6 @@ pub(super) fn capture_waiting(session: &Session) {
             poll_interval: Duration::from_secs(60),
             ..Default::default()
         },
-        None,
     );
     let worker = std::thread::spawn(move || runtime.block_on(worker.run()));
     let ui = MainWindow::new().unwrap();

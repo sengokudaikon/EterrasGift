@@ -818,7 +818,7 @@ fn main() {
     assert_eq!(thumb(&ui).0, Some(16), "dragging the thumb up scrolls to the top");
     session.capture(&ui, "settings-narrow-scroll-bar-dragged");
 
-    // A running trainer behind Game definitions: its live status, and Refresh from game offered without the reason.
+    // A running trainer behind Game definitions: its live status, and Read again offered without the reason.
     let ui = session.open_settings_linked(Rc::new(LinkedTrainer));
     for _ in 0..3 {
         session.scroll(500.0, 300.0, -120.0);

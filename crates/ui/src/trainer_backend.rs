@@ -13,7 +13,7 @@ use crate::{
 };
 use eg_core::{bloom::BloomPhase, game_log::GameReadiness};
 use eg_trainer::{
-    backend::{Activity, BackendHandle, BackendSnapshot, CaptureProgress, CatalogState, Command, ErrorKind, ForgeState, MappingRead, Pending, Phase},
+    backend::{Activity, BackendHandle, BackendSnapshot, CatalogState, Command, ErrorKind, ForgeState, MappingRead, Pending, Phase},
     catalog::{Availability, GameCatalog},
 };
 use slint::{ComponentHandle, Timer, TimerMode};
@@ -715,12 +715,9 @@ fn online_advice(snapshot: &BackendSnapshot) -> &'static str {
     }
 }
 
-/// The preparation's progress while connecting: the game definitions as they load.
+/// The preparation's progress while connecting: the game files, when a changed install is read again.
 fn progress(snapshot: &BackendSnapshot) -> Option<String> {
-    (snapshot.activity == Some(Activity::CapturingCatalog)).then(|| match snapshot.capture_progress {
-        Some(CaptureProgress::Page { cursor, total, .. }) if total > 0 => format!("Loading game definitions: {cursor}/{total}"),
-        _ => "Loading game definitions…".to_owned(),
-    })
+    (snapshot.activity == Some(Activity::ReadingGameFiles)).then(|| "Reading game files…".to_owned())
 }
 
 fn status(snapshot: &BackendSnapshot) -> Status {

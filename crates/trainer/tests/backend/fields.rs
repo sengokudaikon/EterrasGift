@@ -15,7 +15,7 @@ fn available(manager: u64) -> AttackLeechRead {
 fn attack_leech_capability_is_explicit_and_never_enables_generic_fields_or_writes() {
     run(async {
         let shared = Shared::new();
-        let (handle, worker) = start(&shared, options(), None);
+        let (handle, worker) = start(&shared, options());
         connected(&handle).await;
         assert!(!handle.snapshot().capabilities.read_attack_leech);
         assert_eq!(command(&handle, Command::ReadAttackLeech).await.unwrap_err().kind, ErrorKind::NotReady);
@@ -35,7 +35,7 @@ fn attack_leech_observations_bind_process_generation_and_monotonic_sequence_incl
         let shared = Shared::new();
         shared.attack_leech_enabled.store(true, Ordering::SeqCst);
         *shared.attack_leech_read.lock().unwrap() = available(0x1000);
-        let (handle, worker) = start(&shared, options(), None);
+        let (handle, worker) = start(&shared, options());
         connected(&handle).await;
         command(&handle, Command::ReadAttackLeech).await.unwrap();
         let first = handle.snapshot().attack_leech.unwrap();
@@ -77,7 +77,7 @@ fn attack_leech_manager_drift_clears_previous_observation_and_wrong_wrapper_neve
         let shared = Shared::new();
         shared.attack_leech_enabled.store(true, Ordering::SeqCst);
         *shared.attack_leech_read.lock().unwrap() = available(0x1000);
-        let (handle, worker) = start(&shared, options(), None);
+        let (handle, worker) = start(&shared, options());
         connected(&handle).await;
         command(&handle, Command::ReadAttackLeech).await.unwrap();
         shared.status.lock().unwrap().manager = 0x9999;
@@ -102,7 +102,7 @@ fn attack_leech_global_refusals_revoke_backend_admission_without_cleanup_io() {
             let shared = Shared::new();
             shared.attack_leech_enabled.store(true, Ordering::SeqCst);
             *shared.attack_leech_read.lock().unwrap() = AttackLeechRead::Unavailable(reason);
-            let (handle, worker) = start(&shared, options(), None);
+            let (handle, worker) = start(&shared, options());
             connected(&handle).await;
             assert_eq!(command(&handle, Command::ReadAttackLeech).await.unwrap_err().kind, ErrorKind::Gate);
             assert_eq!(handle.snapshot().phase, Phase::WaitingForCharacter);
@@ -120,7 +120,7 @@ fn attack_leech_lost_log_after_read_discards_reply_without_cleanup_io() {
         let shared = Shared::new();
         shared.attack_leech_enabled.store(true, Ordering::SeqCst);
         *shared.attack_leech_read.lock().unwrap() = available(0x1000);
-        let (handle, worker) = start(&shared, options(), None);
+        let (handle, worker) = start(&shared, options());
         connected(&handle).await;
         shared.attack_leech_block.arm();
         let receipt = handle.try_submit(Command::ReadAttackLeech).unwrap();
@@ -141,7 +141,7 @@ fn attack_leech_cleanup_barrier_suppresses_inflight_publication_and_drains_once(
         let shared = Shared::new();
         shared.attack_leech_enabled.store(true, Ordering::SeqCst);
         *shared.attack_leech_read.lock().unwrap() = available(0x1000);
-        let (handle, worker) = start(&shared, options(), None);
+        let (handle, worker) = start(&shared, options());
         connected(&handle).await;
         shared.attack_leech_block.arm();
         let read = handle.try_submit(Command::ReadAttackLeech).unwrap();

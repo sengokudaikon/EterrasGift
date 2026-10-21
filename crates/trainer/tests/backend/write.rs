@@ -6,7 +6,7 @@ use eg_trainer_wire::protocol::ResponseCode;
 fn mixed_batch_undo_is_owned_by_the_worker_and_refusal_retains_only_unrestored_steps() {
     run(async {
         let shared = writable();
-        let (handle, worker) = start(&shared, options(), None);
+        let (handle, worker) = start(&shared, options());
         connected(&handle).await;
         command(&handle, Command::BeginForgeBatch).await.unwrap();
         let plan = handle.snapshot().status_plan(eg_trainer::edits::StatusField::Corrupted, 1).unwrap();
@@ -45,7 +45,7 @@ fn mixed_batch_undo_is_owned_by_the_worker_and_refusal_retains_only_unrestored_s
 fn a_new_batch_replaces_previous_undo_only_after_its_first_confirmation() {
     run(async {
         let shared = writable();
-        let (handle, worker) = start(&shared, options(), None);
+        let (handle, worker) = start(&shared, options());
         connected(&handle).await;
         let plan = handle.snapshot().level_requirement_plan(17).unwrap();
         command(&handle, Command::Write(plan.into())).await.unwrap();
@@ -75,7 +75,7 @@ fn failed_write_evidence_is_persisted_without_event_subscribers_even_during_clea
             let directory = tempfile::tempdir().unwrap();
             let faults = eg_core::fault::FaultLog::with_fallbacks(directory.path(), Some(directory.path()), vec![]);
             let shared = writable();
-            let (handle, worker) = backend::service(Locator(shared.clone()), Connect(shared.clone()), Logs(shared.clone()), FakeClock, options(), None);
+            let (handle, worker) = backend::service(Locator(shared.clone()), Connect(shared.clone()), Logs(shared.clone()), FakeClock, options());
             let worker = tokio::spawn(worker.with_fault_log(faults).run());
             connected(&handle).await;
             let plan = handle.snapshot().level_requirement_plan(17).unwrap();
@@ -123,7 +123,7 @@ fn queued_override_revocation_refuses_old_plans_and_undo_before_io() {
             item.item_type = 25;
             item.fingerprint = item.legacy_fingerprint();
         }
-        let (handle, worker) = start(&shared, options(), None);
+        let (handle, worker) = start(&shared, options());
         connected(&handle).await;
         let edit = StatusEdit {
             field: StatusField::WeaversTouch,
@@ -166,7 +166,7 @@ fn reducing_above_limit_legendary_will_does_not_offer_an_illegal_increase_as_und
             item.status.weavers_will = 255;
             item.fingerprint = item.legacy_fingerprint();
         }
-        let (handle, worker) = start(&shared, options(), None);
+        let (handle, worker) = start(&shared, options());
         connected(&handle).await;
         command(&handle, Command::SetOverride(true)).await.unwrap();
         let plan = handle
@@ -188,7 +188,7 @@ fn reducing_above_limit_legendary_will_does_not_offer_an_illegal_increase_as_und
 fn status_family_uses_shared_write_outcomes_and_conditional_undo() {
     run(async {
         let shared = writable();
-        let (handle, worker) = start(&shared, options(), None);
+        let (handle, worker) = start(&shared, options());
         connected(&handle).await;
         for field in [eg_trainer::edits::StatusField::Corrupted, eg_trainer::edits::StatusField::Ruined] {
             let before = handle.snapshot();
@@ -211,7 +211,7 @@ fn status_family_uses_shared_write_outcomes_and_conditional_undo() {
 fn generic_forge_write_publishes_known_different_state_without_undo_or_reconnect() {
     run(async {
         let shared = writable();
-        let (handle, worker) = start(&shared, options(), None);
+        let (handle, worker) = start(&shared, options());
         connected(&handle).await;
         let original = handle.snapshot();
         let plan = original.level_requirement_plan(17).unwrap();
@@ -250,7 +250,7 @@ fn ordinary_forge_refusals_keep_the_connection_but_runtime_refusals_release_it()
             ResponseCode::RestartRequired,
         ] {
             let shared = writable();
-            let (handle, worker) = start(&shared, options(), None);
+            let (handle, worker) = start(&shared, options());
             connected(&handle).await;
             let plan = handle.snapshot().level_requirement_plan(17).unwrap();
             *shared.write_result.lock().unwrap() = Some(WriteStatus::NotApplied {
@@ -285,7 +285,7 @@ fn ordinary_forge_refusals_keep_the_connection_but_runtime_refusals_release_it()
 fn turning_automatic_connection_off_leaves_a_write_in_a_ready_session_alone() {
     run(async {
         let shared = writable();
-        let (handle, worker) = start(&shared, options(), None);
+        let (handle, worker) = start(&shared, options());
         connected(&handle).await;
         let plan = WritePlan::from(handle.snapshot().level_requirement_plan(17).unwrap());
         shared.write_block.arm();
@@ -308,7 +308,7 @@ fn turning_automatic_connection_off_leaves_a_write_in_a_ready_session_alone() {
 fn forge_confirmation_survives_later_gate_loss_without_publishing_a_live_item() {
     run(async {
         let shared = writable();
-        let (handle, worker) = start(&shared, options(), None);
+        let (handle, worker) = start(&shared, options());
         connected(&handle).await;
         let plan = WritePlan::from(handle.snapshot().level_requirement_plan(17).unwrap());
         shared.write_block.arm();
@@ -363,7 +363,7 @@ pub(super) fn writable() -> Arc<Shared> {
 fn only_explicit_write_is_submitted_and_full_confirmation_is_published() {
     run(async {
         let shared = writable();
-        let (handle, worker) = start(&shared, options(), None);
+        let (handle, worker) = start(&shared, options());
         connected(&handle).await;
         let state = handle.snapshot();
         assert!(state.capabilities.level_requirement);
@@ -381,7 +381,7 @@ fn only_explicit_write_is_submitted_and_full_confirmation_is_published() {
 fn stale_full_observation_and_generation_are_refused_before_write_or_status_io() {
     run(async {
         let shared = writable();
-        let (handle, worker) = start(&shared, options(), None);
+        let (handle, worker) = start(&shared, options());
         connected(&handle).await;
         let plan = handle.snapshot().level_requirement_plan(17).unwrap();
         shared.forge_item.lock().unwrap().as_mut().unwrap().name.push_str(" changed");
@@ -403,7 +403,7 @@ fn stale_full_observation_and_generation_are_refused_before_write_or_status_io()
 fn manager_changed_during_fresh_status_revokes_session_before_submission() {
     run(async {
         let shared = writable();
-        let (handle, worker) = start(&shared, options(), None);
+        let (handle, worker) = start(&shared, options());
         connected(&handle).await;
         let plan = handle.snapshot().level_requirement_plan(17).unwrap();
         shared.status.lock().unwrap().manager = 0x5678;
@@ -418,7 +418,7 @@ fn manager_changed_during_fresh_status_revokes_session_before_submission() {
 fn cleanup_drains_submitted_write_and_retains_its_outcome_without_publishing_item() {
     run(async {
         let shared = writable();
-        let (handle, worker) = start(&shared, options(), None);
+        let (handle, worker) = start(&shared, options());
         connected(&handle).await;
         let plan = handle.snapshot().level_requirement_plan(17).unwrap();
         shared.write_block.arm();
@@ -444,7 +444,7 @@ fn cleanup_drains_submitted_write_and_retains_its_outcome_without_publishing_ite
 fn dropped_write_receipt_still_finishes_and_uncertainty_blocks_without_replay() {
     run(async {
         let shared = writable();
-        let (handle, worker) = start(&shared, options(), None);
+        let (handle, worker) = start(&shared, options());
         connected(&handle).await;
         let plan = handle.snapshot().level_requirement_plan(17).unwrap();
         *shared.write_result.lock().unwrap() = Some(WriteStatus::uncertain("lost reply"));
@@ -468,7 +468,7 @@ fn dropped_write_receipt_still_finishes_and_uncertainty_blocks_without_replay() 
 fn mismatched_connection_confirmation_is_uncertain_even_if_legacy_hash_matches() {
     run(async {
         let shared = writable();
-        let (handle, worker) = start(&shared, options(), None);
+        let (handle, worker) = start(&shared, options());
         connected(&handle).await;
         let plan = handle.snapshot().level_requirement_plan(17).unwrap();
         let mut wrong = plan.projected().clone();
@@ -486,7 +486,7 @@ fn success_or_failure_code_cannot_be_reported_as_definite_level_nonexecution() {
     run(async {
         for code in [eg_trainer_wire::protocol::ResponseCode::Done, eg_trainer_wire::protocol::ResponseCode::Failed] {
             let shared = writable();
-            let (handle, worker) = start(&shared, options(), None);
+            let (handle, worker) = start(&shared, options());
             connected(&handle).await;
             let plan = handle.snapshot().level_requirement_plan(17).unwrap();
             *shared.write_result.lock().unwrap() = Some(WriteStatus::NotApplied {
@@ -511,7 +511,7 @@ fn success_or_failure_code_cannot_be_reported_as_definite_level_nonexecution() {
 fn write_preflight_refresh_failure_releases_connection_instead_of_retaining_ready() {
     run(async {
         let shared = writable();
-        let (handle, worker) = start(&shared, options(), None);
+        let (handle, worker) = start(&shared, options());
         connected(&handle).await;
         let plan = handle.snapshot().level_requirement_plan(17).unwrap();
         shared
@@ -531,7 +531,7 @@ fn gate_or_not_ready_refresh_failure_revokes_old_ready_state_without_submitting(
     run(async {
         for kind in [ErrorKind::Gate, ErrorKind::NotReady, ErrorKind::NotConnected] {
             let shared = writable();
-            let (handle, worker) = start(&shared, options(), None);
+            let (handle, worker) = start(&shared, options());
             connected(&handle).await;
             let plan = handle.snapshot().level_requirement_plan(17).unwrap();
             shared.read_errors.lock().unwrap().push_back(BackendError::blocked(kind, "fresh status refused"));
@@ -552,7 +552,7 @@ fn explicit_undo_uses_a_fresh_reverse_plan_and_consumes_the_last_apply() {
     run(async {
         let shared = writable();
         let original = shared.forge_item.lock().unwrap().clone().unwrap();
-        let (handle, worker) = start(&shared, options(), None);
+        let (handle, worker) = start(&shared, options());
         connected(&handle).await;
         let plan = handle.snapshot().level_requirement_plan(17).unwrap();
         command(&handle, Command::ApplyForge(Box::new(plan))).await.unwrap();
@@ -574,7 +574,7 @@ fn explicit_undo_uses_a_fresh_reverse_plan_and_consumes_the_last_apply() {
 fn next_apply_replaces_undo_and_old_ui_intent_is_refused_before_io() {
     run(async {
         let shared = writable();
-        let (handle, worker) = start(&shared, options(), None);
+        let (handle, worker) = start(&shared, options());
         connected(&handle).await;
         let plan = handle.snapshot().level_requirement_plan(17).unwrap();
         command(&handle, Command::ApplyForge(Box::new(plan))).await.unwrap();
@@ -593,7 +593,7 @@ fn next_apply_replaces_undo_and_old_ui_intent_is_refused_before_io() {
 fn observed_change_outside_legacy_hash_discards_undo_and_disconnect_cannot_reuse_it() {
     run(async {
         let shared = writable();
-        let (handle, worker) = start(&shared, options(), None);
+        let (handle, worker) = start(&shared, options());
         connected(&handle).await;
         let plan = handle.snapshot().level_requirement_plan(17).unwrap();
         command(&handle, Command::ApplyForge(Box::new(plan))).await.unwrap();
@@ -613,7 +613,7 @@ fn observed_change_outside_legacy_hash_discards_undo_and_disconnect_cannot_reuse
 fn uncertain_undo_discards_its_token_and_releases_live_item_without_replay() {
     run(async {
         let shared = writable();
-        let (handle, worker) = start(&shared, options(), None);
+        let (handle, worker) = start(&shared, options());
         connected(&handle).await;
         let plan = handle.snapshot().level_requirement_plan(17).unwrap();
         command(&handle, Command::ApplyForge(Box::new(plan))).await.unwrap();

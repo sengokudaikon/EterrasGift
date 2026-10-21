@@ -22,7 +22,7 @@ use eg_ui::shell::Page;
 use eg_ui::trainer_settings;
 use eg_ui::{App, MainWindow};
 use slint::ComponentHandle;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 /// The app's command line (`spec/shell-and-settings.md` §1).
@@ -139,31 +139,19 @@ fn main() -> Result<(), slint::PlatformError> {
     let window = MainWindow::new()?;
     let (found_game, found_dotnet) = discovery.join().unwrap_or_else(|panic| std::panic::resume_unwind(panic));
     let trainer_runtime = if trainer_on {
-        let automatic = store
-            .module_settings(trainer_settings::ID)
-            .and_then(|v| v.get("autoConnect"))
-            .and_then(|v| v.as_bool())
-            .unwrap_or(true);
+        let flag = |key, default| eg_core::settings::module_flag(store.module_settings(trainer_settings::ID), key, default);
         let process_name = found_game
             .as_ref()
             .and_then(|p| p.file_name())
             .map_or_else(|| "Last Epoch.exe".into(), |name| name.to_string_lossy().into_owned());
         match trainer::Trainer::start(
             folders::player_log(),
-            store.paths().module_directory("trainer").join("catalog"),
+            store.paths().module_directory(trainer_settings::ID).join("game-data"),
+            found_game.as_ref().and_then(|exe| exe.parent()).map(Path::to_path_buf),
             process_name,
             eg_trainer::backend::BackendOptions {
-                auto_connect: automatic,
-                override_enabled: store
-                    .module_settings(trainer_settings::ID)
-                    .and_then(|v| v.get("iKnowWhatImDoing"))
-                    .and_then(|v| v.as_bool())
-                    .unwrap_or(false),
-                // Definitions come from the game's files when the connected game is the same build.
-                game_files: found_game
-                    .as_ref()
-                    .and_then(|exe| exe.parent())
-                    .map(|folder| eg_trainer::backend::GameFilesSource::Folder(folder.to_path_buf())),
+                auto_connect: flag(trainer_settings::AUTO_CONNECT, true),
+                override_enabled: flag(trainer_settings::OVERRIDE, false),
                 ..Default::default()
             },
             arguments.no_connect,

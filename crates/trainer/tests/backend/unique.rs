@@ -45,7 +45,7 @@ fn preview(handle: &BackendHandle, value: i32) -> Command {
 fn descriptions_and_preview_are_cached_for_an_exact_item_and_never_create_writes() {
     run(async {
         let shared = shared();
-        let (handle, worker) = start(&shared, options(), None);
+        let (handle, worker) = start(&shared, options());
         connected(&handle).await;
         let before = handle.snapshot();
         describe(&handle).await;
@@ -74,7 +74,7 @@ fn unavailable_descriptions_and_preview_preserve_connection_and_refresh_allows_r
     run(async {
         let shared = shared();
         *shared.unique_lines.lock().unwrap() = None;
-        let (handle, worker) = start(&shared, options(), None);
+        let (handle, worker) = start(&shared, options());
         connected(&handle).await;
         describe(&handle).await;
         assert!(matches!(&handle.snapshot().forge, ForgeState::Item { unique: Some(Err(_)), .. }));
@@ -109,7 +109,7 @@ fn unavailable_descriptions_and_preview_preserve_connection_and_refresh_allows_r
 fn queued_cleanup_suppresses_an_older_preview_completion_and_changed_item_rejects_without_io() {
     run(async {
         let shared = shared();
-        let (handle, worker) = start(&shared, options(), None);
+        let (handle, worker) = start(&shared, options());
         connected(&handle).await;
         describe(&handle).await;
         let old = preview(&handle, 223);

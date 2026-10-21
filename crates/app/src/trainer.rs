@@ -2,7 +2,6 @@
 use eg_core::fault::FaultLog;
 use eg_trainer::{
     backend::{self, BackendHandle, BackendOptions, Command, SubmitError, SystemClock},
-    catalog_cache::CatalogCache,
     sources::FileLogFactory,
 };
 use eg_trainer_host::desktop::{DesktopConnector, GameProcesses, HelperPackage};
@@ -35,9 +34,19 @@ pub struct Trainer {
     worker: JoinHandle<bool>,
 }
 impl Trainer {
-    /// The helper is in the exe; it is written under the app's local folder only when a game connects.
-    pub fn start(player_log: PathBuf, cache: PathBuf, executable_name: String, options: BackendOptions, no_connect: bool, faults: FaultLog) -> Result<Self, String> {
+    /// The helper is in the exe; it is written under the app's local folder only when a game connects. The game data
+    /// is read from `game` (the installed game, when found) at once, and saved in `game_data`.
+    pub fn start(
+        player_log: PathBuf,
+        game_data: PathBuf,
+        game: Option<PathBuf>,
+        executable_name: String,
+        mut options: BackendOptions,
+        no_connect: bool,
+        faults: FaultLog,
+    ) -> Result<Self, String> {
         let helper = helper()?;
+        options.game_data = Some(eg_trainer::game_data::start(game, Some(game_data), Some(faults.clone())).map_err(|e| e.to_string())?);
         let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build().map_err(|e| e.to_string())?;
         let logs = FileLogFactory::new(player_log).map_err(|e| e.to_string())?;
         let (handle, worker) = backend::service(
@@ -46,7 +55,6 @@ impl Trainer {
             logs.reader(),
             SystemClock,
             options,
-            Some(CatalogCache::new(cache)),
         );
         let worker = worker.with_fault_log(faults.clone());
         let worker = thread::Builder::new()

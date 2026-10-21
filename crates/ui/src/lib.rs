@@ -53,12 +53,9 @@ pub fn install(window: &MainWindow, app: App) {
     let before_close = app.mods.map(|page| mods::bind(window, page, &shell));
     // The trainer's pages remember the hooks' values in its slice of the settings.
     let trainer_settings = app.trainer.then(|| app.settings.service().module(trainer_settings::ID));
-    // The trainer's switches reach its session as they flip; Game definitions follows its catalog.
+    // The trainer's switches reach its session as they flip; Game definitions follows its game data.
     let settings = match app.trainer_backend.clone().filter(|_| app.trainer) {
-        Some(backend) => {
-            let cache = app.settings.service().snapshot().store.paths().module_directory(trainer_settings::ID).join("catalog");
-            app.settings.link(trainer_settings::ID, trainer_settings::link(backend, Some(cache)))
-        }
+        Some(backend) => app.settings.link(trainer_settings::ID, trainer_settings::link(backend)),
         None => app.settings,
     };
     settings::bind_with_close(window, settings, before_close);

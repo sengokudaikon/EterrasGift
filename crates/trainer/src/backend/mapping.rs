@@ -114,9 +114,9 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
         match self.locale_changed(epoch, target).await {
             Ok(false) => Ok(false),
             Ok(true) => {
-                // Recapture localized names and definitions together. read's
-                // commit drops mappings/previews from the old identity atomically.
-                self.read(true, false).await?;
+                // The catalog again under the new language. read's commit drops
+                // mappings/previews from the old identity atomically.
+                self.read(super::CatalogRead::Reload, false).await?;
                 Ok(true)
             }
             Err(error) => {

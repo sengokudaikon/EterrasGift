@@ -37,8 +37,8 @@ impl BackendConnection for Connection {
     async fn read_locale(&mut self, _: Timestamp) -> Result<crate::catalog::GameLocale, BackendError> {
         panic!("no locale")
     }
-    async fn capture_catalog(&mut self, _: Timestamp) -> Result<GameCatalog, BackendError> {
-        panic!("no capture")
+    fn build_hashes(&self) -> (String, String) {
+        panic!("no catalog")
     }
     async fn read_forge(&mut self, _: Timestamp) -> Result<Option<ForgeSnapshot>, BackendError> {
         panic!("no forge")
@@ -78,7 +78,7 @@ fn sequence_overflow_refuses_complete_worker_before_log_status_or_store() {
     let AttackLeechDecision::Change(plan) = AttackLeechPlan::prepare(&current, AttackLeechTarget::AttackRate, 1.1).unwrap() else {
         panic!()
     };
-    let (handle, mut worker) = service(Locator, Connect, Logs, Time, BackendOptions::default(), None);
+    let (handle, mut worker) = service(Locator, Connect, Logs, Time, BackendOptions::default());
     worker.state.enabled = true;
     worker.state.phase = Phase::Ready;
     worker.state.generation = 1;
@@ -112,8 +112,8 @@ fn default_rate_capability_is_false_and_default_submission_is_preflight_only() {
         async fn read_locale(&mut self, _: Timestamp) -> Result<crate::catalog::GameLocale, BackendError> {
             panic!("no locale")
         }
-        async fn capture_catalog(&mut self, _: Timestamp) -> Result<GameCatalog, BackendError> {
-            panic!("no capture")
+        fn build_hashes(&self) -> (String, String) {
+            panic!("no catalog")
         }
         async fn read_forge(&mut self, _: Timestamp) -> Result<Option<ForgeSnapshot>, BackendError> {
             panic!("no forge")

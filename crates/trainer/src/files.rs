@@ -1,7 +1,7 @@
 //! The catalog built from the game's shipped files (`eg_game_files`) instead of a live capture: the same definitions,
 //! read the same way, with the same presentation rules and the same reasons where something is unavailable. It needs
 //! no game process. Its identity is the build's binary and metadata hashes; the locale comes from the session that
-//! uses it, since nothing in the catalog is localised.
+//! uses it, since nothing in the catalog is localised. `crate::game_data` reads it in the background and keeps it.
 //!
 //! The presentation selection mirrors `eg_game_access`'s `catalog_numeric_property`: ordinary properties take their
 //! `PropertyList` entry (or its default), ailment chance (43) the stat its ailment's effectiveness selects, and
@@ -39,9 +39,12 @@ pub struct FileCatalog {
     sources: Vec<(PathBuf, Option<Fingerprint>)>,
 }
 
-type Fingerprint = (u64, SystemTime);
+pub type Fingerprint = (u64, SystemTime);
 
-fn fingerprint(path: &Path) -> Option<Fingerprint> {
+/// The locale a catalog is saved under: the catalog holds no localised text, and a session relabels it with its own.
+pub const SAVED_LOCALE: &str = "files";
+
+pub fn fingerprint(path: &Path) -> Option<Fingerprint> {
     let metadata = std::fs::metadata(path).ok()?;
     Some((metadata.len(), metadata.modified().ok()?))
 }
@@ -54,13 +57,17 @@ fn hash(path: &Path) -> Result<String, String> {
 /// Reads and builds the catalog for the game in `folder` (the one holding `Last Epoch.exe`).
 pub fn read(folder: &Path) -> Result<FileCatalog, String> {
     let install = eg_game_files::Install::at(folder).map_err(|e| e.to_string())?;
-    // Taken first, so a file that changes while it is read reads as changed afterwards.
+    let binary = folder.join("GameAssembly.dll");
+    let metadata = install.data_folder().join("il2cpp_data").join("Metadata").join("global-metadata.dat");
+    // Taken first, so a file that changes while it is read reads as changed afterwards. The hashed binaries are among
+    // them, so a saved catalog is known to be current without hashing them again.
     let mut paths = install.definition_sources();
     paths.extend(install.player_sources());
     paths.push(install.data_folder().join("build_hash.txt"));
+    paths.extend([binary.clone(), metadata.clone()]);
     let sources = paths.into_iter().map(|path| (fingerprint(&path), path)).map(|(print, path)| (path, print)).collect();
-    let binary_hash = hash(&folder.join("GameAssembly.dll"))?;
-    let metadata_hash = hash(&install.data_folder().join("il2cpp_data").join("Metadata").join("global-metadata.dat"))?;
+    let binary_hash = hash(&binary)?;
+    let metadata_hash = hash(&metadata)?;
     let definitions = install.definitions().map_err(|e| e.to_string())?;
     let player = install.player_definitions().map_err(|e| e.to_string())?;
     let build = install.build_hash().unwrap_or_default();
@@ -121,6 +128,34 @@ pub fn build_catalog(binary_hash: String, metadata_hash: String, build: String, 
 impl FileCatalog {
     pub fn affix_count(&self) -> usize {
         self.affixes.len()
+    }
+
+    /// Every file it was read from, with its size and write time then.
+    pub fn sources(&self) -> &[(PathBuf, Option<Fingerprint>)] {
+        &self.sources
+    }
+
+    /// The catalog as it is saved, under [`SAVED_LOCALE`].
+    pub fn saved(&self) -> Result<GameCatalog, ProtocolError> {
+        self.catalog(GameLocale {
+            language: SAVED_LOCALE.into(),
+            game_version: String::new(),
+        })
+    }
+
+    /// A saved catalog back, with what it was read from. The definitions are checked again by the session's builder.
+    pub fn restore(saved: GameCatalog, build: String, sources: Vec<(PathBuf, Option<Fingerprint>)>) -> Self {
+        Self {
+            binary_hash: saved.identity.binary_hash,
+            metadata_hash: saved.identity.metadata_hash,
+            build,
+            limits: saved.limits,
+            bases: saved.bases.into_values().collect(),
+            affixes: saved.affixes.into_values().collect(),
+            uniques: saved.uniques.into_values().collect(),
+            rarities: saved.rarities.into_values().collect(),
+            sources,
+        }
     }
 
     /// Whether every file it was read from is as it was then (a Steam update while the app runs changes them).
@@ -467,6 +502,28 @@ fn unique(unique: &eg_game_files::uniques::Unique, presentation: &Presentation<'
     })
 }
 
+/// An empty catalog read from `sources`, for tests.
+#[cfg(test)]
+pub(crate) fn test_catalog(sources: Vec<(PathBuf, Option<Fingerprint>)>) -> FileCatalog {
+    FileCatalog {
+        binary_hash: "a".repeat(64),
+        metadata_hash: "b".repeat(64),
+        build: "build".into(),
+        limits: ItemLimits {
+            forging_potential: ValueRange { minimum: 0, maximum: 255 },
+            legendary_potential: ValueRange { minimum: 0, maximum: 4 },
+            weavers_will: ValueRange { minimum: 5, maximum: 28 },
+            weavers_touch: ValueRange { minimum: 5, maximum: 14 },
+            level_requirement: ValueRange { minimum: 0, maximum: 100 },
+        },
+        bases: vec![],
+        affixes: vec![],
+        uniques: vec![],
+        rarities: vec![],
+        sources,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -476,23 +533,7 @@ mod tests {
         let folder = tempfile::tempdir().unwrap();
         let file = folder.path().join("GameAssembly.dll");
         std::fs::write(&file, b"build one").unwrap();
-        let catalog = FileCatalog {
-            binary_hash: "A".repeat(64),
-            metadata_hash: "B".repeat(64),
-            build: String::new(),
-            limits: ItemLimits {
-                forging_potential: ValueRange { minimum: 0, maximum: 255 },
-                legendary_potential: ValueRange { minimum: 0, maximum: 4 },
-                weavers_will: ValueRange { minimum: 5, maximum: 28 },
-                weavers_touch: ValueRange { minimum: 5, maximum: 14 },
-                level_requirement: ValueRange { minimum: 0, maximum: 100 },
-            },
-            bases: vec![],
-            affixes: vec![],
-            uniques: vec![],
-            rarities: vec![],
-            sources: vec![(file.clone(), fingerprint(&file))],
-        };
+        let catalog = test_catalog(vec![(file.clone(), fingerprint(&file))]);
         assert!(catalog.is_current());
         std::fs::write(&file, b"build two, longer").unwrap();
         assert!(!catalog.is_current(), "a Steam update rewrites the files");

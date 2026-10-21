@@ -16,6 +16,7 @@ mod write;
 use std::{
     fmt,
     future::Future,
+    path::Path,
     sync::{
         Arc, Mutex,
         atomic::{AtomicBool, AtomicUsize, Ordering},
@@ -42,8 +43,8 @@ use tokio::sync::{broadcast, mpsc, oneshot, watch};
 
 use crate::{
     catalog::{GameCatalog, ResolvedItemName},
-    catalog_cache::CatalogCache,
     field_writes::{AttackLeechDecision, AttackLeechPlan, AttackLeechTarget, FieldPlanError, RateWriteRecord, RateWriteStatus},
+    game_data::{GameData, GameDataHandle},
     gate::{self, GateDecision, GatePolicy, GateVerdict, LogSource},
     mapping::{MappingRequest, ValueTable},
     session::{Cleanup, Session, SessionError},
@@ -86,25 +87,9 @@ pub trait BackendConnection: Send + 'static {
     }
     fn refresh(&mut self, now: Timestamp) -> impl Future<Output = Result<RuntimeStatus, BackendError>> + Send;
     fn read_locale(&mut self, now: Timestamp) -> impl Future<Output = Result<crate::catalog::GameLocale, BackendError>> + Send;
-    /// The running build's binary and metadata hashes, when known: a catalog read from files with the same hashes
-    /// describes this game, and is used instead of a capture.
-    fn build_hashes(&self) -> Option<(String, String)> {
-        None
-    }
-    fn capture_catalog(&mut self, now: Timestamp) -> impl Future<Output = Result<GameCatalog, BackendError>> + Send;
-    fn capture_catalog_observed(&mut self, now: Timestamp, observer: &mut dyn CaptureObserver) -> impl Future<Output = Result<CaptureOutcome, BackendError>> + Send {
-        async move {
-            if observer.control() == CaptureControl::Stop {
-                return Ok(CaptureOutcome::Stopped);
-            }
-            observer.progress(CaptureProgress::Starting);
-            let catalog = self.capture_catalog(now).await?;
-            if observer.control() == CaptureControl::Stop {
-                return Ok(CaptureOutcome::Stopped);
-            }
-            Ok(CaptureOutcome::Complete(Box::new(catalog)))
-        }
-    }
+    /// The running build's binary and metadata hashes: the game data read from files with the same hashes describes
+    /// this game. Definitions are never captured from the game.
+    fn build_hashes(&self) -> (String, String);
     fn read_forge(&mut self, now: Timestamp) -> impl Future<Output = Result<Option<ForgeSnapshot>, BackendError>> + Send;
     fn describe_implicits(&mut self, _: Timestamp, _: &ForgeSnapshot) -> impl Future<Output = Result<Option<Vec<ModifierSnapshot>>, BackendError>> + Send {
         async { Ok(None) }
@@ -217,14 +202,8 @@ impl<T: Transport + Send + 'static> BackendConnection for Session<T> {
     async fn read_locale(&mut self, now: Timestamp) -> Result<crate::catalog::GameLocale, BackendError> {
         Ok(Session::read_locale(self, now).await?)
     }
-    fn build_hashes(&self) -> Option<(String, String)> {
-        Some((self.profile().binary_hash().to_owned(), self.profile().metadata_hash().to_owned()))
-    }
-    async fn capture_catalog(&mut self, now: Timestamp) -> Result<GameCatalog, BackendError> {
-        Ok(Session::capture_catalog(self, now).await?)
-    }
-    async fn capture_catalog_observed(&mut self, now: Timestamp, observer: &mut dyn CaptureObserver) -> Result<CaptureOutcome, BackendError> {
-        Ok(Session::capture_catalog_observed(self, now, observer).await?)
+    fn build_hashes(&self) -> (String, String) {
+        (self.profile().binary_hash().to_owned(), self.profile().metadata_hash().to_owned())
     }
     async fn describe_implicits(&mut self, now: Timestamp, expected: &ForgeSnapshot) -> Result<Option<Vec<ModifierSnapshot>>, BackendError> {
         Ok(Session::describe_implicits(self, now, expected).await?)
@@ -419,7 +398,8 @@ pub enum Phase {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Activity {
     Connecting,
-    CapturingCatalog,
+    /// Waiting for the game data service (a changed install is read again).
+    ReadingGameFiles,
     ReadingForge,
     ReadingAttackLeech,
     Refreshing,
@@ -446,7 +426,6 @@ pub struct Capabilities {
 #[derive(Clone, Debug, PartialEq)]
 pub enum CatalogState {
     Missing,
-    Saved(Arc<GameCatalog>),
     Current { generation: u64, data: Arc<GameCatalog> },
     Stale(Arc<GameCatalog>),
 }
@@ -454,7 +433,7 @@ impl CatalogState {
     pub fn data(&self) -> Option<&Arc<GameCatalog>> {
         match self {
             Self::Missing => None,
-            Self::Saved(data) | Self::Current { data, .. } | Self::Stale(data) => Some(data),
+            Self::Current { data, .. } | Self::Stale(data) => Some(data),
         }
     }
 }
@@ -492,19 +471,31 @@ pub struct AttackLeechSnapshot {
     pub manager: u64,
     pub read: AttackLeechRead,
 }
-/// The catalog read from the game's files at start (`crate::files`). A session of the same build uses it on connect
-/// instead of capturing definitions from the game.
+/// The game data service's state (`crate::game_data`), for the views. A session uses its catalog when it runs the build
+/// the files hold; without it the trainer does not open.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum GameFiles {
-    /// No game folder was given.
+    /// No game folder is known yet.
     NotConfigured,
     Reading,
     Ready {
         affixes: usize,
         build: String,
     },
-    /// Reading failed; sessions capture from the game as before.
     Unavailable(String),
+}
+impl From<&GameData> for GameFiles {
+    fn from(data: &GameData) -> Self {
+        match data {
+            GameData::NoGame => Self::NotConfigured,
+            GameData::Reading => Self::Reading,
+            GameData::Ready(catalog) => Self::Ready {
+                affixes: catalog.affix_count(),
+                build: catalog.build.clone(),
+            },
+            GameData::Unavailable(reason) => Self::Unavailable(reason.clone()),
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -517,7 +508,6 @@ pub struct BackendSnapshot {
     pub override_enabled: bool,
     pub phase: Phase,
     pub activity: Option<Activity>,
-    pub capture_progress: Option<CaptureProgress>,
     pub detected: Option<ProcessIdentity>,
     pub attached: Option<ProcessIdentity>,
     pub retained_helper: Option<RetainedHelper>,
@@ -525,7 +515,6 @@ pub struct BackendSnapshot {
     pub cleanup: Cleanup,
     pub runtime_status: Option<RuntimeStatus>,
     pub error: Option<BackendError>,
-    pub cache_error: Option<String>,
     pub catalog: CatalogState,
     pub game_files: GameFiles,
     pub forge: ForgeState,
@@ -660,8 +649,16 @@ pub enum BackendEvent {
     Released { generation: u64, cleanup: Cleanup },
     ReadPublished { generation: u64 },
     Fault(BackendError),
-    CacheFault(String),
     Stopped,
+}
+/// What a read does with the catalog.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum CatalogRead {
+    Keep,
+    /// The game's language changed: the catalog again from the game data service, relabelled.
+    Reload,
+    /// Settings' Read again: the files read again first.
+    ReadFilesAgain,
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Command {
@@ -715,16 +712,8 @@ pub struct BackendOptions {
     pub override_enabled: bool,
     pub poll_interval: Duration,
     pub discovery_interval: Duration,
-    /// Where the catalog comes from before a game connects; `None` keeps capturing from the game.
-    pub game_files: Option<GameFilesSource>,
-}
-
-#[derive(Clone, Debug)]
-pub enum GameFilesSource {
-    /// The game folder, read on a blocking thread when the worker starts.
-    Folder(std::path::PathBuf),
-    /// A catalog already read (tests, tools).
-    Read(Arc<crate::files::FileCatalog>),
+    /// The game data service, the catalog's only source. Without it the trainer does not open.
+    pub game_data: Option<GameDataHandle>,
 }
 impl Default for BackendOptions {
     fn default() -> Self {
@@ -734,16 +723,9 @@ impl Default for BackendOptions {
             override_enabled: false,
             poll_interval: Duration::from_millis(250),
             discovery_interval: Duration::from_secs(1),
-            game_files: None,
+            game_data: None,
         }
     }
-}
-
-/// The file catalog's read, off the worker thread.
-enum FilesTask {
-    None,
-    Reading(tokio::task::JoinHandle<Result<crate::files::FileCatalog, String>>),
-    Ready(Arc<crate::files::FileCatalog>),
 }
 
 struct Envelope {
@@ -880,7 +862,6 @@ where
     log: L,
     clock: K,
     options: BackendOptions,
-    cache: Option<Arc<CatalogCache>>,
     commands: mpsc::Receiver<Envelope>,
     snapshots: watch::Sender<BackendSnapshot>,
     events: broadcast::Sender<BackendEvent>,
@@ -895,7 +876,8 @@ where
     paused: bool,
     faults: Option<eg_core::fault::FaultLog>,
     forge_history: crate::undo::ForgeUndoHistory,
-    files: FilesTask,
+    /// The game data service's state, mirrored into `state.game_files`.
+    game_data: Option<watch::Receiver<GameData>>,
 }
 
 pub fn service<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock>(
@@ -904,8 +886,8 @@ pub fn service<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K
     log: L,
     clock: K,
     options: BackendOptions,
-    cache: Option<CatalogCache>,
 ) -> (BackendHandle, BackendWorker<P, C, L, K>) {
+    let game_data = options.game_data.as_ref().map(GameDataHandle::subscribe);
     let state = BackendSnapshot {
         revision: 0,
         generation: 0,
@@ -915,7 +897,6 @@ pub fn service<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K
         override_enabled: options.override_enabled,
         phase: Phase::Disabled,
         activity: None,
-        capture_progress: None,
         detected: None,
         attached: None,
         retained_helper: None,
@@ -923,9 +904,8 @@ pub fn service<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K
         cleanup: Cleanup::NotNeeded,
         runtime_status: None,
         error: None,
-        cache_error: None,
         catalog: CatalogState::Missing,
-        game_files: GameFiles::NotConfigured,
+        game_files: game_data.as_ref().map_or(GameFiles::NotConfigured, |data| GameFiles::from(&*data.borrow())),
         forge: ForgeState::Unobserved,
         forge_read_sequence: 0,
         mappings: vec![],
@@ -956,7 +936,6 @@ pub fn service<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K
             log,
             clock,
             options,
-            cache: cache.map(Arc::new),
             commands,
             snapshots,
             events,
@@ -971,7 +950,7 @@ pub fn service<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K
             paused: false,
             faults: None,
             forge_history: Default::default(),
-            files: FilesTask::None,
+            game_data,
         },
     )
 }
@@ -983,8 +962,7 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
         self
     }
     pub async fn run(mut self) {
-        self.load_cache().await;
-        self.start_files();
+        self.mirror_game_data();
         let interval = self.options.poll_interval.max(Duration::from_millis(1));
         let mut tick = tokio::time::Instant::now() + interval;
         loop {
@@ -1124,88 +1102,55 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
     fn event(&self, event: BackendEvent) {
         let _ = self.events.send(event);
     }
-    async fn load_cache(&mut self) {
-        if let Some(cache) = self.cache.clone() {
-            match tokio::task::spawn_blocking(move || cache.load_last()).await {
-                Ok(Ok(Some(data))) => self.state.catalog = CatalogState::Saved(Arc::new(data)),
-                Ok(Ok(None)) => {}
-                Ok(Err(e)) => self.cache_fault(e.to_string()),
-                Err(e) => self.cache_fault(e.to_string()),
-            }
+    /// Mirrors the game data service's state into the snapshot, for the views.
+    fn mirror_game_data(&mut self) {
+        let Some(game_data) = &mut self.game_data else {
+            return;
+        };
+        let files = GameFiles::from(&*game_data.borrow_and_update());
+        if files != self.state.game_files {
+            self.state.game_files = files;
             self.publish();
         }
     }
-    fn start_files(&mut self) {
-        match self.options.game_files.clone() {
-            None => return,
-            Some(GameFilesSource::Folder(folder)) => {
-                self.files = FilesTask::Reading(tokio::task::spawn_blocking(move || crate::files::read(&folder)));
-                self.state.game_files = GameFiles::Reading;
-            }
-            Some(GameFilesSource::Read(catalog)) => {
-                self.state.game_files = GameFiles::Ready {
-                    affixes: catalog.affix_count(),
-                    build: catalog.build.clone(),
-                };
-                self.files = FilesTask::Ready(catalog);
-            }
-        }
-        self.publish();
-    }
-    /// Takes a finished read's result; with `wait`, waits for one still running (a connect would rather wait a moment
-    /// than capture definitions it is about to have).
-    async fn settle_files(&mut self, wait: bool) {
-        match &self.files {
-            FilesTask::Reading(handle) if wait || handle.is_finished() => {}
-            _ => return,
-        }
-        let FilesTask::Reading(handle) = std::mem::replace(&mut self.files, FilesTask::None) else {
-            unreachable!("matched above");
+    /// The connected game's catalog: the game data service's for the folder the game runs from (read again first when
+    /// `again`, or when its files changed), if the session runs the build they hold, labelled with the game's language.
+    async fn catalog_for(&mut self, epoch: u64, target: &ProcessIdentity, again: bool) -> Result<GameCatalog, BackendError> {
+        let not_ready = |reason: String| BackendError::blocked(ErrorKind::NotReady, reason);
+        let handle = self
+            .options
+            .game_data
+            .clone()
+            .ok_or_else(|| not_ready("The game's files are not configured, so there is no game data.".into()))?;
+        let folder = target
+            .executable
+            .parent()
+            .map(Path::to_path_buf)
+            .ok_or_else(|| not_ready("The game's folder is unknown.".into()))?;
+        self.state.activity = Some(Activity::ReadingGameFiles);
+        self.publish_if_current(epoch)?;
+        let data = if again {
+            handle.read_again(Some(&folder)).await
+        } else {
+            handle.for_folder(&folder).await
         };
-        let outcome = handle.await.map_err(|e| e.to_string()).and_then(|r| r);
-        match outcome {
-            Ok(catalog) => {
-                self.state.game_files = GameFiles::Ready {
-                    affixes: catalog.affix_count(),
-                    build: catalog.build.clone(),
-                };
-                self.files = FilesTask::Ready(Arc::new(catalog));
-            }
-            Err(reason) => {
-                if let Some(faults) = &self.faults {
-                    faults.write(
-                        "Reading game data from the game files",
-                        Some(&reason),
-                        None,
-                        Some("Game definitions are read from the game when it connects."),
-                    );
-                }
-                self.state.game_files = GameFiles::Unavailable(reason);
-            }
-        }
-        self.publish();
-    }
-    /// The file catalog, for the connected game if it is the same build, with the game's locale.
-    async fn catalog_from_files(&mut self, epoch: u64, target: &ProcessIdentity) -> Result<Option<GameCatalog>, BackendError> {
-        self.settle_files(true).await;
-        // The game updated since the files were read: read them again rather than capture.
-        if matches!(&self.files, FilesTask::Ready(files) if !files.is_current()) {
-            self.start_files();
-            self.settle_files(true).await;
-        }
-        let FilesTask::Ready(files) = &self.files else {
-            return Ok(None);
+        self.superseded(epoch)?;
+        self.mirror_game_data();
+        let files = match data {
+            GameData::Ready(files) => files,
+            GameData::Unavailable(reason) => return Err(not_ready(format!("The game data could not be read from the game's files: {reason}"))),
+            GameData::NoGame | GameData::Reading => return Err(not_ready("The game data is not ready.".into())),
         };
-        let files = files.clone();
         let connection = self
             .connection
             .as_mut()
             .ok_or_else(|| BackendError::blocked(ErrorKind::NotConnected, "connection released"))?;
-        let Some((binary, metadata)) = connection.build_hashes() else {
-            return Ok(None);
-        };
+        let (binary, metadata) = connection.build_hashes();
         if !files.matches(&binary, &metadata) {
-            return Ok(None);
+            return Err(BackendError::blocked(
+                ErrorKind::Identity,
+                "Last Epoch's files changed after it started (a game update?). Restart the game to use the trainer.",
+            ));
         }
         self.admit(target)?;
         let locale = self
@@ -1216,29 +1161,9 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
             .await?;
         self.superseded(epoch)?;
         self.admit(target)?;
-        match files.catalog(locale) {
-            Ok(catalog) => Ok(Some(catalog)),
-            Err(error) => {
-                self.cache_fault(format!("the game-file catalog was refused for this session: {error:?}"));
-                Ok(None)
-            }
-        }
-    }
-    fn cache_fault(&mut self, message: String) {
-        if let Some(faults) = &self.faults {
-            faults.write("Trainer catalog cache", Some(&message), None, Some("The current session remains available."));
-        }
-        self.state.cache_error = Some(message.clone());
-        self.event(BackendEvent::CacheFault(message));
-    }
-    async fn save_cache(&mut self, data: Arc<GameCatalog>) {
-        if let Some(cache) = self.cache.clone() {
-            match tokio::task::spawn_blocking(move || cache.save(&data)).await {
-                Ok(Ok(())) => self.state.cache_error = None,
-                Ok(Err(e)) => self.cache_fault(e.to_string()),
-                Err(e) => self.cache_fault(e.to_string()),
-            }
-        }
+        files
+            .catalog(locale)
+            .map_err(|e| BackendError::blocked(ErrorKind::Protocol, format!("The game data was refused for this session: {e:?}")))
     }
     async fn command(&mut self, command: Command) -> Result<(), BackendError> {
         match command {
@@ -1301,8 +1226,16 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
                 self.close(true, true).await;
                 Ok(())
             }
-            Command::RefreshCatalog => self.read(true, true).await,
-            Command::ReadForge => self.read(false, true).await,
+            // Settings' Read again: the files are read again whether or not a game is connected.
+            Command::RefreshCatalog if self.state.phase == Phase::Ready => self.read(CatalogRead::ReadFilesAgain, true).await,
+            Command::RefreshCatalog => {
+                if let Some(handle) = self.options.game_data.clone() {
+                    handle.read_again(None).await;
+                    self.mirror_game_data();
+                }
+                Ok(())
+            }
+            Command::ReadForge => self.read(CatalogRead::Keep, true).await,
             Command::BeginForgeBatch => {
                 self.forge_history.begin_batch();
                 Ok(())
@@ -1319,7 +1252,7 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
         }
     }
     async fn poll(&mut self) {
-        self.settle_files(false).await;
+        self.mirror_game_data();
         let exited = self.connector.reap_exited();
         if self.connection.as_ref().is_some_and(|connection| exited.contains(connection.target())) {
             self.release_without_io();
@@ -1330,7 +1263,7 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
             return;
         }
         if self.connection.is_some() {
-            let _ = self.read(false, false).await;
+            let _ = self.read(CatalogRead::Keep, false).await;
         } else if self.state.auto_connect && tokio::time::Instant::now() >= self.next_discovery {
             self.next_discovery = tokio::time::Instant::now() + self.options.discovery_interval.max(Duration::from_millis(1));
             let _ = self.connect().await;
@@ -1371,7 +1304,7 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
     }
     async fn connect(&mut self) -> Result<(), BackendError> {
         if self.connection.is_some() {
-            return self.read(false, true).await;
+            return self.read(CatalogRead::Keep, true).await;
         }
         let epoch = self.command_epoch;
         self.superseded(epoch)?;
@@ -1401,7 +1334,6 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
         self.state.generation = self.state.generation.wrapping_add(1);
         self.state.phase = Phase::Connecting;
         self.state.activity = Some(Activity::Connecting);
-        self.state.capture_progress = None;
         self.state.error = None;
         self.state.retained_helper = Some(RetainedHelper {
             target: target.clone(),
@@ -1439,16 +1371,7 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
             let status = self.connection.as_mut().unwrap().refresh(self.clock.now()).await?;
             self.superseded(epoch)?;
             self.check_status(status)?;
-            let catalog = match self.catalog_from_files(epoch, target).await? {
-                Some(catalog) => catalog,
-                None => {
-                    self.state.activity = Some(Activity::CapturingCatalog);
-                    self.publish_if_current(epoch)?;
-                    let catalog = self.capture_observed(epoch).await?;
-                    self.superseded(epoch)?;
-                    catalog
-                }
-            };
+            let catalog = self.catalog_for(epoch, target, false).await?;
             self.admit(target)?;
             self.state.activity = Some(Activity::ReadingForge);
             self.publish_if_current(epoch)?;
@@ -1479,15 +1402,12 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
                 };
                 this.state.phase = Phase::Ready;
                 this.state.activity = None;
-                this.state.capture_progress = None;
                 this.state.error = None;
             })?;
             self.event(BackendEvent::Connected {
                 generation: self.state.generation,
                 target: target.clone(),
             });
-            self.save_cache(data).await;
-            self.publish_if_current(epoch)?;
             Ok(())
         }
         .await;
@@ -1519,7 +1439,8 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
             Ok(())
         }
     }
-    async fn read(&mut self, capture: bool, retry_optional: bool) -> Result<(), BackendError> {
+    async fn read(&mut self, catalog: CatalogRead, retry_optional: bool) -> Result<(), BackendError> {
+        let reload = catalog != CatalogRead::Keep;
         if !self.state.enabled {
             return Err(BackendError::blocked(ErrorKind::Disabled, "trainer disabled"));
         }
@@ -1537,9 +1458,9 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
             self.admit(&target)?;
             // The monitor's own reads run quietly: saying Refreshing four times a second would take every action away
             // (capabilities need no activity) and give it back a moment later. Commands wait for the worker regardless.
-            let monitor = !capture && !retry_optional;
+            let monitor = !reload && !retry_optional;
             if !monitor {
-                self.state.activity = Some(if capture { Activity::CapturingCatalog } else { Activity::Refreshing });
+                self.state.activity = Some(Activity::Refreshing);
                 self.publish_if_current(epoch)?;
             }
             let status = self
@@ -1553,17 +1474,9 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
             // Successful value tables can be reused without another mapping
             // command. Poll locale here too, so even those tables expire when
             // the game changes language while the editor is idle.
-            let locale_changed = !capture && self.locale_changed(epoch, &target).await?;
-            let data = if capture || locale_changed {
-                let from_files = if capture { None } else { self.catalog_from_files(epoch, &target).await? };
-                match from_files {
-                    Some(catalog) => Arc::new(catalog),
-                    None => {
-                        let data = self.capture_observed(epoch).await?;
-                        self.superseded(epoch)?;
-                        Arc::new(data)
-                    }
-                }
+            let locale_changed = !reload && self.locale_changed(epoch, &target).await?;
+            let data = if reload || locale_changed {
+                Arc::new(self.catalog_for(epoch, &target, catalog == CatalogRead::ReadFilesAgain).await?)
             } else {
                 self.state
                     .catalog
@@ -1587,7 +1500,7 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
             }
             self.commit(epoch, |this| {
                 if let ForgeState::Item { unique, .. } = &mut forge
-                    && (capture || locale_changed || retry_optional && unique.as_ref().is_some_and(Result::is_err))
+                    && (reload || locale_changed || retry_optional && unique.as_ref().is_some_and(Result::is_err))
                 {
                     *unique = None;
                 }
@@ -1601,21 +1514,16 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
                     data: data.clone(),
                 };
                 this.state.activity = None;
-                this.state.capture_progress = None;
                 this.state.error = None;
                 // A fresh read lets the view ask again for what failed; a monitor read that saw nothing new is not one,
                 // so it publishes nothing.
-                if !monitor || capture || locale_changed || !this.same_as_published(false) {
+                if !monitor || reload || locale_changed || !this.same_as_published(false) {
                     this.state.forge_read_sequence = this.state.forge_read_sequence.wrapping_add(1);
                 }
             })?;
             self.event(BackendEvent::ReadPublished {
                 generation: self.state.generation,
             });
-            if capture || locale_changed {
-                self.save_cache(data).await;
-                self.publish_if_current(epoch)?;
-            }
             Ok(())
         }
         .await;
@@ -1652,29 +1560,6 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
             }
         }
     }
-    async fn capture_observed(&mut self, epoch: u64) -> Result<GameCatalog, BackendError> {
-        let now = self.clock.now();
-        let outcome = {
-            let mut observer = CapturePublication {
-                state: &mut self.state,
-                snapshots: &self.snapshots,
-                intent: &self.intent,
-                epoch,
-            };
-            self.connection
-                .as_mut()
-                .ok_or_else(|| BackendError::blocked(ErrorKind::NotConnected, "connection released"))?
-                .capture_catalog_observed(now, &mut observer)
-                .await?
-        };
-        match outcome {
-            CaptureOutcome::Complete(catalog) => Ok(*catalog),
-            CaptureOutcome::Stopped => {
-                self.superseded(epoch)?;
-                Err(BackendError::blocked(ErrorKind::Protocol, "capture stopped without a cleanup barrier"))
-            }
-        }
-    }
     fn handle_connection_gate(&mut self, error: &BackendError) {
         if error.kind == ErrorKind::Gate && self.connection.is_some() {
             self.release_without_io();
@@ -1693,7 +1578,6 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
         self.state.attached = None;
         self.state.runtime_status = None;
         self.state.activity = None;
-        self.state.capture_progress = None;
         self.state.forge = ForgeState::Unobserved;
         if let CatalogState::Current { data, .. } = &self.state.catalog {
             self.state.catalog = CatalogState::Stale(data.clone());
@@ -1726,7 +1610,6 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
     async fn close(&mut self, disable: bool, stop: bool) {
         self.state.phase = Phase::Closing;
         self.state.activity = None;
-        self.state.capture_progress = None;
         self.state.forge = ForgeState::Unobserved;
         self.publish();
         if let Some(mut connection) = self.connection.take() {
@@ -1751,30 +1634,5 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
         if stop {
             self.event(BackendEvent::Stopped);
         }
-    }
-}
-
-struct CapturePublication<'a> {
-    state: &'a mut BackendSnapshot,
-    snapshots: &'a watch::Sender<BackendSnapshot>,
-    intent: &'a Mutex<u64>,
-    epoch: u64,
-}
-impl CaptureObserver for CapturePublication<'_> {
-    fn control(&mut self) -> CaptureControl {
-        if *self.intent.lock().unwrap_or_else(|p| p.into_inner()) == self.epoch {
-            CaptureControl::Continue
-        } else {
-            CaptureControl::Stop
-        }
-    }
-    fn progress(&mut self, progress: CaptureProgress) {
-        let epoch = self.intent.lock().unwrap_or_else(|p| p.into_inner());
-        if *epoch != self.epoch {
-            return;
-        }
-        self.state.capture_progress = Some(progress);
-        self.state.revision = self.state.revision.wrapping_add(1);
-        self.snapshots.send_replace(self.state.clone());
     }
 }
