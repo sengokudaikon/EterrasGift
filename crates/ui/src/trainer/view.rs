@@ -1,12 +1,12 @@
 //! Puts the trainer's pages behind the `TrainerState` global: the open page's sections and rows, each row's values and
-//! fields, and the split of the rows into columns. Rows keep their models between changes, so a box being typed in keeps
-//! its focus while its row follows.
+//! fields, and the split of the rows into columns. Rows keep their models between changes, and their place when the
+//! split moves, so a box being typed in keeps its focus while its row follows.
 
 use super::catalog::{Area, Feature, FeatureValue};
 use super::pages::{self, Content, EditorRow, FieldModel, HookRow, PageModel, Row, Tone};
 use super::session::TrainerSession;
 use crate::shell::Page;
-use crate::{FeatureColumn, FeatureFieldView, FeatureRowKind, FeatureRowModels, FeatureRowView, FeatureTone, FeatureValueView, MainWindow, Tokens, TrainerState};
+use crate::{FeatureFieldView, FeatureRowKind, FeatureRowModels, FeatureRowPlace, FeatureRowView, FeatureTone, FeatureValueView, MainWindow, Tokens, TrainerState};
 use slint::{ComponentHandle, Model, ModelRc, SharedString, VecModel, Weak};
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -42,7 +42,7 @@ impl WeakPages {
 pub fn bind(window: &MainWindow, session: Rc<dyn TrainerSession>, features: Vec<Feature>, planned: bool) -> Pages {
     let layout = Rc::new(RefCell::new(Layout {
         window: window.as_weak(),
-        model: Rc::new(VecModel::default()),
+        places: Rc::new(VecModel::default()),
         headings: Vec::new(),
         heights: Vec::new(),
         columns: 1,
@@ -69,7 +69,7 @@ pub fn bind(window: &MainWindow, session: Rc<dyn TrainerSession>, features: Vec<
     let state = window.global::<TrainerState>();
     state.set_rows(controller.borrow().rows.clone().into());
     state.set_row_models(controller.borrow().row_models.clone().into());
-    state.set_column_rows(layout.borrow().model.clone().into());
+    state.set_row_places(layout.borrow().places.clone().into());
     state.set_sections(ModelRc::default());
     state.set_item_forge(false);
 
@@ -523,10 +523,11 @@ fn view(row: &Row, session: &dyn TrainerSession, nested: &Nested) -> FeatureRowV
 }
 
 /// The split of the rows into columns (`RowColumnsPanel`): the view says how many fit and how tall each row is; the split
-/// waits for every height and is made once per batch of reports, after the view has settled.
+/// waits for every height and is made once per batch of reports, after the view has settled. The rows are placed at once
+/// on every report, so a row that grows pushes the ones under it down in the same frame.
 struct Layout {
     window: Weak<MainWindow>,
-    model: Rc<VecModel<FeatureColumn>>,
+    places: Rc<VecModel<FeatureRowPlace>>,
     headings: Vec<bool>,
     heights: Vec<Option<f32>>,
     columns: usize,
@@ -539,8 +540,8 @@ impl Layout {
         let mut this = layout.borrow_mut();
         this.heights = vec![None; headings.len()];
         this.headings = headings;
-        this.starts = Vec::new();
-        this.show(vec![0]);
+        this.starts = vec![0];
+        this.place();
         drop(this);
         Layout::schedule(layout);
     }
@@ -557,6 +558,7 @@ impl Layout {
         };
         if *slot != Some(height) {
             *slot = Some(height);
+            this.place();
             drop(this);
             Layout::schedule(layout);
         }
@@ -576,35 +578,50 @@ impl Layout {
 
     fn apply(&mut self) {
         self.pending = false;
-        if self.columns <= 1 {
-            self.show(vec![0]);
-            return;
-        }
-        let Some(heights) = self.heights.iter().copied().collect::<Option<Vec<f32>>>() else {
-            return;
+        let starts = if self.columns <= 1 {
+            vec![0]
+        } else {
+            let Some(heights) = self.heights.iter().copied().collect::<Option<Vec<f32>>>() else {
+                return;
+            };
+            pages::split(&heights, &self.headings, self.columns, self.spacing())
         };
-        let spacing = self.window.upgrade().map_or(0.0, |window| window.global::<Tokens>().get_feature_section_spacing());
-        let starts = pages::split(&heights, &self.headings, self.columns, spacing);
-        self.show(starts);
+        if starts != self.starts {
+            self.starts = starts;
+            self.place();
+        }
     }
 
-    /// Columns starting at `starts`, each running to the next one's start.
-    fn show(&mut self, starts: Vec<usize>) {
-        if starts == self.starts {
-            return;
-        }
-        let count = self.headings.len();
-        let columns: Vec<FeatureColumn> = starts
-            .iter()
-            .enumerate()
-            .map(|(c, &start)| {
-                let end = starts.get(c + 1).copied().unwrap_or(count);
-                FeatureColumn {
-                    rows: ModelRc::new(VecModel::from((start..end).map(|i| i as i32).collect::<Vec<_>>())),
-                }
+    fn spacing(&self) -> f32 {
+        self.window.upgrade().map_or(0.0, |window| window.global::<Tokens>().get_feature_section_spacing())
+    }
+
+    /// Places every row in the current split, changing only the places that moved.
+    fn place(&mut self) {
+        let heights: Vec<f32> = self.heights.iter().map(|height| height.unwrap_or(0.0)).collect();
+        let (places, tallest) = pages::place(&heights, &self.headings, &self.starts, self.spacing());
+        let places: Vec<FeatureRowPlace> = places
+            .into_iter()
+            .map(|place| FeatureRowPlace {
+                column: place.column as i32,
+                y: place.y,
+                starts: place.starts,
+                ends: place.ends,
             })
             .collect();
-        self.model.set_vec(columns);
-        self.starts = starts;
+        if self.places.row_count() != places.len() {
+            self.places.set_vec(places);
+        } else {
+            for (i, place) in places.into_iter().enumerate() {
+                if self.places.row_data(i).as_ref() != Some(&place) {
+                    self.places.set_row_data(i, place);
+                }
+            }
+        }
+        if let Some(window) = self.window.upgrade() {
+            let state = window.global::<TrainerState>();
+            state.set_column_count(self.starts.len() as i32);
+            state.set_rows_height(tallest);
+        }
     }
 }

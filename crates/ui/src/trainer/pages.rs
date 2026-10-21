@@ -708,6 +708,41 @@ pub fn split(heights: &[f32], headings: &[bool], columns: usize, section_spacing
     starts
 }
 
+/// Where a row sits once the rows are split: its column, its top within the list, and whether it starts or ends that
+/// column (a heading that starts one keeps no space above it; the last row draws no hairline).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Place {
+    pub column: usize,
+    pub y: f32,
+    pub starts: bool,
+    pub ends: bool,
+}
+
+/// Places the rows in the columns that begin at `starts`, stacked as a column of rows each `heights` tall (a row not yet
+/// measured counts as 0); and the tallest column's height. One list of rows, placed, rather than a list per column: a
+/// row that moves to another column stays the same row, keeping its focus and what is being typed in it.
+pub fn place(heights: &[f32], headings: &[bool], starts: &[usize], section_spacing: f32) -> (Vec<Place>, f32) {
+    let count = heights.len();
+    let mut places = Vec::with_capacity(count);
+    let mut tallest = 0.0f32;
+    for (column, &start) in starts.iter().enumerate() {
+        let end = starts.get(column + 1).copied().unwrap_or(count).min(count);
+        let mut y = 0.0;
+        for i in start..end {
+            y += if i > start && headings[i] { section_spacing } else { 0.0 };
+            places.push(Place {
+                column,
+                y,
+                starts: i == start,
+                ends: i + 1 == end,
+            });
+            y += heights[i];
+        }
+        tallest = tallest.max(y);
+    }
+    (places, tallest)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -954,5 +989,28 @@ mod tests {
             headings.extend(std::iter::repeat_n(false, rows.len()));
         }
         assert_eq!(split(&heights, &headings, 2, 24.0), [0, 4]);
+    }
+
+    #[test]
+    fn rows_stack_in_their_columns() {
+        // A heading and two rows, then a heading and one row in the second column.
+        let heights = [20.0, 50.0, 60.0, 20.0, 40.0];
+        let headings = [true, false, false, true, false];
+        let (places, tallest) = place(&heights, &headings, &[0, 3], 24.0);
+        let at = |column, y, starts, ends| Place { column, y, starts, ends };
+        assert_eq!(
+            places,
+            [
+                at(0, 0.0, true, false),
+                at(0, 20.0, false, false),
+                at(0, 70.0, false, true),
+                at(1, 0.0, true, false),
+                at(1, 20.0, false, true)
+            ]
+        );
+        assert_eq!(tallest, 130.0);
+        // One column: the second heading keeps its section spacing above it.
+        let (places, tallest) = place(&heights, &headings, &[0], 24.0);
+        assert_eq!((places[3], places[4].y, tallest), (at(0, 154.0, false, false), 174.0, 214.0));
     }
 }

@@ -1722,6 +1722,17 @@ fn trainer_captures(session: &Session) {
     std::thread::sleep(Duration::from_millis(600));
     show(&ui);
     session.capture(&ui, "trainer-value-stepped-1100");
+    // The rows split anew (here the window narrows from two columns to one) while a number is half typed: the box is the
+    // same box, so it keeps its focus and the "1." typed so far, and the next digit lands after it.
+    let ui = open("combat", 1, 1440, 900, None);
+    session.click(520.0, 149.0);
+    session.control_key("a");
+    session.type_text("1.");
+    session.resize(1100, 700);
+    show(&ui);
+    session.type_text("5");
+    show(&ui);
+    assert_eq!(state(&ui).get_rows().row_data(1).expect("Damage multiplier").inline_value.text, "1.5");
     let ui = open("world", 0, 940, 580, None);
     session.capture(&ui, "trainer-world-940");
     // The pane open beside the narrowest window: the rows narrow below their width, and long titles wrap with their (?).

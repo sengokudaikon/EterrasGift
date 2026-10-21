@@ -82,8 +82,9 @@ export struct FeatureRowModels {
     fields: [FeatureFieldView],
 }
 
-// The rows of one column, by their index in `TrainerState.rows`.
-export struct FeatureColumn { rows: [int] }
+// Where Rust placed a row (by its index in `TrainerState.rows`): its column, its top in the list, and whether it starts or
+// ends that column.
+export struct FeatureRowPlace { column: int, y: length, starts: bool, ends: bool }
 
 export global TrainerState {
     // The forge's empty state for the current connection state.
@@ -101,7 +102,10 @@ export global TrainerState {
     in property <bool> item-forge;
     in property <[FeatureRowView]> rows;
     in property <[FeatureRowModels]> row-models;
-    in property <[FeatureColumn]> column-rows;
+    in property <[FeatureRowPlace]> row-places;
+    in property <int> column-count: 1;
+    // The tallest column, with every row in place.
+    in property <length> rows-height;
     // Changes when another page or section opens, so the list starts at its top.
     in property <int> serial;
 
@@ -681,29 +685,28 @@ component FeatureList inherits Rectangle {
         Rectangle {
             x: root.margin-left;
             y: Tokens.trainer-body-margin.top;
-            width: TrainerState.column-rows.length * root.column-width + Math.max(0, TrainerState.column-rows.length - 1) * Tokens.feature-column-spacing;
+            width: TrainerState.column-count * root.column-width + Math.max(0, TrainerState.column-count - 1) * Tokens.feature-column-spacing;
             height: body.height;
             clip: true;
 
-            body := HorizontalLayout {
+            // One repeater over every row, each at the place Rust gave it: a row the split moves to another column is the
+            // same row, so it keeps its focus and a half-typed number (a repeater per column made it anew).
+            body := Rectangle {
                 x: 0;
                 y: 0;
                 width: parent.width;
-                height: self.preferred-height;
-                spacing: Tokens.feature-column-spacing;
-                alignment: start;
+                height: TrainerState.rows-height;
 
-                for column in TrainerState.column-rows: VerticalLayout {
+                for feature[index] in TrainerState.rows: FeatureRow {
+                    property <FeatureRowPlace> place: TrainerState.row-places[index];
+                    x: self.place.column * (root.column-width + Tokens.feature-column-spacing);
+                    y: self.place.y;
                     width: root.column-width;
-                    alignment: start;
-
-                    for index[k] in column.rows: FeatureRow {
-                        feature: TrainerState.rows[index];
-                        models: TrainerState.row-models[index];
-                        row-index: index;
-                        starts: k == 0;
-                        ends: k == column.rows.length - 1;
-                    }
+                    feature: feature;
+                    models: TrainerState.row-models[index];
+                    row-index: index;
+                    starts: self.place.starts;
+                    ends: self.place.ends;
                 }
             }
         }
