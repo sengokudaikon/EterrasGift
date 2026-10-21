@@ -293,3 +293,26 @@ fn unsupported_orphan_types_and_invalid_files_never_change_original_or_backup() 
         assert_eq!(fs::read(path.with_extension("dll.bak")).unwrap(), b"older backup");
     }
 }
+
+#[test]
+fn the_library_reads_each_copy_once_from_one_parse_and_forgets_copies_no_longer_installed() {
+    use eg_companion::mods::library::{InstalledMod, ModLibrary};
+    let temp = tempfile::tempdir().unwrap();
+    let library = ModLibrary::new(temp.path().to_path_buf());
+    let installed = InstalledMod {
+        file: "Fixture.dll".into(),
+        hash: eg_core::hashes::of_bytes(CLEAN),
+        enabled: true,
+    };
+    let path = library.path_of(&installed);
+    write(&path, CLEAN);
+    let facts = library.facts(&installed);
+    assert_eq!(facts.melon.as_ref().unwrap().as_ref().unwrap().name, "Fixture Mod");
+    assert_eq!(facts.settings.as_ref().unwrap().as_deref(), read_settings_resource(&path).unwrap().as_deref());
+    assert_eq!(facts.strings, read_strings(&path));
+    // Read once: the refresh every two seconds reads nothing again.
+    fs::remove_file(&path).unwrap();
+    assert!(library.facts(&installed).melon.is_ok());
+    library.keep_facts(&[]);
+    assert!(library.facts(&installed).melon.is_err());
+}

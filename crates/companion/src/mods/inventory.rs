@@ -1,7 +1,7 @@
 //! One coherent file-backed observation for Mods. No module code is loaded or executed to describe a DLL.
 
 use super::{
-    assembly::{self, LoaderVersion, MelonAssembly},
+    assembly::LoaderVersion,
     description::ModSettingsDescription,
     library::{InstalledMod, ModChanges, ModLibrary, latest_log_path, preferences_path},
     loader_state::{self, LoaderInstall, LoaderPreparation},
@@ -108,10 +108,11 @@ pub fn read(install: Option<&GameInstall>, library: &ModLibrary, loader_root: Op
     });
     let mut descriptions = Vec::new();
     let mut strings = Vec::new();
+    library.keep_facts(&profile.mods);
     for installed in profile.mods {
-        let path = library.path_of(&installed);
-        let (melon, read_problem) = match MelonAssembly::read(&path) {
-            Ok(Some(melon)) => (Some(melon), None),
+        let facts = library.facts(&installed);
+        let (melon, read_problem) = match &facts.melon {
+            Ok(Some(melon)) => (Some(melon.clone()), None),
             Ok(None) => (
                 None,
                 Some(format!(
@@ -119,13 +120,16 @@ pub fn read(install: Option<&GameInstall>, library: &ModLibrary, loader_root: Op
                     installed.file
                 )),
             ),
-            Err(error) if error.kind() == std::io::ErrorKind::InvalidData => (None, Some(format!("{} is not a .NET assembly, so MelonLoader can't load it.", installed.file))),
-            Err(error) => (None, Some(format!("The app's copy of {} could not be read: {error}", installed.file))),
+            Err((std::io::ErrorKind::InvalidData, _)) => (None, Some(format!("{} is not a .NET assembly, so MelonLoader can't load it.", installed.file))),
+            Err((_, error)) => (None, Some(format!("The app's copy of {} could not be read: {error}", installed.file))),
         };
-        let description = if melon.is_some() {
-            assembly::read_settings_resource(&path).and_then(|resource| resource.map(|bytes| ModSettingsDescription::from_bytes(&bytes)).transpose())
-        } else {
-            Ok(None)
+        let description = match &facts.settings {
+            Ok(resource) => resource
+                .as_ref()
+                .map(|bytes| ModSettingsDescription::from_bytes(bytes))
+                .transpose()
+                .map_err(|error| error.to_string()),
+            Err(error) => Err(error.clone()),
         };
         descriptions.push(description.unwrap_or_else(|error| {
             inventory.settings_problem.get_or_insert_with(|| {
@@ -136,7 +140,7 @@ pub fn read(install: Option<&GameInstall>, library: &ModLibrary, loader_root: Op
             });
             None
         }));
-        strings.push(assembly::read_strings(&path));
+        strings.push(facts.strings.clone());
         let name = melon
             .as_ref()
             .map(|melon| melon.name.clone())

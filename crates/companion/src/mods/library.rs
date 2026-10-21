@@ -1,14 +1,14 @@
 //! The original schema-1 library: drafts are durable here, and reach MelonLoader only before a with-mods start.
 
-use super::assembly::MelonAssembly;
+use super::assembly::{AssemblyFacts, MelonAssembly};
 use super::preferences::{MelonPreferences, PreferenceChange, PreferenceValue};
 use eg_core::{atomic, hashes, paths};
 use serde_json::{Value, json};
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct InstalledMod {
@@ -45,11 +45,37 @@ pub struct ModChanges {
 pub struct ModLibrary {
     directory: PathBuf,
     gate: Mutex<()>,
+    /// The DLLs read so far, by their copy and its hash. A copy never changes under its name (a new build is a new copy),
+    /// so the Mods page, refreshed every two seconds while it follows a start, reads each one once.
+    facts: Mutex<HashMap<(PathBuf, String), Arc<AssemblyFacts>>>,
 }
 
 impl ModLibrary {
     pub fn new(directory: PathBuf) -> Self {
-        Self { directory, gate: Mutex::new(()) }
+        Self {
+            directory,
+            gate: Mutex::new(()),
+            facts: Mutex::new(HashMap::new()),
+        }
+    }
+    /// What the library's copy of `installed` says, read once.
+    pub fn facts(&self, installed: &InstalledMod) -> Arc<AssemblyFacts> {
+        let path = self.path_of(installed);
+        let key = (path.clone(), installed.hash.to_ascii_uppercase());
+        if let Some(facts) = self.facts.lock().unwrap_or_else(|p| p.into_inner()).get(&key) {
+            return facts.clone();
+        }
+        let facts = Arc::new(super::assembly::read_facts(&path));
+        // Only what was read: a copy that could not be (it was still arriving, say) is read again next time.
+        if facts.melon.as_ref().is_ok() || facts.melon.as_ref().is_err_and(|(kind, _)| *kind == io::ErrorKind::InvalidData) {
+            self.facts.lock().unwrap_or_else(|p| p.into_inner()).insert(key, facts.clone());
+        }
+        facts
+    }
+    /// Forgets the DLLs no longer in the profile.
+    pub fn keep_facts(&self, installed: &[InstalledMod]) {
+        let kept: BTreeSet<_> = installed.iter().map(|installed| (self.path_of(installed), installed.hash.to_ascii_uppercase())).collect();
+        self.facts.lock().unwrap_or_else(|p| p.into_inner()).retain(|key, _| kept.contains(key));
     }
     pub fn directory(&self) -> &Path {
         &self.directory

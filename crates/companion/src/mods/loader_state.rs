@@ -136,7 +136,26 @@ pub fn core_module_path(root: &Path) -> PathBuf {
 }
 
 pub fn needs_repair(root: &Path) -> bool {
-    let Ok(view) = read_view(&core_module_path(root)) else {
+    // The Mods page asks every two seconds while it follows a start; the DLL is read again only once it has changed.
+    /// The DLL checked last, its size and write time then, and the answer.
+    type Checked = (PathBuf, (u64, SystemTime), bool);
+    static CHECKED: Mutex<Option<Checked>> = Mutex::new(None);
+    let path = core_module_path(root);
+    let stamp = fs::metadata(&path).ok().and_then(|metadata| Some((metadata.len(), metadata.modified().ok()?)));
+    let mut checked = CHECKED.lock().unwrap_or_else(|p| p.into_inner());
+    if let (Some(stamp), Some((known, at, answer))) = (stamp, checked.as_ref())
+        && *known == path
+        && *at == stamp
+    {
+        return *answer;
+    }
+    let answer = core_module_unsorted(&path);
+    *checked = stamp.map(|stamp| (path, stamp, answer));
+    answer
+}
+
+fn core_module_unsorted(path: &Path) -> bool {
+    let Ok(view) = read_view(path) else {
         return false;
     };
     let Ok(nested) = rows::<NestedClassRaw>(&view) else {

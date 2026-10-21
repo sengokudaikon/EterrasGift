@@ -217,11 +217,54 @@ pub(super) fn invalid(error: impl fmt::Display) -> io::Error {
 
 pub(super) fn read_view(path: &Path) -> io::Result<CilAssemblyView> {
     let bytes = fs::read(path)?;
-    let view = CilAssemblyView::from_mem(bytes).map_err(|_| invalid(format!("{} is not a .NET assembly.", path.file_name().unwrap_or_default().to_string_lossy())))?;
-    if rows::<AssemblyRaw>(&view)?.len() != 1 {
-        return Err(invalid(format!("{} is not a .NET assembly.", path.file_name().unwrap_or_default().to_string_lossy())));
-    }
+    let view = CilAssemblyView::from_mem(bytes).map_err(|_| not_assembly(path))?;
+    one_assembly(&view, path)?;
     Ok(view)
+}
+
+fn not_assembly(path: &Path) -> io::Error {
+    invalid(format!("{} is not a .NET assembly.", path.file_name().unwrap_or_default().to_string_lossy()))
+}
+
+fn one_assembly(view: &CilAssemblyView, path: &Path) -> io::Result<()> {
+    if rows::<AssemblyRaw>(view)?.len() != 1 {
+        return Err(not_assembly(path));
+    }
+    Ok(())
+}
+
+/// What the Mods page reads from a mod's DLL, from one parse of it: its MelonInfo, the settings description it embeds
+/// (read only from a MelonLoader mod) and its strings. Errors keep their kind and words.
+#[derive(Debug)]
+pub struct AssemblyFacts {
+    pub melon: Result<Option<MelonAssembly>, (io::ErrorKind, String)>,
+    pub settings: Result<Option<Vec<u8>>, String>,
+    pub strings: BTreeSet<String>,
+}
+
+pub fn read_facts(path: &Path) -> AssemblyFacts {
+    let failed = |kind, text| AssemblyFacts {
+        melon: Err((kind, text)),
+        settings: Ok(None),
+        strings: BTreeSet::new(),
+    };
+    let bytes = match fs::read(path) {
+        Ok(bytes) => bytes,
+        Err(error) => return failed(error.kind(), error.to_string()),
+    };
+    let Ok(view) = CilAssemblyView::from_mem(bytes) else {
+        return failed(io::ErrorKind::InvalidData, not_assembly(path).to_string());
+    };
+    let melon = one_assembly(&view, path).and_then(|()| read_melon(&view));
+    AssemblyFacts {
+        settings: if matches!(melon, Ok(Some(_))) {
+            settings_resource(&view).map_err(|error| error.to_string())
+        } else {
+            Ok(None)
+        },
+        melon: melon.map_err(|error| (error.kind(), error.to_string())),
+        strings: user_strings(&view),
+    }
 }
 
 pub(super) trait RawRows: RowReadable {
@@ -270,6 +313,10 @@ pub fn read_strings(path: &Path) -> BTreeSet<String> {
     let Ok(view) = CilAssemblyView::from_mem(bytes) else {
         return BTreeSet::new();
     };
+    user_strings(&view)
+}
+
+fn user_strings(view: &CilAssemblyView) -> BTreeSet<String> {
     view.userstrings()
         .map(|heap| heap.iter().map(|(_, text)| text.to_string_lossy()).collect())
         .unwrap_or_default()
@@ -279,8 +326,12 @@ pub fn read_strings(path: &Path) -> BTreeSet<String> {
 pub fn read_settings_resource(path: &Path) -> io::Result<Option<Vec<u8>>> {
     let bytes = fs::read(path)?;
     let view = CilAssemblyView::from_mem(bytes).map_err(invalid)?;
-    for resource in rows::<ManifestResourceRaw>(&view)? {
-        if !resource.implementation.is_null() || string(&view, resource.name)? != "ModSettings.json" {
+    settings_resource(&view)
+}
+
+fn settings_resource(view: &CilAssemblyView) -> io::Result<Option<Vec<u8>>> {
+    for resource in rows::<ManifestResourceRaw>(view)? {
+        if !resource.implementation.is_null() || string(view, resource.name)? != "ModSettings.json" {
             continue;
         }
         let header = view.cor20header();
