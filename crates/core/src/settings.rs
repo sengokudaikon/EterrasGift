@@ -531,6 +531,25 @@ fn upgrade(document: &mut Map<String, Value>, legacy: &[LegacyModuleSettings]) {
     }
 }
 
+/// A module's switch in its settings record (`moduleSettings.<id>`), matched whatever its case, as the C# app reads it
+/// and as people type it by hand: `default` when the record does not say. A record that is unclear, its spellings
+/// disagreeing or the value not true or false, reads as off: for every module switch off is the cautious side (the
+/// trainer then connects only when asked, and writes only what the game would make). Settings shows and the app uses
+/// this one reading, so the two cannot disagree.
+pub fn module_flag(record: Option<&Value>, key: &str, default: bool) -> bool {
+    let Some(fields) = record.and_then(Value::as_object) else {
+        return default;
+    };
+    let mut values = fields.iter().filter(|(name, _)| name.eq_ignore_ascii_case(key)).map(|(_, value)| value.as_bool());
+    let Some(first) = values.next() else {
+        return default;
+    };
+    match first {
+        Some(on) if values.all(|other| other == Some(on)) => on,
+        _ => false,
+    }
+}
+
 /// A top-level key's value, matched whatever its case.
 fn find<'a>(document: &'a Map<String, Value>, key: &str) -> Option<&'a Value> {
     document.iter().find(|(name, _)| name.eq_ignore_ascii_case(key)).map(|(_, value)| value)
@@ -686,6 +705,22 @@ fn same_content(first: &Path, second: &Path) -> io::Result<bool> {
 #[cfg(all(test, windows))]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_module_switch_reads_whatever_its_case_and_unclear_reads_off() {
+        let record = |json: &str| serde_json::from_str::<Value>(json).unwrap();
+        let flag = |json: &str, default| module_flag(Some(&record(json)), "autoConnect", default);
+        assert!(flag("{}", true));
+        assert!(!module_flag(None, "autoConnect", false));
+        assert!(!flag(r#"{"autoConnect": false}"#, true));
+        // As the C# app's `AutoConnect` property, or typed by hand.
+        assert!(!flag(r#"{"AutoConnect": false}"#, true));
+        assert!(flag(r#"{"AUTOCONNECT": true, "autoConnect": true}"#, false));
+        // Spellings that disagree, or a value that is no switch, read as off, whatever the default.
+        assert!(!flag(r#"{"AutoConnect": false, "autoConnect": true}"#, true));
+        assert!(!flag(r#"{"autoConnect": "false"}"#, true));
+        assert!(!flag(r#"{"autoConnect": null}"#, true));
+    }
 
     const TRAINER: LegacyModuleSettings = LegacyModuleSettings {
         module_id: "trainer",

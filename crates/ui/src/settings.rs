@@ -888,16 +888,8 @@ impl View {
                         row.toggle = true;
                         row.on_text = (*on_text).into();
                         row.off_text = (*off_text).into();
-                        row.checked = page
-                            .snapshot
-                            .store
-                            .desired()
-                            .module_settings
-                            .get(module.choice.id)
-                            .and_then(|slice| slice.as_object())
-                            .and_then(|fields| fields.iter().find(|(name, _)| name.eq_ignore_ascii_case(key)))
-                            .and_then(|(_, value)| value.as_bool())
-                            .unwrap_or(*default);
+                        // As the module reads it at start (`main.rs`), so the switch shows what the app does.
+                        row.checked = eg_core::settings::module_flag(page.snapshot.store.desired().module_settings.get(module.choice.id), key, *default);
                         if let Some((_, on)) = page.section_edits.get(&(module_index, section_index)) {
                             row.checked = *on;
                         }
