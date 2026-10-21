@@ -1040,6 +1040,30 @@ fn a_game_of_another_build_than_its_files_is_refused() {
 }
 
 #[test]
+fn a_game_started_before_its_files_changed_is_refused_before_anything_is_loaded() {
+    run(async {
+        // An update wrote the files after the game started: it may still run the old build.
+        let shared = Shared::new();
+        let folder = tempfile::tempdir().unwrap();
+        let file = folder.path().join("GameAssembly.dll");
+        std::fs::write(&file, b"updated").unwrap();
+        let written = std::fs::metadata(&file).unwrap();
+        let sources = vec![(file, Some((written.len(), written.modified().unwrap())))];
+        let mut options = options();
+        options.game_data = Some(GameDataHandle::fixed(GameData::Ready(Arc::new(FileCatalog::restore(catalog(), "build".into(), sources)))));
+        let (handle, worker) = start(&shared, options);
+        command(&handle, Command::Enable).await.unwrap();
+        let error = command(&handle, Command::Connect).await.unwrap_err();
+        assert_eq!(error.kind, ErrorKind::Identity);
+        assert!(error.message.contains("Restart the game"), "{error:?}");
+        assert_eq!(shared.count("connect"), 0, "no helper was loaded");
+        assert_eq!(handle.snapshot().retained_helper, None);
+        assert_eq!(handle.snapshot().phase, Phase::Blocked);
+        shutdown(&handle, worker).await;
+    });
+}
+
+#[test]
 fn unreadable_game_files_keep_the_trainer_closed_and_say_why() {
     run(async {
         // A real service, asked for the fake game's folder, which holds no game.
@@ -1053,7 +1077,8 @@ fn unreadable_game_files_keep_the_trainer_closed_and_say_why() {
         assert_eq!(error.kind, ErrorKind::NotReady);
         assert!(error.message.contains("could not be read from the game's files"), "{error:?}");
         assert!(matches!(handle.snapshot().game_files, backend::GameFiles::Unavailable(ref reason) if reason.contains("Last Epoch_Data")));
-        assert_eq!(shared.count("locale"), 0, "nothing was asked of the game");
+        assert_eq!((shared.count("connect"), shared.count("locale")), (0, 0), "nothing was loaded into or asked of the game");
+        assert_eq!(handle.snapshot().retained_helper, None);
         shutdown(&handle, worker).await;
     });
 }

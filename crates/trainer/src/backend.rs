@@ -651,6 +651,13 @@ pub enum BackendEvent {
     Fault(BackendError),
     Stopped,
 }
+/// The game's files changed after it started: it may run an older build than they hold.
+fn files_changed() -> BackendError {
+    BackendError::blocked(
+        ErrorKind::Identity,
+        "Last Epoch's files changed after it started (a game update?). Restart the game to use the trainer.",
+    )
+}
 /// What a read does with the catalog.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum CatalogRead {
@@ -1118,9 +1125,10 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
             self.publish();
         }
     }
-    /// The connected game's catalog: the game data service's for the folder the game runs from (read again first when
-    /// `again`, or when its files changed), if the session runs the build they hold, labelled with the game's language.
-    async fn catalog_for(&mut self, epoch: u64, target: &ProcessIdentity, again: bool) -> Result<GameCatalog, BackendError> {
+    /// The game data for the folder `target` runs from (read again first when `again`, or when its files changed), if
+    /// it can describe the running game: none of its files written since the game started. Needs no connection, so a
+    /// connect asks before anything is loaded into the game.
+    async fn game_files_for(&mut self, epoch: u64, target: &ProcessIdentity, again: bool) -> Result<Arc<crate::files::FileCatalog>, BackendError> {
         let not_ready = |reason: String| BackendError::blocked(ErrorKind::NotReady, reason);
         let handle = self
             .options
@@ -1132,6 +1140,7 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
             .parent()
             .map(Path::to_path_buf)
             .ok_or_else(|| not_ready("The game's folder is unknown.".into()))?;
+        let started = eg_core::time::from_filetime(target.created).map_err(|e| BackendError::blocked(ErrorKind::Identity, e.to_string()))?;
         self.state.activity = Some(Activity::ReadingGameFiles);
         self.publish_if_current(epoch)?;
         let data = if again {
@@ -1146,16 +1155,22 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
             GameData::Unavailable(reason) => return Err(not_ready(format!("The game data could not be read from the game's files: {reason}"))),
             GameData::NoGame | GameData::Reading => return Err(not_ready("The game data is not ready.".into())),
         };
+        if files.written_after(std::time::SystemTime::from(started)) {
+            return Err(files_changed());
+        }
+        Ok(files)
+    }
+    /// The connected game's catalog: its game data (`game_files_for`), if the session runs the build they hold,
+    /// labelled with the game's language.
+    async fn catalog_for(&mut self, epoch: u64, target: &ProcessIdentity, again: bool) -> Result<GameCatalog, BackendError> {
+        let files = self.game_files_for(epoch, target, again).await?;
         let connection = self
             .connection
             .as_mut()
             .ok_or_else(|| BackendError::blocked(ErrorKind::NotConnected, "connection released"))?;
         let (binary, metadata) = connection.build_hashes();
         if !files.matches(&binary, &metadata) {
-            return Err(BackendError::blocked(
-                ErrorKind::Identity,
-                "Last Epoch's files changed after it started (a game update?). Restart the game to use the trainer.",
-            ));
+            return Err(files_changed());
         }
         self.admit(target)?;
         let locale = self
@@ -1334,6 +1349,14 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
             self.state.phase = Phase::Blocked;
             self.publish();
             return Ok(());
+        }
+        self.admit(&target)?;
+        // Nothing is loaded into a game its game data cannot describe.
+        if let Err(error) = self.game_files_for(epoch, &target, false).await {
+            if error.kind != ErrorKind::Superseded {
+                self.fail(error.clone(), Some(target));
+            }
+            return Err(error);
         }
         self.admit(&target)?;
         self.state.generation = self.state.generation.wrapping_add(1);

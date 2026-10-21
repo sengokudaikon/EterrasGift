@@ -158,6 +158,12 @@ impl FileCatalog {
         }
     }
 
+    /// Whether a file it was read from had been written after `instant`: a game started before then may run an older
+    /// build than the files hold.
+    pub fn written_after(&self, instant: SystemTime) -> bool {
+        self.sources.iter().any(|(_, print)| print.is_some_and(|(_, modified)| modified > instant))
+    }
+
     /// Whether every file it was read from is as it was then (a Steam update while the app runs changes them).
     pub fn is_current(&self) -> bool {
         self.sources.iter().all(|(path, print)| fingerprint(path) == *print)
