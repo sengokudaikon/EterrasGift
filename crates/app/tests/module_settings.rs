@@ -22,7 +22,11 @@ fn module_switches_are_read_only_through_module_flag() {
     for (path, text) in sources() {
         for (number, line) in text.lines().enumerate() {
             if line.contains("module_settings(") {
-                assert!(line.contains("module_flag("), "{path}:{}: a module's settings read other than through module_flag", number + 1);
+                assert!(
+                    line.contains("module_flag("),
+                    "{path}:{}: a module's settings read other than through module_flag",
+                    number + 1
+                );
             }
             let lower = line.to_ascii_lowercase();
             for key in [eg_ui::trainer_settings::AUTO_CONNECT, eg_ui::trainer_settings::OVERRIDE] {
