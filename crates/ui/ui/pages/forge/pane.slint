@@ -1,7 +1,7 @@
 // The changes pane (DESIGN.md "Changes Pane"; spec/item-forge.md §10): what will change and what did, on Lifted Umber
 // beside the table. A record only: Apply never depends on it.
 
-import { ScrollView } from "std-widgets.slint";
+import { ScrollView } from "../../widgets/scroll-view.slint";
 import { Tokens } from "../../tokens.slint";
 import { KeyboardFocus } from "../../globals.slint";
 import { FocusRing, TipTrigger } from "../../widgets/focus.slint";
@@ -68,7 +68,14 @@ export component CompactIconButton inherits Rectangle {
 }
 
 export component ChangesPane inherits Rectangle {
+    // Lying over the table (a narrow window): it takes the pointer over its whole area, and Escape inside it closes it.
+    in property <bool> overlay;
+    callback dismissed();
+
     background: Tokens.raised-brush;
+
+    // Nothing under the overlaid pane answers a press on its empty parts.
+    if root.overlay: TouchArea { }
 
     Rectangle {
         x: 0;
@@ -78,212 +85,285 @@ export component ChangesPane inherits Rectangle {
         background: Tokens.hairline-brush;
     }
 
-    scroll := ScrollView {
-        x: 1px;
-        width: parent.width - 1px;
-        content-width: self.visible-width;
-        content-height: content.preferred-height;
+    keys := FocusScope {
+        focus-on-click: false;
+        focus-on-tab-navigation: false;
+        key-pressed(event) => {
+            if (root.overlay && event.text == Key.Escape) {
+                root.dismissed();
+                return accept;
+            }
+            reject
+        }
 
-        content := VerticalLayout {
-            width: scroll.visible-width;
-            padding-left: Tokens.pane-content-margin.left;
-            padding-right: Tokens.pane-content-margin.right;
-            padding-top: Tokens.pane-content-margin.top;
-            padding-bottom: Tokens.pane-content-margin.bottom;
-            spacing: Tokens.space-18;
-            alignment: start;
+        scroll := ScrollView {
+            x: 1px;
+            width: parent.width - 1px;
+            content-width: self.visible-width;
+            content-height: content.preferred-height;
 
-            VerticalLayout {
-                spacing: Tokens.space-6;
+            content := VerticalLayout {
+                width: scroll.visible-width;
+                padding-left: Tokens.pane-content-margin.left;
+                padding-right: Tokens.pane-content-margin.right;
+                padding-top: Tokens.pane-content-margin.top;
+                padding-bottom: Tokens.pane-content-margin.bottom;
+                spacing: Tokens.space-18;
+                alignment: start;
 
-                // Teal with the pencil only while there are drafts; "No drafts" is a muted note.
-                HorizontalLayout {
-                    spacing: Tokens.space-8;
-                    alignment: start;
+                VerticalLayout {
+                    spacing: Tokens.space-6;
 
-                    if ForgeState.drafts.length > 0: Image {
-                        width: Tokens.icon-size;
-                        height: Tokens.icon-size;
-                        y: (parent.height - self.height) / 2;
-                        image-fit: contain;
-                        source: Tokens.icon-draft;
-                        colorize: Tokens.draft-brush;
+                    // Teal with the pencil only while there are drafts; "No drafts" is a muted note.
+                    HorizontalLayout {
+                        spacing: Tokens.space-8;
+                        alignment: start;
+
+                        if ForgeState.drafts.length > 0: Image {
+                            width: Tokens.icon-size;
+                            height: Tokens.icon-size;
+                            y: (parent.height - self.height) / 2;
+                            image-fit: contain;
+                            source: Tokens.icon-draft;
+                            colorize: Tokens.draft-brush;
+                        }
+
+                        Text {
+                            text: ForgeState.draft-count-text;
+                            font-size: Tokens.font-size-subheading;
+                            font-weight: Tokens.emphasis-weight;
+                            color: ForgeState.drafts.length > 0 ? Tokens.draft-brush : Tokens.text-muted-brush;
+                        }
                     }
 
-                    Text {
-                        text: ForgeState.draft-count-text;
-                        font-size: Tokens.font-size-subheading;
-                        font-weight: Tokens.emphasis-weight;
-                        color: ForgeState.drafts.length > 0 ? Tokens.draft-brush : Tokens.text-muted-brush;
+                    // Each entry is a button, a Tab stop that Enter or Space shows, as the C# ledger's buttons are. The
+                    // entries sit flush, as the C# ItemsControl's do: the 6px spacing parts the header from the list only.
+                    VerticalLayout {
+                        spacing: Tokens.space-0;
+
+                        for entry[index] in ForgeState.drafts: Rectangle {
+                            height: entry-layout.preferred-height;
+                            border-radius: Tokens.control-radius;
+                            background: entry-touch.has-hover || name-touch.has-hover ? Tokens.draft-hover-brush : transparent;
+                            accessible-role: button;
+                            accessible-label: "Show draft for " + entry.name;
+                            accessible-action-default => { ForgeState.show-draft(index); }
+
+                            entry-focus := FocusScope {
+                                focus-gained(reason) => {
+                                    if (reason == FocusReason.tab-navigation) {
+                                        KeyboardFocus.visible = true;
+                                    }
+                                }
+                                key-pressed(event) => {
+                                    if (event.text == Key.Return || event.text == " ") {
+                                        ForgeState.show-draft(index);
+                                        return accept;
+                                    }
+                                    reject
+                                }
+
+                                entry-touch := TouchArea {
+                                    pointer-event(event) => {
+                                        if (event.kind == PointerEventKind.down) {
+                                            KeyboardFocus.visible = false;
+                                        }
+                                    }
+                                    clicked => {
+                                        ForgeState.show-draft(index);
+                                    }
+                                }
+                            }
+
+                            entry-layout := HorizontalLayout {
+                                padding-left: Tokens.ledger-entry-padding.left;
+                                padding-right: Tokens.ledger-entry-padding.right;
+                                padding-top: Tokens.ledger-entry-padding.top;
+                                padding-bottom: Tokens.ledger-entry-padding.bottom;
+                                spacing: Tokens.space-8;
+
+                                VerticalLayout {
+                                    spacing: Tokens.space-2;
+                                    horizontal-stretch: 1;
+
+                                    // The name, cut to the pane, says itself in full on hover.
+                                    Text {
+                                        text: entry.name;
+                                        font-weight: Tokens.emphasis-weight;
+                                        color: Tokens.text-brush;
+                                        overflow: elide;
+
+                                        name-touch := TouchArea {
+                                            pointer-event(event) => {
+                                                if (event.kind == PointerEventKind.down) {
+                                                    KeyboardFocus.visible = false;
+                                                }
+                                            }
+                                            clicked => {
+                                                ForgeState.show-draft(index);
+                                            }
+                                        }
+                                    }
+
+                                    Text {
+                                        text: entry.summary;
+                                        color: Tokens.draft-brush;
+                                        wrap: word-wrap;
+                                    }
+
+                                    if entry.effect != "": Text {
+                                        text: entry.effect;
+                                        font-size: Tokens.font-size-caption;
+                                        color: Tokens.text-secondary-brush;
+                                        wrap: word-wrap;
+                                    }
+
+                                    if entry.stale: HorizontalLayout {
+                                        spacing: Tokens.space-6;
+                                        alignment: start;
+
+                                        Image {
+                                            width: Tokens.icon-size-small;
+                                            height: Tokens.icon-size-small;
+                                            y: (parent.height - self.height) / 2;
+                                            image-fit: contain;
+                                            source: Tokens.icon-warning;
+                                            colorize: Tokens.warning-brush;
+                                        }
+
+                                        Text {
+                                            text: "Changed in game — discard and redo";
+                                            font-size: Tokens.font-size-caption;
+                                            color: Tokens.warning-brush;
+                                            vertical-alignment: center;
+                                        }
+                                    }
+                                }
+
+                                VerticalLayout {
+                                    alignment: start;
+
+                                    CompactIconButton {
+                                        icon: Tokens.icon-close;
+                                        tip: "Discard the draft for " + entry.name;
+                                        clicked => {
+                                            ForgeState.discard-entry(index);
+                                        }
+                                    }
+                                }
+                            }
+
+                            TipTrigger {
+                                text: name-touch.has-hover ? entry.name : "Show this draft";
+                                hovered: entry-touch.has-hover || name-touch.has-hover;
+                                focused: entry-focus.has-focus;
+                            }
+
+                            FocusRing {
+                                focused: entry-focus.has-focus;
+                            }
+                        }
                     }
                 }
 
-                for entry[index] in ForgeState.drafts: Rectangle {
-                    height: entry-layout.preferred-height;
-                    border-radius: Tokens.control-radius;
-                    background: entry-touch.has-hover ? Tokens.draft-hover-brush : transparent;
-                    accessible-role: button;
-                    accessible-label: "Show draft for " + entry.name;
+                VerticalLayout {
+                    spacing: Tokens.space-6;
 
-                    entry-touch := TouchArea {
-                        pointer-event(event) => {
-                            if (event.kind == PointerEventKind.down) {
-                                KeyboardFocus.visible = false;
-                            }
-                        }
-                        clicked => {
-                            ForgeState.show-draft(index);
-                        }
+                    Text {
+                        text: "Applied";
+                        color: Tokens.text-muted-brush;
                     }
 
-                    TipTrigger {
-                        text: "Show this draft";
-                        hovered: entry-touch.has-hover;
+                    if ForgeState.history.length == 0: Text {
+                        text: "Nothing applied to this item yet.";
+                        font-size: Tokens.font-size-caption;
+                        color: Tokens.text-muted-brush;
+                        wrap: word-wrap;
                     }
 
-                    entry-layout := HorizontalLayout {
-                        padding-left: Tokens.ledger-entry-padding.left;
-                        padding-right: Tokens.ledger-entry-padding.right;
-                        padding-top: Tokens.ledger-entry-padding.top;
-                        padding-bottom: Tokens.ledger-entry-padding.bottom;
-                        spacing: Tokens.space-8;
+                    // Flush, as the C# ItemsControl's entries are; each keeps its own catalog-entry margin.
+                    VerticalLayout {
+                        spacing: Tokens.space-0;
 
-                        VerticalLayout {
-                            spacing: Tokens.space-2;
-                            horizontal-stretch: 1;
+                        for entry in ForgeState.history: HorizontalLayout {
+                            padding-top: Tokens.catalog-entry-margin.top;
+                            padding-bottom: Tokens.catalog-entry-margin.bottom;
+                            spacing: Tokens.space-8;
 
-                            Text {
-                                text: entry.name;
-                                font-weight: Tokens.emphasis-weight;
-                                color: Tokens.text-brush;
-                                overflow: elide;
-                            }
-
-                            Text {
-                                text: entry.summary;
-                                color: Tokens.draft-brush;
-                                wrap: word-wrap;
-                            }
-
-                            if entry.effect != "": Text {
-                                text: entry.effect;
-                                font-size: Tokens.font-size-caption;
-                                color: Tokens.text-secondary-brush;
-                                wrap: word-wrap;
-                            }
-
-                            if entry.stale: HorizontalLayout {
-                                spacing: Tokens.space-6;
+                            VerticalLayout {
+                                padding-top: Tokens.icon-baseline-nudge.top + Tokens.space-2;
                                 alignment: start;
 
                                 Image {
                                     width: Tokens.icon-size-small;
                                     height: Tokens.icon-size-small;
-                                    y: (parent.height - self.height) / 2;
                                     image-fit: contain;
-                                    source: Tokens.icon-warning;
-                                    colorize: Tokens.warning-brush;
+                                    source: Tokens.icon-confirmed;
+                                    colorize: Tokens.confirmed-brush;
+                                }
+                            }
+
+                            VerticalLayout {
+                                spacing: Tokens.space-2;
+                                horizontal-stretch: 1;
+
+                                // The C# line trims the name and the time with a hover tip, and its entries are no Tab stops.
+                                // Here a name too long for the pane wraps, the time kept whole beside its first line, so
+                                // nothing is cut that the keyboard cannot reach; the tip stays for the pointer.
+                                Rectangle {
+                                    height: name-line.preferred-height;
+
+                                    name-line := HorizontalLayout {
+                                        spacing: Tokens.space-6;
+                                        alignment: start;
+
+                                        Text {
+                                            text: entry.name;
+                                            font-weight: Tokens.emphasis-weight;
+                                            color: Tokens.text-brush;
+                                            wrap: word-wrap;
+                                            max-width: self.preferred-width;
+                                            horizontal-stretch: 1;
+                                        }
+
+                                        Text {
+                                            text: "·  " + entry.time;
+                                            font-size: Tokens.font-size-caption;
+                                            color: Tokens.text-muted-brush;
+                                            min-width: self.preferred-width;
+                                            horizontal-stretch: 0;
+                                            vertical-alignment: top;
+                                        }
+                                    }
+
+                                    name-time-touch := TouchArea { }
+
+                                    TipTrigger {
+                                        text: entry.name + "  ·  " + entry.time;
+                                        hovered: name-time-touch.has-hover;
+                                    }
                                 }
 
                                 Text {
-                                    text: "Changed in game — discard and redo";
+                                    text: entry.summary;
                                     font-size: Tokens.font-size-caption;
-                                    color: Tokens.warning-brush;
-                                    vertical-alignment: center;
+                                    color: Tokens.text-secondary-brush;
+                                    wrap: word-wrap;
+                                }
+
+                                if entry.effect != "": Text {
+                                    text: entry.effect;
+                                    font-size: Tokens.font-size-caption;
+                                    color: Tokens.text-secondary-brush;
+                                    wrap: word-wrap;
+                                }
+
+                                Text {
+                                    text: entry.outcome;
+                                    font-size: Tokens.font-size-caption;
+                                    color: Tokens.confirmed-brush;
                                 }
                             }
-                        }
-
-                        VerticalLayout {
-                            alignment: start;
-
-                            CompactIconButton {
-                                icon: Tokens.icon-close;
-                                tip: "Discard the draft for " + entry.name;
-                                clicked => {
-                                    ForgeState.discard-entry(index);
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-
-            VerticalLayout {
-                spacing: Tokens.space-6;
-
-                Text {
-                    text: "Applied";
-                    color: Tokens.text-muted-brush;
-                }
-
-                if ForgeState.history.length == 0: Text {
-                    text: "Nothing applied to this item yet.";
-                    font-size: Tokens.font-size-caption;
-                    color: Tokens.text-muted-brush;
-                    wrap: word-wrap;
-                }
-
-                for entry in ForgeState.history: HorizontalLayout {
-                    padding-top: Tokens.catalog-entry-margin.top;
-                    padding-bottom: Tokens.catalog-entry-margin.bottom;
-                    spacing: Tokens.space-8;
-
-                    VerticalLayout {
-                        padding-top: Tokens.icon-baseline-nudge.top + Tokens.space-2;
-                        alignment: start;
-
-                        Image {
-                            width: Tokens.icon-size-small;
-                            height: Tokens.icon-size-small;
-                            image-fit: contain;
-                            source: Tokens.icon-confirmed;
-                            colorize: Tokens.confirmed-brush;
-                        }
-                    }
-
-                    VerticalLayout {
-                        spacing: Tokens.space-2;
-                        horizontal-stretch: 1;
-
-                        HorizontalLayout {
-                            spacing: Tokens.space-6;
-                            alignment: start;
-
-                            Text {
-                                text: entry.name;
-                                font-weight: Tokens.emphasis-weight;
-                                color: Tokens.text-brush;
-                                overflow: elide;
-                                horizontal-stretch: 0;
-                            }
-
-                            Text {
-                                text: "·  " + entry.time;
-                                font-size: Tokens.font-size-caption;
-                                color: Tokens.text-muted-brush;
-                                vertical-alignment: center;
-                            }
-                        }
-
-                        Text {
-                            text: entry.summary;
-                            font-size: Tokens.font-size-caption;
-                            color: Tokens.text-secondary-brush;
-                            wrap: word-wrap;
-                        }
-
-                        if entry.effect != "": Text {
-                            text: entry.effect;
-                            font-size: Tokens.font-size-caption;
-                            color: Tokens.text-secondary-brush;
-                            wrap: word-wrap;
-                        }
-
-                        Text {
-                            text: entry.outcome;
-                            font-size: Tokens.font-size-caption;
-                            color: Tokens.confirmed-brush;
                         }
                     }
                 }

@@ -10,6 +10,7 @@ pub mod background;
 pub mod decorations;
 pub mod forge;
 pub mod home;
+mod models;
 #[allow(unsafe_code)] // Windows/FFI boundary; the rest of the crate denies unsafe.
 pub mod mods;
 pub mod preparation;
@@ -48,23 +49,36 @@ pub fn install(window: &MainWindow, app: App) {
     navigation.navigate(app.start);
     let shell = shell::bind(window, navigation);
     let decorations = decorations::Decorations::install(window);
-    home::bind(window, app.launcher, &shell, decorations);
+    home::bind(window, app.launcher, &shell, decorations.clone());
     let before_close = app.mods.map(|page| mods::bind(window, page, &shell));
-    settings::bind_with_close(window, app.settings, before_close);
+    // The trainer's pages remember the hooks' values in its slice of the settings.
+    let trainer_settings = app.trainer.then(|| app.settings.service().module(trainer_settings::ID));
+    // The trainer's switches reach its session as they flip; Game definitions follows its catalog.
+    let settings = match app.trainer_backend.clone().filter(|_| app.trainer) {
+        Some(backend) => {
+            let cache = app.settings.service().snapshot().store.paths().module_directory(trainer_settings::ID).join("catalog");
+            app.settings.link(trainer_settings::ID, trainer_settings::link(backend, Some(cache)))
+        }
+        None => app.settings,
+    };
+    settings::bind_with_close(window, settings, before_close);
     stubs::install(window, app.trainer);
-    trainer::install(window);
-    if app.trainer
-        && let Some(backend) = app.trainer_backend
-    {
-        trainer_backend::bind(window, backend);
+    let trainer_backend = app.trainer_backend.filter(|_| app.trainer);
+    trainer::install(window, trainer_backend.clone(), trainer_settings);
+    if let Some(backend) = trainer_backend {
+        trainer_backend::bind(window, backend, &shell, decorations);
     }
     apply_system_settings(window);
 }
 
 /// Windows says nothing when "Animation effects" or high contrast changes, and Slint surfaces no window activation to
 /// read them again on (the C# app's moment), so they are read again every few seconds: two cheap system calls. Captures
-/// hold their own settings, so the app starts this and they do not.
-pub fn follow_system_settings(window: &MainWindow) {
+/// hold their own settings, so the app and the launcher's preparation window start this and they do not.
+pub fn follow_system_settings<C>(window: &C)
+where
+    C: ComponentHandle + 'static,
+    for<'a> Tokens<'a>: slint::Global<'a, C>,
+{
     let timer = slint::Timer::default();
     timer.start(slint::TimerMode::Repeated, std::time::Duration::from_secs(2), {
         let window = window.as_weak();

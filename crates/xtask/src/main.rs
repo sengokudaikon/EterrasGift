@@ -303,17 +303,18 @@ fn radial_svg(gradient: &Value, name: &str) -> Result<String, String> {
     ))
 }
 
-/// One icon as an SVG whose view box is the path's own bounds, so it fills its box as Avalonia's `PathIcon` stretches
-/// its geometry (uniformly, centred).
+/// One icon as an SVG whose view box is the square round the path's own bounds, centred, so it fills a square box as
+/// Avalonia's `PathIcon` stretches its geometry (uniformly, centred). A square box also keeps the software renderer from
+/// stretching a not-quite-square icon past its box, which cut the foot off the small warning mark.
 fn svg(name: &str, path: &str) -> Result<String, String> {
     use kurbo::Shape as _;
     let bounds = kurbo::BezPath::from_svg(path).map_err(|e| format!("{name}: {e}"))?.bounding_box();
+    let side = bounds.width().max(bounds.height());
     Ok(format!(
-        "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"{w}\" height=\"{h}\" viewBox=\"{x} {y} {w} {h}\"><path d=\"{path}\" fill=\"#000\"/></svg>{NEWLINE}",
-        x = fmt(bounds.x0),
-        y = fmt(bounds.y0),
-        w = fmt(bounds.width()),
-        h = fmt(bounds.height()),
+        "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"{w}\" height=\"{w}\" viewBox=\"{x} {y} {w} {w}\"><path d=\"{path}\" fill=\"#000\"/></svg>{NEWLINE}",
+        x = fmt(bounds.x0 - (side - bounds.width()) / 2.0),
+        y = fmt(bounds.y0 - (side - bounds.height()) / 2.0),
+        w = fmt(side),
     ))
 }
 

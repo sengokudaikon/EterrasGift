@@ -1,9 +1,9 @@
 // Settings (spec/shell-and-settings.md §10). Switches save the moment they flip; the typed locations wait for
 // "Save locations".
 
-import { ScrollView } from "std-widgets.slint";
+import { ScrollView } from "../widgets/scroll-view.slint";
 import { Tokens } from "../tokens.slint";
-import { TitleText, SectionText, SecondaryText, LabelText, CaptionText } from "../widgets/text.slint";
+import { TitleText, SectionText, SecondaryText, LabelText, CaptionText, BodyText } from "../widgets/text.slint";
 import { Button, ButtonKind } from "../widgets/button.slint";
 import { ToggleSwitch } from "../widgets/toggle.slint";
 import { TextField } from "../widgets/text-field.slint";
@@ -11,6 +11,8 @@ import { ActionBar, MessageTone, SettingGroup, SwitchSetting } from "common.slin
 
 export struct LocationSetting {
     label: string,
+    // The box's accessible name, when the label is not it ("Mod library folder").
+    name: string,
     value: string,
     placeholder: string,
     caption: string,
@@ -20,8 +22,10 @@ export struct LocationSetting {
 export struct ModuleRow { title: string, description: string, problem: string, enabled: bool }
 export struct SettingsSectionRow {
     module-index: int, section-index: int, title: string, description: string, note: string,
-    toggle: bool, checked: bool, on-text: string, off-text: string,
+    // `label` names the switch for a screen reader (the C# AutomationProperties.Name).
+    toggle: bool, checked: bool, label: string, on-text: string, off-text: string,
     status: string, action: string, unavailable: string,
+    action-enabled: bool, action-tip: string,
 }
 
 export global SettingsState {
@@ -30,12 +34,16 @@ export global SettingsState {
     in property <[LocationSetting]> locations;
     in property <bool> locations-changed;
     in property <bool> saving;
+    in property <bool> saving-locations;
     in property <bool> can-retry;
     in property <string> message;
     in property <MessageTone> message-tone;
     in property <bool> can-restart;
     callback module-toggled(int, bool);
     callback setting-toggled(int, int, bool);
+    callback backend-updated();
+    // A status section's action (module index, section index).
+    callback section-action(int, int);
     callback location-edited(int, string);
     callback browse(int);
     callback save-locations();
@@ -45,6 +53,26 @@ export global SettingsState {
 
 export component SettingsPage inherits Rectangle {
     in property <bool> compact;
+
+    // The shared switch column, as wide as the widest switch the page shows with either word (the C# SharedSizeGroup
+    // over ToggleSwitches that hold both words). Measured from hidden switches, out of the focus chain and the
+    // accessibility tree.
+    Rectangle {
+        visible: false;
+        width: 0px;
+        height: 0px;
+
+        switch-measure := VerticalLayout {
+            for module in SettingsState.modules: VerticalLayout {
+                ToggleSwitch { checked: true; }
+                ToggleSwitch { checked: false; }
+            }
+            for section in SettingsState.sections: VerticalLayout {
+                if section.toggle: ToggleSwitch { checked: true; on-text: section.on-text; }
+                if section.toggle: ToggleSwitch { checked: false; off-text: section.off-text; }
+            }
+        }
+    }
 
     VerticalLayout {
         ScrollView {
@@ -78,6 +106,7 @@ export component SettingsPage inherits Rectangle {
                         description: module.description;
                         note: "Takes effect after restarting Eterra's Gift.";
                         problem: module.problem;
+                        control-width: switch-measure.preferred-width;
                         ToggleSwitch {
                             label: module.title;
                             checked: module.enabled;
@@ -91,8 +120,9 @@ export component SettingsPage inherits Rectangle {
                         title: section.title;
                         description: section.description;
                         note: section.note;
+                        control-width: switch-measure.preferred-width;
                         ToggleSwitch {
-                            label: section.title;
+                            label: section.label != "" ? section.label : section.title;
                             checked: section.checked;
                             on-text: section.on-text;
                             off-text: section.off-text;
@@ -100,7 +130,7 @@ export component SettingsPage inherits Rectangle {
                         }
                     }
                     if !section.toggle: VerticalLayout {
-                        spacing: Tokens.space-12;
+                        spacing: Tokens.space-10;
                         SectionText { text: section.title; }
                         SecondaryText { text: section.description; }
                         Rectangle {
@@ -108,18 +138,26 @@ export component SettingsPage inherits Rectangle {
                             border-width: Tokens.border-all.left;
                             border-color: Tokens.hairline-brush;
                             border-radius: Tokens.control-radius;
+                            // Avalonia pads inside the 1px border, so the frame adds to the padding.
                             HorizontalLayout {
-                                padding-left: Tokens.notice-padding.left;
-                                padding-right: Tokens.notice-padding.right;
-                                padding-top: Tokens.notice-padding.top;
-                                padding-bottom: Tokens.notice-padding.bottom;
-                                Text { text: section.status; color: Tokens.text-brush; wrap: word-wrap; }
+                                padding-left: Tokens.border-all.left + Tokens.notice-padding.left;
+                                padding-right: Tokens.border-all.right + Tokens.notice-padding.right;
+                                padding-top: Tokens.border-all.top + Tokens.notice-padding.top;
+                                padding-bottom: Tokens.border-all.bottom + Tokens.notice-padding.bottom;
+                                BodyText { text: section.status; }
                             }
                         }
                         HorizontalLayout {
                             spacing: Tokens.space-12;
                             alignment: start;
-                            Button { text: section.action; icon: Tokens.icon-refresh; enabled: false; }
+                            Button {
+                                text: section.action;
+                                icon: Tokens.icon-refresh;
+                                enabled: section.action-enabled;
+                                tip: section.action-tip;
+                                clicked => { SettingsState.section-action(section.module-index, section.section-index); }
+                            }
+                            // Refreshing reads the game, so while it can't, the reason sits beside the button.
                             CaptionText { text: section.unavailable; vertical-alignment: center; horizontal-stretch: 1; }
                         }
                     }
@@ -146,7 +184,7 @@ export component SettingsPage inherits Rectangle {
                                 spacing: Tokens.space-8;
 
                                 TextField {
-                                    label: location.label;
+                                    label: location.name;
                                     text: location.value;
                                     placeholder: location.placeholder;
                                     edited(text) => {
@@ -157,7 +195,8 @@ export component SettingsPage inherits Rectangle {
                                 Button {
                                     text: "Browse…";
                                     icon: Tokens.icon-folder;
-                                    tip: location.browse-label;
+                                    // A name, not a tip: the C# button has no tooltip.
+                                    accessible-name: location.browse-label;
                                     clicked => {
                                         SettingsState.browse(i);
                                     }
@@ -200,7 +239,7 @@ export component SettingsPage inherits Rectangle {
             Button {
                 text: "Save locations";
                 kind: ButtonKind.primary;
-                enabled: SettingsState.locations-changed && !SettingsState.saving;
+                enabled: SettingsState.locations-changed && !SettingsState.saving-locations;
                 tip: "Save the locations. The game executable, user-data, mod library and MelonLoader folders take effect after a restart; the mod sources and .NET SDK folders at once.";
                 clicked => {
                     SettingsState.save-locations();

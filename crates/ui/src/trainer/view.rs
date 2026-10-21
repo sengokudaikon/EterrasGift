@@ -13,9 +13,33 @@ use std::collections::HashMap;
 use std::rc::Rc;
 use std::time::Duration;
 
+/// The bound pages, for whoever follows the session's changes: each change refreshes them.
+#[derive(Clone)]
+pub struct Pages(Rc<RefCell<Controller>>);
+
+impl Pages {
+    /// The session changed: rows take their answers, read on a new connection, and show where they stand.
+    pub fn refresh(&self) {
+        self.0.borrow_mut().refresh();
+    }
+
+    /// A reference that does not keep the pages bound: rebinding the window ends whatever follows them.
+    pub fn downgrade(&self) -> WeakPages {
+        WeakPages(Rc::downgrade(&self.0))
+    }
+}
+
+pub struct WeakPages(std::rc::Weak<RefCell<Controller>>);
+
+impl WeakPages {
+    pub fn upgrade(&self) -> Option<Pages> {
+        self.0.upgrade().map(Pages)
+    }
+}
+
 /// Shows the trainer's pages on `session`. `features` is the catalog; `planned` lists features that are not ported yet
 /// (a source checkout). Binding again replaces the previous binding.
-pub fn bind(window: &MainWindow, session: Rc<dyn TrainerSession>, features: Vec<Feature>, planned: bool) {
+pub fn bind(window: &MainWindow, session: Rc<dyn TrainerSession>, features: Vec<Feature>, planned: bool) -> Pages {
     let layout = Rc::new(RefCell::new(Layout {
         window: window.as_weak(),
         model: Rc::new(VecModel::default()),
@@ -37,7 +61,10 @@ pub fn bind(window: &MainWindow, session: Rc<dyn TrainerSession>, features: Vec<
         nested: Vec::new(),
         layout: layout.clone(),
         serial: 0,
+        polling: slint::Timer::default(),
+        this: std::rc::Weak::new(),
     }));
+    controller.borrow_mut().this = Rc::downgrade(&controller);
 
     let state = window.global::<TrainerState>();
     state.set_rows(controller.borrow().rows.clone().into());
@@ -127,7 +154,11 @@ pub fn bind(window: &MainWindow, session: Rc<dyn TrainerSession>, features: Vec<
     state.on_read(editor(|editor, session| editor.read(session)));
     state.on_apply(editor(|editor, session| editor.apply(session)));
     state.on_discard(editor(|editor, _| editor.discard()));
+    Pages(controller)
 }
+
+/// How often a row waiting on the game looks for its answer: an answer can come just after the snapshot that announced it.
+const POLL: Duration = Duration::from_millis(50);
 
 fn area(page: Page) -> Option<Area> {
     Some(match page {
@@ -166,6 +197,9 @@ struct Controller {
     nested: Vec<Nested>,
     layout: Rc<RefCell<Layout>>,
     serial: i32,
+    /// Runs only while a row waits on the game.
+    polling: slint::Timer,
+    this: std::rc::Weak<RefCell<Controller>>,
 }
 
 impl Controller {
@@ -238,10 +272,54 @@ impl Controller {
             state.set_item_forge(forge);
             state.set_serial(self.serial);
         }
+        // A row made or shown while connected may have just asked the game; its answer is taken by the next refresh.
+        let busy = self.pages.values().flatten().flat_map(|page| &page.sections).any(|section| match &section.content {
+            Content::Rows(rows) => rows.iter().any(|row| matches!(row, Row::Editor(editor) if editor.is_busy())),
+            Content::ItemForge => false,
+        });
+        self.keep_polling(busy);
     }
 
-    /// Every row as it stands now; only what changed reaches the view.
+    /// Every row as it stands now; only what changed reaches the view. Answers reach rows on every page, shown or not.
     fn refresh(&mut self) {
+        let busy = self.poll();
+        self.keep_polling(busy);
+        self.show_rows();
+    }
+
+    /// Looks for answers every [`POLL`] while a row waits on the game, and not otherwise.
+    fn keep_polling(&mut self, busy: bool) {
+        if busy && !self.polling.running() {
+            let this = self.this.clone();
+            self.polling.start(slint::TimerMode::Repeated, POLL, move || {
+                if let Some(controller) = this.upgrade() {
+                    controller.borrow_mut().refresh();
+                }
+            });
+        } else if !busy {
+            self.polling.stop();
+        }
+    }
+
+    /// Takes the answers that have come; true while a row still waits on the game.
+    fn poll(&mut self) -> bool {
+        let mut busy = false;
+        for page in self.pages.values_mut().flatten() {
+            for section in &mut page.sections {
+                if let Content::Rows(rows) = &mut section.content {
+                    for row in rows {
+                        if let Row::Editor(editor) = row {
+                            editor.poll();
+                            busy |= editor.is_busy();
+                        }
+                    }
+                }
+            }
+        }
+        busy
+    }
+
+    fn show_rows(&mut self) {
         let session = self.session.clone();
         let Some(area) = self.current else {
             return;
@@ -412,6 +490,7 @@ fn view(row: &Row, session: &dyn TrainerSession, nested: &Nested) -> FeatureRowV
                 title: hook.feature.title.into(),
                 help: hook.feature.help().into(),
                 on: hook.is_on(session),
+                can_use: hook.can_use(session),
                 has_inline: inline,
                 // A single value sits on the title line, named for the feature.
                 inline_value: if inline {
@@ -429,10 +508,11 @@ fn view(row: &Row, session: &dyn TrainerSession, nested: &Nested) -> FeatureRowV
             title: editor.feature.title.into(),
             help: editor.feature.help().into(),
             can_use: editor.can_use(session),
-            needs_connection: !session.is_connected(),
+            reason: editor.reason(session).unwrap_or_default().into(),
             unread: !editor.has_read,
             empty: editor.is_empty(),
             has_drafts: editor.has_drafts(),
+            can_discard: editor.can_discard(),
             can_apply: editor.can_apply(session),
             apply_text: editor.apply_text().into(),
             status: editor.status.as_str().into(),

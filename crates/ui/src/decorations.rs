@@ -328,6 +328,9 @@ pub struct Decorations<C: ComponentHandle + 'static> {
     window: Weak<C>,
     art: Option<Rc<Art>>,
     state: RefCell<State>,
+    /// The drifting motes, one model for the window's life: each frame replaces its rows rather than handing the view a
+    /// new model, which would rebuild every mote element 24 times a second.
+    motes: Rc<VecModel<Mote>>,
 }
 
 impl<C> Decorations<C>
@@ -388,7 +391,9 @@ where
                 started: None,
                 behind: None,
             }),
+            motes: Rc::new(VecModel::default()),
         });
+        eterra.set_motes(ModelRc::from(decorations.motes.clone()));
         eterra.on_frame({
             let decorations = Rc::downgrade(&decorations);
             move || {
@@ -482,7 +487,14 @@ where
                 motes(time, level, false, &state.look)
             }
         };
-        eterra.set_motes(ModelRc::new(VecModel::from(ash)));
+        // The same motes move: change their rows in place; only a change in their number resets the model.
+        if self.motes.row_count() == ash.len() {
+            for (row, mote) in ash.into_iter().enumerate() {
+                self.motes.set_row_data(row, mote);
+            }
+        } else {
+            self.motes.set_vec(ash);
+        }
         eterra.set_moving(moving);
     }
 }

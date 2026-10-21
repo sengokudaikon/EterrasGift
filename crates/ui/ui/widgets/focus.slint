@@ -10,12 +10,12 @@ export component FocusRing inherits Rectangle {
     in property <length> radius: Tokens.control-radius;
 
     Rectangle {
-        x: -2px;
-        y: -2px;
-        width: parent.width + 4px;
-        height: parent.height + 4px;
-        border-radius: root.radius + 2px;
-        border-width: root.focused && KeyboardFocus.visible ? 2px : 0px;
+        x: -Tokens.focus-ring-offset;
+        y: -Tokens.focus-ring-offset;
+        width: parent.width + 2 * Tokens.focus-ring-offset;
+        height: parent.height + 2 * Tokens.focus-ring-offset;
+        border-radius: root.radius + Tokens.focus-ring-offset;
+        border-width: root.focused && KeyboardFocus.visible ? Tokens.focus-ring-width : 0px;
         border-color: Tokens.focus-brush;
     }
 }
@@ -32,28 +32,52 @@ export component TipTrigger inherits Rectangle {
     property <bool> hover-ready;
     property <bool> keyboard: root.focused && KeyboardFocus.visible;
     property <bool> wanted: root.text != "" && (root.hover-ready || root.keyboard);
+    // The text this trigger last put in the bubble: it closes and updates only its own tip, even after its text changed.
+    property <string> published;
+    // No longer wanted, the tip waits a moment before closing, so the pointer can cross onto the bubble and stay there.
+    property <bool> leaving;
 
     changed hovered => {
         if (!root.hovered) {
             root.hover-ready = false;
         }
     }
+    changed text => {
+        if (root.wanted && Tip.open && Tip.text == root.published) {
+            Tip.text = root.text;
+            root.published = root.text;
+        }
+    }
     changed wanted => {
         if (root.wanted) {
+            root.published = root.text;
             Tip.text = root.text;
             Tip.anchor-x = root.absolute-position.x;
             Tip.anchor-y = root.absolute-position.y;
             Tip.anchor-width = root.width;
             Tip.anchor-height = root.height;
             Tip.placement = root.keyboard ? root.keyboard-placement : root.hover-placement;
+            Tip.bubble-hovered = false;
+            root.leaving = false;
             Tip.open = true;
-        } else if (Tip.text == root.text) {
-            Tip.open = false;
+        } else if (Tip.text == root.published) {
+            root.leaving = true;
         }
     }
 
     Timer {
-        interval: 500ms;
+        interval: Tokens.tip-linger-duration;
+        running: root.leaving;
+        triggered => {
+            root.leaving = false;
+            if (!root.wanted && !Tip.bubble-hovered && Tip.text == root.published) {
+                Tip.open = false;
+            }
+        }
+    }
+
+    Timer {
+        interval: Tokens.tip-show-delay;
         running: root.hovered && !root.hover-ready && root.text != "";
         triggered => {
             root.hover-ready = true;
@@ -69,16 +93,36 @@ export component TipBubble inherits Rectangle {
     property <length> gap: Tokens.keyboard-tip-offset;
     width: Math.min(layout.preferred-width, Tokens.reading-max-width * 0.6);
     height: layout.preferred-height;
+    // Beside or under its control, and on the other side when that side has no room, as Windows places a tooltip: a
+    // tip pushed back inside the window would lie over the control it explains (and catch the click meant for it).
+    property <length> after-x: Tip.anchor-x + Tip.anchor-width + root.gap;
+    property <length> below-y: Tip.anchor-y + Tip.anchor-height + root.gap;
+    property <bool> flip-x: root.after-x + self.width > root.window-width - Tokens.space-4;
+    property <bool> flip-y: root.below-y + self.height > root.window-height - Tokens.space-4;
     x: Math.max(Tokens.space-4, Math.min(root.window-width - self.width - Tokens.space-4, Tip.placement == TipPlacement.right
-        ? Tip.anchor-x + Tip.anchor-width + root.gap
+        ? (root.flip-x ? Tip.anchor-x - root.gap - self.width : root.after-x)
         : Tip.anchor-x));
     y: Math.max(Tokens.space-4, Math.min(root.window-height - self.height - Tokens.space-4, Tip.placement == TipPlacement.right
         ? Tip.anchor-y + (Tip.anchor-height - self.height) / 2
-        : Tip.anchor-y + Tip.anchor-height + root.gap));
-    background: Tokens.raised-brush;
+        : (root.flip-y ? Tip.anchor-y - root.gap - self.height : root.below-y)));
+    // Fluent's tooltip ground on the retinted palette (ChromeMediumLow, Dusk Brown), as the menus use.
+    background: Tokens.hover-brush;
     border-width: 1px;
     border-color: Tokens.strong-line-brush;
     border-radius: Tokens.control-radius;
+
+    // Kept open while the pointer is on it; leaving it, or a click, closes it.
+    TouchArea {
+        changed has-hover => {
+            Tip.bubble-hovered = self.has-hover;
+            if (!self.has-hover) {
+                Tip.open = false;
+            }
+        }
+        clicked => {
+            Tip.open = false;
+        }
+    }
 
     layout := HorizontalLayout {
         padding-left: Tokens.space-8;

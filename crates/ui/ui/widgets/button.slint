@@ -15,23 +15,44 @@ export component Button inherits Rectangle {
     // focus, but a waiting one keeps its tip for the pointer, saying why (DESIGN.md, Buttons › Focus); the page says the
     // reason too, except on Home's Play buttons.
     in property <string> tip;
+    // Where the pointer's tip opens. A keyboard tip opens below unless told otherwise, as `KeyboardToolTips` places it.
     in property <TipPlacement> tip-placement: TipPlacement.below;
+    in property <TipPlacement> keyboard-tip-placement: TipPlacement.below;
+    // The name a screen reader hears when the visible text or tip is not it (C#'s AutomationProperties.Name).
+    in property <string> accessible-name;
+    // A standard button whose label is hidden (compact toolbars): the icon alone, standard padding, the label kept as
+    // its name.
+    in property <bool> label-hidden;
     callback clicked();
 
     property <bool> has-icon: root.icon.width > 0;
     property <bool> icon-only: root.has-icon && root.text == "";
+    property <bool> shows-text: root.text != "" && !root.label-hidden;
+    // Fluent counts the frame in a button's size: the padding sits inside the 1px border, so an icon button is 34 square.
+    property <length> frame: 1px;
     property <bool> hovered: touch.has-hover && root.enabled;
     property <bool> pressed: touch.pressed && root.enabled;
 
     accessible-role: button;
-    accessible-label: root.text != "" ? root.text : root.tip;
+    accessible-label: root.accessible-name != "" ? root.accessible-name : root.text != "" ? root.text : root.tip;
     accessible-enabled: root.enabled;
-    accessible-action-default => { root.clicked(); }
+    accessible-action-default => {
+        if (root.enabled) {
+            root.clicked();
+        }
+    }
+
+    // A button that turns disabled under keyboard focus lets it go, as Avalonia's does, so Enter can't act on it.
+    changed enabled => {
+        if (!root.enabled && focus.has-focus) {
+            focus.clear-focus();
+        }
+    }
 
     min-height: Tokens.control-min-height;
     min-width: root.icon-only ? Tokens.icon-button-size : 0px;
     border-radius: Tokens.control-radius;
-    border-width: 1px;
+    border-width: root.frame;
     background: !root.enabled ? (root.kind == ButtonKind.subtle ? transparent : Tokens.ground-brush)
         : root.kind == ButtonKind.primary ? (root.pressed ? Tokens.primary-pressed-brush : root.hovered ? Tokens.primary-hover-brush : Tokens.primary-brush)
         : root.kind == ButtonKind.subtle ? (root.pressed ? Tokens.selected-brush : root.hovered ? Tokens.hover-brush : transparent)
@@ -47,12 +68,12 @@ export component Button inherits Rectangle {
         : Tokens.label-brush;
 
     HorizontalLayout {
-        padding-left: root.icon-only ? Tokens.icon-button-padding.left
-            : root.kind == ButtonKind.primary ? Tokens.primary-button-padding.left : Tokens.button-padding.left;
-        padding-right: root.icon-only ? Tokens.icon-button-padding.right
-            : root.kind == ButtonKind.primary ? Tokens.primary-button-padding.right : Tokens.button-padding.right;
-        padding-top: root.icon-only ? Tokens.icon-button-padding.top : Tokens.button-padding.top;
-        padding-bottom: root.icon-only ? Tokens.icon-button-padding.bottom : Tokens.button-padding.bottom;
+        padding-left: root.frame + (root.icon-only ? Tokens.icon-button-padding.left
+            : root.kind == ButtonKind.primary ? Tokens.primary-button-padding.left : Tokens.button-padding.left);
+        padding-right: root.frame + (root.icon-only ? Tokens.icon-button-padding.right
+            : root.kind == ButtonKind.primary ? Tokens.primary-button-padding.right : Tokens.button-padding.right);
+        padding-top: root.frame + (root.icon-only ? Tokens.icon-button-padding.top : Tokens.button-padding.top);
+        padding-bottom: root.frame + (root.icon-only ? Tokens.icon-button-padding.bottom : Tokens.button-padding.bottom);
         spacing: Tokens.space-8;
         alignment: center;
 
@@ -64,7 +85,7 @@ export component Button inherits Rectangle {
             y: (parent.height - self.height) / 2;
             colorize: root.foreground;
         }
-        if root.text != "": Text {
+        if root.shows-text: Text {
             text: root.text;
             color: root.foreground;
             vertical-alignment: center;
@@ -80,7 +101,7 @@ export component Button inherits Rectangle {
         }
         enabled: root.enabled;
         key-pressed(event) => {
-            if (event.text == Key.Return || event.text == " ") {
+            if (root.enabled && (event.text == Key.Return || event.text == " ")) {
                 root.clicked();
                 return accept;
             }
@@ -109,7 +130,7 @@ export component Button inherits Rectangle {
         hovered: touch.has-hover;
         focused: focus.has-focus;
         hover-placement: root.tip-placement;
-        keyboard-placement: root.tip-placement;
+        keyboard-placement: root.keyboard-tip-placement;
     }
 
     FocusRing {

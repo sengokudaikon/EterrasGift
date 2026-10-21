@@ -2,11 +2,12 @@
 // one, which is written at once. The title and caption, the search, All / Prefixes / Suffixes, the incompatible toggle
 // with its caption, the list, the status, then Cancel and the primary in equal halves.
 
-import { ScrollView } from "std-widgets.slint";
+import { ListView } from "../../widgets/scroll-view.slint";
 import { Tokens } from "../../tokens.slint";
 import { KeyboardFocus } from "../../globals.slint";
 import { Button, ButtonKind } from "../../widgets/button.slint";
 import { FocusRing } from "../../widgets/focus.slint";
+import { FlyoutSurface } from "../../widgets/menu.slint";
 import { ForgeState } from "state.slint";
 import { CheckBox, RadioButton } from "cells.slint";
 
@@ -31,6 +32,35 @@ export global PickerMetrics {
             + self.caption-line
             + Tokens.control-min-height
             + Tokens.space-10 * 5;
+    }
+}
+
+// The picker's wrapped caption lines, measured at the flyout's width: what they add over one line each, for the flyout's
+// height (a PopupWindow needs one, and can't be measured from outside).
+export component PickerMeasure inherits Rectangle {
+    out property <length> extra: Math.max(0px, subtitle.preferred-height - PickerMetrics.caption-line)
+        + Math.max(0px, status.preferred-height - PickerMetrics.caption-line);
+
+    width: 0;
+    height: 0;
+    visible: false;
+
+    subtitle := Text {
+        x: 0;
+        y: 0;
+        width: Tokens.replace-flyout-width;
+        text: ForgeState.picker-subtitle;
+        font-size: Tokens.font-size-caption;
+        wrap: word-wrap;
+    }
+
+    status := Text {
+        x: 0;
+        y: 0;
+        width: Tokens.replace-flyout-width;
+        text: ForgeState.picker-status;
+        font-size: Tokens.font-size-caption;
+        wrap: word-wrap;
     }
 }
 
@@ -112,7 +142,7 @@ export component SearchBox inherits Rectangle {
     }
 }
 
-export component AffixPickerPanel inherits Rectangle {
+export component AffixPickerPanel inherits FlyoutSurface {
     // The picker closed itself (used, cancelled or dismissed with Escape).
     callback done();
 
@@ -128,8 +158,46 @@ export component AffixPickerPanel inherits Rectangle {
         }
     }
 
-    background: Tokens.hover-brush;
-    border-radius: Tokens.control-radius;
+    // Left / Right (or Up / Down) on a kind filter moves to its neighbour, as a radio group does.
+    function move-filter(delta: int) {
+        let next = Math.clamp(ForgeState.picker-filter + delta, 0, 2);
+        ForgeState.picker-filter-changed(next);
+        if (next == 0) {
+            all-kinds.focus-button();
+        } else if (next == 1) {
+            prefixes.focus-button();
+        } else {
+            suffixes.focus-button();
+        }
+    }
+
+    // The entry last brought into view exactly, by the entry itself.
+    property <int> revealed: -1;
+    property <int> selected: ForgeState.picker-selected;
+
+    // Keeps the selected entry in view as the keyboard moves it: exactly, from an entry the list has built.
+    function reveal-entry(index: int, top: length, height: length) {
+        root.revealed = index;
+        if (top + list-scroll.content-y < 0) {
+            list-scroll.content-y = -top;
+        } else if (top + height + list-scroll.content-y > list-scroll.visible-height) {
+            list-scroll.content-y = list-scroll.visible-height - top - height;
+        }
+    }
+
+    // The list builds only the entries in view, so a selection outside them is first scrolled to where the average entry
+    // puts it (as the standard ListView does); the entry, built there, then brings itself in exactly.
+    changed selected => {
+        if (root.selected >= 0 && root.selected != root.revealed && ForgeState.picker-rows.length > 0) {
+            let average = list-scroll.content-height / ForgeState.picker-rows.length;
+            let top = root.selected * average;
+            if (top + list-scroll.content-y < 0) {
+                list-scroll.content-y = -top;
+            } else if (top + average + list-scroll.content-y > list-scroll.visible-height) {
+                list-scroll.content-y = list-scroll.visible-height - top - average;
+            }
+        }
+    }
 
     keys := FocusScope {
         capture-key-pressed(event) => {
@@ -162,7 +230,7 @@ export component AffixPickerPanel inherits Rectangle {
                     text: ForgeState.picker-subtitle;
                     font-size: Tokens.font-size-caption;
                     color: Tokens.text-muted-brush;
-                    overflow: elide;
+                    wrap: word-wrap;
                 }
             }
 
@@ -176,6 +244,7 @@ export component AffixPickerPanel inherits Rectangle {
                 edited(text) => {
                     ForgeState.picker-search-edited(text);
                 }
+                // Down leaves the search for the list; Enter in the search does nothing, as in the C# picker.
                 down => {
                     if (ForgeState.picker-rows.length > 0) {
                         if (ForgeState.picker-selected < 0) {
@@ -184,9 +253,6 @@ export component AffixPickerPanel inherits Rectangle {
                         KeyboardFocus.visible = true;
                         list-focus.focus();
                     }
-                }
-                accepted => {
-                    root.use-entry();
                 }
             }
 
@@ -197,27 +263,36 @@ export component AffixPickerPanel inherits Rectangle {
                     spacing: Tokens.space-12;
                     alignment: start;
 
-                    RadioButton {
+                    all-kinds := RadioButton {
                         text: "All";
                         checked: ForgeState.picker-filter == 0;
                         chosen => {
                             ForgeState.picker-filter-changed(0);
                         }
+                        arrow(delta) => {
+                            root.move-filter(delta);
+                        }
                     }
 
-                    RadioButton {
+                    prefixes := RadioButton {
                         text: "Prefixes";
                         checked: ForgeState.picker-filter == 1;
                         chosen => {
                             ForgeState.picker-filter-changed(1);
                         }
+                        arrow(delta) => {
+                            root.move-filter(delta);
+                        }
                     }
 
-                    RadioButton {
+                    suffixes := RadioButton {
                         text: "Suffixes";
                         checked: ForgeState.picker-filter == 2;
                         chosen => {
                             ForgeState.picker-filter-changed(2);
+                        }
+                        arrow(delta) => {
+                            root.move-filter(delta);
                         }
                     }
                 }
@@ -261,6 +336,8 @@ export component AffixPickerPanel inherits Rectangle {
                 }
 
                 list-focus := FocusScope {
+                    accessible-role: list;
+                    accessible-label: "Replacement affixes";
                     focus-gained(reason) => {
                         if (reason == FocusReason.tab-navigation) {
                             KeyboardFocus.visible = true;
@@ -286,37 +363,54 @@ export component AffixPickerPanel inherits Rectangle {
                         reject
                     }
 
-                    ScrollView {
-                        content-width: self.visible-width;
-                        content-height: ForgeState.picker-rows.length * (PickerMetrics.row + Tokens.space-2) - Tokens.space-2;
-                        content-y: -Math.max(0px, Math.min(self.content-height - self.visible-height,
-                            ForgeState.picker-selected * (PickerMetrics.row + Tokens.space-2) + PickerMetrics.row - self.visible-height));
+                    // A ListView builds only the entries in view, so a search over the whole catalogue rebuilds a screenful
+                    // rather than every affix. Each entry carries the 2px gap under it, as a ListView has no spacing.
+                    list-scroll := ListView {
+                        // The focus scope around it is the named list.
+                        accessible-role: none;
 
-                        VerticalLayout {
-                            spacing: Tokens.space-2;
-                            alignment: start;
+                        for entry[index] in ForgeState.picker-rows: Rectangle {
+                            property <bool> chosen: ForgeState.picker-selected == index;
+                            property <length> entry-height: Math.max(PickerMetrics.row, entry-layout.preferred-height);
+                            // An entry built or chosen while selected scrolls itself into view exactly, after the list's
+                            // estimate brought it near (`reveal-index`).
+                            init => {
+                                if (self.chosen) {
+                                    root.reveal-entry(index, self.y, self.entry-height);
+                                }
+                            }
+                            changed chosen => {
+                                if (self.chosen) {
+                                    root.reveal-entry(index, self.y, self.entry-height);
+                                }
+                            }
+                            height: self.entry-height + (index < ForgeState.picker-rows.length - 1 ? Tokens.space-2 : 0px);
 
-                            for entry[index] in ForgeState.picker-rows: Rectangle {
-                                height: PickerMetrics.row;
+                            Rectangle {
+                                y: 0;
+                                height: parent.entry-height;
                                 border-radius: Tokens.control-radius;
                                 border-width: 1px;
-                                border-color: ForgeState.picker-selected == index ? Tokens.accent-brush : transparent;
-                                background: ForgeState.picker-selected == index ? Tokens.selected-brush : entry-touch.has-hover ? Tokens.hover-brush : transparent;
+                                border-color: parent.chosen ? Tokens.accent-brush : transparent;
+                                // The flyout's ground is the hover colour, so the entry under the pointer takes Wine-Stained
+                                // Brown, as menu rows do; the chosen one adds the brass frame.
+                                background: parent.chosen || entry-touch.has-hover ? Tokens.selected-brush : transparent;
                                 accessible-role: list-item;
                                 accessible-label: entry.name;
-                                accessible-item-selected: ForgeState.picker-selected == index;
+                                accessible-item-selected: parent.chosen;
 
-                                VerticalLayout {
+                                entry-layout := VerticalLayout {
                                     padding-left: Tokens.row-padding.left;
                                     padding-right: Tokens.row-padding.right;
                                     padding-top: Tokens.catalog-entry-margin.top;
                                     padding-bottom: Tokens.catalog-entry-margin.bottom;
                                     spacing: Tokens.space-1;
+                                    alignment: center;
 
                                     Text {
                                         text: entry.name;
                                         color: Tokens.text-brush;
-                                        overflow: elide;
+                                        wrap: word-wrap;
                                     }
 
                                     Text {
@@ -356,17 +450,18 @@ export component AffixPickerPanel inherits Rectangle {
                 text: ForgeState.picker-status;
                 font-size: Tokens.font-size-caption;
                 color: Tokens.text-secondary-brush;
-                overflow: elide;
-                height: PickerMetrics.caption-line;
+                wrap: word-wrap;
             }
 
-            HorizontalLayout {
+            // Two equal halves, as the C# grid's "*,*" columns: stretch alone shares only the space left after each
+            // button's own width.
+            footer := HorizontalLayout {
                 spacing: Tokens.space-8;
 
                 Button {
                     text: "Cancel";
                     tip: "Keep the current draft (Esc)";
-                    horizontal-stretch: 1;
+                    width: (footer.width - footer.spacing) / 2;
                     clicked => {
                         root.cancel();
                     }
@@ -376,7 +471,7 @@ export component AffixPickerPanel inherits Rectangle {
                     text: ForgeState.picker-action;
                     kind: ButtonKind.primary;
                     enabled: ForgeState.can-use-picker;
-                    horizontal-stretch: 1;
+                    width: (footer.width - footer.spacing) / 2;
                     clicked => {
                         root.use-entry();
                     }

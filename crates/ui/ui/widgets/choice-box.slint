@@ -1,7 +1,7 @@
 // A pick from a list (Fluent's compact combo box, retinted): the choice and a chevron; one keyboard stop that opens a
 // bounded list. It is at least a field wide and grows as its choice's words need (`natural-width`); the caller places it.
 
-import { ScrollView } from "std-widgets.slint";
+import { ScrollView } from "scroll-view.slint";
 import { Tokens } from "../tokens.slint";
 import { KeyboardFocus } from "../globals.slint";
 import { FocusRing } from "focus.slint";
@@ -11,13 +11,16 @@ export component ChoiceBox inherits Rectangle {
     in property <int> index;
     in property <string> label;
     in property <bool> enabled: true;
+    // Shown while `index` holds no choice (a value the list doesn't name); empty by default.
+    in property <string> fallback-text;
     callback chosen(int);
 
-    // The width its choice needs, and at least a field's (a combo box sizes to what it shows).
-    out property <length> natural-width: Math.max(Tokens.feature-field-width, Tokens.space-12 + measure.preferred-width + Tokens.space-8 + Tokens.icon-size-tiny + Tokens.space-10);
+    // The width its choice needs, and at least a field's (a combo box sizes to what it shows): Fluent's 12px padding,
+    // the choice, and the chevron's 32px column.
+    out property <length> natural-width: Math.max(Tokens.feature-field-width, Tokens.space-12 + measure.preferred-width + Tokens.combo-box-glyph-column-width);
 
     property <int> highlighted;
-    property <string> current: root.index >= 0 && root.index < root.choices.length ? root.choices[root.index] : "";
+    property <string> current: root.index >= 0 && root.index < root.choices.length ? root.choices[root.index] : root.fallback-text;
 
     function open() {
         root.highlighted = Math.max(0, root.index);
@@ -45,7 +48,7 @@ export component ChoiceBox inherits Rectangle {
 
     Text {
         x: Tokens.space-12;
-        width: parent.width - self.x - Tokens.space-8 - Tokens.icon-size-tiny - Tokens.space-10;
+        width: parent.width - self.x - Tokens.combo-box-glyph-column-width;
         height: parent.height;
         text: root.current;
         color: root.enabled ? Tokens.text-brush : Tokens.text-disabled-brush;
@@ -71,7 +74,9 @@ export component ChoiceBox inherits Rectangle {
             }
         }
         key-pressed(event) => {
-            if (event.text == Key.Return || event.text == " " || (event.text == Key.DownArrow && event.modifiers.alt)) {
+            // As Avalonia's: F4, Alt+Down or Alt+Up open the list, as Enter and Space do.
+            if (event.text == Key.Return || event.text == " " || (event.text == Key.F4 && !event.modifiers.alt)
+                || ((event.text == Key.DownArrow || event.text == Key.UpArrow) && event.modifiers.alt)) {
                 root.open();
                 return accept;
             }
@@ -123,7 +128,9 @@ export component ChoiceBox inherits Rectangle {
                     self.focus();
                 }
                 key-pressed(event) => {
-                    if (event.text == Key.Escape) {
+                    // Escape, F4, Alt+Up and Alt+Down close it again.
+                    if (event.text == Key.Escape || (event.text == Key.F4 && !event.modifiers.alt)
+                        || ((event.text == Key.DownArrow || event.text == Key.UpArrow) && event.modifiers.alt)) {
                         popup.close();
                         return accept;
                     }

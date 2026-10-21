@@ -1,12 +1,14 @@
 // The Mods page (ModsView.axaml): [list | the selected mod's pane] over the action bar, as on Item Forge. Rust
 // (`crates/ui/src/mods.rs`) puts the mod library behind it; disk work belongs to its ordered worker.
-import { ScrollView } from "std-widgets.slint";
+import { ScrollView } from "../widgets/scroll-view.slint";
 import { Tokens } from "../tokens.slint";
 import { KeyboardFocus } from "../globals.slint";
 import { TitleText, SectionText, SecondaryText, BodyText, LabelText, CaptionText, CaptionTone } from "../widgets/text.slint";
 import { Button, ButtonKind } from "../widgets/button.slint";
 import { ToggleSwitch } from "../widgets/toggle.slint";
 import { FocusRing, TipTrigger } from "../widgets/focus.slint";
+import { ChoiceBox } from "../widgets/choice-box.slint";
+import { PopupMenu } from "../widgets/menu.slint";
 import { MessageTone } from "common.slint";
 import { AshField } from "../decorations.slint";
 
@@ -19,7 +21,7 @@ export struct SettingChoiceRow { value: string, label: string }
 export struct ModSettingRow {
     category: string, key: string, name: string, description: string, group: string,
     kind: string, value: string, is-on: bool, unit: string, drafted: bool,
-    was: string, error: string, choices: [SettingChoiceRow], choice-label: string, choice-index: int,
+    was: string, error: string, choices: [SettingChoiceRow], choice-label: string, choice-index: int, choice-labels: [string],
 }
 export struct ModLogRow { time: string, text: string, error: bool, count: int, count-tip: string }
 
@@ -95,7 +97,9 @@ component ModCheck inherits Rectangle {
     height: Tokens.icon-size-nav;
     border-radius: Tokens.control-radius;
     border-width: 1px;
-    border-color: !root.enabled ? Tokens.text-disabled-brush : root.checked ? Tokens.accent-brush : root.hovered ? Tokens.text-brush : Tokens.text-secondary-brush;
+    // Unticked, Fluent's BaseMedium frame, BaseMediumHigh under the pointer; the text's secondary colour in high contrast.
+    border-color: !root.enabled ? Tokens.text-disabled-brush : root.checked ? Tokens.accent-brush
+        : Tokens.high-contrast ? Tokens.text-secondary-brush : root.hovered ? Tokens.fluent-base-medium-high-color : Tokens.fluent-base-medium-color;
     background: root.checked ? Tokens.accent-brush : Tokens.ground-brush;
     if root.checked: Path {
         x: Tokens.space-4;
@@ -103,15 +107,15 @@ component ModCheck inherits Rectangle {
         width: Tokens.space-12;
         height: Tokens.space-12;
         stroke: Tokens.on-accent-brush;
-        stroke-width: 1.5px;
+        stroke-width: Tokens.check-glyph-stroke-width;
         MoveTo { x: 1; y: 6; }
         LineTo { x: 4.5; y: 9.5; }
         LineTo { x: 11; y: 2.5; }
     }
 }
 
-// A part of a row with a tooltip of its own. Pressing it selects the row, as pressing the rest of the row does. A
-// TouchArea takes the right button too, before the ContextMenuArea around it sees it, so it asks for the menu itself.
+// A part of a row with a tooltip of its own. Pressing it selects the row, as pressing the rest of the row does; the
+// right button asks for the row's menu at the pointer.
 component RowSpot inherits TouchArea {
     in property <string> tip;
     callback pressed-down();
@@ -129,22 +133,29 @@ component RowSpot inherits TouchArea {
     TipTrigger { text: root.tip; hovered: root.has-hover; }
 }
 
-// Native editing keeps its undo stack. Enter and focus loss commit the draft.
+// Fluent's text box (retinted, compact): the number right-aligned, a muted unit 8px from the right edge after it. Native
+// editing keeps its undo stack. Enter and focus loss commit the draft.
 component ModsField inherits Rectangle {
-    in-out property <string> text;
+    in property <string> text;
     in property <string> label;
     in property <string> unit;
     in property <bool> enabled: true;
     callback edited(string);
     callback committed();
+    // Revert must reach the input even after native editing replaced its binding.
+    changed text => {
+        if (input.text != root.text) { input.text = root.text; }
+    }
     property <bool> input-focused: input.has-focus;
     changed input-focused => { if (!root.input-focused) { root.committed(); } }
     height: Tokens.control-min-height;
     border-radius: Tokens.control-radius;
     border-width: 1px;
     // A number the cfg can't hold is said under the setting's name; the box keeps its ordinary frame, as in the C# view.
-    border-color: input.has-focus ? Tokens.accent-brush : Tokens.strong-line-brush;
-    background: input.has-focus ? Tokens.ground-brush : touch.has-hover ? Tokens.hover-brush : Tokens.surface-brush;
+    // AltMediumLow at rest in a BaseMedium frame, AltMedium and BaseMediumHigh under the pointer, the ground in the accent
+    // frame while focused; frames step up under high contrast (as widgets/text-field.slint).
+    background: !root.enabled ? Tokens.strong-line-brush : input.has-focus ? Tokens.ground-brush : touch.has-hover ? Tokens.raised-brush : Tokens.hover-brush;
+    border-color: !root.enabled ? Tokens.strong-line-brush : input.has-focus ? Tokens.accent-brush : touch.has-hover ? Tokens.fluent-base-medium-high-color : (Tokens.high-contrast ? Tokens.text-secondary-brush : Tokens.fluent-base-medium-color);
     accessible-role: text-input;
     accessible-label: root.label;
     accessible-value: root.text;
@@ -154,12 +165,14 @@ component ModsField inherits Rectangle {
         pointer-event(event) => { if (event.kind == PointerEventKind.down) { KeyboardFocus.visible = false; } }
         clicked => { input.focus(); }
     }
+    // [padding | number | padding] [unit | its margin], inside the 1px frame (Avalonia's TextBox: InnerRightContent after
+    // the text presenter and its padding).
     HorizontalLayout {
-        padding-left: Tokens.space-8;
-        padding-right: root.unit != "" ? Tokens.mod-setting-unit-margin.right : Tokens.space-6;
-        spacing: Tokens.space-4;
+        padding-left: 1px + Tokens.text-control-padding.left;
+        padding-right: 1px + (root.unit != "" ? Tokens.mod-setting-unit-margin.right : Tokens.text-control-padding.right);
+        spacing: root.unit != "" ? Tokens.text-control-padding.right : 0px;
         input := TextInput {
-            text <=> root.text;
+            text: root.text;
             enabled: root.enabled;
             single-line: true;
             color: root.enabled ? Tokens.text-brush : Tokens.text-disabled-brush;
@@ -167,99 +180,13 @@ component ModsField inherits Rectangle {
             selection-foreground-color: Tokens.on-accent-color;
             horizontal-alignment: right;
             vertical-alignment: center;
+            horizontal-stretch: 1;
             edited => { root.edited(self.text); }
             accepted => { root.committed(); }
         }
-        if root.unit != "": Text { text: root.unit; color: Tokens.text-muted-brush; vertical-alignment: center; }
+        if root.unit != "": Text { text: root.unit; color: Tokens.text-muted-brush; vertical-alignment: center; horizontal-stretch: 0; }
     }
     FocusRing { focused: input.has-focus; }
-}
-
-// One keyboard stop opens a bounded scrolling choice popup.
-component ModsChoice inherits Rectangle {
-    in property <[SettingChoiceRow]> choices;
-    in property <string> value;
-    in property <string> choice-label;
-    in property <int> choice-index;
-    in property <string> label;
-    in property <bool> enabled: true;
-    callback chosen(string);
-    property <int> highlighted;
-    function open() { root.highlighted = Math.max(0, root.choice-index); popup.show(); }
-    height: Tokens.control-min-height;
-    border-radius: Tokens.control-radius;
-    border-width: 1px;
-    border-color: focus.has-focus ? Tokens.accent-brush : Tokens.strong-line-brush;
-    background: touch.has-hover ? Tokens.hover-brush : Tokens.surface-brush;
-    accessible-role: combobox;
-    accessible-label: root.label;
-    accessible-value: root.choice-label;
-    HorizontalLayout {
-        padding-left: Tokens.space-8;
-        padding-right: Tokens.space-8;
-        spacing: Tokens.space-8;
-        Text { text: root.choice-label; color: Tokens.text-brush; vertical-alignment: center; overflow: elide; horizontal-stretch: 1; }
-        Image { source: Tokens.icon-chevron-down; image-fit: contain; colorize: Tokens.text-muted-brush; width: Tokens.icon-size-tiny; height: Tokens.icon-size-tiny; y: (parent.height - self.height) / 2; }
-    }
-    focus := FocusScope {
-        enabled: root.enabled;
-        focus-gained(reason) => { if (reason == FocusReason.tab-navigation) { KeyboardFocus.visible = true; } }
-        key-pressed(event) => {
-            if (event.text == Key.Return || event.text == " " || event.text == Key.DownArrow || event.text == Key.UpArrow) { root.open(); return accept; }
-            reject
-        }
-        touch := TouchArea {
-            enabled: root.enabled;
-            pointer-event(event) => { if (event.kind == PointerEventKind.down) { KeyboardFocus.visible = false; } }
-            clicked => { focus.focus(); root.open(); }
-        }
-    }
-    FocusRing { focused: focus.has-focus; }
-    popup := PopupWindow {
-        x: 0;
-        y: root.height + Tokens.space-2;
-        width: Math.max(root.width, Tokens.value-flyout-width);
-        height: Math.min(root.choices.length, 8) * Tokens.control-min-height + Tokens.space-8;
-        close-policy: PopupClosePolicy.close-on-click-outside;
-        Rectangle {
-            background: Tokens.raised-brush;
-            border-width: 1px;
-            border-color: Tokens.strong-line-brush;
-            border-radius: Tokens.control-radius;
-            FocusScope {
-                init => { self.focus(); }
-                key-pressed(event) => {
-                    if (event.text == Key.Escape) { popup.close(); return accept; }
-                    if (event.text == Key.UpArrow) { root.highlighted = Math.max(0, root.highlighted - 1); return accept; }
-                    if (event.text == Key.DownArrow) { root.highlighted = Math.min(root.choices.length - 1, root.highlighted + 1); return accept; }
-                    if (event.text == Key.Home) { root.highlighted = 0; return accept; }
-                    if (event.text == Key.End) { root.highlighted = root.choices.length - 1; return accept; }
-                    if (event.text == Key.Return || event.text == " ") { root.chosen(root.choices[root.highlighted].value); popup.close(); return accept; }
-                    reject
-                }
-                ScrollView {
-                    x: Tokens.space-4;
-                    y: Tokens.space-4;
-                    width: parent.width - Tokens.space-8;
-                    height: parent.height - Tokens.space-8;
-                    content-width: self.visible-width;
-                    content-height: root.choices.length * Tokens.control-min-height;
-                    content-y: -Math.max(0px, root.highlighted * Tokens.control-min-height - self.visible-height + Tokens.control-min-height);
-                    VerticalLayout {
-                        for choice[index] in root.choices: Rectangle {
-                            height: Tokens.control-min-height;
-                            background: root.highlighted == index ? Tokens.selected-brush : transparent;
-                            Text { x: Tokens.space-8; width: parent.width - Tokens.space-16; text: choice.label; color: Tokens.text-brush; vertical-alignment: center; overflow: elide; }
-                            TouchArea {
-                                moved => { root.highlighted = index; }
-                                clicked => { root.chosen(choice.value); popup.close(); }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
 }
 
 // [name | control] over the description, which takes the pane's whole width, so a narrow pane keeps it readable.
@@ -284,27 +211,21 @@ component SettingItem inherits Rectangle {
                 // Switches, choices and boxes keep to the column's right edge, so they line up whatever their content.
                 Rectangle {
                     horizontal-stretch: 0;
-                    width: root.item.kind == "choice" ? Math.max(Tokens.mod-setting-field-width, choice-probe.preferred-width) : Tokens.mod-setting-field-width;
+                    width: root.item.kind == "choice" ? Math.max(Tokens.mod-setting-field-width, Tokens.space-12 + choice-probe.preferred-width + Tokens.combo-box-glyph-column-width) : Tokens.mod-setting-field-width;
                     height: Tokens.control-min-height;
-                    // The choice box is as wide as the label it shows, and never narrower than a number box.
-                    choice-probe := HorizontalLayout {
-                        visible: false;
-                        padding-left: Tokens.space-8;
-                        padding-right: Tokens.space-8;
-                        spacing: Tokens.space-8;
-                        Text { text: root.item.choice-label; }
-                        Rectangle { width: Tokens.icon-size-tiny; }
-                    }
+                    // The choice box is as wide as the label it shows (Fluent's 12px padding and 32px chevron column), and
+                    // never narrower than a number box.
+                    choice-probe := Text { visible: false; text: root.item.choice-label; }
                     if root.item.kind == "switch": ToggleSwitch {
                         x: parent.width - self.preferred-width;
                         width: self.preferred-width;
                         checked: root.item.is-on; label: root.item.name; enabled: !ModsState.busy;
                         toggled(value) => { ModsState.setting-toggled(root.index, value); }
                     }
-                    if root.item.kind == "choice": ModsChoice {
-                        choices: root.item.choices; value: root.item.value; label: root.item.name; enabled: !ModsState.busy;
-                        choice-label: root.item.choice-label; choice-index: root.item.choice-index;
-                        chosen(value) => { ModsState.setting-choice(root.index, value); }
+                    if root.item.kind == "choice": ChoiceBox {
+                        choices: root.item.choice-labels; index: root.item.choice-index; fallback-text: root.item.choice-label;
+                        label: root.item.name; enabled: !ModsState.busy;
+                        chosen(choice) => { ModsState.setting-choice(root.index, root.item.choices[choice].value); }
                     }
                     if root.item.kind != "switch" && root.item.kind != "choice": ModsField {
                         text: root.item.value; label: root.item.name; unit: root.item.unit;
@@ -338,15 +259,18 @@ component StatusLine inherits Rectangle {
     in property <image> icon;
     in property <brush> icon-ink;
     in property <brush> ink;
-    height: message-text.preferred-height;
+    // Tall enough for the icon as well, so a one-line message never clips its foot.
+    height: Math.max(message-text.preferred-height, Tokens.icon-baseline-nudge.top + Tokens.icon-size-small);
     Image {
-        x: 0; y: Tokens.space-2; width: Tokens.icon-size-small; height: Tokens.icon-size-small;
+        x: 0; y: Tokens.icon-baseline-nudge.top; width: Tokens.icon-size-small; height: Tokens.icon-size-small;
         image-fit: contain; source: root.icon; colorize: root.icon-ink;
     }
     message-text := CaptionText {
         x: Tokens.icon-size-small + Tokens.space-6; y: 0; width: parent.width - self.x; height: self.preferred-height;
         text: root.message; color: root.ink;
         accessible-role: text;
+        // Said when it changes, as the C# lines' AutomationProperties.LiveSetting="Polite".
+        accessible-live-region: polite;
     }
 }
 
@@ -364,11 +288,35 @@ export component ModsPage inherits Rectangle {
     property <int> active-index: ModsState.selected-index;
     property <int> visible-count: ModsState.mods.length;
     property <bool> had-rows;
+    // Ctrl+Z gives the list focus back, on the restored row, once it is there again (the C# FocusSelectedRow).
+    property <bool> focus-list-on-rows;
     init => { root.had-rows = ModsState.mods.length > 0; }
     changed visible-count => {
-        // Removing the final row destroys its focus scope. Keep page shortcuts, particularly Undo, alive.
+        // Removing the final row leaves the list no tab stop. Keep page shortcuts, particularly Undo, alive.
         if (root.visible-count == 0 && root.had-rows) { page-keys.focus(); }
+        if (root.visible-count > 0 && root.focus-list-on-rows) {
+            root.focus-list-on-rows = false;
+            list-focus.focus();
+        }
         root.had-rows = root.visible-count > 0;
+    }
+    // Rows wholly in view, for PageUp and PageDown: they go to the first or last of them, then a page further, as a
+    // Windows list does.
+    property <int> first-shown: Math.min(ModsState.mods.length - 1, Math.ceil(-library-scroll.content-y / root.row-step));
+    property <int> last-shown: Math.max(root.first-shown, Math.min(ModsState.mods.length - 1, Math.floor((-library-scroll.content-y + library-scroll.visible-height + Tokens.row-gap.bottom) / root.row-step) - 1));
+    property <int> page-rows: Math.max(1, root.last-shown - root.first-shown);
+    function page-down() -> int {
+        return ModsState.selected-index < root.last-shown ? root.last-shown : Math.min(ModsState.mods.length - 1, ModsState.selected-index + root.page-rows);
+    }
+    function page-up() -> int {
+        return ModsState.selected-index > root.first-shown ? root.first-shown : Math.max(0, ModsState.selected-index - root.page-rows);
+    }
+    // The keyboard opens the row menu under the selected row, at its left edge (Avalonia's BottomEdgeAlignedLeft).
+    function menu-under-row() {
+        row-menu.open-at(
+            list-focus.absolute-position.x - root.absolute-position.x,
+            list-focus.absolute-position.y - root.absolute-position.y + Math.max(0, ModsState.selected-index) * root.row-step + Tokens.row-min-height,
+            true);
     }
     changed active-index => {
         if (root.active-index >= 0) {
@@ -399,11 +347,19 @@ export component ModsPage inherits Rectangle {
     }
 
     // With no mods and none to build the content column has a still dusting of ash: nothing here, and nothing waited on.
-    if ModsState.is-read && ModsState.installed-count == 0 && ModsState.sources.length == 0: AshField { width: pane.x; height: bar.y; still: true; }
+    // Placed at the page's corner: an element given a size and no position is centred in its parent, which put every mote
+    // (pane gap / 2, bar / 2) away from the C# app's.
+    if ModsState.is-read && ModsState.installed-count == 0 && ModsState.sources.length == 0: AshField { x: 0; y: 0; width: pane.x; height: bar.y; still: true; }
     page-keys := FocusScope {
         key-pressed(event) => {
             // Ctrl+Z puts back a mod just removed, as the action bar's Undo does; a text box keeps Ctrl+Z for its own text.
-            if (event.modifiers.control && (event.text == "z" || event.text == "Z") && ModsState.can-undo) { ModsState.undo-remove(); return accept; }
+            if (event.modifiers.control && (event.text == "z" || event.text == "Z") && ModsState.can-undo) {
+                ModsState.undo-remove();
+                // Focus follows the restored row, as from the keyboard.
+                KeyboardFocus.visible = true;
+                if (ModsState.mods.length > 0) { list-focus.focus(); } else { root.focus-list-on-rows = true; }
+                return accept;
+            }
             reject
         }
         // Nothing above the list appears or disappears, so the list's top edge never moves under the pointer.
@@ -417,13 +373,27 @@ export component ModsPage inherits Rectangle {
                 TitleText { text: "Mods"; height: Tokens.line-height-title; vertical-alignment: center; }
                 SecondaryText { text: "Mods load only when you play offline with mods. Playing online or plain offline never loads them."; }
             }
-            // The list's tools: the folder it comes from and the log of the last game. Below the standard class, icons with tips.
+            // The list's tools: the folder it comes from and the log of the last game. Below the standard class their labels hide
+            // and they keep a standard button's padding, as the C# toolbar does. Adding is always open: it queues on the
+            // library's ordered worker behind the first read.
             HorizontalLayout {
                 spacing: Tokens.space-8; alignment: start;
                 padding-bottom: Tokens.preview-header-margin.bottom;
-                Button { text: root.compact ? "" : "Add mod"; icon: Tokens.icon-add; enabled: !ModsState.busy; tip: "Add a mod from its DLL file; take it out of a downloaded zip first"; clicked => { ModsState.add-mod(); } }
-                Button { text: root.compact ? "" : "Open folder"; icon: Tokens.icon-folder; enabled: ModsState.can-open-folder; tip: ModsState.open-folder-tip; clicked => { ModsState.open-folder(); } }
-                Button { text: root.compact ? "" : "Open log"; icon: Tokens.icon-log; enabled: ModsState.can-open-log; tip: ModsState.open-log-tip; clicked => { ModsState.open-log(); } }
+                Button {
+                    text: "Add mod"; label-hidden: root.compact; accessible-name: "Add mod"; icon: Tokens.icon-add;
+                    tip: "Add a mod from its DLL file; take it out of a downloaded zip first";
+                    clicked => { ModsState.add-mod(); }
+                }
+                Button {
+                    text: "Open folder"; label-hidden: root.compact; accessible-name: "Open the Mods folder"; icon: Tokens.icon-folder;
+                    enabled: ModsState.can-open-folder; tip: ModsState.open-folder-tip;
+                    clicked => { ModsState.open-folder(); }
+                }
+                Button {
+                    text: "Open log"; label-hidden: root.compact; accessible-name: "Open log"; icon: Tokens.icon-log;
+                    enabled: ModsState.can-open-log; tip: ModsState.open-log-tip;
+                    clicked => { ModsState.open-log(); }
+                }
             }
         }
         installed-header := HorizontalLayout {
@@ -438,7 +408,8 @@ export component ModsPage inherits Rectangle {
                 LabelText { text: "Installed"; horizontal-stretch: 0; vertical-alignment: center; }
                 CaptionText { text: ModsState.installed-count > 0 ? "\{ModsState.enabled-count} of \{ModsState.installed-count} on" : ""; horizontal-stretch: 1; vertical-alignment: center; }
             }
-            if root.wide: LabelText { text: "Version"; width: root.version-width; wrap: no-wrap; }
+            // The C# grid keeps the Version column's gap while the column is empty, so the name stops 12px earlier.
+            LabelText { text: root.wide ? "Version" : ""; width: root.version-width; wrap: no-wrap; }
             Rectangle { width: root.state-width; }
         }
         // The installed list over the mod projects not installed yet: sized to its rows, it scrolls in what the projects leave it.
@@ -450,126 +421,136 @@ export component ModsPage inherits Rectangle {
             content-width: self.visible-width;
             content-height: ModsState.mods.length * root.row-step;
             // One tab stop: arrows move, Space turns the selected mod on or off, Del removes it, the menu key or Shift+F10 opens its menu.
-            if ModsState.mods.length > 0: list-menu := ContextMenuArea {
+            // Always there, so Ctrl+Z can bring focus back to it; a tab stop only while it has rows.
+            list-focus := FocusScope {
+                enabled: ModsState.mods.length > 0;
                 height: ModsState.mods.length * root.row-step;
-                Menu {
-                    MenuItem { title: ModsState.selected-enabled ? "Turn off" : "Turn on"; enabled: ModsState.selected-index >= 0 && !ModsState.busy; activated => { ModsState.toggle-mod(ModsState.selected-index); } }
-                    MenuItem { title: "Show in folder"; enabled: ModsState.selected-index >= 0; activated => { ModsState.reveal-mod(ModsState.selected-index); } }
-                    MenuSeparator { }
-                    MenuItem { title: "Remove"; enabled: ModsState.selected-index >= 0 && !ModsState.busy; activated => { ModsState.remove-mod(ModsState.selected-index); } }
-                }
-                list-focus := FocusScope {
-                    accessible-role: list;
-                    accessible-label: "Installed mods";
-                    focus-gained(reason) => { if (reason == FocusReason.tab-navigation) { KeyboardFocus.visible = true; } if (ModsState.selected-index < 0) { ModsState.select-mod(0); } }
-                    key-pressed(event) => {
-                        // The keyboard opens the menu under the row; a right-click opens it at the pointer.
-                        if (event.text == Key.Menu || (event.text == Key.F10 && event.modifiers.shift)) {
-                            list-menu.show({x: Tokens.row-padding.left, y: Math.max(0, ModsState.selected-index) * root.row-step + Tokens.row-min-height});
-                            return accept;
-                        }
-                        if (event.modifiers.control || event.modifiers.alt) { return reject; }
-                        if (event.text == Key.DownArrow) { ModsState.select-mod(Math.min(ModsState.mods.length - 1, ModsState.selected-index + 1)); return accept; }
-                        if (event.text == Key.UpArrow) { ModsState.select-mod(Math.max(0, ModsState.selected-index - 1)); return accept; }
-                        if (event.text == Key.Home) { ModsState.select-mod(0); return accept; }
-                        if (event.text == Key.End) { ModsState.select-mod(ModsState.mods.length - 1); return accept; }
-                        if (event.text == " " && !ModsState.busy) { ModsState.toggle-mod(ModsState.selected-index); return accept; }
-                        if (event.text == Key.Delete && !ModsState.busy) { ModsState.remove-mod(ModsState.selected-index); return accept; }
-                        reject
+                accessible-role: list;
+                accessible-label: "Installed mods";
+                focus-gained(reason) => { if (reason == FocusReason.tab-navigation) { KeyboardFocus.visible = true; } if (ModsState.selected-index < 0) { ModsState.select-mod(0); } }
+                key-pressed(event) => {
+                    // The keyboard opens the menu under the row; a right-click opens it at the pointer.
+                    if (event.text == Key.Menu || (event.text == Key.F10 && event.modifiers.shift)) {
+                        root.menu-under-row();
+                        return accept;
                     }
-                    VerticalLayout {
-                        spacing: Tokens.row-gap.bottom;
-                        alignment: start;
-                        for item[index] in ModsState.mods: mod-row := Rectangle {
-                            // Hovered parts with tooltips of their own count as the row being hovered.
-                            property <int> spots;
-                            property <bool> selected: ModsState.selected-index == index;
-                            property <bool> hovered: row-touch.has-hover || self.spots > 0;
-                            function pick() { ModsState.select-mod(index); list-focus.focus(); }
-                            // A right-click opens the row's menu at the pointer.
-                            function menu-at(x: length, y: length) { list-menu.show({x: x - list-menu.absolute-position.x, y: y - list-menu.absolute-position.y}); }
-                            height: Tokens.row-min-height;
-                            border-radius: Tokens.control-radius;
-                            border-width: 1px;
-                            border-color: self.selected ? Tokens.accent-brush : transparent;
-                            background: self.selected ? Tokens.selected-brush : self.hovered ? Tokens.hover-brush : transparent;
-                            accessible-role: list-item;
-                            accessible-label: item.name;
-                            accessible-description: item.caption;
-                            accessible-checkable: true;
-                            accessible-checked: item.enabled;
-                            accessible-item-selectable: true;
-                            accessible-item-selected: self.selected;
-                            accessible-action-default => { ModsState.select-mod(index); }
-                            row-touch := RowSpot {
-                                pressed-down => { mod-row.pick(); }
-                                menu-requested(x, y) => { mod-row.menu-at(x, y); }
+                    if (event.modifiers.control || event.modifiers.alt) { return reject; }
+                    // Keys on the list show where focus is, as the C# list's arrows show its focus frame.
+                    if (event.text == Key.DownArrow) { KeyboardFocus.visible = true; ModsState.select-mod(Math.min(ModsState.mods.length - 1, ModsState.selected-index + 1)); return accept; }
+                    if (event.text == Key.UpArrow) { KeyboardFocus.visible = true; ModsState.select-mod(Math.max(0, ModsState.selected-index - 1)); return accept; }
+                    if (event.text == Key.Home) { KeyboardFocus.visible = true; ModsState.select-mod(0); return accept; }
+                    if (event.text == Key.End) { KeyboardFocus.visible = true; ModsState.select-mod(ModsState.mods.length - 1); return accept; }
+                    if (event.text == Key.PageDown) { KeyboardFocus.visible = true; ModsState.select-mod(root.page-down()); return accept; }
+                    if (event.text == Key.PageUp) { KeyboardFocus.visible = true; ModsState.select-mod(root.page-up()); return accept; }
+                    if (event.text == " " && !ModsState.busy) { KeyboardFocus.visible = true; ModsState.toggle-mod(ModsState.selected-index); return accept; }
+                    if (event.text == Key.Delete && !ModsState.busy) { KeyboardFocus.visible = true; ModsState.remove-mod(ModsState.selected-index); return accept; }
+                    reject
+                }
+                VerticalLayout {
+                    spacing: Tokens.row-gap.bottom;
+                    alignment: start;
+                    for item[index] in ModsState.mods: mod-row := Rectangle {
+                        // Hovered parts with tooltips of their own count as the row being hovered.
+                        property <int> spots;
+                        property <bool> selected: ModsState.selected-index == index;
+                        property <bool> hovered: row-touch.has-hover || self.spots > 0;
+                        function pick() { ModsState.select-mod(index); list-focus.focus(); }
+                        // A right-click opens the row's menu at the pointer.
+                        function menu-at(x: length, y: length) { row-menu.open-at(x - root.absolute-position.x, y - root.absolute-position.y, false); }
+                        height: Tokens.row-min-height;
+                        border-radius: Tokens.control-radius;
+                        border-width: 1px;
+                        border-color: self.selected ? Tokens.accent-brush : transparent;
+                        background: self.selected ? Tokens.selected-brush : self.hovered ? Tokens.hover-brush : transparent;
+                        accessible-role: list-item;
+                        accessible-label: item.name;
+                        accessible-description: item.caption;
+                        accessible-checkable: true;
+                        accessible-checked: item.enabled;
+                        accessible-item-selectable: true;
+                        accessible-item-selected: self.selected;
+                        accessible-action-default => { ModsState.select-mod(index); }
+                        row-touch := RowSpot {
+                            pressed-down => { mod-row.pick(); }
+                            menu-requested(x, y) => { mod-row.menu-at(x, y); }
+                        }
+                        HorizontalLayout {
+                            // Inside the row's 1px frame, as ListBoxItem's padding is.
+                            padding-left: 1px + Tokens.row-padding.left; padding-right: 1px + Tokens.row-padding.right; spacing: Tokens.space-12;
+                            Rectangle {
+                                width: Tokens.icon-size-nav;
+                                ModCheck {
+                                    y: (parent.height - self.height) / 2;
+                                    checked: item.enabled;
+                                    hovered: check-spot.has-hover;
+                                    check-spot := RowSpot {
+                                        tip: "Load this mod when you play with mods (Space)";
+                                        changed has-hover => { mod-row.spots += self.has-hover ? 1 : -1; }
+                                        pressed-down => { mod-row.pick(); }
+                                        menu-requested(x, y) => { mod-row.menu-at(x, y); }
+                                        clicked => { if (!ModsState.busy) { ModsState.toggle-mod(index); } }
+                                    }
+                                }
                             }
+                            VerticalLayout {
+                                alignment: center; horizontal-stretch: 1; spacing: Tokens.space-1;
+                                Text {
+                                    text: item.name; font-size: Tokens.font-size-value; color: item.enabled ? Tokens.text-brush : Tokens.text-muted-brush; overflow: elide;
+                                    RowSpot {
+                                        tip: item.name;
+                                        changed has-hover => { mod-row.spots += self.has-hover ? 1 : -1; }
+                                        pressed-down => { mod-row.pick(); }
+                                        menu-requested(x, y) => { mod-row.menu-at(x, y); }
+                                    }
+                                }
+                                // Maximized, the list gains a Version column and the caption keeps only the author.
+                                CaptionText {
+                                    text: root.wide ? item.author : item.caption; wrap: no-wrap; overflow: elide;
+                                    RowSpot {
+                                        tip: root.wide ? item.author : item.caption;
+                                        changed has-hover => { mod-row.spots += self.has-hover ? 1 : -1; }
+                                        pressed-down => { mod-row.pick(); }
+                                        menu-requested(x, y) => { mod-row.menu-at(x, y); }
+                                    }
+                                }
+                            }
+                            // Kept while empty, with its gap, as the C# grid's column is.
+                            CaptionText { text: root.wide ? item.version : ""; tone: CaptionTone.secondary; width: root.version-width; wrap: no-wrap; vertical-alignment: center; }
+                            // Only what needs attention shows in the row: a load problem, and the draft pencil while it differs from the last game.
                             HorizontalLayout {
-                                padding-left: Tokens.row-padding.left; padding-right: Tokens.row-padding.right; spacing: Tokens.space-12;
-                                Rectangle {
-                                    width: Tokens.icon-size-nav;
-                                    ModCheck {
-                                        y: (parent.height - self.height) / 2;
-                                        checked: item.enabled;
-                                        hovered: check-spot.has-hover;
-                                        check-spot := RowSpot {
-                                            tip: "Load this mod when you play with mods (Space)";
-                                            changed has-hover => { mod-row.spots += self.has-hover ? 1 : -1; }
-                                            pressed-down => { mod-row.pick(); }
-                                            menu-requested(x, y) => { mod-row.menu-at(x, y); }
-                                            clicked => { if (!ModsState.busy) { ModsState.toggle-mod(index); } }
-                                        }
-                                    }
+                                width: root.state-width;
+                                spacing: Tokens.space-12;
+                                alignment: end;
+                                if item.problem != "": HorizontalLayout {
+                                    spacing: Tokens.space-6;
+                                    Image { width: Tokens.icon-size-small; height: Tokens.icon-size-small; y: (parent.height - self.height) / 2; image-fit: contain; source: Tokens.icon-error; colorize: Tokens.error-brush; }
+                                    CaptionText { text: item.problem-label; tone: CaptionTone.error; wrap: no-wrap; vertical-alignment: center; }
                                 }
-                                VerticalLayout {
-                                    alignment: center; horizontal-stretch: 1; spacing: Tokens.space-1;
-                                    Text {
-                                        text: item.name; font-size: Tokens.font-size-value; color: item.enabled ? Tokens.text-brush : Tokens.text-muted-brush; overflow: elide;
-                                        RowSpot {
-                                            tip: item.name;
-                                            changed has-hover => { mod-row.spots += self.has-hover ? 1 : -1; }
-                                            pressed-down => { mod-row.pick(); }
-                                            menu-requested(x, y) => { mod-row.menu-at(x, y); }
-                                        }
-                                    }
-                                    // Maximized, the list gains a Version column and the caption keeps only the author.
-                                    CaptionText {
-                                        text: root.wide ? item.author : item.caption; wrap: no-wrap; overflow: elide;
-                                        RowSpot {
-                                            tip: root.wide ? item.author : item.caption;
-                                            changed has-hover => { mod-row.spots += self.has-hover ? 1 : -1; }
-                                            pressed-down => { mod-row.pick(); }
-                                            menu-requested(x, y) => { mod-row.menu-at(x, y); }
-                                        }
-                                    }
-                                }
-                                if root.wide: CaptionText { text: item.version; tone: CaptionTone.secondary; width: root.version-width; wrap: no-wrap; vertical-alignment: center; }
-                                // Only what needs attention shows in the row: a load problem, and the draft pencil while it differs from the last game.
-                                HorizontalLayout {
-                                    width: root.state-width;
-                                    spacing: Tokens.space-12;
-                                    alignment: end;
-                                    if item.problem != "": HorizontalLayout {
-                                        spacing: Tokens.space-6;
-                                        Image { width: Tokens.icon-size-small; height: Tokens.icon-size-small; y: (parent.height - self.height) / 2; image-fit: contain; source: Tokens.icon-error; colorize: Tokens.error-brush; }
-                                        CaptionText { text: item.problem-label; tone: CaptionTone.error; wrap: no-wrap; vertical-alignment: center; }
-                                    }
-                                    if item.drafted: Rectangle {
-                                        width: Tokens.icon-size-small;
-                                        accessible-role: image;
-                                        accessible-label: "Changed since the last game with mods";
-                                        Image { width: Tokens.icon-size-small; height: Tokens.icon-size-small; y: (parent.height - self.height) / 2; image-fit: contain; source: Tokens.icon-draft; colorize: Tokens.draft-brush; }
-                                        RowSpot {
-                                            tip: "Changed since the last game with mods";
-                                            changed has-hover => { mod-row.spots += self.has-hover ? 1 : -1; }
-                                            pressed-down => { mod-row.pick(); }
-                                            menu-requested(x, y) => { mod-row.menu-at(x, y); }
-                                        }
+                                if item.drafted: Rectangle {
+                                    width: Tokens.icon-size-small;
+                                    accessible-role: image;
+                                    accessible-label: "Changed since the last game with mods";
+                                    Image { width: Tokens.icon-size-small; height: Tokens.icon-size-small; y: (parent.height - self.height) / 2; image-fit: contain; source: Tokens.icon-draft; colorize: Tokens.draft-brush; }
+                                    RowSpot {
+                                        tip: "Changed since the last game with mods";
+                                        changed has-hover => { mod-row.spots += self.has-hover ? 1 : -1; }
+                                        pressed-down => { mod-row.pick(); }
+                                        menu-requested(x, y) => { mod-row.menu-at(x, y); }
                                     }
                                 }
                             }
-                            FocusRing { focused: list-focus.has-focus && mod-row.selected; }
+                        }
+                        // Fluent's focus visual on a list item sits inside it, over its frame: 2px of the focus colour on a 1px
+                        // line of the ground (so the scroller can't clip it off the first row).
+                        if list-focus.has-focus && mod-row.selected && KeyboardFocus.visible: Rectangle {
+                            border-radius: Tokens.control-radius;
+                            border-width: 2px;
+                            border-color: Tokens.focus-brush;
+                            Rectangle {
+                                x: 2px; y: 2px; width: parent.width - 4px; height: parent.height - 4px;
+                                border-width: 1px;
+                                border-color: Tokens.ground-brush;
+                            }
                         }
                     }
                 }
@@ -588,7 +569,7 @@ export component ModsPage inherits Rectangle {
             if ModsState.is-read && ModsState.mods.length == 0: HorizontalLayout {
                 alignment: start;
                 padding-top: Tokens.empty-action-margin.top;
-                Button { text: "Add mod"; enabled: !ModsState.busy; tip: "Add a mod from its DLL file; take it out of a downloaded zip first"; clicked => { ModsState.add-mod(); } }
+                Button { text: "Add mod"; tip: "Add a mod from its DLL file; take it out of a downloaded zip first"; clicked => { ModsState.add-mod(); } }
             }
         }
         // Mod projects in the sources folder that no installed mod builds: not loaded (the box is off and can't be ticked) until built and installed.
@@ -609,8 +590,10 @@ export component ModsPage inherits Rectangle {
                     LabelText { text: "Not installed"; horizontal-stretch: 0; vertical-alignment: center; }
                     CaptionText { text: "\{ModsState.sources.length} from sources"; vertical-alignment: center; horizontal-stretch: 1; }
                 }
+                // Each C# row keeps its RowGap below it, the last one too.
                 VerticalLayout {
                     padding-top: Tokens.mod-list-margin.top;
+                    padding-bottom: Tokens.row-gap.bottom;
                     spacing: Tokens.row-gap.bottom;
                     for source[index] in ModsState.sources: HorizontalLayout {
                         min-height: Tokens.row-min-height;
@@ -628,18 +611,33 @@ export component ModsPage inherits Rectangle {
                                 TipTrigger { text: "Build and install it to load it"; hovered: check-tip.has-hover; }
                             }
                         }
-                        VerticalLayout {
-                            alignment: center; spacing: Tokens.space-1; horizontal-stretch: 1;
-                            Text {
-                                text: source.name; font-size: Tokens.font-size-value; color: Tokens.text-muted-brush; overflow: elide;
-                                source-name-tip := TouchArea { }
-                                TipTrigger { text: source.name; hovered: source-name-tip.has-hover; }
+                        // The name and caption can be elided, with hover tips in full; as one tab stop they say both to the
+                        // keyboard too (the selected mod's identity block does the same).
+                        source-text := Rectangle {
+                            horizontal-stretch: 1;
+                            source-focus := FocusScope {
+                                accessible-role: text;
+                                accessible-label: source.name + "\n" + source.project;
+                                focus-gained(reason) => { if (reason == FocusReason.tab-navigation) { KeyboardFocus.visible = true; } }
+                                TouchArea {
+                                    pointer-event(event) => { if (event.kind == PointerEventKind.down) { KeyboardFocus.visible = false; } }
+                                }
                             }
-                            CaptionText {
-                                text: source.caption; wrap: no-wrap; overflow: elide;
-                                caption-tip := TouchArea { }
-                                TipTrigger { text: source.project; hovered: caption-tip.has-hover; }
+                            VerticalLayout {
+                                alignment: center; spacing: Tokens.space-1;
+                                Text {
+                                    text: source.name; font-size: Tokens.font-size-value; color: Tokens.text-muted-brush; overflow: elide;
+                                    source-name-tip := TouchArea { }
+                                    TipTrigger { text: source.name; hovered: source-name-tip.has-hover; }
+                                }
+                                CaptionText {
+                                    text: source.caption; wrap: no-wrap; overflow: elide;
+                                    caption-tip := TouchArea { }
+                                    TipTrigger { text: source.project; hovered: caption-tip.has-hover; }
+                                }
                             }
+                            TipTrigger { text: source.name + "\n" + source.project; focused: source-focus.has-focus; }
+                            FocusRing { focused: source-focus.has-focus; }
                         }
                         Button {
                             text: source.busy ? "Building…" : "Build and install";
@@ -658,9 +656,10 @@ export component ModsPage inherits Rectangle {
             x: root.width - root.pane-width; y: 0; width: root.pane-width; height: bar.y;
             background: Tokens.raised-brush;
             Rectangle { x: 0; y: 0; width: 1px; background: Tokens.hairline-brush; }
+            // Inside the pane's 1px left border, as the C# Border's content is.
             if ModsState.selected-index < 0: CaptionText {
-                x: Tokens.pane-content-margin.left; y: Tokens.pane-content-margin.top;
-                width: parent.width - Tokens.pane-content-margin.left - Tokens.pane-content-margin.right;
+                x: 1px + Tokens.pane-content-margin.left; y: Tokens.pane-content-margin.top;
+                width: parent.width - 1px - Tokens.pane-content-margin.left - Tokens.pane-content-margin.right;
                 height: self.preferred-height;
                 text: ModsState.installed-count > 0 ? "Select a mod to see what it is, whether it loaded, and its settings." : "A mod's details and settings show here once you add one.";
             }
@@ -668,34 +667,51 @@ export component ModsPage inherits Rectangle {
                 x: 1px;
                 width: parent.width - 1px;
                 content-width: self.visible-width;
-                // Measured from where the details really end (research/slint.md: wrapped text in `if` and `for`).
-                content-height: detail.y + detail-end.y + Tokens.pane-content-margin.bottom;
+                // Measured from where the details really end (research/slint.md: wrapped text in `if` and `for`). The end
+                // marker sits one spacing below the last block; the C# StackPanel adds none after it.
+                content-height: detail.y + detail-end.y - detail.spacing + Tokens.pane-content-margin.bottom;
                 detail := VerticalLayout {
-                    x: Tokens.pane-content-margin.left - 1px; y: Tokens.pane-content-margin.top;
-                    width: parent.width - Tokens.pane-content-margin.left - Tokens.pane-content-margin.right + 1px;
+                    x: Tokens.pane-content-margin.left; y: Tokens.pane-content-margin.top;
+                    width: parent.width - Tokens.pane-content-margin.left - Tokens.pane-content-margin.right;
                     height: self.preferred-height; spacing: Tokens.space-18; alignment: start;
-                    VerticalLayout {
-                        spacing: Tokens.space-4;
-                        SectionText {
-                            text: ModsState.selected-name; max-lines: Tokens.title-max-lines; overflow: elide;
-                            name-tip := TouchArea { }
-                            TipTrigger { text: ModsState.selected-name; hovered: name-tip.has-hover; }
+                    // What it is. The name, the file and the project can be elided, and their hover tips say them in full; the
+                    // block is one tab stop whose keyboard tip says all three, so the keyboard reaches them too.
+                    identity := Rectangle {
+                        property <string> full: ModsState.selected-name + "\n" + ModsState.selected-file
+                            + (ModsState.selected-has-sources ? "\n" + ModsState.selected-source-path : "");
+                        identity-focus := FocusScope {
+                            accessible-role: text;
+                            accessible-label: identity.full;
+                            focus-gained(reason) => { if (reason == FocusReason.tab-navigation) { KeyboardFocus.visible = true; } }
+                            TouchArea {
+                                pointer-event(event) => { if (event.kind == PointerEventKind.down) { KeyboardFocus.visible = false; } }
+                            }
                         }
-                        CaptionText { text: ModsState.selected-detail; }
-                        CaptionText {
-                            text: ModsState.selected-file; wrap: no-wrap; overflow: elide;
-                            file-tip := TouchArea { }
-                            TipTrigger { text: ModsState.selected-file; hovered: file-tip.has-hover; }
+                        VerticalLayout {
+                            spacing: Tokens.space-4;
+                            SectionText {
+                                text: ModsState.selected-name; max-lines: Tokens.title-max-lines; overflow: elide;
+                                name-tip := TouchArea { }
+                                TipTrigger { text: ModsState.selected-name; hovered: name-tip.has-hover; }
+                            }
+                            CaptionText { text: ModsState.selected-detail; }
+                            CaptionText {
+                                text: ModsState.selected-file; wrap: no-wrap; overflow: elide;
+                                file-tip := TouchArea { }
+                                TipTrigger { text: ModsState.selected-file; hovered: file-tip.has-hover; }
+                            }
+                            // A mod built here: where its project is, and how its latest build stands to the installed one.
+                            if ModsState.selected-has-sources: CaptionText {
+                                text: ModsState.selected-source; wrap: no-wrap; overflow: elide;
+                                source-tip := TouchArea { }
+                                TipTrigger { text: ModsState.selected-source-path; hovered: source-tip.has-hover; }
+                            }
+                            if ModsState.selected-build-status != "": CaptionText { text: ModsState.selected-build-status; tone: CaptionTone.secondary; }
+                            // Only a change waiting for the next game with mods: on or off itself shows in the row and on the button.
+                            if ModsState.selected-state != "": CaptionText { text: ModsState.selected-state; color: Tokens.draft-brush; }
                         }
-                        // A mod built here: where its project is, and how its latest build stands to the installed one.
-                        if ModsState.selected-has-sources: CaptionText {
-                            text: ModsState.selected-source; wrap: no-wrap; overflow: elide;
-                            source-tip := TouchArea { }
-                            TipTrigger { text: ModsState.selected-source-path; hovered: source-tip.has-hover; }
-                        }
-                        if ModsState.selected-build-status != "": CaptionText { text: ModsState.selected-build-status; tone: CaptionTone.secondary; }
-                        // Only a change waiting for the next game with mods: on or off itself shows in the row and on the button.
-                        if ModsState.selected-state != "": CaptionText { text: ModsState.selected-state; color: Tokens.draft-brush; }
+                        TipTrigger { text: identity.full; focused: identity-focus.has-focus; }
+                        FocusRing { focused: identity-focus.has-focus; }
                     }
                     // The reason it did not load sits right above the ways out of it.
                     if ModsState.selected-problem != "" && ModsState.selected-enabled: HorizontalLayout {
@@ -716,7 +732,10 @@ export component ModsPage inherits Rectangle {
                                 tip: "Whether the next game with mods loads it; it stays installed either way";
                                 clicked => { ModsState.toggle-mod(ModsState.selected-index); }
                             }
-                            Button { icon: Tokens.icon-folder; horizontal-stretch: 0; tip: "Show its DLL in File Explorer"; clicked => { ModsState.reveal-mod(ModsState.selected-index); } }
+                            Button {
+                                icon: Tokens.icon-folder; accessible-name: "Show in folder"; horizontal-stretch: 0; tip: "Show its DLL in File Explorer";
+                                clicked => { ModsState.reveal-mod(ModsState.selected-index); }
+                            }
                             Rectangle { horizontal-stretch: 1; }
                             Button {
                                 text: "Remove"; icon: Tokens.icon-delete; kind: ButtonKind.subtle; enabled: !ModsState.busy; horizontal-stretch: 0;
@@ -779,14 +798,17 @@ export component ModsPage inherits Rectangle {
         // Action bar: whether the next game with mods can go well and the latest change on the left; Undo, Revert and Play on the right.
         bar := Rectangle {
             x: 0; y: root.height - self.height; width: root.width;
-            height: Math.max(Tokens.action-bar-status-min-height, statuses.height) + Tokens.action-bar-padding.top + Tokens.action-bar-padding.bottom;
+            // The hairline is the bar's top border and adds its pixel to the height, as the C# Border's does; the content is
+            // centred under it.
+            property <length> border: Tokens.border-top.top;
+            height: self.border + Math.max(Tokens.action-bar-status-min-height, statuses.height) + Tokens.action-bar-padding.top + Tokens.action-bar-padding.bottom;
             background: Tokens.surface-brush;
-            Rectangle { x: 0; y: 0; height: 1px; background: Tokens.hairline-brush; }
+            Rectangle { x: 0; y: 0; height: parent.border; background: Tokens.hairline-brush; }
             // The status keeps its height as lines come and go, and centres whatever it holds on the buttons.
             // Width-aware text heights avoid preferred-height undercounting conditional wrapped captions.
             statuses := Rectangle {
                 x: Tokens.action-bar-padding.left;
-                y: (parent.height - self.height) / 2;
+                y: parent.border + (parent.height - parent.border - self.height) / 2;
                 width: Math.min(Tokens.status-message-max-width, actions.x - self.x - Tokens.space-20);
                 height: readiness-line.height + (ModsState.change-message == "" ? 0px : Tokens.space-4 + change-line.height);
                 property <bool> warning: ModsState.readiness-tone == MessageTone.warning;
@@ -810,7 +832,7 @@ export component ModsPage inherits Rectangle {
             // Right-aligned, so a button appearing to the left of Play never moves it.
             actions := HorizontalLayout {
                 x: parent.width - self.width - Tokens.action-bar-padding.right;
-                y: (parent.height - self.height) / 2;
+                y: parent.border + (parent.height - parent.border - self.height) / 2;
                 width: self.preferred-width;
                 height: Tokens.control-min-height;
                 spacing: Tokens.space-8;
@@ -830,6 +852,21 @@ export component ModsPage inherits Rectangle {
                     clicked => { ModsState.commit-settings(); ModsState.play(); }
                 }
             }
+        }
+    }
+
+    // The row menu (ModsView.axaml's ContextMenu): what the pane's buttons do, with the keys that do it from the list.
+    row-menu := PopupMenu {
+        entries: [
+            { title: ModsState.selected-enabled ? "Turn off" : "Turn on", gesture: "Space", disabled: ModsState.selected-index < 0 || ModsState.busy },
+            { title: "Show in folder", icon: Tokens.icon-folder, disabled: ModsState.selected-index < 0 },
+            { separator: true },
+            { title: "Remove", icon: Tokens.icon-delete, gesture: "Delete", disabled: ModsState.selected-index < 0 || ModsState.busy },
+        ];
+        activated(index) => {
+            if (index == 0) { ModsState.toggle-mod(ModsState.selected-index); }
+            if (index == 1) { ModsState.reveal-mod(ModsState.selected-index); }
+            if (index == 3) { ModsState.remove-mod(ModsState.selected-index); }
         }
     }
 }

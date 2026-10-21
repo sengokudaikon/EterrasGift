@@ -23,10 +23,9 @@ use eg_core::settings::SettingsStore;
 use eg_core::settings_service::SettingsService;
 use eg_ui::decorations::freeze_clock;
 use eg_ui::mods::ModsPage;
-use eg_ui::preparation::{PreparationView, Stage};
 use eg_ui::settings::SettingsPage;
 use eg_ui::shell::Page;
-use eg_ui::{App, Eterra, HomeState, LaunchMode as ViewMode, MainWindow, ModsState, Nav, PreparationWindow, SettingsState, Tokens};
+use eg_ui::{App, Eterra, HomeState, LaunchMode as ViewMode, MainWindow, ModsState, Nav, SettingsState, Tokens};
 use slint::platform::software_renderer::{MinimalSoftwareWindow, RepaintBufferType};
 use slint::platform::{Key, Platform, PointerEventButton, WindowAdapter, WindowEvent};
 use slint::{ComponentHandle, LogicalPosition, Model, PhysicalSize, SharedString};
@@ -121,10 +120,22 @@ struct CapturePlatform {
 type UiEvent = Box<dyn FnOnce() + Send>;
 static UI_EVENTS: std::sync::Mutex<std::collections::VecDeque<UiEvent>> = std::sync::Mutex::new(std::collections::VecDeque::new());
 static QUIT_REQUESTED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+thread_local! {
+    static CAPTURE_WINDOW: std::cell::RefCell<std::rc::Weak<MinimalSoftwareWindow>> = const { std::cell::RefCell::new(std::rc::Weak::new()) };
+}
 struct CaptureEventLoop;
 impl slint::platform::EventLoopProxy for CaptureEventLoop {
     fn quit_event_loop(&self) -> Result<(), slint::EventLoopError> {
-        QUIT_REQUESTED.store(true, std::sync::atomic::Ordering::SeqCst);
+        // Slint requests quit when the last window is hidden. Captures deliberately
+        // hide one scenario and open another in the same process. A quit while a
+        // window is visible (or from another thread) still signals an unexpected fault.
+        let visible = CAPTURE_WINDOW
+            .try_with(|slot| slot.borrow().upgrade().map(|window| window.window().is_visible()))
+            .ok()
+            .flatten();
+        if visible != Some(false) {
+            QUIT_REQUESTED.store(true, std::sync::atomic::Ordering::SeqCst);
+        }
         Ok(())
     }
     fn invoke_from_event_loop(&self, event: UiEvent) -> Result<(), slint::EventLoopError> {
@@ -216,6 +227,30 @@ impl Session {
                 launcher: None,
                 mods: None,
                 settings: SettingsPage::new(service, vec![eg_ui::trainer_settings::descriptor(true)], None, None, false),
+                trainer: true,
+                trainer_backend: None,
+                start: Page::Settings,
+            },
+        );
+        ui.global::<Tokens>().set_motion(false);
+        ui.global::<Tokens>().set_high_contrast(false);
+        self.window.set_size(PhysicalSize::new(1100, 700));
+        ui.show().expect("show settings");
+        settle();
+        ui
+    }
+
+    /// Settings in a run whose trainer is running behind `link`.
+    fn open_settings_linked(&self, link: Rc<dyn eg_ui::settings::ModuleLink>) -> MainWindow {
+        let folder = self.folder();
+        let service = SettingsService::inline(SettingsStore::open(&folder.join("app"), &folder.join("settings.json"), &[]));
+        let ui = MainWindow::new().expect("create MainWindow");
+        eg_ui::install(
+            &ui,
+            App {
+                launcher: None,
+                mods: None,
+                settings: SettingsPage::new(service, vec![eg_ui::trainer_settings::descriptor(true)], None, None, false).link(eg_ui::trainer_settings::ID, link),
                 trainer: true,
                 trainer_backend: None,
                 start: Page::Settings,
@@ -386,6 +421,21 @@ impl Session {
     }
 }
 
+/// A connected trainer as Settings sees it: definitions captured from the game, ready to refresh.
+struct LinkedTrainer;
+
+impl eg_ui::settings::ModuleLink for LinkedTrainer {
+    fn switched(&self, _key: &str, _on: bool) {}
+    fn status(&self, _section: usize) -> Option<eg_ui::settings::LiveStatus> {
+        Some(eg_ui::settings::LiveStatus {
+            text: "Current game data · 1342 affixes".into(),
+            can_act: true,
+            busy: false,
+        })
+    }
+    fn act(&self, _section: usize) {}
+}
+
 fn settle() {
     slint::platform::update_timers_and_animations();
     for _ in 0..10_000 {
@@ -428,6 +478,7 @@ const FIRST_LOCATION_BOX_Y: f32 = 58.0;
 
 fn main() {
     let window = MinimalSoftwareWindow::new(RepaintBufferType::NewBuffer);
+    CAPTURE_WINDOW.with(|slot| *slot.borrow_mut() = Rc::downgrade(&window));
     slint::platform::set_platform(Box::new(CapturePlatform { window: window.clone() })).expect("the capture platform is set once per process");
     let out = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../artifacts/captures");
     std::fs::create_dir_all(&out).expect("create artifacts/captures");
@@ -436,7 +487,14 @@ fn main() {
     // No event loop runs here, so work the pages hand to a thread runs at once instead.
     eg_ui::background::run_inline(true);
     if std::env::args().any(|arg| arg == "--trainer-backend") {
+        trainer_backend_fixture::capture_waiting(&session);
         trainer_backend_fixture::capture(&session);
+        return;
+    }
+    // The Item Forge alone (`cargo capture -- --forge`), for work on its views.
+    if std::env::args().any(|arg| arg == "--forge") {
+        forge_captures(&session);
+        trainer_backend_fixture::capture_waiting(&session);
         return;
     }
 
@@ -472,6 +530,37 @@ fn main() {
     session.key(Key::Tab);
     session.key(Key::DownArrow);
     session.capture(&ui, "keyboard-rows");
+    // On the rail the connection's words reach the keyboard: the Connect button's tip says them under its action, and
+    // without the button (connected) the status is the block's one stop.
+    session.key(Key::Tab);
+    session.capture(&ui, "keyboard-connect");
+    let ui = session.open(true, 1100, 700);
+    let connection = ui.global::<eg_ui::Connection>();
+    connection.set_connected(true);
+    connection.set_text("Connected".into());
+    connection.set_show_action(false);
+    for _ in 0..3 {
+        session.key(Key::Tab);
+    }
+    session.capture(&ui, "keyboard-connection");
+
+    // A short window with the pane expanded on a trainer page: expanding opens the Trainer item, the rows scroll and
+    // the foot (Settings, the connection) stays in view.
+    let ui = session.open(true, 940, 580);
+    ui.global::<Nav>().invoke_navigate("combat".into());
+    ui.global::<Nav>().invoke_toggle_pane();
+    settle();
+    assert!(
+        ui.global::<Nav>().get_rows().iter().any(|row| row.id == "combat"),
+        "expanding the pane reveals the current trainer page"
+    );
+    session.capture(&ui, "nav-short-trainer-open");
+    // From Settings, Up reaches the last trainer page, which the rows scroll into view.
+    session.key(Key::Tab);
+    session.key(Key::Tab);
+    session.key(Key::End);
+    session.key(Key::UpArrow);
+    session.capture(&ui, "nav-short-keyboard-scroll");
 
     // A disabled Play takes no focus but keeps its tip for the pointer, saying why (the game runs); a click does nothing.
     let host = session.host();
@@ -509,6 +598,14 @@ fn main() {
     session.click(LOCATION_BOX_X, FIRST_LOCATION_BOX_Y);
     session.type_text(r"D:\Games\Last Epoch\Last Epoch.exe");
     session.capture(&ui, "settings-location-typed");
+    // A picker updates the same model while the existing input remains mounted.
+    let picked = r"E:\Steam\Last Epoch\Last Epoch.exe";
+    ui.global::<SettingsState>().invoke_location_edited(0, picked.into());
+    settle();
+    session.key(Key::End);
+    session.type_text("!");
+    assert_eq!(ui.global::<SettingsState>().get_locations().row_data(0).unwrap().value, format!("{picked}!"));
+    session.capture(&ui, "settings-location-replaced");
 
     // Home follows the game: a start's message, a game on its way in, one in play, and a start that is refused.
     let host = session.host();
@@ -562,6 +659,44 @@ fn main() {
     let ui = session.open_on(host, true, 1100, 700);
     session.capture(&ui, "home-conflict");
 
+    // A start with mods waits for MelonLoader: Home says so while it waits, and every Play holds.
+    let host = session.host();
+    let ui = session.open_on(host, true, 1100, 700);
+    eg_ui::background::run_inline(false);
+    ui.global::<HomeState>().invoke_start(ViewMode::WithMods);
+    assert!(!ui.global::<HomeState>().get_can_start(), "a start holds the buttons");
+    session.capture(&ui, "home-with-mods-starting");
+    wait_for("the start with mods", || ui.global::<HomeState>().get_can_start());
+    eg_ui::background::run_inline(true);
+    // Without MelonLoader beside the game, Play offline with mods waits and its tip says why.
+    let host = session.host();
+    host.with(|game| game.loader = ModLoaderState::NotInstalled);
+    let ui = session.open_on(host, true, 1100, 700);
+    assert!(!ui.global::<HomeState>().get_can_start_with_mods());
+    session.capture(&ui, "home-mods-not-installed");
+
+    // A run with no launcher (the C# `home-trainer-on`/`-off`): Home names the companion and nothing else.
+    let folder = session.folder();
+    let service = SettingsService::inline(SettingsStore::open(&folder.join("app"), &folder.join("settings.json"), &[]));
+    let ui = MainWindow::new().expect("create MainWindow");
+    eg_ui::install(
+        &ui,
+        App {
+            launcher: None,
+            mods: None,
+            settings: SettingsPage::new(service, vec![eg_ui::trainer_settings::descriptor(true)], None, None, false),
+            trainer: true,
+            trainer_backend: None,
+            start: Page::Home,
+        },
+    );
+    ui.global::<Tokens>().set_motion(false);
+    ui.global::<Tokens>().set_high_contrast(false);
+    session.window.set_size(PhysicalSize::new(1100, 700));
+    ui.show().expect("show MainWindow");
+    settle();
+    session.capture(&ui, "home-no-launcher");
+
     // Settings: the trainer switch saves as it flips and says a restart waits; a relative location is refused.
     let ui = session.open(true, 1100, 700);
     ui.global::<Nav>().invoke_navigate("settings".into());
@@ -578,22 +713,40 @@ fn main() {
     settle();
     session.capture(&ui, "settings-location-refused");
 
-    // The launcher's preparation window while it builds, and once it has stopped.
-    let preparation = PreparationView::new(PreparationWindow::new().expect("create PreparationWindow"));
-    preparation.window().global::<Tokens>().set_motion(false);
-    session.window.set_size(PhysicalSize::new(580, 460));
-    preparation.window().show().expect("show PreparationWindow");
-    preparation.start("Checking application components…");
-    preparation.report(Stage::Building, "Building application and native helper");
-    preparation.show_detail(r"EterrasGift.Desktop -> C:\Users\player\AppData\Local\EterrasGift\runtime\.stage-1a2b3c4d\EterrasGift.Desktop.dll");
-    settle();
-    session.capture(preparation.window(), "preparation-building");
-    preparation.stop(
-        "dotnet publish exited with code 1: error CS1002: ; expected (src/Hosts/EterrasGift.Desktop/Program.cs, line 12)",
-        Some("Preparation stopped. Resolve the problem below, then Retry."),
+    // Under the launcher, Restart now closes the window through the ordinary drain and leaves the request for the app
+    // to exit with 42 (crates/app/src/main.rs).
+    let folder = session.folder();
+    let service = SettingsService::inline(SettingsStore::open(&folder.join("app"), &folder.join("settings.json"), &[]));
+    let settings = SettingsPage::new(service, vec![eg_ui::trainer_settings::descriptor(true)], None, None, true);
+    let restart = settings.restart_request();
+    let ui = MainWindow::new().expect("create MainWindow");
+    eg_ui::install(
+        &ui,
+        App {
+            launcher: None,
+            mods: None,
+            settings,
+            trainer: true,
+            trainer_backend: None,
+            start: Page::Settings,
+        },
     );
+    ui.global::<Tokens>().set_motion(false);
+    session.window.set_size(PhysicalSize::new(1100, 700));
+    ui.show().expect("show settings");
     settle();
-    session.capture(preparation.window(), "preparation-stopped");
+    ui.global::<SettingsState>().invoke_module_toggled(0, false);
+    settle();
+    assert!(ui.global::<SettingsState>().get_can_restart(), "supervised, a saved switch offers Restart now");
+    ui.global::<SettingsState>().invoke_restart();
+    for _ in 0..100 {
+        if !ui.window().is_visible() {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(20));
+        settle();
+    }
+    assert!(restart.requested() && !ui.window().is_visible(), "Restart now closes the window and asks for a restart");
 
     // Windows high contrast swaps the line and muted-text roles.
     let ui = session.open(true, 1100, 700);
@@ -601,6 +754,76 @@ fn main() {
     ui.global::<Tokens>().set_high_contrast(true);
     settle();
     session.capture(&ui, "settings-high-contrast");
+
+    // The C# settings-trainer-off: a run without the trainer, its switch alone in a column as wide as "Off".
+    let ui = session.open(false, 1100, 700);
+    ui.global::<Nav>().invoke_navigate("settings".into());
+    settle();
+    session.capture(&ui, "settings-trainer-off");
+
+    // Narrow, scrolled through the trainer's groups to Locations: wrapped text in repeated groups must not overlap.
+    let ui = session.open(true, 680, 580);
+    ui.global::<Nav>().invoke_navigate("settings".into());
+    settle();
+    for _ in 0..3 {
+        session.scroll(400.0, 300.0, -120.0);
+    }
+    session.capture(&ui, "settings-narrow-definitions");
+    for _ in 0..3 {
+        session.scroll(400.0, 300.0, -120.0);
+    }
+    session.capture(&ui, "settings-narrow-locations");
+
+    // The scroll bar: a pointer resting on it widens it over its track (after its show delay, on the real clock), and
+    // dragging the thumb to the top brings the title back.
+    let thumb = |ui: &MainWindow| {
+        let frame = ui.window().take_snapshot().expect("take_snapshot");
+        let (width, height) = (frame.width() as usize, frame.height() as usize);
+        let strong_line = ui.global::<Tokens>().get_strong_line_color();
+        // A column inside the expanded thumb and outside the 2px resting one.
+        let column = width - 10;
+        let rows: Vec<usize> = (0..height)
+            .filter(|&y| {
+                let pixel = frame.as_slice()[y * width + column];
+                (pixel.r, pixel.g, pixel.b) == (strong_line.red(), strong_line.green(), strong_line.blue())
+            })
+            .collect();
+        (rows.first().copied(), rows.last().copied())
+    };
+    let bar_x = 680.0 - 8.0;
+    // Over the line-up button, which the page's scroll view starts with at the window's top.
+    let line_up = LogicalPosition::new(bar_x, 8.0);
+    session.window.dispatch_event(WindowEvent::PointerMoved { position: line_up });
+    std::thread::sleep(Duration::from_millis(600));
+    settle();
+    session.capture(&ui, "settings-narrow-scroll-bar");
+    let (Some(top), Some(bottom)) = thumb(&ui) else {
+        panic!("the resting pointer widens the scroll bar")
+    };
+    assert!(top > 16, "the thumb has moved down with the content");
+    let button = PointerEventButton::Left;
+    let grip = LogicalPosition::new(bar_x, ((top + bottom) / 2) as f32);
+    session.window.dispatch_event(WindowEvent::PointerMoved { position: grip });
+    session.window.dispatch_event(WindowEvent::PointerPressed { position: grip, button });
+    settle();
+    for step in 1..=4 {
+        let position = LogicalPosition::new(bar_x, grip.y - step as f32 * 150.0);
+        session.window.dispatch_event(WindowEvent::PointerMoved { position });
+        settle();
+    }
+    let released = LogicalPosition::new(bar_x, grip.y - 600.0);
+    session.window.dispatch_event(WindowEvent::PointerReleased { position: released, button });
+    session.window.dispatch_event(WindowEvent::PointerMoved { position: line_up });
+    settle();
+    assert_eq!(thumb(&ui).0, Some(16), "dragging the thumb up scrolls to the top");
+    session.capture(&ui, "settings-narrow-scroll-bar-dragged");
+
+    // A running trainer behind Game definitions: its live status, and Refresh from game offered without the reason.
+    let ui = session.open_settings_linked(Rc::new(LinkedTrainer));
+    for _ in 0..3 {
+        session.scroll(500.0, 300.0, -120.0);
+    }
+    session.capture(&ui, "settings-trainer-connected");
 
     // A blocked worker never blocks pointer input or navigation. The real toggle queues behind it.
     let folder = session.folder();
@@ -644,6 +867,7 @@ fn main() {
     mods_captures(&session);
     trainer_captures(&session);
     forge_captures(&session);
+    trainer_backend_fixture::capture_waiting(&session);
     trainer_backend_fixture::capture(&session);
 }
 
@@ -763,10 +987,43 @@ fn mods_input(session: &Session) {
     assert_eq!(ui.global::<ModsState>().get_settings().row_count(), 3);
     session.capture(&ui, "mods-raw-settings");
 
+    // Revert must update the mounted switch and text input after real edits.
+    for _ in 0..2 {
+        session.click(1030.0, 234.0);
+        wait_for("switch off", || !ui.global::<ModsState>().get_settings().row_data(0).unwrap().is_on);
+        session.click(800.0, 670.0);
+        wait_for("switch reverted", || {
+            ui.global::<ModsState>().get_settings().row_data(0).unwrap().is_on && ui.global::<ModsState>().get_draft_count() == 0
+        });
+    }
+    session.click(1040.0, 360.0);
+    session.control_key("a");
+    session.type_text("Different");
+    session.key(Key::Return);
+    wait_for("text edited", || ui.global::<ModsState>().get_settings().row_data(2).unwrap().value == "Different");
+    session.click(800.0, 670.0);
+    wait_for("text reverted", || ui.global::<ModsState>().get_draft_count() == 0);
+    session.click(1040.0, 360.0);
+    session.key(Key::End);
+    session.type_text("!");
+    assert_eq!(ui.global::<ModsState>().get_settings().row_data(2).unwrap().value, "Default!");
+    session.key(Key::Return);
+    session.click(800.0, 670.0);
+    wait_for("text draft reverted again", || ui.global::<ModsState>().get_draft_count() == 0);
+    session.capture(&ui, "mods-input-reverted");
+
     session.click(200.0, 197.0);
     session.key(Key::Menu);
     session.capture(&ui, "mods-row-menu");
     session.key(Key::Escape);
+    // The themed row menu acts from the keyboard: Enter on its first row turns the mod off, and closing it gives the list
+    // its focus back, so Space turns the mod on again.
+    session.key(Key::Menu);
+    session.key(Key::Return);
+    wait_for("menu toggle", || !ui.global::<ModsState>().get_selected_enabled());
+    session.type_text(" ");
+    wait_for("list focus after the menu", || ui.global::<ModsState>().get_selected_enabled());
+    wait_for("no mod draft", || ui.global::<ModsState>().get_draft_count() == 0);
 
     // Pointer selection establishes the list's keyboard stop; Space changes the durable desired state.
     session.click(200.0, 197.0);
@@ -1337,13 +1594,21 @@ fn mods_captures(session: &Session) {
     );
     sizes(&ui, "mods-update-available");
     assert_eq!(runner.builds.load(Ordering::Relaxed), 1);
+
+    // The name, file and project the pane may elide reach the keyboard: the block is one stop past the list, and its tip
+    // says them in full.
+    session.resize(1100, 700);
+    for _ in 0..8 {
+        session.key(Key::Tab);
+    }
+    session.capture(&ui, "mods-keyboard-identity");
 }
 
 /// The trainer's pages (spec/trainer.md §5): as the app shows them with no session (nothing connected), and in states
 /// only a connected game has, through a fake session that answers reads and writes from its own fields.
 fn trainer_captures(session: &Session) {
     use eg_ui::trainer::catalog::{Area, FEATURES};
-    use eg_ui::trainer::session::{FieldError, FieldWrite, GameField, HookState, TrainerSession, Unconnected};
+    use eg_ui::trainer::session::{FieldRequest, FieldWrite, GameField, HookState, TrainerSession, Unconnected};
     use eg_ui::{Connection, TrainerState};
     use std::cell::RefCell;
     use std::collections::{BTreeMap, BTreeSet};
@@ -1391,10 +1656,10 @@ fn trainer_captures(session: &Session) {
         fn hook_state(&self, id: &str) -> Option<HookState> {
             self.hooks.get(id).cloned()
         }
-        fn read_fields(&self, id: &str) -> Result<Vec<GameField>, FieldError> {
-            Ok(self.fields.borrow().get(id).cloned().unwrap_or_default())
+        fn read_fields(&self, id: &str) -> FieldRequest {
+            Ok(self.fields.borrow().get(id).cloned().unwrap_or_default()).into()
         }
-        fn write_fields(&self, id: &str, writes: &[FieldWrite]) -> Result<Vec<GameField>, FieldError> {
+        fn write_fields(&self, id: &str, writes: &[FieldWrite]) -> FieldRequest {
             let mut fields = self.fields.borrow_mut();
             let list = fields.get_mut(id).expect("a field set the fake holds");
             for (field, write) in list.iter_mut().zip(writes) {
@@ -1402,7 +1667,7 @@ fn trainer_captures(session: &Session) {
             }
             // A count written to 0 is no longer held.
             list.retain(|field| field.label.is_empty() || field.value != 0.0);
-            Ok(list.clone())
+            Ok(list.clone()).into()
         }
     }
 
@@ -1601,7 +1866,10 @@ fn trainer_captures(session: &Session) {
     // A source checkout lists features that are not ported yet where they will go.
     let ui = session.open(true, 1100, 700);
     let mut features = FEATURES.to_vec();
-    features.iter_mut().filter(|feature| feature.area == Area::Loot).for_each(|feature| feature.ported = false);
+    features
+        .iter_mut()
+        .filter(|feature| feature.area == Area::Loot)
+        .for_each(|feature| feature.presented = false);
     eg_ui::trainer::bind(&ui, Rc::new(Unconnected::default()), features, true);
     ui.global::<Nav>().invoke_navigate("loot".into());
     show(&ui);
@@ -1648,6 +1916,40 @@ fn forge_captures(session: &Session) {
         assert!(editor.commit_input(cell));
     }
 
+    // Not connected, Connect in the page (`forge-not-connected`, the C# `TheForgeFollowsTheLoginInWordsWithNavigationAtHand`;
+    // the port has no trainer-only window, so Home stays in the rail), and the same wait at three sizes (`empty`,
+    // `empty-compact`, `empty-narrow`, the C# `WaitingForTheGame`).
+    for (name, width, height) in [
+        ("forge-not-connected", 1100, 700),
+        ("item-empty", 1100, 700),
+        ("item-empty-compact", 940, 580),
+        ("item-empty-narrow", 680, 580),
+    ] {
+        let ui = session.open(true, width, height);
+        ui.global::<Nav>().invoke_navigate("forge".into());
+        settle();
+        assert!(!ui.global::<Connection>().get_connected());
+        session.capture(&ui, name);
+    }
+
+    // Apply, a draft stepped back with Ctrl+Z, Undo apply, then a draft discarded: the ledger keeps both readbacks and the
+    // message says what was discarded (`ui-preview`, the C# `ForgeSessionTests` walk-through; its refused out-of-range roll
+    // has no port equivalent, since the value popover never drafts one).
+    let forge = open(session, FixtureGame::boots(false), 1100, 700);
+    forge.handle.edit(|editor| {
+        editor.select_affix(Some(0));
+        type_value(editor, Cell::Affix(0), "37");
+        editor.apply();
+        type_value(editor, Cell::Affix(0), "38");
+        editor.undo_draft_only();
+        editor.undo();
+        type_value(editor, Cell::Affix(0), "36");
+        editor.discard_entry(0);
+    });
+    assert_eq!(forge.ui.global::<ForgeState>().get_message(), "Draft for Health discarded.");
+    assert_eq!(forge.game.borrow().writes.len(), 2, "the apply and its undo");
+    session.capture(&forge.ui, "item-ui-preview");
+
     // Two drafts pending at every window class: Movement Speed T1 → T4, Health +34 → +37 (the C# `PendingDraftsAtEachWindowClass`).
     for (class, width, height) in SIZES {
         let forge = open(session, FixtureGame::boots(false), width, height);
@@ -1667,6 +1969,29 @@ fn forge_captures(session: &Session) {
         session.capture(&forge.ui, &format!("item-{class}-hidden"));
     }
 
+    // A narrow window with the pane open over the table: Tab skips the cells under it and goes on into the pane
+    // (`item-narrow-pane-keyboard`); Escape there closes the pane and gives focus back to Changes (`item-narrow-pane-escape`).
+    let forge = open(session, FixtureGame::boots(false), 680, 580);
+    forge.handle.edit(|editor| {
+        editor.pick_tier(2, 4);
+        type_value(editor, Cell::Affix(0), "37");
+    });
+    let state = forge.ui.global::<ForgeState>();
+    state.set_pane_open(true);
+    settle();
+    // The rail's four stops (connected, the connection's words are one), the rarity, then the four values: the names,
+    // tiers and seals lie under the pane.
+    for _ in 0..10 {
+        session.key(Key::Tab);
+    }
+    session.capture(&forge.ui, "item-narrow-pane-keyboard");
+    // The first Escape closes the entry's tip, the next the pane.
+    session.key(Key::Escape);
+    assert!(state.get_pane_open());
+    session.key(Key::Escape);
+    assert!(!state.get_pane_open(), "Escape in the overlaid pane closes it");
+    session.capture(&forge.ui, "item-narrow-pane-escape");
+
     // A seal-only draft beside a value draft, then Apply: both confirmed by readback, Fire Resistance moved where the game
     // loads a normal affix (`seal-draft`, `confirmed`).
     let forge = open(session, FixtureGame::boots(false), 1100, 700);
@@ -1681,6 +2006,31 @@ fn forge_captures(session: &Session) {
     assert_eq!(forge.game.borrow().writes.len(), 2);
     session.capture(&forge.ui, "item-confirmed");
 
+    // A name too long for the header wraps to two lines and ends in an ellipsis, with a seal drafted and another row
+    // selected (`item-long-name-{940,1100}`, the C# `shell-{940,1100}-long-name`, ShellTests).
+    for (width, height) in [(940, 580), (1100, 700)] {
+        let forge = open(session, FixtureGame::boots(false), width, height);
+        forge.handle.edit(|editor| {
+            editor.select_affix(Some(0));
+            editor.pick_seal(0, Seal::Sealed);
+            editor.select_affix(Some(2));
+        });
+        const LONG_NAME: &str = "Wayfarer's Boots of Unwavering Determination and Extraordinary Elemental Resistance";
+        forge.game.borrow_mut().item.as_mut().unwrap().name = LONG_NAME.into();
+        forge.handle.refresh();
+        assert_eq!(forge.ui.global::<ForgeState>().get_item_name(), LONG_NAME);
+        session.capture(&forge.ui, &format!("item-long-name-{width}"));
+    }
+
+    // High contrast raises the hairlines, frames and notes in place, a value drafted to its maximum (`item-high-contrast`,
+    // the C# `high-contrast.png`, `ContrastThemesRaiseHairlinesFramesAndNotesInPlace`).
+    let forge = open(session, FixtureGame::boots(false), 1100, 700);
+    forge.ui.global::<Tokens>().set_high_contrast(true);
+    forge.handle.edit(|editor| editor.step_to_end(Cell::Affix(0), true));
+    settle();
+    session.capture(&forge.ui, "item-high-contrast");
+    forge.ui.global::<Tokens>().set_high_contrast(false);
+
     // A draft the game changed after it was made: Apply refuses the whole ledger with the reason (`rejected`).
     let forge = open(session, FixtureGame::boots(false), 1100, 700);
     forge.handle.edit(|editor| type_value(editor, Cell::Affix(0), "37"));
@@ -1690,6 +2040,10 @@ fn forge_captures(session: &Session) {
     assert!(forge.ui.global::<ForgeState>().get_message().contains("changed in the game after you drafted it"));
     assert!(forge.game.borrow().writes.is_empty());
     session.capture(&forge.ui, "item-rejected");
+    // The stale row says so in words too, for when the changes pane is closed (`stale`).
+    forge.ui.global::<ForgeState>().set_pane_open(false);
+    settle();
+    session.capture(&forge.ui, "item-stale");
 
     // Maximized with the captured tier ranges: the selected affix's tier ladder beside the table (`tier-ladder`).
     let forge = open(session, FixtureGame::boots(true), 1920, 1080);
@@ -1709,6 +2063,39 @@ fn forge_captures(session: &Session) {
     session.capture(&forge.ui, "item-unique-read-only");
     session.resize(1920, 1080);
     session.capture(&forge.ui, "item-unique-maximized");
+
+    // A unique modifier with two rolls scrubs both in its own row, one cell over the other (`unique-rolls-*`, the C#
+    // `UniqueRollsScrubInPlacePreviewLinkedEffectsAndApplyOnlyRolls`).
+    for (width, height) in [(1100, 700), (940, 580)] {
+        let game = FixtureGame::unique();
+        game.change(|item| {
+            let unique = item.unique.as_mut().unwrap();
+            unique.modifiers[1].roll_ids = vec![1, 2];
+        });
+        let forge = open(session, game, width, height);
+        forge.handle.edit(|editor| {
+            editor.select_unique(Some(1));
+            type_value(editor, Cell::Unique(1, 0), "45");
+        });
+        let line = forge.ui.global::<ForgeState>().get_unique_modifiers().row_data(1).unwrap();
+        assert_eq!(line.rolls.row_count(), 2, "both rolls are value cells in the one row");
+        session.capture(&forge.ui, &format!("unique-rolls-{width}"));
+    }
+
+    // A Weaver's Will unique: its status strip leads with Weaver's Will, corrupted, the base fixed (`item-status-unique`,
+    // the C# `UniquesOfferOnlyTheirLegendaryKindAndKeepTheirBase`).
+    let game = FixtureGame::unique_ring();
+    game.change(|item| {
+        item.name = "Fixture Woven Unique".into();
+        item.unique.as_mut().unwrap().id = 71;
+        let status = item.status.as_mut().unwrap();
+        status.weavers_will = 12;
+        status.corrupted = true;
+    });
+    let forge = open(session, game, 1100, 700);
+    let fields = forge.ui.global::<ForgeState>().get_fields();
+    assert_eq!(fields.row_data(0).unwrap().name, "Weaver's Will");
+    session.capture(&forge.ui, "item-status-unique");
 
     // The ring: the status strip, a flag and the base drafted (`item-status-*`), then its implicits (`implicits*`).
     for (class, width, height) in SIZES {
@@ -1776,7 +2163,8 @@ fn forge_captures(session: &Session) {
     let forge = open(session, FixtureGame::boots(true), 1100, 700);
 
     // Hovering a value lights only its bar (`value-hover`); a click without dragging opens the popover (`value-popover`).
-    pointer(&forge, VALUE_X + 70.0, row_y(1) - 14.0, "move");
+    // On the value itself, as the C# capture's pointer is: the cell takes its hover ground and the bar thickens.
+    pointer(&forge, VALUE_X + 70.0, row_y(1) - 6.0, "move");
     session.capture(&forge.ui, "item-value-hover");
     session.click(VALUE_X, row_y(1) - 6.0);
     assert_eq!(forge.ui.global::<ForgeState>().get_input_text(), "7.3");
@@ -1807,7 +2195,27 @@ fn forge_captures(session: &Session) {
     pointer(&forge, NAME_X, row_y(0), "right");
     pointer(&forge, NAME_X, row_y(0), "right-up");
     session.capture(&forge.ui, "item-row-menu");
+    // The row under the pointer takes a ground of its own on the menu's (`row-menu-hover`).
+    pointer(&forge, NAME_X + 60.0, row_y(0) + 47.0, "move");
+    session.capture(&forge.ui, "item-row-menu-hover");
     session.key(Key::Escape);
+
+    // Del on a focused row's cell removes the affix, as Remove affix does; with a draft pending it does nothing (the
+    // caption under the table says why).
+    let affixes = |forge: &Forge| forge.ui.global::<ForgeState>().get_affixes().row_count();
+    let forge = open(session, FixtureGame::boots(false), 1100, 700);
+    // The rail's four stops (connected, the connection's words are one) and the rarity, then the first row's value and
+    // its name.
+    for _ in 0..7 {
+        session.key(Key::Tab);
+    }
+    forge.handle.edit(|editor| type_value(editor, Cell::Affix(1), "7.5"));
+    session.key(Key::Delete);
+    assert_eq!(affixes(&forge), 4, "Del waits while drafts are pending");
+    forge.handle.edit(ForgeEditor::discard_all);
+    session.key(Key::Delete);
+    assert_eq!(affixes(&forge), 3, "Del on the name removes the affix");
+    assert_eq!(forge.game.borrow().writes.len(), 1);
 
     // The name opens the affix picker: a search, the incompatible toggle, the first entry (`replace`).
     let forge = open(session, FixtureGame::boots(false), 1100, 700);
@@ -1843,16 +2251,63 @@ fn forge_captures(session: &Session) {
     session.capture(&forge.ui, "item-add-affix");
     session.key(Key::Escape);
 
-    // The rarity in the facts line opens the rarity menu (`item-rarity-menu`); the base, the base picker (`item-base-picker`).
-    let forge = open(session, FixtureGame::ring(true), 1100, 700);
+    // The rarity in the facts line opens the rarity menu (`item-rarity-menu`); the base, the base picker with the implicits
+    // each base grants (`implicits-base-picker`, the C# `ImplicitsRerollInPlaceAndOnlyABaseChangeReplacesThem`) and, over
+    // the status drafts with the base drafted, on the drafted base (`item-base-picker`, the C# `ItemHeaderTests`).
+    // As the C# `ExaltedSwitchesThroughAffixTierDraftsAndBackAgain` does, Exalted is drafted first, so the menu opens over the
+    // rarity in draft colour; Escape closes it and keeps the draft. The C# ring there has no implicits.
+    let forge = open(session, FixtureGame::ring(false), 1100, 700);
+    forge.handle.edit(|editor| editor.pick_rarity(true));
+    assert_eq!(forge.ui.global::<ForgeState>().get_rarity_text(), "Exalted");
     session.click(95.0, 117.0);
-    session.key(Key::DownArrow);
     session.capture(&forge.ui, "item-rarity-menu");
-    session.key(Key::Return);
+    session.key(Key::Escape);
     assert_eq!(forge.ui.global::<ForgeState>().get_rarity_text(), "Exalted");
     let forge = open(session, FixtureGame::ring(true), 1100, 700);
     session.click(155.0, 117.0);
+    session.capture(&forge.ui, "item-implicits-base-picker");
+    let forge = open(session, FixtureGame::ring(false), 1100, 700);
+    forge.handle.edit(|editor| {
+        type_value(editor, Cell::Field(0), "60");
+        editor.toggle_flag(2, true);
+        editor.pick_base(1);
+    });
+    session.click(155.0, 117.0);
     session.capture(&forge.ui, "item-base-picker");
+
+    // A base that would make affixes incompatible says how many in the base picker (`item-base-picker-incompatible`); Apply
+    // refuses it whole until the picker allows it (`item-base-incompatible-refused`, the C# `ApplyPlanner`).
+    let forge = open(session, FixtureGame::class_ring(), 1100, 700);
+    let options = forge.ui.global::<ForgeState>().get_base_options();
+    assert_eq!(options.row_data(1).unwrap().detail, "Level 28 · 2 incompatible affixes");
+    assert_eq!(options.row_data(2).unwrap().detail, "Level 40 · corrupted base · 1 incompatible affix");
+    session.click(155.0, 117.0);
+    session.capture(&forge.ui, "item-base-picker-incompatible");
+    session.key(Key::Escape);
+    forge.handle.edit(|editor| {
+        editor.pick_base(1);
+        editor.apply();
+    });
+    assert_eq!(
+        forge.ui.global::<ForgeState>().get_message(),
+        "The new base would make affixes incompatible. Allow incompatible affixes in the base picker to apply it anyway."
+    );
+    assert!(forge.game.borrow().writes.is_empty());
+    session.capture(&forge.ui, "item-base-incompatible-refused");
+
+    // While a drafted identity holds the item, its flags wait: a checked one keeps its trim-gold frame, an unchecked one has
+    // none (the C# flag styles over Fluent's disabled toggle button; `item-status-disabled`, not a C# capture).
+    let game = FixtureGame::unique_ring();
+    game.change(|item| item.status.as_mut().unwrap().corrupted = true);
+    let forge = open(session, game, 1100, 700);
+    forge.handle.edit(|editor| editor.pick_identity(2));
+    let fields = forge.ui.global::<ForgeState>().get_fields();
+    let corruption = (0..fields.row_count())
+        .map(|index| fields.row_data(index).unwrap())
+        .find(|field| field.on_name == "Corrupted")
+        .unwrap();
+    assert!(corruption.checked && !corruption.can_edit);
+    session.capture(&forge.ui, "item-status-disabled");
 
     // A unique's name opens the identity picker; a pick drafts the unique alone (`item-identity-picker-*`, `item-identity-draft-*`).
     for (width, height) in [(1100, 700), (940, 580)] {
@@ -1864,4 +2319,49 @@ fn forge_captures(session: &Session) {
         assert!(forge.ui.global::<ForgeState>().get_identity_drafted());
         session.capture(&forge.ui, &format!("item-identity-draft-{width}"));
     }
+
+    // Keeping legendary potential on an identity that never holds it needs the override, with the risk in words
+    // (`item-identity-override-*`, the C# `KeepingLegendaryPotentialAnIdentityNeverHoldsNeedsTheOverrideAndWarns`).
+    for (width, height) in [(1100, 700), (940, 580)] {
+        let game = FixtureGame::unique_ring();
+        game.change(|item| item.status.as_mut().unwrap().legendary_potential = 2);
+        let forge = open(session, game, width, height);
+        let state = forge.ui.global::<ForgeState>();
+        let option = |name: &str| {
+            (0..state.get_identity_options().row_count())
+                .map(|index| state.get_identity_options().row_data(index).unwrap())
+                .find(|option| option.name == name)
+                .unwrap()
+        };
+        assert_eq!(option("Fixture Ember Unique").detail, "Unique · Gold Ring · legendary potential");
+        assert!(option("Fixture Ember Unique").available);
+        assert_eq!(
+            option("Fixture Woven Unique").detail,
+            "Unique · Gold Ring · Weaver's Will · keeps legendary potential it never holds, which may crash the game and reset the item state; needs \"I know what I'm doing\""
+        );
+        assert!(!option("Fixture Woven Unique").available);
+        assert!(option("Fixture Set Ring").detail.contains("keeps legendary potential it never holds"));
+        assert!(!option("Fixture Set Ring").available);
+        session.click(200.0, 84.0);
+        session.capture(&forge.ui, &format!("item-identity-override-{width}"));
+        // The keyboard starts on the unique the item is and skips what can't be picked: Down twice stops at the Sapphire
+        // unique (the Woven unique and the set ring can't be picked), Up twice reaches the Ember unique, and Enter drafts it.
+        session.key(Key::DownArrow);
+        session.key(Key::DownArrow);
+        session.key(Key::UpArrow);
+        session.key(Key::UpArrow);
+        session.key(Key::Return);
+        assert!(state.get_identity_drafted());
+        assert_eq!(state.get_item_name(), "Fixture Ember Unique", "Up from the Sapphire unique reaches the Ember unique");
+    }
+
+    // A click outside the affix picker cancels the replacement, so Apply comes back (the C# flyout's Closed handler).
+    let forge = open(session, FixtureGame::boots(false), 1100, 700);
+    forge.handle.edit(|editor| type_value(editor, Cell::Affix(0), "37"));
+    session.click(NAME_X, row_y(3));
+    assert!(forge.ui.global::<ForgeState>().get_picker_open());
+    assert!(!forge.ui.global::<ForgeState>().get_can_apply());
+    session.click(900.0, 500.0);
+    assert!(!forge.ui.global::<ForgeState>().get_picker_open(), "a click outside cancels the picker");
+    assert!(forge.ui.global::<ForgeState>().get_can_apply());
 }

@@ -22,6 +22,9 @@ enum Tier {
     Trainer,
     GameAccess,
     Composition,
+    /// A host beside the app: the launcher prepares and supervises it, and reaches only the shared kernel and the UI's
+    /// preparation window.
+    Launcher,
     Tool,
 }
 
@@ -34,6 +37,7 @@ fn tier(name: &str) -> Tier {
         "eg-game-files" => Tier::GameFiles,
         "eg-game-access" => Tier::GameAccess,
         "eg-ui" | "eterras-gift" => Tier::Composition,
+        "eterras-gift-launcher" => Tier::Launcher,
         "xtask"
         | "eg-eval-unity-rust-host"
         | "eg-persistent-player-client"
@@ -147,6 +151,12 @@ fn cargo_dependencies_preserve_the_tiers_including_tools() {
             if to == Tier::GameAccess {
                 assert!(matches!(from, Tier::Trainer | Tier::Tool), "{} directly reaches game access", package.name);
             }
+            // The launcher builds and starts the app, never its features; and nothing depends on a host.
+            if from == Tier::Launcher {
+                assert!(matches!(to, Tier::Shared | Tier::Composition), "the launcher depends on {dependency}");
+                assert!(dependency != "eterras-gift", "the launcher depends on the app's composition");
+            }
+            assert!(to != Tier::Launcher, "{} depends on the launcher", package.name);
         }
     }
 }
@@ -211,7 +221,7 @@ fn source_imports_and_reexports_preserve_feature_boundaries() {
         } else {
             tier(&package.name)
         };
-        if !matches!(area, Tier::Shared | Tier::Companion | Tier::Trainer) {
+        if !matches!(area, Tier::Shared | Tier::Companion | Tier::Trainer | Tier::Launcher) {
             continue;
         }
         let aliases: BTreeMap<_, _> = package
@@ -232,6 +242,7 @@ fn source_imports_and_reexports_preserve_feature_boundaries() {
                         (Tier::Shared, Tier::Companion | Tier::Trainer | Tier::GameAccess | Tier::Composition)
                             | (Tier::Companion, Tier::Trainer | Tier::Wire | Tier::GameAccess)
                             | (Tier::Trainer, Tier::Companion)
+                            | (Tier::Launcher, Tier::Companion | Tier::Trainer | Tier::Wire | Tier::GameAccess)
                     ),
                     "{relative}: forbidden import/re-export {}",
                     path.join("::")

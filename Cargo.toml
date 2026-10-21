@@ -22,6 +22,7 @@ sha2 = "0.11.1"
 uuid = { version = "1.28.0", features = ["v4"] }
 # File and folder pickers, parented to the Slint window through raw-window-handle 0.6.
 rfd = { version = "0.17.2", default-features = false }
+raw-window-handle = "0.6.2"
 tempfile = "3.27.0"
 tokio = { version = "=1.53.3", features = ["rt", "net", "io-util", "time", "sync"] }
 # LZ4 blocks in Unity bundles; pure Rust, no unsafe in the decoder.

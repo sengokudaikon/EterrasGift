@@ -232,13 +232,19 @@ impl Navigation {
     pub fn navigate(&mut self, page: Page) {
         self.current = page;
         // Navigating to a trainer page while the pane is expanded opens the item, so the current row is visible.
-        if page.is_trainer() && self.pane_open {
-            self.trainer_open = true;
-        }
+        self.reveal_current();
     }
 
+    /// Expanding the pane reveals the current page: a trainer page opens the Trainer item, so its row shows.
     pub fn toggle_pane(&mut self) {
         self.pane_open = !self.pane_open;
+        self.reveal_current();
+    }
+
+    fn reveal_current(&mut self) {
+        if self.pane_open && self.current.is_trainer() {
+            self.trainer_open = true;
+        }
     }
 
     /// Crossing the wide threshold sets the pane: expanded when wide, the rail below. The user's toggle holds in
@@ -247,9 +253,7 @@ impl Navigation {
         if self.wide != Some(wide) {
             self.wide = Some(wide);
             self.pane_open = wide;
-            if wide && self.current.is_trainer() {
-                self.trainer_open = true;
-            }
+            self.reveal_current();
         }
     }
 
@@ -324,6 +328,7 @@ pub fn bind(window: &MainWindow, navigation: Navigation) -> ShellHandle {
         footer: Rc::new(VecModel::default()),
         window: window.as_weak(),
         focus_serial: RefCell::new(0),
+        page_serial: Cell::new(0),
         entered: RefCell::new(Vec::new()),
     });
     let nav = window.global::<Nav>();
@@ -404,6 +409,8 @@ struct Shell {
     footer: Rc<VecModel<NavRow>>,
     window: Weak<MainWindow>,
     focus_serial: RefCell<i32>,
+    /// Counts pages that came to show after the first, for the view's entrance (the first page never fades in).
+    page_serial: Cell<i32>,
     /// The page last synced to the view, to tell when another one comes to show.
     shown: Cell<Page>,
     entered: RefCell<Vec<PageEntered>>,
@@ -451,6 +458,8 @@ impl Shell {
         let current = navigation.current();
         drop(navigation);
         if self.shown.replace(current) != current {
+            self.page_serial.set(self.page_serial.get() + 1);
+            nav.set_page_serial(self.page_serial.get());
             for entered in self.entered.borrow().iter() {
                 entered(current);
             }
@@ -581,6 +590,25 @@ mod tests {
         assert!(nav.rows().contains(&Node::Page(Page::Forge)));
         assert!(nav.is_selected(Node::Page(Page::Forge)));
         assert!(!nav.is_selected(Node::Trainer));
+    }
+
+    #[test]
+    fn expanding_the_pane_on_a_trainer_page_opens_the_item() {
+        let mut nav = navigation();
+        nav.navigate(Page::Forge);
+        assert!(nav.is_selected(Node::Trainer), "on the rail the Trainer item carries the mark");
+        nav.toggle_pane();
+        assert!(nav.rows().contains(&Node::Page(Page::Forge)), "the expanded pane shows the current page's row");
+        assert!(nav.is_selected(Node::Page(Page::Forge)));
+        assert!(!nav.is_selected(Node::Trainer));
+        assert_eq!(nav.tab_row(), nav.index_of(Node::Page(Page::Forge)).unwrap());
+    }
+
+    #[test]
+    fn expanding_the_pane_on_another_page_leaves_the_item_closed() {
+        let mut nav = navigation();
+        nav.toggle_pane();
+        assert_eq!(ids(&nav.rows()), ["home", "mods", "trainer"]);
     }
 
     #[test]

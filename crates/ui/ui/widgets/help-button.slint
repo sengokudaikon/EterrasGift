@@ -21,8 +21,13 @@ export component HelpButton inherits Rectangle {
     accessible-description: root.help;
     accessible-action-default => { root.toggle(); }
 
+    // Tab opened the tip already, so the first press after it means "show it" and keeps it open (`KeyboardToolTips`).
+    property <bool> opened-by-focus;
+
     function toggle() {
-        if (Tip.open && Tip.text == root.help) {
+        if (root.opened-by-focus && Tip.open && Tip.text == root.help) {
+            root.opened-by-focus = false;
+        } else if (Tip.open && Tip.text == root.help) {
             Tip.open = false;
         } else {
             Tip.text = root.help;
@@ -49,7 +54,11 @@ export component HelpButton inherits Rectangle {
         focus-gained(reason) => {
             if (reason == FocusReason.tab-navigation) {
                 KeyboardFocus.visible = true;
+                root.opened-by-focus = true;
             }
+        }
+        focus-lost => {
+            root.opened-by-focus = false;
         }
         key-pressed(event) => {
             if (event.text == Key.Return || event.text == " ") {
@@ -64,6 +73,7 @@ export component HelpButton inherits Rectangle {
             pointer-event(event) => {
                 if (event.kind == PointerEventKind.down) {
                     KeyboardFocus.visible = false;
+                    root.opened-by-focus = false;
                 }
             }
             clicked => {

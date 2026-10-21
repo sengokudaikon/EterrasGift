@@ -14,6 +14,8 @@ export enum ItemRarity { normal, magic, rare, exalted, unique, set, legendary }
 // A value cell: the value, the "was" caption while drafted, and where the value sits in the game's range.
 export struct ValueCell {
     cell: CellRef,
+    // The value's own identity (its row's uid and roll): another value in the same place ends a drag on the old one.
+    uid: int,
     label: string,
     display: string,
     was: string,
@@ -77,6 +79,8 @@ export struct FieldView {
     numeric: bool,
     value: ValueCell,
     tip: string,
+    // The tip's bold first line on a numeric field (why it is read-only), or empty.
+    tip-heading: string,
     confirmed: bool,
     stale: bool,
     editable: bool,
@@ -99,6 +103,39 @@ export struct MenuOptionView {
     current: bool
 }
 export struct PickerRowView { name: string, detail: string, reforged: bool }
+
+// A cell Rust brought into focus (Show draft, Up/Down) asks the lists to scroll it into view: its top and height in window
+// coordinates. Only the forge's own views read it.
+export global ForgeReveal {
+    out property <length> top;
+    out property <length> height;
+    out property <int> serial;
+
+    public function show(top: length, height: length) {
+        self.top = top;
+        self.height = height;
+        self.serial += 1;
+    }
+}
+
+// In a narrow window the open changes pane lies over the table's right side: its area in window coordinates, so the cells
+// under it leave the Tab order (focus would land out of sight). Only the forge's own views read it.
+export global ForgeCover {
+    out property <bool> active;
+    out property <length> left;
+    out property <length> top;
+
+    public function set(active: bool, left: length, top: length) {
+        self.active = active;
+        self.left = left;
+        self.top = top;
+    }
+
+    // Whether a cell at (x, y) of this size, in window coordinates, lies under the pane.
+    public pure function covers(x: length, y: length, width: length, height: length) -> bool {
+        return self.active && x + width > self.left && y + height > self.top;
+    }
+}
 
 export global ForgeState {
     in property <bool> has-item;
@@ -128,6 +165,8 @@ export global ForgeState {
     in property <int> base-caption-lines;
     in property <int> rarity-caption-lines;
     in property <bool> base-allow-incompatible;
+    // The base field itself can be edited now (its "Allow incompatible affixes" box).
+    in property <bool> base-can-edit;
     in property <string> summary;
     in property <[FieldView]> fields;
 
@@ -157,8 +196,11 @@ export global ForgeState {
     in property <string> formatting-error;
     in property <bool> formatting-loading;
 
-    // The changes pane: open or closed is the view's (it follows the window class); the entries are Rust's.
+    // The changes pane: open or closed is the view's (it follows the window class); the entries are Rust's. The window
+    // class it last followed lives here too, so an item swap that rebuilds the forge keeps the user's choice.
     in-out property <bool> pane-open: true;
+    in-out property <bool> pane-class-known;
+    in-out property <bool> pane-narrow;
     in property <[DraftEntryView]> drafts;
     in property <string> draft-count-text: "No drafts";
     in property <[AppliedEntryView]> history;
@@ -175,7 +217,9 @@ export global ForgeState {
     in property <string> apply-text: "Apply to game";
     in property <bool> can-apply;
 
-    // The value popover, for the one cell typing.
+    // The value popover, for the one cell typing; typing ended elsewhere (Undo, an item change) closes it.
+    in property <bool> typing;
+    in property <CellRef> typing-cell: { kind: CellKind.affix, row: -1, roll: -1 };
     in property <string> input-label;
     in-out property <string> input-text;
     in property <string> input-range;
@@ -197,7 +241,8 @@ export global ForgeState {
 
     // Rust asks a cell to take keyboard focus (a ledger entry for a value, Up/Down between rows).
     in property <CellRef> focus-cell: { kind: CellKind.affix, row: -1, roll: -1 };
-    // Which of an affix row's cells: 0 value, 1 name, 2 tier, 3 seal.
+    // Which of an affix row's cells: 0 value, 1 name, 2 tier, 3 seal. A field (kind field): 0 its value, 1 its flag toggle;
+    // with row -1, 4 the base and 5 the identity in the header.
     in property <int> focus-part;
     in property <int> focus-serial;
 
@@ -205,6 +250,12 @@ export global ForgeState {
     callback select-unique(int);
     // Up / Down from a cell of row `int` in part `int`.
     callback move-row(int, int, int);
+    // Up / Down from roll `int` of unique modifier row `int`.
+    callback move-unique(int, int, int);
+    // A menu's keyboard highlight: where it starts (the held entry, else the first available), and the next available entry
+    // from one in a direction (the same one when there is none).
+    pure callback option-start([MenuOptionView]) -> int;
+    pure callback option-step([MenuOptionView], int, int) -> int;
     callback press(CellRef);
     callback scrub(CellRef, float);
     callback end-scrub(CellRef, bool);

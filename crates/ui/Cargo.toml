@@ -11,10 +11,13 @@ eg-companion.workspace = true
 eg-trainer = { path = "../trainer" }
 rfd.workspace = true
 jiff.workspace = true
+serde_json.workspace = true
 slint = { workspace = true, features = ["raw-window-handle-06"] }
 
 [target.'cfg(windows)'.dependencies]
-windows-sys = { workspace = true, features = ["Win32_UI_WindowsAndMessaging", "Win32_UI_Accessibility", "Win32_UI_Shell"] }
+windows-sys = { workspace = true, features = ["Win32_UI_WindowsAndMessaging", "Win32_UI_Accessibility", "Win32_UI_Shell", "Win32_Graphics_Dwm"] }
+# The window's HWND, for its dark title bar (system.rs).
+raw-window-handle.workspace = true
 
 [build-dependencies]
 slint-build.workspace = true
@@ -22,7 +25,6 @@ slint-build.workspace = true
 [dev-dependencies]
 image.workspace = true
 jiff.workspace = true
-serde_json.workspace = true
 tempfile.workspace = true
 tokio.workspace = true
 

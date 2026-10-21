@@ -1,0 +1,254 @@
+// A context menu as the C# app's FluentTheme draws one (Avalonia's ContextMenu and MenuItem, compact density, on the
+// retinted palette): Dusk Brown in a Weathered Taupe frame over a soft shadow, 28px rows of [icon | title | key] in Noto Sans, separators between
+// groups. Slint's own ContextMenuArea is a native menu on Windows that can't take the app's look, so menus are this.
+//
+// Declare it as a child of the element whose coordinates you'll give, and open it with `open-at`: at the pointer for a
+// right-click, under the row for the menu key or Shift+F10. Up and Down move (wrapping, skipping separators and disabled
+// rows), Home and End go to the ends, Enter or Space picks, Escape closes; closing gives focus back to whatever had it.
+
+import { Tokens } from "../tokens.slint";
+import { KeyboardFocus } from "../globals.slint";
+
+// The ground of every menu and flyout: Dusk Brown in the strong-line frame, as the tooltip and the rail's flyout have it,
+// over a soft drop shadow so it lifts off the near-black page (the 2026-10-20 audit measured Fluent's faint frame at
+// about 1.02:1). The software renderer draws no shadows, so captures show the frame alone.
+export component FlyoutSurface inherits Rectangle {
+    background: Tokens.hover-brush;
+    border-width: 1px;
+    border-color: Tokens.strong-line-brush;
+    border-radius: Tokens.control-radius;
+    drop-shadow-color: Tokens.flyout-shadow-color;
+    drop-shadow-blur: Tokens.flyout-shadow-blur;
+    drop-shadow-offset-y: Tokens.flyout-shadow-offset-y;
+}
+
+export struct MenuEntry {
+    title: string,
+    // Drawn in the row's text colour; a row without one keeps the column blank, so titles line up.
+    icon: image,
+    // The key that does the same outside the menu ("Space", "Delete"), muted at the row's end.
+    gesture: string,
+    disabled: bool,
+    // A line between groups; its other fields are ignored.
+    separator: bool,
+}
+
+// It is itself a zero-size anchor (popups' insides can't be reached from outside, so the PopupWindow sits inside it).
+export component PopupMenu inherits Rectangle {
+    in property <[MenuEntry]> entries;
+    // The icon column, kept for every row when any row has an icon (the C# grid's shared size group).
+    in property <bool> has-icons: true;
+    // A row picked, by its index in `entries`. The menu has closed by then.
+    callback activated(int);
+
+    // The row Up, Down and Enter act on; -1 when opened by the pointer, until a key is pressed.
+    property <int> highlighted: -1;
+    property <length> icon-column: root.has-icons ? Tokens.icon-size + Tokens.space-12 : 0px;
+
+    // Opens with its top-left corner at (at-x, at-y) in the coordinates of the element it's declared in. From the
+    // keyboard the first row it can pick is highlighted, so Enter acts at once.
+    public function open-at(at-x: length, at-y: length, keyboard: bool) {
+        root.at-x = at-x;
+        root.at-y = at-y;
+        root.highlighted = keyboard ? root.step(-1, 1) : -1;
+        if (keyboard) {
+            KeyboardFocus.visible = true;
+        }
+        popup.show();
+    }
+
+    property <length> at-x;
+    property <length> at-y;
+    // Popups need an explicit size (research/slint.md): measured from hidden copies of the rows.
+    property <length> menu-width: 2px + Tokens.menu-item-padding.left + root.icon-column + titles.preferred-width + Tokens.menu-gesture-margin.left + gestures.preferred-width + Tokens.menu-item-padding.right;
+    property <length> menu-height: 2px + Tokens.menu-flyout-scroller-margin.top + heights.preferred-height + Tokens.menu-flyout-scroller-margin.bottom;
+    // At its parent's origin, so `open-at` takes the parent's coordinates (sized but unplaced, it would be centred).
+    x: 0px;
+    y: 0px;
+    width: 0px;
+    height: 0px;
+
+    pure function usable(index: int) -> bool {
+        return index >= 0 && index < root.entries.length && !root.entries[index].separator && !root.entries[index].disabled;
+    }
+    pure function wrap(index: int) -> int {
+        return Math.mod(index, Math.max(1, root.entries.length));
+    }
+    // The next row it can pick from `from` in `direction`, wrapping; `from` itself when there's none. Slint has no loops,
+    // so it looks eight rows on, more than a context menu skips in a row.
+    pure function step(from: int, direction: int) -> int {
+        let start = from < 0 && direction < 0 ? 0 : from;
+        if (root.usable(root.wrap(start + direction))) { return root.wrap(start + direction); }
+        if (root.usable(root.wrap(start + 2 * direction))) { return root.wrap(start + 2 * direction); }
+        if (root.usable(root.wrap(start + 3 * direction))) { return root.wrap(start + 3 * direction); }
+        if (root.usable(root.wrap(start + 4 * direction))) { return root.wrap(start + 4 * direction); }
+        if (root.usable(root.wrap(start + 5 * direction))) { return root.wrap(start + 5 * direction); }
+        if (root.usable(root.wrap(start + 6 * direction))) { return root.wrap(start + 6 * direction); }
+        if (root.usable(root.wrap(start + 7 * direction))) { return root.wrap(start + 7 * direction); }
+        if (root.usable(root.wrap(start + 8 * direction))) { return root.wrap(start + 8 * direction); }
+        return from;
+    }
+    function pick(index: int) {
+        if (root.usable(index)) {
+            popup.close();
+            root.activated(index);
+        }
+    }
+
+    // Hidden copies of the titles, keys and row heights, for the menu's size.
+    titles := VerticalLayout {
+        visible: false;
+        for entry in root.entries: Text { text: entry.separator ? "" : entry.title; font-size: Tokens.font-size-value; }
+    }
+    gestures := VerticalLayout {
+        visible: false;
+        for entry in root.entries: Text { text: entry.separator ? "" : entry.gesture; font-size: Tokens.font-size-caption; }
+    }
+    heights := VerticalLayout {
+        visible: false;
+        for entry in root.entries: Rectangle {
+            height: entry.separator ? Tokens.menu-separator-margin.top + 1px + Tokens.menu-separator-margin.bottom : Tokens.menu-item-height;
+        }
+    }
+
+    popup := PopupWindow {
+        x: root.at-x;
+        y: root.at-y;
+        width: root.menu-width;
+        height: root.menu-height;
+        close-policy: PopupClosePolicy.close-on-click-outside;
+
+        FlyoutSurface {
+            border-radius: Tokens.overlay-radius;
+            accessible-role: list;
+
+            FocusScope {
+                init => {
+                    self.focus();
+                }
+                key-pressed(event) => {
+                    if (event.text == Key.Escape || event.text == Key.Tab || event.text == Key.Backtab) {
+                        popup.close();
+                        return accept;
+                    }
+                    if (event.text == Key.DownArrow) {
+                        KeyboardFocus.visible = true;
+                        root.highlighted = root.step(root.highlighted, 1);
+                        return accept;
+                    }
+                    if (event.text == Key.UpArrow) {
+                        KeyboardFocus.visible = true;
+                        root.highlighted = root.step(root.highlighted, -1);
+                        return accept;
+                    }
+                    if (event.text == Key.Home) {
+                        KeyboardFocus.visible = true;
+                        root.highlighted = root.step(-1, 1);
+                        return accept;
+                    }
+                    if (event.text == Key.End) {
+                        KeyboardFocus.visible = true;
+                        root.highlighted = root.step(root.entries.length, -1);
+                        return accept;
+                    }
+                    if (event.text == Key.Return || event.text == " ") {
+                        root.pick(root.highlighted);
+                        return accept;
+                    }
+                    // The menu keeps the keyboard while it is open.
+                    accept
+                }
+
+                VerticalLayout {
+                    padding-left: 1px;
+                    padding-right: 1px;
+                    padding-top: 1px + Tokens.menu-flyout-scroller-margin.top;
+                    padding-bottom: 1px + Tokens.menu-flyout-scroller-margin.bottom;
+
+                    for entry[index] in root.entries: Rectangle {
+                        height: entry.separator ? Tokens.menu-separator-margin.top + 1px + Tokens.menu-separator-margin.bottom : Tokens.menu-item-height;
+
+                        if entry.separator: Rectangle {
+                            x: Tokens.menu-separator-margin.left;
+                            y: Tokens.menu-separator-margin.top;
+                            width: parent.width - Tokens.menu-separator-margin.left - Tokens.menu-separator-margin.right;
+                            height: 1px;
+                            background: Tokens.fluent-base-medium-low-color;
+                        }
+
+                        if !entry.separator: row := Rectangle {
+                            property <bool> enabled: !entry.disabled;
+                            property <brush> ink: !self.enabled ? Tokens.fluent-base-medium-low-color : Tokens.text-brush;
+                            accessible-role: list-item;
+                            accessible-label: entry.title;
+                            accessible-description: entry.gesture;
+                            accessible-enabled: self.enabled;
+                            accessible-item-selectable: true;
+                            accessible-item-selected: root.highlighted == index;
+                            accessible-action-default => { root.pick(index); }
+                            // Fluent hovers on ListLow, which the retinted palette makes the menu's own ground, so the row under
+                            // the pointer takes Wine-Stained Brown (Fluent's pressed ListMedium), as the rail's flyout does. The
+                            // keyboard's row is framed while focus shows.
+                            background: touch.has-hover ? Tokens.selected-brush : transparent;
+                            border-width: 1px;
+                            border-color: root.highlighted == index && KeyboardFocus.visible ? Tokens.focus-brush : transparent;
+                            border-radius: Tokens.control-radius;
+
+                            HorizontalLayout {
+                                padding-left: Tokens.menu-item-padding.left;
+                                padding-right: Tokens.menu-item-padding.right;
+                                padding-top: Tokens.menu-item-padding.top;
+                                padding-bottom: Tokens.menu-item-padding.bottom;
+                                spacing: 0px;
+
+                                if root.has-icons: Rectangle {
+                                    width: root.icon-column;
+                                    Image {
+                                        x: 0;
+                                        width: Tokens.icon-size;
+                                        height: Tokens.icon-size;
+                                        image-fit: contain;
+                                        source: entry.icon;
+                                        colorize: row.ink;
+                                    }
+                                }
+                                Text {
+                                    text: entry.title;
+                                    font-size: Tokens.font-size-value;
+                                    color: row.ink;
+                                    vertical-alignment: center;
+                                    horizontal-stretch: 1;
+                                }
+                                Rectangle {
+                                    width: Tokens.menu-gesture-margin.left;
+                                    horizontal-stretch: 0;
+                                }
+                                Text {
+                                    text: entry.gesture;
+                                    font-size: Tokens.font-size-caption;
+                                    color: row.enabled ? Tokens.fluent-base-medium-color : Tokens.fluent-base-medium-low-color;
+                                    horizontal-alignment: right;
+                                    vertical-alignment: center;
+                                    horizontal-stretch: 0;
+                                    width: gestures.preferred-width;
+                                }
+                            }
+
+                            touch := TouchArea {
+                                enabled: row.enabled;
+                                pointer-event(event) => {
+                                    if (event.kind == PointerEventKind.down) {
+                                        KeyboardFocus.visible = false;
+                                    }
+                                }
+                                clicked => {
+                                    root.pick(index);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

@@ -448,13 +448,32 @@ impl SettingsStore {
         if let Err(error) = atomic::write(&self.file_path, text.as_bytes()) {
             self.pending = Some(settings);
             self.pending_explicit = replace_unreadable;
-            return Err(error);
+            return Err(io::Error::new(error.kind(), describe_io(&error, &self.file_path)));
         }
         self.saved = settings;
         self.pending = None;
         self.pending_explicit = false;
         self.unreadable = false;
         Ok(())
+    }
+}
+
+/// An IO failure on `path` as .NET words it (`Win32Marshal`), the way the C# page shows it: "Access to the path '…' is
+/// denied." rather than Rust's "Access is denied. (os error 5)".
+pub fn describe_io(error: &io::Error, path: &Path) -> String {
+    let path = path.display();
+    match error.raw_os_error() {
+        Some(2) => format!("Could not find file '{path}'."),
+        Some(3) => format!("Could not find a part of the path '{path}'."),
+        Some(5) => format!("Access to the path '{path}' is denied."),
+        Some(32) => format!("The process cannot access the file '{path}' because it is being used by another process."),
+        Some(80 | 183) => format!("The file '{path}' already exists."),
+        Some(206) => format!("The path '{path}' is too long, or a component of the specified path is too long."),
+        _ => {
+            let text = error.to_string();
+            let text = text.split(" (os error ").next().unwrap_or(&text).trim_end();
+            format!("{text} : '{path}'")
+        }
     }
 }
 
@@ -629,6 +648,17 @@ mod tests {
         enabled_key: Some("trainerEnabled"),
         keys: &["autoConnect", "iKnowWhatImDoing", "hookValues"],
     };
+
+    #[test]
+    fn io_failures_read_as_the_c_sharp_app_words_them() {
+        let path = Path::new(r"C:\data\settings.json");
+        assert_eq!(
+            describe_io(&io::Error::from_raw_os_error(5), path),
+            r"Access to the path 'C:\data\settings.json' is denied."
+        );
+        let other = describe_io(&io::Error::from_raw_os_error(112), path);
+        assert!(!other.contains("os error") && other.ends_with(r" : 'C:\data\settings.json'"), "{other}");
+    }
 
     struct Fixture {
         _temp: tempfile::TempDir,

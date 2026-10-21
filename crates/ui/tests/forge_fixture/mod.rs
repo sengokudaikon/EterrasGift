@@ -36,6 +36,8 @@ pub struct FixtureState {
 
 pub struct FixtureGame {
     catalog: Catalog,
+    /// The classes each affix rolls for (the game's `AffixClasses` bits); an affix missing here rolls for any class.
+    classes: std::collections::HashMap<u16, i32>,
     pub state: Rc<RefCell<FixtureState>>,
 }
 
@@ -87,7 +89,7 @@ impl FixtureGame {
                                     sub_type: b.sub_type,
                                     name: name(&b.name),
                                     level_requirement: i32::from(b.level),
-                                    class_requirement: 0,
+                                    class_requirement: b.class_requirement,
                                     cannot_drop: false,
                                     is_corrupted: b.corrupted,
                                     implicits: data::Availability::Available(vec![]),
@@ -112,7 +114,7 @@ impl FixtureGame {
                             game_display_name: data::Availability::Available(d.name.clone()),
                             kind: d.kind as i32,
                             special: d.category.as_raw(),
-                            class_requirement: 0,
+                            class_requirement: self.classes.get(&d.id).copied().unwrap_or(0),
                             item_types: Some(d.item_types.iter().map(|t| i32::from(*t)).collect()),
                             tier_count: u16::from(d.max_tier),
                             standard_effect: 1.0,
@@ -156,7 +158,8 @@ impl FixtureGame {
             item_type: item.item_type as u8,
             sub_type: item.sub_type,
             rarity: item.rarity,
-            class_requirement: 0,
+            // The game gives an item the class requirement of its base.
+            class_requirement: self.catalog.base(item.item_type, item.sub_type).map_or(0, |base| base.class_requirement),
             affixes: item
                 .affixes
                 .iter()
@@ -239,9 +242,38 @@ impl FixtureGame {
         FixtureGame::new(Some(item), false, true, false)
     }
 
+    /// A Sentinel's ring with two class affixes: the Sapphire Ring (any class) would make both incompatible, the Obsidian
+    /// Ring (Acolyte) the Sentinel-only one. Not in the C# fixture; it shows the base picker's incompatible counts and the
+    /// refusal of a base that breaks affixes (the C# `ForgeChoices.BaseOptions`, `ApplyPlanner`).
+    pub fn class_ring() -> FixtureGame {
+        const SENTINEL: i32 = 4;
+        const ACOLYTE: i32 = 8;
+        let mut game = FixtureGame::ring(false);
+        for (id, name, kind, classes) in [(4010, "Sentinel's Bulwark", AffixKind::Prefix, 8), (4011, "Oathbound Vigil", AffixKind::Suffix, 8 | 16)] {
+            game.catalog.definitions.push(AffixDefinition {
+                item_types: vec![RING],
+                ..definition(id, name, kind, Category::Standard)
+            });
+            game.classes.insert(id, classes);
+        }
+        for base in &mut game.catalog.item_types[0].bases {
+            base.class_requirement = match base.sub_type {
+                2 => SENTINEL,
+                9 => ACOLYTE,
+                _ => 0,
+            };
+        }
+        game.change(|item| {
+            item.affixes.push(affix(1, 4010, 4, 120, AffixKind::Prefix, Seal::Normal, Category::Standard));
+            item.affixes.push(affix(2, 4011, 3, 90, AffixKind::Suffix, Seal::Normal, Category::Standard));
+        });
+        game
+    }
+
     pub fn new(item: Option<ForgeItem>, seed_tiers: bool, identity: bool, base_implicits: bool) -> FixtureGame {
         FixtureGame {
             catalog: catalog(seed_tiers, base_implicits),
+            classes: Default::default(),
             state: Rc::new(RefCell::new(FixtureState {
                 item,
                 identity,
@@ -312,6 +344,7 @@ fn catalog(seed_tiers: bool, base_implicits: bool) -> Catalog {
                     name: "Gold Ring".into(),
                     level: 20,
                     corrupted: false,
+                    class_requirement: 0,
                     implicits: if base_implicits {
                         vec!["+10–16 Armor".into(), "+5% Cold Resistance".into()]
                     } else {
@@ -323,6 +356,7 @@ fn catalog(seed_tiers: bool, base_implicits: bool) -> Catalog {
                     name: "Sapphire Ring".into(),
                     level: 28,
                     corrupted: false,
+                    class_requirement: 0,
                     implicits: if base_implicits { vec!["+12–18% Fire Resistance".into()] } else { Vec::new() },
                 },
                 BaseDefinition {
@@ -330,6 +364,7 @@ fn catalog(seed_tiers: bool, base_implicits: bool) -> Catalog {
                     name: "Obsidian Ring".into(),
                     level: 40,
                     corrupted: true,
+                    class_requirement: 0,
                     implicits: Vec::new(),
                 },
             ],
@@ -643,16 +678,7 @@ impl ForgeGame for FixtureGame {
         if undo.after() != &context.expected {
             return None;
         }
-        match undo.prepare_with_override(
-            &context.expected,
-            1,
-            &context.catalog,
-            &eg_trainer::edits::CatalogProvenance::RuntimeRead {
-                generation: 1,
-                process: context.expected.process().clone(),
-            },
-            state.unrestricted,
-        ) {
+        match undo.prepare_with_override(&context.expected, 1, &context.catalog, state.unrestricted) {
             Ok(plan) => Some(plan.edit_intent().clone()),
             Err(_) if matches!(undo.reverse_edit(), ItemEdit::Roll(e) if e.target != RollTarget::Affix) => Some(undo.reverse_edit().clone()),
             Err(_) => None,
@@ -692,6 +718,11 @@ impl FixtureGame {
             Ok(after) => after,
             Err(e) => return refused(e.to_string()),
         };
+        // An authored item without a status strip keeps none after a write: the projected snapshot always carries
+        // a status, which would otherwise add a strip the item never had.
+        if item.status.is_none() {
+            after.status = None;
+        }
         // The game names the item after its new identity.
         if let ItemEdit::UniqueIdentity(eg_trainer::edits::UniqueIdentityEdit { unique_id, .. }) = edit
             && let Some(unique) = self.catalog.unique(*unique_id as u16)
@@ -709,16 +740,7 @@ impl FixtureGame {
             let regular = !matches!(reverse, ItemEdit::Roll(e) if e.target != RollTarget::Affix);
             if regular
                 && undo
-                    .prepare_with_override(
-                        undo.after(),
-                        1,
-                        &after.context.as_ref().unwrap().catalog,
-                        &eg_trainer::edits::CatalogProvenance::RuntimeRead {
-                            generation: 1,
-                            process: undo.after().process().clone(),
-                        },
-                        state.unrestricted,
-                    )
+                    .prepare_with_override(undo.after(), 1, &after.context.as_ref().unwrap().catalog, state.unrestricted)
                     .is_err()
             {
                 state.history.clear();

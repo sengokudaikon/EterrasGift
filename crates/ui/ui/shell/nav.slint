@@ -6,18 +6,20 @@ import { Tokens } from "../tokens.slint";
 import { Nav, NavRow, NavOutcome, Connection, KeyboardFocus, TipPlacement } from "../globals.slint";
 import { FocusRing, TipTrigger } from "../widgets/focus.slint";
 import { Button, ButtonKind } from "../widgets/button.slint";
+import { FlyoutSurface } from "../widgets/menu.slint";
+import { ScrollView } from "../widgets/scroll-view.slint";
 
-// The Trainer item's pages on the rail, as a menu beside the item. The current page carries the radio mark.
-component TrainerFlyout inherits Rectangle {
+// The Trainer item's pages on the rail, as a menu beside the item. The current page carries the radio mark. The flyout
+// surface every menu has (Dusk Brown in the strong-line frame over a shadow); the row under the pointer is Wine-Stained
+// Brown, as every menu row's is, and the keyboard's is framed.
+component TrainerFlyout inherits FlyoutSurface {
     callback chosen(string);
     callback dismissed();
 
-    property <int> highlighted: 0;
+    // The C# rail builds radio menu items: each page by its title, the one shown checked.
+    accessible-role: AccessibleRole.list;
 
-    background: Tokens.raised-brush;
-    border-width: 1px;
-    border-color: Tokens.strong-line-brush;
-    border-radius: Tokens.control-radius;
+    property <int> highlighted: 0;
 
     keys := FocusScope {
         init => {
@@ -25,12 +27,16 @@ component TrainerFlyout inherits Rectangle {
         }
         key-pressed(event) => {
             if (event.text == Key.UpArrow) {
+                KeyboardFocus.visible = true;
                 root.highlighted = Math.max(0, root.highlighted - 1);
             } else if (event.text == Key.DownArrow) {
+                KeyboardFocus.visible = true;
                 root.highlighted = Math.min(Nav.flyout-pages.length - 1, root.highlighted + 1);
             } else if (event.text == Key.Home) {
+                KeyboardFocus.visible = true;
                 root.highlighted = 0;
             } else if (event.text == Key.End) {
+                KeyboardFocus.visible = true;
                 root.highlighted = Nav.flyout-pages.length - 1;
             } else if (event.text == Key.Return || event.text == " ") {
                 root.chosen(Nav.flyout-pages[root.highlighted].id);
@@ -47,9 +53,28 @@ component TrainerFlyout inherits Rectangle {
         padding: Tokens.space-4;
 
         for page[i] in Nav.flyout-pages: Rectangle {
+            // The keyboard starts on the page now shown, as the forge's menus start on the held entry.
+            init => {
+                if (page.selected) {
+                    root.highlighted = i;
+                }
+            }
             height: Tokens.nav-item-min-height;
+            accessible-role: list-item;
+            accessible-label: page.title;
+            accessible-item-selectable: true;
+            accessible-item-selected: page.selected;
+            accessible-checkable: true;
+            accessible-checked: page.selected;
+            accessible-action-default => {
+                root.chosen(page.id);
+            }
             border-radius: Tokens.control-radius;
-            background: item-touch.has-hover || (root.highlighted == i && KeyboardFocus.visible) ? Tokens.hover-brush : transparent;
+            background: item-touch.has-hover ? Tokens.selected-brush : transparent;
+            // The keyboard's row is framed in the focus colour (as `MenuRow` and the context menus do): a darker ground
+            // alone is lost on the flyout's.
+            border-width: 1px;
+            border-color: root.highlighted == i && KeyboardFocus.visible ? Tokens.focus-brush : transparent;
 
             item-touch := TouchArea {
                 clicked => {
@@ -66,9 +91,9 @@ component TrainerFlyout inherits Rectangle {
                 Rectangle {
                     width: Tokens.icon-size-tiny;
                     Rectangle {
-                        width: 6px;
-                        height: 6px;
-                        border-radius: 3px;
+                        width: Tokens.radio-mark-size;
+                        height: Tokens.radio-mark-size;
+                        border-radius: self.width / 2;
                         background: page.selected ? Tokens.text-brush : transparent;
                     }
                 }
@@ -98,10 +123,16 @@ component NavRowView inherits Rectangle {
     in property <NavRow> item;
     in property <int> index;
     in property <bool> rail;
+    // Keyboard focus came to this row, by whatever way: the pane scrolls it into view.
+    callback took-focus();
 
-    accessible-role: tab;
+    // An invokable list item, as the C# ListBoxItem is.
+    accessible-role: list-item;
     accessible-label: root.item.title;
     accessible-item-selected: root.item.selected;
+    accessible-action-default => {
+        root.act(Nav.row-clicked(root.index));
+    }
 
     // Rust's focus request for this row, taken once and cleared.
     property <int> focus-ticket: Nav.focus-row == root.index ? Nav.focus-serial : -1;
@@ -124,7 +155,7 @@ component NavRowView inherits Rectangle {
     border-width: 1px;
     border-color: root.item.selected ? Tokens.accent-trim-brush : transparent;
     background: root.item.selected ? (touch.has-hover ? Tokens.primary-hover-brush : Tokens.primary-brush)
-        : touch.has-hover ? Tokens.hover-brush : transparent;
+        : touch.pressed ? Tokens.selected-brush : touch.has-hover ? Tokens.hover-brush : transparent;
 
     property <brush> foreground: root.item.selected ? Tokens.on-primary-brush : Tokens.text-brush;
 
@@ -166,6 +197,7 @@ component NavRowView inherits Rectangle {
             if (reason == FocusReason.tab-navigation) {
                 KeyboardFocus.visible = true;
             }
+            root.took-focus();
         }
         // One tab stop for the rows and the foot (spec §3 "Keyboard").
         focus-on-tab-navigation: Nav.tab-row == root.index;
@@ -176,15 +208,16 @@ component NavRowView inherits Rectangle {
             reject
         }
 
+        // A row acts as the pointer goes down, as the C# ListBox selects on press; the keyboard acts as before.
         touch := TouchArea {
             pointer-event(event) => {
                 if (event.kind == PointerEventKind.down) {
                     KeyboardFocus.visible = false;
+                    if (event.button == PointerEventButton.left) {
+                        focus.focus();
+                        root.act(Nav.row-clicked(root.index));
+                    }
                 }
-            }
-            clicked => {
-                focus.focus();
-                root.act(Nav.row-clicked(root.index));
             }
         }
     }
@@ -210,21 +243,26 @@ component NavRowView inherits Rectangle {
         height: Nav.flyout-pages.length * Tokens.nav-item-min-height + 2 * Tokens.space-4;
         close-policy: PopupClosePolicy.close-on-click-outside;
 
+        // Focus goes back to the row as Avalonia restores it after a flyout (no navigation method): no ring and no tip
+        // until the next navigation key.
         TrainerFlyout {
             width: parent.width;
             height: parent.height;
             chosen(id) => {
                 flyout.close();
+                KeyboardFocus.visible = false;
                 Nav.navigate(id);
             }
             dismissed => {
                 flyout.close();
+                KeyboardFocus.visible = false;
             }
         }
     }
 }
 
-// The trainer's connection, fixed at the foot of the navigation above a hairline: icon and words, never colour alone.
+// The trainer's connection, fixed at the foot of the navigation under a hairline: icon and words, never colour alone.
+// The hairline is the block's top border and adds its pixel to the height, as the C# Border's does.
 component ConnectionBlock inherits Rectangle {
     in property <bool> rail;
 
@@ -232,27 +270,33 @@ component ConnectionBlock inherits Rectangle {
 
     Rectangle {
         y: 0;
-        height: 1px;
+        height: Tokens.border-top.top;
         background: Tokens.hairline-brush;
     }
 
     layout := VerticalLayout {
         padding-left: root.rail ? Tokens.nav-status-collapsed-padding.left : Tokens.nav-status-padding.left;
         padding-right: root.rail ? Tokens.nav-status-collapsed-padding.right : Tokens.nav-status-padding.right;
-        padding-top: Tokens.nav-status-padding.top;
-        padding-bottom: Tokens.nav-status-padding.bottom;
+        padding-top: Tokens.border-top.top + (root.rail ? Tokens.nav-status-collapsed-padding.top : Tokens.nav-status-padding.top);
+        padding-bottom: root.rail ? Tokens.nav-status-collapsed-padding.bottom : Tokens.nav-status-padding.bottom;
         spacing: Tokens.space-10;
 
         status := HorizontalLayout {
             spacing: Tokens.space-10;
             padding-left: root.rail ? Tokens.nav-status-icon-collapsed-margin.left : 0px;
 
-            Image {
-                image-fit: contain;
-                source: Connection.connected ? Tokens.icon-connected : Tokens.icon-disconnected;
-                width: Tokens.icon-size;
-                height: Tokens.icon-size;
-                colorize: Connection.connected ? Tokens.confirmed-brush : Connection.blocked ? Tokens.warning-brush : Tokens.text-muted-brush;
+            // Top-aligned with the words' first line, nudged onto their baseline.
+            VerticalLayout {
+                padding-top: Tokens.icon-baseline-nudge.top;
+                alignment: start;
+
+                Image {
+                    image-fit: contain;
+                    source: Connection.connected ? Tokens.icon-connected : Tokens.icon-disconnected;
+                    width: Tokens.icon-size;
+                    height: Tokens.icon-size;
+                    colorize: Connection.connected ? Tokens.confirmed-brush : Connection.blocked ? Tokens.warning-brush : Tokens.text-muted-brush;
+                }
             }
 
             if !root.rail: Text {
@@ -266,23 +310,62 @@ component ConnectionBlock inherits Rectangle {
             }
         }
 
-        if Connection.show-action: Button {
-            text: root.rail ? "" : Connection.action-text;
+        // On the rail an icon button of the icon-button size, centred, as the C# rail sets it.
+        if Connection.show-action && root.rail: HorizontalLayout {
+            alignment: center;
+
+            // The rail shows no words, so the button's tip carries them under its action, for the pointer and the
+            // keyboard alike; a screen reader hears the action, and the words from the status.
+            Button {
+                width: Tokens.icon-button-size;
+                height: Tokens.icon-button-size;
+                icon: Tokens.icon-refresh;
+                tip: "\{Connection.action-text}\n\{Connection.text}";
+                accessible-name: Connection.action-text;
+                tip-placement: TipPlacement.right;
+                keyboard-tip-placement: TipPlacement.right;
+                clicked => {
+                    Connection.connect();
+                }
+            }
+        }
+
+        if Connection.show-action && !root.rail: Button {
+            text: Connection.action-text;
             icon: Tokens.icon-refresh;
             tip: Connection.action-text;
-            tip-placement: root.rail ? TipPlacement.right : TipPlacement.below;
             clicked => {
                 Connection.connect();
             }
         }
     }
 
-    // The rail shows the words as a tip on the status icon.
-    status-touch := TouchArea {
+    // The words as a tip on the status, in the pane and on the rail alike, and as its name for a screen reader. On the
+    // rail without the Connect button, which says them otherwise, the status is the block's one tab stop, so the keyboard
+    // reaches the words too.
+    property <bool> status-stop: root.rail && !Connection.show-action;
+    status-focus := FocusScope {
         x: status.x;
         y: status.y;
         width: status.width;
         height: status.height;
+        enabled: root.status-stop;
+        focus-on-click: false;
+        accessible-role: text;
+        accessible-label: Connection.text;
+        focus-gained(reason) => {
+            if (reason == FocusReason.tab-navigation) {
+                KeyboardFocus.visible = true;
+            }
+        }
+
+        status-touch := TouchArea {
+            pointer-event(event) => {
+                if (event.kind == PointerEventKind.down) {
+                    KeyboardFocus.visible = false;
+                }
+            }
+        }
     }
 
     TipTrigger {
@@ -290,9 +373,19 @@ component ConnectionBlock inherits Rectangle {
         y: status.y;
         width: status.width;
         height: status.height;
-        text: root.rail ? Connection.text : "";
+        text: Connection.text;
         hovered: status-touch.has-hover;
-        hover-placement: TipPlacement.right;
+        focused: status-focus.has-focus;
+        hover-placement: root.rail ? TipPlacement.right : TipPlacement.below;
+        keyboard-placement: TipPlacement.right;
+    }
+
+    FocusRing {
+        x: status.x;
+        y: status.y;
+        width: status.width;
+        height: status.height;
+        focused: status-focus.has-focus;
     }
 }
 
@@ -302,15 +395,19 @@ export component NavPane inherits Rectangle {
     width: root.rail ? Tokens.nav-rail-width : Tokens.nav-pane-width;
     background: Tokens.surface-brush;
 
+    // The right border is inside the pane's width, as the C# Border's is: the content stops short of it.
     VerticalLayout {
-        // Brand row: the wordmark and the toggle; the rail keeps only the toggle.
+        padding-right: Tokens.border-right.right;
+
+        // Brand row: the wordmark and the toggle in its right column; the rail keeps only the toggle, still on the right.
         HorizontalLayout {
             padding-left: root.rail ? Tokens.nav-brand-collapsed-margin.left : Tokens.nav-brand-margin.left;
             padding-right: root.rail ? Tokens.nav-brand-collapsed-margin.right : Tokens.nav-brand-margin.right;
             padding-top: Tokens.nav-brand-margin.top;
-            padding-bottom: Tokens.nav-brand-margin.bottom;
-            min-height: Tokens.control-min-height + Tokens.nav-brand-margin.top + Tokens.nav-brand-margin.bottom;
-            alignment: root.rail ? center : space-between;
+            // The rows' scroll view starts a focus ring's reach higher, so the first row's ring is not clipped.
+            padding-bottom: Tokens.nav-brand-margin.bottom - Tokens.space-2;
+            min-height: Tokens.control-min-height + Tokens.nav-brand-margin.top + Tokens.nav-brand-margin.bottom - Tokens.space-2;
+            alignment: root.rail ? end : space-between;
 
             if !root.rail: HorizontalLayout {
                 padding-left: Tokens.nav-brand-text-margin.left;
@@ -332,6 +429,7 @@ export component NavPane inherits Rectangle {
                 kind: ButtonKind.subtle;
                 icon: root.rail ? Tokens.icon-pane-expand : Tokens.icon-pane-collapse;
                 tip: root.rail ? "Expand navigation" : "Collapse navigation";
+                // The pointer's tip stands beside the rail; the keyboard's opens below, as everywhere.
                 tip-placement: root.rail ? TipPlacement.right : TipPlacement.below;
                 clicked => {
                     Nav.toggle-pane();
@@ -339,18 +437,35 @@ export component NavPane inherits Rectangle {
             }
         }
 
-        // The rows; Settings at the foot, as Windows apps keep it.
-        VerticalLayout {
-            padding-left: Tokens.nav-list-margin.left;
-            padding-right: Tokens.nav-list-margin.right;
-            spacing: Tokens.row-gap.bottom;
-            alignment: start;
+        // The rows scroll when the window is too short for them, as the C# ScrollViewer does; Settings and the connection
+        // stay at the foot, as Windows apps keep them.
+        rows-scroll := ScrollView {
             vertical-stretch: 1;
+            content-width: self.visible-width;
+            content-height: rows.height;
 
-            for row[i] in Nav.rows: NavRowView {
-                item: row;
-                index: i;
-                rail: root.rail;
+            rows := VerticalLayout {
+                width: rows-scroll.visible-width;
+                height: self.preferred-height;
+                padding-left: Tokens.nav-list-margin.left;
+                padding-right: Tokens.nav-list-margin.right;
+                padding-top: Tokens.space-2;
+                // Each C# row keeps its RowGap below it, the last one too.
+                padding-bottom: Tokens.row-gap.bottom;
+                spacing: Tokens.row-gap.bottom;
+
+                for row[i] in Nav.rows: NavRowView {
+                    item: row;
+                    index: i;
+                    rail: root.rail;
+                    took-focus => {
+                        if (self.y < -rows-scroll.content-y) {
+                            rows-scroll.content-y = -self.y;
+                        } else if (self.y + self.height > -rows-scroll.content-y + rows-scroll.visible-height) {
+                            rows-scroll.content-y = Math.min(0px, rows-scroll.visible-height - self.y - self.height);
+                        }
+                    }
+                }
             }
         }
 
@@ -358,7 +473,8 @@ export component NavPane inherits Rectangle {
             padding-left: Tokens.nav-footer-margin.left;
             padding-right: Tokens.nav-footer-margin.right;
             padding-top: Tokens.nav-footer-margin.top;
-            padding-bottom: Tokens.nav-footer-margin.bottom;
+            // The last row keeps its RowGap too, inside the foot's margin.
+            padding-bottom: Tokens.nav-footer-margin.bottom + Tokens.row-gap.bottom;
             spacing: Tokens.row-gap.bottom;
 
             for row[i] in Nav.footer: NavRowView {
@@ -373,10 +489,10 @@ export component NavPane inherits Rectangle {
         }
     }
 
-    // Hairline on the right edge.
+    // The right border.
     Rectangle {
-        x: parent.width - 1px;
-        width: 1px;
+        x: parent.width - self.width;
+        width: Tokens.border-right.right;
         background: Tokens.hairline-brush;
     }
 }

@@ -36,6 +36,11 @@ export component PreparationWindow inherits Window {
         focus-on-click: false;
         focus-on-tab-navigation: false;
         capture-key-pressed(event) => {
+            // Esc closes an open tip first, as in the main window.
+            if (event.text == Key.Escape && Tip.open) {
+                Tip.open = false;
+                return accept;
+            }
             if (event.text == Key.Tab || event.text == Key.Backtab || event.text == Key.LeftArrow || event.text == Key.RightArrow) {
                 KeyboardFocus.visible = true;
             }

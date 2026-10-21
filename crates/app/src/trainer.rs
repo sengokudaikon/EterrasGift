@@ -7,10 +7,19 @@ use eg_trainer::{
 };
 use eg_trainer_host::desktop::{DesktopConnector, GameProcesses};
 use std::{
+    cell::Cell,
     path::PathBuf,
     thread::{self, JoinHandle},
     time::Duration,
 };
+
+thread_local! {
+    static WORKER_CATCHES_PANIC: Cell<bool> = const { Cell::new(false) };
+}
+
+pub fn catches_panic() -> bool {
+    WORKER_CATCHES_PANIC.get()
+}
 
 pub struct Trainer {
     pub handle: BackendHandle,
@@ -30,10 +39,7 @@ impl Trainer {
         let logs = FileLogFactory::new(player_log).map_err(|e| e.to_string())?;
         let (handle, worker) = backend::service(
             GameProcesses::new(executable_name),
-            // SAFETY: NativePreparer's game-specific graph/lifecycle and instrumentation
-            // assumptions apply to this desktop composition. Engine version and module
-            // identity are checked during preparation, before remote work.
-            unsafe { DesktopConnector::new(helper_manifest, logs.clone()) },
+            DesktopConnector::new(helper_manifest, logs.clone()),
             logs.reader(),
             SystemClock,
             options,
@@ -78,7 +84,10 @@ impl Trainer {
 /// Unexpected worker panics have the same fatal policy as Mods/Settings. Expected
 /// connection and write failures are typed results and never enter this path.
 fn run_worker(work: impl FnOnce(), faults: &FaultLog, shutdown: impl FnOnce()) -> bool {
-    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(work)) {
+    let previous = WORKER_CATCHES_PANIC.replace(true);
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(work));
+    WORKER_CATCHES_PANIC.set(previous);
+    match result {
         Ok(()) => true,
         Err(panic) => {
             let message = panic
@@ -102,7 +111,15 @@ mod tests {
         let directory = tempfile::tempdir().unwrap();
         let faults = FaultLog::with_fallbacks(directory.path(), Some(directory.path()), vec![]);
         let mut shutdown = false;
-        assert!(!run_worker(|| panic!("fixture worker fault"), &faults, || shutdown = true));
+        assert!(!run_worker(
+            || {
+                assert!(catches_panic());
+                panic!("fixture worker fault")
+            },
+            &faults,
+            || shutdown = true
+        ));
+        assert!(!catches_panic());
         assert!(shutdown);
         let reports = std::fs::read_dir(directory.path()).unwrap().collect::<Vec<_>>();
         assert_eq!(reports.len(), 1);

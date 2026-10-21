@@ -8,8 +8,9 @@ use std::path::{Component, Path, PathBuf};
 /// same, so sharing the C# app's folder later is this one name ("EterrasGift").
 pub const LOCAL_FOLDER: &str = "EterrasGiftRS";
 
-/// The app's executable, as an install holds it.
-pub const EXECUTABLE: &str = "eterras-gift.exe";
+/// The app's executable, as an install holds it beside the launcher (`hosting::LAUNCHER_EXECUTABLE`): the C# app's
+/// `EterrasGift.Desktop.exe` beside `EterrasGift.exe`.
+pub const EXECUTABLE: &str = "eterras-gift-desktop.exe";
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct AppPaths {

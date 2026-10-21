@@ -71,9 +71,10 @@ impl GameLauncher {
         self.host.read_mod_loader(self.host.find_install().as_ref())
     }
 
-    /// At startup: sets aside a MelonLoader proxy an earlier start left in place while no game runs.
-    pub fn settle_mod_loader(&self) -> bool {
-        self.host.settle_mod_loader(self.host.find_install().as_ref())
+    /// At startup: sets aside a MelonLoader proxy an earlier start left in place while no game runs. Takes the install
+    /// the caller found (`find_install`), so startup looks for the game once.
+    pub fn settle_mod_loader(&self, install: Option<&GameInstall>) -> bool {
+        self.host.settle_mod_loader(install)
     }
 
     /// Starts the game and says how it went. Blocks while a start with mods waits for MelonLoader, so call it off the

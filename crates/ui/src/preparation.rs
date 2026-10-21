@@ -1,7 +1,7 @@
 //! The launcher's preparation window behind `PreparationState` (spec/shell-and-settings.md §11): Eterra's tree follows how
 //! far preparation has really come, ash drifts while it works, and the state shows in words beneath. When it stops, the
-//! reason in full and the two ways on. TODO(launcher): no Rust launcher exists yet to prepare, run and restart the app;
-//! this is its window, driven by captures.
+//! reason in full and the two ways on. The launcher (`crates/launcher`) drives it from its supervisor; its captures
+//! drive the same supervisor on a fake preparation and app.
 
 use crate::decorations::{Ash, Decorations};
 use crate::{PreparationState, PreparationWindow};

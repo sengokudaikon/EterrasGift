@@ -10,6 +10,7 @@ use std::collections::{HashMap, VecDeque};
 
 pub const OVERRIDE_REQUIRED: &str = "This edit goes past what the game allows. Turn on \"I know what I'm doing\" in Settings to write it. Nothing was applied.";
 const NOTHING_APPLIED: &str = "Nothing was applied.";
+const BROKEN_BY_BASE: &str = "The new base would make affixes incompatible. Allow incompatible affixes in the base picker to apply it anyway.";
 const INCOMPATIBLE: &str = "Incompatible with this item or slot";
 const NOT_ADDED_HERE: &str = "The game would not add it here";
 const MIXED_HEADING: &str = "Don't do it";
@@ -122,6 +123,8 @@ struct WriteBatch {
     one_way: bool,
     undoing: bool,
     names: Vec<String>,
+    /// The step the game did not apply, named in a part-applied batch's message as the C# Apply names it.
+    failed: Option<String>,
 }
 
 struct WaitingWrite {
@@ -406,7 +409,8 @@ impl ForgeEditor {
     }
 
     /// The edit that makes the item this unique or set item: the unique's base (the item's own when the unique comes on
-    /// it), and the rarity the game gives it. A legendary the game never makes of this unique needs the override.
+    /// it), and the rarity the game gives it. A legendary the game never makes of this unique needs the override, as does
+    /// legendary potential or Weaver's Will kept on a unique or set item that does not hold it.
     fn identity_edit(&self, item: &ForgeItem, unique_id: u16) -> ItemEdit {
         let unique = self.catalog().unique(unique_id);
         let sub_type = match unique {
@@ -414,7 +418,7 @@ impl ForgeEditor {
             _ => item.sub_type,
         };
         let rarity = item::identity_rarity(item, unique.is_some_and(|unique| unique.is_set));
-        let unrestricted = unique.is_some_and(|unique| rarity == item::LEGENDARY && !unique.can_drop_as_legendary);
+        let unrestricted = unique.is_some_and(|unique| (rarity == item::LEGENDARY && !unique.can_drop_as_legendary) || !Self::legendary_fits(item, unique));
         ItemEdit::UniqueIdentity(eg_trainer::edits::UniqueIdentityEdit {
             unique_id: (unique_id) as i32,
             sub_type: (sub_type) as i32,
@@ -423,8 +427,33 @@ impl ForgeEditor {
         })
     }
 
-    /// The uniques and set items of the item's type, uniques first, each with the rarity it would end with (spec §3.5).
-    /// TODO(forge): the legendary-potential and Weaver's Will cautions ("keeps … it never holds").
+    /// Whether the unique or set item holds the legendary values the item has (the trainer's own rule).
+    fn legendary_fits(item: &ForgeItem, unique: &super::game::UniqueDefinition) -> bool {
+        item.context
+            .as_ref()
+            .is_none_or(|context| eg_trainer::edits::legendary_fits(context.expected.snapshot(), unique.is_set, i32::from(unique.legendary_type == LegendaryType::WeaversWill)))
+    }
+
+    /// What the item keeps that this unique or set item never holds, or None when it holds what the item has (the C#
+    /// `ForgeChoices.ForeignLegendary`, the forge's risk wording cut to fit a menu caption).
+    fn foreign_legendary(item: &ForgeItem, unique: &super::game::UniqueDefinition) -> Option<String> {
+        if Self::legendary_fits(item, unique) {
+            return None;
+        }
+        let status = item.status.unwrap_or_default();
+        let kept = match (unique.is_set, status.legendary_potential > 0, status.weavers_will > 0) {
+            (false, _, _) if unique.legendary_type == LegendaryType::WeaversWill => "legendary potential",
+            (false, _, _) => "Weaver's Will",
+            (_, true, true) => "legendary potential and Weaver's Will",
+            (_, true, false) => "legendary potential",
+            _ => "Weaver's Will",
+        };
+        Some(format!("keeps {kept} it never holds, which may crash the game and reset the item state"))
+    }
+
+    /// The uniques and set items of the item's type, uniques first, each with the rarity it would end with (spec §3.5). A
+    /// legendary the game never makes, or legendary potential or Weaver's Will kept where the new identity never holds it,
+    /// needs the override.
     fn identity_options(&self, item: &ForgeItem) -> Vec<FieldOption> {
         let mut uniques: Vec<&super::game::UniqueDefinition> = self.catalog().uniques.iter().filter(|unique| unique.item_type == item.item_type).collect();
         uniques.sort_by(|a, b| (a.is_set, &a.name).cmp(&(b.is_set, &b.name)));
@@ -433,11 +462,9 @@ impl ForgeEditor {
             .map(|unique| {
                 let game = Some(unique.id) == item.identity_id();
                 let edit = self.identity_edit(item, unique.id);
-                let (sub_type, rarity, needs) = match edit {
-                    ItemEdit::UniqueIdentity(eg_trainer::edits::UniqueIdentityEdit {
-                        sub_type, rarity, unrestricted, ..
-                    }) => (sub_type as u16, rarity as u8, unrestricted),
-                    _ => (item.sub_type, item.rarity, false),
+                let (sub_type, rarity) = match edit {
+                    ItemEdit::UniqueIdentity(eg_trainer::edits::UniqueIdentityEdit { sub_type, rarity, .. }) => (sub_type as u16, rarity as u8),
+                    _ => (item.sub_type, item.rarity),
                 };
                 let rarity = if game { item.rarity } else { rarity };
                 let mut detail = vec![self.rarity_label(rarity)];
@@ -459,14 +486,27 @@ impl ForgeEditor {
                     detail.push("holds no affixes: remove them first".into());
                     available = false;
                 } else if !game {
-                    if needs {
+                    let mut overrides = Vec::new();
+                    if rarity == item::LEGENDARY && !unique.can_drop_as_legendary {
+                        overrides.push("never legendary in the game".to_string());
+                    }
+                    overrides.extend(Self::foreign_legendary(item, unique));
+                    if !overrides.is_empty() {
                         let note = if self.unrestricted() { "" } else { "; needs \"I know what I'm doing\"" };
-                        detail.push(format!("never legendary in the game{note}"));
+                        detail.push(format!("{}{note}", overrides.join("; ")));
                         available = self.unrestricted();
                     }
                     if !edit.can_reverse(item) {
                         detail.push("one-way: Undo apply cannot reverse it".into());
                     }
+                }
+                // Anything else the trainer would refuse says why, once the override rules above have had their say.
+                if !game
+                    && available
+                    && let Err(error) = edit.prepare_view_with_override(item, self.unrestricted())
+                {
+                    available = false;
+                    detail.push(error.to_string());
                 }
                 FieldOption {
                     value: i64::from(unique.id),
@@ -475,7 +515,7 @@ impl ForgeEditor {
                     in_game: game,
                     implicits: String::new(),
                     available,
-                    rarity: self.rarity_label(rarity),
+                    rarity,
                 }
             })
             .collect()
@@ -497,7 +537,7 @@ impl ForgeEditor {
 
     /// Picks a unique from the searched choices; it is drafted alone.
     pub fn pick_identity(&mut self, choice: usize) {
-        if !self.can_change_identity() && !self.is_identity_drafted() {
+        if !self.can_change_identity() {
             return;
         }
         let Some(value) = self.identity_choices().get(choice).filter(|option| option.available).map(|option| option.value) else {
@@ -519,17 +559,12 @@ impl ForgeEditor {
     }
 
     /// Normal, magic, rare, exalted, unique, set or legendary: what colours the title.
-    pub fn rarity_name(&self) -> &'static str {
-        match self.item.as_ref() {
-            None => "",
-            Some(item) => match item.rarity {
-                item::LEGENDARY => "Legendary",
-                item::SET => "Set",
-                item::UNIQUE => "Unique",
-                _ if item.is_exalted() => "Exalted",
-                rarity => item::crafted_name(rarity),
-            },
-        }
+    pub fn rarity_code(&self) -> u8 {
+        self.item.as_ref().map_or(0, |item| self.drafted_identity().map_or(item.rarity, |(_, _, rarity)| rarity))
+    }
+
+    pub fn name_is_exalted(&self) -> bool {
+        self.item.as_ref().is_some_and(ForgeItem::is_exalted)
     }
 
     fn count_rarity_name(&self) -> String {
@@ -1047,8 +1082,13 @@ impl ForgeEditor {
         }
     }
 
-    /// The drag ends; a cancelled one (Escape) puts the value back and leaves no Undo step.
+    /// The drag ends; a cancelled one (Escape) puts the value back and leaves no Undo step. A cell whose row was rebuilt
+    /// under the pointer ends the drag of the value it began on, wherever that value is now.
     pub fn end_scrub(&mut self, cell: Cell, cancelled: bool) {
+        let cell = match self.value_cells().find(|(_, editor)| editor.dragging) {
+            Some((dragged, _)) => dragged,
+            None => cell,
+        };
         let Some(editor) = self.editor_mut(cell) else {
             return;
         };
@@ -1118,6 +1158,10 @@ impl ForgeEditor {
 
     /// Enter: a valid value goes into the draft (the nearest attainable roll); an invalid one keeps the popover open.
     pub fn commit_input(&mut self, cell: Cell) -> bool {
+        if !self.can_edit_value(cell) {
+            self.cancel_input(cell);
+            return true;
+        }
         let Some((editor, roll, _)) = self.editor_of(cell) else {
             return true;
         };
@@ -1159,6 +1203,32 @@ impl ForgeEditor {
             .chain(self.uniques.iter().chain(self.implicits.iter()).flat_map(|row| row.rolls.iter().map(|roll| &roll.editor)))
             .chain(self.fields.iter().filter_map(|field| field.editor.as_ref()))
             .find(|editor| editor.typing)
+    }
+
+    /// Every value cell with its editor.
+    fn value_cells(&self) -> impl Iterator<Item = (Cell, &ValueEditor)> {
+        fn lines(rows: &[RollRow], cell: fn(usize, usize) -> Cell) -> impl Iterator<Item = (Cell, &ValueEditor)> {
+            rows.iter()
+                .enumerate()
+                .flat_map(move |(row, line)| line.rolls.iter().enumerate().map(move |(roll, value)| (cell(row, roll), &value.editor)))
+        }
+        self.affixes
+            .iter()
+            .enumerate()
+            .map(|(row, affix)| (Cell::Affix(row), &affix.value))
+            .chain(lines(&self.uniques, Cell::Unique))
+            .chain(lines(&self.implicits, Cell::Implicit))
+            .chain(
+                self.fields
+                    .iter()
+                    .enumerate()
+                    .filter_map(|(index, field)| field.editor.as_ref().map(|editor| (Cell::Field(index), editor))),
+            )
+    }
+
+    /// The cell whose value is being typed in the popover, if any.
+    pub fn typing_cell(&self) -> Option<Cell> {
+        self.value_cells().find(|(_, editor)| editor.typing).map(|(cell, _)| cell)
     }
 
     pub fn input_of(&self, cell: Cell) -> Option<&ValueEditor> {
@@ -1203,7 +1273,15 @@ impl ForgeEditor {
         }
     }
 
+    /// The base field can be edited now: its "Allow incompatible affixes" box follows this (the C# `CanEdit`).
+    pub fn can_edit_base_field(&self) -> bool {
+        self.base.as_ref().is_some_and(FieldDraft::is_editable) && self.can_mutate()
+    }
+
     pub fn set_base_allow_incompatible(&mut self, allow: bool) {
+        if !self.can_edit_base_field() {
+            return;
+        }
         if let Some(base) = self.base.as_mut() {
             base.allow_incompatible = allow;
         }
@@ -2024,8 +2102,10 @@ impl ForgeEditor {
         }
     }
 
-    /// The item type's bases, each with its level and the implicits it grants. TODO(forge): incompatible counts need the
-    /// class requirements, and with the override an idol lists every idol type's bases.
+    /// The item type's bases, each with its level, the implicits it grants and how many of the item's affixes it would make
+    /// incompatible (the C# `ForgeChoices.BaseOptions`). TODO(forge): with the override an idol lists every idol type's
+    /// bases. That is not editor-only: the base draft's edit (`FieldDraft::read_edit`) must then carry the item type, and
+    /// the base name, implicit preview and tier lookups must follow the drafted type rather than the item's.
     fn base_options(&self, item: &ForgeItem) -> Vec<FieldOption> {
         let Some(item_type) = self.catalog().item_type(item.item_type) else {
             return Vec::new();
@@ -2038,6 +2118,10 @@ impl ForgeEditor {
                 if base.corrupted {
                     detail.push("corrupted base".into());
                 }
+                let broken = self.broken_by_base(item, base.sub_type);
+                if broken > 0 {
+                    detail.push(count(broken, "incompatible affix", "incompatible affixes"));
+                }
                 FieldOption {
                     value: base_key(item.item_type, base.sub_type),
                     name: base.name.clone(),
@@ -2045,10 +2129,17 @@ impl ForgeEditor {
                     in_game: base.sub_type == item.sub_type,
                     implicits: base.implicits.join("\n"),
                     available: true,
-                    rarity: String::new(),
+                    rarity: 0,
                 }
             })
             .collect()
+    }
+
+    /// How many of the item's affixes a change to `sub_type` would make incompatible, judged with the class requirement
+    /// that base carries (the C# `ForgeChoices.BrokenByBase`).
+    fn broken_by_base(&self, item: &ForgeItem, sub_type: u16) -> usize {
+        let class_requirement = self.catalog().base(item.item_type, sub_type).map(|base| base.class_requirement);
+        item::broken_by_base(item, sub_type, class_requirement).len()
     }
 
     // ----- The affix picker -----
@@ -2474,10 +2565,22 @@ impl ForgeEditor {
             )?;
         }
         for field in fields {
-            let edit = if field.kind == FieldKind::Identity {
-                self.identity_edit(&projected, field.value() as u16)
-            } else {
-                field.read_edit()
+            let edit = match field.kind {
+                FieldKind::Identity => self.identity_edit(&projected, field.value() as u16),
+                _ => match field.read_edit() {
+                    // "Allow incompatible affixes" on a base that breaks none needs no override.
+                    ItemEdit::BaseType(
+                        rebase @ eg_trainer::edits::BaseTypeEdit {
+                            allow_incompatible: true,
+                            item_type: None,
+                            ..
+                        },
+                    ) if self.broken_by_base(&projected, rebase.sub_type as u16) == 0 => ItemEdit::BaseType(eg_trainer::edits::BaseTypeEdit {
+                        allow_incompatible: false,
+                        ..rebase
+                    }),
+                    edit => edit,
+                },
             };
             let problem = match &edit {
                 edit if edit.needs_override() && !self.unrestricted() => Some(OVERRIDE_REQUIRED.to_string()),
@@ -2486,6 +2589,12 @@ impl ForgeEditor {
                 }
                 ItemEdit::UniqueIdentity(eg_trainer::edits::UniqueIdentityEdit { .. }) if !edit.is_valid(&projected) => Some("That unique does not fit this item.".into()),
                 ItemEdit::Status(eg_trainer::edits::StatusEdit { .. }) if !edit.is_valid(&projected) => Some(format!("{} does not apply to this item.", field.name)),
+                // Before the base's own check, which also refuses an equipment-type break without naming it.
+                ItemEdit::BaseType(eg_trainer::edits::BaseTypeEdit {
+                    allow_incompatible: false,
+                    item_type: None,
+                    sub_type,
+                }) if self.broken_by_base(&projected, *sub_type as u16) > 0 => Some(BROKEN_BY_BASE.into()),
                 ItemEdit::BaseType(eg_trainer::edits::BaseTypeEdit { .. }) if !edit.is_valid(&projected) => Some("This item's base cannot change.".into()),
                 _ => None,
             };
@@ -2633,6 +2742,7 @@ impl ForgeEditor {
             completed: 0,
             one_way: false,
             undoing: true,
+            failed: None,
         });
         self.writing = true;
         self.advance_writes();
@@ -2650,6 +2760,7 @@ impl ForgeEditor {
             completed: 0,
             one_way: false,
             undoing,
+            failed: None,
         });
         self.writing = true;
         self.advance_writes();
@@ -2737,6 +2848,9 @@ impl ForgeEditor {
                 }
             }
             WriteOutcome::NotApplied { message, .. } => {
+                if let Some(batch) = self.batch.as_mut() {
+                    batch.failed = Some(waiting.step.name);
+                }
                 self.finish_batch(Some(message));
             }
             WriteOutcome::Confirmed(None) => {
@@ -2773,7 +2887,9 @@ impl ForgeEditor {
                 );
             }
             WriteOutcome::Uncertain { message } => {
+                let history = std::mem::take(&mut self.history);
                 self.recover_write(None);
+                self.history = history;
                 self.say(
                     format!("Write outcome is uncertain. {message} Drafts and Undo were cleared. Reconnect to read the item again; the write will not be retried."),
                     MessageKind::Error,
@@ -2833,15 +2949,15 @@ impl ForgeEditor {
         }
         if let Some(message) = failure {
             self.say(
-                if batch.completed == 0 {
-                    message
-                } else {
-                    format!(
-                        "{} of {} {}. {message}",
-                        batch.completed,
+                match (batch.completed, batch.undoing, &batch.failed) {
+                    (0, ..) => message,
+                    // C# `ItemEditorViewModel.Apply`: "{applied} of {count} drafts applied and confirmed; {step} was not applied."
+                    (completed, false, Some(step)) => format!("{completed} of {} drafts applied and confirmed; {step} was not applied. {message}", batch.total),
+                    (completed, undoing, _) => format!(
+                        "{completed} of {} {}. {message}",
                         batch.total,
-                        if batch.undoing { "edits restored" } else { "drafts applied and confirmed" }
-                    )
+                        if undoing { "edits restored" } else { "drafts applied and confirmed" }
+                    ),
                 },
                 MessageKind::Error,
             );

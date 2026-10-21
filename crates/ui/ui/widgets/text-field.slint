@@ -6,12 +6,16 @@ import { KeyboardFocus } from "../globals.slint";
 import { FocusRing } from "focus.slint";
 
 export component TextField inherits Rectangle {
-    in-out property <string> text;
+    in property <string> text;
     in property <string> placeholder;
     in property <string> label;
     in property <bool> enabled: true;
     callback edited(string);
     callback accepted(string);
+    // TextInput replaces its own binding on edit; later model updates still reach it.
+    changed text => {
+        if (input.text != root.text) { input.text = root.text; }
+    }
 
     accessible-role: text-input;
     accessible-label: root.label;
@@ -38,30 +42,37 @@ export component TextField inherits Rectangle {
         }
     }
 
+    // Fluent's compact text box: the text sits at the top-left of its padding, as the C# TextBox's does.
     HorizontalLayout {
-        padding-left: Tokens.space-10;
-        padding-right: Tokens.space-10;
+        padding-left: Tokens.text-control-padding.left + root.border-width;
+        padding-right: Tokens.text-control-padding.right + root.border-width;
+        padding-top: Tokens.text-control-padding.top + root.border-width;
+        padding-bottom: Tokens.text-control-padding.bottom + root.border-width;
 
         Rectangle {
             clip: true;
 
+            // Pinned to the top: an element without a `y` is centred in its parent.
             if root.text == "": Text {
                 x: 0;
+                y: 0;
                 width: parent.width;
                 text: root.placeholder;
                 color: Tokens.text-muted-brush;
-                vertical-alignment: center;
-                overflow: elide;
+                vertical-alignment: top;
+                // Avalonia cuts a long placeholder at the box's edge rather than ending it in "…".
+                overflow: clip;
             }
 
             input := TextInput {
-                text <=> root.text;
+                y: 0;
+                text: root.text;
                 enabled: root.enabled;
                 single-line: true;
                 color: root.enabled ? Tokens.text-brush : Tokens.text-disabled-brush;
                 selection-background-color: Tokens.accent-pressed-color;
                 selection-foreground-color: Tokens.on-accent-color;
-                vertical-alignment: center;
+                vertical-alignment: top;
                 edited => {
                     root.edited(self.text);
                 }

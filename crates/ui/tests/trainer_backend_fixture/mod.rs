@@ -8,8 +8,8 @@ use eg_trainer::{
         SystemClock,
     },
     catalog::{
-        AffixDefinition, Availability, CatalogIdentity, DefinitionName, DefinitionNameSource, EXTRACTION_VERSION, GameCatalog, GameLocale, ItemLimits, ItemTypeDefinition,
-        SubTypeDefinition, UniqueDefinition, ValueRange,
+        AffixDefinition, Availability, CatalogIdentity, DefinitionName, DefinitionNameSource, EXTRACTION_VERSION, GameCatalog, GameLocale, ImplicitDefinition, ItemLimits,
+        ItemTypeDefinition, SubTypeDefinition, UniqueDefinition, ValueRange,
     },
     gate::{GatePolicy, LogSource},
     session::Cleanup,
@@ -32,11 +32,28 @@ struct Data {
     mapping_release: AtomicBool,
     refuse_at: AtomicUsize,
     expected: Mutex<Vec<ForgeSnapshot>>,
+    /// How many matching game processes run.
+    games: AtomicUsize,
+    /// The character's attack rate and increased leech rate, as raw floats.
+    rates: Mutex<[u32; 2]>,
+}
+impl Data {
+    fn rates(&self) -> backend::AttackLeechObservation {
+        let [attack, leech] = *self.rates.lock().unwrap();
+        let identity = |native| backend::ObservedObjectIdentity::new(12, native).unwrap();
+        backend::AttackLeechObservation {
+            manager: identity(1),
+            actor: identity(2),
+            stats: identity(3),
+            attack_rate: backend::ObservedRate { raw_bits: attack },
+            increased_leech_rate: backend::ObservedRate { raw_bits: leech },
+        }
+    }
 }
 struct Locator(Arc<Data>);
 impl ProcessLocator for Locator {
     async fn find(&mut self) -> Result<Vec<ProcessIdentity>, BackendError> {
-        Ok(vec![self.0.target.clone()])
+        Ok(vec![self.0.target.clone(); self.0.games.load(Ordering::SeqCst)])
     }
 }
 struct Logs(Arc<Data>);
@@ -112,7 +129,19 @@ impl BackendConnection for OwnedConnection {
                             class_requirement: 0,
                             cannot_drop: false,
                             is_corrupted: false,
-                            implicits: Availability::Available(vec![]),
+                            // The first base grants none, so the item's own reads stay as they are; the second grants
+                            // one with the game's text at both ends and one without it (C# `ForgeChoices.ImplicitLine`).
+                            implicits: Availability::Available(if sub_type == 2 {
+                                vec![
+                                    implicit(Availability::Available("+10 Armour Ω".into()), Availability::Available("+16 Armour Ω".into())),
+                                    implicit(
+                                        Availability::Unavailable { reason: "not formatted".into() },
+                                        Availability::Unavailable { reason: "not formatted".into() },
+                                    ),
+                                ]
+                            } else {
+                                vec![]
+                            }),
                         })
                         .collect(),
                 },
@@ -346,8 +375,46 @@ impl BackendConnection for OwnedConnection {
             }
         }
     }
+    fn supports_read_attack_leech(&self) -> bool {
+        true
+    }
+    async fn read_attack_leech(&mut self, _: jiff::Timestamp) -> Result<backend::AttackLeechRead, BackendError> {
+        Ok(backend::AttackLeechRead::Available(self.0.rates()))
+    }
+    fn supports_attack_leech_rate(&self) -> bool {
+        true
+    }
+    async fn set_attack_leech_rate(
+        &mut self,
+        _: jiff::Timestamp,
+        plan: &eg_trainer::field_writes::AttackLeechPlan,
+        _: &mut dyn eg_trainer::writes::WriteControl,
+    ) -> Result<eg_trainer::field_writes::RateWriteStatus, BackendError> {
+        tokio::time::sleep(Duration::from_millis(150)).await;
+        assert_eq!(
+            &backend::AttackLeechRead::Available(self.0.rates()),
+            &plan.before().read,
+            "fresh expected rates for every step"
+        );
+        let projected = *plan.projected();
+        *self.0.rates.lock().unwrap() = [projected.attack_rate.raw_bits, projected.increased_leech_rate.raw_bits];
+        Ok(eg_trainer::writes::WriteOutcome::Confirmed(projected))
+    }
     async fn disconnect(&mut self) -> Cleanup {
         Cleanup::ConfirmedOff
+    }
+}
+fn implicit(minimum_text: Availability<String>, maximum_text: Availability<String>) -> ImplicitDefinition {
+    ImplicitDefinition {
+        property: 0,
+        tags: 0,
+        special_tag: 0,
+        extra_tag: 0,
+        modifier_type: 0,
+        minimum: 10.0,
+        maximum: 16.0,
+        minimum_text,
+        maximum_text,
     }
 }
 fn name(text: &str) -> DefinitionName {
@@ -429,6 +496,8 @@ pub(super) fn capture(session: &Session) {
         mapping_release: AtomicBool::new(false),
         refuse_at: AtomicUsize::new(0),
         expected: Mutex::new(Vec::new()),
+        games: AtomicUsize::new(1),
+        rates: Mutex::new([1.0_f32.to_bits(), 0.3_f32.to_bits()]),
     });
     let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
     let (handle, worker) = backend::service(
@@ -464,6 +533,18 @@ pub(super) fn capture(session: &Session) {
     command(&handle, Command::Enable, || handle.snapshot().phase == Phase::Disconnected);
     wait(|| ui.global::<eg_ui::Connection>().get_show_action());
     assert_eq!(data.connects.load(Ordering::SeqCst), 0);
+    // Two games running: the forge waits, ash drifting, and the status says what to do.
+    data.games.store(2, Ordering::SeqCst);
+    ui.global::<eg_ui::Connection>().invoke_connect();
+    wait(|| handle.snapshot().phase == Phase::WaitingForGame && ui.global::<eg_ui::TrainerState>().get_ash_shown());
+    // Connected by hand (automatic connection off), so it asks for a Connect again rather than saying it waits (C#'s
+    // `SessionErrorMessages` `waits`).
+    let multiple = "Close extra game instances, then connect again.";
+    assert_eq!(ui.global::<eg_ui::Connection>().get_text(), multiple);
+    assert_eq!(ui.global::<eg_ui::TrainerState>().get_empty_detail(), multiple);
+    assert!(!ui.global::<eg_ui::TrainerState>().get_ash_still());
+    session.capture(&ui, "backend-forge-multiple-games");
+    data.games.store(1, Ordering::SeqCst);
     ui.global::<eg_ui::Connection>().invoke_connect();
     wait(|| handle.snapshot().phase == Phase::Connecting);
     // Navigation remains responsive while connection work is suspended.
@@ -473,8 +554,10 @@ pub(super) fn capture(session: &Session) {
     wait(|| ui.global::<eg_ui::Connection>().get_connected());
     assert!(handle.snapshot().monitoring);
     assert!(!ui.global::<eg_ui::ForgeState>().get_has_item());
-    assert_eq!(ui.global::<eg_ui::TrainerState>().get_empty_title(), "Forge is empty");
+    assert_eq!(ui.global::<eg_ui::TrainerState>().get_empty_title(), "The forge is empty");
+    assert!(ui.global::<eg_ui::TrainerState>().get_ash_still());
     session.capture(&ui, "backend-forge-empty");
+    combat_rates(session, &ui, &handle, &data);
     *data.item.lock().unwrap() = Some(item("Owned Hatchet Ω", 17));
     command(&handle, Command::ReadForge, || matches!(handle.snapshot().forge, backend::ForgeState::Item { .. }));
     wait(|| ui.global::<eg_ui::ForgeState>().get_has_item());
@@ -590,9 +673,20 @@ pub(super) fn capture(session: &Session) {
     assert_eq!(data.writes.load(Ordering::SeqCst), 9);
     assert!(!forge.get_message().contains("uncertain"));
 
-    // Base and identity pickers use the same command and completion path.
+    // Base and identity pickers use the same command and completion path. The base menu lists the implicits each base
+    // grants from the captured catalog, and a drafted base previews them (C# `ForgeChoices.BaseOptions`,
+    // `ItemEditorViewModel.ImplicitPreview`).
     assert!(forge.get_can_change_base());
+    let options = forge.get_base_options();
+    assert_eq!(options.row_data(0).unwrap().implicits, "");
+    assert_eq!(options.row_data(1).unwrap().implicits, "+10–16 Armour Ω\nImplicit (the game's text is unavailable)");
+    session.click(155.0, 117.0);
+    session.capture(&ui, "backend-forge-base-menu");
+    session.key(Key::Escape);
     forge.invoke_pick_base(1);
+    assert!(forge.get_implicit_preview_draft());
+    assert_eq!(forge.get_implicit_preview().row_count(), 2);
+    session.capture(&ui, "backend-forge-base-draft-implicits");
     forge.invoke_apply();
     wait(|| forge.get_can_undo() && data.item.lock().unwrap().as_ref().unwrap().sub_type == 2);
     forge.invoke_undo();
@@ -621,6 +715,8 @@ pub(super) fn capture(session: &Session) {
     forge.invoke_picker_search_edited("Vitality".into());
     forge.invoke_picker_select(0);
     session.capture(&ui, "backend-forge-affix-picker");
+    // Enter in the search does nothing, as in the C# picker: Down moves into the list, where Enter uses the entry.
+    session.key(Key::DownArrow);
     session.key(Key::Return);
     assert!(!forge.get_picker_open());
     forge.invoke_pick_tier(0, 2);
@@ -687,6 +783,7 @@ pub(super) fn capture(session: &Session) {
     forge.invoke_picker_search_edited("Vitality".into());
     forge.invoke_picker_select(0);
     session.capture(&ui, "backend-forge-add-picker");
+    session.key(Key::DownArrow);
     session.key(Key::Return);
     wait(|| forge.get_can_undo() && data.item.lock().unwrap().as_ref().unwrap().affixes.len() == 2);
     assert_eq!(data.item.lock().unwrap().as_ref().unwrap().rarity, 2);
@@ -946,7 +1043,15 @@ pub(super) fn capture(session: &Session) {
     wait(|| !ui.global::<eg_ui::ForgeState>().get_has_item());
     assert!(!ui.global::<eg_ui::Connection>().get_connected());
     assert_eq!(data.reads.load(Ordering::SeqCst), before);
-    assert!(ui.global::<eg_ui::TrainerState>().get_empty_detail().contains("Online characters"));
+    let advice = "The helper stays in the game until it restarts; restart Last Epoch before playing online.";
+    assert_eq!(ui.global::<eg_ui::TrainerState>().get_empty_title(), "Online character refused");
+    assert_eq!(
+        ui.global::<eg_ui::TrainerState>().get_empty_detail(),
+        format!("Online characters are not supported. {advice}")
+    );
+    assert_eq!(ui.global::<eg_ui::Connection>().get_text(), format!("Online character refused. {advice}"));
+    assert!(ui.global::<eg_ui::TrainerState>().get_empty_stopped() && !ui.global::<eg_ui::TrainerState>().get_ash_shown());
+    assert!(ui.global::<eg_ui::Connection>().get_show_action());
     session.capture(&ui, "backend-forge-online-refused");
     data.online.store(false, Ordering::SeqCst);
     command(&handle, Command::Connect, || handle.snapshot().phase == Phase::Ready);
@@ -957,4 +1062,142 @@ pub(super) fn capture(session: &Session) {
     command(&handle, Command::Shutdown, || handle.snapshot().phase == Phase::Stopped);
     worker.join().unwrap();
     ui.hide().unwrap();
+}
+
+/// Combat › Offense on the worker: Attack and leech rates is read when the page shows and written through its commands,
+/// one conditional plan per changed rate, confirmed by an independent read; the rows this version cannot serve say so and
+/// stay read-only.
+fn combat_rates(session: &Session, ui: &MainWindow, handle: &BackendHandle, data: &Data) {
+    let state = ui.global::<eg_ui::TrainerState>();
+    ui.global::<Nav>().invoke_navigate("combat".into());
+    settle();
+    state.set_section(1);
+    settle();
+    let row = || {
+        (0..state.get_rows().row_count())
+            .find(|&i| state.get_rows().row_data(i).unwrap().title == "Attack and leech rates")
+            .expect("the attack and leech rates row")
+    };
+    let rates = |state: &eg_ui::TrainerState| state.get_rows().row_data(row()).unwrap();
+    wait(|| !rates(&state).unread && rates(&state).can_use);
+    let index = row() as i32;
+    let fields = || state.get_row_models().row_data(row()).unwrap().fields;
+    assert_eq!(fields().row_data(0).unwrap().game_text, "In game: 1");
+    assert_eq!(fields().row_data(1).unwrap().game_text, "In game: 0.3");
+    let hook = state.get_rows().row_data(0).unwrap();
+    assert_eq!((hook.status.as_str(), hook.can_use), ("Not available in this version yet.", false));
+    state.invoke_field_committed(index, 0, "1.1".into());
+    state.invoke_field_committed(index, 1, "2.5".into());
+    assert_eq!(rates(&state).apply_text, "Apply 2 changes");
+    state.invoke_apply(index);
+    // The row waits on the game: Read again, Apply, Discard and the boxes are off until it answers.
+    let pending = rates(&state);
+    assert!(!pending.can_use && !pending.can_apply && !pending.can_discard);
+    state.invoke_discard(index);
+    assert!(rates(&state).has_drafts);
+    wait(|| rates(&state).status == "Confirmed by readback.");
+    assert_eq!(*data.rates.lock().unwrap(), [1.1_f32.to_bits(), 2.5_f32.to_bits()]);
+    assert!(!rates(&state).has_drafts);
+    assert_eq!(fields().row_data(0).unwrap().game_text, "In game: 1.1");
+    assert_eq!(handle.snapshot().phase, Phase::Ready);
+    for _ in 0..3 {
+        settle();
+        ui.window().take_snapshot().expect("render");
+    }
+    session.capture(ui, "backend-combat-rates");
+    ui.global::<Nav>().invoke_navigate("forge".into());
+    settle();
+}
+
+/// The forge while it waits, on the real worker with a game it never reaches (the C# `AutoConnectionTests`): for Last
+/// Epoch, at three window classes (`forge-waiting`, `-compact`, `-maximized`), then for an offline character once a game
+/// runs whose log says no character is loaded (`forge-waiting-character`). The gate stops both before any connect.
+pub(super) fn capture_waiting(session: &Session) {
+    struct Games(Arc<AtomicUsize>, ProcessIdentity);
+    impl ProcessLocator for Games {
+        async fn find(&mut self) -> Result<Vec<ProcessIdentity>, BackendError> {
+            Ok(vec![self.1.clone(); self.0.load(Ordering::SeqCst)])
+        }
+    }
+    struct NoCharacter;
+    impl LogSource for NoCharacter {
+        fn read(&mut self, _: jiff::Timestamp) -> GameLogState {
+            GameLogState {
+                status: GameLogStatus::Current,
+                readiness: GameReadiness::NoCharacter,
+                shell_state: Some("None".into()),
+                offline_mode: None,
+                character: None,
+                problem: None,
+            }
+        }
+    }
+    struct Unreached;
+    impl Connector for Unreached {
+        type Connection = OwnedConnection;
+        async fn connect(&mut self, _: ProcessIdentity, _: jiff::Timestamp) -> Result<OwnedConnection, BackendError> {
+            Err(BackendError::blocked(backend::ErrorKind::Identity, "the waiting captures never connect"))
+        }
+    }
+
+    let folder = session.folder();
+    let games = Arc::new(AtomicUsize::new(0));
+    let target = ProcessIdentity {
+        pid: 1,
+        created: 134_369_000_000_000_000,
+        executable: folder.join("owned-never-opened.exe"),
+    };
+    let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+    let (handle, worker) = backend::service(
+        Games(games.clone(), target),
+        Unreached,
+        NoCharacter,
+        SystemClock,
+        BackendOptions {
+            policy: GatePolicy::Release,
+            auto_connect: true,
+            poll_interval: Duration::from_secs(60),
+            ..Default::default()
+        },
+        None,
+    );
+    let worker = std::thread::spawn(move || runtime.block_on(worker.run()));
+    let ui = MainWindow::new().unwrap();
+    let store = SettingsStore::open(&folder.join("waiting"), &folder.join("waiting-settings.json"), &[]);
+    eg_ui::install(
+        &ui,
+        App {
+            launcher: Some(Arc::new(GameLauncher::new(session.host()))),
+            mods: None,
+            trainer: true,
+            trainer_backend: Some(handle.clone()),
+            settings: SettingsPage::new(SettingsService::inline(store), vec![eg_ui::trainer_settings::descriptor(true)], None, None, true),
+            start: Page::Forge,
+        },
+    );
+    ui.global::<Tokens>().set_motion(false);
+    session.window.set_size(PhysicalSize::new(1100, 700));
+    ui.show().unwrap();
+    command(&handle, Command::Enable, || handle.snapshot().phase == Phase::Disconnected);
+
+    // Monitoring with no game running: the forge waits for Last Epoch, ash drifting, with nothing to press.
+    command(&handle, Command::StartMonitoring, || handle.snapshot().phase == Phase::WaitingForGame);
+    wait(|| ui.global::<eg_ui::TrainerState>().get_ash_shown());
+    assert_eq!(ui.global::<eg_ui::TrainerState>().get_empty_title(), "Waiting for Last Epoch");
+    assert!(!ui.global::<eg_ui::Connection>().get_show_action());
+    for (width, height, size) in [(1100, 700, ""), (940, 580, "-compact"), (1920, 1080, "-maximized")] {
+        session.resize(width, height);
+        session.capture(&ui, &format!("forge-waiting{size}"));
+    }
+    session.resize(1100, 700);
+
+    // A game whose log has no character loaded: the gate waits for an offline character.
+    games.store(1, Ordering::SeqCst);
+    command(&handle, Command::Connect, || handle.snapshot().phase == Phase::WaitingForCharacter);
+    assert_eq!(ui.global::<eg_ui::TrainerState>().get_empty_title(), "Waiting for an offline character");
+    session.capture(&ui, "forge-waiting-character");
+
+    command(&handle, Command::Shutdown, || handle.snapshot().phase == Phase::Stopped);
+    worker.join().unwrap();
+    // Not hidden: hiding the last window asks the event loop to quit, and the captures go on in this one.
 }

@@ -76,9 +76,8 @@ fn start_time(process_id: u32) -> Option<Timestamp> {
 /// FILETIME counts 100 ns since 1601.
 #[cfg(windows)]
 fn from_file_time(time: windows_sys::Win32::Foundation::FILETIME) -> Option<Timestamp> {
-    const UNIX_EPOCH_TICKS: i64 = 116_444_736_000_000_000;
-    let ticks = (i64::from(time.dwHighDateTime) << 32) | i64::from(time.dwLowDateTime);
-    Timestamp::from_nanosecond(i128::from(ticks - UNIX_EPOCH_TICKS) * 100).ok()
+    let ticks = (u64::from(time.dwHighDateTime) << 32) | u64::from(time.dwLowDateTime);
+    eg_core::time::from_filetime(ticks).ok()
 }
 
 #[cfg(not(windows))]

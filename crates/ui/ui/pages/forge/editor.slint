@@ -3,14 +3,15 @@
 // narrow lays the pane over the table, wide adds the Range column and caps the table at 1000px, and from 1180px of lists
 // the column beside the table holds the unique modifiers or the selected affix's tier ladder.
 
-import { ScrollView } from "std-widgets.slint";
+import { ScrollView } from "../../widgets/scroll-view.slint";
 import { Tokens } from "../../tokens.slint";
 import { KeyboardFocus } from "../../globals.slint";
 import { TipTrigger } from "../../widgets/focus.slint";
 import { Button, ButtonKind } from "../../widgets/button.slint";
 import { FocusRing } from "../../widgets/focus.slint";
+import { FlyoutSurface } from "../../widgets/menu.slint";
 import { MessageTone } from "../common.slint";
-import { ForgeState, ItemRarity, CellKind } from "state.slint";
+import { ForgeState, ForgeReveal, ForgeCover, ItemRarity, CellKind, MenuOptionView } from "state.slint";
 import { ValueScrubber } from "scrubber.slint";
 import {
     CellButton,
@@ -22,10 +23,10 @@ import {
 import {
     AffixRowItem,
     ModifierRowItem,
-    TierList,
+    TierLadder,
     MenuMetrics,
 } from "table.slint";
-import { AffixPickerPanel, PickerMetrics, SearchBox } from "picker.slint";
+import { AffixPickerPanel, PickerMeasure, PickerMetrics, SearchBox } from "picker.slint";
 import { ChangesPane } from "pane.slint";
 
 // The game-owned colour of a rarity's names (EpochColor), for item names only.
@@ -40,7 +41,95 @@ global RarityInk {
     }
 }
 
+// A uniques-and-set-items entry: the name in the colour of the rarity the item would end with (dimmed when it can't be
+// picked), "in game" on the one the item is, and the caption with its reasons, wrapped as the C# menu wraps them.
+component IdentityEntry inherits MenuRow {
+    in property <MenuOptionView> option;
+
+    held: root.option.current;
+    enabled: root.option.available;
+
+    VerticalLayout {
+        horizontal-stretch: 1;
+
+        HorizontalLayout {
+            spacing: Tokens.space-12;
+
+            Text {
+                text: root.option.name;
+                color: root.option.available ? RarityInk.of(root.option.rarity) : Tokens.text-disabled-brush;
+                wrap: word-wrap;
+                horizontal-stretch: 1;
+            }
+
+            if root.option.in-game: Text {
+                text: "in game";
+                font-size: Tokens.font-size-caption;
+                color: Tokens.text-secondary-brush;
+                vertical-alignment: center;
+            }
+        }
+
+        Text {
+            text: root.option.detail;
+            font-size: Tokens.font-size-caption;
+            color: Tokens.text-muted-brush;
+            wrap: word-wrap;
+        }
+    }
+}
+
+// A base entry: the name, "in game" on the item's own, the implicits it grants, then its level and notes, all wrapped.
+component BaseEntry inherits MenuRow {
+    in property <MenuOptionView> option;
+
+    held: root.option.current;
+    enabled: root.option.available;
+
+    VerticalLayout {
+        horizontal-stretch: 1;
+
+        HorizontalLayout {
+            spacing: Tokens.space-12;
+
+            Text {
+                text: root.option.name;
+                color: Tokens.text-brush;
+                wrap: word-wrap;
+                horizontal-stretch: 1;
+            }
+
+            if root.option.in-game: Text {
+                text: "in game";
+                font-size: Tokens.font-size-caption;
+                color: Tokens.text-secondary-brush;
+                vertical-alignment: center;
+            }
+        }
+
+        // Kept in the layout at no height when empty: wrapped text inside an if is measured short (research/slint.md).
+        Text {
+            text: root.option.implicits;
+            font-size: Tokens.font-size-caption;
+            color: Tokens.text-secondary-brush;
+            wrap: word-wrap;
+            visible: root.option.implicits != "";
+            height: root.option.implicits == "" ? 0px : self.preferred-height;
+        }
+
+        Text {
+            text: root.option.detail;
+            font-size: Tokens.font-size-caption;
+            color: Tokens.text-muted-brush;
+            wrap: word-wrap;
+            visible: root.option.detail != "";
+            height: root.option.detail == "" ? 0px : self.preferred-height;
+        }
+    }
+}
+
 // A cell in the facts line: plain text that answers like a cell where it can change, outdented so hovering never moves it.
+// It is a Tab stop either way, so its reason shows by keyboard too, as the C# buttons are.
 component InlineCell inherits Rectangle {
     in property <string> text;
     in property <bool> emphasis;
@@ -49,6 +138,10 @@ component InlineCell inherits Rectangle {
     in property <string> tip;
     in property <string> label;
     callback clicked();
+
+    public function focus-cell() {
+        button.focus-cell();
+    }
 
     width: words.preferred-width;
     height: words.preferred-height;
@@ -60,12 +153,13 @@ component InlineCell inherits Rectangle {
         visible: false;
     }
 
-    CellButton {
+    button := CellButton {
         x: Tokens.inline-cell-outdent.left;
         y: Tokens.inline-cell-outdent.top;
         width: root.width - Tokens.inline-cell-outdent.left - Tokens.inline-cell-outdent.right;
         height: root.height - Tokens.inline-cell-outdent.top - Tokens.inline-cell-outdent.bottom;
         changeable: root.changeable;
+        tab-stop: true;
         tip: root.tip;
         label: root.label;
         clicked => {
@@ -85,6 +179,10 @@ component InlineCell inherits Rectangle {
 component ChangesToggle inherits Rectangle {
     in property <string> text;
     in-out property <bool> checked;
+
+    public function focus-toggle() {
+        focus.focus();
+    }
 
     accessible-role: button;
     accessible-label: root.text;
@@ -163,19 +261,97 @@ export component ItemForge inherits Rectangle {
         : root.wide ? Math.min(Tokens.affix-table-max-width, root.lists-width) : root.lists-width;
     property <length> range-width: range-measure.preferred-width;
     property <int> selected: ForgeState.selected-affix;
-    // An identity entry: the name over its caption in the menu row's padding.
+    // An identity entry: the name over its caption in the menu row's padding (the empty list's height).
     property <length> identity-row: Tokens.font-size-body * 4 / 3 + Tokens.font-size-caption * 4 / 3 + Tokens.cell-padding.top + Tokens.cell-padding.bottom + 2px;
+    // The menus' keyboard highlights: they start on the held entry and skip what can't be picked.
     property <int> rarity-highlight;
     property <int> base-highlight;
+    property <int> identity-highlight;
+    // Rust asks for a header cell (Show draft on the identity), or a row asks to be scrolled into view.
+    property <int> serial: ForgeState.focus-serial;
+    property <int> reveal-serial: ForgeReveal.serial;
+    // The add picker's flyout: closing it any way but Use or Cancel cancels, and Rust dropping the picker closes it.
+    property <bool> add-shown: add-popup.is-open;
+    property <bool> picker-live: ForgeState.picker-open;
 
-    // The pane starts closed in a narrow window, closes on the way into narrow and opens again on the way out.
-    init => {
-        if (root.narrow) {
-            ForgeState.pane-open = false;
+    // The pane starts closed in a narrow window, closes on the way into narrow and opens again on the way out. The class it
+    // last followed lives in ForgeState, so an item swap that rebuilds this view keeps the user's choice (the C# view's
+    // FollowWindowWidth).
+    function follow-class() {
+        if (!ForgeState.pane-class-known || ForgeState.pane-narrow != root.narrow) {
+            if (ForgeState.pane-class-known || root.narrow) {
+                ForgeState.pane-open = !root.narrow;
+            }
+            ForgeState.pane-class-known = true;
+            ForgeState.pane-narrow = root.narrow;
         }
     }
+
+    // While the pane lies over the table, the cells under it leave the Tab order (ForgeCover).
+    property <bool> covering: root.narrow && ForgeState.pane-open;
+    property <length> cover-left: root.absolute-position.x + root.width - root.pane-width;
+    property <length> cover-top: root.absolute-position.y + header.height;
+
+    function follow-cover() {
+        ForgeCover.set(root.covering, root.cover-left, root.cover-top);
+    }
+
+    init => {
+        root.follow-class();
+        root.follow-cover();
+    }
     changed narrow => {
-        ForgeState.pane-open = !root.narrow;
+        root.follow-class();
+    }
+    changed covering => {
+        root.follow-cover();
+    }
+    changed cover-left => {
+        root.follow-cover();
+    }
+    changed cover-top => {
+        root.follow-cover();
+    }
+
+    changed serial => {
+        if (ForgeState.focus-cell.kind == CellKind.field && ForgeState.focus-cell.row == -1 && ForgeState.focus-part == 5) {
+            KeyboardFocus.visible = true;
+            identity-cell.focus-cell();
+        }
+    }
+
+    // A row Rust selected or focused scrolls into view (the C# ListBox and BringIntoView).
+    changed reveal-serial => {
+        let top = ForgeReveal.top - lists.absolute-position.y;
+        let bottom = top + ForgeReveal.height;
+        if (top < 0) {
+            lists.content-y = Math.min(0px, lists.content-y - top);
+        } else if (bottom > lists.visible-height) {
+            lists.content-y = Math.max(Math.min(0px, lists.visible-height - lists.content-height), lists.content-y - (bottom - lists.visible-height));
+        }
+    }
+
+    changed add-shown => {
+        if (!root.add-shown && ForgeState.picker-open) {
+            ForgeState.cancel-picker();
+        }
+    }
+    changed picker-live => {
+        if (!root.picker-live) {
+            add-popup.close();
+        }
+    }
+
+    function close-identity() {
+        identity-popup.close();
+        identity-cell.focus-cell();
+    }
+
+    function pick-identity(index: int) {
+        if (index >= 0 && ForgeState.identity-options[index].available) {
+            ForgeState.pick-identity(index);
+            root.close-identity();
+        }
     }
 
     // Hidden measures, in a box of no size so their sizes never reach the page's own layout.
@@ -213,6 +389,8 @@ export component ItemForge inherits Rectangle {
                 }
             }
         }
+
+        add-measure := PickerMeasure { }
 
         // The Range column takes the widest range of the rows, as a shared size group does.
         range-measure := VerticalLayout {
@@ -260,17 +438,22 @@ export component ItemForge inherits Rectangle {
             Rectangle {
                 height: title.preferred-height;
 
-                if ForgeState.has-identity: CellButton {
+                // A Tab stop whenever the item has an identity, as the C# name button is.
+                identity-cell := CellButton {
                     x: Tokens.inline-cell-outdent.left;
                     y: Tokens.inline-cell-outdent.top;
                     width: Math.min(title.preferred-width, parent.width) - Tokens.inline-cell-outdent.left - Tokens.inline-cell-outdent.right;
                     height: parent.height - Tokens.inline-cell-outdent.top - Tokens.inline-cell-outdent.bottom;
+                    visible: ForgeState.has-identity;
+                    enabled: ForgeState.has-identity;
                     changeable: ForgeState.can-change-identity;
+                    tab-stop: true;
                     tip: ForgeState.identity-tip;
                     label: "Item: " + ForgeState.item-name;
                     clicked => {
                         if (ForgeState.can-change-identity) {
                             ForgeState.identity-search-edited("");
+                            root.identity-highlight = ForgeState.option-start(ForgeState.identity-options);
                             identity-popup.show();
                         }
                     }
@@ -293,23 +476,50 @@ export component ItemForge inherits Rectangle {
                     accessible-label: "Item: " + ForgeState.item-name;
                 }
 
+                // The identity picker: focus starts on the entry the item is; Down leaves the search for the list, the arrows
+                // move, Enter or Space picks and closes, and a keyboard close hands focus back to the name.
                 identity-popup := PopupWindow {
                     x: Tokens.inline-cell-outdent.left;
                     y: parent.height - Tokens.inline-cell-outdent.bottom + Tokens.space-4;
                     width: Tokens.base-menu-width + Tokens.flyout-padding.left + Tokens.flyout-padding.right;
                     height: Tokens.flyout-padding.top + Tokens.flyout-padding.bottom + Tokens.control-min-height + Tokens.space-8 * 2
-                        + Math.min(Tokens.replace-list-max-height, Math.max(1, ForgeState.identity-options.length) * (root.identity-row + Tokens.space-2))
-                        + PickerMetrics.caption-line * 3;
+                        + identity-surface.list-height + PickerMetrics.caption-line * 3;
                     close-policy: PopupClosePolicy.close-on-click-outside;
 
-                    Rectangle {
-                        background: Tokens.hover-brush;
-                        border-radius: Tokens.control-radius;
+                    identity-surface := FlyoutSurface {
+                        // The list measured where it really ends (its entries wrap), capped as the C# list is.
+                        property <length> content: Math.max(0px, identity-end.y - Tokens.space-2);
+                        property <length> list-height: Math.min(Tokens.replace-list-max-height, Math.max(root.identity-row, self.content));
+
+                        // The entries at the menu's width, in a box of no size, built only while the menu is open; the
+                        // zero-height marker after them is where the list really ends.
+                        Rectangle {
+                            width: 0;
+                            height: 0;
+                            visible: false;
+
+                            VerticalLayout {
+                                x: 0;
+                                y: 0;
+                                width: Tokens.base-menu-width;
+                                height: self.preferred-height;
+                                spacing: Tokens.space-2;
+
+                                for option in ForgeState.identity-options: IdentityEntry {
+                                    option: option;
+                                }
+
+                                identity-end := Rectangle {
+                                    height: 0px;
+                                }
+                            }
+                        }
+
 
                         FocusScope {
                             capture-key-pressed(event) => {
                                 if (event.text == Key.Escape) {
-                                    identity-popup.close();
+                                    root.close-identity();
                                     return accept;
                                 }
                                 reject
@@ -327,16 +537,20 @@ export component ItemForge inherits Rectangle {
                                     text: ForgeState.identity-search;
                                     placeholder: "Name or ID";
                                     label: "Search uniques and set items";
-                                    init => {
-                                        self.focus-input();
-                                    }
                                     edited(text) => {
                                         ForgeState.identity-search-edited(text);
+                                    }
+                                    down => {
+                                        if (ForgeState.identity-options.length > 0) {
+                                            root.identity-highlight = ForgeState.option-start(ForgeState.identity-options);
+                                            KeyboardFocus.visible = true;
+                                            identity-list.focus();
+                                        }
                                     }
                                 }
 
                                 Rectangle {
-                                    height: Math.min(Tokens.replace-list-max-height, Math.max(1, ForgeState.identity-options.length) * (root.identity-row + Tokens.space-2));
+                                    height: identity-surface.list-height;
 
                                     if ForgeState.identity-options.length == 0: Text {
                                         x: Tokens.empty-list-margin.left;
@@ -347,47 +561,66 @@ export component ItemForge inherits Rectangle {
                                         wrap: word-wrap;
                                     }
 
-                                    ScrollView {
-                                        content-width: self.visible-width;
-                                        content-height: ForgeState.identity-options.length * (root.identity-row + Tokens.space-2);
+                                    identity-list := FocusScope {
+                                        accessible-role: list;
+                                        accessible-label: "Uniques and set items";
+                                        init => {
+                                            self.focus();
+                                        }
+                                        focus-gained(reason) => {
+                                            if (reason == FocusReason.tab-navigation) {
+                                                KeyboardFocus.visible = true;
+                                            }
+                                        }
+                                        key-pressed(event) => {
+                                            if (event.text == Key.UpArrow || event.text == Key.DownArrow) {
+                                                KeyboardFocus.visible = true;
+                                                root.identity-highlight = ForgeState.option-step(ForgeState.identity-options, root.identity-highlight,
+                                                    event.text == Key.UpArrow ? -1 : 1);
+                                                return accept;
+                                            }
+                                            if (event.text == Key.Return || event.text == " ") {
+                                                root.pick-identity(root.identity-highlight);
+                                                return accept;
+                                            }
+                                            reject
+                                        }
 
-                                        VerticalLayout {
-                                            spacing: Tokens.space-2;
-                                            alignment: start;
-
-                                            for option[index] in ForgeState.identity-options: MenuRow {
-                                                held: option.current;
-                                                enabled: option.available;
-                                                picked => {
-                                                    ForgeState.pick-identity(index);
-                                                    identity-popup.close();
+                                        identity-scroll := ScrollView {
+                                            // Keeps the highlighted entry in view as the keyboard moves it.
+                                            function reveal(top: length, height: length) {
+                                                if (top + self.content-y < 0) {
+                                                    self.content-y = -top;
+                                                } else if (top + height + self.content-y > self.visible-height) {
+                                                    self.content-y = self.visible-height - top - height;
                                                 }
+                                            }
 
-                                                VerticalLayout {
-                                                    horizontal-stretch: 1;
+                                            content-width: self.visible-width;
+                                            content-height: identity-surface.content;
 
-                                                    HorizontalLayout {
-                                                        // Each name in the colour of the rarity the item would end with; one it can't become is dimmed.
-                                                        Text {
-                                                            text: option.name;
-                                                            color: option.available ? RarityInk.of(option.rarity) : Tokens.text-disabled-brush;
-                                                            overflow: elide;
-                                                            horizontal-stretch: 1;
-                                                        }
+                                            VerticalLayout {
+                                                height: identity-surface.content;
+                                                spacing: Tokens.space-2;
+                                                alignment: start;
 
-                                                        if option.in-game: Text {
-                                                            text: "in game";
-                                                            font-size: Tokens.font-size-caption;
-                                                            color: Tokens.text-secondary-brush;
-                                                            vertical-alignment: center;
+                                                for option[index] in ForgeState.identity-options: IdentityEntry {
+                                                    property <bool> lit: root.identity-highlight == index;
+                                                    init => {
+                                                        if (self.lit) {
+                                                            identity-scroll.reveal(self.y, self.height);
                                                         }
                                                     }
-
-                                                    Text {
-                                                        text: option.detail;
-                                                        font-size: Tokens.font-size-caption;
-                                                        color: Tokens.text-muted-brush;
-                                                        overflow: elide;
+                                                    changed lit => {
+                                                        if (self.lit) {
+                                                            identity-scroll.reveal(self.y, self.height);
+                                                        }
+                                                    }
+                                                    option: option;
+                                                    highlighted: self.lit && identity-list.has-focus;
+                                                    picked => {
+                                                        root.identity-highlight = index;
+                                                        root.pick-identity(index);
                                                     }
                                                 }
                                             }
@@ -425,7 +658,7 @@ export component ItemForge inherits Rectangle {
                         label: "Rarity: " + ForgeState.rarity-text;
                         clicked => {
                             if (ForgeState.can-change-rarity) {
-                                root.rarity-highlight = 0;
+                                root.rarity-highlight = ForgeState.option-start(ForgeState.rarity-options);
                                 rarity-popup.show();
                             }
                         }
@@ -438,27 +671,31 @@ export component ItemForge inherits Rectangle {
                         height: MenuMetrics.height(ForgeState.rarity-options.length) + ForgeState.rarity-caption-lines * PickerMetrics.caption-line;
                         close-policy: PopupClosePolicy.close-on-click-outside;
 
-                        Rectangle {
-                            background: Tokens.hover-brush;
-                            border-radius: Tokens.control-radius;
+                        FlyoutSurface {
 
                             FocusScope {
+                                accessible-role: list;
+                                accessible-label: "Rarity";
                                 init => {
                                     self.focus();
                                 }
+                                // A keyboard close hands focus back to the rarity.
                                 key-pressed(event) => {
                                     if (event.text == Key.Escape) {
                                         rarity-popup.close();
+                                        rarity-cell.focus-cell();
                                         return accept;
                                     }
                                     if (event.text == Key.UpArrow || event.text == Key.DownArrow) {
                                         KeyboardFocus.visible = true;
-                                        root.rarity-highlight = event.text == Key.UpArrow ? 0 : 1;
+                                        root.rarity-highlight = ForgeState.option-step(ForgeState.rarity-options, root.rarity-highlight,
+                                            event.text == Key.UpArrow ? -1 : 1);
                                         return accept;
                                     }
-                                    if (event.text == Key.Return) {
+                                    if ((event.text == Key.Return || event.text == " ") && root.rarity-highlight >= 0) {
                                         ForgeState.pick-rarity(root.rarity-highlight);
                                         rarity-popup.close();
+                                        rarity-cell.focus-cell();
                                         return accept;
                                     }
                                     reject
@@ -520,6 +757,14 @@ export component ItemForge inherits Rectangle {
                 }
 
                 if ForgeState.base-text != "": Rectangle {
+                    property <int> serial: ForgeState.focus-serial;
+                    changed serial => {
+                        if (ForgeState.focus-cell.kind == CellKind.field && ForgeState.focus-cell.row == -1 && ForgeState.focus-part == 4) {
+                            KeyboardFocus.visible = true;
+                            base-cell.focus-cell();
+                        }
+                    }
+
                     width: base-cell.width;
                     height: base-cell.height;
 
@@ -531,30 +776,73 @@ export component ItemForge inherits Rectangle {
                         label: "Base: " + ForgeState.base-text;
                         clicked => {
                             if (ForgeState.can-change-base) {
+                                root.base-highlight = ForgeState.option-start(ForgeState.base-options);
                                 base-popup.show();
                             }
                         }
                     }
 
+                    // The base picker: focus starts on the base the item has, the arrows move, Enter or Space picks and closes,
+                    // and a keyboard close hands focus back to the base. The list scrolls past the C# list's height.
                     base-popup := PopupWindow {
                         x: Tokens.inline-cell-outdent.left;
                         y: parent.height - Tokens.inline-cell-outdent.bottom + Tokens.space-4;
                         width: Tokens.base-menu-width + Tokens.flyout-padding.left + Tokens.flyout-padding.right;
-                        height: MenuMetrics.height(ForgeState.base-options.length) + ForgeState.base-caption-lines * PickerMetrics.caption-line
+                        height: Tokens.flyout-padding.top + Tokens.flyout-padding.bottom + base-surface.list-height
                             + Tokens.space-8 + Tokens.control-min-height + Tokens.space-2 + PickerMetrics.caption-line * 3;
                         close-policy: PopupClosePolicy.close-on-click-outside;
 
-                        Rectangle {
-                            background: Tokens.hover-brush;
-                            border-radius: Tokens.control-radius;
+                        base-surface := FlyoutSurface {
+                            // The list measured where it really ends (its entries wrap), capped as the C# list is.
+                            property <length> content: Math.max(0px, base-end.y - Tokens.space-2);
+                            property <length> list-height: Math.min(Tokens.replace-list-max-height, self.content);
 
-                            FocusScope {
+                            // The entries at the menu's width, in a box of no size, built only while the menu is open; the
+                            // zero-height marker after them is where the list really ends.
+                            Rectangle {
+                                width: 0;
+                                height: 0;
+                                visible: false;
+
+                                VerticalLayout {
+                                    x: 0;
+                                    y: 0;
+                                    width: Tokens.base-menu-width;
+                                    height: self.preferred-height;
+                                    spacing: Tokens.space-2;
+
+                                    for option in ForgeState.base-options: BaseEntry {
+                                        option: option;
+                                    }
+
+                                    base-end := Rectangle {
+                                        height: 0px;
+                                    }
+                                }
+                            }
+
+
+                            base-keys := FocusScope {
                                 init => {
                                     self.focus();
                                 }
                                 key-pressed(event) => {
                                     if (event.text == Key.Escape) {
                                         base-popup.close();
+                                        base-cell.focus-cell();
+                                        return accept;
+                                    }
+                                    if (event.text == Key.UpArrow || event.text == Key.DownArrow) {
+                                        KeyboardFocus.visible = true;
+                                        root.base-highlight = ForgeState.option-step(ForgeState.base-options, root.base-highlight,
+                                            event.text == Key.UpArrow ? -1 : 1);
+                                        return accept;
+                                    }
+                                    if ((event.text == Key.Return || event.text == " ") && root.base-highlight >= 0
+                                        && ForgeState.base-options[root.base-highlight].available) {
+                                        ForgeState.pick-base(root.base-highlight);
+                                        base-popup.close();
+                                        base-cell.focus-cell();
                                         return accept;
                                     }
                                     reject
@@ -568,45 +856,45 @@ export component ItemForge inherits Rectangle {
                                     spacing: Tokens.space-8;
                                     alignment: start;
 
-                                    VerticalLayout {
-                                        spacing: Tokens.space-2;
-
-                                        for option[index] in ForgeState.base-options: MenuRow {
-                                            held: option.current;
-                                            enabled: option.available;
-                                            picked => {
-                                                ForgeState.pick-base(index);
-                                                base-popup.close();
+                                    base-scroll := ScrollView {
+                                        accessible-role: list;
+                                        accessible-label: "Bases";
+                                        // Keeps the highlighted entry in view as the keyboard moves it.
+                                        function reveal(top: length, height: length) {
+                                            if (top + self.content-y < 0) {
+                                                self.content-y = -top;
+                                            } else if (top + height + self.content-y > self.visible-height) {
+                                                self.content-y = self.visible-height - top - height;
                                             }
+                                        }
 
-                                            VerticalLayout {
-                                                horizontal-stretch: 1;
+                                        height: base-surface.list-height;
+                                        content-width: self.visible-width;
+                                        content-height: base-surface.content;
 
-                                                HorizontalLayout {
-                                                    Text {
-                                                        text: option.name;
-                                                        color: Tokens.text-brush;
-                                                        horizontal-stretch: 1;
-                                                    }
+                                        VerticalLayout {
+                                            height: base-surface.content;
+                                            spacing: Tokens.space-2;
+                                            alignment: start;
 
-                                                    if option.in-game: Text {
-                                                        text: "in game";
-                                                        font-size: Tokens.font-size-caption;
-                                                        color: Tokens.text-secondary-brush;
-                                                        vertical-alignment: center;
+                                            for option[index] in ForgeState.base-options: BaseEntry {
+                                                property <bool> lit: root.base-highlight == index;
+                                                init => {
+                                                    if (self.lit) {
+                                                        base-scroll.reveal(self.y, self.height);
                                                     }
                                                 }
-
-                                                if option.implicits != "": Text {
-                                                    text: option.implicits;
-                                                    font-size: Tokens.font-size-caption;
-                                                    color: Tokens.text-secondary-brush;
+                                                changed lit => {
+                                                    if (self.lit) {
+                                                        base-scroll.reveal(self.y, self.height);
+                                                    }
                                                 }
-
-                                                if option.detail != "": Text {
-                                                    text: option.detail;
-                                                    font-size: Tokens.font-size-caption;
-                                                    color: Tokens.text-muted-brush;
+                                                option: option;
+                                                highlighted: self.lit && base-keys.has-focus;
+                                                picked => {
+                                                    root.base-highlight = index;
+                                                    ForgeState.pick-base(index);
+                                                    base-popup.close();
                                                 }
                                             }
                                         }
@@ -618,6 +906,7 @@ export component ItemForge inherits Rectangle {
                                         CheckBox {
                                             text: "Allow incompatible affixes";
                                             checked: ForgeState.base-allow-incompatible;
+                                            enabled: ForgeState.base-can-edit;
                                             toggled(on) => {
                                                 ForgeState.base-allow(on);
                                             }
@@ -655,7 +944,7 @@ export component ItemForge inherits Rectangle {
             }
 
             if ForgeState.fields.length > 0: VerticalLayout {
-                padding-top: Tokens.status-strip-margin.top - Tokens.space-4;
+                padding-top: Tokens.status-strip-margin.top;
 
                 FlexboxLayout {
                     height: root.strip-one-line ? strip-measure.preferred-height : self.preferred-height;
@@ -666,6 +955,14 @@ export component ItemForge inherits Rectangle {
                     cross-axis-line-alignment: start;
 
                     for field[index] in ForgeState.fields: Rectangle {
+                        // Show draft on a flag brings its toggle into focus.
+                        property <int> serial: ForgeState.focus-serial;
+                        changed serial => {
+                            if (ForgeState.focus-cell.kind == CellKind.field && ForgeState.focus-cell.row == index && ForgeState.focus-part == 1) {
+                                KeyboardFocus.visible = true;
+                                flag.focus-cell();
+                            }
+                        }
                         width: field.numeric ? Tokens.status-cell-width : flag.width;
                         height: field.numeric ? numeric.preferred-height : flag.height;
 
@@ -677,9 +974,17 @@ export component ItemForge inherits Rectangle {
                                 spacing: Tokens.space-4;
                                 alignment: start;
 
+                                // The field's tip, under its heading when it has one (why it is read-only).
                                 Text {
                                     text: field.name;
                                     color: Tokens.text-muted-brush;
+
+                                    label-touch := TouchArea { }
+
+                                    TipTrigger {
+                                        text: field.tip-heading != "" ? field.tip-heading + "\n" + field.tip : field.tip;
+                                        hovered: label-touch.has-hover;
+                                    }
                                 }
 
                                 if field.confirmed: Image {
@@ -758,7 +1063,8 @@ export component ItemForge inherits Rectangle {
                 // Implicits come with the base; only their roll positions reroll in place, and only a base change replaces them.
                 if ForgeState.has-implicits: VerticalLayout {
                     spacing: Tokens.space-2;
-                    padding-bottom: Tokens.implicit-section-margin.bottom - Tokens.space-6;
+                    // The margin adds to the section's 6px spacing, as the C# StackPanel's margin does.
+                    padding-bottom: Tokens.implicit-section-margin.bottom;
 
                     HorizontalLayout {
                         padding-left: Tokens.table-header-inset.left;
@@ -774,6 +1080,7 @@ export component ItemForge inherits Rectangle {
                         HelpButton {
                             y: (parent.height - self.height) / 2;
                             tip: ForgeState.implicit-note;
+                            label: "About implicits";
                         }
                     }
 
@@ -841,15 +1148,21 @@ export component ItemForge inherits Rectangle {
                     }
                 }
 
-                VerticalLayout {
-                    spacing: Tokens.row-gap.bottom;
+                // The rows as one named list (the C# ListBox's AutomationProperties.Name).
+                Rectangle {
+                    accessible-role: list;
+                    accessible-label: "Affixes";
 
-                    for affix[index] in ForgeState.affixes: AffixRowItem {
-                        affix: affix;
-                        index: index;
-                        selected: ForgeState.selected-affix == index;
-                        wide: root.wide;
-                        range-width: root.range-width;
+                    VerticalLayout {
+                        spacing: Tokens.row-gap.bottom;
+
+                        for affix[index] in ForgeState.affixes: AffixRowItem {
+                            affix: affix;
+                            index: index;
+                            selected: ForgeState.selected-affix == index;
+                            wide: root.wide;
+                            range-width: root.range-width;
+                        }
                     }
                 }
 
@@ -881,7 +1194,7 @@ export component ItemForge inherits Rectangle {
                             x: 0;
                             y: parent.height + Tokens.space-4;
                             width: Tokens.replace-flyout-width + Tokens.flyout-padding.left + Tokens.flyout-padding.right;
-                            height: PickerMetrics.height(ForgeState.picker-rows.length);
+                            height: PickerMetrics.height(ForgeState.picker-rows.length) + add-measure.extra;
                             close-policy: PopupClosePolicy.close-on-click-outside;
 
                             AffixPickerPanel {
@@ -892,11 +1205,15 @@ export component ItemForge inherits Rectangle {
                         }
                     }
 
+                    // The C# note trims to one line with a hover tip; here it wraps (up to two lines, within the button's
+                    // height) so that a keyboard user, who never gets the tip, reads it whole.
                     Text {
                         text: ForgeState.affix-list-note;
                         font-size: Tokens.font-size-caption;
                         color: Tokens.text-muted-brush;
                         vertical-alignment: center;
+                        wrap: word-wrap;
+                        max-lines: Tokens.note-max-lines;
                         overflow: elide;
                         horizontal-stretch: 1;
 
@@ -933,16 +1250,17 @@ export component ItemForge inherits Rectangle {
                 }
 
                 Rectangle {
-                    border-width: 1px;
+                    border-width: Tokens.border-all.left;
                     border-color: Tokens.unique-border-brush;
                     border-radius: Tokens.control-radius;
                 }
 
+                // The padding lies inside the frame, as an Avalonia Border's does.
                 unique-layout := VerticalLayout {
-                    padding-left: Tokens.unique-section-padding.left;
-                    padding-right: Tokens.unique-section-padding.right;
-                    padding-top: Tokens.unique-section-padding.top;
-                    padding-bottom: Tokens.unique-section-padding.bottom;
+                    padding-left: Tokens.border-all.left + Tokens.unique-section-padding.left;
+                    padding-right: Tokens.border-all.right + Tokens.unique-section-padding.right;
+                    padding-top: Tokens.border-all.top + Tokens.unique-section-padding.top;
+                    padding-bottom: Tokens.border-all.bottom + Tokens.unique-section-padding.bottom;
                     spacing: Tokens.space-8;
 
                     HorizontalLayout {
@@ -977,7 +1295,9 @@ export component ItemForge inherits Rectangle {
                                 color: ForgeState.preview-failed ? Tokens.error-brush : Tokens.text-muted-brush;
                                 max-width: Tokens.preview-status-max-width;
                                 vertical-alignment: center;
-                                overflow: elide;
+                                // The C# status trims at this width with a hover tip; it wraps here so the keyboard reaches
+                                // the whole reason.
+                                wrap: word-wrap;
 
                                 preview-touch := TouchArea { }
 
@@ -1008,15 +1328,20 @@ export component ItemForge inherits Rectangle {
                         }
                     }
 
-                    VerticalLayout {
-                        spacing: Tokens.row-gap.bottom;
+                    Rectangle {
+                        accessible-role: list;
+                        accessible-label: "Unique modifiers";
 
-                        for line[index] in ForgeState.unique-modifiers: ModifierRowItem {
-                            line: line;
-                            index: index;
-                            kind: CellKind.unique;
-                            on-unique: true;
-                            selected: ForgeState.selected-unique == index;
+                        VerticalLayout {
+                            spacing: Tokens.row-gap.bottom;
+
+                            for line[index] in ForgeState.unique-modifiers: ModifierRowItem {
+                                line: line;
+                                index: index;
+                                kind: CellKind.unique;
+                                on-unique: true;
+                                selected: ForgeState.selected-unique == index;
+                            }
                         }
                     }
                 }
@@ -1067,10 +1392,11 @@ export component ItemForge inherits Rectangle {
                         }
                     }
 
-                    TierList {
+                    TierLadder {
                         tiers: ForgeState.affixes[root.selected].tiers;
                         held: ForgeState.affixes[root.selected].tier-index;
                         enabled: ForgeState.affixes[root.selected].can-edit;
+                        label: "Tier for " + ForgeState.affixes[root.selected].name;
                         picked(index) => {
                             ForgeState.pick-tier(root.selected, index);
                         }
@@ -1079,12 +1405,19 @@ export component ItemForge inherits Rectangle {
             }
         }
 
-        // The changes pane: beside the table, keeping its column when hidden; in a narrow window over the table's right side.
+        // The changes pane: beside the table, keeping its column when hidden; in a narrow window over the table's right side,
+        // where Escape closes it and gives focus back to the Changes toggle.
         if ForgeState.pane-open: ChangesPane {
             x: root.width - root.pane-width;
             y: header.height;
             width: root.pane-width;
             height: bar.y - header.height;
+            overlay: root.narrow;
+            dismissed => {
+                KeyboardFocus.visible = true;
+                changes-toggle.focus-toggle();
+                ForgeState.pane-open = false;
+            }
         }
 
         // The action bar: the message with one icon for its kind, then Changes, Undo, Discard and Apply.
@@ -1141,7 +1474,7 @@ export component ItemForge inherits Rectangle {
                 height: Tokens.control-min-height;
                 spacing: Tokens.space-8;
 
-                ChangesToggle {
+                changes-toggle := ChangesToggle {
                     text: ForgeState.changes-text;
                     checked <=> ForgeState.pane-open;
                 }

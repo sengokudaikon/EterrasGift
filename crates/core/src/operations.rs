@@ -7,7 +7,7 @@ use std::sync::{
 };
 use std::thread::{self, JoinHandle};
 
-#[derive(Clone, Default)]
+#[derive(Clone, Debug, Default)]
 pub struct Cancellation(Arc<AtomicBool>);
 
 impl Cancellation {

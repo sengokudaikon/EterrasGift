@@ -36,7 +36,7 @@ pub enum LaunchOutcome {
     LoaderNotSeen,
 }
 
-/// Why a start did not happen.
+/// Why a start or its cleanup failed.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum LaunchError {
     /// The start was refused or could not run; the sentence says why.
@@ -243,11 +243,9 @@ impl GameHost for FileGameHost {
                 LaunchOutcome::LoaderNotSeen
             }
         });
+        let result = if lifetime.is_cancelled() { Err(LaunchError::Cancelled) } else { result };
         // Whatever happened after the restore, the proxy goes back aside: a start from Steam must never pick it up.
-        if with_mods {
-            let _ = loader.set_aside();
-        }
-        result
+        if with_mods { finish_mod_launch(&loader, result) } else { result }
     }
 
     fn settle_mod_loader(&self, install: Option<&GameInstall>) -> bool {
@@ -261,6 +259,13 @@ impl GameHost for FileGameHost {
         // A rename that failed leaves it for the next start, which sets it aside before anything else.
         loader.state() == ModLoaderState::Active && loader.set_aside().is_ok()
     }
+}
+
+fn finish_mod_launch(loader: &ModLoaderSwitch, result: Result<LaunchOutcome, LaunchError>) -> Result<LaunchOutcome, LaunchError> {
+    loader
+        .set_aside()
+        .map_err(|error| LaunchError::Failed(format!("MelonLoader's proxy could not be set aside. A start from Steam may still load mods: {error}")))?;
+    result
 }
 
 #[cfg(test)]
@@ -327,6 +332,28 @@ mod tests {
         assert!(host.settle_mod_loader(Some(&install)));
         assert_eq!(host.read_mod_loader(Some(&install)), ModLoaderState::SetAside);
         assert!(!host.settle_mod_loader(Some(&install)));
+    }
+
+    #[test]
+    fn cleanup_failure_is_reported_for_every_start_outcome() {
+        let temp = tempfile::tempdir().unwrap();
+        let install = game(temp.path());
+        let loader = ModLoaderSwitch::new(install.directory(), None);
+        fs::write(install.directory().join(loader::PROXY_NAME), b"proxy").unwrap();
+        // A directory at the destination forces a real rename failure.
+        fs::create_dir(install.directory().join(loader::SET_ASIDE_NAME)).unwrap();
+        for outcome in [
+            Ok(LaunchOutcome::LoaderStarted),
+            Ok(LaunchOutcome::LoaderNotSeen),
+            Err(LaunchError::Refused("start failed".into())),
+        ] {
+            assert!(matches!(finish_mod_launch(&loader, outcome), Err(LaunchError::Failed(message))
+                if message.contains("could not be set aside") && message.contains("Steam may still load mods")));
+            assert_eq!(loader.state(), ModLoaderState::Active);
+        }
+        fs::remove_dir(install.directory().join(loader::SET_ASIDE_NAME)).unwrap();
+        assert_eq!(finish_mod_launch(&loader, Ok(LaunchOutcome::LoaderStarted)), Ok(LaunchOutcome::LoaderStarted));
+        assert_eq!(loader.state(), ModLoaderState::SetAside);
     }
 
     #[test]

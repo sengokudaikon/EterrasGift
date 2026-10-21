@@ -124,6 +124,17 @@ struct Control {
 struct Shared {
     snapshot: Mutex<Snapshot>,
     completed: Condvar,
+    listeners: Mutex<Vec<Box<dyn Fn() + Send>>>,
+}
+
+impl Shared {
+    /// Wakes waiters and listeners once a change has completed. Call it with the snapshot unlocked.
+    fn completed(&self) {
+        self.completed.notify_all();
+        for listener in self.listeners.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).iter() {
+            listener();
+        }
+    }
 }
 
 struct Owner {
@@ -168,6 +179,7 @@ impl SettingsService {
                 store: SettingsView::from(&store),
             }),
             completed: Condvar::new(),
+            listeners: Mutex::default(),
         });
         let (sender, receiver) = mpsc::channel();
         let worker = if inline {
@@ -210,12 +222,21 @@ impl SettingsService {
         if let Some(store) = &mut control.inline {
             execute(&self.0.shared, store, revision, change);
         } else if control.sender.as_ref().unwrap().send(Command::Save(revision, change)).is_err() {
-            let mut snapshot = self.0.shared.snapshot.lock().unwrap();
-            snapshot.completed = revision;
-            snapshot.outcome = SaveOutcome::Faulted("The settings worker stopped.".into());
-            self.0.shared.completed.notify_all();
+            {
+                let mut snapshot = self.0.shared.snapshot.lock().unwrap();
+                snapshot.completed = revision;
+                snapshot.outcome = SaveOutcome::Faulted("The settings worker stopped.".into());
+            }
+            self.0.shared.completed();
         }
         Ok(revision)
+    }
+
+    /// Calls `listener` after each change completes, on the thread that completed it: the writer's, or the submitter's
+    /// for an inline service, while it holds the admission lock. It must not call back into the service; a UI wakes
+    /// itself and reads the snapshot there (instead of polling for completions).
+    pub fn on_completed(&self, listener: impl Fn() + Send + 'static) {
+        self.0.shared.listeners.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).push(Box::new(listener));
     }
 
     pub fn snapshot(&self) -> Snapshot {
@@ -312,7 +333,7 @@ fn execute(shared: &Shared, store: &mut SettingsStore, revision: u64, change: Ch
     // After a panic no further mutations run. Queued commands still receive terminal observations for draining.
     if matches!(shared.snapshot.lock().unwrap().outcome, SaveOutcome::Faulted(_)) {
         shared.snapshot.lock().unwrap().completed = revision;
-        shared.completed.notify_all();
+        shared.completed();
         return;
     }
     let locations = matches!(&change, Change::Locations(_));
@@ -355,7 +376,8 @@ fn execute(shared: &Shared, store: &mut SettingsStore, revision: u64, change: Ch
     }
     snapshot.outcome = outcome;
     snapshot.store = SettingsView::from(&*store);
-    shared.completed.notify_all();
+    drop(snapshot);
+    shared.completed();
 }
 
 fn apply(store: &mut SettingsStore, change: Change) -> Result<(), String> {

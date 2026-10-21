@@ -254,6 +254,85 @@ fn status_fields_flags_and_the_base_are_drafts_applied_level_requirement_last() 
     let _ = forge::item::EXALTED_TIER;
 }
 
+/// The C# `ForgeChoices.BaseOptions` and `ApplyPlanner`: each base says how many affixes it would make incompatible, judged
+/// with the class requirement the base carries, and Apply refuses such a base unless the base picker allows it.
+#[test]
+fn a_base_that_breaks_affixes_says_so_and_needs_allowing() {
+    use eg_trainer::edits::{BaseTypeEdit, ItemEdit};
+    let game = FixtureGame::class_ring();
+    let state = game.state.clone();
+    let mut editor = ForgeEditor::new(Box::new(game));
+    let details: Vec<String> = editor.base.as_ref().unwrap().options.iter().map(|option| option.detail.clone()).collect();
+    assert_eq!(
+        details,
+        ["Level 20", "Level 28 · 2 incompatible affixes", "Level 40 · corrupted base · 1 incompatible affix"]
+    );
+
+    // Refused whole, with the way out in words; nothing is written.
+    editor.pick_base(1);
+    editor.apply();
+    assert_eq!(
+        editor.message(),
+        (
+            "The new base would make affixes incompatible. Allow incompatible affixes in the base picker to apply it anyway.",
+            MessageKind::Error
+        )
+    );
+    assert!(state.borrow().writes.is_empty());
+    // With another draft pending, the refusal says nothing was applied.
+    editor.begin_input(Cell::Field(0));
+    editor.set_input(Cell::Field(0), "60");
+    editor.commit_input(Cell::Field(0));
+    editor.apply();
+    assert!(editor.message().0.ends_with("apply it anyway. Nothing was applied."));
+    assert!(state.borrow().writes.is_empty());
+    editor.discard_all();
+
+    // Allowed, the base goes past what the game allows: it needs "I know what I'm doing".
+    editor.pick_base(1);
+    editor.set_base_allow_incompatible(true);
+    editor.apply();
+    assert_eq!(editor.message(), (super::editor::OVERRIDE_REQUIRED, MessageKind::Error));
+    assert!(state.borrow().writes.is_empty());
+    state.borrow_mut().unrestricted = true;
+    editor.apply();
+    assert_eq!(editor.message().1, MessageKind::Confirmed);
+    assert!(matches!(
+        state.borrow().writes.as_slice(),
+        [ItemEdit::BaseType(BaseTypeEdit {
+            sub_type: 5,
+            allow_incompatible: true,
+            item_type: None
+        })]
+    ));
+    assert_eq!(state.borrow().item.as_ref().unwrap().sub_type, 5);
+}
+
+/// Incompatibility the item already carries is not the new base's doing, and "Allow incompatible affixes" on a base that
+/// breaks nothing needs no override (the C# `AffixCompatibility.BrokenByBase`, `ApplyPlanner`).
+#[test]
+fn only_affixes_the_base_breaks_count() {
+    use eg_trainer::edits::{BaseTypeEdit, ItemEdit};
+    // On the Sapphire Ring (any class) both class affixes are already incompatible; back to the Gold Ring breaks none.
+    let game = FixtureGame::class_ring();
+    game.change(|item| item.sub_type = 5);
+    let editor = ForgeEditor::new(Box::new(game));
+    let details: Vec<String> = editor.base.as_ref().unwrap().options.iter().map(|option| option.detail.clone()).collect();
+    assert_eq!(details, ["Level 20", "Level 28", "Level 40 · corrupted base"]);
+
+    let game = FixtureGame::ring(false);
+    let state = game.state.clone();
+    let mut editor = ForgeEditor::new(Box::new(game));
+    editor.pick_base(1);
+    editor.set_base_allow_incompatible(true);
+    editor.apply();
+    assert_eq!(editor.message().1, MessageKind::Confirmed, "{}", editor.message().0);
+    assert!(matches!(
+        state.borrow().writes.as_slice(),
+        [ItemEdit::BaseType(BaseTypeEdit { allow_incompatible: false, .. })]
+    ));
+}
+
 #[test]
 fn the_picker_replaces_as_a_draft_and_adds_at_once() {
     let game = FixtureGame::boots(false);
@@ -453,6 +532,27 @@ mod async_writes {
         editor.toggle_flag(2, true);
     }
     #[test]
+    fn a_pending_identity_write_does_not_allow_another_identity_pick() {
+        let control = Rc::new(RefCell::new(Control {
+            released: false,
+            busy: false,
+            outcomes: VecDeque::new(),
+            pending: None,
+            undoing: false,
+        }));
+        let mut editor = ForgeEditor::new(Box::new(Delayed {
+            game: FixtureGame::unique_ring(),
+            control: control.clone(),
+        }));
+        editor.pick_identity(2);
+        let name = editor.item_name();
+        editor.apply();
+        assert!(control.borrow().pending.is_some());
+        editor.pick_identity(3);
+        assert_eq!(editor.item_name(), name);
+        assert!(!editor.can_change_identity());
+    }
+    #[test]
     fn mixed_draft_waits_between_edits_and_undo_reverses_only_confirmed_steps() {
         let (mut e, c, state) = editor(&[ResultKind::Confirmed, ResultKind::Confirmed]);
         draft(&mut e);
@@ -490,7 +590,14 @@ mod async_writes {
         release(&mut e, &c);
         assert_eq!(state.borrow().writes.len(), 1);
         assert_eq!(e.drafts().len(), 1);
-        assert!(e.message().0.contains("1 of 2"));
+        // The C# Apply names the step the game did not apply.
+        assert_eq!(
+            e.message(),
+            (
+                "1 of 2 drafts applied and confirmed; Corruption was not applied. Refused before any change.",
+                MessageKind::Error
+            )
+        );
         e.discard_all();
         assert!(e.undo_writes_to_game());
         e.undo();
@@ -507,12 +614,8 @@ mod async_writes {
             release(&mut e, &c);
             release(&mut e, &c);
             assert!(e.drafts().is_empty());
-            if matches!(result, ResultKind::Uncertain) {
-                assert!(e.history.is_empty());
-            } else {
-                assert_eq!(e.history.len(), 1);
-                assert_eq!(e.history[0].outcome, "Confirmed");
-            }
+            assert_eq!(e.history.len(), 1);
+            assert_eq!(e.history[0].outcome, "Confirmed");
             assert!(!e.can_undo());
             assert_eq!(state.borrow().writes.len(), 1);
             assert_eq!(e.has_item(), matches!(result, ResultKind::NotKept));
@@ -690,4 +793,77 @@ fn pending_unique_preview_preserves_drafts_refreshes_only_current_text_and_clear
     assert!(!pending.get());
     assert_eq!(editor.drafts().len(), 0);
     assert_eq!(editor.preview_status, "");
+}
+
+#[test]
+fn keeping_legendary_potential_an_identity_never_holds_needs_the_override_and_warns() {
+    // The C# `KeepingLegendaryPotentialAnIdentityNeverHoldsNeedsTheOverrideAndWarns`.
+    let game = FixtureGame::unique_ring();
+    game.change(|item| item.status.as_mut().unwrap().legendary_potential = 2);
+    let mut editor = ForgeEditor::new(Box::new(game));
+    let option = |editor: &ForgeEditor, name: &str| {
+        editor
+            .identity_choices()
+            .iter()
+            .find(|option| option.name == name)
+            .map(|option| (option.detail.clone(), option.available))
+            .unwrap()
+    };
+    assert_eq!(option(&editor, "Fixture Ember Unique"), ("Unique · Gold Ring · legendary potential".into(), true));
+    assert_eq!(
+        option(&editor, "Fixture Woven Unique"),
+        (
+            "Unique · Gold Ring · Weaver's Will · keeps legendary potential it never holds, which may crash the game and reset the item state; needs \"I know what I'm doing\""
+                .into(),
+            false
+        )
+    );
+    let (set, available) = option(&editor, "Fixture Set Ring");
+    assert!(set.contains("keeps legendary potential it never holds"), "{set}");
+    assert!(!available);
+    editor.pick_identity(3);
+    assert!(!editor.is_identity_drafted(), "an entry that needs the override can't be picked without it");
+}
+
+#[test]
+fn the_popover_knows_which_cell_types_and_a_rebuilt_row_ends_the_drag_it_began() {
+    let mut editor = ForgeEditor::new(Box::new(FixtureGame::boots(false)));
+    assert_eq!(editor.typing_cell(), None);
+    assert!(editor.begin_input(Cell::Affix(1)));
+    assert_eq!(editor.typing_cell(), Some(Cell::Affix(1)));
+    editor.cancel_input(Cell::Affix(1));
+    assert_eq!(editor.typing_cell(), None);
+    // A drag on row 0 whose release arrives for another place (the row moved or was rebuilt under the pointer) still ends
+    // the drag it began, as one Undo step.
+    editor.press(Cell::Affix(0));
+    editor.scrub(Cell::Affix(0), 0.1);
+    editor.end_scrub(Cell::Affix(2), false);
+    assert!(!editor.affixes[0].value.dragging);
+    assert_eq!(editor.drafts().len(), 1);
+}
+
+#[test]
+fn typed_value_cannot_commit_after_identity_draft_locks_the_row() {
+    let mut editor = ForgeEditor::new(Box::new(FixtureGame::unique_ring()));
+    // Integer status fields have mappings even though unique roll mapping is unsupported.
+    assert!(editor.begin_input(Cell::Field(0)));
+    editor.set_input(Cell::Field(0), "60");
+    editor.pick_identity(2);
+    assert!(!editor.can_edit_value(Cell::Field(0)));
+    assert!(editor.commit_input(Cell::Field(0)));
+    assert_eq!(editor.drafts().len(), 1);
+    assert!(!editor.fields[0].is_dirty());
+}
+
+#[test]
+fn loading_a_mapping_during_a_drag_still_closes_the_row_undo_group() {
+    let mut editor = ForgeEditor::new(Box::new(FixtureGame::boots(false)));
+    let original = editor.affixes[0].roll();
+    editor.press(Cell::Affix(0));
+    editor.scrub(Cell::Affix(0), 0.1);
+    editor.affixes[0].value.set_mapping(super::game::Lookup::Loading, true);
+    editor.end_scrub(Cell::Affix(0), false);
+    assert!(!editor.affixes[0].value.dragging);
+    editor.undo();
+    assert_eq!(editor.affixes[0].roll(), original);
 }

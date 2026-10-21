@@ -11,6 +11,7 @@ const ONLINE: &str = "Start the game through Steam. MelonLoader is set aside fir
 const OFFLINE: &str = "Start the game in offline mode. MelonLoader is set aside first, so no mod loads";
 const WITH_MODS: &str = "Start the game in offline mode with MelonLoader and the mods that are on; needs MelonLoader in the game folder";
 const RUNNING: &str = "Last Epoch is running. Start it again once it has closed.";
+const NO_MOD_LOADER: &str = "Play offline with mods needs MelonLoader in the game folder.";
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct HomeModel {
@@ -94,6 +95,20 @@ impl HomeModel {
         self.tip(WITH_MODS)
     }
 
+    /// Why a Play button waits, for the line under the buttons when nothing else is said there: a disabled button takes no
+    /// keyboard focus, so its tip alone would leave a keyboard user guessing.
+    pub fn wait_reason(&self) -> Option<&'static str> {
+        if self.starting || self.conflicted {
+            None
+        } else if self.phase != BloomPhase::Wilted {
+            Some(RUNNING)
+        } else if !self.has_mod_loader {
+            Some(NO_MOD_LOADER)
+        } else {
+            None
+        }
+    }
+
     /// What each button does, or, while the game runs and they wait, why they wait.
     fn tip(&self, action: &str) -> String {
         if self.conflicted {
@@ -149,8 +164,12 @@ mod tests {
         assert_eq!(home.offline_tip(), RUNNING);
         home.set_phase(BloomPhase::Wilted);
         assert_eq!(home.online_tip(), ONLINE);
+        assert_eq!(home.wait_reason(), None);
         home.set_mod_loader(ModLoaderState::NotInstalled);
         assert!(home.can_play() && !home.can_play_with_mods());
+        assert_eq!(home.wait_reason(), Some(NO_MOD_LOADER));
+        home.set_phase(BloomPhase::Budding);
+        assert_eq!(home.wait_reason(), Some(RUNNING));
     }
 
     #[test]

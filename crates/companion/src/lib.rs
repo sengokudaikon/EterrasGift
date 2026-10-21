@@ -21,19 +21,5 @@ pub mod process;
 #[allow(unsafe_code)] // Windows/FFI boundary; the rest of the crate denies unsafe.
 pub mod shell;
 
-use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
-
-/// Cancelled when the app closes, so work that waits (a start with mods waiting for MelonLoader) stops and cleans up.
-#[derive(Clone, Debug, Default)]
-pub struct Lifetime(Arc<AtomicBool>);
-
-impl Lifetime {
-    pub fn cancel(&self) {
-        self.0.store(true, Ordering::SeqCst);
-    }
-
-    pub fn is_cancelled(&self) -> bool {
-        self.0.load(Ordering::SeqCst)
-    }
-}
+/// Cancels waiting companion work when the app closes.
+pub use eg_core::operations::Cancellation as Lifetime;

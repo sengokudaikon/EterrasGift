@@ -1422,6 +1422,7 @@ dependencies = [
  "eg-trainer",
  "image",
  "jiff",
+ "raw-window-handle",
  "rfd",
  "serde_json",
  "slint",
@@ -1500,6 +1501,22 @@ dependencies = [
  "syn 2.0.119",
  "tempfile",
  "tokio",
+]
+
+[[package]]
+name = "eterras-gift-launcher"
+version = "0.1.0"
+dependencies = [
+ "eg-core",
+ "eg-ui",
+ "image",
+ "jiff",
+ "serde_json",
+ "sha2",
+ "slint",
+ "tempfile",
+ "uuid",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

@@ -3,17 +3,17 @@
 // Rust (crates/ui/src/trainer) builds the rows from the catalog and owns every value; the view lays them out.
 // Forge › Item is the Item Forge (pages/forge/) while the session holds an item; otherwise the connection's empty state.
 
-import { ScrollView } from "std-widgets.slint";
+import { ScrollView } from "../widgets/scroll-view.slint";
 import { Tokens } from "../tokens.slint";
-import { Connection, KeyboardFocus } from "../globals.slint";
+import { Connection, KeyboardFocus, Tip } from "../globals.slint";
 import { Button, ButtonKind } from "../widgets/button.slint";
 import { ToggleSwitch } from "../widgets/toggle.slint";
 import { FocusRing } from "../widgets/focus.slint";
-import { LabelText, CaptionText, CaptionTone } from "../widgets/text.slint";
+import { LabelText, CaptionText, CaptionTone, TitleText } from "../widgets/text.slint";
 import { HelpButton } from "../widgets/help-button.slint";
 import { NumberBox } from "../widgets/number-box.slint";
 import { ChoiceBox } from "../widgets/choice-box.slint";
-import { EmptyState } from "common.slint";
+import { AshField, EterraFrames } from "../decorations.slint";
 import { ItemForge } from "forge/editor.slint";
 import { ForgeState } from "forge/state.slint";
 
@@ -59,12 +59,16 @@ export struct FeatureRowView {
     inline-value: FeatureValueView,
     status: string,
     tone: FeatureTone,
-    // An editor or held items.
+    // Its controls take changes: an editor connected, served and not waiting on the game; a hook unless the connected game
+    // cannot have it in this version.
     can-use: bool,
-    needs-connection: bool,
+    // An editor or held items: why it cannot be used, under the title (it waits for a connection, or this version cannot
+    // serve it).
+    reason: string,
     unread: bool,
     empty: bool,
     has-drafts: bool,
+    can-discard: bool,
     can-apply: bool,
     apply-text: string,
     // A planned feature: its values and their defaults, or its fields' names.
@@ -85,6 +89,11 @@ export global TrainerState {
     // The forge's empty state for the current connection state.
     in property <string> empty-title: "Not connected";
     in property <string> empty-detail: "Connect, then place an item in the forge.";
+    // The connection stopped for a reason the user has to fix: the warning mark beside the title.
+    in property <bool> empty-stopped;
+    // Ash under the empty forge: drifting while it waits for the game or a character, lying still while it is empty.
+    in property <bool> ash-shown;
+    in property <bool> ash-still;
 
     // The open page: its sections (none when it has one), the chosen one, and what that section holds.
     in property <[string]> sections;
@@ -122,8 +131,10 @@ component SectionBar inherits Rectangle {
     in property <[string]> sections;
     in-out property <int> current;
     in property <bool> compact;
+    in property <string> title;
 
     accessible-role: tab-list;
+    accessible-label: root.title;
     height: layout.preferred-height + Tokens.border-bottom.bottom;
 
     Rectangle {
@@ -232,6 +243,8 @@ component ValueLine inherits Rectangle {
     in property <int> value-index;
     in property <length> title-width;
     in property <length> value-right;
+    in property <bool> enabled;
+    in property <string> help;
 
     height: Math.max(Tokens.control-min-height, label.height);
 
@@ -251,7 +264,9 @@ component ValueLine inherits Rectangle {
         value: root.value.text;
         unit: root.value.unit;
         label: root.value.accessible-name;
+        accessible-description: root.help;
         tip: root.value.step-tip;
+        enabled: root.enabled;
         edited(text) => { TrainerState.value-edited(root.row-index, root.value-index, text); }
         committed(text) => { TrainerState.value-committed(root.row-index, root.value-index, text); }
         stepped(direction) => { TrainerState.value-stepped(root.row-index, root.value-index, direction); }
@@ -264,6 +279,8 @@ component ValueLine inherits Rectangle {
         choices: root.value.choices;
         index: root.value.choice-index;
         label: root.value.accessible-name;
+        accessible-description: root.help;
+        enabled: root.enabled;
         chosen(choice) => { TrainerState.value-chosen(root.row-index, root.value-index, choice); }
     }
 }
@@ -276,6 +293,7 @@ component FieldLine inherits Rectangle {
     in property <length> title-width;
     in property <length> value-x;
     in property <bool> enabled;
+    in property <string> help;
 
     property <length> group-height: root.field.starts-group ? group.y + group.height + Tokens.space-6 : 0px;
     property <length> pair-height: label.height + Tokens.space-2 + game.height;
@@ -318,6 +336,7 @@ component FieldLine inherits Rectangle {
         y: root.group-height + (root.grid-height - self.height) / 2;
         value: root.field.text;
         label: root.field.accessible-name;
+        accessible-description: root.help;
         tip: root.field.step-tip;
         enabled: root.enabled;
         drafted: root.field.drafted;
@@ -358,7 +377,9 @@ component FeatureRow inherits Rectangle {
     property <length> help-room: Tokens.space-6 + help.width + Tokens.feature-title-help-margin.right;
     property <bool> help-below: measure.preferred-width + root.help-room > root.title-width;
     property <length> title-height: title.height + (root.help-below ? measure.preferred-height : 0px);
-    property <length> line: Math.max(root.title-height, root.planned ? mark.height : Tokens.control-min-height);
+    // An editor's line is as tall as Read again (Fluent's icon button: its padding and frame round the icon).
+    property <length> line: Math.max(root.title-height, root.planned ? mark.height
+        : root.editor ? Math.max(Tokens.control-min-height, read.preferred-height) : Tokens.control-min-height);
     property <length> below-title: root.top + root.line;
     property <length> values-height: root.models.listed-values.length > 0 ? Tokens.feature-fields-margin.top + values.height : 0px;
     property <bool> fields-shown: root.editor && !(root.held && root.feature.unread);
@@ -386,6 +407,7 @@ component FeatureRow inherits Rectangle {
 
     accessible-role: groupbox;
     accessible-label: root.feature.title;
+    accessible-description: root.feature.help;
 
     Rectangle {
         x: Tokens.feature-row-outdent.left;
@@ -444,7 +466,9 @@ component FeatureRow inherits Rectangle {
             value: root.feature.inline-value.text;
             unit: root.feature.inline-value.unit;
             label: root.feature.inline-value.accessible-name;
+            accessible-description: root.feature.help;
             tip: root.feature.inline-value.step-tip;
+            enabled: root.feature.can-use;
             edited(text) => { TrainerState.value-edited(root.row-index, 0, text); }
             committed(text) => { TrainerState.value-committed(root.row-index, 0, text); }
             stepped(direction) => { TrainerState.value-stepped(root.row-index, 0, direction); }
@@ -457,6 +481,8 @@ component FeatureRow inherits Rectangle {
             choices: root.feature.inline-value.choices;
             index: root.feature.inline-value.choice-index;
             label: root.feature.inline-value.accessible-name;
+            accessible-description: root.feature.help;
+            enabled: root.feature.can-use;
             chosen(choice) => { TrainerState.value-chosen(root.row-index, 0, choice); }
         }
 
@@ -466,7 +492,9 @@ component FeatureRow inherits Rectangle {
             width: Tokens.feature-switch-min-width;
             height: Tokens.control-min-height;
             label: root.feature.title;
+            accessible-description: root.feature.help;
             checked: root.feature.on;
+            enabled: root.feature.can-use;
             toggled(on) => { TrainerState.hook-toggled(root.row-index, on); }
         }
 
@@ -484,29 +512,34 @@ component FeatureRow inherits Rectangle {
                 value-index: i;
                 title-width: root.title-width;
                 value-right: root.value-right;
+                enabled: root.feature.can-use;
+                help: root.feature.help;
             }
         }
 
-        // An editor: Read again on the title line; while it waits for the game, the reason under the title.
-        if root.editor: Button {
+        // An editor: Read again on the title line, at its own size; while it cannot be used, the reason under the title.
+        // Kept on every row (hidden and disabled off editors, so it takes no focus) for the line to measure it.
+        read := Button {
+            visible: root.editor;
             x: root.switch-x;
             y: root.top + (root.line - self.height) / 2;
-            width: Tokens.icon-button-size;
-            height: Tokens.icon-button-size;
+            width: self.preferred-width;
+            height: self.preferred-height;
             icon: Tokens.icon-refresh;
             kind: ButtonKind.subtle;
-            enabled: root.feature.can-use;
+            enabled: root.editor && root.feature.can-use;
             tip: root.held ? "Read again: what the stash holds now; drafts for what it still holds stay" : "Read again: what the game holds now; drafts that match it are cleared";
+            accessible-name: "Read again";
             clicked => { TrainerState.read(root.row-index); }
         }
 
         offline := CaptionText {
-            visible: root.editor && root.feature.needs-connection;
+            visible: root.editor && root.feature.reason != "";
             x: Tokens.feature-nested-indent.left;
             y: root.below-title;
             width: parent.width - self.x;
             height: self.visible ? self.preferred-height : 0px;
-            text: "Available once an offline character is connected.";
+            text: root.feature.reason;
         }
 
         unread := CaptionText {
@@ -542,6 +575,7 @@ component FeatureRow inherits Rectangle {
                 title-width: root.title-width;
                 value-x: root.value-x;
                 enabled: root.feature.can-use;
+                help: root.feature.help;
             }
         }
 
@@ -553,6 +587,7 @@ component FeatureRow inherits Rectangle {
             height: Tokens.control-min-height;
             text: "Discard";
             kind: ButtonKind.subtle;
+            enabled: root.feature.can-discard;
             tip: "Puts every box back to what the game holds; nothing is written";
             clicked => { TrainerState.discard(root.row-index); }
         }
@@ -581,7 +616,8 @@ component FeatureRow inherits Rectangle {
 
         details := CaptionText {
             visible: root.planned && root.feature.details != "";
-            x: Tokens.feature-nested-indent.left;
+            // C#'s planned row overrides the nested indent with its local FeatureStatusMargin (TrainerPageView.axaml:342).
+            x: Tokens.feature-status-margin.left;
             y: root.below-title + Tokens.feature-status-margin.top;
             width: parent.width - self.x;
             height: self.visible ? self.preferred-height : 0px;
@@ -674,6 +710,97 @@ component FeatureList inherits Rectangle {
     }
 }
 
+// Nothing in the forge, in words in the page (ItemEditorView.axaml's EmptyState): not connected, waiting for the game or a
+// character, refused, stopped, or connected and empty. A stop the user has to fix carries the warning mark beside its
+// title; the one next step (Connect, Retry) is the only button. Ash drifts up while the forge waits and lies still while it
+// is empty; it is gone on a stop (Rust says which, and drives the drift's frames).
+component ForgeEmpty inherits Rectangle {
+    in property <string> title;
+    in property <string> detail;
+    in property <bool> stopped;
+    in property <bool> ash-shown;
+    in property <bool> ash-still;
+
+    // The reading line height as a factor of the value size's own line (research/slint.md: read on a probe, never on the
+    // text that sets it).
+    probe := Text {
+        visible: false;
+        font-size: Tokens.font-size-value;
+        text: " ";
+    }
+
+    if root.ash-shown: AshField {
+        width: root.width;
+        height: root.height;
+        still: root.ash-still;
+    }
+
+    if root.ash-shown && !root.ash-still: EterraFrames { }
+
+    VerticalLayout {
+        alignment: center;
+        padding-left: Tokens.forge-empty-margin.left;
+        padding-right: Tokens.forge-empty-margin.right;
+        padding-top: Tokens.forge-empty-margin.top;
+        padding-bottom: Tokens.forge-empty-margin.bottom;
+
+        HorizontalLayout {
+            alignment: center;
+
+            VerticalLayout {
+                max-width: Tokens.reading-max-width;
+                spacing: Tokens.space-12;
+
+                HorizontalLayout {
+                    alignment: center;
+
+                    if root.stopped: VerticalLayout {
+                        alignment: center;
+                        padding-right: Tokens.leading-mark-margin.right;
+
+                        Image {
+                            width: Tokens.icon-size;
+                            height: Tokens.icon-size;
+                            image-fit: contain;
+                            source: Tokens.icon-warning;
+                            colorize: Tokens.warning-brush;
+                            accessible-role: image;
+                            accessible-label: "Warning";
+                        }
+                    }
+
+                    TitleText {
+                        text: root.title;
+                        horizontal-alignment: center;
+                    }
+                }
+
+                Text {
+                    text: root.detail;
+                    font-size: Tokens.font-size-value;
+                    line-height-factor: Tokens.line-height-reading / Math.max(1px, probe.font-metrics.ascent - probe.font-metrics.descent);
+                    color: Tokens.text-secondary-brush;
+                    horizontal-alignment: center;
+                    wrap: word-wrap;
+                }
+
+                if Connection.show-action: HorizontalLayout {
+                    alignment: center;
+                    padding-top: Tokens.empty-action-margin.top;
+
+                    Button {
+                        text: Connection.action-text;
+                        kind: ButtonKind.primary;
+                        clicked => {
+                            Connection.connect();
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
 export component TrainerPage inherits Rectangle {
     in property <string> page-id;
     in property <string> page-title;
@@ -692,12 +819,18 @@ export component TrainerPage inherits Rectangle {
     changed section => {
         TrainerState.select-section(root.section);
     }
+    // The editor's controls go with its item, and a tip one of them opened goes with them.
+    property <bool> has-item: ForgeState.has-item;
+    changed has-item => {
+        Tip.open = false;
+    }
 
     VerticalLayout {
         if TrainerState.sections.length > 1: SectionBar {
             sections: TrainerState.sections;
             current <=> TrainerState.section;
             compact: root.compact;
+            title: root.page-title;
         }
 
         // The owned item observation, while the current session can display it.
@@ -708,18 +841,13 @@ export component TrainerPage inherits Rectangle {
             wide: root.wide;
         }
 
-        if TrainerState.item-forge && !ForgeState.has-item: EmptyState {
+        if TrainerState.item-forge && !ForgeState.has-item: ForgeEmpty {
             vertical-stretch: 1;
             title: ForgeState.write-recovery-required ? "Item readback unavailable" : TrainerState.empty-title;
             detail: ForgeState.write-recovery-required ? ForgeState.message : TrainerState.empty-detail;
-
-            if Connection.show-action: Button {
-                text: Connection.action-text;
-                kind: ButtonKind.primary;
-                clicked => {
-                    Connection.connect();
-                }
-            }
+            stopped: ForgeState.write-recovery-required || TrainerState.empty-stopped;
+            ash-shown: !ForgeState.write-recovery-required && TrainerState.ash-shown;
+            ash-still: TrainerState.ash-still;
         }
 
         if !TrainerState.item-forge: FeatureList {

@@ -5,6 +5,7 @@
 import { Tokens } from "../../tokens.slint";
 import { KeyboardFocus, TipPlacement } from "../../globals.slint";
 import { FocusRing, TipTrigger } from "../../widgets/focus.slint";
+import { ForgeCover } from "state.slint";
 
 // A cell button: plain text until hovered (Dusk Brown in a Weathered Taupe frame). Disabled, it keeps its own colours and
 // only stops answering. Place it outdented by the cell padding so its hover frame reaches past the column.
@@ -14,11 +15,18 @@ export component CellButton inherits Rectangle {
     in property <string> label;
     // Inline cells in the facts line answer like a cell only where they can change.
     in property <bool> changeable: true;
+    // A Tab stop: by default where the cell can change; the facts line's cells always are, so their reasons show by keyboard.
+    in property <bool> tab-stop: root.changeable;
+    // The tip while the pointer is over the cell, when it differs from the keyboard's (the seal's full name).
+    in property <string> hover-tip;
     callback clicked();
     callback vertical(int);
     callback menu-requested();
     // A right-click, at the pointer in window coordinates.
     callback context-menu(length, length);
+    // Del on a cell that removes what it belongs to (an affix row's cells).
+    in property <bool> deletable;
+    callback delete-pressed();
     out property <bool> has-focus: focus.has-focus;
     out property <bool> hovered: touch.has-hover;
 
@@ -27,6 +35,8 @@ export component CellButton inherits Rectangle {
     }
 
     property <bool> live: root.enabled && root.changeable;
+    // Under the changes pane in a narrow window: out of the Tab order, as focus there would be out of sight.
+    property <bool> covered: ForgeCover.covers(root.absolute-position.x, root.absolute-position.y, root.width, root.height);
 
     accessible-role: button;
     accessible-label: root.label;
@@ -50,7 +60,7 @@ export component CellButton inherits Rectangle {
 
     focus := FocusScope {
         enabled: root.enabled;
-        focus-on-tab-navigation: root.changeable;
+        focus-on-tab-navigation: root.tab-stop && !root.covered;
         focus-gained(reason) => {
             if (reason == FocusReason.tab-navigation) {
                 KeyboardFocus.visible = true;
@@ -72,8 +82,12 @@ export component CellButton inherits Rectangle {
                 root.vertical(1);
                 return accept;
             }
-            if (event.text == Key.F10 && event.modifiers.shift) {
+            if (event.text == Key.Menu || (event.text == Key.F10 && event.modifiers.shift)) {
                 root.menu-requested();
+                return accept;
+            }
+            if (event.text == Key.Delete && root.deletable) {
+                root.delete-pressed();
                 return accept;
             }
             reject
@@ -100,7 +114,7 @@ export component CellButton inherits Rectangle {
     }
 
     TipTrigger {
-        text: root.tip;
+        text: touch.has-hover && root.hover-tip != "" ? root.hover-tip : root.tip;
         hovered: touch.has-hover;
         focused: focus.has-focus;
     }
@@ -110,18 +124,22 @@ export component CellButton inherits Rectangle {
     }
 }
 
-// One entry of a flyout menu: the held one on Wine-Stained Brown in a brass frame, hover Dusk Brown, disabled dimmed.
+// One entry of a flyout menu: the held one on Wine-Stained Brown in a brass frame, the keyboard's framed in the focus
+// colour, disabled dimmed. Hover is Wine-Stained Brown on a flyout, whose own ground is the hover colour (as the rail's
+// flyout and the context menus have it), and Dusk Brown where the rows lie on the page (the tier ladder).
 export component MenuRow inherits Rectangle {
     in property <bool> held;
     in property <bool> highlighted;
     in property <bool> enabled: true;
+    in property <bool> on-flyout: true;
     callback picked();
     out property <bool> hovered: touch.has-hover;
 
     border-radius: Tokens.control-radius;
     border-width: 1px;
     border-color: root.held ? Tokens.accent-brush : root.highlighted && KeyboardFocus.visible ? Tokens.focus-brush : transparent;
-    background: root.held ? Tokens.selected-brush : touch.has-hover && root.enabled ? Tokens.hover-brush : transparent;
+    background: root.held ? Tokens.selected-brush
+        : touch.has-hover && root.enabled ? (root.on-flyout ? Tokens.selected-brush : Tokens.hover-brush) : transparent;
     height: layout.preferred-height;
 
     layout := HorizontalLayout {
@@ -156,6 +174,10 @@ export component FlagToggle inherits Rectangle {
 
     property <bool> hovered: touch.has-hover && root.enabled;
 
+    public function focus-cell() {
+        focus.focus();
+    }
+
     accessible-role: switch;
     accessible-label: root.on-name;
     accessible-checkable: true;
@@ -167,7 +189,11 @@ export component FlagToggle inherits Rectangle {
     background: !root.enabled ? transparent
         : root.hovered ? Tokens.hover-brush
         : root.drafted && root.checked ? Tokens.draft-surface-brush : transparent;
-    border-color: root.drafted && root.checked && !root.hovered ? Tokens.draft-brush
+    // A disabled flag keeps the frame its state gives it when checked (trim gold, teal while drafted) and has none when
+    // not: the C# flag styles set the checked frames over Fluent's transparent disabled one, which then shows only when
+    // unchecked (checked against Avalonia 12.1.3 Fluent, headless).
+    border-color: !root.enabled ? (root.checked ? (root.drafted ? Tokens.draft-brush : Tokens.accent-trim-brush) : transparent)
+        : root.drafted && root.checked && !root.hovered ? Tokens.draft-brush
         : root.checked ? (root.hovered ? Tokens.accent-brush : Tokens.accent-trim-brush)
         : root.hovered ? Tokens.strong-line-brush : Tokens.hairline-brush;
     property <brush> ink: !root.enabled ? Tokens.text-disabled-brush
@@ -363,6 +389,12 @@ export component RadioButton inherits Rectangle {
     in property <string> text;
     in property <bool> checked;
     callback chosen();
+    // Left / Up (-1) or Right / Down (1): the group moves to its neighbour.
+    callback arrow(int);
+
+    public function focus-button() {
+        focus.focus();
+    }
 
     accessible-role: radio-button;
     accessible-label: root.text;
@@ -417,6 +449,14 @@ export component RadioButton inherits Rectangle {
                 root.chosen();
                 return accept;
             }
+            if (event.text == Key.LeftArrow || event.text == Key.UpArrow) {
+                root.arrow(-1);
+                return accept;
+            }
+            if (event.text == Key.RightArrow || event.text == Key.DownArrow) {
+                root.arrow(1);
+                return accept;
+            }
             reject
         }
 
@@ -437,11 +477,14 @@ export component RadioButton inherits Rectangle {
 // A (?) beside a label: a muted 14px icon whose tip opens on hover, on keyboard focus, or when pressed.
 export component HelpButton inherits Rectangle {
     in property <string> tip;
+    // Its name ("About …"); the tip is its description.
+    in property <string> label;
 
     property <bool> shown;
 
     accessible-role: button;
-    accessible-label: root.tip;
+    accessible-label: root.label != "" ? root.label : root.tip;
+    accessible-description: root.tip;
 
     width: Tokens.icon-size-small;
     height: Tokens.icon-size-small;

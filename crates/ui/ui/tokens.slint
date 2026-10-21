@@ -94,8 +94,14 @@ export global Tokens {
     out property <color> fluent-base-medium-low-color: #746D60;
     out property <color> fluent-chrome-black-high-color: #000000;
 
+    // Added by hand for the Slint port (2026-10-20 audit): the drop shadow under menus and flyouts, so they lift off the near-black ground; the C# flyouts have none, and its context menus' frame (Fluent's SystemControlTransientBorderBrush, #0000005C) gave way to StrongLineBrush. The software renderer (captures) draws no shadows, FemtoVG does
+    out property <color> flyout-shadow-color: #00000099;
+
     // The scrub band: the bar's strip tints under the pointer instead of the cell getting a box; flat, no glow
     out property <color> aura-color: #C9A45C26;
+
+    // Added by hand for the Slint port: Avalonia.Themes.Fluent 12.1.3 ScrollBarTrackFill: ChromeMedium (RaisedColor, Theme.axaml) at 0.9 opacity, behind an expanded scroll bar
+    out property <color> scroll-bar-track-color: #1A1915E6;
     out property <brush> ground-brush: ground-color;
     out property <brush> surface-brush: surface-color;
     out property <brush> raised-brush: raised-color;
@@ -151,6 +157,9 @@ export global Tokens {
     // The scrub band: the bar's strip tints under the pointer instead of the cell getting a box; flat, no glow
     out property <brush> aura-brush: aura-color;
 
+    // Added by hand for the Slint port: Avalonia.Themes.Fluent 12.1.3 ScrollBarTrackFill and ScrollBarTrackFillPointerOver: the expanded scroll bar's track
+    out property <brush> scroll-bar-track-brush: scroll-bar-track-color;
+
     // The tooltip's ground with its header glow in the top-left corner, as wide and deep as the game's header shows it
     out property <image> unique-surface-brush-image: @image-url("gradients/unique-surface-brush.svg");
     out property <length> unique-surface-brush-x: -330px;
@@ -172,6 +181,9 @@ export global Tokens {
     // Letter spacing in device-independent pixels: the titles' capitals open slightly
     out property <length> tracking-title: 0.6px;
     out property <int> title-max-lines: 2;
+
+    // Added by hand for the Slint port (2026-10-20): a one-line note beside a control (the Forge's affix-list note) wraps to this many lines rather than cutting, so the keyboard reaches all of it; the C# trims it to one line with a hover tip
+    out property <int> note-max-lines: 2;
 
     // Placeholders show real defaults, so they keep the muted note colour at full strength (Fluent halves it)
     out property <float> placeholder-opacity: 1;
@@ -277,6 +289,14 @@ export global Tokens {
 
     // A tip opened by keyboard focus or a help button hangs this far under its control
     out property <length> keyboard-tip-offset: 4px;
+
+    // Added by hand for the Slint port (2026-10-20 audit): Fluent's FocusVisualPrimaryThickness, the keyboard focus ring's stroke
+    out property <length> focus-ring-width: 2px;
+
+    // Added by hand for the Slint port (2026-10-20 audit): the focus ring sits this far outside its control (Fluent's FocusVisualMargin -2)
+    out property <length> focus-ring-offset: 2px;
+
+    // A tip opened by keyboard focus or a help button hangs this far under its control
     out property <length> value-flyout-width: 160px;
     out property <length> menu-flyout-width: 240px;
     out property <length> base-menu-width: 300px;
@@ -333,6 +353,54 @@ export global Tokens {
     // The earlier keyframe holds until the later one has spread this far across, then fades out under it
     out property <float> eterra-band-handover: 0.7;
 
+    // Added by hand for the Slint port: Avalonia.Themes.Fluent 12.1.3 compact MenuItem: MenuFlyoutItemThemePaddingNarrow 4 + the 14px title's 20px line + 4, measured on the C# app's row menu (design/captures/row-menu.png)
+    out property <length> menu-item-height: 28px;
+
+    // Added by hand for the Slint port: Avalonia.Themes.Fluent 12.1.3 ComboBox.xaml's grid (ColumnDefinitions="*,32"): the chevron's column at a choice box's right, after its 12px ComboBoxPadding and the choice
+    out property <length> combo-box-glyph-column-width: 32px;
+
+    // Added by hand for the Slint port (2026-10-20 audit): how far the menus' and flyouts' drop shadow spreads
+    out property <length> flyout-shadow-blur: 12px;
+
+    // Added by hand for the Slint port (2026-10-20 audit): the menus' and flyouts' drop shadow falls this far below them
+    out property <length> flyout-shadow-offset-y: 4px;
+
+    // Added by hand for the Slint port: Avalonia.Themes.Fluent 12.1.3 ScrollBarSize: an expanded scroll bar's width, its line buttons' height and its thumb's least length
+    out property <length> scroll-bar-size: 16px;
+
+    // Added by hand for the Slint port: Avalonia.Themes.Fluent 12.1.3 VerticalSmallScrollThumbScaleTransform (scaleX(0.125) of ScrollBarSize): the resting thumb's width, measured at W-4..W-3 in design/captures/settings-680.png
+    out property <length> scroll-bar-collapsed-size: 2px;
+
+    // Added by hand for the Slint port: Avalonia.Themes.Fluent 12.1.3 VerticalSmallScrollThumbScaleTransform's translateX(-2px): the resting thumb's gap from the bar's outer edge
+    out property <length> scroll-bar-collapsed-inset: 2px;
+
+    // Added by hand for the Slint port: Avalonia.Themes.Fluent 12.1.3 ScrollBarButtonArrowIconFontSize: the line buttons' arrows on an expanded scroll bar
+    out property <length> scroll-bar-arrow-size: 8px;
+
+    // Added by hand for the Slint port: Avalonia 12.1.3 ScrollViewer.DefaultSmallChange: how far a line button scrolls
+    out property <length> scroll-bar-small-change: 16px;
+
+    // Added by hand for the Slint port (2026-10-20 audit): Fluent's toggle switch track (Avalonia.Themes.Fluent 12.1.3 ToggleSwitch.xaml SwitchAreaGrid, 40 by 20), the size the port's switch already drew
+    out property <length> toggle-track-width: 40px;
+
+    // Added by hand for the Slint port (2026-10-20 audit): the toggle switch track's height; its ends are round, so its radius is half of this
+    out property <length> toggle-track-height: 20px;
+
+    // Added by hand for the Slint port (2026-10-20 audit): the toggle switch's knob at rest (Fluent's SwitchKnob, 10 by 10)
+    out property <length> toggle-knob-size: 10px;
+
+    // Added by hand for the Slint port (2026-10-20 audit): the toggle switch's knob under the pointer, as Fluent grows it
+    out property <length> toggle-knob-hover-size: 12px;
+
+    // Added by hand for the Slint port (2026-10-20 audit): the toggle switch's knob stretches to this width while pressed, as Fluent's does
+    out property <length> toggle-knob-pressed-width: 14px;
+
+    // Added by hand for the Slint port (2026-10-20 audit): the dot that marks the page now shown in the rail's Trainer flyout, as a radio menu item marks its choice
+    out property <length> radio-mark-size: 6px;
+
+    // Added by hand for the Slint port (2026-10-20 audit): the stroke of the tick drawn in the Mods list's check boxes
+    out property <length> check-glyph-stroke-width: 1.5px;
+
     // Named insets, one per role
     out property <Inset> page-gutter: { left: 24px, top: 0px, right: 24px, bottom: 0px };
     out property <Inset> page-gutter-compact: { left: 16px, top: 0px, right: 16px, bottom: 0px };
@@ -340,6 +408,9 @@ export global Tokens {
     out property <Inset> status-strip-margin: { left: 0px, top: 10px, right: 0px, bottom: 0px };
     out property <Inset> pane-content-margin: { left: 20px, top: 18px, right: 20px, bottom: 20px };
     out property <Inset> notice-padding: { left: 12px, top: 10px, right: 12px, bottom: 10px };
+
+    // Added by hand for the Slint port: Fluent's compact TextControlThemePadding (Avalonia.Themes.Fluent DensityStyles/Compact.xaml, 4,2), inside the text box's 1px frame; the C# app takes it from FluentTheme DensityStyle=Compact
+    out property <Inset> text-control-padding: { left: 4px, top: 2px, right: 4px, bottom: 2px };
 
     // A bordered summary on a page (Home): room for a heading, a paragraph and an action
     out property <Inset> ledger-entry-padding: { left: 8px, top: 6px, right: 8px, bottom: 6px };
@@ -491,9 +562,24 @@ export global Tokens {
     // Status flags (corrupted, ruined) are toggles: muted when off, outlined when on
     out property <Inset> flag-padding: { left: 8px, top: 3px, right: 8px, bottom: 3px };
 
+    // Added by hand for the Slint port: Avalonia.Themes.Fluent 12.1.3 DensityStyles/Compact.xaml MenuFlyoutItemThemePaddingNarrow: a context menu row's padding, inside the menu's 1px frame
+    out property <Inset> menu-item-padding: { left: 4px, top: 4px, right: 8px, bottom: 4px };
+
+    // Added by hand for the Slint port: Avalonia.Themes.Fluent 12.1.3 ContextMenu.xaml MenuFlyoutScrollerMargin: room above the first row and below the last
+    out property <Inset> menu-flyout-scroller-margin: { left: 0px, top: 4px, right: 0px, bottom: 4px };
+
+    // Added by hand for the Slint port: Avalonia.Themes.Fluent 12.1.3 MenuFlyoutSeparatorThemePadding: a separator's 1px line between groups of a context menu
+    out property <Inset> menu-separator-margin: { left: 12px, top: 4px, right: 12px, bottom: 4px };
+
+    // Added by hand for the Slint port: Avalonia.Themes.Fluent 12.1.3 MenuItem.xaml MenuInputGestureTextMargin: the key column keeps this room after the title, even when a row names no key
+    out property <Inset> menu-gesture-margin: { left: 24px, top: 0px, right: 0px, bottom: 0px };
+
     // A check box's caption starts under its label, past the box
     out property <length> control-radius: 2px;
     out property <length> radius-none: 0px;
+
+    // Added by hand for the Slint port: Avalonia.Themes.Fluent 12.1.3 BaseResources.xaml OverlayCornerRadius: context menus round their corners by this much
+    out property <length> overlay-radius: 5px;
 
     // The value column holds a box (a currency in the millions with its unit, no spinner) or a choice, which may grow left; the switch column holds the switch (as wide as the page's widest, at least 72) or an editor's Read again
     out property <length> feature-value-column-width: 112px;
@@ -511,6 +597,24 @@ export global Tokens {
 
     // A new page fades in (the old one goes at once), so the launch screen, the forge and Settings never swap in a single frame
     out property <duration> page-transition-duration: 180ms;
+
+    // Added by hand for the Slint port: Avalonia's ToolTip.ShowDelay default, the hover delay before a tip opens
+    out property <duration> tip-show-delay: 400ms;
+
+    // Added by hand for the Slint port: a tip no longer wanted stays this long, so the pointer can cross onto the bubble and keep it open (WCAG 1.4.13)
+    out property <duration> tip-linger-duration: 200ms;
+
+    // Added by hand for the Slint port: Avalonia.Themes.Fluent 12.1.3 ScrollBar.xaml: the thumb's widening and the track's and arrows' fade when a scroll bar expands or collapses
+    out property <duration> scroll-bar-transition-duration: 100ms;
+
+    // Added by hand for the Slint port: Avalonia 12.1.3 ScrollBar.ShowDelay default: the pointer rests on a scroll bar this long before it expands
+    out property <duration> scroll-bar-show-delay: 500ms;
+
+    // Added by hand for the Slint port: Avalonia 12.1.3 ScrollBar.HideDelay default: a scroll bar the pointer left collapses after this long
+    out property <duration> scroll-bar-hide-delay: 2000ms;
+
+    // Added by hand for the Slint port (2026-10-20 audit): the toggle switch's knob slides across this fast when it flips; off when Windows animation effects are off
+    out property <duration> toggle-knob-duration: 120ms;
 
     // Icons: Fluent System Icons, 20px regular (MIT, Microsoft; licence beside this file)
     out property <image> icon-home: @image-url("icons/home.svg");
@@ -553,4 +657,10 @@ export global Tokens {
     out property <image> icon-trainer: @image-url("icons/trainer.svg");
     out property <image> icon-chevron-down: @image-url("icons/chevron-down.svg");
     out property <image> icon-chevron-up: @image-url("icons/chevron-up.svg");
+
+    // Added by hand for the Slint port: Avalonia.Themes.Fluent 12.1.3 ScrollBar.xaml PART_LineUpButton's PathIcon (MIT): the expanded scroll bar's line-up arrow
+    out property <image> icon-scroll-up: @image-url("icons/scroll-up.svg");
+
+    // Added by hand for the Slint port: Avalonia.Themes.Fluent 12.1.3 ScrollBar.xaml PART_LineDownButton's PathIcon (MIT): the expanded scroll bar's line-down arrow
+    out property <image> icon-scroll-down: @image-url("icons/scroll-down.svg");
 }

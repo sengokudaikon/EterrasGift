@@ -39,6 +39,9 @@ pub struct BaseDefinition {
     pub name: String,
     pub level: u8,
     pub corrupted: bool,
+    /// The classes an item on this base is for (the game's `ItemClassRequirements` bits, 0 for any class). A base change
+    /// judges the affixes with it, as the C# `ForgeChoices.BrokenByBase` does.
+    pub class_requirement: i32,
     /// The implicits it grants, in the game's words with their ranges ("+10–16 Armor").
     pub implicits: Vec<String>,
 }
@@ -122,6 +125,48 @@ impl Catalog {
     }
 }
 
+/// The fallback the C# `ForgeChoices.ImplicitLine` shows when the game gave no text for an implicit.
+pub const IMPLICIT_TEXT_UNAVAILABLE: &str = "Implicit (the game's text is unavailable)";
+
+/// One base implicit as a line (C# `ForgeChoices.ImplicitLine`): the game's text at both ends of its range, joined as a
+/// range, or the fallback when the game gave neither.
+pub fn implicit_line(minimum: Option<&str>, maximum: Option<&str>) -> String {
+    let text = modifier_range(minimum.unwrap_or_default(), maximum.unwrap_or_default());
+    if text.is_empty() { IMPLICIT_TEXT_UNAVAILABLE.to_owned() } else { text }
+}
+
+/// The game's text with the rolled number shown as its range, for example "+10–16 Armor" from "+10 Armor" and
+/// "+16 Armor" (C# `ModifierText.Range`). Texts that differ in more than a number read "minimum – maximum".
+pub fn modifier_range(minimum: &str, maximum: &str) -> String {
+    if minimum == maximum || minimum.is_empty() || maximum.is_empty() {
+        return if minimum.is_empty() { maximum } else { minimum }.to_owned();
+    }
+    let low: Vec<char> = minimum.chars().collect();
+    let high: Vec<char> = maximum.chars().collect();
+    let number_part = |c: char| c.is_numeric() || c == '.' || c == ',';
+    let mut prefix = 0;
+    while prefix < low.len() && prefix < high.len() && low[prefix] == high[prefix] {
+        prefix += 1;
+    }
+    let mut suffix = 0;
+    while suffix < low.len() - prefix && suffix < high.len() - prefix && low[low.len() - suffix - 1] == high[high.len() - suffix - 1] {
+        suffix += 1;
+    }
+    while prefix > 0 && number_part(low[prefix - 1]) {
+        prefix -= 1;
+    }
+    while suffix > 0 && number_part(low[low.len() - suffix]) {
+        suffix -= 1;
+    }
+    let is_number = |text: &[char]| text.first().is_some_and(|c| c.is_numeric()) && text.last().is_some_and(|c| c.is_numeric()) && text.iter().all(|c| number_part(*c));
+    let (from, to) = (&low[prefix..low.len() - suffix], &high[prefix..high.len() - suffix]);
+    if !is_number(from) || !is_number(to) {
+        return format!("{minimum} – {maximum}");
+    }
+    let text = |chars: &[char]| chars.iter().collect::<String>();
+    format!("{}{}–{}{}", text(&low[..prefix]), text(from), text(to), text(&low[low.len() - suffix..]))
+}
+
 /// A failed request, in the session's words.
 pub type GameError = String;
 
@@ -197,4 +242,21 @@ pub trait ForgeGame {
     fn clear_unique_preview(&self) {}
     /// The unique modifiers formatted with drafted rolls.
     fn preview_unique(&self, expected: &ForgeItem, edit: &ItemEdit) -> Lookup<Vec<ModifierState>>;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn implicit_lines_join_the_games_texts_as_a_range() {
+        assert_eq!(modifier_range("+10 Armor", "+16 Armor"), "+10–16 Armor");
+        assert_eq!(modifier_range("+12% Fire Resistance", "+18% Fire Resistance"), "+12–18% Fire Resistance");
+        assert_eq!(modifier_range("+1.5 Mana Regen", "+12.5 Mana Regen"), "+1.5–12.5 Mana Regen");
+        assert_eq!(modifier_range("+5 Ward", "+5 Ward"), "+5 Ward");
+        assert_eq!(modifier_range("Armour +5", "Ward +9"), "Armour +5 – Ward +9");
+        assert_eq!(implicit_line(Some(""), Some("+16 Armor")), "+16 Armor");
+        assert_eq!(implicit_line(Some("+10 Armor"), None), "+10 Armor");
+        assert_eq!(implicit_line(None, None), IMPLICIT_TEXT_UNAVAILABLE);
+    }
 }

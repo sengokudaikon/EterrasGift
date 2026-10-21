@@ -217,8 +217,36 @@ fn bind(state: &ForgeState, view: &Rc<View>) {
         view.editor.borrow_mut().select_affix(Some(next as usize));
         view.focus(reference(CellKind::Affix, next as usize, 0), part);
     });
-    // A ledger entry selects its affix or unique row, or brings the cell that edits it into focus.
-    // TODO(forge): focus for a flag, the base and the identity cells (only value cells answer `focus-cell` yet).
+    // Up and Down from a unique modifier's roll: the nearest line in that direction with rolls to scrub takes the selection
+    // and the focus; past the ends nothing moves.
+    let weak = on(view);
+    state.on_move_unique(move |row, delta, roll| {
+        let Some(view) = weak.upgrade() else {
+            return;
+        };
+        let target = {
+            let editor = view.editor.borrow();
+            let lines = &editor.uniques;
+            let step = delta.signum() as isize;
+            let mut next = row as isize + step;
+            let mut found = None;
+            while step != 0 && next >= 0 && (next as usize) < lines.len() {
+                let line = &lines[next as usize];
+                if line.is_editable() && !line.rolls.is_empty() {
+                    found = Some((next as usize, (roll.max(0) as usize).min(line.rolls.len() - 1)));
+                    break;
+                }
+                next += step;
+            }
+            found
+        };
+        if let Some((line, roll)) = target {
+            view.editor.borrow_mut().select_unique(Some(line));
+            view.focus(reference(CellKind::Unique, line, roll), 0);
+        }
+    });
+    // A ledger entry selects its affix or unique row, or brings the cell that edits it into focus: a value's scrubber, a
+    // flag's toggle, or the base or the identity in the header.
     let weak = on(view);
     state.on_show_draft(move |index| {
         let Some(view) = weak.upgrade() else {
@@ -227,20 +255,50 @@ fn bind(state: &ForgeState, view: &Rc<View>) {
         let target = view.editor.borrow_mut().show_draft(index.max(0) as usize);
         let cell = target.and_then(|row| {
             let editor = view.editor.borrow();
+            let header = CellRef {
+                kind: CellKind::Field,
+                row: -1,
+                roll: -1,
+            };
             match row {
-                RowRef::Implicit(uid) => editor.implicits.iter().position(|line| line.uid == uid).map(|line| reference(CellKind::Implicit, line, 0)),
+                RowRef::Implicit(uid) => editor
+                    .implicits
+                    .iter()
+                    .position(|line| line.uid == uid)
+                    .map(|line| (reference(CellKind::Implicit, line, 0), 0)),
+                RowRef::Field(uid) if editor.base.as_ref().is_some_and(|base| base.uid == uid) => Some((header, 4)),
+                RowRef::Field(uid) if editor.identity.as_ref().is_some_and(|identity| identity.uid == uid) => Some((header, 5)),
                 RowRef::Field(uid) => editor
                     .fields
                     .iter()
-                    .position(|field| field.uid == uid && field.kind == FieldKind::Number)
-                    .map(|field| reference(CellKind::Field, field, 0)),
+                    .position(|field| field.uid == uid)
+                    .map(|index| (reference(CellKind::Field, index, 0), i32::from(editor.fields[index].kind != FieldKind::Number))),
                 _ => None,
             }
         });
         view.show();
-        if let Some(cell) = cell {
-            view.focus(cell, 0);
+        if let Some((cell, part)) = cell {
+            view.focus(cell, part);
         }
+    });
+    // Menus' keyboard highlights start on the held entry and skip the entries that can't be picked.
+    state.on_option_start(|options| {
+        let available = |index: usize| options.row_data(index).is_some_and(|option| option.available);
+        (0..options.row_count())
+            .find(|&index| available(index) && options.row_data(index).is_some_and(|option| option.current))
+            .or_else(|| (0..options.row_count()).find(|&index| available(index)))
+            .map_or(-1, |index| index as i32)
+    });
+    state.on_option_step(|options, from, delta| {
+        let step = delta.signum();
+        let mut next = from + step;
+        while step != 0 && next >= 0 && (next as usize) < options.row_count() {
+            if options.row_data(next as usize).is_some_and(|option| option.available) {
+                return next;
+            }
+            next += step;
+        }
+        from
     });
 }
 
@@ -282,11 +340,18 @@ impl View {
                 in_game: option.in_game,
                 available: option.available,
                 current: option.value == held,
-                rarity: rarity_of(&option.rarity),
+                rarity: rarity_of(option.rarity),
             })
             .collect();
         update(&self.models.identity_options, identities);
-        state.set_name_rarity(rarity_of(editor.rarity_name()));
+        // Unique, set and legendary come from the item before exalted does (C# `RarityName`), so a legendary with a T6+
+        // affix keeps its own colour.
+        let rarity = editor.rarity_code();
+        state.set_name_rarity(if !matches!(rarity, 7..=9) && editor.name_is_exalted() {
+            ItemRarity::Exalted
+        } else {
+            rarity_of(rarity)
+        });
         state.set_rarity_text(editor.rarity_text().into());
         state.set_rarity_drafted(editor.is_rarity_drafted());
         state.set_can_change_rarity(editor.can_change_rarity());
@@ -335,6 +400,7 @@ impl View {
         state.set_base_caption_lines(base_lines as i32);
         update(&self.models.base_options, bases);
         state.set_base_allow_incompatible(editor.base.as_ref().is_some_and(|base| base.allow_incompatible));
+        state.set_base_can_edit(editor.can_edit_base_field());
         state.set_summary(editor.summary().into());
         self.show_fields(&state, &editor);
 
@@ -420,6 +486,19 @@ impl View {
         state.set_can_apply(editor.can_apply());
 
         state.set_input_error(editor.typing().map(ValueEditor::input_error).unwrap_or_default().into());
+        let typing = editor.typing_cell();
+        state.set_typing(typing.is_some());
+        state.set_typing_cell(match typing {
+            Some(Cell::Affix(row)) => reference(CellKind::Affix, row, 0),
+            Some(Cell::Unique(row, roll)) => reference(CellKind::Unique, row, roll),
+            Some(Cell::Implicit(row, roll)) => reference(CellKind::Implicit, row, roll),
+            Some(Cell::Field(row)) => reference(CellKind::Field, row, 0),
+            None => CellRef {
+                kind: CellKind::Affix,
+                row: -1,
+                roll: -1,
+            },
+        });
         self.show_picker(&state, &editor);
     }
 
@@ -433,6 +512,7 @@ impl View {
                 let value = match field.editor.as_ref() {
                     Some(values) => value_cell(
                         cell,
+                        uid_of(field.uid, 0),
                         values,
                         field.roll(),
                         Some(field.game().clamp(0, 255) as u8),
@@ -441,13 +521,18 @@ impl View {
                         editor.can_edit_value(Cell::Field(index)),
                         field.value_tip(),
                     ),
-                    None => ValueCell { cell, ..ValueCell::default() },
+                    None => ValueCell {
+                        cell,
+                        uid: uid_of(field.uid, 0),
+                        ..ValueCell::default()
+                    },
                 };
                 FieldView {
                     name: field.name.clone().into(),
                     numeric: field.kind == FieldKind::Number,
                     value,
                     tip: field.tip().into(),
+                    tip_heading: field.tip_heading().into(),
                     confirmed: field.confirmed,
                     stale: field.is_stale(),
                     editable: field.is_editable(),
@@ -483,6 +568,7 @@ impl View {
                 AffixRowView {
                     value: value_cell(
                         reference(CellKind::Affix, index, 0),
+                        uid_of(row.uid, 0),
                         &row.value,
                         row.roll(),
                         row.game_roll(),
@@ -547,6 +633,7 @@ impl View {
                         let game = line.game_roll(roll.index);
                         value_cell(
                             reference(kind, index, position),
+                            uid_of(line.uid, position),
                             &roll.editor,
                             roll.value,
                             game,
@@ -620,24 +707,29 @@ impl View {
     }
 }
 
-/// The game-owned colour of a rarity name.
-fn rarity_of(name: &str) -> ItemRarity {
-    match name {
-        "Legendary" => ItemRarity::Legendary,
-        "Set" => ItemRarity::Set,
-        "Unique" => ItemRarity::Unique,
-        "Exalted" => ItemRarity::Exalted,
-        "Rare" => ItemRarity::Rare,
-        "Magic" => ItemRarity::Magic,
-        _ => ItemRarity::Normal,
+/// The game's rarity code determines its colour independently of localized names.
+fn rarity_of(rarity: u8) -> ItemRarity {
+    match rarity {
+        9 => ItemRarity::Legendary,
+        8 => ItemRarity::Set,
+        7 => ItemRarity::Unique,
+        0 => ItemRarity::Normal,
+        1 | 2 => ItemRarity::Magic,
+        _ => ItemRarity::Rare,
     }
 }
 
+/// A value's identity for the view, from its row's uid and its roll. Only a change matters, so the bits that fit suffice.
+fn uid_of(row: u64, roll: usize) -> i32 {
+    (row as i32).wrapping_mul(64).wrapping_add(roll as i32)
+}
+
 #[allow(clippy::too_many_arguments)]
-fn value_cell(cell: CellRef, editor: &ValueEditor, roll: u8, game: Option<u8>, draft: bool, was: String, editable: bool, tip: String) -> ValueCell {
+fn value_cell(cell: CellRef, uid: i32, editor: &ValueEditor, roll: u8, game: Option<u8>, draft: bool, was: String, editable: bool, tip: String) -> ValueCell {
     let fraction = editor.fraction(roll) as f32;
     ValueCell {
         cell,
+        uid,
         label: editor.label().into(),
         display: editor.display(roll).into(),
         was: was.into(),

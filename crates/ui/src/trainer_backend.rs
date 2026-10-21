@@ -1,15 +1,19 @@
 //! Command-based UI adapter. The worker owns native access; this module observes owned
 //! snapshots and queues commands. No synchronous game/pipe/process work runs here.
+use crate::trainer::backend_session::sentence;
 use crate::{
     Connection, MainWindow, TrainerState,
+    decorations::{Ash, Decorations},
     forge::{
         self,
         game::{Catalog, EditOutcome, ForgeGame, GameError, WriteOutcome, refused},
-        item::{self, AffixDefinition, AffixKind, AffixState, Category, ForgeItem, ItemEdit, ModifierState, RollRequest, Seal, ValueTable},
+        item::{self, AffixDefinition, AffixKind, Category, ForgeItem, ItemEdit, ModifierState, RollRequest, ValueTable},
     },
+    shell::{Page, ShellHandle},
 };
+use eg_core::{bloom::BloomPhase, game_log::GameReadiness};
 use eg_trainer::{
-    backend::{Activity, BackendHandle, BackendSnapshot, CatalogState, Command, ForgeState, MappingRead, Pending, Phase},
+    backend::{Activity, BackendHandle, BackendSnapshot, CaptureProgress, CatalogState, Command, ErrorKind, ForgeState, MappingRead, Pending, Phase},
     catalog::{Availability, GameCatalog},
 };
 use slint::{ComponentHandle, Timer, TimerMode};
@@ -21,6 +25,9 @@ use std::{
 };
 
 const READ_ONLY: &str = "This connection offers no supported item edits.";
+/// How often local receipts and the preview's debounce are looked at while the writer has work; snapshots wake the
+/// binding on their own.
+const POLL: Duration = Duration::from_millis(50);
 
 struct ObservedGame {
     catalog: Arc<Catalog>,
@@ -116,6 +123,10 @@ struct Writer {
     mapping_read_sequence: Option<u64>,
     preview: Option<PendingPreview>,
     descriptions: Option<(eg_trainer::edits::ExpectedObservation, u64, Pending)>,
+    /// Runs only while there is work (`keep_polling`); its tick refreshes the binding.
+    polling: Timer,
+    /// The binding's refresh, set once the binding exists; holds it weakly.
+    tick: Option<Rc<dyn Fn()>>,
 }
 struct PendingPreview {
     expected: eg_trainer::edits::ExpectedObservation,
@@ -143,6 +154,16 @@ impl Writer {
         self.pending.is_some()
             || self.preview.as_ref().is_some_and(|preview| preview.starts.is_some() || preview.receipt.is_some())
             || self.mappings.iter().any(|mapping| mapping.error.is_none())
+    }
+    /// Starts polling when work is pending and stops once it is drained: an idle trainer wakes nothing.
+    fn keep_polling(&self) {
+        if !self.has_pending_work() {
+            self.polling.stop();
+        } else if !self.polling.running()
+            && let Some(tick) = self.tick.clone()
+        {
+            self.polling.start(TimerMode::Repeated, POLL, move || tick());
+        }
     }
     fn poll_descriptions(&mut self) {
         let state = self.backend.snapshot();
@@ -204,6 +225,7 @@ impl Writer {
             }
             Ok(crate::forge::game::Lookup::Loading)
         })();
+        self.keep_polling();
         result.unwrap_or_else(crate::forge::game::Lookup::Unavailable)
     }
     fn poll_preview(&mut self) -> bool {
@@ -305,6 +327,7 @@ impl Writer {
             }
             Ok(crate::forge::game::Lookup::Loading)
         })();
+        self.keep_polling();
         result.unwrap_or_else(crate::forge::game::Lookup::Unavailable)
     }
     fn retain_mappings(&mut self, requests: &[RollRequest]) {
@@ -361,6 +384,7 @@ impl Writer {
                     before: state,
                     plan: None,
                 });
+                self.keep_polling();
                 WriteOutcome::Pending
             }
             Err(_) => refused("The trainer cannot accept another command. Nothing was submitted."),
@@ -461,13 +485,17 @@ struct Binding {
     forge: forge::ForgeHandle,
     revision: Cell<Option<u64>>,
     catalog: RefCell<(Option<Arc<GameCatalog>>, Arc<Catalog>)>,
-    timer: Timer,
     writer: Rc<RefCell<Writer>>,
+    /// The ash under the empty forge follows the window's decorations, which only the page showing may drive.
+    shell: ShellHandle,
+    decorations: Rc<Decorations<MainWindow>>,
+    /// How far the wait for the game has come while the forge waits on it; None when it does not.
+    waiting: Cell<Option<BloomPhase>>,
 }
 
-/// Callback ownership keeps the binding alive; the timer holds only a weak Rc.
+/// Callback ownership keeps the binding alive; the writer's polling timer holds only a weak Rc.
 /// Rebinding or dropping the window releases the UI observer and its timer.
-pub fn bind(window: &MainWindow, backend: BackendHandle) {
+pub fn bind(window: &MainWindow, backend: BackendHandle, shell: &ShellHandle, decorations: Rc<Decorations<MainWindow>>) {
     let empty = Arc::new(Catalog::default());
     let writer = Rc::new(RefCell::new(Writer {
         backend: backend.clone(),
@@ -476,6 +504,8 @@ pub fn bind(window: &MainWindow, backend: BackendHandle) {
         mapping_read_sequence: None,
         preview: None,
         descriptions: None,
+        polling: Timer::default(),
+        tick: None,
     }));
     let forge = forge::attach(
         window,
@@ -490,8 +520,20 @@ pub fn bind(window: &MainWindow, backend: BackendHandle) {
         forge,
         revision: Cell::new(None),
         catalog: RefCell::new((None, empty)),
-        timer: Timer::default(),
         writer,
+        shell: shell.clone(),
+        decorations,
+        waiting: Cell::new(None),
+    });
+    shell.on_page_entered({
+        let binding = Rc::downgrade(&binding);
+        move |page| {
+            if let Some(binding) = binding.upgrade()
+                && page == Page::Forge
+            {
+                binding.drift(true);
+            }
+        }
     });
     let owner = binding.clone();
     window.global::<Connection>().on_connect(move || {
@@ -510,13 +552,11 @@ pub fn bind(window: &MainWindow, backend: BackendHandle) {
         }
     });
     let weak = Rc::downgrade(&binding);
-    binding.timer.start(TimerMode::Repeated, Duration::from_millis(50), move || {
-        if let Some(binding) = weak.upgrade()
-            && binding.writer.borrow().has_pending_work()
-        {
+    binding.writer.borrow_mut().tick = Some(Rc::new(move || {
+        if let Some(binding) = weak.upgrade() {
             binding.refresh();
         }
-    });
+    }));
     let mut updates = binding.backend.subscribe();
     let weak = Rc::downgrade(&binding);
     slint::spawn_local(async move {
@@ -534,7 +574,13 @@ pub fn bind(window: &MainWindow, backend: BackendHandle) {
 }
 
 impl Binding {
+    /// Takes what came, then polls on only while the writer still has work.
     fn refresh(&self) {
+        self.observe();
+        self.writer.borrow().keep_polling();
+    }
+
+    fn observe(&self) {
         self.writer.borrow_mut().poll_descriptions();
         let mappings_completed = self.writer.borrow_mut().poll_mappings();
         let preview_completed = self.writer.borrow_mut().poll_preview();
@@ -550,7 +596,10 @@ impl Binding {
                 let state = window.global::<TrainerState>();
                 state.set_empty_title("Trainer stopped".into());
                 state.set_empty_detail("Restart Eterra's Gift to connect again. Home and Mods remain available.".into());
+                state.set_empty_stopped(true);
+                state.set_ash_shown(false);
             }
+            self.waiting.set(None);
             self.forge.observe(Box::new(ObservedGame {
                 catalog: Arc::new(Catalog::default()),
                 writer: self.writer.clone(),
@@ -571,11 +620,18 @@ impl Binding {
         let Some(window) = self.window.upgrade() else {
             return;
         };
+        window.global::<crate::SettingsState>().invoke_backend_updated();
         let connection = window.global::<Connection>();
         connection.set_connected(snapshot.phase == Phase::Ready);
         connection.set_blocked(snapshot.phase == Phase::Blocked);
-        let (title, detail) = status(&snapshot);
-        connection.set_text(if snapshot.phase == Phase::Ready { "Connected" } else { title }.into());
+        let Status {
+            title,
+            detail,
+            nav,
+            stopped,
+            waiting,
+        } = status(&snapshot);
+        connection.set_text(nav.into());
         connection.set_show_action(
             matches!(snapshot.phase, Phase::Disconnected | Phase::Blocked)
                 || ((!snapshot.auto_connect || !snapshot.monitoring) && matches!(snapshot.phase, Phase::WaitingForGame | Phase::WaitingForCharacter)),
@@ -594,38 +650,149 @@ impl Binding {
             catalog: catalog.1.clone(),
             writer: self.writer.clone(),
         }));
+        let has_item = matches!(item, Ok(Some(_)));
         let state = window.global::<TrainerState>();
+        state.set_empty_stopped(projection_error.is_none() && stopped);
         state.set_empty_title(if projection_error.is_some() { "Item details unavailable" } else { title }.into());
         state.set_empty_detail(projection_error.unwrap_or(detail).into());
+        // Ash drifts while the forge waits, lies still while it is connected and empty, and is gone on a stop or under an
+        // item (ItemEditorViewModel.ShowsAsh).
+        let empty = snapshot.phase == Phase::Ready && !has_item;
+        let waiting = waiting.filter(|_| !has_item);
+        state.set_ash_shown(waiting.is_some() || empty);
+        state.set_ash_still(empty);
+        self.waiting.set(waiting);
+        self.drift(false);
+    }
+
+    /// Drives the window's ash while the forge shows and waits; Home takes the decorations back when it shows.
+    fn drift(&self, entering: bool) {
+        if self.shell.current() != Page::Forge {
+            return;
+        }
+        if let Some(phase) = self.waiting.get() {
+            if entering {
+                self.decorations.enter(phase, Ash::Drifting);
+            } else {
+                self.decorations.follow(phase, Ash::Drifting);
+            }
+        }
     }
 }
 
-fn status(snapshot: &BackendSnapshot) -> (&'static str, String) {
+/// What the app says about the connection: the forge's empty state, the navigation foot's status line, whether the
+/// connection stopped for a reason the user has to fix, and how far a wait has come (ItemEditorViewModel, TrainerConnectionViewModel).
+struct Status {
+    title: &'static str,
+    detail: String,
+    nav: String,
+    stopped: bool,
+    waiting: Option<BloomPhase>,
+}
+
+/// Several games run: the advice says the app connects by itself only when it will, as the C# `SessionErrorMessages`
+/// `waits` (automatic connection, with the game being watched) decides.
+fn multiple_games(snapshot: &BackendSnapshot) -> &'static str {
+    if snapshot.monitoring && snapshot.auto_connect {
+        "Close extra game instances; the app connects once one is left."
+    } else {
+        "Close extra game instances, then connect again."
+    }
+}
+
+/// The game's log says an online character is loaded: the connection waits and refuses it.
+fn online_refused(snapshot: &BackendSnapshot) -> bool {
+    matches!(snapshot.phase, Phase::WaitingForCharacter | Phase::Blocked) && snapshot.gate.as_ref().is_some_and(|gate| gate.readiness == GameReadiness::Online)
+}
+
+/// What to do about a refused online character. The helper cannot be unloaded, so a process that had it keeps it into an
+/// online session.
+fn online_advice(snapshot: &BackendSnapshot) -> &'static str {
+    if snapshot.retained_helper.is_some() {
+        "The helper stays in the game until it restarts; restart Last Epoch before playing online."
+    } else {
+        "Load an offline character."
+    }
+}
+
+/// The preparation's progress while connecting: the game definitions as they load.
+fn progress(snapshot: &BackendSnapshot) -> Option<String> {
+    (snapshot.activity == Some(Activity::CapturingCatalog)).then(|| match snapshot.capture_progress {
+        Some(CaptureProgress::Page { cursor, total, .. }) if total > 0 => format!("Loading game definitions: {cursor}/{total}"),
+        _ => "Loading game definitions…".to_owned(),
+    })
+}
+
+fn status(snapshot: &BackendSnapshot) -> Status {
+    let line = |title: &'static str, detail: &str, nav: &str| Status {
+        title,
+        detail: detail.to_owned(),
+        nav: nav.to_owned(),
+        stopped: false,
+        waiting: None,
+    };
+    if online_refused(snapshot) {
+        let advice = online_advice(snapshot);
+        return Status {
+            stopped: true,
+            ..line(
+                "Online character refused",
+                &format!("Online characters are not supported. {advice}"),
+                &format!("Online character refused. {advice}"),
+            )
+        };
+    }
+    let writing = matches!(snapshot.activity, Some(Activity::WritingForge | Activity::WritingAttackLeech));
     match snapshot.phase {
-        Phase::Ready => ("Forge is empty", "Place an item in the in-game forge to inspect it.".into()),
-        Phase::WaitingForGame => ("Waiting for Last Epoch", "Start Last Epoch and load an offline character.".into()),
-        Phase::WaitingForCharacter => (
-            "Waiting for an offline character",
-            "Load an offline character to use the trainer. Online characters are refused.".into(),
+        Phase::Ready => line(
+            "The forge is empty",
+            "Place an item in the forge to view or edit affixes.",
+            if writing { "Connected · applying…" } else { "Connected" },
         ),
+        Phase::WaitingForGame if snapshot.error.as_ref().is_some_and(|error| error.kind == ErrorKind::MultipleProcesses) => Status {
+            waiting: Some(BloomPhase::Wilted),
+            ..line("Waiting for Last Epoch", multiple_games(snapshot), multiple_games(snapshot))
+        },
+        Phase::WaitingForGame => Status {
+            waiting: Some(BloomPhase::Wilted),
+            ..line("Waiting for Last Epoch", "Start Last Epoch and load an offline character.", "Waiting for game")
+        },
+        Phase::WaitingForCharacter => Status {
+            waiting: Some(BloomPhase::Opening),
+            ..line(
+                "Waiting for an offline character",
+                "Load an offline character to continue.",
+                "Waiting for offline character",
+            )
+        },
         Phase::Connecting => {
-            if snapshot.activity == Some(Activity::CapturingCatalog) {
-                ("Reading game definitions…", "Reading the game's definitions before showing the item.".into())
-            } else {
-                ("Connecting…", "Preparing the trainer for this offline game.".into())
+            let progress = progress(snapshot);
+            Status {
+                waiting: Some(BloomPhase::Budding),
+                ..line(
+                    "Connecting",
+                    progress.as_deref().unwrap_or("Connecting to the game…"),
+                    progress.as_deref().unwrap_or("Preparing…"),
+                )
             }
         }
-        Phase::Blocked => (
-            "Cannot connect",
-            snapshot
-                .error
-                .as_ref()
-                .map_or("The trainer could not connect. Retry when the game is ready.".into(), |e| e.message.clone()),
-        ),
-        Phase::Closing => ("Disconnecting…", "Finishing requests and turning off trainer effects.".into()),
-        Phase::Disabled => ("Trainer is off", "Enable the trainer in Settings and restart Eterra's Gift.".into()),
-        Phase::Stopped => ("Trainer stopped", "Restart Eterra's Gift to connect again.".into()),
-        Phase::Disconnected => ("Not connected", "Connect, then place an item in the forge.".into()),
+        Phase::Blocked => {
+            let message = snapshot.error.as_ref().map_or_else(
+                || "The trainer could not connect. Retry when the game is ready.".to_owned(),
+                |error| sentence(&error.message),
+            );
+            Status {
+                stopped: true,
+                ..line("Connection stopped", &message, &message)
+            }
+        }
+        Phase::Closing => line("Disconnecting…", "Finishing requests and turning off trainer effects.", "Disconnecting…"),
+        Phase::Disabled => line("Trainer is off", "Enable the trainer in Settings and restart Eterra's Gift.", "Trainer is off"),
+        Phase::Stopped => Status {
+            stopped: true,
+            ..line("Trainer stopped", "Restart Eterra's Gift to connect again.", "Trainer stopped")
+        },
+        Phase::Disconnected => line("Not connected", "Connect, then place an item in the forge.", "Not connected"),
     }
 }
 
@@ -644,6 +811,12 @@ fn kind(value: i32) -> Result<AffixKind, String> {
         0 => Ok(AffixKind::Prefix),
         1 => Ok(AffixKind::Suffix),
         _ => Err("This item's affix type is not supported by the editor yet.".into()),
+    }
+}
+fn available_text(text: &Availability<String>) -> Option<&str> {
+    match text {
+        Availability::Available(text) => Some(text),
+        Availability::Unavailable { .. } => None,
     }
 }
 fn project_catalog(data: &GameCatalog) -> Catalog {
@@ -673,7 +846,15 @@ fn project_catalog(data: &GameCatalog) -> Catalog {
                         name: base.name.text.clone(),
                         level: u8::try_from(base.level_requirement).ok()?,
                         corrupted: base.is_corrupted,
-                        implicits: vec![],
+                        class_requirement: base.class_requirement,
+                        // C# `ForgeChoices.BaseOptions` lists each implicit with `ImplicitLine`; an undescribed list is none.
+                        implicits: match &base.implicits {
+                            Availability::Available(implicits) => implicits
+                                .iter()
+                                .map(|implicit| forge::game::implicit_line(available_text(&implicit.minimum_text), available_text(&implicit.maximum_text)))
+                                .collect(),
+                            Availability::Unavailable { .. } => Vec::new(),
+                        },
                     })
                 })
                 .collect(),
@@ -751,83 +932,34 @@ fn project_item(state: &BackendSnapshot) -> Result<Option<ForgeItem>, String> {
     if state.phase != Phase::Ready || *generation != state.generation || !matches!(state.catalog, CatalogState::Current { generation, .. } if generation == state.generation) {
         return Ok(None);
     }
-    let Some(target) = &state.attached else {
+    let Some(_) = &state.attached else {
         return Ok(None);
     };
-    let affixes = snapshot
-        .affixes
-        .iter()
-        .map(|a| {
-            Ok(AffixState {
-                slot: usize::from(a.slot),
-                id: a.id,
-                tier: u8::try_from(a.tier).map_err(|_| "This item's tier is outside the editor's supported range.")?,
-                roll: a.roll,
-                kind: kind(a.kind)?,
-                category: category(a.special)?,
-                seal: match a.seal {
-                    0 => Seal::Normal,
-                    1 => Seal::Sealed,
-                    2 => Seal::Primordial,
-                    3 => Seal::Corrupted,
-                    _ => return Err("This item's seal type is not supported by the editor yet.".into()),
-                },
-            })
-        })
-        .collect::<Result<Vec<_>, String>>()?;
-    let identity = snapshot.identity.as_ref().map(|i| item::UniqueState {
-        id: i.id,
-        rolls: i.rolls.clone(),
-        modifiers: unique
+    let context = Arc::new(item::ForgeContext {
+        expected: state.expected_observation().map_err(|e| e.to_string())?,
+        catalog: state.catalog.data().cloned().ok_or("Catalog unavailable.")?,
+    });
+    let name = resolved_name.as_ref().map_or_else(
+        || if snapshot.name.is_empty() { "Unnamed item".into() } else { snapshot.name.clone() },
+        |name| name.text.clone(),
+    );
+    // Said in the item's own terms: the generic status refusal doesn't tell the user which value is out of reach.
+    if u8::try_from(snapshot.status.level_requirement).is_err() {
+        return Err("This item's level requirement is outside the editor's supported range.".into());
+    }
+    let mut item = ForgeItem::observed(context, name).map_err(|error| error.to_string())?;
+    item.implicits = implicits.as_ref().map(|lines| lines.iter().map(project_modifier).collect());
+    if let Some(identity) = item.unique.as_mut().or(item.set_item.as_mut()) {
+        identity.modifiers = unique
             .as_ref()
             .and_then(|result| result.as_ref().ok())
             .map(|lines| lines.iter().map(project_modifier).collect())
-            .unwrap_or_default(),
-        formatting: match unique {
+            .unwrap_or_default();
+        identity.formatting = match unique {
             Some(Ok(_)) => crate::forge::game::Lookup::Ready(()),
             Some(Err(reason)) => crate::forge::game::Lookup::Unavailable(reason.clone()),
             None => crate::forge::game::Lookup::Loading,
-        },
-    });
-    let level_requirement = u8::try_from(snapshot.status.level_requirement).map_err(|_| "This item's level requirement is outside the editor's supported range.")?;
-    let status = Some(item::ItemStatus {
-        forging_potential: snapshot.status.forging_potential,
-        legendary_potential: snapshot.status.legendary_potential,
-        weavers_will: snapshot.status.weavers_will,
-        weavers_touch: snapshot.status.weavers_touch,
-        level_requirement,
-        corrupted: snapshot.status.corrupted,
-        ruined: snapshot.status.ruined,
-    });
-    Ok(Some(ForgeItem {
-        context: Some(Arc::new(item::ForgeContext {
-            expected: state.expected_observation().map_err(|e| e.to_string())?,
-            catalog: state.catalog.data().cloned().ok_or("Catalog unavailable.")?,
-        })),
-        token: format!("{}:{}:{}:{}:{}", target.pid, target.created, state.generation, snapshot.item, snapshot.individual_id),
-        name: resolved_name
-            .as_ref()
-            .map_or_else(|| if snapshot.name.is_empty() { "Unnamed item".into() } else { snapshot.name.clone() }, |n| n.text.clone()),
-        item_type: u16::from(snapshot.item_type),
-        sub_type: snapshot.sub_type,
-        idol: (25..=33).contains(&snapshot.item_type),
-        rarity: snapshot.rarity,
-        affixes,
-        unique: if snapshot.rarity == 8 { None } else { identity.clone() },
-        set_item: if snapshot.rarity == 8 { identity } else { None },
-        implicits: implicits.as_ref().map(|lines| {
-            lines
-                .iter()
-                .map(|line| item::ModifierState {
-                    index: line.index as usize,
-                    text: line.text.clone(),
-                    range: line.range.clone(),
-                    roll_ids: line.roll_ids.iter().map(|id| usize::from(*id)).collect(),
-                    editable: line.editable,
-                })
-                .collect()
-        }),
-        implicit_rolls: snapshot.implicit_rolls.clone(),
-        status,
-    }))
+        };
+    }
+    Ok(Some(item))
 }

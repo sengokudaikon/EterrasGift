@@ -312,17 +312,7 @@ impl EditPresentation for ItemEdit {
             bindings(before.unique.as_ref().map(|u| u.modifiers.as_slice())),
             bindings(before.implicits.as_deref()),
         );
-        edits::prepare(
-            &context.expected,
-            &context.catalog,
-            &edits::CatalogProvenance::RuntimeRead {
-                generation: context.expected.generation(),
-                process: context.expected.process().clone(),
-            },
-            self.clone(),
-            override_enabled,
-            Some(&evidence),
-        )
+        edits::prepare(&context.expected, &context.catalog, self.clone(), override_enabled, Some(&evidence))
     }
     fn project(&self, before: &ForgeItem) -> Result<ForgeItem, edits::EditError> {
         let prepared = self.prepare_view(before)?;
@@ -331,13 +321,49 @@ impl EditPresentation for ItemEdit {
 }
 
 impl ForgeItem {
+    pub(crate) fn observed(context: Arc<ForgeContext>, name: String) -> Result<Self, edits::EditError> {
+        let expected = &context.expected;
+        let process = expected.process();
+        let snapshot = expected.snapshot();
+        let mut item = Self {
+            token: format!("{}:{}:{}:{}:{}", process.pid, process.created, expected.generation(), snapshot.item, snapshot.individual_id),
+            name,
+            item_type: 0,
+            sub_type: 0,
+            idol: false,
+            rarity: 0,
+            affixes: vec![],
+            implicit_rolls: vec![],
+            implicits: None,
+            unique: None,
+            set_item: None,
+            status: None,
+            context: Some(context.clone()),
+        };
+        item.copy_snapshot(snapshot)?;
+        Ok(item)
+    }
     pub fn with_snapshot(&self, snapshot: eg_trainer::backend::ForgeSnapshot) -> Result<Self, edits::EditError> {
         let context = self.context.as_ref().ok_or(edits::EditError::InvalidObservation)?;
         let mut after = self.clone();
-        after.item_type = u16::from(snapshot.item_type);
-        after.sub_type = snapshot.sub_type;
-        after.rarity = snapshot.rarity;
-        after.affixes = snapshot
+        after.copy_snapshot(&snapshot)?;
+        after.context = Some(Arc::new(ForgeContext {
+            expected: ExpectedObservation::new(
+                context.expected.generation(),
+                context.expected.process().clone(),
+                context.expected.catalog_identity().clone(),
+                snapshot,
+            )?,
+            catalog: context.catalog.clone(),
+        }));
+        Ok(after)
+    }
+    fn copy_snapshot(&mut self, snapshot: &eg_trainer::backend::ForgeSnapshot) -> Result<(), edits::EditError> {
+        self.item_type = u16::from(snapshot.item_type);
+        self.idol = (25..=33).contains(&snapshot.item_type);
+        self.sub_type = snapshot.sub_type;
+        self.rarity = snapshot.rarity;
+        self.affixes = snapshot
             .affixes
             .iter()
             .map(|a| {
@@ -356,7 +382,7 @@ impl ForgeItem {
                 })
             })
             .collect::<Result<_, _>>()?;
-        after.implicit_rolls = snapshot.implicit_rolls.clone();
+        self.implicit_rolls = snapshot.implicit_rolls.clone();
         let identity = snapshot.identity.as_ref().map(|i| {
             let mut view = self
                 .unique
@@ -374,14 +400,14 @@ impl ForgeItem {
             view
         });
         if snapshot.rarity == SET {
-            after.set_item = identity;
-            after.unique = None;
+            self.set_item = identity;
+            self.unique = None;
         } else {
-            after.unique = identity;
-            after.set_item = None;
+            self.unique = identity;
+            self.set_item = None;
         }
         let status = &snapshot.status;
-        after.status = Some(ItemStatus {
+        self.status = Some(ItemStatus {
             forging_potential: status.forging_potential,
             legendary_potential: status.legendary_potential,
             weavers_will: status.weavers_will,
@@ -390,16 +416,7 @@ impl ForgeItem {
             corrupted: status.corrupted,
             ruined: status.ruined,
         });
-        after.context = Some(Arc::new(ForgeContext {
-            expected: ExpectedObservation::new(
-                context.expected.generation(),
-                context.expected.process().clone(),
-                context.expected.catalog_identity().clone(),
-                snapshot,
-            )?,
-            catalog: context.catalog.clone(),
-        }));
-        Ok(after)
+        Ok(())
     }
 }
 
@@ -451,6 +468,40 @@ pub fn compatibility(item: &ForgeItem, definition: &AffixDefinition, slot: Optio
         Reason::AlreadyPresent => Compatibility::Rejected(Rejection::AlreadyPresent),
         Reason::MissingMetadata | Reason::UnknownGameValue => Compatibility::Unknown,
     }
+}
+
+/// The slots of the affixes a base change would make incompatible: allowed on the item now but not once it is on
+/// `sub_type` with that base's `class_requirement` (the C# `AffixCompatibility.BrokenByBase`). Incompatibility the item
+/// already carries is not the new base's doing, and the override plays no part.
+pub fn broken_by_base(item: &ForgeItem, sub_type: u16, class_requirement: Option<i32>) -> Vec<usize> {
+    let Some(context) = &item.context else { return Vec::new() };
+    let catalog = &context.catalog;
+    let now = context.expected.snapshot();
+    let rebased = eg_trainer::backend::ForgeSnapshot {
+        sub_type,
+        class_requirement: class_requirement.unwrap_or(now.class_requirement),
+        ..now.clone()
+    };
+    // Judged as the C# `Evaluate` without the other affixes' definitions: by the item's own class requirement alone.
+    let allowed = |item: &eg_trainer::backend::ForgeSnapshot, affix: &eg_trainer::backend::AffixSnapshot, definition| {
+        let alone = eg_trainer::backend::ForgeSnapshot {
+            affixes: vec![affix.clone()],
+            ..item.clone()
+        };
+        edits::compatibility(catalog, &alone, definition, Some(affix), Some(item.class_requirement), false).allowed
+    };
+    now.affixes
+        .iter()
+        // A duplicate is rejected on either base.
+        .filter(|affix| !now.affixes.iter().any(|other| other.id == affix.id && other.slot != affix.slot))
+        .filter(|affix| {
+            catalog
+                .affixes
+                .get(&affix.id)
+                .is_some_and(|definition| allowed(now, affix, definition) && !allowed(&rebased, affix, definition))
+        })
+        .map(|affix| usize::from(affix.slot))
+        .collect()
 }
 
 /// A tier's value range from the captured numeric data, the way the game's tooltips show it (spec §15.7).

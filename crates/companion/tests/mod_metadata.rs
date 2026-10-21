@@ -46,7 +46,11 @@ fn assembly_attributes_generic_bases_resources_and_strings_are_read_without_load
     assert!(melon.required_loader.unwrap().is_minimum);
     assert!(read_strings(&path).contains("FixtureCategory"));
     let resource = read_settings_resource(&path).unwrap().unwrap();
-    assert_eq!(resource, include_bytes!("fixtures/melon/Mod/ModSettings.json"));
+    // The compiled resource is LF; checkout line endings do not change its JSON content.
+    assert_eq!(
+        serde_json::from_slice::<serde_json::Value>(&resource).unwrap(),
+        serde_json::from_slice::<serde_json::Value>(include_bytes!("fixtures/melon/Mod/ModSettings.json")).unwrap()
+    );
     write(&path, LOADER);
     assert!(MelonAssembly::read(&path).unwrap().is_none());
     assert!(read_settings_resource(&path).unwrap().is_none());

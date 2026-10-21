@@ -3,7 +3,7 @@
 //! `PlannedFeatureViewModel`) and `RowColumnsPanel`'s split, without any view. `view.rs` shows them.
 
 use super::catalog::{self, Area, Feature, FeatureField, FeatureKind, FeatureValue};
-use super::session::{FieldError, FieldWrite, GameField, TrainerSession};
+use super::session::{FieldError, FieldRequest, FieldResult, FieldWrite, GameField, PendingFields, TrainerSession};
 
 /// One trainer page: its sections along the top and the chosen one beneath.
 pub struct PageModel {
@@ -50,7 +50,7 @@ pub fn build(area: Area, features: &[Feature], planned: bool, session: &dyn Trai
     let mut sections = Vec::new();
     for &section in page.sections {
         let in_section: Vec<&Feature> = features.iter().filter(|f| f.area == area && f.section == section).collect();
-        if in_section.iter().any(|f| f.fills_section && f.ported) {
+        if in_section.iter().any(|f| f.fills_section && f.presented) {
             sections.push(Section {
                 title: section.to_owned(),
                 content: Content::ItemForge,
@@ -60,7 +60,7 @@ pub fn build(area: Area, features: &[Feature], planned: bool, session: &dyn Trai
         let rows: Vec<Row> = in_section
             .into_iter()
             .filter_map(|&feature| match feature {
-                _ if feature.ported => Some(match feature.kind {
+                _ if feature.presented => Some(match feature.kind {
                     FeatureKind::Editor => Row::Editor(EditorRow::new(feature, false, session)),
                     FeatureKind::HeldItems => Row::Editor(EditorRow::new(feature, true, session)),
                     FeatureKind::Switch | FeatureKind::SwitchWithValues => Row::Hook(HookRow::new(feature, session)),
@@ -118,7 +118,8 @@ pub enum Tone {
 }
 
 /// A game hook's row: a switch, its values, and where it stands in the game. It starts off with every run; the session
-/// puts it on once an offline character is connected. A change to its values reaches the game at once.
+/// puts it on once an offline character is connected. A change to its values reaches the game at once. A connected game
+/// this version cannot put it in says so, and the row is read-only.
 pub struct HookRow {
     pub feature: Feature,
     /// What the helper is sent: a number, or a choice's index.
@@ -151,6 +152,11 @@ impl HookRow {
         session.is_hook_wanted(self.feature.id)
     }
 
+    /// Its switch and values take changes, except in a connected game this version cannot put it in.
+    pub fn can_use(&self, session: &dyn TrainerSession) -> bool {
+        !(session.is_connected() && session.unavailable(self.feature.id).is_some())
+    }
+
     pub fn set_on(&self, session: &dyn TrainerSession, on: bool) {
         // A feature first turned on starts from its defaults, which the helper needs.
         if on && session.hook_values(self.feature.id).len() != self.values.len() {
@@ -164,7 +170,7 @@ impl HookRow {
         let (Some(value), Some(amount)) = (self.feature.values.get(index), amount) else {
             return;
         };
-        self.set_number(session, index, amount.clamp(value.min, value.max));
+        self.set_number(session, index, amount.clamp(value.minimum, value.maximum));
     }
 
     /// Up and Down: the box's step either way, within its range.
@@ -193,12 +199,15 @@ impl HookRow {
 
     /// Where it stands in the game while it is on; empty while it is off.
     pub fn status(&self, session: &dyn TrainerSession) -> (String, Tone) {
+        let connected = session.is_connected();
+        if connected && let Some(reason) = session.unavailable(self.feature.id) {
+            return (reason.to_owned(), Tone::None);
+        }
         if !self.is_on(session) {
             return (String::new(), Tone::None);
         }
         let state = session.hook_state(self.feature.id);
         let in_place = state.as_ref().is_some_and(|state| state.on);
-        let connected = session.is_connected();
         let failure = if !in_place && connected { state.and_then(|state| state.failure) } else { None };
         match failure {
             _ if in_place => ("On in the game.".to_owned(), Tone::Confirmed),
@@ -219,7 +228,7 @@ pub fn fit(value: &FeatureValue, saved: f64) -> f64 {
             start(value)
         }
     } else if saved.is_finite() {
-        saved.clamp(value.min, value.max)
+        saved.clamp(value.minimum, value.maximum)
     } else {
         start(value)
     }
@@ -259,8 +268,8 @@ impl FieldShape {
         FieldShape {
             label: label.to_owned(),
             group: field.group,
-            min: field.min,
-            max: field.max,
+            min: field.minimum,
+            max: field.maximum,
             step: field.step,
         }
     }
@@ -354,7 +363,8 @@ fn holds(held: Option<f64>, wanted: f64) -> bool {
 
 /// An editor's row: fields read from the game, typed as drafts, applied through the game's own methods and read back. It
 /// reads when the game connects and on Read again; nothing is written until Apply. A listed editor's fields are what the
-/// game lists (what the character holds), named by the game and shaped by the catalog's one field.
+/// game lists (what the character holds), named by the game and shaped by the catalog's one field. A read or write the game
+/// answers later keeps the row busy until it does: Read again, Apply and the boxes wait, and so does Discard.
 pub struct EditorRow {
     pub feature: Feature,
     pub listed: bool,
@@ -364,6 +374,14 @@ pub struct EditorRow {
     pub status: String,
     pub tone: Tone,
     was_connected: bool,
+    busy: Option<(Request, Box<dyn PendingFields>)>,
+}
+
+/// What the row is waiting on the game for.
+enum Request {
+    Read,
+    /// Each field as sent, and the label of the row it was sent for.
+    Apply(Vec<FieldWrite>, Vec<String>),
 }
 
 impl EditorRow {
@@ -390,24 +408,54 @@ impl EditorRow {
             status: String::new(),
             tone: Tone::None,
             was_connected: false,
+            busy: None,
         };
         row.follow(session);
         row
     }
 
-    /// Reads when the session becomes connected (and when made while connected); not on any other state change.
-    /// TODO(trainer): driven by the session's state changes once it has them; until then, on each look at the page.
+    /// Follows a change of the session: takes an answer that has come, and reads when the session becomes connected (and
+    /// when made while connected), not over a request of its own; not on any other state change.
     pub fn follow(&mut self, session: &dyn TrainerSession) {
+        self.poll();
         let connected = session.is_connected();
-        if connected && !self.was_connected {
+        if connected && !self.was_connected && !self.is_busy() {
             self.read(session);
         }
         self.was_connected = connected;
     }
 
-    /// Fields can be read and written only while an offline character is connected.
+    /// Takes the game's answer to the request the row waits on, if it has come. True when it had.
+    pub fn poll(&mut self) -> bool {
+        let Some(result) = self.busy.as_mut().and_then(|(_, pending)| pending.poll()) else {
+            return false;
+        };
+        match self.busy.take() {
+            Some((Request::Read, _)) => self.finish_read(result),
+            Some((Request::Apply(sent, labels), _)) => self.finish_apply(&sent, &labels, result),
+            None => {}
+        }
+        true
+    }
+
+    /// A request is on its way to the game.
+    pub fn is_busy(&self) -> bool {
+        self.busy.is_some()
+    }
+
+    /// Fields can be read and written only while an offline character is connected, when this version can serve them,
+    /// and not while the game is answering another request of the row's.
     pub fn can_use(&self, session: &dyn TrainerSession) -> bool {
-        session.is_connected()
+        session.is_connected() && session.unavailable(self.feature.id).is_none() && !self.is_busy()
+    }
+
+    /// Why the row cannot be used, under its title: it waits for a connection, or this version cannot serve it.
+    pub fn reason(&self, session: &dyn TrainerSession) -> Option<&'static str> {
+        if session.is_connected() {
+            session.unavailable(self.feature.id)
+        } else {
+            Some("Available once an offline character is connected.")
+        }
     }
 
     pub fn has_drafts(&self) -> bool {
@@ -416,6 +464,11 @@ impl EditorRow {
 
     pub fn can_apply(&self, session: &dyn TrainerSession) -> bool {
         self.can_use(session) && self.has_read && self.has_drafts()
+    }
+
+    /// Discard waits for the game too: an answer may yet clear the drafts it applied.
+    pub fn can_discard(&self) -> bool {
+        !self.is_busy() && self.has_drafts()
     }
 
     pub fn apply_text(&self) -> String {
@@ -440,6 +493,13 @@ impl EditorRow {
             return;
         }
         match session.read_fields(self.feature.id) {
+            FieldRequest::Done(result) => self.finish_read(result),
+            FieldRequest::Pending(pending) => self.busy = Some((Request::Read, pending)),
+        }
+    }
+
+    fn finish_read(&mut self, result: FieldResult) {
+        match result {
             Ok(read) if self.fits(&read) => {
                 self.show(&read);
                 self.say("", Tone::None);
@@ -467,6 +527,13 @@ impl EditorRow {
             .collect();
         let labels: Vec<String> = self.fields.iter().map(|f| f.label().to_owned()).collect();
         match session.write_fields(self.feature.id, &sent) {
+            FieldRequest::Done(result) => self.finish_apply(&sent, &labels, result),
+            FieldRequest::Pending(pending) => self.busy = Some((Request::Apply(sent, labels), pending)),
+        }
+    }
+
+    fn finish_apply(&mut self, sent: &[FieldWrite], labels: &[String], result: FieldResult) {
+        match result {
             Ok(read) if self.fits(&read) => {
                 // The game has answered for each change, so its draft goes; a row changed again meanwhile keeps its own.
                 // A fixed field keeps its place; a listed one is found by its name, which is its item's own.
@@ -511,7 +578,9 @@ impl EditorRow {
 
     /// Puts every box back to what the game holds; nothing is written.
     pub fn discard(&mut self) {
-        self.fields.iter_mut().for_each(FieldModel::discard);
+        if self.can_discard() {
+            self.fields.iter_mut().for_each(FieldModel::discard);
+        }
     }
 
     /// A fixed set answers with its catalog's fields, unnamed; a listed one with any number, each named once.
@@ -533,8 +602,8 @@ impl EditorRow {
                 [only] => *only,
                 _ => FeatureField {
                     label: "",
-                    min: 0.0,
-                    max: i32::MAX as f64,
+                    minimum: 0.0,
+                    maximum: i32::MAX as f64,
                     step: 1.0,
                     group: None,
                 },
@@ -642,9 +711,10 @@ pub fn split(heights: &[f32], headings: &[bool], columns: usize, section_spacing
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::trainer::session::{HookState, Unconnected};
+    use crate::trainer::session::{HookState, NOT_AVAILABLE, Unconnected};
     use std::cell::RefCell;
     use std::collections::BTreeMap;
+    use std::rc::Rc;
 
     #[test]
     fn numbers_format_as_the_csharp_strings() {
@@ -677,7 +747,7 @@ mod tests {
         assert!(matches!(forge.sections[0].content, Content::ItemForge));
         // A feature that is not ported shows only in a source checkout.
         let mut features = catalog::FEATURES.to_vec();
-        features.iter_mut().filter(|f| f.area == Area::Loot).for_each(|f| f.ported = false);
+        features.iter_mut().filter(|f| f.area == Area::Loot).for_each(|f| f.presented = false);
         assert!(build(Area::Loot, &features, false, &session).is_none());
         let loot = build(Area::Loot, &features, true, &session).unwrap();
         let Content::Rows(rows) = &loot.sections[0].content else { panic!("rows") };
@@ -715,11 +785,34 @@ mod tests {
     struct Game {
         fields: RefCell<BTreeMap<&'static str, Vec<GameField>>>,
         keep: RefCell<Option<f64>>,
+        /// Answers wait here until the test gives them, as the worker's do.
+        later: Option<Rc<RefCell<Option<FieldResult>>>>,
+        unserved: Option<&'static str>,
+    }
+
+    struct Later(Rc<RefCell<Option<FieldResult>>>);
+
+    impl PendingFields for Later {
+        fn poll(&mut self) -> Option<FieldResult> {
+            self.0.borrow_mut().take()
+        }
+    }
+
+    impl Game {
+        fn answer(&self, result: FieldResult) -> FieldRequest {
+            match &self.later {
+                Some(slot) => FieldRequest::Pending(Box::new(Later(slot.clone()))),
+                None => result.into(),
+            }
+        }
     }
 
     impl TrainerSession for Game {
         fn is_connected(&self) -> bool {
             true
+        }
+        fn unavailable(&self, id: &str) -> Option<&'static str> {
+            self.unserved.filter(|unserved| *unserved == id).map(|_| NOT_AVAILABLE)
         }
         fn is_hook_wanted(&self, _: &str) -> bool {
             true
@@ -735,17 +828,74 @@ mod tests {
                 failure: Some("the helper is older than the app".into()),
             })
         }
-        fn read_fields(&self, id: &str) -> Result<Vec<GameField>, FieldError> {
-            Ok(self.fields.borrow().get(id).cloned().unwrap_or_default())
+        fn read_fields(&self, id: &str) -> FieldRequest {
+            self.answer(Ok(self.fields.borrow().get(id).cloned().unwrap_or_default()))
         }
-        fn write_fields(&self, id: &str, writes: &[FieldWrite]) -> Result<Vec<GameField>, FieldError> {
+        fn write_fields(&self, id: &str, writes: &[FieldWrite]) -> FieldRequest {
             let mut fields = self.fields.borrow_mut();
             let list = fields.get_mut(id).unwrap();
             for (field, write) in list.iter_mut().zip(writes) {
                 field.value = self.keep.borrow().unwrap_or(write.wanted);
             }
-            Ok(list.clone())
+            self.answer(Ok(list.clone()))
         }
+    }
+
+    #[test]
+    fn a_row_waits_for_the_game_and_says_what_it_cannot_serve() {
+        let slot = Rc::new(RefCell::new(None));
+        let game = Game {
+            later: Some(slot.clone()),
+            unserved: Some("points-earned"),
+            ..Game::default()
+        };
+        game.fields.borrow_mut().insert("attack-leech", vec![GameField::new("", 1.0), GameField::new("", 0.3)]);
+        let feature = *catalog::feature("attack-leech").unwrap();
+        let mut row = EditorRow::new(feature, false, &game);
+        // Connected: the read is on its way, and everything waits for it.
+        assert!(row.is_busy() && !row.can_use(&game) && !row.has_read);
+        assert!(!row.poll());
+        *slot.borrow_mut() = Some(Ok(vec![GameField::new("", 1.0), GameField::new("", 0.3)]));
+        assert!(row.poll());
+        assert!(row.has_read && row.can_use(&game));
+        row.fields[0].set_amount(Some(1.1));
+        assert!(row.can_apply(&game) && row.can_discard());
+        row.apply(&game);
+        assert!(!row.can_apply(&game) && !row.can_discard() && !row.can_use(&game));
+        // Discard does nothing while the game answers.
+        row.discard();
+        assert!(row.has_drafts());
+        *slot.borrow_mut() = Some(Ok(vec![GameField::new("", 1.1), GameField::new("", 0.3)]));
+        row.follow(&game);
+        assert_eq!((row.status.as_str(), row.tone), ("Confirmed by readback.", Tone::Confirmed));
+        assert!(!row.has_drafts() && row.can_use(&game));
+        // A failed write that sent nothing keeps the drafts.
+        row.fields[1].set_amount(Some(2.0));
+        row.apply(&game);
+        *slot.borrow_mut() = Some(Err(FieldError {
+            details: "The trainer cannot accept another command.".into(),
+            nothing_sent: true,
+        }));
+        row.poll();
+        assert_eq!(row.status, "Not changed: The trainer cannot accept another command.");
+        assert!(row.has_drafts());
+
+        // A field set this version cannot serve: read-only, with its reason, and nothing is asked of the game.
+        let unserved = EditorRow::new(*catalog::feature("points-earned").unwrap(), false, &game);
+        assert!(!unserved.is_busy() && !unserved.can_use(&game));
+        assert_eq!(unserved.reason(&game), Some(NOT_AVAILABLE));
+        assert_eq!(
+            EditorRow::new(feature, false, &Unconnected::default()).reason(&Unconnected::default()),
+            Some("Available once an offline character is connected.")
+        );
+        let hook = HookRow::new(*catalog::feature("damage-dealt").unwrap(), &game);
+        assert!(hook.can_use(&game));
+        let game = Game {
+            unserved: Some("damage-dealt"),
+            ..Game::default()
+        };
+        assert!(!hook.can_use(&game));
+        assert_eq!(hook.status(&game), (NOT_AVAILABLE.to_owned(), Tone::None));
     }
 
     #[test]

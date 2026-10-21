@@ -428,19 +428,7 @@ impl ModLibrary {
 }
 
 pub fn hash_file(path: &Path) -> io::Result<String> {
-    use sha2::{Digest, Sha256};
-    use std::io::Read;
-    let mut file = fs::File::open(path)?;
-    let mut hash = Sha256::new();
-    let mut buffer = [0u8; 65536];
-    loop {
-        let read = file.read(&mut buffer)?;
-        if read == 0 {
-            break;
-        }
-        hash.update(&buffer[..read]);
-    }
-    Ok(hashes::hex_upper(&hash.finalize()))
+    hashes::of_reader(fs::File::open(path)?)
 }
 
 /// A source may be rebuilt between its initial hash and its copy. Publish only the bytes that the record names.

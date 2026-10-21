@@ -43,20 +43,34 @@ export component MainWindow inherits Window {
     property <bool> pane-open: Nav.pane-open;
     changed page => {
         Tip.open = false;
+    }
+    // Rust counts only the pages after the first, so the page the app starts on never fades in, even when it is not Home.
+    property <int> page-serial: Nav.page-serial;
+    changed page-serial => {
         host.enter();
     }
     changed pane-open => {
         Tip.open = false;
     }
 
-    // Focus visuals show once a navigation key is pressed; widgets hide them again on a pointer press.
+    // Focus visuals show once a navigation key is pressed; widgets hide them again on a pointer press. In a text box the
+    // arrows, Home, End and the page keys move the caret, not focus, so they leave the visuals as they are: a click into a
+    // box and then Left shows no ring and no tip (as `KeyboardToolTips` opens a tip only when focus arrives by Tab or
+    // direction).
     FocusScope {
         focus-on-click: false;
         focus-on-tab-navigation: false;
         capture-key-pressed(event) => {
-            if (event.text == Key.Tab || event.text == Key.Backtab || event.text == Key.UpArrow || event.text == Key.DownArrow
+            // Esc closes an open tip first, as Windows' tooltips do (WCAG 1.4.13); the next Esc reaches the control.
+            if (event.text == Key.Escape && Tip.open) {
+                Tip.open = false;
+                return accept;
+            }
+            if (event.text == Key.Tab || event.text == Key.Backtab || event.text == Key.F6) {
+                KeyboardFocus.visible = true;
+            } else if (!TextInputInterface.text-input-focused && (event.text == Key.UpArrow || event.text == Key.DownArrow
                 || event.text == Key.LeftArrow || event.text == Key.RightArrow || event.text == Key.Home || event.text == Key.End
-                || event.text == Key.PageUp || event.text == Key.PageDown || event.text == Key.F6) {
+                || event.text == Key.PageUp || event.text == Key.PageDown)) {
                 KeyboardFocus.visible = true;
             }
             reject

@@ -19,11 +19,14 @@ struct Home {
     launcher: Arc<GameLauncher>,
     model: RefCell<HomeModel>,
     window: Weak<MainWindow>,
-    visible: Cell<bool>,
     watch_timer: Timer,
     decorations: Rc<Decorations<MainWindow>>,
     /// Home is coming into view: the tree is shown where it is, without blooming there.
     entering: Cell<bool>,
+    /// A look at the game is on its way back from its thread; another waits for it rather than overlapping it.
+    looking: Cell<bool>,
+    /// A look asked for while one was out, and whether it reads MelonLoader's state too.
+    again: Cell<Option<bool>>,
 }
 
 /// `launcher` is None in a run that has none (tests): Home then shows the companion's own title.
@@ -37,10 +40,11 @@ pub fn bind(window: &MainWindow, launcher: Option<Arc<GameLauncher>>, shell: &Sh
         launcher,
         model: RefCell::new(HomeModel::default()),
         window: window.as_weak(),
-        visible: Cell::new(shell.current() == Page::Home),
         watch_timer: Timer::default(),
         decorations,
         entering: Cell::new(true),
+        looking: Cell::new(false),
+        again: Cell::new(None),
     });
     state.on_start({
         let home = home.clone();
@@ -49,42 +53,76 @@ pub fn bind(window: &MainWindow, launcher: Option<Arc<GameLauncher>>, shell: &Sh
     if shell.current() == Page::Home {
         home.refresh();
     }
+    home.follow(shell.current() == Page::Home);
     shell.on_page_entered({
         let home = home.clone();
         move |page| {
-            home.visible.set(page == Page::Home);
+            home.follow(page == Page::Home);
             if page == Page::Home {
                 home.entering.set(true);
                 home.refresh();
             }
         }
     });
-    home.watch_timer.start(TimerMode::Repeated, GameLauncher::WATCH_INTERVAL, {
-        // The window's start callback keeps Home; the timer only looks in while it is there.
-        let home = Rc::downgrade(&home);
-        move || {
-            if let Some(home) = home.upgrade()
-                && home.visible.get()
-            {
-                home.watch();
-            }
-        }
-    });
 }
 
 impl Home {
+    /// Looks at the game every `WATCH_INTERVAL` while Home shows; on another page the timer stops, so it costs nothing.
+    fn follow(self: &Rc<Self>, visible: bool) {
+        if !visible {
+            self.watch_timer.stop();
+            return;
+        }
+        // The window's start callback keeps Home; the timer only holds it weakly.
+        let home = Rc::downgrade(self);
+        self.watch_timer.start(TimerMode::Repeated, GameLauncher::WATCH_INTERVAL, move || {
+            if let Some(home) = home.upgrade() {
+                home.watch();
+            }
+        });
+    }
+
     /// Reads whether MelonLoader is beside the game and whether the game runs.
-    fn refresh(&self) {
-        self.model.borrow_mut().set_mod_loader(self.launcher.read_mod_loader());
-        self.watch();
+    fn refresh(self: &Rc<Self>) {
+        self.look(true);
     }
 
     /// Looks at the game again: cheap enough to repeat while Home shows.
-    fn watch(&self) {
-        let running = self.launcher.find_running();
-        let phase = HomeModel::phase_of(running.as_ref(), |game| self.launcher.read_log(game).readiness);
-        self.model.borrow_mut().set_phase(phase);
-        self.show();
+    fn watch(self: &Rc<Self>) {
+        self.look(false);
+    }
+
+    /// Finding the install reads Steam's registry and library files, and the watch takes a process snapshot and reads
+    /// Player.log: all of it on a thread of its own, so a slow disk never holds the window.
+    fn look(self: &Rc<Self>, loader: bool) {
+        if self.looking.replace(true) {
+            self.again.set(Some(loader || self.again.get().unwrap_or(false)));
+            return;
+        }
+        let launcher = self.launcher.clone();
+        let home = self.clone();
+        background::run(
+            move || {
+                let loader = loader.then(|| launcher.read_mod_loader());
+                let running = launcher.find_running();
+                let phase = HomeModel::phase_of(running.as_ref(), |game| launcher.read_log(game).readiness);
+                (loader, phase)
+            },
+            move |(loader, phase)| {
+                home.looking.set(false);
+                {
+                    let mut model = home.model.borrow_mut();
+                    if let Some(loader) = loader {
+                        model.set_mod_loader(loader);
+                    }
+                    model.set_phase(phase);
+                }
+                home.show();
+                if let Some(loader) = home.again.take() {
+                    home.look(loader);
+                }
+            },
+        );
     }
 
     fn play(self: &Rc<Self>, mode: ViewMode) {
@@ -93,7 +131,7 @@ impl Home {
             ViewMode::Offline => LaunchMode::Offline,
             ViewMode::WithMods => LaunchMode::OfflineWithMods,
         };
-        if !self.model.borrow().can_play() {
+        if !self.can_play() {
             return;
         }
         self.model.borrow_mut().begin(mode == LaunchMode::OfflineWithMods);
@@ -107,6 +145,10 @@ impl Home {
                 home.refresh();
             },
         );
+    }
+
+    fn can_play(&self) -> bool {
+        self.model.borrow().can_play() && !self.launcher.is_starting()
     }
 
     fn show(&self) {
@@ -128,12 +170,23 @@ impl Home {
             BloomPhase::Opening => ViewPhase::Opening,
             BloomPhase::Bloom => ViewPhase::Bloom,
         });
-        state.set_can_start(model.can_play());
-        state.set_can_start_with_mods(model.can_play_with_mods());
+        // A start begun on the Mods page holds Home's buttons too, as the C# app's shared `IsStarting` does.
+        let elsewhere = self.launcher.is_starting();
+        state.set_can_start(model.can_play() && !elsewhere);
+        state.set_can_start_with_mods(model.can_play_with_mods() && !elsewhere);
         state.set_online_tip(model.online_tip().into());
         state.set_offline_tip(model.offline_tip().into());
         state.set_with_mods_tip(model.with_mods_tip().into());
-        state.set_message(model.message().unwrap_or_default().into());
-        state.set_message_is_error(model.is_error());
+        // What a start or a conflict said comes first; otherwise why a button waits, said in words as well as in its tip.
+        match model.message() {
+            Some(message) => {
+                state.set_message(message.into());
+                state.set_message_is_error(model.is_error());
+            }
+            None => {
+                state.set_message(model.wait_reason().unwrap_or_default().into());
+                state.set_message_is_error(false);
+            }
+        }
     }
 }

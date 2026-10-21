@@ -1,6 +1,7 @@
 //! Mods keeps interactive drafts in memory. All library reads and writes enter one ordered worker;
 //! completions are observed on the UI thread without waiting for disk or MSBuild.
 
+use crate::models::update_rows;
 use crate::shell::{Page, ShellHandle};
 use crate::{MainWindow, MessageTone, ModLogRow, ModRow, ModSettingRow, ModsState, SettingChoiceRow, SourceRow, background};
 use eg_companion::host::LaunchMode;
@@ -10,7 +11,7 @@ use eg_companion::mods::{
     library::{InstalledMod, ModLibrary},
     loader_state::LoaderPreparation,
     preferences::PreferenceKind,
-    sources::{ModSources, SourceSnapshot},
+    sources::{ModSources, SourceError, SourceSnapshot},
     worker::ModWorker,
 };
 use eg_core::operations::Cancellation;
@@ -23,8 +24,11 @@ use std::{
     path::PathBuf,
     rc::Rc,
     sync::{Arc, mpsc},
-    time::{Duration, Instant},
+    time::Duration,
 };
+
+/// How often the page looks for the worker's answers while it waits on one.
+const POLL: Duration = Duration::from_millis(40);
 
 pub struct ModsPage {
     pub worker: ModWorker,
@@ -58,6 +62,22 @@ struct Pending {
     receive: mpsc::Receiver<io::Result<Observation>>,
     settings: Vec<SettingKey>,
     clears_build: bool,
+    failure: Failure,
+}
+/// How a failed edit is said. As in the C# view model, an edit of the library's own records (on or off, a setting, Remove,
+/// Undo, Revert) says the change could not be kept; adding a DLL or installing a build says the failure as it is.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Failure {
+    Kept,
+    Raw,
+}
+impl Failure {
+    fn message(self, error: &io::Error) -> String {
+        match self {
+            Failure::Kept => format!("The change could not be kept: {error}"),
+            Failure::Raw => error.to_string(),
+        }
+    }
 }
 struct View {
     rows: Rc<VecModel<ModRow>>,
@@ -93,8 +113,10 @@ struct View {
     deleted: RefCell<Vec<String>>,
     close_error: Cell<bool>,
     closing: Cell<bool>,
-    watch: RefCell<Instant>,
-    timer: slint::Timer,
+    /// Takes the worker's answers while any is awaited, and stops once none is (`keep_polling`).
+    polling: slint::Timer,
+    /// Looks at the game every `GameLauncher::WATCH_INTERVAL` while the page shows, and not otherwise.
+    watching: slint::Timer,
 }
 
 pub(crate) fn bind(window: &MainWindow, page: ModsPage, shell: &ShellHandle) -> Rc<dyn Fn() -> crate::settings::CloseDecision> {
@@ -132,8 +154,8 @@ pub(crate) fn bind(window: &MainWindow, page: ModsPage, shell: &ShellHandle) -> 
         follow: Cell::new(0),
         adopted: RefCell::new(Vec::new()),
         deleted: RefCell::new(Vec::new()),
-        watch: RefCell::new(Instant::now()),
-        timer: slint::Timer::default(),
+        polling: slint::Timer::default(),
+        watching: slint::Timer::default(),
     });
     let state = window.global::<ModsState>();
     state.set_mods(ModelRc::from(view.rows.clone()));
@@ -146,26 +168,19 @@ pub(crate) fn bind(window: &MainWindow, page: ModsPage, shell: &ShellHandle) -> 
         move |page| {
             view.commit_settings();
             view.visible.set(page == Page::Mods);
+            view.keep_watching();
             if page == Page::Mods {
                 view.refresh();
             }
         }
     });
-    view.timer.start(slint::TimerMode::Repeated, Duration::from_millis(40), {
-        let view = Rc::downgrade(&view);
-        move || {
-            if let Some(view) = view.upgrade() {
-                view.poll();
-                if view.services.worker.faulted() {
-                    let _ = slint::quit_event_loop();
-                }
-                if view.visible.get() && view.watch.borrow().elapsed() >= GameLauncher::WATCH_INTERVAL {
-                    *view.watch.borrow_mut() = Instant::now();
-                    view.watch_game();
-                }
-            }
-        }
+    // A task that panics ends the app at once, whoever queued it: a start's preparation from Home shares the worker.
+    view.services.worker.on_fault(|| {
+        let _ = slint::invoke_from_event_loop(|| {
+            let _ = slint::quit_event_loop();
+        });
     });
+    view.keep_watching();
     if view.visible.get() {
         view.refresh();
     }
@@ -274,7 +289,7 @@ impl View {
                 .iter()
                 .map(|project| SourceRow {
                     name: project.name.as_str().into(),
-                    project: project.project_file.display().to_string().into(),
+                    project: breakable_path(&project.project_file.display().to_string()).into(),
                     caption: folder.as_deref().map(|folder| project.caption(folder)).unwrap_or_default().into(),
                     busy: building.as_ref().is_some_and(|file| file.eq_ignore_ascii_case(&project.file())),
                 })
@@ -342,7 +357,12 @@ impl View {
                 .unwrap_or_default()
                 .into(),
         );
-        state.set_selected_source_path(build.map(|build| build.project.project_file.display().to_string()).unwrap_or_default().into());
+        state.set_selected_source_path(
+            build
+                .map(|build| breakable_path(&build.project.project_file.display().to_string()))
+                .unwrap_or_default()
+                .into(),
+        );
         state.set_selected_has_sources(build.is_some());
         state.set_rebuild_tip(
             if update {
@@ -405,12 +425,16 @@ impl View {
                                 label: choice.label.as_str().into(),
                             })
                             .collect::<Vec<_>>();
-                        let choices = self
+                        // The same choices keep their models, so an open choice list isn't rebuilt under the pointer.
+                        let (choices, choice_labels) = self
                             .setting_rows
                             .row_data(index)
                             .filter(|old| old.category == setting.category && old.key == setting.key && old.choices.iter().eq(choices.iter().cloned()))
-                            .map(|old| old.choices)
-                            .unwrap_or_else(|| ModelRc::new(VecModel::from(choices)));
+                            .map(|old| (old.choices, old.choice_labels))
+                            .unwrap_or_else(|| {
+                                let labels = choices.iter().map(|choice| choice.label.clone()).collect::<Vec<_>>();
+                                (ModelRc::new(VecModel::from(choices)), ModelRc::new(VecModel::from(labels)))
+                            });
                         ModSettingRow {
                             category: setting.category.as_str().into(),
                             key: setting.key.as_str().into(),
@@ -438,8 +462,10 @@ impl View {
                                 .map(|choice| choice.label.as_str())
                                 .unwrap_or(&setting.value)
                                 .into(),
-                            choice_index: setting.choices.iter().position(|choice| choice.value == setting.value).unwrap_or(0) as i32,
+                            // A value the mod's list doesn't name shows as it is, with no choice in the list held.
+                            choice_index: setting.choices.iter().position(|choice| choice.value == setting.value).map_or(-1, |index| index as i32),
                             choices,
+                            choice_labels,
                         }
                     })
                     .collect()
@@ -477,18 +503,6 @@ impl View {
     }
 }
 
-fn update_rows<T: Clone + PartialEq + 'static>(model: &VecModel<T>, rows: Vec<T>) {
-    if model.row_count() != rows.len() {
-        model.set_vec(rows);
-    } else {
-        for (index, row) in rows.into_iter().enumerate() {
-            if model.row_data(index).as_ref() != Some(&row) {
-                model.set_row_data(index, row);
-            }
-        }
-    }
-}
-
 impl View {
     fn say(&self, text: impl Into<String>, error: bool) {
         *self.message.borrow_mut() = Some((text.into(), error));
@@ -498,7 +512,7 @@ impl View {
         }
     }
     fn enqueue(self: &Rc<Self>, change: impl FnOnce(&ModLibrary) -> io::Result<ChangeResult> + Send + 'static) {
-        self.enqueue_tracked(change, Vec::new(), false, true);
+        self.enqueue_tracked(change, Vec::new(), false, true, Failure::Kept);
     }
     fn enqueue_tracked(
         self: &Rc<Self>,
@@ -506,6 +520,7 @@ impl View {
         settings: Vec<SettingKey>,
         clears_build: bool,
         mutation: bool,
+        failure: Failure,
     ) {
         let revision = self.revision.get() + 1;
         self.revision.set(revision);
@@ -534,18 +549,22 @@ impl View {
             })
         });
         match receive {
-            Ok(receive) => self.pending.borrow_mut().push_back(Pending {
-                revision,
-                receive,
-                settings,
-                clears_build,
-            }),
+            Ok(receive) => {
+                self.pending.borrow_mut().push_back(Pending {
+                    revision,
+                    receive,
+                    settings,
+                    clears_build,
+                    failure,
+                });
+                self.keep_polling();
+            }
             Err(error) => {
                 self.retain_failed_settings(settings);
                 if clears_build {
                     self.finish_build();
                 }
-                self.say(format!("The change could not be kept: {error}"), true);
+                self.say(failure.message(&error), true);
             }
         }
         self.show();
@@ -561,7 +580,7 @@ impl View {
     fn refresh(self: &Rc<Self>) {
         self.commit_settings();
         self.editing.borrow_mut().clear();
-        self.enqueue_tracked(|_| Ok(ChangeResult::default()), Vec::new(), false, false);
+        self.enqueue_tracked(|_| Ok(ChangeResult::default()), Vec::new(), false, false, Failure::Kept);
     }
     fn poll(self: &Rc<Self>) {
         let mut refresh = false;
@@ -584,7 +603,7 @@ impl View {
             match result {
                 Err(error) => {
                     self.retain_failed_settings(pending.settings);
-                    self.say(format!("The change could not be kept: {error}"), true);
+                    self.say(pending.failure.message(&error), true);
                     refresh = true;
                 }
                 Ok(observation) => {
@@ -660,7 +679,35 @@ impl View {
         }
         self.show();
         if refresh && !self.services.worker.faulted() {
-            self.enqueue_tracked(|_| Ok(ChangeResult::default()), Vec::new(), false, false);
+            self.enqueue_tracked(|_| Ok(ChangeResult::default()), Vec::new(), false, false, Failure::Kept);
+        }
+        self.keep_polling();
+    }
+    /// Polls every [`POLL`] while the worker owes an answer, and not otherwise: an idle page wakes nothing.
+    fn keep_polling(self: &Rc<Self>) {
+        let waiting = !self.pending.borrow().is_empty();
+        if waiting && !self.polling.running() {
+            let view = Rc::downgrade(self);
+            self.polling.start(slint::TimerMode::Repeated, POLL, move || {
+                if let Some(view) = view.upgrade() {
+                    view.poll();
+                }
+            });
+        } else if !waiting {
+            self.polling.stop();
+        }
+    }
+    /// Follows the game while the page shows: Home and the trainer follow it on their own.
+    fn keep_watching(self: &Rc<Self>) {
+        if self.visible.get() && !self.watching.running() {
+            let view = Rc::downgrade(self);
+            self.watching.start(slint::TimerMode::Repeated, GameLauncher::WATCH_INTERVAL, move || {
+                if let Some(view) = view.upgrade() {
+                    view.watch_game();
+                }
+            });
+        } else if !self.visible.get() {
+            self.watching.stop();
         }
     }
     fn select(self: &Rc<Self>, index: i32) {
@@ -724,6 +771,7 @@ impl View {
             unsaved.into_iter().collect(),
             false,
             true,
+            Failure::Kept,
         );
     }
     fn close_decision(self: &Rc<Self>) -> crate::settings::CloseDecision {
@@ -761,6 +809,7 @@ impl View {
         let sources = self.services.sources.clone();
         let cancel = self.services.worker.cancellation();
         let view = self.clone();
+        let shown = folder.clone();
         background::run(
             move || {
                 let result = sources.read(folder.as_deref(), sdk.as_deref(), &files, &cancel);
@@ -777,9 +826,11 @@ impl View {
                             view.say("Building mods from their sources needs the .NET SDK, which was not found. Install it, or choose its folder in Settings, to see and build the mod projects here.", true);
                         }
                     }
+                    // A read cut short by the app's close says nothing.
+                    Err(SourceError::Cancelled) => {}
                     Err(error) => {
                         *view.sources.borrow_mut() = SourceSnapshot::default();
-                        view.say(error.to_string(), true);
+                        view.say(sources_unreadable(shown.as_deref(), &error), true);
                     }
                 }
                 view.show();
@@ -823,6 +874,14 @@ impl View {
                 }
             },
         );
+    }
+}
+
+/// A failed read of the sources folder, said with the folder, as the C# page says it.
+fn sources_unreadable(folder: Option<&std::path::Path>, error: &SourceError) -> String {
+    match folder {
+        Some(folder) => format!("The mod sources in {} could not be read: {error}", folder.display()),
+        None => error.to_string(),
     }
 }
 
@@ -924,8 +983,14 @@ impl View {
             move || {
                 view.unsaved.borrow_mut().clear();
                 view.editing.borrow_mut().clear();
+                // The drafts going is the latest event: it takes the message and the removal's Undo with it, as in the C# page.
+                if view.message.borrow_mut().take().is_some() {
+                    view.removed.borrow_mut().take();
+                }
                 let inventory = view.inventory.borrow();
                 let Some(root) = inventory.mods_folder.as_ref().and_then(|folder| folder.parent()).map(PathBuf::from) else {
+                    drop(inventory);
+                    view.show();
                     return;
                 };
                 let visible: Vec<_> = inventory
@@ -1018,25 +1083,31 @@ impl View {
     }
     fn add(self: &Rc<Self>, path: PathBuf) {
         self.commit_settings();
-        self.enqueue(move |library| {
-            let item = library.add(&path, false)?;
-            let name = eg_companion::mods::assembly::MelonAssembly::read(&library.path_of(&item))
-                .ok()
-                .flatten()
-                .map_or_else(|| item.file.clone(), |assembly| assembly.name);
-            Ok(ChangeResult {
-                message: Some(format!("Added {name}. It loads the next time you play with mods.")),
-                select: Some(item.file),
-                ..Default::default()
-            })
-        });
+        self.enqueue_tracked(
+            move |library| {
+                let item = library.add(&path, false)?;
+                let name = eg_companion::mods::assembly::MelonAssembly::read(&library.path_of(&item))
+                    .ok()
+                    .flatten()
+                    .map_or_else(|| item.file.clone(), |assembly| assembly.name);
+                Ok(ChangeResult {
+                    message: Some(format!("Added {name}. It loads the next time you play with mods.")),
+                    select: Some(item.file),
+                    ..Default::default()
+                })
+            },
+            Vec::new(),
+            false,
+            true,
+            Failure::Raw,
+        );
     }
     fn pick_mod(self: &Rc<Self>) {
         let Some(window) = self.window.upgrade() else {
             return;
         };
         let dialog = rfd::AsyncFileDialog::new()
-            .set_title("Add a MelonLoader mod")
+            .set_title("Add a mod")
             .add_filter("Mod DLL", &["dll"])
             .set_parent(&window.window().window_handle());
         let view = self.clone();
@@ -1045,7 +1116,7 @@ impl View {
                 view.add(file.path().to_owned());
             }
         }) {
-            self.say(format!("The mod picker could not be opened: {error}"), true);
+            self.say(format!("The file picker could not be opened: {error}"), true);
             self.show();
         }
     }
@@ -1105,25 +1176,30 @@ impl View {
             return;
         }
         self.commit_settings();
+        // A project not installed yet goes by its own name; a rebuild by the installed mod's, as its row shows it.
         let project = if source {
-            self.sources.borrow().not_installed.get(index as usize).cloned()
-        } else {
-            self.inventory
+            self.sources
                 .borrow()
-                .mods
+                .not_installed
                 .get(index as usize)
-                .and_then(|item| self.sources.borrow().builds.get(&item.installed.file.to_lowercase()).map(|build| build.project.clone()))
+                .cloned()
+                .map(|project| (project.name.clone(), project))
+        } else {
+            self.inventory.borrow().mods.get(index as usize).and_then(|item| {
+                self.sources
+                    .borrow()
+                    .builds
+                    .get(&item.installed.file.to_lowercase())
+                    .map(|build| (item.name.clone(), build.project.clone()))
+            })
         };
-        let Some(project) = project else {
+        let Some((name, project)) = project else {
             return;
         };
         let root = self.inventory.borrow().mods_folder.as_ref().and_then(|folder| folder.parent()).map(PathBuf::from);
         if root.is_none() && !install_only {
             self.say(
-                format!(
-                    "{} is built against the game's MelonLoader, and Last Epoch was not found. Choose the game executable in Settings.",
-                    project.name
-                ),
+                format!("{name} is built against the game's MelonLoader, and Last Epoch was not found. Choose the game executable in Settings."),
                 true,
             );
             self.show();
@@ -1136,7 +1212,10 @@ impl View {
         };
         let file = project.file();
         *self.building.borrow_mut() = Some(file.clone());
-        self.say(format!("{} {}…", if install_only { "Installing" } else { "Building" }, project.name), false);
+        // An install only reads the mods again; a build says what it builds while the compiler runs.
+        if !install_only {
+            self.say(format!("Building {name}…"), false);
+        }
         self.show();
         let cancel = Cancellation::default();
         *self.build_cancel.borrow_mut() = Some(cancel.clone());
@@ -1170,6 +1249,7 @@ impl View {
                     Vec::new(),
                     true,
                     true,
+                    Failure::Raw,
                 ),
                 Err(error) => {
                     view.finish_build();
@@ -1247,9 +1327,25 @@ fn open_path(_path: &std::path::Path, _reveal: bool, _create: bool) -> io::Resul
     Err(io::Error::other("Opening files is available on Windows."))
 }
 
+/// A path for a tip, which wraps at words: a zero-width space after each separator lets a long path break between its
+/// folders rather than run past the bubble.
+fn breakable_path(path: &str) -> String {
+    path.replace('\\', "\\\u{200B}").replace('/', "/\u{200B}")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_unreadable_sources_folder_is_named_as_the_c_sharp_page_names_it() {
+        let error = SourceError::Failed("Access is denied.".into());
+        assert_eq!(
+            sources_unreadable(Some(std::path::Path::new(r"C:\mods\src")), &error),
+            r"The mod sources in C:\mods\src could not be read: Access is denied."
+        );
+        assert_eq!(sources_unreadable(None, &error), "Access is denied.");
+    }
 
     #[test]
     fn preparation_follows_completion_then_stops_and_waits_for_text_commit() {
@@ -1280,6 +1376,13 @@ mod tests {
             by_hand(&two, &one).unwrap(),
             "2 DLLs were found in the Mods folder and added, on. Loom.dll was deleted from the Mods folder, so it is removed."
         );
+    }
+
+    #[test]
+    fn only_edits_of_the_library_say_the_change_could_not_be_kept() {
+        let error = io::Error::other("Access is denied.");
+        assert_eq!(Failure::Kept.message(&error), "The change could not be kept: Access is denied.");
+        assert_eq!(Failure::Raw.message(&error), "Access is denied.");
     }
 
     #[test]

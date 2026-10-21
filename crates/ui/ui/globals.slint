@@ -29,6 +29,8 @@ export global Nav {
     in property <int> focus-serial;
     // The row that takes the navigation's single tab stop.
     in property <int> tab-row;
+    // Counts the pages that came to show after the first; each one fades in, the first never does.
+    in property <int> page-serial;
 
     callback row-clicked(int) -> NavOutcome;
     callback row-key(int, string, bool) -> NavOutcome;
@@ -65,4 +67,6 @@ export global Tip {
     in-out property <length> anchor-width;
     in-out property <length> anchor-height;
     in-out property <TipPlacement> placement;
+    // The pointer is on the bubble: it stays open while the pointer reads it (WCAG 1.4.13).
+    in-out property <bool> bubble-hovered;
 }

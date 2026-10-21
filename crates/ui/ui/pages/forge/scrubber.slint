@@ -4,7 +4,8 @@
 import { Tokens } from "../../tokens.slint";
 import { KeyboardFocus } from "../../globals.slint";
 import { TipTrigger } from "../../widgets/focus.slint";
-import { ForgeState, ValueCell, CellRef } from "state.slint";
+import { FlyoutSurface } from "../../widgets/menu.slint";
+import { ForgeState, ForgeReveal, ForgeCover, ValueCell, CellRef } from "state.slint";
 
 // Where a value sits inside the game's own minimum and maximum, with the game's value and the draft as separate ticks.
 export component RangeBar inherits Rectangle {
@@ -67,6 +68,11 @@ export component ValueScrubber inherits Rectangle {
     callback menu-requested();
     // A right-click, at the pointer in window coordinates.
     callback context-menu(length, length);
+    // Rust brought this cell into focus; the row scrolls into view (a row that knows its own extent handles it).
+    callback revealed();
+    // Del on a cell that removes what it belongs to (an affix row's value).
+    in property <bool> deletable;
+    callback delete-pressed();
 
     property <bool> locked: !root.cell.editable;
     property <bool> pressed;
@@ -76,11 +82,30 @@ export component ValueScrubber inherits Rectangle {
     property <length> bar-y: value-line.preferred-height + Tokens.space-4;
     property <int> serial: ForgeState.focus-serial;
     property <bool> popup-open: popup.is-open;
+    // Another value in this place (the row was rebuilt under the pointer: an item swap, a reload) ends the drag, which
+    // belonged to the old value (the C# ValueScrubber's DataContextChanged).
+    property <int> uid: root.cell.uid;
+    // This cell is the one typing; when typing ends elsewhere (Undo, an item change, a cancel), the popover follows.
+    property <bool> typing-here: ForgeState.typing && ForgeState.typing-cell.kind == root.cell.cell.kind
+        && ForgeState.typing-cell.row == root.cell.cell.row && ForgeState.typing-cell.roll == root.cell.cell.roll;
 
     changed serial => {
         if (ForgeState.focus-cell.kind == root.cell.cell.kind && ForgeState.focus-cell.row == root.cell.cell.row
             && ForgeState.focus-cell.roll == root.cell.cell.roll && ForgeState.focus-part == 0) {
             focus.focus();
+            root.revealed();
+        }
+    }
+
+    changed uid => {
+        if (root.pressed) {
+            root.end-gesture(false);
+        }
+    }
+
+    changed typing-here => {
+        if (!root.typing-here && root.popup-open) {
+            popup.close();
         }
     }
 
@@ -177,6 +202,8 @@ export component ValueScrubber inherits Rectangle {
     }
 
     focus := FocusScope {
+        // Under the changes pane in a narrow window: out of the Tab order, as focus there would be out of sight.
+        focus-on-tab-navigation: !ForgeCover.covers(root.absolute-position.x, root.absolute-position.y, root.width, root.height);
         focus-gained(reason) => {
             if (reason == FocusReason.tab-navigation) {
                 KeyboardFocus.visible = true;
@@ -223,8 +250,12 @@ export component ValueScrubber inherits Rectangle {
                 root.vertical(1);
                 return accept;
             }
-            if (event.text == Key.F10 && event.modifiers.shift) {
+            if (event.text == Key.Menu || (event.text == Key.F10 && event.modifiers.shift)) {
                 root.menu-requested();
+                return accept;
+            }
+            if (event.text == Key.Delete && root.deletable) {
+                root.delete-pressed();
                 return accept;
             }
             reject
@@ -288,9 +319,7 @@ export component ValueScrubber inherits Rectangle {
             + (ForgeState.input-error != "" ? Tokens.space-6 + Tokens.font-size-caption * 8 / 3 : 0px);
         close-policy: PopupClosePolicy.close-on-click-outside;
 
-        Rectangle {
-            background: Tokens.hover-brush;
-            border-radius: Tokens.control-radius;
+        FlyoutSurface {
 
             FocusScope {
                 capture-key-pressed(event) => {
@@ -316,6 +345,13 @@ export component ValueScrubber inherits Rectangle {
                         font-size: Tokens.font-size-caption;
                         color: Tokens.text-muted-brush;
                         overflow: elide;
+
+                        label-touch := TouchArea { }
+
+                        TipTrigger {
+                            text: ForgeState.input-label;
+                            hovered: label-touch.has-hover;
+                        }
                     }
 
                     Rectangle {

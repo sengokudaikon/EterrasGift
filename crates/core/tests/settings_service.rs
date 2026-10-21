@@ -34,6 +34,22 @@ fn an_idle_close_gate_atomically_stops_admission_and_can_resume_after_failure() 
     assert!(service.submit(Change::Retry).is_err());
 }
 
+#[test]
+fn listeners_hear_each_completion_after_it_is_observable() {
+    let temp = tempfile::tempdir().unwrap();
+    let service = service(temp.path());
+    let (heard, hearing) = mpsc::channel();
+    let observer = service.clone();
+    // A listener may read the snapshot (not submit): the completion it hears is already there.
+    service.on_completed(move || heard.send(observer.snapshot().completed).unwrap());
+    let first = service.module("fixture").set_bool("enabled", true).unwrap();
+    let second = service.module("fixture").set_bool("enabled", false).unwrap();
+    assert_eq!(hearing.recv_timeout(DEADLINE).unwrap(), first);
+    assert_eq!(hearing.recv_timeout(DEADLINE).unwrap(), second);
+    assert!(hearing.try_recv().is_err(), "nothing is heard without a completion");
+    service.close();
+}
+
 fn service(temp: &std::path::Path) -> SettingsService {
     SettingsService::new(SettingsStore::open(&temp.join("app"), &temp.join("settings.json"), &[]))
 }

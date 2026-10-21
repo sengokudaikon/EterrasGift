@@ -115,7 +115,6 @@ impl ValueEditor {
             Lookup::Loading => {
                 // Keep the last display while replacement samples arrive. Its
                 // stale scale cannot authorize typing, stepping or dragging.
-                self.dragging = false;
                 self.status = LOADING.into();
             }
             Lookup::Unavailable(reason) => {
@@ -843,7 +842,7 @@ pub struct FieldOption {
     pub implicits: String,
     pub available: bool,
     /// The rarity the item would end with (an identity), which colours the name.
-    pub rarity: String,
+    pub rarity: u8,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -939,7 +938,7 @@ impl FieldDraft {
                 in_game: !game,
                 implicits: String::new(),
                 available: true,
-                rarity: String::new(),
+                rarity: 0,
             },
             FieldOption {
                 value: 1,
@@ -948,7 +947,7 @@ impl FieldDraft {
                 in_game: game,
                 implicits: String::new(),
                 available: true,
-                rarity: String::new(),
+                rarity: 0,
             },
         ];
         FieldDraft::new(uid, FieldKind::Flag, Some(field), name, i64::from(game), options, String::new())

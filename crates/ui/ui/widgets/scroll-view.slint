@@ -1,0 +1,234 @@
+// The C# app's scroll bar: Avalonia.Themes.Fluent 12.1.3's ScrollBar (Controls/ScrollBar.xaml) on the retinted palette
+// (Theme.axaml), drawn over the content's right edge as its auto-hiding ScrollViewer does. At rest it is a 2px thumb in
+// ChromeDisabledLow (TextDisabledColor) between the line buttons' room; the pointer resting on the bar widens it to the full
+// thumb (BaseLow) over a track, with line arrows, and leaving it narrows it again (ScrollBar.ShowDelay/HideDelay). The
+// standard library's fluent-dark ScrollView drew a thumb close to the ground's own colour.
+//
+// `ScrollView` takes the standard one's properties and callback, so it replaces its import; `ListView` is the standard
+// ListView on it (a component named ListView with these properties keeps the compiler's virtualised rows). The C# views
+// disable every horizontal scroll bar, so there is only the vertical one.
+
+import { Tokens } from "../tokens.slint";
+
+enum ScrollZone { outside, line-up, page-up, thumb, page-down, line-down }
+
+component ScrollBar inherits Rectangle {
+    // How far the content can move (its height less the viewport's), the viewport's height, and the content's offset
+    // (0 down to -maximum), as the Flickable keeps it.
+    in property <length> maximum;
+    in property <length> page-size;
+    in-out property <length> value;
+    in property <bool> enabled;
+
+    callback scrolled();
+
+    property <length> size: Tokens.scroll-bar-size;
+    // The thumb travels between the line buttons, whose room stays even while they are hidden (Avalonia's Track in the
+    // grid's middle row), and is never shorter than the bar is wide (the Thumb's MinHeight).
+    property <length> track-length: Math.max(0px, root.height - 2 * root.size);
+    property <length> thumb-length: Math.min(root.track-length, Math.max(root.size, root.maximum <= 0px ? root.track-length : root.track-length * root.page-size / (root.maximum + root.page-size)));
+    property <length> thumb-y: root.size + (root.maximum <= 0px ? 0px : (root.track-length - root.thumb-length) * (-root.value / root.maximum));
+
+    // Expanded after the pointer rests on the bar, collapsed a while after it leaves; at once with motion off.
+    property <bool> wanted: touch.has-hover || root.dragging;
+    property <bool> settled-open;
+    property <bool> expanded: Tokens.motion ? root.settled-open : root.wanted;
+
+    property <bool> dragging;
+    property <ScrollZone> pressed-zone: touch.pressed ? root.press-zone : ScrollZone.outside;
+    property <ScrollZone> press-zone;
+    property <ScrollZone> hover-zone: touch.has-hover ? root.zone-at(touch.mouse-x, touch.mouse-y) : ScrollZone.outside;
+    property <{value: length, maximum: length, y: length}> drag-start;
+
+    pure function zone-at(x: length, y: length) -> ScrollZone {
+        if (y < root.size) {
+            return ScrollZone.line-up;
+        }
+        if (y >= root.height - root.size) {
+            return ScrollZone.line-down;
+        }
+        if (y < root.thumb-y) {
+            return ScrollZone.page-up;
+        }
+        if (y >= root.thumb-y + root.thumb-length) {
+            return ScrollZone.page-down;
+        }
+        // Only the drawn thumb answers the pointer: the collapsed one is its 2px line (Avalonia hit-tests the thumb
+        // after its render transform).
+        if (root.expanded || (x >= thumb.x && x < thumb.x + thumb.width)) {
+            return ScrollZone.thumb;
+        }
+        ScrollZone.outside
+    }
+
+    function scroll-to(target: length) {
+        root.value = Math.max(-root.maximum, Math.min(0px, target));
+        root.scrolled();
+    }
+
+    function save-drag-start() {
+        root.drag-start = { value: -root.value, maximum: root.maximum, y: touch.mouse-y };
+    }
+
+    Timer {
+        interval: Tokens.scroll-bar-show-delay;
+        running: Tokens.motion && root.wanted && !root.settled-open;
+        triggered => {
+            root.settled-open = true;
+        }
+    }
+
+    Timer {
+        interval: Tokens.scroll-bar-hide-delay;
+        running: Tokens.motion && !root.wanted && root.settled-open;
+        triggered => {
+            root.settled-open = false;
+        }
+    }
+
+    // ScrollBarTrackFill behind the whole bar, line buttons included, fading in as it expands.
+    Rectangle {
+        background: Tokens.scroll-bar-track-brush;
+        opacity: root.expanded ? 1 : 0;
+
+        animate opacity { duration: Tokens.scroll-bar-transition-duration; enabled: Tokens.motion; }
+    }
+
+    // The line buttons: ListLow under the pointer, BaseMedium pressed, with BaseHigh arrows (AltHigh while pressed).
+    for button in [{ zone: ScrollZone.line-up, y: 0px, icon: Tokens.icon-scroll-up }, { zone: ScrollZone.line-down, y: root.height - root.size, icon: Tokens.icon-scroll-down }]: Rectangle {
+        x: 0px;
+        y: button.y;
+        width: root.size;
+        height: root.size;
+        opacity: root.expanded ? 1 : 0;
+        background: root.pressed-zone == button.zone ? Tokens.fluent-base-medium-color : root.hover-zone == button.zone ? Tokens.hover-brush : transparent;
+
+        animate opacity { duration: Tokens.scroll-bar-transition-duration; enabled: Tokens.motion; }
+
+        Image {
+            x: (parent.width - self.width) / 2;
+            y: (parent.height - self.height) / 2;
+            width: Tokens.scroll-bar-arrow-size;
+            height: Tokens.scroll-bar-arrow-size;
+            source: button.icon;
+            image-fit: contain;
+            colorize: root.pressed-zone == button.zone ? Tokens.ground-brush : Tokens.text-brush;
+            accessible-role: none;
+        }
+    }
+
+    // ScrollBarPanningThumbBackground at rest, ScrollBarThumbBackgroundColor expanded, BaseMediumLow under the pointer and
+    // BaseMedium while dragged; square, as the C# thumb is.
+    thumb := Rectangle {
+        x: root.expanded ? 0px : root.size - Tokens.scroll-bar-collapsed-inset - Tokens.scroll-bar-collapsed-size;
+        y: root.thumb-y;
+        width: root.expanded ? root.size : Tokens.scroll-bar-collapsed-size;
+        height: root.thumb-length;
+        background: root.dragging ? Tokens.fluent-base-medium-color
+            : root.hover-zone == ScrollZone.thumb ? Tokens.fluent-base-medium-low-color
+            : root.expanded ? Tokens.strong-line-brush : Tokens.text-disabled-brush;
+
+        animate x, width { duration: Tokens.scroll-bar-transition-duration; enabled: Tokens.motion; }
+    }
+
+    touch := TouchArea {
+        enabled: root.enabled;
+
+        // A press acts at once, as the C# RepeatButtons (ClickMode.Press) do: a line, a page towards the pointer, or a drag.
+        pointer-event(event) => {
+            if (event.button == PointerEventButton.left && event.kind == PointerEventKind.down) {
+                root.press-zone = root.zone-at(self.mouse-x, self.mouse-y);
+                if (root.press-zone == ScrollZone.thumb) {
+                    root.save-drag-start();
+                    root.dragging = true;
+                } else if (root.press-zone == ScrollZone.line-up) {
+                    root.scroll-to(root.value + Tokens.scroll-bar-small-change);
+                } else if (root.press-zone == ScrollZone.line-down) {
+                    root.scroll-to(root.value - Tokens.scroll-bar-small-change);
+                } else if (root.press-zone == ScrollZone.page-up) {
+                    root.scroll-to(root.value + root.page-size);
+                } else if (root.press-zone == ScrollZone.page-down) {
+                    root.scroll-to(root.value - root.page-size);
+                }
+            } else if (event.kind == PointerEventKind.up || event.kind == PointerEventKind.cancel) {
+                root.dragging = false;
+            }
+        }
+
+        moved => {
+            if (root.dragging && self.pressed) {
+                // A ListView's height estimate changes as rows are built; start the drag again from there rather than jump.
+                if (root.drag-start.maximum != root.maximum) {
+                    root.save-drag-start();
+                }
+                let travel = root.track-length - root.thumb-length;
+                if (travel > 0px) {
+                    root.scroll-to(-(root.drag-start.value + (self.mouse-y - root.drag-start.y) * (root.maximum / travel)));
+                }
+            }
+        }
+
+        scroll-event(event) => {
+            if (event.delta-y != 0) {
+                root.scroll-to(root.value + event.delta-y);
+                return accept;
+            }
+            reject
+        }
+    }
+}
+
+export component ScrollView {
+    in property <bool> enabled: true;
+    out property <length> visible-width <=> flickable.width;
+    out property <length> visible-height <=> flickable.height;
+    in-out property <length> content-width <=> flickable.content-width;
+    in-out property <length> content-height <=> flickable.content-height;
+    in-out property <length> content-x <=> flickable.content-x;
+    in-out property <length> content-y <=> flickable.content-y;
+    in property <ScrollBarPolicy> vertical-scrollbar-policy: ScrollBarPolicy.as-needed;
+    in property <bool> mouse-drag-pan-enabled <=> flickable.mouse-drag-pan-enabled;
+    // Kept for the standard ScrollView's API (a ListView sets it); the C# scroll bar looks the same with focus.
+    in-out property <bool> has-focus;
+
+    callback scrolled <=> flickable.flicked;
+
+    // The standard ScrollView's sizing, so layouts place it as before.
+    min-height: 50px;
+    min-width: 50px;
+    horizontal-stretch: 1;
+    vertical-stretch: 1;
+    preferred-height: 100%;
+    preferred-width: 100%;
+
+    flickable := Flickable {
+        mouse-drag-pan-enabled: false;
+        content-y <=> vertical-bar.value;
+        width: parent.width;
+        height: parent.height;
+
+        @children
+    }
+
+    // Over the content's right edge, as the C# ScrollViewer lays its auto-hiding bars over the content.
+    vertical-bar := ScrollBar {
+        enabled: root.enabled;
+        x: flickable.x + flickable.width - self.width;
+        y: flickable.y;
+        width: Tokens.scroll-bar-size;
+        height: flickable.height;
+        maximum: flickable.content-height - flickable.height;
+        page-size: flickable.height;
+        visible: root.vertical-scrollbar-policy == ScrollBarPolicy.always-on || (root.vertical-scrollbar-policy == ScrollBarPolicy.as-needed && self.maximum > 0px);
+
+        scrolled => {
+            root.scrolled();
+        }
+    }
+}
+
+export component ListView inherits ScrollView {
+    @children
+    accessible-role: list;
+    accessible-orientation: Orientation.vertical;
+}

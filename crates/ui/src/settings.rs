@@ -2,6 +2,7 @@
 //! locations that wait for "Save locations". `SettingsPage` is the page's state and rules, testable without a window;
 //! `bind` puts it behind the `SettingsState` global.
 
+use crate::models::update_rows;
 use crate::{LocationSetting, MainWindow, MessageTone, ModuleRow, SettingsSectionRow, SettingsState};
 use eg_core::settings::{AppSettings, Locations};
 use eg_core::settings_service::{Change, SaveOutcome, SettingsService, Snapshot};
@@ -9,6 +10,8 @@ use slint::{ComponentHandle, Model, ModelRc, VecModel, Weak};
 use std::cell::{Cell, RefCell};
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 /// What Settings shows of a part of the app it can turn on or off, before loading it: a module that is off is never
 /// loaded.
@@ -33,6 +36,8 @@ pub enum ModuleSection {
     Toggle {
         key: &'static str,
         title: &'static str,
+        /// The switch's accessible name (the C# AutomationProperties.Name), when the title is not it.
+        label: &'static str,
         description: &'static str,
         note: &'static str,
         default: bool,
@@ -42,10 +47,35 @@ pub enum ModuleSection {
     Status {
         title: &'static str,
         description: &'static str,
+        /// What it says without a running module behind it.
         text: &'static str,
         action: &'static str,
+        /// The action's tip, shown while it can run.
+        tip: &'static str,
+        /// Why the action cannot run, beside it while it cannot.
         unavailable: &'static str,
     },
+}
+
+/// What a status section shows now, and whether its action can run.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct LiveStatus {
+    pub text: String,
+    /// The action is available at all: its reason hides.
+    pub can_act: bool,
+    /// The action is running already: the button waits, but the reason stays hidden (C#'s refresh only greys it).
+    pub busy: bool,
+}
+
+/// A running module behind its sections: a switch takes effect the moment it flips, whatever its save does (the C#
+/// sections set their session before saving), and a status section follows the module.
+pub trait ModuleLink {
+    /// The user flipped the switch saved under `key`.
+    fn switched(&self, key: &str, on: bool);
+    /// The status section at `section` as it stands; None keeps its static text.
+    fn status(&self, section: usize) -> Option<LiveStatus>;
+    /// The status section's action.
+    fn act(&self, section: usize);
 }
 
 impl ModuleChoice {
@@ -63,7 +93,7 @@ impl ModuleChoice {
             if let ModuleSection::Toggle { key, .. } = section {
                 for (_, value) in fields.iter().filter(|(name, _)| name.eq_ignore_ascii_case(key)) {
                     if !value.is_boolean() {
-                        return Err(format!("{}: {key} must be true or false. Its settings were left unchanged.", self.title));
+                        return Err(format!("{key} must be true or false in the settings for {}, which were left unchanged.", self.name));
                     }
                 }
             }
@@ -76,7 +106,6 @@ impl ModuleChoice {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum MessageKind {
     Saved,
-    Saving,
     MemoryOnly,
     RestartRequired,
     Error,
@@ -122,6 +151,14 @@ impl Location {
         }
     }
 
+    /// The box's accessible name (the C# AutomationProperties.Name).
+    fn name(self) -> &'static str {
+        match self {
+            Location::ModLibrary => "Mod library folder",
+            location => location.label(),
+        }
+    }
+
     fn caption(self) -> &'static str {
         match self {
             Location::GameExecutable => "Leave empty to find the game automatically.",
@@ -161,7 +198,27 @@ impl Location {
     }
 }
 
+/// Settings' Restart now, as the app's composition reads it once the window has closed: the app then exits with
+/// `eg_core::hosting::REQUESTED_EXIT_CODE` for its launcher to prepare and start it again (the C# `ShutdownCoordinator`
+/// with 42). Offered only under the launcher (`--supervised`).
+#[derive(Clone, Debug, Default)]
+pub struct RestartRequest(Rc<Cell<bool>>);
+
+impl RestartRequest {
+    pub fn requested(&self) -> bool {
+        self.0.get()
+    }
+    fn request(&self) {
+        self.0.set(true);
+    }
+    fn cancel(&self) {
+        self.0.set(false);
+    }
+}
+
 pub struct SettingsPage {
+    /// The running modules behind their sections, by module index.
+    links: std::collections::BTreeMap<usize, Rc<dyn ModuleLink>>,
     service: SettingsService,
     snapshot: Snapshot,
     modules: Vec<ModuleSwitch>,
@@ -170,12 +227,15 @@ pub struct SettingsPage {
     message: String,
     kind: MessageKind,
     can_restart_at_all: bool,
+    restart: RestartRequest,
     edits: [u64; 6],
     location_save: Option<(u64, [u64; 6])>,
     location_error: Option<String>,
     external_error: Option<String>,
     section_edits: std::collections::BTreeMap<(usize, usize), (u64, bool)>,
     close_observed: Option<u64>,
+    /// The last save asked for was the locations', so its success says "Locations saved."; a switch's says nothing.
+    locations_last: bool,
 }
 
 impl SettingsPage {
@@ -186,7 +246,9 @@ impl SettingsPage {
             .into_iter()
             .map(|mut choice| {
                 if let Err(error) = choice.validate(store.saved()) {
-                    choice.problem = Some(error);
+                    // A module that was to start says so as a start that failed (the composition's words); one that is off
+                    // says the reason as it is.
+                    choice.problem.get_or_insert(error);
                 }
                 ModuleSwitch {
                     enabled: store.saved().modules.get(choice.id).copied().unwrap_or(choice.default_on),
@@ -206,24 +268,55 @@ impl SettingsPage {
             "The game folder".into(),
         ];
         let message = store.startup_error().unwrap_or_default().to_owned();
+        // A folder move saved in an earlier run waits for a restart: Restart now is offered, with nothing to say (the C#
+        // page's opening state).
+        let moving = store.saved().migration_source.is_some() || store.saved().mod_library_migration_source.is_some();
         let mut page = Self {
+            links: Default::default(),
             service,
             snapshot,
             modules,
             boxes: Default::default(),
             placeholders,
-            kind: if message.is_empty() { MessageKind::Saved } else { MessageKind::Error },
+            kind: if !message.is_empty() {
+                MessageKind::Error
+            } else if moving {
+                MessageKind::RestartRequired
+            } else {
+                MessageKind::Saved
+            },
             message: message.clone(),
             can_restart_at_all: can_restart,
+            restart: RestartRequest::default(),
             edits: [0; 6],
             location_save: None,
             location_error: None,
             external_error: (!message.is_empty()).then_some(message.clone()),
             section_edits: Default::default(),
             close_observed: None,
+            locations_last: false,
         };
         page.boxes = location_text(page.snapshot.store.saved());
         page
+    }
+
+    /// The settings service, for a module that saves values of its own (the trainer's remembered hook values).
+    pub fn service(&self) -> &SettingsService {
+        &self.service
+    }
+
+    /// Whether Restart now closed the window, for the app to exit asking for a restart.
+    pub fn restart_request(&self) -> RestartRequest {
+        self.restart.clone()
+    }
+
+    /// Links the running module `id` to its sections. The module already started with the saved choices, so linking
+    /// sends nothing; only flips do.
+    pub fn link(mut self, id: &str, link: Rc<dyn ModuleLink>) -> Self {
+        if let Some(index) = self.modules.iter().position(|module| module.choice.id == id && module.enabled_at_start) {
+            self.links.insert(index, link);
+        }
+        self
     }
 
     pub fn module_enabled(&self, index: usize) -> bool {
@@ -244,11 +337,16 @@ impl SettingsPage {
     pub fn kind(&self) -> MessageKind {
         self.kind
     }
+    /// Stays while a save runs, as in the C# page; Restart now waits for the save (`View::restart_when_saved`).
     pub fn can_restart(&self) -> bool {
-        !self.snapshot.saving() && self.kind == MessageKind::RestartRequired && self.can_restart_at_all
+        self.kind == MessageKind::RestartRequired && self.can_restart_at_all
     }
     pub fn saving(&self) -> bool {
         self.service.is_saving()
+    }
+    /// A Save locations is on its way: only it greys the button, as the C# page's own run does (a switch's save doesn't).
+    pub fn saving_locations(&self) -> bool {
+        self.location_save.is_some()
     }
     pub fn can_retry(&self) -> bool {
         !self.saving() && self.snapshot.store.has_pending_write()
@@ -278,6 +376,7 @@ impl SettingsPage {
             return;
         }
         module.enabled = on;
+        self.locations_last = false;
         let result = self.service.submit(Change::ModuleEnabled {
             id: module.choice.id.into(),
             enabled: on,
@@ -296,6 +395,10 @@ impl SettingsPage {
         let Some(ModuleSection::Toggle { key, .. }) = module.choice.sections.get(section_index) else {
             return;
         };
+        if let Some(link) = self.links.get(&module_index) {
+            link.switched(key, on);
+        }
+        self.locations_last = false;
         let result = self.service.module(module.choice.id).set_bool(key, on);
         if let Ok(revision) = result {
             self.section_edits.insert((module_index, section_index), (revision, on));
@@ -317,6 +420,7 @@ impl SettingsPage {
         if let Ok(revision) = result {
             self.location_save = Some((revision, self.edits));
         }
+        self.locations_last = true;
         self.submitted(result);
     }
 
@@ -343,11 +447,7 @@ impl SettingsPage {
 
     fn submitted(&mut self, result: Result<u64, String>) {
         match result {
-            Ok(_) => {
-                self.message = "Saving settings…".into();
-                self.kind = MessageKind::Saving;
-                self.refresh();
-            }
+            Ok(_) => self.refresh(),
             Err(reason) => self.set_error(&reason),
         }
     }
@@ -388,10 +488,14 @@ impl SettingsPage {
         }
         match self.snapshot.outcome.clone() {
             SaveOutcome::Persisted => self.describe_saved(),
-            SaveOutcome::MemoryOnly => {
-                self.message = "Settings changed for this run only. The unreadable file is unchanged; Save locations replaces it.".into();
-                self.kind = MessageKind::MemoryOnly;
-            }
+            // An error the save did not cause, such as the startup one, stays, as `describe_saved` keeps it.
+            SaveOutcome::MemoryOnly => match self.location_error.clone().or_else(|| self.external_error.clone()) {
+                Some(error) => self.set_error(&error),
+                None => {
+                    self.message = "Settings changed for this run only. The unreadable file is unchanged; Save locations replaces it.".into();
+                    self.kind = MessageKind::MemoryOnly;
+                }
+            },
             SaveOutcome::Failed(reason) | SaveOutcome::Faulted(reason) => {
                 let message = self.location_error.clone().unwrap_or_else(|| format!("Settings were not saved: {reason}"));
                 self.set_error(&message);
@@ -440,7 +544,9 @@ impl SettingsPage {
             (true, true) => format!("Saved. Restart Eterra's Gift to use the new locations and turn {turns}."),
             (true, false) => "Saved. Restart Eterra's Gift to use the new locations.".into(),
             (false, true) => format!("Saved. Restart Eterra's Gift to turn {turns}."),
-            (false, false) => "Settings saved.".into(),
+            // As the C# page: a location save says so; a switch save, which shows itself, says nothing.
+            (false, false) if self.locations_last => "Locations saved.".into(),
+            (false, false) => String::new(),
         };
     }
 }
@@ -464,6 +570,15 @@ fn location_text(saved: &AppSettings) -> [String; 6] {
     .map(|path| path.as_ref().map(|path| path.display().to_string()).unwrap_or_default())
 }
 
+/// How often a waiting close looks again.
+const DRAIN: std::time::Duration = std::time::Duration::from_millis(40);
+
+thread_local! {
+    /// The bound pages a finished save wakes, by the id its listener carries (`View::wake_on_saves`).
+    static VIEWS: RefCell<std::collections::HashMap<u64, std::rc::Weak<View>>> = RefCell::default();
+    static NEXT_VIEW: Cell<u64> = const { Cell::new(0) };
+}
+
 /// Puts the page and module-supplied sections behind the window's `SettingsState`.
 pub fn bind(window: &MainWindow, page: SettingsPage) {
     bind_with_close(window, page, None);
@@ -481,45 +596,17 @@ pub(crate) fn bind_with_close(window: &MainWindow, page: SettingsPage, before_cl
         window: window.as_weak(),
         modules: Rc::new(VecModel::default()),
         sections: Rc::new(VecModel::default()),
-        watch: slint::Timer::default(),
+        drain: slint::Timer::default(),
         closing: Cell::new(false),
+        restarting: Cell::new(false),
         before_close,
     });
     state.set_modules(ModelRc::from(view.modules.clone()));
     state.set_sections(ModelRc::from(view.sections.clone()));
     view.show_all();
-    view.watch.start(slint::TimerMode::Repeated, std::time::Duration::from_millis(40), {
-        let view = Rc::downgrade(&view);
-        move || {
-            if let Some(view) = view.upgrade() {
-                let observed = view.page.borrow().snapshot.completed;
-                if view.closing.get() {
-                    let decision = view.close_decision();
-                    match decision {
-                        CloseDecision::Wait => {}
-                        CloseDecision::ShowFailure => {
-                            view.closing.set(false);
-                        }
-                        CloseDecision::Close => {
-                            view.closing.set(false);
-                            if let Some(window) = view.window.upgrade() {
-                                let _ = window.hide();
-                            }
-                            return;
-                        }
-                    }
-                } else {
-                    view.page.borrow_mut().refresh();
-                }
-                if matches!(view.page.borrow().snapshot.outcome, SaveOutcome::Faulted(_)) {
-                    let _ = slint::quit_event_loop();
-                }
-                if view.page.borrow().snapshot.completed != observed {
-                    view.show_all();
-                }
-            }
-        }
-    });
+    view.wake_on_saves();
+    // A save that finished before the listener was there.
+    view.tick();
     window.window().on_close_requested({
         let view = view.clone();
         move || {
@@ -528,6 +615,7 @@ pub(crate) fn bind_with_close(window: &MainWindow, page: SettingsPage, before_cl
                 CloseDecision::Close => slint::CloseRequestResponse::HideWindow,
                 CloseDecision::Wait => {
                     view.closing.set(true);
+                    view.keep_draining();
                     slint::CloseRequestResponse::KeepWindowShown
                 }
                 CloseDecision::ShowFailure => {
@@ -549,6 +637,21 @@ pub(crate) fn bind_with_close(window: &MainWindow, page: SettingsPage, before_cl
         let view = view.clone();
         move |module, section, on| {
             view.page.borrow_mut().flip_setting(module as usize, section as usize, on);
+            view.show();
+        }
+    });
+    // A linked module's state moved on (the trainer's binding says so on each new backend snapshot).
+    state.on_backend_updated({
+        let view = view.clone();
+        move || view.show()
+    });
+    state.on_section_action({
+        let view = view.clone();
+        move |module, section| {
+            let link = view.page.borrow().links.get(&(module as usize)).cloned();
+            if let Some(link) = link {
+                link.act(section as usize);
+            }
             view.show();
         }
     });
@@ -584,9 +687,15 @@ pub(crate) fn bind_with_close(window: &MainWindow, page: SettingsPage, before_cl
             }
         }
     });
-    // TODO(launcher): Restart now exits with 42 for the launcher to start the app again; no Rust launcher exists yet,
-    // so `can-restart` stays false and this is never offered.
-    state.on_restart(|| eprintln!("TODO: Restart now needs the launcher"));
+    // Restart now waits for a save in flight, as the C# command does.
+    state.on_restart({
+        let view = view.clone();
+        move || {
+            view.restarting.set(true);
+            view.restart_when_saved();
+            view.keep_draining();
+        }
+    });
 }
 
 struct View {
@@ -596,11 +705,99 @@ struct View {
     window: Weak<MainWindow>,
     modules: Rc<VecModel<ModuleRow>>,
     sections: Rc<VecModel<SettingsSectionRow>>,
-    watch: slint::Timer,
+    /// Looks again every [`DRAIN`] while a close waits for saves or for Mods, and not otherwise.
+    drain: slint::Timer,
     closing: Cell<bool>,
+    /// Restart now was chosen and waits for the save in flight.
+    restarting: Cell<bool>,
 }
 
 impl View {
+    /// Each finished save wakes the page on the UI thread, whoever asked for it (the trainer saves values of its own).
+    fn wake_on_saves(self: &Rc<Self>) {
+        let id = NEXT_VIEW.replace(NEXT_VIEW.get() + 1);
+        VIEWS.with_borrow_mut(|views| {
+            views.retain(|_, view| view.strong_count() > 0);
+            views.insert(id, Rc::downgrade(self));
+        });
+        // One wake waits at a time: it reads the latest snapshot, however many saves finished before it ran.
+        let queued = Arc::new(AtomicBool::new(false));
+        self.page.borrow().service.on_completed(move || {
+            if queued.swap(true, Ordering::AcqRel) {
+                return;
+            }
+            let waking = queued.clone();
+            let woken = slint::invoke_from_event_loop(move || {
+                waking.store(false, Ordering::Release);
+                if let Some(view) = VIEWS.with_borrow(|views| views.get(&id).and_then(std::rc::Weak::upgrade)) {
+                    view.tick();
+                }
+            });
+            if woken.is_err() {
+                // No event loop (it ended, or never ran): nothing to wake, and the next save may try again.
+                queued.store(false, Ordering::Release);
+            }
+        });
+    }
+
+    /// Takes what the saves came to, and goes on with a close or Restart now waiting for them.
+    fn tick(self: &Rc<Self>) {
+        let observed = self.page.borrow().snapshot.completed;
+        if self.closing.get() {
+            match self.close_decision() {
+                CloseDecision::Wait => {}
+                CloseDecision::ShowFailure => {
+                    self.closing.set(false);
+                    // The failure is shown instead; nothing restarts.
+                    self.page.borrow().restart.cancel();
+                }
+                CloseDecision::Close => {
+                    self.closing.set(false);
+                    self.keep_draining();
+                    if let Some(window) = self.window.upgrade() {
+                        let _ = window.hide();
+                    }
+                    return;
+                }
+            }
+        } else {
+            self.page.borrow_mut().refresh();
+            self.restart_when_saved();
+        }
+        if matches!(self.page.borrow().snapshot.outcome, SaveOutcome::Faulted(_)) {
+            let _ = slint::quit_event_loop();
+        }
+        if self.page.borrow().snapshot.completed != observed {
+            self.show_all();
+        }
+        self.keep_draining();
+    }
+
+    /// A waiting close also waits on Mods, which no save wakes: it looks again on a timer, only while it waits.
+    fn keep_draining(self: &Rc<Self>) {
+        if self.closing.get() && !self.drain.running() {
+            let view = Rc::downgrade(self);
+            self.drain.start(slint::TimerMode::Repeated, DRAIN, move || {
+                if let Some(view) = view.upgrade() {
+                    view.tick();
+                }
+            });
+        } else if !self.closing.get() {
+            self.drain.stop();
+        }
+    }
+
+    fn restart_when_saved(&self) {
+        if !self.restarting.get() || self.page.borrow().saving() {
+            return;
+        }
+        self.restarting.set(false);
+        // The window closes through the ordinary drain, as a close does (and waits as it waits); the app then exits
+        // with 42 for the launcher (`RestartRequest`).
+        self.page.borrow().restart.request();
+        self.closing.set(true);
+    }
+
     fn close_decision(&self) -> CloseDecision {
         if let Some(before_close) = &self.before_close {
             let decision = before_close();
@@ -620,6 +817,7 @@ impl View {
         let page = self.page.borrow();
         LocationSetting {
             label: location.label().into(),
+            name: location.name().into(),
             value: page.location(location).into(),
             placeholder: page.placeholder(location).into(),
             caption: location.caption().into(),
@@ -676,6 +874,7 @@ impl View {
                     ModuleSection::Toggle {
                         key,
                         title,
+                        label,
                         description,
                         note,
                         default,
@@ -683,6 +882,7 @@ impl View {
                         off_text,
                     } => {
                         row.title = (*title).into();
+                        row.label = (*label).into();
                         row.description = (*description).into();
                         row.note = (*note).into();
                         row.toggle = true;
@@ -707,13 +907,20 @@ impl View {
                         description,
                         text,
                         action,
+                        tip,
                         unavailable,
                     } => {
+                        let live = page.links.get(&module_index).and_then(|link| link.status(section_index));
                         row.title = (*title).into();
                         row.description = (*description).into();
-                        row.status = (*text).into();
+                        row.status = live.as_ref().map_or(*text, |live| live.text.as_str()).into();
                         row.action = (*action).into();
-                        row.unavailable = (*unavailable).into();
+                        let available = live.as_ref().is_some_and(|live| live.can_act);
+                        row.action_enabled = available && !live.as_ref().is_some_and(|live| live.busy);
+                        // The tip while the action can run; the reason beside it only while it is unavailable, not while
+                        // it runs.
+                        row.action_tip = if row.action_enabled { (*tip).into() } else { Default::default() };
+                        row.unavailable = if available { Default::default() } else { (*unavailable).into() };
                     }
                 }
                 sections.push(row);
@@ -721,6 +928,7 @@ impl View {
         }
         update_rows(&self.sections, sections);
         state.set_saving(page.saving());
+        state.set_saving_locations(page.saving_locations());
         state.set_can_retry(page.can_retry());
         state.set_locations_changed(page.can_save_locations());
         state.set_message(page.message().into());
@@ -728,7 +936,7 @@ impl View {
             _ if page.message().is_empty() => MessageTone::None,
             // Saving is a note, not a confirmation: the check is for what the game has read back.
             MessageKind::Saved => MessageTone::Note,
-            MessageKind::RestartRequired | MessageKind::Saving | MessageKind::MemoryOnly => MessageTone::Info,
+            MessageKind::RestartRequired | MessageKind::MemoryOnly => MessageTone::Info,
             MessageKind::Error => MessageTone::Error,
         });
         state.set_can_restart(page.can_restart());
@@ -761,18 +969,6 @@ impl View {
     }
 }
 
-fn update_rows<T: Clone + PartialEq + 'static>(model: &VecModel<T>, rows: Vec<T>) {
-    if model.row_count() != rows.len() {
-        model.set_vec(rows);
-    } else {
-        for (index, row) in rows.into_iter().enumerate() {
-            if model.row_data(index).as_ref() != Some(&row) {
-                model.set_row_data(index, row);
-            }
-        }
-    }
-}
-
 #[cfg(all(test, windows))]
 mod tests {
     use super::*;
@@ -798,6 +994,96 @@ mod tests {
         SettingsPage::new(SettingsService::inline(store), vec![trainer(true)], None, None, true)
     }
 
+    /// Records what the page asks of a running module.
+    #[derive(Default)]
+    struct FakeLink {
+        switched: RefCell<Vec<(String, bool)>>,
+        acted: Cell<usize>,
+        status: RefCell<Option<LiveStatus>>,
+    }
+
+    impl ModuleLink for FakeLink {
+        fn switched(&self, key: &str, on: bool) {
+            self.switched.borrow_mut().push((key.into(), on));
+        }
+        fn status(&self, _section: usize) -> Option<LiveStatus> {
+            self.status.borrow().clone()
+        }
+        fn act(&self, _section: usize) {
+            self.acted.set(self.acted.get() + 1);
+        }
+    }
+
+    #[test]
+    fn trainer_switches_reach_the_running_trainer_as_they_flip_whatever_the_save_does() {
+        let temp = tempfile::tempdir().unwrap();
+        let file = temp.path().join("settings.json");
+        let store = SettingsStore::open(&temp.path().join("app"), &file, &[]);
+        let link = Rc::new(FakeLink::default());
+        let mut page =
+            SettingsPage::new(SettingsService::inline(store), vec![crate::trainer_settings::descriptor(true)], None, None, false).link(crate::trainer_settings::ID, link.clone());
+        page.flip_setting(0, 0, false);
+        assert_eq!(*link.switched.borrow(), [("autoConnect".to_owned(), false)]);
+        // A save that fails still leaves the session with the choice, as the C# section sets it before saving.
+        fs::remove_file(&file).unwrap();
+        fs::create_dir(&file).unwrap();
+        page.flip_setting(0, 1, true);
+        assert_eq!(page.kind(), MessageKind::Error);
+        assert_eq!(link.switched.borrow().last(), Some(&("iKnowWhatImDoing".to_owned(), true)));
+        // A status section is not a switch.
+        page.flip_setting(0, 2, true);
+        assert_eq!(link.switched.borrow().len(), 2);
+    }
+
+    #[test]
+    fn a_trainer_that_did_not_start_is_never_linked() {
+        let temp = tempfile::tempdir().unwrap();
+        let store = SettingsStore::open(&temp.path().join("app"), &temp.path().join("settings.json"), &[]);
+        let link = Rc::new(FakeLink::default());
+        let mut page =
+            SettingsPage::new(SettingsService::inline(store), vec![crate::trainer_settings::descriptor(false)], None, None, false).link(crate::trainer_settings::ID, link.clone());
+        page.flip_setting(0, 0, false);
+        assert!(link.switched.borrow().is_empty());
+    }
+
+    #[test]
+    fn a_location_save_says_so_and_a_switch_save_says_nothing() {
+        let temp = tempfile::tempdir().unwrap();
+        let mut page = page(temp.path());
+        let sources = temp.path().join("sources");
+        fs::create_dir(&sources).unwrap();
+        page.edit(Location::ModSources, &sources.display().to_string());
+        page.save_locations();
+        assert_eq!((page.kind(), page.message()), (MessageKind::Saved, "Locations saved."));
+        page.flip_module(0, false);
+        page.flip_module(0, true);
+        assert_eq!((page.kind(), page.message()), (MessageKind::Saved, ""));
+    }
+
+    #[test]
+    fn restart_stays_offered_while_a_save_runs() {
+        let temp = tempfile::tempdir().unwrap();
+        let store = SettingsStore::open(&temp.path().join("app"), &temp.path().join("settings.json"), &[]);
+        let service = SettingsService::new(store);
+        let mut page = SettingsPage::new(service.clone(), vec![trainer(true)], None, None, true);
+        page.flip_module(0, false);
+        service.wait(service.snapshot().submitted);
+        page.refresh();
+        assert!(page.can_restart());
+        let (release, waiting) = std::sync::mpsc::channel::<()>();
+        service
+            .module("fixture")
+            .update(move |_| {
+                waiting.recv_timeout(std::time::Duration::from_secs(5)).unwrap();
+                Ok(())
+            })
+            .unwrap();
+        page.refresh();
+        assert!(page.saving() && page.can_restart());
+        release.send(()).unwrap();
+        service.wait(service.snapshot().submitted);
+    }
+
     #[test]
     fn a_switch_saves_as_it_flips_and_waits_for_a_restart() {
         let temp = tempfile::tempdir().unwrap();
@@ -810,7 +1096,7 @@ mod tests {
         assert_eq!(saved["modules"]["trainer"], false);
         // Back to the default: the choice leaves the file, and nothing waits any more.
         page.flip_module(0, true);
-        assert_eq!(page.message(), "Settings saved.");
+        assert_eq!(page.message(), "");
         assert_eq!(page.kind(), MessageKind::Saved);
         let saved: serde_json::Value = serde_json::from_slice(&fs::read(temp.path().join("settings.json")).unwrap()).unwrap();
         assert!(saved.get("modules").is_none());
@@ -902,7 +1188,9 @@ mod tests {
         let later = temp.path().join("later");
         page.edit(Location::UserData, &first.display().to_string());
         page.save_locations();
-        assert_eq!(page.kind(), MessageKind::Saving);
+        // No transient message: what was said before stays while the save runs.
+        assert_eq!((page.kind(), page.message()), (MessageKind::Saved, ""));
+        assert!(page.saving());
         page.edit(Location::UserData, &later.display().to_string());
         // A newer switch is queued too; neither acknowledgement may erase the newer location edit.
         page.flip_module(0, false);
@@ -967,9 +1255,16 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         fs::write(temp.path().join("settings.json"), b"invalid").unwrap();
         let mut page = page(temp.path());
+        let startup = page.message().to_owned();
+        assert!(!startup.is_empty());
+        // The startup error stays first, as a save that did not cause it never clears it.
         page.flip_module(0, false);
-        assert_eq!(page.kind(), MessageKind::MemoryOnly);
+        assert_eq!((page.kind(), page.message()), (MessageKind::Error, startup.as_str()));
         assert!(!page.can_restart());
+        // Once nothing else is said, the switch is said to hold for this run only.
+        page.external_error = None;
+        page.flip_module(0, true);
+        assert_eq!(page.kind(), MessageKind::MemoryOnly);
         assert!(page.message().contains("this run only"));
     }
 

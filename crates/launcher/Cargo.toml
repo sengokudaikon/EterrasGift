@@ -1,0 +1,36 @@
+[package]
+name = "eterras-gift-launcher"
+description = "The launcher: prepares an immutable generation of the app (built from a checkout), starts it supervised and restarts it only when asked."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+# The entry executable of an install, as the C# EterrasGift.exe is beside EterrasGift.Desktop.exe; the app's own binary
+# is eterras-gift-desktop.exe (eg_core::paths::EXECUTABLE).
+[[bin]]
+name = "eterras-gift"
+path = "src/main.rs"
+
+[dependencies]
+eg-core.workspace = true
+eg-ui.workspace = true
+jiff.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+slint.workspace = true
+uuid.workspace = true
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { workspace = true, features = ["Win32_Foundation", "Win32_UI_WindowsAndMessaging", "Win32_UI_HiDpi"] }
+
+[dev-dependencies]
+image.workspace = true
+tempfile.workspace = true
+
+[[test]]
+name = "captures"
+harness = false
+
+[lints]
+workspace = true

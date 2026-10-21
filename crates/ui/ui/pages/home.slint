@@ -106,13 +106,18 @@ export component HomePage inherits Rectangle {
             alignment: center;
             spacing: Tokens.space-6;
 
-            Image {
-                image-fit: contain;
-                source: HomeState.message-is-error ? Tokens.icon-error : Tokens.icon-info;
-                width: Tokens.icon-size-small;
-                height: Tokens.icon-size-small;
-                y: (parent.height - self.height) / 2;
-                colorize: HomeState.message-is-error ? Tokens.error-brush : Tokens.text-secondary-brush;
+            // Top-aligned with the first line, as the C# icon is (IconBaselineNudge).
+            VerticalLayout {
+                alignment: start;
+                padding-top: Tokens.icon-baseline-nudge.top;
+
+                Image {
+                    image-fit: contain;
+                    source: HomeState.message-is-error ? Tokens.icon-error : Tokens.icon-info;
+                    width: Tokens.icon-size-small;
+                    height: Tokens.icon-size-small;
+                    colorize: HomeState.message-is-error ? Tokens.error-brush : Tokens.text-muted-brush;
+                }
             }
 
             CaptionText {
