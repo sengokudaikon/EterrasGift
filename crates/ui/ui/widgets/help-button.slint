@@ -23,13 +23,18 @@ export component HelpButton inherits Rectangle {
 
     // Tab opened the tip already, so the first press after it means "show it" and keeps it open (`KeyboardToolTips`).
     property <bool> opened-by-focus;
+    // The `Tip.owner` a press took; the trigger below keeps its own for hover and focus.
+    property <int> claim: -1;
+    property <bool> shown: Tip.open && (Tip.owner == root.claim || Tip.owner == trigger.claim);
 
     function toggle() {
-        if (root.opened-by-focus && Tip.open && Tip.text == root.help) {
+        if (root.opened-by-focus && root.shown) {
             root.opened-by-focus = false;
-        } else if (Tip.open && Tip.text == root.help) {
+        } else if (root.shown) {
             Tip.open = false;
         } else {
+            Tip.owner += 1;
+            root.claim = Tip.owner;
             Tip.text = root.help;
             Tip.anchor-x = root.absolute-position.x;
             Tip.anchor-y = root.absolute-position.y;
@@ -83,7 +88,7 @@ export component HelpButton inherits Rectangle {
         }
     }
 
-    TipTrigger {
+    trigger := TipTrigger {
         text: root.help;
         hovered: touch.has-hover;
         focused: focus.has-focus;

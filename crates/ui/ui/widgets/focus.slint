@@ -32,8 +32,9 @@ export component TipTrigger inherits Rectangle {
     property <bool> hover-ready;
     property <bool> keyboard: root.focused && KeyboardFocus.visible;
     property <bool> wanted: root.text != "" && (root.hover-ready || root.keyboard);
-    // The text this trigger last put in the bubble: it closes and updates only its own tip, even after its text changed.
-    property <string> published;
+    // The `Tip.owner` this trigger took when it last put the tip up: it closes and updates only its own tip.
+    out property <int> claim: -1;
+    property <bool> owns: Tip.owner == root.claim;
     // No longer wanted, the tip waits a moment before closing, so the pointer can cross onto the bubble and stay there.
     property <bool> leaving;
 
@@ -43,14 +44,14 @@ export component TipTrigger inherits Rectangle {
         }
     }
     changed text => {
-        if (root.wanted && Tip.open && Tip.text == root.published) {
+        if (root.wanted && Tip.open && root.owns) {
             Tip.text = root.text;
-            root.published = root.text;
         }
     }
     changed wanted => {
         if (root.wanted) {
-            root.published = root.text;
+            Tip.owner += 1;
+            root.claim = Tip.owner;
             Tip.text = root.text;
             Tip.anchor-x = root.absolute-position.x;
             Tip.anchor-y = root.absolute-position.y;
@@ -60,7 +61,7 @@ export component TipTrigger inherits Rectangle {
             Tip.bubble-hovered = false;
             root.leaving = false;
             Tip.open = true;
-        } else if (Tip.text == root.published) {
+        } else if (root.owns) {
             root.leaving = true;
         }
     }
@@ -70,7 +71,7 @@ export component TipTrigger inherits Rectangle {
         running: root.leaving;
         triggered => {
             root.leaving = false;
-            if (!root.wanted && !Tip.bubble-hovered && Tip.text == root.published) {
+            if (!root.wanted && !Tip.bubble-hovered && root.owns) {
                 Tip.open = false;
             }
         }

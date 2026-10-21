@@ -25,7 +25,7 @@ use eg_ui::decorations::freeze_clock;
 use eg_ui::mods::ModsPage;
 use eg_ui::settings::SettingsPage;
 use eg_ui::shell::Page;
-use eg_ui::{App, Eterra, HomeState, LaunchMode as ViewMode, MainWindow, ModsState, Nav, SettingsState, Tokens};
+use eg_ui::{App, Eterra, HomeState, LaunchMode as ViewMode, MainWindow, ModsState, Nav, SettingsState, Tip, Tokens};
 use slint::platform::software_renderer::{MinimalSoftwareWindow, RepaintBufferType};
 use slint::platform::{Key, Platform, PointerEventButton, WindowAdapter, WindowEvent};
 use slint::{ComponentHandle, LogicalPosition, Model, PhysicalSize, SharedString};
@@ -2159,6 +2159,23 @@ fn forge_captures(session: &Session) {
         "T6",
         "Down and Enter pick the next tier"
     );
+    // Down from one tier cell to the next: both tips say "Change tier", and the one left behind closing a moment later
+    // must not take the new cell's with it (the tip is its opener's, not its text's).
+    let forge = open(session, FixtureGame::boots(true), 1100, 700);
+    let tip = forge.ui.global::<Tip>();
+    for _ in 0..40 {
+        if tip.get_open() && tip.get_text() == "Change tier" {
+            break;
+        }
+        session.key(Key::Tab);
+    }
+    assert_eq!(tip.get_text(), "Change tier", "Tab reaches a tier cell");
+    let owner = tip.get_owner();
+    session.key(Key::DownArrow);
+    assert!(tip.get_open() && tip.get_owner() != owner, "the next row's tier cell puts its own tip up");
+    std::thread::sleep(Duration::from_millis(300));
+    settle();
+    assert!(tip.get_open(), "the tier cell's tip stays open under keyboard focus");
 
     let forge = open(session, FixtureGame::boots(true), 1100, 700);
 

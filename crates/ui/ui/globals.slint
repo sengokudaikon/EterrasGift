@@ -62,6 +62,9 @@ export enum TipPlacement { below, right }
 export global Tip {
     in-out property <bool> open;
     in-out property <string> text;
+    // Who put the tip up: each opening takes the next number, and only that opener updates or closes it. Two controls
+    // with the same text are still two owners (keyboard focus moving between them must not close the new one's tip).
+    in-out property <int> owner;
     in-out property <length> anchor-x;
     in-out property <length> anchor-y;
     in-out property <length> anchor-width;
