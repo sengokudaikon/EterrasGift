@@ -24,6 +24,7 @@ use eg_ui::{App, MainWindow};
 use slint::ComponentHandle;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::time::Duration;
 
 /// The app's command line (`spec/shell-and-settings.md` §1).
 #[derive(Debug, Default)]
@@ -100,7 +101,20 @@ fn main() -> Result<(), slint::PlatformError> {
         early_faults.write("Panic", Some(&report), None, None);
     }));
 
-    let store = SettingsStore::open(&root, &SettingsStore::default_file(), &[trainer_settings::LEGACY]);
+    // One app per settings file, taken before anything writes: two would each write their whole settings over the
+    // other's and race on the mods. A restart hands over within the wait. A folder that can't hold the lock doesn't keep
+    // the app from starting.
+    let settings_file = SettingsStore::default_file();
+    let _instance = match eg_core::instance::acquire(&settings_file, Duration::from_secs(5)) {
+        Ok(None) => {
+            eg_ui::system::tell("Eterra's Gift", "Eterra's Gift is already running.");
+            return Ok(());
+        }
+        Ok(Some(lock)) => Some(lock),
+        Err(_) => None,
+    };
+
+    let store = SettingsStore::open(&root, &settings_file, &[trainer_settings::LEGACY]);
     let development = store.paths().is_source_checkout;
     let mut trainer = trainer_settings::descriptor(development);
     // A module that cannot start is reported as the C# DesktopBootstrapper.CreateModules words it, and the app runs

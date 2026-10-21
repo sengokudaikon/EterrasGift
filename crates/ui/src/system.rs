@@ -81,6 +81,20 @@ fn use_dark_title_bar(window: &slint::Window) -> bool {
     true
 }
 
+/// Says something in a Windows message box, for a start that ends before it has a window to say it in.
+#[cfg(windows)]
+pub fn tell(title: &str, text: &str) {
+    use windows_sys::Win32::UI::WindowsAndMessaging::{MB_ICONINFORMATION, MB_OK, MessageBoxW};
+
+    let wide = |text: &str| text.encode_utf16().chain(Some(0)).collect::<Vec<u16>>();
+    let (title, text) = (wide(title), wide(text));
+    // SAFETY: both strings are NUL-terminated and outlive this synchronous call, which has no owner window.
+    unsafe { MessageBoxW(std::ptr::null_mut(), text.as_ptr(), title.as_ptr(), MB_OK | MB_ICONINFORMATION) };
+}
+
+#[cfg(not(windows))]
+pub fn tell(_title: &str, _text: &str) {}
+
 #[cfg(not(windows))]
 fn use_dark_title_bar(_window: &slint::Window) -> bool {
     true
