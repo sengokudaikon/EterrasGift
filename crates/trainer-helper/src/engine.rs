@@ -1,12 +1,13 @@
 use crate::{
     BUILD_ID, BUILD_ID_C,
+    lifecycle::Watchdog,
     server::{self, Backend, Shared},
 };
 use eg_game_access::{
     hooks::{self, HookState, RetainedHook, gateway::CallbackGate},
     il2cpp::{
         AttachedThread, ThreadContext,
-        discovery::{AttackLeechWriteError, DiscoveryError, ForgeWriteError, RuntimeAccess},
+        discovery::{AttackLeechWriteError, DiscoveryError, ForgeWriteError, RuntimeAccess, presence::PlayPresence},
         raw::{self, MethodInfo},
     },
 };
@@ -21,7 +22,7 @@ use std::{
     os::windows::io::{AsRawHandle, FromRawHandle, OwnedHandle},
     ptr::NonNull,
     sync::{
-        OnceLock,
+        Mutex, OnceLock,
         atomic::{AtomicBool, AtomicU64, Ordering::SeqCst},
     },
     time::{Duration, Instant},
@@ -36,6 +37,8 @@ use windows_sys::Win32::System::{
 
 #[cfg(feature = "fixture")]
 use std::sync::atomic::AtomicPtr;
+
+static WATCHDOG: Mutex<Watchdog> = Mutex::new(Watchdog::new());
 
 static STARTED: AtomicBool = AtomicBool::new(false);
 static STATE: OnceLock<Shared> = OnceLock::new();
@@ -380,6 +383,30 @@ fn after_original(state: &Shared) {
             return;
         }
     }
+    let now = Instant::now();
+    let due = WATCHDOG.lock().unwrap_or_else(|p| p.into_inner()).due(now);
+    if due {
+        // Do not hold a Rust lock across a managed getter. All cached descriptors
+        // belong to the retained runtime; only live state is queried here.
+        // SAFETY: this verified callback thread inherits the initialized runtime
+        // and trusted ClientStateManager getter assumptions of bootstrap.
+        let presence = unsafe {
+            (|| {
+                let runtime = Runtime::retained(module()?)?;
+                let thread = runtime.thread();
+                let attached = thread.attach().map_err(|e| e.to_string())?;
+                runtime.access.play_presence(&attached, runtime.invocation).map_err(|e| e.to_string())
+            })()
+        }
+        .unwrap_or(PlayPresence::Unknown);
+        if WATCHDOG.lock().unwrap_or_else(|p| p.into_inner()).observe(now, presence) {
+            state.stop.store(true, SeqCst);
+            return;
+        }
+    }
+    if !WATCHDOG.lock().unwrap_or_else(|p| p.into_inner()).admits_work() {
+        return;
+    }
     if let Some(queue) = QUEUE.get() {
         queue.execute_one(|request| {
             match request {
@@ -627,14 +654,17 @@ struct BootstrapConfig {
     pid: u32,
     status: i32,
     build_id: [u8; 64],
+    owner_pid: u32,
+    reserved: u32,
+    owner_created: u64,
 }
-const _: () = assert!(std::mem::size_of::<BootstrapConfig>() == 80 && std::mem::offset_of!(BootstrapConfig, status) == 12 && std::mem::offset_of!(BootstrapConfig, build_id) == 16);
+const _: () = assert!(std::mem::size_of::<BootstrapConfig>() == 96 && std::mem::offset_of!(BootstrapConfig, status) == 12 && std::mem::offset_of!(BootstrapConfig, build_id) == 16);
 
 #[unsafe(no_mangle)]
 /// Starts one helper load after LoadLibrary returns, on a dedicated bootstrap thread.
 ///
 /// # Safety
-/// `parameter` points to aligned, initialized, exclusively writable 80-byte configuration
+/// `parameter` points to aligned, initialized, exclusively writable 96-byte configuration
 /// storage until this thread exits. The caller selects the supported initialized Unity
 /// runtime, outside loader lock. The collector must be nonmoving, queried caches initialized,
 /// and synchronous operations must exclude graph mutation, reentrancy and native destruction.
@@ -647,11 +677,15 @@ pub unsafe extern "system" fn eg_helper_bootstrap(parameter: *mut c_void) -> u32
     // SAFETY: the caller supplies aligned, nonaliased configuration memory for this thread.
     let config = unsafe { &mut *parameter.cast::<BootstrapConfig>() };
     let result = std::panic::catch_unwind(|| {
-        if config.magic != 0x4547_4253 || config.size != 80
+        if config.magic != 0x4547_4253 || config.size != 96
             // SAFETY: argument-free process identity query.
             || config.pid != unsafe { GetCurrentProcessId() } || config.build_id != BUILD_ID.as_bytes()
+            || config.owner_pid == 0 || config.owner_created == 0 || config.reserved != 0
         {
             return 60;
+        }
+        if state().owner.set((config.owner_pid, config.owner_created)).is_err() {
+            return 1;
         }
         // SAFETY: validated configuration and the caller's supported runtime contract.
         unsafe { start_authorized() }
@@ -704,11 +738,14 @@ mod tests {
         for invalid in 0..4 {
             let mut config = BootstrapConfig {
                 magic: 0x4547_4253,
-                size: 80,
+                size: 96,
                 // SAFETY: local identity query, no game runtime involved.
                 pid: unsafe { GetCurrentProcessId() },
                 status: -1,
                 build_id: BUILD_ID.as_bytes().try_into().unwrap(),
+                owner_pid: 42,
+                reserved: 0,
+                owner_created: 123,
             };
             match invalid {
                 0 => config.magic = 0,

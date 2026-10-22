@@ -296,6 +296,7 @@ pub enum ErrorKind {
     MultipleProcesses,
     Gate,
     Transport,
+    HelperDeparted,
     Protocol,
     Identity,
     RestartRequired,
@@ -374,7 +375,7 @@ impl From<SessionError> for BackendError {
             SessionError::Transport(TransportError {
                 failure: TransportFailure::Departed,
                 delivery,
-            }) => (ErrorKind::Gate, Some(delivery), true),
+            }) => (ErrorKind::HelperDeparted, Some(delivery), true),
             SessionError::Transport(error) => {
                 let retry = error.delivery == Delivery::NotSent && matches!(error.failure, TransportFailure::Busy | TransportFailure::Missing);
                 (ErrorKind::Transport, Some(error.delivery), retry)
@@ -1467,7 +1468,7 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
         .await;
         if let Err(error) = &result {
             self.handle_connection_gate(error);
-            if error.kind != ErrorKind::Superseded && error.kind != ErrorKind::Gate {
+            if !matches!(error.kind, ErrorKind::Superseded | ErrorKind::Gate | ErrorKind::HelperDeparted) {
                 self.fail(error.clone(), Some(target.clone()));
             }
         }
@@ -1600,7 +1601,7 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
         .await;
         if let Err(error) = &result {
             self.handle_connection_gate(error);
-            if error.kind != ErrorKind::Superseded && error.kind != ErrorKind::Gate {
+            if !matches!(error.kind, ErrorKind::Superseded | ErrorKind::Gate | ErrorKind::HelperDeparted) {
                 self.fail(error.clone(), Some(target));
             }
         }
@@ -1632,7 +1633,7 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
         }
     }
     fn handle_connection_gate(&mut self, error: &BackendError) {
-        if error.kind == ErrorKind::Gate && self.connection.is_some() {
+        if matches!(error.kind, ErrorKind::Gate | ErrorKind::HelperDeparted) && self.connection.is_some() {
             self.release_without_io();
             self.state.phase = Phase::WaitingForCharacter;
             self.state.error = Some(error.clone());
@@ -1670,7 +1671,15 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
             );
         }
         self.release_without_io();
-        if error.retryable() {
+        if error.kind == ErrorKind::HelperDeparted {
+            self.state.retained_helper = target.clone().map(|target| RetainedHelper {
+                target,
+                residency: HelperResidency::Gone,
+            });
+            self.state.cleanup = Cleanup::ConfirmedOff;
+            self.blocked = None;
+            self.state.phase = Phase::WaitingForCharacter;
+        } else if error.retryable() {
             self.state.phase = Phase::WaitingForGame;
         } else {
             self.blocked = target;

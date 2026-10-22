@@ -159,3 +159,11 @@ bijective affix reorder may rebase the previous conditional token; every saved a
 and other item field must still match. Foreign changes invalidate the remaining history.
 Tests cover mixed batches, partial refusal, consumed tokens, slot renumbering, class rules,
 override revocation and known/unknown outcomes without accessing Last Epoch.
+
+Helper lifecycle (2026-10-22): owner-bound Unload, raw control-thread exit, retained external
+callback gateway and complete drain, native module/pristine-entry proof, fresh reload after
+Gone, permanent restart fence after Stuck, and backend/menu/shutdown triggers are implemented.
+The cached 250 ms game watchdog distinguishes ClientStateManager Login/CharacterSelect from
+InGame, preserving zone travel; unknown state refuses work and expires after three seconds.
+Plain native 100-cycle reload and blocked-callback retention passed. Authored Unity lifecycle
+execution is the next gate; live Last Epoch testing remains explicitly deferred.

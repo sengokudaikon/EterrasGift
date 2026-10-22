@@ -12,3 +12,6 @@ pub mod server;
 
 #[cfg(all(windows, target_arch = "x86_64"))]
 pub use engine::{eg_helper_bootstrap, eg_helper_build_id};
+
+#[cfg(all(windows, target_arch = "x86_64"))]
+mod lifecycle;

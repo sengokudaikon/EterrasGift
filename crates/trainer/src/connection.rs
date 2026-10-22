@@ -160,8 +160,14 @@ impl<P: HelperPreparer, F: LogFactory> SessionConnector<P, F> {
         session.enable();
         if let Err(error) = session.connect(admission.time()?).await {
             let gone = session.disconnect().await == crate::session::Cleanup::ConfirmedOff;
+            if gone {
+                self.last_attempt.as_mut().unwrap().residency = PreparationResidency::NotLoaded;
+            }
             if gone && matches!(error, crate::session::SessionError::Transport(_)) {
-                return Err(BackendError::waiting(ErrorKind::Gate, "The helper left Last Epoch. Waiting for an offline character."));
+                return Err(BackendError::waiting(
+                    ErrorKind::HelperDeparted,
+                    "The helper left Last Epoch. Waiting for an offline character.",
+                ));
             }
             return Err(error.into());
         }

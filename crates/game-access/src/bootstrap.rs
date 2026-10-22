@@ -15,7 +15,7 @@ use std::{
 };
 
 const CONFIG_MAGIC: u32 = 0x4547_4253;
-pub const CONFIG_SIZE: usize = 80;
+pub const CONFIG_SIZE: usize = 96;
 const MAX_HELPER_BYTES: u64 = 128 * 1024 * 1024;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -75,6 +75,16 @@ impl BootstrapConfig {
         bytes[12..16].copy_from_slice(&(-1_i32).to_le_bytes());
         bytes[16..80].copy_from_slice(source_id.as_bytes());
         Ok(Self { bytes })
+    }
+    /// Bind the owning controller before the first pipe exchange, so its death
+    /// also stops a helper whose Discover handshake never completed.
+    pub fn with_owner(mut self, pid: u32, created: u64) -> Result<Self> {
+        if pid == 0 || created == 0 {
+            return invalid("controller identity");
+        }
+        self.bytes[80..84].copy_from_slice(&pid.to_le_bytes());
+        self.bytes[88..96].copy_from_slice(&created.to_le_bytes());
+        Ok(self)
     }
     pub fn bytes(&self) -> &[u8; CONFIG_SIZE] {
         &self.bytes

@@ -27,12 +27,14 @@ use windows_sys::Win32::{
 
 pub struct Shared {
     pub stop: AtomicBool,
+    pub owner: std::sync::OnceLock<(u32, u64)>,
     pub main_thread: AtomicU64,
 }
 impl Default for Shared {
     fn default() -> Self {
         Self {
             stop: AtomicBool::new(false),
+            owner: std::sync::OnceLock::new(),
             main_thread: AtomicU64::new(0),
         }
     }
@@ -159,7 +161,13 @@ async fn serve(pid: u32, backend: &mut impl Backend, shared: &Shared) -> Result<
     serve_pipe(pid, pipe, backend, shared).await
 }
 async fn serve_pipe(pid: u32, mut pipe: NamedPipeServer, backend: &mut impl Backend, shared: &Shared) -> Result<(), String> {
-    let mut owner: Option<Owner> = None;
+    let mut owner = match shared.owner.get() {
+        Some(&(pid, created)) => match Owner::capture(pid) {
+            Ok(owner) if owner.created == created => Some(owner),
+            _ => return Ok(()),
+        },
+        None => None, // Only authored server/native fixtures omit bootstrap ownership.
+    };
     let mut connected = false;
     let initial_deadline = Instant::now() + Duration::from_secs(10);
     'connections: while !shared.stop.load(SeqCst) {
@@ -173,10 +181,10 @@ async fn serve_pipe(pid: u32, mut pipe: NamedPipeServer, backend: &mut impl Back
             // Disconnect discards kernel data, but Mio can still hold buffered
             // bytes or an outstanding read from this peer. Drain it before a
             // new peer is admitted, so exchanges cannot share buffered input.
-            match wait(finish_connection_io(&mut pipe), shared, None, Duration::from_secs(3)).await {
+            match wait(finish_connection_io(&mut pipe), shared, owner.as_ref(), Duration::from_secs(3)).await {
                 Ok(Ok(())) => {}
                 Ok(Err(error)) => return Err(error.to_string()),
-                Err(Interrupted::Stop) => return Ok(()),
+                Err(Interrupted::Stop | Interrupted::OwnerExited) => return Ok(()),
                 Err(_) => return Err("Previous pipe I/O did not finish after disconnect".into()),
             }
         }
@@ -212,7 +220,7 @@ async fn serve_pipe(pid: u32, mut pipe: NamedPipeServer, backend: &mut impl Back
         };
         // One deadline covers header and bounded body. No ownership, scheduler
         // installation or queue admission can follow a header-only write.
-        let received = wait(read_connection_request(&mut pipe), shared, Some(&client), Duration::from_secs(15)).await;
+        let received = wait(read_connection_request(&mut pipe), shared, owner.as_ref().or(Some(&client)), Duration::from_secs(15)).await;
         let response = match received {
             Ok(Err(RequestReadError::Protocol(_))) => failure(ResponseCode::Refused, "Invalid or unsupported request frame; nothing was run"),
             Ok(Ok(request)) => {
@@ -352,6 +360,38 @@ mod tests {
         fn restore(&mut self) -> Result<(), String> {
             Ok(())
         }
+    }
+
+    #[test]
+    fn bootstrap_owner_can_unload_before_discovery() {
+        tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap().block_on(async {
+            let pid = std::process::id();
+            let owner = Owner::capture(pid).unwrap();
+            let shared = Shared::default();
+            shared.owner.set((pid, owner.created)).unwrap();
+            let client = async {
+                let name = format!(r"\\.\pipe\eterras-gift-{pid}");
+                let mut pipe = loop {
+                    match ClientOptions::new().open(&name) {
+                        Ok(pipe) => break pipe,
+                        Err(error) if matches!(error.raw_os_error(), Some(2 | 231)) => sleep(Duration::from_millis(1)).await,
+                        Err(error) => panic!("owner pipe: {error}"),
+                    }
+                };
+                pipe.write_all(&Request::Unload.encode()).await.unwrap();
+                let mut header = [0; 12];
+                pipe.read_exact(&mut header).await.unwrap();
+                assert_eq!(Response::decode_header(&header).unwrap(), (ResponseCode::Done, 0));
+            };
+            timeout(Duration::from_secs(3), async {
+                let mut backend = RefusingBackend;
+                let (result, ()) = tokio::join!(run(pid, &mut backend, &shared), client);
+                result.unwrap();
+                assert!(shared.stop.load(SeqCst));
+            })
+            .await
+            .unwrap();
+        });
     }
 
     #[test]

@@ -52,13 +52,13 @@ fn image() -> Vec<u8> {
 #[test]
 fn configuration_matches_independent_native_layout_and_strict_reply_contract() {
     let config = BootstrapConfig::new(0x11223344, SOURCE).unwrap();
-    let mut expected = [0; 80];
-    expected[..16].copy_from_slice(&[0x53, 0x42, 0x47, 0x45, 80, 0, 0, 0, 0x44, 0x33, 0x22, 0x11, 255, 255, 255, 255]);
+    let mut expected = [0; 96];
+    expected[..16].copy_from_slice(&[0x53, 0x42, 0x47, 0x45, 96, 0, 0, 0, 0x44, 0x33, 0x22, 0x11, 255, 255, 255, 255]);
     expected[16..80].copy_from_slice(SOURCE.as_bytes());
     assert_eq!(config.bytes(), &expected);
     expected[12..16].fill(0);
     assert_eq!(config.decode_reply(0, &expected).unwrap(), BootstrapReply::Started);
-    for at in (0..12).chain(16..80) {
+    for at in (0..12).chain(16..96) {
         let mut bad = expected;
         bad[at] ^= 1;
         assert!(config.decode_reply(0, &bad).is_err(), "byte {at}")
@@ -158,4 +158,18 @@ fn explicit_compiled_helper_artifact() {
         artifact.bootstrap_rva(),
         artifact.image_size()
     );
+}
+
+#[test]
+fn bootstrap_binds_controller_birth_as_immutable_reply_data() {
+    let config = BootstrapConfig::new(11, SOURCE).unwrap().with_owner(42, 123456).unwrap();
+    assert_eq!(u32::from_le_bytes(config.bytes()[80..84].try_into().unwrap()), 42);
+    assert_eq!(u64::from_le_bytes(config.bytes()[88..96].try_into().unwrap()), 123456);
+    let mut reply = *config.bytes();
+    reply[12..16].copy_from_slice(&0_i32.to_le_bytes());
+    assert!(config.decode_reply(0, &reply).is_ok());
+    reply[88] ^= 1;
+    assert!(config.decode_reply(0, &reply).is_err());
+    assert!(BootstrapConfig::new(11, SOURCE).unwrap().with_owner(0, 1).is_err());
+    assert!(BootstrapConfig::new(11, SOURCE).unwrap().with_owner(42, 0).is_err());
 }

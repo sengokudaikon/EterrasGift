@@ -26,6 +26,7 @@ mod forge;
 mod limits;
 mod locale;
 mod mapping;
+pub mod presence;
 mod write;
 pub use write::ForgeWriteError;
 
@@ -70,6 +71,7 @@ fn unsupported(contract: impl Into<String>) -> DiscoveryError {
 // Only descriptor lookup is cached; object values and native liveness are always read afresh.
 #[derive(Default)]
 struct MetadataCache {
+    presence: std::sync::OnceLock<presence::PresenceBindings>,
     fields: std::sync::Mutex<std::collections::HashMap<(usize, Vec<u8>), usize>>,
 }
 

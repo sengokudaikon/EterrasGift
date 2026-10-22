@@ -707,7 +707,10 @@ impl RemoteHelper {
             Ok(loaded)
         })()
         .map_err(|error| failure("loaded module validation", RemoteDelivery::MayHaveRun, error))?;
-        let config = BootstrapConfig::new(target.pid, artifact.source_id()).map_err(|e| failure("start configuration", RemoteDelivery::MayHaveRun, e))?;
+        let owner = crate::process::capture(std::process::id()).map_err(|e| failure("controller identity", RemoteDelivery::MayHaveRun, e.into()))?;
+        let config = BootstrapConfig::new(target.pid, artifact.source_id())
+            .and_then(|config| config.with_owner(owner.pid, owner.created))
+            .map_err(|e| failure("start configuration", RemoteDelivery::MayHaveRun, e))?;
         let start = (|| {
             admit()?;
             process.verify()?;

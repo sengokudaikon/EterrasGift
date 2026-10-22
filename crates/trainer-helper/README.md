@@ -2,8 +2,9 @@
 
 `eg-trainer-helper` is the explicitly started, in-process side of the trainer. It builds a Windows
 x64 DLL with explicit startup outside loader lock. The desktop connects through the trainer worker.
-`eg_helper_bootstrap` starts the helper once using an 80-byte configuration containing the process
-ID, helper build ID and returned status. Both the native preparer and the authored player use it.
+`eg_helper_bootstrap` starts the helper once using a 96-byte configuration containing game identity,
+helper build ID, returned status and controller PID/birth. Ownership is bound before the first
+pipe request, so controller exit before Discover also stops the helper. Both the native preparer and the authored player use it.
 The supported runtime assumptions are listed in [trainer-interop.md](../../research/trainer-interop.md).
 
 The control OS thread owns its IL2CPP attachment and current-thread Tokio runtime. Discovery
@@ -110,3 +111,9 @@ Validation uses real local pipes with authored child processes plus the disposab
 IL2CPP player in [persistent-player](../../tools/trainer-eval/persistent-player/README.md). All artifacts,
 logs and phase observations stay separate from the installed game. The desktop uses this helper through the serialized trainer service. Historical
 checkpoints are archived; current interop assumptions are in [trainer-interop.md](../../research/trainer-interop.md).
+
+The game-side watchdog polls every 250 ms on the verified dispatcher. It caches the online
+field, app-state getter and enum metadata. Login/CharacterSelect or online state stop the
+helper immediately; InGame remains admitted across zone changes, even with a missing player.
+None/unknown/failed state reads admit no work and unload after three continuous seconds.
+The enum values come from literal metadata, never fixed numeric guesses.
