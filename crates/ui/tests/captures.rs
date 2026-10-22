@@ -1990,9 +1990,9 @@ fn forge_captures(session: &Session) {
     let state = forge.ui.global::<ForgeState>();
     state.set_pane_open(true);
     settle();
-    // The rail's four stops (connected, the connection's words are one), the rarity, then the four values: the names,
-    // tiers and seals lie under the pane.
-    for _ in 0..10 {
+    // The rail's four stops (connected, the connection's words are one), the rarity, then the four values (the names,
+    // tiers and seals lie under the pane) and Add affix, which drafts wait beside.
+    for _ in 0..11 {
         session.key(Key::Tab);
     }
     session.capture(&forge.ui, "item-narrow-pane-keyboard");
@@ -2257,9 +2257,10 @@ fn forge_captures(session: &Session) {
     session.capture(&forge.ui, "item-row-menu-hover");
     session.key(Key::Escape);
 
-    // Del on a focused row's cell removes the affix, as Remove affix does; with a draft pending it does nothing (the
-    // caption under the table says why).
+    // Del on a focused row's cell drafts the affix's removal, as Remove affix does, beside the other drafts; again it
+    // leaves the removal (the row menu keeps the affix). Unlike the C# Forge, adding and removing wait for Apply.
     let affixes = |forge: &Forge| forge.ui.global::<ForgeState>().get_affixes().row_count();
+    let removed = |forge: &Forge, row: usize| forge.ui.global::<ForgeState>().get_affixes().row_data(row).unwrap().removed;
     let forge = open(session, FixtureGame::boots(false), 1100, 700);
     // The rail's four stops (connected, the connection's words are one) and the rarity, then the first row's value and
     // its name.
@@ -2268,11 +2269,26 @@ fn forge_captures(session: &Session) {
     }
     forge.handle.edit(|editor| type_value(editor, Cell::Affix(1), "7.5"));
     session.key(Key::Delete);
-    assert_eq!(affixes(&forge), 4, "Del waits while drafts are pending");
-    forge.handle.edit(ForgeEditor::discard_all);
+    assert!(removed(&forge, 0), "Del on the name drafts the removal");
     session.key(Key::Delete);
-    assert_eq!(affixes(&forge), 3, "Del on the name removes the affix");
-    assert_eq!(forge.game.borrow().writes.len(), 1);
+    assert!(removed(&forge, 0), "Del again leaves the removal drafted");
+    // An addition is a row of its own after the game's (`item-affix-list-drafts`); nothing is written until Apply, which
+    // removes first and adds last.
+    forge.handle.edit(|editor| {
+        assert!(editor.open_add());
+        editor.picker_search("armour");
+        editor.picker_select(0);
+        editor.use_picker();
+    });
+    settle();
+    assert_eq!(affixes(&forge), 5);
+    assert!(forge.game.borrow().writes.is_empty());
+    session.capture(&forge.ui, "item-affix-list-drafts");
+    forge.handle.edit(ForgeEditor::apply);
+    settle();
+    assert_eq!(forge.game.borrow().writes.len(), 3);
+    assert_eq!(affixes(&forge), 4);
+    assert!(!removed(&forge, 0));
 
     // The name opens the affix picker: a search, the incompatible toggle, the first entry (`replace`).
     let forge = open(session, FixtureGame::boots(false), 1100, 700);

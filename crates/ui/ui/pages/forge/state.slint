@@ -36,6 +36,9 @@ export struct AffixRowView {
     value: ValueCell,
     name: string,
     replaced: bool,
+    // Apply adds this affix, which the game does not hold yet; or removes it.
+    added: bool,
+    removed: bool,
     detail: string,
     reforged: bool,
     name-tip: string,

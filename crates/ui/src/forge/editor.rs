@@ -112,7 +112,6 @@ enum StepRow {
     Uniques(Vec<u64>),
     Implicits(Vec<u64>),
     Field(u64),
-    List(String),
     Undo,
 }
 
@@ -567,18 +566,21 @@ impl ForgeEditor {
         self.item.as_ref().is_some_and(ForgeItem::is_exalted)
     }
 
-    fn count_rarity_name(&self) -> String {
-        self.item
-            .as_ref()
-            .map(|item| self.catalog().rarity_name(item.rarity).unwrap_or_else(|| item::crafted_name(item.rarity).into()))
-            .unwrap_or_default()
+    /// A crafted rarity in the game's words, by the byte the unsealed affix count gives it.
+    fn count_rarity_name(&self, rarity: u8) -> String {
+        self.catalog().rarity_name(rarity).unwrap_or_else(|| item::crafted_name(rarity).into())
+    }
+
+    /// The crafted rarity the drafted affixes give the item.
+    fn drafted_count_rarity(&self) -> String {
+        self.drafted_item().map(|item| self.count_rarity_name(item.rarity)).unwrap_or_default()
     }
 
     fn is_draft_exalted(&self) -> bool {
         self.affixes.iter().any(AffixRow::is_exalted)
     }
 
-    /// The rarity in the game's words; on crafted items it follows the drafted tiers.
+    /// The rarity in the game's words; on crafted items it follows the drafted tiers and affixes.
     pub fn rarity_text(&self) -> String {
         let Some(item) = self.item.as_ref() else {
             return String::new();
@@ -586,12 +588,13 @@ impl ForgeEditor {
         if !self.is_crafted() {
             return self.rarity_label(self.drafted_identity().map_or(item.rarity, |(_, _, rarity)| rarity));
         }
-        if self.is_draft_exalted() { "Exalted".into() } else { self.count_rarity_name() }
+        if self.is_draft_exalted() { "Exalted".into() } else { self.drafted_count_rarity() }
     }
 
     pub fn is_rarity_drafted(&self) -> bool {
         if self.is_crafted() {
             self.is_draft_exalted() != self.item.as_ref().is_some_and(ForgeItem::is_exalted)
+                || self.item.as_ref().is_some_and(|item| self.drafted_count_rarity() != self.count_rarity_name(item.rarity))
         } else {
             self.drafted_identity()
                 .is_some_and(|(_, _, rarity)| Some(rarity) != self.item.as_ref().map(|item| item.rarity))
@@ -672,7 +675,7 @@ impl ForgeEditor {
         {
             parts.push(format!("Level {}", status.level_requirement));
         }
-        let affixes = count(item.affixes.len(), "affix", "affixes");
+        let affixes = count(self.affixes.iter().filter(|row| !row.is_removed()).count(), "affix", "affixes");
         parts.push(
             if item
                 .unique
@@ -709,7 +712,7 @@ impl ForgeEditor {
                     _ => format!("Lowers {} affixes below T6", plan.len()),
                 };
                 RarityOption {
-                    name: if to_exalted { "Exalted".into() } else { self.count_rarity_name() },
+                    name: if to_exalted { "Exalted".into() } else { self.drafted_count_rarity() },
                     exalted: to_exalted,
                     detail,
                     available: to_exalted == exalted || !plan.is_empty(),
@@ -722,7 +725,8 @@ impl ForgeEditor {
 
     /// The tier drafts that make the item exalted or not (the C# `ExaltedPlan`): row, tier, seal.
     fn exalted_plan(&self, exalted: bool) -> Vec<(usize, u8, Seal)> {
-        let game_tier = |row: &AffixRow| if row.draft_id() == row.state.id { row.state.tier } else { 0 };
+        // Rows Apply removes take no part; an added affix has no tier in the game.
+        let game_tier = |row: &AffixRow| if !row.added && row.draft_id() == row.state.id { row.state.tier } else { 0 };
         let plan: Vec<(usize, u8, Seal)> = if !exalted {
             self.affixes
                 .iter()
@@ -739,7 +743,7 @@ impl ForgeEditor {
                 .affixes
                 .iter()
                 .enumerate()
-                .filter(|(_, row)| game_tier(row) >= 6)
+                .filter(|(_, row)| row.is_editable() && game_tier(row) >= 6)
                 .map(|(index, row)| {
                     let seal = if row.seal() == Seal::Normal && row.state.seal == Seal::Primordial {
                         Seal::Primordial
@@ -750,7 +754,7 @@ impl ForgeEditor {
                 })
                 .collect();
             if restore.is_empty() {
-                let mut candidates: Vec<(usize, &AffixRow)> = self.affixes.iter().enumerate().filter(|(_, row)| row.max_tier() >= 6).collect();
+                let mut candidates: Vec<(usize, &AffixRow)> = self.affixes.iter().enumerate().filter(|(_, row)| row.is_editable() && row.max_tier() >= 6).collect();
                 candidates.sort_by_key(|(_, row)| (row.seal() != Seal::Normal, std::cmp::Reverse(row.tier())));
                 candidates.into_iter().take(1).map(|(index, row)| (index, 6, row.seal())).collect()
             } else {
@@ -841,21 +845,22 @@ impl ForgeEditor {
         self.selected_unique = index;
     }
 
-    /// Adding and removing write at once, so they wait for drafts to be applied or discarded.
+    /// Adding and removing are drafts like the others (unlike the C# Forge, which wrote them at once): Apply writes them in
+    /// order with the rest, each step naming the slots the earlier ones leave.
     pub fn can_change_affix_list(&self) -> bool {
-        self.can_mutate() && self.item.is_some() && !self.has_pending_drafts() && self.game.supports(&ItemEdit::RemoveAffix(eg_trainer::edits::RemoveAffixEdit { slot: 0, id: 0 }))
+        self.can_mutate() && self.item.is_some() && self.game.supports(&ItemEdit::RemoveAffix(eg_trainer::edits::RemoveAffixEdit { slot: 0, id: 0 }))
     }
 
     pub fn add_affix_tip(&self) -> String {
         match self.item {
             None => String::new(),
-            Some(_) if self.has_pending_drafts() => "Apply or discard the drafts first: adding an affix renumbers the slots they name.".into(),
-            Some(_) => "Add an affix. It is written at once and read back; Undo apply removes it.".into(),
+            Some(_) => "Add an affix as a draft. Apply writes it with the other drafts and reads it back; its value can be set once it is added.".into(),
         }
     }
 
+    /// The free slots the drafted affixes leave.
     pub fn free_slots_text(&self) -> String {
-        let Some(item) = self.item.as_ref() else {
+        let Some(item) = self.drafted_item() else {
             return String::new();
         };
         if matches!(item.rarity, item::UNIQUE | item::SET) {
@@ -874,11 +879,7 @@ impl ForgeEditor {
     }
 
     pub fn affix_list_note(&self) -> String {
-        if self.item.is_some() && self.has_pending_drafts() {
-            "Apply or discard the drafts to add or remove an affix.".into()
-        } else {
-            self.free_slots_text()
-        }
+        self.free_slots_text()
     }
 
     pub fn tier_ladder_note(&self) -> &'static str {
@@ -898,19 +899,20 @@ impl ForgeEditor {
                 (
                     tier,
                     self.catalog().tier_range(row.draft_id(), tier),
-                    row.draft_id() == row.state.id && tier == row.state.tier,
+                    !row.added && row.draft_id() == row.state.id && tier == row.state.tier,
                 )
             })
             .collect()
     }
 
-    /// The range of the value as drafted, "min – max".
+    /// The range of the value as drafted, "min – max"; an added affix's, which the game has no values for yet, is its
+    /// tier's range from game data.
     pub fn range_text(&self, row: usize) -> String {
-        self.affixes
-            .get(row)
-            .filter(|row| row.value.has_mapping())
-            .map(|row| format!("{} – {}", row.value.minimum_text(), row.value.maximum_text()))
-            .unwrap_or_default()
+        match self.affixes.get(row) {
+            Some(row) if row.added => self.catalog().tier_range(row.draft_id(), row.tier()),
+            Some(row) if row.value.has_mapping() => format!("{} – {}", row.value.minimum_text(), row.value.maximum_text()),
+            _ => String::new(),
+        }
     }
 
     pub fn can_change_affix(&self) -> bool {
@@ -933,7 +935,7 @@ impl ForgeEditor {
         if !self.can_change_affix() {
             return;
         }
-        if let Some(affix) = self.affixes.get_mut(row) {
+        if let Some(affix) = self.affixes.get_mut(row).filter(|affix| affix.is_editable()) {
             let seal = affix.seal();
             if affix.draft_tier(tier, seal) {
                 let uid = affix.uid;
@@ -947,7 +949,7 @@ impl ForgeEditor {
         if !self.can_change_affix() {
             return;
         }
-        if let Some(affix) = self.affixes.get_mut(row) {
+        if let Some(affix) = self.affixes.get_mut(row).filter(|affix| affix.is_editable()) {
             let tier = affix.tier();
             if affix.draft_tier(tier, seal) {
                 let uid = affix.uid;
@@ -991,8 +993,9 @@ impl ForgeEditor {
         let unlocked = match cell {
             Cell::Implicit(..) => self.can_mutate() && !self.is_base_drafted(),
             Cell::Field(index) => self.can_change_field(index),
-            Cell::Affix(_) => {
+            Cell::Affix(row) => {
                 self.can_mutate()
+                    && self.affixes.get(row).is_some_and(AffixRow::is_editable)
                     && self.game.supports(&ItemEdit::Roll(eg_trainer::edits::RollEdit {
                         target: RollTarget::Affix,
                         changes: vec![],
@@ -1329,7 +1332,8 @@ impl ForgeEditor {
                 name: row.name(),
                 summary: row.change_summary(),
                 stale: row.is_stale(),
-                effect: row.value.effects(row.roll()),
+                // What the item gains: a removal gains nothing.
+                effect: if row.is_removed() { String::new() } else { row.value.effects(row.roll()) },
             });
         }
         // Modifiers that only mirror a shared roll stay out of the ledger; their rows preview the change in place.
@@ -1398,8 +1402,12 @@ impl ForgeEditor {
         match row {
             RowRef::Affix(uid) => {
                 if let Some(index) = self.affixes.iter().position(|row| row.uid == uid) {
-                    let definition = self.catalog().definition(self.affixes[index].state.id);
-                    self.affixes[index].reset(definition);
+                    if self.affixes[index].added {
+                        self.drop_added(index);
+                    } else {
+                        let definition = self.catalog().definition(self.affixes[index].state.id);
+                        self.affixes[index].reset(definition);
+                    }
                 }
             }
             RowRef::Unique(uid) => {
@@ -1423,6 +1431,18 @@ impl ForgeEditor {
         self.forget(row);
     }
 
+    /// Takes an added row away, keeping the selection on the row it was on, or the one before.
+    fn drop_added(&mut self, index: usize) {
+        let selected = self.selected_affix.and_then(|selected| self.affixes.get(selected)).map(|row| row.uid);
+        let uid = self.affixes.remove(index).uid;
+        self.forget(RowRef::Affix(uid));
+        self.selected_affix = match selected {
+            Some(selected) if selected == uid => index.checked_sub(1).or((!self.affixes.is_empty()).then_some(0)),
+            Some(selected) => self.affixes.iter().position(|row| row.uid == selected),
+            None => None,
+        };
+    }
+
     /// The row menu's "Discard draft".
     pub fn discard_row(&mut self, row: usize) {
         if let Some(entry) = self
@@ -1443,6 +1463,9 @@ impl ForgeEditor {
             return;
         }
         let count = self.drafts().len();
+        while let Some(index) = self.affixes.iter().position(|row| row.added) {
+            self.drop_added(index);
+        }
         for index in 0..self.affixes.len() {
             let definition = self.catalog().definition(self.affixes[index].state.id);
             self.affixes[index].reset(definition);
@@ -1546,7 +1569,12 @@ impl ForgeEditor {
                 let index = self.affixes.iter().position(|r| r.uid == uid);
                 self.select_affix(index);
                 if let Some(index) = index {
-                    self.affixes[index].undo_draft();
+                    // An addition's first step is the addition itself.
+                    if self.affixes[index].added && self.affixes[index].undo_steps() == 1 {
+                        self.drop_added(index);
+                    } else {
+                        self.affixes[index].undo_draft();
+                    }
                 }
             }
             RowRef::Unique(uid) => {
@@ -1681,6 +1709,10 @@ impl ForgeEditor {
         let mut requests = Vec::new();
         for index in 0..self.affixes.len() {
             let row = &self.affixes[index];
+            // The game reads values for affixes it holds; an added one waits for Apply.
+            if row.added {
+                continue;
+            }
             let (slot, id, tier, seal) = (row.slot(), row.draft_id(), row.tier(), row.seal());
             let key = format!("affix:{slot}:{id}:{tier}:{seal:?}");
             let request = RollRequest {
@@ -1773,9 +1805,10 @@ impl ForgeEditor {
         }
         self.item = snapshot.clone();
         let states = snapshot.as_ref().map(|item| item.affixes.clone()).unwrap_or_default();
-        // Rows are slots. After this editor's own write each row follows its affix to the slot the write put it in.
-        let mut old: Vec<AffixRow> = std::mem::take(&mut self.affixes);
-        let selected_uid = self.selected_affix.and_then(|index| old.get(index)).map(|row| row.uid);
+        // Rows are slots. After this editor's own write each row follows its affix to the slot the write put it in. Added
+        // rows wait for Apply after the game's rows, whatever the game reads.
+        let selected_uid = self.selected_affix.and_then(|index| self.affixes.get(index)).map(|row| row.uid);
+        let (added, mut old): (Vec<AffixRow>, Vec<AffixRow>) = std::mem::take(&mut self.affixes).into_iter().partition(|row| row.added);
         if let Some(moves) = moves {
             for row in &mut old {
                 let slot = *moves.get(&row.slot()).unwrap_or(&usize::MAX);
@@ -1800,6 +1833,7 @@ impl ForgeEditor {
         for row in old {
             self.forget(RowRef::Affix(row.uid));
         }
+        self.affixes.extend(added);
         self.selected_affix = selected_uid.and_then(|uid| self.affixes.iter().position(|row| row.uid == uid));
 
         let unique = snapshot.as_ref().and_then(|item| item.unique.clone());
@@ -2155,10 +2189,11 @@ impl ForgeEditor {
         }
     }
 
-    /// Opens the picker to replace a row's affix: a fresh search, All, nothing chosen.
+    /// Opens the picker to replace a row's affix: a fresh search, All, nothing chosen. An added affix is chosen again by
+    /// removing it and adding another; one Apply removes has nothing to replace.
     pub fn open_replace(&mut self, row: usize) -> bool {
         self.select_affix(Some(row));
-        if !self.can_change_affix() || self.selected_affix.is_none() {
+        if !self.can_change_affix() || !self.affixes.get(row).is_some_and(|row| !row.added && row.is_editable()) {
             return false;
         }
         self.picker = Some(Picker::default());
@@ -2214,6 +2249,12 @@ impl ForgeEditor {
             return;
         };
         let slot = if picker.adding { None } else { self.slot_state() };
+        // An addition joins the item as the other drafts leave it; a replacement takes the game's slot.
+        let item = if picker.adding { self.drafted_item() } else { self.item.clone() };
+        let compatible = |definition: &AffixDefinition| {
+            item.as_ref()
+                .is_some_and(|item| self.game.compatibility(item, definition, slot.as_ref(), self.unrestricted()).is_allowed())
+        };
         let search = picker.search.to_lowercase();
         let mut list: Vec<AffixDefinition> = self
             .catalog()
@@ -2230,7 +2271,7 @@ impl ForgeEditor {
                 KindFilter::Prefixes => definition.kind == AffixKind::Prefix,
                 KindFilter::Suffixes => definition.kind == AffixKind::Suffix,
             })
-            .filter(|definition| picker.allow_incompatible || self.compatibility_of(definition, slot.as_ref()).is_allowed())
+            .filter(|definition| picker.allow_incompatible || compatible(definition))
             .cloned()
             .collect();
         list.sort_by(|a, b| a.name.cmp(&b.name));
@@ -2279,21 +2320,29 @@ impl ForgeEditor {
         (!compatibility.is_allowed() && !self.unrestricted()).then(|| OVERRIDE_REQUIRED.to_string())
     }
 
-    /// The addition for a definition, or why not (spec §8 Add).
+    /// The addition the picker drafts for a definition, to the item as the other drafts leave it, or why not (spec §8 Add).
+    /// It starts at tier 5 (or the affix's highest below it) and the middle roll, corrupted where the affix is.
     fn add_edit(&self, definition: &AffixDefinition) -> Result<ItemEdit, String> {
-        let Some(item) = self.item.as_ref() else {
+        let Some(item) = self.drafted_item() else {
             return Err("This affix has no verified definition in the current build.".into());
         };
+        let seal = if definition.category == Category::Corrupted { Seal::Corrupted } else { Seal::Normal };
+        let allow = self.picker.as_ref().is_some_and(|picker| picker.allow_incompatible);
+        self.addition(&item, definition, 5.min(definition.max_tier.clamp(1, 8)), 128, seal, allow)
+    }
+
+    /// The edit that adds an affix to `item`, or why it may not. Where the game would not roll it, or past the free slots
+    /// (a sealed or corrupted affix takes none), it needs "I know what I'm doing", and an incompatible one the picker's
+    /// "Allow incompatible affixes" too.
+    fn addition(&self, item: &ForgeItem, definition: &AffixDefinition, tier: u8, roll: u8, seal: Seal, allow_incompatible: bool) -> Result<ItemEdit, String> {
         if !definition.verified {
             return Err("This affix has no verified definition in the current build.".into());
         }
-        let compatibility = self.compatibility_of(definition, None);
+        let compatibility = self.game.compatibility(item, definition, None, self.unrestricted());
         let (prefixes, suffixes) = item.free_slots();
-        let corrupted = definition.category == Category::Corrupted;
-        let seal = if corrupted { Seal::Corrupted } else { Seal::Normal };
         let slot_free = seal != Seal::Normal || (if definition.kind == AffixKind::Prefix { prefixes } else { suffixes }) > 0;
         let needs_override = compatibility != Compatibility::Allowed || !slot_free;
-        let allow = self.picker.as_ref().is_some_and(|picker| picker.allow_incompatible) && self.unrestricted();
+        let allow = allow_incompatible && self.unrestricted();
         if !compatibility.allows_edit(allow) {
             return Err(if self.unrestricted() {
                 format!("{INCOMPATIBLE}.")
@@ -2311,8 +2360,8 @@ impl ForgeEditor {
         }
         let edit = ItemEdit::AddAffix(eg_trainer::edits::AddAffixEdit {
             id: (definition.id) as i32,
-            tier: (5.min(definition.max_tier.clamp(1, 8))) as i32,
-            roll: 128,
+            tier: i32::from(tier),
+            roll: i32::from(roll),
             seal,
             kind: definition.kind,
             category: Some((definition.category).as_raw()),
@@ -2367,7 +2416,7 @@ impl ForgeEditor {
             })
     }
 
-    /// Uses the chosen entry: a replacement is a draft; an addition is written at once and read back.
+    /// Uses the chosen entry: a replacement drafts the row's affix; an addition drafts a row of its own after the game's.
     pub fn use_picker(&mut self) {
         if !self.can_use_picker() {
             return;
@@ -2378,8 +2427,14 @@ impl ForgeEditor {
         if picker.adding {
             let addition = self.add_edit(&definition);
             self.picker = None;
-            if let Ok(edit) = addition {
-                self.write_affix_list(edit, "Add affix", &definition.name);
+            if let Ok(ItemEdit::AddAffix(add)) = addition {
+                let uid = self.uid();
+                self.affixes
+                    .push(AffixRow::added(uid, definition, add.tier as u8, add.roll as u8, add.seal, picker.allow_incompatible));
+                self.selected_unique = None;
+                self.selected_affix = Some(self.affixes.len() - 1);
+                self.edited(RowRef::Affix(uid));
+                self.resolve_tables();
             }
             return;
         }
@@ -2393,43 +2448,26 @@ impl ForgeEditor {
         }
     }
 
-    /// The row menu's "Remove affix": written at once; Undo apply adds it back.
+    /// The row menu's "Remove affix" and Del: a draft, which Apply writes with the others; the same entry ("Keep affix"),
+    /// Ctrl+Z or discarding it keeps the affix. On an added affix it drops the addition.
     pub fn remove_affix(&mut self, row: usize) {
-        let Some(state) = self.affixes.get(row).map(|row| row.state.clone()) else {
+        if !self.can_change_affix_list() {
+            return;
+        }
+        let Some(affix) = self.affixes.get_mut(row) else {
             return;
         };
-        let name = self.affixes[row].original_name();
-        self.write_affix_list(
-            ItemEdit::RemoveAffix(eg_trainer::edits::RemoveAffixEdit {
-                slot: (state.slot) as i32,
-                id: (state.id) as i32,
-            }),
-            "Remove affix",
-            &name,
-        );
-    }
-
-    fn write_affix_list(&mut self, edit: ItemEdit, name: &str, summary: &str) {
-        if self.item.is_none() {
-            return;
-        }
-        if !self.can_change_affix_list() {
-            if self.has_pending_drafts() {
-                self.say(
-                    "Apply or discard the drafts first: adding or removing an affix renumbers the slots they name.",
-                    MessageKind::Error,
-                );
+        let uid = affix.uid;
+        if affix.added {
+            self.discard_row_ref(RowRef::Affix(uid));
+        } else {
+            // A removed row takes no other draft, so its removal is its latest step.
+            let changed = if affix.is_removed() { affix.undo_draft() } else { affix.draft_removal() };
+            if changed {
+                self.track(RowRef::Affix(uid));
             }
-            return;
         }
-        self.start_batch(
-            vec![Step {
-                name: name.into(),
-                edit,
-                row: StepRow::List(summary.into()),
-            }],
-            false,
-        );
+        self.resolve_tables();
     }
 
     // ----- Apply and Undo apply -----
@@ -2448,12 +2486,27 @@ impl ForgeEditor {
         self.game.write(expected, edit)
     }
 
-    /// The writes Apply makes, in order, or why none may be made (the C# `ApplyPlanner`).
+    /// The item as Apply would leave it, or the game's while the drafts cannot all be applied.
+    fn drafted_item(&self) -> Option<ForgeItem> {
+        let item = self.item.as_ref()?;
+        Some(self.project(item).map_or_else(|_| item.clone(), |(_, projected)| projected))
+    }
+
     fn plan(&self, current: &ForgeItem) -> Result<Vec<Step>, String> {
-        let rows: Vec<&AffixRow> = self.affixes.iter().filter(|row| row.is_dirty()).collect();
+        self.project(current).map(|(steps, _)| steps)
+    }
+
+    /// The writes Apply makes, in order, with the item they leave, or why none may be made (the C# `ApplyPlanner`, which
+    /// had no additions or removals to plan): removals first, so additions find the slots they free, then the affixes
+    /// kept, additions, unique modifiers, implicits and the item fields, the level requirement last. Each step names the
+    /// slots the earlier ones leave and is checked against the item they leave.
+    fn project(&self, current: &ForgeItem) -> Result<(Vec<Step>, ForgeItem), String> {
+        let removed: Vec<&AffixRow> = self.affixes.iter().filter(|row| row.is_removed()).collect();
+        let rows: Vec<&AffixRow> = self.affixes.iter().filter(|row| row.is_dirty() && !row.added && !row.is_removed()).collect();
+        let added: Vec<&AffixRow> = self.affixes.iter().filter(|row| row.added).collect();
         let uniques: Vec<&RollRow> = self.uniques.iter().filter(|row| row.is_dirty()).collect();
         let implicits: Vec<&RollRow> = self.implicits.iter().filter(|row| row.is_dirty()).collect();
-        if let Some(stale) = rows.iter().find(|row| row.is_stale()) {
+        if let Some(stale) = removed.iter().chain(&rows).find(|row| row.is_stale()) {
             return Err(format!(
                 "{} changed in the game after you drafted it. Discard that draft and edit it again. {NOTHING_APPLIED}",
                 stale.name()
@@ -2477,7 +2530,7 @@ impl ForgeEditor {
                 stale.name
             ));
         }
-        let several = rows.len() + uniques.len() + implicits.len() + fields.len() > 1;
+        let several = removed.len() + rows.len() + added.len() + uniques.len() + implicits.len() + fields.len() > 1;
         let refused = |problem: String| {
             if several && !problem.ends_with(NOTHING_APPLIED) {
                 format!("{problem} {NOTHING_APPLIED}")
@@ -2485,6 +2538,7 @@ impl ForgeEditor {
                 problem
             }
         };
+        let named = |row: &AffixRow, problem: String| refused(if several { format!("{}: {problem}", row.name()) } else { problem });
         let mut steps = Vec::new();
         let mut projected = current.clone();
         let mut at: Moves = current.affixes.iter().map(|affix| (affix.slot, affix.slot)).collect();
@@ -2494,11 +2548,26 @@ impl ForgeEditor {
             steps.push(step);
             Ok::<(), String>(())
         };
+        for row in removed {
+            let edit = ItemEdit::RemoveAffix(eg_trainer::edits::RemoveAffixEdit {
+                slot: *at.get(&row.slot()).unwrap_or(&row.slot()) as i32,
+                id: i32::from(row.state.id),
+            });
+            add(
+                &mut steps,
+                &mut projected,
+                &mut at,
+                Step {
+                    name: row.name(),
+                    edit,
+                    row: StepRow::Affix(row.uid),
+                },
+            )
+            .map_err(|problem| named(row, problem))?;
+        }
         for row in rows {
             let slot = *at.get(&row.slot()).unwrap_or(&row.slot());
-            let edit = self
-                .read_affix_edit(row, &projected, slot)
-                .map_err(|problem| refused(if several { format!("{}: {problem}", row.name()) } else { problem }))?;
+            let edit = self.read_affix_edit(row, &projected, slot).map_err(|problem| named(row, problem))?;
             let Some(previous) = projected.affix(slot) else {
                 return Err(refused("That affix is no longer in that slot.".into()));
             };
@@ -2524,6 +2593,22 @@ impl ForgeEditor {
                     row: StepRow::Affix(row.uid),
                 },
             )?;
+        }
+        for row in added {
+            let edit = self
+                .addition(&projected, row.definition(), row.tier(), row.roll(), row.seal(), row.allows_incompatible())
+                .map_err(|problem| named(row, problem))?;
+            add(
+                &mut steps,
+                &mut projected,
+                &mut at,
+                Step {
+                    name: row.name(),
+                    edit,
+                    row: StepRow::Affix(row.uid),
+                },
+            )
+            .map_err(|problem| named(row, problem))?;
         }
         if !uniques.is_empty() {
             match self.unique_edit() {
@@ -2612,7 +2697,7 @@ impl ForgeEditor {
                 },
             )?;
         }
-        Ok(steps)
+        Ok((steps, projected))
     }
 
     /// A row's draft as an edit of the affix now in `slot`, checked against the item as the earlier drafts leave it.
@@ -2644,7 +2729,7 @@ impl ForgeEditor {
                 .affixes
                 .iter()
                 .find(|r| r.uid == *uid)
-                .map(|r| (r.change_summary(), r.value.effects(r.roll())))
+                .map(|r| (r.change_summary(), if r.is_removed() { String::new() } else { r.value.effects(r.roll()) }))
                 .unwrap_or_default(),
             StepRow::Uniques(uids) => {
                 let rows: Vec<&RollRow> = self.uniques.iter().filter(|r| uids.contains(&r.uid)).collect();
@@ -2661,19 +2746,24 @@ impl ForgeEditor {
                 )
             }
             StepRow::Field(uid) => (self.all_fields().find(|f| f.uid == *uid).map(FieldDraft::change_summary).unwrap_or_default(), String::new()),
-            StepRow::List(summary) => (summary.clone(), String::new()),
             StepRow::Undo => (String::new(), String::new()),
         }
     }
 
+    /// A confirmed step's row goes back to following the game. An added row gives way to the game's row for the affix,
+    /// which `complete_write` marks confirmed; a removed one went with its affix.
     fn clear_applied(&mut self, row: &StepRow) {
         match row {
-            StepRow::List(_) | StepRow::Undo => {}
+            StepRow::Undo => {}
             StepRow::Affix(uid) => {
                 if let Some(index) = self.affixes.iter().position(|r| r.uid == *uid) {
-                    let definition = self.catalog().definition(self.affixes[index].state.id);
-                    self.affixes[index].reset(definition);
-                    self.affixes[index].confirmed = true;
+                    if self.affixes[index].added {
+                        self.drop_added(index);
+                    } else {
+                        let definition = self.catalog().definition(self.affixes[index].state.id);
+                        self.affixes[index].reset(definition);
+                        self.affixes[index].confirmed = true;
+                    }
                 }
                 self.forget(RowRef::Affix(*uid));
             }
@@ -2827,7 +2917,17 @@ impl ForgeEditor {
         };
         match outcome {
             WriteOutcome::Confirmed(Some(after)) => {
+                let known: Vec<u64> = self.affixes.iter().map(|row| row.uid).collect();
                 self.update_item(Some(after), Some(&waiting.moves));
+                // The row the game made for an added affix takes the draft's place: confirmed, and selected if it was.
+                if let (StepRow::Affix(uid), ItemEdit::AddAffix(_)) = (&waiting.step.row, &waiting.step.edit)
+                    && let Some(index) = self.affixes.iter().position(|row| !row.added && !known.contains(&row.uid))
+                {
+                    self.affixes[index].confirmed = true;
+                    if self.selected_affix.and_then(|selected| self.affixes.get(selected)).is_some_and(|row| row.uid == *uid) {
+                        self.selected_affix = Some(index);
+                    }
+                }
                 let batch = self.batch.as_mut().unwrap();
                 if !batch.undoing && self.game.undo_depth() < batch.completed + 1 {
                     batch.one_way = true;
@@ -2965,10 +3065,7 @@ impl ForgeEditor {
             self.say("Previous values restored; readback confirmed.", MessageKind::Confirmed);
         } else {
             let names = batch.names.join(", ");
-            let mut message = if batch.total == 1 && self.history.first().is_some_and(|h| h.name == "Add affix" || h.name == "Remove affix") {
-                let entry = &self.history[0];
-                format!("{} confirmed by readback: {}.", entry.name, entry.summary)
-            } else if batch.total == 1 {
+            let mut message = if batch.total == 1 {
                 format!("Edit readback confirmed: {names}.")
             } else {
                 format!("{} drafts applied. Edit readback confirmed for each: {names}.", batch.total)

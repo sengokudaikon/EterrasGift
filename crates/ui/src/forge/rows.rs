@@ -6,6 +6,8 @@ use super::item::{AffixDefinition, AffixState, ItemEdit, ModifierState, RollTarg
 
 /// The status a value cell shows until its table arrives.
 pub const LOADING: &str = "Loading actual values…";
+/// An added affix's value cell: the game reads values for affixes it holds.
+pub const ADDED_VALUE: &str = "Its value can be set once Apply has added it.";
 
 /// Folds a drag's edits into the one Undo step its first edit makes, and tells whether that step is still the row's latest.
 #[derive(Clone, Debug, Default)]
@@ -122,6 +124,14 @@ impl ValueEditor {
                 self.status = format!("Actual values unavailable: {reason}");
             }
         }
+        self.typing = false;
+    }
+
+    /// No table, for a reason other than the game's: the status says why.
+    pub fn defer(&mut self, status: &str) {
+        self.table = None;
+        self.loading = false;
+        self.status = status.into();
         self.typing = false;
     }
 
@@ -262,7 +272,7 @@ pub fn format_number(value: f64) -> String {
     }
 }
 
-/// One affix's draft: what the slot will hold once applied.
+/// One affix's draft: what the slot will hold once applied, or that Apply removes it.
 #[derive(Clone, Debug, PartialEq)]
 struct AffixDraft {
     definition: AffixDefinition,
@@ -270,13 +280,20 @@ struct AffixDraft {
     roll: u8,
     seal: Seal,
     allows_incompatible: bool,
+    removed: bool,
 }
 
-/// One affix slot of the table.
+/// The slot an added row names until Apply writes it: none the game has.
+pub const ADDED_SLOT: usize = usize::MAX;
+
+/// One affix slot of the table, or an affix drafted to be added.
 #[derive(Clone, Debug)]
 pub struct AffixRow {
     pub uid: u64,
+    /// The game's affix; for an added row, the affix as it was picked.
     pub state: AffixState,
+    /// The game does not hold this affix yet: Apply adds it.
+    pub added: bool,
     original: AffixDefinition,
     draft: AffixDraft,
     history: Vec<AffixDraft>,
@@ -294,10 +311,12 @@ impl AffixRow {
             roll: state.roll,
             seal: state.seal,
             allows_incompatible: false,
+            removed: false,
         };
         AffixRow {
             uid,
             state,
+            added: false,
             original: definition,
             draft,
             history: Vec::new(),
@@ -306,6 +325,24 @@ impl AffixRow {
             confirmed: false,
             value: ValueEditor::new(None),
         }
+    }
+
+    /// An affix drafted to be added, at the tier and seal it was picked with. Its value is read once the game holds it.
+    pub fn added(uid: u64, definition: AffixDefinition, tier: u8, roll: u8, seal: Seal, allows_incompatible: bool) -> AffixRow {
+        let state = AffixState {
+            slot: ADDED_SLOT,
+            id: definition.id,
+            tier,
+            roll,
+            kind: definition.kind,
+            seal,
+            category: definition.category,
+        };
+        let mut row = AffixRow::new(uid, state, definition);
+        row.added = true;
+        row.draft.allows_incompatible = allows_incompatible;
+        row.value.defer(ADDED_VALUE);
+        row
     }
 
     pub fn slot(&self) -> usize {
@@ -363,11 +400,26 @@ impl AffixRow {
     }
 
     pub fn is_dirty(&self) -> bool {
-        self.draft_id() != self.state.id || self.draft.tier != self.state.tier || self.draft.roll != self.state.roll || self.draft.seal != self.state.seal
+        self.added
+            || self.draft.removed
+            || self.draft_id() != self.state.id
+            || self.draft.tier != self.state.tier
+            || self.draft.roll != self.state.roll
+            || self.draft.seal != self.state.seal
+    }
+
+    /// Apply removes this affix.
+    pub fn is_removed(&self) -> bool {
+        self.draft.removed
+    }
+
+    /// Tier, seal and value can be drafted: Apply does not remove the affix.
+    pub fn is_editable(&self) -> bool {
+        !self.draft.removed
     }
 
     pub fn is_stale(&self) -> bool {
-        self.is_dirty() && self.draft_base.as_ref().is_some_and(|start| *start != self.state)
+        !self.added && self.is_dirty() && self.draft_base.as_ref().is_some_and(|start| *start != self.state)
     }
 
     pub fn is_pending(&self) -> bool {
@@ -375,41 +427,46 @@ impl AffixRow {
     }
 
     pub fn is_replaced(&self) -> bool {
-        self.draft_id() != self.state.id
+        !self.added && self.draft_id() != self.state.id
     }
 
     pub fn is_tier_drafted(&self) -> bool {
-        self.draft.tier != self.state.tier
+        self.added || self.draft.tier != self.state.tier
     }
 
     pub fn is_seal_drafted(&self) -> bool {
-        self.draft.seal != self.state.seal
+        if self.added {
+            self.draft.seal != Seal::Normal
+        } else {
+            self.draft.seal != self.state.seal
+        }
     }
 
     fn is_roll_drafted(&self) -> bool {
-        self.draft.roll != self.state.roll
+        !self.added && self.draft.roll != self.state.roll
     }
 
     /// The value changes with the affix, its tier or its roll; a seal-only draft leaves it alone.
     pub fn is_value_drafted(&self) -> bool {
-        self.is_replaced() || self.is_tier_drafted() || self.is_roll_drafted()
+        !self.added && (self.is_replaced() || self.is_tier_drafted() || self.is_roll_drafted())
     }
 
     pub fn is_exalted(&self) -> bool {
-        self.draft.tier >= super::item::EXALTED_TIER
+        !self.draft.removed && self.draft.tier >= super::item::EXALTED_TIER
     }
 
+    /// An addition is itself an Undo step: stepping it back takes the row away.
     pub fn can_undo(&self) -> bool {
-        !self.history.is_empty()
+        self.added || !self.history.is_empty()
     }
 
     pub fn undo_steps(&self) -> usize {
-        self.history.len()
+        self.history.len() + usize::from(self.added)
     }
 
     /// The game's roll, while the draft keeps the affix and tier so the two can be compared.
     pub fn game_roll(&self) -> Option<u8> {
-        (self.draft_id() == self.state.id && self.draft.tier == self.state.tier).then_some(self.state.roll)
+        (!self.added && self.draft_id() == self.state.id && self.draft.tier == self.state.tier).then_some(self.state.roll)
     }
 
     /// The game's value from its own table, readable even when a tier draft changed the scale.
@@ -417,7 +474,7 @@ impl AffixRow {
         if let Some(roll) = self.game_roll() {
             return self.value.sample_at(roll).map(|sample| sample.display.clone());
         }
-        (self.draft_id() == self.state.id)
+        (!self.added && self.draft_id() == self.state.id)
             .then(|| self.value.game_table.as_ref().map(|table| table.samples[self.state.roll as usize].display.clone()))
             .flatten()
     }
@@ -433,6 +490,16 @@ impl AffixRow {
     pub fn change_summary(&self) -> String {
         if !self.is_dirty() {
             return String::new();
+        }
+        if self.draft.removed {
+            return "Removed".into();
+        }
+        if self.added {
+            let mut parts = vec!["Added".to_string(), format!("Tier {}", self.draft.tier)];
+            if self.draft.seal != Seal::Normal {
+                parts.push(self.draft.seal.name().into());
+            }
+            return parts.join(" · ");
         }
         let mut parts = Vec::new();
         if self.is_replaced() {
@@ -455,7 +522,12 @@ impl AffixRow {
 
     pub fn name_tip(&self) -> String {
         let stale = if self.is_stale() { "The game changed this affix after you drafted it." } else { "" };
-        [self.name(), self.detail(), stale.to_string(), "Replace with another affix".to_string()]
+        let action = match (self.added, self.draft.removed) {
+            (true, _) => "Added when you apply",
+            (_, true) => "Removed when you apply",
+            _ => "Replace with another affix",
+        };
+        [self.name(), self.detail(), stale.to_string(), action.to_string()]
             .into_iter()
             .filter(|line| !line.is_empty())
             .collect::<Vec<_>>()
@@ -508,6 +580,20 @@ impl AffixRow {
             roll: self.draft.roll,
             seal: self.draft.seal,
             allows_incompatible: allow_incompatible,
+            removed: false,
+        };
+        self.change(next)
+    }
+
+    /// Drafts the affix's removal as one Undo step; the row's other drafts go back to the game's values until it is kept.
+    pub fn draft_removal(&mut self) -> bool {
+        let next = AffixDraft {
+            definition: self.original.clone(),
+            tier: self.state.tier,
+            roll: self.state.roll,
+            seal: self.state.seal,
+            allows_incompatible: false,
+            removed: true,
         };
         self.change(next)
     }
@@ -548,6 +634,7 @@ impl AffixRow {
             roll: self.state.roll,
             seal: self.state.seal,
             allows_incompatible: false,
+            removed: false,
         };
     }
 

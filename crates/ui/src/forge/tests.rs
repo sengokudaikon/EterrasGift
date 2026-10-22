@@ -96,7 +96,9 @@ fn drafts_at_each_class_read_as_the_game_shows_them() {
             .collect::<Vec<_>>(),
         [1]
     );
-    assert_eq!(editor.affix_list_note(), "Apply or discard the drafts to add or remove an affix.");
+    // Drafts no longer hold the affix list still: it shows the free slots.
+    assert_eq!(editor.affix_list_note(), "Free: 1 prefix, 1 suffix");
+    assert!(editor.can_change_affix_list());
     // A ledger entry can be discarded on its own; the other stays.
     editor.discard_entry(1);
     assert_eq!(editor.drafts().len(), 1);
@@ -333,8 +335,89 @@ fn only_affixes_the_base_breaks_count() {
     ));
 }
 
+/// Not the C# Forge, which wrote additions and removals at once: they are drafts in the ledger like the others, Apply
+/// writes removals first and additions last, and one Undo apply takes the whole batch back.
 #[test]
-fn the_picker_replaces_as_a_draft_and_adds_at_once() {
+fn adding_and_removing_are_drafts_applied_in_order_and_undone_together() {
+    use eg_trainer::edits::{AddAffixEdit, ItemEdit, RemoveAffixEdit};
+    let game = FixtureGame::boots(true);
+    let state = game.state.clone();
+    let mut editor = ForgeEditor::new(Box::new(game));
+    editor.clock = || "23:54".into();
+    let before = ids(&editor);
+    assert_eq!(editor.free_slots_text(), "Free: 1 prefix, 1 suffix");
+
+    // An addition is a row of its own after the game's, selected, with no value until the game holds it.
+    assert!(editor.open_add());
+    editor.picker_search("armour");
+    editor.picker_select(0);
+    assert_eq!(editor.picker_status(), "Fits this item.");
+    editor.use_picker();
+    assert!(state.borrow().writes.is_empty());
+    assert_eq!(editor.affixes.len(), 5);
+    assert!(editor.affixes[4].added);
+    assert_eq!(editor.selected_affix(), Some(4));
+    assert_eq!(editor.drafts()[0].summary, "Added · Tier 5");
+    assert!(!editor.can_edit_value(Cell::Affix(4)));
+    // Its range comes from game data, the tier's.
+    assert_eq!(editor.range_text(4), editor.catalog().tier_range(editor.affixes[4].state.id, 5));
+    assert!(!editor.range_text(4).is_empty());
+    assert_ne!(editor.free_slots_text(), "Free: 1 prefix, 1 suffix");
+    // Its tier is a draft like any other, and Ctrl+Z steps it back before taking the addition away.
+    editor.pick_tier(4, 3);
+    assert_eq!(editor.drafts()[0].summary, "Added · Tier 3");
+    editor.undo_draft_only();
+    assert_eq!(editor.drafts()[0].summary, "Added · Tier 5");
+    editor.undo_draft_only();
+    assert_eq!(editor.affixes.len(), 4);
+    assert!(editor.drafts().is_empty());
+
+    // A removal keeps its row, which takes no other draft until the affix is kept again.
+    editor.remove_affix(0);
+    assert!(editor.affixes[0].is_removed());
+    assert_eq!(editor.drafts()[0].summary, "Removed");
+    assert_eq!(editor.summary(), "3 affixes");
+    editor.pick_tier(0, 2);
+    assert!(!editor.can_edit_value(Cell::Affix(0)));
+    assert_eq!(editor.drafts().len(), 1);
+    editor.remove_affix(0);
+    assert!(!editor.affixes[0].is_dirty());
+    editor.remove_affix(0);
+
+    // The freed suffix takes another addition; both wait for one Apply, removal first.
+    assert!(editor.open_add());
+    editor.picker_search("armour");
+    editor.picker_select(0);
+    editor.use_picker();
+    let added = editor.affixes[4].state.id;
+    assert_eq!(editor.apply_text(), "Apply 2 drafts");
+    editor.apply();
+    assert_eq!(
+        editor.message(),
+        ("2 drafts applied. Edit readback confirmed for each: Health, Increased Armour.", MessageKind::Confirmed)
+    );
+    assert!(matches!(
+        state.borrow().writes.as_slice(),
+        [ItemEdit::RemoveAffix(RemoveAffixEdit { slot: 0, id: 25 }), ItemEdit::AddAffix(AddAffixEdit { tier: 5, .. })]
+    ));
+    assert!(editor.drafts().is_empty());
+    assert!(editor.affixes.iter().all(|row| !row.added));
+    assert!(editor.affixes[row(&editor, added)].confirmed);
+    assert_eq!(editor.selected_affix(), Some(row(&editor, added)));
+    assert_eq!(editor.history.iter().map(|entry| entry.summary.as_str()).collect::<Vec<_>>(), ["Added · Tier 5", "Removed"]);
+
+    // One Undo apply restores the item as it was.
+    editor.undo();
+    assert_eq!(editor.message(), ("Previous values restored; readback confirmed.", MessageKind::Confirmed));
+    let mut restored: Vec<u16> = state.borrow().item.as_ref().unwrap().affixes.iter().map(|affix| affix.id).collect();
+    let mut before = before;
+    restored.sort();
+    before.sort();
+    assert_eq!(restored, before);
+}
+
+#[test]
+fn the_picker_replaces_as_a_draft() {
     let game = FixtureGame::boots(false);
     let state = game.state.clone();
     let mut editor = ForgeEditor::new(Box::new(game));
@@ -352,16 +435,7 @@ fn the_picker_replaces_as_a_draft_and_adds_at_once() {
     assert_eq!(editor.drafts()[0].summary, "Fire Resistance → Cold Resistance");
     editor.discard_all();
     assert_eq!(editor.message().0, "Draft discarded.");
-    assert!(editor.open_add());
-    editor.picker_search("armour");
-    editor.picker_select(0);
-    assert_eq!(editor.picker_status(), "Fits this item.");
-    editor.use_picker();
-    assert_eq!(editor.message(), ("Add affix confirmed by readback: Increased Armour.", MessageKind::Confirmed));
-    assert_eq!(editor.affixes.len(), 5);
-    assert_eq!(state.borrow().writes.len(), 1);
-    editor.undo();
-    assert_eq!(editor.affixes.len(), 4);
+    assert!(state.borrow().writes.is_empty());
 }
 
 #[test]
