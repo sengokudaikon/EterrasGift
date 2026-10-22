@@ -1,16 +1,75 @@
-//! One background runtime owns the trainer. The window holds only its queue/watch handle.
+//! Optional trainer startup and its background runtime. The window holds only its queue/watch handle.
+use eg_companion::folders;
 use eg_core::fault::FaultLog;
+use eg_core::settings::SettingsStore;
 use eg_trainer::{
     backend::{self, BackendHandle, BackendOptions, Command, SubmitError, SystemClock},
     sources::FileLogFactory,
 };
 use eg_trainer_host::desktop::{DesktopConnector, GameProcesses, HelperPackage};
+use eg_ui::settings::ModuleChoice;
+use eg_ui::trainer_settings;
 use std::{
     cell::Cell,
-    path::PathBuf,
+    path::{Path, PathBuf},
     thread::{self, JoinHandle},
     time::Duration,
 };
+
+/// The trainer's choice is fixed for this run. Startup faults leave the companion usable and appear in Settings
+/// without changing the saved choice.
+pub struct Module {
+    pub choice: ModuleChoice,
+    chosen: bool,
+}
+
+impl Module {
+    pub fn new(store: &SettingsStore, faults: &FaultLog) -> Self {
+        let mut choice = trainer_settings::descriptor(store.paths().is_source_checkout);
+        let chosen = store.startup_modules().get(trainer_settings::ID).copied().unwrap_or(choice.default_on);
+        // Unreadable trainer settings fail startup rather than falling back to defaults. Off, they are only the
+        // reason Settings gives; the module has not attempted to start.
+        if let Err(error) = choice.validate(store.saved()) {
+            choice.problem = Some(if chosen { start_failed(faults, choice.title, &error) } else { error });
+        }
+        Self { choice, chosen }
+    }
+
+    pub fn start(&mut self, store: &SettingsStore, game: Option<&Path>, no_connect: bool, faults: &FaultLog) -> Option<Trainer> {
+        if !self.chosen || self.choice.problem.is_some() {
+            return None;
+        }
+        let flag = |key, default| eg_core::settings::module_flag(store.module_settings(trainer_settings::ID), key, default);
+        let process_name = game
+            .and_then(|p| p.file_name())
+            .map_or_else(|| "Last Epoch.exe".into(), |name| name.to_string_lossy().into_owned());
+        match Trainer::start(
+            folders::player_log(),
+            store.paths().module_directory(trainer_settings::ID).join("game-data"),
+            game.and_then(Path::parent).map(Path::to_path_buf),
+            process_name,
+            BackendOptions {
+                auto_connect: flag(trainer_settings::AUTO_CONNECT, true),
+                override_enabled: flag(trainer_settings::OVERRIDE, false),
+                ..Default::default()
+            },
+            no_connect,
+            faults.clone(),
+        ) {
+            Ok(runtime) => Some(runtime),
+            Err(error) => {
+                self.choice.problem = Some(start_failed(faults, self.choice.title, &error));
+                None
+            }
+        }
+    }
+}
+
+/// Report a module that cannot start as the C# DesktopBootstrapper.CreateModules words it.
+fn start_failed(faults: &FaultLog, title: &str, error: &str) -> String {
+    faults.write(&format!("Starting {title}"), Some(error), None, Some("Eterra's Gift runs without it."));
+    format!("{title} could not start: {error} Details are in the fault log.")
+}
 
 /// The trainer helper DLL, built with the app (an artifact dependency) and written out only when a game connects. Cargo
 /// names the variable after the dependency and, as the package and library names differ, the library too.
