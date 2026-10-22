@@ -192,3 +192,13 @@ fn hook_response_is_strict_and_supports_empty_clear_result() {
     assert!(HookState::decode_all(&(-1_i32).to_le_bytes()).is_err());
     assert!(HookState::decode_all(&[golden.as_slice(), &[0]].concat()).is_err());
 }
+
+#[test]
+fn unload_is_an_exact_empty_control_frame_without_dispatcher() {
+    let frame = envelope(25, &[]);
+    assert_eq!(Request::Unload.dispatcher(), None);
+    assert_eq!(Request::Unload.encode(), frame);
+    assert_eq!(Request::decode(&frame), Ok(Request::Unload));
+    assert!(Request::decode_header(&envelope(25, &[0])).is_err());
+    assert!(Request::decode(&[frame, vec![0]].concat()).is_err());
+}

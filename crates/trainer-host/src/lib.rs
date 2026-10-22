@@ -3,6 +3,8 @@
 
 #![deny(unsafe_code)]
 
+mod lifecycle;
+
 #[cfg(all(windows, target_arch = "x86_64"))]
 #[allow(unsafe_code)] // Windows/FFI boundary; the rest of the crate denies unsafe.
 pub mod windows;

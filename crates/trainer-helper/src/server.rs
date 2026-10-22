@@ -226,6 +226,7 @@ async fn serve_pipe(pid: u32, mut pipe: NamedPipeServer, backend: &mut impl Back
                         owner = Some(client);
                     }
                     match request {
+                        Request::Unload => failure(ResponseCode::Refused, "Helper unload is not available yet"),
                         Request::Discover => match backend.discover() {
                             Ok(discovery) => match discovery.encode(pid) {
                                 Ok(payload) => Response {

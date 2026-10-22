@@ -48,6 +48,16 @@ impl std::error::Error for TransportError {}
 pub trait Transport {
     /// Immutable target identity, checked by the session before any process access.
     fn target(&self) -> &crate::process::ProcessIdentity;
+    /// Owner-only shutdown, including native proof that the module left and its
+    /// dispatcher was restored. A protocol ACK alone cannot confirm departure.
+    fn unload(&mut self) -> impl Future<Output = Result<(), TransportError>> + Send {
+        async {
+            Err(TransportError {
+                delivery: Delivery::NotSent,
+                failure: TransportFailure::Io(io::Error::other("Transport cannot verify helper departure")),
+            })
+        }
+    }
     /// Implementations must bind server identity before sending and never replay a submitted request.
     fn send(&mut self, request: &Request) -> impl Future<Output = Result<Response, TransportError>> + Send;
 }

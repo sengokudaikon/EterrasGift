@@ -743,6 +743,23 @@ impl RemoteHelper {
     pub fn artifact(&self) -> &HelperArtifact {
         &self.artifact
     }
+    /// Read-only cleanup evidence, permitted after offline admission is lost.
+    /// The retained process handle binds PID and birth; no new load or write runs.
+    pub fn departed(&self, proof: Option<&DispatcherProof>) -> Result<bool> {
+        if self.process.has_exited() {
+            return Ok(true);
+        }
+        let modules = inventory(self.process.target.pid)?;
+        if reject_helpers(&modules, &self.artifact).is_err() {
+            return Ok(false);
+        }
+        // A dispatcher cannot have been installed through VerifiedTransport until
+        // its pristine proof was retained. Without one there was no admitted hook.
+        if let Some(proof) = proof {
+            self.verify_pristine(proof, &mut || Ok(()))?;
+        }
+        Ok(true)
+    }
     pub fn verify_pristine(&self, proof: &DispatcherProof, admit: Admission<'_>) -> Result<()> {
         admit()?;
         if !self.modules.iter().any(|m| same_path(m.path(), proof.module.path()) && m.sha256() == proof.module.sha256()) {

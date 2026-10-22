@@ -414,7 +414,7 @@ fn after_original(state: &Shared) {
                     code: ResponseCode::Done,
                     payload: 0i32.to_le_bytes().to_vec(),
                 },
-                Request::Discover => server::failure(ResponseCode::Refused, "Discovery belongs on the control thread"),
+                Request::Discover | Request::Unload => server::failure(ResponseCode::Refused, "Discovery belongs on the control thread"),
             }
         });
     }

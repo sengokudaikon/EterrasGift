@@ -4,6 +4,8 @@
 
 mod version;
 
+use crate::lifecycle::{RESTART_REQUIRED, Residency};
+
 use eg_game_access::{
     bootstrap::{
         BootstrapError, HelperArtifact,
@@ -24,7 +26,7 @@ use eg_trainer_wire::{
 use std::{
     io,
     sync::{Arc, Mutex},
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 struct RuntimeRecord {
@@ -33,6 +35,7 @@ struct RuntimeRecord {
     dispatcher: Option<DispatcherSpec>,
     proof: Option<DispatcherProof>,
     rejected: Option<String>,
+    residency: Residency,
 }
 struct Retained {
     target: ProcessIdentity,
@@ -104,6 +107,18 @@ impl NativePreparer {
                 known,
             ));
         }
+        if let Some(index) = self.retained.iter().position(|entry| entry.target == *target) {
+            if let RetainedState::Loaded(record) = &self.retained[index].state {
+                let mut record = record.lock().unwrap_or_else(|p| p.into_inner());
+                let gone = record.helper.departed(record.proof.as_ref()).unwrap_or(false);
+                record.residency.observe(Instant::now(), gone, gone);
+            }
+            if matches!(&self.retained[index].state, RetainedState::Loaded(record)
+                if record.lock().unwrap_or_else(|p| p.into_inner()).residency == Residency::Gone)
+            {
+                self.retained.remove(index);
+            }
+        }
         if let Some(entry) = self.retained.iter().find(|entry| entry.target == *target) {
             if entry.profile != *profile {
                 return Err(failed(
@@ -112,7 +127,14 @@ impl NativePreparer {
                 ));
             }
             return match &entry.state {
-                RetainedState::Loaded(record) => Ok(record.clone()),
+                RetainedState::Loaded(record) => {
+                    let state = record.lock().unwrap_or_else(|p| p.into_inner()).residency;
+                    if state == Residency::Loaded {
+                        Ok(record.clone())
+                    } else {
+                        Err(failed(BackendError::blocked(ErrorKind::RestartRequired, RESTART_REQUIRED), entry.residency()))
+                    }
+                }
                 RetainedState::Uncertain(failure) => Err(failed(BackendError::blocked(ErrorKind::RestartRequired, failure.to_string()), entry.residency())),
                 RetainedState::Attempting => Err(failed(
                     BackendError::blocked(ErrorKind::RestartRequired, "prior helper startup did not complete; do not replay"),
@@ -158,6 +180,7 @@ impl NativePreparer {
                     dispatcher: None,
                     proof: None,
                     rejected: None,
+                    residency: Residency::Loaded,
                 }));
                 self.retained[index].state = RetainedState::Loaded(record.clone());
                 Ok(record)
@@ -270,6 +293,28 @@ pub struct VerifiedTransport {
     runtime: Arc<Mutex<RuntimeRecord>>,
 }
 impl Transport for VerifiedTransport {
+    async fn unload(&mut self) -> Result<(), TransportError> {
+        {
+            let mut record = self.runtime.lock().unwrap_or_else(|p| p.into_inner());
+            record.residency.leaving(Instant::now(), Duration::from_secs(10));
+        }
+        // A missing response can mean successful self-unload. Never replay Unload;
+        // only read native departure evidence after this single exchange.
+        let _ = tokio::time::timeout(Duration::from_secs(3), self.pipe.send(&Request::Unload)).await;
+        loop {
+            let state = {
+                let mut record = self.runtime.lock().unwrap_or_else(|p| p.into_inner());
+                let gone = record.helper.departed(record.proof.as_ref()).unwrap_or(false);
+                record.residency.observe(Instant::now(), gone, gone);
+                record.residency
+            };
+            match state {
+                Residency::Gone => return Ok(()),
+                Residency::Stuck => return Err(transport_error(RESTART_REQUIRED, Delivery::MayHaveRun)),
+                _ => tokio::time::sleep(Duration::from_millis(25)).await,
+            }
+        }
+    }
     fn target(&self) -> &ProcessIdentity {
         self.pipe.target()
     }
@@ -277,6 +322,9 @@ impl Transport for VerifiedTransport {
         {
             let record = self.runtime.lock().unwrap_or_else(|poison| poison.into_inner());
             record.helper.artifact().verify_unchanged().map_err(|error| transport_error(error, Delivery::NotSent))?;
+            if record.residency != Residency::Loaded {
+                return Err(transport_error(RESTART_REQUIRED, Delivery::NotSent));
+            }
             if let Some(reason) = &record.rejected {
                 return Err(transport_error(reason, Delivery::NotSent));
             }

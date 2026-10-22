@@ -48,6 +48,8 @@ pub struct DispatcherSpec {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Request {
     Discover,
+    /// Owner-only control request; no dispatcher installation or offline admission required.
+    Unload,
     Status {
         dispatcher: DispatcherSpec,
     },
@@ -81,7 +83,7 @@ pub enum Request {
 impl Request {
     pub fn dispatcher(&self) -> Option<DispatcherSpec> {
         match self {
-            Self::Discover => None,
+            Self::Discover | Self::Unload => None,
             Self::Status { dispatcher }
             | Self::ClearHooks { dispatcher }
             | Self::ReadForge { dispatcher }

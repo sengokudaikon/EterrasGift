@@ -60,6 +60,7 @@ impl Request {
         }
         let operation = match self {
             Self::Discover => 6,
+            Self::Unload => 25,
             Self::Status { .. } => 7,
             Self::ClearHooks { .. } => 15,
             Self::ReadForge { .. } => 18,
@@ -217,10 +218,10 @@ impl Request {
         }
         let operation = reader.u32()?;
         let length = reader.u32()? as usize;
-        if !matches!(operation, 1 | 2 | 4 | 5 | 6 | 7 | 9 | 10 | 11 | 12 | 13 | 14 | 15 | 17 | 18 | 19 | 20 | 21 | 23 | 24)
+        if !matches!(operation, 1 | 2 | 4 | 5 | 6 | 7 | 9 | 10 | 11 | 12 | 13 | 14 | 15 | 17 | 18 | 19 | 20 | 21 | 23 | 24 | 25)
             || length > MAX_BODY
-            || (operation == 6 && length != 0)
-            || (operation != 6 && length < 24)
+            || (matches!(operation, 6 | 25) && length != 0)
+            || (!matches!(operation, 6 | 25) && length < 24)
         {
             return Err(ProtocolError::InvalidData);
         }
@@ -235,8 +236,9 @@ impl Request {
     }
     pub(super) fn decode_body(operation: u32, bytes: &[u8]) -> Result<Self, ProtocolError> {
         let mut body = Reader::new(bytes);
-        if operation == 6 {
-            return Ok(Self::Discover);
+        if matches!(operation, 6 | 25) {
+            body.finish()?;
+            return Ok(if operation == 6 { Self::Discover } else { Self::Unload });
         }
         let dispatcher = DispatcherSpec {
             rva: body.u64()?,
