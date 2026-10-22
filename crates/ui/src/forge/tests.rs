@@ -693,7 +693,12 @@ mod async_writes {
             assert!(!e.can_undo());
             assert_eq!(state.borrow().writes.len(), 1);
             assert_eq!(e.has_item(), matches!(result, ResultKind::NotKept));
-            assert!(e.message().0.contains(if matches!(result, ResultKind::NotKept) { "different values" } else { "uncertain" }));
+            let said = if matches!(result, ResultKind::NotKept) {
+                "did not keep this edit"
+            } else {
+                "could not be confirmed"
+            };
+            assert!(e.message().0.contains(said));
         }
     }
     #[test]
@@ -745,8 +750,8 @@ mod async_writes {
         assert!(e.drafts().is_empty());
         assert!(!e.can_undo());
         assert_eq!(e.history[0].outcome, "Confirmed");
-        assert!(e.message().0.contains("edit was confirmed"));
-        assert!(!e.message().0.contains("uncertain"));
+        assert!(e.message().0.contains("game confirmed the edit"));
+        assert!(!e.message().0.contains("could not be confirmed"));
     }
 
     #[test]

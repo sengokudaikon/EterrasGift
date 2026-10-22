@@ -2967,8 +2967,10 @@ impl ForgeEditor {
                         effect: waiting.effect,
                     },
                 );
+                // Still connected, so no Retry: the item comes back with the game's next report (`refresh`).
                 self.say(
-                    "The edit was confirmed, but its readback cannot be displayed. Remaining drafts and Undo were cleared. Reconnect to read the item again.",
+                    "The game confirmed the edit, but the item could not be shown afterwards. It shows again the next time the game reports it. \
+                     Remaining drafts and Undo were cleared.",
                     MessageKind::Error,
                 );
             }
@@ -2978,20 +2980,26 @@ impl ForgeEditor {
                 self.recover_write(after);
                 self.history = history;
                 self.say(
+                    // The worker logs every edit the game did not keep (`log_forge_outcome`). With the item shown the line sits in the
+                    // action bar, so it stays short; the empty page has room to say where the details are.
                     if displayable {
-                        "The game kept different values. Drafts and Undo were cleared; the observed item is shown."
+                        "The game did not keep this edit; the item shows what it holds now. Drafts and Undo were cleared."
                     } else {
-                        "The game kept different values, but the observed item cannot be displayed. Drafts and Undo were cleared."
+                        "The game did not keep this edit, and the item could not be shown afterwards. It shows again the next time the game reports it. \
+                         Drafts and Undo were cleared; details are in the fault log."
                     },
                     MessageKind::Error,
                 );
             }
-            WriteOutcome::Uncertain { message } => {
+            // The worker's reason goes to the fault log; the page says what it means and what to do. The connection stops, so the
+            // empty forge's one button is Retry.
+            WriteOutcome::Uncertain { .. } => {
                 let history = std::mem::take(&mut self.history);
                 self.recover_write(None);
                 self.history = history;
                 self.say(
-                    format!("Write outcome is uncertain. {message} Drafts and Undo were cleared. Reconnect to read the item again; the write will not be retried."),
+                    "The edit may have reached the game, but it could not be confirmed. Check the item in the game, then Retry to read it again. \
+                     The edit will not be sent again; drafts and Undo were cleared, and details are in the fault log.",
                     MessageKind::Error,
                 );
             }

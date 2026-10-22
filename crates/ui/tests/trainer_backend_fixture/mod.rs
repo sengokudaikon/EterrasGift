@@ -654,7 +654,7 @@ pub(super) fn capture(session: &Session) {
     assert!(forge.invoke_commit_input(field.clone()));
     forge.invoke_toggle_flag(2, true);
     forge.invoke_apply();
-    wait(|| forge.get_message().contains("game kept different values"));
+    wait(|| forge.get_message().contains("game did not keep this edit"));
     assert_eq!(data.writes.load(Ordering::SeqCst), 8);
     assert_eq!(forge.get_drafts().row_count(), 0);
     assert!(!forge.get_can_undo());
@@ -672,7 +672,7 @@ pub(super) fn capture(session: &Session) {
     forge.invoke_toggle_flag(2, true);
     forge.invoke_apply();
     let until = Instant::now() + Duration::from_secs(8);
-    while !forge.get_message().contains("Write outcome is uncertain") {
+    while !forge.get_message().contains("could not be confirmed") {
         assert!(
             Instant::now() < until,
             "uncertain UI: message={:?}, phase={:?}, record={:?}",
@@ -695,7 +695,7 @@ pub(super) fn capture(session: &Session) {
     ui.global::<eg_ui::Connection>().invoke_connect();
     wait(|| handle.snapshot().phase == Phase::Ready && forge.get_has_item());
     assert_eq!(data.writes.load(Ordering::SeqCst), 9);
-    assert!(!forge.get_message().contains("uncertain"));
+    assert!(!forge.get_message().contains("could not be confirmed"));
 
     // Base and identity pickers use the same command and completion path. The base menu lists the implicits each base
     // grants from the captured catalog, and a drafted base previews them (C# `ForgeChoices.BaseOptions`,
