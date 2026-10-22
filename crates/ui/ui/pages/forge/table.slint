@@ -250,10 +250,10 @@ export component AffixRowItem inherits Rectangle {
         menu.open-at(at-x, root.height - Tokens.space-8, true);
     }
 
-    // Del on any of the row's cells removes the affix, as the menu's Remove affix does; while the list can't change the
-    // key does nothing, and the row's note already says why (the C# Forge has no key for it; Mods rows do).
+    // Del on any of the row's cells drafts the affix's removal, as the menu's Remove affix does; on a row already removed
+    // it does nothing, where the menu's entry keeps the affix (the C# Forge has no key for it; Mods rows do).
     function remove() {
-        if (ForgeState.can-change-affix-list) {
+        if (ForgeState.can-change-affix-list && !root.affix.removed) {
             ForgeState.remove-affix(root.index);
         }
     }
@@ -277,18 +277,20 @@ export component AffixRowItem inherits Rectangle {
     // The C# row's ContextMenu, drawn in the app's look (widgets/menu.slint) rather than as a native menu.
     menu := PopupMenu {
         entries: [
-            { title: "Replace affix…", icon: Tokens.icon-replace },
+            { title: "Replace affix…", icon: Tokens.icon-replace, disabled: root.affix.added || root.affix.removed },
             { title: "Discard draft", icon: Tokens.icon-close, disabled: !root.affix.dirty },
             { separator: true },
-            { title: "Remove affix", icon: Tokens.icon-remove, gesture: "Delete", disabled: !ForgeState.can-change-affix-list },
+            root.affix.removed
+                ? { title: "Keep affix", icon: Tokens.icon-undo, disabled: !ForgeState.can-change-affix-list }
+                : { title: "Remove affix", icon: Tokens.icon-remove, gesture: "Delete", disabled: !ForgeState.can-change-affix-list },
         ];
         activated(index) => {
             if (index == 0) {
                 root.open-picker();
             } else if (index == 1) {
                 ForgeState.discard-row(root.index);
-            } else if (index == 3) {
-                root.remove();
+            } else if (index == 3 && ForgeState.can-change-affix-list) {
+                ForgeState.remove-affix(root.index);
             }
         }
     }
@@ -337,6 +339,7 @@ export component AffixRowItem inherits Rectangle {
                         delete-pressed => {
                             root.remove();
                         }
+                        muted: root.affix.removed;
                     }
                 }
 
@@ -373,7 +376,7 @@ export component AffixRowItem inherits Rectangle {
                             Text {
                                 text: root.affix.name;
                                 font-size: Tokens.font-size-value;
-                                color: root.affix.replaced ? Tokens.draft-brush : Tokens.text-brush;
+                                color: root.affix.removed ? Tokens.text-disabled-brush : root.affix.replaced || root.affix.added ? Tokens.draft-brush : Tokens.text-brush;
                                 overflow: elide;
                             }
 
@@ -417,6 +420,28 @@ export component AffixRowItem inherits Rectangle {
                                         easing: Settle.curve;
                                         enabled: Tokens.motion;
                                     }
+                                }
+                            }
+
+                            // An addition or a removal waits for Apply like any draft; the row says which, in words.
+                            if root.affix.added || root.affix.removed: HorizontalLayout {
+                                spacing: Tokens.space-4;
+                                alignment: start;
+
+                                Image {
+                                    width: Tokens.icon-size-tiny;
+                                    height: Tokens.icon-size-tiny;
+                                    y: (parent.height - self.height) / 2;
+                                    image-fit: contain;
+                                    source: root.affix.added ? Tokens.icon-add : Tokens.icon-remove;
+                                    colorize: Tokens.draft-brush;
+                                }
+
+                                Text {
+                                    text: root.affix.added ? "Added on Apply" : "Removed on Apply";
+                                    font-size: Tokens.font-size-caption;
+                                    color: Tokens.draft-brush;
+                                    overflow: elide;
                                 }
                             }
 
@@ -501,7 +526,8 @@ export component AffixRowItem inherits Rectangle {
                             text: root.affix.tier;
                             font-size: Tokens.font-size-value;
                             // An exalted tier keeps the rarity's colour even drafted: the C# `.exalted` style follows `.draft`.
-                            color: root.affix.exalted ? Tokens.rarity-exalted-brush : root.affix.tier-drafted ? Tokens.draft-brush : Tokens.text-brush;
+                            color: root.affix.removed ? Tokens.text-disabled-brush
+                                : root.affix.exalted ? Tokens.rarity-exalted-brush : root.affix.tier-drafted ? Tokens.draft-brush : Tokens.text-brush;
                         }
                     }
 
@@ -568,7 +594,8 @@ export component AffixRowItem inherits Rectangle {
 
                         Text {
                             text: root.affix.seal;
-                            color: root.affix.seal-drafted ? Tokens.draft-brush : root.affix.sealed ? Tokens.text-secondary-brush : Tokens.text-muted-brush;
+                            color: root.affix.removed ? Tokens.text-disabled-brush
+                                : root.affix.seal-drafted ? Tokens.draft-brush : root.affix.sealed ? Tokens.text-secondary-brush : Tokens.text-muted-brush;
                             overflow: elide;
                         }
                     }

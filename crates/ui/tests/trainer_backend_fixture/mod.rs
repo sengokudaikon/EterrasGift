@@ -792,7 +792,7 @@ pub(super) fn capture(session: &Session) {
     forge.invoke_undo();
     wait(|| !forge.get_can_undo() && data.item.lock().unwrap().as_ref().unwrap().affixes.iter().all(|a| a.tier == 5 && a.seal == 0));
     assert_eq!(data.item.lock().unwrap().as_ref().unwrap().affixes.iter().map(|a| a.id).collect::<Vec<_>>(), vec![4, 1]);
-    // Adding and removing write immediately, with the same asynchronous outcomes.
+    // Adding and removing are drafts Apply writes (the C# Forge wrote them at once), with the same asynchronous outcomes.
     *data.item.lock().unwrap() = Some(item("Add and remove", 24));
     command(&handle, Command::ReadForge, || true);
     wait(|| forge.get_item_name() == "Add and remove");
@@ -805,14 +805,22 @@ pub(super) fn capture(session: &Session) {
     session.capture(&ui, "backend-forge-add-picker");
     session.key(Key::DownArrow);
     session.key(Key::Return);
-    wait(|| forge.get_can_undo() && data.item.lock().unwrap().as_ref().unwrap().affixes.len() == 2);
+    assert!(forge.get_affixes().row_data(1).unwrap().added);
+    assert_eq!(data.item.lock().unwrap().as_ref().unwrap().affixes.len(), 1, "the addition waits for Apply");
+    assert_eq!(forge.get_rarity_text(), "Magic");
+    session.capture(&ui, "backend-forge-add-drafted");
+    forge.invoke_apply();
+    wait(|| forge.get_undo_text() == "Undo apply" && data.item.lock().unwrap().as_ref().unwrap().affixes.len() == 2);
     assert_eq!(data.item.lock().unwrap().as_ref().unwrap().rarity, 2);
     session.capture(&ui, "backend-forge-added");
     forge.invoke_undo();
     wait(|| !forge.get_can_undo() && forge.get_can_change_affix_list() && data.item.lock().unwrap().as_ref().unwrap().affixes.len() == 1);
     assert_eq!(data.item.lock().unwrap().as_ref().unwrap().rarity, 1);
     forge.invoke_remove_affix(0);
-    wait(|| forge.get_can_undo() && data.item.lock().unwrap().as_ref().unwrap().affixes.is_empty());
+    assert!(forge.get_affixes().row_data(0).unwrap().removed);
+    assert_eq!(forge.get_rarity_text(), "Normal");
+    forge.invoke_apply();
+    wait(|| forge.get_undo_text() == "Undo apply" && data.item.lock().unwrap().as_ref().unwrap().affixes.is_empty());
     assert_eq!(data.item.lock().unwrap().as_ref().unwrap().rarity, 0);
     session.capture(&ui, "backend-forge-removed-last");
     session.resize(680, 580);
@@ -829,17 +837,22 @@ pub(super) fn capture(session: &Session) {
     forge.invoke_picker_search_edited("Health".into());
     forge.invoke_picker_select(0);
     forge.invoke_use_picker();
-    wait(|| forge.get_can_undo() && data.item.lock().unwrap().as_ref().unwrap().affixes.len() == 2);
+    forge.invoke_apply();
+    wait(|| forge.get_undo_text() == "Undo apply" && data.item.lock().unwrap().as_ref().unwrap().affixes.len() == 2);
     assert_eq!(data.item.lock().unwrap().as_ref().unwrap().affixes.iter().map(|a| a.id).collect::<Vec<_>>(), vec![1, 1]);
     forge.invoke_undo();
     wait(|| !forge.get_can_undo() && forge.get_can_change_affix_list() && data.item.lock().unwrap().as_ref().unwrap().affixes.len() == 1);
     assert_eq!(data.item.lock().unwrap().as_ref().unwrap().affixes[0].roll, 171);
     command(&handle, Command::SetOverride(false), || true);
-    // Refusal, known mismatch and uncertainty never create a list Undo token.
+    // Refusal, known mismatch and uncertainty never create a list Undo token; a refused removal stays a draft.
     for (mode, label) in [(3, "refused"), (1, "not-kept"), (2, "uncertain")] {
         data.outcome.store(mode, Ordering::SeqCst);
+        forge.invoke_discard_all();
         forge.invoke_remove_affix(0);
-        wait(|| !forge.get_message().contains("Waiting for independent readback") && !forge.get_can_undo());
+        forge.invoke_apply();
+        wait(|| !forge.get_message().contains("Waiting for independent readback") && forge.get_undo_text() != "Undo apply");
+        assert!(handle.snapshot().undo_forge.is_none());
+        assert_eq!(forge.get_drafts().row_count(), usize::from(mode == 3));
         session.capture(&ui, &format!("backend-forge-remove-{label}"));
         if mode == 2 {
             data.outcome.store(0, Ordering::SeqCst);
