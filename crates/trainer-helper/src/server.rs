@@ -112,14 +112,10 @@ async fn wait<F: Future>(future: F, shared: &Shared, owner: Option<&Owner>, dura
     }
 }
 
-fn reap(owner: &mut Option<Owner>, backend: &mut impl Backend) -> Result<(), String> {
+fn reap(owner: &Option<Owner>, shared: &Shared) {
     if owner.as_ref().is_some_and(|owner| !owner.alive()) {
-        // Keep ownership fenced until removal is confirmed. Published callback
-        // storage remains retained even if the departing owner had running work.
-        backend.restore()?;
-        owner.take();
+        shared.stop.store(true, SeqCst);
     }
-    Ok(())
 }
 async fn create(name: &str, shared: &Shared) -> io::Result<NamedPipeServer> {
     let security = security::PipeSecurity::current_user()?;
@@ -165,8 +161,9 @@ async fn serve(pid: u32, backend: &mut impl Backend, shared: &Shared) -> Result<
 async fn serve_pipe(pid: u32, mut pipe: NamedPipeServer, backend: &mut impl Backend, shared: &Shared) -> Result<(), String> {
     let mut owner: Option<Owner> = None;
     let mut connected = false;
+    let initial_deadline = Instant::now() + Duration::from_secs(10);
     'connections: while !shared.stop.load(SeqCst) {
-        reap(&mut owner, backend)?;
+        reap(&owner, shared);
         if connected {
             if let Err(error) = pipe.disconnect()
                 && error.raw_os_error() != Some(233)
@@ -186,6 +183,9 @@ async fn serve_pipe(pid: u32, mut pipe: NamedPipeServer, backend: &mut impl Back
         // Keep process monitoring active even when no client connects. Each wait timeout merely
         // refreshes admission/owner state; it never replays a request.
         loop {
+            if owner.is_none() && Instant::now() >= initial_deadline {
+                return Ok(());
+            }
             match wait(pipe.connect(), shared, owner.as_ref(), Duration::from_secs(1)).await {
                 Ok(Ok(())) => break,
                 Ok(Err(error)) if matches!(error.raw_os_error(), Some(109 | 232 | 233)) => {
@@ -196,7 +196,7 @@ async fn serve_pipe(pid: u32, mut pipe: NamedPipeServer, backend: &mut impl Back
                 }
                 Ok(Err(error)) => return Err(error.to_string()),
                 Err(Interrupted::Stop) => return Ok(()),
-                Err(Interrupted::OwnerExited) => reap(&mut owner, backend)?,
+                Err(Interrupted::OwnerExited) => return Ok(()),
                 Err(Interrupted::Deadline) => {}
             }
         }
@@ -216,7 +216,10 @@ async fn serve_pipe(pid: u32, mut pipe: NamedPipeServer, backend: &mut impl Back
         let response = match received {
             Ok(Err(RequestReadError::Protocol(_))) => failure(ResponseCode::Refused, "Invalid or unsupported request frame; nothing was run"),
             Ok(Ok(request)) => {
-                reap(&mut owner, backend)?;
+                reap(&owner, shared);
+                if shared.stop.load(SeqCst) {
+                    return Ok(());
+                }
                 if owner.as_ref().is_some_and(|owner| owner.pid != client.pid || owner.created != client.created) {
                     failure(ResponseCode::Refused, "Another live application owns this helper; nothing was run")
                 } else if owner.is_none() && request != Request::Discover {
@@ -226,7 +229,13 @@ async fn serve_pipe(pid: u32, mut pipe: NamedPipeServer, backend: &mut impl Back
                         owner = Some(client);
                     }
                     match request {
-                        Request::Unload => failure(ResponseCode::Refused, "Helper unload is not available yet"),
+                        Request::Unload => {
+                            shared.stop.store(true, SeqCst);
+                            Response {
+                                code: ResponseCode::Done,
+                                payload: Vec::new(),
+                            }
+                        }
                         Request::Discover => match backend.discover() {
                             Ok(discovery) => match discovery.encode(pid) {
                                 Ok(payload) => Response {
@@ -275,6 +284,14 @@ async fn serve_pipe(pid: u32, mut pipe: NamedPipeServer, backend: &mut impl Back
             _ => continue,
         };
         let frame = response.encode().map_err(|error| error.to_string())?;
+        if shared.stop.load(SeqCst) {
+            // Admission is already closed, but the owner may still receive its
+            // acknowledgement. EOF proves it drained Mio's buffered reply; a
+            // bounded failure never postpones restoration or authorizes replay.
+            let _ = tokio::time::timeout(Duration::from_millis(250), pipe.write_all(&frame)).await;
+            let _ = tokio::time::timeout(Duration::from_millis(250), pipe.read(&mut [0u8; 1])).await;
+            return Ok(());
+        }
         let _ = wait(pipe.write_all(&frame), shared, owner.as_ref(), Duration::from_secs(15)).await;
         // Drain client-side reads without blocking the control thread in FlushFileBuffers. The
         // next connection requires this one to close; EOF is normal and does not relinquish owner.

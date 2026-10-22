@@ -297,23 +297,40 @@ fn owner_survives_connections_and_rejects_foreign_pid_before_backend() {
 }
 
 #[test]
-fn exited_owner_restores_before_discovery_by_another_process() {
+fn exited_owner_stops_admission_and_restores_once() {
     let mut fixture = Fixture::spawn("normal");
-    fixture.expected_restores = 2;
     let mut foreign = spawn_child("client", "hold", &fixture.directory, fixture.child.id());
     fixture.wait_file("foreign-ready");
     assert_eq!(fs::read_to_string(fixture.directory.join("foreign-code")).unwrap(), "0");
     runtime().block_on(async {
         let mut client = fixture.client();
-        assert_eq!(client.send(&Request::Discover).await.unwrap().code, ResponseCode::Refused);
-        fs::write(fixture.directory.join("foreign-stop"), []).unwrap();
-        assert!(foreign.wait().unwrap().success());
-        assert_eq!(client.send(&status()).await.unwrap().code, ResponseCode::Refused);
+        assert_eq!(client.send(&Request::Unload).await.unwrap().code, ResponseCode::Refused);
+    });
+    fs::write(fixture.directory.join("foreign-stop"), []).unwrap();
+    assert!(foreign.wait().unwrap().success());
+    fixture.wait_file("counters");
+    let deadline = Instant::now() + LIMIT;
+    while fixture.child.try_wait().unwrap().is_none() {
+        assert!(Instant::now() < deadline, "owner loss did not stop server");
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    assert_eq!(fixture.counters()[4], 1);
+    assert_eq!(fixture.counters()[..4], [1, 0, 0, 0]);
+}
+
+#[test]
+fn owner_unload_acknowledges_without_installing_or_queuing_work() {
+    let mut fixture = Fixture::spawn("normal");
+    runtime().block_on(async {
+        let mut client = fixture.client();
+        assert_eq!(client.send(&Request::Unload).await.unwrap().code, ResponseCode::Refused);
         assert_eq!(client.send(&Request::Discover).await.unwrap().code, ResponseCode::Done);
-        assert_eq!(client.send(&status()).await.unwrap().code, ResponseCode::Done);
+        let reply = client.send(&Request::Unload).await.unwrap();
+        assert_eq!(reply.code, ResponseCode::Done);
+        assert!(reply.payload.is_empty());
     });
     fixture.finish();
-    assert_eq!(fixture.counters()[..4], [2, 1, 1, 1]);
+    assert_eq!(fixture.counters()[..4], [1, 0, 0, 0]);
 }
 
 async fn open_raw(pid: u32) -> tokio::net::windows::named_pipe::NamedPipeClient {

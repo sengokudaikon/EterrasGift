@@ -77,8 +77,8 @@ runtime-offline/owner-loss cleanup must run and acknowledge completion on the en
 The local pipe is `eterras-gift-<PID>`, one bounded request per connection: a 12-byte header and a sequential operation body. The first valid
 Discover claims ownership using the kernel-reported client PID and a retained process handle/start
 time. Normal per-request EOF preserves ownership. Other living processes receive Refused without
-reaching the backend; process death restores the dispatcher before relinquishing ownership. A
-restoration error stops the server rather than handing off an unconfirmed entry. This strengthens the original helper's
+reaching the backend; owner death stops the helper and restores the dispatcher. A
+restoration error retains the DLL rather than handing off an unconfirmed entry. This strengthens the original helper's
 ownership model. The protocol has no nonce or authentication against code in the same process.
 
 Admission and request waits observe shutdown/process death. A five-second main-thread deadline or
@@ -86,10 +86,20 @@ disconnect cancels pending work when possible. Once started, the request retains
 slot and failures report uncertain execution. Nothing is replayed automatically. Malformed requests
 never reach discovery or dispatch. Slow clients have a separate bounded read/write deadline.
 
-The helper has no stop or telemetry protocol. Controller death restores the dispatcher before a
-new owner can connect. Internal server failure closes admission and attempts restoration.
-Published trampolines, optional unwind tables and module pins remain until process exit. The
-server future must be driven to completion so it can restore its owned dispatcher entry.
+Owner-only `Unload` (operation 25, empty body) acknowledges shutdown without installing a
+hook or queuing game work. Owner death also stops the server; an unclaimed server expires
+after ten seconds. No module pins are taken. A retained gateway closes callback admission,
+restores ExecuteTasks, and counts calls until they return out of the DLL. The control thread
+waits at most five seconds for callbacks and verifies that its dedicated bootstrap thread
+has exited, then drops its reactor/pipe/IL2CPP attachment before FreeLibraryAndExitThread.
+Failure retains the DLL. An ACK never proves departure: the host checks module absence and
+pristine dispatcher code before permitting another load.
+
+Generated trampoline/gateway code, their unwind tables and small owners stay allocated until
+process exit, so a delayed original call can return safely after the DLL has left. The
+Copy-only attachment registry installs no game-thread TLS destructor. `mise run trainer:unload`
+checks 100 unload/reloads under four callers and retention of a blocked callback. The server
+future must still be driven to completion for restoration/drain; a panic leaves the DLL loaded.
 
 `eg_helper_build_id()` returns 64 lowercase ASCII hex characters plus NUL. The build script hashes
 relative paths and contents of the manifests, lockfile and Rust sources of core, game access, trainer

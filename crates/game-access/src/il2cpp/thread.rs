@@ -37,7 +37,8 @@ struct Attachment {
 thread_local! {
     // Contexts on this OS thread share the final-detach decision. Entries exist
     // only while a lease is alive; no runtime pointer survives the last lease.
-    static ATTACHMENTS: RefCell<Vec<Attachment>> = const { RefCell::new(Vec::new()) };
+    // Fixed, Copy-only storage registers no Rust TLS destructor on game threads.
+    static ATTACHMENTS: RefCell<[Option<Attachment>; 16]> = const { RefCell::new([None; 16]) };
 }
 
 /// One OS thread's access to one live runtime. Attachment does not imply Unity main-thread access.
@@ -71,12 +72,11 @@ impl ThreadContext {
     pub fn attach(&self) -> Result<AttachedThread<'_>, RuntimeError> {
         ATTACHMENTS.with_borrow_mut(|attachments| {
             let runtime = self.runtime_key();
-            if let Some(active) = attachments.iter_mut().find(|active| active.runtime == runtime) {
+            if let Some(active) = attachments.iter_mut().flatten().find(|active| active.runtime == runtime) {
                 active.leases = active.leases.checked_add(1).ok_or(RuntimeError::TooManyAttachments)?;
                 return Ok(AttachedThread { context: self });
             }
-            // Reserve before acquiring an owned native attachment.
-            attachments.reserve(1);
+            let slot = attachments.iter_mut().find(|slot| slot.is_none()).ok_or(RuntimeError::TooManyAttachments)?;
             // SAFETY: new's contract keeps the runtime alive on this thread. current/domain/attach
             // are the bootstrap APIs that may be called before registering a native thread.
             let current = unsafe { (self.api.thread_current)() };
@@ -89,7 +89,7 @@ impl ThreadContext {
                 let thread = NonNull::new(unsafe { (self.api.thread_attach)(domain.as_ptr()) }).ok_or(RuntimeError::AttachFailed)?;
                 (thread, true)
             };
-            attachments.push(Attachment {
+            *slot = Some(Attachment {
                 runtime,
                 thread,
                 owned,
@@ -113,11 +113,14 @@ impl ThreadContext {
 
     fn release(&self) {
         ATTACHMENTS.with_borrow_mut(|attachments| {
-            let index = attachments.iter().position(|active| active.runtime == self.runtime_key()).expect("live attachment lease");
-            let active = &mut attachments[index];
+            let slot = attachments
+                .iter_mut()
+                .find(|slot| slot.is_some_and(|active| active.runtime == self.runtime_key()))
+                .expect("live attachment lease");
+            let active = slot.as_mut().unwrap();
             active.leases -= 1;
             if active.leases == 0 {
-                let active = attachments.swap_remove(index);
+                let active = slot.take().unwrap();
                 if active.owned {
                     // SAFETY: this is the final lease for our attachment, on its creating OS thread.
                     // Roots borrow their lease, so none can still be used through that lease.
@@ -187,5 +190,14 @@ impl Drop for StrongRoot<'_, '_> {
     fn drop(&mut self) {
         // SAFETY: the handle is freed exactly once, before the borrowed attachment can drop.
         unsafe { (self.attachment.context.api.gchandle_free)(self.handle.as_ptr()) };
+    }
+}
+
+#[cfg(test)]
+mod storage_tests {
+    use super::*;
+    #[test]
+    fn attachment_storage_cannot_register_a_thread_exit_destructor() {
+        assert!(!std::mem::needs_drop::<RefCell<[Option<Attachment>; 16]>>());
     }
 }

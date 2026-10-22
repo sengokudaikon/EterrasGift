@@ -92,3 +92,7 @@ run = "cargo build --manifest-path tools/trainer-eval/persistent-player/client/C
 [tasks."trainer:player:client:test"]
 description = "Nightly release controller/response-barrier tests; no player launch"
 run = "cargo test --manifest-path tools/trainer-eval/persistent-player/client/Cargo.toml --release --offline"
+
+[tasks."trainer:unload"]
+description = "Plain native fixture: 100 unload/reloads with active callers, then a stuck callback; no Unity or game"
+run = ["cargo build -p eg-trainer-helper --release --features fixture --offline", "cargo test -p eg-trainer-helper --release --features fixture --test unload --offline -- --ignored --nocapture"]

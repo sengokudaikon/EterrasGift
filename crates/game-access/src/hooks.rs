@@ -4,6 +4,7 @@
 //! backend. Opening/suspending a thread can fail for reasons other than exit; such
 //! a skipped thread is not protected during patching. This is an accepted supported-
 //! target limitation, not a proved complete census. No detour allocation is freed.
+pub mod gateway;
 pub mod threads;
 mod unwind;
 
@@ -16,10 +17,7 @@ use std::{
         atomic::{AtomicUsize, Ordering},
     },
 };
-use windows_sys::Win32::{
-    Foundation::GetLastError,
-    System::LibraryLoader::{GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS, GET_MODULE_HANDLE_EX_FLAG_PIN, GetModuleHandleExW},
-};
+use windows_sys::Win32::Foundation::GetLastError;
 
 static TRANSACTION: Mutex<()> = Mutex::new(());
 
@@ -78,7 +76,8 @@ impl RetainedHook {
     /// constructing the detour, and copied calls/control flow are rejected.
     ///
     /// # Safety
-    /// Target/callback have identical native ABI and belong to loaded modules.
+    /// Target/callback have identical native ABI and remain callable through entry
+    /// restoration and callback draining. Generated callbacks may be process-owned.
     /// Expected bytes cover readable executable target instructions (at most 64).
     /// The target's ordinary Windows unwind metadata correctly describes its ABI.
     /// No incoming edge or outstanding return address enters its copied prefix.
@@ -92,8 +91,6 @@ impl RetainedHook {
             if std::slice::from_raw_parts(target.as_ptr(), expected.len()) != expected {
                 return Err(HookError::OwnershipLost);
             }
-            pin(target.as_ptr())?;
-            pin(callback.cast())?;
             let raw = Box::leak(Box::new(RawDetour::new(target.as_ptr().cast(), callback).map_err(HookError::Detour)?));
             // Even failure below retains the detour; no code pointer can later dangle.
             unwind::register(target.as_ptr(), raw.trampoline().cast(), expected, copied)?;
@@ -109,7 +106,7 @@ impl RetainedHook {
         self.raw.trampoline()
     }
     fn entry(&self) -> [u8; 5] {
-        // SAFETY: prepare pins the target's module; the caller excludes competing entry writers.
+        // SAFETY: prepare's caller retains the target and excludes competing entry writers.
         unsafe { std::slice::from_raw_parts(self.target.as_ptr(), 5).try_into().unwrap() }
     }
     fn remember_patch(&self) {
@@ -155,15 +152,6 @@ fn copied_prefix(bytes: &[u8], address: u64) -> Result<usize, HookError> {
     }
     Ok(decoder.position())
 }
-fn pin(address: *const u8) -> Result<(), HookError> {
-    let mut module = std::ptr::null_mut();
-    // SAFETY: prepare requires loaded module-owned code; FROM_ADDRESS never reads a string.
-    if unsafe { GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_PIN, address.cast(), &raw mut module) } == 0 {
-        return Err(failure("pin hook module"));
-    }
-    Ok(())
-}
-
 /// Change a family together. On error, restore each hook's pre-transaction state
 /// through stock transactions and report every failed recovery/state mismatch.
 /// No hook or trampoline storage is ever reclaimed, including after an error.

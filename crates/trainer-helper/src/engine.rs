@@ -3,11 +3,11 @@ use crate::{
     server::{self, Backend, Shared},
 };
 use eg_game_access::{
-    hooks::{self, HookState, RetainedHook},
+    hooks::{self, HookState, RetainedHook, gateway::CallbackGate},
     il2cpp::{
         AttachedThread, ThreadContext,
         discovery::{AttackLeechWriteError, DiscoveryError, ForgeWriteError, RuntimeAccess},
-        raw::{self, ExecuteTasks, MethodInfo},
+        raw::{self, MethodInfo},
     },
 };
 use eg_trainer_wire::dispatch::{Dispatcher, Pending};
@@ -18,37 +18,37 @@ use eg_trainer_wire::{
 };
 use std::{
     ffi::{CStr, c_char, c_void},
+    os::windows::io::{AsRawHandle, FromRawHandle, OwnedHandle},
     ptr::NonNull,
     sync::{
         OnceLock,
-        atomic::{AtomicBool, AtomicPtr, AtomicU64, Ordering::SeqCst},
+        atomic::{AtomicBool, AtomicU64, Ordering::SeqCst},
     },
+    time::{Duration, Instant},
 };
 use windows_sys::Win32::System::{
     Diagnostics::Debug::RtlLookupFunctionEntry,
-    LibraryLoader::{GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS, GET_MODULE_HANDLE_EX_FLAG_PIN, GetModuleHandleExW, GetModuleHandleW, GetProcAddress},
-    Threading::{GetCurrentProcessId, GetCurrentThreadId},
+    LibraryLoader::{
+        FreeLibraryAndExitThread, GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS, GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT, GetModuleHandleExW, GetModuleHandleW, GetProcAddress,
+    },
+    Threading::{CreateThread, GetCurrentProcessId, GetCurrentThreadId, OpenThread, SYNCHRONIZATION_SYNCHRONIZE, WaitForSingleObject},
 };
+
+#[cfg(feature = "fixture")]
+use std::sync::atomic::AtomicPtr;
 
 static STARTED: AtomicBool = AtomicBool::new(false);
 static STATE: OnceLock<Shared> = OnceLock::new();
 static QUEUE: OnceLock<Dispatcher<Request, Response>> = OnceLock::new();
-static ORIGINAL: AtomicPtr<u8> = AtomicPtr::new(std::ptr::null_mut());
 #[cfg(feature = "fixture")]
 static FIXTURE_HOOK: AtomicPtr<RetainedHook> = AtomicPtr::new(std::ptr::null_mut());
 #[cfg(feature = "fixture")]
 mod fixture;
+#[cfg(feature = "fixture")]
+mod native_fixture;
 
 fn state() -> &'static Shared {
     STATE.get_or_init(Shared::default)
-}
-fn pin(address: *const u8) -> Result<(), String> {
-    let mut module = std::ptr::null_mut();
-    // SAFETY: caller identifies loaded code; FROM_ADDRESS interprets address, never a string.
-    if unsafe { GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_PIN, address.cast(), &raw mut module) } == 0 {
-        return Err(std::io::Error::last_os_error().to_string());
-    }
-    Ok(())
 }
 unsafe fn module() -> Result<NonNull<u8>, String> {
     let name: Vec<u16> = "GameAssembly.dll\0".encode_utf16().collect();
@@ -326,15 +326,10 @@ unsafe fn read_locale() -> Response {
     }
 }
 
-unsafe extern "C-unwind" fn callback(method: *const MethodInfo) {
+unsafe extern "C-unwind" fn callback(_method: *const MethodInfo) {
+    // Original ExecuteTasks has already returned to the process-owned gateway.
+    // Its native unwinds never cross this Rust catch or strand the active count.
     let state = state();
-    // SAFETY: original is published before any patch and retained for process lifetime.
-    let original: ExecuteTasks = unsafe { std::mem::transmute(ORIGINAL.load(SeqCst)) };
-    // Never put this original call inside a Rust catch or hold any Rust lock across it.
-    // SAFETY: original is the published retained trampoline with the unchanged ExecuteTasks ABI; no Rust lock/catch spans the call.
-    unsafe { original(method) };
-    // Contain Rust failures in our own post-call work. The engine's original call above must
-    // retain its native/managed unwind behavior and is deliberately outside this boundary.
     if std::panic::catch_unwind(|| after_original(state)).is_err() {
         state.stop.store(true, SeqCst);
     }
@@ -427,6 +422,7 @@ struct Control<'a> {
     attached: &'a eg_game_access::il2cpp::AttachedThread<'a>,
     discovery: Option<Discovery>,
     hook: Option<&'static RetainedHook>,
+    gate: Option<CallbackGate>,
 }
 impl Backend for Control<'_> {
     fn discover(&mut self) -> Result<Discovery, Response> {
@@ -459,10 +455,12 @@ impl Backend for Control<'_> {
                 if std::slice::from_raw_parts(target, 16) != expected.bytes {
                     return Err(server::failure(ResponseCode::RestartRequired, "Dispatcher bytes changed; nothing ran"));
                 }
-                let hook = RetainedHook::prepare(NonNull::new(target).unwrap(), callback as *const (), &expected.bytes)
+                let gate = CallbackGate::prepare(callback as *const ()).map_err(|error| server::failure(ResponseCode::RestartRequired, error.to_string()))?;
+                let hook = RetainedHook::prepare(NonNull::new(target).unwrap(), gate.entry(), &expected.bytes)
                     .map_err(|error| server::failure(ResponseCode::RestartRequired, error.to_string()))?;
                 let hook = Box::leak(Box::new(hook));
-                ORIGINAL.store(hook.trampoline() as *mut u8, SeqCst);
+                gate.set_original(hook.trampoline());
+                self.gate = Some(gate);
                 #[cfg(feature = "fixture")]
                 FIXTURE_HOOK.store(hook, SeqCst);
                 self.hook = Some(hook); // Retain before entry publication, including post-write failure.
@@ -487,16 +485,29 @@ impl Backend for Control<'_> {
             .map_err(|_| server::failure(ResponseCode::NotReady, "Previous main-thread request is still running; nothing was queued"))
     }
     fn restore(&mut self) -> Result<(), String> {
-        // SAFETY: admission is closed, control thread owns its patch; all code/global state retained.
-        unsafe {
-            if let Some(hook) = self.hook
-                && hook.state() != HookState::Disabled
-            {
-                hooks::commit(&[(hook, false)]).map_err(|error| error.to_string())?;
-            }
-        }
-        Ok(())
+        restore_and_drain(self.hook, self.gate.as_ref())
     }
+}
+
+fn restore_and_drain(hook: Option<&RetainedHook>, gate: Option<&CallbackGate>) -> Result<(), String> {
+    if let Some(gate) = gate {
+        gate.close();
+    }
+    if let Some(hook) = hook
+        && hook.state() != HookState::Disabled
+    {
+        // SAFETY: the control thread owns the target and all generated code is
+        // retained. Closing the gate prevents new helper calls during restoration.
+        unsafe { hooks::commit(&[(hook, false)]) }.map_err(|error| error.to_string())?;
+    }
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while gate.is_some_and(|gate| gate.active() != 0) {
+        if Instant::now() >= deadline {
+            return Err("Helper callback did not drain; module remains loaded".into());
+        }
+        std::thread::sleep(Duration::from_millis(1));
+    }
+    Ok(())
 }
 
 unsafe fn worker() -> Result<(), String> {
@@ -514,6 +525,7 @@ unsafe fn worker() -> Result<(), String> {
             attached: &attached,
             discovery: None,
             hook: None,
+            gate: None,
         };
         // Setup failure remains retryable through Discovery; no partial profile is published.
         let _ = control.discover();
@@ -523,9 +535,79 @@ unsafe fn worker() -> Result<(), String> {
             .build()
             .map_err(|error| error.to_string())?;
         let result = runtime.block_on(server::run(std::process::id(), &mut control, state()));
-        // Dropping the control owner never frees the retained detour or its registered unwind table.
-        // Module pins and global callback/queue state also remain through process exit.
+        // Server has closed admission, dropped the pipe, restored the entry and
+        // drained callbacks before returning. Drop the reactor (including retained
+        // overlapped I/O), then this control thread's IL2CPP attachment, before exit.
         result
+    }
+}
+
+struct ControlStart {
+    module: usize,
+    bootstrap: OwnedHandle,
+    work: unsafe fn() -> Result<(), String>,
+}
+
+// Returns only after all Rust owners are dropped. A raw Windows thread avoids
+// std::thread's closure/join bookkeeping surviving FreeLibraryAndExitThread.
+unsafe fn prepare_exit(parameter: *mut c_void) -> Option<usize> {
+    // SAFETY: spawn_control transfers one Box to this dedicated thread.
+    let start = unsafe { Box::from_raw(parameter.cast::<ControlStart>()) };
+    // SAFETY: the bootstrap's supported-runtime contract covers the selected work.
+    let outcome = std::panic::catch_unwind(|| unsafe { (start.work)() });
+    state().stop.store(true, SeqCst);
+    if !matches!(outcome, Ok(Ok(()))) {
+        eprintln!("EG_HELPER_RETAINED {outcome:?}");
+        return None;
+    }
+    // The remote bootstrap must have returned out of this DLL too. Direct
+    // DllImport bootstraps on a persistent game thread cannot satisfy this fence.
+    // SAFETY: owned synchronize handle captured on the bootstrap thread.
+    if unsafe { WaitForSingleObject(start.bootstrap.as_raw_handle(), 5000) } != 0 {
+        eprintln!("EG_HELPER_RETAINED bootstrap thread did not exit");
+        return None;
+    }
+    Some(start.module)
+}
+
+unsafe extern "system" fn control_entry(parameter: *mut c_void) -> u32 {
+    // SAFETY: the raw thread receives the unique startup allocation.
+    if let Some(module) = unsafe { prepare_exit(parameter) } {
+        // SAFETY: all callback/export frames and Rust owners have finished. The
+        // sole LoadLibrary reference is ours to release; this call never returns.
+        unsafe { FreeLibraryAndExitThread(module as _, 0) };
+    }
+    1 // A failed fence leaves the loader reference and all published storage alive.
+}
+
+unsafe fn spawn_control(work: unsafe fn() -> Result<(), String>) -> i32 {
+    // SAFETY: query our own loaded image without adding a loader reference.
+    unsafe {
+        let mut module = std::ptr::null_mut();
+        if GetModuleHandleExW(
+            GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+            eg_helper_bootstrap as *const () as _,
+            &raw mut module,
+        ) == 0
+        {
+            return 10;
+        }
+        let bootstrap = OpenThread(SYNCHRONIZATION_SYNCHRONIZE, 0, GetCurrentThreadId());
+        if bootstrap.is_null() {
+            return 10;
+        }
+        let start = Box::into_raw(Box::new(ControlStart {
+            module: module as usize,
+            bootstrap: OwnedHandle::from_raw_handle(bootstrap),
+            work,
+        }));
+        let handle = CreateThread(std::ptr::null(), 0, Some(control_entry), start.cast(), 0, std::ptr::null_mut());
+        if handle.is_null() {
+            drop(Box::from_raw(start));
+            return 11;
+        }
+        drop(OwnedHandle::from_raw_handle(handle));
+        0
     }
 }
 
@@ -533,26 +615,9 @@ unsafe fn start_authorized() -> i32 {
     if STARTED.compare_exchange(false, true, SeqCst, SeqCst).is_err() {
         return 1;
     }
-    // SAFETY: exact modules identified by caller; pin before publishing persistent work.
-    if let Err(error) = unsafe { pin(eg_helper_bootstrap as *const u8).and_then(|_| module()).and_then(|module| pin(module.as_ptr())) } {
-        eprintln!("EG_HELPER_START {error}");
-        return 10;
-    }
     let _ = QUEUE.set(Dispatcher::default());
-    match std::thread::Builder::new().name("Eterra helper control".into()).spawn(|| {
-        // SAFETY: inherited start contract; this dedicated OS thread owns all runtime leases.
-        let outcome = std::panic::catch_unwind(|| unsafe { worker() });
-        if !matches!(outcome, Ok(Ok(()))) {
-            crate::engine::state().stop.store(true, SeqCst);
-            eprintln!("EG_HELPER_WORKER {outcome:?}");
-        }
-    }) {
-        Ok(_) => 0,
-        Err(error) => {
-            eprintln!("EG_HELPER_THREAD {error}");
-            11
-        }
-    }
+    // SAFETY: caller supplies the initialized runtime; no module pins are taken.
+    unsafe { spawn_control(worker) }
 }
 
 #[repr(C)]
@@ -566,14 +631,14 @@ struct BootstrapConfig {
 const _: () = assert!(std::mem::size_of::<BootstrapConfig>() == 80 && std::mem::offset_of!(BootstrapConfig, status) == 12 && std::mem::offset_of!(BootstrapConfig, build_id) == 16);
 
 #[unsafe(no_mangle)]
-/// Starts the retained helper once, after LoadLibrary returns.
+/// Starts one helper load after LoadLibrary returns, on a dedicated bootstrap thread.
 ///
 /// # Safety
 /// `parameter` points to aligned, initialized, exclusively writable 80-byte configuration
 /// storage until this thread exits. The caller selects the supported initialized Unity
 /// runtime, outside loader lock. The collector must be nonmoving, queried caches initialized,
 /// and synchronous operations must exclude graph mutation, reentrancy and native destruction.
-/// Edits require exclusive write access. Helper/runtime modules remain loaded through exit;
+/// Edits require exclusive write access. Runtime modules remain loaded through helper departure;
 /// competing patches are excluded. Callback context checks establish the execution thread.
 pub unsafe extern "system" fn eg_helper_bootstrap(parameter: *mut c_void) -> u32 {
     if parameter.is_null() {
