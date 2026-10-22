@@ -18,13 +18,14 @@ pub fn run(startup: Startup) -> Result<(), slint::PlatformError> {
     let discovery = companion.discover();
     let window = MainWindow::new()?;
     let (found_game, found_dotnet) = discovery.join().unwrap_or_else(|panic| std::panic::resume_unwind(panic));
-    let trainer_runtime = trainer.start(&store, found_game.as_deref(), startup.arguments.no_connect, &faults);
-    let start = if startup.arguments.settings || store.startup_error().is_some() || trainer.choice.problem.is_some() {
+    let service = SettingsService::new(store);
+    // The trainer saves its profiles through the service, so it starts once the service runs.
+    let trainer_runtime = trainer.start(&service, found_game.as_deref(), startup.arguments.no_connect, &faults);
+    let start = if startup.arguments.settings || service.snapshot().store.startup_error().is_some() || trainer.choice.problem.is_some() {
         Page::Settings
     } else {
         Page::Home
     };
-    let service = SettingsService::new(store);
     let settings = SettingsPage::new(service.clone(), vec![trainer.choice], found_game, found_dotnet);
     let restart = settings.restart_request();
 

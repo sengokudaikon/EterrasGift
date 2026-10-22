@@ -12,6 +12,8 @@ use std::{
 mod fields;
 #[path = "backend/mapping.rs"]
 mod mappings;
+#[path = "backend/profiles.rs"]
+mod profiles;
 #[path = "backend/rate_write.rs"]
 mod rate_writes;
 #[path = "backend/unique.rs"]
@@ -19,7 +21,7 @@ mod unique;
 #[path = "backend/write.rs"]
 mod writes;
 use eg_trainer::field_writes::{AttackLeechDecision, AttackLeechPlan, AttackLeechTarget, RateWriteStatus};
-use eg_trainer::writes::{ForgePlan, WriteControl, WriteStatus};
+use eg_trainer::writes::{ForgePlan, WriteControl, WriteOutcome, WriteStatus};
 
 use eg_core::game_log::{GameLogState, GameLogStatus, GameReadiness};
 use eg_trainer::files::FileCatalog;
@@ -145,6 +147,10 @@ struct Shared {
     attack_leech_block: Block,
     forge_item: Mutex<Option<ForgeSnapshot>>,
     write_result: Mutex<Option<WriteStatus>>,
+    hooks_supported: AtomicBool,
+    /// Answers to hook changes in turn; without one the game confirms what was asked.
+    hook_results: Mutex<VecDeque<Result<WriteOutcome<bool>, BackendError>>>,
+    hook_requests: Mutex<Vec<backend::HookRequest>>,
     active: AtomicUsize,
     maximum: AtomicUsize,
     aborted: AtomicUsize,
@@ -191,6 +197,9 @@ impl Shared {
             attack_leech_block: Block::default(),
             forge_item: Mutex::new(None),
             write_result: Mutex::new(None),
+            hooks_supported: AtomicBool::new(false),
+            hook_results: Mutex::new(VecDeque::new()),
+            hook_requests: Mutex::new(vec![]),
             active: AtomicUsize::new(0),
             maximum: AtomicUsize::new(0),
             aborted: AtomicUsize::new(0),
@@ -377,6 +386,17 @@ impl BackendConnection for Connection {
         }
         Ok(result)
     }
+    fn supports_hook(&self, _: eg_trainer::features::HookId) -> bool {
+        self.shared.hooks_supported.load(Ordering::SeqCst)
+    }
+    async fn set_hook(&mut self, _: Timestamp, request: &backend::HookRequest, control: &mut dyn WriteControl) -> Result<WriteOutcome<bool>, BackendError> {
+        if !control.allowed() {
+            return Err(BackendError::blocked(ErrorKind::Superseded, "cleanup before submission"));
+        }
+        self.shared.record("hook");
+        self.shared.hook_requests.lock().unwrap().push(request.clone());
+        self.shared.hook_results.lock().unwrap().pop_front().unwrap_or(Ok(WriteOutcome::Confirmed(request.on)))
+    }
     async fn disconnect(&mut self) -> Cleanup {
         self.shared.call("disconnect", &self.shared.disconnect_block).await;
         if self.shared.departure_proven.load(Ordering::SeqCst) {
@@ -415,6 +435,7 @@ fn options() -> BackendOptions {
         // Every monitor read asks, as these tests change the language between reads.
         locale_interval: Duration::ZERO,
         game_data: Some(GameDataHandle::fixed(GameData::Ready(Arc::new(FileCatalog::restore(catalog(), "build".into(), vec![]))))),
+        ..Default::default()
     }
 }
 
@@ -543,8 +564,12 @@ fn constructors_and_disabled_or_unmonitored_services_do_not_discover() {
         assert_eq!(shared.count("find"), 0);
         command(&handle, Command::Enable).await.unwrap();
         tokio::time::sleep(Duration::from_millis(20)).await;
-        assert_eq!(shared.count("find"), 0, "automatic connection disabled");
+        // Without automatic connection the game is only looked for, so profiles lock while it runs.
+        assert!(shared.count("find") > 0);
+        assert_eq!((shared.count("gate"), shared.count("connect")), (0, 0), "automatic connection disabled");
+        assert_eq!(handle.snapshot().detected, Some(target()));
         shutdown(&handle, worker).await;
+        shared.calls.lock().unwrap().clear();
         let mut automatic = options();
         automatic.auto_connect = true;
         let (handle, worker) = start(&shared, automatic);

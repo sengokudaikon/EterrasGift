@@ -2,8 +2,10 @@
 use eg_companion::folders;
 use eg_core::fault::FaultLog;
 use eg_core::settings::SettingsStore;
+use eg_core::settings_service::{ModuleSettings, SettingsService};
 use eg_trainer::{
     backend::{self, BackendHandle, BackendOptions, Command, SubmitError, SystemClock},
+    profiles::{ProfileBook, ProfileSaver},
     sources::FileLogFactory,
 };
 use eg_trainer_host::desktop::{DesktopConnector, GameProcesses, HelperPackage};
@@ -12,6 +14,7 @@ use eg_ui::trainer_settings;
 use std::{
     cell::Cell,
     path::{Path, PathBuf},
+    sync::{Arc, Mutex},
     thread::{self, JoinHandle},
     time::Duration,
 };
@@ -35,22 +38,26 @@ impl Module {
         Self { choice, chosen }
     }
 
-    pub fn start(&mut self, store: &SettingsStore, game: Option<&Path>, no_connect: bool, faults: &FaultLog) -> Option<Trainer> {
+    pub fn start(&mut self, settings: &SettingsService, game: Option<&Path>, no_connect: bool, faults: &FaultLog) -> Option<Trainer> {
         if !self.chosen || self.choice.problem.is_some() {
             return None;
         }
-        let flag = |key, default| eg_core::settings::module_flag(store.module_settings(trainer_settings::ID), key, default);
+        let module = settings.module(trainer_settings::ID);
+        let saved = module.read();
+        let flag = |key, default| eg_core::settings::module_flag(saved.as_ref(), key, default);
         let process_name = game
             .and_then(|p| p.file_name())
             .map_or_else(|| "Last Epoch.exe".into(), |name| name.to_string_lossy().into_owned());
         match Trainer::start(
             folders::player_log(),
-            store.paths().module_directory(trainer_settings::ID).join("game-data"),
+            settings.snapshot().store.paths().module_directory(trainer_settings::ID).join("game-data"),
             game.and_then(Path::parent).map(Path::to_path_buf),
             process_name,
             BackendOptions {
                 auto_connect: flag(trainer_settings::AUTO_CONNECT, true),
                 override_enabled: flag(trainer_settings::OVERRIDE, false),
+                profiles: ProfileBook::from_settings(saved.as_ref()),
+                save_profiles: Some(profile_saver(module)),
                 ..Default::default()
             },
             no_connect,
@@ -63,6 +70,27 @@ impl Module {
             }
         }
     }
+}
+
+/// Saves the trainer's profiles in its settings slice. Changes in quick succession are saved once, with the latest
+/// profiles: a save already queued takes them. A save the closing service refuses is dropped, as the hooks' values were.
+fn profile_saver(settings: ModuleSettings) -> ProfileSaver {
+    let latest: Arc<Mutex<Option<ProfileBook>>> = Arc::default();
+    ProfileSaver::new(move |book| {
+        if latest.lock().unwrap().replace(book.clone()).is_some() {
+            return;
+        }
+        let queued = latest.clone();
+        let result = settings.update(move |fields| {
+            if let Some(book) = queued.lock().unwrap().take() {
+                book.write_settings(fields);
+            }
+            Ok(())
+        });
+        if result.is_err() {
+            latest.lock().unwrap().take();
+        }
+    })
 }
 
 /// Report a module that cannot start as the C# DesktopBootstrapper.CreateModules words it.

@@ -9,11 +9,13 @@
 mod faults;
 mod fields;
 mod mapping;
+mod profiles;
 mod rate_write;
 mod unique;
 mod write;
 
 use std::{
+    collections::BTreeMap,
     fmt,
     future::Future,
     path::Path,
@@ -39,14 +41,17 @@ use eg_trainer_wire::{
     transport::{Transport, TransportError, TransportFailure},
 };
 use jiff::Timestamp;
+pub use profiles::{HOOK_NOT_AVAILABLE, HookRequest, HookRun, ProfileLock};
 use tokio::sync::{broadcast, mpsc, oneshot, watch};
 
 use crate::{
     catalog::{GameCatalog, ResolvedItemName},
+    features::HookId,
     field_writes::{AttackLeechDecision, AttackLeechPlan, AttackLeechTarget, FieldPlanError, RateWriteRecord, RateWriteStatus},
     game_data::{GameData, GameDataHandle},
     gate::{self, GateDecision, GatePolicy, GateVerdict, LogSource},
     mapping::{MappingRequest, ValueTable},
+    profiles::{ProfileBook, ProfileKey, ProfileSaver},
     session::{Cleanup, Session, SessionError},
     writes::{ForgePlan, WriteControl, WriteObservation, WriteOutcome, WritePlan, WriteRecord, WriteStatus},
 };
@@ -177,6 +182,15 @@ pub trait BackendConnection: Send + 'static {
     }
     /// Err must mean submission was not attempted (or carry MayHaveRun). Once
     /// transport is entered, return a certainty-bearing status even on failure.
+    /// Whether this connection can apply the hook. None can yet: a wanted hook then says it is not available.
+    fn supports_hook(&self, _: HookId) -> bool {
+        false
+    }
+    /// Sets the hook as `request` asks, then answers with the game's own report of it: `Confirmed(on)` when it matches
+    /// the request, `NotKept(on)` when it does not.
+    fn set_hook(&mut self, _: Timestamp, _: &HookRequest, _: &mut dyn WriteControl) -> impl Future<Output = Result<WriteOutcome<bool>, BackendError>> + Send {
+        async { Ok(WriteOutcome::refused(HOOK_NOT_AVAILABLE)) }
+    }
     fn edit_forge(&mut self, _: Timestamp, _: &ForgePlan, _: &mut dyn WriteControl) -> impl Future<Output = Result<WriteStatus, BackendError>> + Send {
         async { Err(BackendError::blocked(ErrorKind::NotReady, "level requirement writes are unavailable")) }
     }
@@ -546,6 +560,13 @@ pub struct BackendSnapshot {
     pub undo_forge: Option<crate::undo::ForgeUndo>,
     pub undo_forge_depth: usize,
     pub undo_forge_needs_override: bool,
+    /// Every character's cheat profile, the last played first.
+    pub profiles: Arc<ProfileBook>,
+    /// The profile the pages show: the one chosen while no game runs, or the live one.
+    pub editing: Option<ProfileKey>,
+    pub profile_lock: ProfileLock,
+    /// The live profile's hooks in this connection, every hook by ID; empty while no character is in play.
+    pub hooks: BTreeMap<HookId, HookRun>,
 }
 /// Latest optional preview; matching requires both the full observation and exact draft.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -683,7 +704,7 @@ enum CatalogRead {
     /// Settings' Read again: the files read again first.
     ReadFilesAgain,
 }
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum Command {
     Enable,
     Disable,
@@ -713,6 +734,20 @@ pub enum Command {
     ApplyForge(Box<ForgePlan>),
     SetAttackLeechRate(Box<AttackLeechPlan>),
     UndoForge(Box<crate::undo::ForgeUndo>),
+    /// Shows another profile; only while no game runs.
+    SelectProfile(ProfileKey),
+    /// Only while no game runs.
+    DeleteProfile(ProfileKey),
+    /// Changes the shown profile, saving it. While its character is in play the hook is applied too.
+    SetHookWanted {
+        id: HookId,
+        on: bool,
+    },
+    /// As `SetHookWanted`, for a hook's values.
+    SetHookValues {
+        id: HookId,
+        values: Vec<f64>,
+    },
     Shutdown,
 }
 impl Command {
@@ -739,6 +774,9 @@ pub struct BackendOptions {
     pub locale_interval: Duration,
     /// The game data service, the catalog's only source. Without it the trainer does not open.
     pub game_data: Option<GameDataHandle>,
+    /// The profiles as saved, and where a change to them goes; without a saver they last for the run.
+    pub profiles: ProfileBook,
+    pub save_profiles: Option<ProfileSaver>,
 }
 impl Default for BackendOptions {
     fn default() -> Self {
@@ -750,6 +788,8 @@ impl Default for BackendOptions {
             discovery_interval: Duration::from_secs(1),
             locale_interval: Duration::from_secs(2),
             game_data: None,
+            profiles: ProfileBook::default(),
+            save_profiles: None,
         }
     }
 }
@@ -906,6 +946,12 @@ where
     forge_history: crate::undo::ForgeUndoHistory,
     /// The game data service's state, mirrored into `state.game_files`.
     game_data: Option<watch::Receiver<GameData>>,
+    /// Whether the last look for the game found one running (any number of them).
+    games_running: bool,
+    /// The offline character the last admission let in, as Player.log names it.
+    character: Option<eg_core::game_log::LoggedCharacter>,
+    /// The profile of the character in play in this connection.
+    live: Option<ProfileKey>,
 }
 
 pub fn service<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock>(
@@ -945,6 +991,10 @@ pub fn service<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K
         undo_forge: None,
         undo_forge_depth: 0,
         undo_forge_needs_override: false,
+        editing: options.profiles.profiles().first().map(|profile| profile.key.clone()),
+        profiles: Arc::new(options.profiles.clone()),
+        profile_lock: ProfileLock::Editable,
+        hooks: BTreeMap::new(),
     };
     let (sender, commands) = mpsc::channel(32);
     let (snapshots, receiver) = watch::channel(state.clone());
@@ -981,6 +1031,9 @@ pub fn service<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K
             faults: None,
             forge_history: Default::default(),
             game_data,
+            games_running: false,
+            character: None,
+            live: None,
         },
     )
 }
@@ -1003,7 +1056,12 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
                     self.read_cancel = envelope.read_cancel;
                     let reading = !matches!(
                         envelope.command,
-                        Command::Write(_) | Command::ApplyForge(_) | Command::UndoForge(_) | Command::SetAttackLeechRate(_)
+                        Command::Write(_)
+                            | Command::ApplyForge(_)
+                            | Command::UndoForge(_)
+                            | Command::SetAttackLeechRate(_)
+                            | Command::SetHookWanted { .. }
+                            | Command::SetHookValues { .. }
                     );
                     let result = self.command(envelope.command).await;
                     self.drain_departure().await;
@@ -1043,6 +1101,7 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
         }
     }
     fn publish(&mut self) {
+        self.state.profile_lock = self.profile_lock();
         let expected = self.state.expected_observation().ok();
         self.state
             .mappings
@@ -1300,6 +1359,10 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
             Command::SetAttackLeechRate(plan) => self.set_attack_leech_rate(*plan).await,
             Command::ApplyForge(plan) => self.write_forge(*plan).await,
             Command::UndoForge(undo) => self.undo_forge(*undo).await,
+            Command::SelectProfile(key) => self.select_profile(key),
+            Command::DeleteProfile(key) => self.delete_profile(key),
+            Command::SetHookWanted { id, on } => self.set_hook_wanted(id, on).await,
+            Command::SetHookValues { id, values } => self.set_hook_values(id, values).await,
         }
     }
     async fn poll(&mut self) {
@@ -1317,18 +1380,42 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
         }
         if self.connection.as_ref().is_some_and(|connection| exited.contains(connection.target())) {
             self.release_without_io();
+            self.games_running = false;
+            self.state.detected = None;
             self.state.phase = Phase::WaitingForGame;
             self.publish();
         }
-        if !self.state.enabled || !self.state.monitoring || self.paused {
+        if !self.state.enabled || !self.state.monitoring {
             return;
         }
         if self.connection.is_some() {
-            let _ = self.read(CatalogRead::Keep, false).await;
-        } else if self.state.auto_connect && tokio::time::Instant::now() >= self.next_discovery {
+            // Hooks refused while the character loaded go on once it is in play again.
+            if !self.paused && self.read(CatalogRead::Keep, false).await.is_ok() {
+                let _ = self.apply_queued(self.command_epoch).await;
+            }
+        } else if tokio::time::Instant::now() >= self.next_discovery {
             self.next_discovery = tokio::time::Instant::now() + self.options.discovery_interval.max(Duration::from_millis(1));
-            let _ = self.connect().await;
+            if self.state.auto_connect && !self.paused {
+                let _ = self.connect().await;
+            } else {
+                self.watch().await;
+            }
         }
+    }
+    /// Without automatic connection only looks, so the profiles lock while a game runs. Opens nothing, and a failed
+    /// look changes nothing.
+    async fn watch(&mut self) {
+        if let Ok(targets) = self.locator.find().await {
+            self.observe(&targets);
+            self.publish();
+        }
+    }
+    fn observe(&mut self, targets: &[ProcessIdentity]) {
+        self.games_running = !targets.is_empty();
+        self.state.detected = match targets {
+            [target] => Some(target.clone()),
+            _ => None,
+        };
     }
     fn admit(&mut self, target: &ProcessIdentity) -> Result<(), BackendError> {
         self.admit_using_policy(target, self.options.policy)
@@ -1338,8 +1425,12 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
         if target.pid == 0 || target.created == 0 || !target.executable.is_absolute() {
             return Err(BackendError::blocked(ErrorKind::Identity, "invalid process identity"));
         }
-        let decision = gate::evaluate(&self.log.read(started), started, self.clock.now(), policy);
+        let log = self.log.read(started);
+        let decision = gate::evaluate(&log, started, self.clock.now(), policy);
         self.state.gate = Some(decision);
+        if decision.verdict == GateVerdict::Allow {
+            self.character = log.character.filter(|character| !character.online);
+        }
         match decision.verdict {
             GateVerdict::Allow => Ok(()),
             GateVerdict::Wait | GateVerdict::Refuse => {
@@ -1378,15 +1469,14 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
             }
         };
         self.superseded(epoch)?;
+        self.observe(&targets);
         if targets.len() != 1 {
-            self.state.detected = None;
             self.state.phase = Phase::WaitingForGame;
             self.state.error = (targets.len() > 1).then(|| BackendError::waiting(ErrorKind::MultipleProcesses, "close extra matching game instances"));
             self.publish();
             return Ok(());
         }
         let target = targets.into_iter().next().unwrap();
-        self.state.detected = Some(target.clone());
         if self
             .state
             .retained_helper
@@ -1445,7 +1535,8 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
         });
         self.state.cleanup = Cleanup::Unconfirmed;
         self.superseded(epoch)?;
-        self.initialize(epoch, &target).await
+        self.initialize(epoch, &target).await?;
+        self.enter_play(epoch).await
     }
     async fn initialize(&mut self, epoch: u64, target: &ProcessIdentity) -> Result<(), BackendError> {
         let result: Result<(), BackendError> = async {
@@ -1686,6 +1777,9 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
         }
     }
     fn release_without_io(&mut self) {
+        // The helper takes its hooks with it.
+        self.live = None;
+        self.state.hooks.clear();
         self.forge_history.clear();
         self.state.attack_leech = None;
         self.state.undo_forge = None;

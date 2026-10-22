@@ -189,18 +189,6 @@ pub struct TrainerPage {
     pub stacked: bool,
 }
 
-/// Logical helper report only; an `on: false` report is not physical cleanup proof.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct ReportedState {
-    pub on: bool,
-    pub failure: Option<String>,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum PhysicalState {
-    Unknown,
-}
-
 #[derive(Clone, Debug, PartialEq)]
 pub struct SavedValues {
     pub id: String,
@@ -212,7 +200,6 @@ pub enum FeatureError {
     DuplicateId(String),
     WrongArity { id: HookId, expected: usize, actual: usize },
     InvalidValue { id: HookId, index: usize },
-    RevisionExhausted,
 }
 
 impl fmt::Display for FeatureError {
@@ -221,25 +208,21 @@ impl fmt::Display for FeatureError {
             Self::DuplicateId(id) => write!(formatter, "duplicate feature ID: {id}"),
             Self::WrongArity { id, expected, actual } => write!(formatter, "{} needs {expected} values, received {actual}", id.as_str()),
             Self::InvalidValue { id, index } => write!(formatter, "invalid value {index} for {}", id.as_str()),
-            Self::RevisionExhausted => formatter.write_str("feature revision exhausted"),
         }
     }
 }
 
 impl Error for FeatureError {}
 
-/// Local desired state. Construction, updates, reporting and drop perform no I/O.
+/// One profile's hooks (`crate::profiles`): those wanted on, and every hook's values. Construction and updates
+/// perform no I/O, and nothing here applies, retries or claims an effect in the game; the worker's `HookRun` says that.
 ///
-/// All switches start off. Values start at catalog defaults and can be saved while
-/// off; saved output never includes wanted switches or logical/physical reports.
-/// This layer does not synchronize, retry, inject, or authorize any native effect.
+/// Every switch starts off and every value at the catalog's default. Saved values are fitted to the catalog
+/// (`restore_values`); live edits are validated strictly (`set_values`).
 #[derive(Clone, Debug, PartialEq)]
 pub struct FeatureIntents {
     wanted: BTreeSet<HookId>,
     values: BTreeMap<HookId, Vec<f64>>,
-    reported: BTreeMap<HookId, ReportedState>,
-    intent_revision: u64,
-    report_revision: u64,
 }
 
 impl Default for FeatureIntents {
@@ -253,9 +236,6 @@ impl Default for FeatureIntents {
                     _ => None,
                 })
                 .collect(),
-            reported: BTreeMap::new(),
-            intent_revision: 0,
-            report_revision: 0,
         }
     }
 }
@@ -267,12 +247,6 @@ impl FeatureIntents {
         Ok(state)
     }
 
-    pub fn intent_revision(&self) -> u64 {
-        self.intent_revision
-    }
-    pub fn report_revision(&self) -> u64 {
-        self.report_revision
-    }
     pub fn wanted(&self) -> impl Iterator<Item = HookId> + '_ {
         self.wanted.iter().copied()
     }
@@ -282,25 +256,10 @@ impl FeatureIntents {
     pub fn values(&self, id: HookId) -> &[f64] {
         &self.values[&id]
     }
-    pub fn reported(&self, id: HookId) -> Option<&ReportedState> {
-        self.reported.get(&id)
-    }
-    pub fn physical(&self, _id: HookId) -> PhysicalState {
-        PhysicalState::Unknown
-    }
 
-    pub fn set_wanted(&mut self, id: HookId, on: bool) -> Result<bool, FeatureError> {
-        if self.is_wanted(id) == on {
-            return Ok(false);
-        }
-        let revision = self.intent_revision.checked_add(1).ok_or(FeatureError::RevisionExhausted)?;
-        if on {
-            self.wanted.insert(id);
-        } else {
-            self.wanted.remove(&id);
-        }
-        self.intent_revision = revision;
-        Ok(true)
+    /// False when it was already so.
+    pub fn set_wanted(&mut self, id: HookId, on: bool) -> bool {
+        if on { self.wanted.insert(id) } else { self.wanted.remove(&id) }
     }
 
     /// Strict live validation deliberately strengthens the original weak session
@@ -322,15 +281,13 @@ impl FeatureIntents {
         if self.values(id) == values {
             return Ok(false);
         }
-        let revision = self.intent_revision.checked_add(1).ok_or(FeatureError::RevisionExhausted)?;
         self.values.insert(id, values.to_vec());
-        self.intent_revision = revision;
         Ok(true)
     }
 
     /// Unknown IDs, non-value features and changed arities are dropped, as in the
     /// original HookValueMemory. Duplicate IDs (even unknown ones) reject the whole
-    /// input. Existing wanted and reported state are independent and stay intact.
+    /// input. Wanted switches are independent and stay intact.
     pub fn restore_values(&mut self, saved: impl IntoIterator<Item = SavedValues>) -> Result<bool, FeatureError> {
         let mut seen = BTreeSet::new();
         let mut values = self.values.clone();
@@ -357,9 +314,7 @@ impl FeatureIntents {
         if values == self.values {
             return Ok(false);
         }
-        let revision = self.intent_revision.checked_add(1).ok_or(FeatureError::RevisionExhausted)?;
         self.values = values;
-        self.intent_revision = revision;
         Ok(true)
     }
 
@@ -372,23 +327,5 @@ impl FeatureIntents {
                 values: values.clone(),
             })
             .collect()
-    }
-
-    /// Replace a logical report, without changing intent or claiming physical
-    /// cleanup. Duplicate IDs reject the entire replacement before any mutation.
-    pub fn replace_reported(&mut self, reported: impl IntoIterator<Item = (HookId, ReportedState)>) -> Result<bool, FeatureError> {
-        let mut replacement = BTreeMap::new();
-        for (id, state) in reported {
-            if replacement.insert(id, state).is_some() {
-                return Err(FeatureError::DuplicateId(id.as_str().to_owned()));
-            }
-        }
-        if replacement == self.reported {
-            return Ok(false);
-        }
-        let revision = self.report_revision.checked_add(1).ok_or(FeatureError::RevisionExhausted)?;
-        self.reported = replacement;
-        self.report_revision = revision;
-        Ok(true)
     }
 }

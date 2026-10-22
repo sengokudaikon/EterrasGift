@@ -16,6 +16,7 @@ pub mod game_data;
 pub mod gate;
 pub mod mapping;
 pub mod profile;
+pub mod profiles;
 pub mod session;
 pub mod sources;
 pub mod undo;

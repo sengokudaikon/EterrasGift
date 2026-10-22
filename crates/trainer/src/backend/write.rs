@@ -180,16 +180,10 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
             }
         };
         let status = plan.completed(status);
-        if let WriteOutcome::NotApplied { code, message } = &status {
-            let kind = match code {
-                ResponseCode::OfflineRequired => Some(ErrorKind::Gate),
-                ResponseCode::CharacterLoading => Some(ErrorKind::CharacterLoading),
-                ResponseCode::RestartRequired => Some(ErrorKind::RestartRequired),
-                _ => None,
-            };
-            if let Some(kind) = kind {
-                failure = Some(BackendError::blocked(kind, message.clone()));
-            }
+        if let WriteOutcome::NotApplied { code, message } = &status
+            && let Some(error) = refusal(*code, message)
+        {
+            failure = Some(error);
         }
         (status, failure)
     }
@@ -213,6 +207,16 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
         }
         result
     }
+}
+/// A helper's refusal that says more than "not applied": the session's state changed under the request.
+pub(super) fn refusal(code: ResponseCode, message: &str) -> Option<BackendError> {
+    let kind = match code {
+        ResponseCode::OfflineRequired => ErrorKind::Gate,
+        ResponseCode::CharacterLoading => ErrorKind::CharacterLoading,
+        ResponseCode::RestartRequired => ErrorKind::RestartRequired,
+        _ => return None,
+    };
+    Some(BackendError::blocked(kind, message))
 }
 pub(super) fn invalid_edit(error: impl fmt::Display) -> BackendError {
     BackendError::blocked(ErrorKind::InvalidEdit, error.to_string())

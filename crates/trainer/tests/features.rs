@@ -1,8 +1,7 @@
 use std::collections::BTreeSet;
 
 use eg_trainer::features::{
-    DESCRIPTORS, FeatureError, FeatureIntents, FeatureKey, FeatureKind, FieldSetId, HookId, NativeSupport, PAGES, PhysicalState, ReportedState, SOURCE_COMMIT, SOURCE_FILES,
-    SavedValues, TrainerArea,
+    DESCRIPTORS, FeatureError, FeatureIntents, FeatureKey, FeatureKind, FieldSetId, HookId, NativeSupport, PAGES, SOURCE_COMMIT, SOURCE_FILES, SavedValues, TrainerArea,
 };
 
 type ValueGolden<'a> = (&'a str, f64, f64, f64, f64, Option<&'a str>);
@@ -291,8 +290,6 @@ fn saved_values_fit_legacy_rules_and_switches_start_off() {
     for descriptor in DESCRIPTORS {
         if let FeatureKey::Hook(id) = descriptor.key {
             assert!(!state.is_wanted(id));
-            assert!(state.reported(id).is_none());
-            assert_eq!(state.physical(id), PhysicalState::Unknown);
         }
     }
     for (id, values) in [
@@ -319,7 +316,7 @@ fn saved_values_fit_legacy_rules_and_switches_start_off() {
 fn live_edits_are_strict_transactional_and_do_not_quantize_steps() {
     let mut state = FeatureIntents::default();
     let xp = hook("xp-multiplier");
-    state.set_wanted(xp, true).unwrap();
+    state.set_wanted(xp, true);
     let before = state.clone();
     for values in [&[5.][..], &[5., f64::NAN], &[5., f64::INFINITY], &[5., 100.01], &[0.99, 5.]] {
         assert!(state.set_values(xp, values).is_err());
@@ -340,13 +337,12 @@ fn live_edits_are_strict_transactional_and_do_not_quantize_steps() {
     assert!(state.set_values(hook("force-rarity"), &[0.]).unwrap());
     assert!(state.set_values(hook("force-rarity"), &[4.]).unwrap());
     assert!(state.is_wanted(xp));
-    assert_eq!(state.report_revision(), 0);
 }
 
 #[test]
 fn duplicate_bulk_ids_reject_everything_including_unknown_and_bad_arity() {
     let mut state = FeatureIntents::default();
-    state.set_wanted(hook("god-mode"), true).unwrap();
+    state.set_wanted(hook("god-mode"), true);
     let before = state.clone();
     for duplicate in ["unknown", "currency", "xp-multiplier", "god-mode"] {
         let error = state
@@ -360,63 +356,25 @@ fn duplicate_bulk_ids_reject_everything_including_unknown_and_bad_arity() {
 }
 
 #[test]
-fn persistence_only_carries_values_never_wanted_or_reports() {
+fn saved_values_carry_only_hooks_with_values_and_leave_switches_to_the_profile() {
     let mut current = FeatureIntents::default();
     let id = hook("damage-dealt");
     current.set_values(id, &[3.125]).unwrap();
-    current.set_wanted(id, true).unwrap();
-    current.replace_reported([(id, ReportedState { on: true, failure: None })]).unwrap();
+    current.set_wanted(id, true);
     let saved = current.saved_values();
     assert!(saved.iter().all(|entry| !entry.values.is_empty()));
     assert!(saved.iter().all(|entry| HookId::parse(&entry.id).is_some()));
     assert!(saved.iter().all(|entry| !["god-mode", "currency", "forge-item"].contains(&entry.id.as_str())));
     let restored = FeatureIntents::from_saved(saved.clone()).unwrap();
     assert_eq!(restored.values(id), [3.125]);
-    assert_eq!(restored.wanted().count(), 0);
-    assert_eq!(restored.reported(id), None);
-    assert_eq!(restored.physical(id), PhysicalState::Unknown);
-    // Saved data is owned; editing it cannot mutate the source session.
+    assert_eq!(restored.wanted().count(), 0, "a profile saves its switches itself");
+    // Saved data is owned; editing it cannot mutate the source.
     let mut edited = saved;
     edited.iter_mut().find(|entry| entry.id == "damage-dealt").unwrap().values[0] = 8.;
     assert_eq!(current.values(id), [3.125]);
-    current.set_wanted(id, false).unwrap();
+    assert!(current.set_wanted(id, false));
+    assert!(!current.set_wanted(id, false), "already off");
     assert_eq!(current.values(id), [3.125]);
-}
-
-#[test]
-fn wanted_logical_report_physical_unknown_and_revisions_are_independent() {
-    let mut state = FeatureIntents::default();
-    let id = hook("god-mode");
-    assert_eq!((state.intent_revision(), state.report_revision()), (0, 0));
-    assert!(!state.set_wanted(id, false).unwrap());
-    assert!(state.set_wanted(id, true).unwrap());
-    assert!(!state.set_wanted(id, true).unwrap());
-    assert_eq!((state.intent_revision(), state.report_revision()), (1, 0));
-    state
-        .replace_reported([(
-            id,
-            ReportedState {
-                on: false,
-                failure: Some("source target is unsupported".to_owned()),
-            },
-        )])
-        .unwrap();
-    assert!(state.is_wanted(id));
-    assert_eq!(state.physical(id), PhysicalState::Unknown);
-    assert_eq!((state.intent_revision(), state.report_revision()), (1, 1));
-    let before = state.clone();
-    assert!(
-        state
-            .replace_reported([(id, ReportedState { on: true, failure: None }), (id, ReportedState { on: false, failure: None })])
-            .is_err()
-    );
-    assert_eq!(state, before);
-    state.replace_reported([]).unwrap();
-    assert_eq!(state.physical(id), PhysicalState::Unknown);
-    assert!(state.is_wanted(id));
-    assert_eq!((state.intent_revision(), state.report_revision()), (1, 2));
-    state.restore_values([saved("damage-dealt", &[7.])]).unwrap();
-    assert_eq!((state.intent_revision(), state.report_revision()), (2, 2));
 }
 
 #[test]
@@ -430,14 +388,12 @@ fn shared_owner_metadata_does_not_couple_switches_or_claim_effects() {
     let owners: BTreeSet<_> = DESCRIPTORS.iter().flat_map(|descriptor| descriptor.legacy_owners.iter().copied()).collect();
     assert_eq!(owners.len(), 74);
     let mut state = FeatureIntents::default();
-    state.set_wanted(hook("god-mode"), true).unwrap();
-    state.set_wanted(hook("damage-taken"), true).unwrap();
-    state.set_wanted(hook("god-mode"), false).unwrap();
+    state.set_wanted(hook("god-mode"), true);
+    state.set_wanted(hook("damage-taken"), true);
+    state.set_wanted(hook("god-mode"), false);
     assert!(state.is_wanted(hook("damage-taken")));
     assert!(!state.is_wanted(hook("one-hit-kill")));
     for id in health {
-        assert_eq!(state.physical(hook(id)), PhysicalState::Unknown);
-        assert_eq!(state.reported(hook(id)), None);
         assert_eq!(FeatureKey::parse(id).unwrap().descriptor().native_support, NativeSupport::Unsupported);
     }
 }
