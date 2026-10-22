@@ -82,9 +82,9 @@ export struct FeatureRowModels {
     fields: [FeatureFieldView],
 }
 
-// Where Rust placed a row (by its index in `TrainerState.rows`): its column, its top in the list, and whether it starts or
-// ends that column.
-export struct FeatureRowPlace { column: int, y: length, starts: bool, ends: bool }
+// Where Rust placed a row (by its index in `TrainerState.rows`): its column, its top in the list (a heading's below the
+// section spacing Rust leaves above it), and whether it ends that column.
+export struct FeatureRowPlace { column: int, y: length, ends: bool }
 
 export global TrainerState {
     // The forge's empty state for the current connection state.
@@ -359,8 +359,7 @@ component FeatureRow inherits Rectangle {
     in property <FeatureRowView> feature;
     in property <FeatureRowModels> models;
     in property <int> row-index;
-    // It starts or ends its column: a heading starting one has no space above it; the last row has no hairline.
-    in property <bool> starts;
+    // It ends its column: the last row has no hairline.
     in property <bool> ends;
 
     property <bool> heading: root.feature.kind == FeatureRowKind.heading;
@@ -396,13 +395,12 @@ component FeatureRow inherits Rectangle {
     property <length> status-y: root.below-title + root.values-height + (root.editor ? root.block-height + root.actions-height : 0px) + Tokens.feature-status-margin.top;
     property <length> status-height: root.feature.status != "" ? Tokens.feature-status-margin.top + status.height : 0px;
 
-    // Its own height, without the space a heading keeps above it; what the column split weighs.
+    // Its own height, what the column split weighs; the section spacing above a heading is Rust's, in the row's place.
     out property <length> natural-height: root.heading ? heading-label.height + Tokens.feature-group-margin.bottom
         : root.below-title + root.values-height + (root.editor ? root.block-height + root.actions-height : 0px) + root.details-height + root.status-height
             + Tokens.feature-row-padding.bottom + 1px;
-    property <length> heading-space: root.heading && !root.starts ? Tokens.feature-section-spacing : 0px;
 
-    height: root.heading-space + root.natural-height;
+    height: root.natural-height;
 
     init => {
         TrainerState.row-measured(root.row-index, root.natural-height);
@@ -434,7 +432,7 @@ component FeatureRow inherits Rectangle {
         heading-label := LabelText {
             visible: root.heading;
             x: 0;
-            y: root.heading-space;
+            y: 0;
             width: parent.width;
             height: self.preferred-height;
             text: root.feature.title;
@@ -711,7 +709,6 @@ component FeatureList inherits Rectangle {
                     feature: feature;
                     models: TrainerState.row-models[index];
                     row-index: index;
-                    starts: self.place.starts;
                     ends: self.place.ends;
                 }
             }

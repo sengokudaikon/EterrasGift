@@ -667,7 +667,6 @@ impl Layout {
             .map(|place| FeatureRowPlace {
                 column: place.column as i32,
                 y: place.y,
-                starts: place.starts,
                 ends: place.ends,
             })
             .collect();

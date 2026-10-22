@@ -708,19 +708,20 @@ pub fn split(heights: &[f32], headings: &[bool], columns: usize, section_spacing
     starts
 }
 
-/// Where a row sits once the rows are split: its column, its top within the list, and whether it starts or ends that
-/// column (a heading that starts one keeps no space above it; the last row draws no hairline).
+/// Where a row sits once the rows are split: its column, its top within the list, and whether it ends that column (the
+/// last row draws no hairline).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Place {
     pub column: usize,
     pub y: f32,
-    pub starts: bool,
     pub ends: bool,
 }
 
 /// Places the rows in the columns that begin at `starts`, stacked as a column of rows each `heights` tall (a row not yet
-/// measured counts as 0); and the tallest column's height. One list of rows, placed, rather than a list per column: a
-/// row that moves to another column stays the same row, keeping its focus and what is being typed in it.
+/// measured counts as 0); and the tallest column's height. A heading has `section_spacing` above it unless it starts a
+/// column; the space is left here, so the heading's row draws its label at its own top. One list of rows, placed, rather
+/// than a list per column: a row that moves to another column stays the same row, keeping its focus and what is being
+/// typed in it.
 pub fn place(heights: &[f32], headings: &[bool], starts: &[usize], section_spacing: f32) -> (Vec<Place>, f32) {
     let count = heights.len();
     let mut places = Vec::with_capacity(count);
@@ -730,12 +731,7 @@ pub fn place(heights: &[f32], headings: &[bool], starts: &[usize], section_spaci
         let mut y = 0.0;
         for i in start..end {
             y += if i > start && headings[i] { section_spacing } else { 0.0 };
-            places.push(Place {
-                column,
-                y,
-                starts: i == start,
-                ends: i + 1 == end,
-            });
+            places.push(Place { column, y, ends: i + 1 == end });
             y += heights[i];
         }
         tallest = tallest.max(y);
@@ -997,20 +993,13 @@ mod tests {
         let heights = [20.0, 50.0, 60.0, 20.0, 40.0];
         let headings = [true, false, false, true, false];
         let (places, tallest) = place(&heights, &headings, &[0, 3], 24.0);
-        let at = |column, y, starts, ends| Place { column, y, starts, ends };
-        assert_eq!(
-            places,
-            [
-                at(0, 0.0, true, false),
-                at(0, 20.0, false, false),
-                at(0, 70.0, false, true),
-                at(1, 0.0, true, false),
-                at(1, 20.0, false, true)
-            ]
-        );
+        let at = |column, y, ends| Place { column, y, ends };
+        assert_eq!(places, [at(0, 0.0, false), at(0, 20.0, false), at(0, 70.0, true), at(1, 0.0, false), at(1, 20.0, true)]);
         assert_eq!(tallest, 130.0);
-        // One column: the second heading keeps its section spacing above it.
+        // One column: the second heading keeps its section spacing above it, and its first row follows it directly, as
+        // the heading's row is only as tall as its label (the spacing is never added twice).
         let (places, tallest) = place(&heights, &headings, &[0], 24.0);
-        assert_eq!((places[3], places[4].y, tallest), (at(0, 154.0, false, false), 174.0, 214.0));
+        assert_eq!((places[3], places[4].y, tallest), (at(0, 154.0, false), 174.0, 214.0));
+        assert_eq!(places[4].y - places[3].y, heights[3]);
     }
 }
