@@ -52,7 +52,14 @@ mod fixture;
 mod native_fixture;
 
 fn state() -> &'static Shared {
-    STATE.get_or_init(Shared::default)
+    // A fixture build starts without the bootstrap's owner record; the product helper never claims a client.
+    STATE.get_or_init(|| {
+        if cfg!(feature = "fixture") {
+            Shared::claiming_first_client()
+        } else {
+            Shared::default()
+        }
+    })
 }
 unsafe fn module() -> Result<NonNull<u8>, String> {
     let name: Vec<u16> = "GameAssembly.dll\0".encode_utf16().collect();
@@ -391,7 +398,7 @@ fn after_original(state: &Shared) {
             return;
         }
         Err(error) => {
-            eprintln!("EG_HELPER_DISPATCH_THREAD {error}");
+            crate::report(format_args!("EG_HELPER_DISPATCH_THREAD {error}"));
             state.stop.store(true, SeqCst);
             return;
         }
@@ -413,7 +420,7 @@ fn after_original(state: &Shared) {
         }
         .unwrap_or_else(|error| {
             if !PRESENCE_ERROR_REPORTED.swap(true, SeqCst) {
-                eprintln!("EG_HELPER_PRESENCE {error}");
+                crate::report(format_args!("EG_HELPER_PRESENCE {error}"));
             }
             PlayPresence::Unknown
         });
@@ -452,12 +459,7 @@ fn after_original(state: &Shared) {
                 Request::EditForge(write) => unsafe { edit_forge(&write) },
                 // SAFETY: verified callback thread and exclusive current-player scalar mutation span assumed by unsafe start.
                 Request::SetAttackLeechRate(write) => unsafe { set_attack_leech_rate(&write) },
-                // No feature installation API exists. Empty is the truthful complete feature set.
-                Request::ClearHooks { .. } => Response {
-                    code: ResponseCode::Done,
-                    payload: 0i32.to_le_bytes().to_vec(),
-                },
-                Request::Discover | Request::Unload => server::failure(ResponseCode::Refused, "Discovery belongs on the control thread"),
+                Request::Discover | Request::Unload | Request::ClearHooks { .. } => server::failure(ResponseCode::Refused, "This request belongs on the control thread"),
             }
         });
     }
@@ -558,18 +560,41 @@ fn restore_and_drain(hook: Option<&RetainedHook>, gate: Option<&CallbackGate>) -
     Ok(())
 }
 
+/// Ok when the module may unload. A setup failure is Ok too: it comes before the dispatcher hook exists, so nothing
+/// can reach helper code, and it is reported rather than keeping the helper in the game.
 unsafe fn worker() -> Result<(), String> {
     // SAFETY: start's contract retains an initialized exact runtime through this thread's exit.
     unsafe {
-        let module = module()?;
-        let runtime = Runtime::retained(module)?;
-        let access = runtime.access;
+        let setup = (|| {
+            let module = module()?;
+            let runtime = Runtime::retained(module)?;
+            let size = image_size(module)?;
+            let reactor = tokio::runtime::Builder::new_current_thread()
+                .enable_io()
+                .enable_time()
+                .build()
+                .map_err(|error| error.to_string())?;
+            Ok::<_, String>((module, runtime, size, reactor))
+        })();
+        let (module, runtime, size, reactor) = match setup {
+            Ok(setup) => setup,
+            Err(error) => {
+                crate::report(format_args!("EG_HELPER_SETUP {error}"));
+                return Ok(());
+            }
+        };
         let thread = runtime.thread();
-        let attached = thread.attach().map_err(|error| error.to_string())?;
+        let attached = match thread.attach() {
+            Ok(attached) => attached,
+            Err(error) => {
+                crate::report(format_args!("EG_HELPER_SETUP {error}"));
+                return Ok(());
+            }
+        };
         let mut control = Control {
             module,
-            size: image_size(module)?,
-            access,
+            size,
+            access: runtime.access,
             attached: &attached,
             discovery: None,
             hook: None,
@@ -577,16 +602,14 @@ unsafe fn worker() -> Result<(), String> {
         };
         // Setup failure remains retryable through Discovery; no partial profile is published.
         let _ = control.discover();
-        let runtime = tokio::runtime::Builder::new_current_thread()
-            .enable_io()
-            .enable_time()
-            .build()
-            .map_err(|error| error.to_string())?;
-        let result = runtime.block_on(server::run(std::process::id(), &mut control, state()));
+        let exit = reactor.block_on(server::run(std::process::id(), &mut control, state()));
         // Server has closed admission, dropped the pipe, restored the entry and
         // drained callbacks before returning. Drop the reactor (including retained
         // overlapped I/O), then this control thread's IL2CPP attachment, before exit.
-        result
+        drop(reactor);
+        drop(control);
+        drop(attached);
+        exit.departure()
     }
 }
 
@@ -605,14 +628,14 @@ unsafe fn prepare_exit(parameter: *mut c_void) -> Option<usize> {
     let outcome = std::panic::catch_unwind(|| unsafe { (start.work)() });
     state().stop.store(true, SeqCst);
     if !matches!(outcome, Ok(Ok(()))) {
-        eprintln!("EG_HELPER_RETAINED {outcome:?}");
+        crate::report(format_args!("EG_HELPER_RETAINED {outcome:?}"));
         return None;
     }
     // The remote bootstrap must have returned out of this DLL too. Direct
     // DllImport bootstraps on a persistent game thread cannot satisfy this fence.
     // SAFETY: owned synchronize handle captured on the bootstrap thread.
     if unsafe { WaitForSingleObject(start.bootstrap.as_raw_handle(), 5000) } != 0 {
-        eprintln!("EG_HELPER_RETAINED bootstrap thread did not exit");
+        crate::report(format_args!("EG_HELPER_RETAINED bootstrap thread did not exit"));
         return None;
     }
     Some(start.module)

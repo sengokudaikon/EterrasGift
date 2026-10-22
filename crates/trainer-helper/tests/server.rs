@@ -233,7 +233,7 @@ fn server_fixture_child() {
             }
             return;
         }
-        let shared = Arc::new(Shared::default());
+        let shared = Arc::new(Shared::claiming_first_client());
         let counters: Counters = Arc::new([const { AtomicU64::new(0) }; 5]);
         let dispatcher = Dispatcher::default();
         let mut backend = FakeBackend {
@@ -275,7 +275,7 @@ fn server_fixture_child() {
         let (result, ()) = tokio::join!(eg_trainer_helper::server::run(std::process::id(), &mut backend, &shared), monitor);
         worker.join().unwrap();
         write_counters(&directory, &counters);
-        result.unwrap();
+        result.departure().unwrap();
     });
 }
 

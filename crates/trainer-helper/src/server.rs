@@ -9,7 +9,10 @@ use std::{
     future::Future,
     io,
     os::windows::io::{AsRawHandle, FromRawHandle, OwnedHandle},
+    panic::AssertUnwindSafe,
+    pin::Pin,
     sync::atomic::{AtomicBool, AtomicU64, Ordering::SeqCst},
+    task::{Context, Poll},
     time::Duration,
 };
 use tokio::{
@@ -29,6 +32,9 @@ pub struct Shared {
     pub stop: AtomicBool,
     pub owner: std::sync::OnceLock<(u32, u64)>,
     pub main_thread: AtomicU64,
+    /// Without a bootstrap owner, the first client to Discover becomes the owner. Only tests and native fixtures,
+    /// which start without the bootstrap, ask for this; a product helper without an owner serves nobody.
+    claims_first_client: bool,
 }
 impl Default for Shared {
     fn default() -> Self {
@@ -36,6 +42,15 @@ impl Default for Shared {
             stop: AtomicBool::new(false),
             owner: std::sync::OnceLock::new(),
             main_thread: AtomicU64::new(0),
+            claims_first_client: false,
+        }
+    }
+}
+impl Shared {
+    pub fn claiming_first_client() -> Self {
+        Self {
+            claims_first_client: true,
+            ..Self::default()
         }
     }
 }
@@ -141,16 +156,47 @@ async fn create(name: &str, shared: &Shared) -> io::Result<NamedPipeServer> {
     }
 }
 
+/// How the service ended: how serving went, and whether the entry was restored and callbacks drained.
+#[derive(Debug)]
+pub struct Exit {
+    pub served: Result<(), String>,
+    pub restored: Result<(), String>,
+}
+impl Exit {
+    /// Ok when the module may unload. Restoration alone decides: once the entry is restored and callbacks have
+    /// drained nothing runs helper code, whatever ended the service. A server error is only reported.
+    pub fn departure(self) -> Result<(), String> {
+        if let Err(error) = &self.served {
+            crate::report(format_args!("EG_HELPER_SERVE {error}"));
+        }
+        self.restored
+    }
+}
+
 /// Runs on the control OS thread; backend/attached runtime never migrate to Tokio worker threads.
 /// Drive this future to completion: cancellation by dropping it cannot perform entry restoration.
-pub async fn run(pid: u32, backend: &mut impl Backend, shared: &Shared) -> Result<(), String> {
-    let result = serve(pid, backend, shared).await;
+/// A panic while serving is caught here, so restoration still runs.
+pub async fn run(pid: u32, backend: &mut impl Backend, shared: &Shared) -> Exit {
+    let served = CatchUnwind(Box::pin(serve(pid, backend, shared)))
+        .await
+        .unwrap_or_else(|_| Err("helper service panicked".into()));
     shared.stop.store(true, SeqCst);
     // Backend keeps every published callback/trampoline owner retained even when restore fails.
-    let restored = backend.restore();
-    match (result, restored) {
-        (Err(server), Err(restore)) => Err(format!("{server}; entry restoration failed: {restore}")),
-        (Ok(()), result) | (result, Ok(())) => result,
+    let restored = std::panic::catch_unwind(AssertUnwindSafe(|| backend.restore())).unwrap_or_else(|_| Err("entry restoration panicked".into()));
+    Exit { served, restored }
+}
+
+/// Polls a future inside `catch_unwind`. A panic ends it: the future is dropped by its owner, never polled again.
+struct CatchUnwind<F>(F);
+impl<F: Future + Unpin> Future for CatchUnwind<F> {
+    type Output = std::thread::Result<F::Output>;
+    fn poll(mut self: Pin<&mut Self>, context: &mut Context<'_>) -> Poll<Self::Output> {
+        let future = Pin::new(&mut self.0);
+        match std::panic::catch_unwind(AssertUnwindSafe(|| future.poll(context))) {
+            Ok(Poll::Pending) => Poll::Pending,
+            Ok(Poll::Ready(value)) => Poll::Ready(Ok(value)),
+            Err(panic) => Poll::Ready(Err(panic)),
+        }
     }
 }
 async fn serve(pid: u32, backend: &mut impl Backend, shared: &Shared) -> Result<(), String> {
@@ -166,7 +212,8 @@ async fn serve_pipe(pid: u32, mut pipe: NamedPipeServer, backend: &mut impl Back
             Ok(owner) if owner.created == created => Some(owner),
             _ => return Ok(()),
         },
-        None => None, // Only authored server/native fixtures omit bootstrap ownership.
+        None if shared.claims_first_client => None,
+        None => return Ok(()),
     };
     let mut connected = false;
     let initial_deadline = Instant::now() + Duration::from_secs(10);
@@ -244,6 +291,12 @@ async fn serve_pipe(pid: u32, mut pipe: NamedPipeServer, backend: &mut impl Back
                                 payload: Vec::new(),
                             }
                         }
+                        // No gameplay hook can be installed by this version, so the set is already clear. Answered here,
+                        // as the dispatcher check below would install the dispatcher hook a clear should leave alone.
+                        Request::ClearHooks { .. } => Response {
+                            code: ResponseCode::Done,
+                            payload: 0i32.to_le_bytes().to_vec(),
+                        },
                         Request::Discover => match backend.discover() {
                             Ok(discovery) => match discovery.encode(pid) {
                                 Ok(payload) => Response {
@@ -346,6 +399,115 @@ mod tests {
     use super::*;
     use tokio::{net::windows::named_pipe::ClientOptions, time::timeout};
 
+    async fn owner_pipe(pid: u32) -> tokio::net::windows::named_pipe::NamedPipeClient {
+        let name = format!(r"\\.\pipe\eterras-gift-{pid}");
+        loop {
+            match ClientOptions::new().open(&name) {
+                Ok(pipe) => break pipe,
+                Err(error) if matches!(error.raw_os_error(), Some(2 | 231)) => sleep(Duration::from_millis(1)).await,
+                Err(error) => panic!("owner pipe: {error}"),
+            }
+        }
+    }
+
+    /// The pipe name a test serves on: run's `pid` only names the pipe, and tests in one process run in parallel.
+    fn pipe_pid(test: u32) -> u32 {
+        std::process::id().wrapping_add(test << 28)
+    }
+
+    fn owned() -> Shared {
+        let pid = std::process::id();
+        let shared = Shared::default();
+        shared.owner.set((pid, Owner::capture(pid).unwrap().created)).unwrap();
+        shared
+    }
+
+    struct PanickingBackend {
+        restored: bool,
+    }
+    impl Backend for PanickingBackend {
+        fn discover(&mut self) -> Result<Discovery, Response> {
+            panic!("authored panic while serving")
+        }
+        fn ensure_dispatcher(&mut self, _: &DispatcherSpec) -> Result<(), Response> {
+            unreachable!()
+        }
+        fn submit(&mut self, _: Request) -> Result<Pending<Request, Response>, Response> {
+            unreachable!()
+        }
+        fn restore(&mut self) -> Result<(), String> {
+            self.restored = true;
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn a_panic_while_serving_still_restores_and_lets_the_module_unload() {
+        tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap().block_on(async {
+            let shared = owned();
+            let pid = pipe_pid(1);
+            let client = async {
+                let mut pipe = owner_pipe(pid).await;
+                pipe.write_all(&Request::Discover.encode()).await.unwrap();
+                // The service ends without a reply; the pipe closes.
+                let _ = pipe.read(&mut [0; 12]).await;
+            };
+            timeout(Duration::from_secs(3), async {
+                let mut backend = PanickingBackend { restored: false };
+                let (exit, ()) = tokio::join!(run(pid, &mut backend, &shared), client);
+                assert!(backend.restored, "restoration runs after the panic");
+                assert!(exit.served.is_err());
+                exit.departure().unwrap();
+                assert!(shared.stop.load(SeqCst));
+            })
+            .await
+            .unwrap();
+        });
+    }
+
+    #[test]
+    fn a_helper_without_an_owner_serves_nobody() {
+        tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap().block_on(async {
+            let shared = Shared::default();
+            timeout(Duration::from_secs(3), async {
+                let mut backend = RefusingBackend;
+                let exit = run(pipe_pid(3), &mut backend, &shared).await;
+                assert!(exit.served.is_ok(), "it ends without waiting for a client");
+                exit.departure().unwrap();
+            })
+            .await
+            .unwrap();
+        });
+    }
+
+    #[test]
+    fn clearing_hooks_never_reaches_for_the_dispatcher() {
+        tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap().block_on(async {
+            let shared = owned();
+            let pid = pipe_pid(2);
+            let client = async {
+                let mut pipe = owner_pipe(pid).await;
+                let clear = Request::ClearHooks {
+                    dispatcher: DispatcherSpec { rva: 4096, bytes: [0x90; 16] },
+                };
+                pipe.write_all(&clear.encode()).await.unwrap();
+                let mut header = [0; 12];
+                pipe.read_exact(&mut header).await.unwrap();
+                assert_eq!(Response::decode_header(&header).unwrap(), (ResponseCode::Done, 4));
+                shared.stop.store(true, SeqCst);
+            };
+            timeout(Duration::from_secs(3), async {
+                // Its dispatcher methods panic: a clear that touched them would fail the run.
+                let mut backend = RefusingBackend;
+                let (exit, ()) = tokio::join!(run(pid, &mut backend, &shared), client);
+                assert!(exit.served.is_ok());
+                exit.departure().unwrap();
+            })
+            .await
+            .unwrap();
+        });
+    }
+
     struct RefusingBackend;
     impl Backend for RefusingBackend {
         fn discover(&mut self) -> Result<Discovery, Response> {
@@ -385,8 +547,8 @@ mod tests {
             };
             timeout(Duration::from_secs(3), async {
                 let mut backend = RefusingBackend;
-                let (result, ()) = tokio::join!(run(pid, &mut backend, &shared), client);
-                result.unwrap();
+                let (exit, ()) = tokio::join!(run(pid, &mut backend, &shared), client);
+                exit.departure().unwrap();
                 assert!(shared.stop.load(SeqCst));
             })
             .await
@@ -397,7 +559,7 @@ mod tests {
     #[test]
     fn peer_closed_before_first_accept_does_not_strand_the_retained_instance() {
         tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap().block_on(async {
-            let shared = Shared::default();
+            let shared = Shared::claiming_first_client();
             let name = format!(r"\\.\pipe\eg-first-accept-{}", std::process::id());
             let pipe = create(&name, &shared).await.unwrap();
             // No server connect has been polled yet. Force the initial instance

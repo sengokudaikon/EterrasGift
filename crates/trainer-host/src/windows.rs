@@ -148,14 +148,15 @@ impl NativePreparer {
                 ));
             }
             return match &entry.state {
-                RetainedState::Loaded(record) => {
-                    let state = record.lock().unwrap_or_else(|p| p.into_inner()).residency;
-                    if state == Residency::Loaded {
-                        Ok(record.clone())
-                    } else {
-                        Err(failed(BackendError::blocked(ErrorKind::RestartRequired, RESTART_REQUIRED), entry.residency()))
-                    }
-                }
+                RetainedState::Loaded(record) => match record.lock().unwrap_or_else(|p| p.into_inner()).residency {
+                    Residency::Loaded => Ok(record.clone()),
+                    // Unloading is under way and bounded by its deadline: it ends Gone (a fresh load may follow) or Stuck.
+                    Residency::Leaving { .. } => Err(failed(
+                        BackendError::waiting(ErrorKind::NotReady, "The helper is still leaving Last Epoch. Connecting again once it has gone."),
+                        entry.residency(),
+                    )),
+                    Residency::Gone | Residency::Stuck => Err(failed(BackendError::blocked(ErrorKind::RestartRequired, RESTART_REQUIRED), entry.residency())),
+                },
                 RetainedState::Uncertain(failure) => Err(failed(BackendError::blocked(ErrorKind::RestartRequired, failure.to_string()), entry.residency())),
                 RetainedState::Attempting => Err(failed(
                     BackendError::blocked(ErrorKind::RestartRequired, "prior helper startup did not complete; do not replay"),
@@ -350,14 +351,16 @@ impl Transport for VerifiedTransport {
         {
             let record = self.runtime.lock().unwrap_or_else(|poison| poison.into_inner());
             record.helper.artifact().verify_unchanged().map_err(|error| transport_error(error, Delivery::NotSent))?;
-            if record.residency == Residency::Gone {
-                return Err(TransportError {
-                    delivery: Delivery::NotSent,
-                    failure: TransportFailure::Departed,
-                });
-            }
-            if record.residency != Residency::Loaded {
-                return Err(transport_error(RESTART_REQUIRED, Delivery::NotSent));
+            match record.residency {
+                Residency::Loaded => {}
+                // A helper that is leaving or gone takes no more requests; the session ends as a departure.
+                Residency::Leaving { .. } | Residency::Gone => {
+                    return Err(TransportError {
+                        delivery: Delivery::NotSent,
+                        failure: TransportFailure::Departed,
+                    });
+                }
+                Residency::Stuck => return Err(transport_error(RESTART_REQUIRED, Delivery::NotSent)),
             }
             if let Some(reason) = &record.rejected {
                 return Err(transport_error(reason, Delivery::NotSent));

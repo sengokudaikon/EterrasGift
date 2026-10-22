@@ -18,7 +18,7 @@ use std::{
     time::Duration,
 };
 use windows_sys::Win32::{
-    Foundation::{ERROR_NO_MORE_FILES, FILETIME, GetLastError, HANDLE, INVALID_HANDLE_VALUE},
+    Foundation::{DuplicateHandle, ERROR_NO_MORE_FILES, FILETIME, GetLastError, HANDLE, INVALID_HANDLE_VALUE},
     System::{
         Diagnostics::{
             Debug::{ReadProcessMemory, WriteProcessMemory},
@@ -27,8 +27,8 @@ use windows_sys::Win32::{
         LibraryLoader::{GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS, GET_MODULE_HANDLE_EX_FLAG_PIN, GetModuleFileNameW, GetModuleHandleExW, GetModuleHandleW, GetProcAddress},
         Memory::{MEM_COMMIT, MEM_RELEASE, MEM_RESERVE, PAGE_READWRITE, VirtualAllocEx, VirtualFreeEx},
         Threading::{
-            CreateRemoteThread, GetCurrentProcessId, GetExitCodeThread, GetProcessMitigationPolicy, GetProcessTimes, IsWow64Process2, OpenProcess, PROCESS_CREATE_THREAD,
-            PROCESS_QUERY_INFORMATION, PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_SYNCHRONIZE, PROCESS_VM_OPERATION, PROCESS_VM_READ, PROCESS_VM_WRITE,
+            CreateRemoteThread, GetCurrentProcess, GetCurrentProcessId, GetExitCodeThread, GetProcessMitigationPolicy, GetProcessTimes, IsWow64Process2, OpenProcess,
+            PROCESS_CREATE_THREAD, PROCESS_QUERY_INFORMATION, PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_SYNCHRONIZE, PROCESS_VM_OPERATION, PROCESS_VM_READ, PROCESS_VM_WRITE,
             ProcessControlFlowGuardPolicy, ProcessDEPPolicy, ProcessDynamicCodePolicy, ProcessSignaturePolicy, ProcessUserShadowStackPolicy, QueryFullProcessImageNameW,
             WaitForSingleObject,
         },
@@ -281,6 +281,42 @@ struct ProcessLease {
     fake: Option<Arc<FakeIo>>,
 }
 impl ProcessLease {
+    /// A copy of this lease that can only identify, wait on and read the process: all that watching a loaded helper
+    /// needs. The thread-creation and memory-write rights stay with the load and close with it.
+    fn observer(&self) -> Result<Self> {
+        #[cfg(test)]
+        if self.fake.is_some() {
+            return Ok(Self {
+                handle: self.handle.try_clone().map_err(BootstrapError::from)?,
+                target: self.target.clone(),
+                _modules: self._modules.clone(),
+                fake: self.fake.clone(),
+            });
+        }
+        let mut handle = std::ptr::null_mut();
+        // SAFETY: duplicates this process's own valid handle into itself with a subset of its rights.
+        let duplicated = unsafe {
+            DuplicateHandle(
+                GetCurrentProcess(),
+                self.handle.as_raw_handle(),
+                GetCurrentProcess(),
+                &mut handle,
+                PROCESS_QUERY_INFORMATION | PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_SYNCHRONIZE | PROCESS_VM_READ,
+                0,
+                0,
+            )
+        };
+        if duplicated == 0 {
+            return Err(last());
+        }
+        Ok(Self {
+            handle: owned(handle)?,
+            target: self.target.clone(),
+            _modules: self._modules.clone(),
+            #[cfg(test)]
+            fake: None,
+        })
+    }
     fn has_exited(&self) -> bool {
         #[cfg(test)]
         if let Some(fake) = &self.fake {
@@ -773,6 +809,9 @@ impl RemoteHelper {
                 BootstrapError::Invalid("unexpected startup reply"),
             ));
         }
+        // Every remote call has finished and freed its input. Watching the running helper needs no more than reading;
+        // should narrowing fail, the full lease still watches it correctly.
+        let process = process.observer().map(Arc::new).unwrap_or(process);
         Ok(Self {
             process,
             artifact,
@@ -954,6 +993,36 @@ mod tests {
             Arc::decrement_strong_count(process);
         }
     }
+    #[test]
+    fn a_loaded_helper_is_watched_through_a_lease_that_cannot_write() {
+        let target = crate::process::capture(std::process::id()).unwrap();
+        // SAFETY: opens this test process with the bootstrap's rights; the handle is owned at once.
+        let handle = owned(unsafe {
+            OpenProcess(
+                PROCESS_QUERY_INFORMATION | PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_SYNCHRONIZE | PROCESS_VM_OPERATION | PROCESS_VM_READ | PROCESS_VM_WRITE,
+                0,
+                target.pid,
+            )
+        })
+        .unwrap();
+        let lease = ProcessLease {
+            handle,
+            target,
+            _modules: Vec::new(),
+            fake: None,
+        };
+        let observer = lease.observer().unwrap();
+        let mut value = 7_u64;
+        let address = (&raw mut value) as u64;
+        assert!(!observer.has_exited());
+        assert_eq!(observer.read(address, 8).unwrap(), 7_u64.to_le_bytes());
+        let mut written = 0;
+        // SAFETY: targets a live local; only the access check is under test, and it refuses before any copy.
+        let wrote = unsafe { WriteProcessMemory(observer.handle.as_raw_handle(), address as *const c_void, [9_u8; 8].as_ptr().cast(), 8, &mut written) };
+        assert_eq!(wrote, 0, "the watching lease holds no write right");
+        assert_eq!(std::hint::black_box(value), 7);
+    }
+
     #[test]
     fn import_jump_slots_decode_both_thunks_and_refuse_bad_spans() {
         assert_eq!(import_jump_slot(0x1000, &[0x48, 0xff, 0x25, 0x19, 0, 0, 0]).unwrap(), Some(0x1020));

@@ -72,7 +72,7 @@ unsafe fn native_worker() -> Result<(), String> {
         };
         hooks::commit(&[(&control.hook, true)]).map_err(|e| e.to_string())?;
         let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build().map_err(|e| e.to_string())?;
-        runtime.block_on(server::run(std::process::id(), &mut control, state()))
+        runtime.block_on(server::run(std::process::id(), &mut control, state())).departure()
     }
 }
 
