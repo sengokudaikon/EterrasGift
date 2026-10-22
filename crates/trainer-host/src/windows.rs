@@ -65,6 +65,7 @@ pub struct NativePreparer {
     artifact: Arc<HelperArtifact>,
     retained: Vec<Retained>,
     timeout: Duration,
+    successful_loads: usize,
 }
 impl NativePreparer {
     /// Compose the supported-game Windows adapter without opening a process.
@@ -75,7 +76,27 @@ impl NativePreparer {
             artifact,
             retained: Vec::new(),
             timeout: Duration::from_secs(10),
+            successful_loads: 0,
         }
+    }
+    /// Read-only departure evidence for an already retained exact process.
+    /// This remains permitted after the offline log gate has closed.
+    pub fn departure_proven(&self, target: &ProcessIdentity) -> Result<bool, BootstrapError> {
+        let entry = self
+            .retained
+            .iter()
+            .find(|entry| entry.target == *target)
+            .ok_or(BootstrapError::Invalid("no retained helper load"))?;
+        match &entry.state {
+            RetainedState::Loaded(record) => {
+                let record = record.lock().unwrap_or_else(|p| p.into_inner());
+                record.helper.departed(record.proof.as_ref())
+            }
+            _ => Err(BootstrapError::Invalid("helper startup was not verified")),
+        }
+    }
+    pub fn successful_loads(&self) -> usize {
+        self.successful_loads
     }
     pub fn retained_targets(&self) -> usize {
         self.retained.len()
@@ -174,6 +195,7 @@ impl NativePreparer {
         );
         match result {
             Ok(helper) => {
+                self.successful_loads = self.successful_loads.saturating_add(1);
                 let record = Arc::new(Mutex::new(RuntimeRecord {
                     helper,
                     game: modules.0,

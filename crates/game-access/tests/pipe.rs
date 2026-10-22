@@ -235,7 +235,7 @@ fn pipe_fixture_child() {
             "partial-header" => bytes.truncate(5),
             "partial-body" => bytes.truncate(14),
             "bad-magic" => bytes[..4].copy_from_slice(&(MAGIC ^ 1).to_le_bytes()),
-            "bad-code" => bytes[4..8].copy_from_slice(&7u32.to_le_bytes()),
+            "bad-code" => bytes[4..8].copy_from_slice(&8u32.to_le_bytes()),
             "oversized" => bytes[8..12].copy_from_slice(&(MAX_RESPONSE_SIZE as u32 + 1).to_le_bytes()),
             _ => panic!("unknown fixture mode {mode}"),
         }

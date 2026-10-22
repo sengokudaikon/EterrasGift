@@ -55,6 +55,7 @@ pub enum SessionError {
     Disabled,
     Busy,
     NotConnected,
+    CharacterLoading,
     NotOffline(GameReadiness),
     Protocol(ProtocolError),
     Transport(TransportError),
@@ -68,6 +69,7 @@ impl std::fmt::Display for SessionError {
         match self {
             Self::Disabled => f.write_str("The trainer is disabled."),
             Self::Busy => f.write_str("Wait for the current trainer operation to finish."),
+            Self::CharacterLoading => f.write_str("The offline character is changing area."),
             Self::NotConnected => f.write_str("Connect before reading or editing an item."),
             Self::NotOffline(readiness) => f.write_str(readiness_message(*readiness)),
             Self::Protocol(error) => write!(f, "The helper returned an invalid response: {error}"),
@@ -367,6 +369,11 @@ impl<T: Transport> Session<T> {
                 Ok(OwnedRead::Complete(snapshot))
             }
             Err(error) => {
+                if matches!(error, SessionError::CharacterLoading) {
+                    self.status = None;
+                    self.state = SessionState::Ready;
+                    return Err(error);
+                }
                 if optional_description
                     && matches!(
                         &error,
@@ -421,6 +428,11 @@ impl<T: Transport> Session<T> {
         let response = self.transport.send(request).await.map_err(SessionError::Transport)?;
         if response.code == ResponseCode::Done {
             return Ok(response.payload);
+        }
+        if response.code == ResponseCode::CharacterLoading {
+            self.status = None;
+            self.state = SessionState::Ready;
+            return Err(SessionError::CharacterLoading);
         }
         if response.code == ResponseCode::OfflineRequired {
             self.release_without_io();

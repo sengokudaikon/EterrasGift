@@ -1159,3 +1159,27 @@ fn unload_ack_without_native_departure_evidence_stays_unconfirmed_and_is_not_rep
     assert_eq!(wire.requests().last(), Some(&Request::Unload));
     assert_eq!(wire.requests().len(), 3);
 }
+
+#[test]
+fn typed_travel_response_keeps_the_lease_but_removes_old_manager_authority() {
+    let fixture = Fixture::new();
+    let loading = Step::Reply(Ok(Response {
+        code: ResponseCode::CharacterLoading,
+        payload: b"changing area".to_vec(),
+    }));
+    let wire = FakeTransport::new(
+        fixture.target.clone(),
+        [fixture.discover(), status(false, 0x1234, 0), loading, status(false, 0x5678, 0), clear()],
+    );
+    let mut session = fixture.session(&wire, &FakeLog::new([offline()]), GatePolicy::Release);
+    session.enable();
+    run(session.connect(now())).unwrap();
+    assert!(matches!(run(session.refresh(now())), Err(SessionError::CharacterLoading)));
+    assert_eq!(session.state(), SessionState::Ready);
+    assert!(session.runtime_status().is_none());
+    assert!(session.artifact_bytes_read().is_some());
+    run(session.refresh(now())).unwrap();
+    assert_eq!(session.runtime_status().unwrap().manager, 0x5678);
+    assert_eq!(run(session.disconnect()), Cleanup::ConfirmedOff);
+    assert_eq!(wire.requests().iter().filter(|request| **request == Request::Discover).count(), 1);
+}

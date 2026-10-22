@@ -254,3 +254,21 @@ to both ExpectedObservation and RollEdit; cleanup/generation/item changes discar
 UI draft never displays an earlier draft's text, and dropping its receipt never cancels accepted
 native work or authorizes replay. Production unique mapping and unique/implicit writes remain
 separate unsupported operations.
+
+## Helper departure and travel (2026-10-22)
+
+The helper caches ClientStateManager's static app-state getter and enum literal metadata;
+250 ms checks stop on Login/CharacterSelect or online state, preserve InGame travel, and refuse
+work during unknown state with a three-second departure grace. Bootstrap's 96-byte configuration
+binds controller PID/birth before Discover. No module pins are taken.
+
+CharacterLoading is a pre-store response for a missing offline manager while the app remains
+InGame. Sessions revoke their previous manager/status and editor observations, retain their
+binary lease and transport, and recover through a fresh read. A transport read failure followed
+by proven departure can reconnect later; uncertain writes remain fenced and are never replayed.
+
+`mise run trainer:unload` passed 100 concurrent native reloads plus blocked-callback retention.
+`mise run trainer:player:lifecycle` passed six external Unity 6000.4.8f1 loads, four seconds of
+InGame manager absence, and module-absence/pristine-dispatcher proof after each departure.
+The player never calls a helper export in lifecycle mode, avoiding its own IL2CPP loader reference.
+This is authored fixture evidence; live Last Epoch testing remains deferred until requested.

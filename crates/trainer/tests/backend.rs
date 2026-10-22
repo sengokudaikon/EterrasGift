@@ -114,6 +114,7 @@ impl Block {
 struct Shared {
     calls: Mutex<Vec<&'static str>>,
     targets: Mutex<Vec<ProcessIdentity>>,
+    exited: Mutex<Vec<ProcessIdentity>>,
     log: Mutex<GameLogState>,
     status: Mutex<RuntimeStatus>,
     connect_errors: Mutex<VecDeque<BackendError>>,
@@ -152,6 +153,7 @@ impl Shared {
         Arc::new(Self {
             calls: Mutex::new(vec![]),
             targets: Mutex::new(vec![target()]),
+            exited: Mutex::new(vec![]),
             log: Mutex::new(log(GameReadiness::Offline)),
             status: Mutex::new(RuntimeStatus {
                 online: false,
@@ -232,6 +234,9 @@ impl ProcessLocator for Locator {
 struct Connect(Arc<Shared>);
 impl Connector for Connect {
     type Connection = Connection;
+    fn reap_exited(&mut self) -> Vec<ProcessIdentity> {
+        std::mem::take(&mut *self.0.exited.lock().unwrap())
+    }
     async fn connect(&mut self, target: ProcessIdentity, _: Timestamp) -> Result<Connection, BackendError> {
         self.0.call("connect", &self.0.connect_block).await;
         if let Some(error) = self.0.connect_errors.lock().unwrap().pop_front() {
@@ -1144,5 +1149,75 @@ fn menu_and_quitting_log_events_unload_before_the_next_offline_character_connect
             assert_eq!(handle.snapshot().phase, Phase::Ready);
             shutdown(&handle, worker).await;
         }
+    });
+}
+
+#[test]
+fn in_game_travel_clears_live_editor_data_but_retains_connection_and_resumes_fresh() {
+    run(async {
+        let shared = Shared::new();
+        let (handle, worker) = start(&shared, options());
+        connected(&handle).await;
+        let generation = handle.snapshot().generation;
+        shared
+            .read_errors
+            .lock()
+            .unwrap()
+            .push_back(BackendError::waiting(ErrorKind::CharacterLoading, "area transition"));
+        assert_eq!(command(&handle, Command::ReadForge).await.unwrap_err().kind, ErrorKind::CharacterLoading);
+        let state = handle.snapshot();
+        assert_eq!(state.phase, Phase::WaitingForCharacter);
+        assert!(state.runtime_status.is_none());
+        assert_eq!(state.forge, ForgeState::Unobserved);
+        assert!(state.attached.is_some());
+        assert_eq!(shared.count("disconnect"), 0);
+        command(&handle, Command::ReadForge).await.unwrap();
+        assert_eq!(handle.snapshot().phase, Phase::Ready);
+        assert_eq!(handle.snapshot().generation, generation);
+        assert_eq!(shared.count("connect"), 1);
+        shutdown(&handle, worker).await;
+    });
+}
+
+#[test]
+fn confirmed_game_exit_clears_a_stuck_generation_and_its_restart_advice() {
+    run(async {
+        let shared = Shared::new();
+        let (handle, worker) = start(&shared, options());
+        connected(&handle).await;
+        shared.departure_proven.store(false, Ordering::SeqCst);
+        command(&handle, Command::Disconnect).await.unwrap();
+        assert_eq!(handle.snapshot().phase, Phase::Blocked);
+        shared.targets.lock().unwrap().clear();
+        shared.exited.lock().unwrap().push(target());
+        wait_phase(&handle, Phase::WaitingForGame).await;
+        let state = handle.snapshot();
+        assert!(state.retained_helper.is_none());
+        assert!(state.error.is_none());
+        assert_eq!(state.cleanup, Cleanup::ConfirmedOff);
+        shutdown(&handle, worker).await;
+    });
+}
+
+#[test]
+fn failed_read_with_proven_departure_allows_a_fresh_offline_connection() {
+    run(async {
+        let shared = Shared::new();
+        let (handle, worker) = start(&shared, options());
+        connected(&handle).await;
+        shared.read_errors.lock().unwrap().push_back(BackendError {
+            kind: ErrorKind::Transport,
+            message: "helper stopped during read".into(),
+            delivery: Some(Delivery::MayHaveRun),
+            retry_when_waiting: false,
+        });
+        assert_eq!(command(&handle, Command::ReadForge).await.unwrap_err().kind, ErrorKind::Transport);
+        let state = handle.snapshot();
+        assert_eq!(state.phase, Phase::WaitingForCharacter);
+        assert_eq!(state.retained_helper.unwrap().residency, backend::HelperResidency::Gone);
+        command(&handle, Command::Connect).await.unwrap();
+        assert_eq!(shared.count("connect"), 2);
+        assert_eq!(handle.snapshot().phase, Phase::Ready);
+        shutdown(&handle, worker).await;
     });
 }

@@ -754,6 +754,10 @@ fn status(snapshot: &BackendSnapshot) -> Status {
             waiting: Some(BloomPhase::Wilted),
             ..line("Waiting for Last Epoch", "Start Last Epoch and load an offline character.", "Waiting for game")
         },
+        Phase::WaitingForCharacter if snapshot.error.as_ref().is_some_and(|error| error.kind == ErrorKind::CharacterLoading) => Status {
+            waiting: Some(BloomPhase::Opening),
+            ..line("Changing area", "Waiting for the offline character to finish changing area.", "Changing area…")
+        },
         Phase::WaitingForCharacter => Status {
             waiting: Some(BloomPhase::Opening),
             ..line(

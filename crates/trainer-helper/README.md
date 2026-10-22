@@ -24,7 +24,7 @@ checks the current UnitySynchronizationContext main managed ID against Thread.Cu
 Only a matching callback establishes the Windows thread ID used for subsequent dispatch; other threads
 forward the original without taking a command. There is no pre-bootstrap main-thread nomination. Rust panics in this post-call work close admission;
 native/managed exceptions continue to their caller. The authored Unity throwing-task route checks
-that later queued tasks still run. Game graph reads occur only for requested operations.
+that later queued tasks still run. Game graph reads serve requested operations and the bounded app-state watchdog.
 
 Status roots the manager wrapper, checks assignability and reads its metadata-validated Unity
 `m_CachedPtr`. A retained managed wrapper whose native object was destroyed reports no character.
@@ -56,7 +56,8 @@ Locale wrappers must both have live native pointers. Uninitialized, pending, sta
 return NotReady, without invoking settings/selection/initialization/waiting methods. Metadata/layout failures fail
 the whole read. All objects, including the handle and returned identifier box, stay rooted through copying.
 
-Only the Locale.Identifier, LocaleIdentifier.Code and Application.version getters run. The real identifier
+The Locale.Identifier, LocaleIdentifier.Code, Application.version and cached
+ClientStateManager.CurrentClientAppStateType getters run. The real identifier
 has **two references, 16-byte payload and 8-byte alignment**; the earlier one-field invocation fixture was not its
 layout. The version getter may initialize Application's framework CancellationTokenSource, cache an internal call,
 allocate/convert strings and dispose a native buffer. These are explicitly authorized effects; read-only means no
@@ -75,9 +76,9 @@ The complete hook feature set is currently empty:
 stat or gameplay field writes remain unavailable. Before adding effects, their
 runtime-offline/owner-loss cleanup must run and acknowledge completion on the engine thread.
 
-The local pipe is `eterras-gift-<PID>`, one bounded request per connection: a 12-byte header and a sequential operation body. The first valid
-Discover claims ownership using the kernel-reported client PID and a retained process handle/start
-time. Normal per-request EOF preserves ownership. Other living processes receive Refused without
+The local pipe is `eterras-gift-<PID>`, one bounded request per connection: a 12-byte header and a sequential operation body. Bootstrap binds the controller PID/birth before any request; the kernel-reported
+client PID and retained process handle/start time verify each owner request. Fixture servers
+without a bootstrap binding let the first valid Discover claim ownership. Normal per-request EOF preserves ownership. Other living processes receive Refused without
 reaching the backend; owner death stops the helper and restores the dispatcher. A
 restoration error retains the DLL rather than handing off an unconfirmed entry. This strengthens the original helper's
 ownership model. The protocol has no nonce or authentication against code in the same process.
@@ -103,7 +104,7 @@ checks 100 unload/reloads under four callers and retention of a blocked callback
 future must still be driven to completion for restoration/drain; a panic leaves the DLL loaded.
 
 `eg_helper_build_id()` returns 64 lowercase ASCII hex characters plus NUL. The build script hashes
-relative paths and contents of the manifests, lockfile and Rust sources of core, game access, trainer
+relative paths and contents of the manifests, lockfile and Rust sources of core, game access, trainer wire
 and helper. This is source compatibility/provenance, not authentication or a compiled-binary hash.
 Evaluation separately records the DLL SHA256 and compiler identity.
 
@@ -117,3 +118,9 @@ field, app-state getter and enum metadata. Login/CharacterSelect or online state
 helper immediately; InGame remains admitted across zone changes, even with a missing player.
 None/unknown/failed state reads admit no work and unload after three continuous seconds.
 The enum values come from literal metadata, never fixed numeric guesses.
+
+A missing offline character during InGame returns typed CharacterLoading. The session clears
+old manager/editor authority, retains the connection and binary lease, and resumes from a fresh
+read without reloading. This response never authorizes a store or an automatic write retry.
+`mise run trainer:player:lifecycle` checks six fresh external loads, menu/login/online/unknown
+state departure, explicit Disconnect, and four seconds of InGame character absence.

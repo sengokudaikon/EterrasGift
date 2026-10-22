@@ -159,6 +159,9 @@ impl<P: HelperPreparer, F: LogFactory> SessionConnector<P, F> {
         let mut session = Session::new(target.clone(), prepared.transport, profile)?;
         session.enable();
         if let Err(error) = session.connect(admission.time()?).await {
+            if matches!(error, crate::session::SessionError::CharacterLoading) {
+                return Ok(session);
+            }
             let gone = session.disconnect().await == crate::session::Cleanup::ConfirmedOff;
             if gone {
                 self.last_attempt.as_mut().unwrap().residency = PreparationResidency::NotLoaded;

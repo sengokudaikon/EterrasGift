@@ -164,6 +164,8 @@ pub enum ResponseCode {
     Refused = 4,
     OfflineRequired = 5,
     RestartRequired = 6,
+    /// Offline InGame instance between player wrappers; no operation started.
+    CharacterLoading = 7,
 }
 
 impl TryFrom<u32> for ResponseCode {
@@ -178,6 +180,7 @@ impl TryFrom<u32> for ResponseCode {
             4 => Self::Refused,
             5 => Self::OfflineRequired,
             6 => Self::RestartRequired,
+            7 => Self::CharacterLoading,
             _ => return Err(ProtocolError::InvalidData),
         })
     }

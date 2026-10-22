@@ -35,7 +35,7 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
             Ok(None) => Err("Localized descriptions are unavailable.".into()),
             Err(error) => {
                 self.handle_connection_gate(&error);
-                if error.kind != ErrorKind::Gate {
+                if !matches!(error.kind, ErrorKind::Gate | ErrorKind::HelperDeparted | ErrorKind::CharacterLoading) {
                     self.fail(error.clone(), Some(target));
                 }
                 return Err(error);
@@ -89,7 +89,7 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
             }
             Err(error) => {
                 self.handle_connection_gate(&error);
-                if error.kind != ErrorKind::Gate {
+                if !matches!(error.kind, ErrorKind::Gate | ErrorKind::HelperDeparted | ErrorKind::CharacterLoading) {
                     self.fail(error.clone(), Some(target));
                 }
                 return Err(error);

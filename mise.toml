@@ -96,3 +96,7 @@ run = "cargo test --manifest-path tools/trainer-eval/persistent-player/client/Ca
 [tasks."trainer:unload"]
 description = "Plain native fixture: 100 unload/reloads with active callers, then a stuck callback; no Unity or game"
 run = ["cargo build -p eg-trainer-helper --release --features fixture --offline", "cargo test -p eg-trainer-helper --release --features fixture --test unload --offline -- --ignored --nocapture"]
+
+[tasks."trainer:player:lifecycle"]
+description = "Build and exercise owned Unity 6000.4.8f1 menu departure, zone travel and fresh external helper loads; no game"
+run = "pwsh -NoProfile -File tools/trainer-eval/persistent-player/Run-Lifecycle.ps1"

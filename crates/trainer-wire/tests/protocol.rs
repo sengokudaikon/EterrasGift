@@ -86,7 +86,7 @@ fn response_header_is_bounded_before_payload_allocation() {
     assert_eq!(Response::decode(&golden), Ok(expected.clone()));
     assert_eq!(expected.encode().unwrap(), golden);
     assert_eq!(Response::decode_header(&golden[..12]), Ok((ResponseCode::OfflineRequired, 3)));
-    for code in 0_u32..=6 {
+    for code in 0_u32..=7 {
         let mut header = golden[..12].to_vec();
         header[4..8].copy_from_slice(&code.to_le_bytes());
         assert_eq!(Response::decode_header(&header).unwrap().0 as u32, code);
@@ -97,7 +97,7 @@ fn response_header_is_bounded_before_payload_allocation() {
         assert!(Response::decode_header(&header).is_err());
     }
     let mut header = golden[..12].to_vec();
-    header[4] = 7;
+    header[4] = 8;
     assert!(Response::decode_header(&header).is_err());
     header[4] = 0;
     header[0] = 0;

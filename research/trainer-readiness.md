@@ -165,5 +165,8 @@ callback gateway and complete drain, native module/pristine-entry proof, fresh r
 Gone, permanent restart fence after Stuck, and backend/menu/shutdown triggers are implemented.
 The cached 250 ms game watchdog distinguishes ClientStateManager Login/CharacterSelect from
 InGame, preserving zone travel; unknown state refuses work and expires after three seconds.
-Plain native 100-cycle reload and blocked-callback retention passed. Authored Unity lifecycle
-execution is the next gate; live Last Epoch testing remains explicitly deferred.
+Plain native 100-cycle reload and blocked-callback retention passed. The external Unity
+6000.4.8f1 lifecycle run passed six fresh loads and module/pristine-entry checks after menu,
+login, Disconnect, unknown-state timeout and online departure. Four seconds of character
+absence during InGame preserved the session with typed CharacterLoading and fresh recovery.
+Live Last Epoch testing remains explicitly deferred.

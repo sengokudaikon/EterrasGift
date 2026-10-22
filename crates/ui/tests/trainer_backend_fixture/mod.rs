@@ -22,6 +22,7 @@ struct Data {
     target: ProcessIdentity,
     item: Mutex<Option<ForgeSnapshot>>,
     online: AtomicBool,
+    loading: AtomicBool,
     reads: AtomicUsize,
     connects: AtomicUsize,
     writes: AtomicUsize,
@@ -87,6 +88,9 @@ impl BackendConnection for OwnedConnection {
         &self.0.target
     }
     async fn refresh(&mut self, _: jiff::Timestamp) -> Result<RuntimeStatus, BackendError> {
+        if self.0.loading.load(Ordering::SeqCst) {
+            return Err(BackendError::waiting(backend::ErrorKind::CharacterLoading, "changing area"));
+        }
         Ok(RuntimeStatus {
             online: false,
             manager: 12,
@@ -495,6 +499,7 @@ pub(super) fn capture(session: &Session) {
         },
         item: Mutex::new(None),
         online: AtomicBool::new(false),
+        loading: AtomicBool::new(false),
         reads: AtomicUsize::new(0),
         connects: AtomicUsize::new(0),
         writes: AtomicUsize::new(0),
@@ -1051,6 +1056,14 @@ pub(super) fn capture(session: &Session) {
     assert!(ui.global::<eg_ui::TrainerState>().get_empty_detail().contains("level requirement"));
     *data.item.lock().unwrap() = Some(item("Replaced item", 18));
     command(&handle, Command::ReadForge, || true);
+    wait(|| ui.global::<eg_ui::ForgeState>().get_has_item());
+    data.loading.store(true, Ordering::SeqCst);
+    command(&handle, Command::ReadForge, || handle.snapshot().phase == Phase::WaitingForCharacter);
+    wait(|| ui.global::<eg_ui::TrainerState>().get_empty_title() == "Changing area");
+    assert!(handle.snapshot().attached.is_some());
+    session.capture(&ui, "backend-forge-changing-area");
+    data.loading.store(false, Ordering::SeqCst);
+    command(&handle, Command::ReadForge, || handle.snapshot().phase == Phase::Ready);
     wait(|| ui.global::<eg_ui::ForgeState>().get_has_item());
     data.online.store(true, Ordering::SeqCst);
     let before = data.reads.load(Ordering::SeqCst);

@@ -55,7 +55,7 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
             Ok(status) => status,
             Err(error) => {
                 self.handle_connection_gate(&error);
-                if error.kind != ErrorKind::Gate {
+                if !matches!(error.kind, ErrorKind::Gate | ErrorKind::HelperDeparted | ErrorKind::CharacterLoading) {
                     self.fail(error.clone(), Some(target));
                 }
                 return Err(error);
@@ -166,6 +166,7 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
         if let WriteOutcome::NotApplied { code, message } = &status {
             let kind = match code {
                 ResponseCode::OfflineRequired => Some(ErrorKind::Gate),
+                ResponseCode::CharacterLoading => Some(ErrorKind::CharacterLoading),
                 ResponseCode::RestartRequired => Some(ErrorKind::RestartRequired),
                 _ => None,
             };
@@ -187,7 +188,7 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
             if reusable {
                 self.state.error = Some(error.clone());
                 self.publish();
-            } else if error.kind == ErrorKind::Gate {
+            } else if matches!(error.kind, ErrorKind::Gate | ErrorKind::HelperDeparted | ErrorKind::CharacterLoading) {
                 self.handle_connection_gate(error);
             } else if self.connection.is_some() {
                 self.fail(error.clone(), Some(target));

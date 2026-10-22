@@ -38,6 +38,7 @@ use windows_sys::Win32::System::{
 #[cfg(feature = "fixture")]
 use std::sync::atomic::AtomicPtr;
 
+static PRESENCE_ERROR_REPORTED: AtomicBool = AtomicBool::new(false);
 static WATCHDOG: Mutex<Watchdog> = Mutex::new(Watchdog::new());
 
 static STARTED: AtomicBool = AtomicBool::new(false);
@@ -59,10 +60,10 @@ unsafe fn module() -> Result<NonNull<u8>, String> {
     NonNull::new(unsafe { GetModuleHandleW(name.as_ptr()) }.cast()).ok_or_else(|| "GameAssembly is not loaded".into())
 }
 unsafe fn export(module: NonNull<u8>, name: &'static CStr) -> Option<NonNull<c_void>> {
-    // SAFETY: caller pins the exact module and selects only declared exports.
+    // SAFETY: caller retains the exact module and selects only declared exports.
     unsafe { GetProcAddress(module.as_ptr().cast(), name.as_ptr().cast()) }.and_then(|value| NonNull::new(value as *const () as *mut c_void))
 }
-// One resolver binds every table to the same pinned GameAssembly. Keep the
+// One resolver binds every table to the same retained GameAssembly. Keep the
 // tables private: operation closures receive this bundle, never re-resolve them.
 struct Runtime {
     ownership: raw::Api,
@@ -76,8 +77,8 @@ impl Runtime {
         if let Some(runtime) = RUNTIME.get() {
             return Ok(runtime);
         }
-        // SAFETY: startup pins GameAssembly before creating the worker; every lookup
-        // uses that same module, whose immutable metadata survives until process exit.
+        // SAFETY: startup retains the initialized runtime through worker exit; every lookup
+        // uses that same module and its immutable metadata.
         let runtime = unsafe { Self::resolve(module) }?;
         let _ = RUNTIME.set(runtime);
         Ok(RUNTIME.get().unwrap())
@@ -130,7 +131,15 @@ unsafe fn runtime_operation(operation: impl FnOnce(&Runtime, RuntimeAccess, &Att
             let (_, runtime) = prepare_operation(|| module(), |module| Runtime::retained(module))?;
             let thread = runtime.thread();
             let attached = thread.attach().map_err(|error| server::failure(ResponseCode::NotReady, error.to_string()))?;
-            operation(runtime, runtime.access, &attached)
+            let result = operation(runtime, runtime.access, &attached);
+            if let Err(response) = &result
+                && response.code == ResponseCode::OfflineRequired
+                && runtime.access.play_presence(&attached, runtime.invocation).ok() == Some(PlayPresence::InGame)
+                && runtime.access.status(&attached).is_ok_and(|status| !status.online && status.manager == 0)
+            {
+                return Err(server::failure(ResponseCode::CharacterLoading, "The offline character is changing area."));
+            }
+            result
         })();
         result.unwrap_or_else(|error| error)
     }
@@ -149,8 +158,11 @@ unsafe fn read_status() -> Response {
     // SAFETY: captured engine thread after original; initialized modules/metadata
     // remain retained and the status reader rechecks the current offline graph.
     unsafe {
-        runtime_operation(|_, access, attached| {
+        runtime_operation(|runtime, access, attached| {
             let status = access.status(attached).map_err(map_discovery)?;
+            if !status.online && status.manager == 0 && access.play_presence(attached, runtime.invocation).ok() == Some(PlayPresence::InGame) {
+                return Err(server::failure(ResponseCode::CharacterLoading, "The offline character is changing area."));
+            }
             Ok(Response {
                 code: ResponseCode::Done,
                 payload: status.encode().map_err(|e| server::failure(ResponseCode::Refused, e.to_string()))?.to_vec(),
@@ -223,7 +235,7 @@ unsafe fn set_attack_leech_rate(write: &AttackLeechRateWrite) -> Response {
 
 unsafe fn read_forge() -> Response {
     // SAFETY: called only after the engine original returns on its captured main thread.
-    // Module pins retain code. Absence of concurrent graph mutation is an external
+    // The startup contract retains runtime code. Absence of concurrent graph mutation is an external
     // assumption of unsafe start, not a property established by bootstrap.
     // RuntimeAccess rechecks offline admission and validates/root-copies the entire object graph.
     unsafe {
@@ -398,7 +410,15 @@ fn after_original(state: &Shared) {
                 runtime.access.play_presence(&attached, runtime.invocation).map_err(|e| e.to_string())
             })()
         }
-        .unwrap_or(PlayPresence::Unknown);
+        .unwrap_or_else(|error| {
+            if !PRESENCE_ERROR_REPORTED.swap(true, SeqCst) {
+                eprintln!("EG_HELPER_PRESENCE {error}");
+            }
+            PlayPresence::Unknown
+        });
+        if presence != PlayPresence::Unknown {
+            PRESENCE_ERROR_REPORTED.store(false, SeqCst);
+        }
         if WATCHDOG.lock().unwrap_or_else(|p| p.into_inner()).observe(now, presence) {
             state.stop.store(true, SeqCst);
             return;
@@ -456,7 +476,7 @@ impl Backend for Control<'_> {
         if let Some(discovery) = &self.discovery {
             return Ok(discovery.clone());
         }
-        // SAFETY: exact initialized/pinned runtime and current-thread attachment established by bootstrap.
+        // SAFETY: exact initialized runtime and current-thread attachment established by bootstrap.
         let found = unsafe { self.access.discover(self.attached, BUILD_ID.into(), self.module, self.size) }.map_err(map_discovery)?;
         self.discovery = Some(found.discovery.clone());
         Ok(found.discovery)
@@ -470,7 +490,7 @@ impl Backend for Control<'_> {
             return Err(server::failure(ResponseCode::RestartRequired, "Dispatcher profile changed; nothing ran"));
         }
         // SAFETY: discovery established this module-backed exact method. Unsafe startup contract
-        // grants exclusive patching/control-flow ownership and permanent helper/runtime retention.
+        // grants exclusive patching/control-flow ownership and runtime lifetime through drain.
         unsafe {
             let target = self.module.as_ptr().add(expected.rva as usize);
             if self.hook.is_none() {
@@ -538,7 +558,7 @@ fn restore_and_drain(hook: Option<&RetainedHook>, gate: Option<&CallbackGate>) -
 }
 
 unsafe fn worker() -> Result<(), String> {
-    // SAFETY: start's contract pins an initialized exact runtime before creating this thread.
+    // SAFETY: start's contract retains an initialized exact runtime through this thread's exit.
     unsafe {
         let module = module()?;
         let runtime = Runtime::retained(module)?;

@@ -91,12 +91,22 @@ impl<T: Transport> Session<T> {
                 WriteOutcome::Confirmed(_)
                     | WriteOutcome::NotKept(_)
                     | WriteOutcome::NotApplied {
-                        code: ResponseCode::NotReady | ResponseCode::StaleItem | ResponseCode::Refused,
+                        code: ResponseCode::NotReady | ResponseCode::StaleItem | ResponseCode::Refused | ResponseCode::CharacterLoading,
                         ..
                     }
             );
         if reusable {
-            self.status = runtime;
+            self.status = if matches!(
+                result,
+                WriteOutcome::NotApplied {
+                    code: ResponseCode::CharacterLoading,
+                    ..
+                }
+            ) {
+                None
+            } else {
+                runtime
+            };
             self.state = SessionState::Ready;
         } else {
             self.release_without_io();

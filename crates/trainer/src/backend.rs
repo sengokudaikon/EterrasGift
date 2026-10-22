@@ -297,6 +297,7 @@ pub enum ErrorKind {
     Gate,
     Transport,
     HelperDeparted,
+    CharacterLoading,
     Protocol,
     Identity,
     RestartRequired,
@@ -349,6 +350,7 @@ impl From<SessionError> for BackendError {
         let message = error.to_string();
         let (kind, delivery, retry_when_waiting) = match error {
             SessionError::Disabled => (ErrorKind::Disabled, None, false),
+            SessionError::CharacterLoading => (ErrorKind::CharacterLoading, Some(Delivery::NotSent), true),
             SessionError::Busy => (ErrorKind::NotReady, None, false),
             SessionError::NotConnected => (ErrorKind::NotConnected, None, false),
             SessionError::NotOffline(_) => (ErrorKind::Gate, None, true),
@@ -995,8 +997,15 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
                     let stop = envelope.command == Command::Shutdown;
                     self.command_epoch = envelope.epoch;
                     self.read_cancel = envelope.read_cancel;
+                    let reading = !matches!(
+                        envelope.command,
+                        Command::Write(_) | Command::ApplyForge(_) | Command::UndoForge(_) | Command::SetAttackLeechRate(_)
+                    );
                     let result = self.command(envelope.command).await;
                     self.drain_departure().await;
+                    if reading && result.as_ref().is_err_and(|error| error.kind == ErrorKind::Transport) {
+                        self.recover_departed_read();
+                    }
                     self.read_cancel = None;
                     let _ = envelope.reply.send(result);
                     if stop {
@@ -1008,8 +1017,12 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
                     break;
                 }
                 Err(_) => {
+                    let reading = self.connection.is_some();
                     self.poll().await;
                     self.drain_departure().await;
+                    if reading {
+                        self.recover_departed_read();
+                    }
                     tick = tokio::time::Instant::now() + interval;
                 }
             }
@@ -1288,6 +1301,16 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
     async fn poll(&mut self) {
         self.mirror_game_data();
         let exited = self.connector.reap_exited();
+        if self.state.retained_helper.as_ref().is_some_and(|helper| exited.contains(&helper.target)) {
+            self.state.retained_helper = None;
+            self.state.cleanup = Cleanup::ConfirmedOff;
+            if self.blocked.as_ref().is_some_and(|target| exited.contains(target)) {
+                self.blocked = None;
+                self.state.error = None;
+                self.state.phase = Phase::WaitingForGame;
+            }
+            self.publish();
+        }
         if self.connection.as_ref().is_some_and(|connection| exited.contains(connection.target())) {
             self.release_without_io();
             self.state.phase = Phase::WaitingForGame;
@@ -1468,7 +1491,10 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
         .await;
         if let Err(error) = &result {
             self.handle_connection_gate(error);
-            if !matches!(error.kind, ErrorKind::Superseded | ErrorKind::Gate | ErrorKind::HelperDeparted) {
+            if !matches!(
+                error.kind,
+                ErrorKind::Superseded | ErrorKind::Gate | ErrorKind::HelperDeparted | ErrorKind::CharacterLoading
+            ) {
                 self.fail(error.clone(), Some(target.clone()));
             }
         }
@@ -1499,7 +1525,7 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
         if !self.state.enabled {
             return Err(BackendError::blocked(ErrorKind::Disabled, "trainer disabled"));
         }
-        if self.state.phase != Phase::Ready {
+        if self.state.phase != Phase::Ready && !(self.state.phase == Phase::WaitingForCharacter && self.connection.is_some()) {
             return Err(BackendError::blocked(ErrorKind::NotConnected, "session is not ready"));
         }
         let target = self
@@ -1580,6 +1606,7 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
                     this.state.unique_preview = None;
                 }
                 this.state.forge = forge;
+                this.state.phase = Phase::Ready;
                 this.state.mappings.retain(|mapping| mapping.result.is_ok() || !retry_optional && !mapping.retry_on_read);
                 this.state.catalog = CatalogState::Current {
                     generation: this.state.generation,
@@ -1601,7 +1628,10 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
         .await;
         if let Err(error) = &result {
             self.handle_connection_gate(error);
-            if !matches!(error.kind, ErrorKind::Superseded | ErrorKind::Gate | ErrorKind::HelperDeparted) {
+            if !matches!(
+                error.kind,
+                ErrorKind::Superseded | ErrorKind::Gate | ErrorKind::HelperDeparted | ErrorKind::CharacterLoading
+            ) {
                 self.fail(error.clone(), Some(target));
             }
         }
@@ -1633,6 +1663,17 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
         }
     }
     fn handle_connection_gate(&mut self, error: &BackendError) {
+        if error.kind == ErrorKind::CharacterLoading && self.connection.is_some() {
+            self.state.phase = Phase::WaitingForCharacter;
+            self.state.runtime_status = None;
+            self.state.forge = ForgeState::Unobserved;
+            self.state.attack_leech = None;
+            self.state.undo_forge = None;
+            self.state.activity = None;
+            self.state.error = Some(error.clone());
+            self.publish();
+            return;
+        }
         if matches!(error.kind, ErrorKind::Gate | ErrorKind::HelperDeparted) && self.connection.is_some() {
             self.release_without_io();
             self.state.phase = Phase::WaitingForCharacter;
@@ -1688,6 +1729,20 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
         self.state.error = Some(error.clone());
         self.event(BackendEvent::Fault(error));
         self.publish();
+    }
+    fn recover_departed_read(&mut self) {
+        if self.state.phase == Phase::Blocked
+            && self.state.cleanup == Cleanup::ConfirmedOff
+            && self.state.error.as_ref().is_some_and(|error| error.kind == ErrorKind::Transport)
+            && self.state.retained_helper.as_ref().is_some_and(|helper| helper.residency == HelperResidency::Gone)
+        {
+            // The read is over and no write is replayed. Native proof permits a
+            // new connection for the next admitted offline character.
+            self.blocked = None;
+            self.state.phase = Phase::WaitingForCharacter;
+            self.state.error = Some(BackendError::waiting(ErrorKind::Gate, "The helper left Last Epoch. Waiting for an offline character."));
+            self.publish();
+        }
     }
     async fn drain_departure(&mut self) {
         let Some(mut connection) = self.retiring.take() else { return };
