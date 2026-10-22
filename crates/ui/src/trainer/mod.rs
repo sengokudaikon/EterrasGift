@@ -10,6 +10,7 @@
 pub mod backend_session;
 pub mod catalog;
 pub mod pages;
+pub mod profiles;
 pub mod session;
 mod view;
 

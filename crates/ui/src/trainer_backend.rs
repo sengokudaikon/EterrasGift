@@ -2,7 +2,7 @@
 //! snapshots and queues commands. No synchronous game/pipe/process work runs here.
 use crate::trainer::backend_session::sentence;
 use crate::{
-    Connection, MainWindow, TrainerState,
+    Connection, MainWindow, TrainerAccess, TrainerState,
     decorations::{Ash, Decorations},
     forge::{
         self,
@@ -626,6 +626,7 @@ impl Binding {
                 state.set_connection_detail("Restart Eterra's Gift to connect again. Home and Mods remain available.".into());
                 state.set_connection_stopped(true);
                 state.set_connection_waiting(false);
+                state.set_access(TrainerAccess::Locked);
             }
             self.waiting.set(None);
             self.forge.observe(Box::new(ObservedGame {
@@ -681,6 +682,7 @@ impl Binding {
         let state = window.global::<TrainerState>();
         // Not connected, every trainer page shows this in place of its body; connected, the forge says only why its item
         // cannot be shown. Ash drifts during a real wait and lies still under the empty forge (ItemEditorViewModel.ShowsAsh).
+        state.set_access(access(&snapshot));
         state.set_connection_title(title.into());
         state.set_connection_detail(detail.into());
         state.set_connection_stopped(stopped);
@@ -825,6 +827,19 @@ fn status(snapshot: &BackendSnapshot) -> Status {
             ..line("Trainer stopped", "Restart Eterra's Gift to connect again.", "Trainer stopped")
         },
         Phase::Disconnected => line("Not connected", "Connect to an offline character to use the trainer.", "Not connected"),
+    }
+}
+
+/// What the trainer pages can do: set up a profile while no game runs, wait behind the connection's notice from the moment
+/// a game is seen until an offline character is in play (or after a stop), and act on the game once one is.
+fn access(snapshot: &BackendSnapshot) -> TrainerAccess {
+    // TODO(trainer): `detected` follows the game only while the worker connects automatically; a process-only watch is to
+    // keep it current with automatic connection off, so a game running then is not taken for none.
+    let several = snapshot.error.as_ref().is_some_and(|error| error.kind == ErrorKind::MultipleProcesses);
+    match snapshot.phase {
+        Phase::Ready => TrainerAccess::Live,
+        Phase::Disconnected | Phase::WaitingForGame if snapshot.detected.is_none() && !several => TrainerAccess::Setup,
+        _ => TrainerAccess::Locked,
     }
 }
 

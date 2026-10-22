@@ -4,6 +4,7 @@
 
 use super::catalog::{Area, Feature, FeatureValue};
 use super::pages::{self, Content, EditorRow, FieldModel, HookRow, PageModel, Row, Tone};
+use super::profiles::{Profile, Profiles};
 use super::session::TrainerSession;
 use crate::shell::Page;
 use crate::{FeatureFieldView, FeatureRowKind, FeatureRowModels, FeatureRowPlace, FeatureRowView, FeatureTone, FeatureValueView, MainWindow, Nav, Tokens, TrainerState};
@@ -21,6 +22,13 @@ impl Pages {
     /// The session changed: rows take their answers, read on a new connection, and show where they stand.
     pub fn refresh(&self) {
         self.0.borrow_mut().refresh();
+    }
+
+    /// The profiles a setup offers, the last played first (TODO(trainer): from the worker's snapshot).
+    pub fn set_profiles(&self, profiles: Vec<Profile>) {
+        let mut controller = self.0.borrow_mut();
+        controller.profiles.set(profiles);
+        controller.publish_profiles();
     }
 
     /// A reference that does not keep the pages bound: rebinding the window ends whatever follows them.
@@ -64,6 +72,7 @@ pub fn bind(window: &MainWindow, session: Rc<dyn TrainerSession>, features: Vec<
         layout: layout.clone(),
         serial: 0,
         polling: slint::Timer::default(),
+        profiles: Profiles::default(),
         this: std::rc::Weak::new(),
     }));
     controller.borrow_mut().this = Rc::downgrade(&controller);
@@ -87,6 +96,11 @@ pub fn bind(window: &MainWindow, session: Rc<dyn TrainerSession>, features: Vec<
         let controller = controller.clone();
         move |id| controller.borrow_mut().open(&id)
     });
+    state.on_select_profile({
+        let controller = controller.clone();
+        move |index| controller.borrow_mut().select_profile(index)
+    });
+    controller.borrow().publish_profiles();
     state.on_select_section({
         let controller = controller.clone();
         move |section| controller.borrow_mut().select_section(section)
@@ -202,6 +216,7 @@ struct Controller {
     serial: i32,
     /// Runs only while a row waits on the game.
     polling: slint::Timer,
+    profiles: Profiles,
     this: std::rc::Weak<RefCell<Controller>>,
 }
 
@@ -225,6 +240,35 @@ impl Controller {
         state.set_sections(ModelRc::new(VecModel::from(sections)));
         state.set_section(selected as i32);
         self.show_section();
+    }
+
+    /// Another profile shown: its hooks reach the session, and every page is made again from them, on the section it showed.
+    fn select_profile(&mut self, index: i32) {
+        let session = self.session.clone();
+        if !self.profiles.select(index.max(0) as usize, &*session, &self.features) {
+            return;
+        }
+        let (features, planned) = (&self.features, self.planned);
+        for (area, page) in self.pages.iter_mut() {
+            let selected = page.as_ref().map(|page| page.selected);
+            *page = pages::build(*area, features, planned, &*session);
+            if let (Some(page), Some(selected)) = (page.as_mut(), selected) {
+                page.selected = selected;
+            }
+        }
+        self.publish_profiles();
+        self.show_section();
+    }
+
+    fn publish_profiles(&self) {
+        let Some(window) = self.window.upgrade() else {
+            return;
+        };
+        let state = window.global::<TrainerState>();
+        let labels: Vec<SharedString> = self.profiles.list().iter().map(|profile| profile.label().into()).collect();
+        state.set_profiles(ModelRc::new(VecModel::from(labels)));
+        state.set_profile_index(self.profiles.selected_index() as i32);
+        state.set_profile_caption(self.profiles.caption().into());
     }
 
     fn page(&mut self) -> Option<&mut PageModel> {

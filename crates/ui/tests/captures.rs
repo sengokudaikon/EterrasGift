@@ -1619,8 +1619,9 @@ fn mods_captures(session: &Session) {
 /// only a connected game has, through a fake session that answers reads and writes from its own fields.
 fn trainer_captures(session: &Session) {
     use eg_ui::trainer::catalog::{Area, FEATURES};
-    use eg_ui::trainer::session::{FieldRequest, FieldWrite, GameField, HookState, TrainerSession};
-    use eg_ui::{Connection, TrainerState};
+    use eg_ui::trainer::profiles::Profile;
+    use eg_ui::trainer::session::{FieldRequest, FieldWrite, GameField, HookState, TrainerSession, Unconnected};
+    use eg_ui::{Connection, TrainerAccess, TrainerState};
     use std::cell::RefCell;
     use std::collections::{BTreeMap, BTreeSet};
 
@@ -1694,6 +1695,7 @@ fn trainer_captures(session: &Session) {
         let ui = session.open(true, width, height);
         if let Some(fake) = fake {
             eg_ui::trainer::bind(&ui, Rc::new(fake), FEATURES.to_vec(), false);
+            ui.global::<TrainerState>().set_access(TrainerAccess::Live);
             let connection = ui.global::<Connection>();
             connection.set_connected(true);
             connection.set_text("Connected".into());
@@ -1727,6 +1729,49 @@ fn trainer_captures(session: &Session) {
     session.capture(&ui, "forge-rules-not-connected-1100");
     let ui = open("character", 0, 1920, 1080, None);
     session.capture(&ui, "trainer-not-connected-1920");
+
+    // No game yet: the hooks are a profile to set up, applied when its character enters play; editors wait for the game,
+    // and the Item Forge shows the connection. Without a known character only what happens is said.
+    let setup = |page: &str, section: i32, width: u32, height: u32| -> (MainWindow, eg_ui::trainer::Pages) {
+        let ui = session.open(true, width, height);
+        let pages = eg_ui::trainer::bind(&ui, Rc::new(Unconnected::default()), FEATURES.to_vec(), false);
+        ui.global::<TrainerState>().set_access(TrainerAccess::Setup);
+        ui.global::<Nav>().invoke_navigate(page.into());
+        show(&ui);
+        state(&ui).set_section(section);
+        show(&ui);
+        (ui, pages)
+    };
+    let (ui, pages) = setup("combat", 1, 1100, 700);
+    session.capture(&ui, "trainer-setup-1100");
+    // Known characters: a picker, the last played first; each keeps its own hooks.
+    let character = |key: &str, name: &str, class: &str| Profile {
+        key: key.into(),
+        name: name.into(),
+        class: class.into(),
+        cycle: "Legacy".into(),
+    };
+    pages.set_profiles(vec![character("mira", "Mira", "Primalist"), character("oren", "Oren", "Sentinel")]);
+    show(&ui);
+    // Damage multiplier's switch, under the profile band.
+    session.click(628.0, 222.0);
+    show(&ui);
+    let on = |ui: &MainWindow, row: usize| state(ui).get_rows().row_data(row).is_some_and(|row| row.on);
+    assert!(on(&ui, 1), "Mira's Damage multiplier switched on in the setup");
+    session.capture(&ui, "trainer-setup-profiles-1100");
+    session.resize(680, 580);
+    show(&ui);
+    session.capture(&ui, "trainer-setup-profiles-680");
+    session.resize(1100, 700);
+    state(&ui).invoke_select_profile(1);
+    show(&ui);
+    assert!(!on(&ui, 1), "Oren's profile is not set up yet");
+    assert_eq!(state(&ui).get_profile_caption(), "Hooks switched on here turn on when Oren enters play.");
+    state(&ui).invoke_select_profile(0);
+    show(&ui);
+    assert!(on(&ui, 1), "Mira's profile kept its switch");
+    let (ui, _) = setup("forge", 0, 1100, 700);
+    session.capture(&ui, "trainer-setup-forge-1100");
 
     // A connected game (holding Combat's rates, so its editor reads). A switch turned on says where it stands.
     let connected = || Some(FakeTrainer::holding(&[("attack-leech", &[("", 1.0), ("", 0.3)])]));
@@ -1921,6 +1966,7 @@ fn trainer_captures(session: &Session) {
         .filter(|feature| feature.area == Area::Loot)
         .for_each(|feature| feature.presented = false);
     eg_ui::trainer::bind(&ui, Rc::new(FakeTrainer::default()), features, true);
+    ui.global::<TrainerState>().set_access(TrainerAccess::Live);
     ui.global::<Connection>().set_connected(true);
     ui.global::<Nav>().invoke_navigate("loot".into());
     show(&ui);
@@ -1946,6 +1992,7 @@ fn forge_captures(session: &Session) {
     fn open(session: &Session, game: FixtureGame, width: u32, height: u32) -> Forge {
         let state = game.state.clone();
         let ui = session.open(true, width, height);
+        ui.global::<eg_ui::TrainerState>().set_access(eg_ui::TrainerAccess::Live);
         let connection = ui.global::<Connection>();
         connection.set_connected(true);
         connection.set_text("Connected".into());

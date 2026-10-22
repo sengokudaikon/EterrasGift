@@ -1,7 +1,8 @@
 // Trainer pages (spec/trainer.md §5, DESIGN.md "Trainer Pages"; TrainerPageView.axaml): a page's sections along the top,
 // left out when it has one, and the chosen section beneath: rows of features, or Forge › Item, which is the Item Forge.
 // Rust (crates/ui/src/trainer) builds the rows from the catalog and owns every value; the view lays them out.
-// Forge › Item is the Item Forge (pages/forge/) while the session holds an item; otherwise the connection's empty state.
+// Forge › Item is the Item Forge (pages/forge/) while the session holds an item. Without the game the hooks are a profile
+// to set up; once a game is seen they wait, behind the connection's notice, until an offline character is in play.
 
 import { ScrollView } from "../widgets/scroll-view.slint";
 import { Tokens } from "../tokens.slint";
@@ -86,9 +87,20 @@ export struct FeatureRowModels {
 // section spacing Rust leaves above it), and whether it ends that column.
 export struct FeatureRowPlace { column: int, y: length, ends: bool }
 
+// What the trainer pages can do: set up a profile while no game runs, wait behind the connection's notice from the moment
+// a game is seen until an offline character is in play (or after a stop), and act on the game once one is.
+export enum TrainerAccess { setup, locked, live }
+
 export global TrainerState {
-    // What every trainer page shows in place of its body while the game is not connected (`Connection.connected`):
-    // waiting for the game or a character, connecting, online mode, a stop. Nothing on a page acts without the game.
+    in property <TrainerAccess> access: TrainerAccess.locked;
+    // The profiles a setup can edit (a character's name, class and cycle each), the one shown, and what it does.
+    in property <[string]> profiles;
+    in property <int> profile-index;
+    in property <string> profile-caption: "Hooks switched on here turn on when an offline character enters play.";
+    callback select-profile(int);
+
+    // What every trainer page shows in place of its body while it waits (`access` locked), and what the Item Forge shows
+    // without the game: waiting for the game or a character, connecting, online mode, a stop.
     in property <string> connection-title: "Not connected";
     in property <string> connection-detail: "Connect to an offline character to use the trainer.";
     // The connection stopped for a reason the user has to fix: the warning mark beside the title.
@@ -720,6 +732,46 @@ component FeatureList inherits Rectangle {
     }
 }
 
+// Over a setup's rows: whose profile they are and when it applies. With no character known yet, only what happens to them.
+component ProfileBand inherits Rectangle {
+    in property <bool> compact;
+
+    property <length> margin-left: root.compact ? Tokens.trainer-body-compact-margin.left : Tokens.trainer-body-margin.left;
+    property <length> margin-right: root.compact ? Tokens.trainer-body-compact-margin.right : Tokens.trainer-body-margin.right;
+
+    VerticalLayout {
+        padding-left: root.margin-left;
+        padding-right: root.margin-right;
+        padding-top: Tokens.trainer-body-margin.top;
+        spacing: Tokens.space-4;
+
+        if TrainerState.profiles.length > 0: HorizontalLayout {
+            spacing: Tokens.space-12;
+            alignment: start;
+
+            LabelText {
+                text: "Profile";
+                vertical-alignment: center;
+            }
+
+            ChoiceBox {
+                width: self.natural-width;
+                choices: TrainerState.profiles;
+                index: TrainerState.profile-index;
+                label: "Profile";
+                chosen(index) => {
+                    TrainerState.select-profile(index);
+                }
+            }
+        }
+
+        CaptionText {
+            text: TrainerState.profile-caption;
+            wrap: word-wrap;
+        }
+    }
+}
+
 // A page body that has nothing to work on yet, in words (ItemEditorView.axaml's EmptyState): the connection's state on
 // every trainer page, or the connected forge with no item to show. A stop the user has to fix carries the warning mark
 // beside its title; the connection's one next step (Connect, Retry) is the only button, and only the connection offers it.
@@ -845,8 +897,9 @@ export component TrainerPage inherits Rectangle {
             title: root.page-title;
         }
 
-        // Without the game, every section of every trainer page shows the connection instead of its body.
-        if !Connection.connected: TrainerNotice {
+        // While the trainer waits on a game, every section of every trainer page shows the connection instead of its body;
+        // the Item Forge needs the game itself, so it shows it in a setup too.
+        if TrainerState.access == TrainerAccess.locked || (TrainerState.item-forge && TrainerState.access != TrainerAccess.live): TrainerNotice {
             vertical-stretch: 1;
             title: TrainerState.connection-title;
             detail: TrainerState.connection-detail;
@@ -856,7 +909,7 @@ export component TrainerPage inherits Rectangle {
         }
 
         // The owned item observation, while the current session can display it.
-        if Connection.connected && TrainerState.item-forge && ForgeState.has-item: ItemForge {
+        if TrainerState.access == TrainerAccess.live && TrainerState.item-forge && ForgeState.has-item: ItemForge {
             vertical-stretch: 1;
             compact: root.compact;
             narrow: root.narrow;
@@ -865,7 +918,7 @@ export component TrainerPage inherits Rectangle {
 
         // Connected with nothing to show: the forge is empty, or its item could not be shown (a write's readback, or an
         // item the catalog cannot describe).
-        if Connection.connected && TrainerState.item-forge && !ForgeState.has-item: TrainerNotice {
+        if TrainerState.access == TrainerAccess.live && TrainerState.item-forge && !ForgeState.has-item: TrainerNotice {
             vertical-stretch: 1;
             title: ForgeState.write-recovery-required ? "Item readback unavailable"
                 : TrainerState.item-unavailable != "" ? "Item details unavailable" : "The forge is empty";
@@ -876,7 +929,12 @@ export component TrainerPage inherits Rectangle {
             ash-still: true;
         }
 
-        if Connection.connected && !TrainerState.item-forge: FeatureList {
+        // No game: the hooks are the profile being set up, applied when its character enters play.
+        if TrainerState.access == TrainerAccess.setup && !TrainerState.item-forge: ProfileBand {
+            compact: root.compact;
+        }
+
+        if TrainerState.access != TrainerAccess.locked && !TrainerState.item-forge: FeatureList {
             vertical-stretch: 1;
             compact: root.compact;
         }
