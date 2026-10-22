@@ -1058,7 +1058,7 @@ pub(super) fn capture(session: &Session) {
     wait(|| !ui.global::<eg_ui::ForgeState>().get_has_item());
     assert!(!ui.global::<eg_ui::Connection>().get_connected());
     assert_eq!(data.reads.load(Ordering::SeqCst), before);
-    let advice = "The helper stays in the game until it restarts; restart Last Epoch before playing online.";
+    let advice = "Load an offline character.";
     assert_eq!(ui.global::<eg_ui::TrainerState>().get_empty_title(), "Online character refused");
     assert_eq!(
         ui.global::<eg_ui::TrainerState>().get_empty_detail(),

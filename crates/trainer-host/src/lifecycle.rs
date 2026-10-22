@@ -2,7 +2,7 @@
 //! admit a fresh load; uncertainty permanently fences this process generation.
 use std::time::{Duration, Instant};
 
-pub const RESTART_REQUIRED: &str = "The helper could not leave the game; restart Last Epoch before playing online.";
+pub use eg_trainer::backend::HELPER_RESTART_REQUIRED as RESTART_REQUIRED;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Residency {

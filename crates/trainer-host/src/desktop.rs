@@ -38,7 +38,7 @@ impl HelperPackage {
     }
 
     /// The file the helper is loaded from: `eg_trainer_helper-<SHA-256 prefix>.dll` in `folder`. A game keeps a loaded
-    /// helper's file in use until it exits, so each build has its own name, and an identical file already there (one a
+    /// helper's file in use while resident, so each build has its own name, and an identical file already there (one a
     /// game may hold) is used as it is.
     pub fn file_in(&self, folder: &Path) -> Result<PathBuf, BackendError> {
         let path = folder.join(format!("eg_trainer_helper-{}.dll", &self.sha256[..16]));

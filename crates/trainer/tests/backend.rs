@@ -130,6 +130,7 @@ struct Shared {
     locale: Mutex<eg_trainer::catalog::GameLocale>,
     hashes: Mutex<(String, String)>,
     disconnect_block: Block,
+    departure_proven: AtomicBool,
     write_block: Block,
     refresh_block: Block,
     rate_write_block: Block,
@@ -171,6 +172,7 @@ impl Shared {
             locale: Mutex::new(catalog().identity.locale),
             hashes: Mutex::new(("A".repeat(64), "B".repeat(64))),
             disconnect_block: Block::default(),
+            departure_proven: AtomicBool::new(true),
             write_block: Block::default(),
             refresh_block: Block::default(),
             rate_write_block: Block::default(),
@@ -370,7 +372,11 @@ impl BackendConnection for Connection {
     }
     async fn disconnect(&mut self) -> Cleanup {
         self.shared.call("disconnect", &self.shared.disconnect_block).await;
-        Cleanup::ConfirmedOff
+        if self.shared.departure_proven.load(Ordering::SeqCst) {
+            Cleanup::ConfirmedOff
+        } else {
+            Cleanup::Unconfirmed
+        }
     }
 }
 impl Drop for Connection {
@@ -743,7 +749,7 @@ fn definite_not_sent_wait_can_retry_and_new_process_identity_unblocks_failure() 
 }
 
 #[test]
-fn online_or_gate_loss_clears_live_data_without_helper_cleanup_io() {
+fn online_or_gate_loss_unloads_after_clearing_live_data() {
     run(async {
         for loss in 0..3 {
             let shared = Shared::new();
@@ -762,10 +768,10 @@ fn online_or_gate_loss_clears_live_data_without_helper_cleanup_io() {
             assert_eq!(handle.snapshot().phase, Phase::WaitingForCharacter);
             assert_eq!(handle.snapshot().forge, ForgeState::Unobserved);
             assert!(matches!(handle.snapshot().catalog, CatalogState::Stale(_)));
-            assert_eq!(shared.count("disconnect"), 0);
-            assert_eq!(handle.snapshot().cleanup, Cleanup::Unconfirmed);
+            assert_eq!(shared.count("disconnect"), 1);
+            assert_eq!(handle.snapshot().cleanup, Cleanup::ConfirmedOff);
             shutdown(&handle, worker).await;
-            assert_eq!(shared.count("disconnect"), 0);
+            assert_eq!(shared.count("disconnect"), 1);
         }
     });
 }
@@ -891,7 +897,7 @@ fn failed_first_forge_read_never_publishes_partial_catalog_or_ready() {
         assert_eq!(handle.snapshot().phase, Phase::Blocked);
         assert!(matches!(handle.snapshot().catalog, CatalogState::Missing));
         assert_eq!(handle.snapshot().forge, ForgeState::Unobserved);
-        assert_eq!(shared.count("disconnect"), 0);
+        assert_eq!(shared.count("disconnect"), 1);
         shutdown(&handle, worker).await;
     });
 }
@@ -1094,5 +1100,49 @@ fn read_again_reads_the_files_without_a_connection() {
         assert_eq!(handle.snapshot().game_files, backend::GameFiles::NotConfigured, "no folder yet: nothing to read");
         assert!(shared.calls.lock().unwrap().is_empty(), "and the game is not touched");
         shutdown(&handle, worker).await;
+    });
+}
+
+#[test]
+fn unproven_departure_requires_restart_and_even_retry_cannot_reload_that_game() {
+    run(async {
+        let shared = Shared::new();
+        let (handle, worker) = start(&shared, options());
+        connected(&handle).await;
+        shared.departure_proven.store(false, Ordering::SeqCst);
+        command(&handle, Command::Disconnect).await.unwrap();
+        let state = handle.snapshot();
+        assert_eq!(state.phase, Phase::Blocked);
+        assert_eq!(state.retained_helper.unwrap().residency, backend::HelperResidency::Stuck);
+        assert_eq!(state.error.unwrap().message, backend::HELPER_RESTART_REQUIRED);
+        assert_eq!(command(&handle, Command::Retry).await.unwrap_err().kind, ErrorKind::RestartRequired);
+        assert_eq!(shared.count("connect"), 1);
+        assert_eq!(shared.count("disconnect"), 1);
+        shutdown(&handle, worker).await;
+    });
+}
+
+#[test]
+fn menu_and_quitting_log_events_unload_before_the_next_offline_character_connects() {
+    run(async {
+        for event in [
+            eg_core::game_log::GameLogEvent::ShellStateChanged("CharacterSelect".into()),
+            eg_core::game_log::GameLogEvent::ShellStateChanged("Login".into()),
+            eg_core::game_log::GameLogEvent::GameQuitting,
+        ] {
+            let shared = Shared::new();
+            let (handle, worker) = start(&shared, options());
+            connected(&handle).await;
+            let state = shared.log.lock().unwrap().clone().apply(event);
+            *shared.log.lock().unwrap() = state;
+            assert!(command(&handle, Command::ReadForge).await.is_err());
+            assert_eq!(shared.count("disconnect"), 1);
+            assert_eq!(handle.snapshot().retained_helper.unwrap().residency, backend::HelperResidency::Gone);
+            *shared.log.lock().unwrap() = log(GameReadiness::Offline);
+            command(&handle, Command::Connect).await.unwrap();
+            assert_eq!(shared.count("connect"), 2);
+            assert_eq!(handle.snapshot().phase, Phase::Ready);
+            shutdown(&handle, worker).await;
+        }
     });
 }

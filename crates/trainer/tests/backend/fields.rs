@@ -92,7 +92,7 @@ fn attack_leech_manager_drift_clears_previous_observation_and_wrong_wrapper_neve
 }
 
 #[test]
-fn attack_leech_global_refusals_revoke_backend_admission_without_cleanup_io() {
+fn attack_leech_global_refusals_revoke_backend_admission_with_owner_unload() {
     run(async {
         for reason in [
             AttackLeechUnavailable::OfflineRequired,
@@ -108,14 +108,14 @@ fn attack_leech_global_refusals_revoke_backend_admission_without_cleanup_io() {
             assert_eq!(handle.snapshot().phase, Phase::WaitingForCharacter);
             assert!(handle.snapshot().attack_leech.is_none());
             assert!(handle.snapshot().attached.is_none());
-            assert_eq!(shared.count("disconnect"), 0);
+            assert_eq!(shared.count("disconnect"), 1);
             shutdown(&handle, worker).await;
         }
     });
 }
 
 #[test]
-fn attack_leech_lost_log_after_read_discards_reply_without_cleanup_io() {
+fn attack_leech_lost_log_after_read_discards_reply_with_owner_unload() {
     run(async {
         let shared = Shared::new();
         shared.attack_leech_enabled.store(true, Ordering::SeqCst);
@@ -130,7 +130,7 @@ fn attack_leech_lost_log_after_read_discards_reply_without_cleanup_io() {
         assert_eq!(receipt.wait().await.unwrap_err().kind, ErrorKind::Gate);
         assert!(handle.snapshot().attack_leech.is_none());
         assert!(handle.snapshot().attached.is_none());
-        assert_eq!(shared.count("disconnect"), 0);
+        assert_eq!(shared.count("disconnect"), 1);
         shutdown(&handle, worker).await;
     });
 }

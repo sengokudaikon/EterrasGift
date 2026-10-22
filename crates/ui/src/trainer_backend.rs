@@ -705,13 +705,13 @@ fn online_refused(snapshot: &BackendSnapshot) -> bool {
     matches!(snapshot.phase, Phase::WaitingForCharacter | Phase::Blocked) && snapshot.gate.as_ref().is_some_and(|gate| gate.readiness == GameReadiness::Online)
 }
 
-/// What to do about a refused online character. The helper cannot be unloaded, so a process that had it keeps it into an
-/// online session.
+/// Advice follows proven residency; an unloaded helper needs no restart.
 fn online_advice(snapshot: &BackendSnapshot) -> &'static str {
-    if snapshot.retained_helper.is_some() {
-        "The helper stays in the game until it restarts; restart Last Epoch before playing online."
-    } else {
-        "Load an offline character."
+    use eg_trainer::backend::{HELPER_RESTART_REQUIRED, HelperResidency};
+    match snapshot.retained_helper.as_ref().map(|helper| helper.residency) {
+        Some(HelperResidency::Stuck | HelperResidency::MayBeLoaded | HelperResidency::Loaded) => HELPER_RESTART_REQUIRED,
+        Some(HelperResidency::Leaving) => "The helper is leaving Last Epoch.",
+        Some(HelperResidency::Gone) | None => "Load an offline character.",
     }
 }
 

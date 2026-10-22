@@ -60,7 +60,7 @@ impl Retained {
 /// One registry per owning trainer worker, retained across connect/disconnect.
 /// A possibly submitted load is never repeated in the same process generation.
 /// Process birth/path are part of the key; there is no arbitrary eight-game limit.
-/// Published helper code stays resident until game exit, independently of this owner.
+/// A new load requires proven departure; a failed departure fences this process.
 pub struct NativePreparer {
     artifact: Arc<HelperArtifact>,
     retained: Vec<Retained>,
@@ -294,13 +294,19 @@ pub struct VerifiedTransport {
 }
 impl Transport for VerifiedTransport {
     async fn unload(&mut self) -> Result<(), TransportError> {
-        {
+        let send = {
             let mut record = self.runtime.lock().unwrap_or_else(|p| p.into_inner());
+            let gone = record.helper.departed(record.proof.as_ref()).unwrap_or(false);
+            record.residency.observe(Instant::now(), gone, gone);
+            let send = record.residency == Residency::Loaded;
             record.residency.leaving(Instant::now(), Duration::from_secs(10));
+            send
+        };
+        // Missing ACK can mean self-unload. A cancelled prior unload may only be
+        // observed, never sent again; module absence alone is also insufficient.
+        if send {
+            let _ = tokio::time::timeout(Duration::from_secs(3), self.pipe.send(&Request::Unload)).await;
         }
-        // A missing response can mean successful self-unload. Never replay Unload;
-        // only read native departure evidence after this single exchange.
-        let _ = tokio::time::timeout(Duration::from_secs(3), self.pipe.send(&Request::Unload)).await;
         loop {
             let state = {
                 let mut record = self.runtime.lock().unwrap_or_else(|p| p.into_inner());
@@ -322,6 +328,12 @@ impl Transport for VerifiedTransport {
         {
             let record = self.runtime.lock().unwrap_or_else(|poison| poison.into_inner());
             record.helper.artifact().verify_unchanged().map_err(|error| transport_error(error, Delivery::NotSent))?;
+            if record.residency == Residency::Gone {
+                return Err(TransportError {
+                    delivery: Delivery::NotSent,
+                    failure: TransportFailure::Departed,
+                });
+            }
             if record.residency != Residency::Loaded {
                 return Err(transport_error(RESTART_REQUIRED, Delivery::NotSent));
             }
@@ -330,7 +342,22 @@ impl Transport for VerifiedTransport {
             }
             require_request_proof(request, record.dispatcher, record.proof.is_some()).map_err(|error| transport_error(error, Delivery::NotSent))?;
         }
-        let response = self.pipe.send(request).await?;
+        let response = match self.pipe.send(request).await {
+            Ok(response) => response,
+            Err(error) => {
+                let mut record = self.runtime.lock().unwrap_or_else(|p| p.into_inner());
+                let gone = record.helper.departed(record.proof.as_ref()).unwrap_or(false);
+                record.residency.observe(Instant::now(), gone, gone);
+                return Err(if record.residency == Residency::Gone {
+                    TransportError {
+                        delivery: error.delivery,
+                        failure: TransportFailure::Departed,
+                    }
+                } else {
+                    error
+                });
+            }
+        };
         if matches!(request, Request::Discover) && response.code == ResponseCode::Done {
             let proof_result = (|| {
                 let mut record = self.runtime.lock().unwrap_or_else(|poison| poison.into_inner());

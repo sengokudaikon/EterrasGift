@@ -6,6 +6,7 @@ use eg_trainer::{
     session::{Cleanup, Session, SessionState},
 };
 use eg_trainer_wire::protocol::{Discovery, DispatcherSpec, REQUEST_HEADER_SIZE, Request, Response, ResponseCode, RuntimeStatus};
+use eg_trainer_wire::transport::{Delivery, Transport, TransportError, TransportFailure};
 use std::{
     fs,
     os::windows::process::CommandExt,
@@ -13,6 +14,26 @@ use std::{
     process::{Child, Command, Stdio},
     time::{Duration, Instant},
 };
+
+// This authored pipe has no native DLL proof. Even its successful Unload ACK
+// must leave cleanup unconfirmed, while exercising the real control exchange.
+struct Unverified(PipeClient);
+impl Transport for Unverified {
+    fn target(&self) -> &eg_trainer_wire::process::ProcessIdentity {
+        self.0.target()
+    }
+    async fn send(&mut self, request: &Request) -> Result<Response, TransportError> {
+        self.0.send(request).await
+    }
+    async fn unload(&mut self) -> Result<(), TransportError> {
+        let response = self.send(&Request::Unload).await?;
+        assert_eq!(response.code, ResponseCode::Done);
+        Err(TransportError {
+            delivery: Delivery::MayHaveRun,
+            failure: TransportFailure::Missing,
+        })
+    }
+}
 
 struct OwnedChild(Child);
 impl Drop for OwnedChild {
@@ -91,13 +112,13 @@ fn actual_log_pipe_and_session_validate_before_status_and_clear_on_disable() {
     let runtime = tokio::runtime::Builder::new_current_thread().enable_io().enable_time().build().unwrap();
     runtime.block_on(async {
         let client = PipeClient::with_timeouts(target.clone(), Duration::from_secs(3), Duration::from_secs(3));
-        let mut session = Session::new(target, client, profile).unwrap();
+        let mut session = Session::new(target, Unverified(client), profile).unwrap();
         assert_eq!(session.state(), SessionState::Disabled);
         session.enable();
         timeout(Duration::from_secs(5), session.connect(now)).await.unwrap().unwrap();
         assert_eq!(session.state(), SessionState::Ready);
         assert_eq!(session.runtime_status().unwrap().features_on, 2);
-        assert_eq!(timeout(Duration::from_secs(5), session.disable()).await.unwrap(), Cleanup::ConfirmedOff);
+        assert_eq!(timeout(Duration::from_secs(5), session.disable()).await.unwrap(), Cleanup::Unconfirmed);
         assert_eq!(session.state(), SessionState::Disabled);
         assert!(session.runtime_status().is_none());
         fs::write(root.path().join("done"), b"finished").unwrap();
@@ -140,7 +161,7 @@ fn pipe_session_child() {
             .unwrap();
         fs::write(root.join("ready"), b"ready").unwrap();
         timeout(Duration::from_secs(10), async move {
-            let expected = [Request::Discover, Request::Status { dispatcher }, Request::ClearHooks { dispatcher }];
+            let expected = [Request::Discover, Request::Status { dispatcher }, Request::Unload];
             let responses = [
                 discovery.encode(pid).unwrap(),
                 RuntimeStatus {
@@ -151,7 +172,7 @@ fn pipe_session_child() {
                 .encode()
                 .unwrap()
                 .to_vec(),
-                0i32.to_le_bytes().to_vec(),
+                Vec::new(),
             ];
             let mut first = Some(first);
             for (request, response) in expected.into_iter().zip(responses) {

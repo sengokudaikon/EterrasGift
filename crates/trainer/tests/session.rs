@@ -106,7 +106,7 @@ fn status(online: bool, manager: u64, features_on: u32) -> Step {
 }
 
 fn clear() -> Step {
-    done(0_i32.to_le_bytes().to_vec())
+    done(Vec::new())
 }
 
 fn forge_item() -> ForgeSnapshot {
@@ -168,6 +168,7 @@ struct FakeTransport(Arc<Mutex<Wire>>, ProcessIdentity);
 struct Wire {
     requests: Vec<Request>,
     steps: VecDeque<Step>,
+    departure_proven: bool,
 }
 
 impl FakeTransport {
@@ -176,6 +177,7 @@ impl FakeTransport {
             Arc::new(Mutex::new(Wire {
                 requests: Vec::new(),
                 steps: steps.into_iter().collect(),
+                departure_proven: true,
             })),
             target,
         )
@@ -195,11 +197,28 @@ impl Transport for FakeTransport {
         &self.1
     }
 
+    async fn unload(&mut self) -> Result<(), TransportError> {
+        let response = self.send(&Request::Unload).await?;
+        if response.code == ResponseCode::Done && response.payload.is_empty() && self.0.lock().unwrap().departure_proven {
+            Ok(())
+        } else {
+            Err(TransportError {
+                delivery: Delivery::MayHaveRun,
+                failure: TransportFailure::Missing,
+            })
+        }
+    }
     async fn send(&mut self, request: &Request) -> Result<Response, TransportError> {
         let step = {
             let mut wire = self.0.lock().unwrap();
             wire.requests.push(request.clone());
-            wire.steps.pop_front().expect("unexpected helper request")
+            wire.steps.pop_front().unwrap_or_else(|| {
+                assert_eq!(*request, Request::Unload, "unexpected helper request");
+                Step::Reply(Err(TransportError {
+                    delivery: Delivery::NotSent,
+                    failure: TransportFailure::Missing,
+                }))
+            })
         };
         match step {
             Step::Reply(response) => response,
@@ -414,7 +433,7 @@ fn session_rejects_identical_artifacts_outside_the_target_installation_before_io
 }
 
 #[test]
-fn successful_handshake_clears_hooks_on_disable() {
+fn successful_handshake_unloads_on_disable() {
     let fixture = Fixture::new();
     let wire = FakeTransport::new(fixture.target.clone(), [fixture.discover(), status(false, 0x1234, 2), clear()]);
     let log = FakeLog::new([offline()]);
@@ -428,14 +447,7 @@ fn successful_handshake_clears_hooks_on_disable() {
     assert_eq!(run(session.disable()), Cleanup::ConfirmedOff);
     assert_eq!(session.state(), SessionState::Disabled);
     assert_eq!(session.runtime_status(), None);
-    assert_eq!(
-        wire.requests(),
-        [
-            Request::Discover,
-            Request::Status { dispatcher: fixture.dispatcher },
-            Request::ClearHooks { dispatcher: fixture.dispatcher }
-        ]
-    );
+    assert_eq!(wire.requests(), [Request::Discover, Request::Status { dispatcher: fixture.dispatcher }, Request::Unload]);
     assert!(matches!(run(session.connect(now())), Err(SessionError::Disabled)));
     assert_eq!(wire.requests().len(), 3);
 }
@@ -463,7 +475,7 @@ fn reconnecting_invalidates_the_previous_cleanup_acknowledgement() {
 }
 
 #[test]
-fn helper_offline_required_releases_attachment_without_cleanup_afterward() {
+fn helper_offline_required_revokes_gameplay_but_allows_owner_unload() {
     for during_refresh in [false, true] {
         let fixture = Fixture::new();
         let mut steps = vec![fixture.discover()];
@@ -501,7 +513,7 @@ fn helper_offline_required_releases_attachment_without_cleanup_afterward() {
         assert_eq!(run(session.disconnect()), Cleanup::Unconfirmed);
         assert_eq!(run(session.disable()), Cleanup::Unconfirmed);
         assert_eq!(session.state(), SessionState::Disabled);
-        assert_eq!(wire.requests(), before_disconnect);
+        assert_eq!(wire.requests(), [before_disconnect, vec![Request::Unload]].concat());
         assert!(!wire.requests().iter().any(|request| matches!(request, Request::ClearHooks { .. })));
     }
 }
@@ -558,7 +570,7 @@ fn artifacts_changed_while_discovery_is_in_flight_prevent_status() {
 }
 
 #[test]
-fn runtime_online_or_absent_character_releases_attachment_without_further_calls() {
+fn runtime_online_or_absent_character_releases_attachment_with_only_owner_unload() {
     for (online, manager, readiness) in [
         (true, 0x1234, GameReadiness::Online),
         (false, 0, GameReadiness::NoCharacter),
@@ -574,12 +586,12 @@ fn runtime_online_or_absent_character_releases_attachment_without_further_calls(
         assert_eq!(session.cleanup(), Cleanup::Unconfirmed);
         assert_eq!(session.runtime_status(), None);
         assert_eq!(run(session.disconnect()), Cleanup::Unconfirmed);
-        assert_eq!(wire.requests(), [Request::Discover, Request::Status { dispatcher: fixture.dispatcher }]);
+        assert_eq!(wire.requests(), [Request::Discover, Request::Status { dispatcher: fixture.dispatcher }, Request::Unload]);
     }
 }
 
 #[test]
-fn refresh_observing_runtime_online_revokes_readiness_without_further_calls() {
+fn refresh_observing_runtime_online_revokes_readiness_with_only_owner_unload() {
     let fixture = Fixture::new();
     let wire = FakeTransport::new(fixture.target.clone(), [fixture.discover(), status(false, 0x1234, 1), status(true, 0x1234, 1)]);
     let log = FakeLog::new([offline()]);
@@ -591,7 +603,7 @@ fn refresh_observing_runtime_online_revokes_readiness_without_further_calls() {
     assert_eq!(session.cleanup(), Cleanup::Unconfirmed);
     assert_eq!(session.runtime_status(), None);
     assert_eq!(run(session.disable()), Cleanup::Unconfirmed);
-    assert_eq!(wire.requests().len(), 3);
+    assert_eq!(wire.requests().len(), 4);
 }
 
 #[test]
@@ -664,9 +676,9 @@ fn canceled_discovery_requires_explicit_disconnect_without_cleanup_replay() {
     drop(attaching);
     assert_eq!(session.state(), SessionState::Connecting);
     assert!(matches!(run(session.connect(now())), Err(SessionError::Busy)));
-    assert_eq!(run(session.disconnect()), Cleanup::NotNeeded);
+    assert_eq!(run(session.disconnect()), Cleanup::Unconfirmed);
     assert_eq!(session.state(), SessionState::Disconnected);
-    assert_eq!(wire.requests(), [Request::Discover]);
+    assert_eq!(wire.requests(), [Request::Discover, Request::Unload]);
 }
 
 #[test]
@@ -692,9 +704,9 @@ fn canceled_cleanup_remains_closing_until_explicit_disconnect_finishes() {
     assert!(matches!(run(session.connect(now())), Err(SessionError::Busy)));
     assert!(matches!(run(session.refresh(now())), Err(SessionError::Busy)));
     assert_eq!(wire.requests().len(), 3);
-    assert_eq!(run(session.disconnect()), Cleanup::ConfirmedOff);
+    assert_eq!(run(session.disconnect()), Cleanup::Unconfirmed);
     assert_eq!(session.state(), SessionState::Disconnected);
-    assert_eq!(wire.requests().len(), 4);
+    assert_eq!(wire.requests().len(), 3);
 }
 
 #[test]
@@ -865,7 +877,7 @@ fn changed_artifacts_prevent_forge_io_and_release_the_session() {
         assert_eq!(session.state(), SessionState::Disconnected);
         assert_eq!(session.runtime_status(), None);
         assert_eq!(run(session.disconnect()), Cleanup::Unconfirmed);
-        assert_eq!(wire.requests(), [Request::Discover, Request::Status { dispatcher: fixture.dispatcher }]);
+        assert_eq!(wire.requests(), [Request::Discover, Request::Status { dispatcher: fixture.dispatcher }, Request::Unload]);
     }
 }
 
@@ -1010,7 +1022,7 @@ fn canceled_forge_read_remains_busy_until_explicit_disconnect_without_replay() {
             Request::Discover,
             Request::Status { dispatcher: fixture.dispatcher },
             Request::ReadForge { dispatcher: fixture.dispatcher },
-            Request::ClearHooks { dispatcher: fixture.dispatcher }
+            Request::Unload
         ]
     );
     wire.push(fixture.discover());
@@ -1132,4 +1144,18 @@ fn canceled_locale_read_preserves_shared_busy_barrier_until_disconnect() {
     assert!(matches!(run(session.read_forge(now())), Err(SessionError::Busy)));
     assert_eq!(wire.requests().len(), 3);
     assert_eq!(run(session.disconnect()), Cleanup::ConfirmedOff);
+}
+
+#[test]
+fn unload_ack_without_native_departure_evidence_stays_unconfirmed_and_is_not_replayed() {
+    let fixture = Fixture::new();
+    let wire = FakeTransport::new(fixture.target.clone(), [fixture.discover(), status(false, 0x1234, 0), clear()]);
+    wire.0.lock().unwrap().departure_proven = false;
+    let mut session = fixture.session(&wire, &FakeLog::new([offline()]), GatePolicy::Release);
+    session.enable();
+    run(session.connect(now())).unwrap();
+    assert_eq!(run(session.disconnect()), Cleanup::Unconfirmed);
+    assert_eq!(run(session.disconnect()), Cleanup::Unconfirmed);
+    assert_eq!(wire.requests().last(), Some(&Request::Unload));
+    assert_eq!(wire.requests().len(), 3);
 }

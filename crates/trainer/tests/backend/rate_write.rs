@@ -431,7 +431,7 @@ fn log_loss_after_confirmation_withholds_publication_and_retains_historical_conf
         let state = handle.snapshot();
         assert!(state.attack_leech.is_none());
         assert!(matches!(state.last_rate_write.unwrap().status, RateWriteStatus::Confirmed(_)));
-        assert_eq!(shared.count("disconnect"), 0);
+        assert_eq!(shared.count("disconnect"), 1);
         shutdown(&handle, worker).await;
     });
 }

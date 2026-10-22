@@ -67,7 +67,7 @@ Player.log must identify an offline character in the exact process. Process crea
 artifact profile, runtime offline state and current manager are rechecked at the relevant I/O
 and mutation boundaries. The named-pipe server has one owner; a new client does not take over
 unfinished work. Unfinished remote calls retain their thread/process handles and input buffers.
-A helper generation is reused rather than unloading executing code or reinjecting over it.
+A helper load is reused only while resident. Owner-only Unload fences callbacks, restores the dispatcher, drains helper frames, and unloads on its control thread; native departure evidence is required before a fresh load. Failed departure requires a game restart.
 
 The connected session retains its game binary/metadata read lease across polling, catalog
 capture, mapping and writes, releasing it on disconnect or lost admission. Windows helper
@@ -75,7 +75,7 @@ and module verification also check retained file identity without rereading cont
 profile's full-hash fallback remains for platforms/storage or existing writers that prevent
 a lease; it still validates each operation rather than trusting an unpinned hash.
 
-The helper retains one pipe instance through disconnect/reconnect, with a protected DACL
+The helper retains one pipe instance across per-request EOFs in a connected session, with a protected DACL
 granting access only to the game process's user and SYSTEM. The client still verifies server
 PID; the server still binds ownership to client PID and creation time. Buffered input and
 unfinished buffered output are settled before accepting the next peer. Authored child-process
@@ -152,7 +152,7 @@ the authored Unity ExecuteTasks route: a throwing task with one Rust cleanup, su
 progress, injected second-target failure with dispatcher recovery, owner-exit restoration and
 reinstallation by a new owner. No actual-game execution or gameplay-specific ABI proof is claimed.
 
-`hooks::RetainedHook` pins modules and leaks each RawDetour immediately. It exposes no direct
+`hooks::RetainedHook` leaks each RawDetour immediately; callers retain module lifetime through entry restoration and callback drain. The helper takes no module pins and uses an external, registered gateway that closes callback admission before restoration and counts complete DLL calls. Trampoline/gateway pages and tables remain process-owned after the DLL leaves. It exposes no direct
 enable/disable/drop path. Transactions verify entry bytes/state, attempt explicit recovery to
 each prior state on failure, and report recovery errors or unknown state. Copied calls and other
 control flow are rejected. Original unwind codes cover unchanged relocated instruction offsets;

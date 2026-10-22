@@ -20,7 +20,7 @@ pub fn descriptor(development: bool) -> ModuleChoice {
     ModuleChoice {
         id: ID,
         title: "Trainer",
-        description: "Edits items in the running game for offline characters. It loads a helper into Last Epoch, which stays there until the game restarts. Online characters are always refused.",
+        description: "Edits items in the running game for offline characters. It loads a helper into Last Epoch, which leaves when the offline character leaves play or you disconnect. Online characters are always refused.",
         name: "the trainer",
         default_on: development,
         problem: None,

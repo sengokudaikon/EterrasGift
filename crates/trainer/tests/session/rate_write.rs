@@ -418,7 +418,7 @@ fn rate_and_forge_records_survive_each_other_including_abandoned_second_submissi
                 assert!(matches!(session.last_rate_write().unwrap().status, RateWriteStatus::Uncertain { .. }));
                 assert_eq!(session.last_write(), Some(&kept));
             }
-            assert_eq!(wire.requests().len(), if abandon { 6 } else { 5 });
+            assert_eq!(wire.requests().len(), 6);
         }
     }
 }

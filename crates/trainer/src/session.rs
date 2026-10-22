@@ -10,7 +10,7 @@ use eg_trainer_wire::{
     forge::{self, ForgeSnapshot},
     locale::{self, GameLocale},
     process::ProcessIdentity,
-    protocol::{Discovery, DispatcherSpec, HookState, ProtocolError, Request, ResponseCode, RuntimeStatus},
+    protocol::{Discovery, DispatcherSpec, ProtocolError, Request, ResponseCode, RuntimeStatus},
     transport::{Transport, TransportError},
 };
 use jiff::Timestamp;
@@ -26,6 +26,7 @@ pub enum SessionState {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Cleanup {
     NotNeeded,
+    /// The helper module is absent and its dispatcher entry is pristine.
     ConfirmedOff,
     Unconfirmed,
 }
@@ -102,6 +103,7 @@ pub struct Session<T> {
     discovery: Option<Discovery>,
     status: Option<RuntimeStatus>,
     cleanup: Cleanup,
+    unload_needed: bool,
     last_write: Option<crate::writes::WriteRecord>,
     last_rate_write: Option<crate::field_writes::RateWriteRecord>,
 }
@@ -136,6 +138,7 @@ impl<T: Transport> Session<T> {
             discovery: None,
             status: None,
             cleanup: Cleanup::NotNeeded,
+            unload_needed: false,
             last_write: None,
             last_rate_write: None,
         })
@@ -189,6 +192,8 @@ impl<T: Transport> Session<T> {
         result
     }
     async fn attach(&mut self) -> Result<(), SessionError> {
+        self.unload_needed = true;
+        self.cleanup = Cleanup::Unconfirmed;
         let payload = self.request(&Request::Discover).await?;
         let discovery = Discovery::decode(&payload, self.target.pid).map_err(SessionError::Protocol)?;
         if !discovery.build_id.eq_ignore_ascii_case(self.profile.helper_build_id()) {
@@ -433,30 +438,24 @@ impl<T: Transport> Session<T> {
         }
         self.status = None;
         self.lease = None;
-        // Once offline admission is lost, there is no more client process/pipe access. The helper
-        // must independently remove gameplay features on its main-thread callback.
+        // Admission is revoked synchronously. The worker subsequently sends only
+        // the owner-only Unload control request and reads departure evidence.
     }
-    async fn clear_hooks(&mut self) {
-        let Some(discovery) = &self.discovery else {
-            return;
-        };
-        // Empty wanted set is permitted online too. It never removes the scheduler/helper itself.
-        self.cleanup = Cleanup::Unconfirmed;
-        if let Ok(bytes) = self.request(&Request::ClearHooks { dispatcher: discovery.dispatcher }).await
-            && let Ok(states) = HookState::decode_all(&bytes)
-            && states.iter().all(|state| !state.on)
-        {
-            self.cleanup = Cleanup::ConfirmedOff;
-        }
-    }
-    /// Explicit asynchronous cleanup; dropping Session never claims to turn effects off or unload code.
+    /// Stop this helper load and wait for native departure proof. This control
+    /// request is allowed after loss of offline admission; it cannot install a
+    /// hook or perform gameplay work. Dropping Session still performs no I/O.
     pub async fn disconnect(&mut self) -> Cleanup {
         let was_disabled = self.state == SessionState::Disabled;
         self.abandon_pending_write();
         self.status = None;
         self.state = SessionState::Closing;
-        // Best effort, as in HookSync.TurnOffAsync. Cancellation never proves a submitted clear ran.
-        let _ = tokio::time::timeout(std::time::Duration::from_secs(3), self.clear_hooks()).await;
+        // Consume before awaiting: cancellation never causes another Unload send.
+        if std::mem::take(&mut self.unload_needed) {
+            self.cleanup = Cleanup::Unconfirmed;
+            if matches!(tokio::time::timeout(std::time::Duration::from_secs(11), self.transport.unload()).await, Ok(Ok(()))) {
+                self.cleanup = Cleanup::ConfirmedOff;
+            }
+        }
         self.discovery = None;
         self.lease = None;
         self.state = if was_disabled { SessionState::Disabled } else { SessionState::Disconnected };

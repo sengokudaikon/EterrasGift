@@ -315,7 +315,7 @@ fn a_stop_at_each_check_around_the_first_page_keeps_the_session_and_its_files_fo
         assert_eq!(wire.requests().len(), sent, "stop at {stop_at}");
         assert!(fs::OpenOptions::new().write(true).open(&fixture.metadata).is_err(), "the session still holds its files");
         assert_eq!(run(session.disconnect()), Cleanup::ConfirmedOff);
-        assert_eq!(wire.requests()[sent], Request::ClearHooks { dispatcher: fixture.dispatcher });
+        assert_eq!(wire.requests()[sent], Request::Unload);
         assert!(fs::OpenOptions::new().write(true).open(&fixture.metadata).is_ok());
     }
 }
@@ -340,5 +340,5 @@ fn an_observer_stop_does_not_turn_a_runtime_refusal_into_a_cancellation() {
     ));
     assert_eq!(session.state(), SessionState::Disconnected);
     assert_eq!(run(session.disconnect()), Cleanup::Unconfirmed);
-    assert_eq!(wire.requests().len(), 3, "no cleanup I/O after the refusal");
+    assert_eq!(wire.requests().len(), 4, "only owner Unload follows refusal");
 }

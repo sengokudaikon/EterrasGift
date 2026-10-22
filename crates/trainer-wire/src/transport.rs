@@ -17,6 +17,8 @@ pub enum TransportFailure {
     Timeout,
     Busy,
     Missing,
+    /// Native evidence proves this helper load left the process.
+    Departed,
     ProcessChanged,
     WrongServer,
     Protocol(ProtocolError),
@@ -32,6 +34,7 @@ impl std::fmt::Display for TransportError {
             TransportFailure::Io(error) => write!(f, "Communication with the helper failed: {error}"),
             TransportFailure::Timeout => f.write_str("The helper did not respond in time."),
             TransportFailure::Busy => f.write_str("The helper is busy. Wait for the current operation to finish."),
+            TransportFailure::Departed => f.write_str("The helper left Last Epoch. Waiting for an offline character."),
             TransportFailure::Missing => f.write_str("The helper is unavailable. Reconnect before continuing."),
             TransportFailure::ProcessChanged => f.write_str("The game process changed. Reconnect before continuing."),
             TransportFailure::WrongServer => f.write_str("The helper connection belongs to another process."),

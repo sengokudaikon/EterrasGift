@@ -282,7 +282,7 @@ fn mapping_result_cannot_reopen_an_offline_gate_lost_while_sampling() {
         assert_eq!(pending.wait().await.unwrap_err().kind, ErrorKind::Gate);
         assert!(handle.snapshot().mappings.is_empty());
         assert!(handle.snapshot().attached.is_none());
-        assert_eq!(shared.count("disconnect"), 0);
+        assert_eq!(shared.count("disconnect"), 1);
         shutdown(&handle, worker).await;
     });
 }

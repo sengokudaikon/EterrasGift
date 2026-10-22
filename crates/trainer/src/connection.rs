@@ -142,7 +142,11 @@ impl<P: HelperPreparer, F: LogFactory> SessionConnector<P, F> {
             }
         };
         self.last_attempt.as_mut().unwrap().residency = prepared.residency;
-        admission.check()?;
+        if let Err(error) = admission.check() {
+            let mut transport = prepared.transport;
+            let _ = transport.unload().await;
+            return Err(error);
+        }
         if prepared.target != *target || prepared.transport.target() != target {
             return Err(BackendError::blocked(
                 ErrorKind::Identity,
@@ -154,7 +158,13 @@ impl<P: HelperPreparer, F: LogFactory> SessionConnector<P, F> {
         }
         let mut session = Session::new(target.clone(), prepared.transport, profile)?;
         session.enable();
-        session.connect(admission.time()?).await?;
+        if let Err(error) = session.connect(admission.time()?).await {
+            let gone = session.disconnect().await == crate::session::Cleanup::ConfirmedOff;
+            if gone && matches!(error, crate::session::SessionError::Transport(_)) {
+                return Err(BackendError::waiting(ErrorKind::Gate, "The helper left Last Epoch. Waiting for an offline character."));
+            }
+            return Err(error.into());
+        }
         Ok(session)
     }
 }
@@ -185,7 +195,7 @@ impl<P: HelperPreparer, F: LogFactory> Connector for SessionConnector<P, F> {
                 }
                 .into_error();
                 // No automatic return to preparation after a handshake failure.
-                // The retained server remains loaded until game exit.
+                // Failed/unfinished departure remains fenced by the preparer.
                 if attempt.residency != PreparationResidency::NotLoaded && error.kind != ErrorKind::Gate {
                     error.retry_when_waiting = false;
                 }

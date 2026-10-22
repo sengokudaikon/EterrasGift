@@ -166,11 +166,15 @@ impl Transport for Wire {
     fn target(&self) -> &ProcessIdentity {
         &self.target
     }
+    async fn unload(&mut self) -> Result<(), TransportError> {
+        self.send(&Request::Unload).await?;
+        Ok(()) // Authored transport models native departure after the control ACK.
+    }
     async fn send(&mut self, request: &Request) -> Result<Response, TransportError> {
         let (wait, payload) = {
             let mut s = self.shared.lock().unwrap();
             s.requests.push(request.clone());
-            if matches!(request, Request::ClearHooks { .. }) {
+            if matches!(request, Request::Unload) {
                 return Ok(Response {
                     code: ResponseCode::Done,
                     payload: vec![0; 4],
@@ -373,7 +377,8 @@ fn runtime_refusal_releases_lease_and_stops_all_further_io() {
     assert_eq!(shared.lock().unwrap().requests.len(), 3);
     assert!(OpenOptions::new().write(true).open(&f.metadata).is_ok());
     run(session.disconnect());
-    assert_eq!(shared.lock().unwrap().requests.len(), 3);
+    assert_eq!(shared.lock().unwrap().requests.len(), 4);
+    assert_eq!(shared.lock().unwrap().requests.last(), Some(&Request::Unload));
 }
 
 #[test]

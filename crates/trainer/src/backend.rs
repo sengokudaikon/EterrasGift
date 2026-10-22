@@ -36,7 +36,7 @@ pub use eg_trainer_wire::{
 };
 use eg_trainer_wire::{
     protocol::ResponseCode,
-    transport::{Transport, TransportFailure},
+    transport::{Transport, TransportError, TransportFailure},
 };
 use jiff::Timestamp;
 use tokio::sync::{broadcast, mpsc, oneshot, watch};
@@ -67,6 +67,8 @@ pub trait Connector: Send + 'static {
     /// identity/build/helper. Existing retained modules must never be reinjected.
     fn connect(&mut self, target: ProcessIdentity, now: Timestamp) -> impl Future<Output = Result<Self::Connection, BackendError>> + Send;
 }
+
+pub const HELPER_RESTART_REQUIRED: &str = "The helper could not leave the game; restart Last Epoch before playing online.";
 
 pub trait BackendConnection: Send + 'static {
     fn target(&self) -> &ProcessIdentity;
@@ -179,8 +181,8 @@ pub trait BackendConnection: Send + 'static {
         async { Err(BackendError::blocked(ErrorKind::NotReady, "level requirement writes are unavailable")) }
     }
     fn disconnect(&mut self) -> impl Future<Output = Cleanup> + Send;
-    // Dropping a connection must perform no process/pipe I/O. Admission loss
-    // drops it directly, without asking the helper to perform cleanup.
+    // Dropping a connection performs no I/O. After admission loss the worker
+    // drains only owner shutdown and read-only native departure evidence.
 }
 
 impl<T: Transport + Send + 'static> BackendConnection for Session<T> {
@@ -369,6 +371,10 @@ impl From<SessionError> for BackendError {
                 ..
             } => (ErrorKind::RestartRequired, Some(if may_have_run { Delivery::MayHaveRun } else { Delivery::NotSent }), false),
             SessionError::Helper { may_have_run, .. } => (ErrorKind::Protocol, Some(if may_have_run { Delivery::MayHaveRun } else { Delivery::NotSent }), false),
+            SessionError::Transport(TransportError {
+                failure: TransportFailure::Departed,
+                delivery,
+            }) => (ErrorKind::Gate, Some(delivery), true),
             SessionError::Transport(error) => {
                 let retry = error.delivery == Delivery::NotSent && matches!(error.failure, TransportFailure::Busy | TransportFailure::Missing);
                 (ErrorKind::Transport, Some(error.delivery), retry)
@@ -455,6 +461,9 @@ pub enum ForgeState {
 pub enum HelperResidency {
     MayBeLoaded,
     Loaded,
+    Leaving,
+    Gone,
+    Stuck,
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RetainedHelper {
@@ -878,6 +887,7 @@ where
     intent: Arc<Mutex<u64>>,
     state: BackendSnapshot,
     connection: Option<C::Connection>,
+    retiring: Option<C::Connection>,
     blocked: Option<ProcessIdentity>,
     next_discovery: tokio::time::Instant,
     next_locale_check: tokio::time::Instant,
@@ -953,6 +963,7 @@ pub fn service<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K
             intent,
             state,
             connection: None,
+            retiring: None,
             blocked: None,
             next_discovery: tokio::time::Instant::now(),
             next_locale_check: tokio::time::Instant::now(),
@@ -984,6 +995,7 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
                     self.command_epoch = envelope.epoch;
                     self.read_cancel = envelope.read_cancel;
                     let result = self.command(envelope.command).await;
+                    self.drain_departure().await;
                     self.read_cancel = None;
                     let _ = envelope.reply.send(result);
                     if stop {
@@ -996,6 +1008,7 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
                 }
                 Err(_) => {
                     self.poll().await;
+                    self.drain_departure().await;
                     tick = tokio::time::Instant::now() + interval;
                 }
             }
@@ -1323,6 +1336,7 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
         }
     }
     async fn connect(&mut self) -> Result<(), BackendError> {
+        self.drain_departure().await;
         if self.connection.is_some() {
             return self.read(CatalogRead::Keep, true).await;
         }
@@ -1345,6 +1359,18 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
         }
         let target = targets.into_iter().next().unwrap();
         self.state.detected = Some(target.clone());
+        if self
+            .state
+            .retained_helper
+            .as_ref()
+            .is_some_and(|helper| helper.target == target && helper.residency == HelperResidency::Stuck)
+        {
+            let error = BackendError::blocked(ErrorKind::RestartRequired, HELPER_RESTART_REQUIRED);
+            self.state.phase = Phase::Blocked;
+            self.state.error = Some(error.clone());
+            self.publish();
+            return Err(error);
+        }
         if self.blocked.as_ref() == Some(&target) {
             self.state.phase = Phase::Blocked;
             self.publish();
@@ -1617,7 +1643,9 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
         self.forge_history.clear();
         self.state.attack_leech = None;
         self.state.undo_forge = None;
-        if self.connection.take().is_some() {
+        if let Some(connection) = self.connection.take() {
+            debug_assert!(self.retiring.is_none());
+            self.retiring = Some(connection);
             self.state.cleanup = Cleanup::Unconfirmed;
         }
         self.state.attached = None;
@@ -1652,20 +1680,43 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
         self.event(BackendEvent::Fault(error));
         self.publish();
     }
+    async fn drain_departure(&mut self) {
+        let Some(mut connection) = self.retiring.take() else { return };
+        let target = connection.target().clone();
+        let phase = self.state.phase;
+        self.state.phase = Phase::Closing;
+        self.state.retained_helper = Some(RetainedHelper {
+            target: target.clone(),
+            residency: HelperResidency::Leaving,
+        });
+        self.publish();
+        self.state.cleanup = connection.disconnect().await;
+        let gone = self.state.cleanup == Cleanup::ConfirmedOff;
+        self.state.retained_helper = Some(RetainedHelper {
+            target: target.clone(),
+            residency: if gone { HelperResidency::Gone } else { HelperResidency::Stuck },
+        });
+        self.state.phase = if gone { phase } else { Phase::Blocked };
+        if !gone {
+            self.blocked = Some(target);
+            self.state.error = Some(BackendError::blocked(ErrorKind::RestartRequired, HELPER_RESTART_REQUIRED));
+        }
+        self.publish();
+    }
     async fn close(&mut self, disable: bool, stop: bool) {
         self.state.phase = Phase::Closing;
         self.state.activity = None;
         self.state.forge = ForgeState::Unobserved;
         self.publish();
-        if let Some(mut connection) = self.connection.take() {
-            self.state.cleanup = connection.disconnect().await;
-        }
         self.release_without_io();
+        self.drain_departure().await;
         if disable {
             self.state.enabled = false;
         }
         self.state.phase = if stop {
             Phase::Stopped
+        } else if self.state.enabled && self.state.retained_helper.as_ref().is_some_and(|helper| helper.residency == HelperResidency::Stuck) {
+            Phase::Blocked
         } else if self.state.enabled {
             Phase::Disconnected
         } else {

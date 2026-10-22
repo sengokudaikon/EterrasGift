@@ -275,7 +275,10 @@ fn ordinary_forge_refusals_keep_the_connection_but_runtime_refusals_release_it()
                 assert!(handle.snapshot().attached.is_none());
             }
             assert_eq!(shared.count("write"), 1);
-            assert_eq!(shared.count("disconnect"), 0);
+            assert_eq!(
+                shared.count("disconnect"),
+                usize::from(matches!(code, ResponseCode::OfflineRequired | ResponseCode::RestartRequired))
+            );
             shutdown(&handle, worker).await;
         }
     });
@@ -323,7 +326,7 @@ fn forge_confirmation_survives_later_gate_loss_without_publishing_a_live_item() 
         assert!(matches!(state.forge, ForgeState::Unobserved));
         assert!(state.undo_forge.is_none());
         assert_eq!(shared.count("write"), 1);
-        assert_eq!(shared.count("disconnect"), 0);
+        assert_eq!(shared.count("disconnect"), 1);
         shutdown(&handle, worker).await;
     });
 }

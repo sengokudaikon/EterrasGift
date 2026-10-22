@@ -37,13 +37,18 @@ unfinished/uncertain attempt. Factual NotSent failures release the reservation.
 `RemoteFailure`/`PendingCall` retain unfinished calls and their input allocations;
 no unrelated host-side ownership journal or eight-target capacity limit remains.
 Dropping preparation submits no stop/unload and cannot release an unfinished
-remote call's storage. Published helper/trampoline code remains resident until
-process exit. Host-side registry pruning after confirmed exit remains future work.
+remote call's storage. Loaded -> Leaving -> Gone requires a snapshot without any helper
+and a pristine dispatcher body/table/unwind check. Gone permits a fresh load in the
+same process. A timed-out or unprovable departure becomes Stuck until process exit;
+Retry cannot bypass it. Exited process records are pruned.
 
 `VerifiedTransport` repeats Release offline admission and checks the complete
 file-derived dispatcher body/table/unwind before the first Status can install the
-scheduler. Later requests must carry that same dispatcher. Disconnect clears
-features but does not unload the helper or authorize another load.
+scheduler. Later gameplay requests must carry that same dispatcher. Disconnect,
+menu/login/quitting log events and runtime gate loss send owner-only Unload and wait
+for native departure evidence. These shutdown/read-only checks remain permitted
+after offline admission is lost. A lost ACK is never replayed. A proven self-unload
+is reported as departed, allowing the next offline character to prepare a fresh helper.
 
 Run `mise run trainer:verify` for the trainer product suite followed by workspace
 lint, formatting, token checks and fake-host captures. The persistent-player
