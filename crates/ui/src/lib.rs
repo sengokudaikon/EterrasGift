@@ -1,6 +1,6 @@
 //! The Slint UI: the `.slint` sources under `ui/`, compiled by `build.rs`, and the Rust that puts the app's state
-//! behind them: navigation, Home, Settings, Eterra's decorations, and the Windows settings the design reacts to. What is not ported yet is
-//! stubbed (`stubs`).
+//! behind them: navigation, Home, Mods, Settings, the trainer's pages and Item Forge, Eterra's decorations, and the Windows
+//! settings the design reacts to.
 
 #![deny(unsafe_code)]
 
@@ -15,7 +15,6 @@ mod models;
 pub mod mods;
 pub mod settings;
 pub mod shell;
-pub mod stubs;
 #[allow(unsafe_code)] // Windows/FFI boundary; the rest of the crate denies unsafe.
 pub mod system;
 pub mod trainer;
@@ -58,7 +57,7 @@ pub fn install(window: &MainWindow, app: App) {
         None => app.settings,
     };
     settings::bind_with_close(window, settings, before_close);
-    stubs::install(window, app.trainer);
+    trainer_backend::unbound(window, app.trainer);
     let trainer_backend = app.trainer_backend.filter(|_| app.trainer);
     trainer::install(window, trainer_backend.clone(), trainer_settings);
     if let Some(backend) = trainer_backend {

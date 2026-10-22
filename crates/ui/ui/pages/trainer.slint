@@ -106,6 +106,8 @@ export global TrainerState {
     in property <int> column-count: 1;
     // The tallest column, with every row in place.
     in property <length> rows-height;
+    // False while a section's rows wait for their split, so they appear in their columns (view.rs `Layout`).
+    in property <bool> rows-ready: true;
     // Changes when another page or section opens, so the list starts at its top.
     in property <int> serial;
 
@@ -646,6 +648,9 @@ component FeatureRow inherits Rectangle {
             width: parent.width - self.x;
             height: self.visible ? self.preferred-height : 0px;
             text: root.feature.status;
+            accessible-role: text;
+            // Said when it changes, as the C# row's Status (AutomationProperties.LiveSetting="Polite").
+            accessible-live-region: polite;
             tone: root.feature.tone == FeatureTone.confirmed ? CaptionTone.confirmed : root.feature.tone == FeatureTone.error ? CaptionTone.error : CaptionTone.muted;
         }
     }
@@ -702,6 +707,7 @@ component FeatureList inherits Rectangle {
                     x: self.place.column * (root.column-width + Tokens.feature-column-spacing);
                     y: self.place.y;
                     width: root.column-width;
+                    opacity: TrainerState.rows-ready ? 1 : 0;
                     feature: feature;
                     models: TrainerState.row-models[index];
                     row-index: index;

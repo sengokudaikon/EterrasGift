@@ -1464,6 +1464,8 @@ export component ItemForge inherits Rectangle {
                     wrap: word-wrap;
                     horizontal-stretch: 1;
                     accessible-role: text;
+                    // Said when it changes, as the C# StatusMessage's AutomationProperties.LiveSetting="Polite".
+                    accessible-live-region: polite;
                 }
             }
 

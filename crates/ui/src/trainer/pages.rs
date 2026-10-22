@@ -30,7 +30,7 @@ pub struct Section {
 }
 
 pub enum Content {
-    /// A whole feature's own page: the Item Forge. TODO(trainer): the Item Forge is ported on its own.
+    /// A whole feature's own page: the Item Forge, which `forge` shows.
     ItemForge,
     Rows(Vec<Row>),
 }

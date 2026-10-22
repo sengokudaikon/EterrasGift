@@ -6,7 +6,7 @@ use super::catalog::{Area, Feature, FeatureValue};
 use super::pages::{self, Content, EditorRow, FieldModel, HookRow, PageModel, Row, Tone};
 use super::session::TrainerSession;
 use crate::shell::Page;
-use crate::{FeatureFieldView, FeatureRowKind, FeatureRowModels, FeatureRowPlace, FeatureRowView, FeatureTone, FeatureValueView, MainWindow, Tokens, TrainerState};
+use crate::{FeatureFieldView, FeatureRowKind, FeatureRowModels, FeatureRowPlace, FeatureRowView, FeatureTone, FeatureValueView, MainWindow, Nav, Tokens, TrainerState};
 use slint::{ComponentHandle, Model, ModelRc, SharedString, VecModel, Weak};
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -45,9 +45,11 @@ pub fn bind(window: &MainWindow, session: Rc<dyn TrainerSession>, features: Vec<
         places: Rc::new(VecModel::default()),
         headings: Vec::new(),
         heights: Vec::new(),
-        columns: 1,
+        columns: None,
         starts: Vec::new(),
         pending: false,
+        settled: false,
+        reveal: slint::Timer::default(),
     }));
     let controller = Rc::new(RefCell::new(Controller {
         window: window.as_weak(),
@@ -174,12 +176,13 @@ fn area(page: Page) -> Option<Area> {
     })
 }
 
-/// A row's own models, kept while it shows so its boxes keep their state.
+/// A row's own models, kept while it shows so its boxes keep their state, and its help, which never changes.
 #[derive(Default)]
 struct Nested {
     listed: Rc<VecModel<FeatureValueView>>,
     fields: Rc<VecModel<FeatureFieldView>>,
     choices: Vec<ModelRc<SharedString>>,
+    help: SharedString,
 }
 
 struct Controller {
@@ -280,11 +283,23 @@ impl Controller {
         self.keep_polling(busy);
     }
 
-    /// Every row as it stands now; only what changed reaches the view. Answers reach rows on every page, shown or not.
+    /// Every row as it stands now; only what changed reaches the view. Answers reach rows on every page, shown or not; the
+    /// rows are rebuilt only while their page shows, since opening a page shows its section afresh.
     fn refresh(&mut self) {
         let busy = self.poll();
         self.keep_polling(busy);
-        self.show_rows();
+        if self.showing() {
+            self.show_rows();
+        }
+    }
+
+    /// The page the rows belong to is the one the window shows.
+    fn showing(&self) -> bool {
+        let Some(window) = self.window.upgrade() else {
+            return false;
+        };
+        let page = window.global::<Nav>().get_current_page();
+        self.current.is_some() && Page::from_id(&page).and_then(area) == self.current
     }
 
     /// Looks for answers every [`POLL`] while a row waits on the game, and not otherwise.
@@ -374,6 +389,9 @@ impl Controller {
 impl Nested {
     fn of(row: &Row) -> Nested {
         let mut nested = Nested::default();
+        if let Row::Planned(feature) | Row::Hook(HookRow { feature, .. }) | Row::Editor(EditorRow { feature, .. }) = row {
+            nested.help = feature.help().into();
+        }
         if let Row::Hook(hook) = row {
             nested.choices = hook
                 .feature
@@ -478,7 +496,7 @@ fn view(row: &Row, session: &dyn TrainerSession, nested: &Nested) -> FeatureRowV
         Row::Planned(feature) => FeatureRowView {
             kind: FeatureRowKind::Planned,
             title: feature.title.into(),
-            help: feature.help().into(),
+            help: nested.help.clone(),
             details: pages::planned_details(feature).into(),
             ..Default::default()
         },
@@ -488,7 +506,7 @@ fn view(row: &Row, session: &dyn TrainerSession, nested: &Nested) -> FeatureRowV
             FeatureRowView {
                 kind: FeatureRowKind::Hook,
                 title: hook.feature.title.into(),
-                help: hook.feature.help().into(),
+                help: nested.help.clone(),
                 on: hook.is_on(session),
                 can_use: hook.can_use(session),
                 has_inline: inline,
@@ -506,7 +524,7 @@ fn view(row: &Row, session: &dyn TrainerSession, nested: &Nested) -> FeatureRowV
         Row::Editor(editor) => FeatureRowView {
             kind: if editor.listed { FeatureRowKind::Held } else { FeatureRowKind::Editor },
             title: editor.feature.title.into(),
-            help: editor.feature.help().into(),
+            help: nested.help.clone(),
             can_use: editor.can_use(session),
             reason: editor.reason(session).unwrap_or_default().into(),
             unread: !editor.has_read,
@@ -525,15 +543,27 @@ fn view(row: &Row, session: &dyn TrainerSession, nested: &Nested) -> FeatureRowV
 /// The split of the rows into columns (`RowColumnsPanel`): the view says how many fit and how tall each row is; the split
 /// waits for every height and is made once per batch of reports, after the view has settled. The rows are placed at once
 /// on every report, so a row that grows pushes the ones under it down in the same frame.
+///
+/// A new section's rows report their heights as they are made, before any of them draws, and the split is made as soon
+/// as the last one has: the section's first frame shows it in its columns, not in one column first. Should the heights
+/// come in pieces, the rows are drawn transparent until that first split (or until the view says one column fits), and
+/// [`REVEAL`] shows them anyway should a height never come.
 struct Layout {
     window: Weak<MainWindow>,
     places: Rc<VecModel<FeatureRowPlace>>,
     headings: Vec<bool>,
     heights: Vec<Option<f32>>,
-    columns: usize,
+    /// How many columns fit, once the view has said.
+    columns: Option<usize>,
     starts: Vec<usize>,
     pending: bool,
+    /// The shown section has had its split.
+    settled: bool,
+    reveal: slint::Timer,
 }
+
+/// The longest a section's rows stay hidden waiting for their heights.
+const REVEAL: Duration = Duration::from_millis(250);
 
 impl Layout {
     fn reset(layout: &Rc<RefCell<Layout>>, headings: Vec<bool>) {
@@ -541,13 +571,26 @@ impl Layout {
         this.heights = vec![None; headings.len()];
         this.headings = headings;
         this.starts = vec![0];
+        this.settled = false;
+        this.show();
         this.place();
+        let weak = Rc::downgrade(layout);
+        this.reveal.start(slint::TimerMode::SingleShot, REVEAL, move || {
+            if let Some(layout) = weak.upgrade() {
+                let mut this = layout.borrow_mut();
+                this.settled = true;
+                this.show();
+            }
+        });
         drop(this);
         Layout::schedule(layout);
     }
 
     fn set_columns(layout: &Rc<RefCell<Layout>>, columns: i32) {
-        layout.borrow_mut().columns = columns.max(1) as usize;
+        let mut this = layout.borrow_mut();
+        this.columns = Some(columns.max(1) as usize);
+        this.show();
+        drop(this);
         Layout::schedule(layout);
     }
 
@@ -559,8 +602,12 @@ impl Layout {
         if *slot != Some(height) {
             *slot = Some(height);
             this.place();
-            drop(this);
-            Layout::schedule(layout);
+            if !this.settled && this.heights.iter().all(Option::is_some) {
+                this.apply();
+            } else {
+                drop(this);
+                Layout::schedule(layout);
+            }
         }
     }
 
@@ -578,17 +625,29 @@ impl Layout {
 
     fn apply(&mut self) {
         self.pending = false;
-        let starts = if self.columns <= 1 {
-            vec![0]
-        } else {
-            let Some(heights) = self.heights.iter().copied().collect::<Option<Vec<f32>>>() else {
-                return;
-            };
-            pages::split(&heights, &self.headings, self.columns, self.spacing())
+        let starts = match self.columns {
+            None => return,
+            Some(1) => vec![0],
+            Some(columns) => {
+                let Some(heights) = self.heights.iter().copied().collect::<Option<Vec<f32>>>() else {
+                    return;
+                };
+                pages::split(&heights, &self.headings, columns, self.spacing())
+            }
         };
         if starts != self.starts {
             self.starts = starts;
             self.place();
+        }
+        self.settled = true;
+        self.reveal.stop();
+        self.show();
+    }
+
+    /// Shows the rows once their section has its split, or at once when one column fits.
+    fn show(&self) {
+        if let Some(window) = self.window.upgrade() {
+            window.global::<TrainerState>().set_rows_ready(self.settled || self.columns == Some(1));
         }
     }
 
