@@ -98,8 +98,18 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
             ));
         }
         let kept = matches!(&status, WriteStatus::Confirmed(_));
+        let mut describe_failure = None;
         let result = match status {
             WriteStatus::Confirmed(snapshot) | WriteStatus::NotKept(snapshot) => {
+                // The readback is a changed item: the game describes its implicits again before it is published, so the
+                // item and its text arrive together (the monitor keeps text only for an item that has not changed).
+                let implicits = match self.connection.as_mut().unwrap().describe_implicits(self.clock.now(), &snapshot).await {
+                    Ok(implicits) => implicits,
+                    Err(error) => {
+                        describe_failure = Some(error);
+                        None
+                    }
+                };
                 if let Err(error) = self.admit_using_policy(&target, GatePolicy::Release) {
                     // Confirmation is historical. Admission controls publication,
                     // not whether the completed write is retroactively unknown.
@@ -119,7 +129,10 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
                     if undo.is_none() {
                         self.forge_history.clear();
                     }
-                    let forge = self.forge_state(Some(snapshot), &data);
+                    let mut forge = self.forge_state(Some(snapshot), &data);
+                    if let ForgeState::Item { implicits: observed, .. } = &mut forge {
+                        *observed = implicits;
+                    }
                     self.commit(epoch, |this| {
                         this.state.forge = forge;
                         this.state.undo_forge = undo;
@@ -145,6 +158,10 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
             }
             WriteStatus::Pending => unreachable!(),
         };
+        // The write's outcome stands; a session that broke while describing is revoked as any other.
+        if let Some(error) = describe_failure {
+            let _ = self.check_write_failure(Err(error));
+        }
         self.finish_write(result, failure, target)
     }
     pub(super) async fn submit_write(&mut self, plan: &WritePlan, control: &mut dyn WriteControl) -> (WriteOutcome<WriteObservation>, Option<BackendError>) {

@@ -86,6 +86,17 @@ impl ValueEditor {
         self.table.as_ref().filter(|table| !self.loading && table.is_usable())
     }
 
+    /// The table on screen: the current one, or while a new one loads, the last. Only `table` authorizes input.
+    fn shown(&self) -> Option<&ValueTable> {
+        self.table.as_ref().filter(|table| table.is_usable())
+    }
+
+    /// The value has a scale to draw, though it may still be loading: a re-read (after Apply, say) keeps the bar and
+    /// range in place and replaces them when the new table arrives, rather than showing a lock in between.
+    pub fn has_scale(&self) -> bool {
+        self.shown().is_some()
+    }
+
     /// A new table, or why there is none; `game_context` marks a table read for what the game holds.
     pub fn set_mapping(&mut self, table: impl Into<super::game::Lookup<ValueTable>>, game_context: bool) {
         use super::game::Lookup;
@@ -151,10 +162,7 @@ impl ValueEditor {
     }
 
     pub fn display(&self, roll: u8) -> String {
-        self.table
-            .as_ref()
-            .filter(|table| table.is_usable())
-            .map_or_else(|| "—".into(), |table| table.samples[roll as usize].display.clone())
+        self.shown().map_or_else(|| "—".into(), |table| table.samples[roll as usize].display.clone())
     }
 
     pub fn effects(&self, roll: u8) -> String {
@@ -170,22 +178,25 @@ impl ValueEditor {
     }
 
     pub fn minimum_text(&self) -> String {
-        self.table().map(|table| table.minimum().display.clone()).unwrap_or_default()
+        self.shown().map(|table| table.minimum().display.clone()).unwrap_or_default()
     }
 
     pub fn maximum_text(&self) -> String {
-        self.table().map(|table| table.maximum().display.clone()).unwrap_or_default()
+        self.shown().map(|table| table.maximum().display.clone()).unwrap_or_default()
     }
 
     pub fn value(&self, roll: u8) -> f64 {
         self.sample_at(roll).map_or(self.minimum(), |sample| sample.value)
     }
 
-    /// Where a roll's value sits in the game's range, 0 to 1.
+    /// Where a roll's value sits in the game's range, 0 to 1, on the table shown.
     pub fn fraction(&self, roll: u8) -> f64 {
-        let (minimum, maximum) = (self.minimum(), self.maximum());
-        match self.sample_at(roll) {
-            Some(sample) if maximum > minimum => (sample.value - minimum) / (maximum - minimum),
+        let Some(table) = self.shown() else {
+            return 0.0;
+        };
+        let (minimum, maximum) = (table.minimum().value, table.maximum().value);
+        match &table.samples[roll as usize] {
+            sample if maximum > minimum => (sample.value - minimum) / (maximum - minimum),
             _ => 0.0,
         }
     }

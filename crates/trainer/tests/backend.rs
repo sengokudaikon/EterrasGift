@@ -125,6 +125,7 @@ struct Shared {
     mapping_block: Block,
     unique_block: Block,
     unique_lines: Mutex<Option<Vec<backend::ModifierSnapshot>>>,
+    implicit_lines: Mutex<Option<Vec<backend::ModifierSnapshot>>>,
     preview_errors: Mutex<VecDeque<BackendError>>,
     mapping_errors: Mutex<VecDeque<BackendError>>,
     mapping_result: Mutex<Option<eg_trainer::mapping::ValueTable>>,
@@ -168,6 +169,7 @@ impl Shared {
             mapping_block: Block::default(),
             unique_block: Block::default(),
             unique_lines: Mutex::new(None),
+            implicit_lines: Mutex::new(None),
             preview_errors: Mutex::new(VecDeque::new()),
             mapping_errors: Mutex::new(VecDeque::new()),
             mapping_result: Mutex::new(None),
@@ -276,7 +278,7 @@ impl BackendConnection for Connection {
     }
     async fn describe_implicits(&mut self, _: Timestamp, _: &ForgeSnapshot) -> Result<Option<Vec<backend::ModifierSnapshot>>, BackendError> {
         self.shared.record("implicits");
-        Ok(None)
+        Ok(self.shared.implicit_lines.lock().unwrap().clone())
     }
     async fn describe_unique(&mut self, _: Timestamp, _: &ForgeSnapshot) -> Result<Option<Vec<backend::ModifierSnapshot>>, BackendError> {
         self.shared.record("unique-description");

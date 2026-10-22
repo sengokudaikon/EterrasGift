@@ -111,7 +111,11 @@ impl BackendConnection for OwnedConnection {
         Ok(self.0.item.lock().unwrap().clone())
     }
     async fn describe_implicits(&mut self, _: jiff::Timestamp, expected: &ForgeSnapshot) -> Result<Option<Vec<backend::ModifierSnapshot>>, BackendError> {
-        assert_eq!(self.0.item.lock().unwrap().as_ref(), Some(expected));
+        // The helper refuses to describe an item that changed since it was read (StaleItem), which the session reads as
+        // no text: the test may change the item while a write's readback is described.
+        if self.0.item.lock().unwrap().as_ref() != Some(expected) {
+            return Ok(None);
+        }
         Ok((self.0.descriptions.load(Ordering::SeqCst) == 1).then(|| {
             vec![
                 backend::ModifierSnapshot {
@@ -902,7 +906,7 @@ pub(super) fn capture(session: &Session) {
     data.mappings.store(1, Ordering::SeqCst);
     *data.item.lock().unwrap() = Some(item("Mapped values", 42));
     command(&handle, Command::ReadForge, || true);
-    wait(|| forge.get_item_name() == "Mapped values" && forge.get_affixes().row_data(0).unwrap().value.mapped);
+    wait(|| forge.get_item_name() == "Mapped values" && forge.get_affixes().row_data(0).unwrap().value.editable);
     let value = forge.get_affixes().row_data(0).unwrap().value;
     assert_eq!(value.display, "363 Ω"); // id 1, tier 5, item 42, roll 171
     assert!(value.editable);
@@ -921,15 +925,15 @@ pub(super) fn capture(session: &Session) {
     session.capture(&ui, "backend-forge-roll-draft");
     forge.invoke_apply();
     wait(|| forge.get_can_undo() && data.item.lock().unwrap().as_ref().unwrap().affixes[0].roll == 255);
-    wait(|| forge.get_affixes().row_data(0).unwrap().value.mapped);
+    wait(|| forge.get_affixes().row_data(0).unwrap().value.editable);
     session.capture(&ui, "backend-forge-roll-confirmed");
     forge.invoke_undo();
     wait(|| !forge.get_can_undo() && forge.get_can_change_affix_list() && data.item.lock().unwrap().as_ref().unwrap().affixes[0].roll == 171);
     wait(|| {
         let value = forge.get_affixes().row_data(0).unwrap().value;
-        value.mapped && value.display == "363 Ω"
+        value.editable && value.display == "363 Ω"
     });
-    // Keep the last value readable while a draft table loads, and discard
+    // Keep the last value, bar and range while a draft table loads (not editable), and discard
     // queued requests when the user returns to an already cached draft.
     data.mapping_release.store(false, Ordering::SeqCst);
     data.mappings.store(4, Ordering::SeqCst);
@@ -938,7 +942,7 @@ pub(super) fn capture(session: &Session) {
     wait(|| data.mapping_calls.load(Ordering::SeqCst) > calls);
     let loading = forge.get_affixes().row_data(0).unwrap().value;
     assert_eq!(loading.display, "363 Ω");
-    assert!(!loading.mapped && !loading.editable);
+    assert!(loading.mapped && !loading.editable);
     assert!(loading.tip.contains("Loading actual values"));
     session.capture(&ui, "backend-forge-values-reloading");
     forge.invoke_pick_tier(0, 2);
@@ -946,7 +950,7 @@ pub(super) fn capture(session: &Session) {
     forge.invoke_discard_all();
     data.mapping_release.store(true, Ordering::SeqCst);
     command(&handle, Command::SetOverride(false), || true);
-    wait(|| forge.get_affixes().row_data(0).unwrap().value.mapped);
+    wait(|| forge.get_affixes().row_data(0).unwrap().value.editable);
     assert_eq!(forge.get_affixes().row_data(0).unwrap().value.display, "363 Ω");
     assert_eq!(data.mapping_calls.load(Ordering::SeqCst), calls + 1, "obsolete queued drafts do not sample the game");
     assert!(handle.snapshot().mappings.iter().all(|mapping| mapping.request.draft.is_none()));
@@ -954,7 +958,7 @@ pub(super) fn capture(session: &Session) {
     // Tier and replacement drafts resolve in their own context. Unrelated watch
     // publications preserve both local drafts and a value currently being typed.
     forge.invoke_pick_tier(0, 2);
-    wait(|| forge.get_affixes().row_data(0).unwrap().value.mapped);
+    wait(|| forge.get_affixes().row_data(0).unwrap().value.editable);
     assert_eq!(forge.get_affixes().row_data(0).unwrap().value.display, "343 Ω");
     assert_eq!(forge.get_drafts().row_count(), 1);
     session.capture(&ui, "backend-forge-tier-values");
@@ -962,11 +966,11 @@ pub(super) fn capture(session: &Session) {
     forge.invoke_picker_search_edited("Vitality".into());
     forge.invoke_picker_select(0);
     forge.invoke_use_picker();
-    wait(|| forge.get_affixes().row_data(0).unwrap().value.mapped);
+    wait(|| forge.get_affixes().row_data(0).unwrap().value.editable);
     assert_eq!(forge.get_affixes().row_data(0).unwrap().value.display, "443 Ω");
     session.capture(&ui, "backend-forge-replacement-values");
     forge.invoke_discard_all();
-    wait(|| forge.get_affixes().row_data(0).unwrap().value.mapped);
+    wait(|| forge.get_affixes().row_data(0).unwrap().value.editable);
     assert!(forge.invoke_begin_input(affix_cell.clone()));
     forge.invoke_input_edited(affix_cell.clone(), "400".into());
     command(&handle, Command::ReadForge, || true);
@@ -990,7 +994,7 @@ pub(super) fn capture(session: &Session) {
     let _read = handle.try_submit(Command::ReadForge).unwrap();
     wait(|| forge.get_item_name() == "New mapping context");
     assert!(!forge.get_affixes().row_data(0).unwrap().value.mapped);
-    wait(|| forge.get_affixes().row_data(0).unwrap().value.mapped);
+    wait(|| forge.get_affixes().row_data(0).unwrap().value.editable);
     assert_eq!(forge.get_affixes().row_data(0).unwrap().value.display, "365 Ω");
     assert_eq!(forge.get_drafts().row_count(), 0);
     data.mappings.store(3, Ordering::SeqCst);
@@ -1009,7 +1013,7 @@ pub(super) fn capture(session: &Session) {
     assert_eq!(data.mapping_calls.load(Ordering::SeqCst), calls, "failed reads never form a retry loop");
     data.mappings.store(1, Ordering::SeqCst);
     command(&handle, Command::ReadForge, || true);
-    wait(|| forge.get_affixes().row_data(0).unwrap().value.mapped);
+    wait(|| forge.get_affixes().row_data(0).unwrap().value.editable);
     assert_eq!(forge.get_affixes().row_data(0).unwrap().value.display, "366 Ω");
     assert_eq!(data.mapping_calls.load(Ordering::SeqCst), calls + 1);
     session.capture(&ui, "backend-forge-values-recovered");

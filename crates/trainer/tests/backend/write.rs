@@ -381,6 +381,29 @@ fn only_explicit_write_is_submitted_and_full_confirmation_is_published() {
     });
 }
 #[test]
+fn a_confirmed_write_publishes_the_item_with_the_games_implicit_text() {
+    run(async {
+        let shared = writable();
+        let line = backend::ModifierSnapshot {
+            index: 0,
+            text: "+12% Increased Attack Speed".into(),
+            range: String::new(),
+            roll_ids: vec![],
+            editable: true,
+        };
+        *shared.implicit_lines.lock().unwrap() = Some(vec![line.clone()]);
+        let (handle, worker) = start(&shared, options());
+        connected(&handle).await;
+        assert_eq!(shared.count("implicits"), 1);
+        let plan = handle.snapshot().level_requirement_plan(17).unwrap();
+        command(&handle, Command::ApplyForge(Box::new(plan))).await.unwrap();
+        // The readback is described before it is published: the monitor keeps text only for an unchanged item.
+        assert_eq!(shared.count("implicits"), 2);
+        assert!(matches!(handle.snapshot().forge, ForgeState::Item { implicits: Some(lines), .. } if lines == vec![line]));
+        shutdown(&handle, worker).await;
+    });
+}
+#[test]
 fn stale_full_observation_and_generation_are_refused_before_write_or_status_io() {
     run(async {
         let shared = writable();

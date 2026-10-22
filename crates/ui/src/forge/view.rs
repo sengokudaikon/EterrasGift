@@ -736,11 +736,11 @@ fn value_cell(cell: CellRef, uid: i32, editor: &ValueEditor, roll: u8, game: Opt
         display: editor.display(roll).into(),
         was: was.into(),
         draft,
-        mapped: editor.has_mapping(),
+        mapped: editor.has_scale(),
         editable,
         fraction,
         game_fraction: game.map_or(fraction, |game| editor.fraction(game) as f32),
-        game_tick: editor.has_mapping() && game.is_some_and(|game| game != roll),
+        game_tick: editor.has_scale() && game.is_some_and(|game| game != roll),
         tip: tip.into(),
     }
 }

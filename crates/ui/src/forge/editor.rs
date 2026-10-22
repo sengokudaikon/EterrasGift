@@ -910,7 +910,7 @@ impl ForgeEditor {
     pub fn range_text(&self, row: usize) -> String {
         match self.affixes.get(row) {
             Some(row) if row.added => self.catalog().tier_range(row.draft_id(), row.tier()),
-            Some(row) if row.value.has_mapping() => format!("{} – {}", row.value.minimum_text(), row.value.maximum_text()),
+            Some(row) if row.value.has_scale() => format!("{} – {}", row.value.minimum_text(), row.value.maximum_text()),
             _ => String::new(),
         }
     }
