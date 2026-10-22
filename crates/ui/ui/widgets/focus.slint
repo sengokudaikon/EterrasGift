@@ -38,6 +38,22 @@ export component TipTrigger inherits Rectangle {
     // No longer wanted, the tip waits a moment before closing, so the pointer can cross onto the bubble and stay there.
     property <bool> leaving;
 
+    // The control can move while its tip is up (rows above it come or go, its list scrolls): the tip goes with it.
+    property <length> at-x: root.absolute-position.x;
+    property <length> at-y: root.absolute-position.y;
+    changed at-x => {
+        root.follow();
+    }
+    changed at-y => {
+        root.follow();
+    }
+    function follow() {
+        if (Tip.open && root.owns) {
+            Tip.anchor-x = root.absolute-position.x;
+            Tip.anchor-y = root.absolute-position.y;
+        }
+    }
+
     changed hovered => {
         if (!root.hovered) {
             root.hover-ready = false;

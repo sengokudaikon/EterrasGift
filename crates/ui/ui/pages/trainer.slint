@@ -705,7 +705,9 @@ component FeatureList inherits Rectangle {
                     x: self.place.column * (root.column-width + Tokens.feature-column-spacing);
                     y: self.place.y;
                     width: root.column-width;
-                    opacity: TrainerState.rows-ready ? 1 : 0;
+                    // Hidden, not transparent, while the split is pending: a row not drawn takes no click or Tab. It still
+                    // reports its height.
+                    visible: TrainerState.rows-ready;
                     feature: feature;
                     models: TrainerState.row-models[index];
                     row-index: index;

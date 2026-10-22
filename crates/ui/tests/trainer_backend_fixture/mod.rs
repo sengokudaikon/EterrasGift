@@ -820,12 +820,27 @@ pub(super) fn capture(session: &Session) {
     forge.invoke_undo();
     wait(|| !forge.get_can_undo() && forge.get_can_change_affix_list() && data.item.lock().unwrap().as_ref().unwrap().affixes.len() == 1);
     assert_eq!(data.item.lock().unwrap().as_ref().unwrap().rarity, 1);
+    // Add affix kept the keyboard and its tip; the tip follows the button as the rows above it change.
+    let tip = ui.global::<Tip>();
+    settle();
+    let tip_y = tip.get_anchor_y();
     forge.invoke_remove_affix(0);
     assert!(forge.get_affixes().row_data(0).unwrap().removed);
     assert_eq!(forge.get_rarity_text(), "Normal");
+    // A drafted removal stays readable: only its caption says it goes on Apply.
+    session.capture(&ui, "backend-forge-remove-drafted");
     forge.invoke_apply();
     wait(|| forge.get_undo_text() == "Undo apply" && data.item.lock().unwrap().as_ref().unwrap().affixes.is_empty());
     assert_eq!(data.item.lock().unwrap().as_ref().unwrap().rarity, 0);
+    // Change handlers run with a frame: draw one, as the app does, then let the moved tip be drawn.
+    settle();
+    ui.window().take_snapshot().expect("render");
+    settle();
+    assert!(
+        tip.get_open() && tip.get_anchor_y() < tip_y,
+        "the tip moved up with Add affix: {} from {tip_y}",
+        tip.get_anchor_y()
+    );
     session.capture(&ui, "backend-forge-removed-last");
     session.resize(680, 580);
     session.capture(&ui, "backend-forge-removed-last-narrow");

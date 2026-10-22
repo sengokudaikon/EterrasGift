@@ -73,7 +73,7 @@ export component ValueScrubber inherits Rectangle {
     // Del on a cell that removes what it belongs to (an affix row's value).
     in property <bool> deletable;
     callback delete-pressed();
-    // What the value belongs to goes on Apply (a removed affix): the value greys out and its bar goes.
+    // What the value belongs to goes on Apply (a removed affix): the value takes the muted text, still readable, and its bar goes.
     in property <bool> muted;
 
     property <bool> locked: !root.cell.editable;
@@ -165,7 +165,7 @@ export component ValueScrubber inherits Rectangle {
         Text {
             text: root.cell.display;
             font-size: Tokens.font-size-value;
-            color: root.muted ? Tokens.text-disabled-brush : root.cell.draft ? Tokens.draft-brush : Tokens.text-brush;
+            color: root.muted ? Tokens.text-muted-brush : root.cell.draft ? Tokens.draft-brush : Tokens.text-brush;
             vertical-alignment: center;
             horizontal-stretch: 0;
         }

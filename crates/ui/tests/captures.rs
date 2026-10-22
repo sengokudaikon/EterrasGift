@@ -1769,6 +1769,29 @@ fn trainer_captures(session: &Session) {
     show(&ui);
     session.capture(&ui, "trainer-keyboard-switch");
 
+    // Rows waiting for their column split are not drawn, and take neither the pointer nor the keyboard: a click on a
+    // switch, or Tab from the strip and Space, turns nothing on. The same input on shown rows turns both on.
+    let on = |ui: &MainWindow, row: usize| state(ui).get_rows().row_data(row).is_some_and(|row| row.on);
+    for ready in [true, false] {
+        // Damage multiplier's switch.
+        let ui = open("combat", 1, 1100, 700, None);
+        state(&ui).set_rows_ready(ready);
+        settle();
+        session.click(628.0, 149.0);
+        settle();
+        assert_eq!(on(&ui, 1), ready, "a click on rows shown: {ready}");
+        // The strip, then the first row's (?) and its switch.
+        let ui = open("combat", 1, 1100, 700, None);
+        state(&ui).set_rows_ready(ready);
+        settle();
+        for _ in 0..6 {
+            session.key(Key::Tab);
+        }
+        session.type_text(" ");
+        settle();
+        assert_eq!(on(&ui, 0), ready, "Tab and Space on rows shown: {ready}");
+    }
+
     // A connected game: an editor applied and read back.
     let fake = FakeTrainer::holding(&[("points-earned", &[("", 40.0), ("", 30.0)])]);
     let ui = open("character", 0, 1100, 700, Some(fake));

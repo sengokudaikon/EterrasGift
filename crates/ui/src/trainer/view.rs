@@ -549,7 +549,7 @@ fn view(row: &Row, session: &dyn TrainerSession, nested: &Nested) -> FeatureRowV
 ///
 /// A new section's rows report their heights as they are made, before any of them draws, and the split is made as soon
 /// as the last one has: the section's first frame shows it in its columns, not in one column first. Should the heights
-/// come in pieces, the rows are drawn transparent until that first split (or until the view says one column fits), and
+/// come in pieces, the rows are hidden (and take no input) until that first split (or until the view says one column fits), and
 /// [`REVEAL`] shows them anyway should a height never come.
 struct Layout {
     window: Weak<MainWindow>,

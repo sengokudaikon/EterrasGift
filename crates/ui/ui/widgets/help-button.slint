@@ -27,6 +27,22 @@ export component HelpButton inherits Rectangle {
     property <int> claim: -1;
     property <bool> shown: Tip.open && (Tip.owner == root.claim || Tip.owner == trigger.claim);
 
+    // A tip a press put up follows the button as the trigger's does.
+    property <length> at-x: root.absolute-position.x;
+    property <length> at-y: root.absolute-position.y;
+    changed at-x => {
+        root.follow();
+    }
+    changed at-y => {
+        root.follow();
+    }
+    function follow() {
+        if (Tip.open && Tip.owner == root.claim) {
+            Tip.anchor-x = root.absolute-position.x;
+            Tip.anchor-y = root.absolute-position.y;
+        }
+    }
+
     function toggle() {
         if (root.opened-by-focus && root.shown) {
             root.opened-by-focus = false;

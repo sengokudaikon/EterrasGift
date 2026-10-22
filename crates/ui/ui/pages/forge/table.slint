@@ -376,7 +376,7 @@ export component AffixRowItem inherits Rectangle {
                             Text {
                                 text: root.affix.name;
                                 font-size: Tokens.font-size-value;
-                                color: root.affix.removed ? Tokens.text-disabled-brush : root.affix.replaced || root.affix.added ? Tokens.draft-brush : Tokens.text-brush;
+                                color: root.affix.removed ? Tokens.text-muted-brush : root.affix.replaced || root.affix.added ? Tokens.draft-brush : Tokens.text-brush;
                                 overflow: elide;
                             }
 
@@ -526,7 +526,7 @@ export component AffixRowItem inherits Rectangle {
                             text: root.affix.tier;
                             font-size: Tokens.font-size-value;
                             // An exalted tier keeps the rarity's colour even drafted: the C# `.exalted` style follows `.draft`.
-                            color: root.affix.removed ? Tokens.text-disabled-brush
+                            color: root.affix.removed ? Tokens.text-muted-brush
                                 : root.affix.exalted ? Tokens.rarity-exalted-brush : root.affix.tier-drafted ? Tokens.draft-brush : Tokens.text-brush;
                         }
                     }
@@ -594,7 +594,7 @@ export component AffixRowItem inherits Rectangle {
 
                         Text {
                             text: root.affix.seal;
-                            color: root.affix.removed ? Tokens.text-disabled-brush
+                            color: root.affix.removed ? Tokens.text-muted-brush
                                 : root.affix.seal-drafted ? Tokens.draft-brush : root.affix.sealed ? Tokens.text-secondary-brush : Tokens.text-muted-brush;
                             overflow: elide;
                         }
