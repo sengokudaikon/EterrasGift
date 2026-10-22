@@ -9,7 +9,7 @@ use crate::{
         game::{Catalog, EditOutcome, ForgeGame, GameError, WriteOutcome, refused},
         item::{self, AffixDefinition, AffixKind, Category, ForgeItem, ItemEdit, ModifierState, RollRequest, ValueTable},
     },
-    shell::{Page, ShellHandle},
+    shell::ShellHandle,
 };
 use eg_core::{bloom::BloomPhase, game_log::GameReadiness};
 use eg_trainer::{
@@ -499,15 +499,15 @@ struct Binding {
     revision: Cell<Option<u64>>,
     catalog: RefCell<(Option<Arc<GameCatalog>>, Arc<Catalog>)>,
     writer: Rc<RefCell<Writer>>,
-    /// The ash under the empty forge follows the window's decorations, which only the page showing may drive.
+    /// The ash under the connection's wait follows the window's decorations, which only the page showing may drive.
     shell: ShellHandle,
     decorations: Rc<Decorations<MainWindow>>,
-    /// How far the wait for the game has come while the forge waits on it; None when it does not.
+    /// How far the wait for the game has come while the connection waits on it; None when it does not.
     waiting: Cell<Option<BloomPhase>>,
 }
 
 /// The connection as a run without the trainer's worker shows it: not connected, in the navigation's foot (only when the
-/// trainer is on) and the empty forge. A worker's binding takes both over.
+/// trainer is on) and in place of every trainer page's body. A worker's binding takes both over.
 pub fn unbound(window: &MainWindow, trainer: bool) {
     let connection = window.global::<Connection>();
     connection.set_present(trainer);
@@ -516,8 +516,8 @@ pub fn unbound(window: &MainWindow, trainer: bool) {
     connection.set_show_action(true);
     connection.set_action_text("Connect".into());
     let state = window.global::<TrainerState>();
-    state.set_empty_title("Not connected".into());
-    state.set_empty_detail("Connect, then place an item in the forge.".into());
+    state.set_connection_title("Not connected".into());
+    state.set_connection_detail("Connect to an offline character to use the trainer.".into());
 }
 
 /// Callback ownership keeps the binding alive; the writer's polling timer holds only a weak Rc.
@@ -556,7 +556,7 @@ pub fn bind(window: &MainWindow, backend: BackendHandle, shell: &ShellHandle, de
         let binding = Rc::downgrade(&binding);
         move |page| {
             if let Some(binding) = binding.upgrade()
-                && page == Page::Forge
+                && page.is_trainer()
             {
                 binding.drift(true);
             }
@@ -622,10 +622,10 @@ impl Binding {
                 connection.set_show_action(false);
                 connection.set_text("Trainer stopped".into());
                 let state = window.global::<TrainerState>();
-                state.set_empty_title("Trainer stopped".into());
-                state.set_empty_detail("Restart Eterra's Gift to connect again. Home and Mods remain available.".into());
-                state.set_empty_stopped(true);
-                state.set_ash_shown(false);
+                state.set_connection_title("Trainer stopped".into());
+                state.set_connection_detail("Restart Eterra's Gift to connect again. Home and Mods remain available.".into());
+                state.set_connection_stopped(true);
+                state.set_connection_waiting(false);
             }
             self.waiting.set(None);
             self.forge.observe(Box::new(ObservedGame {
@@ -673,31 +673,27 @@ impl Binding {
             catalog.1 = Arc::new(project_catalog(data));
             catalog.0 = Some(data.clone());
         }
-        let item = project_item(&snapshot);
-        let projection_error = item.as_ref().err().cloned();
+        let projection_error = project_item(&snapshot).err();
         self.forge.observe(Box::new(ObservedGame {
             catalog: catalog.1.clone(),
             writer: self.writer.clone(),
         }));
-        let has_item = matches!(item, Ok(Some(_)));
         let state = window.global::<TrainerState>();
-        state.set_online_mode(online_refused(&snapshot));
-        state.set_empty_stopped(projection_error.is_none() && stopped);
-        state.set_empty_title(if projection_error.is_some() { "Item details unavailable" } else { title }.into());
-        state.set_empty_detail(projection_error.unwrap_or(detail).into());
-        // Ash drifts while the forge waits, lies still while it is connected and empty, and is gone on a stop or under an
-        // item (ItemEditorViewModel.ShowsAsh).
-        let empty = snapshot.phase == Phase::Ready && !has_item;
-        let waiting = waiting.filter(|_| !has_item);
-        state.set_ash_shown(waiting.is_some() || empty);
-        state.set_ash_still(empty);
+        // Not connected, every trainer page shows this in place of its body; connected, the forge says only why its item
+        // cannot be shown. Ash drifts during a real wait and lies still under the empty forge (ItemEditorViewModel.ShowsAsh).
+        state.set_connection_title(title.into());
+        state.set_connection_detail(detail.into());
+        state.set_connection_stopped(stopped);
+        state.set_connection_waiting(waiting.is_some());
+        state.set_item_unavailable(projection_error.unwrap_or_default().into());
         self.waiting.set(waiting);
         self.drift(false);
     }
 
-    /// Drives the window's ash while the forge shows and waits; Home takes the decorations back when it shows.
+    /// Drives the window's ash while a trainer page shows and the connection waits; Home takes the decorations back when
+    /// it shows.
     fn drift(&self, entering: bool) {
-        if self.shell.current() != Page::Forge {
+        if !self.shell.current().is_trainer() {
             return;
         }
         if let Some(phase) = self.waiting.get() {
@@ -710,8 +706,9 @@ impl Binding {
     }
 }
 
-/// What the app says about the connection: the forge's empty state, the navigation foot's status line, whether the
-/// connection stopped for a reason the user has to fix, and how far a wait has come (ItemEditorViewModel, TrainerConnectionViewModel).
+/// What the app says about the connection: what every trainer page shows in place of its body while not connected, the
+/// navigation foot's status line, whether the connection stopped for a reason the user has to fix, and how far a wait has
+/// come (ItemEditorViewModel, TrainerConnectionViewModel).
 struct Status {
     title: &'static str,
     detail: String,
@@ -767,11 +764,8 @@ fn status(snapshot: &BackendSnapshot) -> Status {
     }
     let writing = matches!(snapshot.activity, Some(Activity::WritingForge | Activity::WritingAttackLeech));
     match snapshot.phase {
-        Phase::Ready => line(
-            "The forge is empty",
-            "Place an item in the forge to view or edit affixes.",
-            if writing { "Connected · applying…" } else { "Connected" },
-        ),
+        // Connected, the pages show their own bodies; only the navigation's line is said.
+        Phase::Ready => line("Connected", "", if writing { "Connected · applying…" } else { "Connected" }),
         Phase::WaitingForGame if snapshot.error.as_ref().is_some_and(|error| error.kind == ErrorKind::MultipleProcesses) => Status {
             waiting: Some(BloomPhase::Wilted),
             ..line("Waiting for Last Epoch", multiple_games(snapshot), multiple_games(snapshot))
@@ -803,6 +797,17 @@ fn status(snapshot: &BackendSnapshot) -> Status {
                 )
             }
         }
+        // A write that may have reached the game stops the connection: its worker reason is in the fault log, and the page
+        // says what it means and what to do (Retry is the page's one button).
+        Phase::Blocked if snapshot.error.as_ref().is_some_and(|error| error.kind == ErrorKind::WriteUncertain) => Status {
+            stopped: true,
+            ..line(
+                "Edit not confirmed",
+                "The edit may have reached the game, but it could not be confirmed. Check the item in the game, then Retry to read it again. \
+                 The edit will not be sent again; drafts and Undo were cleared, and details are in the fault log.",
+                "Edit not confirmed. Check the item in the game, then Retry.",
+            )
+        },
         Phase::Blocked => {
             let message = snapshot.error.as_ref().map_or_else(
                 || "The trainer could not connect. Retry when the game is ready.".to_owned(),
@@ -819,7 +824,7 @@ fn status(snapshot: &BackendSnapshot) -> Status {
             stopped: true,
             ..line("Trainer stopped", "Restart Eterra's Gift to connect again.", "Trainer stopped")
         },
-        Phase::Disconnected => line("Not connected", "Connect, then place an item in the forge.", "Not connected"),
+        Phase::Disconnected => line("Not connected", "Connect to an offline character to use the trainer.", "Not connected"),
     }
 }
 

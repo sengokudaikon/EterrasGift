@@ -87,16 +87,16 @@ export struct FeatureRowModels {
 export struct FeatureRowPlace { column: int, y: length, ends: bool }
 
 export global TrainerState {
-    // Online play blocks every trainer page, with the same recovery guidance.
-    in property <bool> online-mode;
-    // The forge's empty state for the current connection state.
-    in property <string> empty-title: "Not connected";
-    in property <string> empty-detail: "Connect, then place an item in the forge.";
+    // What every trainer page shows in place of its body while the game is not connected (`Connection.connected`):
+    // waiting for the game or a character, connecting, online mode, a stop. Nothing on a page acts without the game.
+    in property <string> connection-title: "Not connected";
+    in property <string> connection-detail: "Connect to an offline character to use the trainer.";
     // The connection stopped for a reason the user has to fix: the warning mark beside the title.
-    in property <bool> empty-stopped;
-    // Ash under the empty forge: drifting while it waits for the game or a character, lying still while it is empty.
-    in property <bool> ash-shown;
-    in property <bool> ash-still;
+    in property <bool> connection-stopped;
+    // A real wait (for the game, a character, the connection): ash drifts under it.
+    in property <bool> connection-waiting;
+    // Connected, but the forge's item could not be shown: why (empty when it can, or the forge is empty).
+    in property <string> item-unavailable;
 
     // The open page: its sections (none when it has one), the chosen one, and what that section holds.
     in property <[string]> sections;
@@ -720,16 +720,18 @@ component FeatureList inherits Rectangle {
     }
 }
 
-// Nothing in the forge, in words in the page (ItemEditorView.axaml's EmptyState): not connected, waiting for the game or a
-// character, refused, stopped, or connected and empty. A stop the user has to fix carries the warning mark beside its
-// title; the one next step (Connect, Retry) is the only button. Ash drifts up while the forge waits and lies still while it
-// is empty; it is gone on a stop (Rust says which, and drives the drift's frames).
-component ForgeEmpty inherits Rectangle {
+// A page body that has nothing to work on yet, in words (ItemEditorView.axaml's EmptyState): the connection's state on
+// every trainer page, or the connected forge with no item to show. A stop the user has to fix carries the warning mark
+// beside its title; the connection's one next step (Connect, Retry) is the only button, and only the connection offers it.
+// Ash drifts up during a real wait and lies still under the empty forge; it is gone on a stop (Rust says which, and drives
+// the drift's frames).
+component TrainerNotice inherits Rectangle {
     in property <string> title;
     in property <string> detail;
     in property <bool> stopped;
     in property <bool> ash-shown;
     in property <bool> ash-still;
+    in property <bool> action-shown;
 
     // The reading line height as a factor of the value size's own line (research/slint.md: read on a probe, never on the
     // text that sets it).
@@ -794,7 +796,7 @@ component ForgeEmpty inherits Rectangle {
                     wrap: word-wrap;
                 }
 
-                if Connection.show-action: HorizontalLayout {
+                if root.action-shown && Connection.show-action: HorizontalLayout {
                     alignment: center;
                     padding-top: Tokens.empty-action-margin.top;
 
@@ -843,24 +845,38 @@ export component TrainerPage inherits Rectangle {
             title: root.page-title;
         }
 
+        // Without the game, every section of every trainer page shows the connection instead of its body.
+        if !Connection.connected: TrainerNotice {
+            vertical-stretch: 1;
+            title: TrainerState.connection-title;
+            detail: TrainerState.connection-detail;
+            stopped: TrainerState.connection-stopped;
+            ash-shown: TrainerState.connection-waiting;
+            action-shown: true;
+        }
+
         // The owned item observation, while the current session can display it.
-        if TrainerState.item-forge && ForgeState.has-item && !TrainerState.online-mode: ItemForge {
+        if Connection.connected && TrainerState.item-forge && ForgeState.has-item: ItemForge {
             vertical-stretch: 1;
             compact: root.compact;
             narrow: root.narrow;
             wide: root.wide;
         }
 
-        if (TrainerState.item-forge && !ForgeState.has-item) || TrainerState.online-mode: ForgeEmpty {
+        // Connected with nothing to show: the forge is empty, or its item could not be shown (a write's readback, or an
+        // item the catalog cannot describe).
+        if Connection.connected && TrainerState.item-forge && !ForgeState.has-item: TrainerNotice {
             vertical-stretch: 1;
-            title: ForgeState.write-recovery-required ? "Item readback unavailable" : TrainerState.empty-title;
-            detail: ForgeState.write-recovery-required ? ForgeState.message : TrainerState.empty-detail;
-            stopped: ForgeState.write-recovery-required || TrainerState.empty-stopped;
-            ash-shown: !ForgeState.write-recovery-required && TrainerState.ash-shown;
-            ash-still: TrainerState.ash-still;
+            title: ForgeState.write-recovery-required ? "Item readback unavailable"
+                : TrainerState.item-unavailable != "" ? "Item details unavailable" : "The forge is empty";
+            detail: ForgeState.write-recovery-required ? ForgeState.message
+                : TrainerState.item-unavailable != "" ? TrainerState.item-unavailable : "Place an item in the forge to view or edit affixes.";
+            stopped: ForgeState.write-recovery-required;
+            ash-shown: !ForgeState.write-recovery-required;
+            ash-still: true;
         }
 
-        if !TrainerState.item-forge && !TrainerState.online-mode: FeatureList {
+        if Connection.connected && !TrainerState.item-forge: FeatureList {
             vertical-stretch: 1;
             compact: root.compact;
         }

@@ -1619,7 +1619,7 @@ fn mods_captures(session: &Session) {
 /// only a connected game has, through a fake session that answers reads and writes from its own fields.
 fn trainer_captures(session: &Session) {
     use eg_ui::trainer::catalog::{Area, FEATURES};
-    use eg_ui::trainer::session::{FieldRequest, FieldWrite, GameField, HookState, TrainerSession, Unconnected};
+    use eg_ui::trainer::session::{FieldRequest, FieldWrite, GameField, HookState, TrainerSession};
     use eg_ui::{Connection, TrainerState};
     use std::cell::RefCell;
     use std::collections::{BTreeMap, BTreeSet};
@@ -1718,8 +1718,19 @@ fn trainer_captures(session: &Session) {
         ui.global::<TrainerState>()
     }
 
-    // As the app is: no offline character connected. Editors wait with their reason; a switch turned on says it waits too.
+    // Without the game every trainer page shows the connection in place of its rows, in every section and at every size;
+    // nothing on the page can act without it.
     let ui = open("combat", 1, 1100, 700, None);
+    assert!(!ui.global::<Connection>().get_connected());
+    sizes(&ui, "trainer-not-connected", &small);
+    let ui = open("forge", 1, 1100, 700, None);
+    session.capture(&ui, "forge-rules-not-connected-1100");
+    let ui = open("character", 0, 1920, 1080, None);
+    session.capture(&ui, "trainer-not-connected-1920");
+
+    // A connected game (holding Combat's rates, so its editor reads). A switch turned on says where it stands.
+    let connected = || Some(FakeTrainer::holding(&[("attack-leech", &[("", 1.0), ("", 0.3)])]));
+    let ui = open("combat", 1, 1100, 700, connected());
     sizes(&ui, "trainer-combat", &small);
     session.click(628.0, 149.0);
     show(&ui);
@@ -1735,7 +1746,7 @@ fn trainer_captures(session: &Session) {
     session.capture(&ui, "trainer-value-stepped-1100");
     // The rows split anew (here the window narrows from two columns to one) while a number is half typed: the box is the
     // same box, so it keeps its focus and the "1." typed so far, and the next digit lands after it.
-    let ui = open("combat", 1, 1440, 900, None);
+    let ui = open("combat", 1, 1440, 900, connected());
     session.click(520.0, 149.0);
     session.control_key("a");
     session.type_text("1.");
@@ -1744,29 +1755,23 @@ fn trainer_captures(session: &Session) {
     session.type_text("5");
     show(&ui);
     assert_eq!(state(&ui).get_rows().row_data(1).expect("Damage multiplier").inline_value.text, "1.5");
-    let ui = open("world", 0, 940, 580, None);
+    let ui = open("world", 0, 940, 580, connected());
     session.capture(&ui, "trainer-world-940");
     // The pane open beside the narrowest window: the rows narrow below their width, and long titles wrap with their (?).
     session.resize(680, 580);
     ui.global::<Nav>().invoke_toggle_pane();
     show(&ui);
     session.capture(&ui, "trainer-world-680-pane");
-    let ui = open("forge", 1, 1100, 700, None);
+    let ui = open("forge", 1, 1100, 700, connected());
     sizes(&ui, "forge-rules", &[(940, 580), (1100, 700)]);
-    let ui = open("loot", 0, 1100, 700, None);
+    let ui = open("loot", 0, 1100, 700, connected());
     session.capture(&ui, "trainer-values-1100");
     state(&ui).set_section(1);
     show(&ui);
     session.capture(&ui, "trainer-values-quality-1100");
-    let ui = open("stash", 1, 940, 580, None);
-    session.capture(&ui, "stash-keys-unconnected-940");
-    let ui = open("character", 0, 1920, 1080, None);
-    session.capture(&ui, "character-unconnected-1920");
 
     // Keyboard: the strip, then the first row's (?) opens its tip under it; Space on the switch turns it on.
-    let ui = session.open(true, 1100, 700);
-    ui.global::<Nav>().invoke_navigate("forge".into());
-    settle();
+    let ui = open("forge", 0, 1100, 700, connected());
     for _ in 0..4 {
         session.key(Key::Tab);
     }
@@ -1785,14 +1790,14 @@ fn trainer_captures(session: &Session) {
     let on = |ui: &MainWindow, row: usize| state(ui).get_rows().row_data(row).is_some_and(|row| row.on);
     for ready in [true, false] {
         // Damage multiplier's switch.
-        let ui = open("combat", 1, 1100, 700, None);
+        let ui = open("combat", 1, 1100, 700, connected());
         state(&ui).set_rows_ready(ready);
         settle();
         session.click(628.0, 149.0);
         settle();
         assert_eq!(on(&ui, 1), ready, "a click on rows shown: {ready}");
         // The strip, then the first row's (?) and its switch.
-        let ui = open("combat", 1, 1100, 700, None);
+        let ui = open("combat", 1, 1100, 700, connected());
         state(&ui).set_rows_ready(ready);
         settle();
         for _ in 0..6 {
@@ -1915,7 +1920,8 @@ fn trainer_captures(session: &Session) {
         .iter_mut()
         .filter(|feature| feature.area == Area::Loot)
         .for_each(|feature| feature.presented = false);
-    eg_ui::trainer::bind(&ui, Rc::new(Unconnected::default()), features, true);
+    eg_ui::trainer::bind(&ui, Rc::new(FakeTrainer::default()), features, true);
+    ui.global::<Connection>().set_connected(true);
     ui.global::<Nav>().invoke_navigate("loot".into());
     show(&ui);
     session.capture(&ui, "trainer-planned-1100");
