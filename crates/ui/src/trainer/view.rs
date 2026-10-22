@@ -316,15 +316,18 @@ impl Controller {
         }
     }
 
-    /// Takes the answers that have come; true while a row still waits on the game.
+    /// Takes the answers that have come, and has every editor follow the connection (a row reads when it connects again,
+    /// shown or not, so a page opened later never shows the last connection's values); true while a row still waits on
+    /// the game.
     fn poll(&mut self) -> bool {
+        let session = self.session.clone();
         let mut busy = false;
         for page in self.pages.values_mut().flatten() {
             for section in &mut page.sections {
                 if let Content::Rows(rows) = &mut section.content {
                     for row in rows {
                         if let Row::Editor(editor) = row {
-                            editor.poll();
+                            editor.follow(&*session);
                             busy |= editor.is_busy();
                         }
                     }
