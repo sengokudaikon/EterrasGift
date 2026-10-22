@@ -79,7 +79,7 @@ fn offline() -> GameLogState {
         .apply(GameLogEvent::ShellStateChanged("CharacterSelect".into()))
         .apply(GameLogEvent::CharacterLoaded(LoggedCharacter {
             name: "Owned test character".into(),
-            level: 23,
+            level: Some(23),
             online: false,
             cycle: "Legacy".into(),
             class: "Rogue".into(),

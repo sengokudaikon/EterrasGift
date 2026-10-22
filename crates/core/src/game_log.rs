@@ -21,7 +21,8 @@ pub enum GameReadiness {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct LoggedCharacter {
     pub name: String,
-    pub level: u32,
+    /// Offline/legacy loads log a level; current online loads log a character ID instead.
+    pub level: Option<u32>,
     pub online: bool,
     pub cycle: String,
     pub class: String,
@@ -35,6 +36,8 @@ pub enum GameLogEvent {
     CharacterLoaded(LoggedCharacter),
     /// Logged once at startup. False for a normal launch, even when an offline character is played later.
     LaunchModeLogged(bool),
+    /// Online client initialization revokes admission even before a character load is logged.
+    OnlineClientInitialized,
     GameQuitting,
 }
 
@@ -94,6 +97,13 @@ impl GameLogState {
                 self.readiness = if character.online { GameReadiness::Online } else { GameReadiness::Offline };
                 self.character = Some(character);
             }
+            GameLogEvent::OnlineClientInitialized => {
+                self.status = GameLogStatus::Current;
+                self.readiness = GameReadiness::Online;
+                if self.character.as_ref().is_some_and(|character| !character.online) {
+                    self.character = None;
+                }
+            }
             GameLogEvent::ShellStateChanged(state) if state == "SplashScreen" => {
                 self.shell_state = Some(state);
                 self.readiness = GameReadiness::Starting;
@@ -106,8 +116,9 @@ impl GameLogState {
                 self.character = None;
             }
             GameLogEvent::ShellStateChanged(state) => {
-                // Leaving the shell is entering play; the character line comes just before it. Without one, nothing is known.
-                if self.character.is_none() && matches!(self.shell_state.as_deref(), Some("Login" | "CharacterSelect")) {
+                // Online initialization is sufficient to refuse access, even if
+                // its character line is unknown. Offline admission still needs a load.
+                if self.character.is_none() && self.readiness != GameReadiness::Online && matches!(self.shell_state.as_deref(), Some("Login" | "CharacterSelect")) {
                     self.status = GameLogStatus::Unrecognized;
                     self.readiness = GameReadiness::NoCharacter;
                 }
@@ -126,6 +137,8 @@ static STAMPED: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^(?<time>\d{4}-\
 static SHELL: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^ShellSceneManager: State transition (?<from>\w+) -> (?<to>\w+)$").unwrap());
 static CHARACTER: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"^Loading character: (?<name>.+) (?<level>\d{1,3}) isOnline: (?<online>True|False), cycle: (?<cycle>[^,]*), class: (?<class>.+)$").unwrap());
+static ONLINE_CHARACTER: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"^Loading character: (?<name>.+) [0-9A-Fa-f]{16} isOnline: True, cycle: (?<cycle>[^,]*), class: (?<class>.+)$").unwrap());
 static LAUNCH_MODE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^Offline Mode: (?<offline>True|False)$").unwrap());
 
 /// Reads a Player.log line: its time when it is one of the game's own (stamped) lines, and the event it carries, if any.
@@ -138,11 +151,21 @@ pub fn parse(line: &str) -> Option<(Timestamp, Option<GameLogEvent>)> {
     } else if let Some(character) = CHARACTER.captures(message) {
         Some(GameLogEvent::CharacterLoaded(LoggedCharacter {
             name: character["name"].to_owned(),
-            level: character["level"].parse().ok()?,
+            level: Some(character["level"].parse().ok()?),
             online: &character["online"] == "True",
             cycle: character["cycle"].to_owned(),
             class: character["class"].to_owned(),
         }))
+    } else if let Some(character) = ONLINE_CHARACTER.captures(message) {
+        Some(GameLogEvent::CharacterLoaded(LoggedCharacter {
+            name: character["name"].to_owned(),
+            level: None,
+            online: true,
+            cycle: character["cycle"].to_owned(),
+            class: character["class"].to_owned(),
+        }))
+    } else if message == "[Network] Initializing network service group for online client." {
+        Some(GameLogEvent::OnlineClientInitialized)
     } else if let Some(mode) = LAUNCH_MODE.captures(message) {
         Some(GameLogEvent::LaunchModeLogged(&mode["offline"] == "True"))
     } else if message == "Application.quitting..." {
@@ -331,7 +354,7 @@ mod tests {
             loaded,
             Some(GameLogEvent::CharacterLoaded(LoggedCharacter {
                 name: "Two Words".into(),
-                level: 100,
+                level: Some(100),
                 online: true,
                 cycle: "Legacy".into(),
                 class: "Rogue".into(),
@@ -429,6 +452,82 @@ mod tests {
         let state = GameLogReader::new(&path).read(start());
         assert_eq!(state.status, GameLogStatus::Unrecognized);
         assert_ne!(state.readiness, GameReadiness::Offline);
+    }
+
+    #[test]
+    fn online_character_ids_are_not_levels_and_stay_online_when_entering_play() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("Player.log");
+        fs::write(
+            &path,
+            menu(start())
+                + &line(start(), "Loading character: Online Mage B6C126989DAFF026 isOnline: True, cycle: Swordfish, class: Mage")
+                + &line(start(), "[Network] Initializing network service group for online client.")
+                + &line(start(), "ShellSceneManager: State transition CharacterSelect -> None"),
+        )
+        .unwrap();
+        let state = GameLogReader::new(&path).read(start());
+        assert_eq!((state.status, state.readiness), (GameLogStatus::Current, GameReadiness::Online));
+        let character = state.character.unwrap();
+        assert_eq!(character.name, "Online Mage");
+        assert_eq!(character.level, None);
+        assert!(character.online);
+        assert_eq!(state.offline_mode, Some(false));
+    }
+
+    #[test]
+    fn online_client_selection_revokes_an_old_offline_character_without_a_recognized_load() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("Player.log");
+        fs::write(
+            &path,
+            menu(start())
+                + &character(start(), false)
+                + &line(start(), "ShellSceneManager: State transition CharacterSelect -> None")
+                + &line(start(), "[Network] Initializing network service group for online client.")
+                + &line(start(), "ShellSceneManager: State transition None -> None"),
+        )
+        .unwrap();
+        let state = GameLogReader::new(&path).read(start());
+        assert_eq!((state.status, state.readiness, state.character), (GameLogStatus::Current, GameReadiness::Online, None));
+
+        // Creating an online character need not produce the ordinary load line.
+        fs::write(
+            &path,
+            menu(start())
+                + &line(start(), "[Network] Initializing network service group for online client.")
+                + &line(start(), "Character Created: Online Mage B6C126989DAFF026 isOnline: True, cycle: Swordfish, class: 1")
+                + &line(start(), "ShellSceneManager: State transition CharacterSelect -> None"),
+        )
+        .unwrap();
+        let state = GameLogReader::new(&path).read(start());
+        assert_eq!((state.status, state.readiness), (GameLogStatus::Current, GameReadiness::Online));
+    }
+
+    #[test]
+    fn leaving_online_requires_a_recognized_offline_load_before_admission() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("Player.log");
+        fs::write(&path, menu(start()) + &line(start(), "[Network] Initializing network service group for online client.")).unwrap();
+        let mut reader = GameLogReader::new(&path);
+        assert_eq!(reader.read(start()).readiness, GameReadiness::Online);
+        let append = |message| {
+            fs::OpenOptions::new()
+                .append(true)
+                .open(&path)
+                .unwrap()
+                .write_all(line(start(), message).as_bytes())
+                .unwrap()
+        };
+        append("ShellSceneManager: State transition None -> CharacterSelect");
+        append("[Network] Initializing network service group for offline client.");
+        assert_eq!(reader.read(start()).readiness, GameReadiness::NoCharacter);
+        // A hexadecimal ID must never acquire the meaning of an offline level.
+        append("Loading character: Bad Offline B6C126989DAFF026 isOnline: False, cycle: Swordfish, class: Mage");
+        append("ShellSceneManager: State transition CharacterSelect -> None");
+        assert_eq!(reader.read(start()).status, GameLogStatus::Unrecognized);
+        append("Loading character: Offline Mage 27 isOnline: False, cycle: Swordfish, class: Mage");
+        assert_eq!(reader.read(start()).readiness, GameReadiness::Offline);
     }
 
     #[test]

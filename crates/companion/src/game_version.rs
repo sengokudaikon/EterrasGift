@@ -1,20 +1,18 @@
-//! The game's own version ("1.5.2"), as it writes it into Player.log near the start of every run ("game version: 1.5.2.
-//! internal version: 1.5.2"). The game folder holds it only inside Unity's binary settings, so the last run's log is the
-//! plain source.
+//! A display version recorded in Player.log ("game version: 1.5.2. internal version: 1.5.2"). Log freshness is checked
+//! against the installed build's write time; this is a best-effort label, not proof of the installed build's identity.
 
 use regex::Regex;
 use std::fs;
 use std::io::Read;
 use std::path::Path;
 use std::sync::LazyLock;
-use std::time::SystemTime;
 
 const HEADER_BYTES: u64 = 1024 * 1024;
 
-/// The version from Player.log, or the log of the run before it beside it (Player-prev.log); None when neither says
-/// one. A log older than `build` (the game's GameAssembly.dll) is from before an update, so it is not used.
+/// Prefer Player.log, then Player-prev.log beside it. Only logs at least as new as `build` (GameAssembly.dll) qualify.
+/// None when the build's write time cannot be read, or neither qualifying log has a readable version.
 pub fn read(player_log: &Path, build: &Path) -> Option<String> {
-    let installed = fs::metadata(build).and_then(|metadata| metadata.modified()).unwrap_or(SystemTime::UNIX_EPOCH);
+    let installed = fs::metadata(build).and_then(|metadata| metadata.modified()).ok()?;
     let previous = player_log.with_file_name("Player-prev.log");
     [player_log, previous.as_path()].into_iter().find_map(|path| {
         // Being written or locked: the other log, or no version.
@@ -28,8 +26,8 @@ pub fn read(player_log: &Path, build: &Path) -> Option<String> {
     })
 }
 
-/// The version in a log's text; None when it has no "game version:" line.
-pub fn parse(text: &str) -> Option<String> {
+/// The dotted numeric version following "game version:" anywhere in the log text.
+fn parse(text: &str) -> Option<String> {
     static LINE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\bgame version: (\d+(?:\.\d+)+)").unwrap());
     LINE.captures(text).map(|found| found[1].to_owned())
 }
@@ -37,17 +35,69 @@ pub fn parse(text: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::time::{Duration, SystemTime};
+
+    fn write_at(path: &Path, text: &str, seconds: u64) {
+        fs::write(path, text).unwrap();
+        fs::File::options()
+            .write(true)
+            .open(path)
+            .unwrap()
+            .set_times(fs::FileTimes::new().set_modified(SystemTime::UNIX_EPOCH + Duration::from_secs(seconds)))
+            .unwrap();
+    }
 
     #[test]
-    fn the_version_comes_from_the_newest_log_that_is_not_older_than_the_build() {
+    fn logs_cannot_supply_a_version_without_the_build_write_time() {
         let temp = tempfile::tempdir().unwrap();
         let log = temp.path().join("Player.log");
         let build = temp.path().join("GameAssembly.dll");
+        write_at(&log, "game version: 1.5.2", 2000);
+        write_at(&temp.path().join("Player-prev.log"), "game version: 1.5.1", 2000);
         assert_eq!(read(&log, &build), None);
-        fs::write(temp.path().join("Player-prev.log"), "Mono path\ngame version: 1.5.1. internal version: 1.5.1\n").unwrap();
+    }
+
+    #[test]
+    fn logs_older_than_the_build_are_rejected_and_equal_times_qualify() {
+        let temp = tempfile::tempdir().unwrap();
+        let log = temp.path().join("Player.log");
+        let previous = temp.path().join("Player-prev.log");
+        let build = temp.path().join("GameAssembly.dll");
+        write_at(&build, "fixture build", 2000);
+        write_at(&log, "game version: 1.5.0", 1999);
+        write_at(&previous, "game version: 1.5.1", 1998);
+        assert_eq!(read(&log, &build), None);
+        write_at(&previous, "game version: 1.5.1", 2000);
         assert_eq!(read(&log, &build).as_deref(), Some("1.5.1"));
-        fs::write(&log, "game version: 1.5.2. internal version: 1.5.2\n").unwrap();
+        // An updated build invalidates both earlier logs.
+        write_at(&build, "updated fixture build", 2001);
+        assert_eq!(read(&log, &build), None);
+    }
+
+    #[test]
+    fn player_log_is_preferred_and_previous_is_used_when_it_cannot_supply_a_version() {
+        let temp = tempfile::tempdir().unwrap();
+        let log = temp.path().join("Player.log");
+        let previous = temp.path().join("Player-prev.log");
+        let build = temp.path().join("GameAssembly.dll");
+        write_at(&build, "fixture build", 2000);
+        assert_eq!(read(&log, &build), None);
+        write_at(&previous, "game version: 1.5.1", 2002);
+        assert_eq!(read(&log, &build).as_deref(), Some("1.5.1"));
+        write_at(&log, "game version: 1.5.2", 2001);
+        // Player.log wins even if the previous log has a newer write time.
         assert_eq!(read(&log, &build).as_deref(), Some("1.5.2"));
+        write_at(&log, "the game has not logged its version yet", 2001);
+        assert_eq!(read(&log, &build).as_deref(), Some("1.5.1"));
+        fs::remove_file(&log).unwrap();
+        fs::create_dir(&log).unwrap();
+        assert_eq!(read(&log, &build).as_deref(), Some("1.5.1"));
+    }
+
+    #[test]
+    fn parsing_extracts_only_the_dotted_version() {
+        assert_eq!(parse("Mono path\ngame version: 1.5.2. internal version: 9.9.9\n").as_deref(), Some("1.5.2"));
         assert_eq!(parse("no version here"), None);
+        assert_eq!(parse("game version: unknown"), None);
     }
 }

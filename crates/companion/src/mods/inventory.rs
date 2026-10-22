@@ -297,11 +297,7 @@ impl Inventory {
                 can_play,
             };
         }
-        let mut text = format!(
-            "MelonLoader {} · Last Epoch {}",
-            report.version,
-            version.unwrap_or("(version unknown until this build has run once)")
-        );
+        let mut text = format!("MelonLoader {} · Last Epoch {}", report.version, version.unwrap_or("(version unavailable)"));
         if report.preparation == LoaderPreparation::WillPrepare {
             text.push_str(". MelonLoader prepares for this game build in the next game with mods: it takes about a minute to start, and runs without mods. Close it once it is up; the game after loads them.");
         } else if report.core_module_needs_repair {

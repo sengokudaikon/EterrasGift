@@ -87,6 +87,8 @@ export struct FeatureRowModels {
 export struct FeatureRowPlace { column: int, y: length, ends: bool }
 
 export global TrainerState {
+    // Online play blocks every trainer page, with the same recovery guidance.
+    in property <bool> online-mode;
     // The forge's empty state for the current connection state.
     in property <string> empty-title: "Not connected";
     in property <string> empty-detail: "Connect, then place an item in the forge.";
@@ -842,14 +844,14 @@ export component TrainerPage inherits Rectangle {
         }
 
         // The owned item observation, while the current session can display it.
-        if TrainerState.item-forge && ForgeState.has-item: ItemForge {
+        if TrainerState.item-forge && ForgeState.has-item && !TrainerState.online-mode: ItemForge {
             vertical-stretch: 1;
             compact: root.compact;
             narrow: root.narrow;
             wide: root.wide;
         }
 
-        if TrainerState.item-forge && !ForgeState.has-item: ForgeEmpty {
+        if (TrainerState.item-forge && !ForgeState.has-item) || TrainerState.online-mode: ForgeEmpty {
             vertical-stretch: 1;
             title: ForgeState.write-recovery-required ? "Item readback unavailable" : TrainerState.empty-title;
             detail: ForgeState.write-recovery-required ? ForgeState.message : TrainerState.empty-detail;
@@ -858,7 +860,7 @@ export component TrainerPage inherits Rectangle {
             ash-still: TrainerState.ash-still;
         }
 
-        if !TrainerState.item-forge: FeatureList {
+        if !TrainerState.item-forge && !TrainerState.online-mode: FeatureList {
             vertical-stretch: 1;
             compact: root.compact;
         }

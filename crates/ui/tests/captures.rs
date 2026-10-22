@@ -46,6 +46,7 @@ struct FakeGameHost {
 
 struct FakeGame {
     install: Option<GameInstall>,
+    version: Option<String>,
     loader: ModLoaderState,
     running: Option<RunningGame>,
     readiness: GameReadiness,
@@ -57,6 +58,7 @@ impl FakeGameHost {
         Arc::new(FakeGameHost {
             state: Mutex::new(FakeGame {
                 install: Some(GameInstall::new(folder.join("Last Epoch").join("Last Epoch.exe"))),
+                version: Some("1.5.2".into()),
                 loader: ModLoaderState::SetAside,
                 running: None,
                 readiness: GameReadiness::Starting,
@@ -95,7 +97,7 @@ impl GameHost for FakeGameHost {
     }
 
     fn read_game_version(&self, _install: &GameInstall) -> Option<String> {
-        Some("1.5.2".into())
+        self.state.lock().unwrap().version.clone()
     }
 
     fn launch(&self, mode: LaunchMode, install: Option<&GameInstall>, _lifetime: &Lifetime) -> Result<LaunchOutcome, LaunchError> {
@@ -911,6 +913,15 @@ fn capture_mods(session: &Session) {
     session.capture(&ui, "mods-high-contrast");
     ui.global::<Tokens>().set_high_contrast(false);
     session.capture(&ui, "mods-motion-off");
+
+    let fixture = session.mods_fixture(true);
+    fixture.host.with(|game| game.version = None);
+    let ui = session.open_mods(&fixture, 1100, 700);
+    assert!(ui.global::<ModsState>().get_readiness().contains("Last Epoch (version unavailable)"));
+    assert!(ui.global::<ModsState>().get_can_play(), "an unknown display version does not block a start with mods");
+    session.capture(&ui, "mods-version-unavailable-standard");
+    session.resize(680, 580);
+    session.capture(&ui, "mods-version-unavailable-narrow");
 
     let fixture = session.mods_fixture(true);
     fixture

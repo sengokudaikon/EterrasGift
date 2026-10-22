@@ -1103,19 +1103,29 @@ pub(super) fn capture(session: &Session) {
     wait(|| !ui.global::<eg_ui::ForgeState>().get_has_item());
     assert!(!ui.global::<eg_ui::Connection>().get_connected());
     assert_eq!(data.reads.load(Ordering::SeqCst), before);
-    let advice = "Load an offline character.";
-    assert_eq!(ui.global::<eg_ui::TrainerState>().get_empty_title(), "Online character refused");
-    assert_eq!(
-        ui.global::<eg_ui::TrainerState>().get_empty_detail(),
-        format!("Online characters are not supported. {advice}")
-    );
-    assert_eq!(ui.global::<eg_ui::Connection>().get_text(), format!("Online character refused. {advice}"));
+    let advice = "Exit online mode and load an offline character to use the trainer.";
+    assert!(ui.global::<eg_ui::TrainerState>().get_online_mode());
+    assert_eq!(ui.global::<eg_ui::TrainerState>().get_empty_title(), "Online mode");
+    assert_eq!(ui.global::<eg_ui::TrainerState>().get_empty_detail(), advice);
+    assert_eq!(ui.global::<eg_ui::Connection>().get_text(), format!("Online mode. {advice}"));
     assert!(ui.global::<eg_ui::TrainerState>().get_empty_stopped() && !ui.global::<eg_ui::TrainerState>().get_ash_shown());
     assert!(ui.global::<eg_ui::Connection>().get_show_action());
     session.capture(&ui, "backend-forge-online-refused");
+    session.resize(680, 580);
+    session.capture(&ui, "backend-forge-online-refused-narrow");
+    session.resize(1100, 700);
+    ui.global::<Nav>().invoke_navigate("combat".into());
+    settle();
+    session.capture(&ui, "backend-trainer-online-refused");
+    session.resize(680, 580);
+    session.capture(&ui, "backend-trainer-online-refused-narrow");
+    session.resize(1100, 700);
+    ui.global::<Nav>().invoke_navigate("forge".into());
+    settle();
     data.online.store(false, Ordering::SeqCst);
     command(&handle, Command::Connect, || handle.snapshot().phase == Phase::Ready);
     wait(|| ui.global::<eg_ui::ForgeState>().get_has_item());
+    assert!(!ui.global::<eg_ui::TrainerState>().get_online_mode());
     *data.item.lock().unwrap() = None;
     command(&handle, Command::ReadForge, || true);
     wait(|| !ui.global::<eg_ui::ForgeState>().get_has_item());

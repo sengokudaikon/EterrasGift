@@ -681,6 +681,7 @@ impl Binding {
         }));
         let has_item = matches!(item, Ok(Some(_)));
         let state = window.global::<TrainerState>();
+        state.set_online_mode(online_refused(&snapshot));
         state.set_empty_stopped(projection_error.is_none() && stopped);
         state.set_empty_title(if projection_error.is_some() { "Item details unavailable" } else { title }.into());
         state.set_empty_detail(projection_error.unwrap_or(detail).into());
@@ -729,7 +730,7 @@ fn multiple_games(snapshot: &BackendSnapshot) -> &'static str {
     }
 }
 
-/// The game's log says an online character is loaded: the connection waits and refuses it.
+/// The game's log identifies online mode or a character: the connection refuses access.
 fn online_refused(snapshot: &BackendSnapshot) -> bool {
     matches!(snapshot.phase, Phase::WaitingForCharacter | Phase::Blocked) && snapshot.gate.as_ref().is_some_and(|gate| gate.readiness == GameReadiness::Online)
 }
@@ -740,7 +741,7 @@ fn online_advice(snapshot: &BackendSnapshot) -> &'static str {
     match snapshot.retained_helper.as_ref().map(|helper| helper.residency) {
         Some(HelperResidency::Stuck | HelperResidency::MayBeLoaded | HelperResidency::Loaded) => HELPER_RESTART_REQUIRED,
         Some(HelperResidency::Leaving) => "The helper is leaving Last Epoch.",
-        Some(HelperResidency::Gone) | None => "Load an offline character.",
+        Some(HelperResidency::Gone) | None => "Exit online mode and load an offline character to use the trainer.",
     }
 }
 
@@ -761,11 +762,7 @@ fn status(snapshot: &BackendSnapshot) -> Status {
         let advice = online_advice(snapshot);
         return Status {
             stopped: true,
-            ..line(
-                "Online character refused",
-                &format!("Online characters are not supported. {advice}"),
-                &format!("Online character refused. {advice}"),
-            )
+            ..line("Online mode", advice, &format!("Online mode. {advice}"))
         };
     }
     let writing = matches!(snapshot.activity, Some(Activity::WritingForge | Activity::WritingAttackLeech));

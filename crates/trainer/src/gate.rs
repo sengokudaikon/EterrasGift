@@ -51,3 +51,48 @@ pub fn evaluate(log: &GameLogState, started: Timestamp, now: Timestamp, _policy:
         log_status: log.status,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn current_online_log_formats_refuse_admission_until_an_offline_character_loads() {
+        let started: Timestamp = "2026-10-22T19:18:13Z".parse().unwrap();
+        let now: Timestamp = "2026-10-22T19:20:00Z".parse().unwrap();
+        for character in [
+            "Loading character: Online Mage B6C126989DAFF026 isOnline: True, cycle: Swordfish, class: Mage",
+            "Character Created: Online Mage B6C126989DAFF026 isOnline: True, cycle: Swordfish, class: 1",
+        ] {
+            let mut state = GameLogState::started();
+            for message in [
+                "Offline Mode: False",
+                "ShellSceneManager: State transition Login -> CharacterSelect",
+                "[Network] Initializing network service group for online client.",
+                character,
+                "ShellSceneManager: State transition CharacterSelect -> None",
+            ] {
+                if let Some((_, Some(event))) = eg_core::game_log::parse(&format!("{now}\tLog\t{message}")) {
+                    state = state.apply(event);
+                }
+                assert_ne!(evaluate(&state, started, now, GatePolicy::Release).verdict, GateVerdict::Allow);
+            }
+            let decision = evaluate(&state, started, now, GatePolicy::Release);
+            assert_eq!(
+                (decision.verdict, decision.readiness, decision.log_status),
+                (GateVerdict::Wait, GameReadiness::Online, GameLogStatus::Current)
+            );
+            for message in [
+                "ShellSceneManager: State transition None -> CharacterSelect",
+                "[Network] Initializing network service group for offline client.",
+                "Loading character: Offline Mage 27 isOnline: False, cycle: Swordfish, class: Mage",
+                "ShellSceneManager: State transition CharacterSelect -> None",
+            ] {
+                if let Some((_, Some(event))) = eg_core::game_log::parse(&format!("{now}\tLog\t{message}")) {
+                    state = state.apply(event);
+                }
+            }
+            assert_eq!(evaluate(&state, started, now, GatePolicy::Release).verdict, GateVerdict::Allow);
+        }
+    }
+}

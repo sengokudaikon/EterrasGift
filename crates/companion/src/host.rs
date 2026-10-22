@@ -58,7 +58,8 @@ pub trait GameHost: Send + Sync {
     fn read_mod_loader(&self, install: Option<&GameInstall>) -> ModLoaderState;
     /// Where a game with mods runs MelonLoader from: the game folder, unless another is chosen in Settings.
     fn loader_root(&self, install: &GameInstall) -> PathBuf;
-    /// The installed game's version ("1.5.2"), as its last run wrote it.
+    /// A display version from Player.log or Player-prev.log, checked against the installed build's write time.
+    /// None when that timestamp or a qualifying logged version is unavailable; not a build-identity check.
     fn read_game_version(&self, install: &GameInstall) -> Option<String>;
     /// Starts the game. Without mods, MelonLoader's proxy is set aside first so nothing of it loads, online or offline.
     /// With mods, the proxy goes back in place for this start and is set aside again once MelonLoader has started.

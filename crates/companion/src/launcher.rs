@@ -59,6 +59,7 @@ impl GameLauncher {
         self.host.loader_root(install)
     }
 
+    /// A best-effort logged version for display, or None when unavailable.
     pub fn read_game_version(&self, install: &GameInstall) -> Option<String> {
         self.host.read_game_version(install)
     }
