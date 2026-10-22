@@ -144,12 +144,17 @@ struct Service {
 impl Service {
     fn serve(&mut self, folder: &Path, again: bool) -> GameData {
         let same_folder = self.folder.as_deref().is_some_and(|kept| eg_core::paths::same_folder(kept, folder));
+        let kept = self.publish.borrow().clone();
         if !again
             && same_folder
-            && let GameData::Ready(catalog) = &*self.publish.borrow()
+            && let GameData::Ready(catalog) = kept
             && catalog.is_current()
         {
-            return GameData::Ready(catalog.clone());
+            let mut catalog = (*catalog).clone();
+            catalog.checked_at = Some(jiff::Timestamp::now());
+            let state = GameData::Ready(Arc::new(catalog));
+            self.publish.send_replace(state.clone());
+            return state;
         }
         self.folder = Some(folder.to_path_buf());
         self.publish.send_replace(GameData::Reading);
@@ -158,9 +163,15 @@ impl Service {
             _ => None,
         };
         let state = match saved {
-            Some(catalog) => GameData::Ready(Arc::new(catalog)),
+            Some(mut catalog) => {
+                catalog.checked_at = Some(jiff::Timestamp::now());
+                GameData::Ready(Arc::new(catalog))
+            }
             None => match files::read(folder) {
-                Ok(catalog) => {
+                Ok(mut catalog) => {
+                    let now = jiff::Timestamp::now();
+                    catalog.checked_at = Some(now);
+                    catalog.updated_at = Some(now);
                     if let Some(Err(e)) = self.store.as_ref().map(|store| store.save(folder, &catalog)) {
                         self.fault::<()>("Saving the game data", &e);
                     }
@@ -246,7 +257,10 @@ impl Store {
         let Some(saved) = self.cache.load(&identity).map_err(|e| e.to_string())? else {
             return Ok(None);
         };
-        Ok(Some(FileCatalog::restore(saved, text("build")?, sources)))
+        let mut catalog = FileCatalog::restore(saved, text("build")?, sources);
+        // Older indexes have no update time. Do not invent one from file metadata or startup.
+        catalog.updated_at = index["updated_at"].as_str().and_then(|value| value.parse().ok());
+        Ok(Some(catalog))
     }
 
     /// Saves the catalog, then its index; an index is never left naming a catalog that was not written.
@@ -270,6 +284,7 @@ impl Store {
             "binary_hash": catalog.binary_hash,
             "metadata_hash": catalog.metadata_hash,
             "build": catalog.build,
+            "updated_at": catalog.updated_at.map(|time| time.to_string()),
             "sources": sources,
         });
         eg_core::atomic::write(&self.directory.join(INDEX_FILE), serde_json::to_string_pretty(&index).unwrap_or_default().as_bytes()).map_err(|e| e.to_string())
@@ -309,7 +324,8 @@ mod tests {
         let runtime = tokio::runtime::Builder::new_current_thread().build().unwrap();
         let (game, data) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
         // The folder holds no game, so a catalog that comes back was loaded, not read.
-        let read = catalog(game.path());
+        let mut read = catalog(game.path());
+        read.updated_at = Some("2026-10-21T17:15:00Z".parse().unwrap());
         Store::new(data.path().to_path_buf()).save(game.path(), &read).unwrap();
         let service = start(None, Some(data.path().to_path_buf()), None).unwrap();
         assert_eq!(service.current(), GameData::NoGame);
@@ -318,10 +334,14 @@ mod tests {
         };
         assert_eq!(loaded.saved().unwrap(), read.saved().unwrap());
         assert_eq!(service.current(), GameData::Ready(loaded.clone()), "and is published");
-        assert!(
-            matches!(runtime.block_on(service.for_folder(game.path())), GameData::Ready(again) if Arc::ptr_eq(&again, &loaded)),
-            "kept while current"
-        );
+        assert_eq!(loaded.updated_at, read.updated_at, "cache reuse preserves when definitions were rebuilt");
+        assert!(loaded.checked_at.is_some(), "loading a cache checks its source files now");
+        let GameData::Ready(checked) = runtime.block_on(service.for_folder(game.path())) else {
+            panic!("still current")
+        };
+        assert_eq!(checked.updated_at, loaded.updated_at, "an unchanged recheck is not a cache rebuild");
+        assert!(checked.checked_at >= loaded.checked_at);
+        assert_eq!(checked.saved().unwrap(), loaded.saved().unwrap());
 
         assert!(
             matches!(runtime.block_on(service.read_again(None)), GameData::Unavailable(_)),
@@ -331,6 +351,24 @@ mod tests {
         let elsewhere = data.path().join("no game here");
         assert!(matches!(runtime.block_on(service.for_folder(&elsewhere)), GameData::Unavailable(_)));
         assert!(matches!(service.current(), GameData::Unavailable(_)));
+    }
+
+    #[test]
+    fn cache_update_time_roundtrips_and_older_indexes_do_not_invent_one() {
+        let (game, data) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+        let store = Store::new(data.path().to_path_buf());
+        let mut read = catalog(game.path());
+        read.checked_at = Some("2026-10-22T11:40:00Z".parse().unwrap());
+        read.updated_at = Some("2026-10-21T17:15:00Z".parse().unwrap());
+        store.save(game.path(), &read).unwrap();
+        let loaded = store.load(game.path()).unwrap().unwrap();
+        assert_eq!(loaded.updated_at, read.updated_at);
+        assert_eq!(loaded.checked_at, None, "checks describe this run, not an old session");
+        let path = data.path().join(INDEX_FILE);
+        let mut index: Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+        index.as_object_mut().unwrap().remove("updated_at");
+        std::fs::write(path, serde_json::to_vec(&index).unwrap()).unwrap();
+        assert_eq!(store.load(game.path()).unwrap().unwrap().updated_at, None);
     }
 
     #[test]

@@ -167,12 +167,20 @@ impl<P: HelperPreparer, F: LogFactory> SessionConnector<P, F> {
                 self.last_attempt.as_mut().unwrap().residency = PreparationResidency::NotLoaded;
             }
             if gone && matches!(error, crate::session::SessionError::Transport(_)) {
-                return Err(BackendError::waiting(
-                    ErrorKind::HelperDeparted,
-                    "The helper left Last Epoch. Waiting for an offline character.",
-                ));
+                // A character leaving during the handshake is a normal wait.
+                // Departure with unchanged admission can also mean a helper
+                // startup failure; never hide it behind another automatic load.
+                admission.check()?;
             }
-            return Err(error.into());
+            let mut error: BackendError = error.into();
+            if error.kind == ErrorKind::HelperDeparted {
+                error.kind = ErrorKind::Transport;
+                error.message = "The helper left Last Epoch before the connection completed. Reconnect to try again.".into();
+            }
+            // Confirmed cleanup permits a later explicit connect; it does not
+            // make a failed handshake a reason to inject again automatically.
+            error.retry_when_waiting = false;
+            return Err(error);
         }
         Ok(session)
     }

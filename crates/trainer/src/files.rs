@@ -30,6 +30,10 @@ pub struct FileCatalog {
     pub metadata_hash: String,
     /// `build_hash.txt`, for display.
     pub build: String,
+    /// Last successful source fingerprint check; independent of when definitions were decoded.
+    pub checked_at: Option<jiff::Timestamp>,
+    /// Last successful definitions rebuild, retained when an unchanged saved cache is reused.
+    pub updated_at: Option<jiff::Timestamp>,
     limits: ItemLimits,
     bases: Vec<ItemTypeDefinition>,
     affixes: Vec<AffixDefinition>,
@@ -108,6 +112,8 @@ pub fn build_catalog(binary_hash: String, metadata_hash: String, build: String, 
         binary_hash,
         metadata_hash,
         build,
+        checked_at: None,
+        updated_at: None,
         limits,
         bases,
         affixes,
@@ -149,6 +155,8 @@ impl FileCatalog {
             binary_hash: saved.identity.binary_hash,
             metadata_hash: saved.identity.metadata_hash,
             build,
+            checked_at: None,
+            updated_at: None,
             limits: saved.limits,
             bases: saved.bases.into_values().collect(),
             affixes: saved.affixes.into_values().collect(),
@@ -515,6 +523,8 @@ pub(crate) fn test_catalog(sources: Vec<(PathBuf, Option<Fingerprint>)>) -> File
         binary_hash: "a".repeat(64),
         metadata_hash: "b".repeat(64),
         build: "build".into(),
+        checked_at: None,
+        updated_at: None,
         limits: ItemLimits {
             forging_potential: ValueRange { minimum: 0, maximum: 255 },
             legendary_potential: ValueRange { minimum: 0, maximum: 4 },

@@ -27,8 +27,9 @@ Runtime/module lifetime and absence of competing scheduler patchers are supporte
 execution assumptions. File hashes do not establish those external facts.
 
 The helper checks its execution thread inside the verified ExecuteTasks callback:
-the current UnitySynchronizationContext's managed main ID must equal the current
-managed thread ID. Only then is the callback's Windows ID retained for dispatch.
+UnityEngine.Object.CurrentThreadIsMainThread must identify the caller as Unity's
+native main thread. Only then is the callback's Windows ID retained for dispatch.
+The managed SynchronizationContext.Current can be null or replaced by game/mod code.
 The original ExecuteTasks still runs first; worker calls cannot claim the queue.
 
 Preparation retains a registry keyed by process birth/path and artifact profile.

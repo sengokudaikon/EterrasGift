@@ -421,14 +421,14 @@ impl Session {
     }
 }
 
-/// A connected trainer as Settings sees it: definitions captured from the game, ready to refresh.
+/// A connected trainer as Settings sees it: checked game definitions, ready to refresh.
 struct LinkedTrainer;
 
 impl eg_ui::settings::ModuleLink for LinkedTrainer {
     fn switched(&self, _key: &str, _on: bool) {}
     fn status(&self, _section: usize) -> Option<eg_ui::settings::LiveStatus> {
         Some(eg_ui::settings::LiveStatus {
-            text: "Current game data · 1342 affixes".into(),
+            text: "Current game data · 1342 affixes\nLast checked: 2026-10-22 13:40:00 CEST\nCache updated: 2026-10-21 19:15:00 CEST".into(),
             can_act: true,
             busy: false,
         })
@@ -820,10 +820,10 @@ fn main() {
 
     // A running trainer behind Game definitions: its live status, and Read again offered without the reason.
     let ui = session.open_settings_linked(Rc::new(LinkedTrainer));
-    for _ in 0..3 {
-        session.scroll(500.0, 300.0, -120.0);
-    }
+    session.scroll(500.0, 300.0, -120.0);
     session.capture(&ui, "settings-trainer-connected");
+    session.resize(680, 580);
+    session.capture(&ui, "settings-trainer-connected-narrow");
 
     // A blocked worker never blocks pointer input or navigation. The real toggle queues behind it.
     let folder = session.folder();

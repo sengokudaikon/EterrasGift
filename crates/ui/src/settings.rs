@@ -1011,16 +1011,16 @@ mod tests {
         let link = Rc::new(FakeLink::default());
         let mut page =
             SettingsPage::new(SettingsService::inline(store), vec![crate::trainer_settings::descriptor(true)], None, None).link(crate::trainer_settings::ID, link.clone());
-        page.flip_setting(0, 0, false);
+        page.flip_setting(0, 1, false);
         assert_eq!(*link.switched.borrow(), [("autoConnect".to_owned(), false)]);
         // A save that fails still leaves the session with the choice, as the C# section sets it before saving.
         fs::remove_file(&file).unwrap();
         fs::create_dir(&file).unwrap();
-        page.flip_setting(0, 1, true);
+        page.flip_setting(0, 2, true);
         assert_eq!(page.kind(), MessageKind::Error);
         assert_eq!(link.switched.borrow().last(), Some(&("iKnowWhatImDoing".to_owned(), true)));
         // A status section is not a switch.
-        page.flip_setting(0, 2, true);
+        page.flip_setting(0, 0, true);
         assert_eq!(link.switched.borrow().len(), 2);
     }
 
@@ -1031,7 +1031,7 @@ mod tests {
         let link = Rc::new(FakeLink::default());
         let mut page =
             SettingsPage::new(SettingsService::inline(store), vec![crate::trainer_settings::descriptor(false)], None, None).link(crate::trainer_settings::ID, link.clone());
-        page.flip_setting(0, 0, false);
+        page.flip_setting(0, 1, false);
         assert!(link.switched.borrow().is_empty());
     }
 
@@ -1231,8 +1231,8 @@ mod tests {
         assert!(page.module_problem(0).is_some());
         assert!(!page.modules[0].enabled_at_start);
         assert!(page.modules[1].enabled_at_start);
-        page.flip_setting(0, 0, false); // Invalid module cannot overwrite its malformed slice.
-        page.flip_setting(1, 0, false);
+        page.flip_setting(0, 1, false); // Invalid module cannot overwrite its malformed slice.
+        page.flip_setting(1, 1, false);
         let saved = service.snapshot();
         assert_eq!(saved.store.saved().module_settings["trainer"]["autoConnect"], "invalid");
         assert_eq!(saved.store.saved().module_settings["second"]["future"], serde_json::json!([1, 2]));

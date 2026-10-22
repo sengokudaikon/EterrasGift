@@ -20,7 +20,7 @@ and mutable instance fields. A generic IL2CPP crate is not a prerequisite for th
 | Area | Implemented | Remaining |
 |---|---|---|
 | Desktop composition | Worker thread, manual/automatic connection, helper package validation; trainer startup failure leaves Home/Mods running | Final bundle assembly and restart handling |
-| Bootstrap | DLL load/start/connect, callback-local managed main-ID check; process/log/artifact gates and pending-call retention | Actual-game validation of the simplified callback path |
+| Bootstrap | DLL load/start/connect, callback-local native Unity main-thread check; process/log/artifact gates and pending-call retention | Actual-game validation of the corrected callback path |
 | Reads | Owned rooted forge snapshots, literal limits, completed locale, catalog subset and names/cache; game-built implicit/unique descriptions, private-copy unique previews and sampled regular-affix values | Unique/implicit mapping; getter replacements must match readiness behavior |
 | Forge writes | One EditForge request/ForgePlan/WriteOutcome path: seven status fields, base/subtype, unique/set identity, regular affix-roll batches, replacement/tier/seal and add/remove | Unique/implicit rolls |
 | Editor | Ordered single-edit drafts, fresh reads, Pending/Confirmed/refusal/NotKept/Uncertain, conditional reverse Undo; status/base/identity, replacement/tier/seal, add/remove and regular-affix Value controls connected; unique text and asynchronous preview adapter | Unique/implicit value controls and roll writes stay disabled until supported |

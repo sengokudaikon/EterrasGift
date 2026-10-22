@@ -1018,7 +1018,9 @@ fn the_catalog_comes_from_the_game_files_of_the_running_build() {
             handle.snapshot().game_files,
             backend::GameFiles::Ready {
                 affixes: 1,
-                build: "build".into()
+                build: "build".into(),
+                checked_at: None,
+                updated_at: None,
             }
         );
         connected(&handle).await;

@@ -493,6 +493,8 @@ pub enum GameFiles {
     Ready {
         affixes: usize,
         build: String,
+        checked_at: Option<Timestamp>,
+        updated_at: Option<Timestamp>,
     },
     Unavailable(String),
 }
@@ -504,6 +506,8 @@ impl From<&GameData> for GameFiles {
             GameData::Ready(catalog) => Self::Ready {
                 affixes: catalog.affix_count(),
                 build: catalog.build.clone(),
+                checked_at: catalog.checked_at,
+                updated_at: catalog.updated_at,
             },
             GameData::Unavailable(reason) => Self::Unavailable(reason.clone()),
         }

@@ -351,7 +351,8 @@ unsafe extern "C-unwind" fn callback(_method: *const MethodInfo) {
 }
 
 // The engine callback establishes its own thread identity. A worker calling
-// ExecuteTasks has no Unity context and cannot claim the queue or the main TID.
+// ExecuteTasks cannot claim the queue or the main TID unless Unity identifies it
+// as its native main thread, regardless of the managed synchronization context.
 fn claim_dispatch_thread(main: &AtomicU64, tid: u64, check: impl FnOnce() -> Result<bool, String>) -> Result<bool, String> {
     let known = main.load(SeqCst);
     if known != 0 {
@@ -365,7 +366,7 @@ fn claim_dispatch_thread(main: &AtomicU64, tid: u64, check: impl FnOnce() -> Res
 
 unsafe fn check_dispatch_thread() -> Result<bool, String> {
     // SAFETY: called after original ExecuteTasks on a thread of the retained
-    // initialized runtime. The getters access only its thread-local context.
+    // initialized runtime. Unity's predicate reads only its native thread identity.
     unsafe {
         let module = module()?;
         let runtime = Runtime::retained(module)?;
@@ -383,7 +384,7 @@ fn after_original(state: &Shared) {
     }
     // SAFETY: process-local identity query and callback-local initialized runtime.
     let tid = unsafe { GetCurrentThreadId() } as u64;
-    // SAFETY: after the original call, only current-thread runtime context is inspected under the unsafe start contract.
+    // SAFETY: after the original call, Unity's thread-safe predicate checks caller identity under the unsafe start contract.
     match claim_dispatch_thread(&state.main_thread, tid, || unsafe { check_dispatch_thread() }) {
         Ok(true) => {}
         Ok(false) => {

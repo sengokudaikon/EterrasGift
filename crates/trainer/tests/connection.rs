@@ -137,6 +137,8 @@ impl Fixture {
             mode: Mutex::new(Mode::Success),
             metadata: self.metadata.clone(),
             block: AtomicBool::new(false),
+            unload_confirmed: AtomicBool::new(false),
+            send_failure: Mutex::new(None),
             started: Notify::new(),
             release: Notify::new(),
         })
@@ -166,6 +168,8 @@ struct Shared {
     mode: Mutex<Mode>,
     metadata: PathBuf,
     block: AtomicBool,
+    unload_confirmed: AtomicBool,
+    send_failure: Mutex<Option<TransportError>>,
     started: Notify,
     release: Notify,
 }
@@ -213,9 +217,23 @@ impl Transport for Wire {
     fn target(&self) -> &ProcessIdentity {
         &self.target
     }
+    async fn unload(&mut self) -> Result<(), TransportError> {
+        self.shared.record("unload");
+        if self.shared.unload_confirmed.load(Ordering::SeqCst) {
+            Ok(())
+        } else {
+            Err(TransportError {
+                delivery: Delivery::NotSent,
+                failure: eg_trainer_wire::transport::TransportFailure::Missing,
+            })
+        }
+    }
     async fn send(&mut self, request: &Request) -> Result<Response, TransportError> {
         self.shared.record("pipe");
         self.shared.requests.lock().unwrap().push(request.clone());
+        if let Some(error) = self.shared.send_failure.lock().unwrap().take() {
+            return Err(error);
+        }
         Ok(self.shared.responses.lock().unwrap().pop_front().expect("unexpected pipe request"))
     }
 }
@@ -532,21 +550,56 @@ fn missing_log_never_probes_the_runtime() {
 #[test]
 fn helper_not_ready_after_preparation_is_not_an_automatic_bootstrap_retry() {
     run(async {
+        for gone in [false, true] {
+            for during_status in [false, true] {
+                let fixture = Fixture::new();
+                let shared = fixture.shared();
+                shared.unload_confirmed.store(gone, Ordering::SeqCst);
+                let mut responses = VecDeque::new();
+                if during_status {
+                    responses.push_back(fixture.discovery());
+                }
+                responses.push_back(Response {
+                    code: ResponseCode::NotReady,
+                    payload: b"Request canceled before the main thread took it; nothing ran".to_vec(),
+                });
+                *shared.responses.lock().unwrap() = responses;
+                let mut connector = connector(&shared, GatePolicy::Release);
+                let error = connector.connect(fixture.target, now()).await.err().unwrap();
+                assert_eq!(error.kind, ErrorKind::NotReady);
+                assert!(error.message.contains("Request canceled before the main thread took it"));
+                assert_eq!(error.delivery, Some(if gone { Delivery::NotSent } else { Delivery::MayHaveRun }));
+                assert!(!error.retry_when_waiting);
+                assert_eq!(shared.count("prepare"), 1);
+                assert_eq!(shared.count("pipe"), if during_status { 2 } else { 1 });
+                assert_eq!(shared.count("unload"), 1);
+                assert_eq!(
+                    connector.last_attempt().unwrap().residency,
+                    if gone { PreparationResidency::NotLoaded } else { PreparationResidency::Loaded }
+                );
+            }
+        }
+    });
+}
+
+#[test]
+fn helper_departure_during_handshake_with_unchanged_admission_is_not_a_reload_loop() {
+    run(async {
         let fixture = Fixture::new();
         let shared = fixture.shared();
-        *shared.responses.lock().unwrap() = [Response {
-            code: ResponseCode::NotReady,
-            payload: b"runtime not initialized".to_vec(),
-        }]
-        .into();
+        shared.unload_confirmed.store(true, Ordering::SeqCst);
+        *shared.send_failure.lock().unwrap() = Some(TransportError {
+            delivery: Delivery::MayHaveRun,
+            failure: eg_trainer_wire::transport::TransportFailure::Departed,
+        });
         let mut connector = connector(&shared, GatePolicy::Release);
         let error = connector.connect(fixture.target, now()).await.err().unwrap();
-        assert_eq!(error.kind, ErrorKind::NotReady);
-        assert_eq!(error.delivery, Some(Delivery::MayHaveRun));
+        assert_eq!(error.kind, ErrorKind::Transport);
+        assert!(error.message.contains("before the connection completed"));
         assert!(!error.retry_when_waiting);
+        assert_eq!(connector.last_attempt().unwrap().residency, PreparationResidency::NotLoaded);
         assert_eq!(shared.count("prepare"), 1);
-        assert_eq!(shared.count("pipe"), 1);
-        assert_eq!(connector.last_attempt().unwrap().residency, PreparationResidency::Loaded);
+        assert_eq!(shared.count("unload"), 1);
     });
 }
 
