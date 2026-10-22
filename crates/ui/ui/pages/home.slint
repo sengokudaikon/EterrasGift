@@ -124,6 +124,9 @@ export component HomePage inherits Rectangle {
                 text: HomeState.message;
                 tone: HomeState.message-is-error ? CaptionTone.error : CaptionTone.secondary;
                 max-width: Tokens.reading-max-width;
+                accessible-role: text;
+                // Said when it changes, as the C# game message's AutomationProperties.LiveSetting="Polite".
+                accessible-live-region: polite;
             }
         }
     }

@@ -42,7 +42,7 @@ impl ForgeGame for ObservedGame {
         if writer.backend.subscribe().has_changed().is_err() {
             return None;
         }
-        project_item(&writer.backend.snapshot()).ok().flatten()
+        writer.backend.peek(project_item).ok().flatten()
     }
     // The editor asks these per row, option and cell: they read the snapshot in place rather than copy it each time.
     fn can_write(&self) -> bool {
@@ -94,8 +94,10 @@ impl ForgeGame for ObservedGame {
         self.writer.borrow().backend.peek(|state| state.undo_forge_needs_override)
     }
     fn undo_intent(&self) -> Option<ItemEdit> {
-        let state = self.writer.borrow().backend.snapshot();
-        state.forge_undo_plan(state.undo_forge.as_ref()?).ok().map(|plan| plan.edit_intent().clone())
+        self.writer
+            .borrow()
+            .backend
+            .peek(|state| state.forge_undo_plan(state.undo_forge.as_ref()?).ok().map(|plan| plan.edit_intent().clone()))
     }
     fn undo(&mut self, expected: &ForgeItem) -> EditOutcome {
         let Some(edit) = self.undo_intent() else {
@@ -166,8 +168,14 @@ impl Writer {
         }
     }
     fn poll_descriptions(&mut self) {
-        let state = self.backend.snapshot();
-        let Ok(expected) = state.expected_observation() else {
+        let (expected, undescribed, read_sequence) = self.backend.peek(|state| {
+            (
+                state.expected_observation(),
+                matches!(&state.forge, ForgeState::Item { unique: None, .. }),
+                state.forge_read_sequence,
+            )
+        });
+        let Ok(expected) = expected else {
             self.descriptions = None;
             return;
         };
@@ -175,41 +183,50 @@ impl Writer {
             self.descriptions = None;
             return;
         }
-        if !matches!(&state.forge, ForgeState::Item { unique: None, .. }) {
+        if !undescribed {
             return;
         }
         if self
             .descriptions
             .as_ref()
-            .is_none_or(|(before, sequence, _)| before != &expected || *sequence != state.forge_read_sequence)
+            .is_none_or(|(before, sequence, _)| before != &expected || *sequence != read_sequence)
             && let Ok(receipt) = self.backend.try_submit(Command::DescribeUnique {
                 expected: Box::new(expected.clone()),
             })
         {
-            self.descriptions = Some((expected, state.forge_read_sequence, receipt));
+            self.descriptions = Some((expected, read_sequence, receipt));
         }
     }
 
     fn preview(&mut self, item: &ForgeItem, edit: &ItemEdit) -> crate::forge::game::Lookup<Vec<ModifierState>> {
         let result: Result<crate::forge::game::Lookup<Vec<ModifierState>>, GameError> = (|| {
-            let state = self.backend.snapshot();
-            if self.backend.subscribe().has_changed().is_err() || project_item(&state).ok().flatten().as_ref().is_none_or(|actual| !actual.same_state(item)) {
-                return Err("The item changed before its preview could be read.".into());
-            }
-            let expected = state.expected_observation().map_err(|e| e.to_string())?;
-            let eg_trainer::edits::ItemEdit::Roll(draft) = edit.clone() else {
+            let draft = match edit {
+                eg_trainer::edits::ItemEdit::Roll(draft) => Some(draft),
+                _ => None,
+            };
+            let closed = self.backend.subscribe().has_changed().is_err();
+            let (expected, cached) = self.backend.peek(|state| -> Result<_, GameError> {
+                if closed || project_item(state).ok().flatten().as_ref().is_none_or(|actual| !actual.same_state(item)) {
+                    return Err("The item changed before its preview could be read.".into());
+                }
+                let expected = state.expected_observation().map_err(|e| e.to_string())?;
+                let cached = state.unique_preview.as_ref().filter(|p| p.expected == expected && Some(&p.draft) == draft).map(|preview| {
+                    preview
+                        .result
+                        .as_ref()
+                        .map(|p| p.preview().modifiers.iter().map(project_modifier).collect())
+                        .map_err(Clone::clone)
+                });
+                Ok((expected, cached))
+            })?;
+            let Some(draft) = draft.cloned() else {
                 return Err("This preview draft is unsupported.".into());
             };
             if draft.target != eg_trainer::edits::RollTarget::Unique {
                 return Err("Only unique rolls have a tooltip preview.".into());
             }
-            if let Some(preview) = state.unique_preview.as_ref().filter(|p| p.expected == expected && p.draft == draft) {
-                return preview
-                    .result
-                    .as_ref()
-                    .map(|p| p.preview().modifiers.iter().map(project_modifier).collect())
-                    .map_err(Clone::clone)
-                    .map(crate::forge::game::Lookup::Ready);
+            if let Some(cached) = cached {
+                return cached.map(crate::forge::game::Lookup::Ready);
             }
             if self.preview.as_ref().is_none_or(|p| p.expected != expected || p.draft != draft) {
                 self.preview = Some(PendingPreview {
@@ -232,7 +249,7 @@ impl Writer {
         if self
             .preview
             .as_ref()
-            .is_some_and(|p| self.backend.snapshot().expected_observation().as_ref() != Ok(&p.expected))
+            .is_some_and(|p| self.backend.peek(|state| state.expected_observation().as_ref() != Ok(&p.expected)))
         {
             self.preview = None;
             return false;
@@ -269,45 +286,41 @@ impl Writer {
             if request.target != item::RollTarget::Affix {
                 return Err("Actual values for this modifier are unavailable in this build.".into());
             }
-            let state = self.backend.snapshot();
-            if self.backend.subscribe().has_changed().is_err() || project_item(&state).ok().flatten().as_ref().is_none_or(|actual| !actual.same_state(item)) {
-                return Err("The item changed before its values could be read.".into());
-            }
-            self.poll_mappings();
-            if self.mapping_read_sequence != Some(state.forge_read_sequence) {
-                // A fresh owned read permits another optional read attempt. Merely
-                // republishing a mapping result must never create a retry loop.
-                self.mapping_read_sequence = Some(state.forge_read_sequence);
-                self.mappings.retain(|pending| pending.error.is_none());
-            }
-            let expected = state.expected_observation().map_err(|error| error.to_string())?;
-            let request = MappingRequest {
+            let mapping = u8::try_from(request.index).ok().map(|index| MappingRequest {
                 address: MappingAddress {
                     target: MappingTarget::Affix,
-                    index: u8::try_from(request.index).map_err(|_| "This affix slot is unsupported.")?,
+                    index,
                     line: None,
                 },
                 draft: request.draft.clone(),
-            };
+            });
+            let closed = self.backend.subscribe().has_changed().is_err();
+            let (read_sequence, expected, ready) = self.backend.peek(|state| -> Result<_, GameError> {
+                if closed || project_item(state).ok().flatten().as_ref().is_none_or(|actual| !actual.same_state(item)) {
+                    return Err("The item changed before its values could be read.".into());
+                }
+                let expected = state.expected_observation().map_err(|error| error.to_string());
+                let ready = expected
+                    .as_ref()
+                    .ok()
+                    .zip(mapping.as_ref())
+                    .and_then(|(expected, mapping)| state.mapping(expected, mapping))
+                    .map(|result| result.as_ref().map(|table| value_table(table)).map_err(Clone::clone));
+                Ok((state.forge_read_sequence, expected, ready))
+            })?;
+            self.poll_mappings();
+            if self.mapping_read_sequence != Some(read_sequence) {
+                // A fresh owned read permits another optional read attempt. Merely
+                // republishing a mapping result must never create a retry loop.
+                self.mapping_read_sequence = Some(read_sequence);
+                self.mappings.retain(|pending| pending.error.is_none());
+            }
+            let expected = expected?;
+            let request = mapping.ok_or("This affix slot is unsupported.")?;
             self.mappings
                 .retain(|pending| pending.expected == expected && (pending.request.address != request.address || pending.request == request));
-            if let Some(result) = state.mapping(&expected, &request) {
-                return result
-                    .as_ref()
-                    .map(|table| ValueTable {
-                        label: "Value".into(),
-                        samples: table
-                            .samples()
-                            .iter()
-                            .map(|sample| item::ValueSample {
-                                value: sample.value,
-                                display: sample.display.clone(),
-                                effects: sample.effects.clone(),
-                            })
-                            .collect(),
-                    })
-                    .map_err(Clone::clone)
-                    .map(crate::forge::game::Lookup::Ready);
+            if let Some(result) = ready {
+                return result.map(crate::forge::game::Lookup::Ready);
             }
             self.mappings.retain(|pending| pending.expected == expected);
             if let Some(error) = self.mappings.iter().find(|pending| pending.request == request).and_then(|pending| pending.error.clone()) {
@@ -331,7 +344,7 @@ impl Writer {
         result.unwrap_or_else(crate::forge::game::Lookup::Unavailable)
     }
     fn retain_mappings(&mut self, requests: &[RollRequest]) {
-        let expected = self.backend.snapshot().expected_observation().ok();
+        let expected = self.backend.peek(|state| state.expected_observation().ok());
         self.mappings.retain(|pending| {
             expected.as_ref() == Some(&pending.expected)
                 && requests.iter().any(|request| {
@@ -493,6 +506,20 @@ struct Binding {
     waiting: Cell<Option<BloomPhase>>,
 }
 
+/// The connection as a run without the trainer's worker shows it: not connected, in the navigation's foot (only when the
+/// trainer is on) and the empty forge. A worker's binding takes both over.
+pub fn unbound(window: &MainWindow, trainer: bool) {
+    let connection = window.global::<Connection>();
+    connection.set_present(trainer);
+    connection.set_connected(false);
+    connection.set_text("Not connected".into());
+    connection.set_show_action(true);
+    connection.set_action_text("Connect".into());
+    let state = window.global::<TrainerState>();
+    state.set_empty_title("Not connected".into());
+    state.set_empty_detail("Connect, then place an item in the forge.".into());
+}
+
 /// Callback ownership keeps the binding alive; the writer's polling timer holds only a weak Rc.
 /// Rebinding or dropping the window releases the UI observer and its timer.
 pub fn bind(window: &MainWindow, backend: BackendHandle, shell: &ShellHandle, decorations: Rc<Decorations<MainWindow>>) {
@@ -537,11 +564,11 @@ pub fn bind(window: &MainWindow, backend: BackendHandle, shell: &ShellHandle, de
     });
     let owner = binding.clone();
     window.global::<Connection>().on_connect(move || {
-        let snapshot = owner.backend.snapshot();
-        if matches!(snapshot.phase, Phase::Connecting | Phase::Closing | Phase::Ready | Phase::Stopped | Phase::Disabled) {
+        let phase = owner.backend.peek(|state| state.phase);
+        if matches!(phase, Phase::Connecting | Phase::Closing | Phase::Ready | Phase::Stopped | Phase::Disabled) {
             return;
         }
-        let command = if snapshot.phase == Phase::Blocked { Command::Retry } else { Command::Connect };
+        let command = if phase == Phase::Blocked { Command::Retry } else { Command::Connect };
         if owner.backend.try_submit(command).is_ok() {
             // --no-connect suppresses automatic startup; an explicit Connect
             // starts observation too, so connected items continue to follow reads.
@@ -584,8 +611,9 @@ impl Binding {
         self.writer.borrow_mut().poll_descriptions();
         let mappings_completed = self.writer.borrow_mut().poll_mappings();
         let preview_completed = self.writer.borrow_mut().poll_preview();
-        let snapshot = self.backend.snapshot();
-        if self.backend.subscribe().has_changed().is_err() && snapshot.phase != Phase::Stopped {
+        // A tick without a new snapshot only settles the editor's receipts; the snapshot is copied only when it changed.
+        let (phase, revision) = self.backend.peek(|state| (state.phase, state.revision));
+        if self.backend.subscribe().has_changed().is_err() && phase != Phase::Stopped {
             // An unexpected worker failure must not leave apparently live data.
             if let Some(window) = self.window.upgrade() {
                 let connection = window.global::<Connection>();
@@ -606,7 +634,7 @@ impl Binding {
             }));
             return;
         }
-        if self.revision.get() == Some(snapshot.revision) {
+        if self.revision.get() == Some(revision) {
             self.forge.edit(|editor| {
                 if mappings_completed || preview_completed {
                     editor.refresh();
@@ -616,6 +644,7 @@ impl Binding {
             });
             return;
         }
+        let snapshot = self.backend.snapshot();
         self.revision.set(Some(snapshot.revision));
         let Some(window) = self.window.upgrade() else {
             return;
@@ -909,6 +938,20 @@ fn project_catalog(data: &GameCatalog) -> Catalog {
         }
     }
     catalog
+}
+fn value_table(table: &eg_trainer::mapping::ValueTable) -> ValueTable {
+    ValueTable {
+        label: "Value".into(),
+        samples: table
+            .samples()
+            .iter()
+            .map(|sample| item::ValueSample {
+                value: sample.value,
+                display: sample.display.clone(),
+                effects: sample.effects.clone(),
+            })
+            .collect(),
+    }
 }
 fn project_modifier(line: &eg_trainer::backend::ModifierSnapshot) -> item::ModifierState {
     item::ModifierState {

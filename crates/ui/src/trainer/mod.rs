@@ -1,9 +1,11 @@
 //! The trainer's pages (spec/trainer.md §5): the catalog of features, the page and row models ported from the C# app's
 //! view models, and their binding to `pages/trainer.slint`. With the trainer's worker they run on its snapshots
 //! (`backend_session`); without one, on `session::Unconnected`, which tells the truth: no offline character is connected.
-//! Captures drive other states through fake sessions of their own.
+//! Captures drive other states through fake sessions of their own. The catalog is `eg_trainer::features`, which `catalog`
+//! adapts.
 //!
-//! TODO(trainer): the catalog and the row models move to the trainer's own crates; this module keeps only the binding.
+//! TODO(trainer): the hooks' wanted state and values move to the trainer's own crates (`eg_trainer::features::FeatureIntents`);
+//! this module keeps only the rows and their binding.
 
 pub mod backend_session;
 pub mod catalog;
