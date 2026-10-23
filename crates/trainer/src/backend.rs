@@ -46,7 +46,7 @@ use tokio::sync::{broadcast, mpsc, oneshot, watch};
 
 use crate::{
     catalog::{GameCatalog, ResolvedItemName},
-    features::HookId,
+    features::{FeatureIntents, HookId},
     field_writes::{AttackLeechDecision, AttackLeechPlan, AttackLeechTarget, FieldPlanError, RateWriteRecord, RateWriteStatus},
     game_data::{GameData, GameDataHandle},
     gate::{self, GateDecision, GatePolicy, GateVerdict, LogSource},
@@ -560,10 +560,13 @@ pub struct BackendSnapshot {
     pub undo_forge: Option<crate::undo::ForgeUndo>,
     pub undo_forge_depth: usize,
     pub undo_forge_needs_override: bool,
-    /// Every character's cheat profile, the last played first.
+    /// Every kept cheat profile, the last played first.
     pub profiles: Arc<ProfileBook>,
-    /// The profile the pages show: the one chosen while no game runs, or the live one.
+    /// The character the pages show: the profile chosen while no game runs, or the character in play, whose hooks are
+    /// its profile's or, without one, `unsaved`.
     pub editing: Option<ProfileKey>,
+    /// The hooks of a character in play without a profile: they last this connection unless kept as its profile.
+    pub unsaved: Option<Arc<FeatureIntents>>,
     pub profile_lock: ProfileLock,
     /// The live profile's hooks in this connection, every hook by ID; empty while no character is in play.
     pub hooks: BTreeMap<HookId, HookRun>,
@@ -587,6 +590,14 @@ pub struct ResolvedMapping {
     pub retry_on_read: bool,
 }
 impl BackendSnapshot {
+    /// The hooks the pages show: the shown profile's, or those of the character in play for this connection.
+    pub fn shown_hooks(&self) -> Option<&FeatureIntents> {
+        self.editing
+            .as_ref()
+            .and_then(|key| self.profiles.get(key))
+            .map(|profile| &profile.hooks)
+            .or(self.unsaved.as_deref())
+    }
     pub fn mapping(&self, expected: &crate::edits::ExpectedObservation, request: &MappingRequest) -> Option<&Result<Arc<ValueTable>, String>> {
         self.mappings
             .iter()
@@ -736,9 +747,11 @@ pub enum Command {
     UndoForge(Box<crate::undo::ForgeUndo>),
     /// Shows another profile; only while no game runs.
     SelectProfile(ProfileKey),
-    /// Only while no game runs.
+    /// Keeps the hooks of the character in play, which has no profile, as its profile.
+    CreateProfile,
+    /// While no game runs, or the profile of the character in play, which goes on with its hooks for this connection.
     DeleteProfile(ProfileKey),
-    /// Changes the shown profile, saving it. While its character is in play the hook is applied too.
+    /// Changes the shown hooks, saving a profile's. While their character is in play the hook is applied too.
     SetHookWanted {
         id: HookId,
         on: bool,
@@ -993,6 +1006,7 @@ pub fn service<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K
         undo_forge_needs_override: false,
         editing: options.profiles.profiles().first().map(|profile| profile.key.clone()),
         profiles: Arc::new(options.profiles.clone()),
+        unsaved: None,
         profile_lock: ProfileLock::Editable,
         hooks: BTreeMap::new(),
     };
@@ -1360,6 +1374,7 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
             Command::ApplyForge(plan) => self.write_forge(*plan).await,
             Command::UndoForge(undo) => self.undo_forge(*undo).await,
             Command::SelectProfile(key) => self.select_profile(key),
+            Command::CreateProfile => self.create_profile(),
             Command::DeleteProfile(key) => self.delete_profile(key),
             Command::SetHookWanted { id, on } => self.set_hook_wanted(id, on).await,
             Command::SetHookValues { id, values } => self.set_hook_values(id, values).await,
@@ -1536,7 +1551,7 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
         self.state.cleanup = Cleanup::Unconfirmed;
         self.superseded(epoch)?;
         self.initialize(epoch, &target).await?;
-        self.enter_play(epoch).await
+        self.apply_queued(epoch).await
     }
     async fn initialize(&mut self, epoch: u64, target: &ProcessIdentity) -> Result<(), BackendError> {
         let result: Result<(), BackendError> = async {
@@ -1576,6 +1591,8 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
                 this.state.phase = Phase::Ready;
                 this.state.activity = None;
                 this.state.error = None;
+                // The character in play is shown in the same snapshot that says Ready.
+                this.enter_play();
             })?;
             self.event(BackendEvent::Connected {
                 generation: self.state.generation,
@@ -1777,9 +1794,13 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
         }
     }
     fn release_without_io(&mut self) {
-        // The helper takes its hooks with it.
+        // The helper takes its hooks with it, and hooks without a profile end with the connection.
         self.live = None;
         self.state.hooks.clear();
+        self.state.unsaved = None;
+        if self.state.editing.as_ref().is_some_and(|key| self.state.profiles.get(key).is_none()) {
+            self.state.editing = self.state.profiles.profiles().first().map(|profile| profile.key.clone());
+        }
         self.forge_history.clear();
         self.state.attack_leech = None;
         self.state.undo_forge = None;

@@ -73,7 +73,7 @@ fn requested(shared: &Shared) -> Vec<(HookId, bool, Vec<f64>)> {
 }
 
 #[test]
-fn a_character_without_a_profile_gets_an_empty_one_and_nothing_is_applied() {
+fn a_character_without_a_profile_has_hooks_for_this_connection_until_they_are_kept() {
     run(async {
         let shared = Shared::new();
         playing(&shared, "Ysolde");
@@ -85,13 +85,70 @@ fn a_character_without_a_profile_gets_an_empty_one_and_nothing_is_applied() {
         let snapshot = handle.snapshot();
         assert_eq!(snapshot.profile_lock, ProfileLock::Live(key("Ysolde")));
         assert_eq!(snapshot.editing, Some(key("Ysolde")));
-        let names: Vec<_> = snapshot.profiles.profiles().iter().map(|profile| profile.key.name.as_str()).collect();
-        assert_eq!(names, ["Ysolde", "Mira", "Oren"]);
-        let profile = snapshot.profiles.get(&key("Ysolde")).unwrap();
-        assert_eq!((profile.last_played, profile.hooks.wanted().count()), (Some(now()), 0));
+        assert_eq!(snapshot.profiles.profiles().len(), 2, "playing makes no profile");
+        assert_eq!(snapshot.shown_hooks(), Some(snapshot.profiles.template()));
         assert!(!snapshot.hooks.is_empty() && snapshot.hooks.values().all(|run| *run == HookRun::Off));
         assert_eq!(shared.count("hook"), 0);
-        assert_eq!(saves.lock().unwrap().last().map(|book| book.profiles()[0].key.clone()), Some(key("Ysolde")));
+
+        let zoom = hook("zoom");
+        command(&handle, Command::SetHookWanted { id: zoom, on: true }).await.unwrap();
+        command(&handle, Command::SetHookValues { id: zoom, values: vec![-20.] }).await.unwrap();
+        assert_eq!(requested(&shared).last(), Some(&(zoom, true, vec![-20.])));
+        let snapshot = handle.snapshot();
+        assert_eq!(snapshot.hooks[&zoom], HookRun::On);
+        assert!(snapshot.shown_hooks().unwrap().is_wanted(zoom));
+        assert!(saves.lock().unwrap().is_empty(), "this connection's hooks are not saved");
+
+        command(&handle, Command::CreateProfile).await.unwrap();
+        let snapshot = handle.snapshot();
+        assert_eq!(snapshot.unsaved, None);
+        let names: Vec<_> = snapshot.profiles.profiles().iter().map(|profile| profile.key.name.as_str()).collect();
+        assert_eq!(names, ["Ysolde", "Mira", "Oren"]);
+        let ysolde = snapshot.profiles.get(&key("Ysolde")).unwrap();
+        assert_eq!(
+            (ysolde.last_played, ysolde.hooks.is_wanted(zoom), ysolde.hooks.values(zoom)),
+            (Some(now()), true, &[-20.][..])
+        );
+        assert_eq!(saves.lock().unwrap().last(), Some(&*snapshot.profiles));
+        assert_eq!(command(&handle, Command::CreateProfile).await.unwrap_err().kind, ErrorKind::InvalidEdit);
+        assert_eq!(shared.count("hook"), 2, "keeping them changes nothing in the game");
+        command(&handle, Command::SetHookWanted { id: zoom, on: false }).await.unwrap();
+        assert!(
+            !saves.lock().unwrap().last().unwrap().get(&key("Ysolde")).unwrap().hooks.is_wanted(zoom),
+            "and changes are saved from now on"
+        );
+        shutdown(&handle, worker).await;
+    });
+}
+
+#[test]
+fn deleting_the_profile_in_play_leaves_its_hooks_to_this_connection_and_they_end_with_it() {
+    run(async {
+        let shared = Shared::new();
+        playing(&shared, "Mira");
+        shared.hooks_supported.store(true, Ordering::SeqCst);
+        let (options, saves) = saving(book());
+        let (handle, worker) = start(&shared, options);
+        connected(&handle).await;
+        let applied = shared.count("hook");
+        assert_eq!(
+            command(&handle, Command::DeleteProfile(key("Oren"))).await.unwrap_err().kind,
+            ErrorKind::NotReady,
+            "only the one in play"
+        );
+        assert_eq!(command(&handle, Command::CreateProfile).await.unwrap_err().kind, ErrorKind::InvalidEdit, "Mira has one");
+        command(&handle, Command::DeleteProfile(key("Mira"))).await.unwrap();
+        let snapshot = handle.snapshot();
+        assert!(snapshot.profiles.get(&key("Mira")).is_none());
+        assert!(saves.lock().unwrap().last().unwrap().get(&key("Mira")).is_none());
+        assert_eq!((&snapshot.profile_lock, &snapshot.editing), (&ProfileLock::Live(key("Mira")), &Some(key("Mira"))));
+        let shown = snapshot.shown_hooks().unwrap();
+        assert!(mira_order().iter().all(|id| shown.is_wanted(*id) && snapshot.hooks[id] == HookRun::On));
+        assert_eq!(shared.count("hook"), applied, "nothing changes in the game");
+
+        command(&handle, Command::Disconnect).await.unwrap();
+        let snapshot = handle.snapshot();
+        assert_eq!((snapshot.unsaved, snapshot.editing), (None, Some(key("Oren"))));
         shutdown(&handle, worker).await;
     });
 }

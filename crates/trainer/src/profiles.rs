@@ -1,10 +1,10 @@
-//! Cheat profiles: for each offline character, the hooks it wants on and their values, kept across runs in
-//! `moduleSettings.trainer.profiles`. Pure: the worker owns the book (`backend`), and the composition saves it through
-//! a [`ProfileSaver`].
+//! Cheat profiles: for each offline character the user chose to keep one for, the hooks it wants on and their values,
+//! kept across runs in `moduleSettings.trainer.profiles`. Pure: the worker owns the book (`backend`), and the
+//! composition saves it through a [`ProfileSaver`].
 //!
 //! The C# app kept one set of values for every character (`hookValues`) and turned every switch off with each run.
-//! Here those values are the template a new character's profile starts from; the key stays for the C# app, which still
-//! reads and writes it.
+//! Here those values are what a character without a profile starts from in play; the key stays for the C# app, which
+//! still reads and writes it.
 
 use crate::features::{FeatureIntents, HookId, SavedValues};
 use eg_core::game_log::LoggedCharacter;
@@ -44,7 +44,7 @@ pub struct Profile {
     pub hooks: FeatureIntents,
 }
 
-/// Every character's profile, the last played first, and the template a new one starts from.
+/// Every kept profile, the last played first, and the template a character without one starts from.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct ProfileBook {
     profiles: Vec<Profile>,
@@ -92,26 +92,39 @@ impl ProfileBook {
         self.profiles.iter_mut().find(|profile| profile.key == *key).map(|profile| &mut profile.hooks)
     }
 
-    /// The character entered play: its profile becomes the last played. A character without one gets a new profile
-    /// that wants nothing, with the template's values.
-    pub fn played(&mut self, key: &ProfileKey, at: Timestamp) {
-        let mut profile = match self.profiles.iter().position(|profile| profile.key == *key) {
-            Some(index) => self.profiles.remove(index),
-            None => Profile {
-                key: key.clone(),
-                last_played: None,
-                hooks: self.template.clone(),
-            },
-        };
-        profile.last_played = Some(at);
-        self.profiles.insert(0, profile);
+    /// What a character without a profile starts from: nothing wanted, with the C# app's values.
+    pub fn template(&self) -> &FeatureIntents {
+        &self.template
     }
 
-    /// False when there was no such profile.
-    pub fn remove(&mut self, key: &ProfileKey) -> bool {
-        let count = self.profiles.len();
-        self.profiles.retain(|profile| profile.key != *key);
-        self.profiles.len() != count
+    /// The character entered play: its profile becomes the last played. False when it has none; none is made.
+    pub fn played(&mut self, key: &ProfileKey, at: Timestamp) -> bool {
+        let Some(index) = self.profiles.iter().position(|profile| profile.key == *key) else {
+            return false;
+        };
+        let mut profile = self.profiles.remove(index);
+        profile.last_played = Some(at);
+        self.profiles.insert(0, profile);
+        true
+    }
+
+    /// Keeps `hooks` as the profile of a character in play, the last played. One it already had is replaced.
+    pub fn create(&mut self, key: ProfileKey, hooks: FeatureIntents, at: Timestamp) {
+        self.profiles.retain(|profile| profile.key != key);
+        self.profiles.insert(
+            0,
+            Profile {
+                key,
+                last_played: Some(at),
+                hooks,
+            },
+        );
+    }
+
+    /// The profile removed, if there was one.
+    pub fn remove(&mut self, key: &ProfileKey) -> Option<Profile> {
+        let index = self.profiles.iter().position(|profile| profile.key == *key)?;
+        Some(self.profiles.remove(index))
     }
 }
 

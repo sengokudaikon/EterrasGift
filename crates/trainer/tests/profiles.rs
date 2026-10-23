@@ -80,34 +80,38 @@ fn saved_profiles_are_read_fitted_to_the_catalog_and_ordered_by_last_played() {
 #[test]
 fn nothing_saved_reads_as_no_profiles_with_the_catalogs_values() {
     for slice in [None, Some(json!(null)), Some(json!({ "profiles": "?", "hookValues": [1] })), Some(json!({}))] {
-        let mut book = ProfileBook::from_settings(slice.as_ref());
+        let book = ProfileBook::from_settings(slice.as_ref());
         assert!(book.profiles().is_empty());
-        book.played(&key("Mira"), at("2026-10-19T10:00:00Z"));
-        assert_eq!(book.get(&key("Mira")).unwrap().hooks.values(hook("damage-dealt")), [default_of("damage-dealt")]);
+        assert_eq!(book.template().values(hook("damage-dealt")), [default_of("damage-dealt")]);
     }
 }
 
 #[test]
-fn a_new_character_starts_from_the_c_sharp_apps_values_wanting_nothing() {
+fn profiles_are_only_made_when_kept_and_a_character_without_one_starts_from_the_c_sharp_apps_values() {
     let mut book = ProfileBook::from_settings(Some(&json!({ "hookValues": { "damage-dealt": [5.0] } })));
-    book.played(&key("Mira"), at("2026-10-19T10:00:00Z"));
-    book.played(&key("Oren"), at("2026-10-19T11:00:00Z"));
+    assert!(!book.played(&key("Mira"), at("2026-10-19T09:00:00Z")), "playing makes no profile");
+    assert!(book.profiles().is_empty());
+    let template = book.template().clone();
+    assert_eq!((template.wanted().count(), template.values(hook("damage-dealt"))), (0, &[5.][..]));
+    book.create(key("Mira"), template.clone(), at("2026-10-19T10:00:00Z"));
+    let mut oren = template;
+    oren.set_wanted(hook("zoom"), true);
+    book.create(key("Oren"), oren.clone(), at("2026-10-19T11:00:00Z"));
     book.hooks_mut(&key("Mira")).unwrap().set_values(hook("damage-dealt"), &[7.]).unwrap();
-    book.played(&key("Mira"), at("2026-10-19T12:00:00Z"));
+    assert!(book.played(&key("Mira"), at("2026-10-19T12:00:00Z")));
     let names: Vec<_> = book.profiles().iter().map(|profile| profile.key.name.as_str()).collect();
     assert_eq!(names, ["Mira", "Oren"]);
     let mira = book.get(&key("Mira")).unwrap();
     assert_eq!((mira.last_played, mira.hooks.values(hook("damage-dealt"))), (Some(at("2026-10-19T12:00:00Z")), &[7.][..]));
-    let oren = book.get(&key("Oren")).unwrap();
-    assert_eq!((oren.hooks.wanted().count(), oren.hooks.values(hook("damage-dealt"))), (0, &[5.][..]));
-    assert!(book.remove(&key("Oren")));
-    assert!(!book.remove(&key("Oren")));
+    assert_eq!(book.get(&key("Oren")).unwrap().hooks, oren);
+    assert_eq!(book.remove(&key("Oren")).map(|profile| profile.hooks), Some(oren));
+    assert!(book.remove(&key("Oren")).is_none());
 }
 
 #[test]
 fn profiles_are_written_beside_the_c_sharp_apps_values_and_read_back_the_same() {
     let mut book = ProfileBook::from_settings(Some(&json!({ "hookValues": { "damage-dealt": [5.0] } })));
-    book.played(&key("Mira"), at("2026-10-19T10:00:00Z"));
+    book.create(key("Mira"), book.template().clone(), at("2026-10-19T10:00:00Z"));
     let hooks = book.hooks_mut(&key("Mira")).unwrap();
     hooks.set_wanted(hook("zoom"), true);
     hooks.set_values(hook("zoom"), &[-25.5]).unwrap();
