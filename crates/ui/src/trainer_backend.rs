@@ -13,7 +13,7 @@ use crate::{
 };
 use eg_core::{bloom::BloomPhase, game_log::GameReadiness};
 use eg_trainer::{
-    backend::{Activity, BackendHandle, BackendSnapshot, CatalogState, Command, ErrorKind, ForgeState, MappingRead, Pending, Phase},
+    backend::{Activity, BackendHandle, BackendSnapshot, CatalogState, Command, ErrorKind, ForgeState, MappingRead, Pending, Phase, ProfileLock},
     catalog::{Availability, GameCatalog},
 };
 use slint::{ComponentHandle, Timer, TimerMode};
@@ -831,15 +831,13 @@ fn status(snapshot: &BackendSnapshot) -> Status {
 }
 
 /// What the trainer pages can do: set up a profile while no game runs, wait behind the connection's notice from the moment
-/// a game is seen until an offline character is in play (or after a stop), and act on the game once one is.
+/// a game is seen until an offline character is in play (or after a stop), and act on the game once one is. The worker's
+/// profile lock says which; a connected game is acted on even before its character's profile is live (the Item Forge).
 fn access(snapshot: &BackendSnapshot) -> TrainerAccess {
-    // TODO(trainer): `detected` follows the game only while the worker connects automatically; a process-only watch is to
-    // keep it current with automatic connection off, so a game running then is not taken for none.
-    let several = snapshot.error.as_ref().is_some_and(|error| error.kind == ErrorKind::MultipleProcesses);
-    match snapshot.phase {
-        Phase::Ready => TrainerAccess::Live,
-        Phase::Disconnected | Phase::WaitingForGame if snapshot.detected.is_none() && !several => TrainerAccess::Setup,
-        _ => TrainerAccess::Locked,
+    match (&snapshot.profile_lock, snapshot.phase) {
+        (_, Phase::Ready) | (ProfileLock::Live(_), _) => TrainerAccess::Live,
+        (ProfileLock::Editable, _) => TrainerAccess::Setup,
+        (ProfileLock::Locked, _) => TrainerAccess::Locked,
     }
 }
 

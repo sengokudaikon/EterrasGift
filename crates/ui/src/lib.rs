@@ -49,8 +49,6 @@ pub fn install(window: &MainWindow, app: App) {
     let decorations = decorations::Decorations::install(window);
     home::bind(window, app.launcher, &shell, decorations.clone());
     let before_close = app.mods.map(|page| mods::bind(window, page, &shell));
-    // The trainer's pages remember the hooks' values in its slice of the settings.
-    let trainer_settings = app.trainer.then(|| app.settings.service().module(trainer_settings::ID));
     // The trainer's switches reach its session as they flip; Game definitions follows its game data.
     let settings = match app.trainer_backend.clone().filter(|_| app.trainer) {
         Some(backend) => app.settings.link(trainer_settings::ID, trainer_settings::link(backend)),
@@ -59,7 +57,7 @@ pub fn install(window: &MainWindow, app: App) {
     settings::bind_with_close(window, settings, before_close);
     trainer_backend::unbound(window, app.trainer);
     let trainer_backend = app.trainer_backend.filter(|_| app.trainer);
-    trainer::install(window, trainer_backend.clone(), trainer_settings);
+    trainer::install(window, trainer_backend.clone());
     if let Some(backend) = trainer_backend {
         trainer_backend::bind(window, backend, &shell, decorations);
     }

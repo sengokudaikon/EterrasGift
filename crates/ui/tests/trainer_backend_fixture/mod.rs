@@ -1270,3 +1270,127 @@ pub(super) fn capture_waiting(session: &Session) {
     worker.join().unwrap();
     // Not hidden: hiding the last window asks the event loop to quit, and the captures go on in this one.
 }
+
+/// The trainer's profiles on the real worker, with no game running: the pages set up the shown profile (its switch saved
+/// at once), another profile can be shown or the shown one deleted, and the moment a game is seen they lock behind the
+/// connection's notice. Automatic connection is off, so the worker only looks for the game; nothing connects.
+pub(super) fn capture_profiles(session: &Session) {
+    use eg_trainer::profiles::{ProfileBook, ProfileSaver};
+
+    struct Games(Arc<AtomicUsize>, ProcessIdentity);
+    impl ProcessLocator for Games {
+        async fn find(&mut self) -> Result<Vec<ProcessIdentity>, BackendError> {
+            Ok(vec![self.1.clone(); self.0.load(Ordering::SeqCst)])
+        }
+    }
+    struct NoLog;
+    impl LogSource for NoLog {
+        fn read(&mut self, _: jiff::Timestamp) -> GameLogState {
+            GameLogState {
+                status: GameLogStatus::Current,
+                readiness: GameReadiness::NoCharacter,
+                shell_state: Some("None".into()),
+                offline_mode: None,
+                character: None,
+                problem: None,
+            }
+        }
+    }
+    struct Unreached;
+    impl Connector for Unreached {
+        type Connection = OwnedConnection;
+        async fn connect(&mut self, _: ProcessIdentity, _: jiff::Timestamp) -> Result<OwnedConnection, BackendError> {
+            Err(BackendError::blocked(backend::ErrorKind::Identity, "the profile captures never connect"))
+        }
+    }
+
+    let folder = session.folder();
+    let games = Arc::new(AtomicUsize::new(0));
+    let target = ProcessIdentity {
+        pid: 1,
+        created: 134_369_000_000_000_000,
+        executable: folder.join("owned-never-opened.exe"),
+    };
+    let saved = serde_json::json!({ "profiles": [
+        { "name": "Mira", "class": "Primalist", "cycle": "Legacy", "lastPlayed": "2026-10-20T18:00:00Z" },
+        { "name": "Oren", "class": "Sentinel", "cycle": "Legacy", "lastPlayed": "2026-10-19T18:00:00Z", "wanted": ["damage-dealt"] },
+    ]});
+    let saves = Arc::new(Mutex::new(Vec::<ProfileBook>::new()));
+    let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+    let (handle, worker) = backend::service(
+        Games(games.clone(), target),
+        Unreached,
+        NoLog,
+        SystemClock,
+        BackendOptions {
+            policy: GatePolicy::Release,
+            auto_connect: false,
+            poll_interval: Duration::from_millis(10),
+            discovery_interval: Duration::from_millis(10),
+            profiles: ProfileBook::from_settings(Some(&saved)),
+            save_profiles: Some(ProfileSaver::new({
+                let saves = saves.clone();
+                move |book| saves.lock().unwrap().push(book.clone())
+            })),
+            ..Default::default()
+        },
+    );
+    let worker = std::thread::spawn(move || runtime.block_on(worker.run()));
+    let ui = MainWindow::new().unwrap();
+    let store = SettingsStore::open(&folder.join("profiles"), &folder.join("profiles-settings.json"), &[]);
+    eg_ui::install(
+        &ui,
+        App {
+            launcher: Some(Arc::new(GameLauncher::new(session.host()))),
+            mods: None,
+            trainer: true,
+            trainer_backend: Some(handle.clone()),
+            settings: SettingsPage::new(SettingsService::inline(store), vec![eg_ui::trainer_settings::descriptor(true)], None, None),
+            start: Page::Combat,
+        },
+    );
+    ui.global::<Tokens>().set_motion(false);
+    session.window.set_size(PhysicalSize::new(1100, 700));
+    ui.show().unwrap();
+    let state = ui.global::<eg_ui::TrainerState>();
+    command(&handle, Command::Enable, || handle.snapshot().phase == Phase::Disconnected);
+    command(&handle, Command::StartMonitoring, || true);
+    ui.global::<Nav>().invoke_navigate("combat".into());
+    settle();
+    state.set_section(1);
+    // No game: the last played profile shows, and its hooks take changes.
+    wait(|| state.get_access() == eg_ui::TrainerAccess::Setup && state.get_profile_name() == "Mira");
+    assert_eq!(state.get_profiles().row_count(), 2);
+    let damage = || state.get_rows().row_data(1).expect("Damage multiplier");
+    assert_eq!(damage().title, "Damage multiplier");
+    assert!(damage().can_use && !damage().on);
+    state.invoke_hook_toggled(1, true);
+    assert!(damage().on, "the switch shows flipped at once");
+    let mira = |snapshot: &backend::BackendSnapshot| snapshot.profiles.profiles()[0].hooks.wanted().map(|id| id.as_str()).collect::<Vec<_>>();
+    wait(|| mira(&handle.snapshot()) == ["damage-dealt"] && saves.lock().unwrap().last().is_some_and(|book| *book == *handle.snapshot().profiles));
+    assert_eq!(damage().status, "Turns on when Mira enters play.");
+    for _ in 0..3 {
+        settle();
+        ui.window().take_snapshot().expect("render");
+    }
+    session.capture(&ui, "backend-trainer-setup");
+    // Oren's profile, with his own switch; then Mira's deleted, and Oren's the only one.
+    state.invoke_select_profile(1);
+    wait(|| state.get_profile_name() == "Oren" && handle.snapshot().editing.as_ref().is_some_and(|key| key.name == "Oren"));
+    assert!(damage().on, "Oren wants Damage multiplier");
+    state.invoke_select_profile(0);
+    wait(|| state.get_profile_name() == "Mira");
+    state.invoke_delete_profile();
+    wait(|| state.get_profiles().row_count() == 1 && state.get_profile_name() == "Oren");
+    assert!(handle.snapshot().profiles.profiles().iter().all(|profile| profile.key.name != "Mira"));
+    // A game is seen: the profiles lock until an offline character is in play, and the pages show the connection.
+    games.store(1, Ordering::SeqCst);
+    wait(|| state.get_access() == eg_ui::TrainerAccess::Locked);
+    assert_eq!(handle.snapshot().profile_lock, backend::ProfileLock::Locked);
+    // A game gone again: they can be set up once more.
+    games.store(0, Ordering::SeqCst);
+    wait(|| state.get_access() == eg_ui::TrainerAccess::Setup);
+
+    command(&handle, Command::Shutdown, || handle.snapshot().phase == Phase::Stopped);
+    worker.join().unwrap();
+}

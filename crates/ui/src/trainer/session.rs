@@ -1,20 +1,25 @@
-//! What the trainer's pages ask of the game session: the part of the C# app's `GameSessionCoordinator` (and its
-//! `HookValueMemory`) that the page view models use. The app runs on the trainer's worker (`backend_session`) when it has
-//! one, and otherwise on [`Unconnected`], which tells the truth: no offline character is connected.
+//! What the trainer's pages ask of the game session: the part of the C# app's `GameSessionCoordinator` that the page view
+//! models use, and the characters' profiles that hold the hooks. The app runs on the trainer's worker (`backend_session`)
+//! when it has one, and otherwise on [`Unconnected`], which tells the truth: no offline character is connected, and no
+//! profile is known.
 
-use super::catalog::Feature;
-use eg_core::settings_service::ModuleSettings;
-use serde_json::{Map, Value};
-use std::cell::RefCell;
-use std::collections::{BTreeMap, BTreeSet};
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
+use super::profiles::Profile;
 
-/// Where a hook stands in the game, as the helper reported it.
-#[derive(Clone, Debug, Default, PartialEq)]
-pub struct HookState {
-    pub on: bool,
-    pub failure: Option<String>,
+/// Where a hook of the live profile stands in the game (the worker's `HookRun`).
+#[derive(Clone, Debug, PartialEq)]
+pub enum HookState {
+    /// Off in the game: not wanted, or turned off as asked.
+    Off,
+    /// Wanted, waiting its turn.
+    Queued,
+    Applying,
+    /// On in the game, as its own report confirmed.
+    On,
+    /// The last change did not take, for `reason`; `on` is what the game holds.
+    Failed {
+        reason: String,
+        on: bool,
+    },
 }
 
 /// A field as the game answered: unnamed for a fixed editor, named by the game for a listed one (what the character holds).
@@ -85,168 +90,44 @@ pub trait TrainerSession {
     fn unavailable(&self, _id: &str) -> Option<&'static str> {
         None
     }
-    /// The hooks the user wants on; each starts off with every run.
+    /// Every kept profile, the last played first.
+    fn profiles(&self) -> Vec<Profile> {
+        Vec::new()
+    }
+    /// Whose hooks the rows are: the profile chosen while no game runs, or the character in play. None while no game runs
+    /// and no profile is kept.
+    fn shown_profile(&self) -> Option<Profile> {
+        None
+    }
+    /// The shown hooks are a kept profile's; false for a character in play without one, whose hooks last this connection.
+    fn is_profile_kept(&self) -> bool {
+        true
+    }
+    /// Shows another profile; only while no game runs.
+    fn select_profile(&self, _profile: &Profile) {}
+    /// Keeps the hooks of the character in play, which has no profile, as its profile.
+    fn keep_profile(&self) {}
+    /// While no game runs, or the profile of the character in play, whose hooks then last this connection only.
+    fn delete_profile(&self, _profile: &Profile) {}
+    /// The hooks the shown profile wants on. Changing them changes the profile, and while it is in play the game too.
     fn is_hook_wanted(&self, id: &str) -> bool;
     fn set_hook(&self, id: &str, on: bool);
-    /// A hook's remembered values; empty when it has none.
+    /// A hook's values in the shown profile; empty when it has none.
     fn hook_values(&self, id: &str) -> Vec<f64>;
     fn set_hook_values(&self, id: &str, values: &[f64]);
-    /// Where a hook stands in the game, while connected.
+    /// Where a hook stands in the game, while its character is in play.
     fn hook_state(&self, id: &str) -> Option<HookState>;
+    /// A change is on its way and not yet taken: the pages look again until it is.
+    fn is_busy(&self) -> bool {
+        false
+    }
     fn read_fields(&self, id: &str) -> FieldRequest;
     fn write_fields(&self, id: &str, fields: &[FieldWrite]) -> FieldRequest;
 }
 
-/// The switches the user wants on for this run, and the hooks' values remembered across runs (`HookValueMemory`).
+/// The session without a trainer worker: never connected, and without profiles, so no hook can be set up.
 #[derive(Default)]
-pub struct Hooks {
-    wanted: RefCell<BTreeSet<String>>,
-    pub memory: HookMemory,
-}
-
-impl Hooks {
-    pub fn new(memory: HookMemory) -> Hooks {
-        Hooks {
-            wanted: RefCell::default(),
-            memory,
-        }
-    }
-
-    pub fn is_wanted(&self, id: &str) -> bool {
-        self.wanted.borrow().contains(id)
-    }
-
-    pub fn set(&self, id: &str, on: bool) {
-        let mut wanted = self.wanted.borrow_mut();
-        if on {
-            wanted.insert(id.to_owned());
-        } else {
-            wanted.remove(id);
-        }
-    }
-}
-
-/// The settings key the values are saved under, in `moduleSettings.trainer`.
-pub const HOOK_VALUES_KEY: &str = "hookValues";
-
-/// The hooks' values (multipliers, counts, a choice as its index), remembered across runs in `moduleSettings.trainer.hookValues`
-/// (spec/data-and-persistence.md, the C# `HookValueMemory`). Values of a feature the catalog no longer has, or that now
-/// takes another number of values, are dropped on load and the settings saved once without them. Changes in quick
-/// succession are saved once, with the latest values; a failed save is ignored (the value comes back at its default).
-#[derive(Default)]
-pub struct HookMemory {
-    values: Arc<Mutex<BTreeMap<String, Vec<f64>>>>,
-    settings: Option<ModuleSettings>,
-    /// A save is queued and not yet started: it will take the latest values, so another change needs no save of its own.
-    queued: Arc<AtomicBool>,
-}
-
-impl HookMemory {
-    /// Loads the saved values fitted to `features`, saving once if any were dropped. Without settings, it remembers for
-    /// this run only.
-    pub fn load(settings: Option<ModuleSettings>, features: &[Feature]) -> HookMemory {
-        let saved = settings.as_ref().and_then(ModuleSettings::read).unwrap_or(Value::Null);
-        let (values, dropped) = fit_saved(&saved, features);
-        let memory = HookMemory {
-            values: Arc::new(Mutex::new(values)),
-            settings,
-            queued: Arc::default(),
-        };
-        if dropped {
-            memory.save();
-        }
-        memory
-    }
-
-    pub fn get(&self, id: &str) -> Vec<f64> {
-        self.values.lock().unwrap().get(id).cloned().unwrap_or_default()
-    }
-
-    pub fn set(&self, id: &str, values: &[f64]) {
-        let changed = self.values.lock().unwrap().insert(id.to_owned(), values.to_vec()).as_deref() != Some(values);
-        if changed {
-            self.save();
-        }
-    }
-
-    pub fn snapshot(&self) -> BTreeMap<String, Vec<f64>> {
-        self.values.lock().unwrap().clone()
-    }
-
-    fn save(&self) {
-        let Some(settings) = &self.settings else {
-            return;
-        };
-        if self.queued.swap(true, Ordering::AcqRel) {
-            return;
-        }
-        let (values, queued) = (self.values.clone(), self.queued.clone());
-        let result = settings.update(move |fields| {
-            // From here a change saves again: this save may already have read the values it would miss.
-            queued.store(false, Ordering::Release);
-            let values = values.lock().unwrap().clone();
-            let aliases: Vec<_> = fields.keys().filter(|name| name.eq_ignore_ascii_case(HOOK_VALUES_KEY)).cloned().collect();
-            for alias in aliases {
-                fields.remove(&alias);
-            }
-            fields.insert(HOOK_VALUES_KEY.into(), to_json(&values));
-            Ok(())
-        });
-        if result.is_err() {
-            // Settings are closing: best effort, as the C# app's.
-            self.queued.store(false, Ordering::Release);
-        }
-    }
-}
-
-/// The saved values the catalog still takes: each feature it has, with as many numbers as the feature has values. True
-/// when anything was dropped.
-fn fit_saved(slice: &Value, features: &[Feature]) -> (BTreeMap<String, Vec<f64>>, bool) {
-    let mut values = BTreeMap::new();
-    let mut dropped = false;
-    let saved = slice
-        .as_object()
-        .and_then(|fields| fields.iter().find(|(name, _)| name.eq_ignore_ascii_case(HOOK_VALUES_KEY)))
-        .map(|(_, value)| value);
-    let Some(saved) = saved else {
-        return (values, false);
-    };
-    let Some(entries) = saved.as_object() else {
-        return (values, !saved.is_null());
-    };
-    for (id, numbers) in entries {
-        let numbers: Option<Vec<f64>> = numbers.as_array().and_then(|list| list.iter().map(Value::as_f64).collect());
-        let wanted = features.iter().find(|feature| feature.id == id).map(|feature| feature.values.len());
-        match (numbers, wanted) {
-            (Some(numbers), Some(count)) if count > 0 && numbers.len() == count => {
-                values.insert(id.clone(), numbers);
-            }
-            _ => dropped = true,
-        }
-    }
-    (values, dropped)
-}
-
-fn to_json(values: &BTreeMap<String, Vec<f64>>) -> Value {
-    let mut map = Map::new();
-    for (id, numbers) in values {
-        map.insert(id.clone(), Value::Array(numbers.iter().map(|&number| Value::from(number)).collect()));
-    }
-    Value::Object(map)
-}
-
-/// The session without a trainer worker: never connected. It keeps the switches the user turns on and their values, as
-/// the C# session does before a connection, so a page shows what it would send.
-#[derive(Default)]
-pub struct Unconnected {
-    hooks: Hooks,
-}
-
-impl Unconnected {
-    pub fn new(memory: HookMemory) -> Unconnected {
-        Unconnected { hooks: Hooks::new(memory) }
-    }
-}
+pub struct Unconnected;
 
 const NOT_CONNECTED: &str = "No offline character is connected.";
 
@@ -263,21 +144,17 @@ impl TrainerSession for Unconnected {
         false
     }
 
-    fn is_hook_wanted(&self, id: &str) -> bool {
-        self.hooks.is_wanted(id)
+    fn is_hook_wanted(&self, _id: &str) -> bool {
+        false
     }
 
-    fn set_hook(&self, id: &str, on: bool) {
-        self.hooks.set(id, on);
+    fn set_hook(&self, _id: &str, _on: bool) {}
+
+    fn hook_values(&self, _id: &str) -> Vec<f64> {
+        Vec::new()
     }
 
-    fn hook_values(&self, id: &str) -> Vec<f64> {
-        self.hooks.memory.get(id)
-    }
-
-    fn set_hook_values(&self, id: &str, values: &[f64]) {
-        self.hooks.memory.set(id, values);
-    }
+    fn set_hook_values(&self, _id: &str, _values: &[f64]) {}
 
     fn hook_state(&self, _id: &str) -> Option<HookState> {
         None
@@ -289,57 +166,5 @@ impl TrainerSession for Unconnected {
 
     fn write_fields(&self, _id: &str, _fields: &[FieldWrite]) -> FieldRequest {
         not_connected()
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::trainer::catalog;
-    use eg_core::settings::SettingsStore;
-    use eg_core::settings_service::SettingsService;
-
-    #[test]
-    fn saved_values_are_fitted_to_the_catalog() {
-        let saved = serde_json::json!({
-            "autoConnect": true,
-            "hookValues": { "damage-dealt": [3.0], "drop-rates": [0.1, 1.0], "gone": [1.0], "god-mode": [] }
-        });
-        let (values, dropped) = fit_saved(&saved, catalog::FEATURES);
-        assert!(dropped);
-        assert_eq!(values.into_iter().collect::<Vec<_>>(), [("damage-dealt".to_owned(), vec![3.0])]);
-        let (_, dropped) = fit_saved(&serde_json::json!({ "hookValues": { "damage-dealt": [3.0] } }), catalog::FEATURES);
-        assert!(!dropped);
-        assert!(!fit_saved(&Value::Null, catalog::FEATURES).1);
-    }
-
-    #[test]
-    fn values_are_remembered_across_runs() {
-        let folder = tempfile::tempdir().unwrap();
-        let open = || {
-            let store = SettingsStore::open(&folder.path().join("app"), &folder.path().join("settings.json"), &[]);
-            SettingsService::inline(store)
-        };
-        let service = open();
-        service
-            .module("trainer")
-            .update(|fields| {
-                fields.insert("hookValues".into(), serde_json::json!({ "damage-dealt": [3.0], "gone": [1.0] }));
-                Ok(())
-            })
-            .unwrap();
-        // Loading drops the stale entry and saves once without it.
-        let memory = HookMemory::load(Some(service.module("trainer")), catalog::FEATURES);
-        assert_eq!(memory.get("damage-dealt"), [3.0]);
-        let saved = service.module("trainer").read().unwrap();
-        assert_eq!(saved["hookValues"], serde_json::json!({ "damage-dealt": [3.0] }));
-        memory.set("move-speed", &[1.5]);
-        memory.set("damage-dealt", &[4.0]);
-        drop(memory);
-        let memory = HookMemory::load(Some(open().module("trainer")), catalog::FEATURES);
-        assert_eq!(
-            memory.snapshot().into_iter().collect::<Vec<_>>(),
-            [("damage-dealt".to_owned(), vec![4.0]), ("move-speed".to_owned(), vec![1.5])]
-        );
     }
 }

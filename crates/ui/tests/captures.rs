@@ -490,6 +490,7 @@ fn main() {
     eg_ui::background::run_inline(true);
     if std::env::args().any(|arg| arg == "--trainer-backend") {
         trainer_backend_fixture::capture_waiting(&session);
+        trainer_backend_fixture::capture_profiles(&session);
         trainer_backend_fixture::capture(&session);
         return;
     }
@@ -870,6 +871,7 @@ fn main() {
     trainer_captures(&session);
     forge_captures(&session);
     trainer_backend_fixture::capture_waiting(&session);
+    trainer_backend_fixture::capture_profiles(&session);
     trainer_backend_fixture::capture(&session);
 }
 
@@ -1620,18 +1622,28 @@ fn mods_captures(session: &Session) {
 fn trainer_captures(session: &Session) {
     use eg_ui::trainer::catalog::{Area, FEATURES};
     use eg_ui::trainer::profiles::Profile;
-    use eg_ui::trainer::session::{FieldRequest, FieldWrite, GameField, HookState, TrainerSession, Unconnected};
+    use eg_ui::trainer::session::{FieldRequest, FieldWrite, GameField, HookState, TrainerSession, not_connected};
     use eg_ui::{Connection, TrainerAccess, TrainerState};
-    use std::cell::RefCell;
+    use std::cell::{Cell, RefCell};
     use std::collections::{BTreeMap, BTreeSet};
 
-    /// An offline character connected to a game that holds `fields` and reports `hooks`.
+    fn character(name: &str, class: &str) -> Profile {
+        Profile {
+            name: name.into(),
+            class: class.into(),
+            cycle: "Legacy".into(),
+        }
+    }
+
+    /// Mira, an offline character, connected to a game that holds `fields` and reports `hooks`; the hooks are her profile,
+    /// or, while `unsaved`, hers for this session only.
     #[derive(Default)]
     struct FakeTrainer {
         fields: RefCell<BTreeMap<String, Vec<GameField>>>,
         hooks: BTreeMap<String, HookState>,
         wanted: RefCell<BTreeSet<String>>,
         values: RefCell<BTreeMap<String, Vec<f64>>>,
+        unsaved: Cell<bool>,
     }
 
     impl FakeTrainer {
@@ -1648,6 +1660,21 @@ fn trainer_captures(session: &Session) {
     impl TrainerSession for FakeTrainer {
         fn is_connected(&self) -> bool {
             true
+        }
+        fn profiles(&self) -> Vec<Profile> {
+            if self.unsaved.get() { Vec::new() } else { vec![character("Mira", "Primalist")] }
+        }
+        fn shown_profile(&self) -> Option<Profile> {
+            Some(character("Mira", "Primalist"))
+        }
+        fn is_profile_kept(&self) -> bool {
+            !self.unsaved.get()
+        }
+        fn keep_profile(&self) {
+            self.unsaved.set(false);
+        }
+        fn delete_profile(&self, _profile: &Profile) {
+            self.unsaved.set(true);
         }
         fn is_hook_wanted(&self, id: &str) -> bool {
             self.wanted.borrow().contains(id)
@@ -1680,6 +1707,89 @@ fn trainer_captures(session: &Session) {
             // A count written to 0 is no longer held.
             list.retain(|field| field.label.is_empty() || field.value != 0.0);
             Ok(list.clone()).into()
+        }
+    }
+
+    /// A profile as the fake keeps it: its switches and values.
+    struct Kept {
+        profile: Profile,
+        wanted: BTreeSet<String>,
+        values: BTreeMap<String, Vec<f64>>,
+    }
+
+    /// No game yet: the profiles as the worker keeps them, the last played first, each with its own switches and values.
+    #[derive(Default)]
+    struct FakeSetup {
+        profiles: RefCell<Vec<Kept>>,
+        shown: Cell<usize>,
+    }
+
+    impl FakeSetup {
+        fn of(profiles: &[Profile]) -> FakeSetup {
+            let setup = FakeSetup::default();
+            setup.profiles.replace(
+                profiles
+                    .iter()
+                    .map(|profile| Kept {
+                        profile: profile.clone(),
+                        wanted: BTreeSet::new(),
+                        values: BTreeMap::new(),
+                    })
+                    .collect(),
+            );
+            setup
+        }
+
+        fn with<R>(&self, look: impl FnOnce(&mut Kept) -> R) -> Option<R> {
+            self.profiles.borrow_mut().get_mut(self.shown.get()).map(look)
+        }
+    }
+
+    impl TrainerSession for FakeSetup {
+        fn is_connected(&self) -> bool {
+            false
+        }
+        fn profiles(&self) -> Vec<Profile> {
+            self.profiles.borrow().iter().map(|kept| kept.profile.clone()).collect()
+        }
+        fn shown_profile(&self) -> Option<Profile> {
+            self.with(|kept| kept.profile.clone())
+        }
+        fn select_profile(&self, profile: &Profile) {
+            if let Some(index) = self.profiles().iter().position(|listed| listed == profile) {
+                self.shown.set(index);
+            }
+        }
+        fn delete_profile(&self, profile: &Profile) {
+            self.profiles.borrow_mut().retain(|kept| kept.profile != *profile);
+            self.shown.set(0);
+        }
+        fn is_hook_wanted(&self, id: &str) -> bool {
+            self.with(|kept| kept.wanted.contains(id)).unwrap_or(false)
+        }
+        fn set_hook(&self, id: &str, on: bool) {
+            self.with(|kept| {
+                if on {
+                    kept.wanted.insert(id.to_owned());
+                } else {
+                    kept.wanted.remove(id);
+                }
+            });
+        }
+        fn hook_values(&self, id: &str) -> Vec<f64> {
+            self.with(|kept| kept.values.get(id).cloned()).flatten().unwrap_or_default()
+        }
+        fn set_hook_values(&self, id: &str, values: &[f64]) {
+            self.with(|kept| kept.values.insert(id.to_owned(), values.to_vec()));
+        }
+        fn hook_state(&self, _: &str) -> Option<HookState> {
+            None
+        }
+        fn read_fields(&self, _: &str) -> FieldRequest {
+            not_connected()
+        }
+        fn write_fields(&self, _: &str, _: &[FieldWrite]) -> FieldRequest {
+            not_connected()
         }
     }
 
@@ -1731,33 +1841,31 @@ fn trainer_captures(session: &Session) {
     session.capture(&ui, "trainer-not-connected-1920");
 
     // No game yet: the hooks are a profile to set up, applied when its character enters play; editors wait for the game,
-    // and the Item Forge shows the connection. Without a known character only what happens is said.
-    let setup = |page: &str, section: i32, width: u32, height: u32| -> (MainWindow, eg_ui::trainer::Pages) {
+    // and the Item Forge shows the connection. Before any character has a profile, the rows only say how one comes.
+    let setup = |page: &str, section: i32, width: u32, height: u32, profiles: &[Profile]| -> MainWindow {
         let ui = session.open(true, width, height);
-        let pages = eg_ui::trainer::bind(&ui, Rc::new(Unconnected::default()), FEATURES.to_vec(), false);
+        eg_ui::trainer::bind(&ui, Rc::new(FakeSetup::of(profiles)), FEATURES.to_vec(), false);
         ui.global::<TrainerState>().set_access(TrainerAccess::Setup);
         ui.global::<Nav>().invoke_navigate(page.into());
         show(&ui);
         state(&ui).set_section(section);
         show(&ui);
-        (ui, pages)
+        ui
     };
-    let (ui, pages) = setup("combat", 1, 1100, 700);
+    let on = |ui: &MainWindow, row: usize| state(ui).get_rows().row_data(row).is_some_and(|row| row.on);
+    let ui = setup("combat", 1, 1100, 700, &[]);
+    assert!(!state(&ui).get_rows().row_data(1).is_some_and(|row| row.can_use), "no profile to set up");
     session.capture(&ui, "trainer-setup-1100");
-    // Known characters: a picker, the last played first; each keeps its own hooks.
-    let character = |key: &str, name: &str, class: &str| Profile {
-        key: key.into(),
-        name: name.into(),
-        class: class.into(),
-        cycle: "Legacy".into(),
-    };
-    pages.set_profiles(vec![character("mira", "Mira", "Primalist"), character("oren", "Oren", "Sentinel")]);
-    show(&ui);
+    // Profiles: a picker, the last played first; each keeps its own hooks.
+    let ui = setup("combat", 1, 1100, 700, &[character("Mira", "Primalist"), character("Oren", "Sentinel")]);
     // Damage multiplier's switch, under the profile band.
     session.click(628.0, 222.0);
     show(&ui);
-    let on = |ui: &MainWindow, row: usize| state(ui).get_rows().row_data(row).is_some_and(|row| row.on);
     assert!(on(&ui, 1), "Mira's Damage multiplier switched on in the setup");
+    assert_eq!(
+        state(&ui).get_rows().row_data(1).map(|row| row.status.to_string()).as_deref(),
+        Some("Turns on when Mira enters play.")
+    );
     session.capture(&ui, "trainer-setup-profiles-1100");
     session.resize(680, 580);
     show(&ui);
@@ -1770,18 +1878,54 @@ fn trainer_captures(session: &Session) {
     state(&ui).invoke_select_profile(0);
     show(&ui);
     assert!(on(&ui, 1), "Mira's profile kept its switch");
-    let (ui, _) = setup("forge", 0, 1100, 700);
+    // The profile band's Delete…, and the Delete it asks with.
+    const DELETE: (f32, f32) = (370.0, 86.0);
+    const CONFIRM: (f32, f32) = (679.0, 122.0);
+    // Delete asks first, in place of the caption; then Mira's profile is gone and Oren's shows.
+    session.click(DELETE.0, DELETE.1);
+    show(&ui);
+    session.capture(&ui, "trainer-setup-delete-1100");
+    session.click(CONFIRM.0, CONFIRM.1);
+    show(&ui);
+    assert_eq!(state(&ui).get_profiles().row_count(), 1);
+    assert_eq!(state(&ui).get_profile_name(), "Oren");
+    assert!(!on(&ui, 1), "Oren's switch is his own");
+    let ui = setup("forge", 0, 1100, 700, &[character("Mira", "Primalist")]);
     session.capture(&ui, "trainer-setup-forge-1100");
 
     // A connected game (holding Combat's rates, so its editor reads). A switch turned on says where it stands.
     let connected = || Some(FakeTrainer::holding(&[("attack-leech", &[("", 1.0), ("", 0.3)])]));
     let ui = open("combat", 1, 1100, 700, connected());
     sizes(&ui, "trainer-combat", &small);
-    session.click(628.0, 149.0);
+    session.click(628.0, 208.0);
     show(&ui);
     session.capture(&ui, "trainer-combat-on-1100");
+    // Mira in play without a profile: her switches last this session until they are kept as her profile. Kept, the
+    // profile deletes after asking, and her switches stay as they are in the game.
+    let fake = connected().expect("a connected game");
+    fake.unsaved.set(true);
+    let ui = open("combat", 1, 1100, 700, Some(fake));
+    session.click(628.0, 208.0);
+    show(&ui);
+    session.capture(&ui, "trainer-live-unsaved-1100");
+    assert!(!state(&ui).get_profile_kept());
+    assert_eq!(state(&ui).get_profile_index(), -1);
+    const KEEP: (f32, f32) = (320.0, 86.0);
+    session.click(KEEP.0, KEEP.1);
+    show(&ui);
+    assert!(state(&ui).get_profile_kept(), "Keep as profile keeps Mira's hooks");
+    assert_eq!(state(&ui).get_profile_index(), 0);
+    const LIVE_DELETE: (f32, f32) = KEEP;
+    session.click(LIVE_DELETE.0, LIVE_DELETE.1);
+    show(&ui);
+    session.capture(&ui, "trainer-live-delete-1100");
+    const LIVE_CONFIRM: (f32, f32) = (678.0, 122.0);
+    session.click(LIVE_CONFIRM.0, LIVE_CONFIRM.1);
+    show(&ui);
+    assert!(!state(&ui).get_profile_kept(), "the profile is deleted");
+    assert!(state(&ui).get_rows().row_data(1).is_some_and(|row| row.on), "her switch stays on");
     // Up steps a focused box by its step, within its range; the tip says so.
-    session.click(520.0, 149.0);
+    session.click(520.0, 208.0);
     session.key(Key::UpArrow);
     session.key(Key::UpArrow);
     show(&ui);
@@ -1792,7 +1936,7 @@ fn trainer_captures(session: &Session) {
     // The rows split anew (here the window narrows from two columns to one) while a number is half typed: the box is the
     // same box, so it keeps its focus and the "1." typed so far, and the next digit lands after it.
     let ui = open("combat", 1, 1440, 900, connected());
-    session.click(520.0, 149.0);
+    session.click(520.0, 208.0);
     session.control_key("a");
     session.type_text("1.");
     session.resize(1100, 700);
@@ -1815,13 +1959,15 @@ fn trainer_captures(session: &Session) {
     show(&ui);
     session.capture(&ui, "trainer-values-quality-1100");
 
-    // Keyboard: the strip, then the first row's (?) opens its tip under it; Space on the switch turns it on.
+    // Keyboard: the strip, the profile's Delete…, then the first row's (?) opens its tip under it; Space on the switch
+    // turns it on.
     let ui = open("forge", 0, 1100, 700, connected());
     for _ in 0..4 {
         session.key(Key::Tab);
     }
     session.key(Key::RightArrow);
     show(&ui);
+    session.key(Key::Tab);
     session.key(Key::Tab);
     show(&ui);
     session.capture(&ui, "trainer-keyboard-help");
@@ -1838,14 +1984,14 @@ fn trainer_captures(session: &Session) {
         let ui = open("combat", 1, 1100, 700, connected());
         state(&ui).set_rows_ready(ready);
         settle();
-        session.click(628.0, 149.0);
+        session.click(628.0, 208.0);
         settle();
         assert_eq!(on(&ui, 1), ready, "a click on rows shown: {ready}");
-        // The strip, then the first row's (?) and its switch.
+        // The strip, the profile's Delete…, then the first row's (?) and its switch.
         let ui = open("combat", 1, 1100, 700, connected());
         state(&ui).set_rows_ready(ready);
         settle();
-        for _ in 0..6 {
+        for _ in 0..7 {
             session.key(Key::Tab);
         }
         session.type_text(" ");
@@ -1944,12 +2090,12 @@ fn trainer_captures(session: &Session) {
 
     // Hooks in a connected game: in place, and refused.
     let mut fake = FakeTrainer::default();
-    fake.hooks.insert("god-mode".into(), HookState { on: true, failure: None });
+    fake.hooks.insert("god-mode".into(), HookState::On);
     fake.hooks.insert(
         "damage-taken".into(),
-        HookState {
+        HookState::Failed {
+            reason: "the game's method was not found".into(),
             on: false,
-            failure: Some("the game's method was not found".into()),
         },
     );
     for id in ["god-mode", "damage-taken"] {

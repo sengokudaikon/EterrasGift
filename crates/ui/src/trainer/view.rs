@@ -4,7 +4,7 @@
 
 use super::catalog::{Area, Feature, FeatureValue};
 use super::pages::{self, Content, EditorRow, FieldModel, HookRow, PageModel, Row, Tone};
-use super::profiles::{Profile, Profiles};
+use super::profiles::{self, Profile};
 use super::session::TrainerSession;
 use crate::shell::Page;
 use crate::{FeatureFieldView, FeatureRowKind, FeatureRowModels, FeatureRowPlace, FeatureRowView, FeatureTone, FeatureValueView, MainWindow, Nav, Tokens, TrainerState};
@@ -22,13 +22,6 @@ impl Pages {
     /// The session changed: rows take their answers, read on a new connection, and show where they stand.
     pub fn refresh(&self) {
         self.0.borrow_mut().refresh();
-    }
-
-    /// The profiles a setup offers, the last played first (TODO(trainer): from the worker's snapshot).
-    pub fn set_profiles(&self, profiles: Vec<Profile>) {
-        let mut controller = self.0.borrow_mut();
-        controller.profiles.set(profiles);
-        controller.publish_profiles();
     }
 
     /// A reference that does not keep the pages bound: rebinding the window ends whatever follows them.
@@ -72,7 +65,10 @@ pub fn bind(window: &MainWindow, session: Rc<dyn TrainerSession>, features: Vec<
         layout: layout.clone(),
         serial: 0,
         polling: slint::Timer::default(),
-        profiles: Profiles::default(),
+        listed: Vec::new(),
+        shown: None,
+        live: false,
+        kept: true,
         this: std::rc::Weak::new(),
     }));
     controller.borrow_mut().this = Rc::downgrade(&controller);
@@ -100,6 +96,15 @@ pub fn bind(window: &MainWindow, session: Rc<dyn TrainerSession>, features: Vec<
         let controller = controller.clone();
         move |index| controller.borrow_mut().select_profile(index)
     });
+    state.on_delete_profile({
+        let controller = controller.clone();
+        move || controller.borrow_mut().delete_profile()
+    });
+    state.on_keep_profile({
+        let controller = controller.clone();
+        move || controller.borrow_mut().keep_profile()
+    });
+    controller.borrow_mut().follow_profiles();
     controller.borrow().publish_profiles();
     state.on_select_section({
         let controller = controller.clone();
@@ -216,7 +221,13 @@ struct Controller {
     serial: i32,
     /// Runs only while a row waits on the game.
     polling: slint::Timer,
-    profiles: Profiles,
+    /// The profiles as last shown, the last played first, and the character whose hooks the rows are.
+    listed: Vec<Profile>,
+    shown: Option<Profile>,
+    /// The shown character is in play.
+    live: bool,
+    /// The shown hooks are a kept profile's, not only this connection's.
+    kept: bool,
     this: std::rc::Weak<RefCell<Controller>>,
 }
 
@@ -242,22 +253,60 @@ impl Controller {
         self.show_section();
     }
 
-    /// Another profile shown: its hooks reach the session, and every page is made again from them, on the section it showed.
     fn select_profile(&mut self, index: i32) {
-        let session = self.session.clone();
-        if !self.profiles.select(index.max(0) as usize, &*session, &self.features) {
+        let Some(profile) = usize::try_from(index).ok().and_then(|index| self.listed.get(index)).cloned() else {
+            return;
+        };
+        if self.shown.as_ref() != Some(&profile) {
+            self.session.select_profile(&profile);
+            self.refresh();
+        }
+    }
+
+    fn delete_profile(&mut self) {
+        if let Some(profile) = self.shown.clone() {
+            self.session.delete_profile(&profile);
+            self.refresh();
+        }
+    }
+
+    fn keep_profile(&mut self) {
+        self.session.keep_profile();
+        self.refresh();
+    }
+
+    /// Follows the session's profiles. Another profile shown makes every page again from its hooks, each on the section it
+    /// showed.
+    fn follow_profiles(&mut self) {
+        let (listed, shown, live, kept) = (
+            self.session.profiles(),
+            self.session.shown_profile(),
+            self.session.is_connected(),
+            self.session.is_profile_kept(),
+        );
+        if listed == self.listed && shown == self.shown && live == self.live && kept == self.kept {
             return;
         }
-        let (features, planned) = (&self.features, self.planned);
-        for (area, page) in self.pages.iter_mut() {
-            let selected = page.as_ref().map(|page| page.selected);
-            *page = pages::build(*area, features, planned, &*session);
-            if let (Some(page), Some(selected)) = (page.as_mut(), selected) {
-                page.selected = selected;
+        // Keeping or deleting the live character's profile leaves its hooks as they are.
+        let rebuild = shown != self.shown;
+        self.listed = listed;
+        self.shown = shown;
+        self.live = live;
+        self.kept = kept;
+        self.publish_profiles();
+        if rebuild {
+            let (features, planned, session) = (&self.features, self.planned, &self.session);
+            for (area, page) in self.pages.iter_mut() {
+                let selected = page.as_ref().map(|page| page.selected);
+                *page = pages::build(*area, features, planned, &**session);
+                if let (Some(page), Some(selected)) = (page.as_mut(), selected) {
+                    page.selected = selected;
+                }
+            }
+            if self.current.is_some() {
+                self.show_section();
             }
         }
-        self.publish_profiles();
-        self.show_section();
     }
 
     fn publish_profiles(&self) {
@@ -265,10 +314,14 @@ impl Controller {
             return;
         };
         let state = window.global::<TrainerState>();
-        let labels: Vec<SharedString> = self.profiles.list().iter().map(|profile| profile.label().into()).collect();
+        let labels: Vec<SharedString> = self.listed.iter().map(|profile| profile.label().into()).collect();
         state.set_profiles(ModelRc::new(VecModel::from(labels)));
-        state.set_profile_index(self.profiles.selected_index() as i32);
-        state.set_profile_caption(self.profiles.caption().into());
+        let index = self.shown.as_ref().and_then(|shown| self.listed.iter().position(|profile| profile == shown));
+        state.set_profile_index(index.map_or(-1, |index| index as i32));
+        state.set_profile_name(self.shown.as_ref().map(|profile| profile.name.as_str()).unwrap_or_default().into());
+        state.set_profile_label(self.shown.as_ref().map(Profile::label).unwrap_or_default().into());
+        state.set_profile_kept(self.kept);
+        state.set_profile_caption(profiles::caption(self.shown.as_ref(), self.live, self.kept).into());
     }
 
     fn page(&mut self) -> Option<&mut PageModel> {
@@ -330,6 +383,7 @@ impl Controller {
     /// Every row as it stands now; only what changed reaches the view. Answers reach rows on every page, shown or not; the
     /// rows are rebuilt only while their page shows, since opening a page shows its section afresh.
     fn refresh(&mut self) {
+        self.follow_profiles();
         let busy = self.poll();
         self.keep_polling(busy);
         if self.showing() {
@@ -365,7 +419,7 @@ impl Controller {
     /// the game.
     fn poll(&mut self) -> bool {
         let session = self.session.clone();
-        let mut busy = false;
+        let mut busy = session.is_busy();
         for page in self.pages.values_mut().flatten() {
             for section in &mut page.sections {
                 if let Content::Rows(rows) = &mut section.content {

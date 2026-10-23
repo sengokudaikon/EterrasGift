@@ -4,8 +4,8 @@
 //! Captures drive other states through fake sessions of their own. The catalog is `eg_trainer::features`, which `catalog`
 //! adapts.
 //!
-//! TODO(trainer): the hooks' wanted state and values move to the trainer's own crates (`eg_trainer::features::FeatureIntents`);
-//! this module keeps only the rows and their binding.
+//! The hooks' wanted state and values are the worker's profiles (`eg_trainer::profiles`); this module keeps only the rows
+//! and their binding.
 
 pub mod backend_session;
 pub mod catalog;
@@ -17,27 +17,19 @@ mod view;
 pub use view::{Pages, WeakPages, bind};
 
 use crate::MainWindow;
-use eg_core::settings_service::ModuleSettings;
 use eg_trainer::backend::BackendHandle;
 use std::rc::Rc;
 
-/// Binds the trainer's pages, on the worker when there is one. `settings` is the trainer's slice of the settings, where
-/// the hooks' values are remembered; None remembers them for this run only. Navigation offers the pages only in a run
-/// with the trainer on; binding them costs nothing else.
+/// Binds the trainer's pages, on the worker when there is one; the worker keeps the profiles. Navigation offers the pages
+/// only in a run with the trainer on; binding them costs nothing else.
 /// TODO(trainer): list planned features (`presented: false`) in a source checkout, once the composition says it is one.
 /// Row presentation and native availability are separate; the backend decides what can run.
-pub fn install(window: &MainWindow, backend: Option<BackendHandle>, settings: Option<ModuleSettings>) {
-    let memory = session::HookMemory::load(settings, catalog::FEATURES);
+pub fn install(window: &MainWindow, backend: Option<BackendHandle>) {
     let Some(backend) = backend else {
-        bind(window, Rc::new(session::Unconnected::new(memory)), catalog::FEATURES.to_vec(), false);
+        bind(window, Rc::new(session::Unconnected), catalog::FEATURES.to_vec(), false);
         return;
     };
-    let pages = bind(
-        window,
-        Rc::new(backend_session::BackendSession::new(backend.clone(), memory)),
-        catalog::FEATURES.to_vec(),
-        false,
-    );
+    let pages = bind(window, Rc::new(backend_session::BackendSession::new(backend.clone())), catalog::FEATURES.to_vec(), false);
     follow(&pages, &backend);
 }
 

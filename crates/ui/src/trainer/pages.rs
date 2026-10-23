@@ -3,7 +3,7 @@
 //! `PlannedFeatureViewModel`) and `RowColumnsPanel`'s split, without any view. `view.rs` shows them.
 
 use super::catalog::{self, Area, Feature, FeatureField, FeatureKind, FeatureValue};
-use super::session::{FieldError, FieldRequest, FieldResult, FieldWrite, GameField, PendingFields, TrainerSession};
+use super::session::{FieldError, FieldRequest, FieldResult, FieldWrite, GameField, HookState, PendingFields, TrainerSession};
 
 /// One trainer page: its sections along the top and the chosen one beneath.
 pub struct PageModel {
@@ -117,9 +117,9 @@ pub enum Tone {
     Error,
 }
 
-/// A game hook's row: a switch, its values, and where it stands in the game. It starts off with every run; the session
-/// puts it on once an offline character is connected. A change to its values reaches the game at once. A connected game
-/// this version cannot put it in says so, and the row is read-only.
+/// A game hook's row: a switch, its values, and where it stands in the game. They are the shown profile's: set up while
+/// no game runs, and put in the game when its character enters play; while it is in play a change reaches the game at
+/// once. With no profile to show, or in a connected game this version cannot put it in, the row is read-only.
 pub struct HookRow {
     pub feature: Feature,
     /// What the helper is sent: a number, or a choice's index.
@@ -152,9 +152,9 @@ impl HookRow {
         session.is_hook_wanted(self.feature.id)
     }
 
-    /// Its switch and values take changes, except in a connected game this version cannot put it in.
+    /// Its switch and values take changes while a profile shows, except in a connected game this version cannot put it in.
     pub fn can_use(&self, session: &dyn TrainerSession) -> bool {
-        !(session.is_connected() && session.unavailable(self.feature.id).is_some())
+        session.shown_profile().is_some() && !(session.is_connected() && session.unavailable(self.feature.id).is_some())
     }
 
     pub fn set_on(&self, session: &dyn TrainerSession, on: bool) {
@@ -197,23 +197,28 @@ impl HookRow {
         }
     }
 
-    /// Where it stands in the game while it is on; empty while it is off.
+    /// Where it stands in the game while it is wanted on, or until the game lets it go; empty while it is off.
     pub fn status(&self, session: &dyn TrainerSession) -> (String, Tone) {
         let connected = session.is_connected();
         if connected && let Some(reason) = session.unavailable(self.feature.id) {
             return (reason.to_owned(), Tone::None);
         }
-        if !self.is_on(session) {
-            return (String::new(), Tone::None);
+        let wanted = self.is_on(session);
+        if !connected {
+            return match session.shown_profile() {
+                Some(profile) if wanted => (format!("Turns on when {} enters play.", profile.name), Tone::None),
+                _ => (String::new(), Tone::None),
+            };
         }
-        let state = session.hook_state(self.feature.id);
-        let in_place = state.as_ref().is_some_and(|state| state.on);
-        let failure = if !in_place && connected { state.and_then(|state| state.failure) } else { None };
-        match failure {
-            _ if in_place => ("On in the game.".to_owned(), Tone::Confirmed),
-            _ if !connected => ("Turns on once an offline character is connected.".to_owned(), Tone::None),
-            Some(failure) => (format!("Could not turn on: {failure}"), Tone::Error),
-            None => ("Turning on in the game…".to_owned(), Tone::None),
+        let say = |text: &str, tone| (text.to_owned(), tone);
+        match (wanted, session.hook_state(self.feature.id)) {
+            (true, Some(HookState::On)) => say("On in the game.", Tone::Confirmed),
+            (true, Some(HookState::Failed { reason, .. })) => (format!("Could not turn on: {reason}"), Tone::Error),
+            (true, Some(HookState::Applying | HookState::Off)) => say("Turning on in the game…", Tone::None),
+            (true, Some(HookState::Queued) | None) => say("Waiting to turn on…", Tone::None),
+            (false, Some(HookState::Failed { reason, on: true })) => (format!("Could not turn off: {reason}"), Tone::Error),
+            (false, Some(HookState::Applying | HookState::On)) => say("Turning off in the game…", Tone::None),
+            (false, _) => (String::new(), Tone::None),
         }
     }
 }
@@ -742,9 +747,10 @@ pub fn place(heights: &[f32], headings: &[bool], starts: &[usize], section_spaci
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::trainer::session::{HookState, NOT_AVAILABLE, Unconnected};
+    use crate::trainer::profiles::Profile;
+    use crate::trainer::session::{NOT_AVAILABLE, Unconnected};
     use std::cell::RefCell;
-    use std::collections::BTreeMap;
+    use std::collections::{BTreeMap, BTreeSet};
     use std::rc::Rc;
 
     #[test]
@@ -767,7 +773,7 @@ mod tests {
 
     #[test]
     fn pages_follow_the_catalog() {
-        let session = Unconnected::default();
+        let session = Unconnected;
         let character = build(Area::Character, catalog::FEATURES, false, &session).unwrap();
         assert!(!character.has_section_strip());
         let Content::Rows(rows) = &character.sections[0].content else { panic!("rows") };
@@ -790,15 +796,71 @@ mod tests {
         assert_eq!(planned_details(catalog::feature("currency").unwrap()), "Gold · Soul embers · Ancient bones");
     }
 
+    fn mira() -> Profile {
+        Profile {
+            name: "Mira".into(),
+            class: "Primalist".into(),
+            cycle: "Legacy".into(),
+        }
+    }
+
+    /// No game yet, with Mira's profile shown, or in play (`live`) with the game holding `states`.
+    #[derive(Default)]
+    struct Setup {
+        live: bool,
+        states: BTreeMap<&'static str, HookState>,
+        wanted: RefCell<BTreeSet<String>>,
+        values: RefCell<BTreeMap<String, Vec<f64>>>,
+    }
+
+    impl TrainerSession for Setup {
+        fn is_connected(&self) -> bool {
+            self.live
+        }
+        fn shown_profile(&self) -> Option<Profile> {
+            Some(mira())
+        }
+        fn is_hook_wanted(&self, id: &str) -> bool {
+            self.wanted.borrow().contains(id)
+        }
+        fn set_hook(&self, id: &str, on: bool) {
+            if on {
+                self.wanted.borrow_mut().insert(id.to_owned());
+            } else {
+                self.wanted.borrow_mut().remove(id);
+            }
+        }
+        fn hook_values(&self, id: &str) -> Vec<f64> {
+            self.values.borrow().get(id).cloned().unwrap_or_default()
+        }
+        fn set_hook_values(&self, id: &str, values: &[f64]) {
+            self.values.borrow_mut().insert(id.to_owned(), values.to_vec());
+        }
+        fn hook_state(&self, id: &str) -> Option<HookState> {
+            self.states.get(id).cloned()
+        }
+        fn read_fields(&self, _: &str) -> FieldRequest {
+            crate::trainer::session::not_connected()
+        }
+        fn write_fields(&self, _: &str, _: &[FieldWrite]) -> FieldRequest {
+            crate::trainer::session::not_connected()
+        }
+    }
+
     #[test]
     fn a_hook_says_where_it_stands() {
-        let session = Unconnected::default();
+        // Without a profile there is nothing to set up.
+        let none = Unconnected;
+        let row = HookRow::new(*catalog::feature("damage-dealt").unwrap(), &none);
+        assert!(!row.can_use(&none));
+        let session = Setup::default();
         let mut row = HookRow::new(*catalog::feature("damage-dealt").unwrap(), &session);
+        assert!(row.can_use(&session));
         assert_eq!(row.values, [2.0]);
         assert_eq!(row.status(&session), (String::new(), Tone::None));
         row.set_on(&session, true);
         assert_eq!(session.hook_values("damage-dealt"), [2.0]);
-        assert_eq!(row.status(&session).0, "Turns on once an offline character is connected.");
+        assert_eq!(row.status(&session).0, "Turns on when Mira enters play.");
         row.set_amount(&session, 0, Some(500.0));
         assert_eq!(row.values, [100.0]);
         row.set_amount(&session, 0, None);
@@ -809,6 +871,33 @@ mod tests {
         assert_eq!(rarity.values, [3.0]);
         rarity.choose(&session, 0, 9);
         assert_eq!(rarity.values, [3.0]);
+
+        // In play, each hook as the game has it.
+        let failed = |on| HookState::Failed {
+            reason: "the game's method was not found".into(),
+            on,
+        };
+        let live = Setup {
+            live: true,
+            states: BTreeMap::from([
+                ("god-mode", HookState::On),
+                ("damage-dealt", HookState::Queued),
+                ("damage-taken", failed(false)),
+                ("move-speed", failed(true)),
+                ("force-rarity", HookState::Applying),
+            ]),
+            ..Setup::default()
+        };
+        for id in ["god-mode", "damage-dealt", "damage-taken"] {
+            live.set_hook(id, true);
+        }
+        let status = |id| HookRow::new(*catalog::feature(id).unwrap(), &live).status(&live);
+        assert_eq!(status("god-mode"), ("On in the game.".into(), Tone::Confirmed));
+        assert_eq!(status("damage-dealt").0, "Waiting to turn on…");
+        assert_eq!(status("damage-taken"), ("Could not turn on: the game's method was not found".into(), Tone::Error));
+        assert_eq!(status("move-speed"), ("Could not turn off: the game's method was not found".into(), Tone::Error));
+        assert_eq!(status("force-rarity").0, "Turning off in the game…");
+        assert_eq!(status("drop-rates").0, "");
     }
 
     /// A connected game holding fixed fields, for the editor's flow.
@@ -853,10 +942,13 @@ mod tests {
             Vec::new()
         }
         fn set_hook_values(&self, _: &str, _: &[f64]) {}
+        fn shown_profile(&self) -> Option<Profile> {
+            Some(mira())
+        }
         fn hook_state(&self, _: &str) -> Option<HookState> {
-            Some(HookState {
+            Some(HookState::Failed {
+                reason: "the helper is older than the app".into(),
                 on: false,
-                failure: Some("the helper is older than the app".into()),
             })
         }
         fn read_fields(&self, id: &str) -> FieldRequest {
@@ -916,7 +1008,7 @@ mod tests {
         assert!(!unserved.is_busy() && !unserved.can_use(&game));
         assert_eq!(unserved.reason(&game), Some(NOT_AVAILABLE));
         assert_eq!(
-            EditorRow::new(feature, false, &Unconnected::default()).reason(&Unconnected::default()),
+            EditorRow::new(feature, false, &Unconnected).reason(&Unconnected),
             Some("Available once an offline character is connected.")
         );
         let hook = HookRow::new(*catalog::feature("damage-dealt").unwrap(), &game);

@@ -1,16 +1,22 @@
 //! The trainer's pages on the trainer's worker: the session is connected while the worker is Ready, and the one field set
 //! this version serves (Combat › Attack and leech rates) is read and written through its commands, each answer arriving
-//! with a later snapshot. Every other field set and every hook says, while connected, that this version cannot serve it
-//! (`research/trainer-readiness.md`: the hook backend and the other six field sets are not ported). No game, pipe or
-//! process work runs here; commands are queued and their receipts polled.
+//! with a later snapshot. The hooks are the worker's profiles: the shown one's switches and values come from its snapshot
+//! (or, for a character in play without one, this connection's), and each change is a command. Every other field set and
+//! every hook says, while connected, that this version cannot serve it (`research/trainer-readiness.md`: the hook
+//! backend and the other six field sets are not ported). No game, pipe or process work runs here; commands are queued
+//! and their receipts polled.
 
-use super::session::{FieldError, FieldRequest, FieldResult, FieldWrite, GameField, HookMemory, HookState, Hooks, NOT_AVAILABLE, PendingFields, TrainerSession, not_connected};
+use super::profiles::Profile;
+use super::session::{FieldError, FieldRequest, FieldResult, FieldWrite, GameField, HookState, NOT_AVAILABLE, PendingFields, TrainerSession, not_connected};
 use eg_trainer::backend::{
-    AttackLeechObservation, AttackLeechRead, AttackLeechUnavailable, BackendError, BackendHandle, BackendSnapshot, Command, Delivery, ObservedRate, Pending, Phase,
+    AttackLeechObservation, AttackLeechRead, AttackLeechUnavailable, BackendError, BackendHandle, BackendSnapshot, Command, Delivery, HookRun, ObservedRate, Pending, Phase,
 };
+use eg_trainer::features::{FeatureIntents, HookId};
 use eg_trainer::field_writes::{AttackLeechDecision, AttackLeechPlan, AttackLeechTarget, FieldInputError, FieldPlanError, RateWriteRecord};
+use eg_trainer::profiles::ProfileKey;
 use eg_trainer::writes::WriteOutcome;
-use std::collections::VecDeque;
+use std::cell::RefCell;
+use std::collections::{BTreeMap, VecDeque};
 
 /// The catalog's id of the field set the worker serves.
 pub const ATTACK_LEECH: &str = "attack-leech";
@@ -19,15 +25,49 @@ const BUSY: &str = "The trainer cannot accept another command.";
 
 pub struct BackendSession {
     backend: BackendHandle,
-    hooks: Hooks,
+    /// Switches flipped and not yet taken by the worker: until they are, the row shows them as flipped.
+    switching: RefCell<BTreeMap<HookId, (Pending, bool)>>,
+    /// A profile chosen and not yet shown by the worker.
+    selecting: RefCell<Option<(Pending, ProfileKey)>>,
+    /// Other changes on their way, held only to know when they are taken.
+    changing: RefCell<Vec<Pending>>,
 }
 
 impl BackendSession {
-    pub fn new(backend: BackendHandle, memory: HookMemory) -> BackendSession {
+    pub fn new(backend: BackendHandle) -> BackendSession {
         BackendSession {
             backend,
-            hooks: Hooks::new(memory),
+            switching: RefCell::default(),
+            selecting: RefCell::default(),
+            changing: RefCell::default(),
         }
+    }
+
+    /// Queues a change whose answer the next snapshot shows; a full queue drops it, and the row keeps what the profile holds.
+    fn submit(&self, command: Command) {
+        if let Ok(receipt) = self.backend.try_submit(command) {
+            self.changing.borrow_mut().push(receipt);
+        }
+    }
+
+    /// Whose hooks the pages show, and the hooks: the profile chosen, until the worker has taken the choice, else the
+    /// worker's (a profile, or the hooks of the character in play without one).
+    fn shown<'a>(&self, snapshot: &'a BackendSnapshot) -> Option<(ProfileKey, &'a FeatureIntents)> {
+        self.settle();
+        if let Some((_, key)) = self.selecting.borrow().as_ref() {
+            return snapshot.profiles.get(key).map(|profile| (key.clone(), &profile.hooks));
+        }
+        Some((snapshot.editing.clone()?, snapshot.shown_hooks()?))
+    }
+
+    /// Lets go of the changes the worker has taken: from then on the snapshot says what they did.
+    fn settle(&self) {
+        self.switching.borrow_mut().retain(|_, (receipt, _)| receipt.try_result().is_none());
+        let mut selecting = self.selecting.borrow_mut();
+        if selecting.as_mut().is_some_and(|(receipt, _)| receipt.try_result().is_some()) {
+            *selecting = None;
+        }
+        self.changing.borrow_mut().retain_mut(|receipt| receipt.try_result().is_none());
     }
 
     /// The worker's latest snapshot, while it runs.
@@ -51,25 +91,78 @@ impl TrainerSession for BackendSession {
         (!served).then_some(NOT_AVAILABLE)
     }
 
+    fn profiles(&self) -> Vec<Profile> {
+        self.with(|snapshot| snapshot.profiles.profiles().iter().map(|profile| profile_of(&profile.key)).collect())
+            .unwrap_or_default()
+    }
+
+    fn shown_profile(&self) -> Option<Profile> {
+        self.with(|snapshot| self.shown(snapshot).map(|(key, _)| profile_of(&key))).flatten()
+    }
+
+    fn is_profile_kept(&self) -> bool {
+        self.with(|snapshot| self.shown(snapshot).is_none_or(|(key, _)| snapshot.profiles.get(&key).is_some()))
+            .unwrap_or(true)
+    }
+
+    fn keep_profile(&self) {
+        self.submit(Command::CreateProfile);
+    }
+
+    fn select_profile(&self, profile: &Profile) {
+        let key = key_of(profile);
+        if let Ok(receipt) = self.backend.try_submit(Command::SelectProfile(key.clone())) {
+            *self.selecting.borrow_mut() = Some((receipt, key));
+        }
+    }
+
+    fn delete_profile(&self, profile: &Profile) {
+        self.submit(Command::DeleteProfile(key_of(profile)));
+    }
+
     fn is_hook_wanted(&self, id: &str) -> bool {
-        self.hooks.is_wanted(id)
+        let Some(id) = HookId::parse(id) else {
+            return false;
+        };
+        self.settle();
+        if let Some((_, on)) = self.switching.borrow().get(&id) {
+            return *on;
+        }
+        self.with(|snapshot| self.shown(snapshot).is_some_and(|(_, hooks)| hooks.is_wanted(id))).unwrap_or(false)
     }
 
     fn set_hook(&self, id: &str, on: bool) {
-        self.hooks.set(id, on);
+        let Some(id) = HookId::parse(id) else {
+            return;
+        };
+        if let Ok(receipt) = self.backend.try_submit(Command::SetHookWanted { id, on }) {
+            self.switching.borrow_mut().insert(id, (receipt, on));
+        }
     }
 
     fn hook_values(&self, id: &str) -> Vec<f64> {
-        self.hooks.memory.get(id)
+        let Some(id) = HookId::parse(id) else {
+            return Vec::new();
+        };
+        self.with(|snapshot| self.shown(snapshot).map(|(_, hooks)| hooks.values(id).to_vec()))
+            .flatten()
+            .unwrap_or_default()
     }
 
     fn set_hook_values(&self, id: &str, values: &[f64]) {
-        self.hooks.memory.set(id, values);
+        if let Some(id) = HookId::parse(id) {
+            self.submit(Command::SetHookValues { id, values: values.to_vec() });
+        }
     }
 
-    /// No hook is put in the game by this version (`unavailable` says so while connected).
-    fn hook_state(&self, _id: &str) -> Option<HookState> {
-        None
+    fn hook_state(&self, id: &str) -> Option<HookState> {
+        let id = HookId::parse(id)?;
+        self.with(|snapshot| snapshot.hooks.get(&id).map(hook_state)).flatten()
+    }
+
+    fn is_busy(&self) -> bool {
+        self.settle();
+        !self.switching.borrow().is_empty() || self.selecting.borrow().is_some() || !self.changing.borrow().is_empty()
     }
 
     fn read_fields(&self, id: &str) -> FieldRequest {
@@ -111,6 +204,32 @@ impl TrainerSession for BackendSession {
             Some(result) => FieldRequest::Done(result),
             None => FieldRequest::Pending(Box::new(write)),
         }
+    }
+}
+
+fn profile_of(key: &ProfileKey) -> Profile {
+    Profile {
+        name: key.name.clone(),
+        class: key.class.clone(),
+        cycle: key.cycle.clone(),
+    }
+}
+
+fn key_of(profile: &Profile) -> ProfileKey {
+    ProfileKey {
+        name: profile.name.clone(),
+        class: profile.class.clone(),
+        cycle: profile.cycle.clone(),
+    }
+}
+
+fn hook_state(run: &HookRun) -> HookState {
+    match run {
+        HookRun::Off => HookState::Off,
+        HookRun::Queued => HookState::Queued,
+        HookRun::Applying => HookState::Applying,
+        HookRun::On => HookState::On,
+        HookRun::Failed { reason, on } => HookState::Failed { reason: reason.clone(), on: *on },
     }
 }
 
