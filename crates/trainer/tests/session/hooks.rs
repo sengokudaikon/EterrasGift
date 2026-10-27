@@ -4,7 +4,7 @@ use eg_trainer::{
     features::HookId,
     writes::{WriteControl, WriteOutcome},
 };
-use eg_trainer_wire::hooks::{BooleanHook, HookObservation, PatchState};
+use eg_trainer_wire::hooks::{GameplayHook, HookObservation, PatchState};
 
 struct AllowWrite;
 impl WriteControl for AllowWrite {
@@ -27,7 +27,7 @@ fn rift_mode_is_sent_and_confirmed_independently_of_enabled_state() {
             HookObservation {
                 patch: if on { PatchState::Patched } else { PatchState::Original },
                 enabled: on,
-                answer: actual_answer,
+                value: u8::from(actual_answer),
             }
             .encode(),
         ));
@@ -41,7 +41,7 @@ fn rift_mode_is_sent_and_confirmed_independently_of_enabled_state() {
             if kept { WriteOutcome::Confirmed(on) } else { WriteOutcome::NotKept(on) }
         );
         let sent = wire.requests();
-        assert!(matches!(sent[sent.len()-2], Request::SetBooleanHook { on: sent_on, answer, .. } if sent_on == on && answer == (choice != 2.0)));
+        assert!(matches!(sent[sent.len()-2], Request::SetGameplayHook { on: sent_on, value, .. } if sent_on == on && value == u8::from(choice != 2.0)));
     }
 }
 
@@ -49,12 +49,12 @@ fn rift_mode_is_sent_and_confirmed_independently_of_enabled_state() {
 fn monitor_cannot_keep_reporting_portal_when_answer_changes_to_boss() {
     let fixture = Fixture::rehashing();
     let log = FakeLog::new([offline()]);
-    let observation = |answer| {
+    let observation = |value| {
         done(
             HookObservation {
                 patch: PatchState::Patched,
                 enabled: true,
-                answer,
+                value,
             }
             .encode(),
         )
@@ -65,22 +65,22 @@ fn monitor_cannot_keep_reporting_portal_when_answer_changes_to_boss() {
             fixture.discover(),
             status(false, 0x1234, 0),
             done(vec![]),
-            observation(true),
+            observation(1),
             status(false, 0x1234, 0),
-            observation(false),
+            observation(0),
         ],
     );
     let mut session = fixture.session(&wire, &log, GatePolicy::Release);
     session.enable();
     run(session.connect(now())).unwrap();
-    run(session.set_boolean_hook(BooleanHook::MysteriousRift, true, &mut AllowWrite)).unwrap();
+    run(session.set_gameplay_hook(GameplayHook::MysteriousRift, true, &mut AllowWrite)).unwrap();
     assert!(run(BackendConnection::refresh(&mut session, now())).is_err());
     assert_eq!(session.state(), SessionState::Disconnected);
 }
 
 #[test]
-fn each_boolean_hook_requires_a_separate_readback_for_on_and_off() {
-    for hook in BooleanHook::ALL {
+fn each_gameplay_hook_requires_a_separate_readback_for_on_and_off() {
+    for hook in GameplayHook::ALL {
         let fixture = Fixture::rehashing();
         let log = FakeLog::new([offline()]);
         let wire = FakeTransport::new(fixture.target.clone(), [fixture.discover(), status(false, 0x1234, 0)]);
@@ -94,40 +94,40 @@ fn each_boolean_hook_requires_a_separate_readback_for_on_and_off() {
                 HookObservation {
                     patch: if on { PatchState::Patched } else { PatchState::Original },
                     enabled: on,
-                    answer: true,
+                    value: 1,
                 }
                 .encode(),
             ));
             let request = HookRequest {
                 id: HookId::parse(hook.id()).unwrap(),
                 on,
-                values: if hook == BooleanHook::MysteriousRift { vec![1.0] } else { vec![] },
+                values: if hook == GameplayHook::Offhand { vec![] } else { vec![1.0] },
             };
             assert_eq!(
                 run(BackendConnection::set_hook(&mut session, now(), &request, &mut AllowWrite)).unwrap(),
                 WriteOutcome::Confirmed(on)
             );
             let sent = wire.requests();
-            assert!(matches!(sent[sent.len()-2],Request::SetBooleanHook { hook: id,on: enabled,expected_manager:0x1234,.. } if id == hook && enabled == on));
-            assert!(matches!(sent[sent.len()-1],Request::ReadBooleanHook { hook: id,expected_manager:0x1234,.. } if id == hook));
+            assert!(matches!(sent[sent.len()-2],Request::SetGameplayHook { hook: id,on: enabled,expected_manager:0x1234,.. } if id == hook && enabled == on));
+            assert!(matches!(sent[sent.len()-1],Request::ReadGameplayHook { hook: id,expected_manager:0x1234,.. } if id == hook));
         }
     }
 }
 
 #[test]
-fn a_boolean_hook_ack_cannot_hide_missing_or_inconsistent_readback() {
+fn a_gameplay_hook_ack_cannot_hide_missing_or_inconsistent_readback() {
     for payload in [
         vec![],
         HookObservation {
             patch: PatchState::Original,
             enabled: true,
-            answer: true,
+            value: 1,
         }
         .encode(),
         HookObservation {
             patch: PatchState::Unknown,
             enabled: false,
-            answer: true,
+            value: 1,
         }
         .encode(),
     ] {
@@ -138,7 +138,7 @@ fn a_boolean_hook_ack_cannot_hide_missing_or_inconsistent_readback() {
         session.enable();
         run(session.connect(now())).unwrap();
         assert!(matches!(
-            run(session.set_boolean_hook(BooleanHook::MysteriousRift, true, &mut AllowWrite)).unwrap(),
+            run(session.set_gameplay_hook(GameplayHook::MysteriousRift, true, &mut AllowWrite)).unwrap(),
             WriteOutcome::Uncertain { .. }
         ));
         assert_eq!(wire.requests().len(), 4);
@@ -161,10 +161,10 @@ fn hook_cleanup_queued_after_ack_prevents_readback_and_never_retries() {
     session.enable();
     run(session.connect(now())).unwrap();
     assert!(matches!(
-        run(session.set_boolean_hook(BooleanHook::Offhand, true, &mut StopAfterAck(true))).unwrap(),
+        run(session.set_gameplay_hook(GameplayHook::Offhand, true, &mut StopAfterAck(true))).unwrap(),
         WriteOutcome::Uncertain { .. }
     ));
-    assert!(run(session.set_boolean_hook(BooleanHook::Offhand, true, &mut AllowWrite)).is_err());
+    assert!(run(session.set_gameplay_hook(GameplayHook::Offhand, true, &mut AllowWrite)).is_err());
     assert_eq!(wire.requests().len(), 3);
 }
 
@@ -182,7 +182,7 @@ fn hook_monitor_reads_actual_disabled_state_after_helper_suspension() {
                 HookObservation {
                     patch: PatchState::Patched,
                     enabled: true,
-                    answer: true,
+                    value: 1,
                 }
                 .encode(),
             ),
@@ -191,7 +191,7 @@ fn hook_monitor_reads_actual_disabled_state_after_helper_suspension() {
                 HookObservation {
                     patch: PatchState::Original,
                     enabled: false,
-                    answer: true,
+                    value: 1,
                 }
                 .encode(),
             ),
@@ -200,7 +200,37 @@ fn hook_monitor_reads_actual_disabled_state_after_helper_suspension() {
     let mut session = fixture.session(&wire, &log, GatePolicy::Release);
     session.enable();
     run(session.connect(now())).unwrap();
-    run(session.set_boolean_hook(BooleanHook::Offhand, true, &mut AllowWrite)).unwrap();
+    run(session.set_gameplay_hook(GameplayHook::Offhand, true, &mut AllowWrite)).unwrap();
     run(BackendConnection::refresh(&mut session, now())).unwrap();
     assert_eq!(session.observed_hook(HookId::parse("offhand").unwrap()), Some(false));
+}
+
+#[test]
+fn damage_percentage_must_match_independent_readback() {
+    let fixture = Fixture::rehashing();
+    let log = FakeLog::new([offline()]);
+    let wire = FakeTransport::new(fixture.target.clone(), [fixture.discover(), status(false, 0x1234, 0)]);
+    let mut session = fixture.session(&wire, &log, GatePolicy::Release);
+    session.enable();
+    run(session.connect(now())).unwrap();
+    for (wanted, actual) in [(0, 0), (50, 50), (100, 100), (25, 50)] {
+        wire.push(done(vec![]));
+        wire.push(done(
+            HookObservation {
+                patch: PatchState::Patched,
+                enabled: true,
+                value: actual,
+            }
+            .encode(),
+        ));
+        let request = HookRequest {
+            id: HookId::parse("incoming-damage").unwrap(),
+            on: true,
+            values: vec![f64::from(wanted)],
+        };
+        assert_eq!(
+            run(BackendConnection::set_hook(&mut session, now(), &request, &mut AllowWrite)).unwrap(),
+            if wanted == actual { WriteOutcome::Confirmed(true) } else { WriteOutcome::NotKept(true) }
+        );
+    }
 }

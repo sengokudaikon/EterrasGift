@@ -2,7 +2,7 @@
 //! Owned native executable + fixture DLL; no Unity or existing game process.
 use eg_game_access::pipe::PipeClient;
 use eg_trainer_wire::{
-    hooks::{BooleanHook, HookObservation},
+    hooks::{GameplayHook, HookObservation},
     protocol::{Discovery, Request, ResponseCode},
     transport::Transport,
 };
@@ -61,6 +61,9 @@ struct Targets {
     offhand_class: *const (),
     pairing: *const (),
     enforce: *const (),
+    damage: *const (),
+    player_storage: *const (),
+    online_storage: *const (),
 }
 
 #[unsafe(naked)]
@@ -102,6 +105,18 @@ unsafe extern "C-unwind" fn enforce_original(events: *const Events, value: usize
     unsafe { &*events }.originals.fetch_add(1, SeqCst);
 }
 
+static PLAYER: AtomicU64 = AtomicU64::new(1234);
+static ONLINE: AtomicBool = AtomicBool::new(false);
+static DAMAGE_ACTOR: usize = 1234;
+#[unsafe(naked)]
+unsafe extern "C-unwind" fn damage(_actor: *const usize, _damage: f32, _method: usize) -> f32 {
+    core::arch::naked_asm!("nop","nop","nop","nop","nop","jmp {}","nop","nop","nop","nop","nop","nop",sym damage_original);
+}
+unsafe extern "C-unwind" fn damage_original(_actor: *const usize, damage: f32, method: usize) -> f32 {
+    assert_eq!(method, 987);
+    damage + 7.0
+}
+
 fn wait_for(mut condition: impl FnMut() -> bool) {
     let deadline = Instant::now() + Duration::from_secs(12);
     while !condition() {
@@ -121,8 +136,8 @@ fn reload_a_hundred_times_with_running_callers_then_retain_a_blocked_callback() 
     // SAFETY: our process-owned naked target has sixteen readable code bytes.
     let original = unsafe { std::slice::from_raw_parts(execute_tasks as *const u8, 16) }.to_vec();
     // SAFETY: authored executable bodies each contain sixteen readable bytes.
-    let gameplay_originals =
-        [rift as *const u8, offhand as *const u8, pairing as *const u8, enforce as *const u8].map(|target| unsafe { std::slice::from_raw_parts(target, 16) }.to_vec());
+    let gameplay_originals = [rift as *const u8, offhand as *const u8, pairing as *const u8, enforce as *const u8, damage as *const u8]
+        .map(|target| unsafe { std::slice::from_raw_parts(target, 16) }.to_vec());
     static OFFHAND_CLASS: u8 = 0;
     let targets = Targets {
         dispatcher: execute_tasks as *const (),
@@ -131,6 +146,9 @@ fn reload_a_hundred_times_with_running_callers_then_retain_a_blocked_callback() 
         offhand_class: (&OFFHAND_CLASS as *const u8).cast(),
         pairing: pairing as *const (),
         enforce: enforce as *const (),
+        damage: damage as *const (),
+        player_storage: (&raw const PLAYER).cast(),
+        online_storage: (&raw const ONLINE).cast(),
     };
     let events = Arc::new(Events::default());
     let gameplay = Arc::new(Events {
@@ -152,6 +170,8 @@ fn reload_a_hundred_times_with_running_callers_then_retain_a_blocked_callback() 
                         execute_tasks(Arc::as_ptr(&events));
                         rift(Arc::as_ptr(&gameplay), 123);
                         offhand(Arc::as_ptr(&gameplay), 456, -7, 789);
+                        let result = damage(&DAMAGE_ACTOR, 200.0, 987);
+                        assert!(matches!(result, 7.0 | 107.0 | 207.0));
                         pairing(42);
                         enforce(Arc::as_ptr(&gameplay), 43);
                         assert!(!offhand(Arc::as_ptr(&other_slot), 456, -7, 789));
@@ -190,27 +210,32 @@ fn reload_a_hundred_times_with_running_callers_then_retain_a_blocked_callback() 
             assert_eq!(discovery.code, ResponseCode::Done);
             let found = Discovery::decode(&discovery.payload, std::process::id()).unwrap();
             assert_eq!(client.send(&Request::Status { dispatcher: found.dispatcher }).await.unwrap().code, ResponseCode::Done);
-            for hook in BooleanHook::ALL {
+            for hook in GameplayHook::ALL {
                 for (on, answer) in [
                     (true, true),
-                    (true, hook == BooleanHook::Offhand),
+                    (true, hook == GameplayHook::Offhand),
                     (true, true),
                     (false, true),
-                    (true, hook == BooleanHook::Offhand),
+                    (true, hook == GameplayHook::Offhand),
                 ] {
+                    let value = if hook == GameplayHook::IncomingDamage {
+                        if answer { 50 } else { 0 }
+                    } else {
+                        u8::from(answer)
+                    };
                     let reply = client
-                        .send(&Request::SetBooleanHook {
+                        .send(&Request::SetGameplayHook {
                             dispatcher: found.dispatcher,
                             expected_manager: 1,
                             hook,
                             on,
-                            answer,
+                            value,
                         })
                         .await
                         .unwrap();
                     assert_eq!(reply.code, ResponseCode::Done, "{}", String::from_utf8_lossy(&reply.payload));
                     let read = client
-                        .send(&Request::ReadBooleanHook {
+                        .send(&Request::ReadGameplayHook {
                             dispatcher: found.dispatcher,
                             expected_manager: 1,
                             hook,
@@ -220,12 +245,18 @@ fn reload_a_hundred_times_with_running_callers_then_retain_a_blocked_callback() 
                     assert_eq!(read.code, ResponseCode::Done);
                     let observation = HookObservation::decode(&read.payload).unwrap();
                     assert!(observation.confirmed(on));
-                    assert_eq!(observation.answer, answer);
+                    assert_eq!(observation.value, value);
+                    if hook == GameplayHook::IncomingDamage {
+                        // SAFETY: authored health target and actor storage outlive all calls.
+                        assert_eq!(unsafe { damage(&DAMAGE_ACTOR, 200.0, 987) }, if on { f32::from(value) * 2.0 + 7.0 } else { 207.0 });
+                        continue;
+                    }
                     // SAFETY: same process-owned targets and retained arguments as running callers.
                     let actual = unsafe {
                         match hook {
-                            BooleanHook::MysteriousRift => rift(Arc::as_ptr(&gameplay), 123),
-                            BooleanHook::Offhand => {
+                            GameplayHook::IncomingDamage => unreachable!("damage checked above"),
+                            GameplayHook::MysteriousRift => rift(Arc::as_ptr(&gameplay), 123),
+                            GameplayHook::Offhand => {
                                 assert_eq!(pairing(42), !on);
                                 let isolated = Events::default();
                                 enforce(&isolated, 43);
@@ -239,9 +270,9 @@ fn reload_a_hundred_times_with_running_callers_then_retain_a_blocked_callback() 
             }
             if cycle == 0 {
                 assert_eq!(client.send(&Request::ClearHooks { dispatcher: found.dispatcher }).await.unwrap().code, ResponseCode::Done);
-                for hook in BooleanHook::ALL {
+                for hook in GameplayHook::ALL {
                     let read = client
-                        .send(&Request::ReadBooleanHook {
+                        .send(&Request::ReadGameplayHook {
                             dispatcher: found.dispatcher,
                             expected_manager: 1,
                             hook,
@@ -251,12 +282,12 @@ fn reload_a_hundred_times_with_running_callers_then_retain_a_blocked_callback() 
                     assert!(HookObservation::decode(&read.payload).unwrap().confirmed(false));
                     assert_eq!(
                         client
-                            .send(&Request::SetBooleanHook {
+                            .send(&Request::SetGameplayHook {
                                 dispatcher: found.dispatcher,
                                 expected_manager: 1,
                                 hook,
                                 on: true,
-                                answer: true,
+                                value: if hook == GameplayHook::IncomingDamage { 50 } else { 1 },
                             })
                             .await
                             .unwrap()
@@ -285,7 +316,7 @@ fn reload_a_hundred_times_with_running_callers_then_retain_a_blocked_callback() 
         }
         // SAFETY: restoration finished; the entry is immutable until our next load.
         assert_eq!(unsafe { std::slice::from_raw_parts(execute_tasks as *const u8, 16) }, original);
-        for (target, original) in [rift as *const u8, offhand as *const u8, pairing as *const u8, enforce as *const u8]
+        for (target, original) in [rift as *const u8, offhand as *const u8, pairing as *const u8, enforce as *const u8, damage as *const u8]
             .into_iter()
             .zip(&gameplay_originals)
         {

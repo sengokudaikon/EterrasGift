@@ -93,7 +93,7 @@ impl TrainerSession for BackendSession {
                     return snapshot.capabilities.read_attack_leech;
                 }
                 match FeatureKey::parse(id).map(|key| key.descriptor().native_support) {
-                    Some(NativeSupport::BooleanOverride(hook)) => snapshot.capabilities.boolean_hooks[hook as usize],
+                    Some(NativeSupport::GameplayOverride(hook)) => snapshot.capabilities.gameplay_hooks[hook as usize],
                     _ => false,
                 }
             })
@@ -162,9 +162,12 @@ impl TrainerSession for BackendSession {
     fn set_hook_values(&self, id: &str, values: &[f64]) {
         if let Some(id) = HookId::parse(id) {
             let command = Command::SetHookValues { id, values: values.to_vec() };
-            if eg_trainer::features::FeatureKey::Hook(id).descriptor().kind == eg_trainer::features::FeatureKind::Choice {
+            let descriptor = eg_trainer::features::FeatureKey::Hook(id).descriptor();
+            let choice = descriptor.kind == eg_trainer::features::FeatureKind::Choice;
+            if choice || matches!(descriptor.native_support, eg_trainer::features::NativeSupport::GameplayOverride(_)) {
+                let on = if choice { values != [0.0] } else { self.is_hook_wanted(id.as_str()) };
                 if let Ok(receipt) = self.backend.try_submit(command) {
-                    self.switching.borrow_mut().insert(id, (receipt, values != [0.0]));
+                    self.switching.borrow_mut().insert(id, (receipt, on));
                 }
             } else {
                 self.submit(command);

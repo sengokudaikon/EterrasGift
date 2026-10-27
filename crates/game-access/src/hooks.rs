@@ -4,8 +4,8 @@
 //! backend. Opening/suspending a thread can fail for reasons other than exit; such
 //! a skipped thread is not protected during patching. This is an accepted supported-
 //! target limitation, not a proved complete census. No detour allocation is freed.
-pub mod constant;
 pub mod gateway;
+pub mod leaf;
 pub mod threads;
 mod unwind;
 

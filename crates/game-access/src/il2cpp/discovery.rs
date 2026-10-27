@@ -17,8 +17,8 @@ use std::{
 };
 
 mod attack_leech;
-mod boolean_hooks;
-pub use boolean_hooks::BooleanHookTarget;
+mod gameplay_hooks;
+pub use gameplay_hooks::GameplayHookTarget;
 mod descriptions;
 mod dispatcher_thread;
 mod unique;
@@ -192,6 +192,7 @@ exports! {
     class_type: "il2cpp_class_get_type" => unsafe extern "C-unwind" fn(Class) -> Type,
     class_element: "il2cpp_class_get_element_class" => unsafe extern "C-unwind" fn(Class) -> Class,
     class_rank: "il2cpp_class_get_rank" => unsafe extern "C-unwind" fn(*const raw::Class) -> i32,
+    class_static_data: "il2cpp_class_get_static_field_data" => unsafe extern "C-unwind" fn(Class) -> Ptr,
     class_value: "il2cpp_class_is_valuetype" => raw::ClassIsValueType,
     class_enum: "il2cpp_class_is_enum" => unsafe extern "C-unwind" fn(*const raw::Class) -> bool,
     enum_base: "il2cpp_class_enum_basetype" => unsafe extern "C-unwind" fn(Class) -> Type,

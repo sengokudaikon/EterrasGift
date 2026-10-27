@@ -1,23 +1,23 @@
-//! Both features share this lifecycle; gameplay calls execute only retained leaf code.
+//! Concrete gameplay effects share this lifecycle; gameplay calls execute only retained leaf code.
 use super::*;
-use eg_game_access::hooks::constant::ConstantGate;
-use eg_game_access::il2cpp::discovery::BooleanHookTarget;
-use eg_trainer_wire::hooks::{BooleanHook, HookObservation, PatchState};
+use eg_game_access::hooks::leaf::LeafGate;
+use eg_game_access::il2cpp::discovery::GameplayHookTarget;
+use eg_trainer_wire::hooks::{GameplayHook, HookObservation, PatchState};
 
 struct Installed {
     hook: RetainedHook,
-    gate: ConstantGate,
+    gate: LeafGate,
 }
 // SAFETY: target/trampoline/pages are process-lifetime, not thread-affine. All
 // preparation and transactions are serialized by HOOKS and the hook backend.
 unsafe impl Send for Installed {}
 struct Hooks {
-    slots: [Option<Vec<Installed>>; 2],
+    slots: [Option<Vec<Installed>>; 3],
     manager: u64,
     closing: bool,
 }
 static HOOKS: Mutex<Hooks> = Mutex::new(Hooks {
-    slots: [None, None],
+    slots: [None, None, None],
     manager: 0,
     closing: false,
 });
@@ -72,9 +72,9 @@ pub(super) fn count() -> u32 {
 
 /// Caller resolves metadata on the main thread. The mutex fences publication
 /// against control-thread clear/unload; it is never acquired by a gameplay call.
-unsafe fn change(hook: BooleanHook, on: bool, answer: bool, target: impl FnOnce() -> Result<Vec<BooleanHookTarget>, Response>) -> Result<(), Response> {
-    if hook == BooleanHook::Offhand && !answer {
-        return Err(server::failure(ResponseCode::Refused, "Offhand has no selectable answer"));
+unsafe fn change(hook: GameplayHook, on: bool, value: u8, target: impl FnOnce() -> Result<Vec<GameplayHookTarget>, Response>) -> Result<(), Response> {
+    if hook.validate_value(value).is_err() {
+        return Err(server::failure(ResponseCode::Refused, "Invalid hook setting"));
     }
     let mut hooks = HOOKS.lock().unwrap_or_else(|p| p.into_inner());
     if hooks.closing || state().stop.load(SeqCst) {
@@ -83,19 +83,19 @@ unsafe fn change(hook: BooleanHook, on: bool, answer: bool, target: impl FnOnce(
     let slot = &mut hooks.slots[hook as usize];
     if on && slot.is_none() {
         let mut prepared: Vec<Installed> = Vec::new();
-        for BooleanHookTarget {
+        for GameplayHookTarget {
             name,
             address,
             bytes,
-            answer,
+            effect,
             receiver_class,
             linked_offset,
         } in target()?
         {
-            // SAFETY: metadata validates the exact return type and optional receiver/linked field.
-            let gate = unsafe { ConstantGate::prepare_shared(answer, receiver_class, linked_offset, prepared.first().map(|slot| &slot.gate)) }
+            // SAFETY: metadata validates the effect ABI, receiver fields and retained static storage.
+            let gate = unsafe { LeafGate::prepare_shared(effect, receiver_class, linked_offset, prepared.first().map(|slot| &slot.gate)) }
                 .map_err(|e| server::failure(ResponseCode::Refused, e.to_string()))?;
-            // SAFETY: resolved method; retained leaf preserves all arguments.
+            // SAFETY: resolved method; retained leaf implements its validated argument transformation.
             let retained = unsafe { RetainedHook::prepare(address, gate.entry(), &bytes) }.map_err(|e| server::failure(ResponseCode::Refused, format!("{name}: {e}")))?;
             // SAFETY: not yet published, process-owned trampoline.
             unsafe { gate.set_original(retained.trampoline()) };
@@ -112,30 +112,30 @@ unsafe fn change(hook: BooleanHook, on: bool, answer: bool, target: impl FnOnce(
         // SAFETY: serialized owner retained even on partial failure; all entries form one transaction.
         unsafe { hooks::commit(&changes) }.map_err(|e| server::failure(ResponseCode::Failed, e.to_string()))?;
         for slot in group {
-            slot.gate.set_answer(answer);
+            slot.gate.set_value(value);
             slot.gate.set_enabled(on);
         }
     }
     Ok(())
 }
 
-pub(super) fn read(hook: BooleanHook) -> HookObservation {
+pub(super) fn read(hook: GameplayHook) -> HookObservation {
     let hooks = HOOKS.lock().unwrap_or_else(|p| p.into_inner());
     hooks.slots[hook as usize].as_ref().map_or(
         HookObservation {
             patch: PatchState::Original,
             enabled: false,
-            answer: true,
+            value: 1,
         },
         |group| HookObservation {
             patch: group_patch(group.iter().map(|slot| slot.hook.state())),
             enabled: group.iter().all(|slot| slot.gate.enabled()),
-            answer: group[0].gate.answer(),
+            value: group[0].gate.value(),
         },
     )
 }
 
-pub(super) unsafe fn operation(expected_manager: u64, hook: BooleanHook, on: Option<(bool, bool)>) -> Response {
+pub(super) unsafe fn operation(expected_manager: u64, hook: GameplayHook, on: Option<(bool, u8)>) -> Response {
     // SAFETY: admitted main thread; same runtime/graph lifetime as status. The
     // supplied manager is compared only, never dereferenced.
     unsafe {
@@ -149,11 +149,11 @@ pub(super) unsafe fn operation(expected_manager: u64, hook: BooleanHook, on: Opt
             if status.manager != expected_manager {
                 return Err(server::failure(ResponseCode::Refused, "Character changed; nothing ran"));
             }
-            if let Some((on, answer)) = on {
-                change(hook, on, answer, || {
+            if let Some((on, value)) = on {
+                change(hook, on, value, || {
                     let module = module().map_err(|e| server::failure(ResponseCode::Refused, e))?;
                     let size = image_size(module).map_err(|e| server::failure(ResponseCode::Refused, e))?;
-                    access.boolean_hook_targets(attached, hook, module, size).map_err(map_discovery)
+                    access.gameplay_hook_targets(attached, hook, module, size).map_err(map_discovery)
                 })?;
                 Ok(Response {
                     code: ResponseCode::Done,
@@ -171,40 +171,43 @@ pub(super) unsafe fn operation(expected_manager: u64, hook: BooleanHook, on: Opt
 
 #[cfg(feature = "fixture")]
 pub(super) unsafe fn fixture_change(
-    hook: BooleanHook,
+    hook: GameplayHook,
     on: bool,
-    answer: bool,
+    value: u8,
     address: *mut u8,
     receiver_class: Option<NonNull<c_void>>,
     extras: &[*mut u8],
+    damage: Option<eg_game_access::hooks::leaf::DamageLayout>,
 ) -> Result<(), Response> {
     // SAFETY: fixture owns executable target and optional class identity for
     // the process lifetime; scoped calls use readable object-shaped headers.
     unsafe {
-        change(hook, on, answer, || {
-            let mut targets = vec![BooleanHookTarget {
+        change(hook, on, value, || {
+            let mut targets = vec![GameplayHookTarget {
                 name: "fixture eligibility".into(),
                 address: NonNull::new(address).unwrap(),
                 bytes: address.cast::<[u8; 16]>().read_unaligned(),
                 receiver_class,
-                answer: if hook == BooleanHook::MysteriousRift {
-                    eg_game_access::hooks::constant::LeafReturn::SelectableBoolean
+                effect: if let Some(layout) = damage {
+                    eg_game_access::hooks::leaf::LeafEffect::PlayerDamage(layout)
+                } else if hook == GameplayHook::MysteriousRift {
+                    eg_game_access::hooks::leaf::LeafEffect::SelectableBoolean
                 } else {
-                    eg_game_access::hooks::constant::LeafReturn::Boolean(true)
+                    eg_game_access::hooks::leaf::LeafEffect::Boolean(true)
                 },
                 linked_offset: None,
             }];
             for (index, &address) in extras.iter().enumerate() {
-                targets.push(BooleanHookTarget {
+                targets.push(GameplayHookTarget {
                     name: format!("fixture pairing {index}"),
                     address: NonNull::new(address).unwrap(),
                     bytes: address.cast::<[u8; 16]>().read_unaligned(),
                     receiver_class: None,
                     linked_offset: None,
-                    answer: if index == 0 {
-                        eg_game_access::hooks::constant::LeafReturn::Boolean(false)
+                    effect: if index == 0 {
+                        eg_game_access::hooks::leaf::LeafEffect::Boolean(false)
                     } else {
-                        eg_game_access::hooks::constant::LeafReturn::Void
+                        eg_game_access::hooks::leaf::LeafEffect::Void
                     },
                 });
             }

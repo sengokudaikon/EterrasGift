@@ -887,21 +887,21 @@ mod tests {
         let live = Setup {
             live: true,
             states: BTreeMap::from([
-                ("god-mode", HookState::On),
+                ("incoming-damage", HookState::On),
                 ("damage-dealt", HookState::Queued),
-                ("damage-taken", failed(false)),
+                ("cast-speed", failed(false)),
                 ("move-speed", failed(true)),
                 ("force-rarity", HookState::Applying),
             ]),
             ..Setup::default()
         };
-        for id in ["god-mode", "damage-dealt", "damage-taken"] {
+        for id in ["incoming-damage", "damage-dealt", "cast-speed"] {
             live.set_hook(id, true);
         }
         let status = |id| HookRow::new(*catalog::feature(id).unwrap(), &live).status(&live);
-        assert_eq!(status("god-mode"), ("On in the game.".into(), Tone::Confirmed));
+        assert_eq!(status("incoming-damage"), ("On in the game.".into(), Tone::Confirmed));
         assert_eq!(status("damage-dealt").0, "Waiting to turn on…");
-        assert_eq!(status("damage-taken"), ("Could not turn on: the game's method was not found".into(), Tone::Error));
+        assert_eq!(status("cast-speed"), ("Could not turn on: the game's method was not found".into(), Tone::Error));
         assert_eq!(status("move-speed"), ("Could not turn off: the game's method was not found".into(), Tone::Error));
         assert_eq!(status("force-rarity").0, "Turning off in the game…");
         assert_eq!(status("drop-rates").0, "");
@@ -1047,7 +1047,7 @@ mod tests {
         row.apply(&game);
         assert_eq!(row.status, "The game kept Passive points 40.");
         assert_eq!(
-            HookRow::new(*catalog::feature("god-mode").unwrap(), &game).status(&game).0,
+            HookRow::new(*catalog::feature("incoming-damage").unwrap(), &game).status(&game).0,
             "Could not turn on: the helper is older than the app"
         );
     }

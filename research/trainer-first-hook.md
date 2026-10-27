@@ -51,7 +51,7 @@ The original `CanReceiveItem` still checks the item's level, class, faction, pri
 cocoon state and quantity. Turning the feature off does not unequip accepted items or force
 cached equipment stats to refresh; re-equip to observe the changed policy immediately.
 
-Both features use process-owned constant-return leaf gateways in `eg-game-access::hooks::constant`.
+Both features use process-owned constant-return leaf gateways in `eg-game-access::hooks::leaf`.
 Each offhand leaf reads the same retained atomic enable switch. A leaf returns its Boolean
 constant (or void) when enabled and otherwise tail-jumps its retained trampoline. The offhand
 eligibility guard reads the receiver's class header; the linked-slot guard also reads the
@@ -76,7 +76,7 @@ keeps the helper resident. No new helper callback runs on gameplay threads.
 
 The production session sends one set request and requires a separate manager-bound entry/flag
 readback before reporting on or off. Its monitor rechecks hooks it has used. The catalog and
-worker capabilities enable only these two existing UI rows.
+worker capabilities also include the combined incoming-damage row described below.
 
 Validation uses the authored native reload test, the authored Unity lifecycle player, session
 certainty tests and fake-worker UI captures. Unity checks each original's side-effect counter,
@@ -136,3 +136,72 @@ See the [original inventory](../tools/trainer-eval/hooks-fields-audit/hook-inven
 [hook evaluation](../tools/trainer-eval/hook-eval/README.md) and
 [interop notes](trainer-interop.md). The former unpatched/bridge experiment narrative and
 artifacts are preserved by `archive/trainer-evaluations-2026-10-19`.
+
+## Incoming damage, 2026-10-27
+
+The user chose one **Damage taken** control: 0%-100% in whole percentages, default 50%.
+0% replaces God mode, 100% passes the amount unchanged, and disabling restores the entry.
+The stable ID is `incoming-damage`; profiles migrate old `damage-taken` divisors to the nearest
+whole percentage. An enabled old `god-mode` wins at zero. Already migrated values take precedence.
+The original two features become one row (67 hook rows, 3 supported, 64 unsupported).
+
+Original behavior comes from `native/hooks/combat.h`: `float BaseHealth.HealthDamage(float)`
+reads `BaseHealth.actor`, compares with `PlayerFinder.playerActorComponent`, changes incoming
+player damage, and calls the original exactly once. We preserve that call even at zero; skipping
+it would suppress unrelated game bookkeeping. Enemies and other actors remain unchanged.
+
+The shared lifecycle is now named `gameplay_hooks`, with a third concrete target and bounded
+setting byte (Boolean selection for rift, fixed one for offhand, 0..100 for damage). Both enabled
+state and setting must match independent byte/setting readback. Values publish atomically;
+changing them follows the existing close/transaction/open ordering. Profile, worker, UI,
+helper-side status suspension and unload all use the same path as the first two features.
+
+`LeafEffect::PlayerDamage` extends the retained leaf with the exact Windows x64 ABI:
+RCX is the health receiver, XMM1 the float amount, R8 the hidden MethodInfo. RAX/R11/XMM0 are
+volatile scratch; the stack is untouched, and the original's XMM0 return is preserved by a
+tail jump. Intermediate percentages calculate in double precision, then convert back to float.
+Zero explicitly replaces even NaN/infinity; 100 and disabled paths leave the amount untouched.
+Negative amounts scale as in the original C++ feature.
+
+Static check of the installed GameAssembly with SHA-256
+`323e9183f3bee600b6c9e1c469218b9de926e9044f2ca3d44fae8a0ec9a91464`
+found `BaseHealth.HealthDamage` at RVA `0x10fbeb0`, consuming XMM1, and the exported
+`il2cpp_class_get_static_field_data` at RVA `0x2170`. The retained disassembly is
+`artifacts/trainer-eval/offhand-trace/BaseHealth.HealthDamage.asm.txt`; these addresses
+are evidence only, never compiled into the hook.
+
+Metadata validates the method signature and actor reference layout. Public
+`il2cpp_class_get_static_field_data` supplies process-owned storage for the current player and
+online flag, after the public field API initializes the class. Both addresses and offsets are
+checked. The leaf reads those statics on every call, forwarding when online, missing a player,
+or called on another actor. It reads just the receiver's actor field and compares the pointer;
+it never follows the player object or enters the helper/runtime. This relies on the supported
+non-moving IL2CPP heap, atomic aligned reference stores, valid method receiver and static
+storage lifetime. Unlike the OG SEH guard, it does not recover from an invalid receiver pointer;
+that is the original method's own readable-object precondition.
+
+Authored coverage includes native percentage/identity/online/original-call tests, the native
+100-reload fixture with concurrent damage calls, Unity percentage changes and C++ exception
+propagation from the original, travel/manager departure, profile migration, independent wire
+readback, and real worker UI controls on a fake host. These are not live-game proof.
+
+Live checklist: with an offline character and repeatable incoming attacks, compare off/100%,
+50%, and 0%; enemies should still take normal damage. Change the percentage while enabled,
+turn it off, travel to another zone, reconnect, and disconnect the trainer. Confirm original
+incoming damage returns on off/disconnect and the helper leaves when the character leaves play.
+
+Validation evidence for this slice: the Unity lifecycle passed six loads with 20 percentage
+probes (`artifacts/trainer-eval/lifecycle-run-c66fa738d5e442088621e992e55d64f1/report.json`).
+The native reload test passed 100 cycles with running damage callers and blocked-callback
+retention in 448.76 seconds. Release profile/catalog/session regressions passed, including
+percentage readback mismatch. The 0%, 50% and 100% worker/UI captures are retained as
+`artifacts/captures/backend-hook-damage-*.png`. The temporary Unity project and superseded
+helper DLL/PDB were removed; the successful helper snapshot, reports and static disassembly
+remain as validation evidence. Live Last Epoch behavior is still unverified.
+
+Final workspace verification passed release trainer/controller tests, all 90 UI unit tests,
+lint, formatting and token checks. The complete capture run passed all gameplay-hook cases
+and then timed out waiting for the unrelated Forge "Unusual values" fixture item
+(`crates/ui/tests/trainer_backend_fixture/mod.rs`). Full `trainer:verify` therefore remains
+failed at that capture, amid concurrent Forge changes. The damage control was visually checked
+at standard and narrow widths. `mise run build` refreshed `target/debug/eterras-gift.exe`.

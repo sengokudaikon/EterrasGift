@@ -1,4 +1,4 @@
-mod boolean_hooks;
+mod gameplay_hooks;
 use crate::{
     BUILD_ID, BUILD_ID_C,
     lifecycle::Watchdog,
@@ -145,7 +145,7 @@ unsafe fn runtime_operation(operation: impl FnOnce(&Runtime, RuntimeAccess, &Att
             {
                 // Every operation that observes lost admission closes gameplay
                 // effects, including Forge/field requests between watchdog ticks.
-                boolean_hooks::observe(0).map_err(|e| server::failure(ResponseCode::Failed, e))?;
+                gameplay_hooks::observe(0).map_err(|e| server::failure(ResponseCode::Failed, e))?;
                 if runtime.access.play_presence(&attached, runtime.invocation).ok() == Some(PlayPresence::InGame)
                     && runtime.access.status(&attached).is_ok_and(|status| !status.online && status.manager == 0)
                 {
@@ -173,9 +173,9 @@ unsafe fn read_status() -> Response {
     unsafe {
         runtime_operation(|runtime, access, attached| {
             let status_result = access.status(attached);
-            boolean_hooks::observe(status_result.as_ref().map_or(0, |s| if s.online { 0 } else { s.manager })).map_err(|e| server::failure(ResponseCode::Failed, e))?;
+            gameplay_hooks::observe(status_result.as_ref().map_or(0, |s| if s.online { 0 } else { s.manager })).map_err(|e| server::failure(ResponseCode::Failed, e))?;
             let mut status = status_result.map_err(map_discovery)?;
-            status.features_on = boolean_hooks::count();
+            status.features_on = gameplay_hooks::count();
             if !status.online && status.manager == 0 && access.play_presence(attached, runtime.invocation).ok() == Some(PlayPresence::InGame) {
                 return Err(server::failure(ResponseCode::CharacterLoading, "The offline character is changing area."));
             }
@@ -430,7 +430,7 @@ fn after_original(state: &Shared) {
                 } else {
                     0
                 };
-                boolean_hooks::observe(manager)?;
+                gameplay_hooks::observe(manager)?;
                 Ok::<_, String>(presence)
             })()
         }
@@ -438,7 +438,7 @@ fn after_original(state: &Shared) {
             if !PRESENCE_ERROR_REPORTED.swap(true, SeqCst) {
                 crate::report(format_args!("EG_HELPER_PRESENCE {error}"));
             }
-            if let Err(error) = boolean_hooks::observe(0) {
+            if let Err(error) = gameplay_hooks::observe(0) {
                 crate::report(format_args!("EG_HELPER_HOOK_RESTORE {error}"));
                 state.stop.store(true, SeqCst);
             }
@@ -461,18 +461,18 @@ fn after_original(state: &Shared) {
                 // SAFETY: correct-thread gate and initialized exact-runtime contract above.
                 Request::Status { .. } => unsafe { read_status() },
                 // SAFETY: admitted main-thread metadata/status query and serialized patch owner.
-                Request::SetBooleanHook {
+                Request::SetGameplayHook {
                     expected_manager,
                     hook,
                     on,
-                    answer,
+                    value,
                     ..
                 } => {
                     // SAFETY: admitted Unity main thread; operation rechecks the current offline manager.
-                    unsafe { boolean_hooks::operation(expected_manager, hook, Some((on, answer))) }
+                    unsafe { gameplay_hooks::operation(expected_manager, hook, Some((on, value))) }
                 }
                 // SAFETY: same main-thread character admission; reads real entry bytes.
-                Request::ReadBooleanHook { expected_manager, hook, .. } => unsafe { boolean_hooks::operation(expected_manager, hook, None) },
+                Request::ReadGameplayHook { expected_manager, hook, .. } => unsafe { gameplay_hooks::operation(expected_manager, hook, None) },
                 // SAFETY: same main-thread and per-operation graph ownership contract above.
                 Request::ReadForge { .. } => unsafe { read_forge() },
                 // SAFETY: verified callback thread and the rooted tooltip graph span assumed by unsafe start.
@@ -568,10 +568,10 @@ impl Backend for Control<'_> {
             .map_err(|_| server::failure(ResponseCode::NotReady, "Previous main-thread request is still running; nothing was queued"))
     }
     fn clear_hooks(&mut self) -> Result<(), String> {
-        boolean_hooks::clear(false)
+        gameplay_hooks::clear(false)
     }
     fn restore(&mut self) -> Result<(), String> {
-        boolean_hooks::clear(true)?;
+        gameplay_hooks::clear(true)?;
         restore_and_drain(self.hook, self.gate.as_ref())
     }
 }

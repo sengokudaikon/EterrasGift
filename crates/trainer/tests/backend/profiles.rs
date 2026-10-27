@@ -54,7 +54,7 @@ fn book() -> ProfileBook {
             { "name": "Oren", "class": "Primalist", "cycle": "Legacy", "lastPlayed": "2026-10-17T09:00:00Z", "wanted": [] },
             {
                 "name": "Mira", "class": "Primalist", "cycle": "Legacy", "lastPlayed": "2026-10-18T09:00:00Z",
-                "wanted": ["god-mode", "damage-dealt", "zoom"], "values": { "damage-dealt": [3.0] }
+                "wanted": ["incoming-damage", "damage-dealt", "zoom"], "values": { "damage-dealt": [3.0] }
             }
         ]
     })))
@@ -64,7 +64,7 @@ fn mira_order() -> Vec<HookId> {
     DESCRIPTORS
         .iter()
         .filter_map(|descriptor| match descriptor.key {
-            FeatureKey::Hook(id) if ["god-mode", "damage-dealt", "zoom"].contains(&id.as_str()) => Some(id),
+            FeatureKey::Hook(id) if ["incoming-damage", "damage-dealt", "zoom"].contains(&id.as_str()) => Some(id),
             _ => None,
         })
         .collect()
@@ -357,9 +357,17 @@ fn a_chosen_profile_is_the_one_changed_and_deleting_it_shows_the_last_played() {
         let (options, saves) = saving(book());
         let (handle, worker) = start(&shared, options);
         command(&handle, Command::SelectProfile(key("Oren"))).await.unwrap();
-        command(&handle, Command::SetHookWanted { id: hook("god-mode"), on: true }).await.unwrap();
+        command(
+            &handle,
+            Command::SetHookWanted {
+                id: hook("incoming-damage"),
+                on: true,
+            },
+        )
+        .await
+        .unwrap();
         let snapshot = handle.snapshot();
-        assert!(snapshot.profiles.get(&key("Oren")).unwrap().hooks.is_wanted(hook("god-mode")));
+        assert!(snapshot.profiles.get(&key("Oren")).unwrap().hooks.is_wanted(hook("incoming-damage")));
         assert_eq!(snapshot.profiles.get(&key("Mira")).unwrap().hooks.wanted().count(), 3);
         assert_eq!(command(&handle, Command::SelectProfile(key("Ysolde"))).await.unwrap_err().kind, ErrorKind::InvalidEdit);
         command(&handle, Command::DeleteProfile(key("Oren"))).await.unwrap();
@@ -368,7 +376,16 @@ fn a_chosen_profile_is_the_one_changed_and_deleting_it_shows_the_last_played() {
         command(&handle, Command::DeleteProfile(key("Mira"))).await.unwrap();
         assert_eq!(handle.snapshot().editing, None);
         assert_eq!(
-            command(&handle, Command::SetHookWanted { id: hook("god-mode"), on: true }).await.unwrap_err().kind,
+            command(
+                &handle,
+                Command::SetHookWanted {
+                    id: hook("incoming-damage"),
+                    on: true
+                }
+            )
+            .await
+            .unwrap_err()
+            .kind,
             ErrorKind::NotReady,
             "no profile to change"
         );

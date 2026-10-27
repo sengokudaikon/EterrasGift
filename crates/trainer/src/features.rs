@@ -96,7 +96,7 @@ impl FeatureKey {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum NativeSupport {
     Unsupported,
-    BooleanOverride(eg_trainer_wire::hooks::BooleanHook),
+    GameplayOverride(eg_trainer_wire::hooks::GameplayHook),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -280,7 +280,7 @@ impl FeatureIntents {
             });
         }
         for (index, (specification, value)) in descriptor.values.iter().zip(values).enumerate() {
-            if !specification.accepts(*value) {
+            if !specification.accepts(*value) || (id.as_str() == "incoming-damage" && value.fract() != 0.0) {
                 return Err(FeatureError::InvalidValue { id, index });
             }
         }
@@ -318,7 +318,10 @@ impl FeatureIntents {
                 specification
                     .iter()
                     .zip(entry.values)
-                    .map(|(specification, value)| specification.fit_saved(value))
+                    .map(|(specification, value)| {
+                        let fitted = specification.fit_saved(value);
+                        if id.as_str() == "incoming-damage" { fitted.round() } else { fitted }
+                    })
                     .collect(),
             );
         }

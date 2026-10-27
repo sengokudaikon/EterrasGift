@@ -1,12 +1,12 @@
 use super::*;
-use crate::hooks::constant::LeafReturn;
-use eg_trainer_wire::hooks::BooleanHook;
+use crate::hooks::leaf::{DamageLayout, LeafEffect};
+use eg_trainer_wire::hooks::GameplayHook;
 
-pub struct BooleanHookTarget {
+pub struct GameplayHookTarget {
     pub name: String,
     pub address: NonNull<u8>,
     pub bytes: [u8; 16],
-    pub answer: LeafReturn,
+    pub effect: LeafEffect,
     pub receiver_class: Option<NonNull<c_void>>,
     pub linked_offset: Option<u32>,
 }
@@ -18,45 +18,52 @@ impl RuntimeAccess {
     /// Same retained metadata, attached thread, MethodInfo layout and readable
     /// GameAssembly span contract as `discover`. Exclusive patch ownership is
     /// additionally required before using the returned code addresses.
-    pub unsafe fn boolean_hook_targets(
+    pub unsafe fn gameplay_hook_targets(
         &self,
         attached: &AttachedThread<'_>,
-        hook: BooleanHook,
+        hook: GameplayHook,
         module_base: NonNull<u8>,
         module_size: usize,
-    ) -> Result<Vec<BooleanHookTarget>, DiscoveryError> {
+    ) -> Result<Vec<GameplayHookTarget>, DiscoveryError> {
         let _ = attached;
-        // These are the two implemented features, not a universal hook registry.
-        let specs: &[(&CStr, &CStr, bool, &[&str], LeafReturn)] = match hook {
-            BooleanHook::MysteriousRift => &[(c"TimeBeastTracker", c"NextEncounterShouldBeEggs", true, &[], LeafReturn::SelectableBoolean)],
-            BooleanHook::Offhand => &[
+        let damage = if hook == GameplayHook::IncomingDamage {
+            // SAFETY: attached main thread, initialized game statics and retained metadata.
+            Some(unsafe { self.damage_layout()? })
+        } else {
+            None
+        };
+        // Only concrete implemented features belong here.
+        let specs: &[(&CStr, &CStr, bool, &[&str], LeafEffect)] = match hook {
+            GameplayHook::IncomingDamage => &[(c"BaseHealth", c"HealthDamage", true, &["System.Single"], LeafEffect::PlayerDamage(damage.unwrap()))],
+            GameplayHook::MysteriousRift => &[(c"TimeBeastTracker", c"NextEncounterShouldBeEggs", true, &[], LeafEffect::SelectableBoolean)],
+            GameplayHook::Offhand => &[
                 (
                     c"OneSlotItemContainerWithCharacterRequirements",
                     c"alternateSufficientBaseTypeConditionFulfilled",
                     true,
                     &["System.Int32"],
-                    LeafReturn::Boolean(true),
+                    LeafEffect::Boolean(true),
                 ),
                 (
                     c"OffhandItemContainer",
                     c"IncompatibleDueTo2hWeapon",
                     false,
                     &["AdditionalBaseTypeProvider", "ItemData", "ItemData"],
-                    LeafReturn::Boolean(false),
+                    LeafEffect::Boolean(false),
                 ),
                 (
                     c"LinkedOneSlotItemContainer",
                     c"incompatibleWithItemInLinkedSlot",
                     true,
                     &["ItemData"],
-                    LeafReturn::Boolean(false),
+                    LeafEffect::Boolean(false),
                 ),
                 (
                     c"OffhandItemContainer",
                     c"EnforceWeaponLimitations",
                     true,
                     &["System.Boolean", "UnityEngine.Vector2Int"],
-                    LeafReturn::Void,
+                    LeafEffect::Void,
                 ),
             ],
         };
@@ -64,7 +71,7 @@ impl RuntimeAccess {
         unsafe {
             let images = self.images()?;
             let mut targets = Vec::new();
-            for &(class, name, instance, params, answer) in specs {
+            for &(class, name, instance, params, effect) in specs {
                 let owner = self.class(&images, c"", class)?;
                 let scoped = class == c"OneSlotItemContainerWithCharacterRequirements" || class == c"LinkedOneSlotItemContainer";
                 let receiver_class = if scoped {
@@ -97,7 +104,11 @@ impl RuntimeAccess {
                     }
                     let returns = (self.method_return)(method);
                     let mut implementation = 0;
-                    let return_name = if matches!(answer, LeafReturn::Void) { "System.Void" } else { "System.Boolean" };
+                    let return_name = match effect {
+                        LeafEffect::Void => "System.Void",
+                        LeafEffect::PlayerDamage(_) => "System.Single",
+                        _ => "System.Boolean",
+                    };
                     if found.is_some()
                         || (self.method_instance)(method) != instance
                         || (self.method_generic)(method)
@@ -123,16 +134,63 @@ impl RuntimeAccess {
                     .checked_sub(module_base.as_ptr() as usize)
                     .filter(|offset| offset.checked_add(16).is_some_and(|end| end <= module_size))
                     .ok_or_else(|| unsupported("hook module range"))?;
-                targets.push(BooleanHookTarget {
+                targets.push(GameplayHookTarget {
                     name: format!("{}.{}", class.to_string_lossy(), name.to_string_lossy()),
                     address: NonNull::new(address).ok_or_else(|| unsupported("hook address"))?,
                     bytes: read_value(address.cast()),
-                    answer,
+                    effect,
                     receiver_class,
                     linked_offset,
                 });
             }
             Ok(targets)
+        }
+    }
+}
+
+impl RuntimeAccess {
+    // Called only after offline status admission. No instance or static getters are
+    // invoked by gameplay threads; IL2CPP owns these static-storage allocations.
+    unsafe fn damage_layout(&self) -> Result<DamageLayout, DiscoveryError> {
+        // SAFETY: same initialized metadata, attached-thread and readable field contract as status.
+        unsafe {
+            let images = self.images()?;
+            let health = self.class(&images, c"", c"BaseHealth")?;
+            let actor = self.class(&images, c"", c"Actor")?;
+            let field = self.field(health, c"actor")?;
+            let offset = (self.field_offset)(field);
+            if (self.class_value)(health) || (self.field_flags)(field) & 0x10 != 0 || self.field_class(field)? != actor || !(16..=16384).contains(&offset) || offset % 8 != 0 {
+                return Err(unsupported("health actor reference layout"));
+            }
+            let player_class = self.class(&images, c"", c"PlayerFinder")?;
+            let player = self.static_field(player_class, c"playerActorComponent", "Actor")?;
+            let environment = self.class(&images, c"EHG.Multiplayer", c"GameplayEnvironment")?;
+            let online = self.static_field(environment, c"_isOnlinePlay", "System.Boolean")?;
+            let player_storage = self.hook_static_storage(player_class, player, 8)?;
+            let online_storage = self.hook_static_storage(environment, online, 1)?;
+            Ok(DamageLayout {
+                player_storage,
+                online_storage,
+                actor_offset: offset as u32,
+            })
+        }
+    }
+    unsafe fn hook_static_storage(&self, owner: Class, field: Ptr, alignment: usize) -> Result<NonNull<c_void>, DiscoveryError> {
+        // SAFETY: static field type/flags validated by caller; initialize through the
+        // public field API, then obtain the owning storage through the public class API.
+        unsafe {
+            let mut snapshot = 0u64;
+            (self.static_get)(field, (&raw mut snapshot).cast());
+            let offset = (self.field_offset)(field);
+            let storage = (self.class_static_data)(owner);
+            if storage.is_null() || offset > 16384 || !offset.is_multiple_of(alignment) {
+                return Err(unsupported("hook static storage layout"));
+            }
+            let pointer = storage.cast::<u8>().add(offset);
+            if !(pointer as usize).is_multiple_of(alignment) {
+                return Err(unsupported("hook static storage alignment"));
+            }
+            Ok(NonNull::new(pointer.cast()).unwrap())
         }
     }
 }

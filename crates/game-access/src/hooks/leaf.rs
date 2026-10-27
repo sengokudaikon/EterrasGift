@@ -1,5 +1,5 @@
-//! Process-owned leaf gateway: return a constant, or tail-call the retained original.
-//! It never calls helper code, changes arguments/stack, or creates an unwind frame.
+//! Process-owned leaves for Boolean overrides and player incoming damage.
+//! They never enter helper code or change the stack; damage scales XMM1 before tail-calling.
 use super::{HookError, failure};
 use std::{
     ptr::NonNull,
@@ -18,25 +18,37 @@ struct Data {
     receiver_class: u64,
     switch: u64,
     answer: AtomicU64,
+    player_storage: u64,
+    online_storage: u64,
+    hundred: f64,
 }
 
 #[derive(Clone, Copy)]
-pub enum LeafReturn {
+pub enum LeafEffect {
     Boolean(bool),
     SelectableBoolean,
     Void,
+    PlayerDamage(DamageLayout),
+}
+
+/// Metadata-validated game storage, retained for the process lifetime.
+#[derive(Clone, Copy)]
+pub struct DamageLayout {
+    pub player_storage: NonNull<std::ffi::c_void>,
+    pub online_storage: NonNull<std::ffi::c_void>,
+    pub actor_offset: u32,
 }
 
 /// Pages intentionally survive helper unload, including calls paused in this leaf.
-pub struct ConstantGate {
+pub struct LeafGate {
     entry: usize,
     data: &'static Data,
     switch: &'static AtomicU64,
 }
-impl ConstantGate {
+impl LeafGate {
     pub fn prepare() -> Result<Self, HookError> {
         // SAFETY: unscoped gate never reads a receiver.
-        unsafe { Self::prepare_override(LeafReturn::Boolean(true), None, None) }
+        unsafe { Self::prepare_override(LeafEffect::Boolean(true), None, None) }
     }
     /// Override only calls on this exact IL2CPP class. Other receivers forward.
     ///
@@ -46,7 +58,7 @@ impl ConstantGate {
     /// its class pointer. No other object fields are read by the gateway.
     pub unsafe fn prepare_for_class(class: NonNull<std::ffi::c_void>) -> Result<Self, HookError> {
         // SAFETY: caller supplies the retained metadata and object-header contract.
-        unsafe { Self::prepare_override(LeafReturn::Boolean(true), Some(class), None) }
+        unsafe { Self::prepare_override(LeafEffect::Boolean(true), Some(class), None) }
     }
     /// # Safety
     /// The target's return type must match `answer`. With a class guard, every
@@ -54,7 +66,11 @@ impl ConstantGate {
     /// it names a metadata-validated reference field on that receiver; a non-null
     /// linked object also has a readable header. Class metadata is process-lifetime.
     /// The linked guard admits either the selected class or a slot linked to it.
-    pub unsafe fn prepare_override(answer: LeafReturn, class: Option<NonNull<std::ffi::c_void>>, linked_offset: Option<u32>) -> Result<Self, HookError> {
+    /// PlayerDamage requires `float(BaseHealth*, float, MethodInfo*)` on Windows x64.
+    /// Non-null receivers have a readable actor reference at actor_offset; its two
+    /// static addresses remain readable until process exit (aligned pointer and byte).
+    /// Runtime reference stores are atomic and objects do not move.
+    pub unsafe fn prepare_override(answer: LeafEffect, class: Option<NonNull<std::ffi::c_void>>, linked_offset: Option<u32>) -> Result<Self, HookError> {
         // SAFETY: forwarded target/receiver contract, with a new private switch.
         unsafe { Self::prepare_shared(answer, class, linked_offset, None) }
     }
@@ -63,22 +79,33 @@ impl ConstantGate {
     /// # Safety
     /// Same target and receiver contract as `prepare_override`. Neither leaf may
     /// be published until every original has been set and all entries verified.
-    pub unsafe fn prepare_shared(answer: LeafReturn, class: Option<NonNull<std::ffi::c_void>>, linked_offset: Option<u32>, shared: Option<&Self>) -> Result<Self, HookError> {
+    pub unsafe fn prepare_shared(answer: LeafEffect, class: Option<NonNull<std::ffi::c_void>>, linked_offset: Option<u32>, shared: Option<&Self>) -> Result<Self, HookError> {
         // SAFETY: private allocation; code and aligned atomic data fit the two pages.
         unsafe {
             let allocation = VirtualAlloc(std::ptr::null(), 8192, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE).cast::<u8>();
             let Some(code) = NonNull::new(allocation) else {
-                return Err(failure("allocate constant gateway"));
+                return Err(failure("allocate leaf gateway"));
             };
             let data = allocation.add(4096).cast::<Data>();
             data.write(Data {
                 enabled: AtomicU64::new(0),
                 original: AtomicU64::new(0),
                 answer: AtomicU64::new(1),
+                player_storage: if let LeafEffect::PlayerDamage(layout) = answer {
+                    layout.player_storage.as_ptr() as u64
+                } else {
+                    0
+                },
+                online_storage: if let LeafEffect::PlayerDamage(layout) = answer {
+                    layout.online_storage.as_ptr() as u64
+                } else {
+                    0
+                },
+                hundred: 100.0,
                 receiver_class: class.map_or(0, |class| class.as_ptr() as u64),
                 switch: shared.map_or(data as u64, |gate| gate.switch as *const AtomicU64 as u64),
             });
-            // Only volatile RAX/R11 and flags change; all arguments stay intact.
+            // RAX/R11 and flags are scratch; the damage effect also changes XMM0/XMM1.
             let mut bytes = vec![0x48, 0xb8];
             bytes.extend((data as u64).to_le_bytes());
             bytes.extend([0x4c, 0x8b, 0x58, 0x18, 0x49, 0x83, 0x3b, 0, 0x74, 0]); // mov r11,[rax+24]; cmp [r11],0; je original
@@ -98,20 +125,26 @@ impl ConstantGate {
                 bytes.extend([0x75, 0]); // jne original
                 branches.push(bytes.len() - 1);
             }
-            if matches!(answer, LeafReturn::SelectableBoolean) {
+            if let LeafEffect::PlayerDamage(layout) = answer {
+                damage_code(&mut bytes, &mut branches, layout.actor_offset);
+            } else if matches!(answer, LeafEffect::SelectableBoolean) {
                 bytes.extend([0x48, 0x8b, 0x40, 0x20, 0xc3]); // mov rax,[rax+32]; ret
             } else {
-                let answer = matches!(answer, LeafReturn::Boolean(true));
+                let answer = matches!(answer, LeafEffect::Boolean(true));
                 bytes.extend([0xb8, u8::from(answer), 0, 0, 0, 0xc3]); // mov eax,answer; ret (also valid for void)
             }
             for branch in branches {
-                bytes[branch] = (bytes.len() - branch - 1) as u8;
+                let Ok(distance) = i8::try_from(bytes.len() - branch - 1) else {
+                    VirtualFree(allocation.cast(), 0, MEM_RELEASE);
+                    return Err(HookError::UnsupportedPrefix);
+                };
+                bytes[branch] = distance as u8;
             }
             bytes.extend([0xff, 0x60, 0x08]); // original: jmp [rax+8]
             std::ptr::copy_nonoverlapping(bytes.as_ptr(), allocation, bytes.len());
             let mut old = 0;
             if VirtualProtect(allocation.cast(), 4096, PAGE_EXECUTE_READ, &raw mut old) == 0 || FlushInstructionCache(GetCurrentProcess(), allocation.cast(), 4096) == 0 {
-                let error = failure("publish constant gateway");
+                let error = failure("publish leaf gateway");
                 VirtualFree(allocation.cast(), 0, MEM_RELEASE);
                 return Err(error);
             }
@@ -133,7 +166,14 @@ impl ConstantGate {
     }
     /// Used by a selectable Boolean leaf; fixed leaves retain their authored answer.
     pub fn set_answer(&self, answer: bool) {
-        self.data.answer.store(u64::from(answer), SeqCst);
+        self.set_value(u8::from(answer));
+    }
+    /// Caller validates the value for its concrete effect before enabling it.
+    pub fn set_value(&self, value: u8) {
+        self.data.answer.store(u64::from(value), SeqCst);
+    }
+    pub fn value(&self) -> u8 {
+        self.data.answer.load(SeqCst) as u8
     }
     pub fn answer(&self) -> bool {
         self.data.answer.load(SeqCst) != 0
@@ -146,10 +186,103 @@ impl ConstantGate {
     }
 }
 
+// RCX=this, XMM1=damage, R8=MethodInfo. RAX/R11/XMM0 are scratch only.
+// Every exit tail-calls the original exactly once, including zero damage.
+fn damage_code(bytes: &mut Vec<u8>, branches: &mut Vec<usize>, actor_offset: u32) {
+    let branch = |bytes: &mut Vec<u8>, branches: &mut Vec<usize>, opcode: u8| {
+        bytes.extend([opcode, 0]);
+        branches.push(bytes.len() - 1);
+    };
+    bytes.extend([0x4c, 0x8b, 0x58, 0x30, 0x41, 0x80, 0x3b, 0]); // online storage; cmp byte [r11],0
+    branch(bytes, branches, 0x75);
+    bytes.extend([0x48, 0x85, 0xc9]); // null this
+    branch(bytes, branches, 0x74);
+    bytes.extend([0x4c, 0x8b, 0x58, 0x28, 0x4d, 0x8b, 0x1b, 0x4d, 0x85, 0xdb]); // current static player
+    branch(bytes, branches, 0x74);
+    bytes.extend([0x4c, 0x39, 0x99]); // cmp [rcx+actor_offset],r11
+    bytes.extend(actor_offset.to_le_bytes());
+    branch(bytes, branches, 0x75);
+    bytes.extend([0x4c, 0x8b, 0x58, 0x20, 0x49, 0x83, 0xfb, 100]); // single coherent value read
+    branch(bytes, branches, 0x73); // >=100 forwards untouched
+    bytes.extend([0x4d, 0x85, 0xdb, 0x75, 6]); // nonzero skips zero path
+    bytes.extend([0x0f, 0x57, 0xc9]); // xorps xmm1,xmm1 (also turns NaN/Inf into zero)
+    bytes.extend([0xff, 0x60, 0x08]); // original
+    bytes.extend([0xf2, 0x49, 0x0f, 0x2a, 0xc3]); // cvtsi2sd xmm0,r11
+    bytes.extend([0xf2, 0x0f, 0x5e, 0x40, 0x38]); // divsd xmm0,[rax+56] (100)
+    bytes.extend([0xf3, 0x0f, 0x5a, 0xc9]); // cvtss2sd xmm1,xmm1
+    bytes.extend([0xf2, 0x0f, 0x59, 0xc8]); // mulsd xmm1,xmm0
+    bytes.extend([0xf2, 0x0f, 0x5a, 0xc9]); // cvtsd2ss xmm1,xmm1
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::sync::atomic::AtomicUsize;
+    #[repr(C)]
+    struct Health {
+        header: [usize; 2],
+        actor: usize,
+        calls: AtomicUsize,
+    }
+    #[test]
+    fn damage_scales_only_current_player_and_always_preserves_original_call() {
+        extern "C-unwind" fn original(health: &Health, damage: f32, method: usize) -> f32 {
+            assert_eq!(method, 0x12345678);
+            health.calls.fetch_add(1, SeqCst);
+            damage + 7.0
+        }
+        let player = Box::leak(Box::new(AtomicUsize::new(42)));
+        let online = Box::leak(Box::new(std::sync::atomic::AtomicU8::new(0)));
+        let layout = DamageLayout {
+            player_storage: NonNull::from(&*player).cast(),
+            online_storage: NonNull::from(&*online).cast(),
+            actor_offset: 16,
+        };
+        // SAFETY: fixture storage is process-lifetime and every receiver has this layout and exact ABI.
+        let gate = unsafe { LeafGate::prepare_override(LeafEffect::PlayerDamage(layout), None, None).unwrap() };
+        // SAFETY: matching retained original configured before calls.
+        unsafe { gate.set_original(original as *const ()) };
+        // SAFETY: exact Windows x64 signature of this damage leaf.
+        let call: extern "C-unwind" fn(&Health, f32, usize) -> f32 = unsafe { std::mem::transmute(gate.entry()) };
+        let mine = Health {
+            header: [0; 2],
+            actor: 42,
+            calls: AtomicUsize::new(0),
+        };
+        let other = Health {
+            header: [0; 2],
+            actor: 43,
+            calls: AtomicUsize::new(0),
+        };
+        let hit = |health: &Health, amount| {
+            let before = health.calls.load(SeqCst);
+            let result = call(health, amount, 0x12345678);
+            assert_eq!(health.calls.load(SeqCst), before + 1);
+            result
+        };
+        for percent in [0, 1, 25, 50, 99, 100] {
+            gate.set_value(percent);
+            gate.set_enabled(true);
+            assert_eq!(hit(&mine, 200.0), f32::from(percent) * 2.0 + 7.0);
+            assert_eq!(hit(&mine, -200.0), -f32::from(percent) * 2.0 + 7.0);
+            assert_eq!(hit(&other, 200.0), 207.0);
+        }
+        gate.set_value(0);
+        for amount in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
+            assert_eq!(hit(&mine, amount), 7.0);
+        }
+        player.store(43, SeqCst);
+        assert_eq!(hit(&mine, 200.0), 207.0);
+        assert_eq!(hit(&other, 200.0), 7.0);
+        player.store(0, SeqCst);
+        assert_eq!(hit(&other, 200.0), 207.0);
+        player.store(42, SeqCst);
+        online.store(1, SeqCst);
+        assert_eq!(hit(&mine, 200.0), 207.0);
+        online.store(0, SeqCst);
+        gate.set_enabled(false);
+        assert_eq!(hit(&mine, 200.0), 207.0);
+    }
     static CALLS: AtomicUsize = AtomicUsize::new(0);
     #[test]
     fn selectable_answer_changes_without_replacing_code_and_disabled_always_forwards() {
@@ -158,7 +291,7 @@ mod tests {
             answer
         }
         // SAFETY: unscoped Boolean leaf with a matching process-lifetime original.
-        let gate = unsafe { ConstantGate::prepare_override(LeafReturn::SelectableBoolean, None, None).unwrap() };
+        let gate = unsafe { LeafGate::prepare_override(LeafEffect::SelectableBoolean, None, None).unwrap() };
         // SAFETY: configured before publication.
         unsafe { gate.set_original(original as *const ()) };
         // SAFETY: exact original ABI; retained leaf preserves the arguments.
@@ -181,9 +314,9 @@ mod tests {
             false
         }
         let (a, b, second) = {
-            let first = ConstantGate::prepare().unwrap();
+            let first = LeafGate::prepare().unwrap();
             // SAFETY: same Boolean ABI; shared switch and executable pages are process-owned.
-            let second = unsafe { ConstantGate::prepare_shared(LeafReturn::Boolean(true), None, None, Some(&first)).unwrap() };
+            let second = unsafe { LeafGate::prepare_shared(LeafEffect::Boolean(true), None, None, Some(&first)).unwrap() };
             // SAFETY: matching originals, configured before either entry is used.
             unsafe {
                 first.set_original(original as *const ());
@@ -226,7 +359,7 @@ mod tests {
             linked: std::ptr::null(),
         };
         // SAFETY: authored readable headers/references; exact field offset and process-lifetime class.
-        let gate = unsafe { ConstantGate::prepare_override(LeafReturn::Boolean(false), Some(class), Some(8)).unwrap() };
+        let gate = unsafe { LeafGate::prepare_override(LeafEffect::Boolean(false), Some(class), Some(8)).unwrap() };
         // SAFETY: matching process-lifetime Boolean target.
         unsafe { gate.set_original(original as *const ()) };
         // SAFETY: leaf forwards this ABI exactly.
@@ -249,7 +382,7 @@ mod tests {
             count.fetch_add(1, SeqCst);
         }
         // SAFETY: no receiver guard; matching void target below.
-        let gate = unsafe { ConstantGate::prepare_override(LeafReturn::Void, None, None).unwrap() };
+        let gate = unsafe { LeafGate::prepare_override(LeafEffect::Void, None, None).unwrap() };
         // SAFETY: process-lifetime original, configured before publication.
         unsafe { gate.set_original(original as *const ()) };
         // SAFETY: exact target ABI, including a stack argument.
@@ -270,7 +403,7 @@ mod tests {
     }
     #[test]
     fn bypasses_original_on_and_preserves_register_and_stack_arguments_off() {
-        let gate = ConstantGate::prepare().unwrap();
+        let gate = LeafGate::prepare().unwrap();
         // SAFETY: unpublished leaf and process-lifetime test target with matching ABI.
         unsafe { gate.set_original(original as *const ()) };
         // SAFETY: leaf preserves this exact ABI when forwarding and returns a Boolean.
@@ -303,7 +436,7 @@ mod tests {
         let other = Object { class: 0 };
         // SAFETY: class identity is compared only; all non-null test receivers
         // have this readable header and outlive calls. The gate outlives the test.
-        let gate = unsafe { ConstantGate::prepare_for_class(NonNull::new(class).unwrap()).unwrap() };
+        let gate = unsafe { LeafGate::prepare_for_class(NonNull::new(class).unwrap()).unwrap() };
         // SAFETY: process-lifetime original with the same ABI as the leaf.
         unsafe { gate.set_original(original as *const ()) };
         // SAFETY: the leaf preserves register/stack arguments and returns bool.

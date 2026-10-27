@@ -156,7 +156,7 @@ fn field<'a>(slice: Option<&'a Value>, key: &str) -> Option<&'a Value> {
 
 /// `{ "id": [numbers] }`; an entry that is not a list of numbers is dropped.
 fn saved_values(values: &Value) -> Vec<SavedValues> {
-    values
+    let mut saved: Vec<_> = values
         .as_object()
         .into_iter()
         .flatten()
@@ -164,7 +164,17 @@ fn saved_values(values: &Value) -> Vec<SavedValues> {
             let values = numbers.as_array()?.iter().map(Value::as_f64).collect::<Option<Vec<_>>>()?;
             Some(SavedValues { id: id.clone(), values })
         })
-        .collect()
+        .collect();
+    if !saved.iter().any(|s| s.id == "incoming-damage")
+        && let Some(old) = saved.iter().find(|s| s.id == "damage-taken" && s.values.len() == 1 && s.values[0].is_finite())
+    {
+        saved.push(SavedValues {
+            id: "incoming-damage".into(),
+            values: vec![(100.0 / old.values[0].clamp(1.0, 100.0)).round()],
+        });
+    }
+    saved.retain(|s| s.id != "damage-taken" && s.id != "god-mode");
+    saved
 }
 
 fn profile(entry: &Value, template: &FeatureIntents) -> Option<Profile> {
@@ -182,6 +192,23 @@ fn profile(entry: &Value, template: &FeatureIntents) -> Option<Profile> {
         if let Some(id) = id.as_str().and_then(HookId::parse) {
             hooks.set_wanted(id, true);
         }
+    }
+    let wanted: Vec<_> = field(Some(entry), "wanted")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_str)
+        .collect();
+    let has_new = field(Some(entry), "values")
+        .and_then(Value::as_object)
+        .is_some_and(|values| values.contains_key("incoming-damage"))
+        || wanted.contains(&"incoming-damage");
+    if !has_new && (wanted.contains(&"god-mode") || wanted.contains(&"damage-taken")) {
+        let id = HookId::parse("incoming-damage").unwrap();
+        if wanted.contains(&"god-mode") {
+            let _ = hooks.set_values(id, &[0.0]);
+        }
+        hooks.set_wanted(id, true);
     }
     Some(Profile { key, last_played, hooks })
 }

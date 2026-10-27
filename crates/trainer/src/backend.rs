@@ -215,7 +215,7 @@ impl<T: Transport + Send + 'static> BackendConnection for Session<T> {
     }
     async fn refresh(&mut self, now: Timestamp) -> Result<RuntimeStatus, BackendError> {
         Session::refresh(self, now).await?;
-        self.refresh_boolean_hooks().await?;
+        self.refresh_gameplay_hooks().await?;
         self.runtime_status()
             .copied()
             .ok_or_else(|| BackendError::blocked(ErrorKind::Protocol, "missing runtime status"))
@@ -272,25 +272,26 @@ impl<T: Transport + Send + 'static> BackendConnection for Session<T> {
         true
     }
     fn supports_hook(&self, id: HookId) -> bool {
-        eg_trainer_wire::hooks::BooleanHook::from_id(id.as_str()).is_some()
+        eg_trainer_wire::hooks::GameplayHook::from_id(id.as_str()).is_some()
     }
     fn observed_hook(&self, id: HookId) -> Option<bool> {
-        eg_trainer_wire::hooks::BooleanHook::from_id(id.as_str())
+        eg_trainer_wire::hooks::GameplayHook::from_id(id.as_str())
             .and_then(|hook| self.hook_observation(hook))
             .map(|actual| actual.enabled)
     }
     async fn set_hook(&mut self, _: Timestamp, request: &HookRequest, control: &mut dyn WriteControl) -> Result<WriteOutcome<bool>, BackendError> {
-        let Some(hook) = eg_trainer_wire::hooks::BooleanHook::from_id(request.id.as_str()) else {
+        let Some(hook) = eg_trainer_wire::hooks::GameplayHook::from_id(request.id.as_str()) else {
             return Ok(WriteOutcome::refused(HOOK_NOT_AVAILABLE));
         };
-        let answer = match (hook, request.values.as_slice()) {
-            (eg_trainer_wire::hooks::BooleanHook::MysteriousRift, [mode]) if *mode == 1.0 => true,
-            (eg_trainer_wire::hooks::BooleanHook::MysteriousRift, [mode]) if *mode == 2.0 => false,
-            (eg_trainer_wire::hooks::BooleanHook::MysteriousRift, [mode]) if *mode == 0.0 && !request.on => true,
-            (eg_trainer_wire::hooks::BooleanHook::Offhand, []) => true,
+        let value = match (hook, request.values.as_slice()) {
+            (eg_trainer_wire::hooks::GameplayHook::MysteriousRift, [mode]) if *mode == 1.0 => 1,
+            (eg_trainer_wire::hooks::GameplayHook::MysteriousRift, [mode]) if *mode == 2.0 => 0,
+            (eg_trainer_wire::hooks::GameplayHook::MysteriousRift, [mode]) if *mode == 0.0 && !request.on => 1,
+            (eg_trainer_wire::hooks::GameplayHook::Offhand, []) => 1,
+            (eg_trainer_wire::hooks::GameplayHook::IncomingDamage, [percent]) if percent.is_finite() && (0.0..=100.0).contains(percent) && percent.fract() == 0.0 => *percent as u8,
             _ => return Ok(WriteOutcome::refused("Invalid hook selection")),
         };
-        Ok(self.set_boolean_hook_with_answer(hook, request.on, answer, control).await?)
+        Ok(self.set_gameplay_hook_with_value(hook, request.on, value, control).await?)
     }
     fn supports_status(&self, _field: crate::edits::StatusField) -> bool {
         true
@@ -457,8 +458,8 @@ pub enum Activity {
 }
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Capabilities {
-    /// In BooleanHook order; availability comes from this connection, not saved intent.
-    pub boolean_hooks: [bool; 2],
+    /// In GameplayHook order; availability comes from this connection, not saved intent.
+    pub gameplay_hooks: [bool; 3],
     pub read_forge: bool,
     pub read_attack_leech: bool,
     /// Narrow operation support, not current observation eligibility or lifetime authority.
@@ -1178,7 +1179,7 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
         self.state.undo_forge_depth = if self.state.undo_forge.is_some() { self.forge_history.len() } else { 0 };
         self.state.undo_forge_needs_override = self.state.undo_forge.is_some() && self.forge_history.needs_override();
         self.state.capabilities = Capabilities {
-            boolean_hooks: eg_trainer_wire::hooks::BooleanHook::ALL.map(|hook| {
+            gameplay_hooks: eg_trainer_wire::hooks::GameplayHook::ALL.map(|hook| {
                 self.state.phase == Phase::Ready
                     && self.state.activity.is_none()
                     && self

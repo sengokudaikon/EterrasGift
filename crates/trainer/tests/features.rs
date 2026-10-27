@@ -37,11 +37,12 @@ fn all_source_ids_are_ordered_unique_typed_and_support_is_explicit() {
         "src/Trainer/EterrasGift.Trainer.Application/Features/TrainerCatalog.cs",
         "8cf232cea9f2199672031235c61c170644051382c09aa33442cf550c4b21e2c1"
     )));
-    let expected: Vec<_> = SOURCE_IDS.split_whitespace().collect();
-    assert_eq!(expected.len(), 76);
+    let combined = SOURCE_IDS.replace("god-mode damage-taken", "incoming-damage");
+    let expected: Vec<_> = combined.split_whitespace().collect();
+    assert_eq!(expected.len(), 75);
     assert_eq!(DESCRIPTORS.iter().map(|descriptor| descriptor.key.as_str()).collect::<Vec<_>>(), expected);
-    assert_eq!(expected.iter().copied().collect::<BTreeSet<_>>().len(), 76);
-    assert_eq!(DESCRIPTORS.iter().filter(|descriptor| matches!(descriptor.key, FeatureKey::Hook(_))).count(), 68);
+    assert_eq!(expected.iter().copied().collect::<BTreeSet<_>>().len(), 75);
+    assert_eq!(DESCRIPTORS.iter().filter(|descriptor| matches!(descriptor.key, FeatureKey::Hook(_))).count(), 67);
     assert_eq!(DESCRIPTORS.iter().filter(|descriptor| matches!(descriptor.key, FeatureKey::Fields(_))).count(), 7);
     assert_eq!(DESCRIPTORS.iter().filter(|descriptor| descriptor.key == FeatureKey::Forge).count(), 1);
     for descriptor in DESCRIPTORS {
@@ -49,7 +50,7 @@ fn all_source_ids_are_ordered_unique_typed_and_support_is_explicit() {
         assert_eq!(descriptor.key.descriptor(), descriptor);
         assert_eq!(
             descriptor.native_support,
-            eg_trainer_wire::hooks::BooleanHook::from_id(descriptor.key.as_str()).map_or(NativeSupport::Unsupported, NativeSupport::BooleanOverride)
+            eg_trainer_wire::hooks::GameplayHook::from_id(descriptor.key.as_str()).map_or(NativeSupport::Unsupported, NativeSupport::GameplayOverride)
         );
         assert!(!descriptor.title.is_empty());
         assert!(!descriptor.description.is_empty());
@@ -86,7 +87,7 @@ fn pages_and_original_section_order_are_preserved() {
     let expected = [
         (Character, "Character", "IconCharacter", vec!["Progression", "Trees", "Equipment rules"], true, 13),
         (Stash, "Stash", "IconStash", vec!["Currency", "Keys", "Woven echoes", "Duplicate"], false, 4),
-        (Combat, "Combat", "IconCombat", vec!["Survival", "Offense", "Resources", "Movement"], false, 14),
+        (Combat, "Combat", "IconCombat", vec!["Survival", "Offense", "Resources", "Movement"], false, 13),
         (Forge, "Forge", "IconForge", vec!["Item", "Crafting rules"], false, 5),
         (Loot, "Loot", "IconLoot", vec!["Drops", "Quality", "Pickup"], false, 7),
         (Monolith, "Monolith", "IconMonolith", vec!["Run", "Echo web"], false, 6),
@@ -116,7 +117,7 @@ fn source_parameter_defaults_bounds_steps_choices_and_units() {
             &[("Character experience", 2., 1., 100., 0.5, Some("×")), ("Skill experience", 2., 1., 100., 0.5, Some("×"))],
         ),
         ("duplicate", &[("Stack multiplier", 2., 1., 20., 1., Some("×"))]),
-        ("damage-taken", &[("Divide by", 2., 1., 100., 0.5, None)]),
+        ("incoming-damage", &[("Damage taken", 50., 0., 100., 1., Some("%"))]),
         ("damage-dealt", &[("Multiplier", 2., 0., 100., 0.5, Some("×"))]),
         ("cast-speed", &[("Multiplier", 2., 0., 100., 0.5, Some("×"))]),
         ("projectiles", &[("Multiplier", 2., 0., 100., 0.5, Some("×"))]),
@@ -346,7 +347,7 @@ fn live_edits_are_strict_transactional_and_do_not_quantize_steps() {
 #[test]
 fn duplicate_bulk_ids_reject_everything_including_unknown_and_bad_arity() {
     let mut state = FeatureIntents::default();
-    state.set_wanted(hook("god-mode"), true);
+    state.set_wanted(hook("incoming-damage"), true);
     let before = state.clone();
     for duplicate in ["unknown", "currency", "xp-multiplier", "god-mode"] {
         let error = state
@@ -383,7 +384,7 @@ fn saved_values_carry_only_hooks_with_values_and_leave_switches_to_the_profile()
 
 #[test]
 fn shared_owner_metadata_does_not_couple_switches_or_claim_effects() {
-    let health = ["god-mode", "damage-taken", "one-hit-kill", "damage-dealt"];
+    let health = ["incoming-damage", "one-hit-kill", "damage-dealt"];
     for id in health {
         assert_eq!(FeatureKey::parse(id).unwrap().descriptor().legacy_owners, ["healthDamageHook"]);
     }
@@ -392,12 +393,12 @@ fn shared_owner_metadata_does_not_couple_switches_or_claim_effects() {
     let owners: BTreeSet<_> = DESCRIPTORS.iter().flat_map(|descriptor| descriptor.legacy_owners.iter().copied()).collect();
     assert_eq!(owners.len(), 74);
     let mut state = FeatureIntents::default();
-    state.set_wanted(hook("god-mode"), true);
-    state.set_wanted(hook("damage-taken"), true);
-    state.set_wanted(hook("god-mode"), false);
-    assert!(state.is_wanted(hook("damage-taken")));
+    state.set_wanted(hook("incoming-damage"), true);
+    state.set_wanted(hook("damage-dealt"), true);
+    state.set_wanted(hook("incoming-damage"), false);
+    assert!(state.is_wanted(hook("damage-dealt")));
     assert!(!state.is_wanted(hook("one-hit-kill")));
-    for id in health {
+    for id in ["one-hit-kill", "damage-dealt"] {
         assert_eq!(FeatureKey::parse(id).unwrap().descriptor().native_support, NativeSupport::Unsupported);
     }
 }

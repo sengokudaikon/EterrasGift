@@ -39,7 +39,8 @@ struct Data {
     games: AtomicUsize,
     /// The character's attack rate and increased leech rate, as raw floats.
     rates: Mutex<[u32; 2]>,
-    boolean_hooks: [AtomicBool; 2],
+    gameplay_hooks: [AtomicBool; 3],
+    damage_percent: AtomicUsize,
     rift_choice: AtomicUsize,
 }
 impl Data {
@@ -298,15 +299,16 @@ impl BackendConnection for OwnedConnection {
         }
     }
     fn supports_hook(&self, id: eg_trainer::features::HookId) -> bool {
-        matches!(id.as_str(), "mysterious-rift" | "offhand")
+        matches!(id.as_str(), "mysterious-rift" | "offhand" | "incoming-damage")
     }
     fn observed_hook(&self, id: eg_trainer::features::HookId) -> Option<bool> {
         let index = match id.as_str() {
             "mysterious-rift" => 0,
             "offhand" => 1,
+            "incoming-damage" => 2,
             _ => return None,
         };
-        Some(self.0.boolean_hooks[index].load(Ordering::SeqCst))
+        Some(self.0.gameplay_hooks[index].load(Ordering::SeqCst))
     }
     async fn set_hook(
         &mut self,
@@ -318,9 +320,13 @@ impl BackendConnection for OwnedConnection {
         let index = match request.id.as_str() {
             "mysterious-rift" => 0,
             "offhand" => 1,
+            "incoming-damage" => 2,
             _ => panic!("unsupported fixture hook"),
         };
-        self.0.boolean_hooks[index].store(request.on, Ordering::SeqCst);
+        self.0.gameplay_hooks[index].store(request.on, Ordering::SeqCst);
+        if index == 2 {
+            self.0.damage_percent.store(request.values[0] as usize, Ordering::SeqCst);
+        }
         if index == 0 {
             self.0.rift_choice.store(request.values[0] as usize, Ordering::SeqCst);
         }
@@ -555,7 +561,8 @@ pub(super) fn capture(session: &Session) {
         expected: Mutex::new(Vec::new()),
         games: AtomicUsize::new(1),
         rates: Mutex::new([1.0_f32.to_bits(), 0.3_f32.to_bits()]),
-        boolean_hooks: [AtomicBool::new(false), AtomicBool::new(false)],
+        gameplay_hooks: [AtomicBool::new(false), AtomicBool::new(false), AtomicBool::new(false)],
+        damage_percent: AtomicUsize::new(50),
         rift_choice: AtomicUsize::new(0),
     });
     let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
@@ -621,7 +628,7 @@ pub(super) fn capture(session: &Session) {
     assert_eq!(ui.global::<eg_ui::TrainerState>().get_item_unavailable(), "");
     session.capture(&ui, "backend-forge-empty");
     combat_rates(session, &ui, &handle, &data);
-    boolean_hooks(session, &ui, &handle, &data);
+    gameplay_hooks(session, &ui, &handle, &data);
     *data.item.lock().unwrap() = Some(item("Owned Hatchet Ω", 17));
     command(&handle, Command::ReadForge, || matches!(handle.snapshot().forge, backend::ForgeState::Item { .. }));
     wait(|| ui.global::<eg_ui::ForgeState>().get_has_item());
@@ -1207,12 +1214,17 @@ pub(super) fn capture(session: &Session) {
     ui.hide().unwrap();
 }
 
-/// Both supported hooks use the real profile commands and worker snapshots.
-fn boolean_hooks(session: &Session, ui: &MainWindow, handle: &BackendHandle, data: &Data) {
+/// Supported gameplay hooks use the real profile commands and worker snapshots.
+fn gameplay_hooks(session: &Session, ui: &MainWindow, handle: &BackendHandle, data: &Data) {
     let state = ui.global::<eg_ui::TrainerState>();
     for on in [true, false] {
-        for (index, page, title, id) in [(0, "world", "Mysterious rifts", "mysterious-rift"), (1, "character", "Anything in the offhand", "offhand")] {
+        for (index, page, title, id) in [
+            (0, "world", "Mysterious rifts", "mysterious-rift"),
+            (1, "character", "Anything in the offhand", "offhand"),
+            (2, "combat", "Damage taken", "incoming-damage"),
+        ] {
             ui.global::<Nav>().invoke_navigate(page.into());
+            settle();
             state.set_section(0);
             settle();
             let row = (0..state.get_rows().row_count())
@@ -1228,7 +1240,18 @@ fn boolean_hooks(session: &Session, ui: &MainWindow, handle: &BackendHandle, dat
             let id = eg_trainer::features::HookId::parse(id).unwrap();
             wait(|| handle.snapshot().hooks.get(&id) == Some(if on { &backend::HookRun::On } else { &backend::HookRun::Off }));
             wait(|| state.get_rows().row_data(row).unwrap().on == on);
-            assert_eq!(data.boolean_hooks[index].load(Ordering::SeqCst), on);
+            assert_eq!(data.gameplay_hooks[index].load(Ordering::SeqCst), on);
+            if on && index == 2 {
+                for percent in [0, 100, 50] {
+                    state.invoke_value_committed(row as i32, 0, percent.to_string().into());
+                    wait(|| data.damage_percent.load(Ordering::SeqCst) == percent);
+                    wait(|| state.get_rows().row_data(row).unwrap().status == "On in the game.");
+                    session.capture(ui, &format!("backend-hook-damage-{percent}"));
+                }
+                session.resize(680, 580);
+                session.capture(ui, "backend-hook-damage-narrow");
+                session.resize(1100, 700);
+            }
             if on && index == 0 {
                 wait(|| state.get_rows().row_data(row).unwrap().status == "Portal selected in the game.");
                 state.invoke_value_chosen(row as i32, 0, 2);
@@ -1247,7 +1270,7 @@ fn boolean_hooks(session: &Session, ui: &MainWindow, handle: &BackendHandle, dat
             if on {
                 // Both rows sit near the bottom of their page. Capture the
                 // supported switch itself, not the unsupported rows above it.
-                session.scroll(500.0, 400.0, -10_000.0);
+                session.scroll(500.0, 400.0, if index == 2 { 10_000.0 } else { -10_000.0 });
                 for _ in 0..3 {
                     settle();
                     ui.window().take_snapshot().expect("render");

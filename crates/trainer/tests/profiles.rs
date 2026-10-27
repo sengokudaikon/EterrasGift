@@ -91,7 +91,7 @@ fn saved_profiles_are_read_fitted_to_the_catalog_and_ordered_by_last_played() {
             .map(|value| value.start)
             .collect::<Vec<_>>()
     );
-    assert!(oren.hooks.is_wanted(hook("god-mode")));
+    assert!(oren.hooks.is_wanted(hook("incoming-damage")));
     assert_eq!(book.get(&key("Never played")).unwrap().last_played, None);
 }
 
@@ -149,4 +149,32 @@ fn profiles_are_written_beside_the_c_sharp_apps_values_and_read_back_the_same() 
         (&json!("Mira"), &json!("2026-10-19T10:00:00Z"), &json!(["zoom"]), &json!([-25.5]))
     );
     assert_eq!(ProfileBook::from_settings(Some(&Value::Object(fields))), book);
+}
+
+#[test]
+fn combined_damage_migrates_divisors_and_god_mode_with_new_settings_taking_precedence() {
+    for (wanted, values, expected_on, expected) in [
+        (json!(["damage-taken"]), json!({"damage-taken":[4]}), true, 25.0),
+        (json!(["damage-taken"]), json!({"damage-taken":[3]}), true, 33.0),
+        (json!(["god-mode", "damage-taken"]), json!({"damage-taken":[4]}), true, 0.0),
+        (json!(["damage-taken"]), json!({}), true, 50.0),
+        (json!([]), json!({"damage-taken":[4]}), false, 25.0),
+        (json!(["god-mode"]), json!({"incoming-damage":[75]}), false, 75.0),
+        (json!(["incoming-damage", "god-mode"]), json!({"incoming-damage":[75]}), true, 75.0),
+    ] {
+        let book = ProfileBook::from_settings(Some(
+            &json!({"profiles":[{"name":"Mira","class":"Mage","cycle":"Swordfish","wanted":wanted,"values":values}]}),
+        ));
+        let hooks = &book.get(&key("Mira")).unwrap().hooks;
+        assert_eq!(hooks.is_wanted(hook("incoming-damage")), expected_on);
+        assert_eq!(hooks.values(hook("incoming-damage")), [expected]);
+        let mut saved = Map::new();
+        book.write_settings(&mut saved);
+        let text = serde_json::to_string(&saved).unwrap();
+        assert!(!text.contains("god-mode") && !text.contains("damage-taken"));
+        assert_eq!(book, ProfileBook::from_settings(Some(&Value::Object(saved))));
+    }
+    let book = ProfileBook::from_settings(Some(&json!({"hookValues":{"damage-taken":[5]}})));
+    assert_eq!(book.template().values(hook("incoming-damage")), [20.0]);
+    assert!(!book.template().is_wanted(hook("incoming-damage")));
 }

@@ -2,6 +2,9 @@
 use super::*;
 use std::sync::atomic::AtomicU64;
 
+static DAMAGE: AtomicPtr<u8> = AtomicPtr::new(std::ptr::null_mut());
+static PLAYER_STORAGE: AtomicPtr<c_void> = AtomicPtr::new(std::ptr::null_mut());
+static ONLINE_STORAGE: AtomicPtr<c_void> = AtomicPtr::new(std::ptr::null_mut());
 static RIFT: AtomicPtr<u8> = AtomicPtr::new(std::ptr::null_mut());
 static OFFHAND: AtomicPtr<u8> = AtomicPtr::new(std::ptr::null_mut());
 static PAIRING: AtomicPtr<u8> = AtomicPtr::new(std::ptr::null_mut());
@@ -15,6 +18,9 @@ struct Targets {
     offhand_class: *mut c_void,
     pairing: *mut u8,
     enforce: *mut u8,
+    damage: *mut u8,
+    player_storage: *mut c_void,
+    online_storage: *mut c_void,
 }
 static TARGET: AtomicPtr<u8> = AtomicPtr::new(std::ptr::null_mut());
 
@@ -35,21 +41,44 @@ unsafe extern "C-unwind" fn native_callback(events: *const MethodInfo) {
         std::thread::sleep(Duration::from_millis(1));
     }
     QUEUE.get().unwrap().execute_one(|request| {
-        use eg_trainer_wire::hooks::BooleanHook;
+        use eg_trainer_wire::hooks::GameplayHook;
         match request {
-            Request::SetBooleanHook { hook, on, answer, .. } => {
+            Request::SetGameplayHook { hook, on, value, .. } => {
                 let target = match hook {
-                    BooleanHook::MysteriousRift => RIFT.load(SeqCst),
-                    BooleanHook::Offhand => OFFHAND.load(SeqCst),
+                    GameplayHook::MysteriousRift => RIFT.load(SeqCst),
+                    GameplayHook::Offhand => OFFHAND.load(SeqCst),
+                    GameplayHook::IncomingDamage => DAMAGE.load(SeqCst),
                 };
-                // SAFETY: authored harness owns both matching Boolean target bodies.
-                let class = if hook == BooleanHook::Offhand { NonNull::new(OFFHAND_CLASS.load(SeqCst)) } else { None };
-                let extras = if hook == BooleanHook::Offhand {
+                let class = if hook == GameplayHook::Offhand {
+                    NonNull::new(OFFHAND_CLASS.load(SeqCst))
+                } else {
+                    None
+                };
+                let extras = if hook == GameplayHook::Offhand {
                     vec![PAIRING.load(SeqCst), ENFORCE.load(SeqCst)]
                 } else {
                     Vec::new()
                 };
-                match unsafe { boolean_hooks::fixture_change(hook, on, answer, target, class, &extras) } {
+                // SAFETY: authored targets, receiver layouts and static storage are process-lifetime.
+                match unsafe {
+                    gameplay_hooks::fixture_change(
+                        hook,
+                        on,
+                        value,
+                        target,
+                        class,
+                        &extras,
+                        if hook == GameplayHook::IncomingDamage {
+                            Some(eg_game_access::hooks::leaf::DamageLayout {
+                                player_storage: NonNull::new(PLAYER_STORAGE.load(SeqCst)).unwrap(),
+                                online_storage: NonNull::new(ONLINE_STORAGE.load(SeqCst)).unwrap(),
+                                actor_offset: 0,
+                            })
+                        } else {
+                            None
+                        },
+                    )
+                } {
                     Ok(()) => Response {
                         code: ResponseCode::Done,
                         payload: Vec::new(),
@@ -57,9 +86,9 @@ unsafe extern "C-unwind" fn native_callback(events: *const MethodInfo) {
                     Err(error) => error,
                 }
             }
-            Request::ReadBooleanHook { hook, .. } => Response {
+            Request::ReadGameplayHook { hook, .. } => Response {
                 code: ResponseCode::Done,
-                payload: boolean_hooks::read(hook).encode(),
+                payload: gameplay_hooks::read(hook).encode(),
             },
             _ => Response {
                 code: ResponseCode::Done,
@@ -93,10 +122,10 @@ impl Backend for NativeControl {
             .map_err(|_| server::failure(ResponseCode::NotReady, "Native fixture queue busy"))
     }
     fn clear_hooks(&mut self) -> Result<(), String> {
-        boolean_hooks::clear(false)
+        gameplay_hooks::clear(false)
     }
     fn restore(&mut self) -> Result<(), String> {
-        boolean_hooks::clear(true)?;
+        gameplay_hooks::clear(true)?;
         restore_and_drain(Some(&self.hook), Some(&self.gate))
     }
 }
@@ -143,6 +172,9 @@ pub unsafe extern "system" fn eg_helper_fixture_native_start(target: *mut c_void
     OFFHAND_CLASS.store(targets.offhand_class, SeqCst);
     PAIRING.store(targets.pairing, SeqCst);
     ENFORCE.store(targets.enforce, SeqCst);
+    DAMAGE.store(targets.damage, SeqCst);
+    PLAYER_STORAGE.store(targets.player_storage, SeqCst);
+    ONLINE_STORAGE.store(targets.online_storage, SeqCst);
     let _ = QUEUE.set(Dispatcher::default());
     // SAFETY: the caller supplies the native fixture contract above.
     unsafe { spawn_control(native_worker) as u32 }

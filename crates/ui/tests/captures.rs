@@ -2096,15 +2096,15 @@ fn trainer_captures(session: &Session) {
 
     // Hooks in a connected game: in place, and refused.
     let mut fake = FakeTrainer::default();
-    fake.hooks.insert("god-mode".into(), HookState::On);
+    fake.hooks.insert("incoming-damage".into(), HookState::On);
     fake.hooks.insert(
-        "damage-taken".into(),
+        "cast-speed".into(),
         HookState::Failed {
             reason: "the game's method was not found".into(),
             on: false,
         },
     );
-    for id in ["god-mode", "damage-taken"] {
+    for id in ["incoming-damage", "cast-speed"] {
         fake.wanted.borrow_mut().insert(id.into());
     }
     let ui = open("combat", 0, 1100, 700, Some(fake));

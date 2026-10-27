@@ -61,20 +61,20 @@ impl Request {
         let operation = match self {
             Self::Discover => 6,
             Self::Unload => 25,
-            Self::SetBooleanHook {
+            Self::SetGameplayHook {
                 expected_manager,
                 hook,
                 on,
-                answer,
+                value,
                 ..
             } => {
                 body.u64(*expected_manager);
                 body.byte(*hook as u8);
                 body.flag(*on);
-                body.flag(*answer);
+                body.byte(*value);
                 26
             }
-            Self::ReadBooleanHook { expected_manager, hook, .. } => {
+            Self::ReadGameplayHook { expected_manager, hook, .. } => {
                 body.u64(*expected_manager);
                 body.byte(*hook as u8);
                 27
@@ -270,17 +270,17 @@ impl Request {
                 if expected_manager == 0 {
                     return Err(ProtocolError::InvalidData);
                 }
-                let hook = crate::hooks::BooleanHook::decode(body.byte()?)?;
+                let hook = crate::hooks::GameplayHook::decode(body.byte()?)?;
                 if operation == 26 {
-                    Self::SetBooleanHook {
+                    Self::SetGameplayHook {
                         dispatcher,
                         expected_manager,
                         hook,
                         on: body.flag()?,
-                        answer: body.flag()?,
+                        value: hook.validate_value(body.byte()?)?,
                     }
                 } else {
-                    Self::ReadBooleanHook {
+                    Self::ReadGameplayHook {
                         dispatcher,
                         expected_manager,
                         hook,

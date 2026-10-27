@@ -1,22 +1,23 @@
 use super::*;
 use crate::writes::{WriteControl, WriteOutcome};
 use eg_trainer_wire::{
-    hooks::{BooleanHook, HookObservation},
+    hooks::{GameplayHook, HookObservation},
     transport::Delivery,
 };
 
 impl<T: Transport> Session<T> {
-    pub fn hook_observation(&self, hook: BooleanHook) -> Option<HookObservation> {
+    pub fn hook_observation(&self, hook: GameplayHook) -> Option<HookObservation> {
         self.hooks[hook as usize]
     }
 
     /// A submitted mutation is never retried. ACK and independent entry/flag
     /// readback both belong to the same admitted manager and artifact lease.
-    pub async fn set_boolean_hook(&mut self, hook: BooleanHook, on: bool, control: &mut dyn WriteControl) -> Result<WriteOutcome<bool>, SessionError> {
-        self.set_boolean_hook_with_answer(hook, on, true, control).await
+    pub async fn set_gameplay_hook(&mut self, hook: GameplayHook, on: bool, control: &mut dyn WriteControl) -> Result<WriteOutcome<bool>, SessionError> {
+        self.set_gameplay_hook_with_value(hook, on, 1, control).await
     }
 
-    pub async fn set_boolean_hook_with_answer(&mut self, hook: BooleanHook, on: bool, answer: bool, control: &mut dyn WriteControl) -> Result<WriteOutcome<bool>, SessionError> {
+    pub async fn set_gameplay_hook_with_value(&mut self, hook: GameplayHook, on: bool, value: u8, control: &mut dyn WriteControl) -> Result<WriteOutcome<bool>, SessionError> {
+        hook.validate_value(value).map_err(SessionError::Protocol)?;
         if matches!(self.state, SessionState::Connecting | SessionState::Closing) {
             return Err(SessionError::Busy);
         }
@@ -31,12 +32,12 @@ impl<T: Transport> Session<T> {
             return Err(SessionError::Busy);
         }
         self.state = SessionState::Connecting;
-        let request = Request::SetBooleanHook {
+        let request = Request::SetGameplayHook {
             dispatcher,
             expected_manager,
             hook,
             on,
-            answer,
+            value,
         };
         let mut outcome = match self.transport.send(&request).await {
             Ok(response) => match response.code {
@@ -64,7 +65,7 @@ impl<T: Transport> Session<T> {
             } else {
                 match self
                     .transport
-                    .send(&Request::ReadBooleanHook {
+                    .send(&Request::ReadGameplayHook {
                         dispatcher,
                         expected_manager,
                         hook,
@@ -72,9 +73,9 @@ impl<T: Transport> Session<T> {
                     .await
                 {
                     Ok(response) if response.code == ResponseCode::Done => match HookObservation::decode(&response.payload) {
-                        Ok(actual) if actual.confirmed(actual.enabled) => {
+                        Ok(actual) if actual.confirmed(actual.enabled) && hook.validate_value(actual.value).is_ok() => {
                             self.hooks[hook as usize] = Some(actual);
-                            if actual.enabled == on && (!on || actual.answer == answer) {
+                            if actual.enabled == on && (!on || actual.value == value) {
                                 WriteOutcome::Confirmed(on)
                             } else {
                                 WriteOutcome::NotKept(actual.enabled)
@@ -121,28 +122,28 @@ impl<T: Transport> Session<T> {
     }
 
     /// Poll only hooks this connection has confirmed; unsupported features need no RPC.
-    pub(crate) async fn refresh_boolean_hooks(&mut self) -> Result<(), SessionError> {
+    pub(crate) async fn refresh_gameplay_hooks(&mut self) -> Result<(), SessionError> {
         let dispatcher = self.discovery.as_ref().ok_or(SessionError::NotConnected)?.dispatcher;
         let expected_manager = self.status.ok_or(SessionError::NotConnected)?.manager;
         self.state = SessionState::Connecting;
         let result = async {
-            for hook in BooleanHook::ALL {
+            for hook in GameplayHook::ALL {
                 if self.hooks[hook as usize].is_none() {
                     continue;
                 }
                 self.write_provenance(&dispatcher)?;
                 let payload = self
-                    .request(&Request::ReadBooleanHook {
+                    .request(&Request::ReadGameplayHook {
                         dispatcher,
                         expected_manager,
                         hook,
                     })
                     .await?;
                 let actual = HookObservation::decode(&payload).map_err(SessionError::Protocol)?;
-                if !actual.confirmed(actual.enabled) {
+                if !actual.confirmed(actual.enabled) || hook.validate_value(actual.value).is_err() {
                     return Err(SessionError::Identity("Hook flag and entry bytes no longer agree".into()));
                 }
-                if actual.enabled && self.hooks[hook as usize].is_some_and(|previous| previous.enabled && previous.answer != actual.answer) {
+                if actual.enabled && self.hooks[hook as usize].is_some_and(|previous| previous.enabled && previous.value != actual.value) {
                     return Err(SessionError::Identity("Hook selection changed since confirmation".into()));
                 }
                 self.write_provenance(&dispatcher)?;
