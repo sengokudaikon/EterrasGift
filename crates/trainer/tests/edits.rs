@@ -1037,3 +1037,40 @@ fn removing_the_only_unserializable_id_can_repair_an_item_but_cannot_offer_undo(
         Err(EditError::InvalidValues)
     );
 }
+#[test]
+fn a_held_affix_takes_a_new_roll_tier_or_seal_whatever_its_compatibility() {
+    let mut c = catalog();
+    // The game placed an affix that does not roll on this kind of item.
+    let held = c.affixes.get_mut(&1).unwrap();
+    held.item_types = Some(vec![25]);
+    held.tier_count = 6;
+    let expected = observation(item(), &c);
+    let roll = RollEdit {
+        target: RollTarget::Affix,
+        changes: vec![RollChange { index: 0, value: 200 }],
+        allow_incompatible: false,
+    };
+    assert_eq!(prepare(&expected, &c, ItemEdit::Roll(roll), false, None).unwrap().projected().affixes[0].roll, 200);
+    let tier = AffixEdit {
+        slot: 0,
+        id: 1,
+        tier: 6,
+        roll: 120,
+        seal: SealState::Normal,
+        allow_incompatible: false,
+    };
+    assert_eq!(prepare(&expected, &c, ItemEdit::Affix(tier.clone()), false, None).unwrap().projected().affixes[0].tier, 6);
+    // Its definition still bounds the tier, and a replacement still has to fit.
+    assert_eq!(
+        prepare(&expected, &c, ItemEdit::Affix(AffixEdit { tier: 7, ..tier.clone() }), false, None),
+        Err(EditError::TierUnavailable)
+    );
+    let mut moved = item();
+    moved.affixes[0].id = 3;
+    moved.fingerprint = moved.legacy_fingerprint();
+    let replaced = observation(moved, &c);
+    assert_eq!(
+        prepare(&replaced, &c, ItemEdit::Affix(tier), false, None),
+        Err(EditError::Incompatible(CompatibilityReason::EquipmentType))
+    );
+}

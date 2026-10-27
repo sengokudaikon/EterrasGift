@@ -2579,7 +2579,7 @@ impl ForgeEditor {
                     ItemEdit::Roll(eg_trainer::edits::RollEdit {
                         target: RollTarget::Affix,
                         changes: vec![eg_trainer::edits::RollChange { index: slot, value: roll }],
-                        allow_incompatible: self.unrestricted(),
+                        allow_incompatible: false,
                     })
                 }
                 edit => edit,
@@ -2710,11 +2710,13 @@ impl ForgeEditor {
         if row.tier() > definition.max_tier {
             return Err(format!("This affix supports at most tier {}.", definition.max_tier));
         }
-        let allow = if row.draft_id() == row.state.id {
-            self.unrestricted()
-        } else {
-            row.allows_incompatible()
-        };
+        // The affix the item holds takes a new tier, seal or roll whatever its compatibility; only a replacement is checked.
+        if row.draft_id() == row.state.id {
+            let edit = row.read_edit(slot, false);
+            edit.prepare_view(item).map_err(|e| e.to_string())?;
+            return Ok(edit);
+        }
+        let allow = row.allows_incompatible();
         let compatibility = self.game.compatibility(item, &definition, item.affix(slot), self.unrestricted());
         if let Some(problem) = self.replacement_problem(compatibility, allow) {
             return Err(problem);

@@ -539,7 +539,13 @@ pub fn prepare(
         ItemEdit::Affix(e) => {
             affix_values(e.id, e.tier, e.roll)?;
             let slot = index(before, e.slot)?;
-            validate_affix(catalog, before, e.id, e.tier, Some(&before.affixes[slot]), e.allow_incompatible)?;
+            // The affix the item holds keeps its place whatever its compatibility: only its definition and tier are
+            // checked. A replacement must fit the slot.
+            if i32::from(before.affixes[slot].id) == e.id {
+                definition(catalog, e.id, e.tier)?;
+            } else {
+                validate_affix(catalog, before, e.id, e.tier, Some(&before.affixes[slot]), e.allow_incompatible)?;
+            }
             let a = &mut ordered[slot];
             a.id = e.id as u16;
             a.tier = e.tier as u16;
@@ -588,7 +594,7 @@ pub fn prepare(
                     RollTarget::Affix => {
                         let slot = index(before, change.index)?;
                         let a = &before.affixes[slot];
-                        validate_affix(catalog, before, i32::from(a.id), i32::from(a.tier), Some(a), e.allow_incompatible)?;
+                        definition(catalog, i32::from(a.id), i32::from(a.tier))?;
                         ordered[slot].roll = change.value as u8;
                     }
                     RollTarget::Unique | RollTarget::Implicit => {
