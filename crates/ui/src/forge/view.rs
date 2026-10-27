@@ -157,6 +157,7 @@ fn bind(state: &ForgeState, view: &Rc<View>) {
     state.on_remove_affix(edit!(view, |editor, row| editor.remove_affix(row.max(0) as usize)));
     state.on_discard_entry(edit!(view, |editor, index| editor.discard_entry(index.max(0) as usize)));
     state.on_discard_all(edit!(view, |editor| editor.discard_all()));
+    state.on_max_tiers(edit!(view, |editor| editor.max_tiers()));
     state.on_apply(edit!(view, |editor| editor.apply()));
     state.on_undo(edit!(view, |editor| editor.undo()));
     state.on_undo_draft(edit!(view, |editor| editor.undo_draft_only()));
@@ -608,6 +609,8 @@ impl View {
         state.set_selected_affix(editor.selected_affix().map_or(-1, |index| index as i32));
         state.set_can_change_affix_list(editor.can_change_affix_list());
         state.set_add_affix_tip(editor.add_affix_tip().into());
+        state.set_can_max_tiers(editor.can_max_tiers());
+        state.set_max_tiers_tip(editor.max_tiers_tip().into());
         state.set_affix_list_note(editor.affix_list_note().into());
         state.set_ladder_note(editor.tier_ladder_note().into());
     }

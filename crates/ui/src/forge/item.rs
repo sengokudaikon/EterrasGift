@@ -627,6 +627,21 @@ pub struct ValueTable {
 }
 
 impl ValueTable {
+    /// The roll positions themselves, 0 to 255: what an affix's value cell edits when the game can't say what its rolls
+    /// are worth.
+    pub fn positions() -> ValueTable {
+        ValueTable {
+            label: "Roll position".into(),
+            samples: (0..=255)
+                .map(|roll| ValueSample {
+                    value: f64::from(roll),
+                    display: format!("Roll {roll}"),
+                    effects: Vec::new(),
+                })
+                .collect(),
+        }
+    }
+
     /// 256 finite samples, at least two distinct values, monotonic.
     pub fn is_usable(&self) -> bool {
         if self.samples.len() != 256 || self.samples.iter().any(|sample| !sample.value.is_finite()) {

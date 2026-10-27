@@ -777,6 +777,46 @@ impl ForgeEditor {
         self.resolve_tables();
     }
 
+    /// The tier drafts "Max tiers" makes: every affix the item keeps up to its highest tier below the primordial T8 (row,
+    /// tier). None is lowered, and a primordial is left as it is: T8 needs its seal, and the game keeps one primordial.
+    fn max_tier_plan(&self) -> Vec<(usize, u8)> {
+        self.affixes
+            .iter()
+            .enumerate()
+            .filter(|(_, row)| row.is_editable() && row.seal() != Seal::Primordial)
+            .filter_map(|(index, row)| {
+                let target = row.max_tier().min(7);
+                (row.tier() < target).then_some((index, target))
+            })
+            .collect()
+    }
+
+    pub fn can_max_tiers(&self) -> bool {
+        self.can_change_affix() && !self.max_tier_plan().is_empty()
+    }
+
+    pub fn max_tiers_tip(&self) -> String {
+        match self.max_tier_plan().len() {
+            0 => "Every affix is at its highest tier below T8.".into(),
+            1 => "Drafts the affix below its highest tier up to it, at most T7. Primordial affixes stay as they are.".into(),
+            n => format!("Drafts {n} affixes up to their highest tier, at most T7. Primordial affixes stay as they are."),
+        }
+    }
+
+    /// Drafts every affix up to its highest tier below T8, one tier draft each.
+    pub fn max_tiers(&mut self) {
+        if !self.can_max_tiers() {
+            return;
+        }
+        for (index, tier) in self.max_tier_plan() {
+            let seal = self.affixes[index].seal();
+            if self.affixes[index].draft_tier(tier, seal) {
+                self.edited(RowRef::Affix(self.affixes[index].uid));
+            }
+        }
+        self.resolve_tables();
+    }
+
     // ----- Implicits -----
 
     pub fn shows_implicit_preview(&self) -> bool {
@@ -1730,8 +1770,12 @@ impl ForgeEditor {
             };
             let game_context = row.game_roll().is_some();
             requests.push(request.clone());
-            let table = self.table(&key, &item, &request);
-            self.affixes[index].value.set_mapping(table, game_context);
+            // Without the game's values the roll is still edited, by its position.
+            match self.table(&key, &item, &request) {
+                Lookup::Ready(table) if !table.is_usable() => self.affixes[index].value.set_positions("the game gave no usable values", game_context),
+                Lookup::Unavailable(reason) => self.affixes[index].value.set_positions(&reason, game_context),
+                table => self.affixes[index].value.set_mapping(table, game_context),
+            }
         }
         let changes = match self.unique_edit() {
             Some(ItemEdit::Roll(eg_trainer::edits::RollEdit { changes, .. })) => changes,

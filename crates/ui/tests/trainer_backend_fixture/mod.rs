@@ -1058,9 +1058,10 @@ pub(super) fn capture(session: &Session) {
     data.mappings.store(3, Ordering::SeqCst);
     *data.item.lock().unwrap() = Some(item("Unavailable mapping", 45));
     command(&handle, Command::ReadForge, || true);
+    // Without the game's values the roll is edited by its position, the reason in its tip.
     wait(|| forge.get_item_name() == "Unavailable mapping" && forge.get_affixes().row_data(0).unwrap().value.tip.contains("Owned formatting is unavailable"));
-    assert!(!forge.get_affixes().row_data(0).unwrap().value.mapped);
-    assert!(!forge.get_affixes().row_data(0).unwrap().value.editable);
+    assert!(forge.get_affixes().row_data(0).unwrap().value.editable);
+    assert_eq!(forge.get_affixes().row_data(0).unwrap().value.display, "Roll 171");
     assert_eq!(handle.snapshot().phase, Phase::Ready);
     session.capture(&ui, "backend-forge-values-unavailable");
     let calls = data.mapping_calls.load(Ordering::SeqCst);
@@ -1120,20 +1121,20 @@ pub(super) fn capture(session: &Session) {
     wait(|| forge.get_unique_modifiers().row_count() == 4);
     assert_eq!(forge.get_formatting_error(), "");
     assert_eq!(forge.get_drafts().row_count(), 0);
-    // Values the editor cannot represent no longer hide the item: an unknown special type is named on its row, and a level
-    // requirement past the field's range shows at its end.
+    // Values the editor cannot represent no longer hide the item: a special type past the game's eight, a level requirement
+    // past the field's range (shown at its end) and an unknown seal, which makes its affix read-only.
     let mut unusual = item("Unusual values", 19);
     unusual.status.level_requirement = -1;
     unusual.affixes[0].special = 8;
+    unusual.affixes[0].seal = 7;
     unusual.fingerprint = unusual.legacy_fingerprint();
     *data.item.lock().unwrap() = Some(unusual);
     command(&handle, Command::ReadForge, || true);
-    wait(|| {
-        ui.global::<eg_ui::ForgeState>()
-            .get_affixes()
-            .row_data(0)
-            .is_some_and(|row| row.detail.contains("Special affix 8"))
-    });
+    wait(|| forge.get_item_name() == "Unusual values");
+    assert!(forge.get_has_item());
+    let row = forge.get_affixes().row_data(0).unwrap();
+    assert_eq!(row.detail, "Unknown seal 7");
+    assert!(!row.can_edit);
     assert_eq!(ui.global::<eg_ui::TrainerState>().get_item_unavailable(), "");
     // An item the forge cannot show at all is recorded once, as the game reported it.
     let refused = || {

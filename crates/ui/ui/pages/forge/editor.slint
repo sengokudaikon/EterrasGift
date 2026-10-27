@@ -1205,6 +1205,17 @@ export component ItemForge inherits Rectangle {
                         }
                     }
 
+                    // Not in C#: every affix up to its highest tier below the primordial T8, as tier drafts.
+                    Button {
+                        text: "Max tiers";
+                        kind: ButtonKind.subtle;
+                        enabled: ForgeState.can-max-tiers;
+                        tip: ForgeState.max-tiers-tip;
+                        clicked => {
+                            ForgeState.max-tiers();
+                        }
+                    }
+
                     // The C# note trims to one line with a hover tip; here it wraps (up to two lines, within the button's
                     // height) so that a keyboard user, who never gets the tip, reads it whole.
                     Text {

@@ -56,6 +56,8 @@ pub struct ValueEditor {
     /// while a tier draft switches this editor to another table.
     pub game_table: Option<ValueTable>,
     label: Option<String>,
+    /// Why the table is the roll positions rather than the game's values; empty for the game's own.
+    note: String,
     pub typing: bool,
     pub input: String,
     pub dragging: bool,
@@ -71,6 +73,7 @@ impl ValueEditor {
             status: LOADING.into(),
             game_table: None,
             label,
+            note: String::new(),
             typing: false,
             input: String::new(),
             dragging: false,
@@ -112,6 +115,7 @@ impl ValueEditor {
             }
             return;
         }
+        self.note.clear();
         self.loading = matches!(table, Lookup::Loading);
         match table {
             Lookup::Ready(table) if table.is_usable() => {
@@ -138,8 +142,15 @@ impl ValueEditor {
         self.typing = false;
     }
 
+    /// The roll positions 0 to 255 in place of the game's values, which it could not give (`reason`).
+    pub fn set_positions(&mut self, reason: &str, game_context: bool) {
+        self.set_mapping(super::game::Lookup::Ready(ValueTable::positions()), game_context);
+        self.note = format!("Actual values unavailable ({reason}). Editing the roll position.");
+    }
+
     /// No table, for a reason other than the game's: the status says why.
     pub fn defer(&mut self, status: &str) {
+        self.note.clear();
         self.table = None;
         self.loading = false;
         self.status = status.into();
@@ -236,7 +247,8 @@ impl ValueEditor {
             Some(game) if game != roll => self.sample_at(game).map(|sample| format!(" · in game {}", sample.display)).unwrap_or_default(),
             _ => String::new(),
         };
-        format!("{} · range {} – {}{in_game}", self.display(roll), self.minimum_text(), self.maximum_text())
+        let tip = format!("{} · range {} – {}{in_game}", self.display(roll), self.minimum_text(), self.maximum_text());
+        if self.note.is_empty() { tip } else { format!("{tip}\n{}", self.note) }
     }
 
     /// Reads a typed value the way the game shows it ("+20%", "1,5"); the first reading inside the range wins.

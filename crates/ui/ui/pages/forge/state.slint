@@ -186,6 +186,8 @@ export global ForgeState {
     in property <int> selected-affix: -1;
     in property <bool> can-change-affix-list;
     in property <string> add-affix-tip;
+    in property <bool> can-max-tiers;
+    in property <string> max-tiers-tip;
     in property <string> affix-list-note;
     in property <string> ladder-note;
 
@@ -279,6 +281,7 @@ export global ForgeState {
     callback base-allow(bool);
     callback open-replace(int) -> bool;
     callback open-add() -> bool;
+    callback max-tiers();
     callback picker-search-edited(string);
     callback picker-filter-changed(int);
     callback picker-allow-changed(bool);

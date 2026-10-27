@@ -186,6 +186,20 @@ fn ctrl_z_steps_back_drafts_only_and_never_writes() {
 }
 
 #[test]
+fn max_tiers_drafts_every_affix_up_to_t7_and_leaves_a_primordial() {
+    let mut editor = ForgeEditor::new(Box::new(FixtureGame::boots(false)));
+    editor.pick_tier(0, 8);
+    editor.pick_seal(0, Seal::Primordial);
+    assert!(editor.can_max_tiers());
+    editor.max_tiers();
+    let tiers: Vec<u8> = editor.affixes.iter().map(|row| row.tier()).collect();
+    assert_eq!(tiers, [8, 7, 7, 7]);
+    assert_eq!(editor.affixes[0].seal(), Seal::Primordial);
+    assert!(!editor.can_max_tiers());
+    assert_eq!(editor.max_tiers_tip(), "Every affix is at its highest tier below T8.");
+}
+
+#[test]
 fn a_cancelled_drag_leaves_nothing_to_undo() {
     let mut editor = ForgeEditor::new(Box::new(FixtureGame::boots(false)));
     editor.press(Cell::Affix(0));

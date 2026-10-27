@@ -2230,8 +2230,8 @@ fn forge_captures(session: &Session) {
     state.set_pane_open(true);
     settle();
     // The rail's four stops (connected, the connection's words are one), the rarity, then the four values (the names,
-    // tiers and seals lie under the pane) and Add affix, which drafts wait beside.
-    for _ in 0..11 {
+    // tiers and seals lie under the pane), Add affix and Max tiers, which drafts wait beside.
+    for _ in 0..12 {
         session.key(Key::Tab);
     }
     session.capture(&forge.ui, "item-narrow-pane-keyboard");
@@ -2546,15 +2546,14 @@ fn forge_captures(session: &Session) {
     );
     session.capture(&forge.ui, "item-replaced");
 
-    // A value whose mapping the game could not read: locked, with the reason as its tip, focus still shows
-    // (`value-focus-locked`).
+    // A value whose mapping the game could not read is edited by its roll position, 0 to 255.
     let game = FixtureGame::boots(false);
     game.state.borrow_mut().unmapped.push(1148);
     let forge = open(session, game, 1100, 700);
     session.click(VALUE_X, row_y(1) - 6.0);
     session.key(Key::Tab);
     session.key(Key::Backtab);
-    session.capture(&forge.ui, "item-value-focus-locked");
+    session.capture(&forge.ui, "item-value-positions");
 
     // Add affix opens the picker to add, its caption the free slots.
     let forge = open(session, FixtureGame::boots(false), 1100, 700);
