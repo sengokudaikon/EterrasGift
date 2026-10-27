@@ -874,16 +874,6 @@ fn access(snapshot: &BackendSnapshot) -> TrainerAccess {
     }
 }
 
-fn category(value: i32) -> Result<Category, String> {
-    Category::from_raw(value).ok_or_else(|| "This item's affix category is not supported by the editor yet.".into())
-}
-fn kind(value: i32) -> Result<AffixKind, String> {
-    match value {
-        0 => Ok(AffixKind::Prefix),
-        1 => Ok(AffixKind::Suffix),
-        _ => Err("This item's affix type is not supported by the editor yet.".into()),
-    }
-}
 fn available_text(text: &Availability<String>) -> Option<&str> {
     match text {
         Availability::Available(text) => Some(text),
@@ -915,7 +905,7 @@ fn project_catalog(data: &GameCatalog) -> Catalog {
                     Some(forge::game::BaseDefinition {
                         sub_type: base.sub_type,
                         name: base.name.text.clone(),
-                        level: u8::try_from(base.level_requirement).ok()?,
+                        level: base.level_requirement.clamp(0, 255) as u8,
                         corrupted: base.is_corrupted,
                         class_requirement: base.class_requirement,
                         // C# `ForgeChoices.BaseOptions` lists each implicit with `ImplicitLine`; an undescribed list is none.
@@ -951,7 +941,14 @@ fn project_catalog(data: &GameCatalog) -> Catalog {
         })
         .collect();
     for definition in data.affixes.values() {
-        if let (Ok(kind), Ok(category), Ok(max_tier)) = (kind(definition.kind), category(definition.special), u8::try_from(definition.tier_count)) {
+        {
+            // Every affix the game defines is kept, for its name at least. One of the game's other types (its SPECIAL)
+            // is shown but cannot be written: an affix's type is part of what is written.
+            let kind = match definition.kind {
+                0 => Some(AffixKind::Prefix),
+                1 => Some(AffixKind::Suffix),
+                _ => None,
+            };
             let name = match &definition.game_display_name {
                 Availability::Available(text) if !text.is_empty() => text.clone(),
                 _ if !definition.raw_display_name.is_empty() => definition.raw_display_name.clone(),
@@ -960,15 +957,15 @@ fn project_catalog(data: &GameCatalog) -> Catalog {
             catalog.definitions.push(AffixDefinition {
                 id: definition.id,
                 name,
-                kind,
-                category,
+                kind: kind.unwrap_or(AffixKind::Prefix),
+                category: Category::from_raw(definition.special),
                 item_types: definition
                     .item_types
                     .as_ref()
                     .map(|types| types.iter().filter_map(|t| u16::try_from(*t).ok()).collect())
                     .unwrap_or_default(),
-                max_tier,
-                verified: definition.id <= 4095 && (1..=8).contains(&max_tier) && definition.item_types.as_ref().is_some_and(|types| types.iter().all(|t| (0..=41).contains(t))),
+                max_tier: definition.tier_count.min(255) as u8,
+                writable: kind.is_some(),
             });
         }
     }
@@ -1028,7 +1025,7 @@ fn project_item(state: &BackendSnapshot) -> Result<Option<ForgeItem>, String> {
         || if snapshot.name.is_empty() { "Unnamed item".into() } else { snapshot.name.clone() },
         |name| name.text.clone(),
     );
-    let mut item = ForgeItem::observed(context, name).map_err(|error| error.to_string())?;
+    let mut item = ForgeItem::observed(context, name);
     item.implicits = implicits.as_ref().map(|lines| lines.iter().map(project_modifier).collect());
     if let Some(identity) = item.unique.as_mut().or(item.set_item.as_mut()) {
         identity.modifiers = unique

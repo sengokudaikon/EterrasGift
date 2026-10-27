@@ -1120,37 +1120,46 @@ pub(super) fn capture(session: &Session) {
     wait(|| forge.get_unique_modifiers().row_count() == 4);
     assert_eq!(forge.get_formatting_error(), "");
     assert_eq!(forge.get_drafts().row_count(), 0);
-    let mut unsupported = item("Unsupported status", 19);
-    unsupported.status.level_requirement = -1;
-    unsupported.fingerprint = unsupported.legacy_fingerprint();
-    *data.item.lock().unwrap() = Some(unsupported);
+    // Values the editor cannot represent no longer hide the item: an unknown special type is named on its row, and a level
+    // requirement past the field's range shows at its end.
+    let mut unusual = item("Unusual values", 19);
+    unusual.status.level_requirement = -1;
+    unusual.affixes[0].special = 8;
+    unusual.fingerprint = unusual.legacy_fingerprint();
+    *data.item.lock().unwrap() = Some(unusual);
     command(&handle, Command::ReadForge, || true);
-    wait(|| ui.global::<eg_ui::TrainerState>().get_item_unavailable() != "");
-    assert!(!ui.global::<eg_ui::ForgeState>().get_has_item());
-    assert_eq!(handle.snapshot().phase, Phase::Ready);
-    assert!(ui.global::<eg_ui::TrainerState>().get_item_unavailable().contains("level requirement"));
-    // An item the forge refuses names the value and is recorded once, as the game reported it.
+    wait(|| {
+        ui.global::<eg_ui::ForgeState>()
+            .get_affixes()
+            .row_data(0)
+            .is_some_and(|row| row.detail.contains("Special affix 8"))
+    });
+    assert_eq!(ui.global::<eg_ui::TrainerState>().get_item_unavailable(), "");
+    // An item the forge cannot show at all is recorded once, as the game reported it.
     let refused = || {
         std::fs::read_dir(folder.join("logs"))
-            .unwrap()
+            .into_iter()
+            .flatten()
             .map(|entry| serde_json::from_slice::<serde_json::Value>(&std::fs::read(entry.unwrap().path()).unwrap()).unwrap())
             .filter(|report| report["code"] == "ItemNotShown")
             .collect::<Vec<_>>()
     };
-    assert_eq!(refused().len(), 1);
-    let mut unknown = item("Unknown special affix", 20);
-    unknown.affixes[0].special = 8;
-    unknown.fingerprint = unknown.legacy_fingerprint();
-    *data.item.lock().unwrap() = Some(unknown);
+    assert!(refused().is_empty());
+    let mut unreadable = item("Unreadable item", 20);
+    unreadable.implicit_rolls = vec![1, 2, 3, 4];
+    unreadable.fingerprint = unreadable.legacy_fingerprint();
+    *data.item.lock().unwrap() = Some(unreadable);
     command(&handle, Command::ReadForge, || true);
-    wait(|| ui.global::<eg_ui::TrainerState>().get_item_unavailable().contains("special type 8"));
+    wait(|| ui.global::<eg_ui::TrainerState>().get_item_unavailable().contains("fault log"));
+    assert!(!ui.global::<eg_ui::ForgeState>().get_has_item());
+    assert_eq!(handle.snapshot().phase, Phase::Ready);
     command(&handle, Command::ReadForge, || true);
     settle();
     let reports = refused();
-    assert_eq!(reports.len(), 2);
-    let report = reports.iter().find(|report| report["readback"]["item"]["individualId"] == 20).unwrap();
-    assert_eq!(report["readback"]["item"]["affixes"][0]["special"], 8);
-    assert_eq!(report["operation"], "Item Forge");
+    assert_eq!(reports.len(), 1);
+    assert_eq!(reports[0]["readback"]["item"]["individualId"], 20);
+    assert_eq!(reports[0]["readback"]["item"]["implicitRolls"].as_array().map(Vec::len), Some(4));
+    assert_eq!(reports[0]["operation"], "Item Forge");
     *data.item.lock().unwrap() = Some(item("Replaced item", 18));
     command(&handle, Command::ReadForge, || true);
     wait(|| ui.global::<eg_ui::ForgeState>().get_has_item());

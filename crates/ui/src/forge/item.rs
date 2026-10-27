@@ -51,6 +51,8 @@ pub enum Category {
     Corrupted,
     /// An affix shown as one of a unique's own modifiers.
     FakeUniqueMod,
+    /// A type the game added after this build of the editor.
+    Other(i32),
 }
 
 impl Category {
@@ -64,10 +66,11 @@ impl Category {
             Self::IdolWeaver => 5,
             Self::Corrupted => 6,
             Self::FakeUniqueMod => 7,
+            Self::Other(value) => value,
         }
     }
-    pub fn from_raw(value: i32) -> Option<Self> {
-        Some(match value {
+    pub fn from_raw(value: i32) -> Self {
+        match value {
             0 => Self::Standard,
             1 => Self::Experimental,
             2 => Self::Personal,
@@ -76,19 +79,20 @@ impl Category {
             5 => Self::IdolWeaver,
             6 => Self::Corrupted,
             7 => Self::FakeUniqueMod,
-            _ => return None,
-        })
+            other => Self::Other(other),
+        }
     }
-    pub fn name(self) -> &'static str {
+    pub fn name(self) -> std::borrow::Cow<'static, str> {
         match self {
-            Category::Standard => "",
-            Category::Experimental => "Experimental",
-            Category::Personal => "Personal",
-            Category::Set => "Set · Reforged",
-            Category::IdolEnchantment => "Idol enchantment",
-            Category::IdolWeaver => "Weaver idol",
-            Category::Corrupted => "Corrupted",
-            Category::FakeUniqueMod => "Unique modifier",
+            Category::Standard => "".into(),
+            Category::Experimental => "Experimental".into(),
+            Category::Personal => "Personal".into(),
+            Category::Set => "Set · Reforged".into(),
+            Category::IdolEnchantment => "Idol enchantment".into(),
+            Category::IdolWeaver => "Weaver idol".into(),
+            Category::Corrupted => "Corrupted".into(),
+            Category::FakeUniqueMod => "Unique modifier".into(),
+            Category::Other(value) => format!("Special affix {value}").into(),
         }
     }
 }
@@ -103,14 +107,15 @@ pub struct AffixDefinition {
     /// The equipment types it rolls on.
     pub item_types: Vec<u16>,
     pub max_tier: u8,
-    /// Read from the running game (RuntimeVerified); only such definitions can be written.
-    pub verified: bool,
+    /// In the current game data with a type the editor can write (prefix or suffix); a placeholder for an ID the game
+    /// data lacks is not.
+    pub writable: bool,
 }
 
 impl AffixDefinition {
     /// "type · category · class", e.g. "Prefix · Set · Reforged".
     pub fn kind_description(&self) -> String {
-        join_parts(&[self.kind.name(), self.category.name()])
+        join_parts(&[self.kind.name(), &self.category.name()])
     }
 
     pub fn is_reforged(&self) -> bool {
@@ -125,7 +130,7 @@ impl AffixDefinition {
             category: Category::Standard,
             item_types: Vec::new(),
             max_tier: 8,
-            verified: false,
+            writable: false,
         }
     }
 }
@@ -144,6 +149,8 @@ pub struct AffixState {
     pub kind: AffixKind,
     pub seal: Seal,
     pub category: Category,
+    /// A value of it the editor cannot represent (its type, seal or tier): the affix is shown but not edited.
+    pub unknown: Option<Unreadable>,
 }
 
 /// One line of the unique tooltip or one implicit: its text, its range caption and the rolls it reads.
@@ -334,7 +341,7 @@ impl EditPresentation for ItemEdit {
 }
 
 impl ForgeItem {
-    pub(crate) fn observed(context: Arc<ForgeContext>, name: String) -> Result<Self, Unreadable> {
+    pub(crate) fn observed(context: Arc<ForgeContext>, name: String) -> Self {
         let expected = &context.expected;
         let process = expected.process();
         let snapshot = expected.snapshot();
@@ -353,13 +360,13 @@ impl ForgeItem {
             status: None,
             context: Some(context.clone()),
         };
-        item.copy_snapshot(snapshot)?;
-        Ok(item)
+        item.copy_snapshot(snapshot);
+        item
     }
     pub fn with_snapshot(&self, snapshot: eg_trainer::backend::ForgeSnapshot) -> Result<Self, edits::EditError> {
         let context = self.context.as_ref().ok_or(edits::EditError::InvalidObservation)?;
         let mut after = self.clone();
-        after.copy_snapshot(&snapshot)?;
+        after.copy_snapshot(&snapshot);
         after.context = Some(Arc::new(ForgeContext {
             expected: ExpectedObservation::new(
                 context.expected.generation(),
@@ -371,7 +378,9 @@ impl ForgeItem {
         }));
         Ok(after)
     }
-    fn copy_snapshot(&mut self, snapshot: &eg_trainer::backend::ForgeSnapshot) -> Result<(), Unreadable> {
+    /// Takes every value the game reported. One the editor cannot represent is noted on its affix, never a reason to
+    /// hide the item; the worker's planner refuses edits that would write it.
+    fn copy_snapshot(&mut self, snapshot: &eg_trainer::backend::ForgeSnapshot) {
         self.item_type = u16::from(snapshot.item_type);
         self.idol = (25..=33).contains(&snapshot.item_type);
         self.sub_type = snapshot.sub_type;
@@ -380,27 +389,43 @@ impl ForgeItem {
             .affixes
             .iter()
             .map(|a| {
-                let unknown = |field, value: i64| Unreadable::Affix {
-                    slot: a.slot,
-                    id: a.id,
-                    field,
-                    value,
+                let tier = u8::try_from(a.tier).ok();
+                let kind = match a.kind {
+                    0 => Some(AffixKind::Prefix),
+                    1 => Some(AffixKind::Suffix),
+                    _ => None,
                 };
-                Ok(AffixState {
+                let seal = usize::try_from(a.seal).ok().and_then(|seal| Seal::ALL.get(seal).copied());
+                let unknown = if tier.is_none() {
+                    Some(Unreadable {
+                        field: "tier",
+                        value: a.tier.into(),
+                    })
+                } else if kind.is_none() {
+                    Some(Unreadable {
+                        field: "type",
+                        value: a.kind.into(),
+                    })
+                } else if seal.is_none() {
+                    Some(Unreadable {
+                        field: "seal",
+                        value: a.seal.into(),
+                    })
+                } else {
+                    None
+                };
+                AffixState {
                     slot: usize::from(a.slot),
                     id: a.id,
-                    tier: u8::try_from(a.tier).map_err(|_| unknown("tier", a.tier.into()))?,
+                    tier: tier.unwrap_or(u8::MAX),
                     roll: a.roll,
-                    kind: match a.kind {
-                        0 => AffixKind::Prefix,
-                        1 => AffixKind::Suffix,
-                        other => return Err(unknown("type", other.into())),
-                    },
-                    seal: *usize::try_from(a.seal).ok().and_then(|seal| Seal::ALL.get(seal)).ok_or(unknown("seal", a.seal.into()))?,
-                    category: Category::from_raw(a.special).ok_or(unknown("special type", a.special.into()))?,
-                })
+                    kind: kind.unwrap_or(AffixKind::Prefix),
+                    seal: seal.unwrap_or(Seal::Normal),
+                    category: Category::from_raw(a.special),
+                    unknown,
+                }
             })
-            .collect::<Result<_, _>>()?;
+            .collect();
         self.implicit_rolls = snapshot.implicit_rolls.clone();
         let identity = snapshot.identity.as_ref().map(|i| {
             let mut view = self
@@ -431,37 +456,24 @@ impl ForgeItem {
             legendary_potential: status.legendary_potential,
             weavers_will: status.weavers_will,
             weavers_touch: status.weavers_touch,
-            level_requirement: u8::try_from(status.level_requirement).map_err(|_| Unreadable::LevelRequirement(status.level_requirement))?,
+            // The game recalculates it on reload; a value past the field's range shows at its end.
+            level_requirement: status.level_requirement.clamp(0, 255) as u8,
             corrupted: status.corrupted,
             ruined: status.ruined,
         });
-        Ok(())
     }
 }
 
-/// A value of an item read from the game that the editor has no meaning for, named so the forge and the fault log can
-/// say which.
+/// A value of an affix read from the game that the editor cannot represent, e.g. "seal 7".
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Unreadable {
-    Affix { slot: u8, id: u16, field: &'static str, value: i64 },
-    LevelRequirement(i32),
+pub struct Unreadable {
+    pub field: &'static str,
+    pub value: i64,
 }
 
 impl std::fmt::Display for Unreadable {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Affix { slot, id, field, value } => write!(f, "The affix in slot {slot} (ID {id}) has {field} {value}, which the editor does not know."),
-            Self::LevelRequirement(value) => write!(f, "The item's level requirement, {value}, is outside the editor's supported range."),
-        }
-    }
-}
-
-impl From<Unreadable> for edits::EditError {
-    fn from(value: Unreadable) -> Self {
-        match value {
-            Unreadable::Affix { .. } => Self::InvalidValues,
-            Unreadable::LevelRequirement(_) => Self::InvalidStatus,
-        }
+        write!(f, "Unknown {} {}", self.field, self.value)
     }
 }
 
@@ -481,6 +493,8 @@ pub enum Rejection {
     EquipmentType,
     SpecialCategory,
     AlreadyPresent,
+    /// The game data lacks the affix's equipment types, or holds a value the rules don't know.
+    IncompleteData,
 }
 
 impl Compatibility {
@@ -511,7 +525,7 @@ pub fn compatibility(item: &ForgeItem, definition: &AffixDefinition, slot: Optio
         Reason::EquipmentType => Compatibility::Rejected(Rejection::EquipmentType),
         Reason::SpecialCategory => Compatibility::Rejected(Rejection::SpecialCategory),
         Reason::AlreadyPresent => Compatibility::Rejected(Rejection::AlreadyPresent),
-        Reason::MissingMetadata | Reason::UnknownGameValue => Compatibility::Unknown,
+        Reason::MissingMetadata | Reason::UnknownGameValue => Compatibility::Rejected(Rejection::IncompleteData),
     }
 }
 
@@ -666,6 +680,7 @@ mod tests {
             kind: AffixKind::Suffix,
             seal,
             category: Category::Standard,
+            unknown: None,
         }
     }
 

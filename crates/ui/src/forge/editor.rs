@@ -2335,8 +2335,8 @@ impl ForgeEditor {
     /// (a sealed or corrupted affix takes none), it needs "I know what I'm doing", and an incompatible one the picker's
     /// "Allow incompatible affixes" too.
     fn addition(&self, item: &ForgeItem, definition: &AffixDefinition, tier: u8, roll: u8, seal: Seal, allow_incompatible: bool) -> Result<ItemEdit, String> {
-        if !definition.verified {
-            return Err("This affix has no verified definition in the current build.".into());
+        if !definition.writable {
+            return Err("This affix cannot be written: it is missing from the game data, or the editor does not know its type.".into());
         }
         let compatibility = self.game.compatibility(item, definition, None, self.unrestricted());
         let (prefixes, suffixes) = item.free_slots();
@@ -2396,6 +2396,7 @@ impl ForgeEditor {
                 item::Rejection::ClassRequirement => "Incompatible: this affix requires another class.".into(),
                 item::Rejection::EquipmentType => "Incompatible: this affix rolls on another kind of item.".into(),
                 item::Rejection::SpecialCategory => "Incompatible: this kind of affix (experimental, personal, set) stays in its own slots.".into(),
+                item::Rejection::IncompleteData => "The game data is incomplete for this affix, so where it rolls can't be checked.".into(),
             },
             Compatibility::Unknown if !self.unrestricted() => format!("Compatibility could not be confirmed. {}", turn_on_override("use it")),
             Compatibility::Unknown => "Compatibility could not be confirmed for this affix.".into(),
@@ -2703,8 +2704,8 @@ impl ForgeEditor {
     /// A row's draft as an edit of the affix now in `slot`, checked against the item as the earlier drafts leave it.
     fn read_affix_edit(&self, row: &AffixRow, item: &ForgeItem, slot: usize) -> Result<ItemEdit, String> {
         let definition = self.catalog().definition(row.draft_id());
-        if !definition.verified {
-            return Err("This ID has no verified definition in the current build.".into());
+        if !definition.writable {
+            return Err("This affix cannot be written: it is missing from the game data, or the editor does not know its type.".into());
         }
         if row.tier() > definition.max_tier {
             return Err(format!("This affix supports at most tier {}.", definition.max_tier));

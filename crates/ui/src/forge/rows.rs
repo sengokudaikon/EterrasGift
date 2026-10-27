@@ -348,6 +348,7 @@ impl AffixRow {
             kind: definition.kind,
             seal,
             category: definition.category,
+            unknown: None,
         };
         let mut row = AffixRow::new(uid, state, definition);
         row.added = true;
@@ -396,18 +397,21 @@ impl AffixRow {
         self.draft.definition.max_tier.clamp(1, 8)
     }
 
-    /// "type · category · class" of the slot as drafted.
+    /// "type · category · class" of the slot as drafted; for an affix with a value the editor cannot represent, that value.
     pub fn detail(&self) -> String {
-        let category = if self.draft.definition.verified {
+        if let Some(unknown) = self.state.unknown {
+            return unknown.to_string();
+        }
+        let category = if self.draft.definition.writable {
             self.draft.definition.category
         } else {
             self.state.category
         };
-        super::item::join_parts(&[self.state.kind.name(), category.name()])
+        super::item::join_parts(&[self.state.kind.name(), &category.name()])
     }
 
     pub fn is_reforged(&self) -> bool {
-        self.draft.definition.is_reforged() || (!self.draft.definition.verified && self.state.category == super::item::Category::Set)
+        self.draft.definition.is_reforged() || (!self.draft.definition.writable && self.state.category == super::item::Category::Set)
     }
 
     pub fn is_dirty(&self) -> bool {
@@ -425,8 +429,9 @@ impl AffixRow {
     }
 
     /// Tier, seal and value can be drafted: Apply does not remove the affix.
+    /// Its tier, seal, roll and ID can be drafted; removing it is always possible.
     pub fn is_editable(&self) -> bool {
-        !self.draft.removed
+        !self.draft.removed && self.state.unknown.is_none()
     }
 
     pub fn is_stale(&self) -> bool {
@@ -1338,7 +1343,7 @@ mod tests {
             category: Category::Standard,
             item_types: vec![1],
             max_tier: 8,
-            verified: true,
+            writable: true,
         };
         let state = AffixState {
             slot: 0,
@@ -1348,6 +1353,7 @@ mod tests {
             kind: AffixKind::Suffix,
             seal: Seal::Normal,
             category: Category::Standard,
+            unknown: None,
         };
         let mut row = AffixRow::new(1, state, definition);
         row.value.set_mapping(Ok(table(22.0, 39.6)), true);

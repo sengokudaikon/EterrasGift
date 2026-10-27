@@ -103,7 +103,7 @@ impl FixtureGame {
                 .catalog
                 .definitions
                 .iter()
-                .filter(|d| d.verified)
+                .filter(|d| d.writable)
                 .map(|d| {
                     (
                         d.id,
@@ -310,7 +310,7 @@ fn definition(id: u16, name: &str, kind: AffixKind, category: Category) -> Affix
         category,
         item_types: vec![BOOTS],
         max_tier: 8,
-        verified: true,
+        writable: true,
     }
 }
 
@@ -468,6 +468,7 @@ fn affix(slot: usize, id: u16, tier: u8, roll: u8, kind: AffixKind, seal: Seal, 
         kind,
         seal,
         category,
+        unknown: None,
     }
 }
 
