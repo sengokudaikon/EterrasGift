@@ -901,22 +901,20 @@ fn project_catalog(data: &GameCatalog) -> Catalog {
             bases: definition
                 .sub_types
                 .iter()
-                .filter_map(|base| {
-                    Some(forge::game::BaseDefinition {
-                        sub_type: base.sub_type,
-                        name: base.name.text.clone(),
-                        level: base.level_requirement.clamp(0, 255) as u8,
-                        corrupted: base.is_corrupted,
-                        class_requirement: base.class_requirement,
-                        // C# `ForgeChoices.BaseOptions` lists each implicit with `ImplicitLine`; an undescribed list is none.
-                        implicits: match &base.implicits {
-                            Availability::Available(implicits) => implicits
-                                .iter()
-                                .map(|implicit| forge::game::implicit_line(available_text(&implicit.minimum_text), available_text(&implicit.maximum_text)))
-                                .collect(),
-                            Availability::Unavailable { .. } => Vec::new(),
-                        },
-                    })
+                .map(|base| forge::game::BaseDefinition {
+                    sub_type: base.sub_type,
+                    name: base.name.text.clone(),
+                    level: base.level_requirement.clamp(0, 255) as u8,
+                    corrupted: base.is_corrupted,
+                    class_requirement: base.class_requirement,
+                    // C# `ForgeChoices.BaseOptions` lists each implicit with `ImplicitLine`; an undescribed list is none.
+                    implicits: match &base.implicits {
+                        Availability::Available(implicits) => implicits
+                            .iter()
+                            .map(|implicit| forge::game::implicit_line(available_text(&implicit.minimum_text), available_text(&implicit.maximum_text)))
+                            .collect(),
+                        Availability::Unavailable { .. } => Vec::new(),
+                    },
                 })
                 .collect(),
         })
