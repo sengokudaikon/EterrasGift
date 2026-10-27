@@ -60,19 +60,19 @@ pub(super) fn clear(closing: bool) -> Result<(), String> {
     hooks.clear()
 }
 pub(super) fn count() -> u32 {
-    HOOKS
-        .lock()
-        .unwrap_or_else(|p| p.into_inner())
-        .slots
-        .iter()
-        .flatten()
-        .filter(|group| group.iter().all(|slot| slot.gate.enabled() && slot.hook.state() == HookState::Enabled))
+    let hooks = HOOKS.lock().unwrap_or_else(|p| p.into_inner());
+    GameplayHook::ALL
+        .into_iter()
+        .filter(|hook| {
+            let actual = observation(hooks.slots[hook.target()].as_deref(), *hook);
+            actual.confirmed(true)
+        })
         .count() as u32
 }
 
 /// Caller resolves metadata on the main thread. The mutex fences publication
 /// against control-thread clear/unload; it is never acquired by a gameplay call.
-unsafe fn change(hook: GameplayHook, on: bool, value: u8, target: impl FnOnce() -> Result<Vec<GameplayHookTarget>, Response>) -> Result<(), Response> {
+unsafe fn change(hook: GameplayHook, on: bool, value: u64, target: impl FnOnce() -> Result<Vec<GameplayHookTarget>, Response>) -> Result<(), Response> {
     if hook.validate_value(value).is_err() {
         return Err(server::failure(ResponseCode::Refused, "Invalid hook setting"));
     }
@@ -80,7 +80,7 @@ unsafe fn change(hook: GameplayHook, on: bool, value: u8, target: impl FnOnce() 
     if hooks.closing || state().stop.load(SeqCst) {
         return Err(server::failure(ResponseCode::NotReady, "Helper stopping; nothing ran"));
     }
-    let slot = &mut hooks.slots[hook as usize];
+    let slot = &mut hooks.slots[hook.target()];
     if on && slot.is_none() {
         let mut prepared: Vec<Installed> = Vec::new();
         for GameplayHookTarget {
@@ -104,38 +104,67 @@ unsafe fn change(hook: GameplayHook, on: bool, value: u8, target: impl FnOnce() 
         *slot = Some(prepared);
     }
     if let Some(group) = slot {
-        // A retry after a partial transaction must also begin with every effect closed.
-        for slot in group.iter() {
-            slot.gate.set_enabled(false);
-        }
-        let changes: Vec<_> = group.iter().map(|slot| (&slot.hook, on)).collect();
-        // SAFETY: serialized owner retained even on partial failure; all entries form one transaction.
-        unsafe { hooks::commit(&changes) }.map_err(|e| server::failure(ResponseCode::Failed, e.to_string()))?;
-        for slot in group {
-            slot.gate.set_value(value);
-            slot.gate.set_enabled(on);
-        }
+        change_group(group, hook, on, value)?;
     }
     Ok(())
 }
 
-pub(super) fn read(hook: GameplayHook) -> HookObservation {
-    let hooks = HOOKS.lock().unwrap_or_else(|p| p.into_inner());
-    hooks.slots[hook as usize].as_ref().map_or(
-        HookObservation {
-            patch: PatchState::Original,
-            enabled: false,
-            value: 1,
-        },
-        |group| HookObservation {
-            patch: group_patch(group.iter().map(|slot| slot.hook.state())),
-            enabled: group.iter().all(|slot| slot.gate.enabled()),
-            value: group[0].gate.value(),
-        },
-    )
+fn change_group(group: &[Installed], hook: GameplayHook, on: bool, value: u64) -> Result<(), Response> {
+    let gate = &group[0].gate;
+    let target_on = on
+        || (hook.is_damage()
+            && GameplayHook::ALL
+                .into_iter()
+                .any(|other| other.is_damage() && other != hook && gate.damage_setting(other).0));
+    // A cleared or failed target must never revive stale sibling settings.
+    if hook.is_damage() && !gate.enabled() {
+        for other in GameplayHook::ALL.into_iter().filter(|other| other.is_damage()) {
+            gate.set_damage(other, false, other.default_value());
+        }
+    }
+    for slot in group {
+        slot.gate.set_enabled(false);
+    }
+    let changes: Vec<_> = group.iter().map(|slot| (&slot.hook, target_on)).collect();
+    // SAFETY: serialized owner retained even on partial failure; entries form one transaction.
+    unsafe { hooks::commit(&changes) }.map_err(|e| server::failure(ResponseCode::Failed, e.to_string()))?;
+    for slot in group {
+        if hook.is_damage() {
+            slot.gate.set_damage(hook, on, value);
+        } else {
+            slot.gate.set_value(value);
+        }
+        slot.gate.set_enabled(target_on);
+    }
+    Ok(())
 }
 
-pub(super) unsafe fn operation(expected_manager: u64, hook: GameplayHook, on: Option<(bool, u8)>) -> Response {
+fn observation(group: Option<&[Installed]>, hook: GameplayHook) -> HookObservation {
+    let Some(group) = group else {
+        return HookObservation {
+            patch: PatchState::Original,
+            enabled: false,
+            value: hook.default_value(),
+        };
+    };
+    let (enabled, value) = if hook.is_damage() {
+        group[0].gate.damage_setting(hook)
+    } else {
+        (group.iter().all(|slot| slot.gate.enabled()), group[0].gate.value())
+    };
+    let mut patch = group_patch(group.iter().map(|slot| slot.hook.state()));
+    if hook.is_damage() && !enabled && patch == PatchState::Patched && GameplayHook::ALL.into_iter().any(|other| other.is_damage() && group[0].gate.damage_setting(other).0) {
+        patch = PatchState::Shared;
+    }
+    HookObservation { patch, enabled, value }
+}
+
+pub(super) fn read(hook: GameplayHook) -> HookObservation {
+    let hooks = HOOKS.lock().unwrap_or_else(|p| p.into_inner());
+    observation(hooks.slots[hook.target()].as_deref(), hook)
+}
+
+pub(super) unsafe fn operation(expected_manager: u64, hook: GameplayHook, on: Option<(bool, u64)>) -> Response {
     // SAFETY: admitted main thread; same runtime/graph lifetime as status. The
     // supplied manager is compared only, never dereferenced.
     unsafe {
@@ -173,7 +202,7 @@ pub(super) unsafe fn operation(expected_manager: u64, hook: GameplayHook, on: Op
 pub(super) unsafe fn fixture_change(
     hook: GameplayHook,
     on: bool,
-    value: u8,
+    value: u64,
     address: *mut u8,
     receiver_class: Option<NonNull<c_void>>,
     extras: &[*mut u8],
@@ -231,6 +260,80 @@ fn group_patch(states: impl Iterator<Item = HookState>) -> PatchState {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn damage_controls_share_one_patch_until_last_off_and_clear_does_not_revive_siblings() {
+        use eg_game_access::hooks::leaf::{DamageLayout, LeafEffect};
+        use eg_trainer_wire::hooks::GameplayHook::{DamageDealt, IncomingDamage};
+        use std::sync::atomic::{AtomicU8, AtomicUsize};
+        #[unsafe(naked)]
+        unsafe extern "C-unwind" fn target(_health: *const usize, _damage: f32, _method: usize) -> f32 {
+            core::arch::naked_asm!(
+                "nop",
+                "nop",
+                "nop",
+                "nop",
+                "nop",
+                "movaps xmm0,xmm1",
+                "ret",
+                "nop",
+                "nop",
+                "nop",
+                "nop",
+                "nop",
+                "nop",
+                "nop"
+            );
+        }
+        let player = Box::leak(Box::new(AtomicUsize::new(42)));
+        let online = Box::leak(Box::new(AtomicU8::new(0)));
+        let address = NonNull::new(target as *mut u8).unwrap();
+        // SAFETY: authored process-lifetime executable and static storage, exact float ABI.
+        let group = unsafe {
+            let gate = LeafGate::prepare_override(
+                LeafEffect::PlayerDamage(DamageLayout {
+                    player_storage: NonNull::from(&*player).cast(),
+                    online_storage: NonNull::from(&*online).cast(),
+                    actor_offset: 0,
+                    offense: None,
+                }),
+                None,
+                None,
+            )
+            .unwrap();
+            let bytes = address.cast::<[u8; 16]>().as_ptr().read_unaligned();
+            let hook = RetainedHook::prepare(address, gate.entry(), &bytes).unwrap();
+            gate.set_original(hook.trampoline());
+            vec![Installed { hook, gate }]
+        };
+        let mut owner = Hooks {
+            slots: [None, None, Some(group)],
+            manager: 1,
+            closing: false,
+        };
+        let group = owner.slots[2].as_ref().unwrap();
+        for first in [IncomingDamage, DamageDealt] {
+            let second = if first == IncomingDamage { DamageDealt } else { IncomingDamage };
+            change_group(group, first, true, first.default_value()).unwrap();
+            change_group(group, second, true, second.default_value()).unwrap();
+            assert!(observation(Some(group), first).confirmed(true));
+            assert!(observation(Some(group), second).confirmed(true));
+            change_group(group, first, false, first.default_value()).unwrap();
+            let inactive = observation(Some(group), first);
+            assert_eq!(inactive.patch, PatchState::Shared);
+            assert!(inactive.confirmed(false));
+            assert!(observation(Some(group), second).confirmed(true));
+            change_group(group, second, false, second.default_value()).unwrap();
+            assert_eq!(group[0].hook.state(), HookState::Disabled);
+        }
+        change_group(group, IncomingDamage, true, 0).unwrap();
+        change_group(group, DamageDealt, true, 101.0f64.to_bits()).unwrap();
+        owner.clear().unwrap();
+        let group = owner.slots[2].as_ref().unwrap();
+        change_group(group, DamageDealt, true, 2.5f64.to_bits()).unwrap();
+        assert!(observation(Some(group), IncomingDamage).confirmed(false));
+        assert!(observation(Some(group), DamageDealt).confirmed(true));
+        owner.clear().unwrap();
+    }
     #[test]
     fn partial_group_is_never_confirmed() {
         for index in 0..4 {

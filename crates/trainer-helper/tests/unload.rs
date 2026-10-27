@@ -210,7 +210,7 @@ fn reload_a_hundred_times_with_running_callers_then_retain_a_blocked_callback() 
             assert_eq!(discovery.code, ResponseCode::Done);
             let found = Discovery::decode(&discovery.payload, std::process::id()).unwrap();
             assert_eq!(client.send(&Request::Status { dispatcher: found.dispatcher }).await.unwrap().code, ResponseCode::Done);
-            for hook in GameplayHook::ALL {
+            for hook in [GameplayHook::MysteriousRift, GameplayHook::Offhand, GameplayHook::IncomingDamage] {
                 for (on, answer) in [
                     (true, true),
                     (true, hook == GameplayHook::Offhand),
@@ -221,7 +221,7 @@ fn reload_a_hundred_times_with_running_callers_then_retain_a_blocked_callback() 
                     let value = if hook == GameplayHook::IncomingDamage {
                         if answer { 50 } else { 0 }
                     } else {
-                        u8::from(answer)
+                        u64::from(answer)
                     };
                     let reply = client
                         .send(&Request::SetGameplayHook {
@@ -245,16 +245,18 @@ fn reload_a_hundred_times_with_running_callers_then_retain_a_blocked_callback() 
                     assert_eq!(read.code, ResponseCode::Done);
                     let observation = HookObservation::decode(&read.payload).unwrap();
                     assert!(observation.confirmed(on));
-                    assert_eq!(observation.value, value);
+                    if on {
+                        assert_eq!(observation.value, value);
+                    }
                     if hook == GameplayHook::IncomingDamage {
                         // SAFETY: authored health target and actor storage outlive all calls.
-                        assert_eq!(unsafe { damage(&DAMAGE_ACTOR, 200.0, 987) }, if on { f32::from(value) * 2.0 + 7.0 } else { 207.0 });
+                        assert_eq!(unsafe { damage(&DAMAGE_ACTOR, 200.0, 987) }, if on { value as f32 * 2.0 + 7.0 } else { 207.0 });
                         continue;
                     }
                     // SAFETY: same process-owned targets and retained arguments as running callers.
                     let actual = unsafe {
                         match hook {
-                            GameplayHook::IncomingDamage => unreachable!("damage checked above"),
+                            GameplayHook::IncomingDamage | GameplayHook::DamageDealt => unreachable!("damage checked above"),
                             GameplayHook::MysteriousRift => rift(Arc::as_ptr(&gameplay), 123),
                             GameplayHook::Offhand => {
                                 assert_eq!(pairing(42), !on);
@@ -270,7 +272,7 @@ fn reload_a_hundred_times_with_running_callers_then_retain_a_blocked_callback() 
             }
             if cycle == 0 {
                 assert_eq!(client.send(&Request::ClearHooks { dispatcher: found.dispatcher }).await.unwrap().code, ResponseCode::Done);
-                for hook in GameplayHook::ALL {
+                for hook in [GameplayHook::MysteriousRift, GameplayHook::Offhand, GameplayHook::IncomingDamage] {
                     let read = client
                         .send(&Request::ReadGameplayHook {
                             dispatcher: found.dispatcher,

@@ -7,25 +7,38 @@ pub enum GameplayHook {
     MysteriousRift = 0,
     Offhand = 1,
     IncomingDamage = 2,
+    DamageDealt = 3,
 }
 
 impl GameplayHook {
-    pub const ALL: [Self; 3] = [Self::MysteriousRift, Self::Offhand, Self::IncomingDamage];
+    pub const ALL: [Self; 4] = [Self::MysteriousRift, Self::Offhand, Self::IncomingDamage, Self::DamageDealt];
+    pub const fn is_damage(self) -> bool {
+        matches!(self, Self::IncomingDamage | Self::DamageDealt)
+    }
+    /// Two damage controls share one patched method.
+    pub const fn target(self) -> usize {
+        if self.is_damage() { 2 } else { self as usize }
+    }
+    pub fn default_value(self) -> u64 {
+        if self == Self::DamageDealt { 1.0f64.to_bits() } else { 1 }
+    }
     pub const fn id(self) -> &'static str {
         match self {
             Self::MysteriousRift => "mysterious-rift",
             Self::Offhand => "offhand",
             Self::IncomingDamage => "incoming-damage",
+            Self::DamageDealt => "damage-dealt",
         }
     }
     pub fn from_id(id: &str) -> Option<Self> {
         Self::ALL.into_iter().find(|hook| hook.id() == id)
     }
-    /// Wire settings are whole percentages for incoming damage, Boolean selections otherwise.
-    pub fn validate_value(self, value: u8) -> Result<u8, ProtocolError> {
+    /// Multiplier uses IEEE f64 bits; other settings are integer percentages or Boolean selections.
+    pub fn validate_value(self, value: u64) -> Result<u64, ProtocolError> {
         if match self {
             Self::IncomingDamage => value <= 100,
             Self::Offhand => value == 1,
+            Self::DamageDealt => f64::from_bits(value).is_finite() && ((0.0..=100.0).contains(&f64::from_bits(value)) || value == 101.0f64.to_bits()),
             Self::MysteriousRift => value <= 1,
         } {
             Ok(value)
@@ -43,31 +56,40 @@ pub enum PatchState {
     Original,
     Patched,
     Unknown,
+    /// Entry bytes are patched and another damage feature still owns the target.
+    Shared,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct HookObservation {
     pub patch: PatchState,
     pub enabled: bool,
-    pub value: u8,
+    pub value: u64,
 }
 impl HookObservation {
     pub fn confirmed(self, wanted: bool) -> bool {
-        self.enabled == wanted && self.patch == if wanted { PatchState::Patched } else { PatchState::Original }
+        self.enabled == wanted
+            && if wanted {
+                self.patch == PatchState::Patched
+            } else {
+                matches!(self.patch, PatchState::Original | PatchState::Shared)
+            }
     }
     pub fn encode(self) -> Vec<u8> {
-        vec![
+        let mut bytes = vec![
             match self.patch {
                 PatchState::Original => 0,
                 PatchState::Patched => 1,
                 PatchState::Unknown => 2,
+                PatchState::Shared => 3,
             },
             u8::from(self.enabled),
-            self.value,
-        ]
+        ];
+        bytes.extend(self.value.to_le_bytes());
+        bytes
     }
     pub fn decode(bytes: &[u8]) -> Result<Self, ProtocolError> {
-        let [patch, enabled @ 0..=1, value @ 0..=100] = *bytes else {
+        let [patch, enabled @ 0..=1, ref value @ ..] = *bytes else {
             return Err(ProtocolError::InvalidData);
         };
         Ok(Self {
@@ -75,10 +97,11 @@ impl HookObservation {
                 0 => PatchState::Original,
                 1 => PatchState::Patched,
                 2 => PatchState::Unknown,
+                3 => PatchState::Shared,
                 _ => return Err(ProtocolError::InvalidData),
             },
             enabled: enabled != 0,
-            value,
+            value: u64::from_le_bytes(value.try_into().map_err(|_| ProtocolError::InvalidData)?),
         })
     }
 }
@@ -97,7 +120,7 @@ mod tests {
                     expected_manager: 1,
                     hook,
                     on: true,
-                    value: 1,
+                    value: hook.default_value(),
                 },
                 Request::ReadGameplayHook {
                     dispatcher,
@@ -111,7 +134,7 @@ mod tests {
                     assert!(Request::decode(&bytes[..len]).is_err());
                 }
                 let mut invalid = bytes.clone();
-                invalid[44] = 3;
+                invalid[44] = 255;
                 assert!(Request::decode(&invalid).is_err());
                 let mut extra = bytes.clone();
                 extra.push(0);
@@ -119,7 +142,11 @@ mod tests {
                 if matches!(request, Request::SetGameplayHook { .. }) {
                     for offset in [45, 46] {
                         let mut invalid = bytes.clone();
-                        invalid[offset] = 255;
+                        if offset == 46 {
+                            invalid[offset..offset + 8].fill(255);
+                        } else {
+                            invalid[offset] = 255;
+                        }
                         assert!(Request::decode(&invalid).is_err());
                     }
                 }

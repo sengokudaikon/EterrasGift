@@ -55,7 +55,7 @@ pub enum Request {
         expected_manager: u64,
         hook: crate::hooks::GameplayHook,
         on: bool,
-        value: u8,
+        value: u64,
     },
     ReadGameplayHook {
         dispatcher: DispatcherSpec,

@@ -1,6 +1,8 @@
-//! Process-owned leaves for Boolean overrides and player incoming damage.
+//! Process-owned leaves for Boolean overrides and shared incoming/outgoing damage.
 //! They never enter helper code or change the stack; damage scales XMM1 before tail-calling.
+mod damage;
 use super::{HookError, failure};
+use eg_trainer_wire::hooks::GameplayHook;
 use std::{
     ptr::NonNull,
     sync::atomic::{AtomicU64, Ordering::SeqCst},
@@ -21,6 +23,7 @@ struct Data {
     player_storage: u64,
     online_storage: u64,
     hundred: f64,
+    multiplier: AtomicU64,
 }
 
 #[derive(Clone, Copy)]
@@ -37,6 +40,18 @@ pub struct DamageLayout {
     pub player_storage: NonNull<std::ffi::c_void>,
     pub online_storage: NonNull<std::ffi::c_void>,
     pub actor_offset: u32,
+    pub offense: Option<OffenseLayout>,
+}
+
+/// Validated instance fields followed on a health-damage call. References must
+/// remain readable for that call, as in the supported game's original handler.
+#[derive(Clone, Copy)]
+pub struct OffenseLayout {
+    pub current_health: u32,
+    pub alignment_manager: u32,
+    pub alignment: u32,
+    pub alignment_id: u32,
+    pub is_foe: u32,
 }
 
 /// Pages intentionally survive helper unload, including calls paused in this leaf.
@@ -69,7 +84,8 @@ impl LeafGate {
     /// PlayerDamage requires `float(BaseHealth*, float, MethodInfo*)` on Windows x64.
     /// Non-null receivers have a readable actor reference at actor_offset; its two
     /// static addresses remain readable until process exit (aligned pointer and byte).
-    /// Runtime reference stores are atomic and objects do not move.
+    /// Offense fields additionally require readable actor/alignment/foe-array graphs
+    /// for the duration of the call. Runtime reference stores are atomic and objects do not move.
     pub unsafe fn prepare_override(answer: LeafEffect, class: Option<NonNull<std::ffi::c_void>>, linked_offset: Option<u32>) -> Result<Self, HookError> {
         // SAFETY: forwarded target/receiver contract, with a new private switch.
         unsafe { Self::prepare_shared(answer, class, linked_offset, None) }
@@ -102,6 +118,7 @@ impl LeafGate {
                     0
                 },
                 hundred: 100.0,
+                multiplier: AtomicU64::new(u64::MAX),
                 receiver_class: class.map_or(0, |class| class.as_ptr() as u64),
                 switch: shared.map_or(data as u64, |gate| gate.switch as *const AtomicU64 as u64),
             });
@@ -126,7 +143,8 @@ impl LeafGate {
                 branches.push(bytes.len() - 1);
             }
             if let LeafEffect::PlayerDamage(layout) = answer {
-                damage_code(&mut bytes, &mut branches, layout.actor_offset);
+                bytes = damage::code(data as u64, layout);
+                branches.clear();
             } else if matches!(answer, LeafEffect::SelectableBoolean) {
                 bytes.extend([0x48, 0x8b, 0x40, 0x20, 0xc3]); // mov rax,[rax+32]; ret
             } else {
@@ -166,14 +184,31 @@ impl LeafGate {
     }
     /// Used by a selectable Boolean leaf; fixed leaves retain their authored answer.
     pub fn set_answer(&self, answer: bool) {
-        self.set_value(u8::from(answer));
+        self.set_value(u64::from(answer));
     }
     /// Caller validates the value for its concrete effect before enabling it.
-    pub fn set_value(&self, value: u8) {
-        self.data.answer.store(u64::from(value), SeqCst);
+    pub fn set_value(&self, value: u64) {
+        self.data.answer.store(value, SeqCst);
     }
-    pub fn value(&self) -> u8 {
-        self.data.answer.load(SeqCst) as u8
+    pub fn value(&self) -> u64 {
+        self.data.answer.load(SeqCst)
+    }
+    /// Update one effect while preserving the other users of the damage target.
+    /// The enable sentinel and numeric value publish in a single aligned store.
+    pub fn set_damage(&self, hook: GameplayHook, on: bool, value: u64) {
+        match hook {
+            GameplayHook::IncomingDamage => self.data.answer.store(if on { value } else { u64::MAX }, SeqCst),
+            GameplayHook::DamageDealt => self.data.multiplier.store(if on { value } else { u64::MAX }, SeqCst),
+            _ => unreachable!("not a damage feature"),
+        }
+    }
+    pub fn damage_setting(&self, hook: GameplayHook) -> (bool, u64) {
+        let value = match hook {
+            GameplayHook::IncomingDamage => self.data.answer.load(SeqCst),
+            GameplayHook::DamageDealt => self.data.multiplier.load(SeqCst),
+            _ => unreachable!("not a damage feature"),
+        };
+        (self.enabled() && value != u64::MAX, if value == u64::MAX { hook.default_value() } else { value })
     }
     pub fn answer(&self) -> bool {
         self.data.answer.load(SeqCst) != 0
@@ -184,34 +219,6 @@ impl LeafGate {
     pub fn enabled(&self) -> bool {
         self.switch.load(SeqCst) != 0
     }
-}
-
-// RCX=this, XMM1=damage, R8=MethodInfo. RAX/R11/XMM0 are scratch only.
-// Every exit tail-calls the original exactly once, including zero damage.
-fn damage_code(bytes: &mut Vec<u8>, branches: &mut Vec<usize>, actor_offset: u32) {
-    let branch = |bytes: &mut Vec<u8>, branches: &mut Vec<usize>, opcode: u8| {
-        bytes.extend([opcode, 0]);
-        branches.push(bytes.len() - 1);
-    };
-    bytes.extend([0x4c, 0x8b, 0x58, 0x30, 0x41, 0x80, 0x3b, 0]); // online storage; cmp byte [r11],0
-    branch(bytes, branches, 0x75);
-    bytes.extend([0x48, 0x85, 0xc9]); // null this
-    branch(bytes, branches, 0x74);
-    bytes.extend([0x4c, 0x8b, 0x58, 0x28, 0x4d, 0x8b, 0x1b, 0x4d, 0x85, 0xdb]); // current static player
-    branch(bytes, branches, 0x74);
-    bytes.extend([0x4c, 0x39, 0x99]); // cmp [rcx+actor_offset],r11
-    bytes.extend(actor_offset.to_le_bytes());
-    branch(bytes, branches, 0x75);
-    bytes.extend([0x4c, 0x8b, 0x58, 0x20, 0x49, 0x83, 0xfb, 100]); // single coherent value read
-    branch(bytes, branches, 0x73); // >=100 forwards untouched
-    bytes.extend([0x4d, 0x85, 0xdb, 0x75, 6]); // nonzero skips zero path
-    bytes.extend([0x0f, 0x57, 0xc9]); // xorps xmm1,xmm1 (also turns NaN/Inf into zero)
-    bytes.extend([0xff, 0x60, 0x08]); // original
-    bytes.extend([0xf2, 0x49, 0x0f, 0x2a, 0xc3]); // cvtsi2sd xmm0,r11
-    bytes.extend([0xf2, 0x0f, 0x5e, 0x40, 0x38]); // divsd xmm0,[rax+56] (100)
-    bytes.extend([0xf3, 0x0f, 0x5a, 0xc9]); // cvtss2sd xmm1,xmm1
-    bytes.extend([0xf2, 0x0f, 0x59, 0xc8]); // mulsd xmm1,xmm0
-    bytes.extend([0xf2, 0x0f, 0x5a, 0xc9]); // cvtsd2ss xmm1,xmm1
 }
 
 #[cfg(test)]
@@ -237,6 +244,7 @@ mod tests {
             player_storage: NonNull::from(&*player).cast(),
             online_storage: NonNull::from(&*online).cast(),
             actor_offset: 16,
+            offense: None,
         };
         // SAFETY: fixture storage is process-lifetime and every receiver has this layout and exact ABI.
         let gate = unsafe { LeafGate::prepare_override(LeafEffect::PlayerDamage(layout), None, None).unwrap() };
@@ -263,8 +271,8 @@ mod tests {
         for percent in [0, 1, 25, 50, 99, 100] {
             gate.set_value(percent);
             gate.set_enabled(true);
-            assert_eq!(hit(&mine, 200.0), f32::from(percent) * 2.0 + 7.0);
-            assert_eq!(hit(&mine, -200.0), -f32::from(percent) * 2.0 + 7.0);
+            assert_eq!(hit(&mine, 200.0), percent as f32 * 2.0 + 7.0);
+            assert_eq!(hit(&mine, -200.0), -(percent as f32) * 2.0 + 7.0);
             assert_eq!(hit(&other, 200.0), 207.0);
         }
         gate.set_value(0);

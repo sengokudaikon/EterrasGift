@@ -1,5 +1,5 @@
 use super::*;
-use crate::hooks::leaf::{DamageLayout, LeafEffect};
+use crate::hooks::leaf::{DamageLayout, LeafEffect, OffenseLayout};
 use eg_trainer_wire::hooks::GameplayHook;
 
 pub struct GameplayHookTarget {
@@ -26,7 +26,7 @@ impl RuntimeAccess {
         module_size: usize,
     ) -> Result<Vec<GameplayHookTarget>, DiscoveryError> {
         let _ = attached;
-        let damage = if hook == GameplayHook::IncomingDamage {
+        let damage = if hook.is_damage() {
             // SAFETY: attached main thread, initialized game statics and retained metadata.
             Some(unsafe { self.damage_layout()? })
         } else {
@@ -34,7 +34,7 @@ impl RuntimeAccess {
         };
         // Only concrete implemented features belong here.
         let specs: &[(&CStr, &CStr, bool, &[&str], LeafEffect)] = match hook {
-            GameplayHook::IncomingDamage => &[(c"BaseHealth", c"HealthDamage", true, &["System.Single"], LeafEffect::PlayerDamage(damage.unwrap()))],
+            GameplayHook::IncomingDamage | GameplayHook::DamageDealt => &[(c"BaseHealth", c"HealthDamage", true, &["System.Single"], LeafEffect::PlayerDamage(damage.unwrap()))],
             GameplayHook::MysteriousRift => &[(c"TimeBeastTracker", c"NextEncounterShouldBeEggs", true, &[], LeafEffect::SelectableBoolean)],
             GameplayHook::Offhand => &[
                 (
@@ -172,7 +172,33 @@ impl RuntimeAccess {
                 player_storage,
                 online_storage,
                 actor_offset: offset as u32,
+                offense: Some(OffenseLayout {
+                    current_health: self.hook_field(health, c"currentHealth", "System.Single", 4)?,
+                    alignment_manager: self.hook_field(actor, c"alignmentManager", "AlignmentManager", 8)?,
+                    alignment: self.hook_field(self.class(&images, c"", c"AlignmentManager")?, c"alignment", "Alignment", 8)?,
+                    alignment_id: self.hook_field(self.class(&images, c"", c"Alignment")?, c"alignmentID", "System.Byte", 1)?,
+                    is_foe: self.hook_field(self.class(&images, c"", c"Alignment")?, c"isFoe", "System.Boolean[]", 8)?,
+                }),
             })
+        }
+    }
+    unsafe fn hook_field(&self, owner: Class, name: &CStr, expected: &str, alignment: usize) -> Result<u32, DiscoveryError> {
+        // SAFETY: immutable attached metadata, instance fields on readable managed objects.
+        unsafe {
+            let field = self.field(owner, name)?;
+            let offset = (self.field_offset)(field);
+            let ty = (self.field_type)(field);
+            if (self.class_value)(owner)
+                || (self.field_flags)(field) & 0x10 != 0
+                || ty.is_null()
+                || (self.type_byref)(ty)
+                || self.type_name(ty)? != expected
+                || !(16..=16384).contains(&offset)
+                || !offset.is_multiple_of(alignment)
+            {
+                return Err(unsupported(format!("damage field layout: {}", name.to_string_lossy())));
+            }
+            Ok(offset as u32)
         }
     }
     unsafe fn hook_static_storage(&self, owner: Class, field: Ptr, alignment: usize) -> Result<NonNull<c_void>, DiscoveryError> {

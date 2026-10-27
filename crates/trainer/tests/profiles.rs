@@ -178,3 +178,19 @@ fn combined_damage_migrates_divisors_and_god_mode_with_new_settings_taking_prece
     assert_eq!(book.template().values(hook("incoming-damage")), [20.0]);
     assert!(!book.template().is_wanted(hook("incoming-damage")));
 }
+
+#[test]
+fn one_hit_profiles_migrate_to_the_multiplier_endpoint_and_round_trip() {
+    let book = ProfileBook::from_settings(Some(&json!({"profiles":[{
+        "name":"Mira", "class":"Sentinel", "cycle":"1",
+        "wanted":["one-hit-kill", "damage-dealt"], "values":{"damage-dealt":[2.5]}
+    }]})));
+    let hooks = &book.profiles()[0].hooks;
+    assert_eq!(hooks.values(hook("damage-dealt")), [101.0]);
+    assert!(hooks.wanted().any(|id| id == hook("damage-dealt")));
+    assert!(HookId::parse("one-hit-kill").is_none());
+    let mut fields = Map::new();
+    book.write_settings(&mut fields);
+    assert!(!fields["profiles"].to_string().contains("one-hit-kill"));
+    assert_eq!(ProfileBook::from_settings(Some(&Value::Object(fields))), book);
+}

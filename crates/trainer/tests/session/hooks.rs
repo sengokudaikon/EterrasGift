@@ -27,7 +27,7 @@ fn rift_mode_is_sent_and_confirmed_independently_of_enabled_state() {
             HookObservation {
                 patch: if on { PatchState::Patched } else { PatchState::Original },
                 enabled: on,
-                value: u8::from(actual_answer),
+                value: u64::from(actual_answer),
             }
             .encode(),
         ));
@@ -41,7 +41,7 @@ fn rift_mode_is_sent_and_confirmed_independently_of_enabled_state() {
             if kept { WriteOutcome::Confirmed(on) } else { WriteOutcome::NotKept(on) }
         );
         let sent = wire.requests();
-        assert!(matches!(sent[sent.len()-2], Request::SetGameplayHook { on: sent_on, value, .. } if sent_on == on && value == u8::from(choice != 2.0)));
+        assert!(matches!(sent[sent.len()-2], Request::SetGameplayHook { on: sent_on, value, .. } if sent_on == on && value == u64::from(choice != 2.0)));
     }
 }
 
@@ -94,7 +94,7 @@ fn each_gameplay_hook_requires_a_separate_readback_for_on_and_off() {
                 HookObservation {
                     patch: if on { PatchState::Patched } else { PatchState::Original },
                     enabled: on,
-                    value: 1,
+                    value: hook.default_value(),
                 }
                 .encode(),
             ));
@@ -226,11 +226,54 @@ fn damage_percentage_must_match_independent_readback() {
         let request = HookRequest {
             id: HookId::parse("incoming-damage").unwrap(),
             on: true,
-            values: vec![f64::from(wanted)],
+            values: vec![wanted as f64],
         };
         assert_eq!(
             run(BackendConnection::set_hook(&mut session, now(), &request, &mut AllowWrite)).unwrap(),
             if wanted == actual { WriteOutcome::Confirmed(true) } else { WriteOutcome::NotKept(true) }
         );
     }
+}
+
+#[test]
+fn outgoing_modes_require_exact_readback_and_off_accepts_a_verified_shared_target() {
+    let fixture = Fixture::rehashing();
+    let log = FakeLog::new([offline()]);
+    let wire = FakeTransport::new(fixture.target.clone(), [fixture.discover(), status(false, 0x1234, 0)]);
+    let mut session = fixture.session(&wire, &log, GatePolicy::Release);
+    session.enable();
+    run(session.connect(now())).unwrap();
+    for (wanted, actual, on) in [(0.0f64, 0.0f64, true), (3.125, 3.125, true), (101.0, 101.0, true), (101.0, 100.0, true), (1.0, 1.0, false)] {
+        wire.push(done(vec![]));
+        wire.push(done(
+            HookObservation {
+                patch: if on { PatchState::Patched } else { PatchState::Shared },
+                enabled: on,
+                value: actual.to_bits(),
+            }
+            .encode(),
+        ));
+        let request = HookRequest {
+            id: HookId::parse("damage-dealt").unwrap(),
+            on,
+            values: vec![wanted],
+        };
+        assert_eq!(
+            run(BackendConnection::set_hook(&mut session, now(), &request, &mut AllowWrite)).unwrap(),
+            if wanted == actual { WriteOutcome::Confirmed(on) } else { WriteOutcome::NotKept(on) }
+        );
+    }
+    let before = wire.requests().len();
+    for value in [f64::NAN, f64::INFINITY, -1.0, 100.5, 102.0] {
+        let request = HookRequest {
+            id: HookId::parse("damage-dealt").unwrap(),
+            on: true,
+            values: vec![value],
+        };
+        assert!(matches!(
+            run(BackendConnection::set_hook(&mut session, now(), &request, &mut AllowWrite)).unwrap(),
+            WriteOutcome::NotApplied { .. }
+        ));
+    }
+    assert_eq!(wire.requests().len(), before);
 }

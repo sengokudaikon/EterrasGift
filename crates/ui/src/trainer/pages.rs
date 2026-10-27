@@ -173,13 +173,19 @@ impl HookRow {
         let (Some(value), Some(amount)) = (self.feature.values.get(index), amount) else {
             return;
         };
+        if self.feature.id == "damage-dealt" && amount > 100.0 && amount != 101.0 {
+            return;
+        }
         self.set_number(session, index, amount.clamp(value.minimum, value.maximum));
     }
 
     /// Up and Down: the box's step either way, within its range.
     pub fn step(&mut self, session: &dyn TrainerSession, index: usize, direction: i32) {
         if let Some(value) = self.feature.values.get(index) {
-            let amount = self.values[index] + value.step * f64::from(direction.signum());
+            let mut amount = self.values[index] + value.step * f64::from(direction.signum());
+            if self.feature.id == "damage-dealt" && amount > 100.0 {
+                amount = if direction < 0 { 100.0 } else { 101.0 };
+            }
             self.set_amount(session, index, Some(amount));
         }
     }
@@ -219,6 +225,7 @@ impl HookRow {
                 format!("{} selected in the game.", self.feature.values[0].choices[self.values[0] as usize]),
                 Tone::Confirmed,
             ),
+            (true, Some(HookState::On)) if self.feature.id == "damage-dealt" && self.values == [101.0] => say("One-hit kills on in the game.", Tone::Confirmed),
             (true, Some(HookState::On)) => say("On in the game.", Tone::Confirmed),
             (true, Some(HookState::Failed { reason, .. })) => (format!("Could not turn on: {reason}"), Tone::Error),
             (true, Some(HookState::Applying | HookState::Off)) => say("Turning on in the game…", Tone::None),
@@ -228,6 +235,18 @@ impl HookRow {
             (false, _) => (String::new(), Tone::None),
         }
     }
+}
+
+pub fn hook_amount(id: &str, text: &str) -> Option<f64> {
+    if id == "damage-dealt" && matches!(text.trim().to_ascii_lowercase().as_str(), "∞" | "inf" | "infinity") {
+        Some(101.0)
+    } else {
+        parse(text)
+    }
+}
+
+pub fn hook_text(id: &str, number: f64) -> String {
+    if id == "damage-dealt" && number == 101.0 { "∞".into() } else { plain(number) }
 }
 
 /// A remembered number as the value takes it now: within its range, or a choice it still lists (else its default). The
@@ -855,6 +874,27 @@ mod tests {
     }
 
     #[test]
+    fn damage_knob_enters_and_leaves_one_hit_mode_and_formats_infinity() {
+        let session = Setup::default();
+        let mut row = HookRow::new(*catalog::feature("damage-dealt").unwrap(), &session);
+        row.set_amount(&session, 0, Some(100.0));
+        row.step(&session, 0, 1);
+        assert_eq!(row.values, [101.0]);
+        assert_eq!(hook_text("damage-dealt", row.values[0]), "∞");
+        row.step(&session, 0, -1);
+        assert_eq!(row.values, [100.0]);
+        for text in ["∞", "infinity", "INF"] {
+            row.set_amount(&session, 0, hook_amount("damage-dealt", text));
+            assert_eq!(row.values, [101.0]);
+        }
+        assert_eq!(hook_amount("incoming-damage", "∞"), None);
+        assert_eq!(hook_text("incoming-damage", 100.0), "100");
+        row.set_amount(&session, 0, Some(2.5));
+        assert_eq!(row.values, [2.5]);
+        assert_eq!(hook_text("damage-dealt", 2.5), "2.5");
+    }
+
+    #[test]
     fn a_hook_says_where_it_stands() {
         // Without a profile there is nothing to set up.
         let none = Unconnected;
@@ -868,7 +908,7 @@ mod tests {
         row.set_on(&session, true);
         assert_eq!(session.hook_values("damage-dealt"), [2.0]);
         assert_eq!(row.status(&session).0, "Turns on when Mira enters play.");
-        row.set_amount(&session, 0, Some(500.0));
+        row.set_amount(&session, 0, Some(100.0));
         assert_eq!(row.values, [100.0]);
         row.set_amount(&session, 0, None);
         assert_eq!(row.values, [100.0]);

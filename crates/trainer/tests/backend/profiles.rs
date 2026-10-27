@@ -263,7 +263,7 @@ fn a_hook_this_version_cannot_apply_says_so_without_reaching_the_game() {
                 }
             );
         }
-        assert_eq!(snapshot.hooks[&hook("one-hit-kill")], HookRun::Off);
+        assert_eq!(snapshot.hooks[&hook("cast-speed")], HookRun::Off);
         assert_eq!(shared.count("hook"), 0);
         shutdown(&handle, worker).await;
     });
@@ -279,17 +279,9 @@ fn profiles_change_while_no_game_runs_and_lock_while_one_does_without_opening_it
         command(&handle, Command::Enable).await.unwrap();
         command(&handle, Command::StartMonitoring).await.unwrap();
         wait_until(&handle, |snapshot| snapshot.profile_lock == ProfileLock::Editable).await;
-        command(
-            &handle,
-            Command::SetHookWanted {
-                id: hook("one-hit-kill"),
-                on: true,
-            },
-        )
-        .await
-        .unwrap();
+        command(&handle, Command::SetHookWanted { id: hook("cast-speed"), on: true }).await.unwrap();
         let saved = saves.lock().unwrap().last().cloned().unwrap();
-        assert!(saved.get(&key("Mira")).unwrap().hooks.is_wanted(hook("one-hit-kill")));
+        assert!(saved.get(&key("Mira")).unwrap().hooks.is_wanted(hook("cast-speed")));
 
         // Automatic connection is off: the game is only looked for.
         shared.targets.lock().unwrap().push(target());

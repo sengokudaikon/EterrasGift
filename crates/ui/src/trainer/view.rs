@@ -131,12 +131,10 @@ pub fn bind(window: &MainWindow, session: Rc<dyn TrainerSession>, features: Vec<
     });
     // A value reaches the game while it is typed, once it reads as a number; committing an emptied box keeps the last one.
     state.on_value_edited(with(|controller, row, index, text| {
-        if let Some(amount) = pages::parse(text) {
-            controller.hook(row, |hook, session| hook.set_amount(session, index as usize, Some(amount)));
-        }
+        controller.hook(row, |hook, session| hook.set_amount(session, index as usize, pages::hook_amount(hook.feature.id, text)));
     }));
     state.on_value_committed(with(|controller, row, index, text| {
-        controller.hook(row, |hook, session| hook.set_amount(session, index as usize, pages::parse(text)));
+        controller.hook(row, |hook, session| hook.set_amount(session, index as usize, pages::hook_amount(hook.feature.id, text)));
     }));
     let step = |action: fn(&mut Controller, i32, i32, i32)| {
         let controller = controller.clone();
@@ -527,7 +525,7 @@ impl Nested {
                     .values
                     .iter()
                     .enumerate()
-                    .map(|(i, value)| value_view(value, hook.values[i], value.label, &self.choices[i]))
+                    .map(|(i, value)| value_view(hook.feature.id, value, hook.values[i], value.label, &self.choices[i]))
                     .collect();
                 sync(&mut self.listed, views)
             }
@@ -561,15 +559,19 @@ fn tone(tone: Tone) -> FeatureTone {
     }
 }
 
-fn value_view(value: &FeatureValue, number: f64, name: &str, choices: &ModelRc<SharedString>) -> FeatureValueView {
+fn value_view(id: &str, value: &FeatureValue, number: f64, name: &str, choices: &ModelRc<SharedString>) -> FeatureValueView {
     FeatureValueView {
         label: value.label.into(),
-        accessible_name: name.into(),
-        unit: value.unit.unwrap_or_default().into(),
+        accessible_name: if id == "damage-dealt" && number == 101.0 {
+            format!("{name}: one-hit kills").into()
+        } else {
+            name.into()
+        },
+        unit: if id == "damage-dealt" && number == 101.0 { "" } else { value.unit.unwrap_or_default() }.into(),
         choice: !value.choices.is_empty(),
         choices: choices.clone(),
         choice_index: number as i32,
-        text: pages::plain(number).into(),
+        text: pages::hook_text(id, number).into(),
         step_tip: pages::step_text(value.step).into(),
     }
 }
@@ -620,7 +622,7 @@ fn view(row: &Row, session: &dyn TrainerSession, nested: &Nested) -> FeatureRowV
                 choice_only: hook.feature.kind == super::catalog::FeatureKind::Choice,
                 // A single value sits on the title line, named for the feature.
                 inline_value: if inline {
-                    value_view(&hook.feature.values[0], hook.values[0], hook.feature.title, &nested.choices[0])
+                    value_view(hook.feature.id, &hook.feature.values[0], hook.values[0], hook.feature.title, &nested.choices[0])
                 } else {
                     FeatureValueView::default()
                 },

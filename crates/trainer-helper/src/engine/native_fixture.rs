@@ -47,7 +47,7 @@ unsafe extern "C-unwind" fn native_callback(events: *const MethodInfo) {
                 let target = match hook {
                     GameplayHook::MysteriousRift => RIFT.load(SeqCst),
                     GameplayHook::Offhand => OFFHAND.load(SeqCst),
-                    GameplayHook::IncomingDamage => DAMAGE.load(SeqCst),
+                    GameplayHook::IncomingDamage | GameplayHook::DamageDealt => DAMAGE.load(SeqCst),
                 };
                 let class = if hook == GameplayHook::Offhand {
                     NonNull::new(OFFHAND_CLASS.load(SeqCst))
@@ -68,11 +68,12 @@ unsafe extern "C-unwind" fn native_callback(events: *const MethodInfo) {
                         target,
                         class,
                         &extras,
-                        if hook == GameplayHook::IncomingDamage {
+                        if hook.is_damage() {
                             Some(eg_game_access::hooks::leaf::DamageLayout {
                                 player_storage: NonNull::new(PLAYER_STORAGE.load(SeqCst)).unwrap(),
                                 online_storage: NonNull::new(ONLINE_STORAGE.load(SeqCst)).unwrap(),
                                 actor_offset: 0,
+                                offense: None,
                             })
                         } else {
                             None

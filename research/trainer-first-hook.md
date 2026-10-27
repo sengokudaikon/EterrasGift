@@ -205,3 +205,59 @@ and then timed out waiting for the unrelated Forge "Unusual values" fixture item
 (`crates/ui/tests/trainer_backend_fixture/mod.rs`). Full `trainer:verify` therefore remains
 failed at that capture, amid concurrent Forge changes. The damage control was visually checked
 at standard and narrow widths. `mise run build` refreshed `target/debug/eterras-gift.exe`.
+
+
+## Outgoing damage and shared target, 2026-10-27
+
+Damage multiplier now covers 0–100× and a separate one-hit mode displayed as ∞.
+The saved finite endpoint is 101; it is never multiplied into damage. The number box
+steps from 100 to ∞ and back, and accepts ∞/inf/infinity. The separate one-hit row
+is removed; legacy wanted `one-hit-kill` migrates to an enabled multiplier at 101.
+This leaves 66 hook rows: 4 supported controls, 62 unsupported.
+
+The OG `native/hooks/combat.h` filters target actors through
+`actor.alignmentManager.alignment`, compared with the current player's alignment.
+Same or missing alignments pass through. Otherwise `ours.isFoe[theirs.alignmentID]`
+selects enemies with a bounds check; a missing array follows the OG fallback that
+different alignments are foes. This includes damage inflicted by allies or minions.
+It does not establish who caused the hit. Numeric mode multiplies the argument;
+one-hit mode raises a positive hit to current health when that is larger. Zero,
+negative and NaN hits receive no one-hit floor. The original is called once.
+
+Metadata validates the reference/scalar types and offsets before installation.
+The leaf reads this managed graph directly, with no helper calls, allocation,
+locks or runtime API calls. It relies on the supported game's managed graph
+remaining readable for the call, as the OG hook does. A same-thread native access
+fault is not caught by this leaf. This is an explicit supported-runtime assumption,
+not something metadata validation can prove. The online static byte still bypasses
+effects immediately, and helper status clears all settings on character transitions.
+
+Two feature IDs map to one owned HealthDamage target. Each effect publishes its
+value/enabled state in one aligned 64-bit store (disabled sentinel); changing one
+preserves the other. Closing a target suppresses both, restores its bytes and leaves
+only process-owned code/data behind. A subsequent enable resets stale sibling
+settings. Independent readback distinguishes Original, Patched, Unknown and Shared:
+Shared means this feature is off, actual bytes are patched, and the sibling effect
+is active. Only damage controls can confirm this shared-off state.
+
+Wire settings now occupy a u64: integer percentage/Boolean values for earlier hooks,
+exact f64 bits for outgoing damage. Decoder and session reject invalid ranges,
+nonfinite multipliers and values between 100 and the one-hit endpoint. The existing
+helper artifact binding requires matching desktop/helper builds.
+
+Focused verification covers emitted code (foes/allies, null fields, bounded arrays,
+OG fallback, multiplier/one-hit transitions, original arguments/return/call count),
+actual patch sharing and restoration, clear/re-enable, wire/readback and profile
+migration. The Unity fixture's metadata is updated for the extra fields; its full
+lifecycle/captures are not rerun for this change, per the requested scope.
+
+Live verification pending: compare off/1×/2×/∞ against an enemy, confirm allied/minion
+health is unaffected, then toggle each damage control off while the other remains on.
+Finally disconnect and confirm ordinary damage in both directions.
+
+Verified for this slice: `mise run build` and `mise run lint` pass. Focused release
+checks pass for the native leaves (8), shared helper lifecycle (2), wire hook codec
+(1), session hook readback (8), catalog/profile behavior (18), worker profile
+commands (11), and the two affected UI model tests. No captures or live game run.
+The normal debug desktop/helper build is retained for manual verification; no new
+scratch workspace or Unity build was created.

@@ -210,6 +210,11 @@ fn profile(entry: &Value, template: &FeatureIntents) -> Option<Profile> {
         }
         hooks.set_wanted(id, true);
     }
+    if wanted.contains(&"one-hit-kill") {
+        let id = HookId::parse("damage-dealt").unwrap();
+        let _ = hooks.set_values(id, &[101.0]);
+        hooks.set_wanted(id, true);
+    }
     Some(Profile { key, last_played, hooks })
 }
 

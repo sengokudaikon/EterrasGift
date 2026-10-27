@@ -71,7 +71,7 @@ impl Request {
                 body.u64(*expected_manager);
                 body.byte(*hook as u8);
                 body.flag(*on);
-                body.byte(*value);
+                body.u64(*value);
                 26
             }
             Self::ReadGameplayHook { expected_manager, hook, .. } => {
@@ -277,7 +277,7 @@ impl Request {
                         expected_manager,
                         hook,
                         on: body.flag()?,
-                        value: hook.validate_value(body.byte()?)?,
+                        value: hook.validate_value(body.u64()?)?,
                     }
                 } else {
                     Self::ReadGameplayHook {

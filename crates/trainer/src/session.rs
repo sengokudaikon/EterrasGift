@@ -109,7 +109,7 @@ pub struct Session<T> {
     unload_needed: bool,
     last_write: Option<crate::writes::WriteRecord>,
     last_rate_write: Option<crate::field_writes::RateWriteRecord>,
-    hooks: [Option<eg_trainer_wire::hooks::HookObservation>; 3],
+    hooks: [Option<eg_trainer_wire::hooks::HookObservation>; 4],
 }
 impl<T: Transport> Session<T> {
     fn observation_matches(&self, expected: &crate::edits::ExpectedObservation) -> bool {
@@ -138,7 +138,7 @@ impl<T: Transport> Session<T> {
             transport,
             profile,
             lease: None,
-            hooks: [None, None, None],
+            hooks: [None; 4],
             state: SessionState::Disabled,
             discovery: None,
             status: None,
@@ -448,7 +448,7 @@ impl<T: Transport> Session<T> {
         })
     }
     fn release_without_io(&mut self) {
-        self.hooks = [None, None, None];
+        self.hooks = [None; 4];
         if self.discovery.take().is_some() {
             self.cleanup = Cleanup::Unconfirmed;
         }

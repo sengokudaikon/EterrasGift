@@ -7,7 +7,7 @@ feature, and do not give each feature its own installation, transport or unloadi
 This plan covers the 68 hook features in the original application at
 `e1c1ed4e9e0ab6404574113f2dcf1179b2113629`, checked against the adjacent checkout on 2026-10-23.
 Mysterious rift and offhand now share the first production Boolean-override lifecycle (see
-[implementation](trainer-first-hook.md)). Incoming damage now combines God mode and Damage taken in a single 0%-100% control on that lifecycle; the other 64 original features remain unsupported. The seven direct field sets and
+[implementation](trainer-first-hook.md)). Incoming damage now combines God mode and Damage taken in a single 0%-100% control on that lifecycle; outgoing damage combines the multiplier and one-hit kills in a second control; the other 62 original features remain unsupported. The seven direct field sets and
 Forge item editor use another path; their boundary is recorded below.
 
 ## What the feature inventory establishes
@@ -355,7 +355,7 @@ feature within it.
 | Pass | Implement through the production worker and fixtures | Decision to make afterwards |
 |---|---|---|
 | 1 | Mysterious rift, then offhand using the same retained lifecycle. | Extract only the proven lifecycle and simple forwarding support. Confirm complete on/off/readback/unload, not merely generated code. |
-| 2 | Incoming damage implemented as one percentage control replacing God mode/damage taken. Next: damage dealt/one-hit kill on the same target. | Mixed float ABI and current-player lookup use a retained leaf; add shared target composition when outgoing damage is implemented. |
+| 2 | Incoming damage is one percentage control; outgoing multiplier includes the infinity one-hit endpoint. Both implemented on the same target. | Mixed float ABI, current-player/foe lookup and shared target composition use one retained leaf. Both controls off restores the method. |
 | 3 | Forge level, then equipment requirements and a mixed feature such as experimental uniques. | Prove patch groups, non-overlap and mixed partial-failure reporting before freezing the registry shape. Extract patch mechanics here. |
 | 4 | XP multiplier/instant level, faction gains, primordial limit, area, zero mana cost and cast speed. | Consolidate scalar settings and repeated owner reads. Add coherent multi-value publication with an actual consumer. |
 | 5 | Perfect rolls, boss drops, always T7, force rarity, reveal map and prophecy distance; remaining simple patch features as their targets validate. | Extend only the ABI shapes exercised by these signatures. Keep original-call and RNG behavior explicit. |

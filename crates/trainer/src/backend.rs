@@ -288,7 +288,12 @@ impl<T: Transport + Send + 'static> BackendConnection for Session<T> {
             (eg_trainer_wire::hooks::GameplayHook::MysteriousRift, [mode]) if *mode == 2.0 => 0,
             (eg_trainer_wire::hooks::GameplayHook::MysteriousRift, [mode]) if *mode == 0.0 && !request.on => 1,
             (eg_trainer_wire::hooks::GameplayHook::Offhand, []) => 1,
-            (eg_trainer_wire::hooks::GameplayHook::IncomingDamage, [percent]) if percent.is_finite() && (0.0..=100.0).contains(percent) && percent.fract() == 0.0 => *percent as u8,
+            (eg_trainer_wire::hooks::GameplayHook::IncomingDamage, [percent]) if percent.is_finite() && (0.0..=100.0).contains(percent) && percent.fract() == 0.0 => {
+                *percent as u64
+            }
+            (eg_trainer_wire::hooks::GameplayHook::DamageDealt, [multiplier]) if multiplier.is_finite() && ((0.0..=100.0).contains(multiplier) || *multiplier == 101.0) => {
+                multiplier.to_bits()
+            }
             _ => return Ok(WriteOutcome::refused("Invalid hook selection")),
         };
         Ok(self.set_gameplay_hook_with_value(hook, request.on, value, control).await?)
@@ -459,7 +464,7 @@ pub enum Activity {
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Capabilities {
     /// In GameplayHook order; availability comes from this connection, not saved intent.
-    pub gameplay_hooks: [bool; 3],
+    pub gameplay_hooks: [bool; 4],
     pub read_forge: bool,
     pub read_attack_leech: bool,
     /// Narrow operation support, not current observation eligibility or lifetime authority.

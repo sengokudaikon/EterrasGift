@@ -13,10 +13,10 @@ impl<T: Transport> Session<T> {
     /// A submitted mutation is never retried. ACK and independent entry/flag
     /// readback both belong to the same admitted manager and artifact lease.
     pub async fn set_gameplay_hook(&mut self, hook: GameplayHook, on: bool, control: &mut dyn WriteControl) -> Result<WriteOutcome<bool>, SessionError> {
-        self.set_gameplay_hook_with_value(hook, on, 1, control).await
+        self.set_gameplay_hook_with_value(hook, on, hook.default_value(), control).await
     }
 
-    pub async fn set_gameplay_hook_with_value(&mut self, hook: GameplayHook, on: bool, value: u8, control: &mut dyn WriteControl) -> Result<WriteOutcome<bool>, SessionError> {
+    pub async fn set_gameplay_hook_with_value(&mut self, hook: GameplayHook, on: bool, value: u64, control: &mut dyn WriteControl) -> Result<WriteOutcome<bool>, SessionError> {
         hook.validate_value(value).map_err(SessionError::Protocol)?;
         if matches!(self.state, SessionState::Connecting | SessionState::Closing) {
             return Err(SessionError::Busy);
@@ -73,7 +73,11 @@ impl<T: Transport> Session<T> {
                     .await
                 {
                     Ok(response) if response.code == ResponseCode::Done => match HookObservation::decode(&response.payload) {
-                        Ok(actual) if actual.confirmed(actual.enabled) && hook.validate_value(actual.value).is_ok() => {
+                        Ok(actual)
+                            if actual.confirmed(actual.enabled)
+                                && hook.validate_value(actual.value).is_ok()
+                                && (actual.patch != eg_trainer_wire::hooks::PatchState::Shared || hook.is_damage()) =>
+                        {
                             self.hooks[hook as usize] = Some(actual);
                             if actual.enabled == on && (!on || actual.value == value) {
                                 WriteOutcome::Confirmed(on)
@@ -140,7 +144,10 @@ impl<T: Transport> Session<T> {
                     })
                     .await?;
                 let actual = HookObservation::decode(&payload).map_err(SessionError::Protocol)?;
-                if !actual.confirmed(actual.enabled) || hook.validate_value(actual.value).is_err() {
+                if !actual.confirmed(actual.enabled)
+                    || hook.validate_value(actual.value).is_err()
+                    || (actual.patch == eg_trainer_wire::hooks::PatchState::Shared && !hook.is_damage())
+                {
                     return Err(SessionError::Identity("Hook flag and entry bytes no longer agree".into()));
                 }
                 if actual.enabled && self.hooks[hook as usize].is_some_and(|previous| previous.enabled && previous.value != actual.value) {
