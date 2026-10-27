@@ -18,6 +18,7 @@ use std::{
 
 mod attack_leech;
 mod boolean_hooks;
+pub use boolean_hooks::BooleanHookTarget;
 mod descriptions;
 mod dispatcher_thread;
 mod unique;

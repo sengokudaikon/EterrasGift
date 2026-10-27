@@ -298,7 +298,7 @@ pub static DESCRIPTORS: &[FeatureDescriptor] = &[
         area: TrainerArea::Character,
         section: "Equipment rules",
         title: "Anything in the offhand",
-        description: "Any item fits the offhand slot.",
+        description: "Use offhand items without type, dual-wield unlock or weapon-pairing restrictions. The item's own requirements still apply.",
         kind: FeatureKind::Switch,
         values: &[],
         fields: &[],

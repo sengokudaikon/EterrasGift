@@ -1,8 +1,10 @@
 //! Registers the copied prefix and stock near jump using the original function's
 //! unwind codes. The stock jump-back is replaced with the old adapter's two
 //! conditional near jumps, preserving flags/registers without epilogue detection.
-//! Relocated instruction offsets must remain unchanged. Functions with handler or
-//! chained records keep the backend's ordinary trampoline without registration.
+//! Relocated instruction offsets must remain unchanged. A redundant REX byte
+//! stripped from a push is restored when the entire prefix is position-independent.
+//! Handler/chained records keep the ordinary trampoline when offsets are unchanged;
+//! combining them with restored REX prefixes is refused.
 use super::{HookError, failure};
 use iced_x86::{Decoder, DecoderOptions};
 use windows_sys::Win32::System::{
@@ -17,12 +19,34 @@ pub(super) unsafe fn register(target: *const u8, trampoline: *const u8, expected
         let generated = std::slice::from_raw_parts(trampoline, copied + 5);
         let mut original = Decoder::with_ip(64, &expected[..copied], target as u64, DecoderOptions::NONE);
         let mut relocated = Decoder::with_ip(64, generated, trampoline as u64, DecoderOptions::NONE);
+        let mut restore_prefix = false;
+        let mut ip_relative = false;
         while original.can_decode() {
+            let from_offset = original.position();
+            let to_offset = relocated.position();
             let from = original.decode();
             let to = relocated.decode();
-            if from.code() != to.code() || from.len() != to.len() {
+            ip_relative |= from.is_ip_rel_memory_operand();
+            if from.code() != to.code() {
                 return Err(HookError::UnsupportedUnwind);
             }
+            if from.len() != to.len() {
+                // MSVC's 40 55/40 57 prologues become 55/57 in the stock encoder.
+                // Restore exactly that redundant prefix, keeping original unwind
+                // offsets. No other instruction-size change is accepted.
+                if from.code() != iced_x86::Code::Push_r64
+                    || from.len() != to.len() + 1
+                    || expected[from_offset] != 0x40
+                    || expected[from_offset + 1..original.position()] != generated[to_offset..relocated.position()]
+                {
+                    return Err(HookError::UnsupportedUnwind);
+                }
+                restore_prefix = true;
+            }
+        }
+        if restore_prefix && ip_relative {
+            // Copying the original bytes would invalidate relocated RIP displacements.
+            return Err(HookError::UnsupportedUnwind);
         }
         let jump = relocated.decode();
         if jump.code() != iced_x86::Code::Jmp_rel32_64 || jump.near_branch_target() != target as u64 + copied as u64 {
@@ -37,7 +61,7 @@ pub(super) unsafe fn register(target: *const u8, trampoline: *const u8, expected
             }
             let address = (image_base + u64::from((*entry).Anonymous.UnwindData)) as *const u8;
             let header = std::slice::from_raw_parts(address, 4);
-            if header[0] & 7 == 1 && header[0] >> 3 != 0 {
+            if header[0] & 7 == 1 && header[0] >> 3 != 0 && !restore_prefix {
                 return Ok(());
             }
             if header[0] != 1 || header[2] > 64 {
@@ -81,15 +105,18 @@ pub(super) unsafe fn register(target: *const u8, trampoline: *const u8, expected
                 i32::try_from(target as i128 + copied as i128 - (trampoline as i128 + copied as i128 + offset as i128 + 6)).map_err(|_| HookError::UnsupportedUnwind)?;
             tail[offset + 2..offset + 6].copy_from_slice(&displacement.to_le_bytes());
         }
-        let destination = trampoline.add(copied).cast_mut();
+        let destination = trampoline.cast_mut();
         let mut protection = 0;
-        if VirtualProtect(destination.cast(), 12, PAGE_EXECUTE_READWRITE, &raw mut protection) == 0 {
+        if VirtualProtect(destination.cast(), copied + 12, PAGE_EXECUTE_READWRITE, &raw mut protection) == 0 {
             return Err(failure("trampoline tail protection"));
         }
-        std::ptr::copy_nonoverlapping(tail.as_ptr(), destination, 12);
-        let flushed = FlushInstructionCache(GetCurrentProcess(), destination.cast(), 12);
+        if restore_prefix {
+            std::ptr::copy_nonoverlapping(expected.as_ptr(), destination, copied);
+        }
+        std::ptr::copy_nonoverlapping(tail.as_ptr(), destination.add(copied), 12);
+        let flushed = FlushInstructionCache(GetCurrentProcess(), destination.cast(), copied + 12);
         let mut ignored = 0;
-        let restored = VirtualProtect(destination.cast(), 12, protection, &raw mut ignored);
+        let restored = VirtualProtect(destination.cast(), copied + 12, protection, &raw mut ignored);
         if flushed == 0 || restored == 0 {
             return Err(failure("trampoline tail cache/protection"));
         }

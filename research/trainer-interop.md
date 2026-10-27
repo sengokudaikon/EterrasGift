@@ -155,8 +155,14 @@ reinstallation by a new owner. No actual-game execution or gameplay-specific ABI
 `hooks::RetainedHook` leaks each RawDetour immediately; callers retain module lifetime through entry restoration and callback drain. The helper takes no module pins and uses an external, registered gateway that closes callback admission before restoration and counts complete DLL calls. Trampoline/gateway pages and tables remain process-owned after the DLL leaves. It exposes no direct
 enable/disable/drop path. Transactions verify entry bytes/state, attempt explicit recovery to
 each prior state on failure, and report recovery errors or unknown state. Copied calls and other
-control flow are rejected. Original unwind codes cover unchanged relocated instruction offsets;
-the old adapter's two conditional jump-back instructions preserve unwind coverage at the tail.
+control flow are rejected. Original unwind codes cover unchanged relocated instruction offsets. The offhand pairing
+work also preserves MSVC redundant REX bytes on register pushes when the stock encoder drops
+them: only byte-identical push encodings minus that redundant byte are accepted, and only
+when the entire copied prefix has no RIP-relative operands. Other layout changes still refuse;
+handler/chained records with this normalization also refuse. A native fixture checks each
+prologue/tail boundary with RtlVirtualUnwind.
+
+The old adapter's two conditional jump-back instructions preserve unwind coverage at the tail.
 Simply registering metadata over the stock unconditional jump failed the retained virtual-unwind
 test at that jump. Detour still owns allocation, relocation, target patching and thread contexts.
 

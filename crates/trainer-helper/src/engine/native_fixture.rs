@@ -4,16 +4,23 @@ use std::sync::atomic::AtomicU64;
 
 static RIFT: AtomicPtr<u8> = AtomicPtr::new(std::ptr::null_mut());
 static OFFHAND: AtomicPtr<u8> = AtomicPtr::new(std::ptr::null_mut());
+static PAIRING: AtomicPtr<u8> = AtomicPtr::new(std::ptr::null_mut());
+static ENFORCE: AtomicPtr<u8> = AtomicPtr::new(std::ptr::null_mut());
+static OFFHAND_CLASS: AtomicPtr<c_void> = AtomicPtr::new(std::ptr::null_mut());
 #[repr(C)]
 struct Targets {
     dispatcher: *mut u8,
     rift: *mut u8,
     offhand: *mut u8,
+    offhand_class: *mut c_void,
+    pairing: *mut u8,
+    enforce: *mut u8,
 }
 static TARGET: AtomicPtr<u8> = AtomicPtr::new(std::ptr::null_mut());
 
 #[repr(C)]
 struct Events {
+    class: usize,
     originals: AtomicU64,
     callbacks: AtomicU64,
     block: AtomicBool,
@@ -36,7 +43,13 @@ unsafe extern "C-unwind" fn native_callback(events: *const MethodInfo) {
                     BooleanHook::Offhand => OFFHAND.load(SeqCst),
                 };
                 // SAFETY: authored harness owns both matching Boolean target bodies.
-                match unsafe { boolean_hooks::fixture_change(hook, on, target) } {
+                let class = if hook == BooleanHook::Offhand { NonNull::new(OFFHAND_CLASS.load(SeqCst)) } else { None };
+                let extras = if hook == BooleanHook::Offhand {
+                    vec![PAIRING.load(SeqCst), ENFORCE.load(SeqCst)]
+                } else {
+                    Vec::new()
+                };
+                match unsafe { boolean_hooks::fixture_change(hook, on, target, class, &extras) } {
                     Ok(()) => Response {
                         code: ResponseCode::Done,
                         payload: Vec::new(),
@@ -116,7 +129,8 @@ unsafe fn native_worker() -> Result<(), String> {
 /// Called on a dedicated bootstrap thread after LoadLibrary. `target` is an
 /// readable Targets record, copied before return. Its dispatcher is a process-lifetime
 /// void(pointer) target whose Events outlive each call; rift/offhand are process-lifetime
-/// Boolean targets. Only the authored harness uses it.
+/// Boolean targets. `offhand_class` is a retained class identity, compared with
+/// the first word of each valid offhand receiver. Only the authored harness uses it.
 pub unsafe extern "system" fn eg_helper_fixture_native_start(target: *mut c_void) -> u32 {
     if target.is_null() || STARTED.swap(true, SeqCst) {
         return 60;
@@ -126,6 +140,9 @@ pub unsafe extern "system" fn eg_helper_fixture_native_start(target: *mut c_void
     TARGET.store(targets.dispatcher, SeqCst);
     RIFT.store(targets.rift, SeqCst);
     OFFHAND.store(targets.offhand, SeqCst);
+    OFFHAND_CLASS.store(targets.offhand_class, SeqCst);
+    PAIRING.store(targets.pairing, SeqCst);
+    ENFORCE.store(targets.enforce, SeqCst);
     let _ = QUEUE.set(Dispatcher::default());
     // SAFETY: the caller supplies the native fixture contract above.
     unsafe { spawn_control(native_worker) as u32 }

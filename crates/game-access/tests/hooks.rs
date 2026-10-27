@@ -62,6 +62,32 @@ eg_call_dispatch:
 eg_owned_handler:
     mov eax,1
     ret
+    .p2align 4
+    .global eg_rex_dispatch
+    .seh_proc eg_rex_dispatch
+eg_rex_dispatch:
+    .byte 0x40
+    push rdi
+    .seh_pushreg rdi
+    sub rsp,32
+    .seh_stackalloc 32
+    .seh_endprologue
+    add rsp,32
+    pop rdi
+    ret
+    .seh_endproc
+    .p2align 4
+    .global eg_rex_rip_dispatch
+    .seh_proc eg_rex_rip_dispatch
+eg_rex_rip_dispatch:
+    .byte 0x40
+    push rdi
+    .seh_pushreg rdi
+    .seh_endprologue
+    cmp byte ptr [rip + eg_owned_flag],0
+    pop rdi
+    ret
+    .seh_endproc
     .data
 eg_owned_flag:
     .byte 0
@@ -72,6 +98,8 @@ unsafe extern "C-unwind" {
     fn eg_handler_dispatch(method: *const MethodInfo);
     fn eg_batch_dispatch(method: *const MethodInfo);
     fn eg_call_dispatch(method: *const MethodInfo);
+    fn eg_rex_dispatch(method: *const MethodInfo);
+    fn eg_rex_rip_dispatch(method: *const MethodInfo);
 }
 static SERIAL: Mutex<()> = Mutex::new(());
 static ORIGINAL: AtomicPtr<u8> = AtomicPtr::new(std::ptr::null_mut());
@@ -170,6 +198,63 @@ fn every_relocated_instruction_boundary_unwinds_for_both_branch_outcomes() {
             assert_eq!(context.Rsp, caller_sp + 8, "PC +{offset}, ZF {zf}");
         }
     }
+}
+
+#[test]
+fn redundant_rex_push_preserves_prologue_offsets_and_unwinds_at_every_boundary() {
+    let _guard = SERIAL.lock().unwrap();
+    let target = eg_rex_dispatch as *const () as *mut u8;
+    // SAFETY: authored prologue and matching retained callback under SERIAL.
+    let bytes = unsafe { std::slice::from_raw_parts(target, 16) };
+    // SAFETY: exact authored target/callback ABI and unwind data, exclusively owned under SERIAL.
+    let hook = unsafe { RetainedHook::prepare(NonNull::new(target).unwrap(), callback as *const (), bytes) }.unwrap();
+    // SAFETY: the prepared trampoline retains the six original prologue bytes.
+    assert_eq!(unsafe { std::slice::from_raw_parts(hook.trampoline().cast::<u8>(), 6) }, &bytes[..6]);
+    ORIGINAL.store(original(&hook) as *const () as *mut u8, SeqCst);
+    toggle(&hook, true);
+    // SAFETY: owned same-signature target; callback forwards through restored prefix.
+    unsafe { eg_rex_dispatch(std::ptr::null()) };
+    toggle(&hook, false);
+    let body = hook.trampoline() as u64;
+    let mut base = 0;
+    // SAFETY: immutable registered code/table retained for the process lifetime.
+    let entry = unsafe { RtlLookupFunctionEntry(body, &raw mut base, std::ptr::null_mut()) };
+    assert!(!entry.is_null());
+    let mut stack = [0u64; 32];
+    stack[16] = 0x12345678;
+    stack[15] = 0xabcdef;
+    let caller_sp = (&raw mut stack[16]) as u64;
+    for offset in [0, 2, 6, 12] {
+        for flags in [0, 0x40] {
+            #[repr(C, align(16))]
+            struct Aligned(CONTEXT);
+            // SAFETY: zeroed Windows context, backed by the owned synthetic stack.
+            let mut storage = Aligned(unsafe { std::mem::zeroed() });
+            let context = &mut storage.0;
+            context.Rip = body + offset;
+            context.Rsp = caller_sp
+                - match offset {
+                    0 => 0,
+                    2 => 8,
+                    _ => 40,
+                };
+            context.Rdi = if offset == 0 { 0xabcdef } else { 0 };
+            context.EFlags = flags;
+            let mut handler = std::ptr::null_mut();
+            let mut frame = 0;
+            // SAFETY: real retained unwind table and initialized context/stack/output storage.
+            unsafe { RtlVirtualUnwind(0, base, context.Rip, entry, context, &raw mut handler, &raw mut frame, std::ptr::null_mut()) };
+            assert_eq!(
+                (context.Rip, context.Rsp, context.Rdi),
+                (0x12345678, caller_sp + 8, 0xabcdef),
+                "offset {offset}, flags {flags}"
+            );
+        }
+    }
+    let target = eg_rex_rip_dispatch as *const () as *mut u8;
+    // SAFETY: authored immutable target; changed offsets plus RIP relocation must still refuse.
+    let rejected = unsafe { RetainedHook::prepare(NonNull::new(target).unwrap(), callback as *const (), std::slice::from_raw_parts(target, 16)) };
+    assert!(matches!(rejected, Err(HookError::UnsupportedUnwind)));
 }
 
 #[test]

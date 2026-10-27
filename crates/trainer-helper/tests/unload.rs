@@ -27,6 +27,7 @@ use windows_sys::Win32::{
 #[repr(C)]
 #[derive(Default)]
 struct Events {
+    class: usize,
     originals: AtomicU64,
     callbacks: AtomicU64,
     block: AtomicBool,
@@ -41,7 +42,7 @@ unsafe extern "C-unwind" fn execute_tasks(_events: *const Events) {
         "nop",
         "nop",
         "nop",
-        "lock inc qword ptr [rcx]",
+        "lock inc qword ptr [rcx + 8]",
         "ret",
         "nop",
         "nop",
@@ -57,6 +58,9 @@ struct Targets {
     dispatcher: *const (),
     rift: *const (),
     offhand: *const (),
+    offhand_class: *const (),
+    pairing: *const (),
+    enforce: *const (),
 }
 
 #[unsafe(naked)]
@@ -80,6 +84,24 @@ unsafe extern "C-unwind" fn offhand_original(events: *const Events, item: usize,
     false
 }
 
+#[unsafe(naked)]
+unsafe extern "C-unwind" fn pairing(_value: usize) -> bool {
+    core::arch::naked_asm!("nop","nop","nop","nop","nop","jmp {}","nop","nop","nop","nop","nop","nop",sym pairing_original);
+}
+unsafe extern "C-unwind" fn pairing_original(value: usize) -> bool {
+    assert_eq!(value, 42);
+    true
+}
+#[unsafe(naked)]
+unsafe extern "C-unwind" fn enforce(_events: *const Events, _value: usize) {
+    core::arch::naked_asm!("nop","nop","nop","nop","nop","jmp {}","nop","nop","nop","nop","nop","nop",sym enforce_original);
+}
+unsafe extern "C-unwind" fn enforce_original(events: *const Events, value: usize) {
+    assert_eq!(value, 43);
+    // SAFETY: harness owns Events throughout every call.
+    unsafe { &*events }.originals.fetch_add(1, SeqCst);
+}
+
 fn wait_for(mut condition: impl FnMut() -> bool) {
     let deadline = Instant::now() + Duration::from_secs(12);
     while !condition() {
@@ -99,19 +121,29 @@ fn reload_a_hundred_times_with_running_callers_then_retain_a_blocked_callback() 
     // SAFETY: our process-owned naked target has sixteen readable code bytes.
     let original = unsafe { std::slice::from_raw_parts(execute_tasks as *const u8, 16) }.to_vec();
     // SAFETY: authored executable bodies each contain sixteen readable bytes.
-    let gameplay_originals = [rift as *const u8, offhand as *const u8].map(|target| unsafe { std::slice::from_raw_parts(target, 16) }.to_vec());
+    let gameplay_originals =
+        [rift as *const u8, offhand as *const u8, pairing as *const u8, enforce as *const u8].map(|target| unsafe { std::slice::from_raw_parts(target, 16) }.to_vec());
+    static OFFHAND_CLASS: u8 = 0;
     let targets = Targets {
         dispatcher: execute_tasks as *const (),
         rift: rift as *const (),
         offhand: offhand as *const (),
+        offhand_class: (&OFFHAND_CLASS as *const u8).cast(),
+        pairing: pairing as *const (),
+        enforce: enforce as *const (),
     };
     let events = Arc::new(Events::default());
-    let gameplay = Arc::new(Events::default());
+    let gameplay = Arc::new(Events {
+        class: targets.offhand_class as usize,
+        ..Events::default()
+    });
+    let other_slot = Arc::new(Events::default());
     let running = Arc::new(AtomicBool::new(true));
     let threads = (0..4)
         .map(|_| {
             let events = events.clone();
             let gameplay = gameplay.clone();
+            let other_slot = other_slot.clone();
             let running = running.clone();
             std::thread::spawn(move || {
                 while running.load(SeqCst) {
@@ -120,6 +152,9 @@ fn reload_a_hundred_times_with_running_callers_then_retain_a_blocked_callback() 
                         execute_tasks(Arc::as_ptr(&events));
                         rift(Arc::as_ptr(&gameplay), 123);
                         offhand(Arc::as_ptr(&gameplay), 456, -7, 789);
+                        pairing(42);
+                        enforce(Arc::as_ptr(&gameplay), 43);
+                        assert!(!offhand(Arc::as_ptr(&other_slot), 456, -7, 789));
                     };
                     std::thread::yield_now();
                 }
@@ -181,7 +216,13 @@ fn reload_a_hundred_times_with_running_callers_then_retain_a_blocked_callback() 
                     let actual = unsafe {
                         match hook {
                             BooleanHook::MysteriousRift => rift(Arc::as_ptr(&gameplay), 123),
-                            BooleanHook::Offhand => offhand(Arc::as_ptr(&gameplay), 456, -7, 789),
+                            BooleanHook::Offhand => {
+                                assert_eq!(pairing(42), !on);
+                                let isolated = Events::default();
+                                enforce(&isolated, 43);
+                                assert_eq!(isolated.originals.load(SeqCst), u64::from(!on));
+                                offhand(Arc::as_ptr(&gameplay), 456, -7, 789)
+                            }
                         }
                     };
                     assert_eq!(actual, on);
@@ -234,7 +275,10 @@ fn reload_a_hundred_times_with_running_callers_then_retain_a_blocked_callback() 
         }
         // SAFETY: restoration finished; the entry is immutable until our next load.
         assert_eq!(unsafe { std::slice::from_raw_parts(execute_tasks as *const u8, 16) }, original);
-        for (target, original) in [rift as *const u8, offhand as *const u8].into_iter().zip(&gameplay_originals) {
+        for (target, original) in [rift as *const u8, offhand as *const u8, pairing as *const u8, enforce as *const u8]
+            .into_iter()
+            .zip(&gameplay_originals)
+        {
             // SAFETY: gameplay entries are restored before dispatcher drain finishes.
             assert_eq!(unsafe { std::slice::from_raw_parts(target, 16) }, original);
         }
@@ -242,6 +286,8 @@ fn reload_a_hundred_times_with_running_callers_then_retain_a_blocked_callback() 
         assert!(!unsafe { rift(Arc::as_ptr(&gameplay), 123) });
         // SAFETY: same retained fixture argument and code ownership.
         assert!(!unsafe { offhand(Arc::as_ptr(&gameplay), 456, -7, 789) });
+        // SAFETY: restored authored target.
+        assert!(unsafe { pairing(42) });
     }
     running.store(false, SeqCst);
     for thread in threads {
