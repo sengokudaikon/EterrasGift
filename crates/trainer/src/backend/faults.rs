@@ -18,11 +18,11 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
             write_outcome: Some(outcome.into()),
             expected: Some(json!({
                 "process": {"pid": before.process().pid, "created": before.process().created, "executable": before.process().executable},
-                "generation": before.generation(), "manager": plan.manager(), "item": forge(before.snapshot()),
+                "generation": before.generation(), "manager": plan.manager(), "item": forge_record(before.snapshot()),
             })),
             edit: Some(edit(plan.edit_intent())),
             readback: Some(json!({
-                "policy": format!("{:?}", diagnostics.policy), "item": observed.map(forge),
+                "policy": format!("{:?}", diagnostics.policy), "item": observed.map(forge_record),
                 "matchingSlots": diagnostics.matching_slots,
                 "differences": diagnostics.differences.iter().map(|d| json!({"field": d.field, "expected": d.expected, "actual": d.actual})).collect::<Vec<_>>(),
             })),
@@ -79,7 +79,8 @@ fn rate(value: &AttackLeechObservation) -> Value {
         "attackRateBits": value.attack_rate.raw_bits, "increasedLeechRateBits": value.increased_leech_rate.raw_bits})
 }
 
-fn forge(value: &ForgeSnapshot) -> Value {
+/// The item as the game reported it, as fault reports record it.
+pub fn forge_record(value: &ForgeSnapshot) -> Value {
     let status = &value.status;
     json!({
         "item": value.item, "individualId": value.individual_id, "fingerprint": value.fingerprint, "name": value.name,

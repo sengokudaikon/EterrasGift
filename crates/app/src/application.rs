@@ -42,6 +42,7 @@ pub fn run(startup: Startup) -> Result<(), slint::PlatformError> {
             }),
             trainer: trainer_runtime.is_some(),
             trainer_backend: trainer_runtime.as_ref().map(|runtime| runtime.handle.clone()),
+            faults: Some(faults.clone()),
             start,
         },
     );

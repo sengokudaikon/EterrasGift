@@ -231,6 +231,7 @@ impl Session {
                 settings: SettingsPage::new(service, vec![eg_ui::trainer_settings::descriptor(true)], None, None),
                 trainer: true,
                 trainer_backend: None,
+                faults: None,
                 start: Page::Settings,
             },
         );
@@ -255,6 +256,7 @@ impl Session {
                 settings: SettingsPage::new(service, vec![eg_ui::trainer_settings::descriptor(true)], None, None).link(eg_ui::trainer_settings::ID, link),
                 trainer: true,
                 trainer_backend: None,
+                faults: None,
                 start: Page::Settings,
             },
         );
@@ -279,6 +281,7 @@ impl Session {
             settings,
             trainer: trainer_on,
             trainer_backend: None,
+            faults: None,
             start: Page::Home,
         };
         eg_ui::install(&ui, app);
@@ -364,6 +367,7 @@ impl Session {
                 settings: SettingsPage::new(fixture.settings.clone(), vec![], fixture.host.find_install().map(|install| install.executable), None),
                 trainer: false,
                 trainer_backend: None,
+                faults: None,
                 start: Page::Mods,
             },
         );
@@ -690,6 +694,7 @@ fn main() {
             settings: SettingsPage::new(service, vec![eg_ui::trainer_settings::descriptor(true)], None, None),
             trainer: true,
             trainer_backend: None,
+            faults: None,
             start: Page::Home,
         },
     );
@@ -731,6 +736,7 @@ fn main() {
             settings,
             trainer: true,
             trainer_backend: None,
+            faults: None,
             start: Page::Settings,
         },
     );

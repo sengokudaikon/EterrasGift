@@ -40,6 +40,7 @@ use eg_trainer_wire::{
     protocol::ResponseCode,
     transport::{Transport, TransportError, TransportFailure},
 };
+pub use faults::forge_record;
 use jiff::Timestamp;
 pub use profiles::{HOOK_NOT_AVAILABLE, HookRequest, HookRun, ProfileLock};
 use tokio::sync::{broadcast, mpsc, oneshot, watch};

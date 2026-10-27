@@ -11,9 +11,13 @@ use crate::{
     },
     shell::ShellHandle,
 };
-use eg_core::{bloom::BloomPhase, game_log::GameReadiness};
+use eg_core::{
+    bloom::BloomPhase,
+    fault::{FaultDetails, FaultLog},
+    game_log::GameReadiness,
+};
 use eg_trainer::{
-    backend::{Activity, BackendHandle, BackendSnapshot, CatalogState, Command, ErrorKind, ForgeState, MappingRead, Pending, Phase, ProfileLock},
+    backend::{Activity, BackendHandle, BackendSnapshot, CatalogState, Command, ErrorKind, ForgeSnapshot, ForgeState, MappingRead, Pending, Phase, ProfileLock},
     catalog::{Availability, GameCatalog},
 };
 use slint::{ComponentHandle, Timer, TimerMode};
@@ -504,6 +508,9 @@ struct Binding {
     decorations: Rc<Decorations<MainWindow>>,
     /// How far the wait for the game has come while the connection waits on it; None when it does not.
     waiting: Cell<Option<BloomPhase>>,
+    faults: Option<FaultLog>,
+    /// The last item the forge could not show and that went to the fault log, so each is recorded once.
+    reported: RefCell<Option<(u64, Arc<ForgeSnapshot>)>>,
 }
 
 /// The connection as a run without the trainer's worker shows it: not connected, in the navigation's foot (only when the
@@ -522,7 +529,7 @@ pub fn unbound(window: &MainWindow, trainer: bool) {
 
 /// Callback ownership keeps the binding alive; the writer's polling timer holds only a weak Rc.
 /// Rebinding or dropping the window releases the UI observer and its timer.
-pub fn bind(window: &MainWindow, backend: BackendHandle, shell: &ShellHandle, decorations: Rc<Decorations<MainWindow>>) {
+pub fn bind(window: &MainWindow, backend: BackendHandle, shell: &ShellHandle, decorations: Rc<Decorations<MainWindow>>, faults: Option<FaultLog>) {
     let empty = Arc::new(Catalog::default());
     let writer = Rc::new(RefCell::new(Writer {
         backend: backend.clone(),
@@ -551,6 +558,8 @@ pub fn bind(window: &MainWindow, backend: BackendHandle, shell: &ShellHandle, de
         shell: shell.clone(),
         decorations,
         waiting: Cell::new(None),
+        faults,
+        reported: RefCell::new(None),
     });
     shell.on_page_entered({
         let binding = Rc::downgrade(&binding);
@@ -674,7 +683,7 @@ impl Binding {
             catalog.1 = Arc::new(project_catalog(data));
             catalog.0 = Some(data.clone());
         }
-        let projection_error = project_item(&snapshot).err();
+        let projection_error = project_item(&snapshot).err().map(|error| self.report_unshown(&snapshot, error));
         self.forge.observe(Box::new(ObservedGame {
             catalog: catalog.1.clone(),
             writer: self.writer.clone(),
@@ -690,6 +699,30 @@ impl Binding {
         state.set_item_unavailable(projection_error.unwrap_or_default().into());
         self.waiting.set(waiting);
         self.drift(false);
+    }
+
+    /// Records an item the forge cannot show, once, with the item as the game reported it, so the refused value can be
+    /// traced. Returns what the forge says in its place.
+    fn report_unshown(&self, state: &BackendSnapshot, error: String) -> String {
+        let (Some(faults), ForgeState::Item { generation, snapshot, .. }) = (&self.faults, &state.forge) else {
+            return error;
+        };
+        let mut reported = self.reported.borrow_mut();
+        if reported.as_ref().is_none_or(|(g, s)| g != generation || s != snapshot) {
+            *reported = Some((*generation, snapshot.clone()));
+            let details = FaultDetails {
+                code: Some("ItemNotShown".into()),
+                readback: Some(serde_json::json!({ "generation": generation, "item": eg_trainer::backend::forge_record(snapshot) })),
+                ..Default::default()
+            };
+            faults.write(
+                "Item Forge",
+                Some(&error),
+                Some(&details),
+                Some("The forge shows the reason in place of the item. Nothing was sent to the game."),
+            );
+        }
+        format!("{error} Details are in the fault log.")
     }
 
     /// Drives the window's ash while a trainer page shows and the connection waits; Home takes the decorations back when
@@ -842,14 +875,7 @@ fn access(snapshot: &BackendSnapshot) -> TrainerAccess {
 }
 
 fn category(value: i32) -> Result<Category, String> {
-    match value {
-        0 => Ok(Category::Standard),
-        1 => Ok(Category::Experimental),
-        2 => Ok(Category::Personal),
-        3 => Ok(Category::Set),
-        6 => Ok(Category::Corrupted),
-        _ => Err("This item's affix category is not supported by the editor yet.".into()),
-    }
+    Category::from_raw(value).ok_or_else(|| "This item's affix category is not supported by the editor yet.".into())
 }
 fn kind(value: i32) -> Result<AffixKind, String> {
     match value {
@@ -1002,10 +1028,6 @@ fn project_item(state: &BackendSnapshot) -> Result<Option<ForgeItem>, String> {
         || if snapshot.name.is_empty() { "Unnamed item".into() } else { snapshot.name.clone() },
         |name| name.text.clone(),
     );
-    // Said in the item's own terms: the generic status refusal doesn't tell the user which value is out of reach.
-    if u8::try_from(snapshot.status.level_requirement).is_err() {
-        return Err("This item's level requirement is outside the editor's supported range.".into());
-    }
     let mut item = ForgeItem::observed(context, name).map_err(|error| error.to_string())?;
     item.implicits = implicits.as_ref().map(|lines| lines.iter().map(project_modifier).collect());
     if let Some(identity) = item.unique.as_mut().or(item.set_item.as_mut()) {

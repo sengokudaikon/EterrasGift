@@ -46,7 +46,11 @@ pub enum Category {
     Experimental,
     Personal,
     Set,
+    IdolEnchantment,
+    IdolWeaver,
     Corrupted,
+    /// An affix shown as one of a unique's own modifiers.
+    FakeUniqueMod,
 }
 
 impl Category {
@@ -56,7 +60,10 @@ impl Category {
             Self::Experimental => 1,
             Self::Personal => 2,
             Self::Set => 3,
+            Self::IdolEnchantment => 4,
+            Self::IdolWeaver => 5,
             Self::Corrupted => 6,
+            Self::FakeUniqueMod => 7,
         }
     }
     pub fn from_raw(value: i32) -> Option<Self> {
@@ -65,7 +72,10 @@ impl Category {
             1 => Self::Experimental,
             2 => Self::Personal,
             3 => Self::Set,
+            4 => Self::IdolEnchantment,
+            5 => Self::IdolWeaver,
             6 => Self::Corrupted,
+            7 => Self::FakeUniqueMod,
             _ => return None,
         })
     }
@@ -75,7 +85,10 @@ impl Category {
             Category::Experimental => "Experimental",
             Category::Personal => "Personal",
             Category::Set => "Set · Reforged",
+            Category::IdolEnchantment => "Idol enchantment",
+            Category::IdolWeaver => "Weaver idol",
             Category::Corrupted => "Corrupted",
+            Category::FakeUniqueMod => "Unique modifier",
         }
     }
 }
@@ -321,7 +334,7 @@ impl EditPresentation for ItemEdit {
 }
 
 impl ForgeItem {
-    pub(crate) fn observed(context: Arc<ForgeContext>, name: String) -> Result<Self, edits::EditError> {
+    pub(crate) fn observed(context: Arc<ForgeContext>, name: String) -> Result<Self, Unreadable> {
         let expected = &context.expected;
         let process = expected.process();
         let snapshot = expected.snapshot();
@@ -358,7 +371,7 @@ impl ForgeItem {
         }));
         Ok(after)
     }
-    fn copy_snapshot(&mut self, snapshot: &eg_trainer::backend::ForgeSnapshot) -> Result<(), edits::EditError> {
+    fn copy_snapshot(&mut self, snapshot: &eg_trainer::backend::ForgeSnapshot) -> Result<(), Unreadable> {
         self.item_type = u16::from(snapshot.item_type);
         self.idol = (25..=33).contains(&snapshot.item_type);
         self.sub_type = snapshot.sub_type;
@@ -367,18 +380,24 @@ impl ForgeItem {
             .affixes
             .iter()
             .map(|a| {
+                let unknown = |field, value: i64| Unreadable::Affix {
+                    slot: a.slot,
+                    id: a.id,
+                    field,
+                    value,
+                };
                 Ok(AffixState {
                     slot: usize::from(a.slot),
                     id: a.id,
-                    tier: u8::try_from(a.tier).map_err(|_| edits::EditError::InvalidValues)?,
+                    tier: u8::try_from(a.tier).map_err(|_| unknown("tier", a.tier.into()))?,
                     roll: a.roll,
                     kind: match a.kind {
                         0 => AffixKind::Prefix,
                         1 => AffixKind::Suffix,
-                        _ => return Err(edits::EditError::InvalidValues),
+                        other => return Err(unknown("type", other.into())),
                     },
-                    seal: *Seal::ALL.get(a.seal as usize).ok_or(edits::EditError::InvalidValues)?,
-                    category: Category::from_raw(a.special).ok_or(edits::EditError::InvalidValues)?,
+                    seal: *usize::try_from(a.seal).ok().and_then(|seal| Seal::ALL.get(seal)).ok_or(unknown("seal", a.seal.into()))?,
+                    category: Category::from_raw(a.special).ok_or(unknown("special type", a.special.into()))?,
                 })
             })
             .collect::<Result<_, _>>()?;
@@ -412,11 +431,37 @@ impl ForgeItem {
             legendary_potential: status.legendary_potential,
             weavers_will: status.weavers_will,
             weavers_touch: status.weavers_touch,
-            level_requirement: u8::try_from(status.level_requirement).map_err(|_| edits::EditError::InvalidStatus)?,
+            level_requirement: u8::try_from(status.level_requirement).map_err(|_| Unreadable::LevelRequirement(status.level_requirement))?,
             corrupted: status.corrupted,
             ruined: status.ruined,
         });
         Ok(())
+    }
+}
+
+/// A value of an item read from the game that the editor has no meaning for, named so the forge and the fault log can
+/// say which.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Unreadable {
+    Affix { slot: u8, id: u16, field: &'static str, value: i64 },
+    LevelRequirement(i32),
+}
+
+impl std::fmt::Display for Unreadable {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Affix { slot, id, field, value } => write!(f, "The affix in slot {slot} (ID {id}) has {field} {value}, which the editor does not know."),
+            Self::LevelRequirement(value) => write!(f, "The item's level requirement, {value}, is outside the editor's supported range."),
+        }
+    }
+}
+
+impl From<Unreadable> for edits::EditError {
+    fn from(value: Unreadable) -> Self {
+        match value {
+            Unreadable::Affix { .. } => Self::InvalidValues,
+            Unreadable::LevelRequirement(_) => Self::InvalidStatus,
+        }
     }
 }
 

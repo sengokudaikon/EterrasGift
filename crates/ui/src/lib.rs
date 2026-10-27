@@ -36,6 +36,8 @@ pub struct App {
     /// This run has the trainer: its pages, its connection block and its Settings groups.
     pub trainer: bool,
     pub trainer_backend: Option<eg_trainer::backend::BackendHandle>,
+    /// Where the trainer's pages record what they refuse; None in tests.
+    pub faults: Option<eg_core::fault::FaultLog>,
     /// Home, or Settings when the settings file or a module has something to say.
     pub start: Page,
 }
@@ -59,7 +61,7 @@ pub fn install(window: &MainWindow, app: App) {
     let trainer_backend = app.trainer_backend.filter(|_| app.trainer);
     trainer::install(window, trainer_backend.clone());
     if let Some(backend) = trainer_backend {
-        trainer_backend::bind(window, backend, &shell, decorations);
+        trainer_backend::bind(window, backend, &shell, decorations, app.faults);
     }
     apply_system_settings(window);
 }

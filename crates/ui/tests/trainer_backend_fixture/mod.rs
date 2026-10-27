@@ -586,6 +586,7 @@ pub(super) fn capture(session: &Session) {
             mods: None,
             trainer: true,
             trainer_backend: Some(handle.clone()),
+            faults: Some(eg_core::fault::FaultLog::with_fallbacks(&folder.join("app"), Some(&folder.join("logs")), vec![])),
             settings: SettingsPage::new(SettingsService::inline(store), vec![eg_ui::trainer_settings::descriptor(true)], None, None),
             start: Page::Forge,
         },
@@ -1128,6 +1129,28 @@ pub(super) fn capture(session: &Session) {
     assert!(!ui.global::<eg_ui::ForgeState>().get_has_item());
     assert_eq!(handle.snapshot().phase, Phase::Ready);
     assert!(ui.global::<eg_ui::TrainerState>().get_item_unavailable().contains("level requirement"));
+    // An item the forge refuses names the value and is recorded once, as the game reported it.
+    let refused = || {
+        std::fs::read_dir(folder.join("logs"))
+            .unwrap()
+            .map(|entry| serde_json::from_slice::<serde_json::Value>(&std::fs::read(entry.unwrap().path()).unwrap()).unwrap())
+            .filter(|report| report["code"] == "ItemNotShown")
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(refused().len(), 1);
+    let mut unknown = item("Unknown special affix", 20);
+    unknown.affixes[0].special = 8;
+    unknown.fingerprint = unknown.legacy_fingerprint();
+    *data.item.lock().unwrap() = Some(unknown);
+    command(&handle, Command::ReadForge, || true);
+    wait(|| ui.global::<eg_ui::TrainerState>().get_item_unavailable().contains("special type 8"));
+    command(&handle, Command::ReadForge, || true);
+    settle();
+    let reports = refused();
+    assert_eq!(reports.len(), 2);
+    let report = reports.iter().find(|report| report["readback"]["item"]["individualId"] == 20).unwrap();
+    assert_eq!(report["readback"]["item"]["affixes"][0]["special"], 8);
+    assert_eq!(report["operation"], "Item Forge");
     *data.item.lock().unwrap() = Some(item("Replaced item", 18));
     command(&handle, Command::ReadForge, || true);
     wait(|| ui.global::<eg_ui::ForgeState>().get_has_item());
@@ -1330,6 +1353,7 @@ pub(super) fn capture_waiting(session: &Session) {
             mods: None,
             trainer: true,
             trainer_backend: Some(handle.clone()),
+            faults: None,
             settings: SettingsPage::new(SettingsService::inline(store), vec![eg_ui::trainer_settings::descriptor(true)], None, None),
             start: Page::Forge,
         },
@@ -1435,6 +1459,7 @@ pub(super) fn capture_profiles(session: &Session) {
             mods: None,
             trainer: true,
             trainer_backend: Some(handle.clone()),
+            faults: None,
             settings: SettingsPage::new(SettingsService::inline(store), vec![eg_ui::trainer_settings::descriptor(true)], None, None),
             start: Page::Combat,
         },
