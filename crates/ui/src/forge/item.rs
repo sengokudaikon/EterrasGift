@@ -536,14 +536,15 @@ pub fn compatibility(item: &ForgeItem, definition: &AffixDefinition, slot: Optio
     }
 }
 
-/// The slots of the affixes a base change would make incompatible: allowed on the item now but not once it is on
-/// `sub_type` with that base's `class_requirement` (the C# `AffixCompatibility.BrokenByBase`). Incompatibility the item
-/// already carries is not the new base's doing, and the override plays no part.
-pub fn broken_by_base(item: &ForgeItem, sub_type: u16, class_requirement: Option<i32>) -> Vec<usize> {
+/// The slots of the affixes a base change would make incompatible: allowed on the item now but not once it is
+/// `item_type`'s `sub_type` with that base's `class_requirement` (the C# `AffixCompatibility.BrokenByBase`). Incompatibility
+/// the item already carries is not the new base's doing, and the override plays no part.
+pub fn broken_by_base(item: &ForgeItem, item_type: u16, sub_type: u16, class_requirement: Option<i32>) -> Vec<usize> {
     let Some(context) = &item.context else { return Vec::new() };
     let catalog = &context.catalog;
     let now = context.expected.snapshot();
     let rebased = eg_trainer::backend::ForgeSnapshot {
+        item_type: u8::try_from(item_type).unwrap_or(now.item_type),
         sub_type,
         class_requirement: class_requirement.unwrap_or(now.class_requirement),
         ..now.clone()

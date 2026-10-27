@@ -615,23 +615,23 @@ impl ForgeEditor {
         }
     }
 
-    /// The base a draft would give the item: a drafted base, or the base a drafted unique comes on when it differs.
-    fn drafted_base(&self) -> Option<u16> {
+    /// The base a draft would give the item (item type, sub-type): a drafted base, or the base a drafted unique comes on
+    /// when it differs.
+    fn drafted_base(&self) -> Option<(u16, u16)> {
         let item = self.item.as_ref()?;
         match (&self.base, self.drafted_identity()) {
-            (Some(base), _) if base.is_dirty() => Some(base_of(base.value()).1),
-            (_, Some((_, sub_type, _))) if sub_type != item.sub_type => Some(sub_type),
+            (Some(base), _) if base.is_dirty() => Some(base_of(base.value())),
+            (_, Some((_, sub_type, _))) if sub_type != item.sub_type => Some((item.item_type, sub_type)),
             _ => None,
         }
     }
 
     pub fn base_text(&self) -> String {
         match &self.item {
-            Some(item) => self
-                .catalog()
-                .base(item.item_type, self.drafted_base().unwrap_or(item.sub_type))
-                .map(|base| base.name.clone())
-                .unwrap_or_default(),
+            Some(item) => {
+                let (item_type, sub_type) = self.drafted_base().unwrap_or((item.item_type, item.sub_type));
+                self.catalog().base(item_type, sub_type).map(|base| base.name.clone()).unwrap_or_default()
+            }
             None => String::new(),
         }
     }
@@ -828,12 +828,12 @@ impl ForgeEditor {
         let Some(item) = self.item.as_ref() else {
             return Vec::new();
         };
-        let sub_type = match self.drafted_base() {
-            Some(sub_type) => sub_type,
-            None if item.implicits.is_none() => item.sub_type,
+        let (item_type, sub_type) = match self.drafted_base() {
+            Some(base) => base,
+            None if item.implicits.is_none() => (item.item_type, item.sub_type),
             None => return Vec::new(),
         };
-        self.catalog().base(item.item_type, sub_type).map(|base| base.implicits.clone()).unwrap_or_default()
+        self.catalog().base(item_type, sub_type).map(|base| base.implicits.clone()).unwrap_or_default()
     }
 
     pub fn has_implicits(&self) -> bool {
@@ -2181,43 +2181,58 @@ impl ForgeEditor {
     }
 
     /// The item type's bases, each with its level, the implicits it grants and how many of the item's affixes it would make
-    /// incompatible (the C# `ForgeChoices.BaseOptions`). TODO(forge): with the override an idol lists every idol type's
-    /// bases. That is not editor-only: the base draft's edit (`FieldDraft::read_edit`) must then carry the item type, and
-    /// the base name, implicit preview and tier lookups must follow the drafted type rather than the item's.
+    /// incompatible (the C# `ForgeChoices.BaseOptions`). An idol lists every idol type's bases after its own, which only
+    /// "I know what I'm doing" can pick (the C# `ForgeChoices.BaseOptions` with the override).
     fn base_options(&self, item: &ForgeItem) -> Vec<FieldOption> {
-        let Some(item_type) = self.catalog().item_type(item.item_type) else {
-            return Vec::new();
-        };
-        item_type
-            .bases
-            .iter()
-            .map(|base| {
+        let mut types: Vec<u16> = vec![item.item_type];
+        if item.idol {
+            types.extend(
+                self.catalog()
+                    .item_types
+                    .iter()
+                    .map(|t| t.item_type)
+                    .filter(|t| (25..=33).contains(t) && *t != item.item_type),
+            );
+        }
+        let unrestricted = self.unrestricted();
+        types
+            .into_iter()
+            .filter_map(|item_type| self.catalog().item_type(item_type))
+            .flat_map(|definition| definition.bases.iter().map(move |base| (definition, base)))
+            .map(|(definition, base)| {
+                let other_type = definition.item_type != item.item_type;
                 let mut detail = vec![format!("Level {}", base.level)];
+                if other_type {
+                    detail.insert(0, definition.name.clone());
+                }
                 if base.corrupted {
                     detail.push("corrupted base".into());
                 }
-                let broken = self.broken_by_base(item, base.sub_type);
+                let broken = self.broken_by_base(item, definition.item_type, base.sub_type);
                 if broken > 0 {
                     detail.push(count(broken, "incompatible affix", "incompatible affixes"));
                 }
+                if other_type && !unrestricted {
+                    detail.push("needs \"I know what I'm doing\"".into());
+                }
                 FieldOption {
-                    value: base_key(item.item_type, base.sub_type),
+                    value: base_key(definition.item_type, base.sub_type),
                     name: base.name.clone(),
                     detail: detail.join(" · "),
-                    in_game: base.sub_type == item.sub_type,
+                    in_game: !other_type && base.sub_type == item.sub_type,
                     implicits: base.implicits.join("\n"),
-                    available: true,
+                    available: !other_type || unrestricted,
                     rarity: 0,
                 }
             })
             .collect()
     }
 
-    /// How many of the item's affixes a change to `sub_type` would make incompatible, judged with the class requirement
-    /// that base carries (the C# `ForgeChoices.BrokenByBase`).
-    fn broken_by_base(&self, item: &ForgeItem, sub_type: u16) -> usize {
-        let class_requirement = self.catalog().base(item.item_type, sub_type).map(|base| base.class_requirement);
-        item::broken_by_base(item, sub_type, class_requirement).len()
+    /// How many of the item's affixes a change to `item_type`'s `sub_type` would make incompatible, judged with the class
+    /// requirement that base carries (the C# `ForgeChoices.BrokenByBase`).
+    fn broken_by_base(&self, item: &ForgeItem, item_type: u16, sub_type: u16) -> usize {
+        let class_requirement = self.catalog().base(item_type, sub_type).map(|base| base.class_requirement);
+        item::broken_by_base(item, item_type, sub_type, class_requirement).len()
     }
 
     // ----- The affix picker -----
@@ -2705,7 +2720,7 @@ impl ForgeEditor {
                             item_type: None,
                             ..
                         },
-                    ) if self.broken_by_base(&projected, rebase.sub_type as u16) == 0 => ItemEdit::BaseType(eg_trainer::edits::BaseTypeEdit {
+                    ) if self.broken_by_base(&projected, projected.item_type, rebase.sub_type as u16) == 0 => ItemEdit::BaseType(eg_trainer::edits::BaseTypeEdit {
                         allow_incompatible: false,
                         ..rebase
                     }),
@@ -2724,7 +2739,7 @@ impl ForgeEditor {
                     allow_incompatible: false,
                     item_type: None,
                     sub_type,
-                }) if self.broken_by_base(&projected, *sub_type as u16) > 0 => Some(BROKEN_BY_BASE.into()),
+                }) if self.broken_by_base(&projected, projected.item_type, *sub_type as u16) > 0 => Some(BROKEN_BY_BASE.into()),
                 ItemEdit::BaseType(eg_trainer::edits::BaseTypeEdit { .. }) if !edit.is_valid(&projected) => Some("This item's base cannot change.".into()),
                 _ => None,
             };

@@ -200,6 +200,35 @@ fn max_tiers_drafts_every_affix_up_to_t7_and_leaves_a_primordial() {
 }
 
 #[test]
+fn an_idol_takes_another_idol_type_only_with_the_override() {
+    use eg_trainer::edits::{BaseTypeEdit, ItemEdit};
+    let editor = ForgeEditor::new(Box::new(FixtureGame::idol()));
+    let options = editor.base.as_ref().unwrap().options.clone();
+    assert_eq!(
+        options.iter().map(|o| o.name.as_str()).collect::<Vec<_>>(),
+        ["Small Lagonian Idol", "Small Eterran Idol", "Humble Eterran Idol"]
+    );
+    assert!(!options[2].available);
+    assert!(options[2].detail.starts_with("Humble Idol"));
+    let game = FixtureGame::idol();
+    game.state.borrow_mut().unrestricted = true;
+    let state = game.state.clone();
+    let mut editor = ForgeEditor::new(Box::new(game));
+    editor.pick_base(2);
+    assert_eq!(editor.base_text(), "Humble Eterran Idol");
+    editor.apply();
+    assert_eq!(
+        state.borrow().writes.last(),
+        Some(&ItemEdit::BaseType(BaseTypeEdit {
+            sub_type: 0,
+            allow_incompatible: false,
+            item_type: Some(26),
+        }))
+    );
+    assert_eq!(state.borrow().item.as_ref().unwrap().item_type, 26);
+}
+
+#[test]
 fn a_cancelled_drag_leaves_nothing_to_undo() {
     let mut editor = ForgeEditor::new(Box::new(FixtureGame::boots(false)));
     editor.press(Cell::Affix(0));

@@ -270,6 +270,41 @@ impl FixtureGame {
         game
     }
 
+    /// A small idol, with a humble idol's bases also in the game data: the base menu lists them, which only the override
+    /// can pick. Not in the C# fixture.
+    pub fn idol() -> FixtureGame {
+        let mut game = FixtureGame::ring(false);
+        let base = |sub_type, name: &str| BaseDefinition {
+            sub_type,
+            name: name.into(),
+            level: 1,
+            corrupted: false,
+            class_requirement: 0,
+            implicits: Vec::new(),
+        };
+        game.catalog.item_types = vec![
+            ItemTypeDefinition {
+                item_type: 25,
+                name: "Small Idol".into(),
+                bases: vec![base(0, "Small Lagonian Idol"), base(1, "Small Eterran Idol")],
+            },
+            ItemTypeDefinition {
+                item_type: 26,
+                name: "Humble Idol".into(),
+                bases: vec![base(0, "Humble Eterran Idol")],
+            },
+        ];
+        game.change(|item| {
+            item.name = "Small Lagonian Idol".into();
+            item.item_type = 25;
+            item.sub_type = 0;
+            item.idol = true;
+            item.affixes.clear();
+            item.implicit_rolls.clear();
+        });
+        game
+    }
+
     pub fn new(item: Option<ForgeItem>, seed_tiers: bool, identity: bool, base_implicits: bool) -> FixtureGame {
         FixtureGame {
             catalog: catalog(seed_tiers, base_implicits),

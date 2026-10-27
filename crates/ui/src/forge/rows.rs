@@ -1291,11 +1291,15 @@ impl FieldDraft {
                 value: (self.value.clamp(0, 255) as u8) as i32,
                 unrestricted: self.unrestricted,
             }),
-            None => ItemEdit::BaseType(eg_trainer::edits::BaseTypeEdit {
-                sub_type: (base_of(self.value).1) as i32,
-                allow_incompatible: self.allow_incompatible,
-                item_type: None,
-            }),
+            None => {
+                let (item_type, sub_type) = base_of(self.value);
+                ItemEdit::BaseType(eg_trainer::edits::BaseTypeEdit {
+                    sub_type: i32::from(sub_type),
+                    allow_incompatible: self.allow_incompatible,
+                    // Another idol type, which only the override lists.
+                    item_type: (item_type != base_of(self.game).0).then_some(i32::from(item_type)),
+                })
+            }
         }
     }
 }
