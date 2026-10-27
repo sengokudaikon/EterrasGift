@@ -151,7 +151,7 @@ impl<T: Transport> Session<T> {
             }
         }
     }
-    fn write_provenance(&mut self, dispatcher: &DispatcherSpec) -> Result<(), SessionError> {
+    pub(super) fn write_provenance(&mut self, dispatcher: &DispatcherSpec) -> Result<(), SessionError> {
         if let Err(error) = self.validate_profile(dispatcher) {
             self.release_without_io();
             self.state = SessionState::Disconnected;

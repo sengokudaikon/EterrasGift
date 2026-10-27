@@ -379,3 +379,24 @@ fn hooks_refused_while_the_character_loads_wait_and_go_on_once_it_is_in_play() {
         shutdown(&handle, worker).await;
     });
 }
+
+#[test]
+fn independently_observed_suspension_requeues_wanted_hooks_on_the_monitor() {
+    run(async {
+        let shared = Shared::new();
+        playing(&shared, "Mira");
+        shared.hooks_supported.store(true, Ordering::SeqCst);
+        let (handle, worker) = start(&shared, saving(book()).0);
+        connected(&handle).await;
+        let before = requested(&shared);
+        assert_eq!(before.len(), mira_order().len());
+        shared.hooks_suspended.store(true, Ordering::SeqCst);
+        command(&handle, Command::StartMonitoring).await.unwrap();
+        wait_until(&handle, |snapshot| {
+            requested(&shared).len() == 2 * before.len() && mira_order().iter().all(|id| snapshot.hooks[id] == HookRun::On)
+        })
+        .await;
+        assert_eq!(&requested(&shared)[before.len()..], before);
+        shutdown(&handle, worker).await;
+    });
+}

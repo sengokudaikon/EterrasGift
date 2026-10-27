@@ -148,6 +148,7 @@ struct Shared {
     forge_item: Mutex<Option<ForgeSnapshot>>,
     write_result: Mutex<Option<WriteStatus>>,
     hooks_supported: AtomicBool,
+    hooks_suspended: AtomicBool,
     /// Answers to hook changes in turn; without one the game confirms what was asked.
     hook_results: Mutex<VecDeque<Result<WriteOutcome<bool>, BackendError>>>,
     hook_requests: Mutex<Vec<backend::HookRequest>>,
@@ -198,6 +199,7 @@ impl Shared {
             forge_item: Mutex::new(None),
             write_result: Mutex::new(None),
             hooks_supported: AtomicBool::new(false),
+            hooks_suspended: AtomicBool::new(false),
             hook_results: Mutex::new(VecDeque::new()),
             hook_requests: Mutex::new(vec![]),
             active: AtomicUsize::new(0),
@@ -389,10 +391,14 @@ impl BackendConnection for Connection {
     fn supports_hook(&self, _: eg_trainer::features::HookId) -> bool {
         self.shared.hooks_supported.load(Ordering::SeqCst)
     }
+    fn observed_hook(&self, _: eg_trainer::features::HookId) -> Option<bool> {
+        self.shared.hooks_suspended.load(Ordering::SeqCst).then_some(false)
+    }
     async fn set_hook(&mut self, _: Timestamp, request: &backend::HookRequest, control: &mut dyn WriteControl) -> Result<WriteOutcome<bool>, BackendError> {
         if !control.allowed() {
             return Err(BackendError::blocked(ErrorKind::Superseded, "cleanup before submission"));
         }
+        self.shared.hooks_suspended.store(false, Ordering::SeqCst);
         self.shared.record("hook");
         self.shared.hook_requests.lock().unwrap().push(request.clone());
         self.shared.hook_results.lock().unwrap().pop_front().unwrap_or(Ok(WriteOutcome::Confirmed(request.on)))

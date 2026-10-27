@@ -61,6 +61,17 @@ impl Request {
         let operation = match self {
             Self::Discover => 6,
             Self::Unload => 25,
+            Self::SetBooleanHook { expected_manager, hook, on, .. } => {
+                body.u64(*expected_manager);
+                body.byte(*hook as u8);
+                body.flag(*on);
+                26
+            }
+            Self::ReadBooleanHook { expected_manager, hook, .. } => {
+                body.u64(*expected_manager);
+                body.byte(*hook as u8);
+                27
+            }
             Self::Status { .. } => 7,
             Self::ClearHooks { .. } => 15,
             Self::ReadForge { .. } => 18,
@@ -218,8 +229,10 @@ impl Request {
         }
         let operation = reader.u32()?;
         let length = reader.u32()? as usize;
-        if !matches!(operation, 1 | 2 | 4 | 5 | 6 | 7 | 9 | 10 | 11 | 12 | 13 | 14 | 15 | 17 | 18 | 19 | 20 | 21 | 23 | 24 | 25)
-            || length > MAX_BODY
+        if !matches!(
+            operation,
+            1 | 2 | 4 | 5 | 6 | 7 | 9 | 10 | 11 | 12 | 13 | 14 | 15 | 17 | 18 | 19 | 20 | 21 | 23 | 24 | 25 | 26 | 27
+        ) || length > MAX_BODY
             || (matches!(operation, 6 | 25) && length != 0)
             || (!matches!(operation, 6 | 25) && length < 24)
         {
@@ -245,6 +258,27 @@ impl Request {
             bytes: body.array()?,
         };
         let request = match operation {
+            26 | 27 => {
+                let expected_manager = body.u64()?;
+                if expected_manager == 0 {
+                    return Err(ProtocolError::InvalidData);
+                }
+                let hook = crate::hooks::BooleanHook::decode(body.byte()?)?;
+                if operation == 26 {
+                    Self::SetBooleanHook {
+                        dispatcher,
+                        expected_manager,
+                        hook,
+                        on: body.flag()?,
+                    }
+                } else {
+                    Self::ReadBooleanHook {
+                        dispatcher,
+                        expected_manager,
+                        hook,
+                    }
+                }
+            }
             7 => Self::Status { dispatcher },
             15 => Self::ClearHooks { dispatcher },
             18 => Self::ReadForge { dispatcher },

@@ -31,7 +31,7 @@ faction-standing faction-gains instant-rank prophecy-any-zone prophecy-max-lp pr
 rune-wardens rune-prison experimental-uniques class-experimentals loot-lizards eternity-cache favor-cache nemesis mysterious-rift omen-windows morditas-timer monster-density pack-size monster-rarity champions eternity-cache-anywhere reveal-map waypoints zoom";
 
 #[test]
-fn all_source_ids_are_ordered_unique_typed_and_unsupported() {
+fn all_source_ids_are_ordered_unique_typed_and_support_is_explicit() {
     assert_eq!(SOURCE_COMMIT, "e1c1ed4e9e0ab6404574113f2dcf1179b2113629");
     assert!(SOURCE_FILES.contains(&(
         "src/Trainer/EterrasGift.Trainer.Application/Features/TrainerCatalog.cs",
@@ -47,7 +47,10 @@ fn all_source_ids_are_ordered_unique_typed_and_unsupported() {
     for descriptor in DESCRIPTORS {
         assert_eq!(FeatureKey::parse(descriptor.key.as_str()), Some(descriptor.key));
         assert_eq!(descriptor.key.descriptor(), descriptor);
-        assert_eq!(descriptor.native_support, NativeSupport::Unsupported);
+        assert_eq!(
+            descriptor.native_support,
+            eg_trainer_wire::hooks::BooleanHook::from_id(descriptor.key.as_str()).map_or(NativeSupport::Unsupported, NativeSupport::BooleanOverride)
+        );
         assert!(!descriptor.title.is_empty());
         assert!(!descriptor.description.is_empty());
         assert_eq!(descriptor.fills_section, descriptor.key == FeatureKey::Forge);

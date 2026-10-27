@@ -7,6 +7,7 @@
 !/research/trainer-readiness.md
 !/research/trainer-interop.md
 !/research/trainer-first-hook.md
+!/research/trainer-feature-plan.md
 /spec/
 # design/ is local reference material (C# captures and theme sources), except the token source xtask reads.
 /design/*

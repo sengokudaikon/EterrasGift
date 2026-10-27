@@ -1,7 +1,7 @@
 //! Immutable original-app feature descriptions and local intent, with no game access.
 //!
-//! The source's `Ported` flag describes the C# app only. Every descriptor here is
-//! unsupported for native synchronization. Owner symbols are source dependencies,
+//! The source's `Ported` flag describes the C# app only; native support is explicit
+//! per descriptor. Owner symbols are source dependencies,
 //! not addresses, ABI declarations, or permission to install a hook.
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -94,6 +94,7 @@ impl FeatureKey {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum NativeSupport {
     Unsupported,
+    BooleanOverride(eg_trainer_wire::hooks::BooleanHook),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]

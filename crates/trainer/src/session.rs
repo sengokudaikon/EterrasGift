@@ -1,4 +1,5 @@
 //! Serialized control session, owned observations and explicit guarded writes. No automatic retry.
+mod hooks;
 mod mapping;
 mod rate_write;
 mod unique;
@@ -108,6 +109,7 @@ pub struct Session<T> {
     unload_needed: bool,
     last_write: Option<crate::writes::WriteRecord>,
     last_rate_write: Option<crate::field_writes::RateWriteRecord>,
+    hooks: [Option<eg_trainer_wire::hooks::HookObservation>; 2],
 }
 impl<T: Transport> Session<T> {
     fn observation_matches(&self, expected: &crate::edits::ExpectedObservation) -> bool {
@@ -136,6 +138,7 @@ impl<T: Transport> Session<T> {
             transport,
             profile,
             lease: None,
+            hooks: [None, None],
             state: SessionState::Disabled,
             discovery: None,
             status: None,
@@ -445,6 +448,7 @@ impl<T: Transport> Session<T> {
         })
     }
     fn release_without_io(&mut self) {
+        self.hooks = [None, None];
         if self.discovery.take().is_some() {
             self.cleanup = Cleanup::Unconfirmed;
         }

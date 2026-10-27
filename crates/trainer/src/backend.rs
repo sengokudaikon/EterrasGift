@@ -182,9 +182,12 @@ pub trait BackendConnection: Send + 'static {
     }
     /// Err must mean submission was not attempted (or carry MayHaveRun). Once
     /// transport is entered, return a certainty-bearing status even on failure.
-    /// Whether this connection can apply the hook. None can yet: a wanted hook then says it is not available.
+    /// Whether this connection implements the feature's native lifecycle.
     fn supports_hook(&self, _: HookId) -> bool {
         false
+    }
+    fn observed_hook(&self, _: HookId) -> Option<bool> {
+        None
     }
     /// Sets the hook as `request` asks, then answers with the game's own report of it: `Confirmed(on)` when it matches
     /// the request, `NotKept(on)` when it does not.
@@ -211,6 +214,7 @@ impl<T: Transport + Send + 'static> BackendConnection for Session<T> {
     }
     async fn refresh(&mut self, now: Timestamp) -> Result<RuntimeStatus, BackendError> {
         Session::refresh(self, now).await?;
+        self.refresh_boolean_hooks().await?;
         self.runtime_status()
             .copied()
             .ok_or_else(|| BackendError::blocked(ErrorKind::Protocol, "missing runtime status"))
@@ -265,6 +269,23 @@ impl<T: Transport + Send + 'static> BackendConnection for Session<T> {
     }
     fn supports_level_requirement(&self) -> bool {
         true
+    }
+    fn supports_hook(&self, id: HookId) -> bool {
+        eg_trainer_wire::hooks::BooleanHook::from_id(id.as_str()).is_some()
+    }
+    fn observed_hook(&self, id: HookId) -> Option<bool> {
+        eg_trainer_wire::hooks::BooleanHook::from_id(id.as_str())
+            .and_then(|hook| self.hook_observation(hook))
+            .map(|actual| actual.enabled)
+    }
+    async fn set_hook(&mut self, _: Timestamp, request: &HookRequest, control: &mut dyn WriteControl) -> Result<WriteOutcome<bool>, BackendError> {
+        let Some(hook) = eg_trainer_wire::hooks::BooleanHook::from_id(request.id.as_str()) else {
+            return Ok(WriteOutcome::refused(HOOK_NOT_AVAILABLE));
+        };
+        if !request.values.is_empty() {
+            return Ok(WriteOutcome::refused("This hook takes no values"));
+        }
+        Ok(self.set_boolean_hook(hook, request.on, control).await?)
     }
     fn supports_status(&self, _field: crate::edits::StatusField) -> bool {
         true
@@ -431,6 +452,8 @@ pub enum Activity {
 }
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Capabilities {
+    /// In BooleanHook order; availability comes from this connection, not saved intent.
+    pub boolean_hooks: [bool; 2],
     pub read_forge: bool,
     pub read_attack_leech: bool,
     /// Narrow operation support, not current observation eligibility or lifetime authority.
@@ -1150,6 +1173,14 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
         self.state.undo_forge_depth = if self.state.undo_forge.is_some() { self.forge_history.len() } else { 0 };
         self.state.undo_forge_needs_override = self.state.undo_forge.is_some() && self.forge_history.needs_override();
         self.state.capabilities = Capabilities {
+            boolean_hooks: eg_trainer_wire::hooks::BooleanHook::ALL.map(|hook| {
+                self.state.phase == Phase::Ready
+                    && self.state.activity.is_none()
+                    && self
+                        .connection
+                        .as_ref()
+                        .is_some_and(|connection| connection.supports_hook(HookId::parse(hook.id()).expect("catalog hook")))
+            }),
             read_forge: self.state.phase == Phase::Ready,
             read_attack_leech: self.state.phase == Phase::Ready
                 && self.state.activity.is_none()
@@ -1559,6 +1590,7 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
             let status = self.connection.as_mut().unwrap().refresh(self.clock.now()).await?;
             self.superseded(epoch)?;
             self.check_status(status)?;
+            self.reconcile_hooks();
             let catalog = self.catalog_for(epoch, target, false).await?;
             self.admit(target)?;
             self.state.activity = Some(Activity::ReadingForge);
@@ -1664,6 +1696,7 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
                 .await?;
             self.superseded(epoch)?;
             self.check_status(status)?;
+            self.reconcile_hooks();
             // Successful value tables can be reused without another mapping
             // command. Poll locale here too, so even those tables expire when
             // the game changes language while the editor is idle; the monitor

@@ -3,6 +3,8 @@
 mod descriptions;
 #[path = "session/fields.rs"]
 mod fields;
+#[path = "session/hooks.rs"]
+mod hooks;
 #[path = "session/mapping.rs"]
 mod mappings;
 #[path = "session/rate_write.rs"]

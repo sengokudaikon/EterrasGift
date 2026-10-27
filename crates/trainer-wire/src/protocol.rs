@@ -50,6 +50,17 @@ pub enum Request {
     Discover,
     /// Owner-only control request; no dispatcher installation or offline admission required.
     Unload,
+    SetBooleanHook {
+        dispatcher: DispatcherSpec,
+        expected_manager: u64,
+        hook: crate::hooks::BooleanHook,
+        on: bool,
+    },
+    ReadBooleanHook {
+        dispatcher: DispatcherSpec,
+        expected_manager: u64,
+        hook: crate::hooks::BooleanHook,
+    },
     Status {
         dispatcher: DispatcherSpec,
     },
@@ -85,6 +96,8 @@ impl Request {
         match self {
             Self::Discover | Self::Unload => None,
             Self::Status { dispatcher }
+            | Self::SetBooleanHook { dispatcher, .. }
+            | Self::ReadBooleanHook { dispatcher, .. }
             | Self::ClearHooks { dispatcher }
             | Self::ReadForge { dispatcher }
             | Self::ReadLocale { dispatcher }

@@ -304,7 +304,7 @@ pub static DESCRIPTORS: &[FeatureDescriptor] = &[
         fields: &[],
         needs: None,
         fills_section: false,
-        native_support: NativeSupport::Unsupported,
+        native_support: NativeSupport::BooleanOverride(eg_trainer_wire::hooks::BooleanHook::Offhand),
         legacy_owners: &["offhandReceivesHook"],
     },
     // src/Trainer/EterrasGift.Trainer.Application/Features/TrainerCatalog.cs:118
@@ -1456,7 +1456,7 @@ pub static DESCRIPTORS: &[FeatureDescriptor] = &[
         fields: &[],
         needs: None,
         fills_section: false,
-        native_support: NativeSupport::Unsupported,
+        native_support: NativeSupport::BooleanOverride(eg_trainer_wire::hooks::BooleanHook::MysteriousRift),
         legacy_owners: &["nextEncounterEggsHook"],
     },
     // src/Trainer/EterrasGift.Trainer.Application/Features/TrainerCatalog.cs:261

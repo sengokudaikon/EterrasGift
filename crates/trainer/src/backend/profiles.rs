@@ -70,6 +70,16 @@ fn not_in_play() -> BackendError {
 }
 
 impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> BackendWorker<P, C, L, K> {
+    pub(super) fn reconcile_hooks(&mut self) {
+        for id in hook_ids() {
+            if let Some(false) = self.connection.as_ref().and_then(|connection| connection.observed_hook(id))
+                && self.state.hooks.get(&id).is_some_and(HookRun::holds)
+            {
+                self.state.hooks.insert(id, if self.wanted(id) { HookRun::Queued } else { HookRun::Off });
+            }
+        }
+    }
+
     pub(super) fn profile_lock(&self) -> ProfileLock {
         match &self.live {
             Some(key) if self.state.phase == Phase::Ready => ProfileLock::Live(key.clone()),

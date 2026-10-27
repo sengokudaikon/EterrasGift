@@ -85,6 +85,9 @@ struct FakeBackend {
     large_reply: bool,
 }
 impl Backend for FakeBackend {
+    fn clear_hooks(&mut self) -> Result<(), String> {
+        Ok(())
+    }
     fn discover(&mut self) -> Result<Discovery, Response> {
         let attempt = self.counters[0].fetch_add(1, SeqCst);
         if self.retry_discovery && attempt == 0 {

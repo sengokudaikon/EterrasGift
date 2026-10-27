@@ -17,6 +17,7 @@ use std::{
 };
 
 mod attack_leech;
+mod boolean_hooks;
 mod descriptions;
 mod dispatcher_thread;
 mod unique;
@@ -531,8 +532,8 @@ impl RuntimeAccess {
     /// after its original ExecuteTasks call has returned. The game's static fields/native-object
     /// lifetime must not race this query; no other thread may destroy the wrapper during rooting.
     /// No process-global initialized state is changed by this query. Static fields must already be
-    /// initialized, as required by the admitted game session. No feature hooks may be active in this
-    /// control-only helper (the returned active feature count is therefore exactly zero).
+    /// initialized, as required by the admitted game session. This reader reports zero features;
+    /// the helper fills in its independently tracked active hook count.
     pub unsafe fn status(&self, attached: &AttachedThread<'_>) -> Result<RuntimeStatus, DiscoveryError> {
         // SAFETY: The caller supplies the immutable main-thread graph span; static references are rooted and native pointer fields are validated before copying.
         unsafe {

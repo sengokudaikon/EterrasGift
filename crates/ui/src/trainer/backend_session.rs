@@ -1,9 +1,8 @@
 //! The trainer's pages on the trainer's worker: the session is connected while the worker is Ready, and the one field set
 //! this version serves (Combat › Attack and leech rates) is read and written through its commands, each answer arriving
 //! with a later snapshot. The hooks are the worker's profiles: the shown one's switches and values come from its snapshot
-//! (or, for a character in play without one, this connection's), and each change is a command. Every other field set and
-//! every hook says, while connected, that this version cannot serve it (`research/trainer-readiness.md`: the hook
-//! backend and the other six field sets are not ported). No game, pipe or process work runs here; commands are queued
+//! (or, for a character in play without one, this connection's), and each change is a command. Hook availability
+//! comes from the connected worker's capabilities. No game, pipe or process work runs here; commands are queued
 //! and their receipts polled.
 
 use super::profiles::Profile;
@@ -87,7 +86,18 @@ impl TrainerSession for BackendSession {
     }
 
     fn unavailable(&self, id: &str) -> Option<&'static str> {
-        let served = id == ATTACK_LEECH && self.with(|snapshot| snapshot.capabilities.read_attack_leech).unwrap_or(false);
+        let served = self
+            .with(|snapshot| {
+                use eg_trainer::features::{FeatureKey, NativeSupport};
+                if id == ATTACK_LEECH {
+                    return snapshot.capabilities.read_attack_leech;
+                }
+                match FeatureKey::parse(id).map(|key| key.descriptor().native_support) {
+                    Some(NativeSupport::BooleanOverride(hook)) => snapshot.capabilities.boolean_hooks[hook as usize],
+                    _ => false,
+                }
+            })
+            .unwrap_or(false);
         (!served).then_some(NOT_AVAILABLE)
     }
 

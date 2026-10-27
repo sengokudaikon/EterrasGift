@@ -6,6 +6,7 @@ pub mod definitions;
 pub mod dispatch;
 pub mod fields;
 pub mod forge;
+pub mod hooks;
 pub mod locale;
 pub mod mapping;
 pub mod process;

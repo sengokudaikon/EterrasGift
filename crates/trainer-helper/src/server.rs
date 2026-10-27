@@ -64,6 +64,7 @@ pub trait Backend {
     fn discover(&mut self) -> Result<Discovery, Response>;
     fn ensure_dispatcher(&mut self, expected: &DispatcherSpec) -> Result<(), Response>;
     fn submit(&mut self, request: Request) -> Result<Pending<Request, Response>, Response>;
+    fn clear_hooks(&mut self) -> Result<(), String>;
     fn restore(&mut self) -> Result<(), String>;
 }
 
@@ -291,11 +292,13 @@ async fn serve_pipe(pid: u32, mut pipe: NamedPipeServer, backend: &mut impl Back
                                 payload: Vec::new(),
                             }
                         }
-                        // No gameplay hook can be installed by this version, so the set is already clear. Answered here,
-                        // as the dispatcher check below would install the dispatcher hook a clear should leave alone.
-                        Request::ClearHooks { .. } => Response {
-                            code: ResponseCode::Done,
-                            payload: 0i32.to_le_bytes().to_vec(),
+                        // Owner-only cleanup never needs to install a dispatcher.
+                        Request::ClearHooks { .. } => match backend.clear_hooks() {
+                            Ok(()) => Response {
+                                code: ResponseCode::Done,
+                                payload: 0i32.to_le_bytes().to_vec(),
+                            },
+                            Err(error) => failure(ResponseCode::Failed, error),
                         },
                         Request::Discover => match backend.discover() {
                             Ok(discovery) => match discovery.encode(pid) {
@@ -435,6 +438,9 @@ mod tests {
         fn submit(&mut self, _: Request) -> Result<Pending<Request, Response>, Response> {
             unreachable!()
         }
+        fn clear_hooks(&mut self) -> Result<(), String> {
+            Ok(())
+        }
         fn restore(&mut self) -> Result<(), String> {
             self.restored = true;
             Ok(())
@@ -518,6 +524,9 @@ mod tests {
         }
         fn submit(&mut self, _: Request) -> Result<Pending<Request, Response>, Response> {
             panic!("discovery only")
+        }
+        fn clear_hooks(&mut self) -> Result<(), String> {
+            Ok(())
         }
         fn restore(&mut self) -> Result<(), String> {
             Ok(())

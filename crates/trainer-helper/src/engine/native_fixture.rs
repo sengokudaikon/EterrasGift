@@ -2,6 +2,14 @@
 use super::*;
 use std::sync::atomic::AtomicU64;
 
+static RIFT: AtomicPtr<u8> = AtomicPtr::new(std::ptr::null_mut());
+static OFFHAND: AtomicPtr<u8> = AtomicPtr::new(std::ptr::null_mut());
+#[repr(C)]
+struct Targets {
+    dispatcher: *mut u8,
+    rift: *mut u8,
+    offhand: *mut u8,
+}
 static TARGET: AtomicPtr<u8> = AtomicPtr::new(std::ptr::null_mut());
 
 #[repr(C)]
@@ -19,9 +27,32 @@ unsafe extern "C-unwind" fn native_callback(events: *const MethodInfo) {
     while events.block.load(SeqCst) && !events.release.load(SeqCst) {
         std::thread::sleep(Duration::from_millis(1));
     }
-    QUEUE.get().unwrap().execute_one(|_| Response {
-        code: ResponseCode::Done,
-        payload: Vec::new(),
+    QUEUE.get().unwrap().execute_one(|request| {
+        use eg_trainer_wire::hooks::BooleanHook;
+        match request {
+            Request::SetBooleanHook { hook, on, .. } => {
+                let target = match hook {
+                    BooleanHook::MysteriousRift => RIFT.load(SeqCst),
+                    BooleanHook::Offhand => OFFHAND.load(SeqCst),
+                };
+                // SAFETY: authored harness owns both matching Boolean target bodies.
+                match unsafe { boolean_hooks::fixture_change(hook, on, target) } {
+                    Ok(()) => Response {
+                        code: ResponseCode::Done,
+                        payload: Vec::new(),
+                    },
+                    Err(error) => error,
+                }
+            }
+            Request::ReadBooleanHook { hook, .. } => Response {
+                code: ResponseCode::Done,
+                payload: boolean_hooks::read(hook).encode(),
+            },
+            _ => Response {
+                code: ResponseCode::Done,
+                payload: Vec::new(),
+            },
+        }
     });
 }
 
@@ -48,7 +79,11 @@ impl Backend for NativeControl {
             .submit(request)
             .map_err(|_| server::failure(ResponseCode::NotReady, "Native fixture queue busy"))
     }
+    fn clear_hooks(&mut self) -> Result<(), String> {
+        boolean_hooks::clear(false)
+    }
     fn restore(&mut self) -> Result<(), String> {
+        boolean_hooks::clear(true)?;
         restore_and_drain(Some(&self.hook), Some(&self.gate))
     }
 }
@@ -79,13 +114,18 @@ unsafe fn native_worker() -> Result<(), String> {
 #[unsafe(no_mangle)]
 /// # Safety
 /// Called on a dedicated bootstrap thread after LoadLibrary. `target` is an
-/// exclusively owned process-lifetime void(pointer) target; its arguments point
-/// to Events atomics that outlive every call. Only the authored harness uses it.
+/// readable Targets record, copied before return. Its dispatcher is a process-lifetime
+/// void(pointer) target whose Events outlive each call; rift/offhand are process-lifetime
+/// Boolean targets. Only the authored harness uses it.
 pub unsafe extern "system" fn eg_helper_fixture_native_start(target: *mut c_void) -> u32 {
     if target.is_null() || STARTED.swap(true, SeqCst) {
         return 60;
     }
-    TARGET.store(target.cast(), SeqCst);
+    // SAFETY: harness retains this record through bootstrap completion.
+    let targets = unsafe { &*target.cast::<Targets>() };
+    TARGET.store(targets.dispatcher, SeqCst);
+    RIFT.store(targets.rift, SeqCst);
+    OFFHAND.store(targets.offhand, SeqCst);
     let _ = QUEUE.set(Dispatcher::default());
     // SAFETY: the caller supplies the native fixture contract above.
     unsafe { spawn_control(native_worker) as u32 }

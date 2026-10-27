@@ -1,3 +1,4 @@
+mod boolean_hooks;
 use crate::{
     BUILD_ID, BUILD_ID_C,
     lifecycle::Watchdog,
@@ -141,10 +142,15 @@ unsafe fn runtime_operation(operation: impl FnOnce(&Runtime, RuntimeAccess, &Att
             let result = operation(runtime, runtime.access, &attached);
             if let Err(response) = &result
                 && response.code == ResponseCode::OfflineRequired
-                && runtime.access.play_presence(&attached, runtime.invocation).ok() == Some(PlayPresence::InGame)
-                && runtime.access.status(&attached).is_ok_and(|status| !status.online && status.manager == 0)
             {
-                return Err(server::failure(ResponseCode::CharacterLoading, "The offline character is changing area."));
+                // Every operation that observes lost admission closes gameplay
+                // effects, including Forge/field requests between watchdog ticks.
+                boolean_hooks::observe(0).map_err(|e| server::failure(ResponseCode::Failed, e))?;
+                if runtime.access.play_presence(&attached, runtime.invocation).ok() == Some(PlayPresence::InGame)
+                    && runtime.access.status(&attached).is_ok_and(|status| !status.online && status.manager == 0)
+                {
+                    return Err(server::failure(ResponseCode::CharacterLoading, "The offline character is changing area."));
+                }
             }
             result
         })();
@@ -166,7 +172,10 @@ unsafe fn read_status() -> Response {
     // remain retained and the status reader rechecks the current offline graph.
     unsafe {
         runtime_operation(|runtime, access, attached| {
-            let status = access.status(attached).map_err(map_discovery)?;
+            let status_result = access.status(attached);
+            boolean_hooks::observe(status_result.as_ref().map_or(0, |s| if s.online { 0 } else { s.manager })).map_err(|e| server::failure(ResponseCode::Failed, e))?;
+            let mut status = status_result.map_err(map_discovery)?;
+            status.features_on = boolean_hooks::count();
             if !status.online && status.manager == 0 && access.play_presence(attached, runtime.invocation).ok() == Some(PlayPresence::InGame) {
                 return Err(server::failure(ResponseCode::CharacterLoading, "The offline character is changing area."));
             }
@@ -415,12 +424,23 @@ fn after_original(state: &Shared) {
                 let runtime = Runtime::retained(module()?)?;
                 let thread = runtime.thread();
                 let attached = thread.attach().map_err(|e| e.to_string())?;
-                runtime.access.play_presence(&attached, runtime.invocation).map_err(|e| e.to_string())
+                let presence = runtime.access.play_presence(&attached, runtime.invocation).map_err(|e| e.to_string())?;
+                let manager = if presence == PlayPresence::InGame {
+                    runtime.access.status(&attached).ok().filter(|s| !s.online).map_or(0, |s| s.manager)
+                } else {
+                    0
+                };
+                boolean_hooks::observe(manager)?;
+                Ok::<_, String>(presence)
             })()
         }
         .unwrap_or_else(|error| {
             if !PRESENCE_ERROR_REPORTED.swap(true, SeqCst) {
                 crate::report(format_args!("EG_HELPER_PRESENCE {error}"));
+            }
+            if let Err(error) = boolean_hooks::observe(0) {
+                crate::report(format_args!("EG_HELPER_HOOK_RESTORE {error}"));
+                state.stop.store(true, SeqCst);
             }
             PlayPresence::Unknown
         });
@@ -440,6 +460,10 @@ fn after_original(state: &Shared) {
             match request {
                 // SAFETY: correct-thread gate and initialized exact-runtime contract above.
                 Request::Status { .. } => unsafe { read_status() },
+                // SAFETY: admitted main-thread metadata/status query and serialized patch owner.
+                Request::SetBooleanHook { expected_manager, hook, on, .. } => unsafe { boolean_hooks::operation(expected_manager, hook, Some(on)) },
+                // SAFETY: same main-thread character admission; reads real entry bytes.
+                Request::ReadBooleanHook { expected_manager, hook, .. } => unsafe { boolean_hooks::operation(expected_manager, hook, None) },
                 // SAFETY: same main-thread and per-operation graph ownership contract above.
                 Request::ReadForge { .. } => unsafe { read_forge() },
                 // SAFETY: verified callback thread and the rooted tooltip graph span assumed by unsafe start.
@@ -534,7 +558,11 @@ impl Backend for Control<'_> {
             .submit(request)
             .map_err(|_| server::failure(ResponseCode::NotReady, "Previous main-thread request is still running; nothing was queued"))
     }
+    fn clear_hooks(&mut self) -> Result<(), String> {
+        boolean_hooks::clear(false)
+    }
     fn restore(&mut self) -> Result<(), String> {
+        boolean_hooks::clear(true)?;
         restore_and_drain(self.hook, self.gate.as_ref())
     }
 }
@@ -712,8 +740,10 @@ const _: () = assert!(std::mem::size_of::<BootstrapConfig>() == 96 && std::mem::
 /// storage until this thread exits. The caller selects the supported initialized Unity
 /// runtime, outside loader lock. The collector must be nonmoving, queried caches initialized,
 /// and synchronous operations must exclude graph mutation, reentrancy and native destruction.
-/// Edits require exclusive write access. Runtime modules remain loaded through helper departure;
-/// competing patches are excluded. Callback context checks establish the execution thread.
+/// Edits require exclusive write access. Game code remains resident for the process lifetime:
+/// retained gateways can still tail-call it after helper departure. Competing patches are
+/// excluded. Callback context checks establish the execution thread for helper operations;
+/// Boolean gameplay gateways may run on any caller thread and never enter the helper.
 pub unsafe extern "system" fn eg_helper_bootstrap(parameter: *mut c_void) -> u32 {
     if parameter.is_null() {
         return 60;

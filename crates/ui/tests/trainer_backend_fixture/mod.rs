@@ -39,6 +39,7 @@ struct Data {
     games: AtomicUsize,
     /// The character's attack rate and increased leech rate, as raw floats.
     rates: Mutex<[u32; 2]>,
+    boolean_hooks: [AtomicBool; 2],
 }
 impl Data {
     fn rates(&self) -> backend::AttackLeechObservation {
@@ -68,7 +69,13 @@ impl LogSource for Logs {
             readiness: if online { GameReadiness::Online } else { GameReadiness::Offline },
             shell_state: Some("None".into()),
             offline_mode: Some(!online),
-            character: None,
+            character: Some(eg_core::game_log::LoggedCharacter {
+                name: "Owned fixture".into(),
+                level: Some(12),
+                online,
+                cycle: "Legacy".into(),
+                class: "Primalist".into(),
+            }),
             problem: None,
         }
     }
@@ -288,6 +295,32 @@ impl BackendConnection for OwnedConnection {
                 Ok(WriteOutcome::Confirmed(item.clone().unwrap()))
             }
         }
+    }
+    fn supports_hook(&self, id: eg_trainer::features::HookId) -> bool {
+        matches!(id.as_str(), "mysterious-rift" | "offhand")
+    }
+    fn observed_hook(&self, id: eg_trainer::features::HookId) -> Option<bool> {
+        let index = match id.as_str() {
+            "mysterious-rift" => 0,
+            "offhand" => 1,
+            _ => return None,
+        };
+        Some(self.0.boolean_hooks[index].load(Ordering::SeqCst))
+    }
+    async fn set_hook(
+        &mut self,
+        _: jiff::Timestamp,
+        request: &backend::HookRequest,
+        control: &mut dyn eg_trainer::writes::WriteControl,
+    ) -> Result<eg_trainer::writes::WriteOutcome<bool>, BackendError> {
+        assert!(control.allowed());
+        let index = match request.id.as_str() {
+            "mysterious-rift" => 0,
+            "offhand" => 1,
+            _ => panic!("unsupported fixture hook"),
+        };
+        self.0.boolean_hooks[index].store(request.on, Ordering::SeqCst);
+        Ok(eg_trainer::writes::WriteOutcome::Confirmed(request.on))
     }
     fn supports_read_attack_leech(&self) -> bool {
         true
@@ -518,6 +551,7 @@ pub(super) fn capture(session: &Session) {
         expected: Mutex::new(Vec::new()),
         games: AtomicUsize::new(1),
         rates: Mutex::new([1.0_f32.to_bits(), 0.3_f32.to_bits()]),
+        boolean_hooks: [AtomicBool::new(false), AtomicBool::new(false)],
     });
     let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
     let (handle, worker) = backend::service(
@@ -581,6 +615,7 @@ pub(super) fn capture(session: &Session) {
     assert_eq!(ui.global::<eg_ui::TrainerState>().get_item_unavailable(), "");
     session.capture(&ui, "backend-forge-empty");
     combat_rates(session, &ui, &handle, &data);
+    boolean_hooks(session, &ui, &handle, &data);
     *data.item.lock().unwrap() = Some(item("Owned Hatchet Ω", 17));
     command(&handle, Command::ReadForge, || matches!(handle.snapshot().forge, backend::ForgeState::Item { .. }));
     wait(|| ui.global::<eg_ui::ForgeState>().get_has_item());
@@ -1134,9 +1169,39 @@ pub(super) fn capture(session: &Session) {
     ui.hide().unwrap();
 }
 
-/// Combat › Offense on the worker: Attack and leech rates is read when the page shows and written through its commands,
-/// one conditional plan per changed rate, confirmed by an independent read; the rows this version cannot serve say so and
-/// stay read-only.
+/// Both supported switches use the real profile commands and worker snapshots.
+fn boolean_hooks(session: &Session, ui: &MainWindow, handle: &BackendHandle, data: &Data) {
+    let state = ui.global::<eg_ui::TrainerState>();
+    for on in [true, false] {
+        for (index, page, title, id) in [(0, "world", "Mysterious rifts", "mysterious-rift"), (1, "character", "Anything in the offhand", "offhand")] {
+            ui.global::<Nav>().invoke_navigate(page.into());
+            state.set_section(0);
+            settle();
+            let row = (0..state.get_rows().row_count())
+                .find(|&i| state.get_rows().row_data(i).unwrap().title == title)
+                .expect("supported hook row");
+            wait(|| state.get_rows().row_data(row).unwrap().can_use);
+            state.invoke_hook_toggled(row as i32, on);
+            let id = eg_trainer::features::HookId::parse(id).unwrap();
+            wait(|| handle.snapshot().hooks.get(&id) == Some(if on { &backend::HookRun::On } else { &backend::HookRun::Off }));
+            wait(|| state.get_rows().row_data(row).unwrap().on == on);
+            assert_eq!(data.boolean_hooks[index].load(Ordering::SeqCst), on);
+            if on {
+                // Both rows sit near the bottom of their page. Capture the
+                // supported switch itself, not the unsupported rows above it.
+                session.scroll(500.0, 400.0, -10_000.0);
+                for _ in 0..3 {
+                    settle();
+                    ui.window().take_snapshot().expect("render");
+                }
+                session.capture(ui, &format!("backend-hook-{}", id.as_str()));
+            }
+        }
+    }
+    ui.global::<Nav>().invoke_navigate("forge".into());
+    settle();
+}
+
 fn combat_rates(session: &Session, ui: &MainWindow, handle: &BackendHandle, data: &Data) {
     let state = ui.global::<eg_ui::TrainerState>();
     ui.global::<Nav>().invoke_navigate("combat".into());
