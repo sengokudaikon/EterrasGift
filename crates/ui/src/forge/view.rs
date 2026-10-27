@@ -692,7 +692,7 @@ impl View {
                 .iter()
                 .map(|definition| PickerRowView {
                     name: definition.name.clone().into(),
-                    detail: definition.kind_description().into(),
+                    detail: definition.picker_description().into(),
                     reforged: definition.is_reforged(),
                 })
                 .collect(),

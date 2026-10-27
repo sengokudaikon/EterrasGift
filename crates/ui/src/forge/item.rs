@@ -118,6 +118,13 @@ impl AffixDefinition {
         join_parts(&[self.kind.name(), &self.category.name()])
     }
 
+    /// The picker's caption: its kind and the tiers it has, which tell apart affixes that read the same, e.g.
+    /// "Suffix · Idol enchantment · T1 only" and "Suffix · T1–T8".
+    pub fn picker_description(&self) -> String {
+        let tiers = if self.max_tier <= 1 { "T1 only".to_owned() } else { format!("T1–T{}", self.max_tier) };
+        join_parts(&[&self.kind_description(), &tiers])
+    }
+
     pub fn is_reforged(&self) -> bool {
         self.category == Category::Set
     }
