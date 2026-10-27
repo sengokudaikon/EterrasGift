@@ -55,6 +55,7 @@ pub enum Request {
         expected_manager: u64,
         hook: crate::hooks::BooleanHook,
         on: bool,
+        answer: bool,
     },
     ReadBooleanHook {
         dispatcher: DispatcherSpec,

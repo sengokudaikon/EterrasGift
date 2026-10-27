@@ -28,7 +28,7 @@ impl RuntimeAccess {
         let _ = attached;
         // These are the two implemented features, not a universal hook registry.
         let specs: &[(&CStr, &CStr, bool, &[&str], LeafReturn)] = match hook {
-            BooleanHook::MysteriousRift => &[(c"TimeBeastTracker", c"NextEncounterShouldBeEggs", true, &[], LeafReturn::Boolean(true))],
+            BooleanHook::MysteriousRift => &[(c"TimeBeastTracker", c"NextEncounterShouldBeEggs", true, &[], LeafReturn::SelectableBoolean)],
             BooleanHook::Offhand => &[
                 (
                     c"OneSlotItemContainerWithCharacterRequirements",

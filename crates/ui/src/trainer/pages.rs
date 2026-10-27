@@ -63,7 +63,7 @@ pub fn build(area: Area, features: &[Feature], planned: bool, session: &dyn Trai
                 _ if feature.presented => Some(match feature.kind {
                     FeatureKind::Editor => Row::Editor(EditorRow::new(feature, false, session)),
                     FeatureKind::HeldItems => Row::Editor(EditorRow::new(feature, true, session)),
-                    FeatureKind::Switch | FeatureKind::SwitchWithValues => Row::Hook(HookRow::new(feature, session)),
+                    FeatureKind::Switch | FeatureKind::SwitchWithValues | FeatureKind::Choice => Row::Hook(HookRow::new(feature, session)),
                 }),
                 _ if planned => Some(Row::Planned(feature)),
                 _ => None,
@@ -136,10 +136,13 @@ impl HookRow {
             .enumerate()
             .map(|(i, value)| if fits { fit(value, saved[i]) } else { start(value) })
             .collect();
-        let row = HookRow { feature, values };
+        let mut row = HookRow { feature, values };
         // A remembered value the catalog no longer allows reaches the helper as the box shows it.
         if fits && saved != row.values {
             row.send(session);
+        }
+        if feature.kind == FeatureKind::Choice && !session.is_hook_wanted(feature.id) {
+            row.values[0] = 0.0;
         }
         row
     }
@@ -212,6 +215,10 @@ impl HookRow {
         }
         let say = |text: &str, tone| (text.to_owned(), tone);
         match (wanted, session.hook_state(self.feature.id)) {
+            (true, Some(HookState::On)) if self.feature.kind == FeatureKind::Choice => (
+                format!("{} selected in the game.", self.feature.values[0].choices[self.values[0] as usize]),
+                Tone::Confirmed,
+            ),
             (true, Some(HookState::On)) => say("On in the game.", Tone::Confirmed),
             (true, Some(HookState::Failed { reason, .. })) => (format!("Could not turn on: {reason}"), Tone::Error),
             (true, Some(HookState::Applying | HookState::Off)) => say("Turning on in the game…", Tone::None),

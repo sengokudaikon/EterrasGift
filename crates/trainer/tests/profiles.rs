@@ -22,6 +22,24 @@ fn default_of(id: &str) -> f64 {
 }
 
 #[test]
+fn legacy_enabled_rifts_become_portal_and_boss_selection_roundtrips() {
+    let mut book = ProfileBook::from_settings(Some(&json!({"profiles": [
+        {"name": "Mira", "class": "Mage", "cycle": "Swordfish", "wanted": ["mysterious-rift"]}
+    ]})));
+    let id = hook("mysterious-rift");
+    let hooks = book.hooks_mut(&key("Mira")).unwrap();
+    assert!(hooks.is_wanted(id));
+    assert_eq!(hooks.values(id), [1.0]);
+    hooks.set_values(id, &[2.0]).unwrap();
+    let mut fields = serde_json::Map::new();
+    book.write_settings(&mut fields);
+    let loaded = ProfileBook::from_settings(Some(&Value::Object(fields)));
+    let hooks = &loaded.get(&key("Mira")).unwrap().hooks;
+    assert!(hooks.is_wanted(id));
+    assert_eq!(hooks.values(id), [2.0]);
+}
+
+#[test]
 fn a_character_is_known_by_name_class_and_cycle_not_level() {
     let character = |level| LoggedCharacter {
         name: "Mira".into(),

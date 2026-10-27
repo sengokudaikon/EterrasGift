@@ -161,12 +161,23 @@ impl TrainerSession for BackendSession {
 
     fn set_hook_values(&self, id: &str, values: &[f64]) {
         if let Some(id) = HookId::parse(id) {
-            self.submit(Command::SetHookValues { id, values: values.to_vec() });
+            let command = Command::SetHookValues { id, values: values.to_vec() };
+            if eg_trainer::features::FeatureKey::Hook(id).descriptor().kind == eg_trainer::features::FeatureKind::Choice {
+                if let Ok(receipt) = self.backend.try_submit(command) {
+                    self.switching.borrow_mut().insert(id, (receipt, values != [0.0]));
+                }
+            } else {
+                self.submit(command);
+            }
         }
     }
 
     fn hook_state(&self, id: &str) -> Option<HookState> {
         let id = HookId::parse(id)?;
+        self.settle();
+        if self.switching.borrow().contains_key(&id) {
+            return Some(HookState::Applying);
+        }
         self.with(|snapshot| snapshot.hooks.get(&id).map(hook_state)).flatten()
     }
 

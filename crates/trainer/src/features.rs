@@ -27,6 +27,8 @@ pub enum TrainerArea {
 pub enum FeatureKind {
     Switch,
     SwitchWithValues,
+    /// One choice replaces the switch; index zero restores the game behavior.
+    Choice,
     Editor,
     HeldItems,
 }
@@ -260,6 +262,9 @@ impl FeatureIntents {
 
     /// False when it was already so.
     pub fn set_wanted(&mut self, id: HookId, on: bool) -> bool {
+        if on && FeatureKey::Hook(id).descriptor().kind == FeatureKind::Choice && self.values(id) == [0.0] {
+            self.values.insert(id, vec![FeatureKey::Hook(id).descriptor().values[0].start]);
+        }
         if on { self.wanted.insert(id) } else { self.wanted.remove(&id) }
     }
 
@@ -279,11 +284,16 @@ impl FeatureIntents {
                 return Err(FeatureError::InvalidValue { id, index });
             }
         }
-        if self.values(id) == values {
-            return Ok(false);
+        let wanted_changed = if descriptor.kind == FeatureKind::Choice {
+            self.set_wanted(id, values[0] != 0.0)
+        } else {
+            false
+        };
+        let changed = self.values(id) != values;
+        if changed {
+            self.values.insert(id, values.to_vec());
         }
-        self.values.insert(id, values.to_vec());
-        Ok(true)
+        Ok(changed || wanted_changed)
     }
 
     /// Unknown IDs, non-value features and changed arities are dropped, as in the

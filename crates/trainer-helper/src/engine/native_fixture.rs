@@ -37,7 +37,7 @@ unsafe extern "C-unwind" fn native_callback(events: *const MethodInfo) {
     QUEUE.get().unwrap().execute_one(|request| {
         use eg_trainer_wire::hooks::BooleanHook;
         match request {
-            Request::SetBooleanHook { hook, on, .. } => {
+            Request::SetBooleanHook { hook, on, answer, .. } => {
                 let target = match hook {
                     BooleanHook::MysteriousRift => RIFT.load(SeqCst),
                     BooleanHook::Offhand => OFFHAND.load(SeqCst),
@@ -49,7 +49,7 @@ unsafe extern "C-unwind" fn native_callback(events: *const MethodInfo) {
                 } else {
                     Vec::new()
                 };
-                match unsafe { boolean_hooks::fixture_change(hook, on, target, class, &extras) } {
+                match unsafe { boolean_hooks::fixture_change(hook, on, answer, target, class, &extras) } {
                     Ok(()) => Response {
                         code: ResponseCode::Done,
                         payload: Vec::new(),

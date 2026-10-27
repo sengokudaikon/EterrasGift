@@ -7,6 +7,30 @@ use eg_trainer::profiles::{ProfileBook, ProfileKey, ProfileSaver};
 fn hook(id: &str) -> HookId {
     HookId::parse(id).unwrap()
 }
+
+#[test]
+fn rift_choice_changes_wanted_and_value_in_one_command_including_restoration() {
+    run(async {
+        let shared = Shared::new();
+        playing(&shared, "Oren");
+        shared.hooks_supported.store(true, Ordering::SeqCst);
+        let (options, _) = saving(book());
+        let (handle, worker) = start(&shared, options);
+        connected(&handle).await;
+        let id = hook("mysterious-rift");
+        for choice in [1.0, 2.0, 1.0, 0.0] {
+            command(&handle, Command::SetHookValues { id, values: vec![choice] }).await.unwrap();
+            assert_eq!(handle.snapshot().hooks[&id], if choice == 0.0 { HookRun::Off } else { HookRun::On });
+        }
+        assert_eq!(
+            requested(&shared),
+            [(id, true, vec![1.0]), (id, true, vec![2.0]), (id, true, vec![1.0]), (id, false, vec![0.0])]
+        );
+        command(&handle, Command::SetHookValues { id, values: vec![3.0] }).await.unwrap_err();
+        assert_eq!(shared.count("hook"), 4);
+        shutdown(&handle, worker).await;
+    });
+}
 fn key(name: &str) -> ProfileKey {
     ProfileKey {
         name: name.into(),

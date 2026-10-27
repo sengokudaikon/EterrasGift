@@ -13,6 +13,10 @@ impl<T: Transport> Session<T> {
     /// A submitted mutation is never retried. ACK and independent entry/flag
     /// readback both belong to the same admitted manager and artifact lease.
     pub async fn set_boolean_hook(&mut self, hook: BooleanHook, on: bool, control: &mut dyn WriteControl) -> Result<WriteOutcome<bool>, SessionError> {
+        self.set_boolean_hook_with_answer(hook, on, true, control).await
+    }
+
+    pub async fn set_boolean_hook_with_answer(&mut self, hook: BooleanHook, on: bool, answer: bool, control: &mut dyn WriteControl) -> Result<WriteOutcome<bool>, SessionError> {
         if matches!(self.state, SessionState::Connecting | SessionState::Closing) {
             return Err(SessionError::Busy);
         }
@@ -32,6 +36,7 @@ impl<T: Transport> Session<T> {
             expected_manager,
             hook,
             on,
+            answer,
         };
         let mut outcome = match self.transport.send(&request).await {
             Ok(response) => match response.code {
@@ -69,7 +74,7 @@ impl<T: Transport> Session<T> {
                     Ok(response) if response.code == ResponseCode::Done => match HookObservation::decode(&response.payload) {
                         Ok(actual) if actual.confirmed(actual.enabled) => {
                             self.hooks[hook as usize] = Some(actual);
-                            if actual.enabled == on {
+                            if actual.enabled == on && (!on || actual.answer == answer) {
                                 WriteOutcome::Confirmed(on)
                             } else {
                                 WriteOutcome::NotKept(actual.enabled)
@@ -136,6 +141,9 @@ impl<T: Transport> Session<T> {
                 let actual = HookObservation::decode(&payload).map_err(SessionError::Protocol)?;
                 if !actual.confirmed(actual.enabled) {
                     return Err(SessionError::Identity("Hook flag and entry bytes no longer agree".into()));
+                }
+                if actual.enabled && self.hooks[hook as usize].is_some_and(|previous| previous.enabled && previous.answer != actual.answer) {
+                    return Err(SessionError::Identity("Hook selection changed since confirmation".into()));
                 }
                 self.write_provenance(&dispatcher)?;
                 self.hooks[hook as usize] = Some(actual);

@@ -58,7 +58,7 @@ fn all_source_ids_are_ordered_unique_typed_and_support_is_explicit() {
             FeatureKey::Hook(id) => {
                 assert_eq!(HookId::parse(id.as_str()), Some(id));
                 assert!(FieldSetId::parse(id.as_str()).is_none());
-                assert!(matches!(descriptor.kind, FeatureKind::Switch | FeatureKind::SwitchWithValues));
+                assert!(matches!(descriptor.kind, FeatureKind::Switch | FeatureKind::SwitchWithValues | FeatureKind::Choice));
                 assert!(!descriptor.legacy_owners.is_empty());
                 assert!(descriptor.fields.is_empty());
             }
@@ -137,6 +137,7 @@ fn source_parameter_defaults_bounds_steps_choices_and_units() {
         ("prophecy-rewards", &[("Multiplier", 2., 0., 100., 0.5, Some("×"))]),
         ("rune-wardens", &[("Rune Wardens", 2., 0., 20., 1., None)]),
         ("loot-lizards", &[("Loot lizards", 3., 0., 20., 1., None)]),
+        ("mysterious-rift", &[("Encounter", 1., 0., 2., 1., None)]),
         (
             "morditas-timer",
             &[

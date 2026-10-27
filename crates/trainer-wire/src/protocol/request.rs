@@ -61,10 +61,17 @@ impl Request {
         let operation = match self {
             Self::Discover => 6,
             Self::Unload => 25,
-            Self::SetBooleanHook { expected_manager, hook, on, .. } => {
+            Self::SetBooleanHook {
+                expected_manager,
+                hook,
+                on,
+                answer,
+                ..
+            } => {
                 body.u64(*expected_manager);
                 body.byte(*hook as u8);
                 body.flag(*on);
+                body.flag(*answer);
                 26
             }
             Self::ReadBooleanHook { expected_manager, hook, .. } => {
@@ -270,6 +277,7 @@ impl Request {
                         expected_manager,
                         hook,
                         on: body.flag()?,
+                        answer: body.flag()?,
                     }
                 } else {
                     Self::ReadBooleanHook {

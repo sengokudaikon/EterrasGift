@@ -143,7 +143,8 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
     /// Validated strictly: values of the wrong count or out of range are refused whole.
     pub(super) async fn set_hook_values(&mut self, id: HookId, values: Vec<f64>) -> Result<(), BackendError> {
         let (changed, live) = self.change_profile(|hooks| hooks.set_values(id, &values))?;
-        let applied = live && (self.wanted(id) || self.state.hooks.get(&id).is_some_and(HookRun::holds));
+        let applied =
+            live && (FeatureKey::Hook(id).descriptor().kind == crate::features::FeatureKind::Choice || self.wanted(id) || self.state.hooks.get(&id).is_some_and(HookRun::holds));
         if changed && applied {
             self.apply_hook(self.command_epoch, id).await?;
         }

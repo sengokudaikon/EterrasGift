@@ -72,7 +72,10 @@ pub(super) fn count() -> u32 {
 
 /// Caller resolves metadata on the main thread. The mutex fences publication
 /// against control-thread clear/unload; it is never acquired by a gameplay call.
-unsafe fn change(hook: BooleanHook, on: bool, target: impl FnOnce() -> Result<Vec<BooleanHookTarget>, Response>) -> Result<(), Response> {
+unsafe fn change(hook: BooleanHook, on: bool, answer: bool, target: impl FnOnce() -> Result<Vec<BooleanHookTarget>, Response>) -> Result<(), Response> {
+    if hook == BooleanHook::Offhand && !answer {
+        return Err(server::failure(ResponseCode::Refused, "Offhand has no selectable answer"));
+    }
     let mut hooks = HOOKS.lock().unwrap_or_else(|p| p.into_inner());
     if hooks.closing || state().stop.load(SeqCst) {
         return Err(server::failure(ResponseCode::NotReady, "Helper stopping; nothing ran"));
@@ -109,6 +112,7 @@ unsafe fn change(hook: BooleanHook, on: bool, target: impl FnOnce() -> Result<Ve
         // SAFETY: serialized owner retained even on partial failure; all entries form one transaction.
         unsafe { hooks::commit(&changes) }.map_err(|e| server::failure(ResponseCode::Failed, e.to_string()))?;
         for slot in group {
+            slot.gate.set_answer(answer);
             slot.gate.set_enabled(on);
         }
     }
@@ -121,15 +125,17 @@ pub(super) fn read(hook: BooleanHook) -> HookObservation {
         HookObservation {
             patch: PatchState::Original,
             enabled: false,
+            answer: true,
         },
         |group| HookObservation {
             patch: group_patch(group.iter().map(|slot| slot.hook.state())),
             enabled: group.iter().all(|slot| slot.gate.enabled()),
+            answer: group[0].gate.answer(),
         },
     )
 }
 
-pub(super) unsafe fn operation(expected_manager: u64, hook: BooleanHook, on: Option<bool>) -> Response {
+pub(super) unsafe fn operation(expected_manager: u64, hook: BooleanHook, on: Option<(bool, bool)>) -> Response {
     // SAFETY: admitted main thread; same runtime/graph lifetime as status. The
     // supplied manager is compared only, never dereferenced.
     unsafe {
@@ -143,8 +149,8 @@ pub(super) unsafe fn operation(expected_manager: u64, hook: BooleanHook, on: Opt
             if status.manager != expected_manager {
                 return Err(server::failure(ResponseCode::Refused, "Character changed; nothing ran"));
             }
-            if let Some(on) = on {
-                change(hook, on, || {
+            if let Some((on, answer)) = on {
+                change(hook, on, answer, || {
                     let module = module().map_err(|e| server::failure(ResponseCode::Refused, e))?;
                     let size = image_size(module).map_err(|e| server::failure(ResponseCode::Refused, e))?;
                     access.boolean_hook_targets(attached, hook, module, size).map_err(map_discovery)
@@ -164,17 +170,28 @@ pub(super) unsafe fn operation(expected_manager: u64, hook: BooleanHook, on: Opt
 }
 
 #[cfg(feature = "fixture")]
-pub(super) unsafe fn fixture_change(hook: BooleanHook, on: bool, address: *mut u8, receiver_class: Option<NonNull<c_void>>, extras: &[*mut u8]) -> Result<(), Response> {
+pub(super) unsafe fn fixture_change(
+    hook: BooleanHook,
+    on: bool,
+    answer: bool,
+    address: *mut u8,
+    receiver_class: Option<NonNull<c_void>>,
+    extras: &[*mut u8],
+) -> Result<(), Response> {
     // SAFETY: fixture owns executable target and optional class identity for
     // the process lifetime; scoped calls use readable object-shaped headers.
     unsafe {
-        change(hook, on, || {
+        change(hook, on, answer, || {
             let mut targets = vec![BooleanHookTarget {
                 name: "fixture eligibility".into(),
                 address: NonNull::new(address).unwrap(),
                 bytes: address.cast::<[u8; 16]>().read_unaligned(),
                 receiver_class,
-                answer: eg_game_access::hooks::constant::LeafReturn::Boolean(true),
+                answer: if hook == BooleanHook::MysteriousRift {
+                    eg_game_access::hooks::constant::LeafReturn::SelectableBoolean
+                } else {
+                    eg_game_access::hooks::constant::LeafReturn::Boolean(true)
+                },
                 linked_offset: None,
             }];
             for (index, &address) in extras.iter().enumerate() {

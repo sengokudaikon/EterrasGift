@@ -17,11 +17,13 @@ struct Data {
     original: AtomicU64,
     receiver_class: u64,
     switch: u64,
+    answer: AtomicU64,
 }
 
 #[derive(Clone, Copy)]
 pub enum LeafReturn {
     Boolean(bool),
+    SelectableBoolean,
     Void,
 }
 
@@ -72,6 +74,7 @@ impl ConstantGate {
             data.write(Data {
                 enabled: AtomicU64::new(0),
                 original: AtomicU64::new(0),
+                answer: AtomicU64::new(1),
                 receiver_class: class.map_or(0, |class| class.as_ptr() as u64),
                 switch: shared.map_or(data as u64, |gate| gate.switch as *const AtomicU64 as u64),
             });
@@ -95,8 +98,12 @@ impl ConstantGate {
                 bytes.extend([0x75, 0]); // jne original
                 branches.push(bytes.len() - 1);
             }
-            let answer = matches!(answer, LeafReturn::Boolean(true));
-            bytes.extend([0xb8, u8::from(answer), 0, 0, 0, 0xc3]); // mov eax,answer; ret (also valid for void)
+            if matches!(answer, LeafReturn::SelectableBoolean) {
+                bytes.extend([0x48, 0x8b, 0x40, 0x20, 0xc3]); // mov rax,[rax+32]; ret
+            } else {
+                let answer = matches!(answer, LeafReturn::Boolean(true));
+                bytes.extend([0xb8, u8::from(answer), 0, 0, 0, 0xc3]); // mov eax,answer; ret (also valid for void)
+            }
             for branch in branches {
                 bytes[branch] = (bytes.len() - branch - 1) as u8;
             }
@@ -124,6 +131,13 @@ impl ConstantGate {
     pub unsafe fn set_original(&self, original: *const ()) {
         self.data.original.store(original as u64, SeqCst);
     }
+    /// Used by a selectable Boolean leaf; fixed leaves retain their authored answer.
+    pub fn set_answer(&self, answer: bool) {
+        self.data.answer.store(u64::from(answer), SeqCst);
+    }
+    pub fn answer(&self) -> bool {
+        self.data.answer.load(SeqCst) != 0
+    }
     pub fn set_enabled(&self, on: bool) {
         self.switch.store(u64::from(on), SeqCst);
     }
@@ -137,6 +151,30 @@ mod tests {
     use super::*;
     use std::sync::atomic::AtomicUsize;
     static CALLS: AtomicUsize = AtomicUsize::new(0);
+    #[test]
+    fn selectable_answer_changes_without_replacing_code_and_disabled_always_forwards() {
+        extern "C-unwind" fn original(calls: &AtomicUsize, answer: bool) -> bool {
+            calls.fetch_add(1, SeqCst);
+            answer
+        }
+        // SAFETY: unscoped Boolean leaf with a matching process-lifetime original.
+        let gate = unsafe { ConstantGate::prepare_override(LeafReturn::SelectableBoolean, None, None).unwrap() };
+        // SAFETY: configured before publication.
+        unsafe { gate.set_original(original as *const ()) };
+        // SAFETY: exact original ABI; retained leaf preserves the arguments.
+        let call: extern "C-unwind" fn(&AtomicUsize, bool) -> bool = unsafe { std::mem::transmute(gate.entry()) };
+        let calls = AtomicUsize::new(0);
+        for answer in [true, false, true, false] {
+            gate.set_answer(answer);
+            gate.set_enabled(true);
+            assert_eq!(call(&calls, !answer), answer);
+            assert_eq!(calls.load(SeqCst), 0, "false must override rather than call the original");
+        }
+        gate.set_enabled(false);
+        assert!(call(&calls, true));
+        assert!(!call(&calls, false));
+        assert_eq!(calls.load(SeqCst), 2);
+    }
     #[test]
     fn one_switch_controls_all_leaves_after_the_owner_is_dropped() {
         extern "C-unwind" fn original() -> bool {

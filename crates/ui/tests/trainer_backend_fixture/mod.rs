@@ -40,6 +40,7 @@ struct Data {
     /// The character's attack rate and increased leech rate, as raw floats.
     rates: Mutex<[u32; 2]>,
     boolean_hooks: [AtomicBool; 2],
+    rift_choice: AtomicUsize,
 }
 impl Data {
     fn rates(&self) -> backend::AttackLeechObservation {
@@ -320,6 +321,9 @@ impl BackendConnection for OwnedConnection {
             _ => panic!("unsupported fixture hook"),
         };
         self.0.boolean_hooks[index].store(request.on, Ordering::SeqCst);
+        if index == 0 {
+            self.0.rift_choice.store(request.values[0] as usize, Ordering::SeqCst);
+        }
         Ok(eg_trainer::writes::WriteOutcome::Confirmed(request.on))
     }
     fn supports_read_attack_leech(&self) -> bool {
@@ -552,6 +556,7 @@ pub(super) fn capture(session: &Session) {
         games: AtomicUsize::new(1),
         rates: Mutex::new([1.0_f32.to_bits(), 0.3_f32.to_bits()]),
         boolean_hooks: [AtomicBool::new(false), AtomicBool::new(false)],
+        rift_choice: AtomicUsize::new(0),
     });
     let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
     let (handle, worker) = backend::service(
@@ -1169,7 +1174,7 @@ pub(super) fn capture(session: &Session) {
     ui.hide().unwrap();
 }
 
-/// Both supported switches use the real profile commands and worker snapshots.
+/// Both supported hooks use the real profile commands and worker snapshots.
 fn boolean_hooks(session: &Session, ui: &MainWindow, handle: &BackendHandle, data: &Data) {
     let state = ui.global::<eg_ui::TrainerState>();
     for on in [true, false] {
@@ -1181,11 +1186,31 @@ fn boolean_hooks(session: &Session, ui: &MainWindow, handle: &BackendHandle, dat
                 .find(|&i| state.get_rows().row_data(i).unwrap().title == title)
                 .expect("supported hook row");
             wait(|| state.get_rows().row_data(row).unwrap().can_use);
-            state.invoke_hook_toggled(row as i32, on);
+            if index == 0 {
+                assert!(state.get_rows().row_data(row).unwrap().choice_only);
+                state.invoke_value_chosen(row as i32, 0, if on { 1 } else { 0 });
+            } else {
+                state.invoke_hook_toggled(row as i32, on);
+            }
             let id = eg_trainer::features::HookId::parse(id).unwrap();
             wait(|| handle.snapshot().hooks.get(&id) == Some(if on { &backend::HookRun::On } else { &backend::HookRun::Off }));
             wait(|| state.get_rows().row_data(row).unwrap().on == on);
             assert_eq!(data.boolean_hooks[index].load(Ordering::SeqCst), on);
+            if on && index == 0 {
+                wait(|| state.get_rows().row_data(row).unwrap().status == "Portal selected in the game.");
+                state.invoke_value_chosen(row as i32, 0, 2);
+                wait(|| data.rift_choice.load(Ordering::SeqCst) == 2);
+                wait(|| state.get_rows().row_data(row).unwrap().status == "Boss selected in the game.");
+                session.scroll(500.0, 400.0, -10_000.0);
+                session.capture(ui, "backend-hook-rift-boss");
+                session.resize(680, 580);
+                session.scroll(500.0, 400.0, -10_000.0);
+                session.capture(ui, "backend-hook-rift-boss-narrow");
+                session.resize(1100, 700);
+                state.invoke_value_chosen(row as i32, 0, 1);
+                wait(|| data.rift_choice.load(Ordering::SeqCst) == 1);
+                wait(|| state.get_rows().row_data(row).unwrap().status == "Portal selected in the game.");
+            }
             if on {
                 // Both rows sit near the bottom of their page. Capture the
                 // supported switch itself, not the unsupported rows above it.

@@ -461,7 +461,16 @@ fn after_original(state: &Shared) {
                 // SAFETY: correct-thread gate and initialized exact-runtime contract above.
                 Request::Status { .. } => unsafe { read_status() },
                 // SAFETY: admitted main-thread metadata/status query and serialized patch owner.
-                Request::SetBooleanHook { expected_manager, hook, on, .. } => unsafe { boolean_hooks::operation(expected_manager, hook, Some(on)) },
+                Request::SetBooleanHook {
+                    expected_manager,
+                    hook,
+                    on,
+                    answer,
+                    ..
+                } => {
+                    // SAFETY: admitted Unity main thread; operation rechecks the current offline manager.
+                    unsafe { boolean_hooks::operation(expected_manager, hook, Some((on, answer))) }
+                }
                 // SAFETY: same main-thread character admission; reads real entry bytes.
                 Request::ReadBooleanHook { expected_manager, hook, .. } => unsafe { boolean_hooks::operation(expected_manager, hook, None) },
                 // SAFETY: same main-thread and per-operation graph ownership contract above.

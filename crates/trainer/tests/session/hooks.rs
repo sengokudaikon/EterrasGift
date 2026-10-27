@@ -14,6 +14,71 @@ impl WriteControl for AllowWrite {
 }
 
 #[test]
+fn rift_mode_is_sent_and_confirmed_independently_of_enabled_state() {
+    let fixture = Fixture::rehashing();
+    let log = FakeLog::new([offline()]);
+    let wire = FakeTransport::new(fixture.target.clone(), [fixture.discover(), status(false, 0x1234, 0)]);
+    let mut session = fixture.session(&wire, &log, GatePolicy::Release);
+    session.enable();
+    run(session.connect(now())).unwrap();
+    for (choice, on, actual_answer, kept) in [(1.0, true, true, true), (2.0, true, false, true), (1.0, true, false, false), (0.0, false, false, true)] {
+        wire.push(done(vec![]));
+        wire.push(done(
+            HookObservation {
+                patch: if on { PatchState::Patched } else { PatchState::Original },
+                enabled: on,
+                answer: actual_answer,
+            }
+            .encode(),
+        ));
+        let request = HookRequest {
+            id: HookId::parse("mysterious-rift").unwrap(),
+            on,
+            values: vec![choice],
+        };
+        assert_eq!(
+            run(BackendConnection::set_hook(&mut session, now(), &request, &mut AllowWrite)).unwrap(),
+            if kept { WriteOutcome::Confirmed(on) } else { WriteOutcome::NotKept(on) }
+        );
+        let sent = wire.requests();
+        assert!(matches!(sent[sent.len()-2], Request::SetBooleanHook { on: sent_on, answer, .. } if sent_on == on && answer == (choice != 2.0)));
+    }
+}
+
+#[test]
+fn monitor_cannot_keep_reporting_portal_when_answer_changes_to_boss() {
+    let fixture = Fixture::rehashing();
+    let log = FakeLog::new([offline()]);
+    let observation = |answer| {
+        done(
+            HookObservation {
+                patch: PatchState::Patched,
+                enabled: true,
+                answer,
+            }
+            .encode(),
+        )
+    };
+    let wire = FakeTransport::new(
+        fixture.target.clone(),
+        [
+            fixture.discover(),
+            status(false, 0x1234, 0),
+            done(vec![]),
+            observation(true),
+            status(false, 0x1234, 0),
+            observation(false),
+        ],
+    );
+    let mut session = fixture.session(&wire, &log, GatePolicy::Release);
+    session.enable();
+    run(session.connect(now())).unwrap();
+    run(session.set_boolean_hook(BooleanHook::MysteriousRift, true, &mut AllowWrite)).unwrap();
+    assert!(run(BackendConnection::refresh(&mut session, now())).is_err());
+    assert_eq!(session.state(), SessionState::Disconnected);
+}
+
+#[test]
 fn each_boolean_hook_requires_a_separate_readback_for_on_and_off() {
     for hook in BooleanHook::ALL {
         let fixture = Fixture::rehashing();
@@ -29,13 +94,14 @@ fn each_boolean_hook_requires_a_separate_readback_for_on_and_off() {
                 HookObservation {
                     patch: if on { PatchState::Patched } else { PatchState::Original },
                     enabled: on,
+                    answer: true,
                 }
                 .encode(),
             ));
             let request = HookRequest {
                 id: HookId::parse(hook.id()).unwrap(),
                 on,
-                values: vec![],
+                values: if hook == BooleanHook::MysteriousRift { vec![1.0] } else { vec![] },
             };
             assert_eq!(
                 run(BackendConnection::set_hook(&mut session, now(), &request, &mut AllowWrite)).unwrap(),
@@ -55,11 +121,13 @@ fn a_boolean_hook_ack_cannot_hide_missing_or_inconsistent_readback() {
         HookObservation {
             patch: PatchState::Original,
             enabled: true,
+            answer: true,
         }
         .encode(),
         HookObservation {
             patch: PatchState::Unknown,
             enabled: false,
+            answer: true,
         }
         .encode(),
     ] {
@@ -114,6 +182,7 @@ fn hook_monitor_reads_actual_disabled_state_after_helper_suspension() {
                 HookObservation {
                     patch: PatchState::Patched,
                     enabled: true,
+                    answer: true,
                 }
                 .encode(),
             ),
@@ -122,6 +191,7 @@ fn hook_monitor_reads_actual_disabled_state_after_helper_suspension() {
                 HookObservation {
                     patch: PatchState::Original,
                     enabled: false,
+                    answer: true,
                 }
                 .encode(),
             ),

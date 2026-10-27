@@ -57,6 +57,7 @@ export struct FeatureRowView {
     // A hook: its switch, its one value on the title line or several listed under it, and where it stands.
     on: bool,
     has-inline: bool,
+    choice-only: bool,
     inline-value: FeatureValueView,
     status: string,
     tone: FeatureTone,
@@ -393,7 +394,7 @@ component FeatureRow inherits Rectangle {
 
     // The three columns, 24 apart: the title's, the value's (a box, a choice growing left, or Apply) and the switch's.
     property <length> switch-x: root.width - Tokens.feature-switch-min-width;
-    property <length> value-right: root.switch-x - Tokens.space-24;
+    property <length> value-right: root.feature.choice-only ? root.width : root.switch-x - Tokens.space-24;
     property <length> value-x: root.value-right - Tokens.feature-value-column-width;
     property <length> title-width: root.value-x - Tokens.space-24;
     property <length> top: Tokens.feature-row-padding.top;
@@ -513,7 +514,7 @@ component FeatureRow inherits Rectangle {
             chosen(choice) => { TrainerState.value-chosen(root.row-index, 0, choice); }
         }
 
-        if root.hook: ToggleSwitch {
+        if root.hook && !root.feature.choice-only: ToggleSwitch {
             x: root.switch-x;
             y: root.top + (root.line - self.height) / 2;
             width: Tokens.feature-switch-min-width;

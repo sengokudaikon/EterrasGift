@@ -35,6 +35,7 @@ pub enum PatchState {
 pub struct HookObservation {
     pub patch: PatchState,
     pub enabled: bool,
+    pub answer: bool,
 }
 impl HookObservation {
     pub fn confirmed(self, wanted: bool) -> bool {
@@ -48,10 +49,13 @@ impl HookObservation {
                 PatchState::Unknown => 2,
             },
             u8::from(self.enabled),
+            u8::from(self.answer),
         ]
     }
     pub fn decode(bytes: &[u8]) -> Result<Self, ProtocolError> {
-        let [patch, enabled @ 0..=1] = *bytes else { return Err(ProtocolError::InvalidData) };
+        let [patch, enabled @ 0..=1, answer @ 0..=1] = *bytes else {
+            return Err(ProtocolError::InvalidData);
+        };
         Ok(Self {
             patch: match patch {
                 0 => PatchState::Original,
@@ -60,6 +64,7 @@ impl HookObservation {
                 _ => return Err(ProtocolError::InvalidData),
             },
             enabled: enabled != 0,
+            answer: answer != 0,
         })
     }
 }
@@ -78,6 +83,7 @@ mod tests {
                     expected_manager: 1,
                     hook,
                     on: true,
+                    answer: true,
                 },
                 Request::ReadBooleanHook {
                     dispatcher,
@@ -97,9 +103,11 @@ mod tests {
                 extra.push(0);
                 assert!(Request::decode(&extra).is_err());
                 if matches!(request, Request::SetBooleanHook { .. }) {
-                    let mut invalid = bytes;
-                    invalid[45] = 2;
-                    assert!(Request::decode(&invalid).is_err());
+                    for offset in [45, 46] {
+                        let mut invalid = bytes.clone();
+                        invalid[offset] = 2;
+                        assert!(Request::decode(&invalid).is_err());
+                    }
                 }
             }
         }

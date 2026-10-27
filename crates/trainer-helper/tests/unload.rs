@@ -191,13 +191,20 @@ fn reload_a_hundred_times_with_running_callers_then_retain_a_blocked_callback() 
             let found = Discovery::decode(&discovery.payload, std::process::id()).unwrap();
             assert_eq!(client.send(&Request::Status { dispatcher: found.dispatcher }).await.unwrap().code, ResponseCode::Done);
             for hook in BooleanHook::ALL {
-                for on in [true, false, true] {
+                for (on, answer) in [
+                    (true, true),
+                    (true, hook == BooleanHook::Offhand),
+                    (true, true),
+                    (false, true),
+                    (true, hook == BooleanHook::Offhand),
+                ] {
                     let reply = client
                         .send(&Request::SetBooleanHook {
                             dispatcher: found.dispatcher,
                             expected_manager: 1,
                             hook,
                             on,
+                            answer,
                         })
                         .await
                         .unwrap();
@@ -211,7 +218,9 @@ fn reload_a_hundred_times_with_running_callers_then_retain_a_blocked_callback() 
                         .await
                         .unwrap();
                     assert_eq!(read.code, ResponseCode::Done);
-                    assert!(HookObservation::decode(&read.payload).unwrap().confirmed(on));
+                    let observation = HookObservation::decode(&read.payload).unwrap();
+                    assert!(observation.confirmed(on));
+                    assert_eq!(observation.answer, answer);
                     // SAFETY: same process-owned targets and retained arguments as running callers.
                     let actual = unsafe {
                         match hook {
@@ -225,7 +234,7 @@ fn reload_a_hundred_times_with_running_callers_then_retain_a_blocked_callback() 
                             }
                         }
                     };
-                    assert_eq!(actual, on);
+                    assert_eq!(actual, on && answer);
                 }
             }
             if cycle == 0 {
@@ -246,7 +255,8 @@ fn reload_a_hundred_times_with_running_callers_then_retain_a_blocked_callback() 
                                 dispatcher: found.dispatcher,
                                 expected_manager: 1,
                                 hook,
-                                on: true
+                                on: true,
+                                answer: true,
                             })
                             .await
                             .unwrap()

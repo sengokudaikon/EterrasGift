@@ -10,9 +10,30 @@ The first implemented target is `TimeBeastTracker.NextEncounterShouldBeEggs()` f
 type RiftOriginal = unsafe extern "C-unwind" fn(*mut core::ffi::c_void, *mut core::ffi::c_void) -> bool;
 ```
 
-Enabled behavior returns true without calling the original, including its side effects.
-Disabled behavior forwards both arguments and preserves the result and exceptions. It needs
-no receiver dereference, player selection or gameplay-field restoration.
+The row now selects **Game decides / Portal / Boss**. Portal returns true; Boss returns false,
+without calling the original. Game decides restores the entry and forwards both arguments,
+preserving the original result and exceptions. One retained atomic answer extends the existing
+leaf; it needs no receiver dereference, player selection or gameplay-field restoration. Both
+the enabled flag and selected answer are independently read back with actual patch bytes.
+Profiles with the old switch enabled retain Portal; a choice change updates wanted state and
+value together, so selecting Boss cannot briefly submit Portal first.
+
+Static tracing of the installed GameAssembly (SHA-256
+`323e9183f3bee600b6c9e1c469218b9de926e9044f2ca3d44fae8a0ec9a91464`) found
+`RandomTimeBeastSpawner.ExecuteSpawn` and `RandomEncounterPlacer.PlacePlayerDependentEncounters`
+branching on this predicate: true calls `CaveManager.CreateCave`, false calls
+`TimeBeastRiftEncounter.PlaceEncounter` / `TimeBeastData.SpawnRegularRift`. `TimeBeastRift.Open`
+starts its enemy spawner. This selects newly eligible encounters; cave availability, spawn
+rules and special scripted paths still apply. In particular, a specific woven echo can bypass
+the predicate in `MonolithZoneManager.SetupTimeBeastObjective`.
+
+Selection verification (2026-10-27): release trainer/controller tests and UI tests passed;
+workspace lint, formatting, tokens and fake-host captures passed. Standard and 680px captures
+were inspected. The native fixture passed 100 reloads with Portal/Boss switches and blocked
+callback retention; the Unity fixture passed six loads, mode switches with original-call
+counts, travel suspension and departure restoration. The desktop debug build was refreshed.
+These are owned fixtures, not live Last Epoch encounter validation.
+The user separately confirmed the selector works in the live game on 2026-10-27.
 
 Offhand uses that same lifecycle for four concrete targets:
 

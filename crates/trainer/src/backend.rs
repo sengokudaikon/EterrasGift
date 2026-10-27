@@ -282,10 +282,14 @@ impl<T: Transport + Send + 'static> BackendConnection for Session<T> {
         let Some(hook) = eg_trainer_wire::hooks::BooleanHook::from_id(request.id.as_str()) else {
             return Ok(WriteOutcome::refused(HOOK_NOT_AVAILABLE));
         };
-        if !request.values.is_empty() {
-            return Ok(WriteOutcome::refused("This hook takes no values"));
-        }
-        Ok(self.set_boolean_hook(hook, request.on, control).await?)
+        let answer = match (hook, request.values.as_slice()) {
+            (eg_trainer_wire::hooks::BooleanHook::MysteriousRift, [mode]) if *mode == 1.0 => true,
+            (eg_trainer_wire::hooks::BooleanHook::MysteriousRift, [mode]) if *mode == 2.0 => false,
+            (eg_trainer_wire::hooks::BooleanHook::MysteriousRift, [mode]) if *mode == 0.0 && !request.on => true,
+            (eg_trainer_wire::hooks::BooleanHook::Offhand, []) => true,
+            _ => return Ok(WriteOutcome::refused("Invalid hook selection")),
+        };
+        Ok(self.set_boolean_hook_with_answer(hook, request.on, answer, control).await?)
     }
     fn supports_status(&self, _field: crate::edits::StatusField) -> bool {
         true

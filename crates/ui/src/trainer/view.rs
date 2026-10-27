@@ -450,6 +450,12 @@ impl Controller {
             if let Row::Editor(editor) = row {
                 editor.follow(&*session);
             }
+            if let Row::Hook(hook) = row
+                && hook.feature.kind == super::catalog::FeatureKind::Choice
+                && !session.is_busy()
+            {
+                *hook = pages::HookRow::new(hook.feature, &*session);
+            }
             let Some(models) = self.nested.get_mut(i) else {
                 continue;
             };
@@ -611,6 +617,7 @@ fn view(row: &Row, session: &dyn TrainerSession, nested: &Nested) -> FeatureRowV
                 on: hook.is_on(session),
                 can_use: hook.can_use(session),
                 has_inline: inline,
+                choice_only: hook.feature.kind == super::catalog::FeatureKind::Choice,
                 // A single value sits on the title line, named for the feature.
                 inline_value: if inline {
                     value_view(&hook.feature.values[0], hook.values[0], hook.feature.title, &nested.choices[0])
