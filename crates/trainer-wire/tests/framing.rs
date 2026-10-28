@@ -137,7 +137,11 @@ fn requests() -> Vec<Request> {
             seal: 3,
             unrestricted: true,
         }),
-        edit(ForgeMutation::RemoveAffix { slot: 0, id: 513 }),
+        edit(ForgeMutation::RemoveAffix {
+            slot: 0,
+            id: 513,
+            restore_potential: Some(2),
+        }),
         edit(ForgeMutation::Affix {
             slot: 0,
             id: 7,

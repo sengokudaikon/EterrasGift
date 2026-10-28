@@ -924,6 +924,46 @@ impl ForgeEditor {
         self.resolve_tables();
     }
 
+    /// The cells "Max rolls" drafts: every roll the forge can edit now (affixes, unique lines, implicits) that is below
+    /// roll 255, the game's perfect roll. A roll unique lines share is drafted once; the others follow it.
+    fn max_roll_plan(&self) -> Vec<Cell> {
+        let mut cells: Vec<Cell> = (0..self.affixes.len()).map(Cell::Affix).collect();
+        let mut shared = std::collections::BTreeSet::new();
+        for (row, line) in self.uniques.iter().enumerate() {
+            for (position, roll) in line.rolls.iter().enumerate() {
+                if shared.insert(roll.index) {
+                    cells.push(Cell::Unique(row, position));
+                }
+            }
+        }
+        for (row, line) in self.implicits.iter().enumerate() {
+            cells.extend((0..line.rolls.len()).map(|position| Cell::Implicit(row, position)));
+        }
+        cells
+            .into_iter()
+            .filter(|&cell| self.can_edit_value(cell) && self.editor_of(cell).is_some_and(|(_, roll, _)| roll != u8::MAX))
+            .collect()
+    }
+
+    pub fn can_max_rolls(&self) -> bool {
+        !self.max_roll_plan().is_empty()
+    }
+
+    pub fn max_rolls_tip(&self) -> String {
+        match self.max_roll_plan().len() {
+            0 => "Every roll that can change is at its best.".into(),
+            1 => "Drafts the roll below its best up to roll 255, the game's perfect roll.".into(),
+            n => format!("Drafts {n} rolls up to roll 255, the game's perfect roll: affixes, unique modifiers and implicits."),
+        }
+    }
+
+    /// Drafts every roll the forge can edit to roll 255, one roll draft each.
+    pub fn max_rolls(&mut self) {
+        for cell in self.max_roll_plan() {
+            self.move_cell(cell, Some(u8::MAX));
+        }
+    }
+
     // ----- Implicits -----
 
     pub fn shows_implicit_preview(&self) -> bool {
@@ -995,7 +1035,13 @@ impl ForgeEditor {
     /// Adding and removing are drafts like the others: Apply writes them in order with the rest, each step naming the slots
     /// the earlier ones leave.
     pub fn can_change_affix_list(&self) -> bool {
-        self.can_mutate() && self.item.is_some() && self.game.supports(&ItemEdit::RemoveAffix(eg_trainer::item::edit::RemoveAffixEdit { slot: 0, id: 0 }))
+        self.can_mutate()
+            && self.item.is_some()
+            && self.game.supports(&ItemEdit::RemoveAffix(eg_trainer::item::edit::RemoveAffixEdit {
+                slot: 0,
+                id: 0,
+                restore_potential: None,
+            }))
     }
 
     pub fn add_affix_tip(&self) -> String {
@@ -2783,6 +2829,7 @@ impl ForgeEditor {
             let edit = ItemEdit::RemoveAffix(eg_trainer::item::edit::RemoveAffixEdit {
                 slot: *at.get(&row.slot()).unwrap_or(&row.slot()) as i32,
                 id: i32::from(row.state.id),
+                restore_potential: None,
             });
             add(
                 &mut steps,

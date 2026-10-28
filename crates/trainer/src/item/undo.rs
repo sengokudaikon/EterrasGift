@@ -170,9 +170,12 @@ impl ForgeUndo {
                 let [added] = added.as_slice() else {
                     return Err(EditError::InvalidObservation);
                 };
+                // An affix that made a unique legendary spent its legendary potential; its removal gives it back.
+                let upgraded = item.rarity == 7 && snapshot.rarity == 9 && item.status.legendary_potential != snapshot.status.legendary_potential;
                 ItemEdit::RemoveAffix(crate::item::edit::RemoveAffixEdit {
                     slot: i32::from(added.slot),
                     id: i32::from(added.id),
+                    restore_potential: upgraded.then_some(item.status.legendary_potential),
                 })
             }
             ItemEdit::RemoveAffix(edit) => {
@@ -247,7 +250,12 @@ impl ForgeUndo {
                 item_type: edit.item_type.map(|_| i32::from(item.item_type)),
             }),
             ItemEdit::UniqueIdentity(edit) => ItemEdit::UniqueIdentity(UniqueIdentityEdit {
-                unique_id: i32::from(item.identity.as_ref().ok_or(EditError::InvalidUniqueIdentity)?.id),
+                unique_id: i32::from(
+                    item.identity
+                        .as_ref()
+                        .ok_or(EditError::InvalidUniqueIdentity(crate::item::edit::IdentityProblem::NotUniqueBacked))?
+                        .id,
+                ),
                 sub_type: i32::from(item.sub_type),
                 rarity: i32::from(item.rarity),
                 unrestricted: edit.unrestricted,

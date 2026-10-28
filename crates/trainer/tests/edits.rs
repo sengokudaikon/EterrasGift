@@ -355,7 +355,20 @@ fn high_readable_ids_are_read_only_when_rebuild_would_truncate_twelve_bit_serial
     );
     // The source's level edit is a direct Int32 write and does not rebuild ID.
     assert!(prepare(&expected, &c, status(StatusField::LevelRequirement, 80, false), false, None).is_ok());
-    assert!(prepare(&expected, &c, ItemEdit::RemoveAffix(RemoveAffixEdit { slot: 0, id: 65500 }), false, None).is_ok());
+    assert!(
+        prepare(
+            &expected,
+            &c,
+            ItemEdit::RemoveAffix(RemoveAffixEdit {
+                slot: 0,
+                id: 65500,
+                restore_potential: None,
+            }),
+            false,
+            None
+        )
+        .is_ok()
+    );
 }
 #[test]
 fn new_layout_problems_are_rejected_but_existing_problems_stay_editable() {
@@ -417,6 +430,18 @@ fn a_unique_that_becomes_legendary_spends_legendary_potential_but_keeps_weavers_
         (after.rarity, after.status.legendary_potential, after.status.weavers_will, after.status.corrupted),
         (9, 0, 9, false)
     );
+    // Undo of the upgrade removes the affix and gives the legendary potential back.
+    let undo = eg_trainer::item::undo::ForgeUndo::from_prepared(&p, 17, after).unwrap();
+    let reverse = undo.prepare(&observation(after.clone(), &c), 17, &c).unwrap();
+    assert_eq!((reverse.projected().rarity, reverse.projected().status.legendary_potential), (7, 3));
+    assert_eq!(
+        reverse.mutation(),
+        eg_trainer_wire::write::ForgeMutation::RemoveAffix {
+            slot: 0,
+            id: 3,
+            restore_potential: Some(3),
+        }
+    );
     // A corrupted affix on an uncorrupted unique makes it a corrupted legendary.
     let p = prepare(&observation(plain, &c), &c, add(SealState::Corrupted), false, None).unwrap();
     assert_eq!((p.projected().rarity, p.projected().status.corrupted), (9, true));
@@ -464,12 +489,29 @@ fn add_remove_compute_rarity_and_refuse_removing_shifted_id() {
     let p = prepared(before.clone(), add);
     assert_eq!(p.projected().rarity, 2);
     assert_eq!(p.projected().affixes.len(), 3);
-    let p = prepared(before.clone(), ItemEdit::RemoveAffix(RemoveAffixEdit { slot: 0, id: 1 }));
+    let p = prepared(
+        before.clone(),
+        ItemEdit::RemoveAffix(RemoveAffixEdit {
+            slot: 0,
+            id: 1,
+            restore_potential: None,
+        }),
+    );
     assert_eq!(p.projected().rarity, 1);
     assert_eq!(p.projected().affixes[0].slot, 0);
     let c = catalog();
     assert_eq!(
-        prepare(&observation(before, &c), &c, ItemEdit::RemoveAffix(RemoveAffixEdit { slot: 0, id: 2 }), false, None),
+        prepare(
+            &observation(before, &c),
+            &c,
+            ItemEdit::RemoveAffix(RemoveAffixEdit {
+                slot: 0,
+                id: 2,
+                restore_potential: None,
+            }),
+            false,
+            None
+        ),
         Err(EditError::InvalidValues)
     );
 }
@@ -496,7 +538,11 @@ fn an_affix_makes_a_unique_legendary_and_losing_the_last_makes_it_unique_again()
     // No override: a unique has a legendary's slots.
     let legendary = prepare(&observation(plain.clone(), &c), &c, add, false, None).unwrap().projected().clone();
     assert_eq!((legendary.rarity, legendary.affixes.len()), (9, 1));
-    let remove = ItemEdit::RemoveAffix(RemoveAffixEdit { slot: 0, id: 3 });
+    let remove = ItemEdit::RemoveAffix(RemoveAffixEdit {
+        slot: 0,
+        id: 3,
+        restore_potential: None,
+    });
     let back = prepare(&observation(legendary, &c), &c, remove, false, None).unwrap();
     assert_eq!(back.projected().rarity, 7);
 }
@@ -684,7 +730,7 @@ fn idol_type_changes_need_override_and_identity_changes_follow_game_rarity() {
             true,
             None
         ),
-        Err(EditError::InvalidBase)
+        Err(EditError::InvalidBase(BaseProblem::OnlyIdols))
     );
     let mut i = item();
     i.item_type = 25;
@@ -704,7 +750,10 @@ fn idol_type_changes_need_override_and_identity_changes_follow_game_rarity() {
         rarity: 8,
         unrestricted: true,
     });
-    assert_eq!(prepare(&expected, &c, set, true, None), Err(EditError::InvalidUniqueIdentity));
+    assert_eq!(
+        prepare(&expected, &c, set, true, None),
+        Err(EditError::InvalidUniqueIdentity(IdentityProblem::SetHoldsAffixes))
+    );
     let p = prepare(
         &expected,
         &c,
@@ -1107,7 +1156,18 @@ fn removed_affix_restore_uses_current_catalog_and_can_require_override() {
     };
     let mut c = catalog();
     let expected = observation(item(), &c);
-    let plan = ForgePlan::edit(&expected, 17, &c, ItemEdit::RemoveAffix(RemoveAffixEdit { slot: 0, id: 1 }), false).unwrap();
+    let plan = ForgePlan::edit(
+        &expected,
+        17,
+        &c,
+        ItemEdit::RemoveAffix(RemoveAffixEdit {
+            slot: 0,
+            id: 1,
+            restore_potential: None,
+        }),
+        false,
+    )
+    .unwrap();
     let token = ForgeUndo::from_confirmed(&WriteRecord {
         status: WriteStatus::Confirmed(plan.projected().clone()),
         plan,
@@ -1128,7 +1188,18 @@ fn removing_the_only_unserializable_id_can_repair_an_item_but_cannot_offer_undo(
     let mut before = item();
     before.affixes[0].id = 65500;
     refresh(&mut before);
-    let plan = ForgePlan::edit(&observation(before, &c), 17, &c, ItemEdit::RemoveAffix(RemoveAffixEdit { slot: 0, id: 65500 }), false).unwrap();
+    let plan = ForgePlan::edit(
+        &observation(before, &c),
+        17,
+        &c,
+        ItemEdit::RemoveAffix(RemoveAffixEdit {
+            slot: 0,
+            id: 65500,
+            restore_potential: None,
+        }),
+        false,
+    )
+    .unwrap();
     assert!(plan.projected().affixes.iter().all(|a| a.id <= 4095));
     assert_eq!(
         ForgeUndo::from_confirmed(&WriteRecord {

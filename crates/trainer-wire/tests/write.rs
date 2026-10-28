@@ -433,7 +433,11 @@ fn every_mutation_roundtrips_with_no_unused_slots() {
             seal: 3,
             unrestricted: true,
         },
-        ForgeMutation::RemoveAffix { slot: 31, id: 65535 },
+        ForgeMutation::RemoveAffix {
+            slot: 31,
+            id: 65535,
+            restore_potential: None,
+        },
     ];
     for mutation in mutations {
         let write = ForgeWrite::edit(spec(), 1, snapshot(), mutation).unwrap();
@@ -462,7 +466,11 @@ fn every_mutation_roundtrips_with_no_unused_slots() {
             seal: 4,
             unrestricted: false,
         },
-        ForgeMutation::RemoveAffix { slot: 32, id: 0 },
+        ForgeMutation::RemoveAffix {
+            slot: 32,
+            id: 0,
+            restore_potential: None,
+        },
     ] {
         assert!(ForgeWrite::edit(spec(), 1, snapshot(), mutation).is_err());
     }

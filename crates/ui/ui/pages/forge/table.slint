@@ -731,6 +731,8 @@ export component ModifierRowItem inherits Rectangle {
                     vertical(delta) => {
                         if (root.on-unique) {
                             ForgeState.move-unique(root.index, delta, roll);
+                        } else {
+                            ForgeState.move-implicit(root.index, delta, roll);
                         }
                     }
                     revealed => {

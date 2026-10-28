@@ -1214,6 +1214,17 @@ export component ItemForge inherits Rectangle {
                         }
                     }
 
+                    // Every roll the forge can edit up to roll 255, the game's perfect roll, as roll drafts.
+                    Button {
+                        text: "Max rolls";
+                        kind: ButtonKind.subtle;
+                        enabled: ForgeState.can-max-rolls;
+                        tip: ForgeState.max-rolls-tip;
+                        clicked => {
+                            ForgeState.max-rolls();
+                        }
+                    }
+
                     // The note wraps (up to two lines, within the button's height) so that a keyboard user, who never gets
                     // the tip, reads it whole.
                     Text {

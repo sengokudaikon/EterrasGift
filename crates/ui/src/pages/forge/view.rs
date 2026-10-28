@@ -222,6 +222,7 @@ fn bind(state: &ForgeState, view: &Rc<View>) {
     state.on_discard_entry(edit!(view, |editor, index| editor.discard_entry(index.max(0) as usize)));
     state.on_discard_all(edit!(view, |editor| editor.discard_all()));
     state.on_max_tiers(edit!(view, |editor| editor.max_tiers()));
+    state.on_max_rolls(edit!(view, |editor| editor.max_rolls()));
     state.on_apply(edit!(view, |editor| editor.apply()));
     state.on_undo(edit!(view, |editor| editor.undo()));
     state.on_undo_draft(edit!(view, |editor| editor.undo_draft_only()));
@@ -278,6 +279,32 @@ fn bind(state: &ForgeState, view: &Rc<View>) {
         if let Some((line, roll)) = target {
             view.editor.borrow_mut().select_unique(Some(line));
             view.focus(reference(CellKind::Unique, line, roll), 0);
+        }
+    });
+    // Up and Down from an implicit's roll: the nearest implicit in that direction with a roll takes the focus.
+    let weak = on(view);
+    state.on_move_implicit(move |row, delta, roll| {
+        let Some(view) = weak.upgrade() else {
+            return;
+        };
+        let target = {
+            let editor = view.editor.borrow();
+            let lines = &editor.implicits;
+            let step = delta.signum() as isize;
+            let mut next = row as isize + step;
+            let mut found = None;
+            while step != 0 && next >= 0 && (next as usize) < lines.len() {
+                let line = &lines[next as usize];
+                if !line.rolls.is_empty() {
+                    found = Some((next as usize, (roll.max(0) as usize).min(line.rolls.len() - 1)));
+                    break;
+                }
+                next += step;
+            }
+            found
+        };
+        if let Some((line, roll)) = target {
+            view.focus(reference(CellKind::Implicit, line, roll), 0);
         }
     });
     // A ledger entry selects its affix or unique row, or brings the cell that edits it into focus: a value's scrubber, a
@@ -667,6 +694,8 @@ impl View {
         state.set_add_affix_tip(editor.add_affix_tip().into());
         state.set_can_max_tiers(editor.can_max_tiers());
         state.set_max_tiers_tip(editor.max_tiers_tip().into());
+        state.set_can_max_rolls(editor.can_max_rolls());
+        state.set_max_rolls_tip(editor.max_rolls_tip().into());
         state.set_affix_list_note(editor.free_slots_text_of(drafted).into());
         state.set_ladder_note(editor.tier_ladder_note().into());
     }

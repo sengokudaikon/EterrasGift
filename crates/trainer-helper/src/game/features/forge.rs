@@ -295,7 +295,7 @@ impl RuntimeAccess {
                 && expected
                     .affixes
                     .iter()
-                    .any(|affix| affix.id > 4095 && !matches!(mutation,ForgeMutation::RemoveAffix{slot,id} if slot==affix.slot && id==affix.id))
+                    .any(|affix| affix.id > 4095 && !matches!(mutation,ForgeMutation::RemoveAffix { slot, id, .. } if slot == affix.slot && id == affix.id))
             {
                 return Err(WriteError::Refused("Rebuilding would truncate an affix ID outside the game's 12-bit save format".into()));
             }
@@ -329,6 +329,14 @@ impl RuntimeAccess {
                     // crafting does beside the list (`affix_list_outcome`): a unique that gains an affix becomes legendary and
                     // spends its legendary potential, a legendary that loses its last becomes a unique, and a legendary that
                     // holds a corrupted affix is corrupted.
+                    if let ForgeMutation::RemoveAffix {
+                        restore_potential: Some(potential),
+                        ..
+                    } = mutation
+                        && !self.read_item_limits(attached)?.legendary_potential.contains(potential)
+                    {
+                        return Err(WriteError::Refused("The legendary potential to restore is outside the game's range".into()));
+                    }
                     let mut projected = expected.clone();
                     mutation.project(&mut projected);
                     if matches!(expected.rarity, 7..=9) {

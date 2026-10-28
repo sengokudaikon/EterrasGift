@@ -847,8 +847,8 @@ pub(in super::super) fn item_captures(session: &Session) {
     state.set_pane_open(true);
     settle();
     // The rail's four stops, the rarity, the status strip's four, then the four values (the names, tiers and seals lie
-    // under the pane), Add affix and Max tiers, which drafts wait beside.
-    for _ in 0..16 {
+    // under the pane), Add affix, Max tiers and Max rolls, which drafts wait beside.
+    for _ in 0..17 {
         session.key(Key::Tab);
     }
     session.capture(&forge.ui, "item-narrow-pane-keyboard");
@@ -922,8 +922,8 @@ pub(in super::super) fn item_captures(session: &Session) {
     session.capture(&forge.ui, "item-tier-ladder");
     drop(forge);
 
-    // A unique item: its modifiers as the game formats them, the shared roll on two lines; the app does not write unique
-    // rolls yet, so they are read only (`unique-standard`, `read-only`, `unique-maximized`).
+    // A unique item: its modifiers as the game formats them, the shared roll on two lines (`unique-standard`,
+    // `read-only`, `unique-maximized`).
     let forge = Forge::open(session, World::unique(), 1100, 700);
     forge.handle.edit(|editor| editor.select_unique(Some(0)));
     settle();
@@ -933,6 +933,24 @@ pub(in super::super) fn item_captures(session: &Session) {
     session.capture(&forge.ui, "item-unique-read-only");
     session.resize(1920, 1080);
     session.capture(&forge.ui, "item-unique-maximized");
+    session.resize(1100, 700);
+    // Max rolls drafts every roll that can change to the game's perfect roll, a shared roll once (`item-max-rolls`).
+    assert!(forge.ui.global::<ForgeState>().get_can_max_rolls());
+    forge.handle.edit(ForgeEditor::max_rolls);
+    settle();
+    forge.handle.edit(|editor| {
+        assert!(editor.draft_count() > 0);
+        assert!(
+            editor
+                .uniques
+                .iter()
+                .flat_map(|line| &line.rolls)
+                .all(|roll| roll.value == u8::MAX || !roll.editor.has_mapping())
+        );
+        assert!(editor.affixes.iter().all(|row| row.roll() == u8::MAX || !row.value.has_mapping()));
+    });
+    assert!(!forge.ui.global::<ForgeState>().get_can_max_rolls());
+    session.capture(&forge.ui, "item-max-rolls");
     drop(forge);
 
     // A unique modifier with two rolls shows both in its own row, one cell over the other (`unique-rolls-*`).

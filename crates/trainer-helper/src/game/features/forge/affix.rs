@@ -45,7 +45,7 @@ impl RuntimeAccess {
                     }
                     (expected.affixes.len() as u8, Some((id, tier, roll, seal)))
                 }
-                ForgeMutation::RemoveAffix { slot, id } => {
+                ForgeMutation::RemoveAffix { slot, id, .. } => {
                     if expected.affixes.get(usize::from(slot)).is_none_or(|a| a.id != id) {
                         return Err(WriteError::Refused("That affix is no longer in that slot".into()));
                     }

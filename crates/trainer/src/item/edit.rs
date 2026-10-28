@@ -89,6 +89,9 @@ pub struct AddAffixEdit {
 pub struct RemoveAffixEdit {
     pub slot: i32,
     pub id: i32,
+    /// The legendary potential a legendary gets back when this removal leaves it a unique: Undo of the upgrade an
+    /// added affix made. None otherwise.
+    pub restore_potential: Option<u8>,
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RollChange {
@@ -182,10 +185,37 @@ pub enum EditError {
     MissingRollEvidence,
     InvalidRollMapping,
     InvalidStatus,
-    InvalidBase,
-    InvalidUniqueIdentity,
+    InvalidBase(BaseProblem),
+    InvalidUniqueIdentity(IdentityProblem),
     AffixIdNotSerializable(u16),
     ProjectedSnapshotOutOfBounds,
+}
+/// Why a base change does not fit the item.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BaseProblem {
+    /// Unique, set and legendary items keep their base.
+    UniqueBacked,
+    Unchanged,
+    /// Only an idol changes size, to another idol.
+    OnlyIdols,
+    /// The base is not in the game's data, or the request is malformed.
+    Unknown,
+}
+/// Why a unique or set identity does not fit the item.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum IdentityProblem {
+    /// Only unique, set and legendary items have an identity to change.
+    NotUniqueBacked,
+    Unchanged,
+    /// A set item holds no affixes.
+    SetHoldsAffixes,
+    /// The item would keep legendary potential or Weaver's Will the identity never holds, or become a legendary the game
+    /// never drops; the override allows it.
+    NeedsOverride {
+        set: bool,
+    },
+    /// Another base, subtype or rarity than the identity has.
+    Mismatch,
 }
 impl fmt::Display for EditError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -199,12 +229,12 @@ impl fmt::Display for EditError {
             Self::InvalidValues => "Enter valid item values and integer roll positions from 0 to 255.",
             Self::MissingDefinition => "This ID has no verified definition in the current build.",
             Self::Incompatible(reason) => match reason {
-                CompatibilityReason::ClassRequirement => "This affix does not fit the item's class requirement.",
-                CompatibilityReason::SlotType => "This affix does not fit this prefix or suffix slot.",
-                CompatibilityReason::EquipmentType => "This affix does not fit this equipment type.",
-                CompatibilityReason::SpecialCategory => "This affix does not fit this slot's special category.",
-                CompatibilityReason::AlreadyPresent => "This item already holds that affix.",
-                _ => "The game's metadata does not establish compatibility for this affix.",
+                CompatibilityReason::ClassRequirement => "This affix belongs to another class.",
+                CompatibilityReason::SlotType => "This affix belongs in the other slot (prefix or suffix).",
+                CompatibilityReason::EquipmentType => "This affix rolls on another kind of item.",
+                CompatibilityReason::SpecialCategory => "This kind of affix stays in its own slots.",
+                CompatibilityReason::AlreadyPresent => "The item already has this affix.",
+                _ => "Compatibility could not be confirmed for this affix.",
             },
             Self::TierUnavailable => "This affix does not support that tier.",
             Self::NewLayoutProblem(problem) => match problem {
@@ -218,10 +248,24 @@ impl fmt::Display for EditError {
                 LayoutProblem::NormalTierEight => "A tier 8 affix is primordial unless it is sealed or corrupted. Choose Primordial.",
             },
             Self::MissingRollEvidence | Self::InvalidRollMapping => "Actual roll mappings are unavailable for this modifier.",
-            Self::InvalidStatus => "This status value does not apply to the current item or exceeds its allowed range.",
-            Self::InvalidBase => "This base does not fit the current item.",
-            Self::InvalidUniqueIdentity => "That unique or set identity does not fit the current item.",
-            Self::AffixIdNotSerializable(_) => "This item contains an affix ID the game cannot save. Nothing was applied.",
+            Self::InvalidStatus => "That status value does not apply to this item.",
+            Self::InvalidBase(problem) => match problem {
+                BaseProblem::UniqueBacked => "Bases can change only on items that are not unique, set or legendary.",
+                BaseProblem::Unchanged => "That is the item's base already.",
+                BaseProblem::OnlyIdols => "Only an idol changes to another idol size.",
+                BaseProblem::Unknown => "This base does not fit the current item.",
+            },
+            Self::InvalidUniqueIdentity(problem) => match problem {
+                IdentityProblem::NotUniqueBacked => "Only a unique, set or legendary item can become another one, with the rarity the game gives it.",
+                IdentityProblem::Unchanged => "That is the item's identity already.",
+                IdentityProblem::SetHoldsAffixes => "A set item holds no affixes; remove them first.",
+                IdentityProblem::NeedsOverride { set: true } => "A set item holds no legendary potential or Weaver's Will; keeping them needs the override.",
+                IdentityProblem::NeedsOverride { set: false } => {
+                    "That unique would keep legendary potential or Weaver's Will it never holds, or be a legendary the game never drops; that needs the override."
+                }
+                IdentityProblem::Mismatch => "That unique does not fit this item.",
+            },
+            Self::AffixIdNotSerializable(_) => "The game saves affix IDs up to 4095.",
             Self::ProjectedSnapshotOutOfBounds => "The edited item would exceed the supported item limits.",
         })
     }
@@ -590,6 +634,12 @@ pub fn prepare(
             }
             ordered.remove(slot);
             settle_affixes(before, &mut after, &ordered)?;
+            if let Some(potential) = e.restore_potential {
+                if before.rarity != 9 || after.rarity != 7 || !catalog.limits.legendary_potential.contains(potential) {
+                    return Err(EditError::InvalidValues);
+                }
+                after.status.legendary_potential = potential;
+            }
             order(&mut ordered, before.rarity);
         }
         ItemEdit::Roll(e) => {
@@ -657,18 +707,24 @@ pub fn prepare(
             }
         }
         ItemEdit::BaseType(e) => {
-            if backed(before.rarity) || !(0..=65535).contains(&e.sub_type) {
-                return Err(EditError::InvalidBase);
+            if backed(before.rarity) {
+                return Err(EditError::InvalidBase(BaseProblem::UniqueBacked));
+            }
+            if !(0..=65535).contains(&e.sub_type) {
+                return Err(EditError::InvalidBase(BaseProblem::Unknown));
             }
             let item_type = if let Some(t) = e.item_type {
-                let t = u8::try_from(t).map_err(|_| EditError::InvalidBase)?;
+                let t = u8::try_from(t).map_err(|_| EditError::InvalidBase(BaseProblem::Unknown))?;
+                if t == before.item_type && e.sub_type == i32::from(before.sub_type) {
+                    return Err(EditError::InvalidBase(BaseProblem::Unchanged));
+                }
                 if t == before.item_type || !idol(t) || !idol(before.item_type) {
-                    return Err(EditError::InvalidBase);
+                    return Err(EditError::InvalidBase(BaseProblem::OnlyIdols));
                 }
                 t
             } else {
                 if e.sub_type == i32::from(before.sub_type) {
-                    return Err(EditError::InvalidBase);
+                    return Err(EditError::InvalidBase(BaseProblem::Unchanged));
                 }
                 before.item_type
             };
@@ -677,7 +733,7 @@ pub fn prepare(
                 .get(&item_type)
                 .is_some_and(|b| b.sub_types.iter().any(|s| i32::from(s.sub_type) == e.sub_type))
             {
-                return Err(EditError::InvalidBase);
+                return Err(EditError::InvalidBase(BaseProblem::Unknown));
             }
             after.item_type = item_type;
             after.sub_type = e.sub_type as u16;
@@ -693,22 +749,29 @@ pub fn prepare(
             }
         }
         ItemEdit::UniqueIdentity(e) => {
-            if !backed(before.rarity) || !byte(e.sub_type) || !(0..=65535).contains(&e.unique_id) || before.identity.as_ref().is_none_or(|u| i32::from(u.id) == e.unique_id) {
-                return Err(EditError::InvalidUniqueIdentity);
+            let Some(current) = before.identity.as_ref().filter(|_| backed(before.rarity)) else {
+                return Err(EditError::InvalidUniqueIdentity(IdentityProblem::NotUniqueBacked));
+            };
+            if !byte(e.sub_type) || !(0..=65535).contains(&e.unique_id) {
+                return Err(EditError::InvalidUniqueIdentity(IdentityProblem::Mismatch));
+            }
+            if i32::from(current.id) == e.unique_id {
+                return Err(EditError::InvalidUniqueIdentity(IdentityProblem::Unchanged));
             }
             let d = catalog.uniques.get(&(e.unique_id as u16)).ok_or(EditError::MissingDefinition)?;
             let rarity = rarity_for(before, d.is_set_item);
-            if d.item_type != before.item_type
-                || !d.sub_types.contains(&(e.sub_type as u8))
-                || i32::from(rarity) != e.rarity
-                || (d.is_set_item && !before.affixes.is_empty())
-                || (!e.unrestricted && ((rarity == 9 && !d.can_drop_as_legendary) || !legendary_fits(before, d.is_set_item, d.legendary_type)))
-            {
-                return Err(EditError::InvalidUniqueIdentity);
+            if d.item_type != before.item_type || !d.sub_types.contains(&(e.sub_type as u8)) || i32::from(rarity) != e.rarity {
+                return Err(EditError::InvalidUniqueIdentity(IdentityProblem::Mismatch));
+            }
+            if d.is_set_item && !before.affixes.is_empty() {
+                return Err(EditError::InvalidUniqueIdentity(IdentityProblem::SetHoldsAffixes));
+            }
+            if !e.unrestricted && ((rarity == 9 && !d.can_drop_as_legendary) || !legendary_fits(before, d.is_set_item, d.legendary_type)) {
+                return Err(EditError::InvalidUniqueIdentity(IdentityProblem::NeedsOverride { set: d.is_set_item }));
             }
             after.sub_type = e.sub_type as u16;
             after.rarity = rarity;
-            after.identity.as_mut().ok_or(EditError::InvalidUniqueIdentity)?.id = e.unique_id as u16;
+            after.identity.as_mut().ok_or(EditError::InvalidUniqueIdentity(IdentityProblem::NotUniqueBacked))?.id = e.unique_id as u16;
         }
     }
     let moves = ordered

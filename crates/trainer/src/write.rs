@@ -81,6 +81,7 @@ impl ForgePlan {
             ItemEdit::RemoveAffix(edit) => ForgeMutation::RemoveAffix {
                 slot: edit.slot as u8,
                 id: edit.id as u16,
+                restore_potential: edit.restore_potential,
             },
             ItemEdit::Affix(edit) => ForgeMutation::Affix {
                 slot: edit.slot as u8,

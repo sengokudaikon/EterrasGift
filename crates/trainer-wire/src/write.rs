@@ -84,6 +84,9 @@ pub enum ForgeMutation {
     RemoveAffix {
         slot: u8,
         id: u16,
+        /// The legendary potential a legendary gets back when the removal leaves it a unique: an Undo of the upgrade
+        /// (`rules::affix_list_outcome` spends it).
+        restore_potential: Option<u8>,
     },
     Affix {
         slot: u8,
@@ -151,12 +154,19 @@ impl ForgeMutation {
                 crate::rules::reorder_affixes(item);
                 (item.rarity, item.status) = crate::rules::affix_list_outcome(item, &item.affixes);
             }
-            Self::RemoveAffix { slot, .. } => {
+            Self::RemoveAffix { slot, restore_potential, .. } => {
                 if usize::from(slot) < item.affixes.len() {
                     item.affixes.remove(usize::from(slot));
                 }
                 crate::rules::reorder_affixes(item);
+                let legendary = item.rarity == 9;
                 (item.rarity, item.status) = crate::rules::affix_list_outcome(item, &item.affixes);
+                if let Some(potential) = restore_potential
+                    && legendary
+                    && item.rarity == 7
+                {
+                    item.status.legendary_potential = potential;
+                }
             }
             Self::Affix { slot, id, tier, roll, seal, .. } => {
                 if let Some(affix) = item.affixes.get_mut(usize::from(slot)) {

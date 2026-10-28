@@ -161,9 +161,13 @@ impl Request {
                         body.flag(unrestricted);
                         op::ADD_AFFIX
                     }
-                    ForgeMutation::RemoveAffix { slot, id } => {
+                    ForgeMutation::RemoveAffix { slot, id, restore_potential } => {
                         body.byte(slot);
                         body.u16(id);
+                        body.flag(restore_potential.is_some());
+                        if let Some(potential) = restore_potential {
+                            body.byte(potential);
+                        }
                         op::REMOVE_AFFIX
                     }
                     ForgeMutation::Affix {
@@ -410,6 +414,7 @@ impl Request {
                     op::REMOVE_AFFIX => ForgeMutation::RemoveAffix {
                         slot: body.byte()?,
                         id: body.u16()?,
+                        restore_potential: if body.flag()? { Some(body.byte()?) } else { None },
                     },
                     op::CHANGE_AFFIX => ForgeMutation::Affix {
                         slot: body.byte()?,

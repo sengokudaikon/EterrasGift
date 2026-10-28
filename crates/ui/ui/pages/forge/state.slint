@@ -189,6 +189,8 @@ export global ForgeState {
     in property <string> add-affix-tip;
     in property <bool> can-max-tiers;
     in property <string> max-tiers-tip;
+    in property <bool> can-max-rolls;
+    in property <string> max-rolls-tip;
     in property <string> affix-list-note;
     in property <string> ladder-note;
 
@@ -258,6 +260,7 @@ export global ForgeState {
     callback move-row(int, int, int);
     // Up / Down from roll `int` of unique modifier row `int`.
     callback move-unique(int, int, int);
+    callback move-implicit(int, int, int);
     // A menu's keyboard highlight: where it starts (the held entry, else the first available), and the next available entry
     // from one in a direction (the same one when there is none).
     pure callback option-start([MenuOptionView]) -> int;
@@ -283,6 +286,7 @@ export global ForgeState {
     callback open-replace(int) -> bool;
     callback open-add() -> bool;
     callback max-tiers();
+    callback max-rolls();
     callback picker-search-edited(string);
     callback picker-filter-changed(int);
     callback picker-allow-changed(bool);
