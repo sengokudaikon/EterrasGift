@@ -1,4 +1,4 @@
-// Buttons: quiet frames by default, one crimson primary per surface, subtle ones for chrome (Theme.axaml "Buttons").
+// Buttons: quiet frames by default, one crimson primary per surface, subtle ones for chrome.
 
 import { Tokens } from "../tokens.slint";
 import { KeyboardFocus, TipPlacement } from "../globals.slint";
@@ -18,7 +18,7 @@ export component Button inherits Rectangle {
     // Where the pointer's tip opens. A keyboard tip opens below unless told otherwise, as `KeyboardToolTips` places it.
     in property <TipPlacement> tip-placement: TipPlacement.below;
     in property <TipPlacement> keyboard-tip-placement: TipPlacement.below;
-    // The name a screen reader hears when the visible text or tip is not it (C#'s AutomationProperties.Name).
+    // The name a screen reader hears when the visible text or tip is not it.
     in property <string> accessible-name;
     // A standard button whose label is hidden (compact toolbars): the icon alone, standard padding, the label kept as
     // its name.
@@ -42,7 +42,7 @@ export component Button inherits Rectangle {
         }
     }
 
-    // A button that turns disabled under keyboard focus lets it go, as Avalonia's does, so Enter can't act on it.
+    // A button that turns disabled under keyboard focus lets it go, so Enter can't act on it.
     changed enabled => {
         if (!root.enabled && focus.has-focus) {
             focus.clear-focus();

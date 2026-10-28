@@ -1,4 +1,4 @@
-// Trainer pages (spec/trainer.md §5, DESIGN.md "Trainer Pages"; TrainerPageView.axaml): a page's sections along the top,
+// Trainer pages (DESIGN.md "Trainer Pages"): a page's sections along the top,
 // left out when it has one, and the chosen section beneath: rows of features, or Forge › Item, which is the Item Forge.
 // Rust (crates/ui/src/trainer) builds the rows from the catalog and owns every value; the view lays them out.
 // Forge › Item is the Item Forge (pages/forge/) while the session holds an item. Without the game the hooks are a profile
@@ -644,7 +644,7 @@ component FeatureRow inherits Rectangle {
 
         details := CaptionText {
             visible: root.planned && root.feature.details != "";
-            // C#'s planned row overrides the nested indent with its local FeatureStatusMargin (TrainerPageView.axaml:342).
+            // A planned row's details take the feature-status margin, not the nested indent.
             x: Tokens.feature-status-margin.left;
             y: root.below-title + Tokens.feature-status-margin.top;
             width: parent.width - self.x;
@@ -671,7 +671,7 @@ component FeatureRow inherits Rectangle {
             height: self.visible ? self.preferred-height : 0px;
             text: root.feature.status;
             accessible-role: text;
-            // Said when it changes, as the C# row's Status (AutomationProperties.LiveSetting="Polite").
+            // Announced as it changes.
             accessible-live-region: polite;
             tone: root.feature.tone == FeatureTone.confirmed ? CaptionTone.confirmed : root.feature.tone == FeatureTone.error ? CaptionTone.error : CaptionTone.muted;
         }
@@ -862,7 +862,7 @@ component ProfileBand inherits Rectangle {
     }
 }
 
-// A page body that has nothing to work on yet, in words (ItemEditorView.axaml's EmptyState): the connection's state on
+// A page body that has nothing to work on yet, in words: the connection's state on
 // every trainer page, or the connected forge with no item to show. A stop the user has to fix carries the warning mark
 // beside its title; the connection's one next step (Connect, Retry) is the only button, and only the connection offers it.
 // Ash drifts up during a real wait and lies still under the empty forge; it is gone on a stop (Rust says which, and drives

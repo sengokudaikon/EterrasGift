@@ -1,5 +1,5 @@
 // The affix table's rows, the tier and seal menus, and the modifier rows shared by implicits and unique modifiers
-// (DESIGN.md "Rows", "In-place Cells", "Implicits", "Unique Modifiers"; spec/item-forge.md §4, §5, §7, §9).
+// (DESIGN.md "Rows", "In-place Cells", "Implicits", "Unique Modifiers").
 
 import { Tokens } from "../../tokens.slint";
 import { KeyboardFocus } from "../../globals.slint";
@@ -69,8 +69,8 @@ export component TierList inherits VerticalLayout {
     }
 }
 
-// The tier ladder beside the table: the tiers as a list that takes the keyboard like the C# ListBox it ports, Up and Down
-// drafting the neighbouring tier as a press does.
+// The tier ladder beside the table: the tiers as a list that takes the keyboard, Up and Down drafting the neighbouring
+// tier as a press does.
 export component TierLadder inherits Rectangle {
     in property <[TierOption]> tiers;
     in property <int> held: -1;
@@ -192,7 +192,7 @@ export component AffixRowItem inherits Rectangle {
     property <int> seal-highlight;
     property <length> content-height: Math.max(Tokens.row-min-height, name-cell.height);
     // The replace picker's flyout: closing it any way but Use or Cancel (a click outside) cancels the replacement, and Rust
-    // dropping the picker closes it (the C# view's flyout Closed and IsReplacing handlers).
+    // dropping the picker closes it.
     property <bool> picker-shown: picker-popup.is-open;
     property <bool> picker-live: ForgeState.picker-open;
 
@@ -209,7 +209,7 @@ export component AffixRowItem inherits Rectangle {
         }
     }
 
-    // A selected row scrolls into view, as the C# ListBox brings its selection in (Show draft, Up/Down, a click).
+    // A selected row scrolls into view, however it was selected (Show draft, Up/Down, a click).
     changed selected => {
         if (root.selected) {
             ForgeReveal.show(root.absolute-position.y, root.height);
@@ -251,7 +251,7 @@ export component AffixRowItem inherits Rectangle {
     }
 
     // Del on any of the row's cells drafts the affix's removal, as the menu's Remove affix does; on a row already removed
-    // it does nothing, where the menu's entry keeps the affix (the C# Forge has no key for it; Mods rows do).
+    // it does nothing, where the menu's entry keeps the affix.
     function remove() {
         if (ForgeState.can-change-affix-list && !root.affix.removed) {
             ForgeState.remove-affix(root.index);
@@ -274,7 +274,7 @@ export component AffixRowItem inherits Rectangle {
     border-color: root.selected ? Tokens.accent-brush : transparent;
     background: root.selected ? Tokens.selected-brush : hover.has-hover ? Tokens.hover-brush : transparent;
 
-    // The C# row's ContextMenu, drawn in the app's look (widgets/menu.slint) rather than as a native menu.
+    // The row's context menu, drawn in the app's look (widgets/menu.slint) rather than as a native menu.
     menu := PopupMenu {
         entries: [
             { title: "Replace affix…", icon: Tokens.icon-replace, disabled: root.affix.added || root.affix.removed },
@@ -307,8 +307,7 @@ export component AffixRowItem inherits Rectangle {
                 }
             }
 
-            // The cells lie inside the row's touch area, so the row keeps its hover ground under them as the C#
-            // ListBoxItem keeps :pointerover over its children.
+            // The cells lie inside the row's touch area, so the row keeps its hover ground while the pointer is over them.
             HorizontalLayout {
                 padding-left: Tokens.row-padding.left + 1px;
                 padding-right: Tokens.row-padding.right + 1px;
@@ -525,7 +524,7 @@ export component AffixRowItem inherits Rectangle {
                         Text {
                             text: root.affix.tier;
                             font-size: Tokens.font-size-value;
-                            // An exalted tier keeps the rarity's colour even drafted: the C# `.exalted` style follows `.draft`.
+                            // An exalted tier keeps the rarity's colour even drafted.
                             color: root.affix.removed ? Tokens.text-muted-brush
                                 : root.affix.exalted ? Tokens.rarity-exalted-brush : root.affix.tier-drafted ? Tokens.draft-brush : Tokens.text-brush;
                         }
@@ -681,7 +680,7 @@ export component ModifierRowItem inherits Rectangle {
     property <length> padding-x: root.on-unique ? Tokens.row-padding.left : Tokens.implicit-row-margin.left;
     property <length> padding-y: root.on-unique ? Tokens.unique-row-margin.top : Tokens.implicit-row-margin.top;
 
-    // A selected unique modifier scrolls into view, as the C# ListBox brings its selection in.
+    // A selected unique modifier scrolls into view.
     changed selected => {
         if (root.selected) {
             ForgeReveal.show(root.absolute-position.y, root.height);

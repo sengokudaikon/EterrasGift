@@ -1,4 +1,4 @@
-// The Item Forge, the Forge page's Item section (DESIGN.md "Item Forge", spec/item-forge.md): the item header, the
+// The Item Forge, the Forge page's Item section (DESIGN.md "Item Forge"): the item header, the
 // implicits, the affix table, the unique modifiers, the changes pane and the action bar. Window classes restructure it:
 // narrow lays the pane over the table, wide adds the Range column and caps the table at 1000px, and from 1180px of lists
 // the column beside the table holds the unique modifiers or the selected affix's tier ladder.
@@ -42,7 +42,7 @@ global RarityInk {
 }
 
 // A uniques-and-set-items entry: the name in the colour of the rarity the item would end with (dimmed when it can't be
-// picked), "in game" on the one the item is, and the caption with its reasons, wrapped as the C# menu wraps them.
+// picked), "in game" on the one the item is, and the caption with its reasons, wrapped.
 component IdentityEntry inherits MenuRow {
     in property <MenuOptionView> option;
 
@@ -129,7 +129,7 @@ component BaseEntry inherits MenuRow {
 }
 
 // A cell in the facts line: plain text that answers like a cell where it can change, outdented so hovering never moves it.
-// It is a Tab stop either way, so its reason shows by keyboard too, as the C# buttons are.
+// It is a Tab stop either way, so its reason shows by keyboard too.
 component InlineCell inherits Rectangle {
     in property <string> text;
     in property <bool> emphasis;
@@ -246,8 +246,7 @@ export component ItemForge inherits Rectangle {
     in property <bool> narrow;
     in property <bool> wide;
 
-    // The C# view sets the compact gutter by style under a local margin, so the forge keeps the 24px gutter at every
-    // class (spec/item-forge.md §2 says 16px at compact; the code wins).
+    // The forge keeps the 24px gutter at every class, compact included.
     property <length> gutter: Tokens.page-gutter.left;
     property <length> pane-width: root.wide ? Tokens.changes-pane-wide-width : root.compact ? Tokens.changes-pane-compact-width : Tokens.changes-pane-width;
     // A narrow window has no column for the pane: the table takes the whole width and the pane lies over it.
@@ -275,8 +274,7 @@ export component ItemForge inherits Rectangle {
     property <bool> picker-live: ForgeState.picker-open;
 
     // The pane starts closed in a narrow window, closes on the way into narrow and opens again on the way out. The class it
-    // last followed lives in ForgeState, so an item swap that rebuilds this view keeps the user's choice (the C# view's
-    // FollowWindowWidth).
+    // last followed lives in ForgeState, so an item swap that rebuilds this view keeps the user's choice.
     function follow-class() {
         if (!ForgeState.pane-class-known || ForgeState.pane-narrow != root.narrow) {
             if (ForgeState.pane-class-known || root.narrow) {
@@ -320,7 +318,7 @@ export component ItemForge inherits Rectangle {
         }
     }
 
-    // A row Rust selected or focused scrolls into view (the C# ListBox and BringIntoView).
+    // A row Rust selected or focused scrolls into view.
     changed reveal-serial => {
         let top = ForgeReveal.top - lists.absolute-position.y;
         let bottom = top + ForgeReveal.height;
@@ -438,7 +436,7 @@ export component ItemForge inherits Rectangle {
             Rectangle {
                 height: title.preferred-height;
 
-                // A Tab stop whenever the item has an identity, as the C# name button is.
+                // A Tab stop whenever the item has an identity.
                 identity-cell := CellButton {
                     x: Tokens.inline-cell-outdent.left;
                     y: Tokens.inline-cell-outdent.top;
@@ -487,7 +485,7 @@ export component ItemForge inherits Rectangle {
                     close-policy: PopupClosePolicy.close-on-click-outside;
 
                     identity-surface := FlyoutSurface {
-                        // The list measured where it really ends (its entries wrap), capped as the C# list is.
+                        // The list measured where it really ends (its entries wrap), capped at the replace list's height.
                         property <length> content: Math.max(0px, identity-end.y - Tokens.space-2);
                         property <length> list-height: Math.min(Tokens.replace-list-max-height, Math.max(root.identity-row, self.content));
 
@@ -783,7 +781,7 @@ export component ItemForge inherits Rectangle {
                     }
 
                     // The base picker: focus starts on the base the item has, the arrows move, Enter or Space picks and closes,
-                    // and a keyboard close hands focus back to the base. The list scrolls past the C# list's height.
+                    // and a keyboard close hands focus back to the base. The list scrolls past the replace list's height.
                     base-popup := PopupWindow {
                         x: Tokens.inline-cell-outdent.left;
                         y: parent.height - Tokens.inline-cell-outdent.bottom + Tokens.space-4;
@@ -793,7 +791,7 @@ export component ItemForge inherits Rectangle {
                         close-policy: PopupClosePolicy.close-on-click-outside;
 
                         base-surface := FlyoutSurface {
-                            // The list measured where it really ends (its entries wrap), capped as the C# list is.
+                            // The list measured where it really ends (its entries wrap), capped at the replace list's height.
                             property <length> content: Math.max(0px, base-end.y - Tokens.space-2);
                             property <length> list-height: Math.min(Tokens.replace-list-max-height, self.content);
 
@@ -1063,7 +1061,7 @@ export component ItemForge inherits Rectangle {
                 // Implicits come with the base; only their roll positions reroll in place, and only a base change replaces them.
                 if ForgeState.has-implicits: VerticalLayout {
                     spacing: Tokens.space-2;
-                    // The margin adds to the section's 6px spacing, as the C# StackPanel's margin does.
+                    // The margin adds to the section's 6px spacing.
                     padding-bottom: Tokens.implicit-section-margin.bottom;
 
                     HorizontalLayout {
@@ -1148,7 +1146,7 @@ export component ItemForge inherits Rectangle {
                     }
                 }
 
-                // The rows as one named list (the C# ListBox's AutomationProperties.Name).
+                // The rows as one named list for a screen reader.
                 Rectangle {
                     accessible-role: list;
                     accessible-label: "Affixes";
@@ -1205,7 +1203,7 @@ export component ItemForge inherits Rectangle {
                         }
                     }
 
-                    // Not in C#: every affix up to its highest tier below the primordial T8, as tier drafts.
+                    // Every affix up to its highest tier below the primordial T8, as tier drafts.
                     Button {
                         text: "Max tiers";
                         kind: ButtonKind.subtle;
@@ -1216,8 +1214,8 @@ export component ItemForge inherits Rectangle {
                         }
                     }
 
-                    // The C# note trims to one line with a hover tip; here it wraps (up to two lines, within the button's
-                    // height) so that a keyboard user, who never gets the tip, reads it whole.
+                    // The note wraps (up to two lines, within the button's height) so that a keyboard user, who never gets
+                    // the tip, reads it whole.
                     Text {
                         text: ForgeState.affix-list-note;
                         font-size: Tokens.font-size-caption;
@@ -1266,7 +1264,7 @@ export component ItemForge inherits Rectangle {
                     border-radius: Tokens.control-radius;
                 }
 
-                // The padding lies inside the frame, as an Avalonia Border's does.
+                // The padding lies inside the frame.
                 unique-layout := VerticalLayout {
                     padding-left: Tokens.border-all.left + Tokens.unique-section-padding.left;
                     padding-right: Tokens.border-all.right + Tokens.unique-section-padding.right;
@@ -1306,8 +1304,7 @@ export component ItemForge inherits Rectangle {
                                 color: ForgeState.preview-failed ? Tokens.error-brush : Tokens.text-muted-brush;
                                 max-width: Tokens.preview-status-max-width;
                                 vertical-alignment: center;
-                                // The C# status trims at this width with a hover tip; it wraps here so the keyboard reaches
-                                // the whole reason.
+                                // The status wraps at this width so the keyboard reaches the whole reason.
                                 wrap: word-wrap;
 
                                 preview-touch := TouchArea { }
@@ -1475,7 +1472,7 @@ export component ItemForge inherits Rectangle {
                     wrap: word-wrap;
                     horizontal-stretch: 1;
                     accessible-role: text;
-                    // Said when it changes, as the C# StatusMessage's AutomationProperties.LiveSetting="Polite".
+                    // Announced as it changes.
                     accessible-live-region: polite;
                 }
             }

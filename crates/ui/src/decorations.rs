@@ -1,4 +1,4 @@
-//! Eterra's decorations behind the `Eterra` global (spec/shell-and-settings.md §8): how far her tree has bloomed, the
+//! Eterra's decorations behind the `Eterra` global: how far her tree has bloomed, the
 //! band's frame, and the ash. Each frame is a pure function of the clock, so the band and the ash agree and a capture is
 //! reproducible. Frames are asked for by the view (`EterraFrames`) at a low rate while something moves, and never with
 //! Windows animation effects off: then the bloom settles at once and the ash holds a still frame.

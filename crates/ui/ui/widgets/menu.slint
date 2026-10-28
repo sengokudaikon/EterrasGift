@@ -1,5 +1,4 @@
-// A context menu as the C# app's FluentTheme draws one (Avalonia's ContextMenu and MenuItem, compact density, on the
-// retinted palette): Dusk Brown in a Weathered Taupe frame over a soft shadow, 28px rows of [icon | title | key] in Noto Sans, separators between
+// A context menu in Fluent's compact density on the retinted palette: Dusk Brown in a Weathered Taupe frame over a soft shadow, 28px rows of [icon | title | key] in Noto Sans, separators between
 // groups. Slint's own ContextMenuArea is a native menu on Windows that can't take the app's look, so menus are this.
 //
 // Declare it as a child of the element whose coordinates you'll give, and open it with `open-at`: at the pointer for a
@@ -36,7 +35,7 @@ export struct MenuEntry {
 // It is itself a zero-size anchor (popups' insides can't be reached from outside, so the PopupWindow sits inside it).
 export component PopupMenu inherits Rectangle {
     in property <[MenuEntry]> entries;
-    // The icon column, kept for every row when any row has an icon (the C# grid's shared size group).
+    // The icon column, kept for every row when any row has an icon, so the titles line up.
     in property <bool> has-icons: true;
     // A row picked, by its index in `entries`. The menu has closed by then.
     callback activated(int);

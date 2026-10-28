@@ -1,4 +1,4 @@
-//! The Settings page (`spec/shell-and-settings.md` §10): module switches that save the moment they flip, and six
+//! The Settings page: module switches that save the moment they flip, and six
 //! locations that wait for "Save locations". `SettingsPage` is the page's state and rules, testable without a window;
 //! `bind` puts it behind the `SettingsState` global.
 
@@ -36,7 +36,7 @@ pub enum ModuleSection {
     Toggle {
         key: &'static str,
         title: &'static str,
-        /// The switch's accessible name (the C# AutomationProperties.Name), when the title is not it.
+        /// The accessible name, when the title is not it.
         label: &'static str,
         description: &'static str,
         note: &'static str,
@@ -63,12 +63,12 @@ pub struct LiveStatus {
     pub text: String,
     /// The action is available at all: its reason hides.
     pub can_act: bool,
-    /// The action is running already: the button waits, but the reason stays hidden (C#'s refresh only greys it).
+    /// The action is running already: the button waits, but the reason stays hidden.
     pub busy: bool,
 }
 
-/// A running module behind its sections: a switch takes effect the moment it flips, whatever its save does (the C#
-/// sections set their session before saving), and a status section follows the module.
+/// A running module behind its sections: a switch takes effect the moment it flips, whatever its save does, and a status
+/// section follows the module.
 pub trait ModuleLink {
     /// The user flipped the switch saved under `key`.
     fn switched(&self, key: &str, on: bool);
@@ -151,7 +151,7 @@ impl Location {
         }
     }
 
-    /// The box's accessible name (the C# AutomationProperties.Name).
+    /// The box's accessible name.
     fn name(self) -> &'static str {
         match self {
             Location::ModLibrary => "Mod library folder",
@@ -198,8 +198,7 @@ impl Location {
     }
 }
 
-/// Settings' Restart now, as the app's composition reads it once the window has closed: the app then starts itself again
-/// (the C# `ShutdownCoordinator` with 42, for a launcher this app does not have).
+/// Settings' Restart now, as the app's composition reads it once the window has closed: the app then starts itself again.
 #[derive(Clone, Debug, Default)]
 pub struct RestartRequest(Rc<Cell<bool>>);
 
@@ -266,8 +265,7 @@ impl SettingsPage {
             "The game folder".into(),
         ];
         let message = store.startup_error().unwrap_or_default().to_owned();
-        // A folder move saved in an earlier run waits for a restart: Restart now is offered, with nothing to say (the C#
-        // page's opening state).
+        // A folder move saved in an earlier run waits for a restart: Restart now is offered, with nothing to say.
         let moving = store.saved().migration_source.is_some() || store.saved().mod_library_migration_source.is_some();
         let mut page = Self {
             links: Default::default(),
@@ -334,14 +332,14 @@ impl SettingsPage {
     pub fn kind(&self) -> MessageKind {
         self.kind
     }
-    /// Stays while a save runs, as in the C# page; Restart now waits for the save (`View::restart_when_saved`).
+    /// Stays while a save runs; Restart now waits for the save (`View::restart_when_saved`).
     pub fn can_restart(&self) -> bool {
         self.kind == MessageKind::RestartRequired
     }
     pub fn saving(&self) -> bool {
         self.service.is_saving()
     }
-    /// A Save locations is on its way: only it greys the button, as the C# page's own run does (a switch's save doesn't).
+    /// A Save locations is on its way: only it greys the button (a switch's save doesn't).
     pub fn saving_locations(&self) -> bool {
         self.location_save.is_some()
     }
@@ -541,7 +539,7 @@ impl SettingsPage {
             (true, true) => format!("Saved. Restart Eterra's Gift to use the new locations and turn {turns}."),
             (true, false) => "Saved. Restart Eterra's Gift to use the new locations.".into(),
             (false, true) => format!("Saved. Restart Eterra's Gift to turn {turns}."),
-            // As the C# page: a location save says so; a switch save, which shows itself, says nothing.
+            // A location save says so; a switch save, which shows itself, says nothing.
             (false, false) if self.locations_last => "Locations saved.".into(),
             (false, false) => String::new(),
         };
@@ -684,7 +682,7 @@ pub(crate) fn bind_with_close(window: &MainWindow, page: SettingsPage, before_cl
             }
         }
     });
-    // Restart now waits for a save in flight, as the C# command does.
+    // Restart now waits for a save in flight.
     state.on_restart({
         let view = view.clone();
         move || {
@@ -1013,7 +1011,7 @@ mod tests {
             SettingsPage::new(SettingsService::inline(store), vec![crate::trainer_settings::descriptor(true)], None, None).link(crate::trainer_settings::ID, link.clone());
         page.flip_setting(0, 1, false);
         assert_eq!(*link.switched.borrow(), [("autoConnect".to_owned(), false)]);
-        // A save that fails still leaves the session with the choice, as the C# section sets it before saving.
+        // A save that fails still leaves the session with the choice: the session takes it before the save.
         fs::remove_file(&file).unwrap();
         fs::create_dir(&file).unwrap();
         page.flip_setting(0, 2, true);

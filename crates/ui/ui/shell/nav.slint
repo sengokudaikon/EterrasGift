@@ -1,4 +1,4 @@
-// The navigation pane: an expanded pane with labels, or an icon rail (spec/shell-and-settings.md §3, §4).
+// The navigation pane: an expanded pane with labels, or an icon rail.
 // Rust (crates/ui/src/shell.rs) owns the rows and decides what each click and key does; these views draw them and
 // report back.
 
@@ -16,7 +16,7 @@ component TrainerFlyout inherits FlyoutSurface {
     callback chosen(string);
     callback dismissed();
 
-    // The C# rail builds radio menu items: each page by its title, the one shown checked.
+    // A list of the pages, each by its title, the one shown checked.
     accessible-role: AccessibleRole.list;
 
     property <int> highlighted: 0;
@@ -126,7 +126,7 @@ component NavRowView inherits Rectangle {
     // Keyboard focus came to this row, by whatever way: the pane scrolls it into view.
     callback took-focus();
 
-    // An invokable list item, as the C# ListBoxItem is.
+    // An invokable list item.
     accessible-role: list-item;
     accessible-label: root.item.title;
     accessible-item-selected: root.item.selected;
@@ -199,7 +199,7 @@ component NavRowView inherits Rectangle {
             }
             root.took-focus();
         }
-        // One tab stop for the rows and the foot (spec §3 "Keyboard").
+        // One tab stop for the rows and the foot; the arrows move between them.
         focus-on-tab-navigation: Nav.tab-row == root.index;
         key-pressed(event) => {
             if (root.act(Nav.row-key(root.index, event.text, event.modifiers.alt || event.modifiers.control || event.modifiers.shift || event.modifiers.meta))) {
@@ -208,7 +208,7 @@ component NavRowView inherits Rectangle {
             reject
         }
 
-        // A row acts as the pointer goes down, as the C# ListBox selects on press; the keyboard acts as before.
+        // A row acts as the pointer goes down; the keyboard acts as before.
         touch := TouchArea {
             pointer-event(event) => {
                 if (event.kind == PointerEventKind.down) {
@@ -243,7 +243,7 @@ component NavRowView inherits Rectangle {
         height: Nav.flyout-pages.length * Tokens.nav-item-min-height + 2 * Tokens.space-4;
         close-policy: PopupClosePolicy.close-on-click-outside;
 
-        // Focus goes back to the row as Avalonia restores it after a flyout (no navigation method): no ring and no tip
+        // Focus goes back to the row after the flyout, as a pointer's focus: no ring and no tip
         // until the next navigation key.
         TrainerFlyout {
             width: parent.width;
@@ -262,7 +262,7 @@ component NavRowView inherits Rectangle {
 }
 
 // The trainer's connection, fixed at the foot of the navigation under a hairline: icon and words, never colour alone.
-// The hairline is the block's top border and adds its pixel to the height, as the C# Border's does.
+// The hairline is the block's top border and adds its pixel to the height.
 component ConnectionBlock inherits Rectangle {
     in property <bool> rail;
 
@@ -310,7 +310,7 @@ component ConnectionBlock inherits Rectangle {
             }
         }
 
-        // On the rail an icon button of the icon-button size, centred, as the C# rail sets it.
+        // On the rail an icon button of the icon-button size, centred.
         if Connection.show-action && root.rail: HorizontalLayout {
             alignment: center;
 
@@ -395,7 +395,7 @@ export component NavPane inherits Rectangle {
     width: root.rail ? Tokens.nav-rail-width : Tokens.nav-pane-width;
     background: Tokens.surface-brush;
 
-    // The right border is inside the pane's width, as the C# Border's is: the content stops short of it.
+    // The right border lies inside the pane's width: the content stops short of it.
     VerticalLayout {
         padding-right: Tokens.border-right.right;
 
@@ -437,8 +437,8 @@ export component NavPane inherits Rectangle {
             }
         }
 
-        // The rows scroll when the window is too short for them, as the C# ScrollViewer does; Settings and the connection
-        // stay at the foot, as Windows apps keep them.
+        // The rows scroll when the window is too short for them; Settings and the connection stay at the foot, as Windows
+        // apps keep them.
         rows-scroll := ScrollView {
             vertical-stretch: 1;
             content-width: self.visible-width;
@@ -450,7 +450,7 @@ export component NavPane inherits Rectangle {
                 padding-left: Tokens.nav-list-margin.left;
                 padding-right: Tokens.nav-list-margin.right;
                 padding-top: Tokens.space-2;
-                // Each C# row keeps its RowGap below it, the last one too.
+                // Each row keeps its row gap below it, the last one too.
                 padding-bottom: Tokens.row-gap.bottom;
                 spacing: Tokens.row-gap.bottom;
 

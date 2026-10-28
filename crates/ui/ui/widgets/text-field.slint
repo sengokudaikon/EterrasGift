@@ -25,7 +25,7 @@ export component TextField inherits Rectangle {
     horizontal-stretch: 1;
     border-radius: Tokens.control-radius;
     border-width: 1px;
-    // Fluent's text box on the retinted palette (Theme.axaml): AltMediumLow at rest in a BaseMedium frame, AltMedium and
+    // Fluent's text box on the retinted palette: AltMediumLow at rest in a BaseMedium frame, AltMedium and
     // BaseMediumHigh under the pointer, the ground in the accent frame while focused; frames step up under high contrast.
     background: input.has-focus ? Tokens.ground-brush : touch.has-hover ? Tokens.raised-brush : Tokens.hover-brush;
     border-color: input.has-focus ? Tokens.accent-brush : touch.has-hover ? Tokens.fluent-base-medium-high-color : (Tokens.high-contrast ? Tokens.text-secondary-brush : Tokens.fluent-base-medium-color);
@@ -42,7 +42,7 @@ export component TextField inherits Rectangle {
         }
     }
 
-    // Fluent's compact text box: the text sits at the top-left of its padding, as the C# TextBox's does.
+    // Fluent's compact text box: the text sits at the top-left of its padding.
     HorizontalLayout {
         padding-left: Tokens.text-control-padding.left + root.border-width;
         padding-right: Tokens.text-control-padding.right + root.border-width;
@@ -60,7 +60,7 @@ export component TextField inherits Rectangle {
                 text: root.placeholder;
                 color: Tokens.text-muted-brush;
                 vertical-alignment: top;
-                // Avalonia cuts a long placeholder at the box's edge rather than ending it in "…".
+                // A long placeholder is cut at the box's edge rather than ended in "…".
                 overflow: clip;
             }
 

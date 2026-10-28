@@ -1,4 +1,4 @@
-// Settings (spec/shell-and-settings.md §10). Switches save the moment they flip; the typed locations wait for
+// Settings. Switches save the moment they flip; the typed locations wait for
 // "Save locations".
 
 import { ScrollView } from "../widgets/scroll-view.slint";
@@ -22,7 +22,7 @@ export struct LocationSetting {
 export struct ModuleRow { title: string, description: string, problem: string, enabled: bool }
 export struct SettingsSectionRow {
     module-index: int, section-index: int, title: string, description: string, note: string,
-    // `label` names the switch for a screen reader (the C# AutomationProperties.Name).
+    // `label` names the switch for a screen reader.
     toggle: bool, checked: bool, label: string, on-text: string, off-text: string,
     status: string, action: string, unavailable: string,
     action-enabled: bool, action-tip: string,
@@ -54,8 +54,7 @@ export global SettingsState {
 export component SettingsPage inherits Rectangle {
     in property <bool> compact;
 
-    // The shared switch column, as wide as the widest switch the page shows with either word (the C# SharedSizeGroup
-    // over ToggleSwitches that hold both words). Measured from hidden switches, out of the focus chain and the
+    // The shared switch column, as wide as the widest switch the page shows with either word. Measured from hidden switches, out of the focus chain and the
     // accessibility tree.
     Rectangle {
         visible: false;
@@ -82,7 +81,7 @@ export component SettingsPage inherits Rectangle {
             // `for` blocks as one line (research/slint.md, "Known pain points").
             content-height: body.y + locations-group.y + locations.y + locations-end.y + Tokens.settings-body-margin.bottom;
 
-            // The body's margin sits outside its maximum width, as in the C# view. Its height is its own, so where its
+            // The body's margin sits outside its maximum width. Its height is its own, so where its
             // last child ends never depends on the scroll content's height (that would be a binding loop).
             body := VerticalLayout {
                 x: root.compact ? Tokens.settings-body-compact-margin.left : Tokens.settings-body-margin.left;
@@ -138,7 +137,7 @@ export component SettingsPage inherits Rectangle {
                             border-width: Tokens.border-all.left;
                             border-color: Tokens.hairline-brush;
                             border-radius: Tokens.control-radius;
-                            // Avalonia pads inside the 1px border, so the frame adds to the padding.
+                            // The padding lies inside the 1px border, so the frame adds to it.
                             HorizontalLayout {
                                 padding-left: Tokens.border-all.left + Tokens.notice-padding.left;
                                 padding-right: Tokens.border-all.right + Tokens.notice-padding.right;
@@ -195,7 +194,7 @@ export component SettingsPage inherits Rectangle {
                                 Button {
                                     text: "Browse…";
                                     icon: Tokens.icon-folder;
-                                    // A name, not a tip: the C# button has no tooltip.
+                                    // A screen-reader name; the button shows no tip.
                                     accessible-name: location.browse-label;
                                     clicked => {
                                         SettingsState.browse(i);

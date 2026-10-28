@@ -1,4 +1,4 @@
-// Home: starting the game (spec/companion.md §5).
+// Home: starting the game, and how far it has come.
 
 import { Tokens } from "../tokens.slint";
 import { TitleText, SecondaryText, CaptionText, CaptionTone } from "../widgets/text.slint";
@@ -106,7 +106,7 @@ export component HomePage inherits Rectangle {
             alignment: center;
             spacing: Tokens.space-6;
 
-            // Top-aligned with the first line, as the C# icon is (IconBaselineNudge).
+            // Top-aligned with the first line.
             VerticalLayout {
                 alignment: start;
                 padding-top: Tokens.icon-baseline-nudge.top;
@@ -125,7 +125,7 @@ export component HomePage inherits Rectangle {
                 tone: HomeState.message-is-error ? CaptionTone.error : CaptionTone.secondary;
                 max-width: Tokens.reading-max-width;
                 accessible-role: text;
-                // Said when it changes, as the C# game message's AutomationProperties.LiveSetting="Polite".
+                // Announced as it changes.
                 accessible-live-region: polite;
             }
         }

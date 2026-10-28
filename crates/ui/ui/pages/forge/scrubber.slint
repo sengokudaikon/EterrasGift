@@ -1,4 +1,4 @@
-// The value scrubber, the forge's signature control (DESIGN.md "Value Scrubber", "Range Bar"; spec/item-forge.md §6): the
+// The value scrubber, the forge's signature control (DESIGN.md "Value Scrubber", "Range Bar"): the
 // value over its range bar, edited in place by dragging, by the arrow keys, or by typing in its popover.
 
 import { Tokens } from "../../tokens.slint";
@@ -85,7 +85,7 @@ export component ValueScrubber inherits Rectangle {
     property <int> serial: ForgeState.focus-serial;
     property <bool> popup-open: popup.is-open;
     // Another value in this place (the row was rebuilt under the pointer: an item swap, a reload) ends the drag, which
-    // belonged to the old value (the C# ValueScrubber's DataContextChanged).
+    // belonged to the old value.
     property <int> uid: root.cell.uid;
     // This cell is the one typing; when typing ends elsewhere (Undo, an item change, a cancel), the popover follows.
     property <bool> typing-here: ForgeState.typing && ForgeState.typing-cell.kind == root.cell.cell.kind

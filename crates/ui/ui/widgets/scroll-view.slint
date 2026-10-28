@@ -1,12 +1,11 @@
-// The C# app's scroll bar: Avalonia.Themes.Fluent 12.1.3's ScrollBar (Controls/ScrollBar.xaml) on the retinted palette
-// (Theme.axaml), drawn over the content's right edge as its auto-hiding ScrollViewer does. At rest it is a 2px thumb in
+// The scroll bar: Fluent's auto-hiding scroll bar on the retinted palette, drawn over the content's right edge. At rest it is a 2px thumb in
 // ChromeDisabledLow (TextDisabledColor) between the line buttons' room; the pointer resting on the bar widens it to the full
 // thumb (BaseLow) over a track, with line arrows, and leaving it narrows it again (ScrollBar.ShowDelay/HideDelay). The
 // standard library's fluent-dark ScrollView drew a thumb close to the ground's own colour.
 //
 // `ScrollView` takes the standard one's properties and callback, so it replaces its import; `ListView` is the standard
-// ListView on it (a component named ListView with these properties keeps the compiler's virtualised rows). The C# views
-// disable every horizontal scroll bar, so there is only the vertical one.
+// ListView on it (a component named ListView with these properties keeps the compiler's virtualised rows). No view
+// scrolls sideways, so there is only the vertical bar.
 
 import { Tokens } from "../tokens.slint";
 
@@ -23,8 +22,8 @@ component ScrollBar inherits Rectangle {
     callback scrolled();
 
     property <length> size: Tokens.scroll-bar-size;
-    // The thumb travels between the line buttons, whose room stays even while they are hidden (Avalonia's Track in the
-    // grid's middle row), and is never shorter than the bar is wide (the Thumb's MinHeight).
+    // The thumb travels between the line buttons, whose room stays even while they are hidden, and is never shorter than
+    // the bar is wide.
     property <length> track-length: Math.max(0px, root.height - 2 * root.size);
     property <length> thumb-length: Math.min(root.track-length, Math.max(root.size, root.maximum <= 0px ? root.track-length : root.track-length * root.page-size / (root.maximum + root.page-size)));
     property <length> thumb-y: root.size + (root.maximum <= 0px ? 0px : (root.track-length - root.thumb-length) * (-root.value / root.maximum));
@@ -53,8 +52,7 @@ component ScrollBar inherits Rectangle {
         if (y >= root.thumb-y + root.thumb-length) {
             return ScrollZone.page-down;
         }
-        // Only the drawn thumb answers the pointer: the collapsed one is its 2px line (Avalonia hit-tests the thumb
-        // after its render transform).
+        // Only the drawn thumb answers the pointer: the collapsed one is its 2px line.
         if (root.expanded || (x >= thumb.x && x < thumb.x + thumb.width)) {
             return ScrollZone.thumb;
         }
@@ -118,7 +116,7 @@ component ScrollBar inherits Rectangle {
     }
 
     // ScrollBarPanningThumbBackground at rest, ScrollBarThumbBackgroundColor expanded, BaseMediumLow under the pointer and
-    // BaseMedium while dragged; square, as the C# thumb is.
+    // BaseMedium while dragged; square.
     thumb := Rectangle {
         x: root.expanded ? 0px : root.size - Tokens.scroll-bar-collapsed-inset - Tokens.scroll-bar-collapsed-size;
         y: root.thumb-y;
@@ -134,7 +132,7 @@ component ScrollBar inherits Rectangle {
     touch := TouchArea {
         enabled: root.enabled;
 
-        // A press acts at once, as the C# RepeatButtons (ClickMode.Press) do: a line, a page towards the pointer, or a drag.
+        // A press acts at once: a line, a page towards the pointer, or a drag.
         pointer-event(event) => {
             if (event.button == PointerEventButton.left && event.kind == PointerEventKind.down) {
                 root.press-zone = root.zone-at(self.mouse-x, self.mouse-y);
@@ -188,7 +186,7 @@ export component ScrollView {
     in-out property <length> content-y <=> flickable.content-y;
     in property <ScrollBarPolicy> vertical-scrollbar-policy: ScrollBarPolicy.as-needed;
     in property <bool> mouse-drag-pan-enabled <=> flickable.mouse-drag-pan-enabled;
-    // Kept for the standard ScrollView's API (a ListView sets it); the C# scroll bar looks the same with focus.
+    // Kept for the standard ScrollView's API (a ListView sets it); the bar looks the same with focus.
     in-out property <bool> has-focus;
 
     callback scrolled <=> flickable.flicked;
@@ -210,7 +208,7 @@ export component ScrollView {
         @children
     }
 
-    // Over the content's right edge, as the C# ScrollViewer lays its auto-hiding bars over the content.
+    // Over the content's right edge: the bar hides at rest, so the content keeps its width.
     vertical-bar := ScrollBar {
         enabled: root.enabled;
         x: flickable.x + flickable.width - self.width;

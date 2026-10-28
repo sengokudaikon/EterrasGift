@@ -1,4 +1,4 @@
-// A number box without a spinner (the trainer's NumericUpDown, TrainerPageView.axaml "feature-value"): right-aligned
+// A number box without a spinner (the trainer's values): right-aligned
 // figures with a slot after them for a muted unit, kept empty or not so the numbers in a column end at one edge. Up and
 // Down (and the wheel while focused) step it, as its tip says; Enter or leaving the box commits what was typed. Rust owns
 // the number: what was typed reaches it as text, and the box shows `value` again once the typing is committed.
@@ -24,7 +24,7 @@ export component NumberBox inherits Rectangle {
     height: Tokens.control-min-height;
     border-radius: Tokens.control-radius;
     border-width: 1px;
-    // Fluent's text box on the retinted palette (Theme.axaml): AltMediumLow at rest in a BaseMedium frame, AltMedium and
+    // Fluent's text box on the retinted palette: AltMediumLow at rest in a BaseMedium frame, AltMedium and
     // BaseMediumHigh under the pointer, the ground in the accent frame while focused; frames step up under high contrast.
     background: !root.enabled ? Tokens.strong-line-brush : input.has-focus ? Tokens.ground-brush : touch.has-hover ? Tokens.raised-brush : Tokens.hover-brush;
     border-color: !root.enabled ? Tokens.strong-line-brush : input.has-focus ? Tokens.accent-brush : touch.has-hover ? Tokens.fluent-base-medium-high-color : (Tokens.high-contrast ? Tokens.text-secondary-brush : Tokens.fluent-base-medium-color);

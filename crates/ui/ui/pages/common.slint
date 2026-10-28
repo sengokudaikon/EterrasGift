@@ -59,8 +59,8 @@ export component ActionBar inherits Rectangle {
         padding-bottom: Tokens.action-bar-padding.bottom;
         spacing: Tokens.space-20;
 
-        // A message that wraps in the room the buttons leave it, with exactly one icon pinned to its first line (the C#
-        // icon's top alignment); the pair is centred in the bar. The text stays in the layout, hidden while empty, since
+        // A message that wraps in the room the buttons leave it, with exactly one icon pinned to its first line; the pair
+        // is centred in the bar. The text stays in the layout, hidden while empty, since
         // wrapped text inside an `if` undercounts its height (research/slint.md).
         VerticalLayout {
             horizontal-stretch: 1;
@@ -96,7 +96,7 @@ export component ActionBar inherits Rectangle {
                     vertical-alignment: top;
                     max-width: Tokens.reading-max-width;
                     horizontal-stretch: 1;
-                    // Announced as it changes, as the C# message's LiveSetting="Polite".
+                    // Announced as it changes.
                     accessible-live-region: polite;
                 }
             }
@@ -166,7 +166,7 @@ export component SwitchSetting inherits HorizontalLayout {
     }
 
     // One control column for every group, so the switches line up whatever their words ("Off", "Automatic"): the page
-    // passes the widest switch it shows, as the C# SharedSizeGroup does.
+    // passes the widest switch it shows.
     VerticalLayout {
         min-width: root.control-width;
         alignment: start;

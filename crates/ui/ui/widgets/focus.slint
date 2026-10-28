@@ -20,8 +20,7 @@ export component FocusRing inherits Rectangle {
     }
 }
 
-// Opens the shared tooltip for its parent: after a hover delay, or at once when keyboard focus lands on it
-// (spec/shell-and-settings.md §6). Fill the control with it; it takes no input.
+// Opens the shared tooltip for its parent: after a hover delay, or at once when keyboard focus lands on it. Fill the control with it; it takes no input.
 export component TipTrigger inherits Rectangle {
     in property <string> text;
     in property <bool> hovered;

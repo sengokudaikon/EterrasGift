@@ -1,4 +1,4 @@
-//! The Item Forge, the Forge page's Item section (spec/item-forge.md, DESIGN.md "Item Forge"): the presentation model
+//! The Item Forge, the Forge page's Item section (DESIGN.md "Item Forge"): the presentation model
 //! (`editor`, `rows`), the game rules it applies before writing (`item`), what it asks of the game (`game`) and the binding
 //! to the `ForgeState` global (`view`).
 //!

@@ -74,7 +74,7 @@ export component ChoiceBox inherits Rectangle {
             }
         }
         key-pressed(event) => {
-            // As Avalonia's: F4, Alt+Down or Alt+Up open the list, as Enter and Space do.
+            // F4, Alt+Down or Alt+Up open the list, as Enter and Space do: the Windows keys for a combo box.
             if (event.text == Key.Return || event.text == " " || (event.text == Key.F4 && !event.modifiers.alt)
                 || ((event.text == Key.DownArrow || event.text == Key.UpArrow) && event.modifiers.alt)) {
                 root.open();

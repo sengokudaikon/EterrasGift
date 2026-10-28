@@ -40,7 +40,7 @@ pub struct BaseDefinition {
     pub level: u8,
     pub corrupted: bool,
     /// The classes an item on this base is for (the game's `ItemClassRequirements` bits, 0 for any class). A base change
-    /// judges the affixes with it, as the C# `ForgeChoices.BrokenByBase` does.
+    /// judges the affixes with it.
     pub class_requirement: i32,
     /// The implicits it grants, in the game's words with their ranges ("+10–16 Armor").
     pub implicits: Vec<String>,
@@ -125,18 +125,18 @@ impl Catalog {
     }
 }
 
-/// The fallback the C# `ForgeChoices.ImplicitLine` shows when the game gave no text for an implicit.
+/// The fallback shown when the game gave no text for an implicit.
 pub const IMPLICIT_TEXT_UNAVAILABLE: &str = "Implicit (the game's text is unavailable)";
 
-/// One base implicit as a line (C# `ForgeChoices.ImplicitLine`): the game's text at both ends of its range, joined as a
-/// range, or the fallback when the game gave neither.
+/// One base implicit as a line: the game's text at both ends of its range, joined as a range, or the fallback when the
+/// game gave neither.
 pub fn implicit_line(minimum: Option<&str>, maximum: Option<&str>) -> String {
     let text = modifier_range(minimum.unwrap_or_default(), maximum.unwrap_or_default());
     if text.is_empty() { IMPLICIT_TEXT_UNAVAILABLE.to_owned() } else { text }
 }
 
 /// The game's text with the rolled number shown as its range, for example "+10–16 Armor" from "+10 Armor" and
-/// "+16 Armor" (C# `ModifierText.Range`). Texts that differ in more than a number read "minimum – maximum".
+/// "+16 Armor". Texts that differ in more than a number read "minimum – maximum".
 pub fn modifier_range(minimum: &str, maximum: &str) -> String {
     if minimum == maximum || minimum.is_empty() || maximum.is_empty() {
         return if minimum.is_empty() { maximum } else { minimum }.to_owned();
@@ -201,14 +201,14 @@ pub trait ForgeGame {
         false
     }
 
-    /// The values a roll takes in its context (spec §6 Mapping). The editor never computes values itself.
+    /// The values a roll takes in its context. The editor never computes values itself.
     fn resolve(&self, item: &ForgeItem, request: &RollRequest) -> Lookup<ValueTable>;
 
     /// Current draft requests, including tables the editor already cached.
     /// Disposable value reads outside this set no longer need to run.
     fn retain_mappings(&self, _: &[RollRequest]) {}
 
-    /// Writes one edit to the item the draft was made on and reads it back (spec §11).
+    /// Writes one edit to the item the draft was made on and reads it back.
     fn write(&mut self, expected: &ForgeItem, edit: &ItemEdit) -> EditOutcome;
 
     /// Start a new Apply history only when its first edit is confirmed.

@@ -1,4 +1,4 @@
-// The changes pane (DESIGN.md "Changes Pane"; spec/item-forge.md §10): what will change and what did, on Lifted Umber
+// The changes pane (DESIGN.md "Changes Pane"): what will change and what did, on Lifted Umber
 // beside the table. A record only: Apply never depends on it.
 
 import { ScrollView } from "../../widgets/scroll-view.slint";
@@ -136,8 +136,8 @@ export component ChangesPane inherits Rectangle {
                         }
                     }
 
-                    // Each entry is a button, a Tab stop that Enter or Space shows, as the C# ledger's buttons are. The
-                    // entries sit flush, as the C# ItemsControl's do: the 6px spacing parts the header from the list only.
+                    // Each entry is a button, a Tab stop that Enter or Space shows. The entries sit flush: the 6px spacing
+                    // parts the header from the list only.
                     VerticalLayout {
                         spacing: Tokens.space-0;
 
@@ -281,7 +281,7 @@ export component ChangesPane inherits Rectangle {
                         wrap: word-wrap;
                     }
 
-                    // Flush, as the C# ItemsControl's entries are; each keeps its own catalog-entry margin.
+                    // Flush; each entry keeps its own catalog-entry margin.
                     VerticalLayout {
                         spacing: Tokens.space-0;
 
@@ -307,8 +307,7 @@ export component ChangesPane inherits Rectangle {
                                 spacing: Tokens.space-2;
                                 horizontal-stretch: 1;
 
-                                // The C# line trims the name and the time with a hover tip, and its entries are no Tab stops.
-                                // Here a name too long for the pane wraps, the time kept whole beside its first line, so
+                                // A name too long for the pane wraps, the time kept whole beside its first line, so
                                 // nothing is cut that the keyboard cannot reach; the tip stays for the pointer.
                                 Rectangle {
                                     height: name-line.preferred-height;

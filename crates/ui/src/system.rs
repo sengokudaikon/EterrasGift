@@ -1,5 +1,4 @@
-//! Windows settings Slint does not read itself ("Animation effects" and high contrast), and the dark title bar the
-//! C# app asks for (App.axaml `RequestedThemeVariant="Dark"`).
+//! Windows settings Slint does not read itself ("Animation effects" and high contrast), and the dark title bar.
 
 /// Whether Windows "Animation effects" is on. When the call fails, animation counts as on.
 #[cfg(windows)]
@@ -28,8 +27,8 @@ pub fn high_contrast() -> bool {
     ok != 0 && contrast.dwFlags & HCF_HIGHCONTRASTON != 0
 }
 
-/// Gives the window a dark title bar once its native window exists, as the C# app asks for one whatever the system theme
-/// (App.axaml `RequestedThemeVariant="Dark"`). The winit window is created only after the event loop starts, so this
+/// Gives the window a dark title bar once its native window exists. The app's palette is always dark, so the title bar is
+/// too. The winit window is created only after the event loop starts, so this
 /// tries on a short timer and gives up after a second; a window with no native handle (headless, the captures' software
 /// window) keeps whatever frame it has.
 pub fn follow_dark_title_bar<C: slint::ComponentHandle + 'static>(component: &C) {

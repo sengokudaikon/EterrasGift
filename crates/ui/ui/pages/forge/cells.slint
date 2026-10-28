@@ -190,8 +190,7 @@ export component FlagToggle inherits Rectangle {
         : root.hovered ? Tokens.hover-brush
         : root.drafted && root.checked ? Tokens.draft-surface-brush : transparent;
     // A disabled flag keeps the frame its state gives it when checked (trim gold, teal while drafted) and has none when
-    // not: the C# flag styles set the checked frames over Fluent's transparent disabled one, which then shows only when
-    // unchecked (checked against Avalonia 12.1.3 Fluent, headless).
+    // not, so a disabled flag still says whether it is set.
     border-color: !root.enabled ? (root.checked ? (root.drafted ? Tokens.draft-brush : Tokens.accent-trim-brush) : transparent)
         : root.drafted && root.checked && !root.hovered ? Tokens.draft-brush
         : root.checked ? (root.hovered ? Tokens.accent-brush : Tokens.accent-trim-brush)
