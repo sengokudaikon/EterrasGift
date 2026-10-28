@@ -1,6 +1,8 @@
-//! A bounds-checked cursor over a byte slice. Every read either succeeds in full or fails without moving.
+//! A bounds-checked cursor over a byte slice, where every read either succeeds in full or fails without moving, and
+//! positioned reads from a file.
 
 use crate::error::{Error, Result};
+use std::fs::File;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Endian {
@@ -94,6 +96,26 @@ impl<'a> Reader<'a> {
         self.position += end + 1;
         Ok(text.to_owned())
     }
+}
+
+/// Fills `out` from `at` in `file`, without moving its cursor.
+#[cfg(windows)]
+pub(crate) fn read_at(file: &File, mut at: u64, mut out: &mut [u8]) -> std::io::Result<()> {
+    use std::os::windows::fs::FileExt;
+    while !out.is_empty() {
+        match file.seek_read(out, at)? {
+            0 => return Err(std::io::ErrorKind::UnexpectedEof.into()),
+            read => {
+                out = &mut out[read..];
+                at += read as u64;
+            }
+        }
+    }
+    Ok(())
+}
+#[cfg(unix)]
+pub(crate) fn read_at(file: &File, at: u64, out: &mut [u8]) -> std::io::Result<()> {
+    std::os::unix::fs::FileExt::read_exact_at(file, out, at)
 }
 
 #[cfg(test)]

@@ -15,11 +15,10 @@ pub struct Strings {
     /// Collection (`Item_Affixes`) → key (`Item_Affix_25_DisplayName`) → text.
     pub tables: BTreeMap<String, BTreeMap<String, String>>,
     /// Entries whose ID no key names. Unity Localization looks text up by key, so the game cannot reach them by name
-    /// either; the shipped tables keep them after their keys are deleted (about a sixth of them in 2026-10).
+    /// either; the shipped tables keep them after their keys are deleted.
     pub unkeyed: usize,
-    /// Entries whose key a later ID in the shared data also names (176 keys in 2026-10, 39 with different text). The
-    /// later ID wins, as a dictionary filled in order would: its text is the newer one where they differ ("PH: Chasing
-    /// Apophis" becomes "Chasing Apophis"). Not yet checked against the game's own lookup.
+    /// Entries whose key a later ID in the shared data also names. The later ID wins, as a dictionary filled in order
+    /// would: its text is the newer one where they differ ("PH: Chasing Apophis" becomes "Chasing Apophis").
     pub shadowed: usize,
 }
 
@@ -38,12 +37,12 @@ pub(crate) enum Key {
 
 /// A `SharedTableData`: its collection name and what each ID is. A key named twice belongs to its later ID.
 pub(crate) fn shared_keys(shared: &Value) -> Result<(String, HashMap<i64, Key>)> {
-    let name = shared.field("m_TableCollectionName", |v| v.as_str().map(str::to_owned))?;
+    let name = shared.field("m_TableCollectionName", Value::as_string)?;
     let keys = shared
         .field("m_Entries", |entries| {
             let (mut keys, mut owner) = (HashMap::new(), HashMap::new());
             for entry in entries.as_array()? {
-                let (id, key) = (entry.field("m_Id", Value::as_i64)?, entry.field("m_Key", |v| v.as_str().map(str::to_owned))?);
+                let (id, key) = (entry.field("m_Id", Value::as_i64)?, entry.field("m_Key", Value::as_string)?);
                 if keys.contains_key(&id) {
                     return Err(Error::data(format!("ID {id} appears twice")));
                 }
@@ -77,7 +76,7 @@ pub(crate) fn table_entries(table: &Value, collection: &str, keys: &HashMap<i64,
             };
             for entry in entries.as_array()? {
                 let id = entry.field("m_Id", Value::as_i64)?;
-                let text = entry.field("m_Localized", |v| v.as_str().map(str::to_owned))?;
+                let text = entry.field("m_Localized", Value::as_string)?;
                 match keys.get(&id) {
                     Some(Key::Named(key)) => {
                         if out.keyed.insert(key.clone(), text).is_some() {
@@ -94,16 +93,13 @@ pub(crate) fn table_entries(table: &Value, collection: &str, keys: &HashMap<i64,
 }
 
 pub(crate) fn locale_code(table: &Value) -> Result<String> {
-    table.field("m_LocaleId", |id| id.field("m_Code", |v| v.as_str().map(str::to_owned)))
+    table.field("m_LocaleId", |id| id.field("m_Code", Value::as_string))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    fn object(fields: Vec<(&str, Value)>) -> Value {
-        Value::Object(fields.into_iter().map(|(k, v)| (k.into(), v)).collect())
-    }
+    use crate::testing::object;
 
     #[test]
     fn entries_take_their_keys_from_the_shared_data() {

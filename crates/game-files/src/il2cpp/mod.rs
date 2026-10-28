@@ -6,7 +6,8 @@ mod binary;
 mod metadata;
 
 use crate::error::{Error, Result};
-use binary::{Binary, RawType, kind};
+pub(crate) use binary::kind;
+use binary::{Binary, RawType};
 pub(crate) use metadata::type_attributes;
 use metadata::{FieldDefinition, Metadata, TypeDefinition};
 use std::path::Path;
@@ -163,11 +164,7 @@ impl Il2Cpp {
 
     /// The value of an `Int32` constant (`const int`) of `assembly`'s `namespace.class`, from its metadata default.
     pub(crate) fn int_constant(&self, assembly: &str, namespace: &str, class: &str, field: &str) -> Result<i32> {
-        let found = self.find(assembly, namespace, class);
-        let [index] = found.as_slice() else {
-            return Err(Error::data(format!("{} definitions of {namespace}.{class} in {assembly}", found.len())));
-        };
-        let definition = self.definition(*index)?;
+        let definition = self.definition(self.find_one(assembly, namespace, class)?)?;
         let field_index = self
             .metadata
             .field_index(definition, field)
@@ -183,9 +180,18 @@ impl Il2Cpp {
         Ok(value)
     }
 
+    /// The one type definition named `namespace.name` (not nested) in the image `assembly`.dll: none or several is an
+    /// error.
+    pub(crate) fn find_one(&self, assembly: &str, namespace: &str, name: &str) -> Result<u32> {
+        match self.find(assembly, namespace, name).as_slice() {
+            [index] => Ok(*index),
+            found => Err(Error::data(format!("{} definitions of {namespace}.{name} in {assembly}", found.len()))),
+        }
+    }
+
     /// The type definitions named `namespace.name` (not nested) in the image `assembly`.dll.
-    pub(crate) fn find(&self, assembly: &str, namespace: &str, name: &str) -> Vec<u32> {
-        // MonoScripts name most assemblies bare (`LE`), some with their extension (`DOTweenPro.dll`).
+    fn find(&self, assembly: &str, namespace: &str, name: &str) -> Vec<u32> {
+        // MonoScripts name most assemblies bare (`Assembly-CSharp`), some with their extension (`DOTweenPro.dll`).
         let image_name = if assembly.ends_with(".dll") { assembly.to_owned() } else { format!("{assembly}.dll") };
         let Some(image) = self.metadata.images.iter().find(|i| i.name == image_name) else {
             return Vec::new();

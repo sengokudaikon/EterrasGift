@@ -1,9 +1,9 @@
-//! Last Epoch's game data, read from the files the game ships: no process, no injection, no game running. See
-//! `research/game-files.md` for where each part lives.
+//! Last Epoch's game data, read from the files the game ships: no process, no injection, no game running.
 //!
-//! Layers, bottom up: [`bundle`] (UnityFS archives and their LZ4 blocks), [`serialized`] (Unity serialized files),
-//! [`typetree`] (layouts and the decoder, which must consume every byte of an object), then the game's own data:
-//! [`Install::definitions`] (affixes and item bases) and [`Install::strings`] (the text of one locale).
+//! Layers, bottom up: `bundle` (UnityFS archives and their LZ4 blocks), `serialized` (Unity serialized files),
+//! `typetree` (layouts and the decoder, which must consume every byte of an object) and `archive` (bundles read
+//! together, so references between them resolve), then the game's own data: [`Install::definitions`] (affixes, item
+//! bases, ailments and the idol altar registry) and [`Install::strings`] (the text of one locale).
 //!
 //! Classes stored without type trees (uniques, properties and set bonuses in `resources.assets`) are read by
 //! [`Install::player_definitions`] with layouts rebuilt from the IL2CPP build (`il2cpp`, `layout`): the metadata
@@ -13,7 +13,7 @@
 #![forbid(unsafe_code)]
 
 mod archive;
-pub mod bundle;
+mod bundle;
 mod common_strings;
 pub mod definitions;
 pub mod error;
@@ -22,18 +22,16 @@ mod install;
 mod layout;
 mod player;
 mod reader;
-pub mod serialized;
-pub mod strings;
+mod serialized;
+mod strings;
 #[cfg(test)]
 mod testing;
-pub mod typetree;
+mod typetree;
 pub mod uniques;
-pub mod value;
+mod value;
 
-pub use archive::Script;
 pub use definitions::Definitions;
 pub use error::{Error, Result};
-pub use install::{DATA_FOLDER, Install};
-
+pub use install::Install;
 pub use strings::Strings;
 pub use uniques::PlayerDefinitions;

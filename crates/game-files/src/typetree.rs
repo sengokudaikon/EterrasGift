@@ -9,7 +9,7 @@ use crate::value::Value;
 use std::sync::Arc;
 
 /// Unity's `kAlignBytes`: after this node the stream moves to the next multiple of 4.
-const ALIGN: u32 = 0x4000;
+pub(crate) const ALIGN: u32 = 0x4000;
 const COMMON_STRING: u32 = 0x8000_0000;
 const MAX_NODES: usize = 1 << 20;
 
@@ -19,7 +19,7 @@ pub struct ReferenceType {
     pub class: String,
     pub namespace: String,
     pub assembly: String,
-    pub tree: Node,
+    pub tree: Arc<Node>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -145,7 +145,7 @@ pub fn decode_prefix(root: &Node, bytes: &[u8], last: &str, references: &[Refere
 
 fn read(node: &Node, reader: &mut Reader<'_>, references: &[ReferenceType]) -> Result<Value> {
     // A node with an `Array` child is a collection whatever it is called: Unity names some after their element
-    // (`SingleAffix singleAffixes`), and an element can be a primitive. Strings keep their own reading.
+    // (`Element elements`), and an element can be a primitive. Strings keep their own reading.
     if let Some(array) = node.array().filter(|_| &*node.type_name != "string") {
         let value = read_array(node, array, reader, references)?;
         if node.aligned() {
@@ -356,7 +356,7 @@ mod tests {
             class: "SmartFormatTag".into(),
             namespace: "UnityEngine.Localization.Metadata".into(),
             assembly: "Unity.Localization".into(),
-            tree: tag.build(),
+            tree: Arc::new(tag.build()),
         }];
         let mut w = Writer::default();
         w.i32(2).i32(2);

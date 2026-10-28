@@ -12,6 +12,7 @@ use crate::typetree::Node;
 use crate::value::Value;
 use std::cell::OnceCell;
 use std::path::Path;
+use std::sync::Arc;
 
 /// A MonoBehaviour, its name and its `m_Script`.
 type Head = (Object, String, (i32, i64));
@@ -19,8 +20,10 @@ type Head = (Object, String, (i32, i64));
 pub(crate) struct PlayerData {
     resources: SerializedFile,
     managers: SerializedFile,
+    /// The managers' file name, as `resources.assets` names it among its externals.
+    managers_name: String,
     /// `MonoScript`'s layout, as the bundles ship it (the same Unity build wrote both).
-    script_tree: Node,
+    script_tree: Arc<Node>,
     il2cpp: Il2Cpp,
     /// Every MonoBehaviour in `resources.assets` with its name and its `m_Script`, read once for all the lists looked up.
     heads: OnceCell<Vec<Head>>,
@@ -34,20 +37,28 @@ fn open(path: &Path) -> Result<SerializedFile> {
 }
 
 impl PlayerData {
-    pub(crate) fn open(game: &Path, data: &Path) -> Result<PlayerData> {
-        let mut scripts = Archive::open([data.join("StreamingAssets").join("LEAssetBundles").join("monoscripts.bundle")])?;
+    /// The player data in `resources` with its scripts in `managers`, its layouts rebuilt from the IL2CPP build
+    /// (`game_assembly` and `metadata`), and `MonoScript`'s layout taken from the bundle `monoscripts`.
+    pub(crate) fn open(game_assembly: &Path, metadata: &Path, resources: &Path, managers: &Path, monoscripts: &Path) -> Result<PlayerData> {
+        let managers_name = managers
+            .file_name()
+            .and_then(|n| n.to_str())
+            .ok_or_else(|| Error::data(format!("{} names no file", managers.display())))?
+            .to_owned();
+        let mut scripts = Archive::open([monoscripts.to_path_buf()])?;
         let file = scripts.main_file(0)?;
         let script = file
             .objects()
             .iter()
             .find(|o| o.class_id == MONO_SCRIPT)
-            .ok_or_else(|| Error::data("monoscripts.bundle holds no MonoScript"))?;
-        let script_tree = (**file.tree(script)?).clone();
+            .ok_or_else(|| Error::data(format!("{} holds no MonoScript", monoscripts.display())))?;
+        let script_tree = file.tree(script)?.clone();
         Ok(PlayerData {
-            resources: open(&data.join("resources.assets"))?,
-            managers: open(&data.join("globalgamemanagers.assets"))?,
+            resources: open(resources)?,
+            managers: open(managers)?,
+            managers_name,
             script_tree,
-            il2cpp: Il2Cpp::open(&game.join("GameAssembly.dll"), &data.join("il2cpp_data").join("Metadata").join("global-metadata.dat"))?,
+            il2cpp: Il2Cpp::open(game_assembly, metadata)?,
             heads: OnceCell::new(),
             scripts: Default::default(),
         })
@@ -95,8 +106,8 @@ impl PlayerData {
             let external = self
                 .resources
                 .external(file_id)?
-                .ok_or_else(|| Error::data(format!("{name}'s script is not in globalgamemanagers.assets")))?;
-            if external.file_name() != "globalgamemanagers.assets" {
+                .ok_or_else(|| Error::data(format!("{name}'s script is not in {}", self.managers_name)))?;
+            if external.file_name() != self.managers_name {
                 return Err(Error::data(format!("{name}'s script is in {}", external.path)));
             }
             let script = self
@@ -105,7 +116,7 @@ impl PlayerData {
                 .filter(|o| o.class_id == MONO_SCRIPT)
                 .ok_or_else(|| Error::data(format!("{name}'s script {path_id} is not a MonoScript")))?;
             let script = self.managers.decode_with(script, &self.script_tree)?;
-            let names = |field| script.field(field, |v| v.as_str().map(str::to_owned));
+            let names = |field| script.field(field, Value::as_string);
             let script = [names("m_AssemblyName")?, names("m_Namespace")?, names("m_ClassName")?];
             self.scripts.borrow_mut().insert((file_id, path_id), script.clone());
             Ok(script)

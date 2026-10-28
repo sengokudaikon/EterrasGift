@@ -8,14 +8,12 @@
 //! is refused by name rather than guessed. A layout is only trusted once an object decodes with it exactly.
 
 use crate::error::{Error, Result};
-use crate::il2cpp::{Field, Il2Cpp, Ty, field_attributes as fa, type_attributes};
-use crate::typetree::Node;
+use crate::il2cpp::{Field, Il2Cpp, Ty, field_attributes as fa, kind, type_attributes};
+use crate::typetree::{ALIGN, Node};
 use std::sync::Arc;
 
-const ALIGN: u32 = 0x4000;
 /// Past this depth of nested serializable classes Unity writes only a class's primitive fields: no enums, collections
-/// or classes (as the shipped `CorruptionOutcomeConfig` shows: its recursive `extraCorruptionOutcomes` stops nine
-/// levels in, the last level keeping its floats, ints and bools).
+/// or classes. A recursive class therefore stops some levels in, its last level keeping its floats, ints and bools.
 const MAX_DEPTH: usize = 10;
 
 /// Unity value types it serializes field by field although they are not marked `[Serializable]`.
@@ -106,22 +104,22 @@ pub(crate) fn mono_behaviour_header() -> Node {
     )
 }
 
-fn primitive_name(kind: u8) -> Option<&'static str> {
-    Some(match kind {
+fn primitive_name(primitive: u8) -> Option<&'static str> {
+    Some(match primitive {
         // Unity 6 writes bool fields as UInt8.
-        0x02 => "UInt8",
+        kind::BOOLEAN => "UInt8",
         // char serializes as its UTF-16 unit.
-        0x03 => "UInt16",
-        0x04 => "SInt8",
-        0x05 => "UInt8",
-        0x06 => "SInt16",
-        0x07 => "UInt16",
-        0x08 => "int",
-        0x09 => "unsigned int",
-        0x0A => "SInt64",
-        0x0B => "UInt64",
-        0x0C => "float",
-        0x0D => "double",
+        kind::CHAR => "UInt16",
+        kind::I1 => "SInt8",
+        kind::U1 => "UInt8",
+        kind::I2 => "SInt16",
+        kind::U2 => "UInt16",
+        kind::I4 => "int",
+        kind::U4 => "unsigned int",
+        kind::I8 => "SInt64",
+        kind::U8 => "UInt64",
+        kind::R4 => "float",
+        kind::R8 => "double",
         _ => return None,
     })
 }
@@ -137,13 +135,10 @@ impl<'a> Layouts<'a> {
 
     /// The tree of a MonoBehaviour (or ScriptableObject) whose script is `assembly`'s `namespace.class`.
     pub(crate) fn mono_behaviour(&self, assembly: &str, namespace: &str, class: &str) -> Result<Node> {
-        let found = self.il2cpp.find(assembly, namespace, class);
-        let [definition] = found.as_slice() else {
-            return Err(Error::data(format!("{} definitions of {namespace}.{class} in {assembly}", found.len())));
-        };
+        let definition = self.il2cpp.find_one(assembly, namespace, class)?;
         let mut root = mono_behaviour_header();
         root.children
-            .extend(self.class_fields(*definition, &[], 0).map_err(|e| e.context(format!("{namespace}.{class}")))?);
+            .extend(self.class_fields(definition, &[], 0).map_err(|e| e.context(format!("{namespace}.{class}")))?);
         Ok(root)
     }
 
@@ -337,7 +332,7 @@ impl<'a> Layouts<'a> {
 
     fn requires_alignment(&self, ty: &Ty) -> Result<bool> {
         Ok(match self.underlying(ty)? {
-            Ty::Primitive(kind) => matches!(kind, 0x02..=0x07),
+            Ty::Primitive(primitive) => matches!(primitive, kind::BOOLEAN..=kind::U2),
             other => match self.element(&other)? {
                 Some(element) if self.is_supported_collection(&other)? => self.requires_alignment(&element)?,
                 _ => false,
@@ -360,10 +355,6 @@ impl<'a> Layouts<'a> {
         Ok(ty.clone())
     }
 
-    fn has_attribute(&self, owner: u32, field: &Field<'_>, name: &str) -> Result<bool> {
-        Ok(self.il2cpp.attributes(owner, Some(field))?.iter().any(|a| a == name))
-    }
-
     /// Unity's `WillUnitySerialize`, for a field of `owner` whose type is already resolved to `ty`.
     fn will_serialize(&self, owner: u32, field: &Field<'_>, ty: &Ty) -> Result<bool> {
         let a = field.attributes;
@@ -371,12 +362,10 @@ impl<'a> Layouts<'a> {
         if a & fa::STATIC != 0 || constant || a & fa::NOT_SERIALIZED != 0 || a & fa::INIT_ONLY != 0 {
             return Ok(false);
         }
-        let reference = self.has_attribute(owner, field, "UnityEngine.SerializeReference")?;
-        if a & fa::ACCESS != fa::PUBLIC
-            && !self.is_unity_value_type(&Ty::Definition { index: owner })?
-            && !reference
-            && !self.has_attribute(owner, field, "UnityEngine.SerializeField")?
-        {
+        let attributes = self.il2cpp.attributes(owner, Some(field))?;
+        let has = |name: &str| attributes.iter().any(|a| a == name);
+        let reference = has("UnityEngine.SerializeReference");
+        if a & fa::ACCESS != fa::PUBLIC && !self.is_unity_value_type(&Ty::Definition { index: owner })? && !reference && !has("UnityEngine.SerializeField") {
             return Ok(false);
         }
         if matches!(ty, Ty::Parameter(_) | Ty::Other(_)) {
@@ -386,12 +375,7 @@ impl<'a> Layouts<'a> {
         if !self.is_unity_object(ty)? && Self::definition_of(ty) == Some(owner) {
             return Ok(false);
         }
-        if self
-            .il2cpp
-            .attributes(owner, Some(field))?
-            .iter()
-            .any(|a| a == "System.Runtime.CompilerServices.FixedBufferAttribute")
-        {
+        if has("System.Runtime.CompilerServices.FixedBufferAttribute") {
             return Err(Error::unsupported(format!("fixed buffer field {}", field.name)));
         }
         let serialized = match ty {
@@ -429,27 +413,27 @@ impl<'a> Layouts<'a> {
         }
         chain.reverse();
         chain.push(this);
+        // Each level's fields, read once: a base field is checked against every more derived level's names.
+        let levels = chain
+            .iter()
+            .map(|ty| {
+                let owner = Self::definition_of(ty).expect("a definition");
+                Ok((owner, ty, self.il2cpp.fields(owner)?))
+            })
+            .collect::<Result<Vec<_>>>()?;
         let mut nodes = Vec::new();
-        for (level, ty) in chain.iter().enumerate() {
-            let owner = Self::definition_of(ty).expect("a definition");
+        for (level, (owner, ty, fields)) in levels.iter().enumerate() {
             let arguments = match ty {
                 Ty::Generic { arguments, .. } => arguments.as_slice(),
                 _ => &[],
             };
-            for field in self.il2cpp.fields(owner)? {
+            for field in fields {
                 let resolved = Self::substitute(&field.ty, arguments);
-                if !self.will_serialize(owner, &field, &resolved)? {
+                if !self.will_serialize(*owner, field, &resolved)? {
                     continue;
                 }
                 // A base field a more derived type redeclares is hidden by it.
-                let mut hidden = false;
-                for derived in &chain[level + 1..] {
-                    hidden |= self
-                        .il2cpp
-                        .fields(Self::definition_of(derived).expect("a definition"))?
-                        .iter()
-                        .any(|f| f.name == field.name);
-                }
+                let hidden = levels[level + 1..].iter().any(|(_, _, derived)| derived.iter().any(|f| f.name == field.name));
                 if hidden || depth > MAX_DEPTH && !matches!(resolved, Ty::Primitive(_)) {
                     continue;
                 }
@@ -628,11 +612,10 @@ mod tests {
     #[test]
     #[ignore = "compares with a Last Epoch install named by EG_LAST_EPOCH"]
     fn generated_layouts_match_the_shipped_type_trees() {
-        let root = std::path::PathBuf::from(std::env::var_os("EG_LAST_EPOCH").expect("EG_LAST_EPOCH"));
-        let il2cpp = Il2Cpp::open(&root.join("GameAssembly.dll"), &root.join("Last Epoch_Data/il2cpp_data/Metadata/global-metadata.dat")).unwrap();
+        let install = crate::Install::at(std::env::var_os("EG_LAST_EPOCH").expect("EG_LAST_EPOCH")).unwrap();
+        let il2cpp = Il2Cpp::open(&install.game_assembly(), &install.metadata()).unwrap();
         let layouts = Layouts::new(&il2cpp);
-        let bundles = root.join("Last Epoch_Data/StreamingAssets/LEAssetBundles");
-        let mut archive = Archive::open([bundles.join("PermaLoad.bundle"), bundles.join("monoscripts.bundle")]).unwrap();
+        let mut archive = Archive::open(install.definition_sources()).unwrap();
         let file = archive.main_file(0).unwrap();
         let mut classes = BTreeMap::new();
         for object in file.objects().iter().filter(|o| o.class_id == MONO_BEHAVIOUR) {

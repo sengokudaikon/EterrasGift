@@ -102,10 +102,7 @@ impl Archive {
     pub(crate) fn resolve(&mut self, from: &Rc<SerializedFile>, (file_id, path_id): (i32, i64)) -> Result<(Rc<SerializedFile>, Object)> {
         let file = match from.external(file_id)? {
             None => from.clone(),
-            Some(external) => {
-                let name = external.file_name().to_owned();
-                self.file(&name)?
-            }
+            Some(external) => self.file(external.file_name())?,
         };
         let object = *file
             .object(path_id)
@@ -130,9 +127,9 @@ impl Archive {
         }
         let value = file.decode(&object)?;
         let script = Script {
-            assembly: value.field("m_AssemblyName", |v| v.as_str().map(str::to_owned))?,
-            namespace: value.field("m_Namespace", |v| v.as_str().map(str::to_owned))?,
-            class: value.field("m_ClassName", |v| v.as_str().map(str::to_owned))?,
+            assembly: value.field("m_AssemblyName", Value::as_string)?,
+            namespace: value.field("m_Namespace", Value::as_string)?,
+            class: value.field("m_ClassName", Value::as_string)?,
         };
         self.scripts.insert(key, script.clone());
         Ok(script)
@@ -148,17 +145,25 @@ impl Archive {
                 continue;
             }
             let object = &file.objects()[head.object as usize];
-            let leading = file.decode_prefix(object, "m_Name")?;
-            if name.is_some_and(|name| leading.get("m_Name").and_then(Value::as_str).ok() != Some(name)) {
-                continue;
+            // A name is compared in full; without one, only a behaviour whose script matches is decoded again.
+            let mut leading = None;
+            if let Some(name) = name {
+                let value = leading.insert(file.decode_prefix(object, "m_Name")?);
+                if value.get("m_Name").and_then(Value::as_str).ok() != Some(name) {
+                    continue;
+                }
             }
             // One with no readable `m_Script` says why when it is asked about.
             let pointer = match head.script {
                 Some(pointer) => pointer,
-                None => leading.field("m_Script", Value::as_pptr)?,
+                None => file.decode_prefix(object, "m_Name")?.field("m_Script", Value::as_pptr)?,
             };
             if self.script_at(file, pointer)?.is(script.0, script.1, script.2) {
-                found.push((*object, if last == "m_Name" { leading } else { file.decode_prefix(object, last)? }));
+                let value = match leading {
+                    Some(leading) if last == "m_Name" => leading,
+                    _ => file.decode_prefix(object, last)?,
+                };
+                found.push((*object, value));
             }
         }
         Ok(found)

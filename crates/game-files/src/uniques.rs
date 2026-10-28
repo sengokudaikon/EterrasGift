@@ -158,10 +158,6 @@ pub struct SetMod {
     pub hidden: bool,
 }
 
-fn text(v: &Value) -> Result<String> {
-    v.as_str().map(str::to_owned)
-}
-
 fn list<T>(v: &Value, name: &str, read: impl Fn(&Value) -> Result<T>) -> Result<Vec<T>> {
     v.field(name, |l| {
         l.as_array()?.iter().enumerate().map(|(i, e)| read(e).map_err(|e| e.context(format!("[{i}]")))).collect()
@@ -170,8 +166,8 @@ fn list<T>(v: &Value, name: &str, read: impl Fn(&Value) -> Result<T>) -> Result<
 
 fn description(v: &Value) -> Result<Description> {
     Ok(Description {
-        text: v.field("description", text)?,
-        alt_text: v.field("altText", text)?,
+        text: v.field("description", Value::as_string)?,
+        alt_text: v.field("altText", Value::as_string)?,
         set_requirement: v.field("setRequirement", Value::int)?,
     })
 }
@@ -196,8 +192,8 @@ fn unique(v: &Value) -> Result<Unique> {
     let read = || -> Result<Unique> {
         Ok(Unique {
             id,
-            name: v.field("name", text)?,
-            display_name: v.field("displayName", text)?,
+            name: v.field("name", Value::as_string)?,
+            display_name: v.field("displayName", Value::as_string)?,
             item_type: v.field("baseType", Value::int)?,
             sub_types: v.field("subTypes", |l| match l {
                 Value::Bytes(bytes) => Ok(bytes.clone()),
@@ -213,7 +209,7 @@ fn unique(v: &Value) -> Result<Unique> {
             mods: list(v, "mods", unique_mod)?,
             descriptions: list(v, "tooltipDescriptions", description)?,
             display_order: list(v, "tooltipEntries", |e| e.field("modDisplay", Value::int))?,
-            lore: v.field("loreText", text)?,
+            lore: v.field("loreText", Value::as_string)?,
         })
     };
     read().map_err(|e| e.context(format!("unique {id}")))
@@ -224,8 +220,8 @@ fn property(v: &Value) -> Result<Property> {
     let read = || -> Result<Property> {
         Ok(Property {
             id,
-            name: v.field("propertyName", text)?,
-            text_key: v.field("textKey", text)?,
+            name: v.field("propertyName", Value::as_string)?,
+            text_key: v.field("textKey", Value::as_string)?,
             rounding_for_added: v.field("roundingForAdded", Value::int)?,
             rounding_for_more: v.field("roundingForMore", Value::int)?,
             display_added_as_percentage: v.field("displayAddedAsPercentage", Value::as_bool)?,
@@ -236,7 +232,7 @@ fn property(v: &Value) -> Result<Property> {
             less_is_better: v.field("lessIsBetter", Value::as_bool)?,
             hide_modifier_value: v.field("hideModifierValue", Value::as_bool)?,
             name_includes_modifier: v.field("nameIncludesModifier", Value::as_bool)?,
-            default_alt_text: v.field("defaultAltText", text)?,
+            default_alt_text: v.field("defaultAltText", Value::as_string)?,
             more_rounding_overrides: list(v, "moreRoundingOverrides", |o| {
                 Ok((o.field("specialTag", Value::int)?, o.field("roundingForMore", Value::int)?))
             })?,
@@ -297,7 +293,7 @@ fn set_bonus(v: &Value) -> Result<SetBonus> {
     let read = || -> Result<SetBonus> {
         Ok(SetBonus {
             id,
-            name: v.field("setName", text)?,
+            name: v.field("setName", Value::as_string)?,
             mods: list(v, "mods", set_mod)?,
             descriptions: list(v, "tooltipDescriptions", description)?,
             items: list(v, "itemsInSet", |item| item.field("uniqueID", Value::int))?,
@@ -306,7 +302,8 @@ fn set_bonus(v: &Value) -> Result<SetBonus> {
     read().map_err(|e| e.context(format!("set {id}")))
 }
 
-fn unique_ids<T: Ord + std::fmt::Display + Copy>(ids: impl Iterator<Item = T>, what: &str) -> Result<()> {
+/// Refuses an ID that appears twice.
+pub(crate) fn unique_ids<T: Ord + std::fmt::Display + Copy>(ids: impl Iterator<Item = T>, what: &str) -> Result<()> {
     let mut seen = BTreeSet::new();
     for id in ids {
         if !seen.insert(id) {
@@ -336,10 +333,7 @@ pub(crate) fn set_bonuses(list_value: &Value) -> Result<Vec<SetBonus>> {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    fn object(fields: Vec<(&str, Value)>) -> Value {
-        Value::Object(fields.into_iter().map(|(k, v)| (k.into(), v)).collect())
-    }
+    use crate::testing::object;
 
     fn mod_value(property: u64) -> Value {
         object(vec![

@@ -15,7 +15,7 @@ use std::rc::Rc;
 /// scan of a file's objects reads them.
 const KEPT_BLOCKS: usize = 8;
 
-/// Larger than anything the game ships (its largest serialized file is ~90 MB); a guard against a bad size field.
+/// A guard against a bad size field, far above any file a bundle holds in practice.
 const MAX_ENTRY_BYTES: u64 = 1 << 30;
 const MAX_TABLE_BYTES: u32 = 64 << 20;
 const MAX_BLOCK_BYTES: u32 = 64 << 20;
@@ -45,7 +45,6 @@ struct Block {
 
 pub struct Bundle {
     path: PathBuf,
-    unity_version: String,
     blocks: Vec<Block>,
     entries: Vec<Entry>,
 }
@@ -99,7 +98,7 @@ impl Bundle {
             return Err(Error::unsupported(format!("UnityFS format {format}")));
         }
         let _player_version = reader.cstring()?;
-        let unity_version = reader.cstring()?;
+        let _unity_version = reader.cstring()?;
         let size = reader.i64()?;
         let (packed_table, unpacked_table, flags) = (reader.u32()?, reader.u32()?, reader.u32()?);
         if u64::try_from(size).ok() != Some(length) {
@@ -174,7 +173,6 @@ impl Bundle {
         }
         Ok(Bundle {
             path: path.to_path_buf(),
-            unity_version,
             blocks,
             entries,
         })
@@ -182,11 +180,6 @@ impl Bundle {
 
     pub fn path(&self) -> &Path {
         &self.path
-    }
-
-    /// The Unity version that built the bundle, e.g. `6000.4.8f1`.
-    pub fn unity_version(&self) -> &str {
-        &self.unity_version
     }
 
     pub fn entries(&self) -> &[Entry] {
@@ -198,6 +191,7 @@ impl Bundle {
     }
 
     /// The bytes of one file in the bundle.
+    #[cfg(test)]
     pub fn read(&self, name: &str) -> Result<Vec<u8>> {
         let stream = self.stream(name)?;
         let mut out = vec![0; stream.len() as usize];
@@ -247,10 +241,6 @@ pub struct Stream {
 impl Stream {
     pub fn len(&self) -> u64 {
         self.size
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.size == 0
     }
 
     /// Fills `out` from `at` in the file.
@@ -325,7 +315,6 @@ mod tests {
                 .file("CAB-two", &second)
                 .write(&path);
             let bundle = Bundle::open(&path).unwrap();
-            assert_eq!(bundle.unity_version(), "6000.4.8f1");
             assert_eq!(bundle.entries().iter().map(|e| e.name.as_str()).collect::<Vec<_>>(), ["CAB-one", "CAB-two"]);
             assert_eq!(bundle.read("CAB-one").unwrap(), first);
             assert_eq!(bundle.read("CAB-two").unwrap(), second);

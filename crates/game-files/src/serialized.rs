@@ -4,7 +4,7 @@
 
 use crate::bundle::Stream;
 use crate::error::{Error, Result};
-use crate::reader::{Endian, Reader};
+use crate::reader::{Endian, Reader, read_at};
 use crate::typetree::{self, Node, ReferenceType};
 use crate::value::Value;
 use std::borrow::Cow;
@@ -17,13 +17,10 @@ const HEAD_BYTES: usize = 4096;
 
 /// Where a serialized file's bytes are.
 pub enum Source {
+    #[cfg(test)]
     Memory(Vec<u8>),
     /// A file on disk (player data such as `resources.assets`), read at positions.
-    File {
-        file: File,
-        path: PathBuf,
-        len: u64,
-    },
+    File { file: File, path: PathBuf, len: u64 },
     /// A file inside a bundle.
     Bundle(Stream),
 }
@@ -41,6 +38,7 @@ impl Source {
 
     fn len(&self) -> u64 {
         match self {
+            #[cfg(test)]
             Source::Memory(bytes) => bytes.len() as u64,
             Source::File { len, .. } => *len,
             Source::Bundle(stream) => stream.len(),
@@ -50,6 +48,7 @@ impl Source {
     /// `length` bytes at `at`, which the caller has checked lie within the file.
     fn bytes(&self, at: u64, length: usize) -> Result<Cow<'_, [u8]>> {
         match self {
+            #[cfg(test)]
             Source::Memory(bytes) => Ok(Cow::Borrowed(&bytes[at as usize..at as usize + length])),
             Source::File { file, path, .. } => {
                 let mut out = vec![0; length];
@@ -63,26 +62,6 @@ impl Source {
             }
         }
     }
-}
-
-/// Fills `out` from `at` in `file`, without moving its cursor.
-#[cfg(windows)]
-pub(crate) fn read_at(file: &File, mut at: u64, mut out: &mut [u8]) -> std::io::Result<()> {
-    use std::os::windows::fs::FileExt;
-    while !out.is_empty() {
-        match file.seek_read(out, at)? {
-            0 => return Err(std::io::ErrorKind::UnexpectedEof.into()),
-            read => {
-                out = &mut out[read..];
-                at += read as u64;
-            }
-        }
-    }
-    Ok(())
-}
-#[cfg(unix)]
-pub(crate) fn read_at(file: &File, at: u64, out: &mut [u8]) -> std::io::Result<()> {
-    std::os::unix::fs::FileExt::read_exact_at(file, out, at)
 }
 
 pub const MONO_BEHAVIOUR: i32 = 114;
@@ -118,8 +97,6 @@ impl External {
 }
 
 pub struct SerializedFile {
-    pub format: u32,
-    pub unity_version: String,
     types: Vec<SerializedType>,
     references: Vec<ReferenceType>,
     objects: Vec<Object>,
@@ -152,6 +129,7 @@ fn read_type(reader: &mut Reader<'_>, format: u32, type_trees: bool, reference: 
 }
 
 impl SerializedFile {
+    #[cfg(test)]
     pub fn parse(bytes: Vec<u8>) -> Result<SerializedFile> {
         Self::open(Source::Memory(bytes))
     }
@@ -170,11 +148,9 @@ impl SerializedFile {
             u64::from(early_data_offset)
         };
         let metadata = source.bytes(0, data_offset.min(length) as usize)?;
-        let (format, unity_version, types, references, objects, externals) = Self::parse_metadata(&metadata, length)?;
+        let (types, references, objects, externals) = Self::parse_metadata(&metadata, length)?;
         drop((head, metadata));
         Ok(SerializedFile {
-            format,
-            unity_version,
             types,
             references,
             objects,
@@ -185,7 +161,7 @@ impl SerializedFile {
 
     /// The metadata from `bytes`, the file's first bytes, of a file `length` long.
     #[allow(clippy::type_complexity)]
-    fn parse_metadata(bytes: &[u8], length: u64) -> Result<(u32, String, Vec<SerializedType>, Vec<ReferenceType>, Vec<Object>, Vec<External>)> {
+    fn parse_metadata(bytes: &[u8], length: u64) -> Result<(Vec<SerializedType>, Vec<ReferenceType>, Vec<Object>, Vec<External>)> {
         let length = usize::try_from(length).map_err(|_| Error::unsupported("serialized file too large"))?;
         let mut reader = Reader::new(bytes, Endian::Big);
         let (_metadata_size, _file_size, format, early_data_offset) = (reader.u32()?, reader.u32()?, reader.u32()?, reader.u32()?);
@@ -205,7 +181,7 @@ impl SerializedFile {
         };
         let data_offset = usize::try_from(data_offset).map_err(|_| Error::malformed("negative data offset"))?;
         reader.endian = if big_endian { Endian::Big } else { Endian::Little };
-        let unity_version = reader.cstring()?;
+        let _unity_version = reader.cstring()?;
         let _platform = reader.i32()?;
         let type_trees = reader.bool()?;
         let type_count = reader.count(23)?;
@@ -259,17 +235,12 @@ impl SerializedFile {
             let count = reader.count(23)?;
             for _ in 0..count {
                 if let (SerializedType { tree: Some(tree), .. }, Some([class, namespace, assembly])) = read_type(&mut reader, format, type_trees, true)? {
-                    references.push(ReferenceType {
-                        class,
-                        namespace,
-                        assembly,
-                        tree: (*tree).clone(),
-                    });
+                    references.push(ReferenceType { class, namespace, assembly, tree });
                 }
             }
         }
         // User information follows; nothing here needs it.
-        Ok((format, unity_version, types, references, objects, externals))
+        Ok((types, references, objects, externals))
     }
 
     pub fn objects(&self) -> &[Object] {
@@ -304,14 +275,12 @@ impl SerializedFile {
 
     /// The whole object, which must fill its bytes exactly.
     pub fn decode(&self, object: &Object) -> Result<Value> {
-        typetree::decode(self.tree(object)?, &self.bytes(object)?, &self.references).map_err(|e| e.context(format!("object {}", object.path_id)))
+        self.decode_with(object, self.tree(object)?)
     }
 
     /// The object's leading fields, through `last`.
     pub fn decode_prefix(&self, object: &Object, last: &str) -> Result<Value> {
-        let tree = self.tree(object)?;
-        self.prefix(object, |bytes| typetree::decode_prefix(tree, bytes, last, &self.references))
-            .map_err(|e| e.context(format!("object {}", object.path_id)))
+        self.decode_prefix_with(object, self.tree(object)?, last)
     }
 
     /// The whole object read with a layout from elsewhere (for files written without type trees).
@@ -361,7 +330,6 @@ mod tests {
             .object(11, 0, &object.bytes)
             .build();
         let file = SerializedFile::parse(file).unwrap();
-        assert_eq!(file.unity_version, "6000.4.8f1");
         assert_eq!(file.objects().len(), 2);
         let first = *file.object(10).unwrap();
         assert_eq!(first.class_id, MONO_BEHAVIOUR);

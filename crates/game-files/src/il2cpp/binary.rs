@@ -1,11 +1,11 @@
 //! `GameAssembly.dll` as data: its PE sections, the IL2CPP metadata registration in them, and the `Il2CppType`
 //! records the registration's type table points at. Only initialised data sections are read; no code is touched and
-//! nothing is loaded or run. The sections (some 26 MB) are read in place: the registration is searched for a chunk
-//! at a time, and records are read through a small cache of pages.
+//! nothing is loaded or run. The sections are large, so they are read in place: the registration is searched for a
+//! chunk at a time, and records are read through a small cache of pages.
 
 use crate::error::{Error, Result};
+use crate::reader::read_at;
 use crate::reader::{Endian, Reader};
-use crate::serialized::read_at;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::fs::File;
@@ -113,7 +113,7 @@ impl Binary {
         r.seek(optional + optional_size)?;
         let mut headers = Vec::new();
         for _ in 0..section_count {
-            // Unwind and relocation tables are data too, but nothing the registration points at (some 5 MB).
+            // Unwind and relocation tables are data too, but nothing the registration points at, so the search skips them.
             let tables = matches!(r.take(8)?, [b'.', b'p', b'd', b'a', b't', b'a', 0, 0] | [b'.', b'r', b'e', b'l', b'o', b'c', 0, 0]);
             let (virtual_size, virtual_address, raw_size, raw_pointer) = (r.u32()?, r.u32()?, r.u32()?, r.u32()?);
             r.take(12)?;

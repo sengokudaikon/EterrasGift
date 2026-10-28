@@ -4,8 +4,14 @@
 use crate::common_strings::COMMON_STRINGS;
 use crate::serialized::{MONO_BEHAVIOUR, MONO_SCRIPT};
 use crate::typetree::Node;
+use crate::value::Value;
 use std::path::Path;
 use std::sync::Arc;
+
+/// A decoded object with these fields, as a type tree decode would give it.
+pub(crate) fn object(fields: Vec<(&str, Value)>) -> Value {
+    Value::Object(fields.into_iter().map(|(k, v)| (k.into(), v)).collect())
+}
 
 /// Little-endian object bytes, aligned as Unity aligns them.
 #[derive(Default)]

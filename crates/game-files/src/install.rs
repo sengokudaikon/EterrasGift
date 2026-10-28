@@ -10,7 +10,7 @@ use crate::value::Value;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
-pub const DATA_FOLDER: &str = "Last Epoch_Data";
+const DATA_FOLDER: &str = "Last Epoch_Data";
 const AFFIX_LIST: (&str, &str, &str) = ("LE", "", "AffixList");
 const ITEM_LIST: (&str, &str, &str) = ("LE", "", "ItemList");
 const AILMENT_LIST: (&str, &str, &str) = ("LE", "", "AilmentList");
@@ -18,9 +18,12 @@ const AILMENT_LIST: (&str, &str, &str) = ("LE", "", "AilmentList");
 const STRING_TABLE_BUNDLES: &str = "localization-string-tables-";
 
 pub struct Install {
+    game: PathBuf,
     data: PathBuf,
 }
 
+/// Every bundle in `folder`. The localisation bundles need the others: their scripts are in the Addressables
+/// `MonoScript` bundle.
 fn bundles_in(folder: &Path) -> Result<Vec<PathBuf>> {
     let mut paths = Vec::new();
     for entry in std::fs::read_dir(folder).map_err(|e| Error::io(folder, e))? {
@@ -36,11 +39,12 @@ fn bundles_in(folder: &Path) -> Result<Vec<PathBuf>> {
 impl Install {
     /// The game folder, the one holding `Last Epoch.exe` and `Last Epoch_Data`.
     pub fn at(folder: impl AsRef<Path>) -> Result<Install> {
-        let data = folder.as_ref().join(DATA_FOLDER);
+        let game = folder.as_ref().to_path_buf();
+        let data = game.join(DATA_FOLDER);
         if !data.is_dir() {
-            return Err(Error::data(format!("{} has no {DATA_FOLDER} folder", folder.as_ref().display())));
+            return Err(Error::data(format!("{} has no {DATA_FOLDER} folder", game.display())));
         }
-        Ok(Install { data })
+        Ok(Install { game, data })
     }
 
     pub fn data_folder(&self) -> &Path {
@@ -55,6 +59,36 @@ impl Install {
         self.data.join("StreamingAssets").join("aa").join("StandaloneWindows64")
     }
 
+    /// `GameAssembly.dll`, the IL2CPP build's native code and the type records its fields point at.
+    pub fn game_assembly(&self) -> PathBuf {
+        self.game.join("GameAssembly.dll")
+    }
+
+    /// `global-metadata.dat`, the IL2CPP build's names, type and field definitions.
+    pub fn metadata(&self) -> PathBuf {
+        self.data.join("il2cpp_data").join("Metadata").join("global-metadata.dat")
+    }
+
+    /// The player data Unity stores without type trees.
+    fn resources(&self) -> PathBuf {
+        self.data.join("resources.assets")
+    }
+
+    /// The player's managers, which hold the `MonoScript`s that `resources.assets`' behaviours run.
+    fn managers(&self) -> PathBuf {
+        self.data.join("globalgamemanagers.assets")
+    }
+
+    /// The bundle of `MonoScript`s the other bundles' behaviours run.
+    fn monoscripts(&self) -> PathBuf {
+        self.bundles().join("monoscripts.bundle")
+    }
+
+    /// The bundle holding the masters (affixes, items, ailments).
+    fn perma_load(&self) -> PathBuf {
+        self.bundles().join("PermaLoad.bundle")
+    }
+
     /// The build hash the game ships in `build_hash.txt`: changes with every game update.
     pub fn build_hash(&self) -> Result<String> {
         let path = self.data.join("build_hash.txt");
@@ -64,7 +98,7 @@ impl Install {
 
     /// The files [`Install::definitions`] reads.
     pub fn definition_sources(&self) -> Vec<PathBuf> {
-        ["PermaLoad.bundle", "monoscripts.bundle"].map(|name| self.bundles().join(name)).into()
+        vec![self.perma_load(), self.monoscripts()]
     }
 
     /// Affix and item base definitions.
@@ -76,15 +110,11 @@ impl Install {
         let (file, altar) = archive.resolve(&masters, items.field("idolAltarPropertyList", Value::as_pptr)?)?;
         let idol_altar = uniques::registry(&file.decode(&altar)?).map_err(|e| e.context("idolAltarPropertyList"))?;
         let list = archive.behaviour(&masters, "AilmentList", AILMENT_LIST)?;
-        let mut ailments = Vec::new();
-        for pointer in list.field("list", |l| l.as_array()?.iter().map(Value::as_pptr).collect::<Result<Vec<_>>>())? {
+        let ailments = definitions::ailments(&list, |pointer| {
             let (file, object) = archive.resolve(&masters, pointer)?;
-            let ailment = file.decode(&object)?;
-            ailments.push(definitions::Ailment {
-                id: ailment.field("id", Value::int)?,
-                effect_of_increased_effectiveness: ailment.field("effectOfIncreasedEffectiveness", Value::int)?,
-            });
-        }
+            file.decode(&object)
+        })
+        .map_err(|e| e.context("AilmentList"))?;
         Ok(Definitions {
             affixes: definitions::affixes(&affixes).map_err(|e| e.context("MasterAffixesList"))?,
             item_types: definitions::item_types(&items).map_err(|e| e.context("MasterItemsList"))?,
@@ -95,20 +125,13 @@ impl Install {
 
     /// The files [`Install::player_definitions`] reads.
     pub fn player_sources(&self) -> Vec<PathBuf> {
-        let game = self.data.parent().unwrap_or(&self.data);
-        vec![
-            game.join("GameAssembly.dll"),
-            self.data.join("il2cpp_data").join("Metadata").join("global-metadata.dat"),
-            self.data.join("resources.assets"),
-            self.data.join("globalgamemanagers.assets"),
-            self.bundles().join("monoscripts.bundle"),
-        ]
+        vec![self.game_assembly(), self.metadata(), self.resources(), self.managers(), self.monoscripts()]
     }
 
     /// Uniques, properties and set bonuses, from the player data Unity stores without type trees. Needs a game build
     /// whose IL2CPP metadata this reader knows (format 39); any other is refused as unsupported.
     pub fn player_definitions(&self) -> Result<PlayerDefinitions> {
-        let player = PlayerData::open(self.data.parent().unwrap_or(&self.data), &self.data)?;
+        let player = PlayerData::open(&self.game_assembly(), &self.metadata(), &self.resources(), &self.managers(), &self.monoscripts())?;
         let properties = player.behaviour("MasterPropertyList", ("LE", "", "PropertyList"))?;
         let registry = |name: &str| player.behaviour(name, ("LE", "", name)).and_then(|v| uniques::registry(&v)).map_err(|e| e.context(name));
         let constant = |class: &str, field: &str| player.il2cpp().int_constant("LE", "", class, field);
@@ -187,7 +210,7 @@ impl Install {
         let (mut tables, mut unkeyed, mut shadowed) = (BTreeMap::new(), 0, 0);
         for (object, _) in archive.behaviours(&file, None, STRING_TABLE, "m_Name")? {
             let table = file.decode(&object)?;
-            let (shared_file, shared_object) = archive.resolve(&file, table.field("m_SharedData", crate::value::Value::as_pptr)?)?;
+            let (shared_file, shared_object) = archive.resolve(&file, table.field("m_SharedData", Value::as_pptr)?)?;
             let shared = shared_file.decode(&shared_object)?;
             if !archive.script(&shared_file, &shared)?.is(SHARED_TABLE.0, SHARED_TABLE.1, SHARED_TABLE.2) {
                 return Err(Error::data("m_SharedData is not a SharedTableData"));

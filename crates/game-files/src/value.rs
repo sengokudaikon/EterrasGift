@@ -89,6 +89,11 @@ impl Value {
         }
     }
 
+    /// [`Value::as_str`], owned.
+    pub fn as_string(&self) -> Result<String> {
+        self.as_str().map(str::to_owned)
+    }
+
     pub fn as_array(&self) -> Result<&[Value]> {
         match self {
             Self::Array(items) => Ok(items),

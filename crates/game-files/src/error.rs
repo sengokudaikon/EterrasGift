@@ -11,7 +11,8 @@ pub enum Error {
     Malformed(String),
     /// A valid file using something this reader does not handle (a compression, a format version, a node type).
     Unsupported(String),
-    /// The file is readable but the game data in it is not where or what this reader expects.
+    /// The file is well-formed but not what this reader expects: a field, object or file missing, of another kind, or
+    /// found more than once.
     Data(String),
 }
 
@@ -32,7 +33,7 @@ impl Error {
         }
     }
 
-    /// Prefixes the message with where it happened, keeping the kind.
+    /// Prefixes the message with where it happened, keeping the kind. An I/O error keeps its own path instead.
     pub(crate) fn context(self, place: impl fmt::Display) -> Self {
         match self {
             Self::Io { path, source } => Self::Io { path, source },
@@ -49,7 +50,7 @@ impl fmt::Display for Error {
             Self::Io { path, source } => write!(f, "{path}: {source}"),
             Self::Malformed(m) => write!(f, "malformed: {m}"),
             Self::Unsupported(m) => write!(f, "unsupported: {m}"),
-            Self::Data(m) => write!(f, "unexpected game data: {m}"),
+            Self::Data(m) => write!(f, "unexpected data: {m}"),
         }
     }
 }

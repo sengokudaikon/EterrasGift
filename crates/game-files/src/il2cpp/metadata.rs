@@ -1,6 +1,6 @@
 //! `global-metadata.dat`, format 39 (Unity 6000.3–6000.4): names, type and field definitions, generic parameters,
 //! images and custom attribute data. Indices into the type definitions, generic containers, the binary's type table and
-//! the parameters are as wide as their tables need (1, 2 or 4 bytes); every other index is 4 bytes until format 104.
+//! the parameters are as wide as their tables need (1, 2 or 4 bytes); every other index is 4 bytes in this format.
 //! Each record size is checked against its section, so a layout this reader has wrong is refused, not misread.
 //! Layouts follow Cpp2IL's LibCpp2IL (MIT), the only reader known to handle this format.
 
@@ -91,8 +91,8 @@ pub(crate) struct Image {
     attribute_count: usize,
 }
 
-/// What the file says, parsed. Of its bytes (some 36 MB) only the two sections read later are kept: attribute data and
-/// default values.
+/// What the file says, parsed. Of its bytes only the two sections read later are kept, attribute data and default
+/// values, so the file is never held whole.
 pub(crate) struct Metadata {
     pub(crate) types: Vec<TypeDefinition>,
     pub(crate) fields: Vec<FieldDefinition>,
@@ -126,15 +126,15 @@ fn index(reader: &mut Reader<'_>, width: usize) -> Result<Option<u32>> {
 }
 
 impl Metadata {
-    /// Reads the file a section at a time, only the sections it uses: some 24 of its 36 MB, never more than one large
-    /// section and the names at once.
+    /// Reads the file a section at a time, only the sections it uses, never more than one large section and the names
+    /// at once.
     pub(crate) fn open(path: &std::path::Path) -> Result<Metadata> {
         let file = std::fs::File::open(path).map_err(|e| Error::io(path, e))?;
         let length = file.metadata().map_err(|e| Error::io(path, e))?.len();
         let length = usize::try_from(length).map_err(|_| Error::unsupported("global-metadata.dat too large"))?;
         Self::read(length, |offset, size| {
             let mut out = vec![0; size];
-            crate::serialized::read_at(&file, offset as u64, &mut out).map_err(|e| Error::io(path, e))?;
+            crate::reader::read_at(&file, offset as u64, &mut out).map_err(|e| Error::io(path, e))?;
             Ok(out)
         })
     }
@@ -300,7 +300,7 @@ impl Metadata {
         }
         let attribute_data = kept(section("attributeData"))?;
 
-        // Field and data indices stay 4 bytes until format 106.
+        // Field and data indices are 4 bytes in this format.
         drop(data);
         let (s, data) = records("fieldDefaultValues", 8 + type_width)?;
         let mut r = Reader::new(&data, Endian::Little);
@@ -356,15 +356,7 @@ impl Metadata {
             return Err(Error::malformed(format!("default value of field {field} out of range")));
         }
         let mut r = Reader::new(&self.default_data[offset..], Endian::Little);
-        let raw = compressed_u32(&mut r)?;
-        let value = if raw == u32::MAX {
-            i32::MIN
-        } else if raw & 1 == 1 {
-            -((raw >> 1) as i32) - 1
-        } else {
-            (raw >> 1) as i32
-        };
-        Ok((type_index, value))
+        Ok((type_index, signed(compressed_u32(&mut r)?)))
     }
 
     pub(crate) fn generic_position(&self, parameter: u32) -> Result<u16> {
@@ -408,6 +400,18 @@ impl Metadata {
     }
 }
 
+/// A compressed unsigned integer read as signed (the runtime's `ReadCompressedInt32`): the low bit is the sign, the rest
+/// the magnitude, and all ones is `i32::MIN`.
+fn signed(raw: u32) -> i32 {
+    if raw == u32::MAX {
+        i32::MIN
+    } else if raw & 1 == 1 {
+        -((raw >> 1) as i32) - 1
+    } else {
+        (raw >> 1) as i32
+    }
+}
+
 /// Unity's compressed unsigned integer (as `MetadataUtils.WriteCompressedUInt32` writes it).
 fn compressed_u32(r: &mut Reader<'_>) -> Result<u32> {
     let first = r.u8()?;
@@ -440,9 +444,9 @@ mod tests {
 
     #[test]
     fn signed_constants_decode_as_the_runtime_does() {
-        // ReadCompressedInt32: the low bit is the sign, the rest the magnitude.
-        let decode = |raw: u32| if raw & 1 == 1 { -((raw >> 1) as i32) - 1 } else { (raw >> 1) as i32 };
-        assert_eq!((decode(56), decode(57), decode(0)), (28, -29, 0));
+        assert_eq!((signed(56), signed(57), signed(0), signed(1)), (28, -29, 0, -1));
+        assert_eq!(signed(u32::MAX), i32::MIN);
+        assert_eq!(signed(u32::MAX - 1), i32::MAX);
     }
 
     #[test]

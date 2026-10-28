@@ -22,7 +22,7 @@ fn reads_definitions_from_the_install() {
         definitions.item_types.len(),
         started.elapsed()
     );
-    // Long-standing definitions, as the live capture and the forge fixture know them.
+    // Long-standing definitions (Added Health, helmets).
     let health = definitions.affixes.iter().find(|a| a.id == 25).expect("affix 25");
     assert_eq!((health.name.as_str(), health.kind, health.multi), ("Added Health", 1, false));
     assert_eq!((health.tiers[0].rolls[0].min, health.tiers[0].rolls[0].max), (5.0, 15.0));

@@ -1,9 +1,10 @@
-//! The game's affix and item base definitions, from the masters in `PermaLoad.bundle`: the same lists the trainer's
-//! live capture reads (`AffixList.singleAffixes`/`multiAffixes`, `ItemList.EquippableItems`), field for field.
+//! The game's affix, item base and ailment definitions, from the masters in `PermaLoad.bundle` the game reads them from
+//! (`AffixList.singleAffixes`/`multiAffixes`, `ItemList.EquippableItems` and `idolAltarPropertyList`, `AilmentList`),
+//! field for field.
 
 use crate::error::{Error, Result};
+use crate::uniques::unique_ids;
 use crate::value::Value;
-use std::collections::BTreeSet;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Definitions {
@@ -104,10 +105,6 @@ pub struct Implicit {
     pub maximum: f32,
 }
 
-fn text(v: &Value) -> Result<String> {
-    v.as_str().map(str::to_owned)
-}
-
 fn property(v: &Value) -> Result<AffixProperty> {
     Ok(AffixProperty {
         property: v.field("property", Value::int)?,
@@ -154,9 +151,9 @@ fn affix(v: &Value, multi: bool) -> Result<Affix> {
         })?;
         Ok(Affix {
             id,
-            name: v.field("affixName", text)?,
-            display_name: v.field("affixDisplayName", text)?,
-            title: v.field("affixTitle", text)?,
+            name: v.field("affixName", Value::as_string)?,
+            display_name: v.field("affixDisplayName", Value::as_string)?,
+            title: v.field("affixTitle", Value::as_string)?,
             kind: v.field("type", Value::int)?,
             special: v.field("specialAffixType", Value::int)?,
             class_specificity: v.field("classSpecificity", Value::int)?,
@@ -192,8 +189,8 @@ fn sub_type(v: &Value) -> Result<SubType> {
     let read = || -> Result<SubType> {
         Ok(SubType {
             id,
-            name: v.field("name", text)?,
-            display_name: v.field("displayName", text)?,
+            name: v.field("name", Value::as_string)?,
+            display_name: v.field("displayName", Value::as_string)?,
             level_requirement: v.field("levelRequirement", Value::int)?,
             class_requirement: v.field("classRequirement", Value::int)?,
             cannot_drop: v.field("cannotDrop", Value::as_bool)?,
@@ -208,11 +205,11 @@ fn item_type(v: &Value) -> Result<ItemType> {
     let id = v.field("baseTypeID", Value::int)?;
     let read = || -> Result<ItemType> {
         let sub_types: Vec<SubType> = v.field("subItems", |list| list.as_array()?.iter().map(sub_type).collect())?;
-        unique(sub_types.iter().map(|s| s.id), "subtype")?;
+        unique_ids(sub_types.iter().map(|s| s.id), "subtype")?;
         Ok(ItemType {
             id,
-            name: v.field("BaseTypeName", text)?,
-            display_name: v.field("displayName", text)?,
+            name: v.field("BaseTypeName", Value::as_string)?,
+            display_name: v.field("displayName", Value::as_string)?,
             maximum_affixes: v.field("maximumAffixes", Value::int)?,
             is_weapon: v.field("isWeapon", Value::as_bool)?,
             sub_types,
@@ -221,38 +218,43 @@ fn item_type(v: &Value) -> Result<ItemType> {
     read().map_err(|e| e.context(format!("item type {id}")))
 }
 
-fn unique<T: Ord + std::fmt::Display + Copy>(ids: impl Iterator<Item = T>, what: &str) -> Result<()> {
-    let mut seen = BTreeSet::new();
-    for id in ids {
-        if !seen.insert(id) {
-            return Err(Error::data(format!("{what} {id} appears twice")));
-        }
-    }
-    Ok(())
-}
-
 /// The affixes from a decoded `AffixList`, single affixes first.
 pub(crate) fn affixes(list: &Value) -> Result<Vec<Affix>> {
     let mut affixes: Vec<Affix> = list.field("singleAffixes", |l| l.as_array()?.iter().map(|a| affix(a, false)).collect())?;
     affixes.extend(list.field("multiAffixes", |l| l.as_array()?.iter().map(|a| affix(a, true)).collect::<Result<Vec<_>>>())?);
-    unique(affixes.iter().map(|a| a.id), "affix")?;
+    unique_ids(affixes.iter().map(|a| a.id), "affix")?;
     Ok(affixes)
 }
 
 /// The equippable item types from a decoded `ItemList`.
 pub(crate) fn item_types(list: &Value) -> Result<Vec<ItemType>> {
     let types: Vec<ItemType> = list.field("EquippableItems", |l| l.as_array()?.iter().map(item_type).collect())?;
-    unique(types.iter().map(|t| t.id), "item type")?;
+    unique_ids(types.iter().map(|t| t.id), "item type")?;
     Ok(types)
+}
+
+/// The ailments of a decoded `AilmentList`, in list order, each read through `resolve` (its entries are references).
+pub(crate) fn ailments(list: &Value, mut resolve: impl FnMut((i32, i64)) -> Result<Value>) -> Result<Vec<Ailment>> {
+    let pointers = list.field("list", |l| l.as_array()?.iter().map(Value::as_pptr).collect::<Result<Vec<_>>>())?;
+    pointers
+        .into_iter()
+        .enumerate()
+        .map(|(index, pointer)| {
+            let ailment = resolve(pointer).and_then(|ailment| {
+                Ok(Ailment {
+                    id: ailment.field("id", Value::int)?,
+                    effect_of_increased_effectiveness: ailment.field("effectOfIncreasedEffectiveness", Value::int)?,
+                })
+            });
+            ailment.map_err(|e| e.context(format!("list[{index}]")))
+        })
+        .collect()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    fn object(fields: Vec<(&str, Value)>) -> Value {
-        Value::Object(fields.into_iter().map(|(k, v)| (k.into(), v)).collect())
-    }
+    use crate::testing::object;
 
     fn tier(min: f32, max: f32, extra: Vec<Value>) -> Value {
         object(vec![
@@ -319,7 +321,7 @@ mod tests {
     }
 
     #[test]
-    fn single_and_multi_affixes_read_as_the_capture_reads_them() {
+    fn single_and_multi_affixes_read_as_the_game_lists_them() {
         let affixes = affixes(&list(vec![single(25)], vec![multi(14, 1)])).unwrap();
         let health = &affixes[0];
         assert_eq!((health.id, health.kind, health.multi, health.use_generated_name), (25, 1, false, true));
@@ -331,6 +333,34 @@ mod tests {
         assert_eq!(pair.properties.iter().map(|p| p.property).collect::<Vec<_>>(), [67, 68]);
         assert_eq!(pair.tiers[0].rolls.len(), 2);
         assert!((pair.tiers[0].rolls[1].min - 0.05).abs() < 1e-6);
+    }
+
+    #[test]
+    fn ailments_read_through_their_references_in_list_order() {
+        let pointer = |path: i64| object(vec![("m_FileID", Value::Int(0)), ("m_PathID", Value::Int(path))]);
+        let list = object(vec![("list", Value::Array(vec![pointer(7), pointer(3)]))]);
+        let read = ailments(&list, |(_, path)| {
+            Ok(object(vec![
+                ("id", Value::UInt(path as u64)),
+                ("effectOfIncreasedEffectiveness", Value::Int(i64::from(path == 3))),
+            ]))
+        })
+        .unwrap();
+        assert_eq!(
+            read,
+            [
+                Ailment {
+                    id: 7,
+                    effect_of_increased_effectiveness: 0
+                },
+                Ailment {
+                    id: 3,
+                    effect_of_increased_effectiveness: 1
+                }
+            ]
+        );
+        let error = ailments(&list, |_| Ok(object(vec![("id", Value::UInt(1))]))).unwrap_err().to_string();
+        assert!(error.contains("list[0]") && error.contains("effectOfIncreasedEffectiveness"), "{error}");
     }
 
     #[test]
