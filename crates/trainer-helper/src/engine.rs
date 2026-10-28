@@ -95,10 +95,11 @@ impl Runtime {
         // SAFETY: caller retains this exact module and establishes its supported ABI.
         unsafe {
             let mut symbol = |name| export(module, name);
+            let access = RuntimeAccess::resolve(&mut symbol).map_err(|e| e.to_string())?;
             Ok(Self {
                 ownership: raw::Api::resolve(&mut symbol).map_err(|e| e.to_string())?,
-                access: RuntimeAccess::resolve(&mut symbol).map_err(|e| e.to_string())?,
-                invocation: raw::InvocationApi::resolve(&mut symbol).map_err(|e| e.to_string())?,
+                invocation: access.invocation(&mut symbol).map_err(|e| e.to_string())?,
+                access,
                 writes: raw::FieldWriteApi::resolve(&mut symbol).map_err(|e| e.to_string())?,
             })
         }

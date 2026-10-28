@@ -107,7 +107,7 @@ impl RuntimeAccess {
         // SAFETY: class is retained metadata; all dependent exports are queried only
         // after its null check. This validates a closed framework List before field access.
         unsafe {
-            if class.is_null() || (self.class_value)(class) || (self.class_image)(class) != (self.corlib)() || (self.type_code)((self.class_type)(class)) != 0x15 {
+            if class.is_null() || (self.class_value)(class) || (self.class_image)(class).cast_const() != (self.corlib)() || (self.type_code)((self.class_type)(class)) != 0x15 {
                 return Err(unsupported("closed List class"));
             }
             let name = (self.class_name)(class);
@@ -441,10 +441,10 @@ mod tests {
         ROOTS.set(ROOTS.get() - 1);
         FREED.set(FREED.get() + 1);
     }
-    unsafe extern "C-unwind" fn corlib() -> Ptr {
-        token(0x7000)
+    unsafe extern "C-unwind" fn corlib() -> *const std::ffi::c_void {
+        token::<std::ffi::c_void>(0x7000).cast_const()
     }
-    unsafe extern "C-unwind" fn class_from_name(_: Ptr, namespace: *const std::ffi::c_char, name: *const std::ffi::c_char) -> Class {
+    unsafe extern "C-unwind" fn class_from_name(_: *const std::ffi::c_void, namespace: *const std::ffi::c_char, name: *const std::ffi::c_char) -> Class {
         // SAFETY: production calls supply static null-terminated metadata names.
         unsafe {
             match (CStr::from_ptr(namespace), CStr::from_ptr(name)) {

@@ -148,7 +148,8 @@ pub type ClassIsEnum = unsafe extern "C-unwind" fn(*const Class) -> bool;
 pub type ClassEnumBasetype = unsafe extern "C-unwind" fn(*mut Class) -> *const Type;
 pub type ClassValueSize = unsafe extern "C-unwind" fn(*mut Class, *mut u32) -> i32;
 
-/// Invocation/metadata exports from the Unity 6000.4 public header. Separate from attachment APIs.
+/// The exports a checked invocation needs, from the Unity 6000.4 public header. Separate from attachment APIs; built by
+/// [`crate::metadata::MetadataApi::invocation`], which shares the metadata table's exports and resolves only the rest.
 #[derive(Clone, Copy)]
 pub struct InvocationApi {
     pub runtime_invoke: RuntimeInvoke,
@@ -224,50 +225,6 @@ impl Api {
             gchandle_new: load!(c"il2cpp_gchandle_new", GcHandleNew),
             gchandle_free: load!(c"il2cpp_gchandle_free", GcHandleFree),
             gchandle_get_target: load!(c"il2cpp_gchandle_get_target", GcHandleTarget),
-        })
-    }
-}
-
-impl InvocationApi {
-    /// Resolve invocation exports without calling any of them.
-    ///
-    /// # Safety
-    /// Every address must implement the named Unity 6000.4 public runtime API with this exact ABI.
-    /// Code must remain loaded throughout all uses. Resolution proves neither runtime identity
-    /// nor permission/safety to execute a particular managed method.
-    pub unsafe fn resolve(mut symbol: impl FnMut(&'static CStr) -> Option<NonNull<c_void>>) -> Result<Self, MissingExport> {
-        macro_rules! load {
-            ($name:expr, $ty:ty) => {{
-                let address = symbol($name).ok_or(MissingExport($name))?;
-                // SAFETY: caller establishes the named export's ABI and code lifetime.
-                unsafe { std::mem::transmute::<*mut c_void, $ty>(address.as_ptr()) }
-            }};
-        }
-        Ok(Self {
-            runtime_invoke: load!(c"il2cpp_runtime_invoke", RuntimeInvoke),
-            method_get_return_type: load!(c"il2cpp_method_get_return_type", MethodGetReturnType),
-            method_get_class: load!(c"il2cpp_method_get_class", MethodGetClass),
-            method_is_generic: load!(c"il2cpp_method_is_generic", MethodIsGeneric),
-            method_is_inflated: load!(c"il2cpp_method_is_inflated", MethodIsInflated),
-            method_is_instance: load!(c"il2cpp_method_is_instance", MethodIsInstance),
-            method_get_param_count: load!(c"il2cpp_method_get_param_count", MethodGetParamCount),
-            method_get_param: load!(c"il2cpp_method_get_param", MethodGetParam),
-            method_get_flags: load!(c"il2cpp_method_get_flags", MethodGetFlags),
-            type_get_type: load!(c"il2cpp_type_get_type", TypeGetType),
-            type_is_byref: load!(c"il2cpp_type_is_byref", TypeIsByref),
-            class_from_type: load!(c"il2cpp_class_from_type", ClassFromType),
-            class_is_valuetype: load!(c"il2cpp_class_is_valuetype", ClassIsValueType),
-            class_is_generic: load!(c"il2cpp_class_is_generic", ClassIsGeneric),
-            class_is_inflated: load!(c"il2cpp_class_is_inflated", ClassIsInflated),
-            class_is_assignable_from: load!(c"il2cpp_class_is_assignable_from", ClassIsAssignableFrom),
-            object_get_class: load!(c"il2cpp_object_get_class", ObjectGetClass),
-            object_unbox: load!(c"il2cpp_object_unbox", ObjectUnbox),
-            object_get_virtual_method: load!(c"il2cpp_object_get_virtual_method", ObjectGetVirtualMethod),
-            get_corlib: load!(c"il2cpp_get_corlib", GetCorlib),
-            class_from_name: load!(c"il2cpp_class_from_name", ClassFromName),
-            class_is_enum: load!(c"il2cpp_class_is_enum", ClassIsEnum),
-            class_enum_basetype: load!(c"il2cpp_class_enum_basetype", ClassEnumBasetype),
-            class_value_size: load!(c"il2cpp_class_value_size", ClassValueSize),
         })
     }
 }

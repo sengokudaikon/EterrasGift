@@ -211,10 +211,10 @@ unsafe extern "C-unwind" fn assemblies(_: *const raw::Domain, count: *mut usize)
 unsafe extern "C-unwind" fn assembly_image(_: Ptr) -> Ptr {
     token(10)
 }
-unsafe extern "C-unwind" fn corlib() -> Ptr {
-    token(11)
+unsafe extern "C-unwind" fn corlib() -> *const std::ffi::c_void {
+    token::<std::ffi::c_void>(11).cast_const()
 }
-unsafe extern "C-unwind" fn class_from_name(_: Ptr, namespace: *const c_char, name: *const c_char) -> Class {
+unsafe extern "C-unwind" fn class_from_name(_: *const std::ffi::c_void, namespace: *const c_char, name: *const c_char) -> Class {
     // SAFETY: adapter supplies static, nul-terminated metadata names.
     let (namespace, name) = unsafe { (CStr::from_ptr(namespace), CStr::from_ptr(name)) };
     token(match (namespace, name) {

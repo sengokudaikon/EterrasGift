@@ -150,10 +150,10 @@ mod tests {
     unsafe extern "C-unwind" fn assembly_image(_: Ptr) -> Ptr {
         token(IMAGE)
     }
-    unsafe extern "C-unwind" fn corlib() -> Ptr {
-        token(IMAGE)
+    unsafe extern "C-unwind" fn corlib() -> *const std::ffi::c_void {
+        token::<std::ffi::c_void>(IMAGE).cast_const()
     }
-    unsafe extern "C-unwind" fn class_from_name(_: Ptr, namespace: *const c_char, name: *const c_char) -> Class {
+    unsafe extern "C-unwind" fn class_from_name(_: *const std::ffi::c_void, namespace: *const c_char, name: *const c_char) -> Class {
         // SAFETY: the production adapter supplies valid null-terminated class names.
         let (namespace, name) = unsafe { (CStr::from_ptr(namespace), CStr::from_ptr(name)) };
         match (namespace, name) {

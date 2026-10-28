@@ -182,7 +182,7 @@ exports! {
     domain_get: "il2cpp_domain_get" => raw::DomainGet,
     assemblies: "il2cpp_domain_get_assemblies" => unsafe extern "C-unwind" fn(*const raw::Domain, *mut usize) -> *const Ptr,
     assembly_image: "il2cpp_assembly_get_image" => unsafe extern "C-unwind" fn(Ptr) -> Ptr,
-    class_from_name: "il2cpp_class_from_name" => unsafe extern "C-unwind" fn(Ptr, *const c_char, *const c_char) -> Class,
+    class_from_name: "il2cpp_class_from_name" => raw::ClassFromName,
     class_parent: "il2cpp_class_get_parent" => unsafe extern "C-unwind" fn(Class) -> Class,
     class_nested: "il2cpp_class_get_nested_types" => unsafe extern "C-unwind" fn(Class, *mut Ptr) -> Class,
     class_name: "il2cpp_class_get_name" => unsafe extern "C-unwind" fn(Class) -> *const c_char,
@@ -217,7 +217,7 @@ exports! {
     method_generic: "il2cpp_method_is_generic" => raw::MethodIsGeneric,
     method_inflated: "il2cpp_method_is_inflated" => raw::MethodIsInflated,
     method_flags: "il2cpp_method_get_flags" => raw::MethodGetFlags,
-    corlib: "il2cpp_get_corlib" => unsafe extern "C-unwind" fn() -> Ptr,
+    corlib: "il2cpp_get_corlib" => raw::GetCorlib,
     object_new: "il2cpp_object_new" => unsafe extern "C-unwind" fn(Class) -> *mut raw::Object,
     array_new: "il2cpp_array_new" => unsafe extern "C-unwind" fn(Class, usize) -> *mut raw::Object,
     array_length: "il2cpp_array_length" => unsafe extern "C-unwind" fn(*mut raw::Object) -> u32,
@@ -233,6 +233,48 @@ exports! {
 }
 
 impl MetadataApi {
+    /// The invocation table for this runtime: the exports this table already holds, plus the seven only invocation
+    /// uses, resolved without calling any of them.
+    ///
+    /// # Safety
+    /// As [`Self::resolve`], with `resolver` resolving from the same runtime as this table. Resolution proves no
+    /// permission or safety to execute a particular managed method.
+    pub unsafe fn invocation(&self, mut resolver: impl FnMut(&'static CStr) -> Option<NonNull<c_void>>) -> Result<raw::InvocationApi, raw::MissingExport> {
+        macro_rules! load {
+            ($name:expr, $ty:ty) => {{
+                let address = resolver($name).ok_or(raw::MissingExport($name))?;
+                // SAFETY: the caller establishes the named export's ABI and code lifetime.
+                unsafe { std::mem::transmute::<*mut c_void, $ty>(address.as_ptr()) }
+            }};
+        }
+        Ok(raw::InvocationApi {
+            runtime_invoke: load!(c"il2cpp_runtime_invoke", raw::RuntimeInvoke),
+            method_get_class: load!(c"il2cpp_method_get_class", raw::MethodGetClass),
+            class_is_generic: load!(c"il2cpp_class_is_generic", raw::ClassIsGeneric),
+            class_is_inflated: load!(c"il2cpp_class_is_inflated", raw::ClassIsInflated),
+            object_unbox: load!(c"il2cpp_object_unbox", raw::ObjectUnbox),
+            object_get_virtual_method: load!(c"il2cpp_object_get_virtual_method", raw::ObjectGetVirtualMethod),
+            class_value_size: load!(c"il2cpp_class_value_size", raw::ClassValueSize),
+            method_get_return_type: self.method_return,
+            method_is_generic: self.method_generic,
+            method_is_inflated: self.method_inflated,
+            method_is_instance: self.method_instance,
+            method_get_param_count: self.method_params,
+            method_get_param: self.method_param,
+            method_get_flags: self.method_flags,
+            type_get_type: self.type_code,
+            type_is_byref: self.type_byref,
+            class_from_type: self.type_class,
+            class_is_valuetype: self.class_value,
+            class_is_assignable_from: self.assignable,
+            object_get_class: self.object_class,
+            get_corlib: self.corlib,
+            class_from_name: self.class_from_name,
+            class_is_enum: self.class_enum,
+            class_enum_basetype: self.enum_base,
+        })
+    }
+
     /// Every loaded assembly's image, bounded and checked; a runtime without a domain yet is not ready.
     ///
     /// # Safety

@@ -626,10 +626,10 @@ mod tests {
         unsafe { drop(Box::from_raw(handle.cast::<*mut raw::Object>())) };
         ROOTS.set(ROOTS.get() - 1);
     }
-    unsafe extern "C-unwind" fn corlib() -> Ptr {
-        token(3)
+    unsafe extern "C-unwind" fn corlib() -> *const std::ffi::c_void {
+        token::<std::ffi::c_void>(3).cast_const()
     }
-    unsafe extern "C-unwind" fn class_from_name(_: Ptr, ns: *const c_char, name: *const c_char) -> Class {
+    unsafe extern "C-unwind" fn class_from_name(_: *const std::ffi::c_void, ns: *const c_char, name: *const c_char) -> Class {
         // SAFETY: adapter supplies static C metadata names.
         unsafe {
             assert_eq!(CStr::from_ptr(ns), c"System");

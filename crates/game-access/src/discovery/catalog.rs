@@ -354,10 +354,10 @@ mod tests {
         ENUM_BASE_CALLS.set(ENUM_BASE_CALLS.get() + 1);
         token(BASE_TYPE)
     }
-    unsafe extern "C-unwind" fn corlib() -> Ptr {
-        token(0xb000)
+    unsafe extern "C-unwind" fn corlib() -> *const std::ffi::c_void {
+        token::<std::ffi::c_void>(0xb000).cast_const()
     }
-    unsafe extern "C-unwind" fn class_from_name(_: Ptr, _: *const std::ffi::c_char, name: *const std::ffi::c_char) -> Class {
+    unsafe extern "C-unwind" fn class_from_name(_: *const std::ffi::c_void, _: *const std::ffi::c_char, name: *const std::ffi::c_char) -> Class {
         // SAFETY: production supplies a static, nul-terminated primitive name.
         assert_eq!(unsafe { CStr::from_ptr(name) }, c"Byte");
         token(BYTE_CLASS)
