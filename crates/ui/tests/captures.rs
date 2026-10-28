@@ -1,9 +1,10 @@
-//! Headless PNG captures of the real UI (`cargo capture`), the counterpart of the C# suite's headless captures.
+//! Headless PNG captures of the real UI (`cargo capture`).
 //!
 //! A test-only Slint platform hands out one `MinimalSoftwareWindow`, so the software renderer draws the real `.slint`
 //! components with the bundled fonts and no display. Each window runs the real pages on a fake game host and a settings
 //! file of its own, so nothing a capture does reaches a real install or the user's settings. Scenarios drive the window
-//! through real input (pointer clicks, keys) where the behaviour lives in the view. Captures land in
+//! through real input (pointer clicks, keys) where the behaviour lives in the view. Slint's clock runs with the real one,
+//! and a scenario moves it on by hand ([`advance`]) past a delay such as a tip's. Captures land in
 //! `artifacts/captures/<name>.png`. This is a `harness = false` test because Slint's platform can be set once per
 //! process.
 
@@ -25,7 +26,7 @@ use eg_ui::decorations::freeze_clock;
 use eg_ui::mods::ModsPage;
 use eg_ui::settings::SettingsPage;
 use eg_ui::shell::Page;
-use eg_ui::{App, Eterra, HomeState, LaunchMode as ViewMode, MainWindow, ModsState, Nav, SettingsState, Tip, Tokens};
+use eg_ui::{App, BloomPhase as ViewPhase, Eterra, HomeState, LaunchMode as ViewMode, MainWindow, ModsState, Nav, SettingsState, Tip, Tokens};
 use slint::platform::software_renderer::{MinimalSoftwareWindow, RepaintBufferType};
 use slint::platform::{Key, Platform, PointerEventButton, WindowAdapter, WindowEvent};
 use slint::{ComponentHandle, LogicalPosition, Model, PhysicalSize, SharedString};
@@ -117,6 +118,16 @@ impl GameHost for FakeGameHost {
 
 struct CapturePlatform {
     window: Rc<MinimalSoftwareWindow>,
+    start: Instant,
+}
+
+/// How far [`advance`] has moved Slint's clock past the real one, in milliseconds.
+static ADVANCED_MS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// Moves Slint's clock on by `by`, then runs what came due: a tip's delay passes without waiting it out.
+fn advance(by: Duration) {
+    ADVANCED_MS.fetch_add(by.as_millis() as u64, std::sync::atomic::Ordering::SeqCst);
+    settle();
 }
 
 type UiEvent = Box<dyn FnOnce() + Send>;
@@ -152,6 +163,9 @@ impl Platform for CapturePlatform {
     }
     fn create_window_adapter(&self) -> Result<Rc<dyn WindowAdapter>, slint::PlatformError> {
         Ok(self.window.clone())
+    }
+    fn duration_since_start(&self) -> Duration {
+        self.start.elapsed() + Duration::from_millis(ADVANCED_MS.load(std::sync::atomic::Ordering::SeqCst))
     }
 }
 
@@ -285,7 +299,7 @@ impl Session {
             start: Page::Home,
         };
         eg_ui::install(&ui, app);
-        // Captures show settled frames, as `Settle()` does in the C# suite.
+        // Captures show settled frames.
         ui.global::<Tokens>().set_motion(false);
         ui.global::<Tokens>().set_high_contrast(false);
         self.window.set_size(PhysicalSize::new(width, height));
@@ -485,7 +499,11 @@ const FIRST_LOCATION_BOX_Y: f32 = 58.0;
 fn main() {
     let window = MinimalSoftwareWindow::new(RepaintBufferType::NewBuffer);
     CAPTURE_WINDOW.with(|slot| *slot.borrow_mut() = Rc::downgrade(&window));
-    slint::platform::set_platform(Box::new(CapturePlatform { window: window.clone() })).expect("the capture platform is set once per process");
+    slint::platform::set_platform(Box::new(CapturePlatform {
+        window: window.clone(),
+        start: Instant::now(),
+    }))
+    .expect("the capture platform is set once per process");
     let out = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../artifacts/captures");
     std::fs::create_dir_all(&out).expect("create artifacts/captures");
     let data = tempfile::tempdir().expect("a folder for the captures' own data");
@@ -575,9 +593,8 @@ fn main() {
     let ui = session.open_on(host.clone(), false, 1100, 700);
     session.click(PLAY_ONLINE_X, PLAY_Y);
     assert!(host.state.lock().unwrap().launched.is_empty(), "a disabled Play starts nothing");
-    // The hover tip opens after its delay, which runs on the real clock.
-    std::thread::sleep(Duration::from_millis(600));
-    settle();
+    // The hover tip opens after its delay.
+    advance(Duration::from_millis(600));
     session.capture(&ui, "home-running-tip");
 
     // The forge's section strip is one tab stop; Right moves to the next section.
@@ -627,17 +644,33 @@ fn main() {
     });
     // Home looks again each time it comes to show.
     revisit_home(&ui);
+    let home = ui.global::<HomeState>();
+    assert_eq!(home.get_phase(), ViewPhase::Opening, "a game at the login is opening");
+    assert!(
+        !home.get_message().is_empty() && !home.get_message_is_error(),
+        "the start's message stays while its game runs"
+    );
+    assert!(!home.get_can_start(), "a running game holds Play");
     session.capture(&ui, "home-opening");
     host.with(|game| game.readiness = GameReadiness::Offline);
     revisit_home(&ui);
+    assert_eq!(ui.global::<HomeState>().get_phase(), ViewPhase::Bloom, "a character in play is the bloom");
+    assert!(!ui.global::<HomeState>().get_message_is_error());
     session.capture(&ui, "home-bloom");
     // The game found, its log not yet at the login: the tree buds and ash drifts up the page.
     let host = session.host();
     host.with(|game| game.running = running());
     let ui = session.open_on(host, true, 1100, 700);
+    let home = ui.global::<HomeState>();
+    assert_eq!(home.get_phase(), ViewPhase::Budding, "a game on its way in buds");
+    assert!(home.get_game_starting(), "ash drifts while the game is on its way in");
+    assert!(
+        home.get_message().starts_with("Last Epoch is running") && !home.get_message_is_error(),
+        "Play says why it waits"
+    );
     session.capture(&ui, "home-starting");
 
-    // A start the game answers: the tree blooms out from the eye, caught partway (the C# suite's `bloom-reveal`).
+    // A start the game answers: the tree blooms out from the eye, caught partway.
     let host = session.host();
     let ui = session.open_on(host.clone(), true, 1100, 700);
     let start = Instant::now();
@@ -660,10 +693,18 @@ fn main() {
     let ui = session.open_on(host, true, 1100, 700);
     ui.global::<HomeState>().invoke_start(ViewMode::Offline);
     settle();
+    let home = ui.global::<HomeState>();
+    assert_eq!(home.get_phase(), ViewPhase::Wilted);
+    assert!(home.get_message_is_error(), "a refused start is an error");
+    assert!(home.get_message().starts_with("Last Epoch was not found"), "{}", home.get_message());
     session.capture(&ui, "home-launch-error");
     let host = session.host();
     host.with(|game| game.loader = ModLoaderState::Conflict);
     let ui = session.open_on(host, true, 1100, 700);
+    let home = ui.global::<HomeState>();
+    assert!(home.get_message_is_error(), "a conflict stops every start");
+    assert!(home.get_message().starts_with(eg_companion::loader::CONFLICT), "{}", home.get_message());
+    assert!(!home.get_can_start() && !home.get_can_start_with_mods(), "every Play waits on the conflict");
     session.capture(&ui, "home-conflict");
 
     // A start with mods waits for MelonLoader: Home says so while it waits, and every Play holds.
@@ -682,7 +723,7 @@ fn main() {
     assert!(!ui.global::<HomeState>().get_can_start_with_mods());
     session.capture(&ui, "home-mods-not-installed");
 
-    // A run with no launcher (the C# `home-trainer-on`/`-off`): Home names the companion and nothing else.
+    // A run with no launcher: Home names the companion and nothing else.
     let folder = session.folder();
     let service = SettingsService::inline(SettingsStore::open(&folder.join("app"), &folder.join("settings.json"), &[]));
     let ui = MainWindow::new().expect("create MainWindow");
@@ -752,8 +793,7 @@ fn main() {
         if !ui.window().is_visible() {
             break;
         }
-        std::thread::sleep(Duration::from_millis(20));
-        settle();
+        advance(Duration::from_millis(20));
     }
     assert!(restart.requested() && !ui.window().is_visible(), "Restart now closes the window and asks for a restart");
 
@@ -764,7 +804,7 @@ fn main() {
     settle();
     session.capture(&ui, "settings-high-contrast");
 
-    // The C# settings-trainer-off: a run without the trainer, its switch alone in a column as wide as "Off".
+    // A run without the trainer, its switch alone in a column as wide as "Off".
     let ui = session.open(false, 1100, 700);
     ui.global::<Nav>().invoke_navigate("settings".into());
     settle();
@@ -783,7 +823,7 @@ fn main() {
     }
     session.capture(&ui, "settings-narrow-locations");
 
-    // The scroll bar: a pointer resting on it widens it over its track (after its show delay, on the real clock), and
+    // The scroll bar: a pointer resting on it widens it over its track (after its show delay), and
     // dragging the thumb to the top brings the title back.
     let thumb = |ui: &MainWindow| {
         let frame = ui.window().take_snapshot().expect("take_snapshot");
@@ -803,8 +843,7 @@ fn main() {
     // Over the line-up button, which the page's scroll view starts with at the window's top.
     let line_up = LogicalPosition::new(bar_x, 8.0);
     session.window.dispatch_event(WindowEvent::PointerMoved { position: line_up });
-    std::thread::sleep(Duration::from_millis(600));
-    settle();
+    advance(Duration::from_millis(600));
     session.capture(&ui, "settings-narrow-scroll-bar");
     let (Some(top), Some(bottom)) = thumb(&ui) else {
         panic!("the resting pointer widens the scroll bar")
@@ -855,19 +894,19 @@ fn main() {
     assert_eq!(ui.global::<Nav>().get_current_page(), "home");
     ui.global::<Nav>().invoke_navigate("settings".into());
     release.send(()).unwrap();
-    wait_for_save(&ui);
+    wait_for("settings save", || !ui.global::<SettingsState>().get_saving());
     assert!(!service.snapshot().store.saved().modules["trainer"]);
 
     // The file becomes unwritable after startup. Failure retains intent and exposes a real retry button.
     std::fs::remove_file(&file).unwrap();
     std::fs::create_dir(&file).unwrap();
     session.click(744.0, 98.0);
-    wait_for_save(&ui);
+    wait_for("settings save", || !ui.global::<SettingsState>().get_saving());
     assert!(ui.global::<SettingsState>().get_can_retry());
     session.capture(&ui, "settings-save-failed");
     std::fs::remove_dir(&file).unwrap();
     session.click(900.0, 672.0);
-    wait_for_save(&ui);
+    wait_for("settings save", || !ui.global::<SettingsState>().get_saving());
     assert!(!ui.global::<SettingsState>().get_can_retry());
     assert!(!service.snapshot().store.has_pending_write());
     session.capture(&ui, "settings-save-retried");
@@ -1180,15 +1219,6 @@ fn mods_input(session: &Session) {
     session.capture(&ui, "mods-choice-selected");
 }
 
-fn wait_for_save(ui: &MainWindow) {
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
-    while ui.global::<SettingsState>().get_saving() {
-        assert!(std::time::Instant::now() < deadline, "settings worker must finish");
-        std::thread::sleep(std::time::Duration::from_millis(1));
-        settle();
-    }
-}
-
 fn wait_for(what: &str, mut completed: impl FnMut() -> bool) {
     let deadline = Instant::now() + Duration::from_secs(5);
     while !completed() {
@@ -1199,9 +1229,9 @@ fn wait_for(what: &str, mut completed: impl FnMut() -> bool) {
     settle();
 }
 
-/// The Mods page on the C# suite's sample library (`ModFixtures.GameFolder` and `CompanionPageTests`), under the C#
-/// captures' names so the two can be laid side by side: Flicker Dreams and Ability Ranges loaded in the last game with
-/// mods, Stash Sorter did not, and Ward Meter is off. The stand-in DLLs are metadata only (`fixtures/sample-mods`).
+/// The Mods page on a sample library, under the C# captures' names so the two can be laid side by side: Flicker Dreams
+/// and Ability Ranges loaded in the last game with mods, Stash Sorter did not, and Ward Meter is off. The stand-in DLLs are
+/// metadata only (`fixtures/sample-mods`).
 fn mods_captures(session: &Session) {
     use eg_core::hashes::of_file as hash_file;
     use std::sync::atomic::{AtomicUsize, Ordering};
@@ -1221,7 +1251,7 @@ fn mods_captures(session: &Session) {
     // The first installed row's middle at 1100×700.
     const ROW_Y: f32 = 197.0;
 
-    /// MSBuild for the sources, as the C# suite's `CompilingRunner`: a project evaluates to `<its folder>\bin\Release\net6.0\<its
+    /// MSBuild for the sources: a project evaluates to `<its folder>\bin\Release\net6.0\<its
     /// name>.dll` at its <Version> (1.0.0 when it sets none), and a build writes `output` there, or fails with its text.
     struct SampleRunner {
         output: Mutex<Result<&'static [u8], String>>,
@@ -1368,7 +1398,7 @@ fn mods_captures(session: &Session) {
         state(ui).invoke_select_mod(index_of(ui, name));
         settle();
     };
-    // Each window class under one name, as the C# suite's `SaveSizesAsync`: standard, compact, narrow, then maximized.
+    // Each window class under one name: standard, compact, narrow, then maximized.
     let sizes = |ui: &MainWindow, name: &str| {
         for (class, width, height) in [("", 1100, 700), ("-compact", 940, 580), ("-narrow", 680, 580), ("-maximized", 1920, 1080)] {
             session.resize(width, height);
@@ -1623,7 +1653,7 @@ fn mods_captures(session: &Session) {
     session.capture(&ui, "mods-keyboard-identity");
 }
 
-/// The trainer's pages (spec/trainer.md §5): as the app shows them with no session (nothing connected), and in states
+/// The trainer's pages: as the app shows them with no session (nothing connected), and in states
 /// only a connected game has, through a fake session that answers reads and writes from its own fields.
 fn trainer_captures(session: &Session) {
     use eg_ui::trainer::catalog::{Area, FEATURES};
@@ -1936,7 +1966,7 @@ fn trainer_captures(session: &Session) {
     session.key(Key::UpArrow);
     show(&ui);
     assert_eq!(state(&ui).get_rows().row_data(0).expect("Damage multiplier").inline_value.text, "3");
-    std::thread::sleep(Duration::from_millis(600));
+    advance(Duration::from_millis(600));
     show(&ui);
     session.capture(&ui, "trainer-value-stepped-1100");
     // The rows split anew (here the window narrows from two columns to one) while a number is half typed: the box is the
@@ -2125,7 +2155,7 @@ fn trainer_captures(session: &Session) {
     session.capture(&ui, "trainer-planned-1100");
 }
 
-/// The Item Forge on the fixture game (spec/forge-fixture.json `captureScenarios`, the C# `ReviewCaptureTests`): every
+/// The Item Forge on the fixture game (spec/forge-fixture.json `captureScenarios`): every
 /// window class with drafts, the menus and the popover, Apply and a draft the game outran, the status strip and
 /// implicits, and a unique item. The real app has no game behind the forge yet; these attach the fixture.
 fn forge_captures(session: &Session) {
@@ -2166,9 +2196,8 @@ fn forge_captures(session: &Session) {
         assert!(editor.commit_input(cell));
     }
 
-    // Not connected, Connect in the page (`forge-not-connected`, the C# `TheForgeFollowsTheLoginInWordsWithNavigationAtHand`;
-    // the port has no trainer-only window, so Home stays in the rail), and the same wait at three sizes (`empty`,
-    // `empty-compact`, `empty-narrow`, the C# `WaitingForTheGame`).
+    // Not connected, Connect in the page (`forge-not-connected`; Home stays in the rail), and the same wait at three sizes (`empty`,
+    // `empty-compact`, `empty-narrow`).
     for (name, width, height) in [
         ("forge-not-connected", 1100, 700),
         ("item-empty", 1100, 700),
@@ -2183,8 +2212,8 @@ fn forge_captures(session: &Session) {
     }
 
     // Apply, a draft stepped back with Ctrl+Z, Undo apply, then a draft discarded: the ledger keeps both readbacks and the
-    // message says what was discarded (`ui-preview`, the C# `ForgeSessionTests` walk-through; its refused out-of-range roll
-    // has no port equivalent, since the value popover never drafts one).
+    // message says what was discarded (`ui-preview`). The value popover never drafts an out-of-range roll, so there is none
+    // to refuse here.
     let forge = open(session, FixtureGame::boots(false), 1100, 700);
     forge.handle.edit(|editor| {
         editor.select_affix(Some(0));
@@ -2200,7 +2229,7 @@ fn forge_captures(session: &Session) {
     assert_eq!(forge.game.borrow().writes.len(), 2, "the apply and its undo");
     session.capture(&forge.ui, "item-ui-preview");
 
-    // Two drafts pending at every window class: Movement Speed T1 → T4, Health +34 → +37 (the C# `PendingDraftsAtEachWindowClass`).
+    // Two drafts pending at every window class: Movement Speed T1 → T4, Health +34 → +37.
     for (class, width, height) in SIZES {
         let forge = open(session, FixtureGame::boots(false), width, height);
         forge.handle.edit(|editor| {
@@ -2257,7 +2286,7 @@ fn forge_captures(session: &Session) {
     session.capture(&forge.ui, "item-confirmed");
 
     // A name too long for the header wraps to two lines and ends in an ellipsis, with a seal drafted and another row
-    // selected (`item-long-name-{940,1100}`, the C# `shell-{940,1100}-long-name`, ShellTests).
+    // selected (`item-long-name-{940,1100}`, the C# `shell-{940,1100}-long-name`).
     for (width, height) in [(940, 580), (1100, 700)] {
         let forge = open(session, FixtureGame::boots(false), width, height);
         forge.handle.edit(|editor| {
@@ -2273,7 +2302,7 @@ fn forge_captures(session: &Session) {
     }
 
     // High contrast raises the hairlines, frames and notes in place, a value drafted to its maximum (`item-high-contrast`,
-    // the C# `high-contrast.png`, `ContrastThemesRaiseHairlinesFramesAndNotesInPlace`).
+    // the C# `high-contrast.png`).
     let forge = open(session, FixtureGame::boots(false), 1100, 700);
     forge.ui.global::<Tokens>().set_high_contrast(true);
     forge.handle.edit(|editor| editor.step_to_end(Cell::Affix(0), true));
@@ -2314,8 +2343,7 @@ fn forge_captures(session: &Session) {
     session.resize(1920, 1080);
     session.capture(&forge.ui, "item-unique-maximized");
 
-    // A unique modifier with two rolls scrubs both in its own row, one cell over the other (`unique-rolls-*`, the C#
-    // `UniqueRollsScrubInPlacePreviewLinkedEffectsAndApplyOnlyRolls`).
+    // A unique modifier with two rolls scrubs both in its own row, one cell over the other (`unique-rolls-*`).
     for (width, height) in [(1100, 700), (940, 580)] {
         let game = FixtureGame::unique();
         game.change(|item| {
@@ -2332,8 +2360,7 @@ fn forge_captures(session: &Session) {
         session.capture(&forge.ui, &format!("unique-rolls-{width}"));
     }
 
-    // A Weaver's Will unique: its status strip leads with Weaver's Will, corrupted, the base fixed (`item-status-unique`,
-    // the C# `UniquesOfferOnlyTheirLegendaryKindAndKeepTheirBase`).
+    // A Weaver's Will unique: its status strip leads with Weaver's Will, corrupted, the base fixed (`item-status-unique`).
     let game = FixtureGame::unique_ring();
     game.change(|item| {
         item.name = "Fixture Woven Unique".into();
@@ -2367,7 +2394,7 @@ fn forge_captures(session: &Session) {
     });
     session.capture(&forge.ui, "item-implicits-base-draft");
 
-    // ----- Real input on the cells (the C# `InPlaceMenusAndValuePopover`, `KeyboardTests`, `ReplacementCatalogue`) -----
+    // ----- Real input on the cells: menus, the value popover, the keyboard and the replacement catalogue -----
     let pointer = |forge: &Forge, x: f32, y: f32, kind: &str| {
         let position = LogicalPosition::new(x, y);
         let event = match kind {
@@ -2423,14 +2450,13 @@ fn forge_captures(session: &Session) {
     let owner = tip.get_owner();
     session.key(Key::DownArrow);
     assert!(tip.get_open() && tip.get_owner() != owner, "the next row's tier cell puts its own tip up");
-    std::thread::sleep(Duration::from_millis(300));
-    settle();
+    advance(Duration::from_millis(300));
     assert!(tip.get_open(), "the tier cell's tip stays open under keyboard focus");
 
     let forge = open(session, FixtureGame::boots(true), 1100, 700);
 
     // Hovering a value lights only its bar (`value-hover`); a click without dragging opens the popover (`value-popover`).
-    // On the value itself, as the C# capture's pointer is: the cell takes its hover ground and the bar thickens.
+    // On the value itself: the cell takes its hover ground and the bar thickens.
     pointer(&forge, VALUE_X + 70.0, row_y(1) - 6.0, "move");
     session.capture(&forge.ui, "item-value-hover");
     session.click(VALUE_X, row_y(1) - 6.0);
@@ -2497,7 +2523,7 @@ fn forge_captures(session: &Session) {
     session.key(Key::Escape);
 
     // Del on a focused row's cell drafts the affix's removal, as Remove affix does, beside the other drafts; again it
-    // leaves the removal (the row menu keeps the affix). Unlike the C# Forge, adding and removing wait for Apply.
+    // leaves the removal (the row menu keeps the affix). Adding and removing wait for Apply.
     let affixes = |forge: &Forge| forge.ui.global::<ForgeState>().get_affixes().row_count();
     let removed = |forge: &Forge, row: usize| forge.ui.global::<ForgeState>().get_affixes().row_data(row).unwrap().removed;
     let forge = open(session, FixtureGame::boots(false), 1100, 700);
@@ -2563,10 +2589,9 @@ fn forge_captures(session: &Session) {
     session.key(Key::Escape);
 
     // The rarity in the facts line opens the rarity menu (`item-rarity-menu`); the base, the base picker with the implicits
-    // each base grants (`implicits-base-picker`, the C# `ImplicitsRerollInPlaceAndOnlyABaseChangeReplacesThem`) and, over
-    // the status drafts with the base drafted, on the drafted base (`item-base-picker`, the C# `ItemHeaderTests`).
-    // As the C# `ExaltedSwitchesThroughAffixTierDraftsAndBackAgain` does, Exalted is drafted first, so the menu opens over the
-    // rarity in draft colour; Escape closes it and keeps the draft. The C# ring there has no implicits.
+    // each base grants (`implicits-base-picker`) and, over the status drafts with the base drafted, on the drafted base
+    // (`item-base-picker`). Exalted is drafted first, so the menu opens over the rarity in draft colour; Escape closes it and
+    // keeps the draft.
     let forge = open(session, FixtureGame::ring(false), 1100, 700);
     forge.handle.edit(|editor| editor.pick_rarity(true));
     assert_eq!(forge.ui.global::<ForgeState>().get_rarity_text(), "Exalted");
@@ -2587,7 +2612,7 @@ fn forge_captures(session: &Session) {
     session.capture(&forge.ui, "item-base-picker");
 
     // A base that would make affixes incompatible says how many in the base picker (`item-base-picker-incompatible`); Apply
-    // refuses it whole until the picker allows it (`item-base-incompatible-refused`, the C# `ApplyPlanner`).
+    // refuses it whole until the picker allows it (`item-base-incompatible-refused`).
     let forge = open(session, FixtureGame::class_ring(), 1100, 700);
     let options = forge.ui.global::<ForgeState>().get_base_options();
     assert_eq!(options.row_data(1).unwrap().detail, "Level 28 · 2 incompatible affixes");
@@ -2607,7 +2632,7 @@ fn forge_captures(session: &Session) {
     session.capture(&forge.ui, "item-base-incompatible-refused");
 
     // While a drafted identity holds the item, its flags wait: a checked one keeps its trim-gold frame, an unchecked one has
-    // none (the C# flag styles over Fluent's disabled toggle button; `item-status-disabled`, not a C# capture).
+    // none (`item-status-disabled`, not a C# capture).
     let game = FixtureGame::unique_ring();
     game.change(|item| item.status.as_mut().unwrap().corrupted = true);
     let forge = open(session, game, 1100, 700);
@@ -2632,7 +2657,7 @@ fn forge_captures(session: &Session) {
     }
 
     // Keeping legendary potential on an identity that never holds it needs the override, with the risk in words
-    // (`item-identity-override-*`, the C# `KeepingLegendaryPotentialAnIdentityNeverHoldsNeedsTheOverrideAndWarns`).
+    // (`item-identity-override-*`).
     for (width, height) in [(1100, 700), (940, 580)] {
         let game = FixtureGame::unique_ring();
         game.change(|item| item.status.as_mut().unwrap().legendary_potential = 2);
@@ -2666,7 +2691,7 @@ fn forge_captures(session: &Session) {
         assert_eq!(state.get_item_name(), "Fixture Ember Unique", "Up from the Sapphire unique reaches the Ember unique");
     }
 
-    // A click outside the affix picker cancels the replacement, so Apply comes back (the C# flyout's Closed handler).
+    // A click outside the affix picker cancels the replacement, so Apply comes back.
     let forge = open(session, FixtureGame::boots(false), 1100, 700);
     forge.handle.edit(|editor| type_value(editor, Cell::Affix(0), "37"));
     session.click(NAME_X, row_y(3));
