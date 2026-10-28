@@ -15,7 +15,9 @@ use eg_game_files::definitions::{Ailment, Definitions};
 use eg_game_files::uniques::{PlayerDefinitions, Property, PropertyInfo};
 use eg_trainer_wire::catalog::MAX_PAGE_ENTRIES;
 use eg_trainer_wire::protocol::ProtocolError;
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::time::SystemTime;
 
 /// Reasons shown where file data lacks a value.
@@ -42,9 +44,109 @@ pub struct FileCatalog {
     rarities: Vec<RarityDefinition>,
     /// Every file read, with its size and modification time when reading began.
     sources: Vec<(PathBuf, Option<Fingerprint>)>,
+    /// The game's names in each language it ships, by its locale code; a session's catalog takes its language's.
+    names: BTreeMap<String, Arc<LocalNames>>,
 }
 
 pub type Fingerprint = (u64, SystemTime);
+
+/// The game's names in one language, from its string tables: affixes (`Item_Affix_<id>_DisplayName`), base types
+/// (`Item_BaseType_Name_<type>`), subtypes (`Item_SubType_Name_<type>_<sub>`) and uniques and set items
+/// (`Unique_Name_<id>`). A name the table lacks keeps the stored one.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct LocalNames {
+    affixes: BTreeMap<u16, String>,
+    bases: BTreeMap<u8, String>,
+    sub_types: BTreeMap<(u8, u16), String>,
+    uniques: BTreeMap<u16, String>,
+}
+
+/// A name as the game shows it, without the markup its text tables carry: grammatical gender and number tags
+/// ("[ms]Zauberstab", "[fp]"), the braces round a skill name ("{【ファイアボール】}") and zero-width padding. A numbered
+/// placeholder ("{0}") stays.
+fn display_text(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut rest = text;
+    while let Some(c) = rest.chars().next() {
+        if c == '['
+            && let Some(end) = rest[1..].find(']')
+            && (1..=3).contains(&end)
+            && rest[1..1 + end].chars().all(|c| c.is_ascii_alphabetic())
+        {
+            rest = &rest[end + 2..];
+            continue;
+        }
+        if c == '{'
+            && let Some(end) = rest.find('}')
+            && !rest[1..end].chars().all(|c| c.is_ascii_digit())
+        {
+            out.push_str(&rest[1..end]);
+            rest = &rest[end + 1..];
+            continue;
+        }
+        if c != '\u{200b}' {
+            out.push(c);
+        }
+        rest = &rest[c.len_utf8()..];
+    }
+    out.trim().to_owned()
+}
+
+impl LocalNames {
+    fn read(strings: &eg_game_files::Strings, catalog: &FileCatalog) -> Self {
+        let text = |table: &str, key: String| strings.get(table, &key).map(display_text).filter(|text| !text.is_empty());
+        Self {
+            affixes: catalog
+                .affixes
+                .iter()
+                .filter_map(|affix| Some((affix.id, text("Item_Affixes", format!("Item_Affix_{}_DisplayName", affix.id))?)))
+                .collect(),
+            bases: catalog
+                .bases
+                .iter()
+                .filter_map(|base| Some((base.item_type, text("Item_Names", format!("Item_BaseType_Name_{}", base.item_type))?)))
+                .collect(),
+            sub_types: catalog
+                .bases
+                .iter()
+                .flat_map(|base| base.sub_types.iter().map(move |sub| (base.item_type, sub.sub_type)))
+                .filter_map(|(item_type, sub)| Some(((item_type, sub), text("Item_Names", format!("Item_SubType_Name_{item_type}_{sub}"))?)))
+                .collect(),
+            uniques: catalog
+                .uniques
+                .iter()
+                .filter_map(|unique| Some((unique.id, text("Item_Names", format!("Unique_Name_{}", unique.id))?)))
+                .collect(),
+        }
+    }
+
+    /// As saved beside the catalog: `{"affixes": {"25": "Health"}, "bases": {"0": "Helmet"}, "sub_types": {"0_1": …},
+    /// "uniques": {"3": "Artor's Legacy"}}`.
+    pub fn to_json(&self) -> serde_json::Value {
+        let map = |entries: Vec<(String, &String)>| serde_json::Value::Object(entries.into_iter().map(|(key, text)| (key, text.clone().into())).collect());
+        serde_json::json!({
+            "affixes": map(self.affixes.iter().map(|(id, text)| (id.to_string(), text)).collect()),
+            "bases": map(self.bases.iter().map(|(id, text)| (id.to_string(), text)).collect()),
+            "sub_types": map(self.sub_types.iter().map(|((item_type, sub), text)| (format!("{item_type}_{sub}"), text)).collect()),
+            "uniques": map(self.uniques.iter().map(|(id, text)| (id.to_string(), text)).collect()),
+        })
+    }
+
+    pub fn from_json(value: &serde_json::Value) -> Option<Self> {
+        fn entries<K: Ord>(value: &serde_json::Value, key: impl Fn(&str) -> Option<K>) -> Option<BTreeMap<K, String>> {
+            value.as_object()?.iter().map(|(k, text)| Some((key(k)?, text.as_str()?.to_owned()))).collect()
+        }
+        Some(Self {
+            affixes: entries(&value["affixes"], |k| k.parse().ok())?,
+            bases: entries(&value["bases"], |k| k.parse().ok())?,
+            sub_types: entries(&value["sub_types"], |k| {
+                let (item_type, sub) = k.split_once('_')?;
+                Some((item_type.parse().ok()?, sub.parse().ok()?))
+            })?,
+            uniques: entries(&value["uniques"], |k| k.parse().ok())?,
+        })
+    }
+}
 
 /// The locale a catalog is saved under: the catalog holds no localised text, and a session relabels it with its own.
 pub const SAVED_LOCALE: &str = "files";
@@ -79,6 +181,16 @@ pub fn read(folder: &Path) -> Result<FileCatalog, String> {
     // Names only: a catalog without the game's text still serves, with the stored names.
     if let Ok(strings) = install.strings(TEXT_LOCALE) {
         catalog.name_affixes(&strings);
+    }
+    // `key` and `dev` are the game's own working tables, not languages a player picks.
+    for code in install.locales().map(|locales| locales.into_keys().collect::<Vec<_>>()).unwrap_or_default() {
+        if code != "key"
+            && code != "dev"
+            && let Ok(strings) = install.strings(&code)
+        {
+            let names = LocalNames::read(&strings, &catalog);
+            catalog.names.insert(code, Arc::new(names));
+        }
     }
     catalog.sources = sources;
     Ok(catalog)
@@ -124,6 +236,7 @@ pub fn build_catalog(binary_hash: String, metadata_hash: String, build: String, 
         uniques,
         rarities,
         sources: Vec::new(),
+        names: BTreeMap::new(),
     };
     // Validate now, with a placeholder locale, so a catalog that is built is one that a session can use.
     catalog
@@ -180,7 +293,29 @@ impl FileCatalog {
             uniques: saved.uniques.into_values().collect(),
             rarities: saved.rarities.into_values().collect(),
             sources,
+            names: BTreeMap::new(),
         }
+    }
+
+    /// The game's names by language, as read (`read`) or saved.
+    pub fn names(&self) -> &BTreeMap<String, Arc<LocalNames>> {
+        &self.names
+    }
+
+    pub fn with_names(mut self, names: BTreeMap<String, Arc<LocalNames>>) -> Self {
+        self.names = names;
+        self
+    }
+
+    /// The names for a session's language: its exact code, else the same code in another case, else its language alone
+    /// ("es" for "es-ES", or the reverse).
+    fn names_for(&self, language: &str) -> Option<&LocalNames> {
+        let base = |code: &str| code.split(['-', '_']).next().unwrap_or(code).to_ascii_lowercase();
+        self.names
+            .get(language)
+            .or_else(|| self.names.iter().find(|(code, _)| code.eq_ignore_ascii_case(language)).map(|(_, names)| names))
+            .or_else(|| self.names.iter().find(|(code, _)| base(code) == base(language)).map(|(_, names)| names))
+            .map(Arc::as_ref)
     }
 
     /// Whether a file it was read from had been written after `instant`: a game started before then may run an older
@@ -230,9 +365,37 @@ impl FileCatalog {
             }
             Ok(())
         }
-        pages(&mut builder, &locale, CatalogKind::Bases, &self.bases, CatalogEntries::Bases)?;
-        pages(&mut builder, &locale, CatalogKind::Affixes, &self.affixes, CatalogEntries::Affixes)?;
-        pages(&mut builder, &locale, CatalogKind::Uniques, &self.uniques, CatalogEntries::Uniques)?;
+        // A language's names replace the stored ones; the saved catalog (SAVED_LOCALE) keeps them.
+        let named = |text: &String| DefinitionName {
+            text: text.clone(),
+            source: DefinitionNameSource::RuntimeDisplay,
+        };
+        let (mut bases, mut affixes, mut uniques) = (self.bases.clone(), self.affixes.clone(), self.uniques.clone());
+        if let Some(names) = self.names_for(&locale.language) {
+            for base in &mut bases {
+                if let Some(text) = names.bases.get(&base.item_type) {
+                    base.name = named(text);
+                }
+                for sub in &mut base.sub_types {
+                    if let Some(text) = names.sub_types.get(&(base.item_type, sub.sub_type)) {
+                        sub.name = named(text);
+                    }
+                }
+            }
+            for affix in &mut affixes {
+                if let Some(text) = names.affixes.get(&affix.id) {
+                    affix.game_display_name = Availability::Available(text.clone());
+                }
+            }
+            for unique in &mut uniques {
+                if let Some(text) = names.uniques.get(&unique.id) {
+                    unique.name = named(text);
+                }
+            }
+        }
+        pages(&mut builder, &locale, CatalogKind::Bases, &bases, CatalogEntries::Bases)?;
+        pages(&mut builder, &locale, CatalogKind::Affixes, &affixes, CatalogEntries::Affixes)?;
+        pages(&mut builder, &locale, CatalogKind::Uniques, &uniques, CatalogEntries::Uniques)?;
         pages(&mut builder, &locale, CatalogKind::Rarities, &self.rarities, CatalogEntries::Rarities)?;
         builder.finish()
     }
@@ -554,6 +717,7 @@ pub(crate) fn test_catalog(sources: Vec<(PathBuf, Option<Fingerprint>)>) -> File
         uniques: vec![],
         rarities: vec![],
         sources,
+        names: BTreeMap::new(),
     }
 }
 
@@ -572,5 +736,13 @@ mod tests {
         assert!(!catalog.is_current(), "a Steam update rewrites the files");
         std::fs::remove_file(&file).unwrap();
         assert!(!catalog.is_current(), "a file that is gone is not as it was");
+    }
+    #[test]
+    fn names_lose_the_text_tables_markup() {
+        assert_eq!(display_text("[ms]Juwelenstirnreif"), "Juwelenstirnreif");
+        assert_eq!(display_text("[Ms]Hełm [fp]x"), "Hełm x");
+        assert_eq!(display_text("直接{【ルーンボルト】}\u{200b}\u{200b}"), "直接【ルーンボルト】");
+        assert_eq!(display_text("출혈 지속시간 {0} 증가 "), "출혈 지속시간 {0} 증가");
+        assert_eq!(display_text("[Bracketed name] stays"), "[Bracketed name] stays");
     }
 }

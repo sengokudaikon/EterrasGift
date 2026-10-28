@@ -18,7 +18,9 @@ use tokio::sync::{oneshot, watch};
 
 /// The index of the saved catalog: the folder and the files it was read from.
 const INDEX_FILE: &str = "files.json";
-const INDEX_VERSION: u64 = 1;
+/// The game's names by language, saved beside the catalog and read only with its index.
+const NAMES_FILE: &str = "names.json";
+const INDEX_VERSION: u64 = 2;
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum GameData {
@@ -257,7 +259,19 @@ impl Store {
         let Some(saved) = self.cache.load(&identity).map_err(|e| e.to_string())? else {
             return Ok(None);
         };
-        let mut catalog = FileCatalog::restore(saved, text("build")?, sources);
+        // Names are optional: a catalog saved without them serves with the stored names.
+        let names = std::fs::read(self.directory.join(NAMES_FILE))
+            .ok()
+            .and_then(|bytes| serde_json::from_slice::<Value>(&bytes).ok())
+            .and_then(|value| {
+                value
+                    .as_object()?
+                    .iter()
+                    .map(|(code, names)| Some((code.clone(), Arc::new(files::LocalNames::from_json(names)?))))
+                    .collect::<Option<std::collections::BTreeMap<_, _>>>()
+            })
+            .unwrap_or_default();
+        let mut catalog = FileCatalog::restore(saved, text("build")?, sources).with_names(names);
         // Older indexes have no update time. Do not invent one from file metadata or startup.
         catalog.updated_at = index["updated_at"].as_str().and_then(|value| value.parse().ok());
         Ok(Some(catalog))
@@ -267,6 +281,12 @@ impl Store {
     fn save(&self, folder: &Path, catalog: &FileCatalog) -> Result<(), String> {
         let saved = catalog.saved().map_err(|e| format!("{e:?}"))?;
         self.cache.save(&saved).map_err(|e| e.to_string())?;
+        let names: serde_json::Map<String, Value> = catalog.names().iter().map(|(code, names)| (code.clone(), names.to_json())).collect();
+        eg_core::atomic::write(
+            &self.directory.join(NAMES_FILE),
+            serde_json::to_string(&Value::Object(names)).unwrap_or_default().as_bytes(),
+        )
+        .map_err(|e| e.to_string())?;
         let sources: Vec<Value> = catalog
             .sources()
             .iter()

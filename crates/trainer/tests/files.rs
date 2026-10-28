@@ -62,7 +62,23 @@ fn a_second_start_loads_the_saved_catalog_instead_of_reading_the_files() {
             panic!("{start}: {:?}", service.current());
         };
         println!("{start}: {:.2?}", started.elapsed());
-        catalogs.push(catalog.saved().unwrap());
+        let german = catalog
+            .catalog(GameLocale {
+                language: "de".into(),
+                game_version: String::new(),
+            })
+            .unwrap();
+        catalogs.push((catalog.saved().unwrap(), german));
     }
     assert_eq!(catalogs[0], catalogs[1]);
+    // A session in another language takes the game's names in it, saved and loaded with the catalog.
+    let (english, german) = &catalogs[1];
+    assert_ne!(german.uniques[&3].name.text, english.uniques[&3].name.text);
+    assert_ne!(german.affixes[&25].game_display_name, english.affixes[&25].game_display_name);
+    // Without the text tables' grammar tags ("[ms]Juwelenstirnreif").
+    assert_eq!(german.bases[&0].sub_types[1].name.text, "Juwelenstirnreif");
+    println!(
+        "de: {:?} / {:?} / {:?}",
+        german.uniques[&3].name.text, german.affixes[&25].game_display_name, german.bases[&0].sub_types[1].name.text
+    );
 }
