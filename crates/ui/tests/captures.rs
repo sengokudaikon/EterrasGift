@@ -2267,7 +2267,7 @@ fn forge_captures(session: &Session) {
         });
         const LONG_NAME: &str = "Wayfarer's Boots of Unwavering Determination and Extraordinary Elemental Resistance";
         forge.game.borrow_mut().item.as_mut().unwrap().name = LONG_NAME.into();
-        forge.handle.refresh();
+        forge.handle.edit(|editor| editor.refresh());
         assert_eq!(forge.ui.global::<ForgeState>().get_item_name(), LONG_NAME);
         session.capture(&forge.ui, &format!("item-long-name-{width}"));
     }
@@ -2285,7 +2285,7 @@ fn forge_captures(session: &Session) {
     let forge = open(session, FixtureGame::boots(false), 1100, 700);
     forge.handle.edit(|editor| type_value(editor, Cell::Affix(0), "37"));
     forge.game.borrow_mut().item.as_mut().unwrap().affixes[0].roll = 120;
-    forge.handle.refresh();
+    forge.handle.edit(|editor| editor.refresh());
     forge.handle.edit(ForgeEditor::apply);
     assert!(forge.ui.global::<ForgeState>().get_message().contains("changed in the game after you drafted it"));
     assert!(forge.game.borrow().writes.is_empty());

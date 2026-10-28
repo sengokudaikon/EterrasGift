@@ -9,7 +9,7 @@ use crate::{
         game::{Catalog, EditOutcome, ForgeGame, GameError, WriteOutcome, refused},
         item::{self, AffixDefinition, AffixKind, Category, ForgeItem, ItemEdit, ModifierState, RollRequest, ValueTable},
     },
-    shell::ShellHandle,
+    shell::{Page, ShellHandle},
 };
 use eg_core::{
     bloom::BloomPhase,
@@ -503,8 +503,11 @@ struct Binding {
     revision: Cell<Option<u64>>,
     catalog: RefCell<(Option<Arc<GameCatalog>>, Arc<Catalog>)>,
     writer: Rc<RefCell<Writer>>,
-    /// The ash under the connection's wait follows the window's decorations, which only the page showing may drive.
+    /// The ash under the connection's wait follows the window's decorations, which only the page showing may drive; the
+    /// forge is rebuilt only while its page shows.
     shell: ShellHandle,
+    /// A read arrived while the Forge page was not showing: the forge is rebuilt from the latest one when it shows again.
+    forge_stale: Cell<bool>,
     decorations: Rc<Decorations<MainWindow>>,
     /// How far the wait for the game has come while the connection waits on it; None when it does not.
     waiting: Cell<Option<BloomPhase>>,
@@ -556,6 +559,7 @@ pub fn bind(window: &MainWindow, backend: BackendHandle, shell: &ShellHandle, de
         catalog: RefCell::new((None, empty)),
         writer,
         shell: shell.clone(),
+        forge_stale: Cell::new(false),
         decorations,
         waiting: Cell::new(None),
         faults,
@@ -564,9 +568,13 @@ pub fn bind(window: &MainWindow, backend: BackendHandle, shell: &ShellHandle, de
     shell.on_page_entered({
         let binding = Rc::downgrade(&binding);
         move |page| {
-            if let Some(binding) = binding.upgrade()
-                && page.is_trainer()
-            {
+            let Some(binding) = binding.upgrade() else {
+                return;
+            };
+            if page == Page::Forge && binding.forge_stale.replace(false) {
+                binding.observe_forge();
+            }
+            if page.is_trainer() {
                 binding.drift(true);
             }
         }
@@ -638,6 +646,7 @@ impl Binding {
                 state.set_access(TrainerAccess::Locked);
             }
             self.waiting.set(None);
+            self.forge_stale.set(false);
             self.forge.observe(Box::new(ObservedGame {
                 catalog: Arc::new(Catalog::default()),
                 writer: self.writer.clone(),
@@ -645,13 +654,15 @@ impl Binding {
             return;
         }
         if self.revision.get() == Some(revision) {
-            self.forge.edit(|editor| {
-                if mappings_completed || preview_completed {
-                    editor.refresh();
-                } else {
-                    editor.poll_writes();
-                }
-            });
+            if !mappings_completed && !preview_completed {
+                // Only the editor's receipts can have moved on; while none did there is nothing new to show.
+                self.forge.edit_if(|editor| editor.poll_writes());
+            } else if self.shell.current() == Page::Forge {
+                self.forge.edit(|editor| editor.refresh());
+            } else {
+                self.forge_stale.set(true);
+                self.forge.edit_if(|editor| editor.poll_writes());
+            }
             return;
         }
         let snapshot = self.backend.snapshot();
@@ -684,13 +695,19 @@ impl Binding {
             catalog.0 = Some(data.clone());
         }
         let projection_error = project_item(&snapshot).err().map(|error| self.report_unshown(&snapshot, error));
-        self.forge.observe(Box::new(ObservedGame {
-            catalog: catalog.1.clone(),
-            writer: self.writer.clone(),
-        }));
+        drop(catalog);
+        if self.shell.current() == Page::Forge {
+            self.forge_stale.set(false);
+            self.observe_forge();
+        } else {
+            // Rebuilding the forge for every read while another page shows is wasted work: it is rebuilt once when its page
+            // shows. A write in flight still settles.
+            self.forge_stale.set(true);
+            self.forge.edit_if(|editor| editor.poll_writes());
+        }
         let state = window.global::<TrainerState>();
         // Not connected, every trainer page shows this in place of its body; connected, the forge says only why its item
-        // cannot be shown. Ash drifts during a real wait and lies still under the empty forge (ItemEditorViewModel.ShowsAsh).
+        // cannot be shown. Ash drifts during a real wait and lies still under the empty forge.
         state.set_access(access(&snapshot));
         state.set_connection_title(title.into());
         state.set_connection_detail(detail.into());
@@ -699,6 +716,15 @@ impl Binding {
         state.set_item_unavailable(projection_error.unwrap_or_default().into());
         self.waiting.set(waiting);
         self.drift(false);
+    }
+
+    /// Puts the latest read and catalog behind the forge and shows it.
+    fn observe_forge(&self) {
+        let catalog = self.catalog.borrow().1.clone();
+        self.forge.observe(Box::new(ObservedGame {
+            catalog,
+            writer: self.writer.clone(),
+        }));
     }
 
     /// Records an item the forge cannot show, once, with the item as the game reported it, so the refused value can be

@@ -2,9 +2,10 @@
 //! state is shown again; the row models are updated in place so a row's cells, popups and drags survive the update.
 
 use super::editor::{Cell, ForgeEditor, KindFilter, MessageKind, RowRef};
-use super::game::ForgeGame;
-use super::item::Seal;
+use super::game::{self, ForgeGame, Lookup};
+use super::item::{ForgeItem, Seal};
 use super::rows::{FieldKind, ValueEditor};
+use crate::models::update_rows as update;
 use crate::{
     AffixRowView, AppliedEntryView, CellKind, CellRef, DraftEntryView, FieldView, ForgeState, ItemRarity, MainWindow, MenuOptionView, MessageTone, ModifierRowView, PickerRowView,
     TierOption, ValueCell,
@@ -32,14 +33,39 @@ struct Models {
     picker_rows: Rc<VecModel<PickerRowView>>,
 }
 
+/// What each menu model was last built from: a scrub or a keystroke rebuilds none of them unless that changed.
+#[derive(Default)]
+struct Built {
+    /// The menu generation, the held unique and the search.
+    identity: RefCell<Option<(u64, i64, String)>>,
+    /// The menu generation and the held base.
+    base: RefCell<Option<(u64, i64)>>,
+    /// Per affix row, what its tier list shows.
+    tiers: RefCell<Vec<Option<TierKey>>>,
+    /// The menu generation and the definitions the picker lists.
+    picker: RefCell<Option<(u64, Vec<usize>)>>,
+}
+
+/// What a row's tier list depends on: the affix drafted, its highest tier and the game's own, and the catalog.
+#[derive(Clone, Copy, PartialEq, Eq)]
+struct TierKey {
+    affix: u16,
+    max_tier: u8,
+    added: bool,
+    game_affix: u16,
+    game_tier: u8,
+    generation: u64,
+}
+
 struct View {
     editor: RefCell<ForgeEditor>,
     window: Weak<MainWindow>,
     models: Models,
+    built: Built,
     focus_serial: Flag<i32>,
 }
 
-/// The forge as a window shows it, for whoever holds the game (the trainer's session once ported; captures until then).
+/// The forge as a window shows it. The trainer binding and the captures each supply its game.
 #[derive(Clone)]
 pub struct ForgeHandle {
     view: Rc<View>,
@@ -50,17 +76,21 @@ impl ForgeHandle {
         self.view.editor.borrow_mut().observe(game);
         self.view.show();
     }
-    /// Reads the forge again, as when the session publishes another read of the item.
-    pub fn refresh(&self) {
-        self.view.editor.borrow_mut().refresh();
-        self.view.show();
-    }
 
     /// Runs `change` on the editor and shows the result.
     pub fn edit<T>(&self, change: impl FnOnce(&mut ForgeEditor) -> T) -> T {
         let result = change(&mut self.view.editor.borrow_mut());
         self.view.show();
         result
+    }
+
+    /// Runs `change` on the editor and shows the result only when `change` reports that something changed.
+    pub fn edit_if(&self, change: impl FnOnce(&mut ForgeEditor) -> bool) -> bool {
+        let changed = change(&mut self.view.editor.borrow_mut());
+        if changed {
+            self.view.show();
+        }
+        changed
     }
 }
 
@@ -71,6 +101,7 @@ pub fn attach(window: &MainWindow, game: Box<dyn ForgeGame>) -> ForgeHandle {
         editor: RefCell::new(ForgeEditor::new(game)),
         window: window.as_weak(),
         models: Models::default(),
+        built: Built::default(),
         focus_serial: Flag::new(0),
     });
     let state = window.global::<ForgeState>();
@@ -101,6 +132,16 @@ fn cell_of(cell: &CellRef) -> Cell {
     }
 }
 
+/// The view's name for a cell, the inverse of `cell_of`.
+fn reference_of(cell: Cell) -> CellRef {
+    match cell {
+        Cell::Affix(row) => reference(CellKind::Affix, row, 0),
+        Cell::Unique(row, roll) => reference(CellKind::Unique, row, roll),
+        Cell::Implicit(row, roll) => reference(CellKind::Implicit, row, roll),
+        Cell::Field(row) => reference(CellKind::Field, row, 0),
+    }
+}
+
 fn reference(kind: CellKind, row: usize, roll: usize) -> CellRef {
     CellRef {
         kind,
@@ -111,16 +152,37 @@ fn reference(kind: CellKind, row: usize, roll: usize) -> CellRef {
 
 fn bind(state: &ForgeState, view: &Rc<View>) {
     let on = |view: &Rc<View>| Rc::downgrade(view);
+    // `edit!` runs the body on the editor and shows the result, returning the body's value (`else` gives the value for a
+    // window already gone). `edit!(view, changed ...)` shows only when the body returns true.
     macro_rules! edit {
-        ($view:expr, |$editor:ident $(, $arg:ident)*| $body:expr) => {{
+        ($view:expr, |$editor:ident $(, $arg:ident)*| $body:expr) => {
+            edit!($view, else Default::default(), |$editor $(, $arg)*| $body)
+        };
+        ($view:expr, else $fallback:expr, |$editor:ident $(, $arg:ident)*| $body:expr) => {{
+            let view = on($view);
+            move |$($arg),*| {
+                let Some(view) = view.upgrade() else {
+                    return $fallback;
+                };
+                let result = {
+                    let mut $editor = view.editor.borrow_mut();
+                    $body
+                };
+                view.show();
+                result
+            }
+        }};
+        ($view:expr, changed |$editor:ident $(, $arg:ident)*| $body:expr) => {{
             let view = on($view);
             move |$($arg),*| {
                 if let Some(view) = view.upgrade() {
-                    {
+                    let changed = {
                         let mut $editor = view.editor.borrow_mut();
-                        $body;
+                        $body
+                    };
+                    if changed {
+                        view.show();
                     }
-                    view.show();
                 }
             }
         }};
@@ -128,10 +190,11 @@ fn bind(state: &ForgeState, view: &Rc<View>) {
     state.on_select_affix(edit!(view, |editor, index| editor.select_affix(usize::try_from(index).ok())));
     state.on_select_unique(edit!(view, |editor, index| editor.select_unique(usize::try_from(index).ok())));
     state.on_press(edit!(view, |editor, cell| editor.press(cell_of(&cell))));
-    state.on_scrub(edit!(view, |editor, cell, fraction| editor.scrub(cell_of(&cell), f64::from(fraction))));
+    // A move that lands on the same roll changes nothing on screen, so the pointer's every move is not a full update.
+    state.on_scrub(edit!(view, changed | editor, cell, fraction | editor.scrub(cell_of(&cell), f64::from(fraction))));
     state.on_end_scrub(edit!(view, |editor, cell, cancelled| editor.end_scrub(cell_of(&cell), cancelled)));
-    state.on_step(edit!(view, |editor, cell, steps| editor.step(cell_of(&cell), steps)));
-    state.on_step_to_end(edit!(view, |editor, cell, maximum| editor.step_to_end(cell_of(&cell), maximum)));
+    state.on_step(edit!(view, changed | editor, cell, steps | editor.step(cell_of(&cell), steps)));
+    state.on_step_to_end(edit!(view, changed | editor, cell, maximum | editor.step_to_end(cell_of(&cell), maximum)));
     state.on_input_edited(edit!(view, |editor, cell, text| editor.set_input(cell_of(&cell), &text)));
     state.on_cancel_input(edit!(view, |editor, cell| editor.cancel_input(cell_of(&cell))));
     state.on_finish_input(edit!(view, |editor, cell| editor.finish_input(cell_of(&cell))));
@@ -161,52 +224,22 @@ fn bind(state: &ForgeState, view: &Rc<View>) {
     state.on_apply(edit!(view, |editor| editor.apply()));
     state.on_undo(edit!(view, |editor| editor.undo()));
     state.on_undo_draft(edit!(view, |editor| editor.undo_draft_only()));
-
     let weak = on(view);
-    state.on_begin_input(move |cell| {
-        let Some(view) = weak.upgrade() else {
-            return false;
-        };
-        let opened = view.editor.borrow_mut().begin_input(cell_of(&cell));
-        if opened {
-            let editor = view.editor.borrow();
-            if let (Some(input), Some(window)) = (editor.input_of(cell_of(&cell)), view.window.upgrade()) {
-                let state = window.global::<ForgeState>();
-                state.set_input_label(input.label().into());
-                state.set_input_text(input.input.clone().into());
-                state.set_input_range(format!("{} – {}", input.minimum_text(), input.maximum_text()).into());
-            }
+    state.on_begin_input(edit!(view, |editor, cell| {
+        let cell = cell_of(&cell);
+        let opened = editor.begin_input(cell);
+        if opened && let (Some(input), Some(window)) = (editor.input_of(cell), weak.upgrade().and_then(|view| view.window.upgrade())) {
+            let state = window.global::<ForgeState>();
+            state.set_input_label(input.label().into());
+            state.set_input_text(input.input.clone().into());
+            state.set_input_range(format!("{} – {}", input.minimum_text(), input.maximum_text()).into());
         }
-        view.show();
         opened
-    });
-    let weak = on(view);
-    state.on_commit_input(move |cell| {
-        let Some(view) = weak.upgrade() else {
-            return true;
-        };
-        let committed = view.editor.borrow_mut().commit_input(cell_of(&cell));
-        view.show();
-        committed
-    });
-    let weak = on(view);
-    state.on_open_replace(move |row| {
-        let Some(view) = weak.upgrade() else {
-            return false;
-        };
-        let opened = view.editor.borrow_mut().open_replace(row.max(0) as usize);
-        view.show();
-        opened
-    });
-    let weak = on(view);
-    state.on_open_add(move || {
-        let Some(view) = weak.upgrade() else {
-            return false;
-        };
-        let opened = view.editor.borrow_mut().open_add();
-        view.show();
-        opened
-    });
+    }));
+    // A window already gone has no popover to keep open.
+    state.on_commit_input(edit!(view, else true, |editor, cell| editor.commit_input(cell_of(&cell))));
+    state.on_open_replace(edit!(view, |editor, row| editor.open_replace(row.max(0) as usize)));
+    state.on_open_add(edit!(view, |editor| editor.open_add()));
     // Up and Down from a cell move the selection; the same cell of the next row takes focus.
     let weak = on(view);
     state.on_move_row(move |row, delta, part| {
@@ -277,9 +310,10 @@ fn bind(state: &ForgeState, view: &Rc<View>) {
                 _ => None,
             }
         });
-        view.show();
-        if let Some((cell, part)) = cell {
-            view.focus(cell, part);
+        // `focus` shows the state itself.
+        match cell {
+            Some((cell, part)) => view.focus(cell, part),
+            None => view.show(),
         }
     });
     // Menus' keyboard highlights start on the held entry and skip the entries that can't be picked.
@@ -304,6 +338,7 @@ fn bind(state: &ForgeState, view: &Rc<View>) {
 }
 
 impl View {
+    /// Shows the state, then moves the keyboard focus to `cell`.
     fn focus(&self, cell: CellRef, part: i32) {
         let Some(window) = self.window.upgrade() else {
             return;
@@ -322,6 +357,10 @@ impl View {
         };
         let state = window.global::<ForgeState>();
         let editor = self.editor.borrow();
+        // The item as Apply would leave it, projected once for everything that reads it.
+        let drafted = editor.drafted_item();
+        let drafted = drafted.as_ref();
+        let generation = editor.menu_generation();
         state.set_has_item(editor.has_item());
         state.set_write_recovery_required(editor.needs_write_recovery());
         state.set_item_name(editor.item_name().into());
@@ -331,34 +370,43 @@ impl View {
         state.set_identity_tip(editor.identity_tip().into());
         state.set_identity_search(editor.identity_search.clone().into());
         let held = editor.identity.as_ref().map_or(-1, |identity| identity.value());
-        let identities: Vec<MenuOptionView> = editor
-            .identity_choices()
-            .into_iter()
-            .map(|option| MenuOptionView {
-                name: option.name.clone().into(),
-                detail: option.detail.clone().into(),
-                implicits: SharedString::new(),
-                in_game: option.in_game,
-                available: option.available,
-                current: option.value == held,
-                rarity: rarity_of(option.rarity),
-            })
-            .collect();
-        update(&self.models.identity_options, identities);
-        // Unique, set and legendary come from the item before exalted does (C# `RarityName`), so a legendary with a T6+
-        // affix keeps its own colour.
+        let identities_built = self
+            .built
+            .identity
+            .borrow()
+            .as_ref()
+            .is_some_and(|(built, built_held, search)| *built == generation && *built_held == held && *search == editor.identity_search);
+        if !identities_built {
+            let identities: Vec<MenuOptionView> = editor
+                .identity_choices()
+                .into_iter()
+                .map(|option| MenuOptionView {
+                    name: option.name.clone().into(),
+                    detail: option.detail.clone().into(),
+                    implicits: SharedString::new(),
+                    in_game: option.in_game,
+                    available: option.available,
+                    current: option.value == held,
+                    rarity: rarity_of(option.rarity),
+                })
+                .collect();
+            update(&self.models.identity_options, identities);
+            *self.built.identity.borrow_mut() = Some((generation, held, editor.identity_search.clone()));
+        }
+        // Unique, set and legendary come from the item before exalted does, so a legendary with a T6+ affix keeps its own
+        // colour.
         let rarity = editor.rarity_code();
         state.set_name_rarity(if !matches!(rarity, 7..=9) && editor.name_is_exalted() {
             ItemRarity::Exalted
         } else {
             rarity_of(rarity)
         });
-        state.set_rarity_text(editor.rarity_text().into());
-        state.set_rarity_drafted(editor.is_rarity_drafted());
+        state.set_rarity_text(editor.rarity_text_of(drafted).into());
+        state.set_rarity_drafted(editor.is_rarity_drafted_of(drafted));
         state.set_can_change_rarity(editor.can_change_rarity());
         state.set_rarity_tip(editor.rarity_tip().into());
         let rarities: Vec<MenuOptionView> = editor
-            .rarity_options()
+            .rarity_options_of(drafted)
             .into_iter()
             .map(|option| MenuOptionView {
                 name: option.name.into(),
@@ -376,34 +424,33 @@ impl View {
         state.set_base_drafted(editor.is_base_drafted());
         state.set_can_change_base(editor.can_change_base());
         state.set_base_tip(editor.base_tip().into());
-        let bases: Vec<MenuOptionView> = editor
-            .base
-            .as_ref()
-            .map(|base| {
-                base.options
-                    .iter()
-                    .map(|option| MenuOptionView {
-                        name: option.name.clone().into(),
-                        detail: option.detail.clone().into(),
-                        implicits: option.implicits.clone().into(),
-                        in_game: option.in_game,
-                        available: option.available,
-                        current: option.value == base.value(),
-                        rarity: ItemRarity::Normal,
-                    })
-                    .collect()
-            })
-            .unwrap_or_default();
-        let base_lines = bases
-            .iter()
-            .map(|option| option.implicits.lines().count() + usize::from(!option.detail.is_empty()))
-            .sum::<usize>();
-        state.set_base_caption_lines(base_lines as i32);
-        update(&self.models.base_options, bases);
+        let base_held = editor.base.as_ref().map_or(-1, |base| base.value());
+        if *self.built.base.borrow() != Some((generation, base_held)) {
+            let bases: Vec<MenuOptionView> = editor
+                .base
+                .as_ref()
+                .map(|base| {
+                    base.options
+                        .iter()
+                        .map(|option| MenuOptionView {
+                            name: option.name.clone().into(),
+                            detail: option.detail.clone().into(),
+                            implicits: option.implicits.clone().into(),
+                            in_game: option.in_game,
+                            available: option.available,
+                            current: option.value == base.value(),
+                            rarity: ItemRarity::Normal,
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
+            update(&self.models.base_options, bases);
+            *self.built.base.borrow_mut() = Some((generation, base_held));
+        }
         state.set_base_allow_incompatible(editor.base.as_ref().is_some_and(|base| base.allow_incompatible));
         state.set_base_can_edit(editor.can_edit_base_field());
         state.set_summary(editor.summary().into());
-        self.show_fields(&state, &editor);
+        self.show_fields(&editor);
 
         state.set_has_implicits(editor.has_implicits());
         state.set_implicit_rows_shown(!editor.shows_implicit_preview());
@@ -413,43 +460,36 @@ impl View {
         let implicits = self.lines(&editor, CellKind::Implicit);
         update(&self.models.implicits, implicits);
 
-        self.show_affixes(&state, &editor);
+        self.show_affixes(&state, &editor, drafted);
 
-        state.set_has_unique(editor.item().is_some_and(|item| item.unique.is_some()));
+        let unique = editor.item().and_then(|item| item.unique.as_ref());
+        state.set_has_unique(unique.is_some());
         let uniques = self.lines(&editor, CellKind::Unique);
         update(&self.models.uniques, uniques);
         state.set_selected_unique(editor.selected_unique().map_or(-1, |index| index as i32));
         state.set_preview_status(editor.preview_status.clone().into());
         state.set_preview_failed(editor.preview_failed);
         state.set_preview_stale(editor.preview_stale);
-        state.set_formatting_loading(
-            editor
-                .item()
-                .and_then(|item| item.unique.as_ref())
-                .is_some_and(|unique| matches!(unique.formatting, crate::forge::game::Lookup::Loading)),
-        );
+        let formatting = unique.map(|unique| &unique.formatting);
+        state.set_formatting_loading(matches!(formatting, Some(Lookup::Loading)));
         state.set_formatting_error(
-            editor
-                .item()
-                .and_then(|item| item.unique.as_ref())
-                .map(|unique| match &unique.formatting {
-                    crate::forge::game::Lookup::Ready(()) => String::new(),
-                    crate::forge::game::Lookup::Loading => super::game::UNIQUE_LOADING.into(),
-                    crate::forge::game::Lookup::Unavailable(reason) => reason.clone(),
-                })
-                .unwrap_or_default()
-                .into(),
+            match formatting {
+                Some(Lookup::Loading) => game::UNIQUE_LOADING,
+                Some(Lookup::Unavailable(reason)) => reason.as_str(),
+                Some(Lookup::Ready(())) | None => "",
+            }
+            .into(),
         );
 
-        let drafts = editor.drafts();
         update(
             &self.models.drafts,
-            drafts
-                .iter()
+            editor
+                .drafts()
+                .into_iter()
                 .map(|entry| DraftEntryView {
-                    name: entry.name.clone().into(),
-                    summary: entry.summary.clone().into(),
-                    effect: entry.effect.clone().into(),
+                    name: entry.name.into(),
+                    summary: entry.summary.into(),
+                    effect: entry.effect.into(),
                     stale: entry.stale,
                 })
                 .collect(),
@@ -489,21 +529,18 @@ impl View {
         state.set_input_error(editor.typing().map(ValueEditor::input_error).unwrap_or_default().into());
         let typing = editor.typing_cell();
         state.set_typing(typing.is_some());
-        state.set_typing_cell(match typing {
-            Some(Cell::Affix(row)) => reference(CellKind::Affix, row, 0),
-            Some(Cell::Unique(row, roll)) => reference(CellKind::Unique, row, roll),
-            Some(Cell::Implicit(row, roll)) => reference(CellKind::Implicit, row, roll),
-            Some(Cell::Field(row)) => reference(CellKind::Field, row, 0),
-            None => CellRef {
+        state.set_typing_cell(typing.map_or(
+            CellRef {
                 kind: CellKind::Affix,
                 row: -1,
                 roll: -1,
             },
-        });
-        self.show_picker(&state, &editor);
+            reference_of,
+        ));
+        self.show_picker(&state, &editor, drafted);
     }
 
-    fn show_fields(&self, state: &ForgeState, editor: &ForgeEditor) {
+    fn show_fields(&self, editor: &ForgeEditor) {
         let fields: Vec<FieldView> = editor
             .fields
             .iter()
@@ -546,25 +583,42 @@ impl View {
             })
             .collect();
         update(&self.models.fields, fields);
-        let _ = state;
     }
 
-    fn show_affixes(&self, state: &ForgeState, editor: &ForgeEditor) {
+    fn show_affixes(&self, state: &ForgeState, editor: &ForgeEditor, drafted: Option<&ForgeItem>) {
         let mut tier_models = self.models.tiers.borrow_mut();
+        let mut tier_keys = self.built.tiers.borrow_mut();
+        let generation = editor.menu_generation();
         let rows: Vec<AffixRowView> = editor
             .affixes
             .iter()
             .enumerate()
             .map(|(index, row)| {
-                let tiers: Vec<TierOption> = editor
-                    .tier_options(index)
-                    .into_iter()
-                    .map(|(tier, range, in_game)| TierOption {
-                        label: format!("T{tier}").into(),
-                        range: range.into(),
-                        in_game,
-                    })
-                    .collect();
+                let key = TierKey {
+                    affix: row.draft_id(),
+                    max_tier: row.max_tier(),
+                    added: row.added,
+                    game_affix: row.state.id,
+                    game_tier: row.state.tier,
+                    generation,
+                };
+                let tiers = if tier_keys.get(index) == Some(&Some(key)) {
+                    ModelRc::from(tier_models[index].clone())
+                } else {
+                    let tiers: Vec<TierOption> = editor
+                        .tier_options(index)
+                        .into_iter()
+                        .map(|(tier, range, in_game)| TierOption {
+                            label: format!("T{tier}").into(),
+                            range: range.into(),
+                            in_game,
+                        })
+                        .collect();
+                    let model = stable(&mut tier_models, index, tiers);
+                    tier_keys.resize(tier_models.len(), None);
+                    tier_keys[index] = Some(key);
+                    model
+                };
                 let range = editor.range_text(index);
                 AffixRowView {
                     value: value_cell(
@@ -600,18 +654,19 @@ impl View {
                     stale: row.is_stale(),
                     draft_tip: row.change_summary().into(),
                     confirmed: row.confirmed,
-                    tiers: stable(&mut tier_models, index, tiers),
+                    tiers,
                 }
             })
             .collect();
         tier_models.truncate(rows.len());
+        tier_keys.truncate(rows.len());
         update(&self.models.affixes, rows);
         state.set_selected_affix(editor.selected_affix().map_or(-1, |index| index as i32));
         state.set_can_change_affix_list(editor.can_change_affix_list());
         state.set_add_affix_tip(editor.add_affix_tip().into());
         state.set_can_max_tiers(editor.can_max_tiers());
         state.set_max_tiers_tip(editor.max_tiers_tip().into());
-        state.set_affix_list_note(editor.affix_list_note().into());
+        state.set_affix_list_note(editor.free_slots_text_of(drafted).into());
         state.set_ladder_note(editor.tier_ladder_note().into());
     }
 
@@ -637,7 +692,7 @@ impl View {
                         };
                         let game = line.game_roll(roll.index);
                         value_cell(
-                            reference(kind, index, position),
+                            reference_of(cell),
                             uid_of(line.uid, position),
                             &roll.editor,
                             roll.value,
@@ -672,14 +727,14 @@ impl View {
         lines
     }
 
-    fn show_picker(&self, state: &ForgeState, editor: &ForgeEditor) {
+    fn show_picker(&self, state: &ForgeState, editor: &ForgeEditor, drafted: Option<&ForgeItem>) {
         let Some(picker) = editor.picker.as_ref() else {
             state.set_picker_open(false);
             return;
         };
         state.set_picker_open(true);
         state.set_picker_title(editor.picker_title().into());
-        state.set_picker_subtitle(editor.picker_subtitle().into());
+        state.set_picker_subtitle(editor.picker_subtitle_of(drafted).into());
         state.set_picker_search(picker.search.clone().into());
         state.set_picker_filter(match picker.filter {
             KindFilter::All => 0,
@@ -688,22 +743,33 @@ impl View {
         });
         state.set_picker_allow(picker.allow_incompatible);
         state.set_picker_allow_enabled(editor.can_mutate());
-        update(
-            &self.models.picker_rows,
-            picker
-                .list
-                .iter()
-                .map(|definition| PickerRowView {
-                    name: definition.name.clone().into(),
-                    detail: definition.picker_description().into(),
-                    reforged: definition.is_reforged(),
-                })
-                .collect(),
-        );
+        // Choosing an entry shows again with the same list; its rows are rebuilt only when the list changes.
+        let generation = editor.menu_generation();
+        let listed = editor.picker_indices();
+        let built = self
+            .built
+            .picker
+            .borrow()
+            .as_ref()
+            .is_some_and(|(built, indices)| *built == generation && indices.as_slice() == listed);
+        if !built {
+            update(
+                &self.models.picker_rows,
+                editor
+                    .picker_list()
+                    .map(|definition| PickerRowView {
+                        name: definition.name.clone().into(),
+                        detail: definition.picker_description().into(),
+                        reforged: definition.is_reforged(),
+                    })
+                    .collect(),
+            );
+            *self.built.picker.borrow_mut() = Some((generation, listed.to_vec()));
+        }
         state.set_picker_selected(
             picker
                 .selected
-                .and_then(|id| picker.list.iter().position(|definition| definition.id == id))
+                .and_then(|id| editor.picker_list().position(|definition| definition.id == id))
                 .map_or(-1, |index| index as i32),
         );
         state.set_picker_status(editor.picker_status().into());
@@ -755,21 +821,4 @@ fn stable<T: Clone + PartialEq + 'static>(models: &mut Vec<Rc<VecModel<T>>>, ind
     }
     update(&models[index], rows);
     ModelRc::from(models[index].clone())
-}
-
-/// Rows are slots: the rows both lists have are updated in place and only the rest come or go, so a cell being dragged
-/// or typed in keeps going while the game adds or takes away a row elsewhere (one remade under the pointer never hears
-/// its release). A cell that now shows another value ends its gesture by that value's `uid`.
-fn update<T: Clone + PartialEq + 'static>(model: &VecModel<T>, rows: Vec<T>) {
-    while model.row_count() > rows.len() {
-        model.remove(model.row_count() - 1);
-    }
-    let kept = model.row_count();
-    for (index, row) in rows.into_iter().enumerate() {
-        if index >= kept {
-            model.push(row);
-        } else if model.row_data(index).as_ref() != Some(&row) {
-            model.set_row_data(index, row);
-        }
-    }
 }

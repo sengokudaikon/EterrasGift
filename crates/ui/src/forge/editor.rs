@@ -1,12 +1,13 @@
-//! The Item Forge's page state (the C# `ItemEditorViewModel`): the rows and fields with their drafts, the ledger and its
-//! Ctrl+Z order, Apply and Undo apply, the pickers and the action bar's message (spec/item-forge.md). Every value comes from
-//! the game through `ForgeGame`; the editor computes none.
+//! The Item Forge's page state: the rows and fields with their drafts, the ledger and its Ctrl+Z order, Apply and Undo
+//! apply, the pickers and the action bar's message. Every value comes from the game through `ForgeGame`; the editor computes
+//! none.
 
 use super::game::{Catalog, EditOutcome, ForgeGame, LegendaryType, Lookup, WriteOutcome, refused};
 use super::item::EditPresentation;
 use super::item::{self, AffixDefinition, AffixKind, Category, Compatibility, ForgeItem, ItemEdit, Moves, RollRequest, RollTarget, Seal, StatusField};
 use super::rows::{AffixRow, FieldDraft, FieldKind, FieldOption, RollRow, ValueEditor, base_key, base_of};
 use std::collections::{HashMap, VecDeque};
+use std::rc::Rc;
 
 pub const OVERRIDE_REQUIRED: &str = "This edit goes past what the game allows. Turn on \"I know what I'm doing\" in Settings to write it. Nothing was applied.";
 const NOTHING_APPLIED: &str = "Nothing was applied.";
@@ -87,10 +88,33 @@ pub struct Picker {
     pub filter: KindFilter,
     pub allow_incompatible: bool,
     pub selected: Option<u16>,
-    pub list: Vec<AffixDefinition>,
+    /// The catalog's definitions the picker may list, in name order, as indices: those that fit, or all of them with
+    /// "Allow incompatible affixes". Judged when the picker opens, when that box changes or when the catalog does; a
+    /// keystroke only searches them.
+    candidates: Vec<usize>,
+    /// The candidates the search and the kind filter leave, as indices into the catalog's definitions.
+    list: Vec<usize>,
 }
 
-/// A rarity the item's tiers can reach (spec §3.4).
+/// Which value table a cell reads: the roll and the draft context the game reads it in.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+enum TableKey {
+    Affix {
+        slot: usize,
+        id: u16,
+        tier: u8,
+        seal: usize,
+    },
+    /// A unique roll through its tooltip line, with the other drafted rolls it is read with.
+    Unique {
+        index: usize,
+        line: usize,
+        dependencies: Vec<(usize, u8)>,
+    },
+    Implicit(usize),
+}
+
+/// A rarity the item's tiers can reach.
 #[derive(Clone, Debug, PartialEq)]
 pub struct RarityOption {
     pub name: String,
@@ -122,7 +146,7 @@ struct WriteBatch {
     one_way: bool,
     undoing: bool,
     names: Vec<String>,
-    /// The step the game did not apply, named in a part-applied batch's message as the C# Apply names it.
+    /// The step the game did not apply, which a part-applied batch's message names.
     failed: Option<String>,
 }
 
@@ -163,13 +187,40 @@ pub struct ForgeEditor {
     waiting: Option<WaitingWrite>,
     recovery_required: bool,
     next_uid: u64,
-    tables: HashMap<String, Lookup<item::ValueTable>>,
+    tables: HashMap<TableKey, Lookup<Rc<item::ValueTable>>>,
+    /// Each identity option's lowercased name and id, which the identity search matches, kept with the options.
+    identity_keys: Vec<String>,
+    /// Each catalog definition's lowercased name, category and id, which the affix picker's search matches.
+    definition_keys: Vec<String>,
+    /// Counts changes to the base and identity options and to the catalog, so the view rebuilds its menus only then.
+    menu_generation: u64,
     /// The local time a confirmed write is listed with.
     pub clock: fn() -> String,
 }
 
 fn local_time() -> String {
     jiff::Zoned::now().strftime("%H:%M").to_string()
+}
+
+/// The table for `key`, from the cache or else from the game; one still loading is asked again next time. Tables are
+/// shared, so a cell's editor holds the cached one rather than a copy.
+fn table(
+    tables: &mut HashMap<TableKey, Lookup<Rc<item::ValueTable>>>,
+    game: &dyn ForgeGame,
+    key: TableKey,
+    item: &ForgeItem,
+    request: &RollRequest,
+) -> Lookup<Rc<item::ValueTable>> {
+    if let Some(table) = tables.get(&key) {
+        return table.clone();
+    }
+    let table = match game.resolve(item, request) {
+        Lookup::Ready(table) => Lookup::Ready(Rc::new(table)),
+        Lookup::Loading => return Lookup::Loading,
+        Lookup::Unavailable(reason) => Lookup::Unavailable(reason),
+    };
+    tables.insert(key, table.clone());
+    table
 }
 
 impl ForgeEditor {
@@ -203,21 +254,32 @@ impl ForgeEditor {
             recovery_required: false,
             next_uid: 1,
             tables: HashMap::new(),
+            identity_keys: Vec::new(),
+            definition_keys: Vec::new(),
+            menu_generation: 0,
             clock: local_time,
         };
         editor.refresh();
         editor
     }
 
-    pub fn game(&mut self) -> &mut dyn ForgeGame {
-        self.game.as_mut()
-    }
-
     /// Replace an owned observation provider, never a synchronous native call.
     /// Normal refresh rules preserve row identity and invalidate changed items.
     pub fn observe(&mut self, game: Box<dyn ForgeGame>) {
+        let same_catalog = std::ptr::eq(self.game.catalog(), game.catalog());
         self.game = game;
+        if !same_catalog {
+            self.menu_generation += 1;
+            self.definition_keys.clear();
+            // The picker lists the catalog's definitions by index.
+            self.filter_picker(true);
+        }
         self.refresh();
+    }
+
+    /// Changes whenever the base or identity options or the catalog change.
+    pub fn menu_generation(&self) -> u64 {
+        self.menu_generation
     }
 
     pub fn catalog(&self) -> &Catalog {
@@ -275,15 +337,17 @@ impl ForgeEditor {
         self.update_item(snapshot, None);
     }
 
-    /// Called on the desktop timer even when the watch revision is unchanged.
-    pub fn poll_writes(&mut self) {
+    /// Called on the desktop timer even when the watch revision is unchanged. Returns whether anything moved on: while
+    /// nothing did, there is nothing new to show.
+    pub fn poll_writes(&mut self) -> bool {
         if self.writing && self.waiting.is_none() {
             self.advance_writes();
-            return;
+            return true;
         }
-        if self.writing
-            && let Some(outcome) = self.game.poll_write()
-        {
+        if !self.writing {
+            return false;
+        }
+        if let Some(outcome) = self.game.poll_write() {
             let uncertain = matches!(outcome, WriteOutcome::Uncertain { .. });
             self.complete_write(outcome);
             self.advance_writes();
@@ -299,7 +363,9 @@ impl ForgeEditor {
                     self.say(message.0, message.1);
                 }
             }
+            return true;
         }
+        false
     }
 
     // ----- What the rows may do -----
@@ -433,8 +499,8 @@ impl ForgeEditor {
             .is_none_or(|context| eg_trainer::edits::legendary_fits(context.expected.snapshot(), unique.is_set, i32::from(unique.legendary_type == LegendaryType::WeaversWill)))
     }
 
-    /// What the item keeps that this unique or set item never holds, or None when it holds what the item has (the C#
-    /// `ForgeChoices.ForeignLegendary`, the forge's risk wording cut to fit a menu caption).
+    /// What the item keeps that this unique or set item never holds, or None when it holds what the item has: the forge's
+    /// risk wording, cut to fit a menu caption.
     fn foreign_legendary(item: &ForgeItem, unique: &super::game::UniqueDefinition) -> Option<String> {
         if Self::legendary_fits(item, unique) {
             return None;
@@ -450,7 +516,7 @@ impl ForgeEditor {
         Some(format!("keeps {kept} it never holds, which may crash the game and reset the item state"))
     }
 
-    /// The uniques and set items of the item's type, uniques first, each with the rarity it would end with (spec §3.5). A
+    /// The uniques and set items of the item's type, uniques first, each with the rarity it would end with. A
     /// legendary the game never makes, or legendary potential or Weaver's Will kept where the new identity never holds it,
     /// needs the override.
     fn identity_options(&self, item: &ForgeItem) -> Vec<FieldOption> {
@@ -526,8 +592,21 @@ impl ForgeEditor {
         self.identity
             .iter()
             .flat_map(|identity| identity.options.iter())
-            .filter(|option| search.is_empty() || option.name.to_lowercase().contains(&search) || option.value.to_string().contains(&search))
+            .enumerate()
+            .filter(|(index, _)| search.is_empty() || self.identity_keys.get(*index).is_some_and(|key| key.contains(&search)))
+            .map(|(_, option)| option)
             .collect()
+    }
+
+    /// Lowercases the identity options' names once, for the search; the options change only with the item or catalog.
+    fn index_identities(&mut self) {
+        self.identity_keys = self
+            .identity
+            .iter()
+            .flat_map(|identity| identity.options.iter())
+            // The separator never comes from a search box, so no match spans the two.
+            .map(|option| format!("{}\0{}", option.name.to_lowercase(), option.value))
+            .collect();
     }
 
     pub fn set_identity_search(&mut self, search: &str) {
@@ -571,9 +650,9 @@ impl ForgeEditor {
         self.catalog().rarity_name(rarity).unwrap_or_else(|| item::crafted_name(rarity).into())
     }
 
-    /// The crafted rarity the drafted affixes give the item.
-    fn drafted_count_rarity(&self) -> String {
-        self.drafted_item().map(|item| self.count_rarity_name(item.rarity)).unwrap_or_default()
+    /// The crafted rarity the drafted affixes give the item, `drafted` being the item as Apply would leave it.
+    fn drafted_count_rarity(&self, drafted: Option<&ForgeItem>) -> String {
+        drafted.map(|item| self.count_rarity_name(item.rarity)).unwrap_or_default()
     }
 
     fn is_draft_exalted(&self) -> bool {
@@ -582,19 +661,32 @@ impl ForgeEditor {
 
     /// The rarity in the game's words; on crafted items it follows the drafted tiers and affixes.
     pub fn rarity_text(&self) -> String {
+        self.rarity_text_of(self.drafted_item().as_ref())
+    }
+
+    /// `rarity_text` with the item as Apply would leave it (`drafted_item`) already projected.
+    pub fn rarity_text_of(&self, drafted: Option<&ForgeItem>) -> String {
         let Some(item) = self.item.as_ref() else {
             return String::new();
         };
         if !self.is_crafted() {
             return self.rarity_label(self.drafted_identity().map_or(item.rarity, |(_, _, rarity)| rarity));
         }
-        if self.is_draft_exalted() { "Exalted".into() } else { self.drafted_count_rarity() }
+        if self.is_draft_exalted() {
+            "Exalted".into()
+        } else {
+            self.drafted_count_rarity(drafted)
+        }
     }
 
-    pub fn is_rarity_drafted(&self) -> bool {
+    /// Whether the drafts change the rarity, `drafted` being the item as Apply would leave it (`drafted_item`).
+    pub fn is_rarity_drafted_of(&self, drafted: Option<&ForgeItem>) -> bool {
         if self.is_crafted() {
             self.is_draft_exalted() != self.item.as_ref().is_some_and(ForgeItem::is_exalted)
-                || self.item.as_ref().is_some_and(|item| self.drafted_count_rarity() != self.count_rarity_name(item.rarity))
+                || self
+                    .item
+                    .as_ref()
+                    .is_some_and(|item| self.drafted_count_rarity(drafted) != self.count_rarity_name(item.rarity))
         } else {
             self.drafted_identity()
                 .is_some_and(|(_, _, rarity)| Some(rarity) != self.item.as_ref().map(|item| item.rarity))
@@ -692,6 +784,11 @@ impl ForgeEditor {
 
     /// The two rarities tiers can reach on a crafted item with affixes.
     pub fn rarity_options(&self) -> Vec<RarityOption> {
+        self.rarity_options_of(self.drafted_item().as_ref())
+    }
+
+    /// `rarity_options` with the item as Apply would leave it (`drafted_item`) already projected.
+    pub fn rarity_options_of(&self, drafted: Option<&ForgeItem>) -> Vec<RarityOption> {
         if !self.is_crafted() || self.affixes.is_empty() {
             return Vec::new();
         }
@@ -712,7 +809,7 @@ impl ForgeEditor {
                     _ => format!("Lowers {} affixes below T6", plan.len()),
                 };
                 RarityOption {
-                    name: if to_exalted { "Exalted".into() } else { self.drafted_count_rarity() },
+                    name: if to_exalted { "Exalted".into() } else { self.drafted_count_rarity(drafted) },
                     exalted: to_exalted,
                     detail,
                     available: to_exalted == exalted || !plan.is_empty(),
@@ -723,7 +820,7 @@ impl ForgeEditor {
             .collect()
     }
 
-    /// The tier drafts that make the item exalted or not (the C# `ExaltedPlan`): row, tier, seal.
+    /// The tier drafts that make the item exalted or not: row, tier, seal.
     fn exalted_plan(&self, exalted: bool) -> Vec<(usize, u8, Seal)> {
         // Rows Apply removes take no part; an added affix has no tier in the game.
         let game_tier = |row: &AffixRow| if !row.added && row.draft_id() == row.state.id { row.state.tier } else { 0 };
@@ -885,8 +982,8 @@ impl ForgeEditor {
         self.selected_unique = index;
     }
 
-    /// Adding and removing are drafts like the others (unlike the C# Forge, which wrote them at once): Apply writes them in
-    /// order with the rest, each step naming the slots the earlier ones leave.
+    /// Adding and removing are drafts like the others: Apply writes them in order with the rest, each step naming the slots
+    /// the earlier ones leave.
     pub fn can_change_affix_list(&self) -> bool {
         self.can_mutate() && self.item.is_some() && self.game.supports(&ItemEdit::RemoveAffix(eg_trainer::edits::RemoveAffixEdit { slot: 0, id: 0 }))
     }
@@ -900,7 +997,12 @@ impl ForgeEditor {
 
     /// The free slots the drafted affixes leave.
     pub fn free_slots_text(&self) -> String {
-        let Some(item) = self.drafted_item() else {
+        self.free_slots_text_of(self.drafted_item().as_ref())
+    }
+
+    /// `free_slots_text` with the item as Apply would leave it (`drafted_item`) already projected.
+    pub fn free_slots_text_of(&self, drafted: Option<&ForgeItem>) -> String {
+        let Some(item) = drafted else {
             return String::new();
         };
         if matches!(item.rarity, item::UNIQUE | item::SET) {
@@ -916,10 +1018,6 @@ impl ForgeEditor {
             count(prefixes.max(0) as usize, "prefix", "prefixes"),
             count(suffixes.max(0) as usize, "suffix", "suffixes")
         )
-    }
-
-    pub fn affix_list_note(&self) -> String {
-        self.free_slots_text()
     }
 
     pub fn tier_ladder_note(&self) -> &'static str {
@@ -1047,8 +1145,8 @@ impl ForgeEditor {
         unlocked && self.editor_of(cell).is_some_and(|(editor, _, _)| editor.has_mapping())
     }
 
-    /// Writes a roll position into the cell's draft.
-    fn set_cell(&mut self, cell: Cell, roll: u8) {
+    /// Writes a roll position into the cell's draft; returns whether the draft changed.
+    fn set_cell(&mut self, cell: Cell, roll: u8) -> bool {
         let changed = match cell {
             Cell::Affix(row) => self.affixes.get_mut(row).is_some_and(|row| row.set_roll(roll)),
             Cell::Unique(row, position) => self.uniques.get_mut(row).is_some_and(|line| line.set_roll(position, roll)),
@@ -1056,7 +1154,7 @@ impl ForgeEditor {
             Cell::Field(index) => self.fields.get_mut(index).is_some_and(|field| field.set_roll(roll)),
         };
         if !changed {
-            return;
+            return false;
         }
         match cell {
             Cell::Affix(row) => self.edited(RowRef::Affix(self.affixes[row].uid)),
@@ -1068,6 +1166,16 @@ impl ForgeEditor {
             Cell::Implicit(row, _) => self.edited(RowRef::Implicit(self.implicits[row].uid)),
             Cell::Field(index) => self.edited(RowRef::Field(self.fields[index].uid)),
         }
+        true
+    }
+
+    /// Sets the cell's roll and asks for the tables its new draft context reads; returns whether the draft changed.
+    fn move_cell(&mut self, cell: Cell, next: Option<u8>) -> bool {
+        let changed = next.is_some_and(|next| self.set_cell(cell, next));
+        if changed {
+            self.resolve_tables();
+        }
+        changed
     }
 
     /// A press on a value cell: it selects the row and remembers the value a drag starts from.
@@ -1103,12 +1211,13 @@ impl ForgeEditor {
     }
 
     /// Scrubs to the pressed value moved by `fraction` of the range: the values a drag passes through are one Undo step.
-    pub fn scrub(&mut self, cell: Cell, fraction: f64) {
+    /// Returns whether the draft changed; a move that lands on the same roll changes nothing the view shows.
+    pub fn scrub(&mut self, cell: Cell, fraction: f64) -> bool {
         if !self.can_edit_value(cell) {
-            return;
+            return false;
         }
         let Some((editor, roll, _)) = self.editor_of(cell) else {
-            return;
+            return false;
         };
         let dragging = editor.dragging;
         let target = (editor.pressed + fraction * (editor.maximum() - editor.minimum())).clamp(editor.minimum(), editor.maximum());
@@ -1119,10 +1228,7 @@ impl ForgeEditor {
                 editor.dragging = true;
             }
         }
-        if let Some(next) = next {
-            self.set_cell(cell, next);
-            self.resolve_tables();
-        }
+        self.move_cell(cell, next)
     }
 
     /// The drag ends; a cancelled one (Escape) puts the value back and leaves no Undo step. A cell whose row was rebuilt
@@ -1157,26 +1263,22 @@ impl ForgeEditor {
         self.resolve_tables();
     }
 
-    /// Left / Right: one attainable value; Shift steps five.
-    pub fn step(&mut self, cell: Cell, steps: i32) {
+    /// Left / Right: one attainable value; Shift steps five. Returns whether the draft changed.
+    pub fn step(&mut self, cell: Cell, steps: i32) -> bool {
         if !self.can_edit_value(cell) {
-            return;
+            return false;
         }
-        if let Some(next) = self.editor_of(cell).and_then(|(editor, roll, _)| editor.step(roll, steps)) {
-            self.set_cell(cell, next);
-            self.resolve_tables();
-        }
+        let next = self.editor_of(cell).and_then(|(editor, roll, _)| editor.step(roll, steps));
+        self.move_cell(cell, next)
     }
 
-    /// Home / End: the minimum or the maximum.
-    pub fn step_to_end(&mut self, cell: Cell, maximum: bool) {
+    /// Home / End: the minimum or the maximum. Returns whether the draft changed.
+    pub fn step_to_end(&mut self, cell: Cell, maximum: bool) -> bool {
         if !self.can_edit_value(cell) {
-            return;
+            return false;
         }
-        if let Some(next) = self.editor_of(cell).and_then(|(editor, roll, _)| editor.end(roll, maximum)) {
-            self.set_cell(cell, next);
-            self.resolve_tables();
-        }
+        let next = self.editor_of(cell).and_then(|(editor, roll, _)| editor.end(roll, maximum));
+        self.move_cell(cell, next)
     }
 
     /// Opens the value popover with the value selected; a locked value stays read-only.
@@ -1218,10 +1320,7 @@ impl ForgeEditor {
         if let Some(editor) = self.editor_mut(cell) {
             editor.typing = false;
         }
-        if let Some(next) = next {
-            self.set_cell(cell, next);
-            self.resolve_tables();
-        }
+        self.move_cell(cell, next);
         true
     }
 
@@ -1316,7 +1415,7 @@ impl ForgeEditor {
         }
     }
 
-    /// The base field can be edited now: its "Allow incompatible affixes" box follows this (the C# `CanEdit`).
+    /// The base field can be edited now: its "Allow incompatible affixes" box follows this.
     pub fn can_edit_base_field(&self) -> bool {
         self.base.as_ref().is_some_and(FieldDraft::is_editable) && self.can_mutate()
     }
@@ -1405,6 +1504,14 @@ impl ForgeEditor {
             });
         }
         entries
+    }
+
+    /// How many entries `drafts` lists, without building them.
+    pub fn draft_count(&self) -> usize {
+        self.affixes.iter().filter(|row| row.is_dirty()).count()
+            + self.uniques.iter().filter(|row| row.is_dirty() && row.can_undo()).count()
+            + self.implicits.iter().filter(|row| row.is_dirty()).count()
+            + self.all_fields().filter(|field| field.is_dirty()).count()
     }
 
     /// An entry selects its affix or unique row, or names the cell that edits it.
@@ -1502,7 +1609,7 @@ impl ForgeEditor {
         if !self.can_discard_all() {
             return;
         }
-        let count = self.drafts().len();
+        let count = self.draft_count();
         while let Some(index) = self.affixes.iter().position(|row| row.added) {
             self.drop_added(index);
         }
@@ -1524,22 +1631,22 @@ impl ForgeEditor {
     }
 
     pub fn draft_count_text(&self) -> String {
-        let drafts = self.drafts().len();
+        let drafts = self.draft_count();
         if drafts == 0 { "No drafts".into() } else { count(drafts, "draft", "drafts") }
     }
 
     pub fn changes_text(&self) -> String {
-        let drafts = self.drafts().len();
+        let drafts = self.draft_count();
         if drafts == 0 { "Changes".into() } else { format!("Changes ({drafts})") }
     }
 
     pub fn discard_text(&self) -> String {
-        let drafts = self.drafts().len();
+        let drafts = self.draft_count();
         if drafts == 1 { "Discard draft".into() } else { format!("Discard {drafts} drafts") }
     }
 
     pub fn apply_text(&self) -> String {
-        let drafts = self.drafts().len();
+        let drafts = self.draft_count();
         if drafts > 1 { format!("Apply {drafts} drafts") } else { "Apply to game".into() }
     }
 
@@ -1699,10 +1806,10 @@ impl ForgeEditor {
     /// The adapter coalesces drafts for 150 ms and publishes only the exact current preview.
     fn refresh_unique_preview(&mut self) {
         self.say_preview("", false, false);
-        let (Some(edit), Some(item)) = (self.unique_edit(), self.item.clone()) else {
+        let (Some(edit), Some(item)) = (self.unique_edit(), self.item.as_ref()) else {
             return;
         };
-        match self.game.preview_unique(&item, &edit) {
+        match self.game.preview_unique(item, &edit) {
             Lookup::Ready(modifiers) => {
                 for state in modifiers {
                     if let Some(row) = self.uniques.iter_mut().find(|row| row.state.index == state.index) {
@@ -1742,19 +1849,38 @@ impl ForgeEditor {
         if self.writing {
             return;
         }
-        let Some(item) = self.item.clone() else {
-            self.game.retain_mappings(&[]);
+        let changes = match self.unique_edit() {
+            Some(ItemEdit::Roll(eg_trainer::edits::RollEdit { changes, .. })) => changes,
+            _ => Vec::new(),
+        };
+        let unrestricted = self.unrestricted();
+        let ForgeEditor {
+            game,
+            item,
+            tables,
+            affixes,
+            uniques,
+            implicits,
+            ..
+        } = self;
+        let game = game.as_ref();
+        let Some(item) = item.as_ref() else {
+            game.retain_mappings(&[]);
             return;
         };
         let mut requests = Vec::new();
-        for index in 0..self.affixes.len() {
-            let row = &self.affixes[index];
+        for row in affixes.iter_mut() {
             // The game reads values for affixes it holds; an added one waits for Apply.
             if row.added {
                 continue;
             }
             let (slot, id, tier, seal) = (row.slot(), row.draft_id(), row.tier(), row.seal());
-            let key = format!("affix:{slot}:{id}:{tier}:{seal:?}");
+            let key = TableKey::Affix {
+                slot,
+                id,
+                tier,
+                seal: seal.index(),
+            };
             let request = RollRequest {
                 target: RollTarget::Affix,
                 index: slot,
@@ -1769,71 +1895,60 @@ impl ForgeEditor {
                 line: None,
             };
             let game_context = row.game_roll().is_some();
-            requests.push(request.clone());
             // Without the game's values the roll is still edited, by its position.
-            match self.table(&key, &item, &request) {
-                Lookup::Ready(table) if !table.is_usable() => self.affixes[index].value.set_positions("the game gave no usable values", game_context),
-                Lookup::Unavailable(reason) => self.affixes[index].value.set_positions(&reason, game_context),
-                table => self.affixes[index].value.set_mapping(table, game_context),
+            match table(tables, game, key, item, &request) {
+                Lookup::Ready(table) if !table.is_usable() => row.value.set_positions("the game gave no usable values", game_context),
+                Lookup::Unavailable(reason) => row.value.set_positions(&reason, game_context),
+                table => row.value.set_mapping(table, game_context),
             }
+            requests.push(request);
         }
-        let changes = match self.unique_edit() {
-            Some(ItemEdit::Roll(eg_trainer::edits::RollEdit { changes, .. })) => changes,
-            _ => Vec::new(),
-        };
-        for line in 0..self.uniques.len() {
-            for position in 0..self.uniques[line].rolls.len() {
-                let index = self.uniques[line].rolls[position].index;
+        for line in uniques.iter_mut() {
+            let line_index = line.state.index;
+            for roll in &mut line.rolls {
+                let index = roll.index;
                 let dependencies: Vec<(usize, u8)> = changes.iter().filter(|c| c.index != index as i32).map(|c| (c.index as usize, c.value as u8)).collect();
-                let key = format!("unique:{index}:line{}:{dependencies:?}", self.uniques[line].state.index);
                 let request = RollRequest {
                     target: RollTarget::Unique,
                     index,
-                    draft: (!dependencies.is_empty()).then_some(ItemEdit::Roll(eg_trainer::edits::RollEdit {
-                        target: RollTarget::Unique,
-                        changes: item::roll_changes(dependencies),
-                        allow_incompatible: self.unrestricted(),
-                    })),
-                    line: Some(self.uniques[line].state.index),
+                    draft: (!dependencies.is_empty()).then(|| {
+                        ItemEdit::Roll(eg_trainer::edits::RollEdit {
+                            target: RollTarget::Unique,
+                            changes: item::roll_changes(dependencies.iter().copied()),
+                            allow_incompatible: unrestricted,
+                        })
+                    }),
+                    line: Some(line_index),
                 };
-                requests.push(request.clone());
-                let table = self.table(&key, &item, &request);
-                self.uniques[line].rolls[position].editor.set_mapping(table, true);
+                let key = TableKey::Unique {
+                    index,
+                    line: line_index,
+                    dependencies,
+                };
+                roll.editor.set_mapping(table(tables, game, key, item, &request), true);
+                requests.push(request);
             }
         }
-        for line in 0..self.implicits.len() {
-            for position in 0..self.implicits[line].rolls.len() {
-                let index = self.implicits[line].rolls[position].index;
+        for line in implicits.iter_mut() {
+            for roll in &mut line.rolls {
                 let request = RollRequest {
                     target: RollTarget::Implicit,
-                    index,
+                    index: roll.index,
                     draft: None,
                     line: None,
                 };
-                requests.push(request.clone());
-                let table = self.table(&format!("implicit:{index}"), &item, &request);
-                self.implicits[line].rolls[position].editor.set_mapping(table, true);
+                roll.editor.set_mapping(table(tables, game, TableKey::Implicit(roll.index), item, &request), true);
+                requests.push(request);
             }
         }
-        self.game.retain_mappings(&requests);
-    }
-
-    fn table(&mut self, key: &str, item: &ForgeItem, request: &RollRequest) -> Lookup<item::ValueTable> {
-        if let Some(table) = self.tables.get(key) {
-            return table.clone();
-        }
-        let table = self.game.resolve(item, request);
-        if !matches!(&table, Lookup::Loading) {
-            self.tables.insert(key.to_string(), table.clone());
-        }
-        table
+        game.retain_mappings(&requests);
     }
 
     // ----- The item -----
 
     fn update_item(&mut self, snapshot: Option<ForgeItem>, moves: Option<&Moves>) {
         let replaced = self.item.as_ref().map(|item| &item.token) != snapshot.as_ref().map(|item| &item.token);
-        let discarded = if replaced { self.drafts().len() } else { 0 };
+        let discarded = if replaced { self.draft_count() } else { 0 };
         self.tables.clear();
         if replaced {
             self.picker = None;
@@ -1910,6 +2025,8 @@ impl ForgeEditor {
                 MessageKind::Info,
             );
         }
+        // What fits depends on the item, so an open picker judges its list again.
+        self.filter_picker(true);
         self.resolve_tables();
         self.refresh_unique_preview();
     }
@@ -1952,7 +2069,9 @@ impl ForgeEditor {
             self.fields.clear();
             self.base = None;
             self.identity = None;
+            self.identity_keys.clear();
             self.fields_key.clear();
+            self.menu_generation += 1;
             return Vec::new();
         };
         let key = format!(
@@ -1976,14 +2095,22 @@ impl ForgeEditor {
             if let Some(base) = self.base.as_mut() {
                 base.update(base_key(item.item_type, item.sub_type));
             }
+            // The options follow the game too; the menus are rebuilt only when they changed.
             let options = self.base_options(&item);
-            if let Some(base) = self.base.as_mut() {
+            if let Some(base) = self.base.as_mut()
+                && base.options != options
+            {
                 base.options = options;
+                self.menu_generation += 1;
             }
             let options = self.identity_options(&item);
             if let Some(identity) = self.identity.as_mut() {
                 identity.update(item.identity_id().map_or(0, i64::from));
-                identity.options = options;
+                if identity.options != options {
+                    identity.options = options;
+                    self.menu_generation += 1;
+                    self.index_identities();
+                }
             }
             return Vec::new();
         }
@@ -1997,6 +2124,8 @@ impl ForgeEditor {
             self.forget(RowRef::Field(field));
         }
         self.rebuild_fields(&item);
+        self.index_identities();
+        self.menu_generation += 1;
         let mut lost = Vec::new();
         for old in drafted {
             match self.fields_mut().find(|field| field.field == old.field && field.kind == old.kind) {
@@ -2115,7 +2244,7 @@ impl ForgeEditor {
         }
     }
 
-    /// Values only "I know what I'm doing" writes (spec §3.1 override cells).
+    /// Values only "I know what I'm doing" writes.
     fn add_override_fields(&mut self, item: &ForgeItem) {
         let Some(status) = item.status else {
             return;
@@ -2181,8 +2310,7 @@ impl ForgeEditor {
     }
 
     /// The item type's bases, each with its level, the implicits it grants and how many of the item's affixes it would make
-    /// incompatible (the C# `ForgeChoices.BaseOptions`). An idol lists every idol type's bases after its own, which only
-    /// "I know what I'm doing" can pick (the C# `ForgeChoices.BaseOptions` with the override).
+    /// incompatible. An idol lists every idol type's bases after its own, which only "I know what I'm doing" can pick.
     fn base_options(&self, item: &ForgeItem) -> Vec<FieldOption> {
         let mut types: Vec<u16> = vec![item.item_type];
         if item.idol {
@@ -2229,7 +2357,7 @@ impl ForgeEditor {
     }
 
     /// How many of the item's affixes a change to `item_type`'s `sub_type` would make incompatible, judged with the class
-    /// requirement that base carries (the C# `ForgeChoices.BrokenByBase`).
+    /// requirement that base carries.
     fn broken_by_base(&self, item: &ForgeItem, item_type: u16, sub_type: u16) -> usize {
         let class_requirement = self.catalog().base(item_type, sub_type).map(|base| base.class_requirement);
         item::broken_by_base(item, item_type, sub_type, class_requirement).len()
@@ -2256,7 +2384,7 @@ impl ForgeEditor {
             return false;
         }
         self.picker = Some(Picker::default());
-        self.filter_picker();
+        self.filter_picker(true);
         true
     }
 
@@ -2268,7 +2396,7 @@ impl ForgeEditor {
             adding: true,
             ..Picker::default()
         });
-        self.filter_picker();
+        self.filter_picker(true);
         true
     }
 
@@ -2280,62 +2408,90 @@ impl ForgeEditor {
         if let Some(picker) = self.picker.as_mut() {
             picker.search = search.into();
         }
-        self.filter_picker();
+        self.filter_picker(false);
     }
 
     pub fn picker_filter(&mut self, filter: KindFilter) {
         if let Some(picker) = self.picker.as_mut() {
             picker.filter = filter;
         }
-        self.filter_picker();
+        self.filter_picker(false);
     }
 
     pub fn picker_allow(&mut self, allow: bool) {
         if let Some(picker) = self.picker.as_mut() {
             picker.allow_incompatible = allow;
         }
-        self.filter_picker();
+        self.filter_picker(true);
     }
 
     pub fn picker_select(&mut self, index: usize) {
+        let definitions = &self.game.catalog().definitions;
         if let Some(picker) = self.picker.as_mut() {
-            picker.selected = picker.list.get(index).map(|definition| definition.id);
+            picker.selected = picker.list.get(index).and_then(|&index| definitions.get(index)).map(|definition| definition.id);
         }
     }
 
-    fn filter_picker(&mut self) {
+    /// What the open picker lists, as indices into the catalog's definitions: the list changed when these did.
+    pub fn picker_indices(&self) -> &[usize] {
+        self.picker.as_ref().map_or(&[], |picker| picker.list.as_slice())
+    }
+
+    /// The definitions the open picker lists, in order.
+    pub fn picker_list(&self) -> impl Iterator<Item = &AffixDefinition> {
+        let definitions = &self.catalog().definitions;
+        self.picker.iter().flat_map(|picker| picker.list.iter()).filter_map(|&index| definitions.get(index))
+    }
+
+    /// Lists the definitions the search and the kind filter leave of the candidates; `rejudge` first judges again which
+    /// definitions fit the item, as when the picker opens.
+    fn filter_picker(&mut self, rejudge: bool) {
         let Some(picker) = self.picker.as_ref() else {
             return;
         };
-        let slot = if picker.adding { None } else { self.slot_state() };
-        // An addition joins the item as the other drafts leave it; a replacement takes the game's slot.
-        let item = if picker.adding { self.drafted_item() } else { self.item.clone() };
-        let compatible = |definition: &AffixDefinition| {
-            item.as_ref()
-                .is_some_and(|item| self.game.compatibility(item, definition, slot.as_ref(), self.unrestricted()).is_allowed())
+        let definitions = &self.game.catalog().definitions;
+        if self.definition_keys.len() != definitions.len() {
+            // The separator never comes from a search box, so no match spans two parts.
+            self.definition_keys = definitions
+                .iter()
+                .map(|definition| format!("{}\0{}\0{}", definition.name.to_lowercase(), definition.category.name().to_lowercase(), definition.id))
+                .collect();
+        }
+        let candidates = if rejudge {
+            let slot = if picker.adding { None } else { self.slot_state() };
+            // An addition joins the item as the other drafts leave it; a replacement takes the game's slot.
+            let drafted = if picker.adding { self.drafted_item() } else { None };
+            let item = if picker.adding { drafted.as_ref() } else { self.item.as_ref() };
+            let unrestricted = self.unrestricted();
+            let compatible = |definition: &AffixDefinition| item.is_some_and(|item| self.game.compatibility(item, definition, slot.as_ref(), unrestricted).is_allowed());
+            let mut candidates: Vec<usize> = (0..definitions.len())
+                .filter(|&index| picker.allow_incompatible || compatible(&definitions[index]))
+                .collect();
+            candidates.sort_by(|a, b| definitions[*a].name.cmp(&definitions[*b].name));
+            Some(candidates)
+        } else {
+            None
         };
         let search = picker.search.to_lowercase();
-        let mut list: Vec<AffixDefinition> = self
-            .catalog()
-            .definitions
+        let list: Vec<usize> = candidates
+            .as_ref()
+            .unwrap_or(&picker.candidates)
             .iter()
-            .filter(|definition| {
-                search.is_empty()
-                    || definition.name.to_lowercase().contains(&search)
-                    || definition.category.name().to_lowercase().contains(&search)
-                    || definition.id.to_string().contains(&search)
-            })
-            .filter(|definition| match picker.filter {
+            .copied()
+            .filter(|&index| definitions.get(index).is_some())
+            .filter(|&index| search.is_empty() || self.definition_keys[index].contains(&search))
+            .filter(|&index| match picker.filter {
                 KindFilter::All => true,
-                KindFilter::Prefixes => definition.kind == AffixKind::Prefix,
-                KindFilter::Suffixes => definition.kind == AffixKind::Suffix,
+                KindFilter::Prefixes => definitions[index].kind == AffixKind::Prefix,
+                KindFilter::Suffixes => definitions[index].kind == AffixKind::Suffix,
             })
-            .filter(|definition| picker.allow_incompatible || compatible(definition))
-            .cloned()
             .collect();
-        list.sort_by(|a, b| a.name.cmp(&b.name));
+        let selected = picker.selected.filter(|id| list.iter().any(|&index| definitions[index].id == *id));
         let picker = self.picker.as_mut().expect("the picker is open");
-        picker.selected = picker.selected.filter(|id| list.iter().any(|definition| definition.id == *id));
+        if let Some(candidates) = candidates {
+            picker.candidates = candidates;
+        }
+        picker.selected = selected;
         picker.list = list;
     }
 
@@ -2348,8 +2504,13 @@ impl ForgeEditor {
     }
 
     pub fn picker_subtitle(&self) -> String {
+        self.picker_subtitle_of(self.drafted_item().as_ref())
+    }
+
+    /// `picker_subtitle` with the item as Apply would leave it (`drafted_item`) already projected.
+    pub fn picker_subtitle_of(&self, drafted: Option<&ForgeItem>) -> String {
         match (&self.picker, self.selected_affix.and_then(|index| self.affixes.get(index))) {
-            (Some(picker), _) if picker.adding => self.free_slots_text(),
+            (Some(picker), _) if picker.adding => self.free_slots_text_of(drafted),
             (_, Some(row)) => format!("Currently {}", row.original_name()),
             _ => String::new(),
         }
@@ -2363,9 +2524,9 @@ impl ForgeEditor {
         }
     }
 
-    fn picked(&self) -> Option<AffixDefinition> {
-        let picker = self.picker.as_ref()?;
-        picker.list.iter().find(|definition| Some(definition.id) == picker.selected).cloned()
+    fn picked(&self) -> Option<&AffixDefinition> {
+        let selected = self.picker.as_ref()?.selected?;
+        self.picker_list().find(|definition| definition.id == selected)
     }
 
     fn replacement_problem(&self, compatibility: Compatibility, allow_incompatible: bool) -> Option<String> {
@@ -2379,7 +2540,7 @@ impl ForgeEditor {
         (!compatibility.is_allowed() && !self.unrestricted()).then(|| OVERRIDE_REQUIRED.to_string())
     }
 
-    /// The addition the picker drafts for a definition, to the item as the other drafts leave it, or why not (spec §8 Add).
+    /// The addition the picker drafts for a definition, to the item as the other drafts leave it, or why not.
     /// It starts at tier 5 (or the affix's highest below it) and the middle roll, corrupted where the affix is.
     fn add_edit(&self, definition: &AffixDefinition) -> Result<ItemEdit, String> {
         let Some(item) = self.drafted_item() else {
@@ -2430,13 +2591,13 @@ impl ForgeEditor {
         Ok(edit)
     }
 
-    /// The picker's status caption for the chosen entry (spec §16).
+    /// The picker's status caption for the chosen entry.
     pub fn picker_status(&self) -> String {
         let (Some(picker), Some(definition)) = (self.picker.as_ref(), self.picked()) else {
             return String::new();
         };
         if picker.adding {
-            return match self.add_edit(&definition) {
+            return match self.add_edit(definition) {
                 Ok(edit) if edit.needs_override() => format!("Added by \"I know what I'm doing\". {NOT_ADDED_HERE}."),
                 Ok(_) => "Fits this item.".into(),
                 Err(problem) => problem,
@@ -2445,7 +2606,7 @@ impl ForgeEditor {
         let Some(slot) = self.slot_state() else {
             return "Select an affix slot.".into();
         };
-        match self.compatibility_of(&definition, Some(&slot)) {
+        match self.compatibility_of(definition, Some(&slot)) {
             Compatibility::Override => "Allowed by \"I know what I'm doing\". The game does not roll it here.".into(),
             Compatibility::Allowed => "Compatible with this slot".into(),
             Compatibility::Rejected(_) if !self.unrestricted() => format!("{INCOMPATIBLE}. {}", turn_on_override("use it")),
@@ -2467,11 +2628,11 @@ impl ForgeEditor {
             return false;
         };
         if picker.adding {
-            return self.can_change_affix_list() && self.add_edit(&definition).is_ok();
+            return self.can_change_affix_list() && self.add_edit(definition).is_ok();
         }
         self.can_mutate()
             && self.slot_state().is_some_and(|slot| {
-                self.replacement_problem(self.compatibility_of(&definition, Some(&slot)), picker.allow_incompatible)
+                self.replacement_problem(self.compatibility_of(definition, Some(&slot)), picker.allow_incompatible)
                     .is_none()
             })
     }
@@ -2481,16 +2642,16 @@ impl ForgeEditor {
         if !self.can_use_picker() {
             return;
         }
-        let (Some(picker), Some(definition)) = (self.picker.clone(), self.picked()) else {
+        let (Some((adding, allow_incompatible)), Some(definition)) = (self.picker.as_ref().map(|picker| (picker.adding, picker.allow_incompatible)), self.picked().cloned()) else {
             return;
         };
-        if picker.adding {
+        if adding {
             let addition = self.add_edit(&definition);
             self.picker = None;
             if let Ok(ItemEdit::AddAffix(add)) = addition {
                 let uid = self.uid();
                 self.affixes
-                    .push(AffixRow::added(uid, definition, add.tier as u8, add.roll as u8, add.seal, picker.allow_incompatible));
+                    .push(AffixRow::added(uid, definition, add.tier as u8, add.roll as u8, add.seal, allow_incompatible));
                 self.selected_unique = None;
                 self.selected_affix = Some(self.affixes.len() - 1);
                 self.edited(RowRef::Affix(uid));
@@ -2500,7 +2661,7 @@ impl ForgeEditor {
         }
         self.picker = None;
         if let Some(index) = self.selected_affix
-            && self.affixes[index].select_definition(definition, picker.allow_incompatible)
+            && self.affixes[index].select_definition(definition, allow_incompatible)
         {
             let uid = self.affixes[index].uid;
             self.edited(RowRef::Affix(uid));
@@ -2547,7 +2708,7 @@ impl ForgeEditor {
     }
 
     /// The item as Apply would leave it, or the game's while the drafts cannot all be applied.
-    fn drafted_item(&self) -> Option<ForgeItem> {
+    pub fn drafted_item(&self) -> Option<ForgeItem> {
         let item = self.item.as_ref()?;
         Some(self.project(item).map_or_else(|_| item.clone(), |(_, projected)| projected))
     }
@@ -2556,8 +2717,8 @@ impl ForgeEditor {
         self.project(current).map(|(steps, _)| steps)
     }
 
-    /// The writes Apply makes, in order, with the item they leave, or why none may be made (the C# `ApplyPlanner`, which
-    /// had no additions or removals to plan): removals first, so additions find the slots they free, then the affixes
+    /// The writes Apply makes, in order, with the item they leave, or why none may be made: removals first, so additions
+    /// find the slots they free, then the affixes
     /// kept, additions, unique modifiers, implicits and the item fields, the level requirement last. Each step names the
     /// slots the earlier ones leave and is checked against the item they leave.
     fn project(&self, current: &ForgeItem) -> Result<(Vec<Step>, ForgeItem), String> {
@@ -2853,7 +3014,7 @@ impl ForgeEditor {
         }
     }
 
-    /// Ctrl+S and the primary: writes every draft, each read back (spec §10 Apply).
+    /// Ctrl+S and the primary: writes every draft, each read back.
     pub fn apply(&mut self) {
         let Some(current) = self.item.clone() else {
             return;
@@ -3121,7 +3282,7 @@ impl ForgeEditor {
             self.say(
                 match (batch.completed, batch.undoing, &batch.failed) {
                     (0, ..) => message,
-                    // C# `ItemEditorViewModel.Apply`: "{applied} of {count} drafts applied and confirmed; {step} was not applied."
+                    // "{applied} of {count} drafts applied and confirmed; {step} was not applied."
                     (completed, false, Some(step)) => format!("{completed} of {} drafts applied and confirmed; {step} was not applied. {message}", batch.total),
                     (completed, undoing, _) => format!(
                         "{completed} of {} {}. {message}",

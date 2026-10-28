@@ -1,5 +1,4 @@
-//! The editor's draft ledger, Apply and Undo on the fixture game, as the C# review scenarios drive them
-//! (spec/item-forge.md §10, spec/forge-fixture.json `captureScenarios`).
+//! The editor's draft ledger, Apply and Undo on the fixture game, driven through the review scenarios.
 
 use super::editor::{Cell, ForgeEditor, MessageKind};
 use super::item::Seal;
@@ -97,7 +96,7 @@ fn drafts_at_each_class_read_as_the_game_shows_them() {
         [1]
     );
     // Drafts no longer hold the affix list still: it shows the free slots.
-    assert_eq!(editor.affix_list_note(), "Free: 1 prefix, 1 suffix");
+    assert_eq!(editor.free_slots_text(), "Free: 1 prefix, 1 suffix");
     assert!(editor.can_change_affix_list());
     // A ledger entry can be discarded on its own; the other stays.
     editor.discard_entry(1);
@@ -299,8 +298,8 @@ fn status_fields_flags_and_the_base_are_drafts_applied_level_requirement_last() 
     let _ = forge::item::EXALTED_TIER;
 }
 
-/// The C# `ForgeChoices.BaseOptions` and `ApplyPlanner`: each base says how many affixes it would make incompatible, judged
-/// with the class requirement the base carries, and Apply refuses such a base unless the base picker allows it.
+/// Each base says how many affixes it would make incompatible, judged with the class requirement the base carries, and
+/// Apply refuses such a base unless the base picker allows it.
 #[test]
 fn a_base_that_breaks_affixes_says_so_and_needs_allowing() {
     use eg_trainer::edits::{BaseTypeEdit, ItemEdit};
@@ -354,7 +353,7 @@ fn a_base_that_breaks_affixes_says_so_and_needs_allowing() {
 }
 
 /// Incompatibility the item already carries is not the new base's doing, and "Allow incompatible affixes" on a base that
-/// breaks nothing needs no override (the C# `AffixCompatibility.BrokenByBase`, `ApplyPlanner`).
+/// breaks nothing needs no override.
 #[test]
 fn only_affixes_the_base_breaks_count() {
     use eg_trainer::edits::{BaseTypeEdit, ItemEdit};
@@ -378,8 +377,8 @@ fn only_affixes_the_base_breaks_count() {
     ));
 }
 
-/// Not the C# Forge, which wrote additions and removals at once: they are drafts in the ledger like the others, Apply
-/// writes removals first and additions last, and one Undo apply takes the whole batch back.
+/// Additions and removals are drafts in the ledger like the others: Apply writes removals first and additions last, and
+/// one Undo apply takes the whole batch back.
 #[test]
 fn adding_and_removing_are_drafts_applied_in_order_and_undone_together() {
     use eg_trainer::edits::{AddAffixEdit, ItemEdit, RemoveAffixEdit};
@@ -468,7 +467,7 @@ fn the_picker_replaces_as_a_draft() {
     editor.picker_search("res");
     editor.picker_allow(true);
     assert_eq!(
-        editor.picker.as_ref().unwrap().list.iter().map(|d| d.name.as_str()).collect::<Vec<_>>(),
+        editor.picker_list().map(|d| d.name.as_str()).collect::<Vec<_>>(),
         ["Cold Resistance", "Fire Resistance", "Sentinel's Resolve Reforged"]
     );
     editor.picker_select(0);
@@ -707,7 +706,7 @@ mod async_writes {
         release(&mut e, &c);
         assert_eq!(state.borrow().writes.len(), 1);
         assert_eq!(e.drafts().len(), 1);
-        // The C# Apply names the step the game did not apply.
+        // A part-applied batch names the step the game did not apply.
         assert_eq!(
             e.message(),
             (
@@ -919,7 +918,6 @@ fn pending_unique_preview_preserves_drafts_refreshes_only_current_text_and_clear
 
 #[test]
 fn keeping_legendary_potential_an_identity_never_holds_needs_the_override_and_warns() {
-    // The C# `KeepingLegendaryPotentialAnIdentityNeverHoldsNeedsTheOverrideAndWarns`.
     let game = FixtureGame::unique_ring();
     game.change(|item| item.status.as_mut().unwrap().legendary_potential = 2);
     let mut editor = ForgeEditor::new(Box::new(game));

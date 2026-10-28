@@ -259,7 +259,7 @@ impl ForgeItem {
         self.affixes.iter().find(|affix| affix.slot == slot)
     }
 
-    /// Free prefix and suffix slots as the game's crafting counts them (spec §15.1.8).
+    /// Free prefix and suffix slots as the game's crafting counts them.
     pub fn free_slots(&self) -> (i32, i32) {
         self.context.as_ref().map_or((0, 0), |c| edits::free_slots(c.expected.snapshot()))
     }
@@ -537,8 +537,8 @@ pub fn compatibility(item: &ForgeItem, definition: &AffixDefinition, slot: Optio
 }
 
 /// The slots of the affixes a base change would make incompatible: allowed on the item now but not once it is
-/// `item_type`'s `sub_type` with that base's `class_requirement` (the C# `AffixCompatibility.BrokenByBase`). Incompatibility
-/// the item already carries is not the new base's doing, and the override plays no part.
+/// `item_type`'s `sub_type` with that base's `class_requirement`. Incompatibility the item already carries is not the new
+/// base's doing, and the override plays no part.
 pub fn broken_by_base(item: &ForgeItem, item_type: u16, sub_type: u16, class_requirement: Option<i32>) -> Vec<usize> {
     let Some(context) = &item.context else { return Vec::new() };
     let catalog = &context.catalog;
@@ -549,7 +549,7 @@ pub fn broken_by_base(item: &ForgeItem, item_type: u16, sub_type: u16, class_req
         class_requirement: class_requirement.unwrap_or(now.class_requirement),
         ..now.clone()
     };
-    // Judged as the C# `Evaluate` without the other affixes' definitions: by the item's own class requirement alone.
+    // Each affix is judged alone, without the other affixes' definitions: by the item's own class requirement only.
     let allowed = |item: &eg_trainer::backend::ForgeSnapshot, affix: &eg_trainer::backend::AffixSnapshot, definition| {
         let alone = eg_trainer::backend::ForgeSnapshot {
             affixes: vec![affix.clone()],
@@ -571,7 +571,7 @@ pub fn broken_by_base(item: &ForgeItem, item_type: u16, sub_type: u16, class_req
         .collect()
 }
 
-/// A tier's value range from the captured numeric data, the way the game's tooltips show it (spec §15.7).
+/// A tier's value range from the captured numeric data, the way the game's tooltips show it.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum TierProperty {
     /// Modifier type 0, rounded to whole numbers when `whole`.
@@ -620,38 +620,42 @@ pub struct ValueSample {
     pub effects: Vec<String>,
 }
 
-/// The values the game produces for one roll, a sample per position 0–255 (spec §15.5).
+/// The values the game produces for one roll, a sample per position 0–255.
 #[derive(Clone, Debug, PartialEq)]
 pub struct ValueTable {
     pub label: String,
     pub samples: Vec<ValueSample>,
 }
 
+thread_local! {
+    static POSITIONS: std::rc::Rc<ValueTable> = std::rc::Rc::new(ValueTable {
+        label: "Roll position".into(),
+        samples: (0..=255)
+            .map(|roll| ValueSample {
+                value: f64::from(roll),
+                display: format!("Roll {roll}"),
+                effects: Vec::new(),
+            })
+            .collect(),
+    });
+}
+
 impl ValueTable {
     /// The roll positions themselves, 0 to 255: what an affix's value cell edits when the game can't say what its rolls
-    /// are worth.
-    pub fn positions() -> ValueTable {
-        ValueTable {
-            label: "Roll position".into(),
-            samples: (0..=255)
-                .map(|roll| ValueSample {
-                    value: f64::from(roll),
-                    display: format!("Roll {roll}"),
-                    effects: Vec::new(),
-                })
-                .collect(),
-        }
+    /// are worth. Built once and shared.
+    pub fn positions() -> std::rc::Rc<ValueTable> {
+        POSITIONS.with(std::rc::Rc::clone)
     }
 
     /// 256 finite samples, at least two distinct values, monotonic.
     pub fn is_usable(&self) -> bool {
-        if self.samples.len() != 256 || self.samples.iter().any(|sample| !sample.value.is_finite()) {
+        let samples = &self.samples;
+        if samples.len() != 256 || samples.iter().any(|sample| !sample.value.is_finite()) {
             return false;
         }
-        let values: Vec<f64> = self.samples.iter().map(|sample| sample.value).collect();
-        let distinct = values.iter().any(|value| *value != values[0]);
-        let rising = values.windows(2).all(|pair| pair[0] <= pair[1]);
-        let falling = values.windows(2).all(|pair| pair[0] >= pair[1]);
+        let distinct = samples.iter().any(|sample| sample.value != samples[0].value);
+        let rising = samples.windows(2).all(|pair| pair[0].value <= pair[1].value);
+        let falling = samples.windows(2).all(|pair| pair[0].value >= pair[1].value);
         distinct && (rising || falling)
     }
 

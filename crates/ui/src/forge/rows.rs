@@ -1,8 +1,9 @@
 //! The forge's rows and fields, each holding its own draft, its Undo steps and whether the game changed what it started
-//! from (spec/item-forge.md §10). Ported from the C# view models: `AffixRow`, `UniqueModifierRow` (also implicits),
-//! `ItemFieldDraft`, `ActualRollControl` and `DragStep`.
+//! from: affix rows, unique modifier and implicit lines, item fields, the value scrubber's model and drag steps.
 
+use super::game::Lookup;
 use super::item::{AffixDefinition, AffixState, ItemEdit, ModifierState, RollTarget, Seal, StatusField, ValueSample, ValueTable};
+use std::rc::Rc;
 
 /// The status a value cell shows until its table arrives.
 pub const LOADING: &str = "Loading actual values…";
@@ -46,15 +47,16 @@ impl DragStep {
     }
 }
 
-/// A value read from the game's table for one roll: the scrubber's model (the C# `ActualRollControl`).
+/// A value read from the game's table for one roll: the scrubber's model.
 #[derive(Clone, Debug)]
 pub struct ValueEditor {
-    table: Option<ValueTable>,
+    /// Only a usable table is kept; tables are shared with the editor's cache rather than copied.
+    table: Option<Rc<ValueTable>>,
     loading: bool,
     status: String,
     /// The last usable table read in the game's own context (same affix and tier), so the game's value stays readable
     /// while a tier draft switches this editor to another table.
-    pub game_table: Option<ValueTable>,
+    pub game_table: Option<Rc<ValueTable>>,
     label: Option<String>,
     /// Why the table is the roll positions rather than the game's values; empty for the game's own.
     note: String,
@@ -82,16 +84,16 @@ impl ValueEditor {
     }
 
     pub fn has_mapping(&self) -> bool {
-        !self.loading && self.table.as_ref().is_some_and(ValueTable::is_usable)
+        !self.loading && self.table.is_some()
     }
 
     pub fn table(&self) -> Option<&ValueTable> {
-        self.table.as_ref().filter(|table| !self.loading && table.is_usable())
+        self.table.as_deref().filter(|_| !self.loading)
     }
 
     /// The table on screen: the current one, or while a new one loads, the last. Only `table` authorizes input.
     fn shown(&self) -> Option<&ValueTable> {
-        self.table.as_ref().filter(|table| table.is_usable())
+        self.table.as_deref()
     }
 
     /// The value has a scale to draw, though it may still be loading: a re-read (after Apply, say) keeps the bar and
@@ -101,15 +103,15 @@ impl ValueEditor {
     }
 
     /// A new table, or why there is none; `game_context` marks a table read for what the game holds.
-    pub fn set_mapping(&mut self, table: impl Into<super::game::Lookup<ValueTable>>, game_context: bool) {
-        use super::game::Lookup;
-        let table = table.into();
+    pub fn set_mapping(&mut self, table: Lookup<Rc<ValueTable>>, game_context: bool) {
         // Monitoring and other rows' completed mappings can republish the same
         // table while the user types. Only a changed mapping ends that input.
         if let Lookup::Ready(value) = &table
             && !self.loading
-            && self.table.as_ref() == Some(value)
+            && self.table.as_ref().is_some_and(|table| Rc::ptr_eq(table, value) || table == value)
         {
+            // Hold the one shared copy, so the next comparison is by pointer.
+            self.table = Some(value.clone());
             if game_context {
                 self.game_table = Some(value.clone());
             }
@@ -144,7 +146,7 @@ impl ValueEditor {
 
     /// The roll positions 0 to 255 in place of the game's values, which it could not give (`reason`).
     pub fn set_positions(&mut self, reason: &str, game_context: bool) {
-        self.set_mapping(super::game::Lookup::Ready(ValueTable::positions()), game_context);
+        self.set_mapping(Lookup::Ready(ValueTable::positions()), game_context);
         self.note = format!("Actual values unavailable ({reason}). Editing the roll position.");
     }
 
@@ -728,7 +730,7 @@ pub struct RollDraft {
     pub editor: ValueEditor,
 }
 
-/// One unique modifier or implicit: only its roll positions are drafted (spec §4, §9).
+/// One unique modifier or implicit: only its roll positions are drafted.
 #[derive(Clone, Debug)]
 pub struct RollRow {
     pub uid: u64,
@@ -969,7 +971,7 @@ pub enum FieldKind {
     Identity,
 }
 
-/// One item-level value held as a draft: a status number, a status flag or the base (the C# `ItemFieldDraft`).
+/// One item-level value held as a draft: a status number, a status flag or the base.
 #[derive(Clone, Debug)]
 pub struct FieldDraft {
     pub uid: u64,
@@ -1039,7 +1041,7 @@ impl FieldDraft {
         draft.read_only_heading = heading.into();
         draft.unrestricted = allow_zero;
         let mut editor = ValueEditor::new(Some(name.to_string()));
-        editor.set_mapping(Ok(integer_table(minimum, maximum, allow_zero)), true);
+        editor.set_mapping(Lookup::Ready(Rc::new(integer_table(minimum, maximum, allow_zero))), true);
         draft.editor = Some(editor);
         draft
     }
@@ -1351,6 +1353,10 @@ mod tests {
         }
     }
 
+    fn ready(table: ValueTable) -> Lookup<Rc<ValueTable>> {
+        Lookup::Ready(Rc::new(table))
+    }
+
     fn health() -> AffixRow {
         let definition = AffixDefinition {
             id: 25,
@@ -1372,7 +1378,7 @@ mod tests {
             unknown: None,
         };
         let mut row = AffixRow::new(1, state, definition);
-        row.value.set_mapping(Ok(table(22.0, 39.6)), true);
+        row.value.set_mapping(ready(table(22.0, 39.6)), true);
         row
     }
 
@@ -1381,13 +1387,13 @@ mod tests {
         let mut row = health();
         row.value.typing = true;
         row.value.input = "37".into();
-        row.value.set_mapping(Ok(table(22.0, 39.6)), true);
+        row.value.set_mapping(ready(table(22.0, 39.6)), true);
         assert!(row.value.typing);
         assert_eq!(row.value.input, "37");
-        row.value.set_mapping(Ok(table(30.0, 50.0)), false);
+        row.value.set_mapping(ready(table(30.0, 50.0)), false);
         assert!(!row.value.typing);
         let previous = row.value.display(171);
-        row.value.set_mapping(super::super::game::Lookup::Loading, false);
+        row.value.set_mapping(Lookup::Loading, false);
         assert_eq!(row.value.display(171), previous);
         assert!(row.value.table().is_none());
         assert!(row.value.nearest(37.0, 171).is_none());
@@ -1395,10 +1401,10 @@ mod tests {
         assert_eq!(row.value.status(), LOADING);
         assert!(!row.value.has_mapping());
         assert!(row.value.game_table.is_some());
-        row.value.set_mapping(Ok(table(30.0, 50.0)), false);
+        row.value.set_mapping(ready(table(30.0, 50.0)), false);
         assert!(row.value.has_mapping(), "an identical table becomes editable again after reload");
         assert_eq!(row.value.status(), "");
-        row.value.set_mapping(super::super::game::Lookup::Unavailable(LOADING.into()), false);
+        row.value.set_mapping(Lookup::Unavailable(LOADING.into()), false);
         assert_eq!(row.value.status(), format!("Actual values unavailable: {LOADING}"));
     }
 
