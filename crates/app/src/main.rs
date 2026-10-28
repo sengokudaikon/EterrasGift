@@ -1,16 +1,17 @@
 #![windows_subsystem = "windows"]
 #![deny(unsafe_code)]
-//! Eterra's Gift: the composition (`spec/architecture.md` §5).
+//! Eterra's Gift: the composition of the settings, the companion, the trainer and the window.
 
 mod application;
 mod companion;
 mod startup;
-#[allow(unsafe_code)] // Composition of the explicitly unsafe native trainer adapter.
 mod trainer;
 
-fn main() -> Result<(), slint::PlatformError> {
+use std::process::ExitCode;
+
+fn main() -> Result<ExitCode, slint::PlatformError> {
     let Some(startup) = startup::Startup::open() else {
-        return Ok(());
+        return Ok(ExitCode::SUCCESS);
     };
     application::run(startup)
 }

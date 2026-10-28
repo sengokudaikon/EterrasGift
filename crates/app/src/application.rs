@@ -1,6 +1,10 @@
 //! Wire the window to its services, then close them in dependency order before considering a restart.
 
-use crate::{companion::Companion, startup::Startup, trainer};
+use crate::{
+    companion::Companion,
+    startup::{self, Startup},
+    trainer,
+};
 use eg_core::fault::FaultLog;
 use eg_core::settings::SettingsStore;
 use eg_core::settings_service::{SaveOutcome, SettingsService, Snapshot};
@@ -9,19 +13,28 @@ use eg_ui::shell::Page;
 use eg_ui::trainer_settings;
 use eg_ui::{App, MainWindow};
 use slint::ComponentHandle;
+use std::process::ExitCode;
 
-pub fn run(startup: Startup) -> Result<(), slint::PlatformError> {
+pub fn run(startup: Startup) -> Result<ExitCode, slint::PlatformError> {
     let store = SettingsStore::open(&startup.root, &startup.settings_file, &[trainer_settings::LEGACY]);
     let faults = FaultLog::new(&startup.root, Some(&store.paths().log_directory()));
+    startup::install_panic_hook(faults.clone());
     let mut trainer = trainer::Module::new(&store, &faults);
     let companion = Companion::new(&store);
     let discovery = companion.discover();
-    let window = MainWindow::new()?;
-    let (found_game, found_dotnet) = discovery.join().unwrap_or_else(|panic| std::panic::resume_unwind(panic));
+    let window = MainWindow::new();
+    // Discovery may be setting a mod-loader proxy aside: it finishes even when the window cannot open. A panic in it
+    // has already been reported by the hook.
+    let found = discovery.join();
+    let window = window.inspect_err(|error| {
+        faults.write("Opening the window", Some(&error.to_string()), None, None);
+    })?;
+    let (found_game, found_dotnet) = found.unwrap_or_else(|panic| std::panic::resume_unwind(panic));
+    let settings_unreadable = store.startup_error().is_some();
     let service = SettingsService::new(store);
     // The trainer saves its profiles through the service, so it starts once the service runs.
     let trainer_runtime = trainer.start(&service, found_game.as_deref(), startup.arguments.no_connect, &faults);
-    let start = if startup.arguments.settings || service.snapshot().store.startup_error().is_some() || trainer.choice.problem.is_some() {
+    let start = if startup.arguments.settings || settings_unreadable || trainer.choice.problem.is_some() {
         Page::Settings
     } else {
         Page::Home
@@ -49,18 +62,23 @@ pub fn run(startup: Startup) -> Result<(), slint::PlatformError> {
     eg_ui::follow_system_settings(&window);
     eg_ui::system::follow_dark_title_bar(&window);
     let result = window.run();
-    let settings = shutdown(&window, trainer_runtime, companion, service);
-    // Shutdown faults exit first. A window error also prevents a requested restart.
+    let Some(settings) = shutdown(&window, trainer_runtime, companion, service) else {
+        // A shutdown fault outranks every restart request and the window's own result.
+        return Ok(ExitCode::FAILURE);
+    };
+    // A window error also prevents a requested restart.
     if result.is_ok() && restart.requested() {
         let faults = FaultLog::new(&startup.root, Some(&settings.store.paths().log_directory()));
-        startup.restart(&faults);
+        if !startup.restart(&faults) {
+            return Ok(ExitCode::FAILURE);
+        }
     }
-    result
+    result.map(|()| ExitCode::SUCCESS)
 }
 
 /// Drain accepted trainer work, cancel producers, then close writers and settle the game's mod-loader proxy.
-/// A worker fault outranks every restart request and ordinary close.
-fn shutdown(window: &MainWindow, trainer: Option<trainer::Trainer>, companion: Companion, settings: SettingsService) -> Snapshot {
+/// The settings as closed, or None when a worker or a writer faulted: the app then exits with a non-zero code.
+fn shutdown(window: &MainWindow, trainer: Option<trainer::Trainer>, companion: Companion, settings: SettingsService) -> Option<Snapshot> {
     let trainer_closed = trainer.is_none_or(|runtime| runtime.close());
     companion.launcher.cancel();
     eg_ui::mods::cancel_work(window);
@@ -71,8 +89,6 @@ fn shutdown(window: &MainWindow, trainer: Option<trainer::Trainer>, companion: C
     let settings = settings.close();
     // A start with mods may still be waiting for MelonLoader; set its proxy aside before exiting.
     companion.launcher.stop();
-    if !trainer_closed || background_fault || companion.mods.faulted() || matches!(settings.outcome, SaveOutcome::Faulted(_)) {
-        std::process::exit(1);
-    }
-    settings
+    let faulted = !trainer_closed || background_fault || companion.mods.faulted() || matches!(settings.outcome, SaveOutcome::Faulted(_));
+    (!faulted).then_some(settings)
 }

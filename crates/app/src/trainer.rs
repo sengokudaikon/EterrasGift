@@ -1,5 +1,5 @@
 //! Optional trainer startup and its background runtime. The window holds only its queue/watch handle.
-use eg_companion::folders;
+use eg_companion::{folders, install};
 use eg_core::fault::FaultLog;
 use eg_core::settings::SettingsStore;
 use eg_core::settings_service::{ModuleSettings, SettingsService};
@@ -13,6 +13,7 @@ use eg_ui::settings::ModuleChoice;
 use eg_ui::trainer_settings;
 use std::{
     cell::Cell,
+    error::Error,
     path::{Path, PathBuf},
     sync::{Arc, Mutex},
     thread::{self, JoinHandle},
@@ -24,6 +25,8 @@ use std::{
 pub struct Module {
     pub choice: ModuleChoice,
     chosen: bool,
+    /// Where the game data read from the install is saved between runs.
+    game_data: PathBuf,
 }
 
 impl Module {
@@ -35,45 +38,82 @@ impl Module {
         if let Err(error) = choice.validate(store.saved()) {
             choice.problem = Some(if chosen { start_failed(faults, choice.title, &error) } else { error });
         }
-        Self { choice, chosen }
+        let game_data = store.paths().module_directory(trainer_settings::ID).join("game-data");
+        Self { choice, chosen, game_data }
     }
 
     pub fn start(&mut self, settings: &SettingsService, game: Option<&Path>, no_connect: bool, faults: &FaultLog) -> Option<Trainer> {
         if !self.chosen || self.choice.problem.is_some() {
             return None;
         }
-        let module = settings.module(trainer_settings::ID);
-        let saved = module.read();
-        let flag = |key, default| eg_core::settings::module_flag(saved.as_ref(), key, default);
-        let process_name = game
-            .and_then(|p| p.file_name())
-            .map_or_else(|| "Last Epoch.exe".into(), |name| name.to_string_lossy().into_owned());
-        match Trainer::start(
-            folders::player_log(),
-            settings.snapshot().store.paths().module_directory(trainer_settings::ID).join("game-data"),
-            game.and_then(Path::parent).map(Path::to_path_buf),
-            process_name,
-            BackendOptions {
-                auto_connect: flag(trainer_settings::AUTO_CONNECT, true),
-                override_enabled: flag(trainer_settings::OVERRIDE, false),
-                profiles: ProfileBook::from_settings(saved.as_ref()),
-                save_profiles: Some(profile_saver(module)),
-                ..Default::default()
-            },
-            no_connect,
-            faults.clone(),
-        ) {
+        match self.launch(settings, game, no_connect, faults) {
             Ok(runtime) => Some(runtime),
             Err(error) => {
-                self.choice.problem = Some(start_failed(faults, self.choice.title, &error));
+                self.choice.problem = Some(start_failed(faults, self.choice.title, &error.to_string()));
                 None
             }
         }
     }
+
+    /// The helper is in the exe; it is written under the app's local folder only when a game connects. The game data
+    /// is read from `game`'s folder (the installed game, when found) at once, and saved in the module's folder.
+    fn launch(&self, settings: &SettingsService, game: Option<&Path>, no_connect: bool, faults: &FaultLog) -> Result<Trainer, Box<dyn Error>> {
+        let helper = helper()?;
+        let module = settings.module(trainer_settings::ID);
+        let saved = module.read();
+        let flag = |key, default| eg_core::settings::module_flag(saved.as_ref(), key, default);
+        let options = BackendOptions {
+            auto_connect: flag(trainer_settings::AUTO_CONNECT, true),
+            override_enabled: flag(trainer_settings::OVERRIDE, false),
+            profiles: ProfileBook::from_settings(saved.as_ref()),
+            save_profiles: Some(profile_saver(module)),
+            game_data: Some(eg_trainer::game_data::start(
+                game.and_then(Path::parent).map(Path::to_path_buf),
+                Some(self.game_data.clone()),
+                Some(faults.clone()),
+            )?),
+            ..Default::default()
+        };
+        let process_name = game
+            .and_then(Path::file_name)
+            .map_or_else(|| install::EXECUTABLE_NAME.into(), |name| name.to_string_lossy().into_owned());
+        let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build()?;
+        let logs = FileLogFactory::new(folders::player_log())?;
+        let (handle, worker) = backend::service(
+            GameProcesses::new(process_name),
+            DesktopConnector::new(helper, eg_core::paths::local_directory().join("helpers"), logs.clone()),
+            logs.reader(),
+            SystemClock,
+            options,
+        );
+        let worker = worker.with_fault_log(faults.clone());
+        let worker_faults = faults.clone();
+        let worker = thread::Builder::new().name("trainer".into()).spawn(move || {
+            run_worker(
+                || runtime.block_on(worker.run()),
+                &worker_faults,
+                || {
+                    let _ = slint::invoke_from_event_loop(|| {
+                        let _ = slint::quit_event_loop();
+                    });
+                },
+            )
+        })?;
+        // No process lookup or preparation when --no-connect was requested. A refused command leaves the trainer
+        // idle rather than failing the app, so it is only reported.
+        let commands = [Some(Command::Enable), (!no_connect).then_some(Command::StartMonitoring)];
+        for command in commands.into_iter().flatten() {
+            if let Err(error) = handle.try_submit(command.clone()) {
+                faults.write("Starting the trainer", Some(&format!("The worker refused {command:?}: {error:?}")), None, None);
+            }
+        }
+        Ok(Trainer { handle, worker })
+    }
 }
 
 /// Saves the trainer's profiles in its settings slice. Changes in quick succession are saved once, with the latest
-/// profiles: a save already queued takes them. A save the closing service refuses is dropped, as the hooks' values were.
+/// profiles: a save already queued takes them. A save the closing service refuses is dropped: the app is closing, and
+/// the profiles in memory end with it.
 fn profile_saver(settings: ModuleSettings) -> ProfileSaver {
     let latest: Arc<Mutex<Option<ProfileBook>>> = Arc::default();
     ProfileSaver::new(move |book| {
@@ -93,7 +133,7 @@ fn profile_saver(settings: ModuleSettings) -> ProfileSaver {
     })
 }
 
-/// Report a module that cannot start as the C# DesktopBootstrapper.CreateModules words it.
+/// Report a module that cannot start: a fault report, and the reason Settings shows.
 fn start_failed(faults: &FaultLog, title: &str, error: &str) -> String {
     faults.write(&format!("Starting {title}"), Some(error), None, Some("Eterra's Gift runs without it."));
     format!("{title} could not start: {error} Details are in the fault log.")
@@ -121,50 +161,6 @@ pub struct Trainer {
     worker: JoinHandle<bool>,
 }
 impl Trainer {
-    /// The helper is in the exe; it is written under the app's local folder only when a game connects. The game data
-    /// is read from `game` (the installed game, when found) at once, and saved in `game_data`.
-    pub fn start(
-        player_log: PathBuf,
-        game_data: PathBuf,
-        game: Option<PathBuf>,
-        executable_name: String,
-        mut options: BackendOptions,
-        no_connect: bool,
-        faults: FaultLog,
-    ) -> Result<Self, String> {
-        let helper = helper()?;
-        options.game_data = Some(eg_trainer::game_data::start(game, Some(game_data), Some(faults.clone())).map_err(|e| e.to_string())?);
-        let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build().map_err(|e| e.to_string())?;
-        let logs = FileLogFactory::new(player_log).map_err(|e| e.to_string())?;
-        let (handle, worker) = backend::service(
-            GameProcesses::new(executable_name),
-            DesktopConnector::new(helper, eg_core::paths::local_directory().join("helpers"), logs.clone()),
-            logs.reader(),
-            SystemClock,
-            options,
-        );
-        let worker = worker.with_fault_log(faults.clone());
-        let worker = thread::Builder::new()
-            .name("trainer".into())
-            .spawn(move || {
-                run_worker(
-                    || runtime.block_on(worker.run()),
-                    &faults,
-                    || {
-                        let _ = slint::invoke_from_event_loop(|| {
-                            let _ = slint::quit_event_loop();
-                        });
-                    },
-                )
-            })
-            .map_err(|e| e.to_string())?;
-        // No process lookup or preparation when --no-connect was requested.
-        let _ = handle.try_submit(Command::Enable);
-        if !no_connect {
-            let _ = handle.try_submit(Command::StartMonitoring);
-        }
-        Ok(Self { handle, worker })
-    }
     /// Called after the event loop ends. Accepted native work drains before cleanup;
     /// a full queue delays the barrier instead of silently abandoning the worker.
     pub fn close(self) -> bool {
