@@ -14,9 +14,10 @@ const NEWLINE: &str = "\r\n";
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
-    let result = match args.first().map(String::as_str) {
-        Some("tokens") => tokens(args.iter().any(|a| a == "--check")),
-        _ => Err("usage: cargo xtask tokens [--check]".to_owned()),
+    let result = match args.iter().map(String::as_str).collect::<Vec<_>>().as_slice() {
+        ["tokens"] => tokens(false),
+        ["tokens", "--check"] => tokens(true),
+        _ => Err(format!("unknown arguments {args:?}\nusage: cargo xtask tokens [--check]")),
     };
     match result {
         Ok(()) => ExitCode::SUCCESS,
@@ -130,8 +131,7 @@ fn slint_tokens(json: &Value) -> Result<String, String> {
     for (name, gradient) in radial_gradients(json) {
         notes.emit(&mut out, gradient);
         let ellipse = Ellipse::read(gradient, name)?;
-        let stops = radial_stops(gradient, name)?;
-        let ground = stops.last().map(|(_, color)| color.clone()).ok_or(format!("{name}: no stops"))?;
+        let ground = stops(gradient, name)?.last().map(|(_, color)| color.name()).ok_or(format!("{name}: no stops"))?;
         out.prop("image", &format!("{name}Image"), &format!("@image-url(\"gradients/{}.svg\")", kebab(name)));
         out.prop("length", &format!("{name}X"), &format!("{}px", fmt(ellipse.cx - ellipse.rx)));
         out.prop("length", &format!("{name}Y"), &format!("{}px", fmt(ellipse.cy - ellipse.ry)));
@@ -213,15 +213,10 @@ fn linear_gradient(gradient: &Value, name: &str) -> Result<String, String> {
     let (start, end) = (point("start")?, point("end")?);
     // CSS angles: 0deg points up, 90deg points right; y grows downwards.
     let angle = (end.0 - start.0).atan2(start.1 - end.1).to_degrees().rem_euclid(360.0);
-    let mut stops = Vec::new();
-    for stop in gradient.get("stops").and_then(Value::as_array).ok_or(format!("{name}: no stops"))? {
-        let offset = stop.get("offset").and_then(Value::as_f64).ok_or(format!("{name}: stop without offset"))?;
-        let color = match stop.get("color").and_then(Value::as_str) {
-            Some(color) => kebab(color),
-            None => str_field(stop, "value", name)?.to_owned(),
-        };
-        stops.push(format!("{color} {}%", fmt(offset * 100.0)));
-    }
+    let stops: Vec<String> = stops(gradient, name)?
+        .into_iter()
+        .map(|(offset, color)| format!("{} {}%", color.name(), fmt(offset * 100.0)))
+        .collect();
     Ok(format!("@linear-gradient({}deg, {})", fmt(angle), stops.join(", ")))
 }
 
@@ -260,14 +255,27 @@ fn number_field(token: &Value, field: &str, name: &str) -> Result<f64, String> {
     token.get(field).and_then(Value::as_f64).ok_or(format!("{name}: no `{field}` number"))
 }
 
-/// Offsets and colours: the token's name for a named colour (for `tokens.slint`), with its hex value beside it.
-fn radial_stops(gradient: &Value, name: &str) -> Result<Vec<(f64, String)>, String> {
+/// A gradient stop's colour: its hex value, and the token it names when it names one.
+struct StopColor<'a> {
+    token: Option<&'a str>,
+    value: &'a str,
+}
+
+impl StopColor<'_> {
+    /// The token's name for a named colour (for `tokens.slint`), else the hex value.
+    fn name(&self) -> String {
+        self.token.map_or_else(|| self.value.to_owned(), kebab)
+    }
+}
+
+/// A gradient's stops, in order: each offset with its colour.
+fn stops<'a>(gradient: &'a Value, name: &str) -> Result<Vec<(f64, StopColor<'a>)>, String> {
     let mut stops = Vec::new();
     for stop in gradient.get("stops").and_then(Value::as_array).ok_or(format!("{name}: no stops"))? {
         let offset = stop.get("offset").and_then(Value::as_f64).ok_or(format!("{name}: stop without offset"))?;
-        let color = match stop.get("color").and_then(Value::as_str) {
-            Some(color) => kebab(color),
-            None => str_field(stop, "value", name)?.to_owned(),
+        let color = StopColor {
+            token: stop.get("color").and_then(Value::as_str),
+            value: str_field(stop, "value", name)?,
         };
         stops.push((offset, color));
     }
@@ -277,24 +285,22 @@ fn radial_stops(gradient: &Value, name: &str) -> Result<Vec<(f64, String)>, Stri
 /// The whole ellipse as an SVG the size of its bounds: a circle gradient squeezed to the ellipse.
 fn radial_svg(gradient: &Value, name: &str) -> Result<String, String> {
     let e = Ellipse::read(gradient, name)?;
-    let mut stops = String::new();
-    for stop in gradient.get("stops").and_then(Value::as_array).ok_or(format!("{name}: no stops"))? {
-        let offset = stop.get("offset").and_then(Value::as_f64).ok_or(format!("{name}: stop without offset"))?;
-        let value = str_field(stop, "value", name)?;
+    let mut svg_stops = String::new();
+    for (offset, StopColor { value, .. }) in stops(gradient, name)? {
         let (rgb, alpha) = if value.len() == 9 {
             (&value[..7], u8::from_str_radix(&value[7..], 16).map_err(|e| e.to_string())?)
         } else {
             (value, 255)
         };
         let _ = write!(
-            stops,
+            svg_stops,
             "<stop offset=\"{}\" stop-color=\"{rgb}\" stop-opacity=\"{}\"/>",
             fmt(offset),
             fmt(f64::from(alpha) / 255.0)
         );
     }
     Ok(format!(
-        "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"{w}\" height=\"{h}\" viewBox=\"0 0 {w} {h}\"><defs><radialGradient id=\"g\" gradientUnits=\"userSpaceOnUse\" cx=\"{rx}\" cy=\"{ry}\" r=\"{rx}\" gradientTransform=\"translate(0 {ry}) scale(1 {k}) translate(0 -{ry})\">{stops}</radialGradient></defs><rect width=\"{w}\" height=\"{h}\" fill=\"url(#g)\"/></svg>{NEWLINE}",
+        "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"{w}\" height=\"{h}\" viewBox=\"0 0 {w} {h}\"><defs><radialGradient id=\"g\" gradientUnits=\"userSpaceOnUse\" cx=\"{rx}\" cy=\"{ry}\" r=\"{rx}\" gradientTransform=\"translate(0 {ry}) scale(1 {k}) translate(0 -{ry})\">{svg_stops}</radialGradient></defs><rect width=\"{w}\" height=\"{h}\" fill=\"url(#g)\"/></svg>{NEWLINE}",
         w = fmt(2.0 * e.rx),
         h = fmt(2.0 * e.ry),
         rx = fmt(e.rx),
