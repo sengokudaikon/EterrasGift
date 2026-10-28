@@ -7,7 +7,14 @@ use std::{collections::BTreeSet, ffi::CStr, ptr::NonNull};
 
 impl RuntimeAccess {
     // Inherits describe_unique's attached, synchronous supported-runtime span.
-    unsafe fn unique_scalar(&self, attached: &AttachedThread<'_>, api: raw::InvocationApi, object: &Root<'_, '_>, name: &CStr, returns: &CStr) -> Result<Scalar, GameError> {
+    pub(super) unsafe fn unique_scalar(
+        &self,
+        attached: &AttachedThread<'_>,
+        api: raw::InvocationApi,
+        object: &Root<'_, '_>,
+        name: &CStr,
+        returns: &CStr,
+    ) -> Result<Scalar, GameError> {
         // SAFETY: The rooted modifier and checked zero-argument getter retain the exact boxed scalar class through unboxing.
         unsafe {
             let method = self.mapping_method(api, object, name, &[], Some(self.system_class(returns)?))?;
@@ -23,7 +30,7 @@ impl RuntimeAccess {
     }
     // The preformatted producer returns a closed List<game reference>. Validate
     // its layout/element before opting this exact class into checked binding.
-    unsafe fn unique_replacements<'a, 'r>(
+    pub(super) unsafe fn unique_replacements<'a, 'r>(
         &self,
         attached: &'a AttachedThread<'r>,
         api: raw::InvocationApi,
@@ -56,16 +63,19 @@ impl RuntimeAccess {
             self.list(attached, &list, element, MAX_MODIFIERS as u32)
         }
     }
-    pub(super) unsafe fn unique_modifiers(
+    /// The game's unique tooltip for an item, line by line: each tooltip entry with what `GetUniqueModifierInfo` builds for
+    /// it (nothing where the line shows nothing), and the definition's modifiers the plain lines read.
+    /// # Safety
+    /// As for [`Self::describe_unique`]; `item` may be the selected item or a detached copy of it.
+    pub(super) unsafe fn unique_lines<'a, 'r>(
         &self,
-        attached: &AttachedThread<'_>,
+        attached: &'a AttachedThread<'r>,
         api: raw::InvocationApi,
         images: &Images,
-        item: &Root<'_, '_>,
-        definition: &Root<'_, '_>,
-        roll_count: usize,
-    ) -> Result<Vec<ModifierSnapshot>, GameError> {
-        // SAFETY: The detached item and validated builder stay rooted across calls; returned modifier lists are bounded before copying.
+        item: &Root<'a, 'r>,
+        definition: &Root<'a, 'r>,
+    ) -> Result<UniqueLines<'a, 'r>, GameError> {
+        // SAFETY: The item, definition and validated builder stay rooted across calls; every list is bounded before copying.
         unsafe {
             let entry_class = (self.object_class)(target(definition)?.as_ptr());
             let tooltip_class = self.class(images, c"", c"UniqueModDisplayListEntry")?;
@@ -104,25 +114,47 @@ impl RuntimeAccess {
                     &[ValueTypeContract::I32Enum { class: slot_type }],
                 )
                 .map_err(|e| unsupported(e.to_string()))?;
+            let mut infos = Vec::new();
+            for entry in &entries {
+                infos.push(
+                    match builder
+                        .invoke(
+                            None,
+                            &mut [
+                                Argument::Reference(Some(item)),
+                                Argument::Reference(Some(definition)),
+                                Argument::Reference(Some(entry)),
+                                Argument::EnumI32 { class: slot_type, value: 0 },
+                            ],
+                        )
+                        .map_err(|e| unsupported(e.to_string()))?
+                    {
+                        InvocationOutcome::Returned(ReturnValue::Reference(info)) => info,
+                        _ => return Err(unsupported("unique tooltip producer failed or threw")),
+                    },
+                );
+            }
+            Ok(UniqueLines { entries, mods, infos })
+        }
+    }
+    pub(super) unsafe fn unique_modifiers<'a, 'r>(
+        &self,
+        attached: &'a AttachedThread<'r>,
+        api: raw::InvocationApi,
+        images: &Images,
+        item: &Root<'a, 'r>,
+        definition: &Root<'a, 'r>,
+        roll_count: usize,
+    ) -> Result<Vec<ModifierSnapshot>, GameError> {
+        // SAFETY: The item, definition and every tooltip result stay rooted across calls; owned text is bounded.
+        unsafe {
+            let lines = self.unique_lines(attached, api, images, item, definition)?;
             let mut result = Vec::new();
-            for (index, entry) in entries.iter().enumerate() {
-                let info = match builder
-                    .invoke(
-                        None,
-                        &mut [
-                            Argument::Reference(Some(item)),
-                            Argument::Reference(Some(definition)),
-                            Argument::Reference(Some(entry)),
-                            Argument::EnumI32 { class: slot_type, value: 0 },
-                        ],
-                    )
-                    .map_err(|e| unsupported(e.to_string()))?
-                {
-                    InvocationOutcome::Returned(ReturnValue::Reference(Some(info))) => info,
-                    InvocationOutcome::Returned(ReturnValue::Reference(None)) => continue,
-                    _ => return Err(unsupported("unique tooltip producer failed or threw")),
+            for (index, (entry, info)) in lines.entries.iter().zip(&lines.infos).enumerate() {
+                let Some(info) = info else {
+                    continue;
                 };
-                let class = (self.object_class)(target(&info)?.as_ptr());
+                let class = (self.object_class)(target(info)?.as_ptr());
                 let name = (self.class_name)(class);
                 if name.is_null() || (self.class_image)(class) != images.game {
                     return Err(unsupported("unique tooltip runtime class"));
@@ -131,7 +163,7 @@ impl RuntimeAccess {
                 let mut editable = true;
                 if metadata_text(name) == c"ItemTooltipPreformattedUniqueModifierInfo" {
                     let parsed = self
-                        .child(attached, &info, c"_parsedUniqueMod")?
+                        .child(attached, info, c"_parsedUniqueMod")?
                         .ok_or_else(|| unsupported("parsed unique modifier absent"))?;
                     for replacement in self.unique_replacements(attached, api, images, &parsed)? {
                         let class = (self.object_class)(target(&replacement)?.as_ptr());
@@ -155,7 +187,7 @@ impl RuntimeAccess {
                     }
                 } else {
                     let ordinal = usize::from(self.primitive::<u8>(entry, c"modDisplay")?);
-                    if let Some(modifier) = mods.get(ordinal) {
+                    if let Some(modifier) = lines.mods.get(ordinal) {
                         let minimum = self.primitive::<f32>(modifier, c"value")?;
                         let maximum = self.primitive::<f32>(modifier, c"maxValue")?;
                         if !minimum.is_finite() || !maximum.is_finite() {
@@ -173,8 +205,8 @@ impl RuntimeAccess {
                 }
                 result.push(ModifierSnapshot {
                     index: index as u32,
-                    text: self.description_text(attached, api, &info, c"ToModifierString")?,
-                    range: self.description_text(attached, api, &info, c"ToRangeString")?,
+                    text: self.description_text(attached, api, info, c"ToModifierString")?,
+                    range: self.description_text(attached, api, info, c"ToRangeString")?,
                     roll_ids: if editable { ids.into_iter().map(|id| id as u8).collect() } else { vec![] },
                     editable,
                 });
@@ -266,4 +298,11 @@ impl RuntimeAccess {
             Ok(result)
         }
     }
+}
+
+/// The game's unique tooltip for an item, from [`RuntimeAccess::unique_lines`].
+pub(super) struct UniqueLines<'a, 'r> {
+    pub entries: Vec<Root<'a, 'r>>,
+    pub mods: Vec<Root<'a, 'r>>,
+    pub infos: Vec<Option<Root<'a, 'r>>>,
 }

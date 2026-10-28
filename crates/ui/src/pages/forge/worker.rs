@@ -285,15 +285,12 @@ impl Writer {
 
     fn resolve(&mut self, item: &ForgeItem, request: &RollRequest) -> super::game::Lookup<ValueTable> {
         let result: Result<super::game::Lookup<ValueTable>, GameError> = (|| {
-            use eg_trainer::item::values::{MappingAddress, MappingRequest, MappingTarget};
-            if request.target != item::RollTarget::Affix {
-                return Err("the game's values are read for affixes only".into());
-            }
+            use eg_trainer::item::values::{MappingAddress, MappingRequest};
             let mapping = u8::try_from(request.index).ok().map(|index| MappingRequest {
                 address: MappingAddress {
-                    target: MappingTarget::Affix,
+                    target: mapping_target(request.target),
                     index,
-                    line: None,
+                    line: request.line.and_then(|line| u32::try_from(line).ok()),
                 },
                 draft: request.draft.clone(),
             });
@@ -319,7 +316,7 @@ impl Writer {
                 self.mappings.retain(|pending| pending.error.is_none());
             }
             let expected = expected?;
-            let request = mapping.ok_or("This affix slot is unsupported.")?;
+            let request = mapping.ok_or("This roll is unsupported.")?;
             self.mappings
                 .retain(|pending| pending.expected == expected && (pending.request.address != request.address || pending.request == request));
             if let Some(result) = ready {
@@ -351,7 +348,7 @@ impl Writer {
         self.mappings.retain(|pending| {
             expected.as_ref() == Some(&pending.expected)
                 && requests.iter().any(|request| {
-                    request.target == item::RollTarget::Affix
+                    mapping_target(request.target) == pending.request.address.target
                         && request.index == usize::from(pending.request.address.index)
                         && request.draft == pending.request.draft
                         && request.line == pending.request.address.line.and_then(|line| usize::try_from(line).ok())
@@ -480,6 +477,16 @@ impl Writer {
             }
             Err(_) => Some(refused("The trainer cannot accept the edit. Nothing was submitted.")),
         }
+    }
+}
+
+/// Which of the item's rolls a value table maps.
+fn mapping_target(target: item::RollTarget) -> eg_trainer::item::values::MappingTarget {
+    use eg_trainer::item::values::MappingTarget;
+    match target {
+        item::RollTarget::Affix => MappingTarget::Affix,
+        item::RollTarget::Unique => MappingTarget::Unique,
+        item::RollTarget::Implicit => MappingTarget::Implicit,
     }
 }
 

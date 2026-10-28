@@ -39,6 +39,7 @@ pub mod op {
     pub const SET_GAMEPLAY_HOOK: u32 = 26;
     pub const READ_GAMEPLAY_HOOK: u32 = 27;
     pub const CHANGE_MODIFIER_ROLLS: u32 = 28;
+    pub const MAP_MODIFIER_ROLL: u32 = 29;
 }
 
 pub const MAGIC: u32 = 0x4546_4735;
@@ -109,6 +110,7 @@ pub enum Request {
     DescribeUnique(crate::mapping::ForgeDescriptionRequest),
     PreviewUnique(crate::mapping::UniquePreviewRequest),
     MapRoll(crate::mapping::AffixMappingQuery),
+    MapModifierRoll(crate::mapping::ModifierMappingQuery),
 }
 
 impl Request {
@@ -125,6 +127,7 @@ impl Request {
             Self::DescribeImplicits(query) | Self::DescribeUnique(query) => Some(query.dispatcher),
             Self::PreviewUnique(query) => Some(query.dispatcher()),
             Self::MapRoll(query) => Some(query.dispatcher()),
+            Self::MapModifierRoll(query) => Some(query.dispatcher()),
         }
     }
 }

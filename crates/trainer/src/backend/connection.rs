@@ -61,11 +61,13 @@ pub trait BackendConnection: Send + 'static {
         async { Err(BackendError::blocked(ErrorKind::MappingUnavailable, "Unique preview is unavailable.")) }
     }
     /// Optional reads may stop between completed exchanges, as `observer` says. Implementations must drain an in-flight
-    /// exchange and preserve fatal transport failures.
+    /// exchange and preserve fatal transport failures. `tooltip` is the game's own description of the item's unique or
+    /// implicit lines, which a unique or implicit request is checked against.
     fn resolve_mapping(
         &mut self,
         _: &crate::item::edit::ExpectedObservation,
         _: &MappingRequest,
+        _: Option<&crate::item::values::BoundTooltip>,
         _: &mut dyn ReadObserver,
     ) -> impl Future<Output = Result<ValueTable, BackendError>> + Send {
         async { Err(BackendError::blocked(ErrorKind::MappingUnavailable, "Actual values are unavailable for this modifier.")) }
@@ -141,9 +143,10 @@ impl<T: Transport + Send + 'static> BackendConnection for Session<T> {
         &mut self,
         expected: &crate::item::edit::ExpectedObservation,
         request: &MappingRequest,
+        tooltip: Option<&crate::item::values::BoundTooltip>,
         observer: &mut dyn ReadObserver,
     ) -> Result<ValueTable, BackendError> {
-        Ok(Session::resolve_mapping_observed(self, expected, request, observer).await?)
+        Ok(Session::resolve_mapping_observed(self, expected, request, tooltip, observer).await?)
     }
     async fn read_forge(&mut self) -> Result<Option<ForgeSnapshot>, BackendError> {
         Ok(Session::read_forge(self).await?)

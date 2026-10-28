@@ -228,6 +228,63 @@ impl AffixMappingQuery {
     }
 }
 
+/// A unique or implicit roll sampled on a detached copy: the roll (`address.index`), for a unique the tooltip line that
+/// reads it (`address.line`; lines that share a roll show it differently), and the other drafted unique rolls its line
+/// depends on. Implicits depend on their own roll only.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ModifierMappingQuery {
+    pub(crate) target: ForgeDescriptionRequest,
+    pub(crate) address: MappingAddress,
+    pub(crate) start: MappingStart,
+    pub(crate) draft: Vec<UniqueRollChange>,
+}
+impl ModifierMappingQuery {
+    pub fn new(
+        dispatcher: crate::protocol::DispatcherSpec,
+        manager: u64,
+        expected: crate::forge::ForgeSnapshot,
+        address: MappingAddress,
+        start: MappingStart,
+        draft: Vec<UniqueRollChange>,
+    ) -> Result<Self, ProtocolError> {
+        Self::from_target(ForgeDescriptionRequest::new(dispatcher, manager, expected)?, address, start, draft)
+    }
+    pub(crate) fn from_target(target: ForgeDescriptionRequest, address: MappingAddress, start: MappingStart, draft: Vec<UniqueRollChange>) -> Result<Self, ProtocolError> {
+        address.validate()?;
+        let expected = target.expected();
+        let count = match address.target {
+            MappingTarget::Affix => return invalid(),
+            MappingTarget::Unique if matches!(expected.rarity, 7..=9) => expected.identity.as_ref().ok_or(ProtocolError::InvalidData)?.rolls.len(),
+            MappingTarget::Unique => return invalid(),
+            MappingTarget::Implicit if draft.is_empty() => expected.implicit_rolls.len(),
+            MappingTarget::Implicit => return invalid(),
+        };
+        let mut seen = BTreeSet::from([address.index]);
+        if usize::from(address.index) >= count || draft.len() > 7 || draft.iter().any(|c| usize::from(c.index) >= count || !seen.insert(c.index)) {
+            return invalid();
+        }
+        Ok(Self { target, address, start, draft })
+    }
+    pub fn dispatcher(&self) -> crate::protocol::DispatcherSpec {
+        self.target.dispatcher
+    }
+    pub fn address(&self) -> MappingAddress {
+        self.address
+    }
+    pub fn start(&self) -> MappingStart {
+        self.start
+    }
+    pub fn draft(&self) -> &[UniqueRollChange] {
+        &self.draft
+    }
+    pub fn expected(&self) -> &crate::forge::ForgeSnapshot {
+        &self.target.expected
+    }
+    pub fn manager(&self) -> u64 {
+        self.target.manager
+    }
+}
+
 fn invalid<T>() -> Result<T, ProtocolError> {
     Err(ProtocolError::InvalidData)
 }

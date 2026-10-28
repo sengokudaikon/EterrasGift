@@ -311,6 +311,7 @@ impl BackendConnection for Connection {
         &mut self,
         expected: &eg_trainer::item::edit::ExpectedObservation,
         request: &eg_trainer::item::values::MappingRequest,
+        _: Option<&eg_trainer::item::values::BoundTooltip>,
         _: &mut dyn backend::ReadObserver,
     ) -> Result<eg_trainer::item::values::ValueTable, BackendError> {
         self.shared.call("mapping", &self.shared.mapping_block).await;

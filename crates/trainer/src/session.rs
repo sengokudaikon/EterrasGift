@@ -308,7 +308,7 @@ impl<T: Transport> Session<T> {
         let request = request(dispatcher);
         let optional_description = matches!(
             request,
-            Request::DescribeImplicits(_) | Request::DescribeUnique(_) | Request::PreviewUnique(_) | Request::MapRoll(_)
+            Request::DescribeImplicits(_) | Request::DescribeUnique(_) | Request::PreviewUnique(_) | Request::MapRoll(_) | Request::MapModifierRoll(_)
         );
         let result = self.request(&request).await.and_then(|bytes| decode(&bytes).map_err(SessionError::Protocol));
         match result {

@@ -281,6 +281,17 @@ unsafe fn read_affix_mapping(query: &eg_trainer_wire::mapping::AffixMappingQuery
     }
 }
 
+unsafe fn read_modifier_mapping(query: &eg_trainer_wire::mapping::ModifierMappingQuery) -> Response {
+    // SAFETY: as for read_affix_mapping: the supported main-thread runtime and synchronous rooted graph span; only
+    // independent detached copies are mutated for sampling.
+    unsafe {
+        runtime_operation(|runtime, access, attached| {
+            let page = access.read_modifier_mapping(attached, runtime.writes, runtime.invocation, query).map_err(game_failure)?;
+            encoded(eg_trainer_wire::mapping::encode_mapping(&page))
+        })
+    }
+}
+
 unsafe fn read_locale() -> Response {
     // SAFETY: captured Unity main thread, after the original callback returned. The
     // bootstrap retains the initialized runtime and trusted method implementations.
@@ -424,6 +435,8 @@ fn after_original(state: &Shared) {
                 Request::PreviewUnique(query) => unsafe { unique_presentation(query.target(), Some(&query)) },
                 // SAFETY: verified callback thread; mapping changes only checked detached copies within the rooted graph span.
                 Request::MapRoll(query) => unsafe { read_affix_mapping(&query) },
+                // SAFETY: as MapRoll: only checked detached copies change within the rooted graph span.
+                Request::MapModifierRoll(query) => unsafe { read_modifier_mapping(&query) },
                 // SAFETY: verified callback thread and the stable player/stat graph span assumed by unsafe start.
                 // SAFETY: verified callback thread and the completed locale/trusted-getter assumptions of unsafe start.
                 Request::ReadLocale { .. } => unsafe { read_locale() },

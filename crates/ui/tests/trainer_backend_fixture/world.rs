@@ -550,7 +550,13 @@ impl BackendConnection for WorldConnection {
         BoundPreview::new(expected, draft.clone(), UniqueRollPreview { modifiers }, evidence)
             .map_err(|error| BackendError::blocked(backend::ErrorKind::MappingUnavailable, error.to_string()))
     }
-    async fn resolve_mapping(&mut self, expected: &ExpectedObservation, request: &MappingRequest, _: &mut dyn backend::ReadObserver) -> Result<ValueTable, BackendError> {
+    async fn resolve_mapping(
+        &mut self,
+        expected: &ExpectedObservation,
+        request: &MappingRequest,
+        tooltip: Option<&eg_trainer::item::values::BoundTooltip>,
+        _: &mut dyn backend::ReadObserver,
+    ) -> Result<ValueTable, BackendError> {
         let range = self.range(expected, request)?;
         let sample = |roll: u8| -> RawValueSample {
             let Some(range) = &range else {
@@ -593,7 +599,7 @@ impl BackendConnection for WorldConnection {
             }
         }
         let invalid = |error: eg_trainer::item::values::MappingError| BackendError::blocked(backend::ErrorKind::MappingUnavailable, error.to_string());
-        let mut builder = MappingBuilder::new(expected.clone(), request.clone(), page(MappingStart::ContextOnly, vec![]), None).map_err(invalid)?;
+        let mut builder = MappingBuilder::new(expected.clone(), request.clone(), page(MappingStart::ContextOnly, vec![]), tooltip).map_err(invalid)?;
         while let Some(start) = builder.next_start() {
             let samples = (start..=start + 15).map(sample).collect();
             builder.push(expected, request, page(MappingStart::Samples(start), samples), &mut Parser).map_err(invalid)?;

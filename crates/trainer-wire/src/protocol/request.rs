@@ -1,7 +1,9 @@
 //! Request bodies are sequential fields. Only the common envelope has fixed positions.
 use super::*;
 use crate::{
-    mapping::{AffixMappingDraft, AffixMappingQuery, ForgeDescriptionRequest, MappingStart, UniquePreviewRequest, UniqueRollChange},
+    mapping::{
+        AffixMappingDraft, AffixMappingQuery, ForgeDescriptionRequest, MappingAddress, MappingStart, MappingTarget, ModifierMappingQuery, UniquePreviewRequest, UniqueRollChange,
+    },
     write::{AffixRollChange, AffixRolls, RollArray, StatusField},
 };
 
@@ -120,6 +122,27 @@ impl Request {
                 }
                 body.snapshot(&query.target.expected);
                 op::MAP_ROLL
+            }
+            Self::MapModifierRoll(query) => {
+                let address = query.address();
+                body.u64(query.manager());
+                body.byte(address.target as u8);
+                body.byte(address.index);
+                body.flag(address.line.is_some());
+                if let Some(line) = address.line {
+                    body.u32(line);
+                }
+                body.flag(matches!(query.start(), MappingStart::Samples(_)));
+                if let MappingStart::Samples(start) = query.start() {
+                    body.byte(start);
+                }
+                body.byte(query.draft().len() as u8);
+                for change in query.draft() {
+                    body.byte(change.index);
+                    body.byte(change.value);
+                }
+                body.snapshot(&query.target.expected);
+                op::MAP_MODIFIER_ROLL
             }
             Self::EditForge(write) => {
                 body.u64(write.expected_manager());
@@ -240,6 +263,7 @@ impl Request {
             | op::DESCRIBE_UNIQUE
             | op::PREVIEW_UNIQUE
             | op::MAP_ROLL
+            | op::MAP_MODIFIER_ROLL
             | op::SET_STATUS
             | op::CHANGE_BASE
             | op::DESCRIBE_IMPLICITS
@@ -345,6 +369,30 @@ impl Request {
                 Self::MapRoll(AffixMappingQuery::from_target(
                     ForgeDescriptionRequest::from_checked(dispatcher, manager, body.snapshot()?)?,
                     slot,
+                    start,
+                    draft,
+                )?)
+            }
+            op::MAP_MODIFIER_ROLL => {
+                let manager = body.u64()?;
+                let target = MappingTarget::try_from(i32::from(body.byte()?))?;
+                let index = body.byte()?;
+                let line = if body.flag()? { Some(body.u32()?) } else { None };
+                let start = if body.flag()? { MappingStart::Samples(body.byte()?) } else { MappingStart::ContextOnly };
+                let count = body.byte()?;
+                if count > 7 {
+                    return Err(ProtocolError::InvalidData);
+                }
+                let mut draft = Vec::with_capacity(usize::from(count));
+                for _ in 0..count {
+                    draft.push(UniqueRollChange {
+                        index: body.byte()?,
+                        value: body.byte()?,
+                    });
+                }
+                Self::MapModifierRoll(ModifierMappingQuery::from_target(
+                    ForgeDescriptionRequest::from_checked(dispatcher, manager, body.snapshot()?)?,
+                    MappingAddress { target, index, line },
                     start,
                     draft,
                 )?)

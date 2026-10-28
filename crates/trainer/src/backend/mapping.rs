@@ -20,8 +20,9 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
         if self.state.expected_observation().as_ref() != Ok(&expected) {
             return Err(BackendError::blocked(ErrorKind::InvalidEdit, "The item changed before its values could be read."));
         }
+        let tooltip = self.state.bound_tooltip(&expected, request.address.target);
         request
-            .validate(&expected, None)
+            .validate(&expected, tooltip.as_ref())
             .map_err(|error| BackendError::blocked(ErrorKind::MappingUnavailable, error.to_string()))?;
         let target = expected.process().clone();
         self.admit(&target)?;
@@ -38,7 +39,7 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
             .connection
             .as_mut()
             .ok_or_else(|| BackendError::blocked(ErrorKind::NotConnected, "connection released"))?
-            .resolve_mapping(&expected, &request, &mut control)
+            .resolve_mapping(&expected, &request, tooltip.as_ref(), &mut control)
             .await;
         self.superseded(epoch)?;
         // Optional formatting must not resurrect a failed offline/process gate.

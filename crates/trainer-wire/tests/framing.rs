@@ -7,11 +7,11 @@ use eg_trainer_wire::{
     hooks::{GameplayHook, HookObservation, PatchState},
     locale::{self, GameLocale},
     mapping::{
-        self, AffixMappingDraft, AffixMappingQuery, ForgeDescriptionRequest, MappingAddress, MappingStart, MappingTarget, ModifierSnapshot, RawMappingPage, RawValueSample,
-        UniquePreviewRequest, UniqueRollChange,
+        self, AffixMappingDraft, AffixMappingQuery, ForgeDescriptionRequest, MappingAddress, MappingStart, MappingTarget, ModifierMappingQuery, ModifierSnapshot, RawMappingPage,
+        RawValueSample, UniquePreviewRequest, UniqueRollChange,
     },
     protocol::{Discovery, DispatcherSpec, ProtocolError, REQUEST_HEADER_SIZE, Request, RequestFrame, Response, ResponseCode},
-    write::{AffixRollChange, AffixRolls, ForgeMutation, ForgeWrite, StatusField},
+    write::{AffixRollChange, AffixRolls, ForgeMutation, ForgeWrite, RollArray, StatusField},
 };
 use std::fmt::Debug;
 
@@ -79,6 +79,41 @@ fn requests() -> Vec<Request> {
         Request::DescribeUnique(description()),
         Request::PreviewUnique(UniquePreviewRequest::new(dispatcher, 0x99, item(), vec![UniqueRollChange { index: 1, value: 17 }]).unwrap()),
         Request::MapRoll(AffixMappingQuery::new(dispatcher, 0x99, item(), 0, MappingStart::ContextOnly, None).unwrap()),
+        Request::MapModifierRoll(
+            ModifierMappingQuery::new(
+                dispatcher,
+                0x99,
+                item(),
+                MappingAddress {
+                    target: MappingTarget::Unique,
+                    index: 1,
+                    line: Some(3),
+                },
+                MappingStart::Samples(16),
+                vec![UniqueRollChange { index: 0, value: 9 }],
+            )
+            .unwrap(),
+        ),
+        Request::MapModifierRoll(
+            ModifierMappingQuery::new(
+                dispatcher,
+                0x99,
+                item(),
+                MappingAddress {
+                    target: MappingTarget::Implicit,
+                    index: 2,
+                    line: None,
+                },
+                MappingStart::ContextOnly,
+                vec![],
+            )
+            .unwrap(),
+        ),
+        edit(ForgeMutation::ModifierRolls {
+            array: RollArray::Unique,
+            rolls: AffixRolls::new(&[AffixRollChange { slot: 1, value: 3 }]).unwrap(),
+            unrestricted: false,
+        }),
         Request::MapRoll(
             AffixMappingQuery::new(
                 dispatcher,

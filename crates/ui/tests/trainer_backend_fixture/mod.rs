@@ -206,6 +206,7 @@ impl BackendConnection for OwnedConnection {
         &mut self,
         expected: &eg_trainer::item::edit::ExpectedObservation,
         request: &eg_trainer::item::values::MappingRequest,
+        tooltip: Option<&eg_trainer::item::values::BoundTooltip>,
         _: &mut dyn backend::ReadObserver,
     ) -> Result<eg_trainer::item::values::ValueTable, BackendError> {
         use eg_trainer::item::values::{DisplayScalarParser, MappingBuilder, MappingStart, RawMappingPage, RawValueSample};
@@ -219,16 +220,23 @@ impl BackendConnection for OwnedConnection {
             };
             return Err(BackendError::blocked(kind, "Owned formatting is unavailable."));
         }
-        assert_eq!(self.0.item.lock().unwrap().as_ref(), Some(expected.snapshot()));
+        // As the helper does, a request for an item the forge no longer holds is refused.
+        if self.0.item.lock().unwrap().as_ref() != Some(expected.snapshot()) {
+            return Err(BackendError::blocked(backend::ErrorKind::MappingRetryable, "forge changed before mapping"));
+        }
         self.0.mapping_calls.fetch_add(1, Ordering::SeqCst);
         while mode == 4 && !self.0.mapping_release.load(Ordering::SeqCst) {
             tokio::time::sleep(Duration::from_millis(5)).await;
         }
         tokio::time::sleep(Duration::from_millis(if mode == 2 { 500 } else { 20 })).await;
-        let affix = &expected.snapshot().affixes[usize::from(request.address.index)];
+        // Unique and implicit rolls read as an affix with their index for id would.
         let (id, tier) = match &request.draft {
             Some(eg_trainer::item::edit::ItemEdit::Affix(edit)) => (edit.id, edit.tier),
-            _ => (i32::from(affix.id), i32::from(affix.tier)),
+            _ if request.address.target != eg_trainer::item::values::MappingTarget::Affix => (i32::from(request.address.index) + 1, 1),
+            _ => {
+                let affix = &expected.snapshot().affixes[usize::from(request.address.index)];
+                (i32::from(affix.id), i32::from(affix.tier))
+            }
         };
         let minimum = id * 100 + tier * 10 + expected.snapshot().individual_id as i32;
         let context = format!("{}:{id}:{tier}", expected.snapshot().individual_id).into_bytes();
@@ -246,7 +254,7 @@ impl BackendConnection for OwnedConnection {
                 display.strip_suffix(unit).unwrap().parse().map_err(|error: std::num::ParseFloatError| error.to_string())
             }
         }
-        let mut builder = MappingBuilder::new(expected.clone(), request.clone(), page(MappingStart::ContextOnly, vec![]), None).unwrap();
+        let mut builder = MappingBuilder::new(expected.clone(), request.clone(), page(MappingStart::ContextOnly, vec![]), tooltip).unwrap();
         while let Some(start) = builder.next_start() {
             let samples = (start..=start + 15)
                 .map(|roll| {
@@ -1034,7 +1042,7 @@ pub(super) fn capture(session: &Session) {
     assert_eq!(data.mapping_calls.load(Ordering::SeqCst), calls + 1);
     session.capture(&ui, "backend-forge-values-recovered");
     // Unique tooltip text is an optional asynchronous read. It remains bound to
-    // this item and is cached across equal reads; its rolls are edited by position.
+    // this item and is cached across equal reads; its rolls take the game's value tables.
     data.unique_mode.store(3, Ordering::SeqCst);
     let mut unique_item = item("Owned unique text", 46);
     unique_item.rarity = 9;
@@ -1052,7 +1060,7 @@ pub(super) fn capture(session: &Session) {
     assert_eq!(forge.get_formatting_error(), "");
     assert_eq!(forge.get_unique_modifiers().row_data(0).unwrap().text, "Game unique +17 Ω");
     assert_eq!(forge.get_unique_modifiers().row_data(1).unwrap().rolls.row_count(), 2);
-    assert!(forge.get_unique_modifiers().row_data(0).unwrap().rolls.row_data(0).unwrap().editable);
+    wait(|| forge.get_unique_modifiers().row_data(0).unwrap().rolls.row_data(0).unwrap().editable);
     assert!(!forge.get_can_apply());
     session.capture(&ui, "backend-forge-unique-descriptions");
     session.resize(680, 580);

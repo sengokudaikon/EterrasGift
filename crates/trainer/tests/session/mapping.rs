@@ -256,13 +256,13 @@ fn obsolete_mapping_stops_between_pages_and_keeps_the_drained_session_ready() {
     );
     let mut session = ready(&fixture, &wire);
     let mut observer = Stop(canceled);
-    let result = run(session.resolve_mapping_observed(&expected(&fixture), &request(), &mut observer));
+    let result = run(session.resolve_mapping_observed(&expected(&fixture), &request(), None, &mut observer));
     assert!(matches!(result, Err(SessionError::Busy)));
     assert_eq!(session.state(), SessionState::Ready);
     assert_eq!(wire.requests().len(), 4, "the next fifteen pages were not submitted");
     assert!(run(session.read_forge()).unwrap().is_some());
     let count = wire.requests().len();
-    assert!(run(session.resolve_mapping_observed(&expected(&fixture), &request(), &mut observer)).is_err());
+    assert!(run(session.resolve_mapping_observed(&expected(&fixture), &request(), None, &mut observer)).is_err());
     assert_eq!(wire.requests().len(), count, "already-canceled reads do no I/O");
 }
 
@@ -297,7 +297,7 @@ fn a_stop_at_each_check_around_the_first_page_keeps_the_session_and_its_files_fo
         let wire = FakeTransport::new(fixture.target.clone(), steps);
         let mut session = ready(&fixture, &wire);
         let mut observer = StopAt { calls: 0, stop_at };
-        let result = run(session.resolve_mapping_observed(&expected(&fixture), &request(), &mut observer));
+        let result = run(session.resolve_mapping_observed(&expected(&fixture), &request(), None, &mut observer));
         assert!(matches!(result, Err(SessionError::Busy)), "stop at {stop_at}: {result:?}");
         assert_eq!(session.state(), SessionState::Ready);
         assert!(session.runtime_status().is_some());
@@ -321,7 +321,7 @@ fn an_observer_stop_does_not_turn_a_runtime_refusal_into_a_cancellation() {
     // It would stop once the reply is in: the refusal must still be reported as one.
     let mut observer = StopAt { calls: 0, stop_at: 4 };
     assert!(matches!(
-        run(session.resolve_mapping_observed(&expected(&fixture), &request(), &mut observer)),
+        run(session.resolve_mapping_observed(&expected(&fixture), &request(), None, &mut observer)),
         Err(SessionError::Helper {
             code: ResponseCode::OfflineRequired,
             ..

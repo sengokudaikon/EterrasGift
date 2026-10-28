@@ -372,6 +372,21 @@ impl BackendSnapshot {
         let catalog = self.catalog.data().ok_or(EditError::CatalogNotVerified)?;
         ForgePlan::edit_with_evidence(&expected, status.manager, catalog, edit, self.override_enabled, self.roll_evidence(&expected).as_ref())
     }
+    /// The game's own description of the item's unique or implicit lines, bound to `expected`: what a unique or implicit
+    /// value request is checked against. None for affixes, or while the game has not described the item.
+    pub fn bound_tooltip(&self, expected: &crate::item::edit::ExpectedObservation, target: eg_trainer_wire::mapping::MappingTarget) -> Option<crate::item::values::BoundTooltip> {
+        use crate::item::values::{BoundTooltip, TooltipKind};
+        use eg_trainer_wire::mapping::MappingTarget;
+        let ForgeState::Item { implicits, unique, .. } = &self.forge else {
+            return None;
+        };
+        let (kind, lines) = match target {
+            MappingTarget::Affix => return None,
+            MappingTarget::Unique => (TooltipKind::Unique, unique.as_ref()?.as_ref().ok()?),
+            MappingTarget::Implicit => (TooltipKind::Implicit, implicits.as_ref()?),
+        };
+        BoundTooltip::new(expected, kind, lines.clone()).ok()
+    }
     /// Which rolls the item's unique and implicit lines read, as the game's own descriptions of this item say.
     fn roll_evidence(&self, expected: &crate::item::edit::ExpectedObservation) -> Option<crate::item::edit::RollEvidence> {
         use crate::definitions::catalog::Availability;

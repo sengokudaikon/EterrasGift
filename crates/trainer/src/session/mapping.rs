@@ -1,16 +1,16 @@
 use super::*;
 use crate::{
     item::edit::{ExpectedObservation, ItemEdit, RollTarget},
-    item::values::{CapturedDisplayParser, MappingBuilder, MappingError, MappingRequest, ValueTable},
+    item::values::{BoundTooltip, CapturedDisplayParser, MappingBuilder, MappingError, MappingRequest, ValueTable},
 };
-use eg_trainer_wire::mapping::{self, AffixMappingDraft, AffixMappingQuery, MappingStart, MappingTarget};
+use eg_trainer_wire::mapping::{self, AffixMappingDraft, AffixMappingQuery, MappingStart, MappingTarget, ModifierMappingQuery, UniqueRollChange};
 
 impl<T: Transport> Session<T> {
     /// Samples the game's exact display on detached items. Each page checks the
     /// full selected item/manager; all pages must have one captured locale and
     /// opaque context before a table is exposed. This never records a write.
     pub async fn resolve_mapping(&mut self, expected: &ExpectedObservation, request: &MappingRequest) -> Result<ValueTable, SessionError> {
-        self.resolve_mapping_observed(expected, request, &mut ContinueRead).await
+        self.resolve_mapping_observed(expected, request, None, &mut ContinueRead).await
     }
     /// Stop only before or after a completed RPC; never abandon pipe I/O or its
     /// artifact lease when the editor moves to a different draft.
@@ -18,15 +18,16 @@ impl<T: Transport> Session<T> {
         &mut self,
         expected: &ExpectedObservation,
         request: &MappingRequest,
+        tooltip: Option<&BoundTooltip>,
         observer: &mut dyn ReadObserver,
     ) -> Result<ValueTable, SessionError> {
         if observer.control() == ReadControl::Stop {
             return Err(SessionError::Busy);
         }
         self.admit()?;
-        request.validate(expected, None).map_err(unavailable)?;
+        request.validate(expected, tooltip).map_err(unavailable)?;
         if request.address.target != MappingTarget::Affix {
-            return Err(SessionError::Mapping("This roll mapping is unavailable.".into()));
+            return self.resolve_modifier_mapping(expected, request, tooltip, observer).await;
         }
         let identity = expected.catalog_identity();
         if !self.observation_matches(expected) {
@@ -62,16 +63,64 @@ impl<T: Transport> Session<T> {
         }
         builder.finish().map_err(unavailable)
     }
+    /// A unique or implicit roll, sampled as an affix's is. A unique's query carries the other drafted unique rolls its
+    /// line depends on; an implicit depends on its own roll only.
+    async fn resolve_modifier_mapping(
+        &mut self,
+        expected: &ExpectedObservation,
+        request: &MappingRequest,
+        tooltip: Option<&BoundTooltip>,
+        observer: &mut dyn ReadObserver,
+    ) -> Result<ValueTable, SessionError> {
+        let identity = expected.catalog_identity();
+        if !self.observation_matches(expected) {
+            return Err(SessionError::Mapping("The mapping belongs to a different process or catalog.".into()));
+        }
+        let draft = match request.draft.as_ref() {
+            None => vec![],
+            Some(ItemEdit::Roll(edit)) if edit.target == RollTarget::Unique => edit
+                .changes
+                .iter()
+                .filter(|change| change.index != i32::from(request.address.index))
+                .map(|change| {
+                    Ok(UniqueRollChange {
+                        index: u8::try_from(change.index).map_err(|_| unavailable(MappingError::InvalidQuery))?,
+                        value: u8::try_from(change.value).map_err(|_| unavailable(MappingError::InvalidQuery))?,
+                    })
+                })
+                .collect::<Result<_, SessionError>>()?,
+            _ => return Err(unavailable(MappingError::InvalidQuery)),
+        };
+        let item = expected.snapshot();
+        let manager = self.offline_manager()?;
+        let dispatcher = self.dispatcher()?;
+        let query = |start| {
+            ModifierMappingQuery::new(dispatcher, manager, item.clone(), request.address, start, draft.clone())
+                .map(Request::MapModifierRoll)
+                .map_err(SessionError::Protocol)
+        };
+        let context = self.mapping_page(query(MappingStart::ContextOnly)?, observer).await?;
+        let mut builder = MappingBuilder::new(expected.clone(), request.clone(), context, tooltip).map_err(unavailable)?;
+        let mut parser = CapturedDisplayParser::new(&identity.locale.language).map_err(SessionError::Mapping)?;
+        while let Some(start) = builder.next_start() {
+            let page = self.mapping_page(query(MappingStart::Samples(start))?, observer).await?;
+            builder.push(expected, request, page, &mut parser).map_err(unavailable)?;
+        }
+        builder.finish().map_err(unavailable)
+    }
     async fn mapping_page(&mut self, request: Request, observer: &mut dyn ReadObserver) -> Result<mapping::RawMappingPage, SessionError> {
-        let Request::MapRoll(query) = &request else {
-            return Err(SessionError::Protocol(ProtocolError::InvalidData));
+        let (address, start) = match &request {
+            Request::MapRoll(query) => (
+                mapping::MappingAddress {
+                    target: MappingTarget::Affix,
+                    index: query.slot(),
+                    line: None,
+                },
+                query.start(),
+            ),
+            Request::MapModifierRoll(query) => (query.address(), query.start()),
+            _ => return Err(SessionError::Protocol(ProtocolError::InvalidData)),
         };
-        let address = mapping::MappingAddress {
-            target: MappingTarget::Affix,
-            index: query.slot(),
-            line: None,
-        };
-        let start = query.start();
         match self
             .read_owned_control(|_| request, |bytes| mapping::decode_mapping(bytes, address, start), Some(observer))
             .await

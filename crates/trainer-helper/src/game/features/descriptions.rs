@@ -143,13 +143,52 @@ impl RuntimeAccess {
             if target(&graph.manager)?.as_ptr() as u64 != request.manager() || self.forge_snapshot(attached, &graph)? != *request.expected() {
                 return Err(unsupported("forge changed before implicit description"));
             }
-            let unpacked = self.class(&graph.images, c"", c"ItemDataUnpacked")?;
-            let getter = self.mapping_method(api, &graph.item, c"get_Implicits", &[], None)?;
+            let mut modifiers = Vec::new();
+            for line in self.implicit_lines(attached, api, &graph.images, &graph.item, request.expected())? {
+                modifiers.push(ModifierSnapshot {
+                    index: line.slot as u32,
+                    text: self.description_text(attached, api, &line.info, c"ToModifierString")?,
+                    range: self.description_text(attached, api, &line.info, c"ToRangeString")?,
+                    roll_ids: if line.slot < request.expected().implicit_rolls.len() && line.minimum != line.maximum {
+                        vec![line.slot as u8]
+                    } else {
+                        vec![]
+                    },
+                    editable: true,
+                });
+            }
+            // Calls may run managed callbacks. Never publish text for an item or
+            // graph that changed while producing it, even if its roots survived.
+            let current = self.forge_graph(attached)?.ok_or(GameError::NotReady("forge item removed during formatting"))?;
+            if target(&current.manager)?.as_ptr() as u64 != request.manager() || self.forge_snapshot(attached, &current)? != *request.expected() {
+                return Err(unsupported("forge changed during implicit description"));
+            }
+            eg_trainer_wire::mapping::encode_modifiers(&modifiers).map_err(|e| unsupported(e.to_string()))?;
+            Ok(modifiers)
+        }
+    }
+
+    /// The item's implicit lines as its tooltip builds them (`get_Implicits`, `ItemList.GetItemImplicit`,
+    /// `GetItemImplicitInfo`), each with its base's range. `snapshot` is the item's own read, for its base.
+    /// # Safety
+    /// As for [`Self::describe_implicits`]; `item` may be the selected item or a detached copy of it.
+    pub(super) unsafe fn implicit_lines<'a, 'r>(
+        &self,
+        attached: &'a AttachedThread<'r>,
+        api: raw::InvocationApi,
+        images: &Images,
+        item: &Root<'a, 'r>,
+        snapshot: &eg_trainer_wire::forge::ForgeSnapshot,
+    ) -> Result<Vec<ImplicitLine<'a, 'r>>, GameError> {
+        // SAFETY: Checked signatures; the item, list, definitions and every tooltip result stay rooted.
+        unsafe {
+            let unpacked = self.class(images, c"", c"ItemDataUnpacked")?;
+            let getter = self.mapping_method(api, item, c"get_Implicits", &[], None)?;
             let list_class = (self.type_class)((self.method_return)(getter));
             self.list_class(list_class)?;
             let array_class = self.field_class(self.field(list_class, c"_items")?, "description")?;
             let element = (self.class_element)(array_class);
-            if element.is_null() || (self.class_value)(element) || (self.class_image)(element) != graph.images.game {
+            if element.is_null() || (self.class_value)(element) || (self.class_image)(element) != images.game {
                 return Err(unsupported("implicit getter game reference element"));
             }
             self.array_class(array_class, element)?;
@@ -160,57 +199,34 @@ impl RuntimeAccess {
                     &[NonNull::new(list_class).ok_or_else(|| unsupported("implicit list class"))?],
                 )
                 .map_err(|e| unsupported(e.to_string()))?;
-            let value = match getter.invoke(Some(&graph.item), &mut []).map_err(|e| unsupported(e.to_string()))? {
+            let value = match getter.invoke(Some(item), &mut []).map_err(|e| unsupported(e.to_string()))? {
                 InvocationOutcome::Returned(ReturnValue::Reference(list)) => list,
                 _ => return Err(unsupported("implicit getter threw or returned a non-reference")),
             };
-            let mut modifiers = Vec::new();
+            let mut lines = Vec::new();
             if let Some(list) = value {
                 self.exact(&list, list_class)?;
                 let implicits = self.list(attached, &list, element, eg_trainer_wire::catalog::MAX_IMPLICITS as u32)?;
                 if !implicits.is_empty() {
-                    let base = self.implicit_definitions(attached, api, &graph.images)?;
-                    let data_class = base.data_class;
-                    let builder = self.class(&graph.images, c"LE.UI.Tooltips", c"ItemTooltipContentBuilder")?;
-                    let build = self.description_method(api, builder, c"GetItemImplicitInfo", &[unpacked, element, data_class], None, false)?;
+                    let base = self.implicit_definitions(attached, api, images)?;
+                    let builder = self.class(images, c"LE.UI.Tooltips", c"ItemTooltipContentBuilder")?;
+                    let build = self.description_method(api, builder, c"GetItemImplicitInfo", &[unpacked, element, base.data_class], None, false)?;
                     for (slot, implicit) in implicits.iter().enumerate() {
-                        let (data, minimum, maximum) = self.implicit_range(attached, api, &base, request.expected(), slot)?;
+                        let (data, minimum, maximum) = self.implicit_range(attached, api, &base, snapshot, slot)?;
                         let info = self.description_call(
                             attached,
                             api,
                             build,
                             None,
-                            &mut [
-                                Argument::Reference(Some(&graph.item)),
-                                Argument::Reference(Some(implicit)),
-                                Argument::Reference(Some(&data)),
-                            ],
+                            &mut [Argument::Reference(Some(item)), Argument::Reference(Some(implicit)), Argument::Reference(Some(&data))],
                         )?;
-                        let Some(info) = info else {
-                            continue;
-                        };
-                        modifiers.push(ModifierSnapshot {
-                            index: slot as u32,
-                            text: self.description_text(attached, api, &info, c"ToModifierString")?,
-                            range: self.description_text(attached, api, &info, c"ToRangeString")?,
-                            roll_ids: if slot < request.expected().implicit_rolls.len() && minimum != maximum {
-                                vec![slot as u8]
-                            } else {
-                                vec![]
-                            },
-                            editable: true,
-                        });
+                        if let Some(info) = info {
+                            lines.push(ImplicitLine { slot, info, minimum, maximum });
+                        }
                     }
                 }
             }
-            // Calls may run managed callbacks. Never publish text for an item or
-            // graph that changed while producing it, even if its roots survived.
-            let current = self.forge_graph(attached)?.ok_or(GameError::NotReady("forge item removed during formatting"))?;
-            if target(&current.manager)?.as_ptr() as u64 != request.manager() || self.forge_snapshot(attached, &current)? != *request.expected() {
-                return Err(unsupported("forge changed during implicit description"));
-            }
-            eg_trainer_wire::mapping::encode_modifiers(&modifiers).map_err(|e| unsupported(e.to_string()))?;
-            Ok(modifiers)
+            Ok(lines)
         }
     }
 
@@ -275,6 +291,14 @@ impl RuntimeAccess {
             Ok((data, minimum, maximum))
         }
     }
+}
+
+/// One implicit line: its slot, the game's tooltip info for it and its base's range.
+pub(super) struct ImplicitLine<'a, 'r> {
+    pub slot: usize,
+    pub info: Root<'a, 'r>,
+    pub minimum: f32,
+    pub maximum: f32,
 }
 
 /// The game's implicit registry and lookup, from [`RuntimeAccess::implicit_definitions`].
