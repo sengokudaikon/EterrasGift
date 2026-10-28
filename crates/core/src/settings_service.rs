@@ -1,6 +1,7 @@
 //! One owner for settings IO. Callers enqueue changes; reads clone a cached snapshot and never wait for disk.
 //! Revisions order observations, not game writes. Failed local persistence remains explicit and retryable.
 
+use crate::json;
 use crate::paths::AppPaths;
 use crate::settings::{AppSettings, Locations, SettingsStore};
 use serde_json::{Map, Value};
@@ -319,10 +320,8 @@ impl ModuleSettings {
 
     pub fn set_bool(&self, key: &'static str, value: bool) -> Result<u64, String> {
         self.update(move |fields| {
-            let aliases: Vec<_> = fields.keys().filter(|name| name.eq_ignore_ascii_case(key)).cloned().collect();
-            for alias in aliases {
-                fields.remove(&alias);
-            }
+            // Every spelling goes, so the one written is the only one read.
+            while json::take(fields, key).is_some() {}
             fields.insert(key.into(), Value::Bool(value));
             Ok(())
         })

@@ -462,7 +462,7 @@ impl ModSources {
             Err(error) if error.kind() == io::ErrorKind::InvalidData => None,
             Err(error) => return Err(error.into()),
         };
-        let hash = eg_core::hashes::of_bytes(&fs::read(&project.target_path)?);
+        let hash = eg_core::hashes::of_file(&project.target_path)?;
         let built = fs::metadata(&project.target_path)?.modified()?;
         let mut source_files = files(project.project_file.parent().unwrap_or(&project.project_file), None)?;
         source_files.extend(build_props(&project.project_file, sources));
@@ -532,10 +532,10 @@ fn evaluated(file: &Path, output: &str) -> Option<(Option<ModProject>, Vec<PathB
         .flat_map(|value| value.split(';'))
         .map(str::trim)
         .map(PathBuf::from)
-        .filter(|path| eg_core::paths::is_fully_qualified(path))
+        .filter(|path| path.is_absolute())
         .collect();
     let target = PathBuf::from(text(properties, "TargetPath").unwrap_or_default());
-    if !eg_core::paths::is_fully_qualified(&target) || !target.extension().is_some_and(|extension| extension.eq_ignore_ascii_case("dll")) {
+    if !target.is_absolute() || !target.extension().is_some_and(|extension| extension.eq_ignore_ascii_case("dll")) {
         return Some((None, imports));
     }
     let library = text(properties, "OutputType").is_some_and(|kind| kind.eq_ignore_ascii_case("Library"));
@@ -638,17 +638,7 @@ fn files(folder: &Path, depth: Option<usize>) -> io::Result<Vec<PathBuf>> {
 
 fn searched(entry: &fs::DirEntry) -> bool {
     let name = entry.file_name().to_string_lossy().to_lowercase();
-    if name.starts_with('.') || name == "bin" || name == "obj" || entry.file_type().is_ok_and(|kind| kind.is_symlink()) {
-        return false;
-    }
-    #[cfg(windows)]
-    {
-        use std::os::windows::fs::MetadataExt;
-        if entry.metadata().is_ok_and(|metadata| metadata.file_attributes() & 0x400 != 0) {
-            return false;
-        }
-    }
-    true
+    !(name.starts_with('.') || name == "bin" || name == "obj") && entry.metadata().is_ok_and(|metadata| eg_core::paths::is_plain_directory(&metadata))
 }
 
 fn compiler_errors(output: &str, folder: &Path) -> String {

@@ -1,5 +1,5 @@
 //! Writes a file in one step through a uniquely named temporary file beside it, so concurrent writers never share one
-//! and a failed write leaves what was there whole (`spec/data-and-persistence.md` §2). Text is UTF-8 without a BOM.
+//! and a failed write leaves what was there whole. Text is UTF-8 without a BOM.
 
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Write};
@@ -20,30 +20,34 @@ pub fn copy(source: &Path, target: &Path) -> io::Result<()> {
 
 /// Copies `source` to `target` in one step, never over a file that is there already (`AlreadyExists` then).
 pub fn copy_new(source: &Path, target: &Path) -> io::Result<()> {
-    create_parent(target)?;
-    let temporary = temporary(target);
-    let result = (|| {
+    through_temporary(target, |temporary| {
         let mut input = File::open(source)?;
-        let mut output = OpenOptions::new().write(true).create_new(true).open(&temporary)?;
+        let mut output = OpenOptions::new().write(true).create_new(true).open(temporary)?;
         io::copy(&mut input, &mut output)?;
         output.sync_all()?;
         drop(output);
-        move_new(&temporary, target)
-    })();
-    discard(&temporary);
-    result
+        move_new(temporary, target)
+    })
 }
 
 /// Has `write` make the new file at the temporary path it is given, then puts it in place of `path`. A write that
 /// fails (one that checks what it wrote, say) leaves the file as it was. The callback
 /// must finish/close its writes before returning; this function syncs the completed file before renaming.
 pub fn replace(path: &Path, write: impl FnOnce(&Path) -> io::Result<()>) -> io::Result<()> {
+    through_temporary(path, |temporary| {
+        write(temporary)?;
+        writable(temporary)?;
+        OpenOptions::new().write(true).open(temporary)?.sync_all()?;
+        move_replace(temporary, path)
+    })
+}
+
+/// Has `publish` make the new file at a temporary path of its own beside `path` and move it into place, then removes
+/// whatever a failure left at the temporary path.
+fn through_temporary(path: &Path, publish: impl FnOnce(&Path) -> io::Result<()>) -> io::Result<()> {
     create_parent(path)?;
     let temporary = temporary(path);
-    let result = write(&temporary)
-        .and_then(|()| writable(&temporary))
-        .and_then(|()| OpenOptions::new().write(true).open(&temporary)?.sync_all())
-        .and_then(|()| move_replace(&temporary, path));
+    let result = publish(&temporary);
     discard(&temporary);
     result
 }
@@ -182,7 +186,7 @@ mod tests {
         let mut permissions = fs::metadata(&source).unwrap().permissions();
         permissions.set_readonly(true);
         fs::set_permissions(&source, permissions).unwrap();
-        // As the mod library's copy_verified does: a plain copy, then the replace's sync.
+
         replace(&target, |temporary| fs::copy(&source, temporary).map(drop)).unwrap();
         assert_eq!(fs::read(&target).unwrap(), b"mod");
         assert!(!fs::metadata(&target).unwrap().permissions().readonly());

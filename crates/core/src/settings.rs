@@ -1,9 +1,10 @@
-//! `settings.json`, schema version 2 (`spec/data-and-persistence.md` §4): the locations the app uses and, for each
-//! module, whether it is on and its own settings, which only the module reads. The file is the C# app's format, read
-//! case-insensitively and written camelCase, so either app can read what the other wrote.
+//! `settings.json`, schema version 2: the locations the app uses and, for each module, whether it is on and its own
+//! settings, which only the module reads. The file is read case-insensitively and written camelCase, so hand-edited and
+//! older files still load.
 
-use crate::atomic;
+use crate::folder_move::{migrate, migration_conflict, probe, relative};
 use crate::paths::{self, AppPaths};
+use crate::{atomic, json, text};
 use serde_json::{Map, Value};
 use std::collections::BTreeMap;
 use std::fs;
@@ -156,7 +157,7 @@ pub struct Locations {
 }
 
 /// The app's settings as saved, and the saves Settings and the modules make. Saves are made one at a time by whoever
-/// holds the store, each applying its change over what the save before it left (`spec/shell-and-settings.md` §10.3).
+/// holds the store, each applying its change over what the save before it left.
 #[derive(Clone, Debug)]
 pub struct SettingsStore {
     file_path: PathBuf,
@@ -252,10 +253,6 @@ impl SettingsStore {
         }
     }
 
-    pub fn file_path(&self) -> &Path {
-        &self.file_path
-    }
-
     pub fn saved(&self) -> &AppSettings {
         &self.saved
     }
@@ -264,17 +261,12 @@ impl SettingsStore {
         self.pending.as_ref().unwrap_or(&self.saved)
     }
 
-    /// None means the file could not be read and the current settings are only in memory.
-    pub fn persisted(&self) -> Option<&AppSettings> {
-        (!self.unreadable).then_some(&self.saved)
-    }
-
     pub fn has_pending_write(&self) -> bool {
         self.pending.is_some()
     }
 
     /// Retries local settings persistence only. This is never a game-write retry.
-    pub fn retry(&mut self) -> io::Result<()> {
+    pub(crate) fn retry(&mut self) -> io::Result<()> {
         self.write(|_| {}, false)
     }
 
@@ -314,11 +306,6 @@ impl SettingsStore {
         &self.startup_modules
     }
 
-    /// Where the Mods page looks for the player's own mod projects: the saved folder, else the default; None for none.
-    pub fn mod_sources_directory(&self) -> Option<PathBuf> {
-        self.saved.mod_sources_directory.clone().or_else(|| self.paths.mod_sources_directory())
-    }
-
     pub fn startup_error(&self) -> Option<&str> {
         self.startup_error.as_deref()
     }
@@ -328,13 +315,8 @@ impl SettingsStore {
         self.unreadable
     }
 
-    /// A module's own settings as saved; None when it has saved none.
-    pub fn module_settings(&self, id: &str) -> Option<&Value> {
-        self.saved.module_settings.get(id)
-    }
-
     /// Saves a module's own settings record. While the file is unreadable it lasts for this run only.
-    pub fn save_module_settings(&mut self, id: &str, record: Value) -> io::Result<()> {
+    pub(crate) fn save_module_settings(&mut self, id: &str, record: Value) -> io::Result<()> {
         self.write(
             |saved| {
                 saved.module_settings.insert(id.to_owned(), record);
@@ -345,13 +327,13 @@ impl SettingsStore {
 
     /// Stores switches alone: the saved locations, and any move they wait on, stay as they are. While the file is
     /// unreadable they are kept for this run only.
-    pub fn save_switches(&mut self, change: impl FnOnce(&mut AppSettings)) -> io::Result<()> {
+    pub(crate) fn save_switches(&mut self, change: impl FnOnce(&mut AppSettings)) -> io::Result<()> {
         self.write(change, false)
     }
 
     /// Stores the locations, checked first. It is the explicit save that may replace a file that could not be read.
     /// The error is the sentence the page shows after "Locations were not saved: ".
-    pub fn save_locations(&mut self, locations: &Locations) -> Result<(), String> {
+    pub(crate) fn save_locations(&mut self, locations: &Locations) -> Result<(), String> {
         let executable = normalize(&locations.game_executable, "game executable")?;
         if let Some(executable) = &executable
             && !(executable.is_file() && has_extension(executable, "exe"))
@@ -458,9 +440,9 @@ impl SettingsStore {
     }
 }
 
-/// An IO failure on `path` as .NET words it (`Win32Marshal`), the way the C# page shows it: "Access to the path '…' is
-/// denied." rather than Rust's "Access is denied. (os error 5)".
-pub fn describe_io(error: &io::Error, path: &Path) -> String {
+/// An IO failure on `path` as a sentence that names the path, which io::Error's Display leaves out: "Access to the path
+/// '…' is denied." rather than "Access is denied. (os error 5)".
+fn describe_io(error: &io::Error, path: &Path) -> String {
     let path = path.display();
     match error.raw_os_error() {
         Some(2) => format!("Could not find file '{path}'."),
@@ -484,13 +466,12 @@ fn read(file_path: &Path, legacy: &[LegacyModuleSettings]) -> Result<(AppSetting
         Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok((AppSettings::default(), false)),
         Err(error) => return Err(error.to_string()),
     };
-    let text = text.strip_prefix(b"\xEF\xBB\xBF").unwrap_or(&text);
-    let mut document = match serde_json::from_slice::<Value>(text) {
+    let mut document = match serde_json::from_slice::<Value>(text::strip_bom_bytes(&text)) {
         Ok(Value::Object(document)) => document,
         Ok(_) => return Err("The settings file is empty.".into()),
         Err(error) => return Err(format!("The settings file is not valid JSON ({error}).")),
     };
-    let version = find(&document, "schemaVersion").and_then(Value::as_i64).unwrap_or(0);
+    let version = json::find(&document, "schemaVersion").and_then(Value::as_i64).unwrap_or(0);
     let upgraded = version == 1;
     if upgraded {
         upgrade(&mut document, legacy);
@@ -500,7 +481,7 @@ fn read(file_path: &Path, legacy: &[LegacyModuleSettings]) -> Result<(AppSetting
     let settings = AppSettings::from_json(&document)?;
     for index in 0..LOCATIONS.len() {
         if let Some(path) = settings.location(index)
-            && (!paths::is_fully_qualified(path) || std::path::absolute(path).ok().as_deref() != Some(path.as_path()))
+            && std::path::absolute(path).ok().as_deref() != Some(path.as_path())
         {
             return Err("Settings paths must be absolute and normalized.".into());
         }
@@ -513,15 +494,19 @@ fn upgrade(document: &mut Map<String, Value>, legacy: &[LegacyModuleSettings]) {
     let mut modules = Map::new();
     let mut slices = Map::new();
     for module in legacy {
-        if let Some(Value::Bool(on)) = module.enabled_key.and_then(|key| take(document, key)) {
+        if let Some(Value::Bool(on)) = module.enabled_key.and_then(|key| json::take(document, key)) {
             modules.insert(module.module_id.into(), on.into());
         }
-        let slice: Map<String, Value> = module.keys.iter().filter_map(|&key| take(document, key).map(|value| (key.to_owned(), value))).collect();
+        let slice: Map<String, Value> = module
+            .keys
+            .iter()
+            .filter_map(|&key| json::take(document, key).map(|value| (key.to_owned(), value)))
+            .collect();
         if !slice.is_empty() {
             slices.insert(module.module_id.into(), Value::Object(slice));
         }
     }
-    take(document, "schemaVersion");
+    json::take(document, "schemaVersion");
     document.insert("schemaVersion".into(), CURRENT_SCHEMA.into());
     if !modules.is_empty() {
         document.insert("modules".into(), Value::Object(modules));
@@ -531,11 +516,10 @@ fn upgrade(document: &mut Map<String, Value>, legacy: &[LegacyModuleSettings]) {
     }
 }
 
-/// A module's switch in its settings record (`moduleSettings.<id>`), matched whatever its case, as the C# app reads it
-/// and as people type it by hand: `default` when the record does not say. A record that is unclear, its spellings
-/// disagreeing or the value not true or false, reads as off: for every module switch off is the cautious side (the
-/// trainer then connects only when asked, and writes only what the game would make). Settings shows and the app uses
-/// this one reading, so the two cannot disagree.
+/// A module's switch in its settings record (`moduleSettings.<id>`), matched whatever its case, since people type it by
+/// hand: `default` when the record does not say. A record that is unclear, its spellings disagreeing or the value not
+/// true or false, reads as off: every module switch is defined so that off is the cautious side. Settings shows and the
+/// app uses this one reading, so the two cannot disagree.
 pub fn module_flag(record: Option<&Value>, key: &str, default: bool) -> bool {
     let Some(fields) = record.and_then(Value::as_object) else {
         return default;
@@ -550,24 +534,13 @@ pub fn module_flag(record: Option<&Value>, key: &str, default: bool) -> bool {
     }
 }
 
-/// A top-level key's value, matched whatever its case.
-fn find<'a>(document: &'a Map<String, Value>, key: &str) -> Option<&'a Value> {
-    document.iter().find(|(name, _)| name.eq_ignore_ascii_case(key)).map(|(_, value)| value)
-}
-
-/// Removes a top-level key, matched whatever its case, and returns its value.
-fn take(document: &mut Map<String, Value>, key: &str) -> Option<Value> {
-    let name = document.keys().find(|name| name.eq_ignore_ascii_case(key))?.clone();
-    document.remove(&name)
-}
-
 /// A typed location as the settings keep it: a full path without a trailing separator; None when the box is empty.
 fn normalize(typed: &str, what: &str) -> Result<Option<PathBuf>, String> {
     let trimmed = typed.trim();
     if trimmed.is_empty() {
         return Ok(None);
     }
-    if !paths::is_fully_qualified(Path::new(trimmed)) {
+    if !Path::new(trimmed).is_absolute() {
         return Err(format!("Enter the full path of the {what}, starting with its drive (such as C:\\), or use Browse."));
     }
     Ok(Some(paths::normalized(Path::new(trimmed))))
@@ -585,123 +558,6 @@ fn has_extension(path: &Path, extension: &str) -> bool {
     path.extension().is_some_and(|found| found.eq_ignore_ascii_case(extension))
 }
 
-fn relative(base: &Path, path: &Path) -> String {
-    path.strip_prefix(base).unwrap_or(path).to_string_lossy().into_owned()
-}
-
-/// Makes sure a folder a location moves to can be written, before anything waits on it.
-fn probe(directory: &Path) -> io::Result<()> {
-    fs::create_dir_all(directory)?;
-    let probe = directory.join(format!(".write-test-{}", uuid::Uuid::new_v4().simple()));
-    fs::write(&probe, b"")?;
-    fs::remove_file(&probe)
-}
-
-/// What a move copied into its destination, by path within it and content hash. A move that fails partway is taken up
-/// again at the next start, while the old folder stays in use and changes: it may then replace its own earlier copies,
-/// still as it made them, but never a file that was there before or that changed after it was copied. Removed once the
-/// move is done.
-const MOVE_RECORD: &str = ".eterras-gift-move.json";
-
-/// Copies a folder's files into its new place, leaving the old ones as they are (`spec/data-and-persistence.md` §4.4).
-fn migrate(source: &Path, destination: &Path) -> io::Result<()> {
-    if paths::same_folder(source, destination) {
-        return Ok(());
-    }
-    fs::create_dir_all(destination)?;
-    let record_path = destination.join(MOVE_RECORD);
-    let mut record = move_record(destination);
-    let mut copies = Vec::new();
-    for (from, to) in migration_copies(source, destination)? {
-        if to.exists() {
-            if same_content(&from, &to)? {
-                continue;
-            }
-            if !copied_before(&record, destination, &to)? {
-                return Err(io::Error::new(io::ErrorKind::AlreadyExists, format!("Destination file already exists: {}", to.display())));
-            }
-        }
-        copies.push((from, to));
-    }
-    // Recorded before anything is copied, so a copy this run leaves behind is known as its own.
-    for (from, to) in &copies {
-        record.insert(relative(destination, to), crate::hashes::of_reader(fs::File::open(from)?)?);
-    }
-    if !copies.is_empty() {
-        atomic::write(&record_path, &serde_json::to_vec_pretty(&record).map_err(io::Error::other)?)?;
-    }
-    for (from, to) in copies {
-        if to.exists() {
-            atomic::copy(&from, &to)?;
-        } else {
-            atomic::copy_new(&from, &to)?;
-        }
-    }
-    // A record left behind only lets a later move into this folder replace files that are still this move's copies.
-    let _ = fs::remove_file(&record_path);
-    Ok(())
-}
-
-fn move_record(destination: &Path) -> BTreeMap<String, String> {
-    fs::read(destination.join(MOVE_RECORD))
-        .ok()
-        .and_then(|bytes| serde_json::from_slice(&bytes).ok())
-        .unwrap_or_default()
-}
-
-/// Whether `to` is a copy an earlier, unfinished move made, still as it made it.
-fn copied_before(record: &BTreeMap<String, String>, destination: &Path, to: &Path) -> io::Result<bool> {
-    match record.get(&relative(destination, to)) {
-        Some(hash) => Ok(*hash == crate::hashes::of_reader(fs::File::open(to)?)?),
-        None => Ok(false),
-    }
-}
-
-/// What moving a folder copies: everything in it, except what lies inside a destination within it.
-fn migration_copies(source: &Path, destination: &Path) -> io::Result<Vec<(PathBuf, PathBuf)>> {
-    let mut files = Vec::new();
-    if source.is_dir() {
-        collect_files(source, &mut files)?;
-    }
-    let inside = format!("{}{}", destination.to_string_lossy().to_uppercase(), std::path::MAIN_SEPARATOR);
-    let record = source.join(MOVE_RECORD);
-    Ok(files
-        .into_iter()
-        .filter(|file| !file.to_string_lossy().to_uppercase().starts_with(&inside) && *file != record)
-        .map(|file| {
-            let target = destination.join(file.strip_prefix(source).unwrap_or(&file));
-            (file, target)
-        })
-        .collect())
-}
-
-fn collect_files(directory: &Path, files: &mut Vec<PathBuf>) -> io::Result<()> {
-    for entry in fs::read_dir(directory)? {
-        let entry = entry?;
-        if entry.file_type()?.is_dir() {
-            collect_files(&entry.path(), files)?;
-        } else {
-            files.push(entry.path());
-        }
-    }
-    Ok(())
-}
-
-/// The first file the destination holds with other content than the one moving the folder would copy there.
-fn migration_conflict(source: &Path, destination: &Path) -> io::Result<Option<PathBuf>> {
-    let record = move_record(destination);
-    for (from, to) in migration_copies(source, destination)? {
-        if to.exists() && !same_content(&from, &to)? && !copied_before(&record, destination, &to)? {
-            return Ok(Some(to));
-        }
-    }
-    Ok(None)
-}
-
-fn same_content(first: &Path, second: &Path) -> io::Result<bool> {
-    Ok(fs::read(first)? == fs::read(second)?)
-}
-
 #[cfg(all(test, windows))]
 mod tests {
     use super::*;
@@ -713,7 +569,7 @@ mod tests {
         assert!(flag("{}", true));
         assert!(!module_flag(None, "autoConnect", false));
         assert!(!flag(r#"{"autoConnect": false}"#, true));
-        // As the C# app's `AutoConnect` property, or typed by hand.
+        // Typed by hand in another case.
         assert!(!flag(r#"{"AutoConnect": false}"#, true));
         assert!(flag(r#"{"AUTOCONNECT": true, "autoConnect": true}"#, false));
         // Spellings that disagree, or a value that is no switch, read as off, whatever the default.
@@ -729,7 +585,7 @@ mod tests {
     };
 
     #[test]
-    fn io_failures_read_as_the_c_sharp_app_words_them() {
+    fn io_failures_name_the_path() {
         let path = Path::new(r"C:\data\settings.json");
         assert_eq!(
             describe_io(&io::Error::from_raw_os_error(5), path),
@@ -773,7 +629,7 @@ mod tests {
     }
 
     #[test]
-    fn the_c_sharp_apps_file_reads_whatever_the_case_and_writes_back_camel_case() {
+    fn known_keys_read_in_any_case_and_write_back_camel_case() {
         let fixture = fixture();
         let game = fixture.root.join("Last Epoch.exe");
         fs::write(&game, b"").unwrap();
@@ -941,49 +797,6 @@ mod tests {
         assert_eq!(fs::read(new.join("logs").join("fault.json")).unwrap(), b"{}");
         assert!(old.join("logs").join("fault.json").exists());
         assert_eq!(store.saved().migration_source, None);
-    }
-
-    #[test]
-    fn a_move_that_failed_partway_finishes_later_over_its_own_copies_only() {
-        let temp = tempfile::tempdir().unwrap();
-        let (old, new) = (temp.path().join("data"), temp.path().join("moved"));
-        fs::create_dir_all(old.join("trainer")).unwrap();
-        fs::write(old.join("profile.json"), b"one").unwrap();
-        fs::write(old.join("trainer").join("catalog.json"), b"catalog").unwrap();
-        // The first attempt copies profile.json, then cannot make the trainer folder (a file is in its way).
-        fs::create_dir_all(&new).unwrap();
-        fs::write(new.join("trainer"), b"in the way").unwrap();
-        assert!(migrate(&old, &new).is_err());
-        assert_eq!(fs::read(new.join("profile.json")).unwrap(), b"one");
-        // The old folder stays in use until the move is done, and changes.
-        fs::write(old.join("profile.json"), b"two").unwrap();
-        fs::remove_file(new.join("trainer")).unwrap();
-        assert_eq!(migration_conflict(&old, &new).unwrap(), None);
-        migrate(&old, &new).unwrap();
-        assert_eq!(fs::read(new.join("profile.json")).unwrap(), b"two");
-        assert_eq!(fs::read(new.join("trainer").join("catalog.json")).unwrap(), b"catalog");
-        assert!(!new.join(MOVE_RECORD).exists());
-    }
-
-    #[test]
-    fn a_retried_move_never_replaces_a_file_changed_after_it_was_copied() {
-        let temp = tempfile::tempdir().unwrap();
-        let (old, new) = (temp.path().join("data"), temp.path().join("moved"));
-        fs::create_dir_all(&old).unwrap();
-        fs::create_dir_all(old.join("trainer")).unwrap();
-        fs::write(old.join("a.json"), b"one").unwrap();
-        fs::write(old.join("trainer").join("catalog.json"), b"catalog").unwrap();
-        fs::create_dir_all(&new).unwrap();
-        fs::write(new.join("trainer"), b"in the way").unwrap();
-        assert!(migrate(&old, &new).is_err());
-        assert_eq!(fs::read(new.join("a.json")).unwrap(), b"one");
-        fs::remove_file(new.join("trainer")).unwrap();
-        fs::write(old.join("a.json"), b"two").unwrap();
-        // Someone else's edit of the copy: no longer the move's own.
-        fs::write(new.join("a.json"), b"edited").unwrap();
-        assert_eq!(migration_conflict(&old, &new).unwrap(), Some(new.join("a.json")));
-        assert_eq!(migrate(&old, &new).unwrap_err().kind(), io::ErrorKind::AlreadyExists);
-        assert_eq!(fs::read(new.join("a.json")).unwrap(), b"edited");
     }
 
     #[test]

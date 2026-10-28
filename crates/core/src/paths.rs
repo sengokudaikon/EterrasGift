@@ -1,6 +1,7 @@
-//! Where the app keeps its files (`spec/data-and-persistence.md` §1): the checkout or install it belongs to, the user
-//! data and what lies in it. `AppPaths` is plain values; the functions below it look at the disk to find them.
+//! Where the app keeps its files: the checkout or install it belongs to, the user data and what lies in it. `AppPaths`
+//! is plain values; the functions below it look at the disk to find them.
 
+use std::fs;
 use std::path::{Component, Path, PathBuf};
 
 /// The app's own folder under `%LOCALAPPDATA%` holds `settings.json` and the last-resort logs. While the rewrite runs
@@ -8,13 +9,13 @@ use std::path::{Component, Path, PathBuf};
 /// same, so sharing the C# app's folder later is this one name ("EterrasGift").
 pub const LOCAL_FOLDER: &str = "EterrasGiftRS";
 
-/// The app's executable, an install's entry (the C# app's `EterrasGift.exe`, which started `EterrasGift.Desktop.exe`).
+/// The app's executable. Its presence in a folder that is not a checkout marks an install.
 pub const EXECUTABLE: &str = "eterras-gift.exe";
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct AppPaths {
     pub root: PathBuf,
-    /// Running from a source checkout: development mode, until a settings flag replaces this signal.
+    /// Running from a source checkout: development mode.
     pub is_source_checkout: bool,
     /// The user-data folder when none is chosen: data\ beside a checkout, or in the app's local folder for an install.
     pub default_user_data_directory: PathBuf,
@@ -27,7 +28,7 @@ impl AppPaths {
     pub fn new(root: &Path, is_source_checkout: bool, default_user_data: &Path, user_data: Option<&Path>, mod_library: Option<&Path>) -> AppPaths {
         let default_user_data_directory = normalized(default_user_data);
         let user_data_directory = user_data.map_or_else(|| default_user_data_directory.clone(), normalized);
-        let mod_library_directory = mod_library.map_or_else(|| user_data_directory.join("mods"), normalized);
+        let mod_library_directory = mod_library.map_or_else(|| default_mod_library(&user_data_directory), normalized);
         AppPaths {
             root: normalized(root),
             is_source_checkout,
@@ -42,11 +43,6 @@ impl AppPaths {
         AppPaths::new(&self.root, self.is_source_checkout, &self.default_user_data_directory, user_data, mod_library)
     }
 
-    /// The data that ships with the app (the bundled catalog), beside the checkout or install.
-    pub fn catalog_directory(&self) -> PathBuf {
-        self.root.join("data").join("catalog")
-    }
-
     pub fn log_directory(&self) -> PathBuf {
         self.user_data_directory.join("logs")
     }
@@ -58,7 +54,7 @@ impl AppPaths {
 
     /// The mod library's folder when none of its own is chosen: mods\ in the user data.
     pub fn default_mod_library_directory(&self) -> PathBuf {
-        self.user_data_directory.join("mods")
+        default_mod_library(&self.user_data_directory)
     }
 
     /// Where the player's own mod projects are by default: mods\ in a source checkout; none in a release.
@@ -67,25 +63,22 @@ impl AppPaths {
     }
 }
 
+fn default_mod_library(user_data: &Path) -> PathBuf {
+    user_data.join("mods")
+}
+
 /// A source checkout: the workspace and its toolchain pin beside it.
-pub fn is_checkout(root: &Path) -> bool {
+fn is_checkout(root: &Path) -> bool {
     root.join("Cargo.toml").is_file() && root.join("rust-toolchain.toml").is_file()
 }
 
-/// The checkout or install a program in `base` belongs to: the nearest checkout above it, else the nearest folder with
-/// bundled catalogs (published checkout artifacts hold catalogs too, so source takes precedence), else `base` itself.
+/// The checkout or install a program in `base` belongs to: the nearest checkout above it, else `base` itself.
 pub fn find_root(base: &Path) -> PathBuf {
     let base = normalized(base);
-    let mut catalog = None;
-    for directory in base.ancestors() {
-        if is_checkout(directory) {
-            return directory.to_path_buf();
-        }
-        if catalog.is_none() && directory.join("data").join("catalog").is_dir() {
-            catalog = Some(directory.to_path_buf());
-        }
+    match base.ancestors().find(|directory| is_checkout(directory)) {
+        Some(checkout) => checkout.to_path_buf(),
+        None => base,
     }
-    catalog.unwrap_or(base)
 }
 
 /// The app's own folder in the user's local application data: settings and the last-resort logs.
@@ -123,11 +116,6 @@ pub fn trim_end_separator(path: &Path) -> PathBuf {
     }
 }
 
-/// A path that names its drive or share and its root, so it never depends on the folder the app runs in.
-pub fn is_fully_qualified(path: &Path) -> bool {
-    path.is_absolute()
-}
-
 /// Two folders are the same place, however their ends and case are spelled.
 pub fn same_folder(first: &Path, second: &Path) -> bool {
     same_text(&normalized(first).to_string_lossy(), &normalized(second).to_string_lossy())
@@ -135,7 +123,24 @@ pub fn same_folder(first: &Path, second: &Path) -> bool {
 
 /// Windows compares paths without case.
 pub fn same_text(first: &str, second: &str) -> bool {
-    first == second || first.to_uppercase() == second.to_uppercase()
+    first == second || first.chars().flat_map(char::to_uppercase).eq(second.chars().flat_map(char::to_uppercase))
+}
+
+/// A real folder, not a link to one: `metadata` as read without following links (`fs::symlink_metadata`, or a
+/// `DirEntry`'s). Housekeeping and searches never step through a symbolic link or junction into a folder elsewhere.
+pub fn is_plain_directory(metadata: &fs::Metadata) -> bool {
+    if !metadata.is_dir() || metadata.file_type().is_symlink() {
+        return false;
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::MetadataExt;
+        use windows_sys::Win32::Storage::FileSystem::FILE_ATTRIBUTE_REPARSE_POINT;
+        if metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0 {
+            return false;
+        }
+    }
+    true
 }
 
 #[cfg(all(test, windows))]
@@ -151,20 +156,11 @@ mod tests {
     }
 
     #[test]
-    fn only_a_path_with_its_drive_and_root_is_fully_qualified() {
-        assert!(is_fully_qualified(Path::new(r"C:\Games")));
-        assert!(is_fully_qualified(Path::new(r"\\server\share\Games")));
-        assert!(!is_fully_qualified(Path::new(r"C:Games")));
-        assert!(!is_fully_qualified(Path::new(r"\Games")));
-        assert!(!is_fully_qualified(Path::new("Games")));
-    }
-
-    #[test]
-    fn the_root_is_the_nearest_checkout_else_the_nearest_catalog() {
+    fn the_root_is_the_nearest_checkout_else_the_programs_own_folder() {
         let temp = tempfile::tempdir().unwrap();
         let checkout = temp.path().join("checkout");
         let install = checkout.join("artifacts").join("app");
-        std::fs::create_dir_all(install.join("data").join("catalog")).unwrap();
+        std::fs::create_dir_all(&install).unwrap();
         assert_eq!(find_root(&install), install);
         std::fs::write(checkout.join("Cargo.toml"), "").unwrap();
         std::fs::write(checkout.join("rust-toolchain.toml"), "").unwrap();

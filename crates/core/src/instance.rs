@@ -12,13 +12,6 @@ use std::time::{Duration, Instant};
 #[derive(Debug)]
 pub struct InstanceLock {
     _file: File,
-    path: PathBuf,
-}
-
-impl InstanceLock {
-    pub fn path(&self) -> &Path {
-        &self.path
-    }
 }
 
 /// The lock beside `settings_file`. `None` when another app holds it for all of `wait` (a restart hands over within
@@ -31,7 +24,7 @@ pub fn acquire(settings_file: &Path, wait: Duration) -> io::Result<Option<Instan
     let until = Instant::now() + wait;
     loop {
         match open(&path) {
-            Ok(file) => return Ok(Some(InstanceLock { _file: file, path })),
+            Ok(file) => return Ok(Some(InstanceLock { _file: file })),
             Err(error) if held(&error) => {
                 if Instant::now() >= until {
                     return Ok(None);
@@ -78,7 +71,7 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let settings = temp.path().join("settings.json");
         let first = acquire(&settings, Duration::ZERO).unwrap().expect("the first app holds it");
-        assert_eq!(first.path(), temp.path().join("settings.json.lock"));
+        assert!(temp.path().join("settings.json.lock").is_file());
         let started = Instant::now();
         assert!(acquire(&settings, Duration::from_millis(120)).unwrap().is_none());
         assert!(started.elapsed() >= Duration::from_millis(120));

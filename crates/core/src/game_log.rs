@@ -1,9 +1,10 @@
-//! Last Epoch's Player.log, read for what the running game says about itself (`spec/companion.md` §3). The game's own
-//! lines carry a UTC timestamp and a level, separated by tabs; engine output and stack traces carry neither. The
-//! companion uses the readiness; a module that reaches into the game gates on the same reader.
+//! Last Epoch's Player.log, read for what the running game says about itself. The game's own lines carry a UTC
+//! timestamp and a level, separated by tabs; engine output and stack traces carry neither. The companion uses the
+//! readiness; a module that reaches into the game gates on the same reader.
 
 use jiff::{SignedDuration, Timestamp};
 use regex::Regex;
+use std::borrow::Cow;
 use std::fs::File;
 use std::io::{self, Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
@@ -190,6 +191,8 @@ fn parse_time(text: &str) -> Option<Timestamp> {
 /// How far the game's clock and the process start time may disagree before a log counts as an earlier run's.
 const CLOCK_SKEW: SignedDuration = SignedDuration::from_secs(10);
 const HEADER_BYTES: u64 = 256 * 1024;
+/// How much of the log one read takes at a time.
+const READ_BYTES: usize = 64 * 1024;
 
 /// Follows Player.log for one game process, reading only what was appended since the last call. A log is the running
 /// game's own when its first timestamped line is not older than the process. Not thread-safe; callers serialise reads.
@@ -200,6 +203,8 @@ pub struct GameLogReader {
     first: Option<Timestamp>,
     offset: u64,
     pending: Vec<u8>,
+    /// Kept between reads, which come every few seconds while the game runs.
+    buffer: Vec<u8>,
     state: GameLogState,
 }
 
@@ -211,13 +216,9 @@ impl GameLogReader {
             first: None,
             offset: 0,
             pending: Vec::new(),
+            buffer: Vec::new(),
             state: GameLogState::missing(),
         }
-    }
-
-    /// Where the log is, for messages.
-    pub fn path(&self) -> &Path {
-        &self.path
     }
 
     /// What the log says about the game process started at `process_start`.
@@ -271,9 +272,16 @@ impl GameLogReader {
 
     fn consume(&mut self, file: &mut File) -> io::Result<()> {
         file.seek(SeekFrom::Start(self.offset))?;
-        let mut buffer = vec![0; 64 * 1024];
+        let mut buffer = std::mem::take(&mut self.buffer);
+        buffer.resize(READ_BYTES, 0);
+        let result = self.consume_into(file, &mut buffer);
+        self.buffer = buffer;
+        result
+    }
+
+    fn consume_into(&mut self, file: &mut File, buffer: &mut [u8]) -> io::Result<()> {
         loop {
-            let read = file.read(&mut buffer)?;
+            let read = file.read(buffer)?;
             if read == 0 {
                 return Ok(());
             }
@@ -283,9 +291,11 @@ impl GameLogReader {
                 if self.pending.is_empty() {
                     self.line(&chunk[..newline]);
                 } else {
-                    self.pending.extend_from_slice(&chunk[..newline]);
-                    let line = std::mem::take(&mut self.pending);
+                    let mut line = std::mem::take(&mut self.pending);
+                    line.extend_from_slice(&chunk[..newline]);
                     self.line(&line);
+                    line.clear();
+                    self.pending = line;
                 }
                 chunk = &chunk[newline + 1..];
             }
@@ -311,10 +321,12 @@ fn first_stamp(file: &mut File) -> io::Result<Option<Timestamp>> {
     Ok(lines.filter_map(stamped).find_map(|line| parse(&line).map(|(time, _)| time)))
 }
 
-/// Decodes only lines that start like a timestamp; most of the log is engine output.
-fn stamped(bytes: &[u8]) -> Option<String> {
+/// Decodes only lines that start like a timestamp; most of the log is engine output. Borrowed unless the line is not
+/// valid UTF-8.
+fn stamped(bytes: &[u8]) -> Option<Cow<'_, str>> {
     bytes.first().filter(|byte| byte.is_ascii_digit())?;
-    Some(String::from_utf8_lossy(bytes).trim_end_matches('\r').to_owned())
+    let end = bytes.iter().rposition(|&byte| byte != b'\r').map_or(0, |last| last + 1);
+    Some(String::from_utf8_lossy(&bytes[..end]))
 }
 
 #[cfg(test)]
@@ -531,17 +543,19 @@ mod tests {
     }
 
     #[test]
-    fn the_reader_shares_the_log_the_game_holds_open_and_reads_large_logs_in_one_pass() {
+    fn lines_past_the_header_are_read_in_the_same_pass() {
         let temp = tempfile::tempdir().unwrap();
         let path = temp.path().join("Player.log");
         let mut game = fs::File::create(&path).unwrap();
         let mut noise = menu(start());
-        for index in 0..20_000 {
+        let mut index = 0;
+        while noise.len() <= HEADER_BYTES as usize {
             noise.push_str("LE.AssetBundles.<SceneLoadAsyncUpdate>d__103:MoveNext()\r\n");
             noise.push_str(&line(
                 start() + SignedDuration::from_secs(5),
                 &format!("Scene M_M{index} load started: load mode: Additive"),
             ));
+            index += 1;
         }
         noise.push_str(&character(start() + minutes(1), false));
         game.write_all(noise.as_bytes()).unwrap();

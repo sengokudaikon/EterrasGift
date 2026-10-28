@@ -1,4 +1,4 @@
-//! The .NET SDK that builds the player's own mods (`spec/companion.md` §6.9).
+//! The .NET SDK that builds the player's own mods.
 
 use std::path::{Path, PathBuf};
 
@@ -16,7 +16,7 @@ pub fn found() -> Option<PathBuf> {
     folders.into_iter().find_map(|folder| {
         let trimmed = PathBuf::from(folder.to_string_lossy().trim());
         let candidate = trimmed.join(FILE_NAME);
-        (eg_core::paths::is_fully_qualified(&trimmed) && candidate.is_file()).then_some(candidate)
+        (trimmed.is_absolute() && candidate.is_file()).then_some(candidate)
     })
 }
 

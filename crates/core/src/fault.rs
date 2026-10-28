@@ -1,5 +1,4 @@
-//! Best-effort fault evidence (`spec/architecture.md` §6, `spec/data-and-persistence.md` §6). Writing a report never
-//! fails and never stands in the way of recovery or exit.
+//! Best-effort fault evidence. Writing a report never fails and never stands in the way of recovery or exit.
 
 use crate::paths;
 use jiff::Timestamp;
@@ -35,7 +34,7 @@ impl FaultLog {
         FaultLog::with_fallbacks(
             root,
             log_directory,
-            vec![paths::local_directory().join("logs"), std::env::temp_dir().join("EterrasGift").join("logs")],
+            vec![paths::local_directory().join("logs"), std::env::temp_dir().join(paths::LOCAL_FOLDER).join("logs")],
         )
     }
 
