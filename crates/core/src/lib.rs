@@ -16,6 +16,8 @@ pub mod instance;
 pub mod json;
 pub mod operations;
 pub mod paths;
+#[allow(unsafe_code)] // Windows/FFI boundary; the rest of the crate denies unsafe.
+pub mod process;
 pub mod settings;
 pub mod settings_service;
 pub mod text;

@@ -8,9 +8,9 @@ use crate::{
 use eg_core::fault::FaultLog;
 use eg_core::settings::SettingsStore;
 use eg_core::settings_service::{SaveOutcome, SettingsService, Snapshot};
-use eg_ui::settings::SettingsPage;
+use eg_ui::pages::settings::SettingsPage;
+use eg_ui::pages::settings::trainer as trainer_settings;
 use eg_ui::shell::Page;
-use eg_ui::trainer_settings;
 use eg_ui::{App, MainWindow};
 use slint::ComponentHandle;
 use std::process::ExitCode;
@@ -47,7 +47,7 @@ pub fn run(startup: Startup) -> Result<ExitCode, slint::PlatformError> {
         App {
             launcher: Some(companion.launcher.clone()),
             settings,
-            mods: Some(eg_ui::mods::ModsPage {
+            mods: Some(eg_ui::pages::mods::ModsPage {
                 worker: companion.mods.clone(),
                 launcher: companion.launcher.clone(),
                 settings: service.clone(),
@@ -81,7 +81,7 @@ pub fn run(startup: Startup) -> Result<ExitCode, slint::PlatformError> {
 fn shutdown(window: &MainWindow, trainer: Option<trainer::Trainer>, companion: Companion, settings: SettingsService) -> Option<Snapshot> {
     let trainer_closed = trainer.is_none_or(|runtime| runtime.close());
     companion.launcher.cancel();
-    eg_ui::mods::cancel_work(window);
+    eg_ui::pages::mods::cancel_work(window);
     companion.mods.cancellation().cancel();
     companion.sources.close();
     let background_fault = eg_ui::background::shutdown();

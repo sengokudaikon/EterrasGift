@@ -4,10 +4,12 @@ use std::{fmt, io};
 
 pub mod assembly;
 pub mod description;
+pub mod dotnet;
 pub mod inventory;
 pub mod library;
 pub mod loader_state;
 pub mod log;
+pub mod page;
 pub mod preferences;
 pub mod sources;
 pub mod worker;

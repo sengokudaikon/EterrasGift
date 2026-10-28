@@ -1,5 +1,5 @@
 //! Optional trainer startup and its background runtime. The window holds only its queue/watch handle.
-use eg_companion::{folders, install};
+use eg_companion::{game::folders, game::install};
 use eg_core::fault::FaultLog;
 use eg_core::settings::SettingsStore;
 use eg_core::settings_service::{ModuleSettings, SettingsService};
@@ -9,8 +9,8 @@ use eg_trainer::{
     connect::sources::FileLogFactory,
     features::profiles::{ProfileBook, ProfileSaver},
 };
-use eg_ui::settings::ModuleChoice;
-use eg_ui::trainer_settings;
+use eg_ui::pages::settings::ModuleChoice;
+use eg_ui::pages::settings::trainer as trainer_settings;
 use std::{
     cell::Cell,
     error::Error,

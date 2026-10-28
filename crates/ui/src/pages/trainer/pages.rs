@@ -747,8 +747,8 @@ pub fn place(heights: &[f32], headings: &[bool], starts: &[usize], section_spaci
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::trainer::profiles::Profile;
-    use crate::trainer::session::{NOT_AVAILABLE, Unconnected};
+    use crate::pages::trainer::profiles::Profile;
+    use crate::pages::trainer::session::{NOT_AVAILABLE, Unconnected};
     use std::cell::RefCell;
     use std::collections::{BTreeMap, BTreeSet};
     use std::rc::Rc;
@@ -840,10 +840,10 @@ mod tests {
             self.states.get(id).cloned()
         }
         fn read_fields(&self, _: &str) -> FieldRequest {
-            crate::trainer::session::not_connected()
+            crate::pages::trainer::session::not_connected()
         }
         fn write_fields(&self, _: &str, _: &[FieldWrite]) -> FieldRequest {
-            crate::trainer::session::not_connected()
+            crate::pages::trainer::session::not_connected()
         }
     }
 

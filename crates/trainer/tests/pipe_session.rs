@@ -152,7 +152,7 @@ fn pipe_session_child() {
     let pid = std::process::id();
     let runtime = tokio::runtime::Builder::new_current_thread().enable_io().enable_time().build().unwrap();
     runtime.block_on(async {
-        let name = format!(r"\\.\pipe\eterras-gift-{pid}");
+        let name = eg_trainer_wire::transport::pipe_name(pid);
         let first = ServerOptions::new()
             .first_pipe_instance(true)
             .max_instances(1)

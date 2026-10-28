@@ -1,6 +1,6 @@
 //! One request per local connection; process ownership survives normal connection closure.
 mod security;
-use eg_trainer_wire::dispatch::{Cancellation, Outcome, Pending};
+use crate::dispatch::{Cancellation, Outcome, Pending};
 use eg_trainer_wire::{
     protocol::{Discovery, DispatcherSpec, Request, Response, ResponseCode},
     transport::{RequestReadError, read_request},
@@ -201,7 +201,7 @@ impl<F: Future + Unpin> Future for CatchUnwind<F> {
     }
 }
 async fn serve(pid: u32, backend: &mut impl Backend, shared: &Shared) -> Result<(), String> {
-    let name = format!(r"\\.\pipe\eterras-gift-{pid}");
+    let name = eg_trainer_wire::transport::pipe_name(pid);
     // Retain the only server handle for the entire service lifetime. Disconnect
     // ends an exchange without relinquishing the pipe name or its DACL.
     let pipe = create(&name, shared).await.map_err(|error| error.to_string())?;
@@ -403,7 +403,7 @@ mod tests {
     use tokio::{net::windows::named_pipe::ClientOptions, time::timeout};
 
     async fn owner_pipe(pid: u32) -> tokio::net::windows::named_pipe::NamedPipeClient {
-        let name = format!(r"\\.\pipe\eterras-gift-{pid}");
+        let name = eg_trainer_wire::transport::pipe_name(pid);
         loop {
             match ClientOptions::new().open(&name) {
                 Ok(pipe) => break pipe,
@@ -541,7 +541,7 @@ mod tests {
             let shared = Shared::default();
             shared.owner.set((pid, owner.created)).unwrap();
             let client = async {
-                let name = format!(r"\\.\pipe\eterras-gift-{pid}");
+                let name = eg_trainer_wire::transport::pipe_name(pid);
                 let mut pipe = loop {
                     match ClientOptions::new().open(&name) {
                         Ok(pipe) => break pipe,

@@ -15,40 +15,17 @@ pub struct RunningGame {
 /// queried, are skipped.
 #[cfg(windows)]
 pub fn oldest_running(process_name: &str) -> Option<RunningGame> {
-    use windows_sys::Win32::Foundation::{CloseHandle, INVALID_HANDLE_VALUE};
-    use windows_sys::Win32::System::Diagnostics::ToolHelp::{CreateToolhelp32Snapshot, PROCESSENTRY32W, Process32FirstW, Process32NextW, TH32CS_SNAPPROCESS};
-    // Compared without case, as Windows names files, and without a string per process: this runs every few seconds.
-    let wanted = format!("{process_name}.exe").to_uppercase();
-    // SAFETY: a snapshot of the process list; closed below.
-    let snapshot = unsafe { CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0) };
-    if snapshot == INVALID_HANDLE_VALUE {
-        return None;
-    }
-    // SAFETY: PROCESSENTRY32W is plain data; dwSize is set as the API requires.
-    let mut entry: PROCESSENTRY32W = unsafe { std::mem::zeroed() };
-    entry.dwSize = size_of::<PROCESSENTRY32W>() as u32;
+    let wanted = format!("{process_name}.exe");
     let mut oldest: Option<RunningGame> = None;
-    // SAFETY: `snapshot` is open and `entry` is sized.
-    let mut more = unsafe { Process32FirstW(snapshot, &mut entry) } != 0;
-    while more {
-        let length = entry.szExeFile.iter().position(|&unit| unit == 0).unwrap_or(entry.szExeFile.len());
-        if char::decode_utf16(entry.szExeFile[..length].iter().copied())
-            .map(|unit| unit.unwrap_or(char::REPLACEMENT_CHARACTER))
-            .flat_map(char::to_uppercase)
-            .eq(wanted.chars())
-            && let Some(start_time) = start_time(entry.th32ProcessID)
+    eg_core::process::each(|process_id, executable| {
+        if eg_core::process::is_named(executable, &wanted)
+            && let Some(start_time) = start_time(process_id)
             && oldest.is_none_or(|known| start_time < known.start_time)
         {
-            oldest = Some(RunningGame {
-                process_id: entry.th32ProcessID,
-                start_time,
-            });
+            oldest = Some(RunningGame { process_id, start_time });
         }
-        // SAFETY: as above.
-        more = unsafe { Process32NextW(snapshot, &mut entry) } != 0;
-    }
-    // SAFETY: the snapshot handle is ours.
-    unsafe { CloseHandle(snapshot) };
+    })
+    .ok()?;
     oldest
 }
 

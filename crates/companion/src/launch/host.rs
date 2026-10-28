@@ -1,12 +1,12 @@
 //! Finds, watches and starts Last Epoch without touching the running process. The `GameHost` trait is what Home and the
 //! Mods page use; tests pass a fake so no test ever starts the real game.
 
-use crate::install::{self, GameInstall};
-use crate::loader::{self, ModLoaderState, ModLoaderSwitch, melon_paths};
+use crate::game::install::{self, GameInstall};
+use crate::game::process::{self, RunningGame};
+use crate::launch::loader::{self, ModLoaderState, ModLoaderSwitch, melon_paths};
 use crate::mods::assembly::LoaderVersion;
 use crate::mods::loader_state::{self, LoaderInstall};
 use crate::mods::worker::ModWorker;
-use crate::process::{self, RunningGame};
 use eg_core::game_log::{GameLogReader, GameLogState};
 use eg_core::operations::Cancellation;
 use std::path::{Path, PathBuf};
@@ -200,7 +200,7 @@ impl GameHost for FileGameHost {
     }
 
     fn read_game_version(&self, install: &GameInstall) -> Option<String> {
-        crate::game_version::read(&self.player_log, &install.game_assembly())
+        crate::game::version::read(&self.player_log, &install.game_assembly())
     }
 
     fn launch(&self, mode: LaunchMode, install: Option<&GameInstall>, lifetime: &Cancellation) -> Result<LaunchOutcome, LaunchError> {
@@ -376,7 +376,7 @@ mod tests {
         let install = game(temp.path());
         let library = ModLibrary::new(temp.path().join("Library"));
         let dll = temp.path().join("Fixture.dll");
-        fs::write(&dll, include_bytes!("../tests/fixtures/melon/clean.bin")).unwrap();
+        fs::write(&dll, include_bytes!("../../tests/fixtures/melon/clean.bin")).unwrap();
         library.add(&dll, false).unwrap();
         let mods = ModWorker::new(library);
         let edited = mods.enqueue(|library| library.set_enabled("Fixture.dll", false)).unwrap();
@@ -408,7 +408,7 @@ mod tests {
         assert!(!staged.exists());
         assert!(!temp.path().join("Library").exists());
         fs::create_dir_all(staged.join("MelonLoader/net6")).unwrap();
-        fs::write(staged.join("MelonLoader/net6/MelonLoader.dll"), include_bytes!("../tests/fixtures/melon/loader.bin")).unwrap();
+        fs::write(staged.join("MelonLoader/net6/MelonLoader.dll"), include_bytes!("../../tests/fixtures/melon/loader.bin")).unwrap();
         host.prepare_mods(&install).unwrap();
         assert!(staged.join("Mods").is_dir());
         assert!(temp.path().join("Library/placed.json").is_file());

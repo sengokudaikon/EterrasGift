@@ -1,13 +1,13 @@
 //! Companion service construction and discovery; neither opens the game process.
 
-use eg_companion::host::FileGameHost;
-use eg_companion::launcher::GameLauncher;
+use eg_companion::launch::host::FileGameHost;
+use eg_companion::launch::launcher::GameLauncher;
 use eg_companion::mods::{
     library::ModLibrary,
     sources::{ModSources, SystemProcessRunner},
     worker::ModWorker,
 };
-use eg_companion::{dotnet, folders};
+use eg_companion::{game::folders, mods::dotnet};
 use eg_core::settings::SettingsStore;
 use std::path::PathBuf;
 use std::sync::Arc;

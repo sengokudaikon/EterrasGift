@@ -352,8 +352,8 @@ fn affix_values(id: i32, tier: i32, roll: i32) -> Result<(), EditError> {
     Ok(())
 }
 
-pub use eg_trainer_wire::write::LayoutProblem;
-use eg_trainer_wire::write::{affix_order_key, layout_problems};
+pub use eg_trainer_wire::rules::LayoutProblem;
+use eg_trainer_wire::rules::{affix_order_key, layout_problems};
 fn new_problem(item: &ForgeSnapshot, affixes: &[AffixSnapshot]) -> Result<(), EditError> {
     let old = layout_problems(item, &item.affixes);
     match layout_problems(item, affixes).into_iter().find(|p| !old.contains(p)) {
@@ -565,7 +565,7 @@ pub fn prepare(
             });
             new_problem(before, &ordered)?;
             order(&mut ordered, before.rarity);
-            after.rarity = eg_trainer_wire::write::affix_list_rarity(before, &ordered);
+            after.rarity = eg_trainer_wire::rules::affix_list_rarity(before, &ordered);
         }
         ItemEdit::RemoveAffix(e) => {
             let slot = index(before, e.slot)?;
@@ -575,7 +575,7 @@ pub fn prepare(
             ordered.remove(slot);
             new_problem(before, &ordered)?;
             order(&mut ordered, before.rarity);
-            after.rarity = eg_trainer_wire::write::affix_list_rarity(before, &ordered);
+            after.rarity = eg_trainer_wire::rules::affix_list_rarity(before, &ordered);
         }
         ItemEdit::Roll(e) => {
             if e.changes.is_empty()

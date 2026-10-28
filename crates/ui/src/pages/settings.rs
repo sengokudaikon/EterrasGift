@@ -2,6 +2,8 @@
 //! locations that wait for "Save locations". `SettingsPage` is the page's state and rules, testable without a window;
 //! `bind` puts it behind the `SettingsState` global.
 
+pub mod trainer;
+
 use crate::models::update_rows;
 use crate::{LocationSetting, MainWindow, MessageTone, ModuleRow, SettingsSectionRow, SettingsState};
 use eg_core::settings::{AppSettings, Locations};
@@ -139,6 +141,18 @@ impl Location {
         Location::Dotnet,
         Location::MelonLoader,
     ];
+
+    /// What the settings file holds for it.
+    fn saved(self, settings: &AppSettings) -> &Option<PathBuf> {
+        match self {
+            Location::GameExecutable => &settings.game_executable,
+            Location::UserData => &settings.user_data_directory,
+            Location::ModLibrary => &settings.mod_library_directory,
+            Location::ModSources => &settings.mod_sources_directory,
+            Location::Dotnet => &settings.dotnet_directory,
+            Location::MelonLoader => &settings.melon_loader_directory,
+        }
+    }
 
     fn label(self) -> &'static str {
         match self {
@@ -403,14 +417,14 @@ impl SettingsPage {
 
     pub fn save_locations(&mut self) {
         self.location_error = None;
-        let [game, user_data, library, sources, dotnet, loader] = self.boxes.clone();
+        let typed = |location: Location| self.boxes[location as usize].clone();
         let result = self.service.submit(Change::Locations(Locations {
-            game_executable: game,
-            user_data_directory: user_data,
-            mod_sources_directory: Some(sources),
-            mod_library_directory: Some(library),
-            dotnet_directory: Some(dotnet),
-            melon_loader_directory: Some(loader),
+            game_executable: typed(Location::GameExecutable),
+            user_data_directory: typed(Location::UserData),
+            mod_sources_directory: Some(typed(Location::ModSources)),
+            mod_library_directory: Some(typed(Location::ModLibrary)),
+            dotnet_directory: Some(typed(Location::Dotnet)),
+            melon_loader_directory: Some(typed(Location::MelonLoader)),
         }));
         if let Ok(revision) = result {
             self.location_save = Some((revision, self.edits));
@@ -554,15 +568,7 @@ pub(crate) enum CloseDecision {
 }
 
 fn location_text(saved: &AppSettings) -> [String; 6] {
-    [
-        &saved.game_executable,
-        &saved.user_data_directory,
-        &saved.mod_library_directory,
-        &saved.mod_sources_directory,
-        &saved.dotnet_directory,
-        &saved.melon_loader_directory,
-    ]
-    .map(|path| path.as_ref().map(|path| path.display().to_string()).unwrap_or_default())
+    Location::ALL.map(|location| location.saved(saved).as_ref().map(|path| path.display().to_string()).unwrap_or_default())
 }
 
 /// How often a waiting close looks again.
@@ -1007,8 +1013,8 @@ mod tests {
         let file = temp.path().join("settings.json");
         let store = SettingsStore::open(&temp.path().join("app"), &file, &[]);
         let link = Rc::new(FakeLink::default());
-        let mut page =
-            SettingsPage::new(SettingsService::inline(store), vec![crate::trainer_settings::descriptor(true)], None, None).link(crate::trainer_settings::ID, link.clone());
+        let mut page = SettingsPage::new(SettingsService::inline(store), vec![crate::pages::settings::trainer::descriptor(true)], None, None)
+            .link(crate::pages::settings::trainer::ID, link.clone());
         page.flip_setting(0, 1, false);
         assert_eq!(*link.switched.borrow(), [("autoConnect".to_owned(), false)]);
         // A save that fails still leaves the session with the choice: the session takes it before the save.
@@ -1027,8 +1033,8 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let store = SettingsStore::open(&temp.path().join("app"), &temp.path().join("settings.json"), &[]);
         let link = Rc::new(FakeLink::default());
-        let mut page =
-            SettingsPage::new(SettingsService::inline(store), vec![crate::trainer_settings::descriptor(false)], None, None).link(crate::trainer_settings::ID, link.clone());
+        let mut page = SettingsPage::new(SettingsService::inline(store), vec![crate::pages::settings::trainer::descriptor(false)], None, None)
+            .link(crate::pages::settings::trainer::ID, link.clone());
         page.flip_setting(0, 1, false);
         assert!(link.switched.borrow().is_empty());
     }
@@ -1223,9 +1229,9 @@ mod tests {
         )
         .unwrap();
         let service = SettingsService::inline(SettingsStore::open(&temp.path().join("app"), &file, &[]));
-        let mut second = crate::trainer_settings::descriptor(true);
+        let mut second = crate::pages::settings::trainer::descriptor(true);
         second.id = "second";
-        let mut page = SettingsPage::new(service.clone(), vec![crate::trainer_settings::descriptor(true), second], None, None);
+        let mut page = SettingsPage::new(service.clone(), vec![crate::pages::settings::trainer::descriptor(true), second], None, None);
         assert!(page.module_problem(0).is_some());
         assert!(!page.modules[0].enabled_at_start);
         assert!(page.modules[1].enabled_at_start);

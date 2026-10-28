@@ -1,7 +1,7 @@
 //! MelonLoader assembly facts, inspected as metadata only. No DLL is loaded or executed.
 
 use super::invalid;
-use crate::install::GameIdentity;
+use crate::game::install::GameIdentity;
 use dotscope::CilAssemblyView;
 use dotscope::metadata::tables::{
     AssemblyRaw, CustomAttributeRaw, ManifestResourceRaw, MemberRefRaw, MethodDefRaw, NestedClassRaw, RowReadable, TableId, TypeDefRaw, TypeRefRaw, TypeSpecRaw,

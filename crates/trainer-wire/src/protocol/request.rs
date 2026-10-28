@@ -62,8 +62,8 @@ impl Request {
             body.0.extend_from_slice(&dispatcher.bytes);
         }
         let operation = match self {
-            Self::Discover => 6,
-            Self::Unload => 25,
+            Self::Discover => op::DISCOVER,
+            Self::Unload => op::UNLOAD,
             Self::SetGameplayHook {
                 expected_manager,
                 hook,
@@ -75,28 +75,28 @@ impl Request {
                 body.byte(*hook as u8);
                 body.flag(*on);
                 body.u64(*value);
-                26
+                op::SET_GAMEPLAY_HOOK
             }
             Self::ReadGameplayHook { expected_manager, hook, .. } => {
                 body.u64(*expected_manager);
                 body.byte(*hook as u8);
-                27
+                op::READ_GAMEPLAY_HOOK
             }
-            Self::Status { .. } => 7,
-            Self::ClearHooks { .. } => 15,
-            Self::ReadForge { .. } => 18,
-            Self::ReadLocale { .. } => 20,
+            Self::Status { .. } => op::STATUS,
+            Self::ClearHooks { .. } => op::CLEAR_HOOKS,
+            Self::ReadForge { .. } => op::READ_FORGE,
+            Self::ReadLocale { .. } => op::READ_LOCALE,
             Self::ReadAttackLeech { expected_manager, .. } => {
                 body.u64(*expected_manager);
-                23
+                op::READ_ATTACK_LEECH
             }
             Self::DescribeImplicits(query) | Self::DescribeUnique(query) => {
                 body.u64(query.manager());
                 body.snapshot(&query.expected);
                 if matches!(self, Self::DescribeUnique(_)) {
-                    4
+                    op::DESCRIBE_UNIQUE
                 } else {
-                    ForgeDescriptionRequest::OPERATION
+                    op::DESCRIBE_IMPLICITS
                 }
             }
             Self::PreviewUnique(query) => {
@@ -107,7 +107,7 @@ impl Request {
                     body.byte(change.value);
                 }
                 body.snapshot(&query.target.expected);
-                UniquePreviewRequest::OPERATION
+                op::PREVIEW_UNIQUE
             }
             Self::MapRoll(query) => {
                 body.u64(query.manager());
@@ -124,7 +124,7 @@ impl Request {
                     body.byte(draft.seal);
                 }
                 body.snapshot(&query.target.expected);
-                AffixMappingQuery::OPERATION
+                op::MAP_ROLL
             }
             Self::SetAttackLeechRate(write) => {
                 body.byte(match write.target() {
@@ -139,7 +139,7 @@ impl Request {
                 }
                 body.u32(expected.attack_rate.raw_bits);
                 body.u32(expected.increased_leech_rate.raw_bits);
-                SET_ATTACK_LEECH_RATE_OPERATION
+                op::SET_ATTACK_LEECH_RATE
             }
             Self::EditForge(write) => {
                 body.u64(write.expected_manager());
@@ -156,12 +156,12 @@ impl Request {
                         body.byte(roll);
                         body.byte(seal);
                         body.flag(unrestricted);
-                        ADD_AFFIX_OPERATION
+                        op::ADD_AFFIX
                     }
                     ForgeMutation::RemoveAffix { slot, id } => {
                         body.byte(slot);
                         body.u16(id);
-                        REMOVE_AFFIX_OPERATION
+                        op::REMOVE_AFFIX
                     }
                     ForgeMutation::Affix {
                         slot,
@@ -177,7 +177,7 @@ impl Request {
                         body.byte(roll);
                         body.byte(seal);
                         body.flag(unrestricted);
-                        CHANGE_AFFIX_OPERATION
+                        op::CHANGE_AFFIX
                     }
                     ForgeMutation::AffixRolls { rolls, unrestricted } => {
                         body.flag(unrestricted);
@@ -186,13 +186,13 @@ impl Request {
                             body.byte(change.slot);
                             body.byte(change.value);
                         }
-                        CHANGE_AFFIX_ROLLS_OPERATION
+                        op::CHANGE_AFFIX_ROLLS
                     }
                     ForgeMutation::Status { field, value, unrestricted } => {
                         body.byte(field as u8);
                         body.byte(value);
                         body.flag(unrestricted);
-                        SET_STATUS_OPERATION
+                        op::SET_STATUS
                     }
                     ForgeMutation::Base {
                         item_type,
@@ -202,7 +202,7 @@ impl Request {
                         body.byte(item_type);
                         body.u16(sub_type);
                         body.flag(unrestricted);
-                        CHANGE_BASE_OPERATION
+                        op::CHANGE_BASE
                     }
                     ForgeMutation::Identity {
                         id,
@@ -214,7 +214,7 @@ impl Request {
                         body.byte(sub_type);
                         body.byte(rarity);
                         body.flag(unrestricted);
-                        CHANGE_IDENTITY_OPERATION
+                        op::CHANGE_IDENTITY
                     }
                 };
                 body.blob(write.expected_bytes());
@@ -239,14 +239,24 @@ impl Request {
         // Every body but Discover's and Unload's starts with the dispatcher (rva and 16 bytes).
         const DISPATCHER: usize = 8 + 16;
         let exact = match operation {
-            6 | 25 => Some(0),
-            7 | 15 | 18 | 20 => Some(DISPATCHER),
-            23 => Some(DISPATCHER + 8),
-            27 => Some(DISPATCHER + 8 + 1),
-            26 => Some(DISPATCHER + 8 + 1 + 1 + 8),
-            SET_ATTACK_LEECH_RATE_OPERATION => Some(DISPATCHER + 1 + 4 + 3 * 16 + 4 + 4),
+            op::DISCOVER | op::UNLOAD => Some(0),
+            op::STATUS | op::CLEAR_HOOKS | op::READ_FORGE | op::READ_LOCALE => Some(DISPATCHER),
+            op::READ_ATTACK_LEECH => Some(DISPATCHER + 8),
+            op::READ_GAMEPLAY_HOOK => Some(DISPATCHER + 8 + 1),
+            op::SET_GAMEPLAY_HOOK => Some(DISPATCHER + 8 + 1 + 1 + 8),
+            op::SET_ATTACK_LEECH_RATE => Some(DISPATCHER + 1 + 4 + 3 * 16 + 4 + 4),
             // A conditional item request carries its expected item, whose size varies.
-            1 | 2 | 4 | 5 | 9 | 10 | 11 | 12 | 13 | 14 | 17 => None,
+            op::CHANGE_AFFIX
+            | op::CHANGE_AFFIX_ROLLS
+            | op::DESCRIBE_UNIQUE
+            | op::PREVIEW_UNIQUE
+            | op::MAP_ROLL
+            | op::SET_STATUS
+            | op::CHANGE_BASE
+            | op::DESCRIBE_IMPLICITS
+            | op::ADD_AFFIX
+            | op::REMOVE_AFFIX
+            | op::CHANGE_IDENTITY => None,
             _ => return Err(ProtocolError::InvalidData),
         };
         let valid = match exact {
@@ -276,7 +286,7 @@ impl Request {
             bytes: body.array()?,
         };
         let request = match operation {
-            26 | 27 => {
+            op::SET_GAMEPLAY_HOOK | op::READ_GAMEPLAY_HOOK => {
                 let expected_manager = body.u64()?;
                 if expected_manager == 0 {
                     return Err(ProtocolError::InvalidData);
@@ -298,23 +308,27 @@ impl Request {
                     }
                 }
             }
-            7 => Self::Status { dispatcher },
-            15 => Self::ClearHooks { dispatcher },
-            18 => Self::ReadForge { dispatcher },
-            20 => Self::ReadLocale { dispatcher },
-            23 => {
+            op::STATUS => Self::Status { dispatcher },
+            op::CLEAR_HOOKS => Self::ClearHooks { dispatcher },
+            op::READ_FORGE => Self::ReadForge { dispatcher },
+            op::READ_LOCALE => Self::ReadLocale { dispatcher },
+            op::READ_ATTACK_LEECH => {
                 let expected_manager = body.u64()?;
                 if expected_manager == 0 {
                     return Err(ProtocolError::InvalidData);
                 }
                 Self::ReadAttackLeech { dispatcher, expected_manager }
             }
-            4 | 12 => {
+            op::DESCRIBE_UNIQUE | op::DESCRIBE_IMPLICITS => {
                 let manager = body.u64()?;
                 let query = ForgeDescriptionRequest::from_checked(dispatcher, manager, body.snapshot()?)?;
-                if operation == 4 { Self::DescribeUnique(query) } else { Self::DescribeImplicits(query) }
+                if operation == op::DESCRIBE_UNIQUE {
+                    Self::DescribeUnique(query)
+                } else {
+                    Self::DescribeImplicits(query)
+                }
             }
-            5 => {
+            op::PREVIEW_UNIQUE => {
                 let manager = body.u64()?;
                 let count = body.byte()?;
                 if !(1..=8).contains(&count) {
@@ -332,7 +346,7 @@ impl Request {
                     changes,
                 )?)
             }
-            9 => {
+            op::MAP_ROLL => {
                 let manager = body.u64()?;
                 let slot = body.byte()?;
                 let start = if body.flag()? { MappingStart::Samples(body.byte()?) } else { MappingStart::ContextOnly };
@@ -353,7 +367,7 @@ impl Request {
                     draft,
                 )?)
             }
-            24 => {
+            op::SET_ATTACK_LEECH_RATE => {
                 let target = match body.byte()? {
                     1 => AttackLeechTarget::AttackRate,
                     2 => AttackLeechTarget::IncreasedLeechRate,
@@ -373,18 +387,18 @@ impl Request {
             _ => {
                 let manager = body.u64()?;
                 let mutation = match operation {
-                    ADD_AFFIX_OPERATION => ForgeMutation::AddAffix {
+                    op::ADD_AFFIX => ForgeMutation::AddAffix {
                         id: body.u16()?,
                         tier: body.byte()?,
                         roll: body.byte()?,
                         seal: body.byte()?,
                         unrestricted: body.flag()?,
                     },
-                    REMOVE_AFFIX_OPERATION => ForgeMutation::RemoveAffix {
+                    op::REMOVE_AFFIX => ForgeMutation::RemoveAffix {
                         slot: body.byte()?,
                         id: body.u16()?,
                     },
-                    CHANGE_AFFIX_OPERATION => ForgeMutation::Affix {
+                    op::CHANGE_AFFIX => ForgeMutation::Affix {
                         slot: body.byte()?,
                         id: body.u16()?,
                         tier: body.byte()?,
@@ -392,7 +406,7 @@ impl Request {
                         seal: body.byte()?,
                         unrestricted: body.flag()?,
                     },
-                    CHANGE_AFFIX_ROLLS_OPERATION => {
+                    op::CHANGE_AFFIX_ROLLS => {
                         let unrestricted = body.flag()?;
                         let count = body.byte()?;
                         if !(1..=32).contains(&count) {
@@ -410,17 +424,17 @@ impl Request {
                             unrestricted,
                         }
                     }
-                    SET_STATUS_OPERATION => ForgeMutation::Status {
+                    op::SET_STATUS => ForgeMutation::Status {
                         field: StatusField::from_wire(u32::from(body.byte()?))?,
                         value: body.byte()?,
                         unrestricted: body.flag()?,
                     },
-                    CHANGE_BASE_OPERATION => ForgeMutation::Base {
+                    op::CHANGE_BASE => ForgeMutation::Base {
                         item_type: body.byte()?,
                         sub_type: body.u16()?,
                         unrestricted: body.flag()?,
                     },
-                    CHANGE_IDENTITY_OPERATION => ForgeMutation::Identity {
+                    op::CHANGE_IDENTITY => ForgeMutation::Identity {
                         id: body.u16()?,
                         sub_type: body.byte()?,
                         rarity: body.byte()?,

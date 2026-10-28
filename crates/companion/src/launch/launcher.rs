@@ -1,10 +1,10 @@
 //! How Home and the Mods page start the game in its three ways: one start at a time, each said in one sentence. The
 //! game process itself is never touched; only Steam, the executable and MelonLoader's proxy in the game folder are.
 
-use crate::host::{GameHost, LaunchError, LaunchMode, LaunchOutcome};
-use crate::install::GameInstall;
-use crate::loader::{self, ModLoaderState};
-use crate::process::RunningGame;
+use crate::game::install::GameInstall;
+use crate::game::process::RunningGame;
+use crate::launch::host::{GameHost, LaunchError, LaunchMode, LaunchOutcome};
+use crate::launch::loader::{self, ModLoaderState};
 use eg_core::game_log::GameLogState;
 use eg_core::operations::Cancellation;
 use std::path::PathBuf;

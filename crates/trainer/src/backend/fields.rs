@@ -68,10 +68,7 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
         }
         .await;
         if let Err(error) = &result {
-            self.handle_connection_gate(error);
-            if error.kind != ErrorKind::Superseded && !matches!(error.kind, ErrorKind::Gate | ErrorKind::HelperDeparted | ErrorKind::CharacterLoading) {
-                self.fail(error.clone(), Some(target));
-            }
+            self.settle(error, target);
         }
         result
     }

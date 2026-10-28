@@ -8,23 +8,23 @@
 //! `artifacts/captures/<name>.png`. This is a `harness = false` test because Slint's platform can be set once per
 //! process.
 
-use eg_companion::host::{GameHost, LaunchError, LaunchMode, LaunchOutcome};
-use eg_companion::install::GameInstall;
-use eg_companion::launcher::GameLauncher;
-use eg_companion::loader::ModLoaderState;
-use eg_companion::loader::melon_paths::preferences as preferences_path;
+use eg_companion::game::install::GameInstall;
+use eg_companion::game::process::RunningGame;
+use eg_companion::launch::host::{GameHost, LaunchError, LaunchMode, LaunchOutcome};
+use eg_companion::launch::launcher::GameLauncher;
+use eg_companion::launch::loader::ModLoaderState;
+use eg_companion::launch::loader::melon_paths::preferences as preferences_path;
 use eg_companion::mods::library::ModLibrary;
 use eg_companion::mods::loader_state::game_assembly_hash;
 use eg_companion::mods::sources::{ModSources, ProcessError, ProcessRequest, ProcessRunner};
 use eg_companion::mods::worker::ModWorker;
-use eg_companion::process::RunningGame;
 use eg_core::game_log::{GameLogState, GameReadiness};
 use eg_core::operations::Cancellation;
 use eg_core::settings::SettingsStore;
 use eg_core::settings_service::SettingsService;
 use eg_ui::decorations::freeze_clock;
-use eg_ui::mods::ModsPage;
-use eg_ui::settings::SettingsPage;
+use eg_ui::pages::mods::ModsPage;
+use eg_ui::pages::settings::SettingsPage;
 use eg_ui::shell::Page;
 use eg_ui::{App, BloomPhase as ViewPhase, Eterra, HomeState, LaunchMode as ViewMode, MainWindow, ModsState, Nav, SettingsState, Tip, Tokens};
 use slint::platform::software_renderer::{MinimalSoftwareWindow, RepaintBufferType};
@@ -36,7 +36,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 // The fixture game behind the Item Forge (spec/forge-fixture.json); it names the forge module through this import.
-use eg_ui::forge;
+use eg_ui::pages::forge;
 mod forge_fixture;
 mod trainer_backend_fixture;
 
@@ -242,7 +242,7 @@ impl Session {
             App {
                 launcher: None,
                 mods: None,
-                settings: SettingsPage::new(service, vec![eg_ui::trainer_settings::descriptor(true)], None, None),
+                settings: SettingsPage::new(service, vec![eg_ui::pages::settings::trainer::descriptor(true)], None, None),
                 trainer: true,
                 trainer_backend: None,
                 faults: None,
@@ -258,7 +258,7 @@ impl Session {
     }
 
     /// Settings in a run whose trainer is running behind `link`.
-    fn open_settings_linked(&self, link: Rc<dyn eg_ui::settings::ModuleLink>) -> MainWindow {
+    fn open_settings_linked(&self, link: Rc<dyn eg_ui::pages::settings::ModuleLink>) -> MainWindow {
         let folder = self.folder();
         let service = SettingsService::inline(SettingsStore::open(&folder.join("app"), &folder.join("settings.json"), &[]));
         let ui = MainWindow::new().expect("create MainWindow");
@@ -267,7 +267,7 @@ impl Session {
             App {
                 launcher: None,
                 mods: None,
-                settings: SettingsPage::new(service, vec![eg_ui::trainer_settings::descriptor(true)], None, None).link(eg_ui::trainer_settings::ID, link),
+                settings: SettingsPage::new(service, vec![eg_ui::pages::settings::trainer::descriptor(true)], None, None).link(eg_ui::pages::settings::trainer::ID, link),
                 trainer: true,
                 trainer_backend: None,
                 faults: None,
@@ -287,7 +287,7 @@ impl Session {
         let folder = self.folder();
         let store = SettingsStore::open(&folder.join("app"), &folder.join("settings.json"), &[]);
         let found = host.find_install().map(|install| install.executable);
-        let settings = SettingsPage::new(SettingsService::inline(store), vec![eg_ui::trainer_settings::descriptor(trainer_on)], found, None);
+        let settings = SettingsPage::new(SettingsService::inline(store), vec![eg_ui::pages::settings::trainer::descriptor(trainer_on)], found, None);
         let ui = MainWindow::new().expect("create MainWindow");
         let app = App {
             launcher: Some(Arc::new(GameLauncher::new(host))),
@@ -322,7 +322,7 @@ impl Session {
         std::fs::create_dir_all(root.join("UserData")).unwrap();
         std::fs::write(&install.executable, b"fake executable: never started").unwrap();
         std::fs::write(install.game_assembly(), b"fake game assembly: never loaded").unwrap();
-        std::fs::write(root.join(eg_companion::loader::SET_ASIDE_NAME), b"fake proxy").unwrap();
+        std::fs::write(root.join(eg_companion::launch::loader::SET_ASIDE_NAME), b"fake proxy").unwrap();
         std::fs::write(
             root.join("MelonLoader/net6/MelonLoader.dll"),
             include_bytes!("../../companion/tests/fixtures/melon/loader.bin"),
@@ -444,10 +444,10 @@ impl Session {
 /// A connected trainer as Settings sees it: checked game definitions, ready to refresh.
 struct LinkedTrainer;
 
-impl eg_ui::settings::ModuleLink for LinkedTrainer {
+impl eg_ui::pages::settings::ModuleLink for LinkedTrainer {
     fn switched(&self, _key: &str, _on: bool) {}
-    fn status(&self, _section: usize) -> Option<eg_ui::settings::LiveStatus> {
-        Some(eg_ui::settings::LiveStatus {
+    fn status(&self, _section: usize) -> Option<eg_ui::pages::settings::LiveStatus> {
+        Some(eg_ui::pages::settings::LiveStatus {
             text: "Current game data · 1342 affixes\nLast checked: 2026-10-22 13:40:00 CEST\nCache updated: 2026-10-21 19:15:00 CEST".into(),
             can_act: true,
             busy: false,
@@ -703,7 +703,7 @@ fn main() {
     let ui = session.open_on(host, true, 1100, 700);
     let home = ui.global::<HomeState>();
     assert!(home.get_message_is_error(), "a conflict stops every start");
-    assert!(home.get_message().starts_with(eg_companion::loader::CONFLICT), "{}", home.get_message());
+    assert!(home.get_message().starts_with(eg_companion::launch::loader::CONFLICT), "{}", home.get_message());
     assert!(!home.get_can_start() && !home.get_can_start_with_mods(), "every Play waits on the conflict");
     session.capture(&ui, "home-conflict");
 
@@ -732,7 +732,7 @@ fn main() {
         App {
             launcher: None,
             mods: None,
-            settings: SettingsPage::new(service, vec![eg_ui::trainer_settings::descriptor(true)], None, None),
+            settings: SettingsPage::new(service, vec![eg_ui::pages::settings::trainer::descriptor(true)], None, None),
             trainer: true,
             trainer_backend: None,
             faults: None,
@@ -766,7 +766,7 @@ fn main() {
     // (crates/app/src/main.rs).
     let folder = session.folder();
     let service = SettingsService::inline(SettingsStore::open(&folder.join("app"), &folder.join("settings.json"), &[]));
-    let settings = SettingsPage::new(service, vec![eg_ui::trainer_settings::descriptor(true)], None, None);
+    let settings = SettingsPage::new(service, vec![eg_ui::pages::settings::trainer::descriptor(true)], None, None);
     let restart = settings.restart_request();
     let ui = MainWindow::new().expect("create MainWindow");
     eg_ui::install(
@@ -1324,7 +1324,7 @@ fn mods_captures(session: &Session) {
         }
         std::fs::write(&install.executable, b"fake executable: never started").unwrap();
         std::fs::write(install.game_assembly(), [1, 2, 3, 4]).unwrap();
-        std::fs::write(root.join(eg_companion::loader::SET_ASIDE_NAME), b"proxy").unwrap();
+        std::fs::write(root.join(eg_companion::launch::loader::SET_ASIDE_NAME), b"proxy").unwrap();
         std::fs::write(root.join("MelonLoader/net6/MelonLoader.dll"), LOADER).unwrap();
         let hash = game_assembly_hash(&install.game_assembly()).unwrap();
         std::fs::write(
@@ -1656,9 +1656,9 @@ fn mods_captures(session: &Session) {
 /// The trainer's pages: as the app shows them with no session (nothing connected), and in states
 /// only a connected game has, through a fake session that answers reads and writes from its own fields.
 fn trainer_captures(session: &Session) {
-    use eg_ui::trainer::catalog::{Area, FEATURES};
-    use eg_ui::trainer::profiles::Profile;
-    use eg_ui::trainer::session::{FieldRequest, FieldWrite, GameField, HookState, TrainerSession, not_connected};
+    use eg_ui::pages::trainer::catalog::{Area, FEATURES};
+    use eg_ui::pages::trainer::profiles::Profile;
+    use eg_ui::pages::trainer::session::{FieldRequest, FieldWrite, GameField, HookState, TrainerSession, not_connected};
     use eg_ui::{Connection, TrainerAccess, TrainerState};
     use std::cell::{Cell, RefCell};
     use std::collections::{BTreeMap, BTreeSet};
@@ -1840,7 +1840,7 @@ fn trainer_captures(session: &Session) {
     let open = |page: &str, section: i32, width: u32, height: u32, fake: Option<FakeTrainer>| -> MainWindow {
         let ui = session.open(true, width, height);
         if let Some(fake) = fake {
-            eg_ui::trainer::bind(&ui, Rc::new(fake), FEATURES.to_vec(), false);
+            eg_ui::pages::trainer::bind(&ui, Rc::new(fake), FEATURES.to_vec(), false);
             ui.global::<TrainerState>().set_access(TrainerAccess::Live);
             let connection = ui.global::<Connection>();
             connection.set_connected(true);
@@ -1880,7 +1880,7 @@ fn trainer_captures(session: &Session) {
     // and the Item Forge shows the connection. Before any character has a profile, the rows only say how one comes.
     let setup = |page: &str, section: i32, width: u32, height: u32, profiles: &[Profile]| -> MainWindow {
         let ui = session.open(true, width, height);
-        eg_ui::trainer::bind(&ui, Rc::new(FakeSetup::of(profiles)), FEATURES.to_vec(), false);
+        eg_ui::pages::trainer::bind(&ui, Rc::new(FakeSetup::of(profiles)), FEATURES.to_vec(), false);
         ui.global::<TrainerState>().set_access(TrainerAccess::Setup);
         ui.global::<Nav>().invoke_navigate(page.into());
         show(&ui);
@@ -2147,7 +2147,7 @@ fn trainer_captures(session: &Session) {
         .iter_mut()
         .filter(|feature| feature.area == Area::Loot)
         .for_each(|feature| feature.presented = false);
-    eg_ui::trainer::bind(&ui, Rc::new(FakeTrainer::default()), features, true);
+    eg_ui::pages::trainer::bind(&ui, Rc::new(FakeTrainer::default()), features, true);
     ui.global::<TrainerState>().set_access(TrainerAccess::Live);
     ui.global::<Connection>().set_connected(true);
     ui.global::<Nav>().invoke_navigate("loot".into());
@@ -2159,15 +2159,15 @@ fn trainer_captures(session: &Session) {
 /// window class with drafts, the menus and the popover, Apply and a draft the game outran, the status strip and
 /// implicits, and a unique item. The real app has no game behind the forge yet; these attach the fixture.
 fn forge_captures(session: &Session) {
-    use eg_ui::forge::editor::{Cell, ForgeEditor};
-    use eg_ui::forge::item::Seal;
+    use eg_ui::pages::forge::editor::{Cell, ForgeEditor};
+    use eg_ui::pages::forge::item::Seal;
     use eg_ui::{Connection, ForgeState};
     use forge_fixture::{FixtureGame, FixtureState};
     use std::cell::RefCell;
 
     struct Forge {
         ui: MainWindow,
-        handle: eg_ui::forge::ForgeHandle,
+        handle: eg_ui::pages::forge::ForgeHandle,
         game: Rc<RefCell<FixtureState>>,
     }
 
@@ -2180,7 +2180,7 @@ fn forge_captures(session: &Session) {
         connection.set_text("Connected".into());
         connection.set_show_action(false);
         ui.global::<Nav>().invoke_navigate("forge".into());
-        let handle = eg_ui::forge::attach(&ui, Box::new(game));
+        let handle = eg_ui::pages::forge::attach(&ui, Box::new(game));
         // Applied entries carry the local time; captures hold one.
         handle.edit(|editor| editor.clock = || "23:54".into());
         // The forge comes into being with the first frame, and its pane follows the window class from there.

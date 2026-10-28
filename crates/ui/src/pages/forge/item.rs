@@ -160,23 +160,17 @@ pub struct AffixState {
     pub unknown: Option<Unreadable>,
 }
 
-/// One line of the unique tooltip or one implicit: its text, its range caption and the rolls it reads.
-#[derive(Clone, Debug, PartialEq)]
-pub struct ModifierState {
-    pub index: usize,
-    pub text: String,
-    pub range: String,
-    pub roll_ids: Vec<usize>,
-    pub editable: bool,
-}
+/// One line of the unique tooltip or one implicit, as the game formats it: its text, its range caption and the rolls it
+/// reads.
+pub use eg_trainer::backend::ModifierSnapshot;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct UniqueState {
     pub id: u16,
     pub rolls: Vec<u8>,
-    pub modifiers: Vec<ModifierState>,
+    pub modifiers: Vec<ModifierSnapshot>,
     /// The game could not format its own unique data.
-    pub formatting: crate::forge::game::Lookup<()>,
+    pub formatting: crate::pages::forge::game::Lookup<()>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
@@ -222,7 +216,7 @@ pub struct ForgeItem {
     /// A set item's identity and rolls (the unique's move here when it becomes a set item, and back).
     pub set_item: Option<UniqueState>,
     /// None when the game did not describe the implicits.
-    pub implicits: Option<Vec<ModifierState>>,
+    pub implicits: Option<Vec<ModifierSnapshot>>,
     pub implicit_rolls: Vec<u8>,
     pub status: Option<ItemStatus>,
 }
@@ -320,7 +314,7 @@ pub trait EditPresentation {
 impl EditPresentation for ItemEdit {
     fn prepare_view_with_override(&self, before: &ForgeItem, override_enabled: bool) -> Result<edit::PreparedEdit, edit::EditError> {
         let context = before.context.as_ref().ok_or(edit::EditError::InvalidObservation)?;
-        let bindings = |lines: Option<&[ModifierState]>| match lines {
+        let bindings = |lines: Option<&[ModifierSnapshot]>| match lines {
             Some(lines) => eg_trainer::definitions::catalog::Availability::Available(
                 lines
                     .iter()
@@ -445,7 +439,7 @@ impl ForgeItem {
                     id: i.id,
                     rolls: vec![],
                     modifiers: vec![],
-                    formatting: crate::forge::game::Lookup::Ready(()),
+                    formatting: crate::pages::forge::game::Lookup::Ready(()),
                 });
             view.rolls = i.rolls.clone();
             view
@@ -733,7 +727,7 @@ mod tests {
     fn item_state_ignores_optional_tooltips_but_keeps_identity_and_roll_changes() {
         let before = item(vec![affix(0, 25, Seal::Normal)]);
         let mut formatted = before.clone();
-        formatted.implicits = Some(vec![ModifierState {
+        formatted.implicits = Some(vec![ModifierSnapshot {
             index: 0,
             text: "Armour +5".into(),
             range: "[5 to 5]".into(),
@@ -749,10 +743,10 @@ mod tests {
             id: 7,
             rolls: vec![12],
             modifiers: vec![],
-            formatting: crate::forge::game::Lookup::Ready(()),
+            formatting: crate::pages::forge::game::Lookup::Ready(()),
         });
         let mut error = unique.clone();
-        error.unique.as_mut().unwrap().formatting = crate::forge::game::Lookup::Unavailable("unavailable".into());
+        error.unique.as_mut().unwrap().formatting = crate::pages::forge::game::Lookup::Unavailable("unavailable".into());
         assert!(unique.same_state(&error));
         error.unique.as_mut().unwrap().id = 8;
         assert!(!unique.same_state(&error));

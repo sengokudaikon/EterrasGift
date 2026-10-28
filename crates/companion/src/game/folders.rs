@@ -1,6 +1,6 @@
 //! Where Last Epoch keeps the files it owns: Unity's persistent data folder under LocalLow.
 
-use crate::install::GameIdentity;
+use crate::game::install::GameIdentity;
 use std::path::PathBuf;
 
 /// The game's own folder: `<LocalLow>\Eleventh Hour Games\Last Epoch`.

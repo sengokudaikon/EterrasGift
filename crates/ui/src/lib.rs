@@ -8,21 +8,15 @@ slint::include_modules!();
 
 pub mod background;
 pub mod decorations;
-pub mod forge;
-pub mod home;
 mod models;
-#[allow(unsafe_code)] // Windows/FFI boundary; the rest of the crate denies unsafe.
-pub mod mods;
-pub mod settings;
+pub mod pages;
 pub mod shell;
 #[allow(unsafe_code)] // Windows/FFI boundary; the rest of the crate denies unsafe.
 pub mod system;
-pub mod trainer;
-pub mod trainer_backend;
-pub mod trainer_settings;
 
-use eg_companion::launcher::GameLauncher;
-use settings::SettingsPage;
+use eg_companion::launch::launcher::GameLauncher;
+use pages::settings::SettingsPage;
+use pages::{forge, home, mods, settings, trainer};
 use shell::{Navigation, Page};
 use slint::ComponentHandle;
 use std::sync::Arc;
@@ -54,14 +48,15 @@ pub fn install(window: &MainWindow, app: App) {
     let trainer_backend = app.trainer_backend.filter(|_| app.trainer);
     // The trainer's switches reach its session as they flip; Game definitions follows its game data.
     let settings = match &trainer_backend {
-        Some(backend) => app.settings.link(trainer_settings::ID, trainer_settings::link(backend.clone())),
+        Some(backend) => app.settings.link(settings::trainer::ID, settings::trainer::link(backend.clone())),
         None => app.settings,
     };
     settings::bind_with_close(window, settings, before_close);
-    trainer_backend::unbound(window, app.trainer);
+    trainer::connection::unbound(window, app.trainer);
     trainer::install(window, trainer_backend.clone());
     if let Some(backend) = trainer_backend {
-        trainer_backend::bind(window, backend, &shell, decorations, app.faults);
+        trainer::connection::bind(window, backend.clone(), &shell, decorations);
+        forge::worker::bind(window, backend, &shell, app.faults);
     }
     apply_system_settings(window);
 }

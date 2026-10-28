@@ -5,6 +5,11 @@ use crate::protocol::{ProtocolError, REQUEST_HEADER_SIZE, RESPONSE_HEADER_SIZE, 
 use std::{future::Future, io};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
+/// The named pipe the helper in process `pid` serves.
+pub fn pipe_name(pid: u32) -> String {
+    format!(r"\\.\pipe\eterras-gift-{pid}")
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Delivery {
     NotSent,

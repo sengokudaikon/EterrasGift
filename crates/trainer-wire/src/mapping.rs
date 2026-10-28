@@ -111,7 +111,6 @@ pub struct ForgeDescriptionRequest {
     pub(crate) expected: crate::forge::CheckedSnapshot,
 }
 impl ForgeDescriptionRequest {
-    pub const OPERATION: u32 = 12;
     pub fn new(dispatcher: crate::protocol::DispatcherSpec, manager: u64, expected: crate::forge::ForgeSnapshot) -> Result<Self, ProtocolError> {
         Self::from_checked(dispatcher, manager, crate::forge::CheckedSnapshot::new(expected)?)
     }
@@ -144,7 +143,6 @@ pub struct UniquePreviewRequest {
     changes: Vec<UniqueRollChange>,
 }
 impl UniquePreviewRequest {
-    pub const OPERATION: u32 = 5;
     pub fn new(dispatcher: crate::protocol::DispatcherSpec, manager: u64, expected: crate::forge::ForgeSnapshot, changes: Vec<UniqueRollChange>) -> Result<Self, ProtocolError> {
         Self::from_target(ForgeDescriptionRequest::new(dispatcher, manager, expected)?, changes)
     }
@@ -193,7 +191,6 @@ pub struct AffixMappingQuery {
     pub(crate) draft: Option<AffixMappingDraft>,
 }
 impl AffixMappingQuery {
-    pub const OPERATION: u32 = 9;
     pub fn new(
         dispatcher: crate::protocol::DispatcherSpec,
         manager: u64,

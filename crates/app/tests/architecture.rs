@@ -210,9 +210,12 @@ fn source_imports_and_reexports_preserve_feature_boundaries() {
         };
         let relative = source.strip_prefix(&workspace.root).unwrap().to_string_lossy().replace('\\', "/");
         // eg-ui's feature areas: the package may name both tiers, so only these sources keep each to its own.
-        let ui_area = if relative.starts_with("crates/ui/src/home") || relative.starts_with("crates/ui/src/mods") {
+        let ui_area = if relative.starts_with("crates/ui/src/pages/home") || relative.starts_with("crates/ui/src/pages/mods") {
             Some(Tier::Companion)
-        } else if relative.starts_with("crates/ui/src/forge") || relative.starts_with("crates/ui/src/trainer") {
+        } else if relative.starts_with("crates/ui/src/pages/forge")
+            || relative.starts_with("crates/ui/src/pages/trainer")
+            || relative.starts_with("crates/ui/src/pages/settings/trainer")
+        {
             Some(Tier::Trainer)
         } else {
             None
@@ -246,7 +249,7 @@ fn source_imports_and_reexports_preserve_feature_boundaries() {
             if ["crate", "self", "super"].contains(&first.as_str()) {
                 let crosses = path.iter().any(|s| match area {
                     Tier::Shared => ["trainer", "companion", "forge", "mods"].contains(&s.as_str()),
-                    Tier::Companion => ["trainer", "trainer_backend", "trainer_settings", "forge"].contains(&s.as_str()),
+                    Tier::Companion => ["trainer", "forge"].contains(&s.as_str()),
                     Tier::Trainer if package.name == "eg-ui" => ["home", "mods"].contains(&s.as_str()),
                     _ => false,
                 });

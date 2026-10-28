@@ -3,7 +3,6 @@
 
 pub mod catalog;
 pub mod definitions;
-pub mod dispatch;
 pub mod fields;
 pub mod forge;
 pub mod hooks;
@@ -12,5 +11,6 @@ pub mod mapping;
 pub mod process;
 pub mod protocol;
 pub mod rate_write;
+pub mod rules;
 pub mod transport;
 pub mod write;

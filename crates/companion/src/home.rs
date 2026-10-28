@@ -1,9 +1,9 @@
 //! Home's state: it starts the game online, offline, or offline with mods, with Eterra's tree saying where the game is.
 //! Plain values; the UI reads them after each change.
 
-use crate::launcher::{LaunchReport, STARTING_WITH_MODS};
-use crate::loader::{CONFLICT, ModLoaderState};
-use crate::process::RunningGame;
+use crate::game::process::RunningGame;
+use crate::launch::launcher::{LaunchReport, STARTING_WITH_MODS};
+use crate::launch::loader::{CONFLICT, ModLoaderState};
 use eg_core::bloom::BloomPhase;
 use eg_core::game_log::GameReadiness;
 use std::borrow::Cow;

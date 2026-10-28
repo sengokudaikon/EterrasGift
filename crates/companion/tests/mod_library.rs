@@ -1,6 +1,6 @@
-use eg_companion::install::GameInstall;
-use eg_companion::loader::ModLoaderState;
-use eg_companion::loader::melon_paths;
+use eg_companion::game::install::GameInstall;
+use eg_companion::launch::loader::ModLoaderState;
+use eg_companion::launch::loader::melon_paths;
 use eg_companion::mods::assembly::LoaderVersion;
 use eg_companion::mods::inventory::{self, Inventory, LoaderReport};
 use eg_companion::mods::library::ModLibrary;

@@ -65,7 +65,7 @@ pub struct BootstrapConfig {
 }
 impl BootstrapConfig {
     pub fn new(pid: u32, source_id: &str) -> Result<Self> {
-        if pid == 0 || !source_id_valid(source_id) {
+        if pid == 0 || !eg_trainer_wire::protocol::is_build_id(source_id) {
             return invalid("PID or source ID");
         }
         let mut bytes = [0; CONFIG_SIZE];
@@ -102,10 +102,6 @@ impl BootstrapConfig {
     }
 }
 
-pub fn source_id_valid(value: &str) -> bool {
-    value.len() == 64 && value.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
-}
-
 /// The open file denies write/delete sharing on Windows through startup. Capture hashes and
 /// validates bytes without loading the DLL into either the controller or the game process.
 pub struct HelperArtifact {
@@ -122,7 +118,7 @@ pub struct HelperArtifact {
 }
 impl HelperArtifact {
     pub fn capture(path: &Path, expected_sha256: &str, expected_source_id: &str) -> Result<Self> {
-        if !path.is_absolute() || !hashes::is_sha256(expected_sha256) || !source_id_valid(expected_source_id) {
+        if !path.is_absolute() || !hashes::is_sha256(expected_sha256) || !eg_trainer_wire::protocol::is_build_id(expected_source_id) {
             return invalid("artifact identity");
         }
         let path = std::fs::canonicalize(path)?;
@@ -211,7 +207,7 @@ pub struct HelperLayout {
 
 impl HelperLayout {
     pub fn parse(bytes: &[u8], expected_source_id: &str) -> Result<Self> {
-        if !source_id_valid(expected_source_id) {
+        if !eg_trainer_wire::protocol::is_build_id(expected_source_id) {
             return invalid("expected source ID");
         }
         let pe = Pe::parse(bytes)?;
@@ -242,7 +238,9 @@ impl HelperLayout {
         let delta = i32::from_le_bytes(getter[3..7].try_into().unwrap());
         let source_rva = i64::from(getter_rva) + 7 + i64::from(delta);
         let source = pe.at(source_rva.try_into().map_err(|_| BootstrapError::Invalid("source getter target"))?, 65, false)?;
-        let id = std::str::from_utf8(&source[..64]).ok().filter(|id| source[64] == 0 && source_id_valid(id));
+        let id = std::str::from_utf8(&source[..64])
+            .ok()
+            .filter(|id| source[64] == 0 && eg_trainer_wire::protocol::is_build_id(id));
         id.map(str::to_owned).ok_or(BootstrapError::Invalid("compiled source ID"))
     }
 }

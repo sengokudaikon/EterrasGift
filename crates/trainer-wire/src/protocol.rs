@@ -7,13 +7,41 @@
 
 use crate::{
     forge,
-    rate_write::{AttackLeechRateWrite, SET_ATTACK_LEECH_RATE_OPERATION},
-    write::{
-        ADD_AFFIX_OPERATION, CHANGE_AFFIX_OPERATION, CHANGE_AFFIX_ROLLS_OPERATION, CHANGE_BASE_OPERATION, CHANGE_IDENTITY_OPERATION, ForgeMutation, ForgeWrite, MAX_EXPECTED_BYTES,
-        REMOVE_AFFIX_OPERATION, SET_STATUS_OPERATION,
-    },
+    rate_write::AttackLeechRateWrite,
+    write::{ForgeMutation, ForgeWrite, MAX_EXPECTED_BYTES},
 };
 use std::{error::Error, fmt};
+
+/// A helper build ID: the 64 hex digits of the SHA-256 its build writes into it. Only the format is checked here; the
+/// session compares the ID itself exactly.
+pub fn is_build_id(value: &str) -> bool {
+    value.len() == 64 && value.bytes().all(|byte| byte.is_ascii_hexdigit())
+}
+
+/// Every operation number the pipe carries, by name. A number never returns once retired.
+pub mod op {
+    pub const CHANGE_AFFIX: u32 = 1;
+    pub const CHANGE_AFFIX_ROLLS: u32 = 2;
+    pub const DESCRIBE_UNIQUE: u32 = 4;
+    pub const PREVIEW_UNIQUE: u32 = 5;
+    pub const DISCOVER: u32 = 6;
+    pub const STATUS: u32 = 7;
+    pub const MAP_ROLL: u32 = 9;
+    pub const SET_STATUS: u32 = 10;
+    pub const CHANGE_BASE: u32 = 11;
+    pub const DESCRIBE_IMPLICITS: u32 = 12;
+    pub const ADD_AFFIX: u32 = 13;
+    pub const REMOVE_AFFIX: u32 = 14;
+    pub const CLEAR_HOOKS: u32 = 15;
+    pub const CHANGE_IDENTITY: u32 = 17;
+    pub const READ_FORGE: u32 = 18;
+    pub const READ_LOCALE: u32 = 20;
+    pub const READ_ATTACK_LEECH: u32 = 23;
+    pub const SET_ATTACK_LEECH_RATE: u32 = 24;
+    pub const UNLOAD: u32 = 25;
+    pub const SET_GAMEPLAY_HOOK: u32 = 26;
+    pub const READ_GAMEPLAY_HOOK: u32 = 27;
+}
 
 pub const MAGIC: u32 = 0x4546_4735;
 pub const REQUEST_HEADER_SIZE: usize = 12;
@@ -295,7 +323,7 @@ impl Discovery {
         Ok(out)
     }
     fn validate(&self) -> Result<(), ProtocolError> {
-        if self.build_id.len() != 64 || !self.build_id.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        if !is_build_id(&self.build_id) {
             return Err(ProtocolError::InvalidData);
         }
         Ok(())

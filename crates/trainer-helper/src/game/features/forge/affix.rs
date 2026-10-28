@@ -6,7 +6,7 @@ use crate::game::GameError;
 use eg_il2cpp_runtime::ValueTypeContract;
 use eg_trainer_wire::{
     forge::AffixSnapshot,
-    write::{affix_order_key, layout_problems},
+    rules::{affix_order_key, layout_problems},
 };
 
 pub(super) struct AffixRewrite<'a, 'r> {

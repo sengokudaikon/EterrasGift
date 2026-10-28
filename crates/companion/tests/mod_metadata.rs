@@ -1,7 +1,7 @@
 //! Synthetic managed DLLs built from tests/fixtures/melon; never loaded or executed by these tests.
 use dotscope::CilAssemblyView;
 use dotscope::metadata::tables::{CustomAttributeRaw, MethodDefRaw, NestedClassRaw, TypeDefRaw};
-use eg_companion::install::{GameIdentity, GameInstall};
+use eg_companion::game::install::{GameIdentity, GameInstall};
 use eg_companion::mods::assembly::{LoaderVersion, MelonAssembly, MelonDomain, MelonGame, MelonKind, read_settings_resource, read_strings};
 use eg_companion::mods::loader_state::{
     LoaderInstall, LoaderPreparation, core_module_path, game_assembly_hash, loader_duplicates, needs_repair, read_generator_record, repair_core_module,

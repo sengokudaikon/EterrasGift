@@ -83,7 +83,7 @@ impl RuntimeAccess {
     pub unsafe fn discover(&self, attached: &AttachedThread<'_>, build_id: String, module_base: NonNull<u8>, module_size: usize) -> Result<DiscoveredRuntime, GameError> {
         // SAFETY: The caller retains the mapped module and immutable metadata; the dispatcher RVA is bounded before its instruction prefix is copied.
         unsafe {
-            if build_id.len() != 64 || !build_id.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+            if !eg_trainer_wire::protocol::is_build_id(&build_id) {
                 return Err(unsupported("helper build ID"));
             }
             let images = self.images()?;

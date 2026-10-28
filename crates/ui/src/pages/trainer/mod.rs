@@ -9,6 +9,7 @@
 
 pub mod backend_session;
 pub mod catalog;
+pub mod connection;
 pub mod pages;
 pub mod profiles;
 pub mod session;
@@ -29,25 +30,21 @@ pub fn install(window: &MainWindow, backend: Option<BackendHandle>) {
         bind(window, Rc::new(session::Unconnected), catalog::FEATURES.to_vec(), false);
         return;
     };
-    let pages = bind(window, Rc::new(backend_session::BackendSession::new(backend.clone())), catalog::FEATURES.to_vec(), false);
-    follow(&pages, &backend);
+    let pages = bind(window, Rc::new(backend_session::BackendSession::new(backend.clone())), catalog::FEATURES.to_vec(), false).downgrade();
+    follow(&backend, move || pages.upgrade().map(|pages| pages.refresh()).is_some());
 }
 
-/// Refreshes the pages on every worker snapshot, as the Item Forge follows them; it ends with the worker or when the pages
-/// are bound again.
-pub fn follow(pages: &Pages, backend: &BackendHandle) {
+/// Calls `changed` on every worker snapshot until the worker ends or `changed` says its owner is gone. Without an event
+/// loop there is nothing to show, and nothing follows.
+pub(crate) fn follow(backend: &BackendHandle, mut changed: impl FnMut() -> bool + 'static) {
     let mut updates = backend.subscribe();
-    let pages = pages.downgrade();
     let spawned = slint::spawn_local(async move {
         loop {
             let ended = updates.changed().await.is_err();
-            let Some(pages) = pages.upgrade() else { break };
-            pages.refresh();
-            if ended {
+            if !changed() || ended {
                 break;
             }
         }
     });
-    // Without an event loop there is nothing to show; the pages stay as they are.
     drop(spawned);
 }

@@ -8,8 +8,8 @@ use super::{
     log::{MelonLog, ModLogRun},
     preferences::{MelonPreferences, ModSetting, PreferenceKind, PreferenceValue},
 };
-use crate::install::{GameIdentity, GameInstall};
-use crate::loader::{self, ModLoaderState, ModLoaderSwitch, melon_paths};
+use crate::game::install::{GameIdentity, GameInstall};
+use crate::launch::loader::{self, ModLoaderState, ModLoaderSwitch, melon_paths};
 use std::path::{Path, PathBuf};
 
 #[derive(Clone, Debug)]

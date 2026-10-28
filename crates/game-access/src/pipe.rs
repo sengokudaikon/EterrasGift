@@ -30,7 +30,7 @@ impl PipeClient {
         &self.target
     }
     pub fn pipe_name(&self) -> String {
-        format!(r"\\.\pipe\eterras-gift-{}", self.target.pid)
+        eg_trainer_wire::transport::pipe_name(self.target.pid)
     }
 }
 impl Transport for PipeClient {

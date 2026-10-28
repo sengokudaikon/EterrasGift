@@ -772,7 +772,7 @@ impl ForgeEditor {
             if item
                 .unique
                 .as_ref()
-                .is_some_and(|unique| matches!(unique.formatting, crate::forge::game::Lookup::Ready(())))
+                .is_some_and(|unique| matches!(unique.formatting, crate::pages::forge::game::Lookup::Ready(())))
             {
                 format!("{affixes} · {}", count(self.uniques.len(), "unique modifier", "unique modifiers"))
             } else {
@@ -1904,7 +1904,7 @@ impl ForgeEditor {
             requests.push(request);
         }
         for line in uniques.iter_mut() {
-            let line_index = line.state.index;
+            let line_index = line.state.index as usize;
             for roll in &mut line.rolls {
                 let index = roll.index;
                 let dependencies: Vec<(usize, u8)> = changes.iter().filter(|c| c.index != index as i32).map(|c| (c.index as usize, c.value as u8)).collect();
@@ -2031,7 +2031,7 @@ impl ForgeEditor {
         self.refresh_unique_preview();
     }
 
-    fn update_lines(&mut self, target: RollTarget, states: &[item::ModifierState], rolls: &[u8]) {
+    fn update_lines(&mut self, target: RollTarget, states: &[item::ModifierSnapshot], rolls: &[u8]) {
         let mut rows = std::mem::take(if target == RollTarget::Unique { &mut self.uniques } else { &mut self.implicits });
         let mut kept = Vec::new();
         for state in states {

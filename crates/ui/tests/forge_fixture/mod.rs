@@ -4,6 +4,10 @@
 //!
 //! Shared by the captures (`crates/ui/tests/captures.rs`) and the editor's unit tests (`src/forge/tests.rs`), which each
 //! bring `forge` into scope before declaring this module.
+//!
+//! TODO(forge): remove once the reorganisation is done. It is a second fake game at the `ForgeGame` seam: the captures
+//! move onto `trainer_backend_fixture` (the real worker), and the editor's tests move with the draft ledger into
+//! `eg-trainer`. `ForgeGame` then needs no trait.
 
 #![allow(dead_code)]
 
@@ -11,7 +15,7 @@ use super::forge::game::{BaseDefinition, Catalog, ForgeGame, GameError, ItemLimi
 use super::forge::game::{EditOutcome, WriteOutcome, refused};
 use super::forge::item::EditPresentation;
 use super::forge::item::{
-    AffixDefinition, AffixKind, AffixState, Category, ForgeItem, ItemEdit, ItemStatus, ModifierState, RollRequest, RollTarget, Seal, TierProperty, UniqueState, ValueSample,
+    AffixDefinition, AffixKind, AffixState, Category, ForgeItem, ItemEdit, ItemStatus, ModifierSnapshot, RollRequest, RollTarget, Seal, TierProperty, UniqueState, ValueSample,
     ValueTable, format_tier_range,
 };
 use std::cell::RefCell;
@@ -530,8 +534,8 @@ pub fn boots() -> ForgeItem {
     }
 }
 
-fn modifier(index: usize, text: &str, range: &str, roll_ids: &[usize], editable: bool) -> ModifierState {
-    ModifierState {
+fn modifier(index: u32, text: &str, range: &str, roll_ids: &[u8], editable: bool) -> ModifierSnapshot {
+    ModifierSnapshot {
         index,
         text: text.into(),
         range: range.into(),
@@ -541,12 +545,12 @@ fn modifier(index: usize, text: &str, range: &str, roll_ids: &[usize], editable:
 }
 
 /// The unique's lines as the fixture's game formats them from the rolls.
-fn format_unique(rolls: &[u8], modifiers: &[ModifierState]) -> Vec<ModifierState> {
+fn format_unique(rolls: &[u8], modifiers: &[ModifierSnapshot]) -> Vec<ModifierSnapshot> {
     let speed = (10.0 + 15.0 * f64::from(rolls[0]) / 255.0).round_ties_even();
     let void = (30.0 + 30.0 * f64::from(rolls[1]) / 255.0).round_ties_even();
     modifiers
         .iter()
-        .map(|modifier| ModifierState {
+        .map(|modifier| ModifierSnapshot {
             text: match modifier.index {
                 0 => format!("+{speed}% Movement Speed"),
                 1 => format!("{void}% increased Void Damage over Time"),
@@ -727,8 +731,8 @@ impl ForgeGame for FixtureGame {
         self.apply_edit(expected, &edit, true)
     }
 
-    fn preview_unique(&self, expected: &ForgeItem, edit: &ItemEdit) -> crate::forge::game::Lookup<Vec<ModifierState>> {
-        let result: Result<Vec<ModifierState>, GameError> = (|| {
+    fn preview_unique(&self, expected: &ForgeItem, edit: &ItemEdit) -> crate::forge::game::Lookup<Vec<ModifierSnapshot>> {
+        let result: Result<Vec<ModifierSnapshot>, GameError> = (|| {
             let after = edit.project(expected).map_err(|e| e.to_string())?;
             let unique = after.unique.ok_or_else(|| "Preview unavailable.".to_string())?;
             Ok(format_unique(&unique.rolls, &unique.modifiers))

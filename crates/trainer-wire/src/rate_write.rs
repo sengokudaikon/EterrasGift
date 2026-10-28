@@ -8,8 +8,6 @@ use crate::{
     protocol::{DispatcherSpec, ProtocolError},
 };
 
-pub const SET_ATTACK_LEECH_RATE_OPERATION: u32 = 24;
-
 /// Validated, immutable one-field mutation intent for the currently admitted player.
 /// This is neither a historical selection ticket nor proof that a request was not
 /// sent before. Identical requests may become valid again when baseline bits return.

@@ -27,7 +27,7 @@ fn runtime() -> Runtime {
 }
 
 fn pipe_name(pid: u32) -> String {
-    format!(r"\\.\pipe\eterras-gift-{pid}")
+    eg_trainer_wire::transport::pipe_name(pid)
 }
 
 fn server(pid: u32) -> NamedPipeServer {

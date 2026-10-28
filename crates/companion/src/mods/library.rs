@@ -6,7 +6,7 @@
 use super::assembly::{AssemblyFacts, MelonAssembly};
 use super::invalid;
 use super::preferences::{MelonPreferences, PreferenceChange, PreferenceValue};
-use crate::loader::melon_paths;
+use crate::launch::loader::melon_paths;
 use eg_core::{atomic, hashes, json, paths};
 use serde_json::{Value, json};
 use std::collections::{BTreeMap, BTreeSet, HashMap};

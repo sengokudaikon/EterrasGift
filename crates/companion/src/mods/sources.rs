@@ -515,7 +515,9 @@ impl ModSources {
 }
 
 fn executable(sdk: Option<&Path>) -> PathBuf {
-    sdk.map(|folder| folder.join("dotnet.exe")).or_else(crate::dotnet::found).unwrap_or_else(|| "dotnet".into())
+    sdk.map(|folder| folder.join("dotnet.exe"))
+        .or_else(crate::mods::dotnet::found)
+        .unwrap_or_else(|| "dotnet".into())
 }
 
 fn cancelled(cancel: &Cancellation) -> Result<(), SourceError> {

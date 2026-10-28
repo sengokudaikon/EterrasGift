@@ -3,8 +3,8 @@
 
 use super::assembly::{LoaderVersion, loader_version, read_view, rows};
 use super::invalid;
-use crate::install::GameInstall;
-use crate::loader::melon_paths;
+use crate::game::install::GameInstall;
+use crate::launch::loader::melon_paths;
 use dotscope::CilAssemblyView;
 use dotscope::metadata::tables::{NestedClassRaw, TableDataOwned, TableId, TypeDefRaw};
 use dotscope::metadata::token::Token;

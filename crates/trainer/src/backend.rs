@@ -961,13 +961,7 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
         }
         .await;
         if let Err(error) = &result {
-            self.handle_connection_gate(error);
-            if !matches!(
-                error.kind,
-                ErrorKind::Superseded | ErrorKind::Gate | ErrorKind::HelperDeparted | ErrorKind::CharacterLoading
-            ) {
-                self.fail(error.clone(), Some(target.clone()));
-            }
+            self.settle(error, target.clone());
         }
         result
     }
@@ -1099,13 +1093,7 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
         }
         .await;
         if let Err(error) = &result {
-            self.handle_connection_gate(error);
-            if !matches!(
-                error.kind,
-                ErrorKind::Superseded | ErrorKind::Gate | ErrorKind::HelperDeparted | ErrorKind::CharacterLoading
-            ) {
-                self.fail(error.clone(), Some(target));
-            }
+            self.settle(error, target);
         }
         result
     }
@@ -1134,6 +1122,18 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
             }
         }
     }
+    /// After a failed read of the connected game: a gate or a departure takes the connection back, a superseded read
+    /// is left as it is, and anything else fails the worker.
+    fn settle(&mut self, error: &BackendError, target: ProcessIdentity) {
+        self.handle_connection_gate(error);
+        if !matches!(
+            error.kind,
+            ErrorKind::Superseded | ErrorKind::Gate | ErrorKind::HelperDeparted | ErrorKind::CharacterLoading
+        ) {
+            self.fail(error.clone(), Some(target));
+        }
+    }
+
     fn handle_connection_gate(&mut self, error: &BackendError) {
         if error.kind == ErrorKind::CharacterLoading && self.connection.is_some() {
             self.state.phase = Phase::WaitingForCharacter;

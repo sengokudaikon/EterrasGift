@@ -1,8 +1,8 @@
-use eg_companion::host::{GameHost, LaunchError, LaunchMode, LaunchOutcome};
-use eg_companion::install::GameInstall;
-use eg_companion::launcher::GameLauncher;
-use eg_companion::loader::ModLoaderState;
-use eg_companion::process::RunningGame;
+use eg_companion::game::install::GameInstall;
+use eg_companion::game::process::RunningGame;
+use eg_companion::launch::host::{GameHost, LaunchError, LaunchMode, LaunchOutcome};
+use eg_companion::launch::launcher::GameLauncher;
+use eg_companion::launch::loader::ModLoaderState;
 use eg_core::game_log::GameLogState;
 use eg_core::operations::Cancellation;
 use std::panic::{AssertUnwindSafe, catch_unwind};

@@ -2,7 +2,7 @@
 //! from: affix rows, unique modifier and implicit lines, item fields, the value scrubber's model and drag steps.
 
 use super::game::Lookup;
-use super::item::{AffixDefinition, AffixState, ItemEdit, ModifierState, RollTarget, Seal, StatusField, ValueSample, ValueTable};
+use super::item::{AffixDefinition, AffixState, ItemEdit, ModifierSnapshot, RollTarget, Seal, StatusField, ValueSample, ValueTable};
 use std::rc::Rc;
 
 /// The status a value cell shows until its table arrives.
@@ -735,7 +735,7 @@ pub struct RollDraft {
 pub struct RollRow {
     pub uid: u64,
     pub target: RollTarget,
-    pub state: ModifierState,
+    pub state: ModifierSnapshot,
     game: Vec<u8>,
     pub rolls: Vec<RollDraft>,
     history: Vec<Vec<u8>>,
@@ -748,7 +748,7 @@ pub struct RollRow {
 }
 
 impl RollRow {
-    pub fn new(uid: u64, target: RollTarget, state: ModifierState, game: &[u8]) -> RollRow {
+    pub fn new(uid: u64, target: RollTarget, state: ModifierSnapshot, game: &[u8]) -> RollRow {
         let mut row = RollRow {
             uid,
             target,
@@ -767,13 +767,13 @@ impl RollRow {
     }
 
     fn make_rolls(&self) -> Vec<RollDraft> {
-        if !self.state.editable || self.state.roll_ids.iter().any(|index| *index >= self.game.len()) {
+        if !self.state.editable || self.state.roll_ids.iter().any(|index| usize::from(*index) >= self.game.len()) {
             return Vec::new();
         }
         let mut seen = Vec::new();
-        for index in &self.state.roll_ids {
-            if !seen.contains(index) {
-                seen.push(*index);
+        for index in self.state.roll_ids.iter().map(|index| usize::from(*index)) {
+            if !seen.contains(&index) {
+                seen.push(index);
             }
         }
         let several = self.state.roll_ids.len() > 1;
@@ -923,13 +923,13 @@ impl RollRow {
     }
 
     /// The text the game formats for the drafted rolls, or the game's own with None.
-    pub fn show_preview(&mut self, state: Option<&ModifierState>) {
+    pub fn show_preview(&mut self, state: Option<&ModifierSnapshot>) {
         let state = state.unwrap_or(&self.state);
         self.text = state.text.clone();
         self.range = state.range.clone();
     }
 
-    pub fn update(&mut self, state: ModifierState, game: &[u8], preserve: bool) {
+    pub fn update(&mut self, state: ModifierSnapshot, game: &[u8], preserve: bool) {
         let mapping_changed = self.state.editable != state.editable || self.state.roll_ids != state.roll_ids;
         if mapping_changed || self.rolls.iter().any(|roll| game.get(roll.index) != self.game.get(roll.index)) {
             self.confirmed = false;
@@ -1335,7 +1335,7 @@ fn integer_table(minimum: u8, maximum: u8, allow_zero: bool) -> ValueTable {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::forge::item::{AffixKind, Category};
+    use crate::pages::forge::item::{AffixKind, Category};
 
     fn table(minimum: f64, maximum: f64) -> ValueTable {
         ValueTable {

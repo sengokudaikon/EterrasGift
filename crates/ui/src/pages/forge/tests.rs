@@ -2,9 +2,9 @@
 
 use super::editor::{Cell, ForgeEditor, MessageKind};
 use super::item::Seal;
-use crate::forge;
+use crate::pages::forge;
 
-#[path = "../../tests/forge_fixture/mod.rs"]
+#[path = "../../../tests/forge_fixture/mod.rs"]
 mod fixture;
 
 use fixture::FixtureGame;
@@ -527,9 +527,9 @@ fn the_name_drafts_another_unique_alone_with_the_rarity_the_game_gives() {
 // Each request is accepted once; changing the observation never retries it.
 mod async_writes {
     use super::*;
-    use crate::forge::{
+    use crate::pages::forge::{
         game::{Catalog, EditOutcome, ForgeGame, GameError, WriteOutcome, refused},
-        item::{ForgeItem, ItemEdit, ModifierState, RollRequest, ValueTable},
+        item::{ForgeItem, ItemEdit, ModifierSnapshot, RollRequest, ValueTable},
     };
     use std::{cell::RefCell, collections::VecDeque, rc::Rc};
 
@@ -585,10 +585,10 @@ mod async_writes {
         fn unrestricted(&self) -> bool {
             self.game.unrestricted()
         }
-        fn resolve(&self, item: &ForgeItem, request: &RollRequest) -> crate::forge::game::Lookup<ValueTable> {
+        fn resolve(&self, item: &ForgeItem, request: &RollRequest) -> crate::pages::forge::game::Lookup<ValueTable> {
             self.game.resolve(item, request)
         }
-        fn preview_unique(&self, item: &ForgeItem, edit: &ItemEdit) -> crate::forge::game::Lookup<Vec<ModifierState>> {
+        fn preview_unique(&self, item: &ForgeItem, edit: &ItemEdit) -> crate::pages::forge::game::Lookup<Vec<ModifierSnapshot>> {
             self.game.preview_unique(item, edit)
         }
         fn write(&mut self, expected: &ForgeItem, edit: &ItemEdit) -> EditOutcome {
@@ -820,7 +820,7 @@ mod async_writes {
             id: 70,
             rolls: vec![100, 7],
             modifiers: vec![],
-            formatting: crate::forge::game::Lookup::Ready(()),
+            formatting: crate::pages::forge::game::Lookup::Ready(()),
         });
         e.refresh();
         let index = e.fields.iter().position(|f| f.unrestricted).unwrap();
@@ -842,7 +842,7 @@ mod async_writes {
 fn pending_unique_preview_preserves_drafts_refreshes_only_current_text_and_clears_on_discard() {
     use super::{
         game::{Catalog, EditOutcome, ForgeGame, PREVIEW_LOADING},
-        item::{ForgeItem, ItemEdit, ModifierState, RollRequest, ValueTable},
+        item::{ForgeItem, ItemEdit, ModifierSnapshot, RollRequest, ValueTable},
     };
     use std::{cell::Cell as State, rc::Rc};
     struct Delayed {
@@ -858,7 +858,7 @@ fn pending_unique_preview_preserves_drafts_refreshes_only_current_text_and_clear
         fn read(&self) -> Option<ForgeItem> {
             self.inner.read()
         }
-        fn resolve(&self, item: &ForgeItem, request: &RollRequest) -> crate::forge::game::Lookup<ValueTable> {
+        fn resolve(&self, item: &ForgeItem, request: &RollRequest) -> crate::pages::forge::game::Lookup<ValueTable> {
             self.inner.resolve(item, request)
         }
         fn write(&mut self, item: &ForgeItem, edit: &ItemEdit) -> EditOutcome {
@@ -867,13 +867,13 @@ fn pending_unique_preview_preserves_drafts_refreshes_only_current_text_and_clear
         fn clear_unique_preview(&self) {
             self.pending.set(false);
         }
-        fn preview_unique(&self, item: &ForgeItem, edit: &ItemEdit) -> crate::forge::game::Lookup<Vec<ModifierState>> {
+        fn preview_unique(&self, item: &ForgeItem, edit: &ItemEdit) -> crate::pages::forge::game::Lookup<Vec<ModifierSnapshot>> {
             self.pending.set(true);
             if self.failed.get() {
-                return crate::forge::game::Lookup::Unavailable(PREVIEW_LOADING.into());
+                return crate::pages::forge::game::Lookup::Unavailable(PREVIEW_LOADING.into());
             }
             if !self.ready.get() {
-                return crate::forge::game::Lookup::Loading;
+                return crate::pages::forge::game::Lookup::Loading;
             }
             self.inner.preview_unique(item, edit)
         }

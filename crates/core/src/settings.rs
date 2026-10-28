@@ -41,45 +41,35 @@ pub struct AppSettings {
     pub module_settings: Map<String, Value>,
 }
 
-/// The location fields in the file's order, with their JSON names.
-const LOCATIONS: [&str; 8] = [
-    "gameExecutable",
-    "userDataDirectory",
-    "migrationSource",
-    "modSourcesDirectory",
-    "modLibraryDirectory",
-    "modLibraryMigrationSource",
-    "dotnetDirectory",
-    "melonLoaderDirectory",
-];
+/// The location fields in the file's order: their JSON names, and the field each is kept in.
+macro_rules! locations {
+    ($($name:literal => $field:ident),* $(,)?) => {
+        const LOCATIONS: [&str; [$($name),*].len()] = [$($name),*];
+
+        impl AppSettings {
+            fn location(&self, index: usize) -> &Option<PathBuf> {
+                [$(&self.$field),*][index]
+            }
+
+            fn location_mut(&mut self, index: usize) -> &mut Option<PathBuf> {
+                [$(&mut self.$field),*].into_iter().nth(index).expect("a location index")
+            }
+        }
+    };
+}
+
+locations! {
+    "gameExecutable" => game_executable,
+    "userDataDirectory" => user_data_directory,
+    "migrationSource" => migration_source,
+    "modSourcesDirectory" => mod_sources_directory,
+    "modLibraryDirectory" => mod_library_directory,
+    "modLibraryMigrationSource" => mod_library_migration_source,
+    "dotnetDirectory" => dotnet_directory,
+    "melonLoaderDirectory" => melon_loader_directory,
+}
 
 impl AppSettings {
-    fn location(&self, index: usize) -> &Option<PathBuf> {
-        [
-            &self.game_executable,
-            &self.user_data_directory,
-            &self.migration_source,
-            &self.mod_sources_directory,
-            &self.mod_library_directory,
-            &self.mod_library_migration_source,
-            &self.dotnet_directory,
-            &self.melon_loader_directory,
-        ][index]
-    }
-
-    fn location_mut(&mut self, index: usize) -> &mut Option<PathBuf> {
-        match index {
-            0 => &mut self.game_executable,
-            1 => &mut self.user_data_directory,
-            2 => &mut self.migration_source,
-            3 => &mut self.mod_sources_directory,
-            4 => &mut self.mod_library_directory,
-            5 => &mut self.mod_library_migration_source,
-            6 => &mut self.dotnet_directory,
-            _ => &mut self.melon_loader_directory,
-        }
-    }
-
     /// Reads the settings from the file's object, matching known keys whatever their case.
     pub fn from_json(document: &Map<String, Value>) -> Result<AppSettings, String> {
         let mut settings = AppSettings::default();

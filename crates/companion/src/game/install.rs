@@ -1,6 +1,6 @@
 //! Finding the game: the executable chosen in Settings, else the Steam library that holds it.
 
-use crate::key_values::KeyValues;
+use crate::game::key_values::KeyValues;
 use regex::bytes::Regex;
 use std::fs;
 use std::io::Read;

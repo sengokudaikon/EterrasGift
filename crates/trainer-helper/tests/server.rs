@@ -1,8 +1,8 @@
 #![cfg(all(windows, target_arch = "x86_64"))]
 //! Persistent server tests use a fake backend and explicitly spawned copies of this executable.
 use eg_game_access::pipe::PipeClient;
+use eg_trainer_helper::dispatch::{Dispatcher, Pending};
 use eg_trainer_helper::server::{Backend, Shared, failure};
-use eg_trainer_wire::dispatch::{Dispatcher, Pending};
 use eg_trainer_wire::{
     protocol::{Discovery, DispatcherSpec, Request, Response, ResponseCode, RuntimeStatus},
     transport::Transport,
@@ -41,7 +41,7 @@ fn server_retains_the_pipe_name_between_exchanges() {
             sleep(Duration::from_millis(2)).await;
             let result = ServerOptions::new()
                 .first_pipe_instance(true)
-                .create(format!(r"\\.\pipe\eterras-gift-{}", fixture.child.id()));
+                .create(eg_trainer_wire::transport::pipe_name(fixture.child.id()));
             assert!(matches!(result.unwrap_err().raw_os_error(), Some(5 | 231)));
         }
     });
@@ -339,7 +339,7 @@ fn owner_unload_acknowledges_without_installing_or_queuing_work() {
 async fn open_raw(pid: u32) -> tokio::net::windows::named_pipe::NamedPipeClient {
     timeout(LIMIT, async {
         loop {
-            match ClientOptions::new().open(format!(r"\\.\pipe\eterras-gift-{pid}")) {
+            match ClientOptions::new().open(eg_trainer_wire::transport::pipe_name(pid)) {
                 Ok(pipe) => return pipe,
                 Err(error) if matches!(error.raw_os_error(), Some(2 | 231)) => sleep(Duration::from_millis(5)).await,
                 Err(error) => panic!("owned raw connection failed: {error}"),

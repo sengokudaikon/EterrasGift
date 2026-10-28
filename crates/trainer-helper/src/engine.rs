@@ -1,4 +1,5 @@
 mod gameplay_hooks;
+use crate::dispatch::{Dispatcher, Pending};
 use crate::{
     BUILD_ID, BUILD_ID_C,
     lifecycle::Watchdog,
@@ -12,7 +13,6 @@ use eg_il2cpp_runtime::{
     AttachedThread, ThreadContext,
     raw::{self, MethodInfo},
 };
-use eg_trainer_wire::dispatch::{Dispatcher, Pending};
 use eg_trainer_wire::{
     protocol::{Discovery, DispatcherSpec, Request, Response, ResponseCode, RuntimeStatus},
     rate_write::AttackLeechRateWrite,

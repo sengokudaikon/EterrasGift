@@ -5,6 +5,8 @@
 
 include!(concat!(env!("OUT_DIR"), "/identity.rs"));
 
+pub mod dispatch;
+
 #[cfg(all(windows, target_arch = "x86_64"))]
 #[allow(unsafe_code)] // Windows/FFI boundary; the rest of the crate denies unsafe.
 mod engine;

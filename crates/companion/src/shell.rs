@@ -19,3 +19,31 @@ pub fn open(target: &str) -> io::Result<()> {
 pub fn open(_target: &str) -> io::Result<()> {
     Err(io::Error::new(io::ErrorKind::Unsupported, "Only Windows can open this."))
 }
+
+/// Opens a file or folder the way Windows does, or shows it selected in File Explorer (`reveal`); `create` makes the
+/// folder first.
+#[cfg(windows)]
+pub fn open_path(path: &std::path::Path, reveal: bool, create: bool) -> io::Result<()> {
+    use std::os::windows::{ffi::OsStrExt, process::CommandExt};
+    if create {
+        std::fs::create_dir_all(path)?;
+    }
+    if reveal {
+        std::process::Command::new("explorer.exe").arg("/select,").arg(path).creation_flags(0x0800_0000).spawn()?;
+        return Ok(());
+    }
+    let wide: Vec<u16> = path.as_os_str().encode_wide().chain(Some(0)).collect();
+    let open: Vec<u16> = "open".encode_utf16().chain(Some(0)).collect();
+    // SAFETY: all UTF-16 strings are terminated and live until the call returns; ShellExecute opens the user's selected file.
+    let result = unsafe { windows_sys::Win32::UI::Shell::ShellExecuteW(std::ptr::null_mut(), open.as_ptr(), wide.as_ptr(), std::ptr::null(), std::ptr::null(), 1) };
+    if result as isize <= 32 {
+        Err(io::Error::other(format!("Could not open {} (Windows error {}).", path.display(), result as isize)))
+    } else {
+        Ok(())
+    }
+}
+
+#[cfg(not(windows))]
+pub fn open_path(_path: &std::path::Path, _reveal: bool, _create: bool) -> io::Result<()> {
+    Err(io::Error::other("Opening files is available on Windows."))
+}

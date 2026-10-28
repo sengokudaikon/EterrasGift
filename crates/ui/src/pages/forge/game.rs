@@ -21,7 +21,7 @@ impl<T> From<Result<T, String>> for Lookup<T> {
     }
 }
 
-use super::item::{AffixDefinition, ForgeItem, ItemEdit, ModifierState, RollRequest, ValueTable};
+use super::item::{AffixDefinition, ForgeItem, ItemEdit, ModifierSnapshot, RollRequest, ValueTable};
 pub use eg_trainer::write::WriteOutcome;
 
 /// An independently observed item can be undisplayable by this editor. That
@@ -241,7 +241,7 @@ pub trait ForgeGame {
     /// Discard an unsubmitted preview when its draft is cleared; accepted work still drains.
     fn clear_unique_preview(&self) {}
     /// The unique modifiers formatted with drafted rolls.
-    fn preview_unique(&self, expected: &ForgeItem, edit: &ItemEdit) -> Lookup<Vec<ModifierState>>;
+    fn preview_unique(&self, expected: &ForgeItem, edit: &ItemEdit) -> Lookup<Vec<ModifierSnapshot>>;
 }
 
 #[cfg(test)]

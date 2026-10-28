@@ -5,19 +5,9 @@
 
 #![deny(unsafe_code)]
 
-pub mod dotnet;
-#[allow(unsafe_code)] // Windows/FFI boundary; the rest of the crate denies unsafe.
-pub mod folders;
-pub mod game_version;
+pub mod game;
 pub mod home;
-pub mod host;
-#[allow(unsafe_code)] // Windows/FFI boundary; the rest of the crate denies unsafe.
-pub mod install;
-pub mod key_values;
-pub mod launcher;
-pub mod loader;
+pub mod launch;
 pub mod mods;
-#[allow(unsafe_code)] // Windows/FFI boundary; the rest of the crate denies unsafe.
-pub mod process;
 #[allow(unsafe_code)] // Windows/FFI boundary; the rest of the crate denies unsafe.
 pub mod shell;

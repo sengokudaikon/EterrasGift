@@ -71,9 +71,15 @@ impl GameProcesses {
 }
 impl ProcessLocator for GameProcesses {
     async fn find(&mut self) -> Result<Vec<ProcessIdentity>, BackendError> {
-        let census = eg_game_access::process::census().map_err(|error| BackendError::waiting(ErrorKind::NotReady, error.to_string()))?;
+        let mut named = Vec::new();
+        eg_core::process::each(|pid, executable| {
+            if eg_core::process::is_named(executable, &self.executable_name) {
+                named.push(pid);
+            }
+        })
+        .map_err(|error| BackendError::waiting(ErrorKind::NotReady, error.to_string()))?;
         let mut found = Vec::new();
-        for (pid, _) in census.into_iter().filter(|(_, name)| name.eq_ignore_ascii_case(&self.executable_name)) {
+        for pid in named {
             match eg_game_access::process::capture(pid) {
                 Ok(identity) => found.push(identity),
                 Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
