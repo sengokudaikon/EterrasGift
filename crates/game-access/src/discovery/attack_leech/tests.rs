@@ -1,6 +1,6 @@
 //! Authored exports use identity tokens only; target object addresses are never dereferenced.
 use super::*;
-use crate::il2cpp::{ThreadContext, raw};
+use eg_il2cpp_runtime::{ThreadContext, raw};
 use std::{
     cell::{Cell, RefCell},
     collections::BTreeMap,

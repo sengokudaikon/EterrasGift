@@ -2,7 +2,7 @@
 
 use super::metadata_text;
 use super::{Class, DiscoveryError, RuntimeAccess, unsupported};
-use crate::il2cpp::{AttachedThread, InvocationContext, InvocationOutcome, ReturnValue, StrongRoot, ValueTypeContract, raw};
+use eg_il2cpp_runtime::{AttachedThread, InvocationContext, InvocationOutcome, ReturnValue, StrongRoot, ValueTypeContract, raw};
 use eg_trainer_wire::locale::GameLocale;
 use std::{ffi::CStr, ptr::NonNull};
 
@@ -272,7 +272,7 @@ impl RuntimeAccess {
 mod tests {
     use super::super::{Ptr, Type};
     use super::*;
-    use crate::il2cpp::ThreadContext;
+    use eg_il2cpp_runtime::ThreadContext;
     use std::cell::Cell;
     const PARENT: usize = 0x1000;
     const CHILD: usize = 0x2000;

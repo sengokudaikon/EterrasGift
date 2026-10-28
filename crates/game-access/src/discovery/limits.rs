@@ -1,7 +1,7 @@
 //! Literal metadata only: the item status bounds the game declares as constants.
 
 use super::{Class, DiscoveryError, RuntimeAccess, unsupported};
-use crate::il2cpp::{AttachedThread, raw};
+use eg_il2cpp_runtime::{AttachedThread, raw};
 use eg_trainer_wire::definitions::{ItemLimits, ValueRange};
 use std::ffi::CStr;
 
@@ -97,7 +97,7 @@ impl RuntimeAccess {
 mod tests {
     use super::super::{Ptr, TestExportStub, Type};
     use super::*;
-    use crate::il2cpp::{ThreadContext, raw};
+    use eg_il2cpp_runtime::{ThreadContext, raw};
     use std::{
         cell::Cell,
         ffi::{CString, c_char},

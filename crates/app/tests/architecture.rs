@@ -17,6 +17,8 @@ use syn::visit::{self, Visit};
 enum Tier {
     /// Generic readers that name neither this app nor the game: anything may use them, and they use only each other.
     Library,
+    /// A live IL2CPP runtime through its exports: game-neutral like a library, but in-game code only.
+    Il2CppRuntime,
     Shared,
     Wire,
     /// The game's shipped data files, read without the game. Like the kernel and the wire, it builds only on libraries.
@@ -31,6 +33,7 @@ enum Tier {
 fn tier(name: &str) -> Tier {
     match name {
         "eg-binary" | "eg-il2cpp-metadata" => Tier::Library,
+        "eg-il2cpp-runtime" => Tier::Il2CppRuntime,
         "eg-core" => Tier::Shared,
         "eg-companion" => Tier::Companion,
         "eg-trainer" | "eg-trainer-host" | "eg-trainer-helper" => Tier::Trainer,
@@ -131,7 +134,7 @@ fn cargo_dependencies_preserve_the_tiers_including_tools() {
             let from = tier(&package.name);
             let to = tier(dependency);
             assert!(
-                !matches!(from, Tier::Library | Tier::Shared | Tier::Wire | Tier::GameFiles) || to == Tier::Library,
+                !matches!(from, Tier::Library | Tier::Il2CppRuntime | Tier::Shared | Tier::Wire | Tier::GameFiles) || to == Tier::Library,
                 "{} depends on first-party {dependency}",
                 package.name
             );
@@ -145,6 +148,9 @@ fn cargo_dependencies_preserve_the_tiers_including_tools() {
             );
             if to == Tier::GameAccess {
                 assert!(matches!(from, Tier::Trainer | Tier::Tool), "{} directly reaches game access", package.name);
+            }
+            if to == Tier::Il2CppRuntime {
+                assert!(matches!(from, Tier::GameAccess | Tier::Trainer | Tier::Tool), "{} reaches the IL2CPP runtime", package.name);
             }
         }
     }
@@ -273,6 +279,7 @@ fn the_desktop_links_no_il2cpp_code() {
         if unit["target"]["name"] == "eg_game_access" {
             (if in_helper { &mut helper } else { &mut linked }).push(features(unit));
         }
+        assert!(in_helper || unit["target"]["name"] != "eg_il2cpp_runtime", "the desktop links the IL2CPP runtime");
         pending.extend(unit["dependencies"].as_array().unwrap().iter().map(|d| (d["index"].as_u64().unwrap(), in_helper)));
     }
     assert!(

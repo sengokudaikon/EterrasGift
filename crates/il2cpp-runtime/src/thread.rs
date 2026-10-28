@@ -160,7 +160,7 @@ impl Drop for AttachedThread<'_> {
 ///
 /// The attachment cannot be released while a root can still be used:
 /// ```compile_fail
-/// use eg_game_access::il2cpp::{ThreadContext, raw};
+/// use eg_il2cpp_runtime::{ThreadContext, raw};
 /// use std::ptr::NonNull;
 /// fn invalid(api: raw::Api, object: NonNull<raw::Object>) {
 ///     let runtime = unsafe { ThreadContext::new(api) };
@@ -176,7 +176,8 @@ pub struct StrongRoot<'attachment, 'runtime> {
 }
 
 impl StrongRoot<'_, '_> {
-    pub(crate) fn belongs_to(&self, attachment: &AttachedThread<'_>) -> bool {
+    /// Whether this root was made by `attachment`, and so belongs to its runtime and thread.
+    pub fn belongs_to(&self, attachment: &AttachedThread<'_>) -> bool {
         std::ptr::eq(self.attachment.context, attachment.context)
     }
 

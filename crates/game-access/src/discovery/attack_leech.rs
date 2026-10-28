@@ -4,7 +4,7 @@ use super::{
     forge::{Root, target},
     unsupported,
 };
-use crate::il2cpp::{AttachedThread, raw};
+use eg_il2cpp_runtime::{AttachedThread, raw};
 use eg_trainer_wire::fields::{AttackLeechObservation, AttackLeechRead, AttackLeechTarget, AttackLeechUnavailable, ObservedObjectIdentity, ObservedRate};
 use std::{ffi::CStr, ptr::NonNull};
 
@@ -25,8 +25,14 @@ impl From<DiscoveryError> for AttackLeechReadError {
     }
 }
 
-impl From<crate::il2cpp::RuntimeError> for AttackLeechReadError {
-    fn from(value: crate::il2cpp::RuntimeError) -> Self {
+impl From<eg_il2cpp_runtime::MetadataError> for AttackLeechReadError {
+    fn from(value: eg_il2cpp_runtime::MetadataError) -> Self {
+        Self::Contract(value.into())
+    }
+}
+
+impl From<eg_il2cpp_runtime::RuntimeError> for AttackLeechReadError {
+    fn from(value: eg_il2cpp_runtime::RuntimeError) -> Self {
         Self::Contract(DiscoveryError::Runtime(value))
     }
 }

@@ -1,78 +1,62 @@
-//! Read-only metadata discovery and the narrow main-thread status query.
+//! Metadata lookups over the runtime's public exports: assemblies and their images, classes, fields and methods, each
+//! checked against the contract its caller states, plus the two layout adapters the queries rely on (modern x64
+//! object/array/string headers, and `MethodInfo.methodPointer` at offset 0). Nothing here invokes a managed method.
+//! Export signatures follow Unity 6000.4.8f1's `il2cpp-api-functions.h`.
 //!
-//! The public API resolves fields instead of carrying game-version offsets. The two small
-//! layout adapters (modern x64 object/array/string headers and MethodInfo.methodPointer) are
-//! explicitly part of the unsafe runtime contract, rather than inferred from a game version.
-//! Export signatures follow the installed 6000.4.8f1 `il2cpp-api-functions.h`.
+//! The lookup contract, which every unsafe lookup here states as its own: the caller is attached to the live runtime
+//! the table was resolved from, its metadata stays loaded and immutable for the call (assembly loading and shutdown
+//! excluded), and every image, class, field, method or type passed in came from that runtime.
 
 // Entry-point contracts cover the shared runtime assumptions. Keep local notes
 // for bounds, ownership and ABI details rather than repeating those contracts.
 
-use super::{AttachedThread, RuntimeError, raw};
-use eg_trainer_wire::protocol::{Discovery, DispatcherSpec, RuntimeStatus};
+use crate::{AttachedThread, RuntimeError, raw};
 use std::{
     ffi::{CStr, c_char, c_void},
     ptr::NonNull,
 };
 
-mod attack_leech;
-mod gameplay_hooks;
-pub use gameplay_hooks::GameplayHookTarget;
-mod descriptions;
-mod dispatcher_thread;
-mod unique;
-pub use attack_leech::AttackLeechWriteError;
-mod catalog;
-mod forge;
-mod limits;
-mod locale;
-mod mapping;
-pub mod presence;
-mod write;
-pub use write::ForgeWriteError;
+pub type Ptr = *mut c_void;
+pub type Class = *mut raw::Class;
+pub type Method = *const raw::MethodInfo;
+pub type Type = *const raw::Type;
 
-type Ptr = *mut c_void;
-type Class = *mut raw::Class;
-type Method = *const raw::MethodInfo;
-type Type = *const raw::Type;
-
-/// A missing contract fails discovery as a whole; no partial layout is published.
+/// Why a lookup failed. A missing contract fails the lookup as a whole; nothing partial is returned.
 #[derive(Debug)]
-pub enum DiscoveryError {
+pub enum MetadataError {
     MissingExport(raw::MissingExport),
     Runtime(RuntimeError),
     NotReady(&'static str),
-    OfflineRequired,
     Contract(String),
 }
 
-impl std::fmt::Display for DiscoveryError {
+impl std::fmt::Display for MetadataError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::MissingExport(error) => error.fmt(f),
             Self::Runtime(error) => error.fmt(f),
             Self::NotReady(reason) => write!(f, "IL2CPP runtime is not ready: {reason}"),
-            Self::OfflineRequired => f.write_str("An offline character with a live item manager is required"),
             Self::Contract(contract) => write!(f, "Unsupported IL2CPP runtime contract: {contract}"),
         }
     }
 }
-impl std::error::Error for DiscoveryError {}
-impl From<RuntimeError> for DiscoveryError {
+
+impl std::error::Error for MetadataError {}
+impl From<RuntimeError> for MetadataError {
     fn from(error: RuntimeError) -> Self {
         Self::Runtime(error)
     }
 }
 
-fn unsupported(contract: impl Into<String>) -> DiscoveryError {
-    DiscoveryError::Contract(contract.into())
+/// A contract the runtime does not meet.
+pub fn unsupported(contract: impl Into<String>) -> MetadataError {
+    MetadataError::Contract(contract.into())
 }
 
-// Class and field descriptors belong to immutable metadata in the retained runtime.
-// Only descriptor lookup is cached; object values and native liveness are always read afresh.
+// Field descriptors belong to immutable metadata in the retained runtime. Only descriptor lookup is cached; object
+// values and native liveness are always read afresh.
 #[derive(Default)]
-struct MetadataCache {
-    presence: std::sync::OnceLock<presence::PresenceBindings>,
+struct FieldCache {
     // Keyed by class, then name: a hit borrows the caller's name and allocates nothing.
     fields: std::sync::Mutex<std::collections::HashMap<usize, std::collections::HashMap<std::ffi::CString, usize>>>,
 }
@@ -80,7 +64,7 @@ struct MetadataCache {
 /// # Safety
 /// The pointer is readable for one initialized T. T's representation matches the
 /// metadata-validated field/adapter; its owner remains rooted or is pinned code/metadata.
-unsafe fn read_value<T: Copy>(pointer: *const T) -> T {
+pub unsafe fn read_value<T: Copy>(pointer: *const T) -> T {
     // SAFETY: the caller supplies the readable span and exact valid representation;
     // unaligned reads also cover generated instruction bytes and packed metadata.
     unsafe { pointer.read_unaligned() }
@@ -88,7 +72,7 @@ unsafe fn read_value<T: Copy>(pointer: *const T) -> T {
 /// # Safety
 /// The pointer addresses `count` initialized, aligned Ts in one readable allocation.
 /// The owner remains rooted and unchanged until this synchronous owned copy completes.
-unsafe fn copy_values<T: Copy>(pointer: *const T, count: usize) -> Vec<T> {
+pub unsafe fn copy_values<T: Copy>(pointer: *const T, count: usize) -> Vec<T> {
     if count == 0 {
         return Vec::new();
     }
@@ -98,7 +82,7 @@ unsafe fn copy_values<T: Copy>(pointer: *const T, count: usize) -> Vec<T> {
 /// # Safety
 /// The nonnull pointer addresses a NUL-terminated runtime metadata name or an allocated
 /// type name. Its storage outlives the returned borrow (before runtime_free for type names).
-unsafe fn metadata_text<'a>(pointer: *const c_char) -> &'a CStr {
+pub unsafe fn metadata_text<'a>(pointer: *const c_char) -> &'a CStr {
     // SAFETY: caller supplies the metadata string's extent and lifetime above.
     unsafe { CStr::from_ptr(pointer) }
 }
@@ -106,7 +90,7 @@ unsafe fn metadata_text<'a>(pointer: *const c_char) -> &'a CStr {
 /// # Safety
 /// The destination is a private rooted byte array with at least source.len()
 /// writable bytes. It does not overlap source and contains no managed references.
-unsafe fn write_bytes(destination: *mut u8, source: &[u8]) {
+pub unsafe fn write_bytes(destination: *mut u8, source: &[u8]) {
     if source.is_empty() {
         return;
     }
@@ -116,25 +100,27 @@ unsafe fn write_bytes(destination: *mut u8, source: &[u8]) {
 
 macro_rules! exports {
     ($($field:ident: $name:literal => $signature:ty),+ $(,)?) => {
-        /// Public runtime exports. Resolution alone invokes neither managed bodies nor class initializers.
+        /// The metadata, allocation and status exports. Resolution alone invokes neither managed bodies nor class
+        /// initializers. Each field is the named export; calling one is the caller's unsafe contract.
         #[derive(Clone, Copy)]
-        pub struct RuntimeAccess { $($field: $signature),+, metadata: Option<&'static MetadataCache> }
-        impl RuntimeAccess {
-            #[cfg(test)]
-            fn test_stubs() -> Self { Self { $($field: <$signature as TestExportStub>::test_stub()),+, metadata: None } }
+        pub struct MetadataApi { $(pub $field: $signature),+, cache: Option<&'static FieldCache> }
+        impl MetadataApi {
+            /// Every export a stub that panics when reached, and no cache: a test sets the exports it expects.
+            #[cfg(any(test, feature = "test-stubs"))]
+            pub fn test_stubs() -> Self { Self { $($field: <$signature as TestExportStub>::test_stub()),+, cache: None } }
             /// Resolve the complete metadata/status export table.
             ///
             /// # Safety
             /// Every address must be the named Unity 6000.4 public export with the declared ABI.
             /// Runtime code and immutable metadata must remain loaded for every subsequent use. GC handles
             /// use the modern pointer-valued ABI. The resolver must not substitute other functions.
-            pub unsafe fn resolve(mut resolver: impl FnMut(&'static CStr) -> Option<NonNull<c_void>>) -> Result<Self, DiscoveryError> {
+            pub unsafe fn resolve(mut resolver: impl FnMut(&'static CStr) -> Option<NonNull<c_void>>) -> Result<Self, MetadataError> {
                 Ok(Self { $($field: {
                     let name = CStr::from_bytes_with_nul(concat!($name, "\0").as_bytes()).expect("static symbol");
-                    let address = resolver(name).ok_or(DiscoveryError::MissingExport(raw::MissingExport(name)))?;
+                    let address = resolver(name).ok_or(MetadataError::MissingExport(raw::MissingExport(name)))?;
                     // SAFETY: the caller establishes export identity, ABI and lifetime.
                     unsafe { std::mem::transmute::<*mut c_void, $signature>(address.as_ptr()) }
-                }),+, metadata: Some(Box::leak(Box::new(MetadataCache::default()))) })
+                }),+, cache: Some(Box::leak(Box::new(FieldCache::default()))) })
             }
         }
     };
@@ -142,11 +128,11 @@ macro_rules! exports {
 
 // Every test stub has its field's actual ABI/signature and fails if an unexpected export is
 // reached. Unlike casting one catch-all address, this does not manufacture mismatched functions.
-#[cfg(test)]
-trait TestExportStub {
+#[cfg(any(test, feature = "test-stubs"))]
+pub trait TestExportStub {
     fn test_stub() -> Self;
 }
-#[cfg(test)]
+#[cfg(any(test, feature = "test-stubs"))]
 macro_rules! test_export_stubs {
     ($($argument:ident),*) => {
         impl<$($argument,)* R> TestExportStub for unsafe extern "C-unwind" fn($($argument),*) -> R {
@@ -157,13 +143,13 @@ macro_rules! test_export_stubs {
         }
     };
 }
-#[cfg(test)]
+#[cfg(any(test, feature = "test-stubs"))]
 test_export_stubs!();
-#[cfg(test)]
+#[cfg(any(test, feature = "test-stubs"))]
 test_export_stubs!(A);
-#[cfg(test)]
+#[cfg(any(test, feature = "test-stubs"))]
 test_export_stubs!(A, B);
-#[cfg(test)]
+#[cfg(any(test, feature = "test-stubs"))]
 test_export_stubs!(A, B, C);
 
 exports! {
@@ -220,25 +206,17 @@ exports! {
     assignable: "il2cpp_class_is_assignable_from" => raw::ClassIsAssignableFrom,
 }
 
-/// Discovery data plus a typed address retained only while the caller's runtime contract holds.
-pub struct DiscoveredRuntime {
-    pub discovery: Discovery,
-    pub dispatcher: NonNull<u8>,
-}
-
-struct Images {
-    all: Vec<Ptr>,
-    game: Ptr,
-}
-
-impl RuntimeAccess {
-    // SAFETY for internal helpers: called only beneath discover/status's live attached-runtime contract.
-    unsafe fn images(&self) -> Result<Images, DiscoveryError> {
+impl MetadataApi {
+    /// Every loaded assembly's image, bounded and checked; a runtime without a domain yet is not ready.
+    ///
+    /// # Safety
+    /// The caller is attached to this export table's live runtime, with assembly loading excluded for the call.
+    pub unsafe fn images(&self) -> Result<Vec<Ptr>, MetadataError> {
         // SAFETY: The attached runtime retains its domain/assembly array; its bounded count precedes copying live image descriptors.
         unsafe {
             let domain = (self.domain_get)();
             if domain.is_null() {
-                return Err(DiscoveryError::NotReady("domain unavailable"));
+                return Err(MetadataError::NotReady("domain unavailable"));
             }
             let mut count = 0;
             let assemblies = (self.assemblies)(domain, &mut count);
@@ -246,62 +224,27 @@ impl RuntimeAccess {
                 return Err(unsupported("assembly table"));
             }
             let mut all = Vec::with_capacity(count);
-            let mut game: Ptr = std::ptr::null_mut();
-            let mut player_finder: Class = std::ptr::null_mut();
             for index in 0..count {
                 let image = (self.assembly_image)(read_value(assemblies.add(index)));
                 if image.is_null() {
                     return Err(unsupported("assembly image"));
                 }
-                let candidate = (self.class_from_name)(image, c"".as_ptr(), c"PlayerFinder".as_ptr());
-                if !candidate.is_null() {
-                    record_class(&mut player_finder, candidate, c"PlayerFinder")?;
-                    if game.is_null() {
-                        game = image;
-                    }
-                }
                 all.push(image);
             }
-            if game.is_null() {
-                return Err(DiscoveryError::NotReady("PlayerFinder assembly missing"));
-            }
-            Ok(Images { all, game })
+            Ok(all)
         }
     }
 
-    // SAFETY: Images and class descriptors are retained immutable metadata; names and nested-class traversal are bounded and checked.
-    unsafe fn class(&self, images: &Images, namespace: &CStr, name: &CStr) -> Result<Class, DiscoveryError> {
-        // SAFETY: Image and class descriptors belong to retained immutable metadata; bounded lookup never invokes a game method.
+    /// The one class named `namespace.name` across `images`: forwarded names that resolve to the same class count once,
+    /// two distinct classes are ambiguous, and none is missing.
+    ///
+    /// # Safety
+    /// `images` are this runtime's retained image descriptors.
+    pub unsafe fn class_in(&self, images: &[Ptr], namespace: &CStr, name: &CStr) -> Result<Class, MetadataError> {
+        // SAFETY: Image and class descriptors belong to retained immutable metadata; lookup never invokes a game method.
         unsafe {
-            let first = (self.class_from_name)(images.game, namespace.as_ptr(), name.as_ptr());
-            if !first.is_null() {
-                return Ok(first);
-            }
-            let parent = if name == c"CraftingContainers" {
-                Some(c"ItemContainersManager")
-            } else if name == c"Affix" {
-                Some(c"AffixList")
-            } else {
-                None
-            };
-            if let Some(parent) = parent {
-                let parent = (self.class_from_name)(images.game, c"".as_ptr(), parent.as_ptr());
-                if !parent.is_null() {
-                    let mut iterator = std::ptr::null_mut();
-                    for _ in 0..4096 {
-                        let nested = (self.class_nested)(parent, &mut iterator);
-                        if nested.is_null() {
-                            break;
-                        }
-                        let actual = (self.class_name)(nested);
-                        if !actual.is_null() && metadata_text(actual) == name {
-                            return Ok(nested);
-                        }
-                    }
-                }
-            }
             let mut found: Class = std::ptr::null_mut();
-            for image in &images.all {
+            for image in images {
                 let class = (self.class_from_name)(*image, namespace.as_ptr(), name.as_ptr());
                 record_class(&mut found, class, name)?;
             }
@@ -313,9 +256,33 @@ impl RuntimeAccess {
         }
     }
 
+    /// The class `name` nested directly in `parent`, if it has one.
+    ///
+    /// # Safety
+    /// `parent` is a retained class descriptor of this runtime.
+    pub unsafe fn nested_class(&self, parent: Class, name: &CStr) -> Option<Class> {
+        // SAFETY: The parent and its nested descriptors are retained immutable metadata; the walk is bounded.
+        unsafe {
+            let mut iterator = std::ptr::null_mut();
+            for _ in 0..4096 {
+                let nested = (self.class_nested)(parent, &mut iterator);
+                if nested.is_null() {
+                    return None;
+                }
+                let actual = (self.class_name)(nested);
+                if !actual.is_null() && metadata_text(actual) == name {
+                    return Some(nested);
+                }
+            }
+            None
+        }
+    }
+
     /// Enumerate descriptors from one live class with a shared bound, one runtime query per item.
-    /// The class's retained metadata must stay live while the iterator is used.
-    unsafe fn methods(&self, class: Class) -> impl Iterator<Item = Result<Method, DiscoveryError>> + '_ {
+    ///
+    /// # Safety
+    /// The lookup contract (module docs), for as long as the iterator is used.
+    pub unsafe fn methods(&self, class: Class) -> impl Iterator<Item = Result<Method, MetadataError>> + '_ {
         let mut iterator = std::ptr::null_mut();
         let mut remaining = 100_000_u32;
         let mut finished = false;
@@ -340,9 +307,13 @@ impl RuntimeAccess {
         })
     }
 
-    unsafe fn field(&self, mut class: Class, name: &CStr) -> Result<Ptr, DiscoveryError> {
+    /// The field `name` of `class` or its nearest ancestor that has one, cached per class and name.
+    ///
+    /// # Safety
+    /// The lookup contract (module docs).
+    pub unsafe fn field(&self, mut class: Class, name: &CStr) -> Result<Ptr, MetadataError> {
         let owner = class as usize;
-        if let Some(cache) = self.metadata
+        if let Some(cache) = self.cache
             && let Some(field) = cache.fields.lock().unwrap_or_else(|p| p.into_inner()).get(&owner).and_then(|fields| fields.get(name))
         {
             return Ok(*field as Ptr);
@@ -356,7 +327,7 @@ impl RuntimeAccess {
                 }
                 let field = (self.class_field)(class, name.as_ptr());
                 if !field.is_null() {
-                    if let Some(cache) = self.metadata {
+                    if let Some(cache) = self.cache {
                         cache
                             .fields
                             .lock()
@@ -374,7 +345,10 @@ impl RuntimeAccess {
     }
 
     /// A `System.*` class from corlib.
-    pub(super) unsafe fn system_class(&self, name: &CStr) -> Result<Class, DiscoveryError> {
+    ///
+    /// # Safety
+    /// The lookup contract (module docs).
+    pub unsafe fn system_class(&self, name: &CStr) -> Result<Class, MetadataError> {
         // SAFETY: Corlib and the named class descriptor belong to retained initialized runtime metadata.
         unsafe {
             let image = (self.corlib)();
@@ -390,7 +364,10 @@ impl RuntimeAccess {
     }
 
     /// The class of a field's non-byref type. `label` names the caller in contract errors.
-    pub(super) unsafe fn field_class(&self, field: Ptr, label: &str) -> Result<Class, DiscoveryError> {
+    ///
+    /// # Safety
+    /// The lookup contract (module docs).
+    pub unsafe fn field_class(&self, field: Ptr, label: &str) -> Result<Class, MetadataError> {
         // SAFETY: The field descriptor is retained metadata; nonnull non-byref type metadata is checked before resolving its class.
         unsafe {
             let ty = (self.field_type)(field);
@@ -406,7 +383,10 @@ impl RuntimeAccess {
     }
 
     /// A nonstatic field of `owner` (or an ancestor) whose non-byref type's class is exactly `expected`.
-    pub(super) unsafe fn instance_field_in(&self, owner: Class, name: &CStr, expected: Class, label: &str) -> Result<Ptr, DiscoveryError> {
+    ///
+    /// # Safety
+    /// The lookup contract (module docs).
+    pub unsafe fn instance_field_in(&self, owner: Class, name: &CStr, expected: Class, label: &str) -> Result<Ptr, MetadataError> {
         // SAFETY: The owner is retained metadata; expected field class and instance storage are validated before returning the descriptor.
         unsafe {
             let field = self.field(owner, name)?;
@@ -417,7 +397,11 @@ impl RuntimeAccess {
         }
     }
 
-    unsafe fn type_name(&self, ty: Type) -> Result<String, DiscoveryError> {
+    /// A type's full name, copied before the runtime's allocation is freed.
+    ///
+    /// # Safety
+    /// The lookup contract (module docs).
+    pub unsafe fn type_name(&self, ty: Type) -> Result<String, MetadataError> {
         // SAFETY: The live type descriptor returns allocated NUL-terminated text; it is copied before RuntimeFree releases that allocation.
         unsafe {
             if ty.is_null() {
@@ -433,7 +417,12 @@ impl RuntimeAccess {
         }
     }
 
-    unsafe fn static_field(&self, class: Class, name: &CStr, expected: &str) -> Result<Ptr, DiscoveryError> {
+    /// A static, nonliteral field of `class` whose type is named `expected`: process-wide state, not a constant or a
+    /// thread-static.
+    ///
+    /// # Safety
+    /// The lookup contract (module docs).
+    pub unsafe fn static_field(&self, class: Class, name: &CStr, expected: &str) -> Result<Ptr, MetadataError> {
         // SAFETY: The live field descriptor is checked for static nonliteral storage and exact type before being used by a getter.
         unsafe {
             let field = self.field(class, name)?;
@@ -449,14 +438,12 @@ impl RuntimeAccess {
         }
     }
 
-    pub(super) unsafe fn zero_arg_method(
-        &self,
-        owner: Class,
-        name: &CStr,
-        returns: Class,
-        instance: bool,
-        api: &raw::InvocationApi,
-    ) -> Result<NonNull<raw::MethodInfo>, DiscoveryError> {
+    /// The one nonvirtual, nonabstract method `name` declared by `owner` that takes no argument, is or is not an
+    /// instance method as `instance` says, and returns exactly `returns`.
+    ///
+    /// # Safety
+    /// The lookup contract (module docs); `api` belongs to the same runtime.
+    pub unsafe fn zero_arg_method(&self, owner: Class, name: &CStr, returns: Class, instance: bool, api: &raw::InvocationApi) -> Result<NonNull<raw::MethodInfo>, MetadataError> {
         // SAFETY: The owner and return class are retained metadata; exact arity and storage are checked before binding.
         unsafe {
             let mut found = None;
@@ -488,7 +475,12 @@ impl RuntimeAccess {
         }
     }
 
-    unsafe fn method(&self, class: Class, name: &CStr, parameters: &[&str], instance: bool) -> Result<Method, DiscoveryError> {
+    /// The one direct (nonvirtual, nonabstract, non-P/Invoke, nongeneric) `System.Void` method `name` of `class` whose
+    /// parameter types are named `parameters`.
+    ///
+    /// # Safety
+    /// The lookup contract (module docs).
+    pub unsafe fn method(&self, class: Class, name: &CStr, parameters: &[&str], instance: bool) -> Result<Method, MetadataError> {
         // SAFETY: The class is retained metadata; exact parameter names, instance flags and nonvirtual Void return are checked before its code is selected.
         unsafe {
             let mut found = None;
@@ -524,45 +516,12 @@ impl RuntimeAccess {
         }
     }
 
-    /// Validate the legacy control discovery contract without invoking game methods.
+    /// Checks the two layout adapters the queries rely on against freshly allocated, rooted samples: the public header
+    /// sizes, and an array's length and a string's length and characters where the modern x64 layout puts them.
     ///
     /// # Safety
-    /// `attached` must belong to these exports' live runtime on this OS thread. Runtime metadata
-    /// must be immutable and assembly loading/shutdown excluded for the operation. The runtime
-    /// must use the Unity 6000.4.8 x64 nonmoving-GC layouts: MethodInfo.methodPointer at offset 0,
-    /// object header 16, array header 32, string length/chars at 16/20. The module range must be
-    /// the readable mapped GameAssembly image containing generated method bodies. Class metadata
-    /// and the allocation APIs must be valid; public header queries and allocated adapter samples
-    /// are cross-checks, not permission to dereference arbitrary or untrusted memory.
-    pub unsafe fn discover(&self, attached: &AttachedThread<'_>, build_id: String, module_base: NonNull<u8>, module_size: usize) -> Result<DiscoveredRuntime, DiscoveryError> {
-        // SAFETY: The caller retains the mapped module and immutable metadata; the dispatcher RVA is bounded before its instruction prefix is copied.
-        unsafe {
-            if build_id.len() != 64 || !build_id.bytes().all(|byte| byte.is_ascii_hexdigit()) {
-                return Err(unsupported("helper build ID"));
-            }
-            let images = self.images()?;
-            self.check_allocated_adapters(attached)?;
-            let dispatcher = self.method(self.class(&images, c"UnityEngine", c"UnitySynchronizationContext")?, c"ExecuteTasks", &[], false)?;
-            let address = read_value(dispatcher.cast::<*mut u8>());
-            let base = module_base.as_ptr() as usize;
-            let rva = (address as usize)
-                .checked_sub(base)
-                .filter(|offset| offset.checked_add(16).is_some_and(|end| end <= module_size))
-                .ok_or_else(|| unsupported("dispatcher module range"))?;
-            let mut bytes = [0; 16];
-            bytes.copy_from_slice(&read_value::<[u8; 16]>(address.cast()));
-            Ok(DiscoveredRuntime {
-                discovery: Discovery {
-                    build_id,
-                    dispatcher: DispatcherSpec { rva: rva as u64, bytes },
-                },
-                dispatcher: NonNull::new(address).ok_or_else(|| unsupported("dispatcher address"))?,
-            })
-        }
-    }
-
-    // SAFETY: Fresh arrays and strings are rooted; their public lengths and addresses are cross-checked before reading supported header slots.
-    unsafe fn check_allocated_adapters(&self, attached: &AttachedThread<'_>) -> Result<(), DiscoveryError> {
+    /// `attached` belongs to this export table's live runtime on this thread.
+    pub unsafe fn check_allocated_adapters(&self, attached: &AttachedThread<'_>) -> Result<(), MetadataError> {
         // SAFETY: Fresh arrays and strings stay rooted while public header APIs and bounded raw header slots are compared.
         unsafe {
             if (self.object_header_size)() != 16 || (self.array_header_size)() != 32 || (self.array_length_offset)() != 24 || (self.array_bounds_offset)() != 16 {
@@ -587,65 +546,11 @@ impl RuntimeAccess {
         }
     }
 
-    /// Read the online flag and the current managed manager wrapper, without running game methods.
-    /// The manager address is an ephemeral identity token; it grants no dereference permission.
+    /// Whether a rooted object's class is `expected` or derives from it.
     ///
     /// # Safety
-    /// All `discover` runtime/attachment/layout conditions apply. Call only on Unity's main thread,
-    /// after its original ExecuteTasks call has returned. The game's static fields/native-object
-    /// lifetime must not race this query; no other thread may destroy the wrapper during rooting.
-    /// No process-global initialized state is changed by this query. Static fields must already be
-    /// initialized, as required by the admitted game session. This reader reports zero features;
-    /// the helper fills in its independently tracked active hook count.
-    pub unsafe fn status(&self, attached: &AttachedThread<'_>) -> Result<RuntimeStatus, DiscoveryError> {
-        // SAFETY: The caller supplies the immutable main-thread graph span; static references are rooted and native pointer fields are validated before copying.
-        unsafe {
-            let images = self.images()?;
-            let online_field = self.static_field(self.class(&images, c"EHG.Multiplayer", c"GameplayEnvironment")?, c"_isOnlinePlay", "System.Boolean")?;
-            let mut online = 1_u8;
-            (self.static_get)(online_field, (&mut online as *mut u8).cast());
-            if online > 1 {
-                return Err(unsupported("online Boolean representation"));
-            }
-            let manager_class = self.class(&images, c"", c"ItemContainersManager")?;
-            let field = self.static_field(self.class(&images, c"", c"PlayerFinder")?, c"localItemContainersManager", "ItemContainersManager")?;
-            let mut manager = std::ptr::null_mut::<raw::Object>();
-            (self.static_get)(field, (&mut manager as *mut *mut raw::Object).cast());
-            let manager_root = NonNull::new(manager).map(|pointer| attached.root(pointer)).transpose()?;
-            let mut manager_address = 0;
-            if let Some(root) = &manager_root {
-                let manager = root.target().ok_or_else(|| unsupported("manager root target"))?;
-                self.check_object(manager_class, manager)?;
-                let cached = self.field(manager_class, c"m_CachedPtr")?;
-                if (self.field_flags)(cached) & raw::FIELD_ATTRIBUTE_STATIC != 0
-                    || (self.field_offset)(cached) != 16
-                    || self.type_name((self.field_type)(cached))? != "System.IntPtr"
-                {
-                    return Err(unsupported("manager native pointer"));
-                }
-                // The managed wrapper is strongly rooted; this reads only its pointer-sized field,
-                // and never dereferences the native object or assumes a root preserves native life.
-                if !read_value(manager.as_ptr().cast::<u8>().add(16).cast::<Ptr>()).is_null() {
-                    manager_address = manager.as_ptr() as u64;
-                }
-            }
-            let master_class = self.class(&images, c"", c"AffixList")?;
-            let field = self.static_field(self.class(&images, c"LE.AssetManagement", c"GlobalAssets")?, c"_storage_MasterAffixesList", "AffixList")?;
-            let mut master = std::ptr::null_mut::<raw::Object>();
-            (self.static_get)(field, (&mut master as *mut *mut raw::Object).cast());
-            let master_root = NonNull::new(master).map(|pointer| attached.root(pointer)).transpose()?;
-            if let Some(root) = master_root {
-                self.check_object(master_class, root.target().ok_or_else(|| unsupported("master root target"))?)?;
-            }
-            Ok(RuntimeStatus {
-                online: online != 0,
-                manager: manager_address,
-                features_on: 0,
-            })
-        }
-    }
-
-    unsafe fn check_object(&self, expected: Class, object: NonNull<raw::Object>) -> Result<(), DiscoveryError> {
+    /// The object is rooted and `expected` is a retained class descriptor of this runtime.
+    pub unsafe fn check_object(&self, expected: Class, object: NonNull<raw::Object>) -> Result<(), MetadataError> {
         // SAFETY: The rooted object and expected class descriptor remain live in this retained runtime while assignability is queried.
         unsafe {
             let actual = (self.object_class)(object.as_ptr());
@@ -659,7 +564,7 @@ impl RuntimeAccess {
 
 // Image::ClassFromName includes exported/forwarded types in its name table. Multiple images
 // may therefore resolve to one canonical class. Only distinct class identities are ambiguous.
-fn record_class(found: &mut Class, candidate: Class, name: &CStr) -> Result<(), DiscoveryError> {
+pub fn record_class(found: &mut Class, candidate: Class, name: &CStr) -> Result<(), MetadataError> {
     if !candidate.is_null() {
         if !found.is_null() && *found != candidate {
             return Err(unsupported(format!("ambiguous class {}", name.to_string_lossy())));
@@ -680,9 +585,9 @@ mod tests {
             LOOKUPS.with(|count| count.set(count.get() + 1));
             NonNull::<u8>::dangling().as_ptr().cast()
         }
-        let mut access = RuntimeAccess::test_stubs();
+        let mut access = MetadataApi::test_stubs();
         access.class_field = lookup;
-        access.metadata = Some(Box::leak(Box::new(MetadataCache::default())));
+        access.cache = Some(Box::leak(Box::new(FieldCache::default())));
         let (mut first, mut second) = (0_u8, 0_u8);
         let first = (&raw mut first).cast();
         let second = (&raw mut second).cast();
@@ -743,7 +648,7 @@ mod tests {
                 drop(CString::from_raw(value.cast()));
             }
         }
-        let mut access = RuntimeAccess::test_stubs();
+        let mut access = MetadataApi::test_stubs();
         access.class_methods = methods;
         access.method_name = name;
         access.method_params = count;
@@ -763,8 +668,8 @@ mod tests {
     #[test]
     fn resolution_fails_before_invoking_any_missing_export() {
         // SAFETY: no address is returned, so no ABI/lifetime promises are exercised.
-        let result = unsafe { RuntimeAccess::resolve(|_| None) };
-        assert!(matches!(result, Err(DiscoveryError::MissingExport(raw::MissingExport(name))) if name == c"il2cpp_domain_get"));
+        let result = unsafe { MetadataApi::resolve(|_| None) };
+        assert!(matches!(result, Err(MetadataError::MissingExport(raw::MissingExport(name))) if name == c"il2cpp_domain_get"));
     }
     #[test]
     fn forwarded_class_identity_is_unique_across_images() {
@@ -778,7 +683,7 @@ mod tests {
         record_class(&mut found, class, c"Forwarded").unwrap();
         record_class(&mut found, std::ptr::null_mut(), c"Forwarded").unwrap();
         assert_eq!(found, class);
-        assert!(matches!(record_class(&mut found, other, c"Forwarded"), Err(DiscoveryError::Contract(message)) if message == "ambiguous class Forwarded"));
+        assert!(matches!(record_class(&mut found, other, c"Forwarded"), Err(MetadataError::Contract(message)) if message == "ambiguous class Forwarded"));
         assert_eq!(found, class);
     }
 }

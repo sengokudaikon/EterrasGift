@@ -5,12 +5,12 @@ use crate::{
     server::{self, Backend, Shared},
 };
 use eg_game_access::{
+    discovery::{AttackLeechWriteError, DiscoveryError, ForgeWriteError, RuntimeAccess, presence::PlayPresence},
     hooks::{self, HookState, RetainedHook, gateway::CallbackGate},
-    il2cpp::{
-        AttachedThread, ThreadContext,
-        discovery::{AttackLeechWriteError, DiscoveryError, ForgeWriteError, RuntimeAccess, presence::PlayPresence},
-        raw::{self, MethodInfo},
-    },
+};
+use eg_il2cpp_runtime::{
+    AttachedThread, ThreadContext,
+    raw::{self, MethodInfo},
 };
 use eg_trainer_wire::dispatch::{Dispatcher, Pending};
 use eg_trainer_wire::{
@@ -489,7 +489,7 @@ struct Control<'a> {
     module: NonNull<u8>,
     size: usize,
     access: RuntimeAccess,
-    attached: &'a eg_game_access::il2cpp::AttachedThread<'a>,
+    attached: &'a AttachedThread<'a>,
     discovery: Option<Discovery>,
     hook: Option<&'static RetainedHook>,
     gate: Option<CallbackGate>,

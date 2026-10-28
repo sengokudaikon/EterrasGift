@@ -2,7 +2,7 @@
 #![cfg(all(windows, target_arch = "x86_64"))]
 //! Owned native target only. Relocation/registered unwind and real suspension/restore tests.
 use eg_game_access::hooks::{self, HookError, HookState, RetainedHook};
-use eg_game_access::il2cpp::raw::{ExecuteTasks, MethodInfo};
+use eg_il2cpp_runtime::raw::{ExecuteTasks, MethodInfo};
 use std::ptr::NonNull;
 use std::sync::atomic::{AtomicBool, AtomicPtr, AtomicUsize, Ordering::SeqCst};
 use std::sync::{Arc, Mutex};

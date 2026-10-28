@@ -1,7 +1,7 @@
 //! Callback-local check against Unity's native main-thread identity.
 use super::metadata_text;
 use super::{DiscoveryError, RuntimeAccess, unsupported};
-use crate::il2cpp::{AttachedThread, InvocationContext, InvocationOutcome, ReturnValue, Scalar, raw};
+use eg_il2cpp_runtime::{AttachedThread, InvocationContext, InvocationOutcome, ReturnValue, Scalar, raw};
 use std::ptr::NonNull;
 
 impl RuntimeAccess {

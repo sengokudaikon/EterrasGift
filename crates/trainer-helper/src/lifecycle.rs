@@ -1,5 +1,5 @@
 //! Pure watchdog policy. Menus are departure; a zone change within InGame is not.
-use eg_game_access::il2cpp::discovery::presence::PlayPresence;
+use eg_game_access::discovery::presence::PlayPresence;
 use std::time::{Duration, Instant};
 
 const POLL: Duration = Duration::from_millis(250);

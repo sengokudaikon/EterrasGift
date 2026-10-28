@@ -1356,9 +1356,9 @@ version = "0.1.0"
 dependencies = [
  "detour",
  "eg-core",
+ "eg-il2cpp-runtime",
  "eg-trainer-wire",
  "iced-x86",
- "static_assertions",
  "tokio",
  "windows-sys 0.61.2",
 ]
@@ -1381,6 +1381,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "eg-il2cpp-runtime"
+version = "0.1.0"
+dependencies = [
+ "static_assertions",
+]
+
+[[package]]
 name = "eg-trainer"
 version = "0.1.0"
 dependencies = [
@@ -1399,6 +1406,7 @@ name = "eg-trainer-helper"
 version = "0.1.0"
 dependencies = [
  "eg-game-access",
+ "eg-il2cpp-runtime",
  "eg-trainer-wire",
  "sha2",
  "tokio",

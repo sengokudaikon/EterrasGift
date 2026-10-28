@@ -1,7 +1,6 @@
-#![cfg(feature = "il2cpp")]
 //! A fake export table. Tests ownership and ABI-width assumptions, not Unity compatibility.
-use eg_game_access::il2cpp::raw::{self, Api};
-use eg_game_access::il2cpp::{AttachedThread, RuntimeError, StrongRoot, ThreadContext};
+use eg_il2cpp_runtime::raw::{self, Api};
+use eg_il2cpp_runtime::{AttachedThread, RuntimeError, StrongRoot, ThreadContext};
 use static_assertions::assert_not_impl_any;
 use std::cell::RefCell;
 use std::collections::BTreeMap;

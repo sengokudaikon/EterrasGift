@@ -7,7 +7,7 @@ use super::{
     Class, DiscoveryError, Ptr, RuntimeAccess,
     forge::{ForgeGraph, Root, target},
 };
-use crate::il2cpp::{Argument, AttachedThread, InvocationContext, InvocationOutcome, ReturnValue, Scalar, raw};
+use eg_il2cpp_runtime::{Argument, AttachedThread, InvocationContext, InvocationOutcome, ReturnValue, Scalar, raw};
 use eg_trainer_wire::{
     forge::ForgeSnapshot,
     write::{ForgeMutation, StatusField},
@@ -33,6 +33,12 @@ impl std::fmt::Display for ForgeWriteError {
     }
 }
 impl std::error::Error for ForgeWriteError {}
+impl From<eg_il2cpp_runtime::MetadataError> for ForgeWriteError {
+    fn from(error: eg_il2cpp_runtime::MetadataError) -> Self {
+        DiscoveryError::from(error).into()
+    }
+}
+
 impl From<DiscoveryError> for ForgeWriteError {
     fn from(error: DiscoveryError) -> Self {
         match error {
@@ -560,7 +566,7 @@ impl RuntimeAccess {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::il2cpp::ThreadContext;
+    use eg_il2cpp_runtime::ThreadContext;
     use std::{
         cell::Cell,
         ffi::{CStr, c_char},

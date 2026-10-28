@@ -5,7 +5,7 @@ use super::{
     forge::{Root, target},
     unsupported,
 };
-use crate::il2cpp::{Argument, AttachedThread, InvocationContext, InvocationOutcome, ReturnValue, Scalar, raw};
+use eg_il2cpp_runtime::{Argument, AttachedThread, InvocationContext, InvocationOutcome, ReturnValue, Scalar, raw};
 use eg_trainer_wire::mapping::{ForgeDescriptionRequest, MAX_TEXT_BYTES, ModifierSnapshot};
 use std::{ffi::CStr, ptr::NonNull};
 

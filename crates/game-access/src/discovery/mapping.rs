@@ -5,7 +5,7 @@ use super::{
     forge::{ForgeGraph, Root, target},
     unsupported,
 };
-use crate::il2cpp::{Argument, AttachedThread, InvocationContext, InvocationOutcome, ReturnValue, Scalar, ValueTypeContract, raw};
+use eg_il2cpp_runtime::{Argument, AttachedThread, InvocationContext, InvocationOutcome, ReturnValue, Scalar, ValueTypeContract, raw};
 use eg_trainer_wire::mapping::{AffixMappingQuery, MAX_CONTEXT_BYTES, MappingAddress, MappingStart, MappingTarget, RawMappingPage, RawValueSample};
 use std::{collections::BTreeSet, ffi::CStr, ptr::NonNull};
 #[derive(PartialEq)]
@@ -182,7 +182,7 @@ impl RuntimeAccess {
             for name in [c"uniqueRolls", c"implicitRolls"] {
                 if let Some(array) = self.catalog_reference(attached, &graph.item, name)? {
                     let cloned = self.mapping_clone_bytes(attached, &array, 8)?;
-                    writes.set_reference(self, attached, &copy, name, &cloned)?;
+                    self.set_reference(&writes, attached, &copy, name, &cloned)?;
                 }
             }
             Ok(copy)

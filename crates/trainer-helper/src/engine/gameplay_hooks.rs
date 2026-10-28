@@ -1,7 +1,7 @@
 //! Concrete gameplay effects share this lifecycle; gameplay calls execute only retained leaf code.
 use super::*;
+use eg_game_access::discovery::GameplayHookTarget;
 use eg_game_access::hooks::leaf::LeafGate;
-use eg_game_access::il2cpp::discovery::GameplayHookTarget;
 use eg_trainer_wire::hooks::{GameplayHook, HookObservation, PatchState};
 
 struct Installed {

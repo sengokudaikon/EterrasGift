@@ -2,7 +2,7 @@
 
 use super::metadata_text;
 use super::*;
-use crate::il2cpp::ValueTypeContract;
+use eg_il2cpp_runtime::ValueTypeContract;
 use eg_trainer_wire::{
     forge::AffixSnapshot,
     write::{affix_order_key, layout_problems},
@@ -233,7 +233,7 @@ impl AffixRewrite<'_, '_> {
         // SAFETY: Prepared metadata fixes every field and method signature; the caller retains exclusive rooted destinations through stores and refresh.
         unsafe {
             let context = InvocationContext::new(attached, api);
-            let failed = |e: crate::il2cpp::InvokeError| ForgeWriteError::Failed(e.to_string());
+            let failed = |e: eg_il2cpp_runtime::InvokeError| ForgeWriteError::Failed(e.to_string());
             let clear = context
                 .bind_with_closed_references(NonNull::new(self.clear.cast_mut()).expect("prepared Clear"), &[self.list_class])
                 .map_err(failed)?;

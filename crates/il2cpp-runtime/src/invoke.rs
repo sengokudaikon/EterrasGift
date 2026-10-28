@@ -237,7 +237,7 @@ impl<'attachment, 'runtime> InvocationContext<'attachment, 'runtime> {
         }
     }
 
-    /// Opt in to exact closed reference classes (for example List<ItemAffix>) as
+    /// Opt in to exact closed reference classes (for example `List<T>` of one exact class) as
     /// receivers, parameters or returns. Ordinary bind still rejects all generics.
     /// This permits inflated methods only on the explicitly listed declaring classes.
     /// Open generic classes, value types and byref references remain unsupported.

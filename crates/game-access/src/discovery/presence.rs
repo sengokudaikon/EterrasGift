@@ -1,7 +1,7 @@
 //! Cached metadata for the menu/play distinction; object and state values are
 //! always read afresh on the verified Unity dispatcher thread.
 use super::{DiscoveryError, RuntimeAccess, unsupported};
-use crate::il2cpp::{AttachedThread, InvocationContext, InvocationOutcome, ReturnValue, ValueTypeContract, raw};
+use eg_il2cpp_runtime::{AttachedThread, InvocationContext, InvocationOutcome, ReturnValue, ValueTypeContract, raw};
 use std::ptr::NonNull;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -114,11 +114,11 @@ impl RuntimeAccess {
         // the checked static state getter; enum boxes remain rooted until copied.
         unsafe {
             let local;
-            let bindings = if let Some(cache) = self.metadata {
-                if cache.presence.get().is_none() {
-                    let _ = cache.presence.set(self.presence_bindings()?);
+            let bindings = if let Some(cache) = self.presence {
+                if cache.get().is_none() {
+                    let _ = cache.set(self.presence_bindings()?);
                 }
-                cache.presence.get().unwrap()
+                cache.get().unwrap()
             } else {
                 local = self.presence_bindings()?;
                 &local

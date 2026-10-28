@@ -8,7 +8,7 @@ use super::{
     forge::{Primitive, Root, target},
     unsupported,
 };
-use crate::il2cpp::{AttachedThread, raw};
+use eg_il2cpp_runtime::{AttachedThread, raw};
 use std::{ffi::CStr, ptr::NonNull};
 
 fn collection_count(count: i32, capacity: u32, maximum: u32) -> Result<usize, DiscoveryError> {
@@ -228,7 +228,7 @@ impl RuntimeAccess {
 mod tests {
     use super::super::{Ptr, Type};
     use super::*;
-    use crate::il2cpp::ThreadContext;
+    use eg_il2cpp_runtime::ThreadContext;
     use std::cell::Cell;
 
     const CHILD: usize = 0x1000;

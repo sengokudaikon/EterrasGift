@@ -2,7 +2,7 @@
 
 use super::metadata_text;
 use super::{Class, DiscoveryError, Images, Ptr, RuntimeAccess, unsupported};
-use crate::il2cpp::{AttachedThread, StrongRoot, raw};
+use eg_il2cpp_runtime::{AttachedThread, StrongRoot, raw};
 use eg_trainer_wire::forge::{AffixSnapshot, ForgeSnapshot, ItemStatus, UniqueIdentity};
 use std::{ffi::CStr, ptr::NonNull};
 
@@ -66,13 +66,33 @@ fn decode_text(units: &[u16], maximum: usize) -> Result<String, DiscoveryError> 
 }
 
 impl RuntimeAccess {
-    pub(in crate::il2cpp) unsafe fn reference_field(
+    /// Store a non-null reference after checking root provenance and mutable reference-field metadata. Exact class
+    /// identity is required; no conversion.
+    ///
+    /// # Safety
+    /// The [`raw::FieldWriteApi::set_object`] runtime, thread, lifetime and exclusive mutation obligations apply.
+    /// `writes` and `attached` belong to this runtime. Metadata and the rooted graph stay stable throughout validation
+    /// and store.
+    pub(super) unsafe fn set_reference(
         &self,
+        writes: &raw::FieldWriteApi,
         attached: &AttachedThread<'_>,
         object: &Root<'_, '_>,
         name: &CStr,
         value: &Root<'_, '_>,
-    ) -> Result<NonNull<raw::FieldInfo>, DiscoveryError> {
+    ) -> Result<(), DiscoveryError> {
+        // SAFETY: caller establishes the runtime and graph span. The validator rejects value types, incompatible roots
+        // and immutable or noninstance fields before the store.
+        unsafe {
+            let field = self.reference_field(attached, object, name, value)?;
+            let object = object.target().ok_or(DiscoveryError::NotReady("reference receiver unavailable"))?;
+            let value = value.target().ok_or(DiscoveryError::NotReady("reference value unavailable"))?;
+            writes.set_object(object, field, value);
+            Ok(())
+        }
+    }
+
+    unsafe fn reference_field(&self, attached: &AttachedThread<'_>, object: &Root<'_, '_>, name: &CStr, value: &Root<'_, '_>) -> Result<NonNull<raw::FieldInfo>, DiscoveryError> {
         // SAFETY: The receiver and value are rooted; exact mutable reference storage and declaring-class compatibility are checked before returning the field.
         unsafe {
             if !object.belongs_to(attached) || !value.belongs_to(attached) {
@@ -106,7 +126,7 @@ impl RuntimeAccess {
             if class.is_null() {
                 return Err(unsupported("forge object class"));
             }
-            self.instance_field_in(class, name, expected, "forge")
+            Ok(self.instance_field_in(class, name, expected, "forge")?)
         }
     }
 
@@ -497,7 +517,7 @@ impl RuntimeAccess {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::il2cpp::ThreadContext;
+    use eg_il2cpp_runtime::ThreadContext;
     use std::{cell::Cell, ffi::c_void};
 
     const PARENT: usize = 0x1000;
@@ -747,23 +767,23 @@ mod tests {
             let writes = raw::FieldWriteApi::test_export(store_reference);
             for flags in [0x10, 0x20, 0x40] {
                 FLAGS.set(flags);
-                assert!(writes.set_reference(&access, &attached, &parent, c"child", &child).is_err());
+                assert!(access.set_reference(&writes, &attached, &parent, c"child", &child).is_err());
             }
             FLAGS.set(0);
             BYREF.set(true);
-            assert!(writes.set_reference(&access, &attached, &parent, c"child", &child).is_err());
+            assert!(access.set_reference(&writes, &attached, &parent, c"child", &child).is_err());
             BYREF.set(false);
             VALUE_CLASS.set(true);
             TYPE_CODE.set(0x11);
-            assert!(writes.set_reference(&access, &attached, &parent, c"child", &child).is_err());
+            assert!(access.set_reference(&writes, &attached, &parent, c"child", &child).is_err());
             VALUE_CLASS.set(false);
-            assert!(writes.set_reference(&access, &attached, &parent, c"child", &child).is_err());
+            assert!(access.set_reference(&writes, &attached, &parent, c"child", &child).is_err());
             TYPE_CODE.set(0x1d);
             FIELD_CLASS.set(WORD_CLASS);
-            assert!(writes.set_reference(&access, &attached, &parent, c"child", &child).is_err());
+            assert!(access.set_reference(&writes, &attached, &parent, c"child", &child).is_err());
             FIELD_CLASS.set(CHILD_CLASS);
             ASSIGNABLE.set(false);
-            assert!(writes.set_reference(&access, &attached, &parent, c"child", &child).is_err());
+            assert!(access.set_reference(&writes, &attached, &parent, c"child", &child).is_err());
             ASSIGNABLE.set(true);
             let other_runtime = {
                 // A distinct context using the same fake exports is still a different
@@ -780,9 +800,9 @@ mod tests {
                 ThreadContext::new(api)
             };
             let other_attached = other_runtime.attach().unwrap();
-            assert!(writes.set_reference(&access, &other_attached, &parent, c"child", &child).is_err());
+            assert!(access.set_reference(&writes, &other_attached, &parent, c"child", &child).is_err());
             assert_eq!(STORES.get(), 0);
-            writes.set_reference(&access, &attached, &parent, c"child", &child).unwrap();
+            access.set_reference(&writes, &attached, &parent, c"child", &child).unwrap();
             assert_eq!(STORES.get(), 1);
         }
         assert_eq!(ROOTS.get(), 0);
@@ -830,7 +850,7 @@ mod tests {
         assert!(matches!(
             // SAFETY: the fake root export deliberately returns failure, before child metadata access.
             unsafe { access.reference(&attached, &parent, c"child", token(CHILD_CLASS)) },
-            Err(DiscoveryError::Runtime(crate::il2cpp::RuntimeError::RootFailed))
+            Err(DiscoveryError::Runtime(eg_il2cpp_runtime::RuntimeError::RootFailed))
         ));
         assert_eq!(ROOTS.get(), 1);
         assert_eq!(FREED.get(), 0);
