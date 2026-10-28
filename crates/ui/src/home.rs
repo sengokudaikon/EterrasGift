@@ -21,6 +21,8 @@ struct Home {
     window: Weak<MainWindow>,
     watch_timer: Timer,
     decorations: Rc<Decorations<MainWindow>>,
+    /// Home shows: it follows the game and owns the decorations only then.
+    visible: Cell<bool>,
     /// Home is coming into view: the tree is shown where it is, without blooming there.
     entering: Cell<bool>,
     /// A look at the game is on its way back from its thread; another waits for it rather than overlapping it.
@@ -42,6 +44,7 @@ pub fn bind(window: &MainWindow, launcher: Option<Arc<GameLauncher>>, shell: &Sh
         window: window.as_weak(),
         watch_timer: Timer::default(),
         decorations,
+        visible: Cell::new(false),
         entering: Cell::new(true),
         looking: Cell::new(false),
         again: Cell::new(None),
@@ -50,10 +53,10 @@ pub fn bind(window: &MainWindow, launcher: Option<Arc<GameLauncher>>, shell: &Sh
         let home = home.clone();
         move |mode| home.play(mode)
     });
+    home.follow(shell.current() == Page::Home);
     if shell.current() == Page::Home {
         home.refresh();
     }
-    home.follow(shell.current() == Page::Home);
     shell.on_page_entered({
         let home = home.clone();
         move |page| {
@@ -69,6 +72,7 @@ pub fn bind(window: &MainWindow, launcher: Option<Arc<GameLauncher>>, shell: &Sh
 impl Home {
     /// Looks at the game every `WATCH_INTERVAL` while Home shows; on another page the timer stops, so it costs nothing.
     fn follow(self: &Rc<Self>, visible: bool) {
+        self.visible.set(visible);
         if !visible {
             self.watch_timer.stop();
             return;
@@ -157,10 +161,13 @@ impl Home {
         };
         let model = self.model.borrow();
         let ash = if model.is_game_starting() { Ash::Drifting } else { Ash::Hidden };
-        if self.entering.replace(false) {
-            self.decorations.enter(model.phase(), ash);
-        } else {
-            self.decorations.follow(model.phase(), ash);
+        // A look or a start that ends while another page shows leaves that page's decorations alone.
+        if self.visible.get() {
+            if self.entering.replace(false) {
+                self.decorations.enter(model.phase(), ash);
+            } else {
+                self.decorations.follow(model.phase(), ash);
+            }
         }
         let state = window.global::<HomeState>();
         state.set_game_starting(model.is_game_starting());
@@ -170,7 +177,7 @@ impl Home {
             BloomPhase::Opening => ViewPhase::Opening,
             BloomPhase::Bloom => ViewPhase::Bloom,
         });
-        // A start begun on the Mods page holds Home's buttons too, as the C# app's shared `IsStarting` does.
+        // One launcher starts the game for every page, so a start begun on Mods holds Home's buttons too.
         let elsewhere = self.launcher.is_starting();
         state.set_can_start(model.can_play() && !elsewhere);
         state.set_can_start_with_mods(model.can_play_with_mods() && !elsewhere);

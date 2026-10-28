@@ -1,9 +1,10 @@
-//! Navigation: which pages exist, which one shows, and how the pane's rows answer clicks and keys
-//! (spec/shell-and-settings.md §3). The model is plain Rust; `bind` connects it to the `Nav` global.
+//! Navigation: which pages exist, which one shows, and how the pane's rows answer clicks and keys. The model is plain
+//! Rust; `bind` connects it to the `Nav` global.
 
+use crate::models::update_rows;
 use crate::{MainWindow, Nav, NavOutcome, NavRow, Tokens};
 use slint::platform::Key;
-use slint::{ComponentHandle, Image, Model, ModelRc, SharedString, VecModel, Weak};
+use slint::{ComponentHandle, Image, ModelRc, VecModel, Weak};
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
@@ -97,7 +98,7 @@ pub enum Node {
     Trainer,
 }
 
-/// The keys the rows answer (spec §3 "Keyboard").
+/// The keys the rows answer.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum NavKey {
     Up,
@@ -326,6 +327,7 @@ pub fn bind(window: &MainWindow, navigation: Navigation) -> ShellHandle {
         navigation: RefCell::new(navigation),
         rows: Rc::new(VecModel::default()),
         footer: Rc::new(VecModel::default()),
+        flyout: Rc::new(VecModel::default()),
         window: window.as_weak(),
         focus_serial: RefCell::new(0),
         page_serial: Cell::new(0),
@@ -334,6 +336,7 @@ pub fn bind(window: &MainWindow, navigation: Navigation) -> ShellHandle {
     let nav = window.global::<Nav>();
     nav.set_rows(ModelRc::from(shell.rows.clone()));
     nav.set_footer(ModelRc::from(shell.footer.clone()));
+    nav.set_flyout_pages(ModelRc::from(shell.flyout.clone()));
 
     nav.on_row_clicked({
         let shell = shell.clone();
@@ -407,6 +410,8 @@ struct Shell {
     navigation: RefCell<Navigation>,
     rows: Rc<VecModel<NavRow>>,
     footer: Rc<VecModel<NavRow>>,
+    /// The rail's flyout of trainer pages.
+    flyout: Rc<VecModel<NavRow>>,
     window: Weak<MainWindow>,
     focus_serial: RefCell<i32>,
     /// Counts pages that came to show after the first, for the view's entrance (the first page never fades in).
@@ -441,10 +446,11 @@ impl Shell {
         let nav = window.global::<Nav>();
         let row = |node: Node| nav_row(&navigation, &tokens, node);
 
-        update(&self.rows, navigation.rows().into_iter().map(row).collect());
-        update(&self.footer, navigation.footer().into_iter().map(row).collect());
-        let flyout: Vec<NavRow> = navigation.trainer_pages().iter().map(|&page| row(Node::Page(page))).collect();
-        nav.set_flyout_pages(ModelRc::new(VecModel::from(flyout)));
+        // The trainer's pages come and go only after the Trainer item, the last row, so rows that stay keep their place and
+        // keyboard focus.
+        update_rows(&self.rows, navigation.rows().into_iter().map(row).collect());
+        update_rows(&self.footer, navigation.footer().into_iter().map(row).collect());
+        update_rows(&self.flyout, navigation.trainer_pages().iter().map(|&page| row(Node::Page(page))).collect());
         nav.set_current_page(navigation.current().id().into());
         nav.set_current_title(navigation.current().title().into());
         nav.set_pane_open(navigation.pane_open());
@@ -496,25 +502,6 @@ fn page_icon(tokens: &Tokens<'_>, page: Page) -> Image {
         Page::Factions => tokens.get_icon_factions(),
         Page::World => tokens.get_icon_world(),
         Page::Settings => tokens.get_icon_settings(),
-    }
-}
-
-/// Changes only the rows that differ, so rows that stay keep their place and keyboard focus (spec §3).
-fn update(model: &VecModel<NavRow>, rows: Vec<NavRow>) {
-    let old: Vec<SharedString> = model.iter().map(|row| row.id).collect();
-    let prefix = old.iter().zip(&rows).take_while(|(a, b)| **a == b.id).count();
-    let max_suffix = old.len().min(rows.len()) - prefix;
-    let suffix = old.iter().rev().zip(rows.iter().rev()).take(max_suffix).take_while(|(a, b)| **a == b.id).count();
-    for index in (prefix..old.len() - suffix).rev() {
-        model.remove(index);
-    }
-    for (offset, row) in rows[prefix..rows.len() - suffix].iter().enumerate() {
-        model.insert(prefix + offset, row.clone());
-    }
-    for (index, row) in rows.into_iter().enumerate() {
-        if model.row_data(index).as_ref() != Some(&row) {
-            model.set_row_data(index, row);
-        }
     }
 }
 

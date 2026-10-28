@@ -51,14 +51,14 @@ pub fn install(window: &MainWindow, app: App) {
     let decorations = decorations::Decorations::install(window);
     home::bind(window, app.launcher, &shell, decorations.clone());
     let before_close = app.mods.map(|page| mods::bind(window, page, &shell));
+    let trainer_backend = app.trainer_backend.filter(|_| app.trainer);
     // The trainer's switches reach its session as they flip; Game definitions follows its game data.
-    let settings = match app.trainer_backend.clone().filter(|_| app.trainer) {
-        Some(backend) => app.settings.link(trainer_settings::ID, trainer_settings::link(backend)),
+    let settings = match &trainer_backend {
+        Some(backend) => app.settings.link(trainer_settings::ID, trainer_settings::link(backend.clone())),
         None => app.settings,
     };
     settings::bind_with_close(window, settings, before_close);
     trainer_backend::unbound(window, app.trainer);
-    let trainer_backend = app.trainer_backend.filter(|_| app.trainer);
     trainer::install(window, trainer_backend.clone());
     if let Some(backend) = trainer_backend {
         trainer_backend::bind(window, backend, &shell, decorations, app.faults);
@@ -67,7 +67,7 @@ pub fn install(window: &MainWindow, app: App) {
 }
 
 /// Windows says nothing when "Animation effects" or high contrast changes, and Slint surfaces no window activation to
-/// read them again on (the C# app's moment), so they are read again every few seconds: two cheap system calls. Captures
+/// read them again on, so they are read again every few seconds: two cheap system calls. Captures
 /// hold their own settings, so the app starts this and they do not.
 pub fn follow_system_settings<C>(window: &C)
 where
@@ -87,20 +87,13 @@ where
     std::mem::forget(timer);
 }
 
-/// Pushes the Windows settings the design depends on into the `Tokens` global. Windows sends no event when
-/// "Animation effects" changes, so it is read again while the window lives (spec/shell-and-settings.md §5).
+/// Pushes the Windows settings the design depends on into the `Tokens` global.
 pub fn apply_system_settings<C>(window: &C)
 where
     C: ComponentHandle,
     for<'a> Tokens<'a>: slint::Global<'a, C>,
 {
     let tokens = window.global::<Tokens>();
-    // Set only on a change, so an unchanged reading wakes no binding.
-    let (high_contrast, motion) = (system::high_contrast(), system::animations_enabled());
-    if tokens.get_high_contrast() != high_contrast {
-        tokens.set_high_contrast(high_contrast);
-    }
-    if tokens.get_motion() != motion {
-        tokens.set_motion(motion);
-    }
+    tokens.set_high_contrast(system::high_contrast());
+    tokens.set_motion(system::animations_enabled());
 }

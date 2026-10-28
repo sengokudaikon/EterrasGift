@@ -1,4 +1,4 @@
-// The Mods page (ModsView.axaml): [list | the selected mod's pane] over the action bar, as on Item Forge. Rust
+// The Mods page: [list | the selected mod's pane] over the action bar, as on Item Forge. Rust
 // (`crates/ui/src/mods.rs`) puts the mod library behind it; disk work belongs to its ordered worker.
 import { ScrollView } from "../widgets/scroll-view.slint";
 import { Tokens } from "../tokens.slint";
@@ -13,7 +13,7 @@ import { MessageTone } from "common.slint";
 import { AshField } from "../decorations.slint";
 
 export struct ModRow {
-    file: string, name: string, version: string, author: string, caption: string,
+    name: string, version: string, author: string, caption: string,
     enabled: bool, drafted: bool, problem: string, problem-label: string,
 }
 export struct SourceRow { name: string, caption: string, project: string, busy: bool }
@@ -151,7 +151,7 @@ component ModsField inherits Rectangle {
     height: Tokens.control-min-height;
     border-radius: Tokens.control-radius;
     border-width: 1px;
-    // A number the cfg can't hold is said under the setting's name; the box keeps its ordinary frame, as in the C# view.
+    // A number the cfg can't hold is said under the setting's name; the box keeps its ordinary frame.
     // AltMediumLow at rest in a BaseMedium frame, AltMedium and BaseMediumHigh under the pointer, the ground in the accent
     // frame while focused; frames step up under high contrast (as widgets/text-field.slint).
     background: !root.enabled ? Tokens.strong-line-brush : input.has-focus ? Tokens.ground-brush : touch.has-hover ? Tokens.raised-brush : Tokens.hover-brush;
@@ -165,8 +165,7 @@ component ModsField inherits Rectangle {
         pointer-event(event) => { if (event.kind == PointerEventKind.down) { KeyboardFocus.visible = false; } }
         clicked => { input.focus(); }
     }
-    // [padding | number | padding] [unit | its margin], inside the 1px frame (Avalonia's TextBox: InnerRightContent after
-    // the text presenter and its padding).
+    // [padding | number | padding] [unit | its margin], inside the 1px frame: the unit sits after the text and its padding.
     HorizontalLayout {
         padding-left: 1px + Tokens.text-control-padding.left;
         padding-right: 1px + (root.unit != "" ? Tokens.mod-setting-unit-margin.right : Tokens.text-control-padding.right);
@@ -269,7 +268,7 @@ component StatusLine inherits Rectangle {
         x: Tokens.icon-size-small + Tokens.space-6; y: 0; width: parent.width - self.x; height: self.preferred-height;
         text: root.message; color: root.ink;
         accessible-role: text;
-        // Said when it changes, as the C# lines' AutomationProperties.LiveSetting="Polite".
+        // Announced as it changes.
         accessible-live-region: polite;
     }
 }
@@ -282,13 +281,13 @@ export component ModsPage inherits Rectangle {
     // The content column fills up to its cap and stays left.
     property <length> content-width: Math.max(0px, Math.min(Tokens.mods-content-max-width, pane.x) - 2 * root.gutter);
     property <length> row-step: Tokens.row-min-height + Tokens.row-gap.bottom;
-    // Column heads share the rows' columns, as the C# grid's shared sizes do: [name] [version, maximized only] [state].
+    // Column heads share the rows' columns: [name] [version, maximized only] [state].
     property <length> version-width: root.wide ? version-probe.preferred-width : 0px;
     property <length> state-width: state-probe.preferred-width;
     property <int> active-index: ModsState.selected-index;
     property <int> visible-count: ModsState.mods.length;
     property <bool> had-rows;
-    // Ctrl+Z gives the list focus back, on the restored row, once it is there again (the C# FocusSelectedRow).
+    // Ctrl+Z gives the list focus back, on the restored row, once it is there again.
     property <bool> focus-list-on-rows;
     init => { root.had-rows = ModsState.mods.length > 0; }
     changed visible-count => {
@@ -311,7 +310,7 @@ export component ModsPage inherits Rectangle {
     function page-up() -> int {
         return ModsState.selected-index > root.first-shown ? root.first-shown : Math.max(0, ModsState.selected-index - root.page-rows);
     }
-    // The keyboard opens the row menu under the selected row, at its left edge (Avalonia's BottomEdgeAlignedLeft).
+    // The keyboard opens the row menu under the selected row, at its left edge.
     function menu-under-row() {
         row-menu.open-at(
             list-focus.absolute-position.x - root.absolute-position.x,
@@ -347,8 +346,8 @@ export component ModsPage inherits Rectangle {
     }
 
     // With no mods and none to build the content column has a still dusting of ash: nothing here, and nothing waited on.
-    // Placed at the page's corner: an element given a size and no position is centred in its parent, which put every mote
-    // (pane gap / 2, bar / 2) away from the C# app's.
+    // Placed at the page's corner: an element given a size and no position is centred in its parent, which would shift
+    // every mote by (pane gap / 2, bar / 2).
     if ModsState.is-read && ModsState.installed-count == 0 && ModsState.sources.length == 0: AshField { x: 0; y: 0; width: pane.x; height: bar.y; still: true; }
     page-keys := FocusScope {
         key-pressed(event) => {
@@ -369,12 +368,12 @@ export component ModsPage inherits Rectangle {
             VerticalLayout {
                 spacing: Tokens.space-8;
                 padding-bottom: Tokens.preview-header-margin.bottom;
-                // The title's line height, as Theme.axaml gives it; "Mods" never wraps.
+                // The title's line height; "Mods" never wraps.
                 TitleText { text: "Mods"; height: Tokens.line-height-title; vertical-alignment: center; }
                 SecondaryText { text: "Mods load only when you play offline with mods. Playing online or plain offline never loads them."; }
             }
             // The list's tools: the folder it comes from and the log of the last game. Below the standard class their labels hide
-            // and they keep a standard button's padding, as the C# toolbar does. Adding is always open: it queues on the
+            // and they keep a standard button's padding. Adding is always open: it queues on the
             // library's ordered worker behind the first read.
             HorizontalLayout {
                 spacing: Tokens.space-8; alignment: start;
@@ -408,7 +407,7 @@ export component ModsPage inherits Rectangle {
                 LabelText { text: "Installed"; horizontal-stretch: 0; vertical-alignment: center; }
                 CaptionText { text: ModsState.installed-count > 0 ? "\{ModsState.enabled-count} of \{ModsState.installed-count} on" : ""; horizontal-stretch: 1; vertical-alignment: center; }
             }
-            // The C# grid keeps the Version column's gap while the column is empty, so the name stops 12px earlier.
+            // The Version column keeps its gap while it is empty, so the name stops 12px earlier.
             LabelText { text: root.wide ? "Version" : ""; width: root.version-width; wrap: no-wrap; }
             Rectangle { width: root.state-width; }
         }
@@ -435,7 +434,7 @@ export component ModsPage inherits Rectangle {
                         return accept;
                     }
                     if (event.modifiers.control || event.modifiers.alt) { return reject; }
-                    // Keys on the list show where focus is, as the C# list's arrows show its focus frame.
+                    // Keys on the list show where focus is.
                     if (event.text == Key.DownArrow) { KeyboardFocus.visible = true; ModsState.select-mod(Math.min(ModsState.mods.length - 1, ModsState.selected-index + 1)); return accept; }
                     if (event.text == Key.UpArrow) { KeyboardFocus.visible = true; ModsState.select-mod(Math.max(0, ModsState.selected-index - 1)); return accept; }
                     if (event.text == Key.Home) { KeyboardFocus.visible = true; ModsState.select-mod(0); return accept; }
@@ -514,7 +513,7 @@ export component ModsPage inherits Rectangle {
                                     }
                                 }
                             }
-                            // Kept while empty, with its gap, as the C# grid's column is.
+                            // Kept while empty, with its gap, so the heads line up.
                             CaptionText { text: root.wide ? item.version : ""; tone: CaptionTone.secondary; width: root.version-width; wrap: no-wrap; vertical-alignment: center; }
                             // Only what needs attention shows in the row: a load problem, and the draft pencil while it differs from the last game.
                             HorizontalLayout {
@@ -590,7 +589,7 @@ export component ModsPage inherits Rectangle {
                     LabelText { text: "Not installed"; horizontal-stretch: 0; vertical-alignment: center; }
                     CaptionText { text: "\{ModsState.sources.length} from sources"; vertical-alignment: center; horizontal-stretch: 1; }
                 }
-                // Each C# row keeps its RowGap below it, the last one too.
+                // Each row keeps its row gap below it, the last one too.
                 VerticalLayout {
                     padding-top: Tokens.mod-list-margin.top;
                     padding-bottom: Tokens.row-gap.bottom;
@@ -656,7 +655,7 @@ export component ModsPage inherits Rectangle {
             x: root.width - root.pane-width; y: 0; width: root.pane-width; height: bar.y;
             background: Tokens.raised-brush;
             Rectangle { x: 0; y: 0; width: 1px; background: Tokens.hairline-brush; }
-            // Inside the pane's 1px left border, as the C# Border's content is.
+            // Inside the pane's 1px left border.
             if ModsState.selected-index < 0: CaptionText {
                 x: 1px + Tokens.pane-content-margin.left; y: Tokens.pane-content-margin.top;
                 width: parent.width - 1px - Tokens.pane-content-margin.left - Tokens.pane-content-margin.right;
@@ -668,7 +667,7 @@ export component ModsPage inherits Rectangle {
                 width: parent.width - 1px;
                 content-width: self.visible-width;
                 // Measured from where the details really end (research/slint.md: wrapped text in `if` and `for`). The end
-                // marker sits one spacing below the last block; the C# StackPanel adds none after it.
+                // marker sits one spacing below the last block, so that spacing comes off.
                 content-height: detail.y + detail-end.y - detail.spacing + Tokens.pane-content-margin.bottom;
                 detail := VerticalLayout {
                     x: Tokens.pane-content-margin.left; y: Tokens.pane-content-margin.top;
@@ -798,8 +797,7 @@ export component ModsPage inherits Rectangle {
         // Action bar: whether the next game with mods can go well and the latest change on the left; Undo, Revert and Play on the right.
         bar := Rectangle {
             x: 0; y: root.height - self.height; width: root.width;
-            // The hairline is the bar's top border and adds its pixel to the height, as the C# Border's does; the content is
-            // centred under it.
+            // The hairline is the bar's top border and adds its pixel to the height; the content is centred under it.
             property <length> border: Tokens.border-top.top;
             height: self.border + Math.max(Tokens.action-bar-status-min-height, statuses.height) + Tokens.action-bar-padding.top + Tokens.action-bar-padding.bottom;
             background: Tokens.surface-brush;
@@ -855,7 +853,7 @@ export component ModsPage inherits Rectangle {
         }
     }
 
-    // The row menu (ModsView.axaml's ContextMenu): what the pane's buttons do, with the keys that do it from the list.
+    // The row menu: what the pane's buttons do, with the keys that do it from the list.
     row-menu := PopupMenu {
         entries: [
             { title: ModsState.selected-enabled ? "Turn off" : "Turn on", gesture: "Space", disabled: ModsState.selected-index < 0 || ModsState.busy },

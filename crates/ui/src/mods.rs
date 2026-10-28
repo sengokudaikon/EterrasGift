@@ -10,7 +10,7 @@ use eg_companion::mods::{
     inventory::{self, Inventory},
     library::{InstalledMod, ModLibrary},
     loader_state::LoaderPreparation,
-    preferences::PreferenceKind,
+    preferences::{ModSetting, PreferenceKind},
     sources::{ModSources, SourceError, SourceSnapshot},
     worker::ModWorker,
 };
@@ -64,7 +64,7 @@ struct Pending {
     clears_build: bool,
     failure: Failure,
 }
-/// How a failed edit is said. As in the C# view model, an edit of the library's own records (on or off, a setting, Remove,
+/// How a failed edit is said. An edit of the library's own records (on or off, a setting, Remove,
 /// Undo, Revert) says the change could not be kept; adding a DLL or installing a build says the failure as it is.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum Failure {
@@ -264,7 +264,6 @@ impl View {
                     let version = item.version.as_deref().unwrap_or("No version");
                     let caption = item.author.as_ref().map_or_else(|| version.to_owned(), |author| format!("{version} · {author}"));
                     ModRow {
-                        file: item.installed.file.as_str().into(),
                         name: item.name.as_str().into(),
                         version: version.into(),
                         author: item.author.as_deref().unwrap_or_default().into(),
@@ -584,6 +583,7 @@ impl View {
     }
     fn poll(self: &Rc<Self>) {
         let mut refresh = false;
+        let mut arrived = false;
         loop {
             let next = {
                 let mut pending = self.pending.borrow_mut();
@@ -596,6 +596,7 @@ impl View {
             let Some((pending, result)) = next else {
                 break;
             };
+            arrived = true;
             let revision = pending.revision;
             if pending.clears_build {
                 self.finish_build();
@@ -644,7 +645,7 @@ impl View {
                     // Preserve text that is still being typed; it has not been submitted to the library yet.
                     for item in &mut inventory.mods {
                         for setting in &mut item.settings {
-                            if self.editing.borrow().contains(&(setting.category.clone(), setting.key.clone()))
+                            if holds(&self.editing.borrow(), setting)
                                 && let Some(old) = self
                                     .inventory
                                     .borrow()
@@ -677,7 +678,9 @@ impl View {
                 }
             }
         }
-        self.show();
+        if arrived {
+            self.show();
+        }
         if refresh && !self.services.worker.faulted() {
             self.enqueue_tracked(|_| Ok(ChangeResult::default()), Vec::new(), false, false, Failure::Kept);
         }
@@ -759,7 +762,7 @@ impl View {
             .mods
             .iter()
             .flat_map(|item| &item.settings)
-            .filter(|setting| unsaved.contains(&(setting.category.clone(), setting.key.clone())))
+            .filter(|setting| holds(&unsaved, setting))
             .map(|setting| (setting.category.clone(), setting.key.clone(), setting.draft().map(|value| value.to_json()).transpose()))
             .collect();
         self.enqueue_tracked(
@@ -781,6 +784,8 @@ impl View {
                 cancel.cancel();
             }
             self.commit_settings();
+            // Play goes while the page closes.
+            self.show();
         }
         self.poll();
         if !self.pending.borrow().is_empty() || self.building.borrow().is_some() {
@@ -857,9 +862,11 @@ impl View {
                 view.modded_run.set(modded);
                 let inventory = view.inventory.borrow();
                 let preparing = inventory.loader.as_ref().is_some_and(|loader| loader.preparation == LoaderPreparation::WillPrepare);
-                let typing = inventory.mods.iter().flat_map(|item| &item.settings).any(|setting| {
-                    setting.kind != PreferenceKind::Switch && !setting.is_choice() && view.unsaved.borrow().contains(&(setting.category.clone(), setting.key.clone()))
-                });
+                let typing = inventory
+                    .mods
+                    .iter()
+                    .flat_map(|item| &item.settings)
+                    .any(|setting| setting.kind != PreferenceKind::Switch && !setting.is_choice() && holds(&view.unsaved.borrow(), setting));
                 drop(inventory);
                 let (refresh, follow) = follow_preparation(was_running, running, modded, preparing, typing, view.follow.get());
                 // Do not pile up full inventory reads behind a slow source copy or profile write.
@@ -877,7 +884,13 @@ impl View {
     }
 }
 
-/// A failed read of the sources folder, said with the folder, as the C# page says it.
+/// Whether `keys` holds the setting's key, compared in place rather than built for each lookup: the sets hold only the
+/// few keys being edited.
+fn holds(keys: &BTreeSet<SettingKey>, setting: &ModSetting) -> bool {
+    keys.iter().any(|(category, key)| *category == setting.category && *key == setting.key)
+}
+
+/// A failed read of the sources folder, said with the folder.
 fn sources_unreadable(folder: Option<&std::path::Path>, error: &SourceError) -> String {
     match folder {
         Some(folder) => format!("The mod sources in {} could not be read: {error}", folder.display()),
@@ -983,7 +996,7 @@ impl View {
             move || {
                 view.unsaved.borrow_mut().clear();
                 view.editing.borrow_mut().clear();
-                // The drafts going is the latest event: it takes the message and the removal's Undo with it, as in the C# page.
+                // The drafts going is the latest event: it takes the message and the removal's Undo with it.
                 if view.message.borrow_mut().take().is_some() {
                     view.removed.borrow_mut().take();
                 }
@@ -1338,7 +1351,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn an_unreadable_sources_folder_is_named_as_the_c_sharp_page_names_it() {
+    fn an_unreadable_sources_folder_is_named() {
         let error = SourceError::Failed("Access is denied.".into());
         assert_eq!(
             sources_unreadable(Some(std::path::Path::new(r"C:\mods\src")), &error),
