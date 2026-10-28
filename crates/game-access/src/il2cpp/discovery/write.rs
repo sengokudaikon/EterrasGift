@@ -87,7 +87,7 @@ impl RuntimeAccess {
                 || (self.type_code)(ty) != code
                 || (self.type_class)(ty) != self.system_class(primitive)?
                 || (self.field_parent)(field) != owner
-                || (self.field_flags)(field) & 0x70 != 0
+                || (self.field_flags)(field) & (raw::FIELD_ATTRIBUTE_STATIC | raw::FIELD_ATTRIBUTE_INIT_ONLY | raw::FIELD_ATTRIBUTE_LITERAL) != 0
                 || !(16..=16384).contains(&(self.field_offset)(field))
             {
                 return Err(ForgeWriteError::Refused("Not the exact mutable instance field".into()));
@@ -96,7 +96,7 @@ impl RuntimeAccess {
         }
     }
 
-    // The original helper calls UniqueList.getUnique(UInt16). Validate its exact
+    // Look up one definition through UniqueList.getUnique(UInt16): validate its exact
     // static signature, root the return across GC, then read only its identity
     // and LegendaryType. Never walk the full catalog during an edit.
     pub(super) unsafe fn unique_definition<'a, 'r>(
@@ -111,7 +111,8 @@ impl RuntimeAccess {
             let owner = self.class(&graph.images, c"", c"UniqueList")?;
             let entry = self.catalog_nested(owner, c"Entry")?;
             let mut found = None;
-            for method in self.methods(owner)? {
+            for method in self.methods(owner) {
+                let method = method?;
                 let name = (self.method_name)(method);
                 if name.is_null() {
                     return Err(ForgeWriteError::Refused("Missing unique lookup method name".into()));
@@ -156,7 +157,7 @@ impl RuntimeAccess {
         }
     }
 
-    // Only the base registry used by the original op 11 is acquired. Every
+    // Only the base registry (ItemList.get) is acquired. Every
     // returned object and collection is rooted across the managed getter/GC.
     unsafe fn validate_base(
         &self,
@@ -202,8 +203,8 @@ impl RuntimeAccess {
         }
     }
 
-    // Mirrors the original validateDefinition: only already-loaded affix IDs
-    // and tier counts are needed, without extracting numeric/display catalogs.
+    // Only already-loaded affix IDs and tier counts are checked, without
+    // extracting numeric/display catalogs.
     pub(super) unsafe fn validate_affix_definition(&self, attached: &AttachedThread<'_>, graph: &ForgeGraph<'_, '_>, id: u16, tier_value: u16) -> Result<(), ForgeWriteError> {
         // SAFETY: The selected graph and affix definition stay rooted during exact type, slot and compatibility validation.
         unsafe {
@@ -245,7 +246,8 @@ impl RuntimeAccess {
     unsafe fn has_refresh(&self, owner: Class, name: &CStr) -> Result<bool, ForgeWriteError> {
         // SAFETY: The owner is retained class metadata; bounded method inspection checks signatures without executing refresh.
         unsafe {
-            for method in self.methods(owner)? {
+            for method in self.methods(owner) {
+                let method = method?;
                 let actual = (self.method_name)(method);
                 if actual.is_null() {
                     return Err(ForgeWriteError::Refused("Missing refresh method name".into()));

@@ -42,7 +42,8 @@ impl RuntimeAccess {
                     break;
                 }
                 let mut found = false;
-                for method in self.methods(owner)? {
+                for method in self.methods(owner) {
+                    let method = method?;
                     let actual = (self.method_name)(method);
                     if actual.is_null() {
                         return Err(unsupported("mapping method name"));
@@ -54,7 +55,7 @@ impl RuntimeAccess {
                 }
                 if found {
                     let method = self.description_method(api, owner, name, parameters, returns, true)?;
-                    if (api.method_get_flags)(method, std::ptr::null_mut()) & 0x40 != 0 {
+                    if (api.method_get_flags)(method, std::ptr::null_mut()) & raw::METHOD_ATTRIBUTE_VIRTUAL != 0 {
                         return NonNull::new((api.object_get_virtual_method)(target(object)?.as_ptr(), method).cast_mut())
                             .map(|m| m.as_ptr().cast_const())
                             .ok_or_else(|| unsupported("mapping virtual method"));
@@ -114,7 +115,9 @@ impl RuntimeAccess {
             let bytes = self.mapping_bytes(source, maximum)?;
             let array = NonNull::new((self.array_new)(self.system_class(c"Byte")?, bytes.len())).ok_or_else(|| unsupported("detached byte allocation"))?;
             let array = attached.root(array)?;
-            self.array_count(&array, self.system_class(c"Byte")?, maximum)?;
+            if self.array_count(&array, self.system_class(c"Byte")?, maximum)? as usize != bytes.len() {
+                return Err(unsupported("detached byte array length"));
+            }
             super::write_bytes(target(&array)?.as_ptr().cast::<u8>().add(32), &bytes);
             Ok(array)
         }
@@ -201,7 +204,8 @@ impl RuntimeAccess {
             let affix = values.get(usize::from(slot)).ok_or_else(|| unsupported("mapping slot absent"))?;
             let builder = self.class(images, c"LE.UI.Tooltips", c"ItemTooltipContentBuilder")?;
             let mut slot_type = None;
-            for method in self.methods(builder)? {
+            for method in self.methods(builder) {
+                let method = method?;
                 let name = (self.method_name)(method);
                 if !name.is_null() && metadata_text(name) == c"GetItemAffixInfo" && (self.method_params)(method) == 3 {
                     if slot_type.is_some() {
@@ -322,7 +326,7 @@ impl RuntimeAccess {
             let list = self.catalog_reference(attached, copy, c"affixes")?.ok_or_else(|| unsupported("detached affixes absent"))?;
             let original = self.catalog_list(attached, &list, class, 32)?;
             let constructor = self.method(class, c".ctor", &["System.UInt16", "System.Byte", "System.Byte", "System.Byte", "SealedAffixType"], true)?;
-            let seal = NonNull::new(self.field_class(self.field(class, c"sealedAffixType")?)?).ok_or_else(|| unsupported("seal enum absent"))?;
+            let seal = NonNull::new(self.field_class(self.field(class, c"sealedAffixType")?, "mapping")?).ok_or_else(|| unsupported("seal enum absent"))?;
             let context = InvocationContext::new(attached, api);
             let constructor = context
                 .bind_with_value_types(

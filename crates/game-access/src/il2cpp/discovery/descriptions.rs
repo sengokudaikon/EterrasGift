@@ -1,4 +1,4 @@
-//! Optional implicit text from the same game methods used by the original tooltip.
+//! Optional implicit text from the methods the game's own item tooltip uses.
 use super::metadata_text;
 use super::{
     Class, DiscoveryError, Method, RuntimeAccess,
@@ -24,7 +24,8 @@ impl RuntimeAccess {
         // SAFETY: Owner and method descriptors belong to retained metadata; parameter and return classes are checked before binding.
         unsafe {
             let mut found = None;
-            for method in self.methods(owner)? {
+            for method in self.methods(owner) {
+                let method = method?;
                 let actual = (self.method_name)(method);
                 if actual.is_null() {
                     return Err(unsupported("tooltip method name"));
@@ -45,7 +46,7 @@ impl RuntimeAccess {
                     || (self.method_instance)(method) != instance
                     || (self.method_generic)(method)
                     || (self.method_inflated)(method)
-                    || (api.method_get_flags)(method, std::ptr::null_mut()) & 0x2400 != 0
+                    || (api.method_get_flags)(method, std::ptr::null_mut()) & (raw::METHOD_ATTRIBUTE_PINVOKE_IMPL | raw::METHOD_ATTRIBUTE_ABSTRACT) != 0
                     || result.is_null()
                     || (self.type_byref)(result)
                     || returns.is_none() && !matches!((self.type_code)(result), 0x0e | 0x12 | 0x15)
@@ -96,7 +97,8 @@ impl RuntimeAccess {
                 if owner.is_null() {
                     break;
                 }
-                for candidate in self.methods(owner)? {
+                for candidate in self.methods(owner) {
+                    let candidate = candidate?;
                     let actual = (self.method_name)(candidate);
                     if actual.is_null() {
                         return Err(unsupported("tooltip formatter name"));
@@ -113,7 +115,7 @@ impl RuntimeAccess {
             }
             let owner = method.ok_or_else(|| unsupported("tooltip formatter unavailable"))?;
             let mut method = self.description_method(api, owner, name, &[self.system_class(c"Boolean")?], Some(string), true)?;
-            if (api.method_get_flags)(method, std::ptr::null_mut()) & 0x40 != 0 {
+            if (api.method_get_flags)(method, std::ptr::null_mut()) & raw::METHOD_ATTRIBUTE_VIRTUAL != 0 {
                 method = (api.object_get_virtual_method)(target(info)?.as_ptr(), method);
                 if method.is_null() {
                     return Err(unsupported("tooltip virtual formatter unavailable"));
@@ -154,7 +156,7 @@ impl RuntimeAccess {
             let getter = self.mapping_method(api, &graph.item, c"get_Implicits", &[], None)?;
             let list_class = (self.type_class)((self.method_return)(getter));
             self.list_class(list_class)?;
-            let array_class = self.field_class(self.field(list_class, c"_items")?)?;
+            let array_class = self.field_class(self.field(list_class, c"_items")?, "description")?;
             let element = (self.class_element)(array_class);
             if element.is_null() || (self.class_value)(element) || (self.class_image)(element) != graph.images.game {
                 return Err(unsupported("implicit getter game reference element"));

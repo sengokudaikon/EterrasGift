@@ -1,5 +1,5 @@
 //! Residency is independent of a pipe acknowledgement. Only native evidence can
-//! admit a fresh load; uncertainty permanently fences this process generation.
+//! admit a fresh load; uncertainty permanently fences this process (pid + creation time).
 use std::time::{Duration, Instant};
 
 pub use eg_trainer::backend::HELPER_RESTART_REQUIRED as RESTART_REQUIRED;

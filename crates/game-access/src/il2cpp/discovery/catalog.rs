@@ -67,7 +67,11 @@ impl RuntimeAccess {
             }
             let field = self.field(owner, name)?;
             let flags = (self.field_flags)(field);
-            if flags & 0x10 == 0 || flags & 0x40 != 0 || (self.field_offset)(field) == usize::MAX || self.field_class(field)? != expected {
+            if flags & raw::FIELD_ATTRIBUTE_STATIC == 0
+                || flags & raw::FIELD_ATTRIBUTE_LITERAL != 0
+                || (self.field_offset)(field) == usize::MAX
+                || self.field_class(field, "catalog")? != expected
+            {
                 return Err(unsupported("catalog static reference storage/identity"));
             }
             let mut pointer = std::ptr::null_mut::<raw::Object>();
@@ -89,7 +93,7 @@ impl RuntimeAccess {
                 return Err(unsupported("catalog reference owner"));
             }
             let field = self.field(owner, name)?;
-            self.reference(attached, parent, name, self.field_class(field)?)
+            self.reference(attached, parent, name, self.field_class(field, "catalog")?)
         }
     }
 
@@ -141,7 +145,7 @@ impl RuntimeAccess {
             self.list_class(class)?;
             let count: i32 = self.primitive(list, c"_size")?;
             let array_field = self.field(class, c"_items")?;
-            let array_class = self.field_class(array_field)?;
+            let array_class = self.field_class(array_field, "catalog")?;
             self.array_class(array_class, element)?;
             let array = self
                 .reference(attached, list, c"_items", array_class)?
@@ -203,14 +207,14 @@ impl RuntimeAccess {
         }
     }
 
-    pub(super) unsafe fn catalog_live(&self, attached: &AttachedThread<'_>, images: &Images, object: &Root<'_, '_>) -> Result<bool, DiscoveryError> {
+    // `_attached` is not read: holding it proves this thread is attached for the reads below.
+    pub(super) unsafe fn catalog_live(&self, _attached: &AttachedThread<'_>, images: &Images, object: &Root<'_, '_>) -> Result<bool, DiscoveryError> {
         // SAFETY: The rooted Unity wrapper's validated native pointer is copied and compared without dereferencing the native address.
         unsafe {
-            let _ = attached;
             let unity_object = self.class(images, c"UnityEngine", c"Object")?;
             self.check_object(unity_object, target(object)?)?;
             let field = self.field(unity_object, c"m_CachedPtr")?;
-            if self.field_class(field)? != self.system_class(c"IntPtr")? || (self.field_flags)(field) & 0x10 != 0 {
+            if self.field_class(field, "catalog")? != self.system_class(c"IntPtr")? || (self.field_flags)(field) & raw::FIELD_ATTRIBUTE_STATIC != 0 {
                 return Err(unsupported("catalog Unity object native pointer"));
             }
             let mut value = 0_usize;

@@ -1,12 +1,11 @@
 //! Process-retained stock detour owners. Entry changes use transactions only.
 //!
-//! Threads::All has the same best-effort suspension policy as the original MinHook
-//! backend. Opening/suspending a thread can fail for reasons other than exit; such
-//! a skipped thread is not protected during patching. This is an accepted supported-
-//! target limitation, not a proved complete census. No detour allocation is freed.
+//! Commits use Threads::All, which suspends every other thread it can open and skips the
+//! rest. Opening/suspending a thread can fail for reasons other than exit; such a skipped
+//! thread is not protected during patching. This is an accepted supported-target
+//! limitation, not a proved complete census. No detour allocation is freed.
 pub mod gateway;
 pub mod leaf;
-pub mod threads;
 mod unwind;
 
 use detour::{RawDetour, Threads, Transaction};
@@ -28,11 +27,6 @@ pub enum HookError {
     UnsupportedUnwind,
     OwnershipLost,
     TransactionPoisoned,
-    ThreadLimit,
-    ThreadCensus,
-    ThreadsChanged,
-    ThreadInEntry,
-    NativeQuery(i32),
     Win32 { operation: &'static str, code: u32 },
     Detour(detour::Error),
     Transaction { error: detour::Error, recovery: Vec<String> },

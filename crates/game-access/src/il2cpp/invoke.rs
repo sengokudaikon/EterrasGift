@@ -1,5 +1,5 @@
 //! Metadata-checked, deliberately bounded invocation. Metadata is not a proof of method-body safety.
-use super::raw::{Class, InvocationApi, MethodInfo, Object, Type};
+use super::raw::{self, Class, InvocationApi, MethodInfo, Object, Type};
 use super::{AttachedThread, RuntimeError, StrongRoot};
 use std::ffi::c_void;
 use std::ptr::{NonNull, null_mut};
@@ -208,7 +208,7 @@ impl<'attachment, 'runtime> InvocationContext<'attachment, 'runtime> {
     /// not prove any of these properties; managed code can contain unsafe operations or native calls.
     pub unsafe fn bind(&self, method: NonNull<MethodInfo>) -> Result<CheckedMethod<'_, 'attachment, 'runtime>, InvokeError> {
         // SAFETY: the caller supplies the same method/runtime permissions as bind_checked. Empty
-        // contracts preserve the original primitive/reference-only signature support.
+        // contracts keep the default primitive/reference-only signature support.
         unsafe { self.bind_checked(method, &[], &[]) }
     }
 
@@ -331,7 +331,7 @@ impl<'attachment, 'runtime> InvocationContext<'attachment, 'runtime> {
                 return Err(InvokeError::GenericMethod);
             }
             let mut implementation_flags = 0;
-            if (api.method_get_flags)(method.as_ptr(), &raw mut implementation_flags) & 0x0400 != 0 {
+            if (api.method_get_flags)(method.as_ptr(), &raw mut implementation_flags) & raw::METHOD_ATTRIBUTE_ABSTRACT != 0 {
                 return Err(InvokeError::AbstractMethod);
             }
             if (api.class_is_generic)(class.as_ptr()) || ((api.class_is_inflated)(class.as_ptr()) && !closed_references.contains(&class)) {

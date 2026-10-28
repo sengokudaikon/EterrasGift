@@ -14,7 +14,7 @@ use eg_game_access::{
 };
 use eg_trainer_wire::dispatch::{Dispatcher, Pending};
 use eg_trainer_wire::{
-    protocol::{Discovery, DispatcherSpec, Request, Response, ResponseCode},
+    protocol::{Discovery, DispatcherSpec, Request, Response, ResponseCode, RuntimeStatus},
     rate_write::AttackLeechRateWrite,
     write::ForgeWrite,
 };
@@ -147,15 +147,34 @@ unsafe fn runtime_operation(operation: impl FnOnce(&Runtime, RuntimeAccess, &Att
                 // effects, including Forge/field requests between watchdog ticks.
                 gameplay_hooks::observe(0).map_err(|e| server::failure(ResponseCode::Failed, e))?;
                 if runtime.access.play_presence(&attached, runtime.invocation).ok() == Some(PlayPresence::InGame)
-                    && runtime.access.status(&attached).is_ok_and(|status| !status.online && status.manager == 0)
+                    && runtime.access.status(&attached).is_ok_and(|status| awaiting_manager(&status))
                 {
-                    return Err(server::failure(ResponseCode::CharacterLoading, "The offline character is changing area."));
+                    return Err(changing_area());
                 }
             }
             result
         })();
         result.unwrap_or_else(|error| error)
     }
+}
+
+// Offline with no live item manager: while the game reports InGame, the character is between areas.
+fn awaiting_manager(status: &RuntimeStatus) -> bool {
+    !status.online && status.manager == 0
+}
+fn changing_area() -> Response {
+    server::failure(ResponseCode::CharacterLoading, "The offline character is changing area.")
+}
+
+fn done(payload: Vec<u8>) -> Result<Response, Response> {
+    Ok(Response {
+        code: ResponseCode::Done,
+        payload,
+    })
+}
+/// An encoder failure after the operation ran is Failed, never a refusal.
+fn encoded(payload: Result<Vec<u8>, impl std::fmt::Display>) -> Result<Response, Response> {
+    done(payload.map_err(|error| server::failure(ResponseCode::Failed, error.to_string()))?)
 }
 
 fn map_discovery(error: DiscoveryError) -> Response {
@@ -176,13 +195,10 @@ unsafe fn read_status() -> Response {
             gameplay_hooks::observe(status_result.as_ref().map_or(0, |s| if s.online { 0 } else { s.manager })).map_err(|e| server::failure(ResponseCode::Failed, e))?;
             let mut status = status_result.map_err(map_discovery)?;
             status.features_on = gameplay_hooks::count();
-            if !status.online && status.manager == 0 && access.play_presence(attached, runtime.invocation).ok() == Some(PlayPresence::InGame) {
-                return Err(server::failure(ResponseCode::CharacterLoading, "The offline character is changing area."));
+            if awaiting_manager(&status) && access.play_presence(attached, runtime.invocation).ok() == Some(PlayPresence::InGame) {
+                return Err(changing_area());
             }
-            Ok(Response {
-                code: ResponseCode::Done,
-                payload: status.encode().map_err(|e| server::failure(ResponseCode::Refused, e.to_string()))?.to_vec(),
-            })
+            done(status.encode().map_err(|e| server::failure(ResponseCode::Refused, e.to_string()))?.to_vec())
         })
     }
 }
@@ -209,11 +225,7 @@ unsafe fn edit_forge(write: &ForgeWrite) -> Response {
                     };
                     server::failure(code, error.to_string())
                 })?;
-            let payload = eg_trainer_wire::forge::encode(Some(&snapshot)).map_err(|error| server::failure(ResponseCode::Failed, error.to_string()))?;
-            Ok::<_, Response>(Response {
-                code: ResponseCode::Done,
-                payload,
-            })
+            encoded(eg_trainer_wire::forge::encode(Some(&snapshot)))
         })
     }
 }
@@ -241,10 +253,7 @@ unsafe fn set_attack_leech_rate(write: &AttackLeechRateWrite) -> Response {
                     };
                     server::failure(code, error.to_string())
                 })?;
-            Ok::<_, Response>(Response {
-                code: ResponseCode::Done,
-                payload: eg_trainer_wire::fields::encode(&eg_trainer_wire::fields::AttackLeechRead::Available(observation)),
-            })
+            done(eg_trainer_wire::fields::encode(&eg_trainer_wire::fields::AttackLeechRead::Available(observation)))
         })
     }
 }
@@ -257,11 +266,7 @@ unsafe fn read_forge() -> Response {
     unsafe {
         runtime_operation(|_, access, attached| {
             let snapshot = access.read_forge(attached).map_err(map_discovery)?;
-            let payload = eg_trainer_wire::forge::encode(snapshot.as_ref()).map_err(|error| server::failure(ResponseCode::Failed, error.to_string()))?;
-            Ok::<_, Response>(Response {
-                code: ResponseCode::Done,
-                payload,
-            })
+            encoded(eg_trainer_wire::forge::encode(snapshot.as_ref()))
         })
     }
 }
@@ -273,11 +278,7 @@ unsafe fn describe_implicits(query: &eg_trainer_wire::mapping::ForgeDescriptionR
         runtime_operation(|runtime, access, attached| {
             let invoke = runtime.invocation;
             let descriptions = access.describe_implicits(attached, invoke, query).map_err(map_discovery)?;
-            let payload = eg_trainer_wire::mapping::encode_modifiers(&descriptions).map_err(|e| server::failure(ResponseCode::Failed, e.to_string()))?;
-            Ok::<_, Response>(Response {
-                code: ResponseCode::Done,
-                payload,
-            })
+            encoded(eg_trainer_wire::mapping::encode_modifiers(&descriptions))
         })
     }
 }
@@ -295,10 +296,7 @@ unsafe fn unique_presentation(query: &eg_trainer_wire::mapping::ForgeDescription
                 access.describe_unique(attached, invoke, query)
             }
             .map_err(map_discovery)?;
-            Ok::<_, Response>(Response {
-                code: ResponseCode::Done,
-                payload: eg_trainer_wire::mapping::encode_modifiers(&descriptions).map_err(|e| server::failure(ResponseCode::Failed, e.to_string()))?,
-            })
+            encoded(eg_trainer_wire::mapping::encode_modifiers(&descriptions))
         })
     }
 }
@@ -311,11 +309,7 @@ unsafe fn read_affix_mapping(query: &eg_trainer_wire::mapping::AffixMappingQuery
             let invoke = runtime.invocation;
             let writes = runtime.writes;
             let page = access.read_affix_mapping(attached, writes, invoke, query).map_err(map_discovery)?;
-            let payload = eg_trainer_wire::mapping::encode_mapping(&page).map_err(|e| server::failure(ResponseCode::Failed, e.to_string()))?;
-            Ok::<_, Response>(Response {
-                code: ResponseCode::Done,
-                payload,
-            })
+            encoded(eg_trainer_wire::mapping::encode_mapping(&page))
         })
     }
 }
@@ -328,10 +322,7 @@ unsafe fn read_attack_leech(expected_manager: u64) -> Response {
     unsafe {
         runtime_operation(|_, access, attached| {
             let observation = access.read_attack_leech(attached, expected_manager).map_err(map_discovery)?;
-            Ok::<_, Response>(Response {
-                code: ResponseCode::Done,
-                payload: eg_trainer_wire::fields::encode(&observation),
-            })
+            done(eg_trainer_wire::fields::encode(&observation))
         })
     }
 }
@@ -348,11 +339,7 @@ unsafe fn read_locale() -> Response {
         runtime_operation(|runtime, access, attached| {
             let invocation = runtime.invocation;
             let locale = access.read_game_locale(attached, invocation).map_err(map_discovery)?;
-            let payload = eg_trainer_wire::locale::encode(&locale).map_err(|error| server::failure(ResponseCode::Failed, error.to_string()))?;
-            Ok::<_, Response>(Response {
-                code: ResponseCode::Done,
-                payload,
-            })
+            encoded(eg_trainer_wire::locale::encode(&locale))
         })
     }
 }

@@ -39,7 +39,7 @@ impl RuntimeAccess {
             let method = self.mapping_method(api, parsed, c"get_Replacements", &[], None)?;
             let list_class = (self.type_class)((self.method_return)(method));
             self.list_class(list_class)?;
-            let array = self.field_class(self.field(list_class, c"_items")?)?;
+            let array = self.field_class(self.field(list_class, c"_items")?, "unique")?;
             let element = (self.class_element)(array);
             if element.is_null() || (self.class_value)(element) || (self.class_image)(element) != images.game {
                 return Err(unsupported("unique replacement element"));
@@ -84,7 +84,8 @@ impl RuntimeAccess {
             let mods = self.catalog_list(attached, &mods, mod_class, MAX_MODIFIERS as u32)?;
             let builder = self.class(images, c"LE.UI.Tooltips", c"ItemTooltipContentBuilder")?;
             let mut slot_type = None;
-            for method in self.methods(builder)? {
+            for method in self.methods(builder) {
+                let method = method?;
                 let name = (self.method_name)(method);
                 if !name.is_null() && metadata_text(name) == c"GetUniqueModifierInfo" && (self.method_params)(method) == 4 {
                     if slot_type.is_some() {

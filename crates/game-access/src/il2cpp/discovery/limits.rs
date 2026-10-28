@@ -1,7 +1,7 @@
-//! Literal metadata only: item status bounds from the original helper's appendItemConstants.
+//! Literal metadata only: the item status bounds the game declares as constants.
 
 use super::{Class, DiscoveryError, RuntimeAccess, unsupported};
-use crate::il2cpp::AttachedThread;
+use crate::il2cpp::{AttachedThread, raw};
 use eg_trainer_wire::definitions::{ItemLimits, ValueRange};
 use std::ffi::CStr;
 
@@ -23,15 +23,14 @@ impl RuntimeAccess {
             }
             let field = self.field(owner, name)?;
             let ty = (self.field_type)(field);
-            if ty.is_null() || (self.type_byref)(ty) || (self.field_flags)(field) & 0x50 != 0x50 {
+            if ty.is_null()
+                || (self.type_byref)(ty)
+                || (self.field_flags)(field) & (raw::FIELD_ATTRIBUTE_STATIC | raw::FIELD_ATTRIBUTE_LITERAL) != (raw::FIELD_ATTRIBUTE_STATIC | raw::FIELD_ATTRIBUTE_LITERAL)
+            {
                 return Err(unsupported(format!("item constant {} type/flags", name.to_string_lossy())));
             }
-            let corlib = (self.corlib)();
-            if corlib.is_null() {
-                return Err(unsupported("item constant corlib"));
-            }
-            let int32 = (self.class_from_name)(corlib, c"System".as_ptr(), c"Int32".as_ptr());
-            if int32.is_null() || (self.type_class)(ty) != int32 {
+            let int32 = self.system_class(c"Int32")?;
+            if (self.type_class)(ty) != int32 {
                 return Err(unsupported("item constant Int32 identity"));
             }
             let declaring = (self.field_parent)(field);
@@ -71,8 +70,8 @@ impl RuntimeAccess {
     /// The attachment must belong to these live exports. Literal defaults must obey the public
     /// runtime contract for valid metadata. Offline/native-manager admission is independently
     /// checked before any item-limit class or constant is read. The eight ItemData constants and
-    /// ExperienceTracker.maxLevel are exact System.Int32 literals; level minimum 0 is the original
-    /// helper's defined domain bound, rather than a nonexistent guessed metadata constant.
+    /// ExperienceTracker.maxLevel are exact System.Int32 literals. The game declares no minimum
+    /// level constant, so the level range starts at 0 rather than at a guessed metadata value.
     pub unsafe fn read_item_limits(&self, attached: &AttachedThread<'_>) -> Result<ItemLimits, DiscoveryError> {
         // SAFETY: The caller supplies the admitted main-thread runtime span; literal metadata checks precede every constant copy.
         unsafe {

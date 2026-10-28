@@ -184,15 +184,9 @@ pub(super) unsafe fn operation(expected_manager: u64, hook: GameplayHook, on: Op
                     let size = image_size(module).map_err(|e| server::failure(ResponseCode::Refused, e))?;
                     access.gameplay_hook_targets(attached, hook, module, size).map_err(map_discovery)
                 })?;
-                Ok(Response {
-                    code: ResponseCode::Done,
-                    payload: Vec::new(),
-                })
+                done(Vec::new())
             } else {
-                Ok(Response {
-                    code: ResponseCode::Done,
-                    payload: read(hook).encode(),
-                })
+                done(read(hook).encode())
             }
         })
     }

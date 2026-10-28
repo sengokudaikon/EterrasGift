@@ -71,7 +71,7 @@ impl RuntimeAccess {
                 || (self.type_byref)(ty)
                 || (self.type_class)(ty) != expected
                 || (self.field_parent)(field) != owner
-                || (self.field_flags)(field) & 0x50 != if is_static { 0x10 } else { 0 }
+                || (self.field_flags)(field) & (raw::FIELD_ATTRIBUTE_STATIC | raw::FIELD_ATTRIBUTE_LITERAL) != if is_static { raw::FIELD_ATTRIBUTE_STATIC } else { 0 }
                 || (self.field_offset)(field) == usize::MAX
             {
                 return Err(unsupported(format!("attack/leech declared field {} type/owner/storage", name.to_string_lossy())));

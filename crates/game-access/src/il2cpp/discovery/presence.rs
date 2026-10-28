@@ -43,7 +43,8 @@ impl RuntimeAccess {
             let online = self.static_field(environment, c"_isOnlinePlay", "System.Boolean")?;
             let owner = self.class(&images, c"ClientAppState", c"ClientStateManager")?;
             let mut getter = None;
-            for candidate in self.methods(owner)? {
+            for candidate in self.methods(owner) {
+                let candidate = candidate?;
                 let name = (self.method_name)(candidate);
                 if name.is_null() {
                     return Err(unsupported("null app state getter name"));
@@ -57,7 +58,9 @@ impl RuntimeAccess {
                     || (self.method_instance)(candidate)
                     || (self.method_generic)(candidate)
                     || (self.method_inflated)(candidate)
-                    || (self.method_flags)(candidate, &raw mut implementation_flags) & 0x2440 != 0
+                    || (self.method_flags)(candidate, &raw mut implementation_flags)
+                        & (raw::METHOD_ATTRIBUTE_PINVOKE_IMPL | raw::METHOD_ATTRIBUTE_ABSTRACT | raw::METHOD_ATTRIBUTE_VIRTUAL)
+                        != 0
                 {
                     return Err(unsupported("client app state getter signature/flags"));
                 }
@@ -76,7 +79,7 @@ impl RuntimeAccess {
                     || (self.type_byref)(ty)
                     || (self.type_class)(ty) != state_class
                     || (self.field_parent)(field) != state_class
-                    || (self.field_flags)(field) & 0x50 != 0x50
+                    || (self.field_flags)(field) & (raw::FIELD_ATTRIBUTE_STATIC | raw::FIELD_ATTRIBUTE_LITERAL) != (raw::FIELD_ATTRIBUTE_STATIC | raw::FIELD_ATTRIBUTE_LITERAL)
                 {
                     return Err(unsupported("client app state literal identity/storage"));
                 }

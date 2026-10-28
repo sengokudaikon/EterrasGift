@@ -1,7 +1,7 @@
 //! Observe an already completed locale operation. Initialization/selection getters are never called.
 
 use super::metadata_text;
-use super::{Class, DiscoveryError, Ptr, RuntimeAccess, unsupported};
+use super::{Class, DiscoveryError, RuntimeAccess, unsupported};
 use crate::il2cpp::{AttachedThread, InvocationContext, InvocationOutcome, ReturnValue, StrongRoot, ValueTypeContract, raw};
 use eg_trainer_wire::locale::GameLocale;
 use std::{ffi::CStr, ptr::NonNull};
@@ -22,41 +22,6 @@ fn completed(handle_version: i32, operation_version: i32, status: i32, reference
 
 impl RuntimeAccess {
     // All internal helpers inherit read_game_locale's attached-runtime and exclusive graph contract.
-    unsafe fn locale_system(&self, name: &CStr) -> Result<Class, DiscoveryError> {
-        // SAFETY: Corlib and the requested System class belong to retained runtime metadata.
-        unsafe {
-            let image = (self.corlib)();
-            if image.is_null() {
-                return Err(unsupported("locale corlib"));
-            }
-            NonNull::new((self.class_from_name)(image, c"System".as_ptr(), name.as_ptr()))
-                .map(NonNull::as_ptr)
-                .ok_or_else(|| unsupported("locale core type"))
-        }
-    }
-
-    unsafe fn locale_field_class(&self, field: Ptr) -> Result<Class, DiscoveryError> {
-        // SAFETY: The field descriptor is retained metadata; its type and class are checked for null before use.
-        unsafe {
-            let ty = (self.field_type)(field);
-            if ty.is_null() || (self.type_byref)(ty) {
-                return Err(unsupported("locale field type"));
-            }
-            NonNull::new((self.type_class)(ty)).map(NonNull::as_ptr).ok_or_else(|| unsupported("locale field class"))
-        }
-    }
-
-    unsafe fn locale_field(&self, owner: Class, name: &CStr, expected: Class) -> Result<Ptr, DiscoveryError> {
-        // SAFETY: The rooted graph's owner is retained metadata; expected field class and instance storage are validated before reading.
-        unsafe {
-            let field = self.field(owner, name)?;
-            if (self.field_flags)(field) & 0x10 != 0 || self.locale_field_class(field)? != expected {
-                return Err(unsupported(format!("locale field {} identity/storage", name.to_string_lossy())));
-            }
-            Ok(field)
-        }
-    }
-
     unsafe fn locale_named_class(&self, class: Class, namespace: &CStr, name: &CStr, value: bool) -> Result<(), DiscoveryError> {
         // SAFETY: The class descriptor and its name/namespace strings belong to retained immutable metadata.
         unsafe {
@@ -81,7 +46,7 @@ impl RuntimeAccess {
         // SAFETY: Exact Int32 field metadata fixes the local copy width; the rooted receiver remains live.
         unsafe {
             self.check_object(owner, target(object)?)?;
-            let field = self.locale_field(owner, name, self.locale_system(c"Int32")?)?;
+            let field = self.instance_field_in(owner, name, self.system_class(c"Int32")?, "locale")?;
             let mut value = 0_i32;
             (self.field_get)(target(object)?.as_ptr(), field, (&mut value as *mut i32).cast());
             Ok(value)
@@ -102,7 +67,7 @@ impl RuntimeAccess {
             if expected.is_null() || (self.class_value)(expected) {
                 return Err(unsupported("locale reference class"));
             }
-            let field = self.locale_field(owner, name, expected)?;
+            let field = self.instance_field_in(owner, name, expected, "locale")?;
             let mut value = std::ptr::null_mut::<raw::Object>();
             (self.field_get)(target(object)?.as_ptr(), field, (&mut value as *mut *mut raw::Object).cast());
             let root = NonNull::new(value).map(|pointer| attached.root(pointer)).transpose()?;
@@ -116,7 +81,8 @@ impl RuntimeAccess {
     unsafe fn locale_no_cctor(&self, class: Class) -> Result<(), DiscoveryError> {
         // SAFETY: The retained value class's methods are inspected without executing a managed initializer.
         unsafe {
-            for method in self.methods(class)? {
+            for method in self.methods(class) {
+                let method = method?;
                 let name = (self.method_name)(method);
                 if name.is_null() || metadata_text(name) == c".cctor" {
                     return Err(unsupported("locale boxing class initializer"));
@@ -137,7 +103,7 @@ impl RuntimeAccess {
         // SAFETY: The receiver remains rooted; exact field metadata and absence of a class initializer precede boxing and rooting the result.
         unsafe {
             self.check_object(owner, target(object)?)?;
-            let field = self.locale_field(owner, name, expected)?;
+            let field = self.instance_field_in(owner, name, expected, "locale")?;
             if !(self.class_value)(expected) {
                 return Err(unsupported("locale boxed field class"));
             }
@@ -157,7 +123,7 @@ impl RuntimeAccess {
         // SAFETY: The rooted Unity wrapper has exact IntPtr storage; the copied native address is never dereferenced.
         unsafe {
             self.check_object(owner, target(object)?)?;
-            let field = self.locale_field(owner, c"m_CachedPtr", self.locale_system(c"IntPtr")?)?;
+            let field = self.instance_field_in(owner, c"m_CachedPtr", self.system_class(c"IntPtr")?, "locale")?;
             let mut native = 0_usize;
             (self.field_get)(target(object)?.as_ptr(), field, (&mut native as *mut usize).cast());
             if native == 0 {
@@ -209,7 +175,7 @@ impl RuntimeAccess {
             let locale_class = self.class(&images, c"UnityEngine.Localization", c"Locale")?;
             let identifier_class = self.class(&images, c"UnityEngine.Localization", c"LocaleIdentifier")?;
             let settings_field = self.static_field(settings_class, c"s_Instance", "UnityEngine.Localization.Settings.LocalizationSettings")?;
-            if self.locale_field_class(settings_field)? != settings_class {
+            if self.field_class(settings_field, "locale")? != settings_class {
                 return Err(unsupported("locale settings static identity"));
             }
             let mut settings = std::ptr::null_mut::<raw::Object>();
@@ -218,7 +184,7 @@ impl RuntimeAccess {
             let settings = attached.root(settings)?;
             self.locale_alive(&settings, settings_class)?;
             let handle_field = self.field(settings_class, c"m_SelectedLocaleAsync")?;
-            let handle_class = self.locale_field_class(handle_field)?;
+            let handle_class = self.field_class(handle_field, "locale")?;
             self.locale_named_class(handle_class, c"UnityEngine.ResourceManagement.AsyncOperations", c"AsyncOperationHandle`1", true)?;
             if (self.type_code)((self.class_type)(handle_class)) != 0x15 {
                 return Err(unsupported("locale closed operation handle"));
@@ -229,13 +195,13 @@ impl RuntimeAccess {
             }
             let handle = self.locale_box(attached, &settings, settings_class, c"m_SelectedLocaleAsync", handle_class)?;
             let operation_field = self.field(handle_class, c"m_InternalOp")?;
-            let operation_class = self.locale_field_class(operation_field)?;
+            let operation_class = self.field_class(operation_field, "locale")?;
             self.locale_named_class(operation_class, c"UnityEngine.ResourceManagement.AsyncOperations", c"AsyncOperationBase`1", false)?;
             if (self.type_code)((self.class_type)(operation_class)) != 0x15 {
                 return Err(unsupported("locale closed operation base"));
             }
             // This field's exact Locale identity proves the closed generic graph's result type.
-            self.locale_field(operation_class, c"<Result>k__BackingField", locale_class)?;
+            self.instance_field_in(operation_class, c"<Result>k__BackingField", locale_class, "locale")?;
             let operation = self
                 .locale_ref(attached, &handle, handle_class, c"m_InternalOp", operation_class)?
                 .ok_or(DiscoveryError::NotReady("selected locale handle is empty"))?;
@@ -243,11 +209,13 @@ impl RuntimeAccess {
             let operation_version = self.locale_i32(&operation, operation_class, c"m_Version")?;
             let references = self.locale_i32(&operation, operation_class, c"m_referenceCount")?;
             let state_field = self.field(operation_class, c"m_Status")?;
-            let state_class = self.locale_field_class(state_field)?;
+            let state_class = self.field_class(state_field, "locale")?;
             self.locale_state_class(state_class)?;
-            self.locale_field(operation_class, c"m_Status", state_class)?;
+            self.instance_field_in(operation_class, c"m_Status", state_class, "locale")?;
             let succeeded = self.field(state_class, c"Succeeded")?;
-            if (self.field_flags)(succeeded) & 0x50 != 0x50 || self.locale_field_class(succeeded)? != state_class {
+            if (self.field_flags)(succeeded) & (raw::FIELD_ATTRIBUTE_STATIC | raw::FIELD_ATTRIBUTE_LITERAL) != (raw::FIELD_ATTRIBUTE_STATIC | raw::FIELD_ATTRIBUTE_LITERAL)
+                || self.field_class(succeeded, "locale")? != state_class
+            {
                 return Err(unsupported("locale success enum literal"));
             }
             let mut success = 0_i32;
@@ -264,7 +232,7 @@ impl RuntimeAccess {
             self.locale_alive(&locale, locale_class)?;
             // These are the only managed bodies authorized by this narrowly scoped operation.
             self.locale_no_cctor(identifier_class)?;
-            let string_class = self.locale_system(c"String")?;
+            let string_class = self.system_class(c"String")?;
             let identifier_method = self.zero_arg_method(locale_class, c"get_Identifier", identifier_class, true, &api)?;
             let code_method = self.zero_arg_method(identifier_class, c"get_Code", string_class, true, &api)?;
             let application = self.class(&images, c"UnityEngine", c"Application")?;
@@ -302,7 +270,7 @@ impl RuntimeAccess {
 
 #[cfg(test)]
 mod tests {
-    use super::super::Type;
+    use super::super::{Ptr, Type};
     use super::*;
     use crate::il2cpp::ThreadContext;
     use std::cell::Cell;

@@ -3,8 +3,7 @@
 //! The public API resolves fields instead of carrying game-version offsets. The two small
 //! layout adapters (modern x64 object/array/string headers and MethodInfo.methodPointer) are
 //! explicitly part of the unsafe runtime contract, rather than inferred from a game version.
-//! Export signatures follow the installed 6000.4.8f1 `il2cpp-api-functions.h`; field and method
-//! contracts follow the original app's `native/runtime-discovery.h` and `native/dispatch.h`.
+//! Export signatures follow the installed 6000.4.8f1 `il2cpp-api-functions.h`.
 
 // Entry-point contracts cover the shared runtime assumptions. Keep local notes
 // for bounds, ownership and ABI details rather than repeating those contracts.
@@ -74,7 +73,8 @@ fn unsupported(contract: impl Into<String>) -> DiscoveryError {
 #[derive(Default)]
 struct MetadataCache {
     presence: std::sync::OnceLock<presence::PresenceBindings>,
-    fields: std::sync::Mutex<std::collections::HashMap<(usize, Vec<u8>), usize>>,
+    // Keyed by class, then name: a hit borrows the caller's name and allocates nothing.
+    fields: std::sync::Mutex<std::collections::HashMap<usize, std::collections::HashMap<std::ffi::CString, usize>>>,
 }
 
 /// # Safety
@@ -313,26 +313,37 @@ impl RuntimeAccess {
         }
     }
 
-    /// Enumerate descriptors from one live class with a shared bound.
-    unsafe fn methods(&self, class: Class) -> Result<Vec<Method>, DiscoveryError> {
+    /// Enumerate descriptors from one live class with a shared bound, one runtime query per item.
+    /// The class's retained metadata must stay live while the iterator is used.
+    unsafe fn methods(&self, class: Class) -> impl Iterator<Item = Result<Method, DiscoveryError>> + '_ {
         let mut iterator = std::ptr::null_mut();
-        let mut methods = Vec::new();
-        for _ in 0..100_000 {
+        let mut remaining = 100_000_u32;
+        let mut finished = false;
+        std::iter::from_fn(move || {
+            if finished {
+                return None;
+            }
+            if remaining == 0 {
+                finished = true;
+                return Some(Err(unsupported("method enumeration limit")));
+            }
+            remaining -= 1;
             // SAFETY: internal callers supply a class descriptor from these exports'
             // retained immutable metadata; iterator is a local slot managed by IL2CPP.
             let method = unsafe { (self.class_methods)(class, &mut iterator) };
             if method.is_null() {
-                return Ok(methods);
+                finished = true;
+                None
+            } else {
+                Some(Ok(method))
             }
-            methods.push(method);
-        }
-        Err(unsupported("method enumeration limit"))
+        })
     }
 
     unsafe fn field(&self, mut class: Class, name: &CStr) -> Result<Ptr, DiscoveryError> {
-        let key = (class as usize, name.to_bytes().to_vec());
+        let owner = class as usize;
         if let Some(cache) = self.metadata
-            && let Some(field) = cache.fields.lock().unwrap_or_else(|p| p.into_inner()).get(&key)
+            && let Some(field) = cache.fields.lock().unwrap_or_else(|p| p.into_inner()).get(&owner).and_then(|fields| fields.get(name))
         {
             return Ok(*field as Ptr);
         }
@@ -346,13 +357,63 @@ impl RuntimeAccess {
                 let field = (self.class_field)(class, name.as_ptr());
                 if !field.is_null() {
                     if let Some(cache) = self.metadata {
-                        cache.fields.lock().unwrap_or_else(|p| p.into_inner()).insert(key, field as usize);
+                        cache
+                            .fields
+                            .lock()
+                            .unwrap_or_else(|p| p.into_inner())
+                            .entry(owner)
+                            .or_default()
+                            .insert(name.to_owned(), field as usize);
                     }
                     return Ok(field);
                 }
                 class = (self.class_parent)(class);
             }
             Err(unsupported("class inheritance cycle/depth"))
+        }
+    }
+
+    /// A `System.*` class from corlib.
+    pub(super) unsafe fn system_class(&self, name: &CStr) -> Result<Class, DiscoveryError> {
+        // SAFETY: Corlib and the named class descriptor belong to retained initialized runtime metadata.
+        unsafe {
+            let image = (self.corlib)();
+            if image.is_null() {
+                return Err(unsupported("corlib image"));
+            }
+            let class = (self.class_from_name)(image, c"System".as_ptr(), name.as_ptr());
+            if class.is_null() {
+                return Err(unsupported(format!("missing class System.{}", name.to_string_lossy())));
+            }
+            Ok(class)
+        }
+    }
+
+    /// The class of a field's non-byref type. `label` names the caller in contract errors.
+    pub(super) unsafe fn field_class(&self, field: Ptr, label: &str) -> Result<Class, DiscoveryError> {
+        // SAFETY: The field descriptor is retained metadata; nonnull non-byref type metadata is checked before resolving its class.
+        unsafe {
+            let ty = (self.field_type)(field);
+            if ty.is_null() || (self.type_byref)(ty) {
+                return Err(unsupported(format!("{label} field type")));
+            }
+            let class = (self.type_class)(ty);
+            if class.is_null() {
+                return Err(unsupported(format!("{label} field class")));
+            }
+            Ok(class)
+        }
+    }
+
+    /// A nonstatic field of `owner` (or an ancestor) whose non-byref type's class is exactly `expected`.
+    pub(super) unsafe fn instance_field_in(&self, owner: Class, name: &CStr, expected: Class, label: &str) -> Result<Ptr, DiscoveryError> {
+        // SAFETY: The owner is retained metadata; expected field class and instance storage are validated before returning the descriptor.
+        unsafe {
+            let field = self.field(owner, name)?;
+            if (self.field_flags)(field) & raw::FIELD_ATTRIBUTE_STATIC != 0 || self.field_class(field, label)? != expected {
+                return Err(unsupported(format!("{label} field {} type/storage", name.to_string_lossy())));
+            }
+            Ok(field)
         }
     }
 
@@ -378,7 +439,10 @@ impl RuntimeAccess {
             let field = self.field(class, name)?;
             // Literal and thread-static fields are not the process-wide live state this adapter
             // accepts. A metadata name/type match alone would not establish that distinction.
-            if (self.field_flags)(field) & 0x50 != 0x10 || (self.field_offset)(field) == usize::MAX || self.type_name((self.field_type)(field))? != expected {
+            if (self.field_flags)(field) & (raw::FIELD_ATTRIBUTE_STATIC | raw::FIELD_ATTRIBUTE_LITERAL) != raw::FIELD_ATTRIBUTE_STATIC
+                || (self.field_offset)(field) == usize::MAX
+                || self.type_name((self.field_type)(field))? != expected
+            {
                 return Err(unsupported(format!("static field {}", name.to_string_lossy())));
             }
             Ok(field)
@@ -396,7 +460,8 @@ impl RuntimeAccess {
         // SAFETY: The owner and return class are retained metadata; exact arity and storage are checked before binding.
         unsafe {
             let mut found = None;
-            for method in self.methods(owner)? {
+            for method in self.methods(owner) {
+                let method = method?;
                 let actual = (self.method_name)(method);
                 if actual.is_null() {
                     return Err(unsupported("zero-argument getter name"));
@@ -413,7 +478,7 @@ impl RuntimeAccess {
                     || ty.is_null()
                     || (api.type_is_byref)(ty)
                     || (api.class_from_type)(ty) != returns
-                    || (api.method_get_flags)(method, &mut implementation_flags) & 0x0440 != 0
+                    || (api.method_get_flags)(method, &mut implementation_flags) & (raw::METHOD_ATTRIBUTE_ABSTRACT | raw::METHOD_ATTRIBUTE_VIRTUAL) != 0
                 {
                     return Err(unsupported(format!("zero-argument getter contract: {}", name.to_string_lossy())));
                 }
@@ -427,7 +492,8 @@ impl RuntimeAccess {
         // SAFETY: The class is retained metadata; exact parameter names, instance flags and nonvirtual Void return are checked before its code is selected.
         unsafe {
             let mut found = None;
-            for method in self.methods(class)? {
+            for method in self.methods(class) {
+                let method = method?;
                 let actual = (self.method_name)(method);
                 if actual.is_null() {
                     return Err(unsupported("null method name"));
@@ -440,7 +506,9 @@ impl RuntimeAccess {
                     || (self.method_instance)(method) != instance
                     || (self.method_generic)(method)
                     || (self.method_inflated)(method)
-                    || (self.method_flags)(method, &mut implementation_flags) & 0x2440 != 0
+                    || (self.method_flags)(method, &mut implementation_flags)
+                        & (raw::METHOD_ATTRIBUTE_PINVOKE_IMPL | raw::METHOD_ATTRIBUTE_ABSTRACT | raw::METHOD_ATTRIBUTE_VIRTUAL)
+                        != 0
                     || self.type_name((self.method_return)(method))? != "System.Void"
                 {
                     return Err(unsupported(format!("method contract {}", name.to_string_lossy())));
@@ -500,14 +568,7 @@ impl RuntimeAccess {
             if (self.object_header_size)() != 16 || (self.array_header_size)() != 32 || (self.array_length_offset)() != 24 || (self.array_bounds_offset)() != 16 {
                 return Err(unsupported("object/array header API"));
             }
-            let corlib = (self.corlib)();
-            if corlib.is_null() {
-                return Err(unsupported("corlib image"));
-            }
-            let byte_class = (self.class_from_name)(corlib, c"System".as_ptr(), c"Byte".as_ptr());
-            if byte_class.is_null() {
-                return Err(unsupported("System.Byte"));
-            }
+            let byte_class = self.system_class(c"Byte")?;
             let bytes = NonNull::new((self.array_new)(byte_class, 2)).ok_or_else(|| unsupported("byte array allocation"))?;
             let bytes = attached.root(bytes)?;
             let text = NonNull::new((self.string_new)(c"EF".as_ptr())).ok_or_else(|| unsupported("string allocation"))?;
@@ -556,7 +617,10 @@ impl RuntimeAccess {
                 let manager = root.target().ok_or_else(|| unsupported("manager root target"))?;
                 self.check_object(manager_class, manager)?;
                 let cached = self.field(manager_class, c"m_CachedPtr")?;
-                if (self.field_flags)(cached) & 0x10 != 0 || (self.field_offset)(cached) != 16 || self.type_name((self.field_type)(cached))? != "System.IntPtr" {
+                if (self.field_flags)(cached) & raw::FIELD_ATTRIBUTE_STATIC != 0
+                    || (self.field_offset)(cached) != 16
+                    || self.type_name((self.field_type)(cached))? != "System.IntPtr"
+                {
                     return Err(unsupported("manager native pointer"));
                 }
                 // The managed wrapper is strongly rooted; this reads only its pointer-sized field,

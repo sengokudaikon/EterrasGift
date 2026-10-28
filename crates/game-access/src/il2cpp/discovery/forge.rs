@@ -84,7 +84,9 @@ impl RuntimeAccess {
             }
             let field = self.instance_field(object, name, actual)?;
             let ty = (self.field_type)(field);
-            if (self.field_flags)(field) & 0x70 != 0 || !matches!((self.type_code)(ty), 0x0e | 0x12 | 0x14 | 0x15 | 0x1c | 0x1d) {
+            if (self.field_flags)(field) & (raw::FIELD_ATTRIBUTE_STATIC | raw::FIELD_ATTRIBUTE_INIT_ONLY | raw::FIELD_ATTRIBUTE_LITERAL) != 0
+                || !matches!((self.type_code)(ty), 0x0e | 0x12 | 0x14 | 0x15 | 0x1c | 0x1d)
+            {
                 return Err(unsupported("reference store requires a mutable reference field"));
             }
             let owner = (self.field_parent)(field);
@@ -96,21 +98,6 @@ impl RuntimeAccess {
         }
     }
     // All internal unsafe helpers inherit read_forge's live attached-runtime and graph access contract.
-    pub(super) unsafe fn system_class(&self, name: &CStr) -> Result<Class, DiscoveryError> {
-        // SAFETY: Corlib and the named class descriptor belong to retained initialized runtime metadata.
-        unsafe {
-            let image = (self.corlib)();
-            if image.is_null() {
-                return Err(unsupported("forge corlib"));
-            }
-            let class = (self.class_from_name)(image, c"System".as_ptr(), name.as_ptr());
-            if class.is_null() {
-                return Err(unsupported(format!("forge System.{}", name.to_string_lossy())));
-            }
-            Ok(class)
-        }
-    }
-
     pub(super) unsafe fn instance_field(&self, object: &Root<'_, '_>, name: &CStr, expected: Class) -> Result<Ptr, DiscoveryError> {
         // SAFETY: The receiver is rooted; its field type, instance storage and expected class are checked before returning metadata.
         unsafe {
@@ -119,27 +106,7 @@ impl RuntimeAccess {
             if class.is_null() {
                 return Err(unsupported("forge object class"));
             }
-            let field = self.field(class, name)?;
-            let ty = (self.field_type)(field);
-            if ty.is_null() || (self.type_byref)(ty) || (self.field_flags)(field) & 0x10 != 0 || (self.type_class)(ty) != expected {
-                return Err(unsupported(format!("forge field {} type/storage", name.to_string_lossy())));
-            }
-            Ok(field)
-        }
-    }
-
-    pub(super) unsafe fn field_class(&self, field: Ptr) -> Result<Class, DiscoveryError> {
-        // SAFETY: The field descriptor is retained metadata; nonnull non-byref type metadata is checked before resolving its class.
-        unsafe {
-            let ty = (self.field_type)(field);
-            if ty.is_null() || (self.type_byref)(ty) {
-                return Err(unsupported("forge field type"));
-            }
-            let class = (self.type_class)(ty);
-            if class.is_null() {
-                return Err(unsupported("forge field class"));
-            }
-            Ok(class)
+            self.instance_field_in(class, name, expected, "forge")
         }
     }
 
@@ -179,12 +146,12 @@ impl RuntimeAccess {
                 return Err(unsupported("forge enum object class"));
             }
             let field = self.field(object_class, name)?;
-            let class = self.field_class(field)?;
+            let class = self.field_class(field, "forge")?;
             let actual_name = (self.class_name)(class);
             // The field itself identifies its enum, including a nested or namespaced enum that
             // cannot be resolved by class_from_name(image, "", simpleName). Recheck both the
             // accepted semantic name and the enum storage before copying into an i32 slot.
-            if (self.field_flags)(field) & 0x10 != 0 || actual_name.is_null() || metadata_text(actual_name) != enum_name {
+            if (self.field_flags)(field) & raw::FIELD_ATTRIBUTE_STATIC != 0 || actual_name.is_null() || metadata_text(actual_name) != enum_name {
                 return Err(unsupported("forge enum field name/storage"));
             }
             self.enum_storage(class, c"Int32", 0x08)?;
@@ -322,7 +289,7 @@ impl RuntimeAccess {
             let byte = self.system_class(c"Byte")?;
             let class = (self.object_class)(target(object)?.as_ptr());
             let field = self.field(class, name)?;
-            let array_class = self.field_class(field)?;
+            let array_class = self.field_class(field, "forge")?;
             self.array_class(array_class, byte)?;
             let Some(array) = self.reference(attached, object, name, array_class)? else {
                 return Ok(Vec::new());
@@ -340,7 +307,7 @@ impl RuntimeAccess {
             let affix_class = self.class(images, c"", c"ItemAffix")?;
             let item_class = (self.object_class)(target(item)?.as_ptr());
             let list_field = self.field(item_class, c"affixes")?;
-            let list_class = self.field_class(list_field)?;
+            let list_class = self.field_class(list_field, "forge")?;
             self.list_class(list_class)?;
             let list = self
                 .reference(attached, item, c"affixes", list_class)?
@@ -348,7 +315,7 @@ impl RuntimeAccess {
             self.exact(&list, list_class)?;
             let count: i32 = self.primitive(&list, c"_size")?;
             let array_field = self.field(list_class, c"_items")?;
-            let array_class = self.field_class(array_field)?;
+            let array_class = self.field_class(array_field, "forge")?;
             self.array_class(array_class, affix_class)?;
             let array = self
                 .reference(attached, &list, c"_items", array_class)?

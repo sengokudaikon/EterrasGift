@@ -84,7 +84,8 @@ impl RuntimeAccess {
                     return Err(ForgeWriteError::Refused("Invalid affix seal".into()));
                 }
                 let constructor = self.method(class, c".ctor", &["System.UInt16", "System.Byte", "System.Byte", "System.Byte", "SealedAffixType"], true)?;
-                let enum_class = NonNull::new(self.field_class(self.field(class, c"sealedAffixType")?)?).ok_or_else(|| ForgeWriteError::Refused("Missing seal enum".into()))?;
+                let enum_class =
+                    NonNull::new(self.field_class(self.field(class, c"sealedAffixType")?, "forge write")?).ok_or_else(|| ForgeWriteError::Refused("Missing seal enum".into()))?;
                 let context = InvocationContext::new(attached, api);
                 let constructor = context
                     .bind_with_value_types(
@@ -185,7 +186,8 @@ impl RuntimeAccess {
         // SAFETY: The owner is retained closed List metadata; exact element and parameter classes are checked before binding.
         unsafe {
             let mut found = None;
-            for method in self.methods(class)? {
+            for method in self.methods(class) {
+                let method = method?;
                 let actual = (self.method_name)(method);
                 if actual.is_null() {
                     return Err(ForgeWriteError::Refused("Missing list method name".into()));
@@ -202,7 +204,7 @@ impl RuntimeAccess {
                     || returns.is_null()
                     || (self.type_byref)(returns)
                     || (self.type_code)(returns) != 1
-                    || (api.method_get_flags)(method, &mut implementation_flags) & 0x2400 != 0
+                    || (api.method_get_flags)(method, &mut implementation_flags) & (raw::METHOD_ATTRIBUTE_PINVOKE_IMPL | raw::METHOD_ATTRIBUTE_ABSTRACT) != 0
                 {
                     return Err(ForgeWriteError::Refused("Affix-list method signature differs".into()));
                 }

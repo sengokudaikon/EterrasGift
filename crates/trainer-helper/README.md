@@ -20,9 +20,9 @@ Owners and registered trampoline unwind tables remain for the process lifetime; 
 refused. Threads::All uses best-effort suspension, with the limits recorded in the interop notes.
 Its callback calls Unity's original first,
 with no Rust lock or catch around that call. After a normal return, the first accepted callback
-checks the current UnitySynchronizationContext main managed ID against Thread.CurrentThread.ManagedThreadId.
+asks Unity's native UnityEngine.Object.CurrentThreadIsMainThread predicate whether it runs on the main thread.
 Only a matching callback establishes the Windows thread ID used for subsequent dispatch; other threads
-forward the original without taking a command. There is no pre-bootstrap main-thread nomination. Rust panics in this post-call work close admission;
+forward the original without taking a command. Rust panics in this post-call work close admission;
 native/managed exceptions continue to their caller. The authored Unity throwing-task route checks
 that later queued tasks still run. Game graph reads serve requested operations and the bounded app-state watchdog.
 
@@ -80,8 +80,8 @@ The local pipe is `eterras-gift-<PID>`, one bounded request per connection: a 12
 client PID and retained process handle/start time verify each owner request. Fixture servers
 without a bootstrap binding let the first valid Discover claim ownership. Normal per-request EOF preserves ownership. Other living processes receive Refused without
 reaching the backend; owner death stops the helper and restores the dispatcher. A
-restoration error retains the DLL rather than handing off an unconfirmed entry. This strengthens the original helper's
-ownership model. The protocol has no nonce or authentication against code in the same process.
+restoration error retains the DLL rather than handing off an unconfirmed entry.
+The protocol has no nonce or authentication against code in the same process.
 
 Admission and request waits observe shutdown/process death. A five-second main-thread deadline or
 disconnect cancels pending work when possible. Once started, the request retains its dispatcher

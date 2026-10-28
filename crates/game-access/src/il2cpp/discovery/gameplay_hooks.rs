@@ -20,12 +20,12 @@ impl RuntimeAccess {
     /// additionally required before using the returned code addresses.
     pub unsafe fn gameplay_hook_targets(
         &self,
-        attached: &AttachedThread<'_>,
+        // Not read: holding it proves this thread is attached, which the metadata and static reads below need.
+        _attached: &AttachedThread<'_>,
         hook: GameplayHook,
         module_base: NonNull<u8>,
         module_size: usize,
     ) -> Result<Vec<GameplayHookTarget>, DiscoveryError> {
-        let _ = attached;
         let damage = if hook.is_damage() {
             // SAFETY: attached main thread, initialized game statics and retained metadata.
             Some(unsafe { self.damage_layout()? })
@@ -86,7 +86,11 @@ impl RuntimeAccess {
                 let linked_offset = if class == c"LinkedOneSlotItemContainer" {
                     let field = self.field(owner, c"linkedSlot")?;
                     let offset = (self.field_offset)(field);
-                    if (self.field_flags)(field) & 0x10 != 0 || self.field_class(field)? != owner || !(16..=16384).contains(&offset) || offset % 8 != 0 {
+                    if (self.field_flags)(field) & raw::FIELD_ATTRIBUTE_STATIC != 0
+                        || self.field_class(field, "hook")? != owner
+                        || !(16..=16384).contains(&offset)
+                        || offset % 8 != 0
+                    {
                         return Err(unsupported("offhand linked-slot reference layout"));
                     }
                     Some(offset as u32)
@@ -94,7 +98,8 @@ impl RuntimeAccess {
                     None
                 };
                 let mut found = None;
-                for method in self.methods(owner)? {
+                for method in self.methods(owner) {
+                    let method = method?;
                     let actual = (self.method_name)(method);
                     if actual.is_null() {
                         return Err(unsupported("null hook method name"));
@@ -113,7 +118,7 @@ impl RuntimeAccess {
                         || (self.method_instance)(method) != instance
                         || (self.method_generic)(method)
                         || (self.method_inflated)(method)
-                        || (self.method_flags)(method, &mut implementation) & 0x2400 != 0
+                        || (self.method_flags)(method, &mut implementation) & (raw::METHOD_ATTRIBUTE_PINVOKE_IMPL | raw::METHOD_ATTRIBUTE_ABSTRACT) != 0
                         || returns.is_null()
                         || (self.type_byref)(returns)
                         || self.type_name(returns)? != return_name
@@ -159,7 +164,12 @@ impl RuntimeAccess {
             let actor = self.class(&images, c"", c"Actor")?;
             let field = self.field(health, c"actor")?;
             let offset = (self.field_offset)(field);
-            if (self.class_value)(health) || (self.field_flags)(field) & 0x10 != 0 || self.field_class(field)? != actor || !(16..=16384).contains(&offset) || offset % 8 != 0 {
+            if (self.class_value)(health)
+                || (self.field_flags)(field) & raw::FIELD_ATTRIBUTE_STATIC != 0
+                || self.field_class(field, "hook")? != actor
+                || !(16..=16384).contains(&offset)
+                || offset % 8 != 0
+            {
                 return Err(unsupported("health actor reference layout"));
             }
             let player_class = self.class(&images, c"", c"PlayerFinder")?;
@@ -189,7 +199,7 @@ impl RuntimeAccess {
             let offset = (self.field_offset)(field);
             let ty = (self.field_type)(field);
             if (self.class_value)(owner)
-                || (self.field_flags)(field) & 0x10 != 0
+                || (self.field_flags)(field) & raw::FIELD_ATTRIBUTE_STATIC != 0
                 || ty.is_null()
                 || (self.type_byref)(ty)
                 || self.type_name(ty)? != expected

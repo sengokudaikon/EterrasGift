@@ -1,7 +1,7 @@
 //! Game-specific retained bootstrap and verified transport. Construction is inert.
-//! Native work is serialized by the trainer worker; no main-thread nomination or
-//! pre-bootstrap runtime certification is required. Drop never stops/unloads code.
+//! Native work is serialized by the trainer worker. Drop never stops/unloads code.
 
+#[allow(unsafe_code)] // Windows version-resource FFI; the rest of the crate denies unsafe.
 mod version;
 
 use crate::lifecycle::{RESTART_REQUIRED, Residency};
@@ -58,7 +58,7 @@ impl Retained {
 }
 
 /// One registry per owning trainer worker, retained across connect/disconnect.
-/// A possibly submitted load is never repeated in the same process generation.
+/// A possibly submitted load is never repeated in this process (pid + creation time).
 /// Process birth/path are part of the key; there is no arbitrary eight-game limit.
 /// A new load requires proven departure; a failed departure fences this process.
 pub struct NativePreparer {

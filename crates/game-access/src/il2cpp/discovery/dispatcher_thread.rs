@@ -7,7 +7,7 @@ use std::ptr::NonNull;
 impl RuntimeAccess {
     /// Ask Unity whether this callback is running on its native main thread.
     /// SynchronizationContext.Current can be replaced by the game or its mods and
-    /// is not a thread identity. No OS thread is nominated before bootstrap.
+    /// is not a thread identity.
     ///
     /// # Safety
     /// Invoke only after the original ExecuteTasks returns, on an attached thread
@@ -23,7 +23,8 @@ impl RuntimeAccess {
             let owner = self.class(&images, c"UnityEngine", c"Object")?;
             let boolean = self.system_class(c"Boolean")?;
             let mut found = None;
-            for method in self.methods(owner)? {
+            for method in self.methods(owner) {
+                let method = method?;
                 let name = (self.method_name)(method);
                 if name.is_null() {
                     return Err(unsupported("dispatcher predicate name"));

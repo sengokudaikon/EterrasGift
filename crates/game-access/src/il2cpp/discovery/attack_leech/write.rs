@@ -99,7 +99,7 @@ impl RuntimeAccess {
                 || (self.type_class)(ty) != graph.single
                 || (self.type_code)(ty) != 0x0c
                 || (self.field_parent)(field) != owner
-                || (self.field_flags)(field) & 0x70 != 0
+                || (self.field_flags)(field) & (raw::FIELD_ATTRIBUTE_STATIC | raw::FIELD_ATTRIBUTE_INIT_ONLY | raw::FIELD_ATTRIBUTE_LITERAL) != 0
                 || field != read_field
             {
                 return Err(AttackLeechWriteError::Refused("Rate is not the exact mutable declared System.Single/R4 field".into()));

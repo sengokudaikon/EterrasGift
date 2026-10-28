@@ -16,6 +16,15 @@ macro_rules! opaque {
 
 opaque!(Domain, Thread, Object, MethodInfo, Exception, Class, Type, FieldInfo);
 
+// Attribute bits returned by il2cpp_field_get_flags and il2cpp_method_get_flags, named as in
+// IL2CPP's il2cpp-tabledefs.h (the ECMA-335 FieldAttributes/MethodAttributes values).
+pub const FIELD_ATTRIBUTE_STATIC: i32 = 0x0010;
+pub const FIELD_ATTRIBUTE_INIT_ONLY: i32 = 0x0020;
+pub const FIELD_ATTRIBUTE_LITERAL: i32 = 0x0040;
+pub const METHOD_ATTRIBUTE_VIRTUAL: u32 = 0x0040;
+pub const METHOD_ATTRIBUTE_ABSTRACT: u32 = 0x0400;
+pub const METHOD_ATTRIBUTE_PINVOKE_IMPL: u32 = 0x2000;
+
 pub type FieldSetValue = unsafe extern "C-unwind" fn(*mut Object, *mut FieldInfo, *mut c_void);
 
 /// The mutation export is deliberately separate from read-only runtime access.
