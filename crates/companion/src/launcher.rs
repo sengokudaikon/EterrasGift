@@ -1,13 +1,12 @@
-//! How Home and the Mods page start the game in its three ways: one start at a time, each said in one sentence
-//! (`spec/companion.md` §4). The game process itself is never touched; only Steam, the executable and MelonLoader's
-//! proxy in the game folder are.
+//! How Home and the Mods page start the game in its three ways: one start at a time, each said in one sentence. The
+//! game process itself is never touched; only Steam, the executable and MelonLoader's proxy in the game folder are.
 
-use crate::Lifetime;
 use crate::host::{GameHost, LaunchError, LaunchMode, LaunchOutcome};
 use crate::install::GameInstall;
 use crate::loader::{self, ModLoaderState};
 use crate::process::RunningGame;
 use eg_core::game_log::GameLogState;
+use eg_core::operations::Cancellation;
 use std::path::PathBuf;
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::Duration;
@@ -25,7 +24,7 @@ pub const STARTING_WITH_MODS: &str = "Starting Last Epoch offline with mods. Mel
 pub struct GameLauncher {
     host: Arc<dyn GameHost>,
     // Cancelled when the app closes, so a start with mods still waiting for MelonLoader sets its proxy aside first.
-    lifetime: Lifetime,
+    lifetime: Cancellation,
     starting: Mutex<bool>,
     finished: Condvar,
 }
@@ -37,7 +36,7 @@ impl GameLauncher {
     pub fn new(host: Arc<dyn GameHost>) -> GameLauncher {
         GameLauncher {
             host,
-            lifetime: Lifetime::default(),
+            lifetime: Cancellation::default(),
             starting: Mutex::new(false),
             finished: Condvar::new(),
         }

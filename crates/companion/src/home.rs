@@ -1,11 +1,12 @@
-//! Home's state (`spec/companion.md` §5): it starts the game online, offline, or offline with mods, with Eterra's tree
-//! saying where the game is. Plain values; the UI reads them after each change.
+//! Home's state: it starts the game online, offline, or offline with mods, with Eterra's tree saying where the game is.
+//! Plain values; the UI reads them after each change.
 
 use crate::launcher::{LaunchReport, STARTING_WITH_MODS};
 use crate::loader::{CONFLICT, ModLoaderState};
 use crate::process::RunningGame;
 use eg_core::bloom::BloomPhase;
 use eg_core::game_log::GameReadiness;
+use std::borrow::Cow;
 
 const ONLINE: &str = "Start the game through Steam. MelonLoader is set aside first, so no mod loads online";
 const OFFLINE: &str = "Start the game in offline mode. MelonLoader is set aside first, so no mod loads";
@@ -83,15 +84,15 @@ impl HomeModel {
         self.can_play() && self.has_mod_loader
     }
 
-    pub fn online_tip(&self) -> String {
+    pub fn online_tip(&self) -> Cow<'static, str> {
         self.tip(ONLINE)
     }
 
-    pub fn offline_tip(&self) -> String {
+    pub fn offline_tip(&self) -> Cow<'static, str> {
         self.tip(OFFLINE)
     }
 
-    pub fn with_mods_tip(&self) -> String {
+    pub fn with_mods_tip(&self) -> Cow<'static, str> {
         self.tip(WITH_MODS)
     }
 
@@ -110,13 +111,13 @@ impl HomeModel {
     }
 
     /// What each button does, or, while the game runs and they wait, why they wait.
-    fn tip(&self, action: &str) -> String {
+    fn tip(&self, action: &'static str) -> Cow<'static, str> {
         if self.conflicted {
-            conflict()
+            Cow::Owned(conflict())
         } else if self.phase == BloomPhase::Wilted {
-            action.to_owned()
+            Cow::Borrowed(action)
         } else {
-            RUNNING.to_owned()
+            Cow::Borrowed(RUNNING)
         }
     }
 

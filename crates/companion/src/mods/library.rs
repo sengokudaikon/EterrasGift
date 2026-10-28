@@ -1,8 +1,13 @@
-//! The original schema-1 library: drafts are durable here, and reach MelonLoader only before a with-mods start.
+//! The mod library's two records. profile.json is what the player chose: each mod added (its DLL kept in the library
+//! under its hash) and whether it is on, and the setting changes waiting for the next start. placed.json is what was
+//! last put in a game's Mods folder, and when that game started. Drafts are durable here, and reach MelonLoader only
+//! before a with-mods start.
 
 use super::assembly::{AssemblyFacts, MelonAssembly};
+use super::invalid;
 use super::preferences::{MelonPreferences, PreferenceChange, PreferenceValue};
-use eg_core::{atomic, hashes, paths};
+use crate::loader::melon_paths;
+use eg_core::{atomic, hashes, json, paths};
 use serde_json::{Value, json};
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fs;
@@ -23,6 +28,18 @@ pub struct ModProfile {
     pub settings: BTreeMap<String, BTreeMap<String, Value>>,
 }
 
+impl ModProfile {
+    /// Drops a waiting setting change, and its category once that has none left.
+    fn clear_setting(&mut self, category: &str, key: &str) {
+        if let Some(entries) = self.settings.get_mut(category) {
+            entries.remove(key);
+            if entries.is_empty() {
+                self.settings.remove(category);
+            }
+        }
+    }
+}
+
 #[derive(Clone, Debug, Default)]
 pub struct PlacedMods {
     pub root: PathBuf,
@@ -33,6 +50,17 @@ pub struct PlacedMods {
 impl PlacedMods {
     pub fn hash_of(&self, file: &str) -> Option<&str> {
         self.files.iter().find(|(name, _)| name.eq_ignore_ascii_case(file)).map(|(_, hash)| hash.as_str())
+    }
+
+    /// Records `file` as placed with `hash`, in place of any spelling of it recorded before.
+    fn record(&mut self, file: String, hash: String) {
+        self.forget(&file);
+        self.files.insert(file, hash);
+    }
+
+    /// Forgets `file`, however its name was spelled when it was recorded.
+    fn forget(&mut self, file: &str) {
+        self.files.retain(|name, _| !same(name, file));
     }
 }
 
@@ -144,11 +172,8 @@ impl ModLibrary {
         self.change(|profile| {
             if let Some(value) = value {
                 profile.settings.entry(category.into()).or_default().insert(key.into(), value);
-            } else if let Some(entries) = profile.settings.get_mut(category) {
-                entries.remove(key);
-                if entries.is_empty() {
-                    profile.settings.remove(category);
-                }
+            } else {
+                profile.clear_setting(category, key);
             }
             Ok(())
         })
@@ -188,12 +213,7 @@ impl ModLibrary {
             installed.enabled = placed.hash_of(&installed.file).is_some();
         }
         for (category, key) in visible_settings {
-            if let Some(entries) = profile.settings.get_mut(category) {
-                entries.remove(key);
-                if entries.is_empty() {
-                    profile.settings.remove(category);
-                }
-            }
+            profile.clear_setting(category, key);
         }
         self.save_profile(&profile)
     }
@@ -226,8 +246,7 @@ impl ModLibrary {
             } else {
                 profile.mods.push(installed);
             }
-            placed.files.retain(|name, _| !same(name, &file));
-            placed.files.insert(file.clone(), hash);
+            placed.record(file.clone(), hash);
             changes.adopted.push(file);
         }
         placed.files.retain(|file, _| {
@@ -252,7 +271,7 @@ impl ModLibrary {
         let mut profile = self.load_profile()?;
         let mut placed = self.load_placed(root)?;
         let mut on = Vec::new();
-        let mods = root.join("Mods");
+        let mods = melon_paths::mods(root);
         let result = (|| {
             fs::create_dir_all(&mods)?;
             for installed in &profile.mods {
@@ -261,12 +280,11 @@ impl ModLibrary {
                     if !target.exists() || hash_file(&target)? != installed.hash {
                         copy_verified(&self.path_of(installed), &target, &installed.hash)?;
                     }
-                    placed.files.retain(|file, _| !same(file, &installed.file));
-                    placed.files.insert(installed.file.clone(), installed.hash.clone());
+                    placed.record(installed.file.clone(), installed.hash.clone());
                     on.push(installed.file.clone());
                 } else if placed.hash_of(&installed.file).is_some() {
                     remove_if_present(&target)?;
-                    placed.files.retain(|file, _| !same(file, &installed.file));
+                    placed.forget(&installed.file);
                 }
             }
             let removed: Vec<_> = placed
@@ -426,6 +444,7 @@ impl ModLibrary {
         let Ok(mods) = fs::read_dir(&library) else {
             return;
         };
+        let plain_directory = |path: &Path| fs::symlink_metadata(path).is_ok_and(|metadata| paths::is_plain_directory(&metadata));
         for directory in mods.flatten().map(|entry| entry.path()) {
             if !plain_directory(&directory) {
                 continue;
@@ -453,9 +472,9 @@ impl ModLibrary {
     }
 }
 
-pub fn hash_file(path: &Path) -> io::Result<String> {
-    hashes::of_reader(fs::File::open(path)?)
-}
+/// MelonPreferences.cfg under the folder MelonLoader runs from, for callers that name it from the library.
+/// The hash the library knows a DLL by.
+use eg_core::hashes::of_file as hash_file;
 
 /// A source may be rebuilt between its initial hash and its copy. Publish only the bytes that the record names.
 fn copy_verified(source: &Path, target: &Path, expected: &str) -> io::Result<()> {
@@ -470,20 +489,11 @@ fn copy_verified(source: &Path, target: &Path, expected: &str) -> io::Result<()>
         Ok(())
     })
 }
-pub fn preferences_path(root: &Path) -> PathBuf {
-    root.join("UserData").join("MelonPreferences.cfg")
-}
-pub fn latest_log_path(root: &Path) -> PathBuf {
-    root.join("MelonLoader").join("Latest.log")
-}
 fn same(a: &str, b: &str) -> bool {
     a.eq_ignore_ascii_case(b)
 }
-fn invalid(message: impl Into<String>) -> io::Error {
-    io::Error::new(io::ErrorKind::InvalidData, message.into())
-}
 fn field<'a>(value: &'a Value, key: &str) -> Option<&'a Value> {
-    value.as_object()?.iter().find(|(name, _)| same(name, key)).map(|(_, value)| value)
+    json::find(value.as_object()?, key)
 }
 fn load_record(path: &Path) -> io::Result<Option<Value>> {
     let text = match fs::read_to_string(path) {
@@ -492,7 +502,7 @@ fn load_record(path: &Path) -> io::Result<Option<Value>> {
         Err(error) => return Err(error),
     };
     let name = path.file_name().unwrap().to_string_lossy();
-    let value: Value = serde_json::from_str(text.trim_start_matches('\u{feff}')).map_err(|error| invalid(format!("{name} is damaged: {error}")))?;
+    let value: Value = serde_json::from_str(eg_core::text::strip_bom(&text)).map_err(|error| invalid(format!("{name} is damaged: {error}")))?;
     if value.is_null() {
         return Err(invalid(format!("{name} is empty.")));
     }
@@ -517,7 +527,7 @@ fn is_dll(file: &str) -> bool {
         && !file.chars().any(|c| c < ' ' || "<>:\"/\\|?*".contains(c))
 }
 fn mod_files(root: &Path) -> io::Result<Vec<PathBuf>> {
-    match fs::read_dir(root.join("Mods")) {
+    match fs::read_dir(melon_paths::mods(root)) {
         Ok(files) => files
             .filter_map(|entry| match entry {
                 Ok(entry) if entry.path().is_file() && is_dll(&entry.file_name().to_string_lossy()) => Some(Ok(entry.path())),
@@ -535,22 +545,7 @@ fn remove_if_present(path: &Path) -> io::Result<()> {
         result => result,
     }
 }
-fn plain_directory(path: &Path) -> bool {
-    let Ok(metadata) = fs::symlink_metadata(path) else {
-        return false;
-    };
-    if !metadata.is_dir() || metadata.file_type().is_symlink() {
-        return false;
-    }
-    #[cfg(windows)]
-    {
-        use std::os::windows::fs::MetadataExt;
-        if metadata.file_attributes() & 0x400 != 0 {
-            return false;
-        }
-    }
-    true
-}
+
 fn save(path: &Path, value: Value) -> io::Result<()> {
     atomic::write(path, serde_json::to_string_pretty(&value)?.as_bytes())
 }
@@ -614,7 +609,7 @@ mod tests {
             .unwrap();
         fs::write(library.path_of(&installed), b"corrupted").unwrap();
 
-        assert!(library.prepare(&root, &preferences_path(&root)).is_err());
+        assert!(library.prepare(&root, &melon_paths::preferences(&root)).is_err());
         assert!(!root.join("Mods/Mod.dll").exists());
         assert!(library.placed(&root).unwrap().files.is_empty());
         assert_eq!(fs::read_dir(root.join("Mods")).unwrap().count(), 0);

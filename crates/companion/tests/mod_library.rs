@@ -1,10 +1,12 @@
 use eg_companion::install::GameInstall;
 use eg_companion::loader::ModLoaderState;
+use eg_companion::loader::melon_paths;
 use eg_companion::mods::assembly::LoaderVersion;
 use eg_companion::mods::inventory::{self, Inventory, LoaderReport};
-use eg_companion::mods::library::{ModLibrary, hash_file, preferences_path};
+use eg_companion::mods::library::ModLibrary;
 use eg_companion::mods::loader_state::LoaderPreparation;
 use eg_companion::mods::worker::ModWorker;
+use eg_core::hashes::of_file as hash_file;
 use serde_json::json;
 use std::{fs, io};
 
@@ -31,7 +33,7 @@ fn turning_off_removing_and_undoing_are_durable_drafts_until_preparation() {
     library.restore(&removed, index).unwrap();
     assert_eq!(library.profile().unwrap().mods[1].file, "Beta.dll");
     library.remove("Beta.dll").unwrap();
-    library.prepare(&root, &preferences_path(&root)).unwrap();
+    library.prepare(&root, &melon_paths::preferences(&root)).unwrap();
     assert!(!root.join("Mods/Alpha.dll").exists());
     assert!(!root.join("Mods/Beta.dll").exists());
     assert!(!library.holds(&removed));
@@ -61,7 +63,7 @@ fn a_manual_rebuild_wins_and_manual_deletion_removes_the_profile_entry() {
 fn settings_wait_and_preserve_cfg_comments_while_incompatible_drafts_are_released() {
     let temp = tempfile::tempdir().unwrap();
     let (library, root) = adopt(temp.path());
-    let file = preferences_path(&root);
+    let file = melon_paths::preferences(&root);
     fs::create_dir_all(file.parent().unwrap()).unwrap();
     let original = "[Example]\r\n# Keep this\r\nOn = true # inline\r\nScale = 1.0\r\n";
     fs::write(&file, original).unwrap();
@@ -98,7 +100,7 @@ fn a_partial_prepare_checkpoints_removed_files_and_preserves_pending_settings() 
     library.set_enabled("Alpha.dll", false).unwrap();
     library.set_setting("Example", "On", Some(json!(false))).unwrap();
     // A blocked preferences path fails after Mods has changed.
-    let file = preferences_path(&root);
+    let file = melon_paths::preferences(&root);
     fs::create_dir_all(&file).unwrap();
     assert!(library.prepare(&root, &file).is_err());
     assert!(library.placed(&root).unwrap().hash_of("Alpha.dll").is_none());
@@ -118,7 +120,7 @@ fn game_preparation_queues_behind_ui_edits_and_shutdown_drains_them() {
             library.set_enabled("Alpha.dll", false)
         })
         .unwrap();
-    let prepare = worker.enqueue(move |library| library.prepare(&root, &preferences_path(&root))).unwrap();
+    let prepare = worker.enqueue(move |library| library.prepare(&root, &melon_paths::preferences(&root))).unwrap();
     assert!(prepare.try_recv().is_err());
     release.send(()).unwrap();
     worker.close();
@@ -141,8 +143,8 @@ fn revert_changes_only_visible_settings_and_keeps_unknown_drafts_until_prepare()
     assert!(!profile.settings["Visible"].contains_key("Enabled"));
     assert_eq!(profile.settings["Visible"]["Retired"], json!(7));
     assert_eq!(profile.settings["Unclaimed"]["Keep"], json!("waiting"));
-    // Settings the current preferences no longer expose are released only at preparation, just as in the C# app.
-    library.prepare(&root, &preferences_path(&root)).unwrap();
+    // Settings the current preferences no longer expose are released only at preparation.
+    library.prepare(&root, &melon_paths::preferences(&root)).unwrap();
     assert!(library.profile().unwrap().settings.is_empty());
 }
 
@@ -153,14 +155,14 @@ fn partial_dll_placement_keeps_ownership_without_pruning_or_erasing_settings() {
     fs::write(root.join("Mods/Gamma.dll"), b"third").unwrap();
     library.reconcile(&root).unwrap();
     library.set_enabled("Gamma.dll", false).unwrap();
-    library.prepare(&root, &preferences_path(&root)).unwrap();
+    library.prepare(&root, &melon_paths::preferences(&root)).unwrap();
     // Taking Alpha out succeeds; placing Gamma then fails because its own library copy disappeared.
     let gamma = library.profile().unwrap().mods.into_iter().find(|installed| installed.file == "Gamma.dll").unwrap();
     fs::remove_file(library.path_of(&gamma)).unwrap();
     library.set_enabled("Alpha.dll", false).unwrap();
     library.set_enabled("Gamma.dll", true).unwrap();
     library.set_setting("Future", "Enabled", Some(json!(true))).unwrap();
-    assert!(library.prepare(&root, &preferences_path(&root)).is_err());
+    assert!(library.prepare(&root, &melon_paths::preferences(&root)).is_err());
     let placed = library.placed(&root).unwrap();
     assert_eq!(placed.files.keys().map(String::as_str).collect::<Vec<_>>(), ["Beta.dll"]);
     assert!(!root.join("Mods/Alpha.dll").exists());
@@ -182,10 +184,10 @@ fn only_top_level_dlls_are_owned_and_failed_placement_leaves_no_temporary_files(
     fs::create_dir_all(root.join("Mods/Bundle")).unwrap();
     fs::write(root.join("Mods/Bundle/Nested.dll"), b"leave alone too").unwrap();
     library.set_enabled("Alpha.dll", false).unwrap();
-    library.prepare(&root, &preferences_path(&root)).unwrap();
+    library.prepare(&root, &melon_paths::preferences(&root)).unwrap();
     fs::create_dir(root.join("Mods/Alpha.dll")).unwrap();
     library.set_enabled("Alpha.dll", true).unwrap();
-    assert!(library.prepare(&root, &preferences_path(&root)).is_err());
+    assert!(library.prepare(&root, &melon_paths::preferences(&root)).is_err());
     assert!(root.join("Mods/Alpha.dll").is_dir());
     assert_eq!(fs::read(root.join("Mods/readme.txt")).unwrap(), b"leave alone");
     assert_eq!(fs::read(root.join("Mods/Bundle/Nested.dll")).unwrap(), b"leave alone too");
@@ -203,7 +205,7 @@ fn a_manual_replacement_of_a_removed_mod_is_adopted_and_not_deleted_by_preparati
     let (library, root) = adopt(temp.path());
     let (removed, _) = library.remove("Alpha.dll").unwrap().unwrap();
     fs::write(root.join("Mods/Alpha.dll"), b"replaced by the user").unwrap();
-    library.prepare(&root, &preferences_path(&root)).unwrap();
+    library.prepare(&root, &melon_paths::preferences(&root)).unwrap();
     let profile = library.profile().unwrap();
     let alpha = profile.mods.iter().find(|installed| installed.file == "Alpha.dll").unwrap();
     assert!(alpha.enabled);
@@ -223,7 +225,7 @@ fn a_loader_root_has_its_own_ownership_and_launch_record() {
     assert!(library.placed(&stage).unwrap().files.is_empty());
     assert!(library.placed(&stage).unwrap().last_launch.is_none());
     library.set_enabled("Alpha.dll", false).unwrap();
-    library.prepare(&stage, &preferences_path(&stage)).unwrap();
+    library.prepare(&stage, &melon_paths::preferences(&stage)).unwrap();
     assert!(root.join("Mods/Alpha.dll").exists(), "preparing a stage never removes the game's own DLL");
     assert_eq!(fs::read(stage.join("Mods/Beta.dll")).unwrap(), b"second");
     assert!(!stage.join("Mods/Alpha.dll").exists());
@@ -249,7 +251,7 @@ fn corrupt_profile_shapes_stop_preparation_without_changing_game_files() {
         let file = library.directory().join("profile.json");
         let text = document.to_string();
         fs::write(&file, &text).unwrap();
-        assert!(library.prepare(&root, &preferences_path(&root)).is_err());
+        assert!(library.prepare(&root, &melon_paths::preferences(&root)).is_err());
         assert_eq!(fs::read_to_string(&file).unwrap(), text);
         assert_eq!(fs::read(root.join("Mods/Alpha.dll")).unwrap(), b"first");
         assert_eq!(fs::read(root.join("Mods/Beta.dll")).unwrap(), b"second");
@@ -273,7 +275,7 @@ fn corrupt_ownership_records_are_refused_even_when_their_root_is_different() {
         let file = library.directory().join("placed.json");
         let text = document.to_string();
         fs::write(&file, &text).unwrap();
-        assert!(library.prepare(&root, &preferences_path(&root)).is_err());
+        assert!(library.prepare(&root, &melon_paths::preferences(&root)).is_err());
         assert_eq!(fs::read_to_string(&file).unwrap(), text);
         assert_eq!(fs::read(root.join("Mods/Alpha.dll")).unwrap(), b"first");
     }
@@ -294,7 +296,7 @@ fn fixture(temp: &std::path::Path) -> (ModLibrary, GameInstall) {
 fn inventory_shows_described_settings_only_and_reports_malformed_preferences_separately() {
     let temp = tempfile::tempdir().unwrap();
     let (library, install) = fixture(temp.path());
-    let file = preferences_path(install.directory());
+    let file = melon_paths::preferences(install.directory());
     fs::create_dir_all(file.parent().unwrap()).unwrap();
     fs::write(&file, "[FixtureCategory]\nEnabled = true\nRetired = 8\n[Unclaimed]\nHidden = false\n").unwrap();
     library.set_setting("FixtureCategory", "Enabled", Some(json!(false))).unwrap();

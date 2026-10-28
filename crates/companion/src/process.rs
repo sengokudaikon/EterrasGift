@@ -1,5 +1,5 @@
 //! The running game, found by name. A process is known by its id and start time only: the query that gives the start
-//! time (`PROCESS_QUERY_LIMITED_INFORMATION`) reads nothing from the process (`spec/companion.md` §2).
+//! time (`PROCESS_QUERY_LIMITED_INFORMATION`) reads nothing from the process.
 
 use jiff::Timestamp;
 
@@ -17,6 +17,7 @@ pub struct RunningGame {
 pub fn oldest_running(process_name: &str) -> Option<RunningGame> {
     use windows_sys::Win32::Foundation::{CloseHandle, INVALID_HANDLE_VALUE};
     use windows_sys::Win32::System::Diagnostics::ToolHelp::{CreateToolhelp32Snapshot, PROCESSENTRY32W, Process32FirstW, Process32NextW, TH32CS_SNAPPROCESS};
+    // Compared without case, as Windows names files, and without a string per process: this runs every few seconds.
     let wanted = format!("{process_name}.exe").to_uppercase();
     // SAFETY: a snapshot of the process list; closed below.
     let snapshot = unsafe { CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0) };
@@ -31,7 +32,10 @@ pub fn oldest_running(process_name: &str) -> Option<RunningGame> {
     let mut more = unsafe { Process32FirstW(snapshot, &mut entry) } != 0;
     while more {
         let length = entry.szExeFile.iter().position(|&unit| unit == 0).unwrap_or(entry.szExeFile.len());
-        if String::from_utf16_lossy(&entry.szExeFile[..length]).to_uppercase() == wanted
+        if char::decode_utf16(entry.szExeFile[..length].iter().copied())
+            .map(|unit| unit.unwrap_or(char::REPLACEMENT_CHARACTER))
+            .flat_map(char::to_uppercase)
+            .eq(wanted.chars())
             && let Some(start_time) = start_time(entry.th32ProcessID)
             && oldest.is_none_or(|known| start_time < known.start_time)
         {

@@ -84,7 +84,7 @@ fn truncated_named_arguments_make_the_attribute_unreadable() {
 }
 
 #[test]
-fn numeric_info_and_unknown_versus_external_base_types_keep_the_original_policy() {
+fn numeric_info_requires_its_exact_loader_and_only_a_resolved_non_melon_base_is_refused() {
     let temp = tempfile::tempdir().unwrap();
     let path = temp.path().join("mod.dll");
     write(&path, NUMERIC);

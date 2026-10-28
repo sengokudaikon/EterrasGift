@@ -3,13 +3,13 @@
 use super::{
     assembly::LoaderVersion,
     description::ModSettingsDescription,
-    library::{InstalledMod, ModChanges, ModLibrary, latest_log_path, preferences_path},
+    library::{InstalledMod, ModChanges, ModLibrary},
     loader_state::{self, LoaderInstall, LoaderPreparation},
     log::{MelonLog, ModLogRun},
     preferences::{MelonPreferences, ModSetting, PreferenceKind, PreferenceValue},
 };
 use crate::install::{GameIdentity, GameInstall};
-use crate::loader::{self, ModLoaderState, ModLoaderSwitch};
+use crate::loader::{self, ModLoaderState, ModLoaderSwitch, melon_paths};
 use std::path::{Path, PathBuf};
 
 #[derive(Clone, Debug)]
@@ -74,7 +74,7 @@ pub fn read(install: Option<&GameInstall>, library: &ModLibrary, loader_root: Op
     };
     let root = loader_root.unwrap_or(install.directory());
     let mut inventory = Inventory {
-        mods_folder: Some(root.join("Mods")),
+        mods_folder: Some(melon_paths::mods(root)),
         ..Default::default()
     };
     let records = (|| Ok::<_, std::io::Error>((library.reconcile(root)?, library.profile()?, library.placed(root)?)))();
@@ -87,7 +87,7 @@ pub fn read(install: Option<&GameInstall>, library: &ModLibrary, loader_root: Op
     };
     inventory.changes = changes;
     inventory.last_launch = placed.last_launch;
-    let log_path = latest_log_path(root);
+    let log_path = melon_paths::latest_log(root);
     let log = MelonLog::read(&log_path).ok();
     inventory.loader_log = log_path.is_file().then_some(log_path);
     let proxy = ModLoaderSwitch::new(install.directory(), Some(root)).state();
@@ -98,7 +98,7 @@ pub fn read(install: Option<&GameInstall>, library: &ModLibrary, loader_root: Op
         core_module_needs_repair: loader_state::needs_repair(root),
         last_game_without_support: log.as_ref().is_some_and(MelonLog::support_failed),
     });
-    let preferences = MelonPreferences::load(&preferences_path(root)).unwrap_or_else(|error| {
+    let preferences = MelonPreferences::load(&melon_paths::preferences(root)).unwrap_or_else(|error| {
         inventory.settings_problem = Some(format!("Settings could not be read: {error}"));
         MelonPreferences::parse("").expect("empty preferences")
     });
@@ -107,12 +107,12 @@ pub fn read(install: Option<&GameInstall>, library: &ModLibrary, loader_root: Op
         product: GameIdentity::LAST_EPOCH_PRODUCT.into(),
     });
     let mut descriptions = Vec::new();
-    let mut strings = Vec::new();
+    let mut read = Vec::new();
     library.keep_facts(&profile.mods);
     for installed in profile.mods {
         let facts = library.facts(&installed);
         let (melon, read_problem) = match &facts.melon {
-            Ok(Some(melon)) => (Some(melon.clone()), None),
+            Ok(Some(melon)) => (Some(melon), None),
             Ok(None) => (
                 None,
                 Some(format!(
@@ -140,7 +140,6 @@ pub fn read(install: Option<&GameInstall>, library: &ModLibrary, loader_root: Op
             });
             None
         }));
-        strings.push(facts.strings.clone());
         let name = melon
             .as_ref()
             .map(|melon| melon.name.clone())
@@ -188,6 +187,7 @@ pub fn read(install: Option<&GameInstall>, library: &ModLibrary, loader_root: Op
             log_from_other_build: other_build,
             build_waiting: waiting,
         });
+        read.push(facts);
     }
     for category in &preferences.categories {
         let mut claims: Vec<_> = descriptions
@@ -197,10 +197,10 @@ pub fn read(install: Option<&GameInstall>, library: &ModLibrary, loader_root: Op
             .map(|(index, _)| index)
             .collect();
         if claims.is_empty() {
-            claims = strings
+            claims = read
                 .iter()
                 .enumerate()
-                .filter(|(_, strings)| strings.contains(&category.name))
+                .filter(|(_, facts)| facts.strings.contains(&category.name))
                 .map(|(index, _)| index)
                 .collect();
         }

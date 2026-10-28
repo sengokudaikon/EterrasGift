@@ -1,4 +1,4 @@
-//! Finding the game (`spec/companion.md` §1): the executable chosen in Settings, else the Steam library that holds it.
+//! Finding the game: the executable chosen in Settings, else the Steam library that holds it.
 
 use crate::key_values::KeyValues;
 use regex::bytes::Regex;

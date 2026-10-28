@@ -9,44 +9,43 @@ pub struct KeyValues {
 }
 
 impl KeyValues {
-    /// The first child with this key, whatever its case.
+    /// The first child with this key, whatever its case. Steam's keys are ASCII.
     pub fn get(&self, key: &str) -> Option<&KeyValues> {
-        self.children.iter().find(|(name, _)| name.to_lowercase() == key.to_lowercase()).map(|(_, child)| child)
+        self.children.iter().find(|(name, _)| name.eq_ignore_ascii_case(key)).map(|(_, child)| child)
     }
 
     /// Reads a whole file's text; None when it is not KeyValues.
     pub fn parse(text: &str) -> Option<KeyValues> {
-        let chars: Vec<char> = text.chars().collect();
-        let mut position = 0;
+        let mut cursor = Cursor { text, position: 0 };
         let mut root = KeyValues::default();
-        root.read_block(&chars, &mut position, false).then_some(root)
+        root.read_block(&mut cursor, false).then_some(root)
     }
 
-    fn read_block(&mut self, text: &[char], position: &mut usize, nested: bool) -> bool {
+    fn read_block(&mut self, cursor: &mut Cursor, nested: bool) -> bool {
         loop {
-            skip_space(text, position);
-            let Some(&next) = text.get(*position) else {
+            cursor.skip_space();
+            let Some(next) = cursor.peek() else {
                 return !nested;
             };
             if next == '}' {
-                *position += 1;
+                cursor.bump();
                 return nested;
             }
-            let Some(key) = read_string(text, position) else {
+            let Some(key) = cursor.read_string() else {
                 return false;
             };
-            skip_space(text, position);
-            let child = match text.get(*position) {
+            cursor.skip_space();
+            let child = match cursor.peek() {
                 None => return false,
                 Some('{') => {
-                    *position += 1;
+                    cursor.bump();
                     let mut child = KeyValues::default();
-                    if !child.read_block(text, position, true) {
+                    if !child.read_block(cursor, true) {
                         return false;
                     }
                     child
                 }
-                Some(_) => match read_string(text, position) {
+                Some(_) => match cursor.read_string() {
                     Some(value) => KeyValues {
                         value: Some(value),
                         children: Vec::new(),
@@ -59,35 +58,47 @@ impl KeyValues {
     }
 }
 
-fn skip_space(text: &[char], position: &mut usize) {
-    while text.get(*position).is_some_and(|c| c.is_whitespace()) {
-        *position += 1;
-    }
+/// A place in the text, read a character at a time.
+struct Cursor<'a> {
+    text: &'a str,
+    position: usize,
 }
 
-fn read_string(text: &[char], position: &mut usize) -> Option<String> {
-    if text.get(*position) != Some(&'"') {
-        return None;
+impl Cursor<'_> {
+    fn peek(&self) -> Option<char> {
+        self.text[self.position..].chars().next()
     }
-    *position += 1;
-    let mut value = String::new();
-    while let Some(&c) = text.get(*position) {
-        *position += 1;
-        match c {
-            '"' => return Some(value),
-            '\\' if *position < text.len() => {
-                let escaped = text[*position];
-                *position += 1;
-                value.push(match escaped {
+
+    fn bump(&mut self) -> Option<char> {
+        let next = self.peek()?;
+        self.position += next.len_utf8();
+        Some(next)
+    }
+
+    fn skip_space(&mut self) {
+        while self.peek().is_some_and(char::is_whitespace) {
+            self.bump();
+        }
+    }
+
+    fn read_string(&mut self) -> Option<String> {
+        if self.peek() != Some('"') {
+            return None;
+        }
+        self.bump();
+        let mut value = String::new();
+        loop {
+            match self.bump()? {
+                '"' => return Some(value),
+                '\\' => value.push(match self.bump()? {
                     'n' => '\n',
                     't' => '\t',
                     other => other,
-                });
+                }),
+                other => value.push(other),
             }
-            other => value.push(other),
         }
     }
-    None
 }
 
 #[cfg(test)]

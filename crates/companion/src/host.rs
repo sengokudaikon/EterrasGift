@@ -1,15 +1,14 @@
-//! Finds, watches and starts Last Epoch without touching the running process (`spec/companion.md` §2 and §4). The
-//! `GameHost` trait is what Home and the Mods page use; tests pass a fake so no test ever starts the real game.
+//! Finds, watches and starts Last Epoch without touching the running process. The `GameHost` trait is what Home and the
+//! Mods page use; tests pass a fake so no test ever starts the real game.
 
-use crate::Lifetime;
 use crate::install::{self, GameInstall};
-use crate::loader::{self, ModLoaderState, ModLoaderSwitch};
+use crate::loader::{self, ModLoaderState, ModLoaderSwitch, melon_paths};
 use crate::mods::assembly::LoaderVersion;
-use crate::mods::library::preferences_path;
 use crate::mods::loader_state::{self, LoaderInstall};
 use crate::mods::worker::ModWorker;
 use crate::process::{self, RunningGame};
 use eg_core::game_log::{GameLogReader, GameLogState};
+use eg_core::operations::Cancellation;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::Mutex;
@@ -64,7 +63,7 @@ pub trait GameHost: Send + Sync {
     /// Starts the game. Without mods, MelonLoader's proxy is set aside first so nothing of it loads, online or offline.
     /// With mods, the proxy goes back in place for this start and is set aside again once MelonLoader has started.
     /// Blocks until then, so call it off the UI thread.
-    fn launch(&self, mode: LaunchMode, install: Option<&GameInstall>, lifetime: &Lifetime) -> Result<LaunchOutcome, LaunchError>;
+    fn launch(&self, mode: LaunchMode, install: Option<&GameInstall>, lifetime: &Cancellation) -> Result<LaunchOutcome, LaunchError>;
     /// Sets MelonLoader's proxy aside when it was left in place and no game is running (a start with mods the app did
     /// not see through), so a start from Steam stays without mods. True when it set it aside.
     fn settle_mod_loader(&self, install: Option<&GameInstall>) -> bool;
@@ -74,6 +73,8 @@ pub trait GameHost: Send + Sync {
 /// Steam or the executable.
 pub struct FileGameHost {
     configured_executable: Option<PathBuf>,
+    /// The game's process name, from the executable this run uses; a new choice in Settings takes a restart.
+    process_name: String,
     player_log: PathBuf,
     log: Mutex<GameLogReader>,
     loader_directory: Option<PathBuf>,
@@ -84,8 +85,13 @@ impl FileGameHost {
     /// `loader_directory` is where a game with mods runs MelonLoader from when not the game folder (chosen in Settings):
     /// the mods are placed there and the game is told with --melonloader.basedir. The proxy stays in the game folder.
     pub fn new(configured_executable: Option<&Path>, player_log: &Path, loader_directory: Option<&Path>) -> FileGameHost {
+        let process_name = match configured_executable {
+            Some(executable) => executable.file_stem().unwrap_or_default().to_string_lossy().into_owned(),
+            None => install::PROCESS_NAME.to_owned(),
+        };
         FileGameHost {
             configured_executable: configured_executable.map(Path::to_path_buf),
+            process_name,
             player_log: player_log.to_path_buf(),
             log: Mutex::new(GameLogReader::new(player_log)),
             loader_directory: loader_directory.map(Path::to_path_buf),
@@ -97,13 +103,6 @@ impl FileGameHost {
     pub fn with_mod_worker(mut self, mods: ModWorker) -> Self {
         self.mods = Some(mods);
         self
-    }
-
-    fn process_name(&self) -> String {
-        match &self.configured_executable {
-            Some(executable) => executable.file_stem().unwrap_or_default().to_string_lossy().into_owned(),
-            None => install::PROCESS_NAME.to_owned(),
-        }
     }
 
     fn switch(&self, install: &GameInstall) -> ModLoaderSwitch {
@@ -159,7 +158,7 @@ impl FileGameHost {
             }
         }
         mods.call(move |library| {
-            library.prepare(&root, &preferences_path(&root))?;
+            library.prepare(&root, &melon_paths::preferences(&root))?;
             if loader_state::needs_repair(&root) {
                 loader_state::repair_core_module(&root)?;
             }
@@ -185,7 +184,7 @@ impl GameHost for FileGameHost {
     }
 
     fn find_running(&self) -> Option<RunningGame> {
-        process::oldest_running(&self.process_name())
+        process::oldest_running(&self.process_name)
     }
 
     fn read_log(&self, game: &RunningGame) -> GameLogState {
@@ -204,7 +203,7 @@ impl GameHost for FileGameHost {
         crate::game_version::read(&self.player_log, &install.game_assembly())
     }
 
-    fn launch(&self, mode: LaunchMode, install: Option<&GameInstall>, lifetime: &Lifetime) -> Result<LaunchOutcome, LaunchError> {
+    fn launch(&self, mode: LaunchMode, install: Option<&GameInstall>, lifetime: &Cancellation) -> Result<LaunchOutcome, LaunchError> {
         if self.find_running().is_some() {
             return Err(LaunchError::Refused("Last Epoch is running already. Close it first to start it another way.".into()));
         }
@@ -290,7 +289,7 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let install = game(temp.path());
         let host = host(temp.path(), &install);
-        let refused = host.launch(LaunchMode::Online, None, &Lifetime::default()).unwrap_err();
+        let refused = host.launch(LaunchMode::Online, None, &Cancellation::default()).unwrap_err();
         assert_eq!(
             refused,
             LaunchError::Refused("Last Epoch was not found, so the app can't make sure mods stay off online. Choose the game executable in Settings.".into())
@@ -305,20 +304,20 @@ mod tests {
         fs::write(install.directory().join(loader::SET_ASIDE_NAME), b"").unwrap();
         let host = host(temp.path(), &install);
         for mode in [LaunchMode::Offline, LaunchMode::OfflineWithMods] {
-            assert!(matches!(host.launch(mode, Some(&install), &Lifetime::default()), Err(LaunchError::Refused(text)) if text.starts_with(loader::CONFLICT)));
+            assert!(matches!(host.launch(mode, Some(&install), &Cancellation::default()), Err(LaunchError::Refused(text)) if text.starts_with(loader::CONFLICT)));
         }
         assert!(install.directory().join(loader::PROXY_NAME).exists());
         assert!(install.directory().join(loader::SET_ASIDE_NAME).exists());
     }
 
     #[test]
-    fn a_start_with_mods_waits_for_the_mod_library_and_leaves_the_proxy_aside() {
+    fn a_start_with_mods_is_refused_without_a_mod_library_and_leaves_the_proxy_aside() {
         let temp = tempfile::tempdir().unwrap();
         let install = game(temp.path());
         fs::write(install.directory().join(loader::SET_ASIDE_NAME), b"").unwrap();
         let host = host(temp.path(), &install);
         assert!(matches!(
-            host.launch(LaunchMode::OfflineWithMods, Some(&install), &Lifetime::default()),
+            host.launch(LaunchMode::OfflineWithMods, Some(&install), &Cancellation::default()),
             Err(LaunchError::Refused(_))
         ));
         assert_eq!(host.read_mod_loader(Some(&install)), ModLoaderState::SetAside);
@@ -426,7 +425,7 @@ mod tests {
         fs::write(directory.join("profile.json"), "damaged").unwrap();
         let mods = ModWorker::new(ModLibrary::new(directory.clone()));
         let host = host(temp.path(), &install).with_mod_worker(mods.clone());
-        let result = host.launch(LaunchMode::OfflineWithMods, Some(&install), &Lifetime::default());
+        let result = host.launch(LaunchMode::OfflineWithMods, Some(&install), &Cancellation::default());
         assert!(matches!(result, Err(LaunchError::Refused(reason)) if reason.starts_with("The mods could not be made ready, so the game was not started:")));
         assert_eq!(host.read_mod_loader(Some(&install)), ModLoaderState::SetAside);
         assert!(!directory.join("placed.json").exists());

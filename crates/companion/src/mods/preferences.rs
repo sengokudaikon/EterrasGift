@@ -2,6 +2,7 @@
 //! unknown entries and line endings. The library applies drafts just before a start, while the game is closed.
 
 use super::description::{SettingChoice, SettingDescription};
+use super::invalid;
 use serde_json::Value as JsonValue;
 use std::collections::{BTreeMap, HashSet};
 use std::fs;
@@ -126,7 +127,7 @@ impl MelonPreferences {
 
     pub fn load(path: &Path) -> io::Result<Self> {
         match fs::read_to_string(path) {
-            Ok(text) => Self::parse(text.trim_start_matches('\u{feff}')),
+            Ok(text) => Self::parse(eg_core::text::strip_bom(&text)),
             Err(error) if error.kind() == io::ErrorKind::NotFound => Self::parse(""),
             Err(error) => Err(error),
         }
@@ -200,7 +201,7 @@ impl MelonPreferences {
 }
 
 /// Explicit table headers are categories. Dotted keys remain entries in their enclosing header; arrays of tables
-/// and root-level keys are left intact without becoming editable settings, matching the original TOML reader.
+/// and root-level keys are left intact without becoming editable settings.
 fn collect_tables<'a>(table: &'a Table, path: &[String], tables: &mut Vec<(String, &'a Table)>) {
     for (name, item) in table.iter() {
         if let Some(child) = item.as_table() {
@@ -296,10 +297,6 @@ fn description(text: &str, entry: usize) -> Option<String> {
 fn comment(text: &str, end: usize) -> Option<String> {
     let rest = text[end..].split('\n').next().unwrap_or_default().trim();
     rest.starts_with('#').then(|| rest.trim_start_matches('#').trim().to_owned())
-}
-
-fn invalid(message: impl Into<String>) -> io::Error {
-    io::Error::new(io::ErrorKind::InvalidData, message.into())
 }
 
 /// The editable state of one setting. A text box may hold an invalid draft; committing it removes a previously

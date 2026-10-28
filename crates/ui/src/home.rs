@@ -174,9 +174,9 @@ impl Home {
         let elsewhere = self.launcher.is_starting();
         state.set_can_start(model.can_play() && !elsewhere);
         state.set_can_start_with_mods(model.can_play_with_mods() && !elsewhere);
-        state.set_online_tip(model.online_tip().into());
-        state.set_offline_tip(model.offline_tip().into());
-        state.set_with_mods_tip(model.with_mods_tip().into());
+        state.set_online_tip(model.online_tip().as_ref().into());
+        state.set_offline_tip(model.offline_tip().as_ref().into());
+        state.set_with_mods_tip(model.with_mods_tip().as_ref().into());
         // What a start or a conflict said comes first; otherwise why a button waits, said in words as well as in its tip.
         match model.message() {
             Some(message) => {

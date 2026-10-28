@@ -1,9 +1,9 @@
-//! MelonLoader in the game folder (`spec/companion.md` §4). It starts through a proxy DLL that Windows loads into every
-//! start of the game, whether Steam starts it or not. Setting the proxy aside (renamed beside itself) is how a start
+//! MelonLoader in the game folder. It starts through a proxy DLL that Windows loads into every start of the game,
+//! whether Steam starts it or not. Setting the proxy aside (renamed beside itself) is how a start
 //! without mods keeps MelonLoader out entirely. Only a folder with MelonLoader in it is touched, so another tool's
 //! version.dll is left alone.
 
-use crate::Lifetime;
+use eg_core::operations::Cancellation;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant, SystemTime};
 
@@ -134,7 +134,7 @@ impl ModLoaderSwitch {
 
     /// Waits until MelonLoader writes its log at or after `since`, the sign it has started and no longer needs the
     /// proxy's name. False when `timeout` passes first or the app closes.
-    pub fn wait_for_loader(&self, since: SystemTime, timeout: Duration, poll: Duration, lifetime: &Lifetime) -> bool {
+    pub fn wait_for_loader(&self, since: SystemTime, timeout: Duration, poll: Duration, lifetime: &Cancellation) -> bool {
         let deadline = Instant::now() + timeout;
         loop {
             if std::fs::metadata(self.loader_log())
@@ -193,7 +193,7 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let switch = ModLoaderSwitch::new(temp.path(), None);
         let since = SystemTime::now() - Duration::from_secs(1);
-        let lifetime = Lifetime::default();
+        let lifetime = Cancellation::default();
         assert!(!switch.wait_for_loader(since, Duration::from_millis(30), Duration::from_millis(10), &lifetime));
         fs::create_dir_all(melon_paths::loader(temp.path())).unwrap();
         fs::write(switch.loader_log(), b"MelonLoader v0.7.3").unwrap();

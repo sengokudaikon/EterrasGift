@@ -1,5 +1,6 @@
 //! MelonLoader assembly facts, inspected as metadata only. No DLL is loaded or executed.
 
+use super::invalid;
 use crate::install::GameIdentity;
 use dotscope::CilAssemblyView;
 use dotscope::metadata::tables::{
@@ -21,7 +22,8 @@ pub struct LoaderVersion {
 }
 
 impl LoaderVersion {
-    /// Exact requirements retain the spelling of prerelease tags, as the original record's equality does.
+    /// An exact requirement is met only by the same prerelease spelling: beta.01 is not beta.1 here, though the two
+    /// compare equal for a minimum.
     pub fn exactly_matches(&self, other: &Self) -> bool {
         (self.major, self.minor, self.patch, &self.prerelease) == (other.major, other.minor, other.patch, &other.prerelease)
     }
@@ -205,14 +207,6 @@ impl MelonAssembly {
         }
         None
     }
-}
-
-pub fn read(path: &Path) -> io::Result<Option<MelonAssembly>> {
-    MelonAssembly::read(path)
-}
-
-pub(super) fn invalid(error: impl fmt::Display) -> io::Error {
-    io::Error::new(io::ErrorKind::InvalidData, error.to_string())
 }
 
 pub(super) fn read_view(path: &Path) -> io::Result<CilAssemblyView> {

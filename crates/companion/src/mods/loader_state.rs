@@ -1,16 +1,18 @@
 //! MelonLoader's own preparation records and its narrow generated-CoreModule repair.
 //! These routines operate on files only, and callers run repair only while the game is stopped.
 
-use super::assembly::{LoaderVersion, invalid, loader_version, read_view, rows};
+use super::assembly::{LoaderVersion, loader_version, read_view, rows};
+use super::invalid;
 use crate::install::GameInstall;
+use crate::loader::melon_paths;
 use dotscope::CilAssemblyView;
 use dotscope::metadata::tables::{NestedClassRaw, TableDataOwned, TableId, TypeDefRaw};
 use dotscope::metadata::token::Token;
 use eg_core::atomic;
-use sha2::{Digest, Sha512};
+use sha2::Sha512;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fs;
-use std::io::{self, Read};
+use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::{LazyLock, Mutex};
 use std::time::SystemTime;
@@ -31,7 +33,7 @@ pub struct LoaderInstall {
 impl LoaderInstall {
     pub fn find(root: &Path) -> Option<Self> {
         ["net6", "net35"].into_iter().find_map(|framework| {
-            loader_version(&root.join("MelonLoader").join(framework).join("MelonLoader.dll"))
+            loader_version(&melon_paths::loader(root).join(framework).join("MelonLoader.dll"))
                 .ok()
                 .map(|version| Self { root: root.into(), version })
         })
@@ -62,8 +64,8 @@ pub struct GeneratorRecord {
 }
 
 pub fn read_generator_record(root: &Path) -> Option<GeneratorRecord> {
-    let text = fs::read_to_string(root.join("MelonLoader/Dependencies/Il2CppAssemblyGenerator/Config.cfg")).ok()?;
-    let document: DocumentMut = text.trim_start_matches('\u{feff}').parse().ok()?;
+    let text = fs::read_to_string(melon_paths::loader(root).join("Dependencies/Il2CppAssemblyGenerator/Config.cfg")).ok()?;
+    let document: DocumentMut = eg_core::text::strip_bom(&text).parse().ok()?;
     let generator = document.get("Il2CppAssemblyGenerator")?.as_table_like()?;
     Some(GeneratorRecord {
         game_assembly_hash: generator.get("GameAssemblyHash").and_then(|item| item.as_str()).map(str::to_owned),
@@ -72,10 +74,10 @@ pub fn read_generator_record(root: &Path) -> Option<GeneratorRecord> {
 }
 
 fn forces_regeneration(root: &Path) -> bool {
-    let Ok(text) = fs::read_to_string(root.join("UserData/Loader.cfg")) else {
+    let Ok(text) = fs::read_to_string(melon_paths::user_data(root).join("Loader.cfg")) else {
         return false;
     };
-    let Ok(document) = text.trim_start_matches('\u{feff}').parse::<DocumentMut>() else {
+    let Ok(document) = eg_core::text::strip_bom(&text).parse::<DocumentMut>() else {
         return false;
     };
     document
@@ -104,17 +106,7 @@ pub fn game_assembly_hash(path: &Path) -> io::Result<String> {
     {
         return Ok(known.hash.clone());
     }
-    let mut input = fs::File::open(path)?;
-    let mut hash = Sha512::new();
-    let mut buffer = [0; 64 * 1024];
-    loop {
-        let count = input.read(&mut buffer)?;
-        if count == 0 {
-            break;
-        }
-        hash.update(&buffer[..count]);
-    }
-    let hash = eg_core::hashes::hex_upper(hash.finalize().as_slice());
+    let hash = eg_core::hashes::digest_reader::<Sha512>(fs::File::open(path)?)?;
     // Do not cache an observation that changed while being read.
     let after = fs::metadata(path)?;
     if metadata.len() != after.len() || after.modified()? != written {
@@ -132,7 +124,7 @@ pub fn game_assembly_hash(path: &Path) -> io::Result<String> {
 }
 
 pub fn core_module_path(root: &Path) -> PathBuf {
-    root.join("MelonLoader/Il2CppAssemblies/UnityEngine.CoreModule.dll")
+    melon_paths::loader(root).join("Il2CppAssemblies/UnityEngine.CoreModule.dll")
 }
 
 pub fn needs_repair(root: &Path) -> bool {

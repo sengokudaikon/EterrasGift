@@ -1,6 +1,7 @@
 //! A mod's embedded `ModSettings.json`, read as data without loading its assembly. The optional description owns
 //! each category it names and orders the settings the page shows; entries it omits are old settings, not guesses.
 
+use super::invalid;
 use serde_json::{Map, Value};
 use std::collections::HashSet;
 use std::io;
@@ -54,7 +55,7 @@ impl ModSettingsDescription {
             return Err(invalid("The settings description is larger than 1 MB."));
         }
         let text = std::str::from_utf8(bytes).map_err(|error| invalid(format!("The settings description is not UTF-8: {error}")))?;
-        Self::parse(text.trim_start_matches('\u{feff}'))
+        Self::parse(eg_core::text::strip_bom(text))
     }
 
     pub fn parse(text: &str) -> io::Result<Self> {
@@ -155,10 +156,6 @@ fn number(root: &Map<String, Value>, name: &str, location: &str) -> io::Result<O
         None | Some(Value::Null) => Ok(None),
         Some(value) => value.as_f64().map(Some).ok_or_else(|| invalid(format!("{location} has a {name} that is not a number."))),
     }
-}
-
-fn invalid(message: impl Into<String>) -> io::Error {
-    io::Error::new(io::ErrorKind::InvalidData, message.into())
 }
 
 /// System.Text.Json allows comments and trailing commas here. Replace only those extensions with whitespace,

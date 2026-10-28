@@ -31,13 +31,39 @@ pub struct MelonLogLine {
 }
 
 impl MelonLogLine {
+    /// Whether the line is tagged with the mod's name, which its tag may spell with underscores for spaces.
     pub fn is_from(&self, name: &str) -> bool {
-        self.source.as_ref().is_some_and(|source| normalize(source) == normalize(name))
+        self.source.as_deref().is_some_and(|source| tag(source).eq(tag(name)))
     }
 }
 
-pub fn normalize(name: &str) -> String {
-    name.replace('_', " ").trim().to_owned()
+/// A mod's name as its tag reads: underscores as spaces, without the spaces at either end.
+fn tag(name: &str) -> impl Iterator<Item = char> + '_ {
+    name.trim_matches(|character: char| character.is_whitespace() || character == '_')
+        .chars()
+        .map(|character| if character == '_' { ' ' } else { character })
+}
+
+/// What finds one mod in MelonLoader's own lines, worked out once for all of them.
+struct Mentions {
+    /// The name as MelonLoader quotes it.
+    quoted: String,
+    /// The DLL's file name, lower-cased.
+    file: String,
+}
+
+impl Mentions {
+    fn new(name: &str, file: &str) -> Self {
+        Self {
+            quoted: format!("'{name}'"),
+            file: file.to_lowercase(),
+        }
+    }
+
+    /// One of MelonLoader's own lines (not a mod's) that names the mod or its file.
+    fn in_line(&self, line: &MelonLogLine) -> bool {
+        line.source.is_none() && (line.text.contains(&self.quoted) || names_file(&line.text, &self.file))
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -61,7 +87,7 @@ impl MelonLog {
     /// Rust's Windows file reader shares read/write/delete, allowing MelonLoader to keep writing this log.
     pub fn read(path: &Path) -> io::Result<Self> {
         let bytes = fs::read(path)?;
-        Ok(Self::parse(String::from_utf8_lossy(&bytes).trim_start_matches('\u{feff}')))
+        Ok(Self::parse(eg_core::text::strip_bom(&String::from_utf8_lossy(&bytes))))
     }
 
     pub fn parse(text: &str) -> Self {
@@ -112,13 +138,14 @@ impl MelonLog {
     }
 
     pub fn banner_for(&self, file: &str) -> Option<&MelonBanner> {
-        self.registered.iter().find(|banner| banner.file.to_lowercase() == file.to_lowercase())
+        self.registered.iter().find(|banner| same_file(&banner.file, file))
     }
 
     pub fn lines_for(&self, name: &str, file: &str) -> Vec<MelonLogLine> {
+        let mentions = Mentions::new(name, file);
         self.lines
             .iter()
-            .filter(|line| line.is_from(name) || (names(line, name, file) && !line.text.starts_with(ASSEMBLY)))
+            .filter(|line| line.is_from(name) || (mentions.in_line(line) && !line.text.starts_with(ASSEMBLY)))
             .cloned()
             .collect()
     }
@@ -140,12 +167,13 @@ impl MelonLog {
         if !self.reached_mods {
             return Some("The game closed before MelonLoader finished loading mods.".into());
         }
+        let mentions = Mentions::new(name, file);
         let reason = self
             .lines
             .iter()
-            .find(|line| names(line, name, file) && !line.text.starts_with(ASSEMBLY_LOADED) && !line.text.starts_with(HASH_LABEL));
+            .find(|line| mentions.in_line(line) && !line.text.starts_with(ASSEMBLY_LOADED) && !line.text.starts_with(HASH_LABEL));
         Some(reason.map(|line| line.text.clone()).unwrap_or_else(|| {
-            if self.found.iter().any(|found| found.to_lowercase() == file.to_lowercase()) {
+            if self.found.iter().any(|found| same_file(found, file)) {
                 "MelonLoader read it but did not load it, and its log gives no reason."
             } else {
                 "MelonLoader did not find it in the Mods folder."
@@ -172,17 +200,35 @@ pub fn runs(lines: impl IntoIterator<Item = MelonLogLine>) -> Vec<ModLogRun> {
     runs
 }
 
-fn names(line: &MelonLogLine, name: &str, file: &str) -> bool {
-    line.source.is_none() && (line.text.contains(&format!("'{name}'")) || names_file(&line.text, file))
+/// File names compare without case, as Windows compares them.
+fn same_file(first: &str, second: &str) -> bool {
+    first.chars().flat_map(char::to_lowercase).eq(second.chars().flat_map(char::to_lowercase))
 }
 
+/// Whether `text` names `file` (lower-cased) as a whole name, whatever the case it is written in there.
 fn names_file(text: &str, file: &str) -> bool {
-    let text = text.to_lowercase();
-    let file = file.to_lowercase();
-    text.match_indices(&file).any(|(at, _)| {
-        let name_part = |character: char| character.is_alphanumeric() || matches!(character, '_' | '-' | '.');
-        text[..at].chars().next_back().is_none_or(|character| !name_part(character)) && text[at + file.len()..].chars().next().is_none_or(|character| !name_part(character))
+    let name_part = |character: char| character.is_alphanumeric() || matches!(character, '_' | '-' | '.');
+    text.char_indices().any(|(at, _)| {
+        lowercase_prefix(&text[at..], file).is_some_and(|length| {
+            text[..at].chars().next_back().is_none_or(|character| !name_part(character)) && text[at + length..].chars().next().is_none_or(|character| !name_part(character))
+        })
     })
+}
+
+/// How long the start of `text` is that reads as `lower` once lower-cased; None when it does not start so.
+fn lowercase_prefix(text: &str, lower: &str) -> Option<usize> {
+    let mut wanted = lower.chars();
+    for (at, character) in text.char_indices() {
+        if wanted.as_str().is_empty() {
+            return Some(at);
+        }
+        for lowered in character.to_lowercase() {
+            if wanted.next() != Some(lowered) {
+                return None;
+            }
+        }
+    }
+    wanted.as_str().is_empty().then_some(text.len())
 }
 
 fn timed(raw: &str) -> Option<MelonLogLine> {

@@ -7,12 +7,12 @@
 //! `artifacts/captures/<name>.png`. This is a `harness = false` test because Slint's platform can be set once per
 //! process.
 
-use eg_companion::Lifetime;
 use eg_companion::host::{GameHost, LaunchError, LaunchMode, LaunchOutcome};
 use eg_companion::install::GameInstall;
 use eg_companion::launcher::GameLauncher;
 use eg_companion::loader::ModLoaderState;
-use eg_companion::mods::library::{ModLibrary, preferences_path};
+use eg_companion::loader::melon_paths::preferences as preferences_path;
+use eg_companion::mods::library::ModLibrary;
 use eg_companion::mods::loader_state::game_assembly_hash;
 use eg_companion::mods::sources::{ModSources, ProcessError, ProcessRequest, ProcessRunner};
 use eg_companion::mods::worker::ModWorker;
@@ -100,7 +100,7 @@ impl GameHost for FakeGameHost {
         self.state.lock().unwrap().version.clone()
     }
 
-    fn launch(&self, mode: LaunchMode, install: Option<&GameInstall>, _lifetime: &Lifetime) -> Result<LaunchOutcome, LaunchError> {
+    fn launch(&self, mode: LaunchMode, install: Option<&GameInstall>, _lifetime: &Cancellation) -> Result<LaunchOutcome, LaunchError> {
         if install.is_none() {
             return Err(LaunchError::Refused(
                 "Last Epoch was not found, so it cannot be started offline. Choose the game executable in Settings.".into(),
@@ -1203,7 +1203,7 @@ fn wait_for(what: &str, mut completed: impl FnMut() -> bool) {
 /// captures' names so the two can be laid side by side: Flicker Dreams and Ability Ranges loaded in the last game with
 /// mods, Stash Sorter did not, and Ward Meter is off. The stand-in DLLs are metadata only (`fixtures/sample-mods`).
 fn mods_captures(session: &Session) {
-    use eg_companion::mods::library::hash_file;
+    use eg_core::hashes::of_file as hash_file;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     const LOADER: &[u8] = include_bytes!("../../companion/tests/fixtures/melon/loader.bin");
