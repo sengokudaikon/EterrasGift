@@ -6,6 +6,7 @@
 //! limitation, not a proved complete census. No detour allocation is freed.
 pub mod gateway;
 pub mod leaf;
+pub mod postfix;
 pub mod scalar;
 mod unwind;
 

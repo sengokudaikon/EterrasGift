@@ -10,16 +10,18 @@ pub enum GameplayHook {
     DamageDealt = 3,
     AttackRate = 4,
     LeechRate = 5,
+    ZeroManaCost = 6,
 }
 
 impl GameplayHook {
-    pub const ALL: [Self; 6] = [
+    pub const ALL: [Self; 7] = [
         Self::MysteriousRift,
         Self::Offhand,
         Self::IncomingDamage,
         Self::DamageDealt,
         Self::AttackRate,
         Self::LeechRate,
+        Self::ZeroManaCost,
     ];
     pub fn default_value(self) -> u64 {
         if matches!(self, Self::DamageDealt | Self::AttackRate) {
@@ -38,6 +40,7 @@ impl GameplayHook {
             Self::DamageDealt => "damage-dealt",
             Self::AttackRate => "attack-rate",
             Self::LeechRate => "leech-rate",
+            Self::ZeroManaCost => "zero-mana-cost",
         }
     }
     pub fn from_id(id: &str) -> Option<Self> {
@@ -47,7 +50,7 @@ impl GameplayHook {
     pub fn validate_value(self, value: u64) -> Result<u64, ProtocolError> {
         if match self {
             Self::IncomingDamage => value <= 100,
-            Self::Offhand => value == 1,
+            Self::Offhand | Self::ZeroManaCost => value == 1,
             Self::DamageDealt => f64::from_bits(value).is_finite() && ((0.0..=100.0).contains(&f64::from_bits(value)) || value == 101.0f64.to_bits()),
             Self::MysteriousRift => value <= 1,
             Self::AttackRate => f64::from_bits(value).is_finite() && (0.01..=20.0).contains(&f64::from_bits(value)),

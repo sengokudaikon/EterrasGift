@@ -6,7 +6,7 @@ use crate::{
         RuntimeAccess, StatBinding, damage,
         gameplay::{Behavior, HookFeature, TargetEffect},
     },
-    hooks::{leaf::LeafGate, scalar::ScalarGate},
+    hooks::{leaf::LeafGate, postfix::PostfixGate, scalar::ScalarGate},
 };
 use eg_il2cpp_runtime::{AttachedThread, raw};
 
@@ -71,6 +71,7 @@ impl FeatureBinding {
                         let shared = gates.first().map(Gate::scalar);
                         ScalarGate::prepare(binding.receiver, binding.offset, binding.online, binding.baseline, *stack_argument, shared).map(Gate::Scalar)
                     }
+                    (Behavior::Postfix, TargetEffect::Postfix(effect)) => PostfixGate::prepare(effect, gates.first().map(Gate::postfix)).map(Gate::Postfix),
                     _ => return Err(server::failure(ResponseCode::Refused, "Hook target and behavior disagree")),
                 }
             };
@@ -87,6 +88,7 @@ impl FeatureBinding {
 pub(super) enum Gate {
     Leaf(LeafGate),
     Scalar(ScalarGate),
+    Postfix(PostfixGate),
 }
 impl Gate {
     fn leaf(&self) -> &LeafGate {
@@ -101,16 +103,24 @@ impl Gate {
             _ => unreachable!("scalar group"),
         }
     }
+    fn postfix(&self) -> &PostfixGate {
+        match self {
+            Self::Postfix(gate) => gate,
+            _ => unreachable!("postfix group"),
+        }
+    }
     fn enabled(&self) -> bool {
         match self {
             Self::Leaf(gate) => gate.enabled(),
             Self::Scalar(gate) => gate.enabled(),
+            Self::Postfix(gate) => gate.enabled(),
         }
     }
     fn value(&self) -> u64 {
         match self {
             Self::Leaf(gate) => gate.value(),
             Self::Scalar(gate) => gate.value(),
+            Self::Postfix(gate) => gate.value(),
         }
     }
 }
@@ -130,6 +140,7 @@ impl Effect {
         match &self.gates[index] {
             Gate::Leaf(gate) => gate.entry(),
             Gate::Scalar(gate) => gate.entry(),
+            Gate::Postfix(gate) => gate.entry(),
         }
     }
     /// # Safety
@@ -140,6 +151,7 @@ impl Effect {
             match &self.gates[index] {
                 Gate::Leaf(gate) => gate.set_original(original),
                 Gate::Scalar(gate) => gate.set_original(original),
+                Gate::Postfix(gate) => gate.set_original(original),
             }
         }
     }
@@ -148,6 +160,7 @@ impl Effect {
             match gate {
                 Gate::Leaf(gate) => gate.set_enabled(false),
                 Gate::Scalar(gate) => gate.close(),
+                Gate::Postfix(gate) => gate.set_enabled(false),
             }
         }
     }
@@ -183,6 +196,13 @@ impl Effect {
                 }
             }
             Behavior::Scalar(_) => {}
+            Behavior::Postfix => {
+                for gate in &self.gates {
+                    let gate = gate.postfix();
+                    gate.set_value(value);
+                    gate.set_enabled(target_on);
+                }
+            }
             Behavior::Leaf | Behavior::Damage => {
                 for gate in &self.gates {
                     let gate = gate.leaf();

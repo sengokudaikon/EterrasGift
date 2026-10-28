@@ -318,3 +318,36 @@ and its pins retained. The generated gateway code and read/apply primitives are 
 Targeted regressions cover multi-entry leaf preparation/restoration, shared damage settings and last-owner disable,
 independent scalar restoration, selected-accessor checks and topology-independent session readback. The fixture build,
 app build and workspace Clippy pass. No captures or live-game run were requested.
+
+## No mana cost (2026-10-28)
+
+The next hook is the existing Combat > Resources switch `zero-mana-cost`. Behavior follows
+`../EterrasGift/native/hooks/combat.h`: call the original cost calculation exactly once, then answer zero only for
+the player's mana component. Other actors keep their costs; this neither fills mana nor changes cooldowns.
+
+Static metadata for GameAssembly SHA-256 `323e9183f3bee600b6c9e1c469218b9de926e9044f2ca3d44fae8a0ec9a91464` and metadata
+SHA-256 `2a4e8440606c420345934158b6784d8f5d8b0184f32fd91af0e9e0903ba94f83` confirms two five-parameter overloads:
+AbilityID comes before Ability. The chosen contract is instance `Single(Ability, Single, Boolean, AbilityMutator,
+Boolean)`, plus receiver and MethodInfo. The common validator now selects the entire parameter signature before
+checking the selected overload's ABI/uniqueness. Runtime names/types and storage layouts remain checked on enable;
+the observed addresses/offsets are evidence only.
+
+`features/zero_mana_cost` owns the contract, Actor.mana layout and post-call predicate. A small retained gateway
+forwards four register positions and three stack arguments, calls the original, restores the receiver and applies
+that predicate to XMM0. It preserves original side effects and propagates unwinding through its registered 72-byte
+frame. Code, return path, data and unwind metadata stay process-owned; no generated path calls into the helper.
+The current player/online state is read after the original returns. The player/actor/mana graph must remain readable
+over this supported-game post-call span, as in the original trainer's owner check. No extra object pin or restoration
+is required because the effect changes only the returned value. Closing before a delayed original returns suppresses
+the adjustment, and the retained path remains valid after the helper leaves.
+
+The feature reuses patch ownership, independent flag/byte readback, character profiles, suspension and unload ordering.
+The lifecycle coordinator has no new feature-specific branch. Targeted native tests cover argument forwarding,
+original side effects, player/enemy/null and online filtering, replacement player identity, unwinding without retry,
+late original return after owner drop and on/off/clear entry restoration. Session/catalog and wire tests cover the
+new switch through existing commands. App build, Clippy and the fixture build pass; no captures or live-game run.
+
+Live check when requested: on an offline character, compare an ordinary mana skill and a channeled skill off/on/off.
+With No mana cost on, their mana costs should be zero while natural regeneration/drain behavior remains the game's.
+Disable should restore normal costs; zone/character changes and reconnect should follow the saved profile and shared
+lifecycle. Keep Mana always full and No cooldowns off while checking this feature.

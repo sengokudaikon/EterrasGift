@@ -184,7 +184,7 @@ fn each_gameplay_hook_requires_a_separate_readback_for_on_and_off() {
             let request = HookRequest {
                 id: HookId::parse(hook.id()).unwrap(),
                 on,
-                values: if hook == GameplayHook::Offhand {
+                values: if matches!(hook, GameplayHook::Offhand | GameplayHook::ZeroManaCost) {
                     vec![]
                 } else if hook == GameplayHook::LeechRate {
                     vec![0.0]

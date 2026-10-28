@@ -2,6 +2,7 @@
 use super::stat::StatFeature;
 use crate::game::*;
 use crate::hooks::leaf::LeafEffect;
+use crate::hooks::postfix::PostfixEffect;
 use eg_trainer_wire::hooks::GameplayHook;
 
 /// Ownership of a set of entry patches. Several controls can share a group, and one group can patch several methods.
@@ -12,14 +13,16 @@ pub(crate) enum GroupId {
     Damage,
     AttackRate,
     LeechRate,
+    ZeroManaCost,
 }
 impl GroupId {
-    pub(crate) const COUNT: usize = 5;
+    pub(crate) const COUNT: usize = 6;
 }
 
 #[derive(Clone, Copy)]
 pub(crate) enum Behavior {
     Leaf,
+    Postfix,
     Damage,
     Scalar(&'static StatFeature),
 }
@@ -39,6 +42,7 @@ pub(crate) fn definition(hook: GameplayHook) -> &'static HookFeature {
         GameplayHook::IncomingDamage | GameplayHook::DamageDealt => &super::damage::FEATURE,
         GameplayHook::AttackRate => &super::attack_rate::FEATURE,
         GameplayHook::LeechRate => &super::leech_rate::FEATURE,
+        GameplayHook::ZeroManaCost => &super::zero_mana_cost::FEATURE,
     }
 }
 
@@ -72,6 +76,12 @@ impl ResolvedMethod {
             effect: TargetEffect::Scalar { stack_argument },
         }
     }
+    pub(crate) fn postfix(self, effect: PostfixEffect) -> GameplayHookTarget {
+        GameplayHookTarget {
+            method: self,
+            effect: TargetEffect::Postfix(effect),
+        }
+    }
 }
 
 pub(crate) enum TargetEffect {
@@ -83,6 +93,7 @@ pub(crate) enum TargetEffect {
     Scalar {
         stack_argument: bool,
     },
+    Postfix(PostfixEffect),
 }
 pub(crate) struct GameplayHookTarget {
     pub method: ResolvedMethod,
@@ -101,6 +112,23 @@ impl RuntimeAccess {
         unsafe {
             let images = self.images()?;
             let owner = self.class(&images, c"", spec.class)?;
+            let method = self.hook_method_contract(owner, spec)?;
+            let address = read_value::<*mut u8>(method.cast());
+            (address as usize)
+                .checked_sub(module_base.as_ptr() as usize)
+                .filter(|offset| offset.checked_add(16).is_some_and(|end| end <= module_size))
+                .ok_or_else(|| unsupported("hook module range"))?;
+            Ok(ResolvedMethod {
+                name: format!("{}.{}", spec.class.to_string_lossy(), spec.method.to_string_lossy()),
+                address: NonNull::new(address).ok_or_else(|| unsupported("hook address"))?,
+                bytes: read_value(address.cast()),
+            })
+        }
+    }
+    // Resolve the complete parameter signature before checking the selected overload's ABI and uniqueness.
+    unsafe fn hook_method_contract(&self, owner: Class, spec: &MethodSpec) -> Result<Method, GameError> {
+        // SAFETY: immutable attached metadata and class descriptor retained by the caller.
+        unsafe {
             let mut found = None;
             for method in self.methods(owner) {
                 let method = method?;
@@ -109,6 +137,20 @@ impl RuntimeAccess {
                     return Err(unsupported("null hook method name"));
                 }
                 if metadata_text(actual) != spec.method || (self.method_params)(method) as usize != spec.params.len() {
+                    continue;
+                }
+                let mut params_match = true;
+                for (index, expected) in spec.params.iter().enumerate() {
+                    let param = (self.method_param)(method, index as u32);
+                    if param.is_null() {
+                        return Err(unsupported("null hook parameter type"));
+                    }
+                    if (self.type_byref)(param) || self.type_name(param)? != *expected {
+                        params_match = false;
+                        break;
+                    }
+                }
+                if !params_match {
                     continue;
                 }
                 let returns = (self.method_return)(method);
@@ -124,25 +166,9 @@ impl RuntimeAccess {
                 {
                     return Err(unsupported(format!("hook contract: {}", spec.method.to_string_lossy())));
                 }
-                for (index, expected) in spec.params.iter().enumerate() {
-                    let param = (self.method_param)(method, index as u32);
-                    if param.is_null() || (self.type_byref)(param) || self.type_name(param)? != *expected {
-                        return Err(unsupported(format!("hook parameter: {}", spec.method.to_string_lossy())));
-                    }
-                }
                 found = Some(method);
             }
-            let method = found.ok_or_else(|| unsupported(format!("missing hook: {}", spec.method.to_string_lossy())))?;
-            let address = read_value::<*mut u8>(method.cast());
-            (address as usize)
-                .checked_sub(module_base.as_ptr() as usize)
-                .filter(|offset| offset.checked_add(16).is_some_and(|end| end <= module_size))
-                .ok_or_else(|| unsupported("hook module range"))?;
-            Ok(ResolvedMethod {
-                name: format!("{}.{}", spec.class.to_string_lossy(), spec.method.to_string_lossy()),
-                address: NonNull::new(address).ok_or_else(|| unsupported("hook address"))?,
-                bytes: read_value(address.cast()),
-            })
+            found.ok_or_else(|| unsupported(format!("missing hook: {}", spec.method.to_string_lossy())))
         }
     }
     pub(crate) unsafe fn hook_static_storage(&self, owner: Class, field: Ptr, alignment: usize) -> Result<NonNull<c_void>, GameError> {
@@ -164,3 +190,6 @@ impl RuntimeAccess {
         }
     }
 }
+
+#[cfg(test)]
+mod tests;

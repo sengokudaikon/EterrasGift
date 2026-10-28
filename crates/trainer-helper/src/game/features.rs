@@ -13,3 +13,4 @@ mod offhand;
 pub mod persistent_stat;
 mod stat;
 mod unique;
+pub(crate) mod zero_mana_cost;

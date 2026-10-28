@@ -72,16 +72,22 @@ checks literal bounds and independently gates offline/native liveness. One publi
 by exact full readback. Every failure after store entry is uncertain; no RebuildID, game setter or rollback
 runs. Only owned authored Unity validation is claimed. Later game recalculation can replace the level again.
 
-Gameplay controls cover mysterious-rift selection, offhand compatibility, incoming/outgoing damage and independent
-attack/leech rates. Each module in `game/features` owns its targets, explicit ABI contracts, effect and receiver rules.
+Gameplay controls cover mysterious-rift selection, offhand compatibility, incoming/outgoing damage, independent
+attack/leech rates and No mana cost. Each module in `game/features` owns its targets, explicit ABI contracts, effect and receiver rules.
 `game/features/hooks` holds the helper's patch-group identities and common method validator; incoming/outgoing damage
 share one group, while offhand and attack rate each own multiple methods. The wire carries feature IDs, settings and
 observations, without knowing patch ownership.
 
 `engine/gameplay_hooks` coordinates admission, entry transactions and cleanup ordering. Its prepared effects adapt
-leaf, shared damage and pinned scalar state to close/restore/publish/observe operations. Clear closes all effects,
+leaf, shared damage, pinned scalar and original-first float-result state to close/restore/publish/observe operations. Clear closes all effects,
 restores receiver state and entry bytes, then releases receiver-bound groups. Every failure retains the affected
 owners and pins. Generated gameplay code stays outside the DLL; the existing dispatcher drain controls helper unload.
+
+No mana cost runs `BaseMana.getManaCost(Ability, float, bool, AbilityMutator, bool)` once before adjusting its result.
+It answers zero only when the receiver matches the current player's `Actor.mana` and the online flag is clear. The
+retained gateway forwards all seven ABI positions, including three stack arguments, and registers its own unwind
+frame. The two five-parameter overloads are distinguished by their complete parameter signatures. No helper frame
+or pinned player identity is retained across the original call; late returns after close keep the original result.
 
 The local pipe is `eterras-gift-<PID>`, one bounded request per connection: a 12-byte header and a sequential operation body. Bootstrap binds the controller PID/birth before any request; the kernel-reported
 client PID and retained process handle/start time verify each owner request. Fixture servers

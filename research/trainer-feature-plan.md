@@ -98,12 +98,11 @@ Source: [character.h](../../EterrasGift/native/hooks/character.h).
 
 ## Combat
 
-Implementation update (2026-10-27): the first two rows below are the original feature inventory.
-Their replacement is one `incoming-damage` percentage control, using a concrete retained numeric
-leaf and the existing lifecycle. The original is always called once. No helper handler, panic
-boundary or arbitrary-ABI generator is needed for this slice. Damage dealt and one-hit kill
-remain unsupported and will extend ownership of this same target when implemented.
-
+Implementation update (2026-10-28): the table preserves the original feature inventory. God mode/damage taken
+now form one `incoming-damage` percentage control, and damage dealt/one-hit kill form one multiplier control with
+an infinity endpoint. They share one retained target and call the original once. Independent persistent attack/leech
+controls also exist. `zero-mana-cost` now selects the exact Ability overload, runs the original once and adjusts its
+float result through a retained seven-position gateway and the shared lifecycle. See trainer-first-hook.md.
 
 Source: [combat.h](../../EterrasGift/native/hooks/combat.h).
 

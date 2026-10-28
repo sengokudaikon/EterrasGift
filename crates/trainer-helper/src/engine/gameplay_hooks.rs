@@ -292,10 +292,11 @@ mod tests {
         };
         assert!(group.hooks.iter().all(|hook| hook.state() == HookState::Disabled));
         let mut owner = Hooks {
-            slots: [None, Some(group), None, None, None],
+            slots: [const { None }; GroupId::COUNT],
             manager: 1,
             closing: false,
         };
+        owner.slots[GroupId::Offhand as usize] = Some(group);
         let group = owner.slots[GroupId::Offhand as usize].as_ref().unwrap();
         change_group(group, GameplayHook::Offhand, true, 1).unwrap();
         assert!(observation(Some(group), GameplayHook::Offhand).confirmed(true));
@@ -368,10 +369,12 @@ mod tests {
             }
         };
         let mut owner = Hooks {
-            slots: [None, None, None, Some(group(attack as *mut u8, 0)), Some(group(leech as *mut u8, 4))],
+            slots: [const { None }; GroupId::COUNT],
             manager: 1,
             closing: false,
         };
+        owner.slots[GroupId::AttackRate as usize] = Some(group(attack as *mut u8, 0));
+        owner.slots[GroupId::LeechRate as usize] = Some(group(leech as *mut u8, 4));
         let set =
             |owner: &Hooks, hook: GameplayHook, on, value: f64| change_group(owner.slots[definition(hook).group as usize].as_ref().unwrap(), hook, on, value.to_bits()).unwrap();
         set(&owner, GameplayHook::AttackRate, true, 6.0);
@@ -449,10 +452,11 @@ mod tests {
             .unwrap()
         };
         let mut owner = Hooks {
-            slots: [None, None, Some(group), None, None],
+            slots: [const { None }; GroupId::COUNT],
             manager: 1,
             closing: false,
         };
+        owner.slots[GroupId::Damage as usize] = Some(group);
         let group = owner.slots[2].as_ref().unwrap();
         for first in [IncomingDamage, DamageDealt] {
             let second = if first == IncomingDamage { DamageDealt } else { IncomingDamage };
@@ -488,5 +492,76 @@ mod tests {
         }
         assert_eq!(group_patch([HookState::Enabled; 4].into_iter()), PatchState::Patched);
         assert_eq!(group_patch([HookState::Disabled; 4].into_iter()), PatchState::Original);
+    }
+
+    #[test]
+    fn mana_cost_uses_the_shared_patch_readback_and_clear_lifecycle() {
+        use crate::game::{gameplay::ResolvedMethod, zero_mana_cost::ManaCostLayout};
+        use std::sync::atomic::{AtomicU8, AtomicUsize};
+        #[repr(C)]
+        struct Actor {
+            header: [usize; 2],
+            mana: usize,
+        }
+        #[unsafe(naked)]
+        unsafe extern "C-unwind" fn target(_: usize, _: usize, _: f32, _: bool, _: usize, _: bool, _: usize) -> f32 {
+            core::arch::naked_asm!(
+                "nop",
+                "nop",
+                "nop",
+                "nop",
+                "nop",
+                "movaps xmm0,xmm2",
+                "ret",
+                "nop",
+                "nop",
+                "nop",
+                "nop",
+                "nop",
+                "nop",
+                "nop"
+            );
+        }
+        let actor = Actor { header: [0; 2], mana: 41 };
+        let player = AtomicUsize::new(&actor as *const Actor as usize);
+        let online = AtomicU8::new(0);
+        let layout = ManaCostLayout {
+            player_storage: NonNull::from(&player).cast(),
+            online_storage: NonNull::from(&online).cast(),
+            mana_offset: std::mem::offset_of!(Actor, mana) as u32,
+        };
+        // SAFETY: authored padded target, exact seven-position float ABI and live receiver/static-like storage.
+        let group = unsafe {
+            let address = NonNull::new(target as *mut u8).unwrap();
+            let method = ResolvedMethod {
+                name: "fixture mana cost".into(),
+                address,
+                bytes: address.cast::<[u8; 16]>().as_ptr().read_unaligned(),
+            };
+            Group::prepare(FeatureBinding::fixture(GameplayHook::ZeroManaCost), &[method.postfix(layout.effect())]).unwrap()
+        };
+        let mut owner = Hooks {
+            slots: [const { None }; GroupId::COUNT],
+            manager: 1,
+            closing: false,
+        };
+        owner.slots[GroupId::ZeroManaCost as usize] = Some(group);
+        let slot = || GroupId::ZeroManaCost as usize;
+        let group = owner.slots[slot()].as_ref().unwrap();
+        for on in [true, false, true] {
+            change_group(group, GameplayHook::ZeroManaCost, on, 1).unwrap();
+            assert!(observation(Some(group), GameplayHook::ZeroManaCost).confirmed(on));
+            // SAFETY: installed entry retains its authored ABI, without touching receiver identity tokens.
+            unsafe {
+                assert_eq!(std::hint::black_box(target)(41, 0, 5.5, false, 0, false, 0), if on { 0.0 } else { 5.5 });
+                assert_eq!(std::hint::black_box(target)(42, 0, 5.5, false, 0, false, 0), 5.5);
+            }
+        }
+        owner.clear().unwrap();
+        assert!(observation(owner.slots[slot()].as_ref(), GameplayHook::ZeroManaCost).confirmed(false));
+        // SAFETY: clear restored the original entry and closed the retained post-call path.
+        unsafe {
+            assert_eq!(std::hint::black_box(target)(41, 0, 5.5, false, 0, false, 0), 5.5);
+        }
     }
 }
