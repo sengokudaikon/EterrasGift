@@ -559,14 +559,14 @@ fn roll_changes_are_bounded_distinct_and_unique_or_implicit_require_full_bound_e
     assert_eq!(prepare(&expected, &c, implicit, false, Some(&stale)), Err(EditError::MissingRollEvidence));
 }
 #[test]
-fn unique_shared_rolls_need_every_mapping_in_range_and_set_rolls_stay_noneditable() {
+fn unique_shared_rolls_need_every_mapping_in_range_and_set_rolls_are_editable() {
     let c = catalog();
     let edit = ItemEdit::Roll(RollEdit {
         target: RollTarget::Unique,
         changes: vec![RollChange { index: 1, value: 99 }],
         allow_incompatible: false,
     });
-    for (rarity, ids, ok) in [(7, vec![0, 1], true), (9, vec![1, 2], true), (7, vec![1, 3], false), (8, vec![1], false)] {
+    for (rarity, ids, ok) in [(7, vec![0, 1], true), (9, vec![1, 2], true), (7, vec![1, 3], false), (8, vec![1], true)] {
         let expected = observation(unique(item(), rarity, 911), &c);
         let evidence = RollEvidence::from_runtime(
             &expected,
@@ -931,7 +931,7 @@ fn forge_affix_roll_batch_and_reverse_keep_unselected_state_and_reject_stale_tar
     for target in [RollTarget::Unique, RollTarget::Implicit] {
         let ItemEdit::Roll(mut edit) = edit.clone() else { unreachable!() };
         edit.target = target;
-        assert_eq!(ForgePlan::edit(&expected, 17, &c, ItemEdit::Roll(edit), false), Err(EditError::InvalidValues));
+        assert_eq!(ForgePlan::edit(&expected, 17, &c, ItemEdit::Roll(edit), false), Err(EditError::MissingRollEvidence));
     }
     let bad = ItemEdit::Roll(RollEdit {
         target: RollTarget::Affix,
@@ -939,6 +939,52 @@ fn forge_affix_roll_batch_and_reverse_keep_unselected_state_and_reject_stale_tar
         allow_incompatible: false,
     });
     assert_eq!(ForgePlan::edit(&expected, 17, &c, bad, false), Err(EditError::InvalidValues));
+}
+
+#[test]
+fn unique_roll_plans_write_the_roll_array_and_their_undo_keeps_the_evidence() {
+    use eg_trainer::{
+        item::undo::ForgeUndo,
+        write::{ForgePlan, WriteRecord, WriteStatus},
+    };
+    use eg_trainer_wire::write::{ForgeMutation, RollArray};
+    let c = catalog();
+    let before = unique(item(), 8, 912);
+    let expected = observation(before.clone(), &c);
+    let evidence = RollEvidence::from_runtime(
+        &expected,
+        Availability::Available(vec![RollBinding {
+            editable: true,
+            roll_ids: vec![0, 2],
+        }]),
+        Availability::Available(vec![]),
+    );
+    let edit = ItemEdit::Roll(RollEdit {
+        target: RollTarget::Unique,
+        changes: vec![RollChange { index: 2, value: 255 }],
+        allow_incompatible: false,
+    });
+    let plan = ForgePlan::edit_with_evidence(&expected, 17, &c, edit, false, Some(&evidence)).unwrap();
+    let ForgeMutation::ModifierRolls {
+        array: RollArray::Unique, rolls, ..
+    } = plan.mutation()
+    else {
+        panic!("unique rolls required")
+    };
+    assert_eq!(rolls.changes().iter().map(|c| (c.slot, c.value)).collect::<Vec<_>>(), vec![(2, 255)]);
+    let mut after = plan.projected().clone();
+    assert_eq!(after.identity.as_ref().unwrap().rolls, [10, 20, 255]);
+    after.name = "derived name".into();
+    refresh(&mut after);
+    assert!(plan.matches(&after));
+    let undo = ForgeUndo::from_confirmed(&WriteRecord {
+        plan,
+        status: WriteStatus::Confirmed(after.clone()),
+    })
+    .unwrap();
+    // The reverse is checked against the same bindings, now for the item the write left.
+    let reverse = undo.prepare(&observation(after, &c), 17, &c).unwrap();
+    assert_eq!(reverse.projected().identity, before.identity);
 }
 
 #[test]

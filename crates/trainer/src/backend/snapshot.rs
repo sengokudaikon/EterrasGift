@@ -140,6 +140,8 @@ pub struct Capabilities {
     pub base_change: bool,
     pub identity_change: bool,
     pub affix_rolls: bool,
+    /// Unique, set and implicit roll positions.
+    pub modifier_rolls: bool,
     pub affix_change: bool,
     pub affix_list: bool,
 }
@@ -151,10 +153,10 @@ impl Capabilities {
             ItemEdit::AddAffix(_) | ItemEdit::RemoveAffix(_) => self.affix_list,
             ItemEdit::Affix(_) => self.affix_change,
             ItemEdit::Roll(edit) if edit.target == RollTarget::Affix => self.affix_rolls,
+            ItemEdit::Roll(_) => self.modifier_rolls,
             ItemEdit::Status(edit) => self.status_fields[edit.field as usize],
             ItemEdit::BaseType(_) => self.base_change,
             ItemEdit::UniqueIdentity(_) => self.identity_change,
-            _ => false,
         }
     }
 }
@@ -368,7 +370,34 @@ impl BackendSnapshot {
             .filter(|status| !status.online && status.manager != 0)
             .ok_or(EditError::OfflineRequired)?;
         let catalog = self.catalog.data().ok_or(EditError::CatalogNotVerified)?;
-        ForgePlan::edit(&expected, status.manager, catalog, edit, self.override_enabled)
+        ForgePlan::edit_with_evidence(&expected, status.manager, catalog, edit, self.override_enabled, self.roll_evidence(&expected).as_ref())
+    }
+    /// Which rolls the item's unique and implicit lines read, as the game's own descriptions of this item say.
+    fn roll_evidence(&self, expected: &crate::item::edit::ExpectedObservation) -> Option<crate::item::edit::RollEvidence> {
+        use crate::definitions::catalog::Availability;
+        use crate::item::edit::{RollBinding, RollEvidence};
+        let ForgeState::Item { implicits, unique, .. } = &self.forge else {
+            return None;
+        };
+        let bindings = |lines: Option<&Vec<ModifierSnapshot>>| match lines {
+            Some(lines) => Availability::Available(
+                lines
+                    .iter()
+                    .map(|line| RollBinding {
+                        editable: line.editable,
+                        roll_ids: line.roll_ids.iter().map(|id| i32::from(*id)).collect(),
+                    })
+                    .collect(),
+            ),
+            None => Availability::Unavailable {
+                reason: "The game has not described this item's modifiers.".into(),
+            },
+        };
+        Some(RollEvidence::from_runtime(
+            expected,
+            bindings(unique.as_ref().and_then(|unique| unique.as_ref().ok())),
+            bindings(implicits.as_ref()),
+        ))
     }
     pub fn forge_undo_plan(&self, undo: &crate::item::undo::ForgeUndo) -> Result<ForgePlan, crate::item::edit::EditError> {
         use crate::item::edit::EditError;

@@ -94,6 +94,7 @@ impl BackendConnection for OwnedConnection {
             base_change: true,
             identity_change: true,
             affix_rolls: true,
+            modifier_rolls: true,
             affix_change: true,
             affix_list: true,
             ..Default::default()
@@ -879,8 +880,8 @@ pub(super) fn capture(session: &Session) {
         }
     }
     data.outcome.store(0, Ordering::SeqCst);
-    // Optional game tooltip text reaches the real editor. Actual-value controls
-    // remain disabled until a sampled mapping is available; failure clears old text.
+    // Optional game tooltip text reaches the real editor. Without a sampled mapping an implicit
+    // that rolls is edited by its roll position; failure clears old text.
     *data.item.lock().unwrap() = Some(item("Described item", 31));
     data.descriptions.store(1, Ordering::SeqCst);
     command(&handle, Command::ReadForge, || true);
@@ -889,7 +890,7 @@ pub(super) fn capture(session: &Session) {
     assert_eq!(forge.get_implicits().row_data(1).unwrap().text, "Ward +5");
     assert!(!forge.get_can_apply());
     let value = forge.get_implicits().row_data(0).unwrap().rolls.row_data(0).unwrap();
-    assert!(!value.mapped && !value.editable);
+    assert!(value.mapped && value.editable && value.display == "Roll 44");
     session.capture(&ui, "backend-forge-implicit-descriptions");
     session.resize(680, 580);
     session.capture(&ui, "backend-forge-implicit-descriptions-narrow");
@@ -1033,7 +1034,7 @@ pub(super) fn capture(session: &Session) {
     assert_eq!(data.mapping_calls.load(Ordering::SeqCst), calls + 1);
     session.capture(&ui, "backend-forge-values-recovered");
     // Unique tooltip text is an optional asynchronous read. It remains bound to
-    // this item, is cached across equal reads, and never enables unwritten rolls.
+    // this item and is cached across equal reads; its rolls are edited by position.
     data.unique_mode.store(3, Ordering::SeqCst);
     let mut unique_item = item("Owned unique text", 46);
     unique_item.rarity = 9;
@@ -1051,7 +1052,7 @@ pub(super) fn capture(session: &Session) {
     assert_eq!(forge.get_formatting_error(), "");
     assert_eq!(forge.get_unique_modifiers().row_data(0).unwrap().text, "Game unique +17 Ω");
     assert_eq!(forge.get_unique_modifiers().row_data(1).unwrap().rolls.row_count(), 2);
-    assert!(!forge.get_unique_modifiers().row_data(0).unwrap().rolls.row_data(0).unwrap().editable);
+    assert!(forge.get_unique_modifiers().row_data(0).unwrap().rolls.row_data(0).unwrap().editable);
     assert!(!forge.get_can_apply());
     session.capture(&ui, "backend-forge-unique-descriptions");
     session.resize(680, 580);

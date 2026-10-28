@@ -242,7 +242,12 @@ impl ForgeItem {
     }
     /// Which unique or set item a unique-backed item is.
     pub fn identity_id(&self) -> Option<u16> {
-        self.unique.as_ref().or(self.set_item.as_ref()).map(|identity| identity.id)
+        self.backing().map(|identity| identity.id)
+    }
+
+    /// The unique or set identity, with its rolls and the game's lines for them.
+    pub fn backing(&self) -> Option<&UniqueState> {
+        self.unique.as_ref().or(self.set_item.as_ref())
     }
 
     pub fn is_exalted(&self) -> bool {
@@ -330,7 +335,7 @@ impl EditPresentation for ItemEdit {
         };
         let evidence = edit::RollEvidence::from_runtime(
             &context.expected,
-            bindings(before.unique.as_ref().map(|u| u.modifiers.as_slice())),
+            bindings(before.backing().map(|u| u.modifiers.as_slice())),
             bindings(before.implicits.as_deref()),
         );
         edit::prepare(&context.expected, &context.catalog, self.clone(), override_enabled, Some(&evidence))
@@ -639,6 +644,12 @@ impl ValueTable {
     /// are worth. Built once and shared.
     pub fn positions() -> std::rc::Rc<ValueTable> {
         POSITIONS.with(std::rc::Rc::clone)
+    }
+
+    /// 256 finite samples, all one value: the roll changes nothing.
+    pub fn is_fixed(&self) -> bool {
+        let samples = &self.samples;
+        samples.len() == 256 && samples[0].value.is_finite() && samples.iter().all(|sample| sample.value == samples[0].value)
     }
 
     /// 256 finite samples, at least two distinct values, monotonic.

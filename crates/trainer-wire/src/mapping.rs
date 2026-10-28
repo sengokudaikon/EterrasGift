@@ -148,7 +148,7 @@ impl UniquePreviewRequest {
     }
     pub(crate) fn from_target(target: ForgeDescriptionRequest, changes: Vec<UniqueRollChange>) -> Result<Self, ProtocolError> {
         let expected = target.expected();
-        if !matches!(expected.rarity, 7 | 9) || changes.is_empty() || changes.len() > 8 {
+        if !matches!(expected.rarity, 7..=9) || changes.is_empty() || changes.len() > 8 {
             return invalid();
         }
         let count = expected.identity.as_ref().ok_or(ProtocolError::InvalidData)?.rolls.len();

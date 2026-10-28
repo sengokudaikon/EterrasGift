@@ -191,8 +191,9 @@ fn increasing_decreasing_plateaus_fixed_and_nonmonotonic() {
     assert_eq!(t.minimum(), 0.);
     assert_eq!(t.maximum(), 255.);
     assert_eq!(t.nearest(20., 0).unwrap(), 235);
-    assert_eq!(table(|_| 3.), Err(MappingError::FixedValue));
-    assert_eq!(table(|i| if i % 2 == 0 { 0.0 } else { -0.0 }), Err(MappingError::FixedValue));
+    assert!(table(|_| 3.).unwrap().is_fixed());
+    assert!(table(|i| if i % 2 == 0 { 0.0 } else { -0.0 }).unwrap().is_fixed());
+    assert!(!t.is_fixed());
     assert_eq!(table(|i| if i == 100 { 200. } else { i as f64 }), Err(MappingError::NonMonotonic));
 }
 #[test]
@@ -367,8 +368,9 @@ fn tooltip_provenance_roll_bounds_and_readonly_lines() {
     assert!(BoundTooltip::new(&obs, TooltipKind::Unique, vec![modifier(1, vec![2], true)]).is_err());
     assert!(BoundTooltip::new(&obs, TooltipKind::Implicit, vec![modifier(1, vec![0, 1], true)]).is_err());
     assert!(BoundTooltip::new(&obs, TooltipKind::Unique, vec![modifier(1, vec![0], true), modifier(3, vec![0], false)]).is_ok());
+    // A set item's unique lines bind its rolls as a unique's do.
     let set = altered(&obs, |i| i.rarity = 8);
-    assert!(BoundTooltip::new(&set, TooltipKind::Unique, vec![]).is_err());
+    assert!(BoundTooltip::new(&set, TooltipKind::Unique, vec![]).is_ok());
     let req = MappingRequest {
         address: MappingAddress {
             target: MappingTarget::Unique,

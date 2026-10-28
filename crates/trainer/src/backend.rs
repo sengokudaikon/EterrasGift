@@ -506,6 +506,7 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
             base_change: idle && served.base_change,
             identity_change: idle && served.identity_change,
             affix_rolls: idle && served.affix_rolls,
+            modifier_rolls: idle && served.modifier_rolls,
             affix_change: idle && served.affix_change,
             affix_list: idle && served.affix_list,
         };

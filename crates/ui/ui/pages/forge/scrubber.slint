@@ -192,8 +192,8 @@ export component ValueScrubber inherits Rectangle {
         on-unique: root.on-unique;
     }
 
-    // An unknown mapping shows the tiny lock in place of the bar; the tip says why.
-    if !root.cell.mapped: Image {
+    // An unknown mapping shows the tiny lock in place of the bar; the tip says why. A fixed value shows nothing.
+    if !root.cell.mapped && !root.cell.fixed: Image {
         x: 0;
         y: root.bar-y + (Tokens.range-bar-height - self.height) / 2;
         width: Tokens.icon-size-tiny;

@@ -29,7 +29,6 @@ pub enum MappingError {
     Incomplete,
     Poisoned,
     DisplayUnavailable(String),
-    FixedValue,
     NonMonotonic,
     OutOfRange,
 }
@@ -58,7 +57,7 @@ impl BoundTooltip {
         let item = expected.snapshot();
         let count = match kind {
             TooltipKind::Unique => {
-                if !matches!(item.rarity, 7 | 9) {
+                if !matches!(item.rarity, 7..=9) {
                     return Err(MappingError::InvalidQuery);
                 }
                 item.identity.as_ref().ok_or(MappingError::InvalidQuery)?.rolls.len()
@@ -144,7 +143,7 @@ impl MappingRequest {
                 }
             }
             MappingTarget::Unique => {
-                if !matches!(item.rarity, 7 | 9) || item.identity.as_ref().is_none_or(|id| usize::from(self.address.index) >= id.rolls.len()) {
+                if !matches!(item.rarity, 7..=9) || item.identity.as_ref().is_none_or(|id| usize::from(self.address.index) >= id.rolls.len()) {
                     return Err(MappingError::InvalidQuery);
                 }
             }
@@ -263,6 +262,10 @@ impl ValueTable {
     pub fn maximum(&self) -> f64 {
         self.samples.iter().map(|s| s.value).fold(f64::NEG_INFINITY, f64::max)
     }
+    /// Every roll shows the same value: the modifier has no roll to edit.
+    pub fn is_fixed(&self) -> bool {
+        self.minimum() == self.maximum()
+    }
     pub fn nearest(&self, value: f64, current: u8) -> Result<u8, MappingError> {
         if !value.is_finite() || value < self.minimum() || value > self.maximum() {
             return Err(MappingError::OutOfRange);
@@ -373,9 +376,6 @@ impl MappingBuilder {
         }
         if self.samples.len() != wire::SAMPLE_COUNT {
             return Err(MappingError::Incomplete);
-        }
-        if self.samples.iter().all(|sample| sample.value == self.samples[0].value) {
-            return Err(MappingError::FixedValue);
         }
         if !self.samples.windows(2).all(|s| s[0].value <= s[1].value) && !self.samples.windows(2).all(|s| s[0].value >= s[1].value) {
             return Err(MappingError::NonMonotonic);

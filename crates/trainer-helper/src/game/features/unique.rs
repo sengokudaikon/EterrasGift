@@ -221,7 +221,7 @@ impl RuntimeAccess {
             if target(&graph.manager)?.as_ptr() as u64 != request.manager() || self.forge_snapshot(attached, &graph)? != *request.expected() {
                 return Err(unsupported("forge changed before unique description"));
             }
-            if !matches!(request.expected().rarity, 7 | 9) {
+            if !matches!(request.expected().rarity, 7..=9) {
                 return Err(unsupported("item has no supported unique modifiers"));
             }
             let identity = request.expected().identity.as_ref().ok_or_else(|| unsupported("unique identity absent"))?;

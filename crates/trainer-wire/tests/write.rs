@@ -493,3 +493,37 @@ fn roll_batches_bound_count_and_reject_duplicate_or_out_of_range_slots() {
     assert!(AffixRolls::new(&[AffixRollChange { slot: 0, value: 1 }; 33]).is_err());
     assert!(AffixRolls::new(&[AffixRollChange { slot: 0, value: 1 }; 2]).is_err());
 }
+
+#[test]
+fn unique_and_implicit_rolls_round_trip_project_and_stay_inside_their_arrays() {
+    let mut item = snapshot();
+    item.rarity = 8;
+    item.implicit_rolls = vec![10, 20];
+    item.identity = Some(UniqueIdentity { id: 5, rolls: vec![1, 2, 3] });
+    item.fingerprint = item.legacy_fingerprint();
+    let rolls = |slot| AffixRolls::new(&[AffixRollChange { slot, value: 200 }]).unwrap();
+    for (array, slot) in [(RollArray::Unique, 2), (RollArray::Implicit, 1)] {
+        let mutation = ForgeMutation::ModifierRolls {
+            array,
+            rolls: rolls(slot),
+            unrestricted: false,
+        };
+        let write = ForgeWrite::edit(spec(), 1, item.clone(), mutation).unwrap();
+        assert_eq!(Request::decode(&frame(&write)), Ok(Request::EditForge(write.clone())));
+        let projected = write.projected();
+        match array {
+            RollArray::Unique => assert_eq!(projected.identity.unwrap().rolls, [1, 2, 200]),
+            RollArray::Implicit => assert_eq!(projected.implicit_rolls, [10, 200]),
+        }
+    }
+    // An index past the game's array is refused before any transport.
+    for (array, slot) in [(RollArray::Unique, 8), (RollArray::Implicit, 3)] {
+        let mutation = ForgeMutation::ModifierRolls {
+            array,
+            rolls: rolls(slot),
+            unrestricted: false,
+        };
+        assert!(ForgeWrite::edit(spec(), 1, item.clone(), mutation).is_err());
+    }
+    assert!(RollArray::from_wire(0).is_err() && RollArray::from_wire(3).is_err());
+}

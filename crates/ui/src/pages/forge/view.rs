@@ -463,7 +463,7 @@ impl View {
 
         self.show_affixes(&state, &editor, drafted);
 
-        let unique = editor.item().and_then(|item| item.unique.as_ref());
+        let unique = editor.item().and_then(|item| item.backing());
         state.set_has_unique(unique.is_some());
         let uniques = self.lines(&editor, CellKind::Unique);
         update(&self.models.uniques, uniques);
@@ -807,6 +807,7 @@ fn value_cell(cell: CellRef, uid: i32, editor: &ValueEditor, roll: u8, game: Opt
         was: was.into(),
         draft,
         mapped: editor.has_scale(),
+        fixed: editor.is_fixed(),
         editable,
         fraction,
         game_fraction: game.map_or(fraction, |game| editor.fraction(game) as f32),

@@ -1,6 +1,6 @@
 //! Optional implicit text from the methods the game's own item tooltip uses.
 use crate::game::metadata_text;
-use crate::game::{Class, GameError, Method, Root, RuntimeAccess, target, unsupported};
+use crate::game::{Class, GameError, Images, Method, Root, RuntimeAccess, target, unsupported};
 use eg_il2cpp_runtime::{Argument, AttachedThread, InvocationContext, InvocationOutcome, ReturnValue, Scalar, raw};
 use eg_trainer_wire::mapping::{ForgeDescriptionRequest, MAX_TEXT_BYTES, ModifierSnapshot};
 use std::{ffi::CStr, ptr::NonNull};
@@ -169,38 +169,12 @@ impl RuntimeAccess {
                 self.exact(&list, list_class)?;
                 let implicits = self.list(attached, &list, element, eg_trainer_wire::catalog::MAX_IMPLICITS as u32)?;
                 if !implicits.is_empty() {
-                    let item_list = self.class(&graph.images, c"", c"ItemList")?;
-                    let data_class = self.nested(item_list, c"EquipmentImplicit")?;
-                    let singleton = self.description_method(api, item_list, c"get", &[], Some(item_list), false)?;
-                    let definitions = self
-                        .description_call(attached, api, singleton, None, &mut [])?
-                        .ok_or(GameError::NotReady("implicit definitions absent"))?;
-                    if !self.is_live(attached, &graph.images, &definitions)? {
-                        return Err(GameError::NotReady("implicit definitions destroyed"));
-                    }
-                    let i32_class = self.system_class(c"Int32")?;
-                    let get_data = self.description_method(api, item_list, c"GetItemImplicit", &[i32_class; 3], Some(data_class), true)?;
+                    let base = self.implicit_definitions(attached, api, &graph.images)?;
+                    let data_class = base.data_class;
                     let builder = self.class(&graph.images, c"LE.UI.Tooltips", c"ItemTooltipContentBuilder")?;
                     let build = self.description_method(api, builder, c"GetItemImplicitInfo", &[unpacked, element, data_class], None, false)?;
                     for (slot, implicit) in implicits.iter().enumerate() {
-                        let data = self
-                            .description_call(
-                                attached,
-                                api,
-                                get_data,
-                                Some(&definitions),
-                                &mut [
-                                    Argument::Scalar(Scalar::I32(i32::from(request.expected().item_type))),
-                                    Argument::Scalar(Scalar::I32(i32::from(request.expected().sub_type))),
-                                    Argument::Scalar(Scalar::I32(slot as i32)),
-                                ],
-                            )?
-                            .ok_or_else(|| unsupported("implicit definition missing"))?;
-                        let minimum: f32 = self.primitive(&data, c"implicitValue")?;
-                        let maximum: f32 = self.primitive(&data, c"implicitMaxValue")?;
-                        if !minimum.is_finite() || !maximum.is_finite() {
-                            return Err(unsupported("implicit nonfinite range"));
-                        }
+                        let (data, minimum, maximum) = self.implicit_range(attached, api, &base, request.expected(), slot)?;
                         let info = self.description_call(
                             attached,
                             api,
@@ -239,4 +213,73 @@ impl RuntimeAccess {
             Ok(modifiers)
         }
     }
+
+    /// The game's implicit registry (`ItemList.get`) and its per-base lookup, `GetItemImplicit(Int32, Int32, Int32)`.
+    /// # Safety
+    /// The describe_implicits runtime/main-thread conditions apply; the registry stays rooted in the result.
+    pub(super) unsafe fn implicit_definitions<'a, 'r>(
+        &self,
+        attached: &'a AttachedThread<'r>,
+        api: raw::InvocationApi,
+        images: &Images,
+    ) -> Result<ImplicitDefinitions<'a, 'r>, GameError> {
+        // SAFETY: Checked signatures only; the registry is rooted and checked live before any lookup.
+        unsafe {
+            let item_list = self.class(images, c"", c"ItemList")?;
+            let data_class = self.nested(item_list, c"EquipmentImplicit")?;
+            let singleton = self.description_method(api, item_list, c"get", &[], Some(item_list), false)?;
+            let registry = self
+                .description_call(attached, api, singleton, None, &mut [])?
+                .ok_or(GameError::NotReady("implicit definitions absent"))?;
+            if !self.is_live(attached, images, &registry)? {
+                return Err(GameError::NotReady("implicit definitions destroyed"));
+            }
+            let i32_class = self.system_class(c"Int32")?;
+            let lookup = self.description_method(api, item_list, c"GetItemImplicit", &[i32_class; 3], Some(data_class), true)?;
+            Ok(ImplicitDefinitions { registry, lookup, data_class })
+        }
+    }
+
+    /// One implicit's definition for the item's base, with its range (`implicitValue` to `implicitMaxValue`). A range of
+    /// one value has no roll.
+    /// # Safety
+    /// As for [`Self::implicit_definitions`].
+    pub(super) unsafe fn implicit_range<'a, 'r>(
+        &self,
+        attached: &'a AttachedThread<'r>,
+        api: raw::InvocationApi,
+        base: &ImplicitDefinitions<'_, '_>,
+        item: &eg_trainer_wire::forge::ForgeSnapshot,
+        slot: usize,
+    ) -> Result<(Root<'a, 'r>, f32, f32), GameError> {
+        // SAFETY: The lookup was signature-checked and its registry is rooted; the returned definition is rooted.
+        unsafe {
+            let data = self
+                .description_call(
+                    attached,
+                    api,
+                    base.lookup,
+                    Some(&base.registry),
+                    &mut [
+                        Argument::Scalar(Scalar::I32(i32::from(item.item_type))),
+                        Argument::Scalar(Scalar::I32(i32::from(item.sub_type))),
+                        Argument::Scalar(Scalar::I32(slot as i32)),
+                    ],
+                )?
+                .ok_or_else(|| unsupported("implicit definition missing"))?;
+            let minimum: f32 = self.primitive(&data, c"implicitValue")?;
+            let maximum: f32 = self.primitive(&data, c"implicitMaxValue")?;
+            if !minimum.is_finite() || !maximum.is_finite() {
+                return Err(unsupported("implicit nonfinite range"));
+            }
+            Ok((data, minimum, maximum))
+        }
+    }
+}
+
+/// The game's implicit registry and lookup, from [`RuntimeAccess::implicit_definitions`].
+pub(super) struct ImplicitDefinitions<'a, 'r> {
+    registry: Root<'a, 'r>,
+    lookup: Method,
+    pub data_class: Class,
 }

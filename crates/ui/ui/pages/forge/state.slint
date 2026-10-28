@@ -22,6 +22,8 @@ export struct ValueCell {
     draft: bool,
     // A usable table is known: the range bar shows (otherwise the tiny lock does).
     mapped: bool,
+    // Every roll gives the same value: no value, bar or lock.
+    fixed: bool,
     // The value can change now; otherwise the cursor is the arrow and hover shows nothing.
     editable: bool,
     fraction: float,

@@ -98,6 +98,7 @@ impl<T: Transport + Send + 'static> BackendConnection for Session<T> {
             base_change: true,
             identity_change: true,
             affix_rolls: true,
+            modifier_rolls: true,
             affix_change: true,
             affix_list: true,
             ..Capabilities::default()

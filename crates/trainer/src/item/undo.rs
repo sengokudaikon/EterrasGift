@@ -118,6 +118,8 @@ pub struct ForgeUndo {
     after: ExpectedObservation,
     manager: u64,
     reverse: ItemEdit,
+    /// A unique or implicit roll edit's bindings, which its reverse is checked against again.
+    evidence: Option<crate::item::edit::RollEvidence>,
 }
 
 impl ForgeUndo {
@@ -142,10 +144,12 @@ impl ForgeUndo {
     fn from_checked(prepared: &crate::item::edit::PreparedEdit, manager: u64, snapshot: &eg_trainer_wire::forge::ForgeSnapshot) -> Result<Self, EditError> {
         let reverse = Self::reverse_checked(prepared, snapshot)?;
         let before = prepared.before();
+        let after = ExpectedObservation::new(before.generation(), before.process().clone(), before.catalog_identity().clone(), snapshot.clone())?;
         Ok(Self {
-            after: ExpectedObservation::new(before.generation(), before.process().clone(), before.catalog_identity().clone(), snapshot.clone())?,
+            after: after.clone(),
             manager,
             reverse,
+            evidence: prepared.evidence().map(|evidence| evidence.rebound(&after)),
         })
     }
 
@@ -293,6 +297,6 @@ impl ForgeUndo {
             let free = add.seal != crate::item::edit::SealState::Normal || (if add.kind == crate::item::edit::AffixKind::Prefix { prefixes } else { suffixes }) > 0;
             add.allow_incompatible = !(compatible && free);
         }
-        ForgePlan::edit(current, manager, catalog, reverse, override_enabled)
+        ForgePlan::edit_with_evidence(current, manager, catalog, reverse, override_enabled, self.evidence.as_ref())
     }
 }

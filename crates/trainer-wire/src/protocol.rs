@@ -38,6 +38,7 @@ pub mod op {
     pub const UNLOAD: u32 = 25;
     pub const SET_GAMEPLAY_HOOK: u32 = 26;
     pub const READ_GAMEPLAY_HOOK: u32 = 27;
+    pub const CHANGE_MODIFIER_ROLLS: u32 = 28;
 }
 
 pub const MAGIC: u32 = 0x4546_4735;

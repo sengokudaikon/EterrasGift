@@ -28,25 +28,28 @@ pub struct ForgePlan {
 }
 impl ForgePlan {
     pub fn edit(expected: &ExpectedObservation, manager: u64, catalog: &GameCatalog, edit: ItemEdit, override_enabled: bool) -> Result<Self, EditError> {
+        Self::edit_with_evidence(expected, manager, catalog, edit, override_enabled, None)
+    }
+    /// A plan for any supported edit. Unique and implicit rolls need `evidence`: the game's own word on which rolls its
+    /// lines read, for this observation.
+    pub fn edit_with_evidence(
+        expected: &ExpectedObservation,
+        manager: u64,
+        catalog: &GameCatalog,
+        edit: ItemEdit,
+        override_enabled: bool,
+        evidence: Option<&edit::RollEvidence>,
+    ) -> Result<Self, EditError> {
         if manager == 0 {
             return Err(EditError::InvalidObservation);
         }
         if !matches!(
             edit,
-            ItemEdit::AddAffix(_)
-                | ItemEdit::RemoveAffix(_)
-                | ItemEdit::Affix(_)
-                | ItemEdit::Status(_)
-                | ItemEdit::BaseType(_)
-                | ItemEdit::UniqueIdentity(_)
-                | ItemEdit::Roll(edit::RollEdit {
-                    target: edit::RollTarget::Affix,
-                    ..
-                })
+            ItemEdit::AddAffix(_) | ItemEdit::RemoveAffix(_) | ItemEdit::Affix(_) | ItemEdit::Status(_) | ItemEdit::BaseType(_) | ItemEdit::UniqueIdentity(_) | ItemEdit::Roll(_)
         ) {
             return Err(EditError::InvalidValues);
         }
-        let prepared = edit::prepare(expected, catalog, edit, override_enabled, None)?;
+        let prepared = edit::prepare(expected, catalog, edit, override_enabled, evidence)?;
         Ok(Self { prepared, manager })
     }
     pub fn before(&self) -> &ExpectedObservation {
@@ -101,6 +104,24 @@ impl ForgePlan {
                 .expect("validated affix roll batch"),
                 unrestricted: edit.allow_incompatible,
             },
+            ItemEdit::Roll(edit) => ForgeMutation::ModifierRolls {
+                array: match edit.target {
+                    edit::RollTarget::Unique => eg_trainer_wire::write::RollArray::Unique,
+                    _ => eg_trainer_wire::write::RollArray::Implicit,
+                },
+                rolls: eg_trainer_wire::write::AffixRolls::new(
+                    &edit
+                        .changes
+                        .iter()
+                        .map(|c| eg_trainer_wire::write::AffixRollChange {
+                            slot: c.index as u8,
+                            value: c.value as u8,
+                        })
+                        .collect::<Vec<_>>(),
+                )
+                .expect("validated roll batch"),
+                unrestricted: edit.allow_incompatible,
+            },
             ItemEdit::Status(edit) => ForgeMutation::Status {
                 field: edit.field,
                 value: edit.field.value(item) as u8,
@@ -117,7 +138,6 @@ impl ForgePlan {
                 rarity: item.rarity,
                 unrestricted: self.unrestricted(),
             },
-            _ => unreachable!("ForgePlan only admits implemented native edits"),
         }
     }
     pub fn moves(&self) -> &std::collections::BTreeMap<u8, u8> {

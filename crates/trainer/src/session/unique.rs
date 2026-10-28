@@ -6,7 +6,7 @@ use crate::{
 use eg_trainer_wire::mapping::{ForgeDescriptionRequest, ModifierSnapshot, UniquePreviewRequest, UniqueRollChange};
 impl<T: Transport> Session<T> {
     pub async fn describe_unique(&mut self, expected: &ForgeSnapshot) -> Result<Option<Vec<ModifierSnapshot>>, SessionError> {
-        if !matches!(expected.rarity, 7 | 9) {
+        if !matches!(expected.rarity, 7..=9) {
             return Ok(None);
         }
         let manager = self.offline_manager()?;

@@ -203,6 +203,17 @@ fn local_time() -> String {
     jiff::Zoned::now().strftime("%H:%M").to_string()
 }
 
+/// Puts a table on a value editor. Without the game's values the roll is still edited, by its position; a value no roll
+/// changes is fixed.
+fn set_table(editor: &mut ValueEditor, table: Lookup<Rc<item::ValueTable>>, game_context: bool) {
+    match table {
+        Lookup::Ready(table) if table.is_fixed() => editor.set_fixed(),
+        Lookup::Ready(table) if !table.is_usable() => editor.set_positions("the game gave no usable values", game_context),
+        Lookup::Unavailable(reason) => editor.set_positions(&reason, game_context),
+        table => editor.set_mapping(table, game_context),
+    }
+}
+
 /// The table for `key`, from the cache or else from the game; one still loading is asked again next time. Tables are
 /// shared, so a cell's editor holds the cached one rather than a copy.
 fn table(tables: &mut HashMap<TableKey, Lookup<Rc<item::ValueTable>>>, game: &ForgeGame, key: TableKey, item: &ForgeItem, request: &RollRequest) -> Lookup<Rc<item::ValueTable>> {
@@ -770,8 +781,7 @@ impl ForgeEditor {
         let affixes = count(self.affixes.iter().filter(|row| !row.is_removed()).count(), "affix", "affixes");
         parts.push(
             if item
-                .unique
-                .as_ref()
+                .backing()
                 .is_some_and(|unique| matches!(unique.formatting, crate::pages::forge::game::Lookup::Ready(())))
             {
                 format!("{affixes} · {}", count(self.uniques.len(), "unique modifier", "unique modifiers"))
@@ -1128,19 +1138,18 @@ impl ForgeEditor {
 
     /// The cell's value can change now: its mapping is known and nothing locks drafts.
     pub fn can_edit_value(&self, cell: Cell) -> bool {
+        let supports = |target| {
+            self.game.supports(&ItemEdit::Roll(eg_trainer::item::edit::RollEdit {
+                target,
+                changes: vec![],
+                allow_incompatible: self.unrestricted(),
+            }))
+        };
         let unlocked = match cell {
-            Cell::Implicit(..) => self.can_mutate() && !self.is_base_drafted(),
+            Cell::Implicit(..) => self.can_mutate() && !self.is_base_drafted() && supports(RollTarget::Implicit),
+            Cell::Unique(..) => self.can_mutate() && supports(RollTarget::Unique),
             Cell::Field(index) => self.can_change_field(index),
-            Cell::Affix(row) => {
-                self.can_mutate()
-                    && self.affixes.get(row).is_some_and(AffixRow::is_editable)
-                    && self.game.supports(&ItemEdit::Roll(eg_trainer::item::edit::RollEdit {
-                        target: RollTarget::Affix,
-                        changes: vec![],
-                        allow_incompatible: self.unrestricted(),
-                    }))
-            }
-            _ => self.can_mutate(),
+            Cell::Affix(row) => self.can_mutate() && self.affixes.get(row).is_some_and(AffixRow::is_editable) && supports(RollTarget::Affix),
         };
         unlocked && self.editor_of(cell).is_some_and(|(editor, _, _)| editor.has_mapping())
     }
@@ -1895,12 +1904,7 @@ impl ForgeEditor {
                 line: None,
             };
             let game_context = row.game_roll().is_some();
-            // Without the game's values the roll is still edited, by its position.
-            match table(tables, game, key, item, &request) {
-                Lookup::Ready(table) if !table.is_usable() => row.value.set_positions("the game gave no usable values", game_context),
-                Lookup::Unavailable(reason) => row.value.set_positions(&reason, game_context),
-                table => row.value.set_mapping(table, game_context),
-            }
+            set_table(&mut row.value, table(tables, game, key, item, &request), game_context);
             requests.push(request);
         }
         for line in uniques.iter_mut() {
@@ -1925,7 +1929,7 @@ impl ForgeEditor {
                     line: line_index,
                     dependencies,
                 };
-                roll.editor.set_mapping(table(tables, game, key, item, &request), true);
+                set_table(&mut roll.editor, table(tables, game, key, item, &request), true);
                 requests.push(request);
             }
         }
@@ -1937,7 +1941,7 @@ impl ForgeEditor {
                     draft: None,
                     line: None,
                 };
-                roll.editor.set_mapping(table(tables, game, TableKey::Implicit(roll.index), item, &request), true);
+                set_table(&mut roll.editor, table(tables, game, TableKey::Implicit(roll.index), item, &request), true);
                 requests.push(request);
             }
         }
@@ -1995,7 +1999,7 @@ impl ForgeEditor {
         self.affixes.extend(added);
         self.selected_affix = selected_uid.and_then(|uid| self.affixes.iter().position(|row| row.uid == uid));
 
-        let unique = snapshot.as_ref().and_then(|item| item.unique.clone());
+        let unique = snapshot.as_ref().and_then(|item| item.backing().cloned());
         let (modifiers, rolls) = unique.map(|unique| (unique.modifiers, unique.rolls)).unwrap_or_default();
         self.update_lines(RollTarget::Unique, &modifiers, &rolls);
         let implicit_rolls = snapshot.as_ref().map(|item| item.implicit_rolls.clone()).unwrap_or_default();

@@ -12,7 +12,7 @@ use crate::game::{
 use eg_il2cpp_runtime::{Argument, AttachedThread, InvocationContext, InvocationOutcome, ReturnValue, Scalar, raw};
 use eg_trainer_wire::{
     forge::ForgeSnapshot,
-    write::{ForgeMutation, StatusField},
+    write::{AffixRolls, ForgeMutation, RollArray, StatusField},
 };
 use std::{ffi::CStr, ptr::NonNull};
 
@@ -173,6 +173,24 @@ impl RuntimeAccess {
         }
     }
 
+    /// One of the item's own zero-argument refreshes. Some are overrides (`ItemDataUnpacked.AfterIDChange` overrides
+    /// `ItemData`'s): those are resolved for the item's class, as the game's own call dispatches, and the body bound is
+    /// the game's.
+    // Internal caller supplies edit_forge's full live-runtime/exclusive-write contract.
+    unsafe fn item_refresh(&self, api: raw::InvocationApi, graph: &ForgeGraph<'_, '_>, owner: Class, name: &CStr) -> Result<crate::game::Method, WriteError> {
+        // SAFETY: The signature is checked against retained metadata; the item stays rooted while its override is resolved.
+        unsafe {
+            let mut method = self.description_method(api, owner, name, &[], Some(self.system_class(c"Void")?), true)?;
+            if (api.method_get_flags)(method, std::ptr::null_mut()) & raw::METHOD_ATTRIBUTE_VIRTUAL != 0 {
+                method = (api.object_get_virtual_method)(target(&graph.item)?.as_ptr(), method);
+                if method.is_null() || (self.class_image)((api.method_get_class)(method)) != graph.images.game {
+                    return Err(WriteError::Refused(format!("The game's {} override is unavailable", name.to_string_lossy())));
+                }
+            }
+            Ok(method)
+        }
+    }
+
     unsafe fn has_refresh(&self, owner: Class, name: &CStr) -> Result<bool, WriteError> {
         // SAFETY: The owner is retained class metadata; bounded method inspection checks signatures without executing refresh.
         unsafe {
@@ -294,6 +312,9 @@ impl RuntimeAccess {
             // its list, clears it or throws. Every batch destination is checked first.
             let mut affix_roots = Vec::new();
             let mut affix_stores = Vec::new();
+            // A unique or implicit roll array stays rooted through the stores and refresh, like the affixes above.
+            let mut roll_array = None;
+            let mut roll_stores = Vec::new();
             let mut replacement = None;
             match mutation {
                 ForgeMutation::Affix { .. } | ForgeMutation::AddAffix { .. } | ForgeMutation::RemoveAffix { .. } => {
@@ -320,6 +341,19 @@ impl RuntimeAccess {
                         self.validate_affix_definition(attached, &graph, before.id, before.tier)?;
                         affix_stores.push((target(affix)?, field, change.value));
                     }
+                }
+                ForgeMutation::ModifierRolls { array, rolls, .. } => {
+                    let api = invoke.ok_or_else(|| WriteError::Refused("Missing invocation API".into()))?;
+                    let (storage, length) = self.modifier_rolls(attached, &graph, api, expected, array, rolls)?;
+                    let base = target(&storage)?.as_ptr().cast::<u8>();
+                    for change in rolls.changes() {
+                        if usize::from(change.slot) >= length {
+                            return Err(WriteError::Stale("Roll array changed".into()));
+                        }
+                        // Element storage begins after the checked 32-byte array header.
+                        roll_stores.push((base.add(32 + usize::from(change.slot)), change.value));
+                    }
+                    roll_array = Some(storage);
                 }
                 ForgeMutation::Status { field, value, unrestricted } => {
                     let limits = self.read_item_limits(attached)?;
@@ -423,8 +457,13 @@ impl RuntimeAccess {
                 methods.push((item_data, c"RebuildID", false));
                 methods.push((self.class(&graph.images, c"", c"ItemContainerEntry")?, c"UpdateEntry", true));
                 for (owner, name, entry) in methods {
+                    let method = if entry {
+                        self.method(owner, name, &[], true)?
+                    } else {
+                        self.item_refresh(invoke.expect("checked invocation API"), &graph, owner, name)?
+                    };
                     let method = context
-                        .bind(NonNull::new(self.method(owner, name, &[], true)?.cast_mut()).ok_or_else(|| WriteError::Refused("Missing refresh method".into()))?)
+                        .bind(NonNull::new(method.cast_mut()).ok_or_else(|| WriteError::Refused("Missing refresh method".into()))?)
                         .map_err(|e| WriteError::Refused(e.to_string()))?;
                     refresh.push((method, entry));
                 }
@@ -474,12 +513,72 @@ impl RuntimeAccess {
                     for (affix, field, value) in affix_stores {
                         write_api.set_u8(affix, field, value);
                     }
+                    for (element, value) in roll_stores {
+                        eg_il2cpp_runtime::metadata::write_bytes(element, &[value]);
+                    }
                     Ok(())
                 },
                 readback,
             );
             drop(affix_roots);
+            drop(roll_array);
             result
+        }
+    }
+
+    /// Checks every change against the game's own word on the item, as the C# app did, and returns the live roll array
+    /// (rooted) with its length. A unique roll must be read by an editable line of the game's unique tooltip; an implicit
+    /// roll must belong to an implicit whose range is more than one value.
+    // Internal caller supplies edit_forge's full live-runtime/exclusive-write contract.
+    unsafe fn modifier_rolls<'a, 'r>(
+        &self,
+        attached: &'a AttachedThread<'r>,
+        graph: &ForgeGraph<'_, '_>,
+        api: raw::InvocationApi,
+        expected: &ForgeSnapshot,
+        array: RollArray,
+        rolls: AffixRolls,
+    ) -> Result<(Root<'a, 'r>, usize), WriteError> {
+        // SAFETY: The graph is rooted by the caller; definitions, tooltip results and the array stay rooted while checked.
+        unsafe {
+            let (field, length) = match array {
+                RollArray::Unique => {
+                    let identity = expected
+                        .identity
+                        .as_ref()
+                        .filter(|_| matches!(expected.rarity, 7..=9))
+                        .ok_or_else(|| WriteError::Refused("This item has no unique rolls".into()))?;
+                    let definition = self.unique_definition(attached, graph, api, identity.id)?;
+                    let lines = self.unique_modifiers(attached, api, &graph.images, &graph.item, &definition, identity.rolls.len())?;
+                    if rolls
+                        .changes()
+                        .iter()
+                        .any(|change| !lines.iter().any(|line| line.editable && line.roll_ids.contains(&change.slot)))
+                    {
+                        return Err(WriteError::Refused("Unique roll mapping could not be confirmed".into()));
+                    }
+                    (c"uniqueRolls", identity.rolls.len())
+                }
+                RollArray::Implicit => {
+                    let base = self.implicit_definitions(attached, api, &graph.images)?;
+                    for change in rolls.changes() {
+                        if usize::from(change.slot) >= expected.implicit_rolls.len() {
+                            return Err(WriteError::Refused("Invalid implicit roll index".into()));
+                        }
+                        let (_, minimum, maximum) = self.implicit_range(attached, api, &base, expected, usize::from(change.slot))?;
+                        if minimum == maximum {
+                            return Err(WriteError::Refused("This implicit does not roll".into()));
+                        }
+                    }
+                    (c"implicitRolls", expected.implicit_rolls.len())
+                }
+            };
+            let storage = self.child(attached, &graph.item, field)?.ok_or_else(|| WriteError::Refused("Missing roll array".into()))?;
+            let count = self.array_count(&storage, self.system_class(c"Byte")?, array.capacity() as u32)? as usize;
+            if count != length {
+                return Err(WriteError::Stale("Roll array changed".into()));
+            }
+            Ok((storage, length))
         }
     }
 }

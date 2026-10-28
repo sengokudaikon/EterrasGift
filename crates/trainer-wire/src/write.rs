@@ -15,7 +15,7 @@ pub struct AffixRollChange {
     pub value: u8,
 }
 
-/// A bounded, nonempty batch with distinct slots. Slots still need a fresh item
+/// A bounded, nonempty batch with distinct slots (an affix's slot, or a unique or implicit roll's index). Slots still need a fresh item
 /// and definition check in the helper; construction grants no memory access.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct AffixRolls {
@@ -46,6 +46,30 @@ impl AffixRolls {
     }
 }
 
+/// The item's own roll arrays: the unique (or set) definition's rolls and the base's implicits.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(u8)]
+pub enum RollArray {
+    Unique = 1,
+    Implicit = 2,
+}
+impl RollArray {
+    pub fn from_wire(value: u8) -> Result<Self, ProtocolError> {
+        match value {
+            1 => Ok(Self::Unique),
+            2 => Ok(Self::Implicit),
+            _ => invalid(),
+        }
+    }
+    /// How many rolls the game's array holds at most.
+    pub fn capacity(self) -> usize {
+        match self {
+            Self::Unique => forge::MAX_UNIQUE_ROLLS,
+            Self::Implicit => forge::MAX_IMPLICIT_ROLLS,
+        }
+    }
+}
+
 /// Only operations implemented by the helper. Wire numbers remain internal to
 /// transport; domain planning separately checks catalog compatibility/override.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -73,6 +97,12 @@ pub enum ForgeMutation {
         rolls: AffixRolls,
         unrestricted: bool,
     },
+    /// Roll positions in one of the item's roll arrays; which modifiers they belong to is the game's to say.
+    ModifierRolls {
+        array: RollArray,
+        rolls: AffixRolls,
+        unrestricted: bool,
+    },
     Status {
         field: StatusField,
         value: u8,
@@ -97,6 +127,7 @@ impl ForgeMutation {
             Self::AddAffix { unrestricted, .. }
             | Self::Affix { unrestricted, .. }
             | Self::AffixRolls { unrestricted, .. }
+            | Self::ModifierRolls { unrestricted, .. }
             | Self::Status { unrestricted, .. }
             | Self::Base { unrestricted, .. }
             | Self::Identity { unrestricted, .. } => unrestricted,
@@ -143,6 +174,19 @@ impl ForgeMutation {
                     }
                 }
             }
+            Self::ModifierRolls { array, rolls, .. } => {
+                let target = match array {
+                    RollArray::Unique => item.identity.as_mut().map(|identity| &mut identity.rolls),
+                    RollArray::Implicit => Some(&mut item.implicit_rolls),
+                };
+                if let Some(target) = target {
+                    for change in rolls.changes() {
+                        if let Some(roll) = target.get_mut(usize::from(change.slot)) {
+                            *roll = change.value;
+                        }
+                    }
+                }
+            }
             Self::Status { field, value, .. } => field.project(item, value),
             Self::Base { item_type, sub_type, .. } => {
                 item.item_type = item_type;
@@ -163,6 +207,7 @@ impl ForgeMutation {
             Self::AddAffix { id, tier, seal, .. } => id <= 4095 && (1..=8).contains(&tier) && seal <= 3,
             Self::Affix { slot, id, tier, seal, .. } => slot < 32 && id <= 4095 && (1..=8).contains(&tier) && seal <= 3,
             Self::RemoveAffix { slot, .. } => slot < 32,
+            Self::ModifierRolls { array, rolls, .. } => rolls.changes().iter().all(|change| usize::from(change.slot) < array.capacity()),
             Self::Status {
                 field: StatusField::Corrupted | StatusField::Ruined,
                 value,

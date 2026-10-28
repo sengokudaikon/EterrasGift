@@ -70,6 +70,7 @@ impl ForgeGame {
             && !capabilities.base_change
             && !capabilities.identity_change
             && !capabilities.affix_rolls
+            && !capabilities.modifier_rolls
             && !capabilities.affix_change
             && !capabilities.affix_list)
             .then_some(READ_ONLY)
@@ -183,7 +184,7 @@ impl Writer {
             self.descriptions = None;
             return;
         };
-        if !matches!(expected.snapshot().rarity, 7 | 9) {
+        if !matches!(expected.snapshot().rarity, 7..=9) {
             self.descriptions = None;
             return;
         }
@@ -286,7 +287,7 @@ impl Writer {
         let result: Result<super::game::Lookup<ValueTable>, GameError> = (|| {
             use eg_trainer::item::values::{MappingAddress, MappingRequest, MappingTarget};
             if request.target != item::RollTarget::Affix {
-                return Err("Actual values for this modifier are unavailable in this build.".into());
+                return Err("the game's values are read for affixes only".into());
             }
             let mapping = u8::try_from(request.index).ok().map(|index| MappingRequest {
                 address: MappingAddress {
@@ -483,17 +484,7 @@ impl Writer {
 }
 
 fn supports(state: &BackendSnapshot, edit: &ItemEdit) -> bool {
-    match edit {
-        ItemEdit::AddAffix(eg_trainer::item::edit::AddAffixEdit { .. }) | ItemEdit::RemoveAffix(eg_trainer::item::edit::RemoveAffixEdit { .. }) => state.capabilities.affix_list,
-        ItemEdit::Affix(eg_trainer::item::edit::AffixEdit { .. }) => state.capabilities.affix_change,
-        ItemEdit::Status(eg_trainer::item::edit::StatusEdit { field, .. }) => state.capabilities.status_fields[*field as usize],
-        ItemEdit::BaseType(eg_trainer::item::edit::BaseTypeEdit { .. }) => state.capabilities.base_change,
-        ItemEdit::UniqueIdentity(eg_trainer::item::edit::UniqueIdentityEdit { .. }) => state.capabilities.identity_change,
-        ItemEdit::Roll(eg_trainer::item::edit::RollEdit {
-            target: item::RollTarget::Affix, ..
-        }) => state.capabilities.affix_rolls,
-        _ => false,
-    }
+    state.capabilities.allows(edit)
 }
 
 /// The forge on the worker: its item and catalog follow the snapshots, and its receipts settle as they come.

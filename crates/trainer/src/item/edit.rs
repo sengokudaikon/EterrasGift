@@ -286,6 +286,14 @@ impl RollEvidence {
             implicits,
         }
     }
+    /// The same bindings for another observation of the same item and identity. Which rolls a line reads is the
+    /// unique's and the base's; a roll edit changes neither, so the bindings carry over to its result.
+    pub fn rebound(&self, observation: &ExpectedObservation) -> Self {
+        Self {
+            observation: observation.clone(),
+            ..self.clone()
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -294,8 +302,13 @@ pub struct PreparedEdit {
     edit: ItemEdit,
     projected: ForgeSnapshot,
     moves: BTreeMap<u8, u8>,
+    /// The roll bindings a unique or implicit roll edit was checked against, kept for its Undo.
+    evidence: Option<RollEvidence>,
 }
 impl PreparedEdit {
+    pub fn evidence(&self) -> Option<&RollEvidence> {
+        self.evidence.as_ref()
+    }
     pub fn before(&self) -> &ExpectedObservation {
         &self.before
     }
@@ -596,7 +609,7 @@ pub fn prepare(
                     RollTarget::Unique | RollTarget::Implicit => {
                         let evidence = roll_evidence.filter(|r| r.observation == *expected).ok_or(EditError::MissingRollEvidence)?;
                         let (bindings, length) = if e.target == RollTarget::Unique {
-                            if !matches!(before.rarity, 7 | 9) {
+                            if !backed(before.rarity) {
                                 return Err(EditError::InvalidRollMapping);
                             }
                             (&evidence.unique, before.identity.as_ref().map_or(0, |u| u.rolls.len()))
@@ -723,11 +736,19 @@ pub fn prepare(
     if eg_trainer_wire::forge::encode(Some(&after)).is_err() {
         return Err(EditError::ProjectedSnapshotOutOfBounds);
     }
+    let evidence = match &edit {
+        ItemEdit::Roll(RollEdit {
+            target: RollTarget::Unique | RollTarget::Implicit,
+            ..
+        }) => roll_evidence.cloned(),
+        _ => None,
+    };
     Ok(PreparedEdit {
         before: expected.clone(),
         edit,
         projected: after,
         moves,
+        evidence,
     })
 }
 

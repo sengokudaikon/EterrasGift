@@ -60,6 +60,8 @@ pub struct ValueEditor {
     label: Option<String>,
     /// Why the table is the roll positions rather than the game's values; empty for the game's own.
     note: String,
+    /// The game shows one value at every roll: there is nothing to edit or show.
+    fixed: bool,
     pub typing: bool,
     pub input: String,
     pub dragging: bool,
@@ -76,6 +78,7 @@ impl ValueEditor {
             game_table: None,
             label,
             note: String::new(),
+            fixed: false,
             typing: false,
             input: String::new(),
             dragging: false,
@@ -118,6 +121,7 @@ impl ValueEditor {
             return;
         }
         self.note.clear();
+        self.fixed = false;
         self.loading = matches!(table, Lookup::Loading);
         match table {
             Lookup::Ready(table) if table.is_usable() => {
@@ -150,9 +154,20 @@ impl ValueEditor {
         self.note = format!("Actual values unavailable ({reason}). Editing the roll position.");
     }
 
+    /// A value the roll does not change: no value, scale or input.
+    pub fn set_fixed(&mut self) {
+        self.defer("Fixed: the roll does not change this value.");
+        self.fixed = true;
+    }
+
+    pub fn is_fixed(&self) -> bool {
+        self.fixed
+    }
+
     /// No table, for a reason other than the game's: the status says why.
     pub fn defer(&mut self, status: &str) {
         self.note.clear();
+        self.fixed = false;
         self.table = None;
         self.loading = false;
         self.status = status.into();
@@ -175,7 +190,11 @@ impl ValueEditor {
     }
 
     pub fn display(&self, roll: u8) -> String {
-        self.shown().map_or_else(|| "—".into(), |table| table.samples[roll as usize].display.clone())
+        match self.shown() {
+            Some(table) => table.samples[roll as usize].display.clone(),
+            None if self.fixed => String::new(),
+            None => "—".into(),
+        }
     }
 
     pub fn effects(&self, roll: u8) -> String {

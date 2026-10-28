@@ -2,7 +2,7 @@
 use super::*;
 use crate::{
     mapping::{AffixMappingDraft, AffixMappingQuery, ForgeDescriptionRequest, MappingStart, UniquePreviewRequest, UniqueRollChange},
-    write::{AffixRollChange, AffixRolls, StatusField},
+    write::{AffixRollChange, AffixRolls, RollArray, StatusField},
 };
 
 const MAX_BODY: usize = MAX_EXPECTED_BYTES + 256;
@@ -168,6 +168,16 @@ impl Request {
                         }
                         op::CHANGE_AFFIX_ROLLS
                     }
+                    ForgeMutation::ModifierRolls { array, rolls, unrestricted } => {
+                        body.byte(array as u8);
+                        body.flag(unrestricted);
+                        body.byte(rolls.changes().len() as u8);
+                        for change in rolls.changes() {
+                            body.byte(change.slot);
+                            body.byte(change.value);
+                        }
+                        op::CHANGE_MODIFIER_ROLLS
+                    }
                     ForgeMutation::Status { field, value, unrestricted } => {
                         body.byte(field as u8);
                         body.byte(value);
@@ -226,6 +236,7 @@ impl Request {
             // A conditional item request carries its expected item, whose size varies.
             op::CHANGE_AFFIX
             | op::CHANGE_AFFIX_ROLLS
+            | op::CHANGE_MODIFIER_ROLLS
             | op::DESCRIBE_UNIQUE
             | op::PREVIEW_UNIQUE
             | op::MAP_ROLL
@@ -362,19 +373,17 @@ impl Request {
                     },
                     op::CHANGE_AFFIX_ROLLS => {
                         let unrestricted = body.flag()?;
-                        let count = body.byte()?;
-                        if !(1..=32).contains(&count) {
-                            return Err(ProtocolError::InvalidData);
-                        }
-                        let mut changes = Vec::with_capacity(count as usize);
-                        for _ in 0..count {
-                            changes.push(AffixRollChange {
-                                slot: body.byte()?,
-                                value: body.byte()?,
-                            });
-                        }
                         ForgeMutation::AffixRolls {
-                            rolls: AffixRolls::new(&changes)?,
+                            rolls: roll_changes(&mut body)?,
+                            unrestricted,
+                        }
+                    }
+                    op::CHANGE_MODIFIER_ROLLS => {
+                        let array = RollArray::from_wire(body.byte()?)?;
+                        let unrestricted = body.flag()?;
+                        ForgeMutation::ModifierRolls {
+                            array,
+                            rolls: roll_changes(&mut body)?,
                             unrestricted,
                         }
                     }
@@ -402,4 +411,20 @@ impl Request {
         body.finish()?;
         Ok(request)
     }
+}
+
+/// A roll batch: its count, then each index and position.
+fn roll_changes(body: &mut Reader<'_>) -> Result<AffixRolls, ProtocolError> {
+    let count = body.byte()?;
+    if !(1..=32).contains(&count) {
+        return Err(ProtocolError::InvalidData);
+    }
+    let mut changes = Vec::with_capacity(count as usize);
+    for _ in 0..count {
+        changes.push(AffixRollChange {
+            slot: body.byte()?,
+            value: body.byte()?,
+        });
+    }
+    AffixRolls::new(&changes)
 }
