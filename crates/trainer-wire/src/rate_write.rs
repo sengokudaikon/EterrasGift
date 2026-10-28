@@ -74,62 +74,18 @@ impl AttackLeechRateWrite {
         }
         projected
     }
-
-    /// Infallible apart from allocation: no unvalidated caller fields remain.
-    pub fn encode(&self) -> Vec<u8> {
-        crate::protocol::Request::SetAttackLeechRate(self.clone()).encode()
-    }
-
-    /// Full fixed frame validation must precede helper ownership/dispatcher/queue
-    /// admission. This decoder performs no I/O, float arithmetic or pointer access.
-    pub fn decode(frame: &[u8]) -> Result<Self, ProtocolError> {
-        match crate::protocol::Request::decode(frame)? {
-            crate::protocol::Request::SetAttackLeechRate(write) => Ok(write),
-            _ => Err(ProtocolError::InvalidData),
-        }
-    }
 }
 
 /// Byte classification only: confirmation still requires host admission and an
 /// independent fresh read. Trusted refusal codes precede the setter boundary.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum RateWriteReply {
-    Confirmed(AttackLeechObservation),
-    NotApplied { code: crate::protocol::ResponseCode, message: String },
-    Uncertain { reason: String },
-}
-fn uncertain(reason: impl Into<String>) -> RateWriteReply {
-    RateWriteReply::Uncertain { reason: reason.into() }
-}
+pub type RateWriteReply = crate::write::Reply<AttackLeechObservation>;
+
 /// Reject malformed, unavailable or mismatched success payloads conservatively.
-/// A failure to parse a refusal cannot prove nonexecution. No result authorizes retry.
 pub fn classify_response(response: &crate::protocol::Response, request: &AttackLeechRateWrite) -> RateWriteReply {
-    use crate::{
-        fields::{self, AttackLeechRead},
-        protocol::{MAX_RESPONSE_SIZE, ResponseCode},
-        write::MAX_ERROR_TEXT,
-    };
-    if response.payload.len() > MAX_RESPONSE_SIZE {
-        return uncertain("response exceeds frame bound");
-    }
-    if response.code == ResponseCode::Done {
-        return match fields::decode(&response.payload) {
-            Ok(AttackLeechRead::Available(actual)) if actual == request.projected() => RateWriteReply::Confirmed(actual),
-            Ok(_) => uncertain("rate write readback differs from complete projected observation"),
-            Err(_) => uncertain("invalid rate write readback payload"),
-        };
-    }
-    if response.payload.len() > MAX_ERROR_TEXT {
-        return uncertain("failure text exceeds bound");
-    }
-    let Ok(message) = std::str::from_utf8(&response.payload) else {
-        return uncertain("invalid UTF-8 failure text");
-    };
-    if response.code == ResponseCode::Failed {
-        return uncertain(message);
-    }
-    RateWriteReply::NotApplied {
-        code: response.code,
-        message: message.into(),
-    }
+    use crate::fields::{self, AttackLeechRead};
+    crate::write::classify(response, |payload| match fields::decode(payload) {
+        Ok(AttackLeechRead::Available(actual)) if actual == request.projected() => Ok(actual),
+        Ok(_) => Err("rate write readback differs from complete projected observation"),
+        Err(_) => Err("invalid rate write readback payload"),
+    })
 }

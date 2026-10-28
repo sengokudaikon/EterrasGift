@@ -1,4 +1,4 @@
-//! Owned read-only forge snapshots, introduced in protocol 22 operation 18.
+//! Owned read-only forge snapshots.
 //!
 //! All integers are little endian. An empty forge is the single byte 0. A present
 //! item starts with 1, then item:u64, individual_id:u32, fingerprint:u64, name:text,
@@ -72,11 +72,10 @@ pub struct ItemStatus {
 }
 
 impl ForgeSnapshot {
-    /// Matches `native/item.h::fingerprint`: each value is an LE int32 mixed
-    /// through FNV-1a 64, including the one-based affix tier. Set identity (rarity
-    /// 8) is transmitted but deliberately excluded, as in the original helper.
-    /// Names, special affix type, class requirement and individual ID are also
-    /// outside that legacy fingerprint. Encode/decode enforce structural bounds.
+    /// The helper's item fingerprint: each value is an LE int32 mixed through
+    /// FNV-1a 64, including the one-based affix tier. Set identity (rarity 8) is
+    /// transmitted but excluded, as are names, special affix type, class
+    /// requirement and individual ID. Encode/decode enforce structural bounds.
     pub fn legacy_fingerprint(&self) -> u64 {
         let mut hash = 14_695_981_039_346_656_037_u64;
         let mut mix = |value: i32| {

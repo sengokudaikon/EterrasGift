@@ -4,7 +4,7 @@
 //! tag u8, zero reserved u8). Available is exactly 64 bytes: manager, actor and
 //! stats wrapper/native u64 pairs followed by two raw f32 u32 bit patterns.
 //! Unavailable is exactly 12 bytes: the header and one typed u32 reason.
-//! All integers are little endian. No process identity, generation, labels,
+//! All integers are little endian. No process identity, labels,
 //! interpreted float, write authority or fallback value comes from this wire.
 
 #![forbid(unsafe_code)]
@@ -61,7 +61,7 @@ impl ObservedRate {
     }
 
     /// UI-domain classification only, never permission to write. Use f32 bounds
-    /// so the original accepted double 0.01 -> float remains inside the domain.
+    /// so an editor's 0.01 (a double) cast to f32 stays inside the domain.
     pub fn attack_editor_value(self) -> Result<f32, RateUnavailable> {
         let value = self.finite_value()?;
         if (0.01_f32..=20.0_f32).contains(&value) {
@@ -155,13 +155,13 @@ pub fn encode(value: &AttackLeechRead) -> Vec<u8> {
 }
 
 pub fn decode(bytes: &[u8]) -> Result<AttackLeechRead, ProtocolError> {
-    if bytes.len() < 8 || bytes[..4] != MAGIC.to_le_bytes() {
+    if bytes.len() < 8 {
         return Err(ProtocolError::InvalidData);
     }
-    if bytes[4..6] != VERSION.to_le_bytes() {
+    if bytes[..4] != MAGIC.to_le_bytes() {
         return Err(ProtocolError::InvalidMagic);
     }
-    if bytes[7] != 0 {
+    if bytes[4..6] != VERSION.to_le_bytes() || bytes[7] != 0 {
         return Err(ProtocolError::InvalidData);
     }
     match bytes[6] {

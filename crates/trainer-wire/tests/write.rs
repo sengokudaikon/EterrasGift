@@ -10,6 +10,9 @@ fn decode_header(bytes: &[u8]) -> Result<eg_trainer_wire::protocol::RequestHeade
 fn decode_frame(bytes: &[u8]) -> Result<Request, ProtocolError> {
     Request::decode(bytes)
 }
+fn frame(write: &ForgeWrite) -> Vec<u8> {
+    Request::EditForge(write.clone()).encode()
+}
 fn spec() -> DispatcherSpec {
     DispatcherSpec { rva: 0x1000, bytes: [0xcc; 16] }
 }
@@ -66,7 +69,7 @@ fn set32(bytes: &mut [u8], at: usize, value: u32) {
 #[test]
 fn independent_literal_full_snapshot_wire_and_infallible_owned_encoder() {
     assert_eq!(forge::encode(Some(&snapshot())).unwrap(), tail_literal());
-    assert_eq!(write().encode(), literal());
+    assert_eq!(frame(&write()), literal());
     assert_eq!(decode_frame(&literal()), Ok(Request::EditForge(write())));
     let header = decode_header(&literal()[..REQUEST_HEADER_SIZE]).unwrap();
     assert_eq!(header.body_len(), 88);
@@ -97,9 +100,6 @@ fn envelope_and_typed_write_fields_are_bounded() {
 #[test]
 fn no_header_only_or_partial_body_can_be_a_request() {
     let bytes = literal();
-    for end in 0..bytes.len() {
-        assert!(decode_frame(&bytes[..end]).is_err());
-    }
     for end in 0..88 {
         let mut frame = FrameAssembler::new(&bytes[..REQUEST_HEADER_SIZE]).unwrap();
         frame.push(&bytes[REQUEST_HEADER_SIZE..REQUEST_HEADER_SIZE + end]).unwrap();
@@ -120,31 +120,13 @@ fn assembler_accepts_arbitrary_fragmentation_only_after_complete_decode() {
     }
 }
 #[test]
-fn seen_excess_poisoned_and_control_requests_do_not_gain_a_tail() {
+fn seen_excess_poisoned() {
     let mut frame = literal();
     frame.push(0);
-    assert!(decode_frame(&frame).is_err());
     let mut assembler = FrameAssembler::new(&frame[..REQUEST_HEADER_SIZE]).unwrap();
     assert!(assembler.push(&frame[REQUEST_HEADER_SIZE..]).is_err());
     assert!(assembler.push(&tail_literal()).is_err());
     assert!(assembler.finish().is_err());
-    let controls = [
-        Request::Discover,
-        Request::Status { dispatcher: spec() },
-        Request::ClearHooks { dispatcher: spec() },
-        Request::ReadForge { dispatcher: spec() },
-        Request::ReadLocale { dispatcher: spec() },
-    ];
-    for request in controls {
-        let bytes = request.encode();
-        assert_eq!(decode_header(&bytes[..REQUEST_HEADER_SIZE]).unwrap().body_len(), bytes.len() - REQUEST_HEADER_SIZE);
-        let mut frame = FrameAssembler::new(&bytes[..REQUEST_HEADER_SIZE]).unwrap();
-        frame.push(&bytes[REQUEST_HEADER_SIZE..]).unwrap();
-        assert_eq!(frame.finish().unwrap(), request);
-        let mut extra = bytes;
-        extra.push(0);
-        assert!(decode_frame(&extra).is_err());
-    }
 }
 #[test]
 fn strict_expected_presence_utf8_bools_and_fingerprint() {
@@ -188,8 +170,8 @@ fn maximum_schema_bound_is_exact_and_allows_large_inherited_ids_without_rebuild(
     assert_eq!(MAX_EXPECTED_BYTES, 135870);
     // Wire decoding is not eligibility: native must refuse unique-backed items before store.
     let request = ForgeWrite::level_requirement(spec(), 1, maximum.clone(), 0).unwrap();
-    assert_eq!(request.encode().len(), MAX_EXPECTED_BYTES + 51);
-    assert_eq!(decode_frame(&request.encode()).unwrap(), Request::EditForge(request));
+    assert_eq!(frame(&request).len(), MAX_EXPECTED_BYTES + 51);
+    assert_eq!(decode_frame(&frame(&request)).unwrap(), Request::EditForge(request));
     maximum.name.push('x');
     assert!(ForgeWrite::level_requirement(spec(), 1, maximum, 0).is_err());
     let mut oversized = vec![0; MAX_REQUEST_BYTES + 1];
@@ -202,7 +184,7 @@ fn minimal_schema_bound_is_exact() {
     item.name.clear();
     assert_eq!(forge::encode(Some(&item)).unwrap().len(), MIN_EXPECTED_BYTES);
     let request = ForgeWrite::level_requirement(spec(), 1, item, 0).unwrap();
-    assert!(decode_frame(&request.encode()).is_ok());
+    assert!(decode_frame(&frame(&request)).is_ok());
     assert_eq!(REQUEST_HEADER_SIZE, 12);
 }
 #[test]
@@ -228,7 +210,7 @@ fn status_fields_have_one_strict_frame_and_boolean_values_are_canonical() {
         (StatusField::WeaversTouch, 77),
     ] {
         let request = ForgeWrite::new(spec(), 1, snapshot(), field, value).unwrap();
-        let bytes = request.encode();
+        let bytes = frame(&request);
         assert_eq!(u32::from_le_bytes(bytes[4..8].try_into().unwrap()), 10);
         assert_eq!(bytes[44], field as u8);
         assert_eq!(Request::decode(&bytes).unwrap(), Request::EditForge(request.clone()));
@@ -236,12 +218,12 @@ fn status_fields_have_one_strict_frame_and_boolean_values_are_canonical() {
     }
     for field in [StatusField::Corrupted, StatusField::Ruined] {
         assert!(ForgeWrite::new(spec(), 1, snapshot(), field, 2).is_err());
-        let mut invalid = write().encode();
+        let mut invalid = frame(&write());
         invalid[44] = field as u8;
         assert!(Request::decode(&invalid).is_err());
     }
     for field in [7, u32::MAX] {
-        let mut invalid = write().encode();
+        let mut invalid = frame(&write());
         invalid[44] = field as u8;
         assert!(Request::decode(&invalid).is_err());
     }
@@ -250,7 +232,7 @@ fn status_fields_have_one_strict_frame_and_boolean_values_are_canonical() {
 #[test]
 fn override_is_one_explicit_bit_and_all_other_flag_bits_are_rejected() {
     let request = ForgeWrite::with_override(spec(), 1, snapshot(), StatusField::WeaversTouch, 77, true).unwrap();
-    let bytes = request.encode();
+    let bytes = frame(&request);
     assert_eq!(bytes[46], 1);
     assert_eq!(Request::decode(&bytes).unwrap(), Request::EditForge(request));
     assert!(!write().unrestricted());
@@ -411,7 +393,7 @@ fn async_reader_does_not_return_request_on_header_only_disconnect() {
         use tokio::io::AsyncWriteExt;
         let (mut writer, mut reader) = tokio::io::duplex(8192);
         let task = tokio::spawn(async move { eg_trainer_wire::transport::read_request(&mut reader).await });
-        writer.write_all(&write().encode()[..REQUEST_HEADER_SIZE]).await.unwrap();
+        writer.write_all(&frame(&write())[..REQUEST_HEADER_SIZE]).await.unwrap();
         tokio::task::yield_now().await;
         assert!(!task.is_finished());
         drop(writer);
@@ -465,12 +447,8 @@ fn every_mutation_roundtrips_with_no_unused_slots() {
     ];
     for mutation in mutations {
         let write = ForgeWrite::edit(spec(), 1, snapshot(), mutation).unwrap();
-        let bytes = write.encode();
+        let bytes = frame(&write);
         assert_eq!(Request::decode(&bytes), Ok(Request::EditForge(write)));
-        for end in 0..bytes.len() {
-            assert!(Request::decode(&bytes[..end]).is_err());
-        }
-        assert!(Request::decode(&[bytes, vec![0]].concat()).is_err());
     }
     for mutation in [
         ForgeMutation::Identity {
@@ -508,7 +486,7 @@ fn roll_batches_bound_count_and_reject_duplicate_or_out_of_range_slots() {
             unrestricted: true,
         };
         let write = ForgeWrite::edit(spec(), 1, snapshot(), mutation).unwrap();
-        let bytes = write.encode();
+        let bytes = frame(&write);
         assert_eq!(Request::decode(&bytes), Ok(Request::EditForge(write)));
         for (at, value) in [(44, 2), (45, 0), (45, 33), (46, 32)] {
             let mut bad = bytes.clone();

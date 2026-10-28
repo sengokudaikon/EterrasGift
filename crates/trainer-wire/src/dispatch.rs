@@ -1,6 +1,6 @@
 //! One command at a time, matching the current helper's dispatch model.
 //!
-//! The eventual Unity adapter calls execute_one after the original ExecuteTasks. This queue does
+//! The helper's dispatcher callback calls `execute_one` after the game's ExecuteTasks returns. This queue does
 //! not establish main-thread identity or grant access to Unity; it only owns scheduling state.
 //! A timeout before execution cancels the command. Once execution starts, timeout means uncertainty,
 //! and the slot stays busy until the operation finishes. It must never trigger an automatic retry.

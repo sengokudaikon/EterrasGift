@@ -1,5 +1,5 @@
 //! Owned conditional Forge writes and bounded native acknowledgement decoding.
-//! These codecs grant no process access or write permission. Host generation,
+//! These codecs grant no process access or write permission. Process identity,
 //! profile, policy and main-thread runtime admission remain independent checks.
 
 #![forbid(unsafe_code)]
@@ -343,40 +343,34 @@ impl ForgeWrite {
         self.mutation.project(&mut projected);
         projected
     }
-    /// Infallible apart from allocation: all fields and canonical tail are owned,
-    /// immutable and validated by construction. No encoder unwrap of caller data.
-    pub fn encode(&self) -> Vec<u8> {
-        crate::protocol::Request::EditForge(self.clone()).encode()
-    }
     pub(crate) fn expected_bytes(&self) -> &[u8] {
         self.expected.bytes()
     }
 }
 
+/// A conditional write's acknowledgement, classified from its bytes alone. No result authorizes a retry.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub enum WriteReply {
-    /// Complete native acknowledgement for the same item. This is provisional;
+pub enum Reply<T> {
+    /// Complete native acknowledgement for the same target. This is provisional;
     /// only the session's separate read may publish Confirmed or NotKept.
-    Confirmed(ForgeSnapshot),
+    Confirmed(T),
     /// Trusted helper contract raises these codes only before the store boundary.
     /// This is never permission for an automatic write retry.
     NotApplied { code: ResponseCode, message: String },
     /// Store may have happened; retain diagnostics and require explicit fresh read.
     Uncertain { reason: String },
 }
-fn uncertain(reason: impl Into<String>) -> WriteReply {
-    WriteReply::Uncertain { reason: reason.into() }
-}
-pub fn classify_response(response: &Response, request: &ForgeWrite) -> WriteReply {
+pub type WriteReply = Reply<ForgeSnapshot>;
+
+/// Classifies a write's reply. `confirm` reads a Done payload as the acknowledged observation, or says why it is not
+/// one. A refusal that cannot be parsed cannot prove that nothing ran, so it stays uncertain.
+pub fn classify<T>(response: &Response, confirm: impl FnOnce(&[u8]) -> Result<T, &'static str>) -> Reply<T> {
+    let uncertain = |reason: &str| Reply::Uncertain { reason: reason.into() };
     if response.payload.len() > MAX_RESPONSE_SIZE {
         return uncertain("response exceeds frame bound");
     }
     if response.code == ResponseCode::Done {
-        return match forge::decode(&response.payload) {
-            Ok(Some(actual)) if actual.item == request.expected().item && actual.individual_id == request.expected().individual_id => WriteReply::Confirmed(actual),
-            Ok(_) => uncertain("write acknowledgement has no current target"),
-            Err(_) => uncertain("invalid write readback payload"),
-        };
+        return confirm(&response.payload).map_or_else(uncertain, Reply::Confirmed);
     }
     if response.payload.len() > MAX_ERROR_TEXT {
         return uncertain("failure text exceeds bound");
@@ -387,10 +381,18 @@ pub fn classify_response(response: &Response, request: &ForgeWrite) -> WriteRepl
     if response.code == ResponseCode::Failed {
         return uncertain(message);
     }
-    WriteReply::NotApplied {
+    Reply::NotApplied {
         code: response.code,
         message: message.into(),
     }
+}
+
+pub fn classify_response(response: &Response, request: &ForgeWrite) -> WriteReply {
+    classify(response, |payload| match forge::decode(payload) {
+        Ok(Some(actual)) if actual.item == request.expected().item && actual.individual_id == request.expected().individual_id => Ok(actual),
+        Ok(_) => Err("write acknowledgement has no current target"),
+        Err(_) => Err("invalid write readback payload"),
+    })
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -455,7 +457,7 @@ fn reorder_affixes(item: &mut ForgeSnapshot) {
 }
 /// Host expectation only: the native writer invokes the game's rarity method.
 pub fn affix_list_rarity(item: &ForgeSnapshot, affixes: &[AffixSnapshot]) -> u8 {
-    if matches!(item.rarity, 7..=9) || item.rarity > 6 {
+    if item.rarity > 6 {
         return item.rarity;
     }
     let seals = affixes.iter().map(|a| a.seal).filter(|s| *s != 0).collect::<std::collections::BTreeSet<_>>();

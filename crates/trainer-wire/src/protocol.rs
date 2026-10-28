@@ -19,7 +19,7 @@ pub const MAGIC: u32 = 0x4546_4735;
 pub const REQUEST_HEADER_SIZE: usize = 12;
 mod request;
 pub const RESPONSE_HEADER_SIZE: usize = 12;
-/// Maximum payload size, excluding the response header, as in NativeBridge.
+/// Maximum payload size, excluding the response header.
 pub const MAX_RESPONSE_SIZE: usize = 1024 * 1024;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -126,6 +126,13 @@ impl RequestHeader {
     pub fn total_len(self) -> usize {
         REQUEST_HEADER_SIZE + self.body_len
     }
+    /// Decodes the complete tail this header announced.
+    pub(crate) fn decode_body(self, body: &[u8]) -> Result<Request, ProtocolError> {
+        if body.len() != self.body_len {
+            return Err(ProtocolError::InvalidData);
+        }
+        Request::decode_body(self.operation, body)
+    }
 }
 
 /// Pure receiver state. Seen excess poisons the frame; future stream bytes
@@ -197,6 +204,13 @@ impl TryFrom<u32> for ResponseCode {
             7 => Self::CharacterLoading,
             _ => return Err(ProtocolError::InvalidData),
         })
+    }
+}
+impl ResponseCode {
+    /// A refusal of a presentation read (a description, preview or value mapping) that leaves the item and the session
+    /// as they were: the read is answered without data and the session stays ready.
+    pub const fn spares_presentation_session(self) -> bool {
+        matches!(self, Self::Refused | Self::Failed | Self::NotReady | Self::StaleItem)
     }
 }
 
@@ -321,53 +335,6 @@ impl RuntimeStatus {
         out[4..12].copy_from_slice(&self.manager.to_le_bytes());
         out[12..].copy_from_slice(&self.features_on.to_le_bytes());
         Ok(out)
-    }
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct HookState {
-    pub id: String,
-    pub on: bool,
-    pub failure: Option<String>,
-}
-
-impl HookState {
-    pub fn decode_all(payload: &[u8]) -> Result<Vec<Self>, ProtocolError> {
-        if payload.len() > MAX_RESPONSE_SIZE {
-            return Err(ProtocolError::InvalidData);
-        }
-        let mut reader = Reader::new(payload);
-        let count = reader.u32()? as usize;
-        if count > 1024 {
-            return Err(ProtocolError::InvalidData);
-        }
-        let mut states = Vec::with_capacity(count);
-        let mut ids = std::collections::BTreeSet::new();
-        for _ in 0..count {
-            let length = usize::from(reader.byte()?);
-            let id = reader.take(length)?;
-            if id.is_empty() || !id.is_ascii() {
-                return Err(ProtocolError::InvalidData);
-            }
-            let id = std::str::from_utf8(id).map_err(|_| ProtocolError::InvalidData)?.to_owned();
-            if !ids.insert(id.clone()) {
-                return Err(ProtocolError::InvalidData);
-            }
-            let on = match reader.byte()? {
-                0 => false,
-                1 => true,
-                _ => return Err(ProtocolError::InvalidData),
-            };
-            let failure_length = usize::from(u16::from_le_bytes(reader.array()?));
-            let failure = std::str::from_utf8(reader.take(failure_length)?).map_err(|_| ProtocolError::InvalidData)?;
-            states.push(Self {
-                id,
-                on,
-                failure: (!failure.is_empty()).then(|| failure.to_owned()),
-            });
-        }
-        reader.finish()?;
-        Ok(states)
     }
 }
 

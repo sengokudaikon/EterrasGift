@@ -8,7 +8,6 @@ use crate::{
 
 const MAX_BODY: usize = MAX_EXPECTED_BYTES + 256;
 
-#[derive(Default)]
 struct Writer(Vec<u8>);
 impl Writer {
     fn byte(&mut self, value: u8) {
@@ -53,7 +52,11 @@ impl Reader<'_> {
 
 impl Request {
     pub fn encode(&self) -> Vec<u8> {
-        let mut body = Writer::default();
+        // The header's operation and length are filled in once the body is written.
+        let mut body = Writer(Vec::with_capacity(REQUEST_HEADER_SIZE + 64));
+        body.u32(MAGIC);
+        body.u32(0);
+        body.u32(0);
         if let Some(dispatcher) = self.dispatcher() {
             body.u64(dispatcher.rva);
             body.0.extend_from_slice(&dispatcher.bytes);
@@ -82,7 +85,6 @@ impl Request {
             Self::Status { .. } => 7,
             Self::ClearHooks { .. } => 15,
             Self::ReadForge { .. } => 18,
-            // 19 (item limits) and 21 (catalog pages) are retired: the definitions come from the game's files.
             Self::ReadLocale { .. } => 20,
             Self::ReadAttackLeech { expected_manager, .. } => {
                 body.u64(*expected_manager);
@@ -219,12 +221,10 @@ impl Request {
                 operation
             }
         };
-        let mut frame = Writer::default();
-        frame.u32(MAGIC);
-        frame.u32(operation);
-        frame.u32(body.0.len() as u32);
-        frame.0.extend(body.0);
-        frame.0
+        let length = (body.0.len() - REQUEST_HEADER_SIZE) as u32;
+        body.0[4..8].copy_from_slice(&operation.to_le_bytes());
+        body.0[8..12].copy_from_slice(&length.to_le_bytes());
+        body.0
     }
     pub fn decode_header(bytes: &[u8]) -> Result<RequestHeader, ProtocolError> {
         if bytes.len() != REQUEST_HEADER_SIZE {
@@ -236,13 +236,24 @@ impl Request {
         }
         let operation = reader.u32()?;
         let length = reader.u32()? as usize;
-        if !matches!(
-            operation,
-            1 | 2 | 4 | 5 | 6 | 7 | 9 | 10 | 11 | 12 | 13 | 14 | 15 | 17 | 18 | 19 | 20 | 21 | 23 | 24 | 25 | 26 | 27
-        ) || length > MAX_BODY
-            || (matches!(operation, 6 | 25) && length != 0)
-            || (!matches!(operation, 6 | 25) && length < 24)
-        {
+        // Every body but Discover's and Unload's starts with the dispatcher (rva and 16 bytes).
+        const DISPATCHER: usize = 8 + 16;
+        let exact = match operation {
+            6 | 25 => Some(0),
+            7 | 15 | 18 | 20 => Some(DISPATCHER),
+            23 => Some(DISPATCHER + 8),
+            27 => Some(DISPATCHER + 8 + 1),
+            26 => Some(DISPATCHER + 8 + 1 + 1 + 8),
+            SET_ATTACK_LEECH_RATE_OPERATION => Some(DISPATCHER + 1 + 4 + 3 * 16 + 4 + 4),
+            // A conditional item request carries its expected item, whose size varies.
+            1 | 2 | 4 | 5 | 9 | 10 | 11 | 12 | 13 | 14 | 17 => None,
+            _ => return Err(ProtocolError::InvalidData),
+        };
+        let valid = match exact {
+            Some(exact) => length == exact,
+            None => (DISPATCHER..=MAX_BODY).contains(&length),
+        };
+        if !valid {
             return Err(ProtocolError::InvalidData);
         }
         Ok(RequestHeader { operation, body_len: length })

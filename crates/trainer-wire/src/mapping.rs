@@ -1,14 +1,12 @@
 //! Conditional presentation requests and bounded tooltip/mapping response codecs.
 //! Mapping f64 is a raw game quantity, NOT the displayed scalar. The host must
 //! parse the exact display/unit using the captured language; guessing is unsafe.
-//! Source: NativeGameData.DecodeMappingPage, NativeBridge.ReadModifiers, and
-//! native/{game-data.h:queryMapping,item.h:encodeModifiers} at e1c1ed4.
 //! All lengths/integers are LE int32, quantities LE f64, editable int32 0/1.
 //! Payloads are capped at 1MiB; text/context at 32KiB, language at 4KiB,
 //! effects at 128/sample, modifiers at 128, roll IDs at 8/line. Storage-bound roll
 //! indices are affix<32, unique<8 and implicit<3. Empty text is preserved.
-//! Unlike the old permissive decoder, malformed UTF-8 and flag values other
-//! than 0/1 fail. Different modifier lines may share a roll ID.
+//! Malformed UTF-8 and flag values other than 0/1 fail. Different modifier
+//! lines may share a roll ID.
 
 #![forbid(unsafe_code)]
 
@@ -132,10 +130,6 @@ impl ForgeDescriptionRequest {
     pub fn manager(&self) -> u64 {
         self.manager
     }
-
-    pub fn encode(&self) -> Result<Vec<u8>, ProtocolError> {
-        Ok(crate::protocol::Request::DescribeImplicits(self.clone()).encode())
-    }
 }
 
 /// Draft unique rolls are applied only to a private item copy for tooltip text.
@@ -180,9 +174,6 @@ impl UniquePreviewRequest {
     }
     pub fn target(&self) -> &ForgeDescriptionRequest {
         &self.target
-    }
-    pub fn encode(&self) -> Vec<u8> {
-        crate::protocol::Request::PreviewUnique(self.clone()).encode()
     }
 }
 
@@ -237,9 +228,6 @@ impl AffixMappingQuery {
     }
     pub fn manager(&self) -> u64 {
         self.target.manager
-    }
-    pub fn encode(&self) -> Vec<u8> {
-        crate::protocol::Request::MapRoll(self.clone()).encode()
     }
 }
 

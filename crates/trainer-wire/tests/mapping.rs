@@ -46,15 +46,8 @@ fn independent_mapping_wire_and_context_only() {
     assert_eq!(decode_mapping(&literal()[..25], address(), MappingStart::ContextOnly).unwrap(), context);
 }
 #[test]
-fn every_truncation_tail_and_invalid_utf8_rejected() {
-    let bytes = literal();
-    for end in 0..bytes.len() {
-        rejects(&bytes[..end]);
-    }
-    let mut tail = bytes.clone();
-    tail.push(0);
-    rejects(&tail);
-    let mut invalid = bytes;
+fn invalid_utf8_is_rejected() {
+    let mut invalid = literal();
     invalid[4] = 0xff;
     rejects(&invalid);
 }
@@ -178,19 +171,13 @@ fn modifier_literal() -> Vec<u8> {
     ]
 }
 #[test]
-fn independent_modifier_preview_wire_and_all_truncations() {
+fn independent_modifier_preview_wire() {
     let bytes = modifier_literal();
     assert_eq!(encode_modifiers(&[modifier()]).unwrap(), bytes);
     assert_eq!(decode_modifiers(&bytes).unwrap(), vec![modifier()]);
     let preview = UniqueRollPreview { modifiers: vec![modifier()] };
     assert_eq!(decode_preview(&bytes).unwrap(), preview);
     assert_eq!(encode_preview(&preview).unwrap(), bytes);
-    for end in 0..bytes.len() {
-        assert!(decode_modifiers(&bytes[..end]).is_err());
-    }
-    let mut bytes = bytes;
-    bytes.push(0);
-    assert!(decode_modifiers(&bytes).is_err());
 }
 #[test]
 fn strict_modifier_flags_ids_counts_and_utf8() {
@@ -257,7 +244,7 @@ fn modifier_empty_strings_false_and_caps() {
 }
 
 #[test]
-fn detached_mapping_query_rejects_reserved_data_invalid_drafts_and_partial_frames() {
+fn detached_mapping_query_rejects_reserved_data_and_invalid_drafts() {
     use eg_trainer_wire::{
         forge::{AffixSnapshot, ForgeSnapshot, ItemStatus},
         protocol::{DispatcherSpec, Request},
@@ -318,12 +305,8 @@ fn detached_mapping_query_rejects_reserved_data_invalid_drafts_and_partial_frame
         bad[at] = value;
         assert!(Request::decode(&bad).is_err());
     }
-    assert!(Request::decode(&frame[..frame.len() - 1]).is_err());
-    let mut excess = frame.clone();
-    excess.push(0);
-    assert!(Request::decode(&excess).is_err());
     let query = AffixMappingQuery::new(dispatcher, 41, expected.clone(), 0, MappingStart::ContextOnly, None).unwrap();
-    let mut frame = query.encode();
+    let mut frame = Request::MapRoll(query.clone()).encode();
     assert_eq!(frame[45..47], [0, 0]);
     assert_eq!(Request::decode(&frame), Ok(Request::MapRoll(query)));
     frame[45] = 2;

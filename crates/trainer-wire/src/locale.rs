@@ -2,9 +2,8 @@
 //!
 //! Two texts in order: language, then application version. Each is a little-endian
 //! u32 UTF-8 byte length followed by those exact bytes, at most 4096 per text.
-//! Language must not be blank; an empty application version is permitted, as in
-//! the original GameDataIdentity. Whitespace/casing and unknown language codes are
-//! preserved. The reader's runtime admission/initialization policy is separate.
+//! Language must not be blank; an empty application version is permitted.
+//! Whitespace/casing and unknown language codes are preserved. The reader's runtime admission/initialization policy is separate.
 
 #![forbid(unsafe_code)]
 

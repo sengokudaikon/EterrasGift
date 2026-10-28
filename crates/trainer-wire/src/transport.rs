@@ -1,7 +1,7 @@
 //! One-request transport and explicit uncertainty. Dropping a send future cannot retract submitted work.
 #![forbid(unsafe_code)]
 
-use crate::protocol::{ProtocolError, REQUEST_HEADER_SIZE, RESPONSE_HEADER_SIZE, Request, RequestFrame, Response};
+use crate::protocol::{ProtocolError, REQUEST_HEADER_SIZE, RESPONSE_HEADER_SIZE, Request, Response};
 use std::{future::Future, io};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
@@ -87,14 +87,11 @@ impl std::error::Error for RequestReadError {}
 pub async fn read_request<S: AsyncRead + Unpin>(stream: &mut S) -> Result<Request, RequestReadError> {
     let mut header = [0; REQUEST_HEADER_SIZE];
     stream.read_exact(&mut header).await.map_err(RequestReadError::Io)?;
-    let mut frame = RequestFrame::new(&header).map_err(RequestReadError::Protocol)?;
-    let mut chunk = [0; 8192];
-    while frame.remaining() != 0 {
-        let length = frame.remaining().min(chunk.len());
-        stream.read_exact(&mut chunk[..length]).await.map_err(RequestReadError::Io)?;
-        frame.push(&chunk[..length]).map_err(RequestReadError::Protocol)?;
-    }
-    frame.finish().map_err(RequestReadError::Protocol)
+    // The header is bounded before its announced tail is allocated.
+    let header = Request::decode_header(&header).map_err(RequestReadError::Protocol)?;
+    let mut body = vec![0; header.body_len()];
+    stream.read_exact(&mut body).await.map_err(RequestReadError::Io)?;
+    header.decode_body(&body).map_err(RequestReadError::Protocol)
 }
 
 /// Generic framed exchange. The first write attempt is the conservative uncertainty boundary;
