@@ -8,7 +8,7 @@
 use super::profiles::Profile;
 use super::session::{FieldError, FieldRequest, FieldResult, FieldWrite, GameField, HookState, NOT_AVAILABLE, PendingFields, TrainerSession, not_connected};
 use eg_trainer::backend::{
-    AttackLeechObservation, AttackLeechRead, AttackLeechUnavailable, BackendError, BackendHandle, BackendSnapshot, Command, Delivery, HookRun, ObservedRate, Pending, Phase,
+    AttackLeechObservation, AttackLeechRead, AttackLeechUnavailable, BackendError, BackendHandle, BackendSnapshot, Command, Delivery, ObservedRate, Pending, Phase,
 };
 use eg_trainer::features::{FeatureIntents, HookId};
 use eg_trainer::field_writes::{AttackLeechDecision, AttackLeechPlan, AttackLeechTarget, FieldInputError, FieldPlanError, RateWriteRecord};
@@ -71,12 +71,7 @@ impl BackendSession {
 
     /// The worker's latest snapshot, while it runs.
     fn with<R>(&self, look: impl FnOnce(&BackendSnapshot) -> R) -> Option<R> {
-        let updates = self.backend.subscribe();
-        if updates.has_changed().is_err() {
-            return None;
-        }
-        let snapshot = updates.borrow();
-        Some(look(&snapshot))
+        self.backend.is_running().then(|| self.backend.peek(look))
     }
 }
 
@@ -92,7 +87,7 @@ impl TrainerSession for BackendSession {
                 if id == ATTACK_LEECH {
                     return snapshot.capabilities.read_attack_leech;
                 }
-                match FeatureKey::parse(id).map(|key| key.descriptor().native_support) {
+                match FeatureKey::parse(id).map(|key| key.descriptor().native_support()) {
                     Some(NativeSupport::GameplayOverride(hook)) => snapshot.capabilities.gameplay_hooks[hook as usize],
                     _ => false,
                 }
@@ -164,7 +159,7 @@ impl TrainerSession for BackendSession {
             let command = Command::SetHookValues { id, values: values.to_vec() };
             let descriptor = eg_trainer::features::FeatureKey::Hook(id).descriptor();
             let choice = descriptor.kind == eg_trainer::features::FeatureKind::Choice;
-            if choice || matches!(descriptor.native_support, eg_trainer::features::NativeSupport::GameplayOverride(_)) {
+            if choice || matches!(descriptor.native_support(), eg_trainer::features::NativeSupport::GameplayOverride(_)) {
                 let on = if choice { values != [0.0] } else { self.is_hook_wanted(id.as_str()) };
                 if let Ok(receipt) = self.backend.try_submit(command) {
                     self.switching.borrow_mut().insert(id, (receipt, on));
@@ -181,7 +176,7 @@ impl TrainerSession for BackendSession {
         if self.switching.borrow().contains_key(&id) {
             return Some(HookState::Applying);
         }
-        self.with(|snapshot| snapshot.hooks.get(&id).map(hook_state)).flatten()
+        self.with(|snapshot| snapshot.hooks.get(&id).cloned()).flatten()
     }
 
     fn is_busy(&self) -> bool {
@@ -244,16 +239,6 @@ fn key_of(profile: &Profile) -> ProfileKey {
         name: profile.name.clone(),
         class: profile.class.clone(),
         cycle: profile.cycle.clone(),
-    }
-}
-
-fn hook_state(run: &HookRun) -> HookState {
-    match run {
-        HookRun::Off => HookState::Off,
-        HookRun::Queued => HookState::Queued,
-        HookRun::Applying => HookState::Applying,
-        HookRun::On => HookState::On,
-        HookRun::Failed { reason, on } => HookState::Failed { reason: reason.clone(), on: *on },
     }
 }
 
@@ -432,7 +417,7 @@ impl PendingFields for PendingWrite {
             }
             match snapshot.attack_leech_plan(target, write.wanted) {
                 Ok(AttackLeechDecision::NoOp) => {}
-                Ok(AttackLeechDecision::Change(plan)) => match self.backend.try_submit(Command::SetAttackLeechRate(Box::new(plan.clone()))) {
+                Ok(AttackLeechDecision::Change(plan)) => match self.backend.try_submit(Command::Write(plan.clone().into())) {
                     Ok(receipt) => self.current = Some((receipt, plan, snapshot.last_rate_write.clone())),
                     Err(_) => return Some(self.refuse(BUSY)),
                 },

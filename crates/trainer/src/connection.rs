@@ -4,7 +4,7 @@
 //! No preparation or pipe exchange is retried. Once preparation may have loaded
 //! code, a failure retains that fact and conservatively reports MayHaveRun.
 
-use std::{future::Future, path::PathBuf, time::Instant};
+use std::{future::Future, time::Instant};
 
 use eg_core::hashes;
 use eg_trainer_wire::{
@@ -62,8 +62,8 @@ pub trait HelperPreparer: Send + 'static {
         Vec::new()
     }
     /// A successful Loaded result asserts only helper preparation, not runtime
-    /// offline readiness. Reusing an existing matching server is permitted;
-    /// reinjecting a loaded generation is not. This future must bound its remote
+    /// offline readiness. Reusing an existing matching server is permitted; loading
+    /// again into a process that already holds the helper is not. This future must bound its remote
     /// operations and keep retained resources alive after uncertain delivery.
     fn prepare(
         &mut self,
@@ -158,7 +158,7 @@ impl<P: HelperPreparer, F: LogFactory> SessionConnector<P, F> {
         }
         let mut session = Session::new(target.clone(), prepared.transport, profile)?;
         session.enable();
-        if let Err(error) = session.connect(admission.time()?).await {
+        if let Err(error) = session.connect().await {
             if matches!(error, crate::session::SessionError::CharacterLoading) {
                 return Ok(session);
             }
@@ -257,20 +257,7 @@ fn process_start(target: &ProcessIdentity) -> Result<Timestamp, BackendError> {
     eg_core::time::from_filetime(target.created).map_err(|_| BackendError::blocked(ErrorKind::Identity, "invalid process creation time"))
 }
 fn capture_profile(target: &ProcessIdentity, helper_build_id: &str) -> Result<(BuildProfile, Option<std::sync::Arc<crate::profile::ConnectionFiles>>), BackendError> {
-    let executable = std::fs::canonicalize(&target.executable).map_err(|e| BackendError::blocked(ErrorKind::Identity, e.to_string()))?;
-    let parent = executable
-        .parent()
-        .ok_or_else(|| BackendError::blocked(ErrorKind::Identity, "missing executable directory"))?;
-    let mut data = executable
-        .file_stem()
-        .ok_or_else(|| BackendError::blocked(ErrorKind::Identity, "missing executable name"))?
-        .to_os_string();
-    data.push("_Data");
-    let binary = parent.join("GameAssembly.dll");
-    let metadata: PathBuf = parent.join(data).join("il2cpp_data/Metadata/global-metadata.dat");
-    let (profile, files) = BuildProfile::capture_connection(&binary, &metadata, helper_build_id).map_err(|e| BackendError::blocked(ErrorKind::Identity, e.to_string()))?;
-    profile
-        .validate_target(&target.executable)
-        .map_err(|e| BackendError::blocked(ErrorKind::Identity, e.to_string()))?;
-    Ok((profile, files))
+    // The profile is captured from the artifacts beside this executable, so it belongs to the target by construction.
+    let (binary, metadata) = crate::profile::artifact_paths(&target.executable).map_err(|e| BackendError::blocked(ErrorKind::Identity, e.to_string()))?;
+    BuildProfile::capture_connection(&binary, &metadata, helper_build_id).map_err(|e| BackendError::blocked(ErrorKind::Identity, e.to_string()))
 }

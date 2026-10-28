@@ -1,4 +1,4 @@
-//! Player.log admission before process access, ported from InjectionGate.Evaluate.
+//! Player.log admission before process access.
 use eg_core::game_log::{GameLogReader, GameLogState, GameLogStatus, GameReadiness};
 use jiff::Timestamp;
 

@@ -266,38 +266,37 @@ impl BackendConnection for Connection {
     fn target(&self) -> &ProcessIdentity {
         &self.target
     }
-    async fn refresh(&mut self, _: Timestamp) -> Result<RuntimeStatus, BackendError> {
+    async fn refresh(&mut self) -> Result<RuntimeStatus, BackendError> {
         self.shared.call("refresh", &self.shared.refresh_block).await;
         if let Some(error) = self.shared.read_errors.lock().unwrap().pop_front() {
             return Err(error);
         }
         Ok(*self.shared.status.lock().unwrap())
     }
-    async fn read_locale(&mut self, _: Timestamp) -> Result<eg_trainer::catalog::GameLocale, BackendError> {
+    async fn read_locale(&mut self) -> Result<eg_trainer::catalog::GameLocale, BackendError> {
         self.shared.call("locale", &self.shared.locale_block).await;
         Ok(self.shared.locale.lock().unwrap().clone())
     }
     fn build_hashes(&self) -> (String, String) {
         self.shared.hashes.lock().unwrap().clone()
     }
-    async fn read_forge(&mut self, _: Timestamp) -> Result<Option<ForgeSnapshot>, BackendError> {
+    async fn read_forge(&mut self) -> Result<Option<ForgeSnapshot>, BackendError> {
         self.shared.call("forge", &self.shared.forge_block).await;
         if let Some(error) = self.shared.read_errors.lock().unwrap().pop_front() {
             return Err(error);
         }
         Ok(self.shared.forge_item.lock().unwrap().clone())
     }
-    async fn describe_implicits(&mut self, _: Timestamp, _: &ForgeSnapshot) -> Result<Option<Vec<backend::ModifierSnapshot>>, BackendError> {
+    async fn describe_implicits(&mut self, _: &ForgeSnapshot) -> Result<Option<Vec<backend::ModifierSnapshot>>, BackendError> {
         self.shared.record("implicits");
         Ok(self.shared.implicit_lines.lock().unwrap().clone())
     }
-    async fn describe_unique(&mut self, _: Timestamp, _: &ForgeSnapshot) -> Result<Option<Vec<backend::ModifierSnapshot>>, BackendError> {
+    async fn describe_unique(&mut self, _: &ForgeSnapshot) -> Result<Option<Vec<backend::ModifierSnapshot>>, BackendError> {
         self.shared.record("unique-description");
         Ok(self.shared.unique_lines.lock().unwrap().clone())
     }
     async fn preview_unique(
         &mut self,
-        _: Timestamp,
         expected: &eg_trainer::edits::ExpectedObservation,
         draft: &eg_trainer::edits::RollEdit,
         evidence: &eg_trainer::mapping::BoundTooltip,
@@ -312,7 +311,6 @@ impl BackendConnection for Connection {
     }
     async fn resolve_mapping(
         &mut self,
-        _: Timestamp,
         expected: &eg_trainer::edits::ExpectedObservation,
         request: &eg_trainer::mapping::MappingRequest,
     ) -> Result<eg_trainer::mapping::ValueTable, BackendError> {
@@ -334,14 +332,14 @@ impl BackendConnection for Connection {
     fn supports_read_attack_leech(&self) -> bool {
         self.shared.attack_leech_enabled.load(Ordering::SeqCst)
     }
-    async fn read_attack_leech(&mut self, _: Timestamp) -> Result<eg_trainer_wire::fields::AttackLeechRead, BackendError> {
+    async fn read_attack_leech(&mut self) -> Result<eg_trainer_wire::fields::AttackLeechRead, BackendError> {
         self.shared.call("attack-leech", &self.shared.attack_leech_block).await;
         Ok(*self.shared.attack_leech_read.lock().unwrap())
     }
     fn supports_attack_leech_rate(&self) -> bool {
         self.shared.rate_write_enabled.load(Ordering::SeqCst)
     }
-    async fn set_attack_leech_rate(&mut self, _: Timestamp, plan: &AttackLeechPlan, control: &mut dyn WriteControl) -> Result<RateWriteStatus, BackendError> {
+    async fn set_attack_leech_rate(&mut self, plan: &AttackLeechPlan, control: &mut dyn WriteControl) -> Result<RateWriteStatus, BackendError> {
         if !control.allowed() {
             return Err(BackendError::blocked(ErrorKind::Superseded, "cleanup before rate submission"));
         }
@@ -371,7 +369,7 @@ impl BackendConnection for Connection {
     fn supports_identity_change(&self) -> bool {
         self.supports_level_requirement()
     }
-    async fn edit_forge(&mut self, _: Timestamp, plan: &ForgePlan, control: &mut dyn WriteControl) -> Result<WriteStatus, BackendError> {
+    async fn edit_forge(&mut self, plan: &ForgePlan, control: &mut dyn WriteControl) -> Result<WriteStatus, BackendError> {
         if !control.allowed() {
             return Err(BackendError::blocked(ErrorKind::Superseded, "cleanup before submission"));
         }
@@ -394,7 +392,7 @@ impl BackendConnection for Connection {
     fn observed_hook(&self, _: eg_trainer::features::HookId) -> Option<bool> {
         self.shared.hooks_suspended.load(Ordering::SeqCst).then_some(false)
     }
-    async fn set_hook(&mut self, _: Timestamp, request: &backend::HookRequest, control: &mut dyn WriteControl) -> Result<WriteOutcome<bool>, BackendError> {
+    async fn set_hook(&mut self, request: &backend::HookRequest, control: &mut dyn WriteControl) -> Result<WriteOutcome<bool>, BackendError> {
         if !control.allowed() {
             return Err(BackendError::blocked(ErrorKind::Superseded, "cleanup before submission"));
         }
@@ -1255,4 +1253,18 @@ fn failed_read_with_proven_departure_allows_a_fresh_offline_connection() {
         assert_eq!(handle.snapshot().phase, Phase::Ready);
         shutdown(&handle, worker).await;
     });
+}
+
+#[test]
+fn catalog_states_compare_by_allocation_first_and_then_by_content() {
+    let data = Arc::new(catalog());
+    let current = |data: &Arc<GameCatalog>, generation| CatalogState::Current { generation, data: data.clone() };
+    assert_eq!(current(&data, 1), current(&data, 1));
+    assert_eq!(current(&data, 1), current(&Arc::new(catalog()), 1), "equal content in another allocation");
+    assert_ne!(current(&data, 1), current(&data, 2));
+    assert_ne!(current(&data, 1), CatalogState::Stale(data.clone()));
+    let mut other = catalog();
+    other.identity.binary_hash = "C".repeat(64);
+    assert_ne!(CatalogState::Stale(data.clone()), CatalogState::Stale(Arc::new(other)));
+    assert_eq!(CatalogState::Missing, CatalogState::Missing);
 }

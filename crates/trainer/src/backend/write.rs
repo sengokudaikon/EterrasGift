@@ -50,7 +50,7 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
         plan.recheck(&current, manager, self.state.override_enabled).map_err(invalid_edit)?;
         let target = current.process().clone();
         self.admit_using_policy(&target, GatePolicy::Release)?;
-        let refreshed = self.connection.as_mut().ok_or_else(|| invalid_edit("connection released"))?.refresh(self.clock.now()).await;
+        let refreshed = self.connection.as_mut().ok_or_else(|| invalid_edit("connection released"))?.refresh().await;
         let status = match refreshed {
             Ok(status) => status,
             Err(error) => {
@@ -103,7 +103,7 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
             WriteStatus::Confirmed(snapshot) | WriteStatus::NotKept(snapshot) => {
                 // The readback is a changed item: the game describes its implicits again before it is published, so the
                 // item and its text arrive together (the monitor keeps text only for an item that has not changed).
-                let implicits = match self.connection.as_mut().unwrap().describe_implicits(self.clock.now(), &snapshot).await {
+                let implicits = match self.connection.as_mut().unwrap().describe_implicits(&snapshot).await {
                     Ok(implicits) => implicits,
                     Err(error) => {
                         describe_failure = Some(error);
@@ -165,7 +165,7 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
         self.finish_write(result, failure, target)
     }
     pub(super) async fn submit_write(&mut self, plan: &WritePlan, control: &mut dyn WriteControl) -> (WriteOutcome<WriteObservation>, Option<BackendError>) {
-        let (status, mut failure) = match self.connection.as_mut().unwrap().write(self.clock.now(), plan, control).await {
+        let (status, mut failure) = match self.connection.as_mut().unwrap().write(plan, control).await {
             Ok(status) => (status, None),
             Err(error) => {
                 let status = if error.delivery == Some(Delivery::MayHaveRun) {

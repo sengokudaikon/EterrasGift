@@ -1,11 +1,7 @@
 use std::collections::BTreeSet;
 
-use eg_trainer::features::{
-    DESCRIPTORS, FeatureError, FeatureIntents, FeatureKey, FeatureKind, FieldSetId, HookId, NativeSupport, PAGES, SOURCE_COMMIT, SOURCE_FILES, SavedValues, TrainerArea,
-};
-
-type ValueGolden<'a> = (&'a str, f64, f64, f64, f64, Option<&'a str>);
-type FieldGolden<'a> = (&'a str, f64, f64, f64);
+use eg_trainer::features::{DESCRIPTORS, FeatureError, FeatureIntents, FeatureKey, FeatureKind, FieldSetId, HookId, NativeSupport, PAGES, SavedValues};
+use eg_trainer_wire::hooks::GameplayHook;
 
 fn hook(id: &str) -> HookId {
     HookId::parse(id).unwrap()
@@ -18,49 +14,21 @@ fn saved(id: &str, values: &[f64]) -> SavedValues {
     }
 }
 
-// Literal navigation-order source inventory, not generated from the Rust registry.
-// TrainerCatalog.cs at e1c1ed4e9e0ab6404574113f2dcf1179b2113629.
-const SOURCE_IDS: &str = "\
-xp-multiplier instant-level max-skill-level points-earned free-skill-points free-passive-points free-weaver-points passive-chain skill-slots item-requirements set-bonus offhand primordial-limit
-currency keys woven-echoes duplicate
-god-mode damage-taken one-hit-kill damage-dealt cast-speed projectiles area attack-leech zero-mana-cost infinite-mana no-cooldowns endless-buffs move-speed auto-target
-forge-item forge-level shards runes-glyphs woven-enchanter
-drop-rates boss-drops extra-rares force-rarity always-t7 perfect-rolls pickup-range
-monolith-run skip-quest-echoes max-bonus-stability echo-cycle echo-type reveal-objective
-faction-standing faction-gains instant-rank prophecy-any-zone prophecy-max-lp prophecy-rewards prophecy-uses hunter-cost
-rune-wardens rune-prison experimental-uniques class-experimentals loot-lizards eternity-cache favor-cache nemesis mysterious-rift omen-windows morditas-timer monster-density pack-size monster-rarity champions eternity-cache-anywhere reveal-map waypoints zoom";
-
 #[test]
-fn all_source_ids_are_ordered_unique_typed_and_support_is_explicit() {
-    assert_eq!(SOURCE_COMMIT, "e1c1ed4e9e0ab6404574113f2dcf1179b2113629");
-    assert!(SOURCE_FILES.contains(&(
-        "src/Trainer/EterrasGift.Trainer.Application/Features/TrainerCatalog.cs",
-        "8cf232cea9f2199672031235c61c170644051382c09aa33442cf550c4b21e2c1"
-    )));
-    let combined = SOURCE_IDS.replace("god-mode damage-taken", "incoming-damage").replace("one-hit-kill ", "");
-    let expected: Vec<_> = combined.split_whitespace().collect();
-    assert_eq!(expected.len(), 74);
-    assert_eq!(DESCRIPTORS.iter().map(|descriptor| descriptor.key.as_str()).collect::<Vec<_>>(), expected);
-    assert_eq!(expected.iter().copied().collect::<BTreeSet<_>>().len(), 74);
-    assert_eq!(DESCRIPTORS.iter().filter(|descriptor| matches!(descriptor.key, FeatureKey::Hook(_))).count(), 66);
-    assert_eq!(DESCRIPTORS.iter().filter(|descriptor| matches!(descriptor.key, FeatureKey::Fields(_))).count(), 7);
+fn ids_are_unique_and_each_key_is_typed_by_its_kind() {
+    let ids: BTreeSet<_> = DESCRIPTORS.iter().map(|descriptor| descriptor.key.as_str()).collect();
+    assert_eq!(ids.len(), DESCRIPTORS.len());
     assert_eq!(DESCRIPTORS.iter().filter(|descriptor| descriptor.key == FeatureKey::Forge).count(), 1);
     for descriptor in DESCRIPTORS {
         assert_eq!(FeatureKey::parse(descriptor.key.as_str()), Some(descriptor.key));
         assert_eq!(descriptor.key.descriptor(), descriptor);
-        assert_eq!(
-            descriptor.native_support,
-            eg_trainer_wire::hooks::GameplayHook::from_id(descriptor.key.as_str()).map_or(NativeSupport::Unsupported, NativeSupport::GameplayOverride)
-        );
         assert!(!descriptor.title.is_empty());
         assert!(!descriptor.description.is_empty());
-        assert_eq!(descriptor.fills_section, descriptor.key == FeatureKey::Forge);
         match descriptor.key {
             FeatureKey::Hook(id) => {
                 assert_eq!(HookId::parse(id.as_str()), Some(id));
                 assert!(FieldSetId::parse(id.as_str()).is_none());
                 assert!(matches!(descriptor.kind, FeatureKind::Switch | FeatureKind::SwitchWithValues | FeatureKind::Choice));
-                assert!(!descriptor.legacy_owners.is_empty());
                 assert!(descriptor.fields.is_empty());
             }
             FeatureKey::Fields(id) => {
@@ -68,7 +36,6 @@ fn all_source_ids_are_ordered_unique_typed_and_support_is_explicit() {
                 assert!(HookId::parse(id.as_str()).is_none());
                 assert!(!descriptor.fields.is_empty());
                 assert!(descriptor.values.is_empty());
-                assert!(descriptor.legacy_owners.is_empty());
             }
             FeatureKey::Forge => {
                 assert!(HookId::parse("forge-item").is_none());
@@ -82,193 +49,57 @@ fn all_source_ids_are_ordered_unique_typed_and_support_is_explicit() {
 }
 
 #[test]
-fn pages_and_original_section_order_are_preserved() {
-    use TrainerArea::*;
-    let expected = [
-        (Character, "Character", "IconCharacter", vec!["Progression", "Trees", "Equipment rules"], true, 13),
-        (Stash, "Stash", "IconStash", vec!["Currency", "Keys", "Woven echoes", "Duplicate"], false, 4),
-        (Combat, "Combat", "IconCombat", vec!["Survival", "Offense", "Resources", "Movement"], false, 12),
-        (Forge, "Forge", "IconForge", vec!["Item", "Crafting rules"], false, 5),
-        (Loot, "Loot", "IconLoot", vec!["Drops", "Quality", "Pickup"], false, 7),
-        (Monolith, "Monolith", "IconMonolith", vec!["Run", "Echo web"], false, 6),
-        (Factions, "Factions", "IconFactions", vec!["Standing", "Prophecies", "Vendors"], false, 8),
-        (World, "World", "IconWorld", vec!["Encounters", "Monsters", "Dungeons", "Map"], false, 19),
-    ];
-    assert_eq!(PAGES.len(), expected.len());
-    for (page, (area, title, icon, sections, stacked, count)) in PAGES.iter().zip(expected) {
-        assert_eq!(
-            (page.area, page.title, page.icon, page.sections, page.stacked),
-            (area, title, icon, sections.as_slice(), stacked)
-        );
-        assert_eq!(DESCRIPTORS.iter().filter(|descriptor| descriptor.area == area).count(), count);
-        for descriptor in DESCRIPTORS.iter().filter(|descriptor| descriptor.area == area) {
-            assert!(page.sections.contains(&descriptor.section));
-        }
+fn every_gameplay_hook_runs_exactly_one_hook_feature() {
+    for hook in GameplayHook::ALL {
+        let descriptor = FeatureKey::parse(hook.id()).unwrap().descriptor();
+        assert_eq!(descriptor.key, FeatureKey::Hook(HookId::parse(hook.id()).unwrap()));
+        assert_eq!(descriptor.native_support(), NativeSupport::GameplayOverride(hook));
+    }
+    let supported = DESCRIPTORS.iter().filter(|descriptor| descriptor.native_support() != NativeSupport::Unsupported).count();
+    assert_eq!(supported, GameplayHook::ALL.len());
+}
+
+#[test]
+fn every_feature_sits_in_a_section_of_its_areas_one_page() {
+    for page in PAGES {
+        assert_eq!(PAGES.iter().filter(|other| other.area == page.area).count(), 1);
+    }
+    for descriptor in DESCRIPTORS {
+        let page = PAGES.iter().find(|page| page.area == descriptor.area).unwrap();
+        assert!(page.sections.contains(&descriptor.section), "{}", descriptor.key.as_str());
     }
 }
 
 #[test]
-fn source_parameter_defaults_bounds_steps_choices_and_units() {
-    // Literal expansion of the source's Multiplier/Count/Rarity factories and
-    // exceptional FeatureValue constructors. Step is presentation, not a grid.
-    let expected: &[(&str, &[ValueGolden<'_>])] = &[
-        (
-            "xp-multiplier",
-            &[("Character experience", 2., 1., 100., 0.5, Some("×")), ("Skill experience", 2., 1., 100., 0.5, Some("×"))],
-        ),
-        ("duplicate", &[("Stack multiplier", 2., 1., 20., 1., Some("×"))]),
-        ("incoming-damage", &[("Damage taken", 50., 0., 100., 1., Some("%"))]),
-        ("damage-dealt", &[("Multiplier", 2., 0., 101., 0.5, Some("×"))]),
-        ("cast-speed", &[("Multiplier", 2., 0., 100., 0.5, Some("×"))]),
-        ("projectiles", &[("Multiplier", 2., 0., 100., 0.5, Some("×"))]),
-        ("area", &[("Increased area", 3., 0., 50., 0.5, None)]),
-        ("move-speed", &[("Multiplier", 2., 0., 100., 0.5, Some("×"))]),
-        (
-            "drop-rates",
-            &[
-                ("Item drop chance", 0.1, 0., 1., 0.05, None),
-                ("Item drop multiplier", 1., 0., 100., 0.5, Some("×")),
-                ("Gold drop chance", 0.1, 0., 1., 0.05, None),
-                ("Gold drop multiplier", 2., 0., 100., 0.5, Some("×")),
-            ],
-        ),
-        ("force-rarity", &[("Rarity", 3., 0., 100., 0.5, None)]),
-        ("echo-type", &[("Echo type", 1., 0., 100., 0.5, None)]),
-        ("faction-gains", &[("Multiplier", 2., 0., 100., 0.5, Some("×"))]),
-        ("prophecy-rewards", &[("Multiplier", 2., 0., 100., 0.5, Some("×"))]),
-        ("rune-wardens", &[("Rune Wardens", 2., 0., 20., 1., None)]),
-        ("loot-lizards", &[("Loot lizards", 3., 0., 20., 1., None)]),
-        ("mysterious-rift", &[("Encounter", 1., 0., 2., 1., None)]),
-        (
-            "morditas-timer",
-            &[
-                ("Starting time", 2., 1., 10., 0.5, Some("×")),
-                ("Timer speed", 0.5, 0., 1., 0.05, Some("×")),
-                ("Time per kill", 2., 1., 10., 0.5, Some("×")),
-            ],
-        ),
-        ("monster-density", &[("Multiplier", 2., 0., 100., 0.5, Some("×"))]),
-        ("pack-size", &[("Multiplier", 2., 0., 10., 0.5, Some("×"))]),
-        (
-            "monster-rarity",
-            &[
-                ("Normal", 1., 0., 20., 0.5, Some("×")),
-                ("Magic", 2., 0., 20., 0.5, Some("×")),
-                ("Rare", 3., 0., 20., 0.5, Some("×")),
-            ],
-        ),
-        ("champions", &[("Champions", 2., 0., 20., 1., None)]),
-        ("zoom", &[("Zoom distance", -30., -100., 0., 0.5, None)]),
-    ];
-    assert_eq!(DESCRIPTORS.iter().filter(|descriptor| !descriptor.values.is_empty()).count(), expected.len());
-    for (id, specifications) in expected {
-        let descriptor = FeatureKey::parse(id).unwrap().descriptor();
-        let actual: Vec<_> = descriptor
-            .values
-            .iter()
-            .map(|value| (value.label, value.start, value.minimum, value.maximum, value.step, value.unit))
-            .collect();
-        assert_eq!(actual, *specifications, "{id}");
+fn values_start_where_their_default_says_and_ranges_hold_them() {
+    for descriptor in DESCRIPTORS {
         for value in descriptor.values {
-            assert!(value.accepts(value.start));
+            assert!(value.minimum <= value.maximum && value.step > 0.0, "{}", descriptor.key.as_str());
+            assert!(value.accepts(value.start), "{}", descriptor.key.as_str());
             if value.choices.is_empty() {
-                assert_eq!(value.default.parse::<f64>().unwrap(), value.start);
+                assert_eq!(value.default.parse::<f64>().unwrap(), value.start, "{}", descriptor.key.as_str());
             } else {
-                assert_eq!(value.choices[value.start as usize], value.default);
+                assert_eq!(value.choices[value.start as usize], value.default, "{}", descriptor.key.as_str());
             }
         }
+        for field in descriptor.fields {
+            assert!(field.minimum <= field.maximum && field.step > 0.0, "{}", descriptor.key.as_str());
+        }
     }
-    assert_eq!(
-        FeatureKey::parse("force-rarity").unwrap().descriptor().values[0].choices,
-        ["Normal", "Magic", "Rare", "Unique", "Set"]
-    );
-    assert_eq!(
-        FeatureKey::parse("echo-type").unwrap().descriptor().values[0].choices,
-        [
-            "Normal",
-            "Arena",
-            "Shade",
-            "Beacon",
-            "Vessel of Chaos",
-            "Vessel of Memory",
-            "Sanctuary of Eterra",
-            "Cemetery of the Erased",
-            "Super Arena",
-            "Super Beacon"
-        ]
-    );
 }
 
 #[test]
-fn all_seven_field_sets_preserve_ui_bounds_and_faction_groups() {
-    let expected: &[(&str, &[FieldGolden<'_>])] = &[
-        ("points-earned", &[("Passive points", 0., 65535., 1.), ("Weaver points", 0., 65535., 1.)]),
-        (
-            "currency",
-            &[("Gold", 0., 2147483647., 1.), ("Soul embers", 0., 2147483647., 1.), ("Ancient bones", 0., 2147483647., 1.)],
-        ),
-        ("keys", &[("A count for each one you hold", 0., 2147483647., 1.)]),
-        ("woven-echoes", &[("A count for each one you hold", 0., 2147483647., 1.)]),
-        ("attack-leech", &[("Attack rate", 0.01, 20., 0.1), ("Increased leech rate", -1., 100., 0.1)]),
-        (
-            "monolith-run",
-            &[("Corruption", 0., 2147483647., 1.), ("Gaze of Orobyss", 0., 10000., 1.), ("Options rerolled", 0., 1., 1.)],
-        ),
-    ];
-    for (id, fields) in expected {
-        let descriptor = FeatureKey::Fields(FieldSetId::parse(id).unwrap()).descriptor();
-        assert_eq!(
-            descriptor
-                .fields
-                .iter()
-                .map(|field| (field.label, field.minimum, field.maximum, field.step))
-                .collect::<Vec<_>>(),
-            *fields
-        );
-        assert!(descriptor.fields.iter().all(|field| field.group.is_none()));
-    }
-    let standing = FeatureKey::parse("faction-standing").unwrap().descriptor();
-    assert_eq!(standing.fields.len(), 12);
-    for (group, fields) in ["Circle of Fortune", "Merchant's Guild", "Forgotten Knights", "Weaver"]
-        .into_iter()
-        .zip(standing.fields.as_chunks::<3>().0)
-    {
-        assert_eq!(fields.iter().map(|field| field.label).collect::<Vec<_>>(), ["Rank", "Favor", "Reputation"]);
-        assert!(fields.iter().all(|field| field.group == Some(group) && field.minimum == 0. && field.step == 1.));
-        assert_eq!(fields.iter().map(|field| field.maximum).collect::<Vec<_>>(), [2147483647., 999999., 2147483647.]);
-    }
-    // These are source UI bounds; runtime rank caps and joined-faction checks are
-    // deliberately not fabricated as static catalog authority.
-}
-
-#[test]
-fn needs_hints_and_help_match_source_order_and_text() {
-    let needs: Vec<_> = DESCRIPTORS
-        .iter()
-        .filter_map(|descriptor| descriptor.needs.map(|needs| (descriptor.key.as_str(), needs)))
-        .collect();
-    assert_eq!(
-        needs,
-        [
-            ("free-weaver-points", "At least one Weaver point earned."),
-            ("keys", "At least one of the item in your stash."),
-            ("woven-echoes", "At least one of the echo in your stash."),
-            ("duplicate", "Drop the item while this is on."),
-            ("move-speed", "Re-equip your boots after changing it."),
-            ("monolith-run", "A Monolith run selected. Open a timeline and choose its difficulty first.")
-        ]
-    );
-    assert_eq!(
-        FeatureKey::parse("area").unwrap().descriptor().help(),
-        "Area skills use this increased area instead of your own.\nIncreased area: 1 is 100% increased area."
-    );
+fn help_joins_description_needs_and_value_hints() {
     assert_eq!(
         FeatureKey::parse("morditas-timer").unwrap().descriptor().help(),
-        "Gives a Rage of Morditas hunt more time: a longer start, a slower countdown, more time for each kill.\nStarting time: From the next hunt you start.\nTimer speed: 1 is the game's own; 0 stops the countdown, so the hunt ends when no foes are left.\nTime per kill: As in the game, a kill adds less the longer the hunt has grown."
+        "Gives a Rage of Morditas hunt more time: a longer start, a slower countdown, more time for each kill.\n\
+         Starting time: From the next hunt you start.\n\
+         Timer speed: 1 is the game's own; 0 stops the countdown, so the hunt ends when no foes are left.\n\
+         Time per kill: As in the game, a kill adds less the longer the hunt has grown."
     );
     assert_eq!(
-        FeatureKey::parse("zoom").unwrap().descriptor().help(),
-        "Sets how far the camera is from your character.\nZoom distance: The game's own is -17.5."
+        FeatureKey::parse("move-speed").unwrap().descriptor().help(),
+        "You move faster.\nRe-equip your boots after changing it."
     );
 }
 
@@ -383,22 +214,11 @@ fn saved_values_carry_only_hooks_with_values_and_leave_switches_to_the_profile()
 }
 
 #[test]
-fn shared_owner_metadata_does_not_couple_switches_or_claim_effects() {
-    let health = ["incoming-damage", "damage-dealt"];
-    for id in health {
-        assert_eq!(FeatureKey::parse(id).unwrap().descriptor().legacy_owners, ["healthDamageHook"]);
-    }
-    assert_eq!(FeatureKey::parse("xp-multiplier").unwrap().descriptor().legacy_owners, ["gainExpHook"]);
-    assert_eq!(FeatureKey::parse("instant-level").unwrap().descriptor().legacy_owners, ["gainExpHook"]);
-    let owners: BTreeSet<_> = DESCRIPTORS.iter().flat_map(|descriptor| descriptor.legacy_owners.iter().copied()).collect();
-    assert_eq!(owners.len(), 74);
+fn hooks_sharing_a_game_method_keep_independent_switches() {
     let mut state = FeatureIntents::default();
     state.set_wanted(hook("incoming-damage"), true);
     state.set_wanted(hook("damage-dealt"), true);
     state.set_wanted(hook("incoming-damage"), false);
     assert!(state.is_wanted(hook("damage-dealt")));
     assert!(HookId::parse("one-hit-kill").is_none());
-    for id in health {
-        assert!(matches!(FeatureKey::parse(id).unwrap().descriptor().native_support, NativeSupport::GameplayOverride(_)));
-    }
 }

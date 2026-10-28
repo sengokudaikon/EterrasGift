@@ -58,7 +58,7 @@ fn pages() -> Vec<Step> {
 fn ready(fixture: &Fixture, wire: &FakeTransport, log: &FakeLog) -> Session<FakeTransport> {
     let mut session = fixture.session(wire, log, GatePolicy::Release);
     session.enable();
-    run(session.connect(now())).unwrap();
+    run(session.connect()).unwrap();
     session
 }
 #[test]
@@ -70,7 +70,7 @@ fn complete_sampled_mapping_uses_exact_display_and_full_conditional_queries() {
     let wire = FakeTransport::new(fixture.target.clone(), steps);
     let mut session = ready(&fixture, &wire, &FakeLog::new([offline()]));
     let bytes_read = session.artifact_bytes_read();
-    let table = run(session.resolve_mapping(now(), &observation, &request())).unwrap();
+    let table = run(session.resolve_mapping(&observation, &request())).unwrap();
     assert_eq!(session.artifact_bytes_read(), bytes_read);
     assert_eq!(table.samples().len(), 256);
     assert_eq!(table.sample(99).value, 1099.);
@@ -106,7 +106,7 @@ fn draft_mapping_changes_only_detached_query_and_retains_original_observation() 
     steps.extend(pages());
     let wire = FakeTransport::new(fixture.target.clone(), steps);
     let mut session = ready(&fixture, &wire, &FakeLog::new([offline()]));
-    let table = run(session.resolve_mapping(now(), &observation, &request)).unwrap();
+    let table = run(session.resolve_mapping(&observation, &request)).unwrap();
     table.recheck(&observation, &request).unwrap();
     for request in &wire.requests()[2..] {
         assert!(
@@ -140,14 +140,14 @@ fn mapping_display_context_and_optional_helper_failures_stay_local() {
         steps.push(done(forge::encode(Some(observation.snapshot())).unwrap()));
         let wire = FakeTransport::new(fixture.target.clone(), steps);
         let mut session = ready(&fixture, &wire, &FakeLog::new([offline()]));
-        let failure = run(session.resolve_mapping(now(), &observation, &request()));
+        let failure = run(session.resolve_mapping(&observation, &request()));
         if matches!(fault, 1..=4 | 6) {
             assert!(matches!(failure, Err(SessionError::MappingRetryable(_))), "{fault}");
         } else {
             assert!(matches!(failure, Err(SessionError::Mapping(_))), "{fault}");
         }
         assert_eq!(session.state(), SessionState::Ready);
-        assert_eq!(run(session.read_forge(now())).unwrap().as_ref(), Some(observation.snapshot()));
+        assert_eq!(run(session.read_forge()).unwrap().as_ref(), Some(observation.snapshot()));
     }
 }
 #[test]
@@ -186,10 +186,10 @@ fn mapping_offline_transport_and_malformed_wire_failures_revoke_without_replay()
         );
         let mut session = ready(&fixture, &wire, &log);
         let observation = expected(&fixture);
-        assert!(run(session.resolve_mapping(now(), &observation, &request())).is_err());
+        assert!(run(session.resolve_mapping(&observation, &request())).is_err());
         assert_ne!(session.state(), SessionState::Ready);
         assert!(session.runtime_status().is_none());
-        assert!(run(session.resolve_mapping(now(), &observation, &request())).is_err());
+        assert!(run(session.resolve_mapping(&observation, &request())).is_err());
         assert_eq!(wire.requests().len(), 4);
     }
 }
@@ -222,15 +222,15 @@ fn canceled_mapping_never_replays_and_artifact_change_between_pages_blocks() {
         let observation = expected(&fixture);
         let request = request();
         if cancel {
-            let mut operation = Box::pin(session.resolve_mapping(now(), &observation, &request));
+            let mut operation = Box::pin(session.resolve_mapping(&observation, &request));
             assert!(operation.as_mut().poll(&mut Context::from_waker(Waker::noop())).is_pending());
             drop(operation);
             assert_eq!(session.state(), SessionState::Connecting);
         } else {
-            assert!(matches!(run(session.resolve_mapping(now(), &observation, &request)), Err(SessionError::Identity(_))));
+            assert!(matches!(run(session.resolve_mapping(&observation, &request)), Err(SessionError::Identity(_))));
             assert_eq!(session.state(), SessionState::Disconnected);
         }
-        assert!(run(session.resolve_mapping(now(), &observation, &request)).is_err());
+        assert!(run(session.resolve_mapping(&observation, &request)).is_err());
         assert_eq!(wire.requests().len(), 4);
     }
 }
@@ -266,14 +266,14 @@ fn obsolete_mapping_stops_between_pages_and_keeps_the_drained_session_ready() {
     );
     let mut session = ready(&fixture, &wire, &FakeLog::new([offline()]));
     let mut observer = Stop(canceled);
-    let result = run(session.resolve_mapping_observed(now(), &expected(&fixture), &request(), &mut observer));
+    let result = run(session.resolve_mapping_observed(&expected(&fixture), &request(), &mut observer));
     assert!(matches!(result, Err(SessionError::Busy)));
     assert_eq!(session.state(), SessionState::Ready);
     assert_eq!(wire.requests().len(), 4, "the next fifteen pages were not submitted");
     assert!(session.last_write().is_none());
-    assert!(run(session.read_forge(now())).unwrap().is_some());
+    assert!(run(session.read_forge()).unwrap().is_some());
     let count = wire.requests().len();
-    assert!(run(session.resolve_mapping_observed(now(), &expected(&fixture), &request(), &mut observer)).is_err());
+    assert!(run(session.resolve_mapping_observed(&expected(&fixture), &request(), &mut observer)).is_err());
     assert_eq!(wire.requests().len(), count, "already-canceled reads do no I/O");
 }
 
@@ -308,7 +308,7 @@ fn a_stop_at_each_check_around_the_first_page_keeps_the_session_and_its_files_fo
         let wire = FakeTransport::new(fixture.target.clone(), steps);
         let mut session = ready(&fixture, &wire, &FakeLog::new([offline()]));
         let mut observer = StopAt { calls: 0, stop_at };
-        let result = run(session.resolve_mapping_observed(now(), &expected(&fixture), &request(), &mut observer));
+        let result = run(session.resolve_mapping_observed(&expected(&fixture), &request(), &mut observer));
         assert!(matches!(result, Err(SessionError::Busy)), "stop at {stop_at}: {result:?}");
         assert_eq!(session.state(), SessionState::Ready);
         assert!(session.runtime_status().is_some());
@@ -332,7 +332,7 @@ fn an_observer_stop_does_not_turn_a_runtime_refusal_into_a_cancellation() {
     // It would stop once the reply is in: the refusal must still be reported as one.
     let mut observer = StopAt { calls: 0, stop_at: 4 };
     assert!(matches!(
-        run(session.resolve_mapping_observed(now(), &expected(&fixture), &request(), &mut observer)),
+        run(session.resolve_mapping_observed(&expected(&fixture), &request(), &mut observer)),
         Err(SessionError::Helper {
             code: ResponseCode::OfflineRequired,
             ..

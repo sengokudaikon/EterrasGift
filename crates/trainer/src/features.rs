@@ -1,15 +1,12 @@
-//! Immutable original-app feature descriptions and local intent, with no game access.
-//!
-//! The source's `Ported` flag describes the C# app only; native support is explicit
-//! per descriptor. Owner symbols are source dependencies,
-//! not addresses, ABI declarations, or permission to install a hook.
+//! Immutable feature descriptions and local intent, with no game access. Native support follows from a hook's
+//! identity (`eg_trainer_wire::hooks::GameplayHook`); a descriptor grants no permission to install a hook.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::error::Error;
 use std::fmt;
 
 mod catalog;
-pub use catalog::{DESCRIPTORS, PAGES, SOURCE_COMMIT, SOURCE_FILES};
+pub use catalog::{DESCRIPTORS, PAGES};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum TrainerArea {
@@ -102,7 +99,7 @@ pub enum NativeSupport {
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct FeatureValue {
     pub label: &'static str,
-    /// Original display default, including the selected choice's label.
+    /// Display default, including the selected choice's label.
     pub default: &'static str,
     /// Numeric default, or the selected choice's zero-based index.
     pub start: f64,
@@ -116,7 +113,8 @@ pub struct FeatureValue {
 }
 
 impl FeatureValue {
-    /// Original `FeatureValueViewModel.Fit` saved-value compatibility rules.
+    /// A saved value as this value takes it now: within its range, or a choice it still lists, else its start. The
+    /// catalog may have changed since the value was saved.
     pub fn fit_saved(&self, value: f64) -> f64 {
         if self.choices.is_empty() {
             if value.is_finite() { value.clamp(self.minimum, self.maximum) } else { self.start }
@@ -157,14 +155,21 @@ pub struct FeatureDescriptor {
     pub values: &'static [FeatureValue],
     pub fields: &'static [FeatureField],
     pub needs: Option<&'static str>,
-    pub fills_section: bool,
-    pub native_support: NativeSupport,
-    /// Original C++ owners, possibly shared by multiple features. Metadata only.
-    pub legacy_owners: &'static [&'static str],
 }
 
 impl FeatureDescriptor {
-    /// Matches the original help text's description, Needs and value hints order.
+    /// The item editor takes its whole section.
+    pub const fn fills_section(&self) -> bool {
+        matches!(self.key, FeatureKey::Forge)
+    }
+    /// The game hook that runs this feature, if this version has one.
+    pub fn native_support(&self) -> NativeSupport {
+        match self.key {
+            FeatureKey::Hook(id) => eg_trainer_wire::hooks::GameplayHook::from_id(id.as_str()).map_or(NativeSupport::Unsupported, NativeSupport::GameplayOverride),
+            _ => NativeSupport::Unsupported,
+        }
+    }
+    /// What its help says, a line each: what it does, what the game has to be showing for it, and what its values mean.
     pub fn help(&self) -> String {
         let mut text = self.description.to_owned();
         if let Some(needs) = self.needs {
@@ -268,8 +273,7 @@ impl FeatureIntents {
         if on { self.wanted.insert(id) } else { self.wanted.remove(&id) }
     }
 
-    /// Strict live validation deliberately strengthens the original weak session
-    /// setter. Invalid input is rejected atomically; UI clamping is a separate concern.
+    /// Live edits are validated strictly: invalid input is rejected atomically. UI clamping is a separate concern.
     pub fn set_values(&mut self, id: HookId, values: &[f64]) -> Result<bool, FeatureError> {
         let descriptor = FeatureKey::Hook(id).descriptor();
         if values.len() != descriptor.values.len() {
@@ -297,9 +301,8 @@ impl FeatureIntents {
         Ok(changed || wanted_changed)
     }
 
-    /// Unknown IDs, non-value features and changed arities are dropped, as in the
-    /// original HookValueMemory. Duplicate IDs (even unknown ones) reject the whole
-    /// input. Wanted switches are independent and stay intact.
+    /// Unknown IDs, non-value features and changed arities are dropped: they belong to a catalog this version no longer
+    /// has. Duplicate IDs (even unknown ones) reject the whole input. Wanted switches are independent and stay intact.
     pub fn restore_values(&mut self, saved: impl IntoIterator<Item = SavedValues>) -> Result<bool, FeatureError> {
         let mut seen = BTreeSet::new();
         let mut values = self.values.clone();

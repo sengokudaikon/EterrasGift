@@ -96,7 +96,7 @@ impl BackendConnection for OwnedConnection {
     fn target(&self) -> &ProcessIdentity {
         &self.0.target
     }
-    async fn refresh(&mut self, _: jiff::Timestamp) -> Result<RuntimeStatus, BackendError> {
+    async fn refresh(&mut self) -> Result<RuntimeStatus, BackendError> {
         if self.0.loading.load(Ordering::SeqCst) {
             return Err(BackendError::waiting(backend::ErrorKind::CharacterLoading, "changing area"));
         }
@@ -106,7 +106,7 @@ impl BackendConnection for OwnedConnection {
             features_on: 0,
         })
     }
-    async fn read_locale(&mut self, _: jiff::Timestamp) -> Result<eg_trainer::catalog::GameLocale, BackendError> {
+    async fn read_locale(&mut self) -> Result<eg_trainer::catalog::GameLocale, BackendError> {
         Ok(GameLocale {
             language: "en".into(),
             game_version: "owned-ui".into(),
@@ -115,11 +115,11 @@ impl BackendConnection for OwnedConnection {
     fn build_hashes(&self) -> (String, String) {
         ("a".repeat(64), "b".repeat(64))
     }
-    async fn read_forge(&mut self, _: jiff::Timestamp) -> Result<Option<ForgeSnapshot>, BackendError> {
+    async fn read_forge(&mut self) -> Result<Option<ForgeSnapshot>, BackendError> {
         self.0.reads.fetch_add(1, Ordering::SeqCst);
         Ok(self.0.item.lock().unwrap().clone())
     }
-    async fn describe_implicits(&mut self, _: jiff::Timestamp, expected: &ForgeSnapshot) -> Result<Option<Vec<backend::ModifierSnapshot>>, BackendError> {
+    async fn describe_implicits(&mut self, expected: &ForgeSnapshot) -> Result<Option<Vec<backend::ModifierSnapshot>>, BackendError> {
         // The helper refuses to describe an item that changed since it was read (StaleItem), which the session reads as
         // no text: the test may change the item while a write's readback is described.
         if self.0.item.lock().unwrap().as_ref() != Some(expected) {
@@ -144,7 +144,7 @@ impl BackendConnection for OwnedConnection {
             ]
         }))
     }
-    async fn describe_unique(&mut self, _: jiff::Timestamp, expected: &ForgeSnapshot) -> Result<Option<Vec<backend::ModifierSnapshot>>, BackendError> {
+    async fn describe_unique(&mut self, expected: &ForgeSnapshot) -> Result<Option<Vec<backend::ModifierSnapshot>>, BackendError> {
         assert_eq!(self.0.item.lock().unwrap().as_ref(), Some(expected));
         self.0.unique_calls.fetch_add(1, Ordering::SeqCst);
         let mode = self.0.unique_mode.load(Ordering::SeqCst);
@@ -187,7 +187,6 @@ impl BackendConnection for OwnedConnection {
     }
     async fn resolve_mapping(
         &mut self,
-        _: jiff::Timestamp,
         expected: &eg_trainer::edits::ExpectedObservation,
         request: &eg_trainer::mapping::MappingRequest,
     ) -> Result<eg_trainer::mapping::ValueTable, BackendError> {
@@ -268,12 +267,7 @@ impl BackendConnection for OwnedConnection {
     fn supports_level_requirement(&self) -> bool {
         true
     }
-    async fn edit_forge(
-        &mut self,
-        _: jiff::Timestamp,
-        plan: &eg_trainer::writes::ForgePlan,
-        _: &mut dyn eg_trainer::writes::WriteControl,
-    ) -> Result<eg_trainer::writes::WriteStatus, BackendError> {
+    async fn edit_forge(&mut self, plan: &eg_trainer::writes::ForgePlan, _: &mut dyn eg_trainer::writes::WriteControl) -> Result<eg_trainer::writes::WriteStatus, BackendError> {
         use eg_trainer::writes::{ResponseCode, WriteOutcome};
         let call = self.0.writes.fetch_add(1, Ordering::SeqCst) + 1;
         self.0.expected.lock().unwrap().push(plan.before().snapshot().clone());
@@ -312,7 +306,6 @@ impl BackendConnection for OwnedConnection {
     }
     async fn set_hook(
         &mut self,
-        _: jiff::Timestamp,
         request: &backend::HookRequest,
         control: &mut dyn eg_trainer::writes::WriteControl,
     ) -> Result<eg_trainer::writes::WriteOutcome<bool>, BackendError> {
@@ -335,7 +328,7 @@ impl BackendConnection for OwnedConnection {
     fn supports_read_attack_leech(&self) -> bool {
         true
     }
-    async fn read_attack_leech(&mut self, _: jiff::Timestamp) -> Result<backend::AttackLeechRead, BackendError> {
+    async fn read_attack_leech(&mut self) -> Result<backend::AttackLeechRead, BackendError> {
         Ok(backend::AttackLeechRead::Available(self.0.rates()))
     }
     fn supports_attack_leech_rate(&self) -> bool {
@@ -343,7 +336,6 @@ impl BackendConnection for OwnedConnection {
     }
     async fn set_attack_leech_rate(
         &mut self,
-        _: jiff::Timestamp,
         plan: &eg_trainer::field_writes::AttackLeechPlan,
         _: &mut dyn eg_trainer::writes::WriteControl,
     ) -> Result<eg_trainer::field_writes::RateWriteStatus, BackendError> {

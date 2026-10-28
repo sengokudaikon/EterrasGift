@@ -4,7 +4,6 @@
 //! there is deliberately no default parser and raw_quantity is never substituted.
 //! The builder requires all 16 pages and pins full observation, draft, opaque
 //! context, language and unit. Failed pushes poison it; no partial table escapes.
-//! Sources: original RollMapping.cs and GameDataService.ResolveAsync at e1c1ed4.
 
 mod display;
 use crate::edits::{ExpectedObservation, ItemEdit, MAX_WRITABLE_AFFIX_ID, RollEdit, RollTarget};

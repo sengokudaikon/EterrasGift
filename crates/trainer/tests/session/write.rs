@@ -43,7 +43,7 @@ fn plan_with_version(fixture: &Fixture, extraction_version: u32) -> ForgePlan {
 fn ready(fixture: &Fixture, wire: &FakeTransport, log: &FakeLog) -> Session<FakeTransport> {
     let mut session = fixture.session(wire, log, GatePolicy::Release);
     session.enable();
-    run(session.connect(now())).unwrap();
+    run(session.connect()).unwrap();
     session
 }
 #[test]
@@ -52,7 +52,7 @@ fn obsolete_catalog_write_is_refused_before_submission_without_recording_a_write
     let plan = plan_with_version(&f, EXTRACTION_VERSION + 1);
     let wire = FakeTransport::new(f.target.clone(), [f.discover(), status(false, 0x1234, 0)]);
     let mut s = ready(&f, &wire, &FakeLog::new([offline()]));
-    assert!(matches!(run(s.write(now(), &plan.into())), Err(SessionError::Identity(_))));
+    assert!(matches!(run(s.write(&plan.into())), Err(SessionError::Identity(_))));
     assert_eq!(wire.requests().len(), 2);
     assert!(s.last_write().is_none());
     assert_eq!(s.state(), SessionState::Ready);
@@ -73,7 +73,7 @@ fn explicit_write_requires_exact_readback_and_retains_confirmed_result_after_dis
     );
     let mut session = ready(&f, &wire, &FakeLog::new([offline()]));
     assert_eq!(
-        run(session.write(now(), &plan.clone().into())).unwrap(),
+        run(session.write(&plan.clone().into())).unwrap(),
         WriteOutcome::Confirmed(WriteObservation::Forge(Box::new(plan.projected().clone())))
     );
     assert_eq!(session.state(), SessionState::Ready);
@@ -104,7 +104,7 @@ fn readback_of_a_replaced_forge_item_is_unknown_even_with_equal_values() {
             ],
         );
         let mut session = ready(&f, &wire, &FakeLog::new([offline()]));
-        assert!(matches!(run(session.write(now(), &plan.into())).unwrap(), WriteOutcome::Uncertain { .. }));
+        assert!(matches!(run(session.write(&plan.into())).unwrap(), WriteOutcome::Uncertain { .. }));
         assert_eq!(session.state(), SessionState::Disconnected);
         assert_eq!(wire.requests().len(), 4);
     }
@@ -140,9 +140,9 @@ fn malformed_replaced_or_failed_write_is_uncertain_and_never_replayed() {
         };
         let wire = FakeTransport::new(f.target.clone(), [f.discover(), status(false, 0x1234, 0), Step::Reply(Ok(response))]);
         let mut session = ready(&f, &wire, &FakeLog::new([offline()]));
-        assert!(matches!(run(session.edit_forge(now(), &plan)).unwrap(), WriteStatus::Uncertain { .. }));
+        assert!(matches!(run(session.edit_forge(&plan)).unwrap(), WriteStatus::Uncertain { .. }));
         assert_eq!(session.state(), SessionState::Disconnected);
-        assert!(run(session.edit_forge(now(), &plan)).is_err());
+        assert!(run(session.edit_forge(&plan)).is_err());
         assert_eq!(wire.requests().len(), 3);
     }
 }
@@ -162,7 +162,7 @@ fn differing_native_ack_still_requires_independent_observation() {
         ],
     );
     let mut session = ready(&f, &wire, &FakeLog::new([offline()]));
-    assert_eq!(run(session.edit_forge(now(), &plan)).unwrap(), WriteStatus::NotKept(unchanged));
+    assert_eq!(run(session.edit_forge(&plan)).unwrap(), WriteStatus::NotKept(unchanged));
     assert_eq!(session.state(), SessionState::Ready);
     assert_eq!(wire.requests().len(), 4);
     assert!(matches!(wire.requests()[3], Request::ReadForge { .. }));
@@ -191,15 +191,15 @@ fn delivery_and_trusted_prestore_refusals_preserve_certainty_without_retry() {
         };
         let wire = FakeTransport::new(f.target.clone(), [f.discover(), status(false, 0x1234, 0), step]);
         let mut session = ready(&f, &wire, &FakeLog::new([offline()]));
-        let result = run(session.edit_forge(now(), &plan)).unwrap();
+        let result = run(session.edit_forge(&plan)).unwrap();
         assert_eq!(matches!(result, WriteStatus::Uncertain { .. }), fault == 1);
         if (2..=4).contains(&fault) {
             assert_eq!(session.state(), SessionState::Ready);
             wire.push(done(forge::encode(Some(plan.before().snapshot())).unwrap()));
-            assert!(run(session.read_forge(now())).unwrap().is_some());
+            assert!(run(session.read_forge()).unwrap().is_some());
             assert_eq!(wire.requests().len(), 4);
         } else {
-            assert!(run(session.edit_forge(now(), &plan)).is_err());
+            assert!(run(session.edit_forge(&plan)).is_err());
             assert_eq!(wire.requests().len(), 3);
         }
         assert_eq!(wire.requests().iter().filter(|r| matches!(r, Request::EditForge(_))).count(), 1);
@@ -229,7 +229,7 @@ fn successful_reply_after_artifact_loss_is_uncertain_without_more_process_io() {
             ],
         );
         let mut session = ready(&f, &wire, &log);
-        assert!(matches!(run(session.edit_forge(now(), &plan)).unwrap(), WriteStatus::Uncertain { .. }));
+        assert!(matches!(run(session.edit_forge(&plan)).unwrap(), WriteStatus::Uncertain { .. }));
         assert_ne!(session.state(), SessionState::Ready);
         assert_eq!(wire.requests().len(), 3);
     }
@@ -244,7 +244,7 @@ fn preflight_refuses_wrong_runtime_manager_or_artifacts_without_write_submission
         if fault == 2 {
             fs::write(&f.metadata, b"changed before write").unwrap();
         }
-        assert!(matches!(run(session.edit_forge(now(), &plan)), Err(SessionError::Identity(_))));
+        assert!(matches!(run(session.edit_forge(&plan)), Err(SessionError::Identity(_))));
         assert_eq!(wire.requests().len(), 2);
         assert!(session.last_write().is_none());
     }
@@ -256,12 +256,12 @@ fn abandoned_write_remains_pending_and_busy_until_cleanup_records_uncertainty() 
     let plan = plan(&f);
     let wire = FakeTransport::new(f.target.clone(), [f.discover(), status(false, 0x1234, 0), Step::Pending, clear()]);
     let mut session = ready(&f, &wire, &FakeLog::new([offline()]));
-    let mut pending = Box::pin(session.edit_forge(now(), &plan));
+    let mut pending = Box::pin(session.edit_forge(&plan));
     assert!(pending.as_mut().poll(&mut Context::from_waker(Waker::noop())).is_pending());
     drop(pending);
     assert_eq!(session.last_write().unwrap().status, WriteStatus::Pending);
-    assert!(matches!(run(session.edit_forge(now(), &plan)), Err(SessionError::Busy)));
-    assert!(matches!(run(session.read_forge(now())), Err(SessionError::Busy)));
+    assert!(matches!(run(session.edit_forge(&plan)), Err(SessionError::Busy)));
+    assert!(matches!(run(session.read_forge()), Err(SessionError::Busy)));
     assert_eq!(wire.requests().len(), 3);
     run(session.disconnect());
     assert!(matches!(session.last_write().unwrap().status, WriteStatus::Uncertain { .. }));
@@ -279,7 +279,7 @@ fn cleanup_control_can_stop_validated_write_before_transport_is_entered() {
     let plan = plan(&f);
     let wire = FakeTransport::new(f.target.clone(), [f.discover(), status(false, 0x1234, 0)]);
     let mut session = ready(&f, &wire, &FakeLog::new([offline()]));
-    assert!(matches!(run(session.edit_forge_controlled(now(), &plan, &mut Stop)), Err(SessionError::Busy)));
+    assert!(matches!(run(session.edit_forge_controlled(&plan, &mut Stop)), Err(SessionError::Busy)));
     assert_eq!(session.state(), SessionState::Ready);
     assert!(session.last_write().is_none());
     assert_eq!(wire.requests().len(), 2);
@@ -328,13 +328,13 @@ fn separate_readback_retains_known_drift_but_malformed_missing_or_failed_reads_a
             [f.discover(), status(false, 0x1234, 0), done(forge::encode(Some(plan.projected())).unwrap()), last],
         );
         let mut session = ready(&f, &wire, &FakeLog::new([offline()]));
-        let result = run(session.edit_forge(now(), &plan)).unwrap();
+        let result = run(session.edit_forge(&plan)).unwrap();
         if fault == 2 {
             assert_eq!(result, WriteStatus::NotKept(changed));
             assert_eq!(session.state(), SessionState::Ready);
         } else {
             assert!(matches!(result, WriteStatus::Uncertain { .. }));
-            assert!(run(session.edit_forge(now(), &plan)).is_err());
+            assert!(run(session.edit_forge(&plan)).is_err());
         }
         assert!(matches!(wire.requests()[3], Request::ReadForge { .. }));
         assert_eq!(wire.requests().len(), 4);
@@ -366,7 +366,7 @@ fn separate_readback_cannot_confirm_after_either_artifact_changes() {
             ],
         );
         let mut session = ready(&f, &wire, &log);
-        assert!(matches!(run(session.edit_forge(now(), &plan)).unwrap(), WriteStatus::Uncertain { .. }));
+        assert!(matches!(run(session.edit_forge(&plan)).unwrap(), WriteStatus::Uncertain { .. }));
         assert_ne!(session.state(), SessionState::Ready);
         assert_eq!(wire.requests().len(), 4);
     }
@@ -380,12 +380,12 @@ fn native_ack_does_not_clear_pending_while_the_separate_read_is_in_flight() {
         [f.discover(), status(false, 0x1234, 0), done(forge::encode(Some(plan.projected())).unwrap()), Step::Pending],
     );
     let mut session = ready(&f, &wire, &FakeLog::new([offline()]));
-    let mut pending = Box::pin(session.edit_forge(now(), &plan));
+    let mut pending = Box::pin(session.edit_forge(&plan));
     assert!(pending.as_mut().poll(&mut Context::from_waker(Waker::noop())).is_pending());
     drop(pending);
     assert_eq!(session.last_write().unwrap().status, WriteStatus::Pending);
     assert_eq!(wire.requests().len(), 4);
-    assert!(matches!(run(session.edit_forge(now(), &plan)), Err(SessionError::Busy)));
+    assert!(matches!(run(session.edit_forge(&plan)), Err(SessionError::Busy)));
     wire.push(clear());
     run(session.disconnect());
     assert!(matches!(session.last_write().unwrap().status, WriteStatus::Uncertain { .. }));
@@ -407,7 +407,7 @@ fn cleanup_after_native_ack_stops_before_separate_read_without_claiming_no_store
     );
     let mut session = ready(&f, &wire, &FakeLog::new([offline()]));
     assert!(matches!(
-        run(session.edit_forge_controlled(now(), &plan, &mut StopAfterFirst(true))).unwrap(),
+        run(session.edit_forge_controlled(&plan, &mut StopAfterFirst(true))).unwrap(),
         WriteStatus::Uncertain { .. }
     ));
     assert_eq!(wire.requests().len(), 3);

@@ -81,11 +81,11 @@ fn unique_text_and_preview_are_full_observation_bound_without_write_history() {
     );
     let mut s = f.session(&wire, &FakeLog::new([offline()]), GatePolicy::Release);
     s.enable();
-    run(s.connect(now())).unwrap();
-    let actual = run(s.describe_unique(now(), before.snapshot())).unwrap().unwrap();
+    run(s.connect()).unwrap();
+    let actual = run(s.describe_unique(before.snapshot())).unwrap().unwrap();
     assert_eq!(actual, lines());
     let evidence = BoundTooltip::new(&before, TooltipKind::Unique, actual).unwrap();
-    let result = run(s.preview_unique(now(), &before, &draft(), &evidence)).unwrap();
+    let result = run(s.preview_unique(&before, &draft(), &evidence)).unwrap();
     assert_eq!(result.preview().modifiers, preview);
     assert!(s.last_write().is_none());
     assert_eq!(s.state(), SessionState::Ready);
@@ -115,8 +115,8 @@ fn optional_unique_failures_keep_ready_but_bad_frames_and_global_failures_revoke
         );
         let mut s = f.session(&wire, &FakeLog::new([offline()]), GatePolicy::Release);
         s.enable();
-        run(s.connect(now())).unwrap();
-        let result = run(s.describe_unique(now(), &item()));
+        run(s.connect()).unwrap();
+        let result = run(s.describe_unique(&item()));
         if code == ResponseCode::OfflineRequired {
             assert!(result.is_err());
             assert_ne!(s.state(), SessionState::Ready);
@@ -137,8 +137,8 @@ fn optional_unique_failures_keep_ready_but_bad_frames_and_global_failures_revoke
         let wire = FakeTransport::new(f.target.clone(), [f.discover(), status(false, 0x1234, 0), done(bad)]);
         let mut s = f.session(&wire, &FakeLog::new([offline()]), GatePolicy::Release);
         s.enable();
-        run(s.connect(now())).unwrap();
-        assert!(run(s.describe_unique(now(), &item())).is_err());
+        run(s.connect()).unwrap();
+        assert!(run(s.describe_unique(&item())).is_err());
         assert_eq!(s.state(), SessionState::Disconnected);
     }
 }
@@ -160,12 +160,12 @@ fn preview_refusal_is_optional_and_invalid_drafts_never_reach_transport() {
     );
     let mut s = f.session(&wire, &FakeLog::new([offline()]), GatePolicy::Release);
     s.enable();
-    run(s.connect(now())).unwrap();
+    run(s.connect()).unwrap();
     let mut bad = draft();
     bad.changes[0].index = 7;
-    assert!(run(s.preview_unique(now(), &before, &bad, &evidence)).is_err());
+    assert!(run(s.preview_unique(&before, &bad, &evidence)).is_err());
     assert_eq!(wire.requests().len(), 2);
-    assert!(matches!(run(s.preview_unique(now(), &before, &draft(), &evidence)), Err(SessionError::Mapping(_))));
+    assert!(matches!(run(s.preview_unique(&before, &draft(), &evidence)), Err(SessionError::Mapping(_))));
     assert_eq!(s.state(), SessionState::Ready);
     assert_eq!(wire.requests().len(), 3);
 }
@@ -181,8 +181,8 @@ fn obsolete_catalog_previews_are_refused_before_transport_without_releasing_a_he
     let wire = FakeTransport::new(f.target.clone(), [f.discover(), status(false, 0x1234, 0)]);
     let mut s = f.session(&wire, &FakeLog::new([offline()]), GatePolicy::Release);
     s.enable();
-    run(s.connect(now())).unwrap();
-    assert!(matches!(run(s.preview_unique(now(), &before, &draft(), &evidence)), Err(SessionError::Mapping(_))));
+    run(s.connect()).unwrap();
+    assert!(matches!(run(s.preview_unique(&before, &draft(), &evidence)), Err(SessionError::Mapping(_))));
     assert_eq!(wire.requests().len(), 2);
     assert_eq!(s.state(), SessionState::Ready);
 }

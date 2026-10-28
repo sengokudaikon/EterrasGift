@@ -14,7 +14,6 @@ use eg_trainer_wire::{
     protocol::{Discovery, DispatcherSpec, ProtocolError, Request, ResponseCode, RuntimeStatus},
     transport::{Transport, TransportError},
 };
-use jiff::Timestamp;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SessionState {
@@ -179,13 +178,36 @@ impl<T: Transport> Session<T> {
     fn require_enabled(&self) -> Result<(), SessionError> {
         if self.state == SessionState::Disabled { Err(SessionError::Disabled) } else { Ok(()) }
     }
+    /// A request may start: nothing else is in flight, and the session is enabled and ready.
+    fn admit(&self) -> Result<(), SessionError> {
+        if matches!(self.state, SessionState::Connecting | SessionState::Closing) {
+            return Err(SessionError::Busy);
+        }
+        self.require_enabled()?;
+        if self.state != SessionState::Ready {
+            return Err(SessionError::NotConnected);
+        }
+        Ok(())
+    }
+    /// The dispatcher the attached helper reported.
+    fn dispatcher(&self) -> Result<DispatcherSpec, SessionError> {
+        Ok(self.discovery.as_ref().ok_or(SessionError::NotConnected)?.dispatcher)
+    }
+    /// The manager of the offline character the last status admitted.
+    fn offline_manager(&self) -> Result<u64, SessionError> {
+        Ok(self
+            .status
+            .filter(|status| !status.online && status.manager != 0)
+            .ok_or(SessionError::NotConnected)?
+            .manager)
+    }
     /// Leaves Connecting if this future is dropped: call disconnect before another attachment.
-    pub async fn connect(&mut self, now: Timestamp) -> Result<(), SessionError> {
+    pub async fn connect(&mut self) -> Result<(), SessionError> {
         if matches!(self.state, SessionState::Connecting | SessionState::Closing) {
             return Err(SessionError::Busy);
         }
         if self.state == SessionState::Ready {
-            return self.refresh(now).await;
+            return self.refresh().await;
         }
         self.require_enabled()?;
         self.state = SessionState::Connecting;
@@ -210,7 +232,7 @@ impl<T: Transport> Session<T> {
         self.cleanup = Cleanup::Unconfirmed;
         self.read_status().await
     }
-    pub async fn refresh(&mut self, _now: Timestamp) -> Result<(), SessionError> {
+    pub async fn refresh(&mut self) -> Result<(), SessionError> {
         if matches!(self.state, SessionState::Connecting | SessionState::Closing) {
             return Err(SessionError::Busy);
         }
@@ -230,18 +252,16 @@ impl<T: Transport> Session<T> {
     /// The item address/individual ID are observations scoped to this process identity, never
     /// permission to dereference memory or edit an item. A dropped future leaves Connecting;
     /// explicitly disconnect before another attachment or operation.
-    pub async fn read_forge(&mut self, now: Timestamp) -> Result<Option<ForgeSnapshot>, SessionError> {
-        self.read_owned(now, |dispatcher| Request::ReadForge { dispatcher }, forge::decode).await
+    pub async fn read_forge(&mut self) -> Result<Option<ForgeSnapshot>, SessionError> {
+        self.read_owned(|dispatcher| Request::ReadForge { dispatcher }, forge::decode).await
     }
     /// Optional presentation. A game formatting refusal leaves the session ready;
     /// transport, protocol, process and offline failures still revoke admission.
-    pub async fn describe_implicits(&mut self, now: Timestamp, expected: &ForgeSnapshot) -> Result<Option<Vec<eg_trainer_wire::mapping::ModifierSnapshot>>, SessionError> {
-        let manager = self.status.filter(|s| !s.online && s.manager != 0).ok_or(SessionError::NotConnected)?.manager;
-        let dispatcher = self.discovery.as_ref().ok_or(SessionError::NotConnected)?.dispatcher;
+    pub async fn describe_implicits(&mut self, expected: &ForgeSnapshot) -> Result<Option<Vec<eg_trainer_wire::mapping::ModifierSnapshot>>, SessionError> {
+        let manager = self.offline_manager()?;
+        let dispatcher = self.dispatcher()?;
         let query = eg_trainer_wire::mapping::ForgeDescriptionRequest::new(dispatcher, manager, expected.clone()).map_err(SessionError::Protocol)?;
-        let result = self
-            .read_owned(now, |_| Request::DescribeImplicits(query), eg_trainer_wire::mapping::decode_modifiers)
-            .await;
+        let result = self.read_owned(|_| Request::DescribeImplicits(query), eg_trainer_wire::mapping::decode_modifiers).await;
         match result {
             Ok(modifiers) => {
                 if modifiers.iter().any(|m| {
@@ -255,33 +275,19 @@ impl<T: Transport> Session<T> {
                 }
                 Ok(Some(modifiers))
             }
-            Err(SessionError::Helper {
-                code: ResponseCode::Refused | ResponseCode::Failed | ResponseCode::NotReady | ResponseCode::StaleItem,
-                ..
-            }) if self.state == SessionState::Ready => Ok(None),
+            Err(SessionError::Helper { code, .. }) if code.spares_presentation_session() && self.state == SessionState::Ready => Ok(None),
             Err(error) => Err(error),
         }
     }
     /// Observe the two actor-stat fields. Identity tokens and raw float bits convey no
     /// write authority. Feature-local graph unavailability leaves the admitted session ready;
     /// runtime offline/manager refusal revokes admission even though its typed reason is returned.
-    pub async fn read_attack_leech(&mut self, now: Timestamp) -> Result<AttackLeechRead, SessionError> {
-        if matches!(self.state, SessionState::Connecting | SessionState::Closing) {
-            return Err(SessionError::Busy);
-        }
-        self.require_enabled()?;
-        if self.state != SessionState::Ready {
-            return Err(SessionError::NotConnected);
-        }
-        let expected_manager = self
-            .status
-            .filter(|status| !status.online && status.manager != 0)
-            .ok_or(SessionError::NotConnected)?
-            .manager;
-        let dispatcher = self.discovery.as_ref().ok_or(SessionError::NotConnected)?.dispatcher;
+    pub async fn read_attack_leech(&mut self) -> Result<AttackLeechRead, SessionError> {
+        self.admit()?;
+        let expected_manager = self.offline_manager()?;
+        let dispatcher = self.dispatcher()?;
         let read = match self
             .read_owned_control(
-                now,
                 |dispatcher| Request::ReadAttackLeech { dispatcher, expected_manager },
                 |bytes| {
                     let read = fields::decode(bytes)?;
@@ -314,33 +320,26 @@ impl<T: Transport> Session<T> {
     }
     /// Read only an already-completed runtime locale selection and the game application version.
     /// This does not start localization or wait for its asynchronous initialization.
-    pub async fn read_locale(&mut self, now: Timestamp) -> Result<GameLocale, SessionError> {
-        self.read_owned(now, |dispatcher| Request::ReadLocale { dispatcher }, locale::decode).await
+    pub async fn read_locale(&mut self) -> Result<GameLocale, SessionError> {
+        self.read_owned(|dispatcher| Request::ReadLocale { dispatcher }, locale::decode).await
     }
-    async fn read_owned<R>(&mut self, now: Timestamp, request: impl FnOnce(DispatcherSpec) -> Request, decode: fn(&[u8]) -> Result<R, ProtocolError>) -> Result<R, SessionError> {
-        match self.read_owned_control(now, request, decode, None).await? {
+    async fn read_owned<R>(&mut self, request: impl FnOnce(DispatcherSpec) -> Request, decode: fn(&[u8]) -> Result<R, ProtocolError>) -> Result<R, SessionError> {
+        match self.read_owned_control(request, decode, None).await? {
             OwnedRead::Complete(value) => Ok(value),
             OwnedRead::Stopped => Err(SessionError::Protocol(ProtocolError::InvalidData)),
         }
     }
     async fn read_owned_control<R>(
         &mut self,
-        _now: Timestamp,
         request: impl FnOnce(DispatcherSpec) -> Request,
         decode: impl FnOnce(&[u8]) -> Result<R, ProtocolError>,
         mut observer: Option<&mut dyn ReadObserver>,
     ) -> Result<OwnedRead<R>, SessionError> {
-        if matches!(self.state, SessionState::Connecting | SessionState::Closing) {
-            return Err(SessionError::Busy);
-        }
-        self.require_enabled()?;
-        if self.state != SessionState::Ready {
-            return Err(SessionError::NotConnected);
-        }
+        self.admit()?;
         if observer.as_mut().is_some_and(|observer| observer.control() == ReadControl::Stop) {
             return Ok(OwnedRead::Stopped);
         }
-        let dispatcher = self.discovery.as_ref().ok_or(SessionError::NotConnected)?.dispatcher;
+        let dispatcher = self.dispatcher()?;
         if let Err(error) = self.validate_profile(&dispatcher) {
             self.release_without_io();
             self.state = SessionState::Disconnected;
@@ -377,15 +376,7 @@ impl<T: Transport> Session<T> {
                     self.state = SessionState::Ready;
                     return Err(error);
                 }
-                if optional_description
-                    && matches!(
-                        &error,
-                        SessionError::Helper {
-                            code: ResponseCode::Refused | ResponseCode::Failed | ResponseCode::NotReady | ResponseCode::StaleItem,
-                            ..
-                        }
-                    )
-                {
+                if optional_description && matches!(&error, SessionError::Helper { code, .. } if code.spares_presentation_session()) {
                     self.status = status;
                     self.state = SessionState::Ready;
                     return Err(error);
@@ -403,7 +394,7 @@ impl<T: Transport> Session<T> {
         self.profile.validate_lease(dispatcher, lease)
     }
     async fn read_status(&mut self) -> Result<(), SessionError> {
-        let dispatcher = self.discovery.as_ref().ok_or(SessionError::NotConnected)?.dispatcher;
+        let dispatcher = self.dispatcher()?;
         if let Err(error) = self.validate_profile(&dispatcher) {
             self.release_without_io();
             self.state = SessionState::Disconnected;

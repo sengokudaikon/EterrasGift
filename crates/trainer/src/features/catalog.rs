@@ -1,35 +1,6 @@
-//! Literal port of TrainerCatalog.cs and native feature ownership.
-// Values and descriptions are data only; source Ported:true is not a Rust capability.
+//! The trainer's pages and features: what each row is, says and takes. Data only; whether a connected game can run a
+//! feature is the connection's to say.
 use super::*;
-pub const SOURCE_COMMIT: &str = "e1c1ed4e9e0ab6404574113f2dcf1179b2113629";
-/// Original-repository paths and exact SHA-256 bytes used for this port.
-pub const SOURCE_FILES: &[(&str, &str)] = &[
-    ("native/hooks/character.h", "6c58b7cad5ea4e2042b46a144331f7b68b7630e1f11b9e9f6cbdf110c6c210ad"),
-    ("native/hooks/combat.h", "dda84d927e59f4e38410d0c8524c617823c5bda3c2cf42481451dfcd3f554440"),
-    ("native/hooks/factions.h", "0df51a7d8e6c95ddb5853f92f101cd08d696c7edb2263e589f94e99076ef5958"),
-    ("native/hooks/forge.h", "566c01000b1c4dd642e9c5871abdfba1ae88f7587a10cb6e0af2a2ca12e61ba4"),
-    ("native/hooks/hooks.h", "ce590d799f9a75f6bc5add95aadf54b7d9ba8bd4e862a180430694ca0831a05d"),
-    ("native/hooks/loot.h", "422e0fff924fd76e1e4519a0e8520d0b3b1ae6212630ac652c1a09f99be4fbca"),
-    ("native/hooks/monolith.h", "3a3c67ff33f80a0b605766dcd8a1bbc22e802d97bd22d2d8dcd9c6edbb23d45e"),
-    ("native/hooks/stash.h", "17848a6debec8e614a587c2df473392f03b5a0655784f474b004987e13431488"),
-    ("native/hooks/world.h", "2104c3a69c0dcc7f252d1da4f9099bfdbee77ae845a51d57054d140186d80cf6"),
-    (
-        "src/Trainer/EterrasGift.Trainer.Application/Features/TrainerCatalog.cs",
-        "8cf232cea9f2199672031235c61c170644051382c09aa33442cf550c4b21e2c1",
-    ),
-    (
-        "src/Trainer/EterrasGift.Trainer.Application/Settings/HookValueMemory.cs",
-        "2f8980934963766863a6d39c9d8b6722f4b2a0f1a16757c8a01d800ad1aa849f",
-    ),
-    (
-        "src/Trainer/EterrasGift.Trainer.Presentation/Pages/FeatureValueViewModel.cs",
-        "0e1111ab645be1113e691a7735a009e403e47865cacf8ca5965b3f389bb24507",
-    ),
-    (
-        "src/Trainer/EterrasGift.Trainer.Presentation/Pages/HookSwitchViewModel.cs",
-        "5fee78bd45cb5b322be617009e1038c05860102ea7991059b06b0db7cfe662b6",
-    ),
-];
 pub static PAGES: &[TrainerPage] = &[
     TrainerPage {
         area: TrainerArea::Character,
@@ -89,7 +60,6 @@ pub static PAGES: &[TrainerPage] = &[
     },
 ];
 pub static DESCRIPTORS: &[FeatureDescriptor] = &[
-    // src/Trainer/EterrasGift.Trainer.Application/Features/TrainerCatalog.cs:90
     FeatureDescriptor {
         key: FeatureKey::Hook(HookId("xp-multiplier")),
         area: TrainerArea::Character,
@@ -123,11 +93,7 @@ pub static DESCRIPTORS: &[FeatureDescriptor] = &[
         ],
         fields: &[],
         needs: None,
-        fills_section: false,
-        native_support: NativeSupport::Unsupported,
-        legacy_owners: &["gainExpHook"],
     },
-    // src/Trainer/EterrasGift.Trainer.Application/Features/TrainerCatalog.cs:93
     FeatureDescriptor {
         key: FeatureKey::Hook(HookId("instant-level")),
         area: TrainerArea::Character,
@@ -138,11 +104,7 @@ pub static DESCRIPTORS: &[FeatureDescriptor] = &[
         values: &[],
         fields: &[],
         needs: None,
-        fills_section: false,
-        native_support: NativeSupport::Unsupported,
-        legacy_owners: &["gainExpHook"],
     },
-    // src/Trainer/EterrasGift.Trainer.Application/Features/TrainerCatalog.cs:95
     FeatureDescriptor {
         key: FeatureKey::Hook(HookId("max-skill-level")),
         area: TrainerArea::Character,
@@ -153,11 +115,7 @@ pub static DESCRIPTORS: &[FeatureDescriptor] = &[
         values: &[],
         fields: &[],
         needs: None,
-        fills_section: false,
-        native_support: NativeSupport::Unsupported,
-        legacy_owners: &["skillLevelHook"],
     },
-    // src/Trainer/EterrasGift.Trainer.Application/Features/TrainerCatalog.cs:97
     FeatureDescriptor {
         key: FeatureKey::Fields(FieldSetId("points-earned")),
         area: TrainerArea::Character,
@@ -183,11 +141,7 @@ pub static DESCRIPTORS: &[FeatureDescriptor] = &[
             },
         ],
         needs: None,
-        fills_section: false,
-        native_support: NativeSupport::Unsupported,
-        legacy_owners: &[],
     },
-    // src/Trainer/EterrasGift.Trainer.Application/Features/TrainerCatalog.cs:101
     FeatureDescriptor {
         key: FeatureKey::Hook(HookId("free-skill-points")),
         area: TrainerArea::Character,
@@ -198,11 +152,7 @@ pub static DESCRIPTORS: &[FeatureDescriptor] = &[
         values: &[],
         fields: &[],
         needs: None,
-        fills_section: false,
-        native_support: NativeSupport::Unsupported,
-        legacy_owners: &["skillPointHook"],
     },
-    // src/Trainer/EterrasGift.Trainer.Application/Features/TrainerCatalog.cs:103
     FeatureDescriptor {
         key: FeatureKey::Hook(HookId("free-passive-points")),
         area: TrainerArea::Character,
@@ -213,11 +163,7 @@ pub static DESCRIPTORS: &[FeatureDescriptor] = &[
         values: &[],
         fields: &[],
         needs: None,
-        fills_section: false,
-        native_support: NativeSupport::Unsupported,
-        legacy_owners: &["passivePointHook"],
     },
-    // src/Trainer/EterrasGift.Trainer.Application/Features/TrainerCatalog.cs:105
     FeatureDescriptor {
         key: FeatureKey::Hook(HookId("free-weaver-points")),
         area: TrainerArea::Character,
@@ -228,11 +174,7 @@ pub static DESCRIPTORS: &[FeatureDescriptor] = &[
         values: &[],
         fields: &[],
         needs: Some("At least one Weaver point earned."),
-        fills_section: false,
-        native_support: NativeSupport::Unsupported,
-        legacy_owners: &["weaverPointHook"],
     },
-    // src/Trainer/EterrasGift.Trainer.Application/Features/TrainerCatalog.cs:108
     FeatureDescriptor {
         key: FeatureKey::Hook(HookId("passive-chain")),
         area: TrainerArea::Character,
@@ -243,11 +185,7 @@ pub static DESCRIPTORS: &[FeatureDescriptor] = &[
         values: &[],
         fields: &[],
         needs: None,
-        fills_section: false,
-        native_support: NativeSupport::Unsupported,
-        legacy_owners: &["masteryLockHook"],
     },
-    // src/Trainer/EterrasGift.Trainer.Application/Features/TrainerCatalog.cs:110
     FeatureDescriptor {
         key: FeatureKey::Hook(HookId("skill-slots")),
         area: TrainerArea::Character,
@@ -258,11 +196,7 @@ pub static DESCRIPTORS: &[FeatureDescriptor] = &[
         values: &[],
         fields: &[],
         needs: None,
-        fills_section: false,
-        native_support: NativeSupport::Unsupported,
-        legacy_owners: &["playerActorHook"],
     },
-    // src/Trainer/EterrasGift.Trainer.Application/Features/TrainerCatalog.cs:112
     FeatureDescriptor {
         key: FeatureKey::Hook(HookId("item-requirements")),
         area: TrainerArea::Character,
@@ -273,11 +207,7 @@ pub static DESCRIPTORS: &[FeatureDescriptor] = &[
         values: &[],
         fields: &[],
         needs: None,
-        fills_section: false,
-        native_support: NativeSupport::Unsupported,
-        legacy_owners: &["equipChecksHook"],
     },
-    // src/Trainer/EterrasGift.Trainer.Application/Features/TrainerCatalog.cs:114
     FeatureDescriptor {
         key: FeatureKey::Hook(HookId("set-bonus")),
         area: TrainerArea::Character,
@@ -288,11 +218,7 @@ pub static DESCRIPTORS: &[FeatureDescriptor] = &[
         values: &[],
         fields: &[],
         needs: None,
-        fills_section: false,
-        native_support: NativeSupport::Unsupported,
-        legacy_owners: &["setBonusHook"],
     },
-    // src/Trainer/EterrasGift.Trainer.Application/Features/TrainerCatalog.cs:116
     FeatureDescriptor {
         key: FeatureKey::Hook(HookId("offhand")),
         area: TrainerArea::Character,
@@ -303,11 +229,7 @@ pub static DESCRIPTORS: &[FeatureDescriptor] = &[
         values: &[],
         fields: &[],
         needs: None,
-        fills_section: false,
-        native_support: NativeSupport::GameplayOverride(eg_trainer_wire::hooks::GameplayHook::Offhand),
-        legacy_owners: &["offhandReceivesHook"],
     },
-    // src/Trainer/EterrasGift.Trainer.Application/Features/TrainerCatalog.cs:118
     FeatureDescriptor {
         key: FeatureKey::Hook(HookId("primordial-limit")),
         area: TrainerArea::Character,
@@ -318,11 +240,7 @@ pub static DESCRIPTORS: &[FeatureDescriptor] = &[
         values: &[],
         fields: &[],
         needs: None,
-        fills_section: false,
-        native_support: NativeSupport::Unsupported,
-        legacy_owners: &["primordialCountHook"],
     },
-    // src/Trainer/EterrasGift.Trainer.Application/Features/TrainerCatalog.cs:122
     FeatureDescriptor {
         key: FeatureKey::Fields(FieldSetId("currency")),
         area: TrainerArea::Stash,
@@ -355,11 +273,7 @@ pub static DESCRIPTORS: &[FeatureDescriptor] = &[
             },
         ],
         needs: None,
-        fills_section: false,
-        native_support: NativeSupport::Unsupported,
-        legacy_owners: &[],
     },
-    // src/Trainer/EterrasGift.Trainer.Application/Features/TrainerCatalog.cs:125
     FeatureDescriptor {
         key: FeatureKey::Fields(FieldSetId("keys")),
         area: TrainerArea::Stash,
@@ -376,11 +290,7 @@ pub static DESCRIPTORS: &[FeatureDescriptor] = &[
             group: None,
         }],
         needs: Some("At least one of the item in your stash."),
-        fills_section: false,
-        native_support: NativeSupport::Unsupported,
-        legacy_owners: &[],
     },
-    // src/Trainer/EterrasGift.Trainer.Application/Features/TrainerCatalog.cs:128
     FeatureDescriptor {
         key: FeatureKey::Fields(FieldSetId("woven-echoes")),
         area: TrainerArea::Stash,
@@ -397,11 +307,7 @@ pub static DESCRIPTORS: &[FeatureDescriptor] = &[
             group: None,
         }],
         needs: Some("At least one of the echo in your stash."),
-        fills_section: false,
-        native_support: NativeSupport::Unsupported,
-        legacy_owners: &[],
     },
-    // src/Trainer/EterrasGift.Trainer.Application/Features/TrainerCatalog.cs:131
     FeatureDescriptor {
         key: FeatureKey::Hook(HookId("duplicate")),
         area: TrainerArea::Stash,
@@ -422,11 +328,7 @@ pub static DESCRIPTORS: &[FeatureDescriptor] = &[
         }],
         fields: &[],
         needs: Some("Drop the item while this is on."),
-        fills_section: false,
-        native_support: NativeSupport::Unsupported,
-        legacy_owners: &["attemptDropHook", "dropItemHook"],
     },
-    // Combines the original God mode and damage divisor into one percentage.
     FeatureDescriptor {
         key: FeatureKey::Hook(HookId("incoming-damage")),
         area: TrainerArea::Combat,
@@ -447,11 +349,7 @@ pub static DESCRIPTORS: &[FeatureDescriptor] = &[
         }],
         fields: &[],
         needs: None,
-        fills_section: false,
-        native_support: NativeSupport::GameplayOverride(eg_trainer_wire::hooks::GameplayHook::IncomingDamage),
-        legacy_owners: &["healthDamageHook"],
     },
-    // src/Trainer/EterrasGift.Trainer.Application/Features/TrainerCatalog.cs:142
     FeatureDescriptor {
         key: FeatureKey::Hook(HookId("damage-dealt")),
         area: TrainerArea::Combat,
@@ -472,11 +370,7 @@ pub static DESCRIPTORS: &[FeatureDescriptor] = &[
         }],
         fields: &[],
         needs: None,
-        fills_section: false,
-        native_support: NativeSupport::GameplayOverride(eg_trainer_wire::hooks::GameplayHook::DamageDealt),
-        legacy_owners: &["healthDamageHook"],
     },
-    // src/Trainer/EterrasGift.Trainer.Application/Features/TrainerCatalog.cs:144
     FeatureDescriptor {
         key: FeatureKey::Hook(HookId("cast-speed")),
         area: TrainerArea::Combat,
@@ -497,11 +391,7 @@ pub static DESCRIPTORS: &[FeatureDescriptor] = &[
         }],
         fields: &[],
         needs: None,
-        fills_section: false,
-        native_support: NativeSupport::Unsupported,
-        legacy_owners: &["speedStatHook"],
     },
-    // src/Trainer/EterrasGift.Trainer.Application/Features/TrainerCatalog.cs:146
     FeatureDescriptor {
         key: FeatureKey::Hook(HookId("projectiles")),
         area: TrainerArea::Combat,
@@ -522,11 +412,7 @@ pub static DESCRIPTORS: &[FeatureDescriptor] = &[
         }],
         fields: &[],
         needs: None,
-        fills_section: false,
-        native_support: NativeSupport::Unsupported,
-        legacy_owners: &["extrasCreatedHook", "totalExtrasHook"],
     },
-    // src/Trainer/EterrasGift.Trainer.Application/Features/TrainerCatalog.cs:148
     FeatureDescriptor {
         key: FeatureKey::Hook(HookId("area")),
         area: TrainerArea::Combat,
@@ -547,11 +433,7 @@ pub static DESCRIPTORS: &[FeatureDescriptor] = &[
         }],
         fields: &[],
         needs: None,
-        fills_section: false,
-        native_support: NativeSupport::Unsupported,
-        legacy_owners: &["increasedAreaHook"],
     },
-    // src/Trainer/EterrasGift.Trainer.Application/Features/TrainerCatalog.cs:151
     FeatureDescriptor {
         key: FeatureKey::Fields(FieldSetId("attack-leech")),
         area: TrainerArea::Combat,
@@ -577,11 +459,7 @@ pub static DESCRIPTORS: &[FeatureDescriptor] = &[
             },
         ],
         needs: None,
-        fills_section: false,
-        native_support: NativeSupport::Unsupported,
-        legacy_owners: &[],
     },
-    // src/Trainer/EterrasGift.Trainer.Application/Features/TrainerCatalog.cs:155
     FeatureDescriptor {
         key: FeatureKey::Hook(HookId("zero-mana-cost")),
         area: TrainerArea::Combat,
@@ -592,11 +470,7 @@ pub static DESCRIPTORS: &[FeatureDescriptor] = &[
         values: &[],
         fields: &[],
         needs: None,
-        fills_section: false,
-        native_support: NativeSupport::Unsupported,
-        legacy_owners: &["manaCostHook"],
     },
-    // src/Trainer/EterrasGift.Trainer.Application/Features/TrainerCatalog.cs:157
     FeatureDescriptor {
         key: FeatureKey::Hook(HookId("infinite-mana")),
         area: TrainerArea::Combat,
@@ -607,11 +481,7 @@ pub static DESCRIPTORS: &[FeatureDescriptor] = &[
         values: &[],
         fields: &[],
         needs: None,
-        fills_section: false,
-        native_support: NativeSupport::Unsupported,
-        legacy_owners: &["manaTickHook"],
     },
-    // src/Trainer/EterrasGift.Trainer.Application/Features/TrainerCatalog.cs:159
     FeatureDescriptor {
         key: FeatureKey::Hook(HookId("no-cooldowns")),
         area: TrainerArea::Combat,
@@ -622,11 +492,7 @@ pub static DESCRIPTORS: &[FeatureDescriptor] = &[
         values: &[],
         fields: &[],
         needs: None,
-        fills_section: false,
-        native_support: NativeSupport::Unsupported,
-        legacy_owners: &["useChargesHook"],
     },
-    // src/Trainer/EterrasGift.Trainer.Application/Features/TrainerCatalog.cs:161
     FeatureDescriptor {
         key: FeatureKey::Hook(HookId("endless-buffs")),
         area: TrainerArea::Combat,
@@ -637,11 +503,7 @@ pub static DESCRIPTORS: &[FeatureDescriptor] = &[
         values: &[],
         fields: &[],
         needs: None,
-        fills_section: false,
-        native_support: NativeSupport::Unsupported,
-        legacy_owners: &["buffsTickHook", "ailmentsTickHook"],
     },
-    // src/Trainer/EterrasGift.Trainer.Application/Features/TrainerCatalog.cs:163
     FeatureDescriptor {
         key: FeatureKey::Hook(HookId("move-speed")),
         area: TrainerArea::Combat,
@@ -662,11 +524,7 @@ pub static DESCRIPTORS: &[FeatureDescriptor] = &[
         }],
         fields: &[],
         needs: Some("Re-equip your boots after changing it."),
-        fills_section: false,
-        native_support: NativeSupport::Unsupported,
-        legacy_owners: &["updateSpeedHook", "statValueHook"],
     },
-    // src/Trainer/EterrasGift.Trainer.Application/Features/TrainerCatalog.cs:166
     FeatureDescriptor {
         key: FeatureKey::Hook(HookId("auto-target")),
         area: TrainerArea::Combat,
@@ -677,11 +535,7 @@ pub static DESCRIPTORS: &[FeatureDescriptor] = &[
         values: &[],
         fields: &[],
         needs: None,
-        fills_section: false,
-        native_support: NativeSupport::Unsupported,
-        legacy_owners: &["autoAimHook", "fireballAimHook", "autoTargetHook", "nearestActorHook"],
     },
-    // src/Trainer/EterrasGift.Trainer.Application/Features/TrainerCatalog.cs:170
     FeatureDescriptor {
         key: FeatureKey::Forge,
         area: TrainerArea::Forge,
@@ -692,11 +546,7 @@ pub static DESCRIPTORS: &[FeatureDescriptor] = &[
         values: &[],
         fields: &[],
         needs: None,
-        fills_section: true,
-        native_support: NativeSupport::Unsupported,
-        legacy_owners: &[],
     },
-    // src/Trainer/EterrasGift.Trainer.Application/Features/TrainerCatalog.cs:172
     FeatureDescriptor {
         key: FeatureKey::Hook(HookId("forge-level")),
         area: TrainerArea::Forge,
@@ -707,11 +557,7 @@ pub static DESCRIPTORS: &[FeatureDescriptor] = &[
         values: &[],
         fields: &[],
         needs: None,
-        fills_section: false,
-        native_support: NativeSupport::Unsupported,
-        legacy_owners: &["forgeLevelHook"],
     },
-    // src/Trainer/EterrasGift.Trainer.Application/Features/TrainerCatalog.cs:175
     FeatureDescriptor {
         key: FeatureKey::Hook(HookId("shards")),
         area: TrainerArea::Forge,
@@ -722,11 +568,7 @@ pub static DESCRIPTORS: &[FeatureDescriptor] = &[
         values: &[],
         fields: &[],
         needs: None,
-        fills_section: false,
-        native_support: NativeSupport::Unsupported,
-        legacy_owners: &["shardCountHook"],
     },
-    // src/Trainer/EterrasGift.Trainer.Application/Features/TrainerCatalog.cs:178
     FeatureDescriptor {
         key: FeatureKey::Hook(HookId("runes-glyphs")),
         area: TrainerArea::Forge,
@@ -737,11 +579,7 @@ pub static DESCRIPTORS: &[FeatureDescriptor] = &[
         values: &[],
         fields: &[],
         needs: None,
-        fills_section: false,
-        native_support: NativeSupport::Unsupported,
-        legacy_owners: &["slotQuantityHook"],
     },
-    // src/Trainer/EterrasGift.Trainer.Application/Features/TrainerCatalog.cs:181
     FeatureDescriptor {
         key: FeatureKey::Hook(HookId("woven-enchanter")),
         area: TrainerArea::Forge,
@@ -752,11 +590,7 @@ pub static DESCRIPTORS: &[FeatureDescriptor] = &[
         values: &[],
         fields: &[],
         needs: None,
-        fills_section: false,
-        native_support: NativeSupport::Unsupported,
-        legacy_owners: &["enchanterUseHook"],
     },
-    // src/Trainer/EterrasGift.Trainer.Application/Features/TrainerCatalog.cs:185
     FeatureDescriptor {
         key: FeatureKey::Hook(HookId("drop-rates")),
         area: TrainerArea::Loot,
@@ -812,11 +646,7 @@ pub static DESCRIPTORS: &[FeatureDescriptor] = &[
         ],
         fields: &[],
         needs: None,
-        fills_section: false,
-        native_support: NativeSupport::Unsupported,
-        legacy_owners: &["deathDropHook"],
     },
-    // src/Trainer/EterrasGift.Trainer.Application/Features/TrainerCatalog.cs:189
     FeatureDescriptor {
         key: FeatureKey::Hook(HookId("boss-drops")),
         area: TrainerArea::Loot,
@@ -827,11 +657,7 @@ pub static DESCRIPTORS: &[FeatureDescriptor] = &[
         values: &[],
         fields: &[],
         needs: None,
-        fills_section: false,
-        native_support: NativeSupport::Unsupported,
-        legacy_owners: &["groupChanceHook"],
     },
-    // src/Trainer/EterrasGift.Trainer.Application/Features/TrainerCatalog.cs:191
     FeatureDescriptor {
         key: FeatureKey::Hook(HookId("extra-rares")),
         area: TrainerArea::Loot,
@@ -842,11 +668,7 @@ pub static DESCRIPTORS: &[FeatureDescriptor] = &[
         values: &[],
         fields: &[],
         needs: None,
-        fills_section: false,
-        native_support: NativeSupport::Unsupported,
-        legacy_owners: &["deathDropHook"],
     },
-    // src/Trainer/EterrasGift.Trainer.Application/Features/TrainerCatalog.cs:193
     FeatureDescriptor {
         key: FeatureKey::Hook(HookId("force-rarity")),
         area: TrainerArea::Loot,
@@ -867,11 +689,7 @@ pub static DESCRIPTORS: &[FeatureDescriptor] = &[
         }],
         fields: &[],
         needs: None,
-        fills_section: false,
-        native_support: NativeSupport::Unsupported,
-        legacy_owners: &["rollBaseItemHook"],
     },
-    // src/Trainer/EterrasGift.Trainer.Application/Features/TrainerCatalog.cs:196
     FeatureDescriptor {
         key: FeatureKey::Hook(HookId("always-t7")),
         area: TrainerArea::Loot,
@@ -882,11 +700,7 @@ pub static DESCRIPTORS: &[FeatureDescriptor] = &[
         values: &[],
         fields: &[],
         needs: None,
-        fills_section: false,
-        native_support: NativeSupport::Unsupported,
-        legacy_owners: &["rollTierHook"],
     },
-    // src/Trainer/EterrasGift.Trainer.Application/Features/TrainerCatalog.cs:198
     FeatureDescriptor {
         key: FeatureKey::Hook(HookId("perfect-rolls")),
         area: TrainerArea::Loot,
@@ -897,11 +711,7 @@ pub static DESCRIPTORS: &[FeatureDescriptor] = &[
         values: &[],
         fields: &[],
         needs: None,
-        fills_section: false,
-        native_support: NativeSupport::Unsupported,
-        legacy_owners: &["randomByteHook"],
     },
-    // src/Trainer/EterrasGift.Trainer.Application/Features/TrainerCatalog.cs:200
     FeatureDescriptor {
         key: FeatureKey::Hook(HookId("pickup-range")),
         area: TrainerArea::Loot,
@@ -912,11 +722,7 @@ pub static DESCRIPTORS: &[FeatureDescriptor] = &[
         values: &[],
         fields: &[],
         needs: None,
-        fills_section: false,
-        native_support: NativeSupport::Unsupported,
-        legacy_owners: &["pickupRangeHook"],
     },
-    // src/Trainer/EterrasGift.Trainer.Application/Features/TrainerCatalog.cs:204
     FeatureDescriptor {
         key: FeatureKey::Fields(FieldSetId("monolith-run")),
         area: TrainerArea::Monolith,
@@ -949,11 +755,7 @@ pub static DESCRIPTORS: &[FeatureDescriptor] = &[
             },
         ],
         needs: Some("A Monolith run selected. Open a timeline and choose its difficulty first."),
-        fills_section: false,
-        native_support: NativeSupport::Unsupported,
-        legacy_owners: &[],
     },
-    // src/Trainer/EterrasGift.Trainer.Application/Features/TrainerCatalog.cs:208
     FeatureDescriptor {
         key: FeatureKey::Hook(HookId("skip-quest-echoes")),
         area: TrainerArea::Monolith,
@@ -964,11 +766,7 @@ pub static DESCRIPTORS: &[FeatureDescriptor] = &[
         values: &[],
         fields: &[],
         needs: None,
-        fills_section: false,
-        native_support: NativeSupport::Unsupported,
-        legacy_owners: &["runInfoHook"],
     },
-    // src/Trainer/EterrasGift.Trainer.Application/Features/TrainerCatalog.cs:210
     FeatureDescriptor {
         key: FeatureKey::Hook(HookId("max-bonus-stability")),
         area: TrainerArea::Monolith,
@@ -979,11 +777,7 @@ pub static DESCRIPTORS: &[FeatureDescriptor] = &[
         values: &[],
         fields: &[],
         needs: None,
-        fills_section: false,
-        native_support: NativeSupport::Unsupported,
-        legacy_owners: &["bonusStabilityHook"],
     },
-    // src/Trainer/EterrasGift.Trainer.Application/Features/TrainerCatalog.cs:212
     FeatureDescriptor {
         key: FeatureKey::Hook(HookId("echo-cycle")),
         area: TrainerArea::Monolith,
@@ -994,11 +788,7 @@ pub static DESCRIPTORS: &[FeatureDescriptor] = &[
         values: &[],
         fields: &[],
         needs: None,
-        fills_section: false,
-        native_support: NativeSupport::Unsupported,
-        legacy_owners: &["islandTypeHook", "modAndZoneHook", "connectionsRevealedHook", "completedSwitchHook"],
     },
-    // src/Trainer/EterrasGift.Trainer.Application/Features/TrainerCatalog.cs:215
     FeatureDescriptor {
         key: FeatureKey::Hook(HookId("echo-type")),
         area: TrainerArea::Monolith,
@@ -1030,11 +820,7 @@ pub static DESCRIPTORS: &[FeatureDescriptor] = &[
         }],
         fields: &[],
         needs: None,
-        fills_section: false,
-        native_support: NativeSupport::Unsupported,
-        legacy_owners: &["islandTypeHook"],
     },
-    // src/Trainer/EterrasGift.Trainer.Application/Features/TrainerCatalog.cs:219
     FeatureDescriptor {
         key: FeatureKey::Hook(HookId("reveal-objective")),
         area: TrainerArea::Monolith,
@@ -1045,11 +831,7 @@ pub static DESCRIPTORS: &[FeatureDescriptor] = &[
         values: &[],
         fields: &[],
         needs: None,
-        fills_section: false,
-        native_support: NativeSupport::Unsupported,
-        legacy_owners: &["scoreChangedHook"],
     },
-    // src/Trainer/EterrasGift.Trainer.Application/Features/TrainerCatalog.cs:223
     FeatureDescriptor {
         key: FeatureKey::Fields(FieldSetId("faction-standing")),
         area: TrainerArea::Factions,
@@ -1145,11 +927,7 @@ pub static DESCRIPTORS: &[FeatureDescriptor] = &[
             },
         ],
         needs: None,
-        fills_section: false,
-        native_support: NativeSupport::Unsupported,
-        legacy_owners: &[],
     },
-    // src/Trainer/EterrasGift.Trainer.Application/Features/TrainerCatalog.cs:227
     FeatureDescriptor {
         key: FeatureKey::Hook(HookId("faction-gains")),
         area: TrainerArea::Factions,
@@ -1170,11 +948,7 @@ pub static DESCRIPTORS: &[FeatureDescriptor] = &[
         }],
         fields: &[],
         needs: None,
-        fills_section: false,
-        native_support: NativeSupport::Unsupported,
-        legacy_owners: &["gainFavorHook"],
     },
-    // src/Trainer/EterrasGift.Trainer.Application/Features/TrainerCatalog.cs:229
     FeatureDescriptor {
         key: FeatureKey::Hook(HookId("instant-rank")),
         area: TrainerArea::Factions,
@@ -1185,11 +959,7 @@ pub static DESCRIPTORS: &[FeatureDescriptor] = &[
         values: &[],
         fields: &[],
         needs: None,
-        fills_section: false,
-        native_support: NativeSupport::Unsupported,
-        legacy_owners: &["gainReputationHook"],
     },
-    // src/Trainer/EterrasGift.Trainer.Application/Features/TrainerCatalog.cs:231
     FeatureDescriptor {
         key: FeatureKey::Hook(HookId("prophecy-any-zone")),
         area: TrainerArea::Factions,
@@ -1200,11 +970,7 @@ pub static DESCRIPTORS: &[FeatureDescriptor] = &[
         values: &[],
         fields: &[],
         needs: None,
-        fills_section: false,
-        native_support: NativeSupport::Unsupported,
-        legacy_owners: &["prophecyRangeHook"],
     },
-    // src/Trainer/EterrasGift.Trainer.Application/Features/TrainerCatalog.cs:233
     FeatureDescriptor {
         key: FeatureKey::Hook(HookId("prophecy-max-lp")),
         area: TrainerArea::Factions,
@@ -1215,11 +981,7 @@ pub static DESCRIPTORS: &[FeatureDescriptor] = &[
         values: &[],
         fields: &[],
         needs: None,
-        fills_section: false,
-        native_support: NativeSupport::Unsupported,
-        legacy_owners: &["spawnRewardHook"],
     },
-    // src/Trainer/EterrasGift.Trainer.Application/Features/TrainerCatalog.cs:235
     FeatureDescriptor {
         key: FeatureKey::Hook(HookId("prophecy-rewards")),
         area: TrainerArea::Factions,
@@ -1240,11 +1002,7 @@ pub static DESCRIPTORS: &[FeatureDescriptor] = &[
         }],
         fields: &[],
         needs: None,
-        fills_section: false,
-        native_support: NativeSupport::Unsupported,
-        legacy_owners: &["spawnRewardHook"],
     },
-    // src/Trainer/EterrasGift.Trainer.Application/Features/TrainerCatalog.cs:237
     FeatureDescriptor {
         key: FeatureKey::Hook(HookId("prophecy-uses")),
         area: TrainerArea::Factions,
@@ -1255,11 +1013,7 @@ pub static DESCRIPTORS: &[FeatureDescriptor] = &[
         values: &[],
         fields: &[],
         needs: None,
-        fills_section: false,
-        native_support: NativeSupport::Unsupported,
-        legacy_owners: &["triggerRewardHook"],
     },
-    // src/Trainer/EterrasGift.Trainer.Application/Features/TrainerCatalog.cs:239
     FeatureDescriptor {
         key: FeatureKey::Hook(HookId("hunter-cost")),
         area: TrainerArea::Factions,
@@ -1270,11 +1024,7 @@ pub static DESCRIPTORS: &[FeatureDescriptor] = &[
         values: &[],
         fields: &[],
         needs: None,
-        fills_section: false,
-        native_support: NativeSupport::Unsupported,
-        legacy_owners: &["hunterCostHook"],
     },
-    // src/Trainer/EterrasGift.Trainer.Application/Features/TrainerCatalog.cs:243
     FeatureDescriptor {
         key: FeatureKey::Hook(HookId("rune-wardens")),
         area: TrainerArea::World,
@@ -1295,11 +1045,7 @@ pub static DESCRIPTORS: &[FeatureDescriptor] = &[
         }],
         fields: &[],
         needs: None,
-        fills_section: false,
-        native_support: NativeSupport::Unsupported,
-        legacy_owners: &["encounterCalculationsHook"],
     },
-    // src/Trainer/EterrasGift.Trainer.Application/Features/TrainerCatalog.cs:245
     FeatureDescriptor {
         key: FeatureKey::Hook(HookId("rune-prison")),
         area: TrainerArea::World,
@@ -1310,11 +1056,7 @@ pub static DESCRIPTORS: &[FeatureDescriptor] = &[
         values: &[],
         fields: &[],
         needs: None,
-        fills_section: false,
-        native_support: NativeSupport::Unsupported,
-        legacy_owners: &["runePrisonComplexHook"],
     },
-    // src/Trainer/EterrasGift.Trainer.Application/Features/TrainerCatalog.cs:247
     FeatureDescriptor {
         key: FeatureKey::Hook(HookId("experimental-uniques")),
         area: TrainerArea::World,
@@ -1325,11 +1067,7 @@ pub static DESCRIPTORS: &[FeatureDescriptor] = &[
         values: &[],
         fields: &[],
         needs: None,
-        fills_section: false,
-        native_support: NativeSupport::Unsupported,
-        legacy_owners: &["experimentalUniquesHook"],
     },
-    // src/Trainer/EterrasGift.Trainer.Application/Features/TrainerCatalog.cs:249
     FeatureDescriptor {
         key: FeatureKey::Hook(HookId("class-experimentals")),
         area: TrainerArea::World,
@@ -1340,11 +1078,7 @@ pub static DESCRIPTORS: &[FeatureDescriptor] = &[
         values: &[],
         fields: &[],
         needs: None,
-        fills_section: false,
-        native_support: NativeSupport::Unsupported,
-        legacy_owners: &["classExperimentalsHook"],
     },
-    // src/Trainer/EterrasGift.Trainer.Application/Features/TrainerCatalog.cs:251
     FeatureDescriptor {
         key: FeatureKey::Hook(HookId("loot-lizards")),
         area: TrainerArea::World,
@@ -1365,11 +1099,7 @@ pub static DESCRIPTORS: &[FeatureDescriptor] = &[
         }],
         fields: &[],
         needs: None,
-        fills_section: false,
-        native_support: NativeSupport::Unsupported,
-        legacy_owners: &["encounterCalculationsHook"],
     },
-    // src/Trainer/EterrasGift.Trainer.Application/Features/TrainerCatalog.cs:253
     FeatureDescriptor {
         key: FeatureKey::Hook(HookId("eternity-cache")),
         area: TrainerArea::World,
@@ -1380,11 +1110,7 @@ pub static DESCRIPTORS: &[FeatureDescriptor] = &[
         values: &[],
         fields: &[],
         needs: None,
-        fills_section: false,
-        native_support: NativeSupport::Unsupported,
-        legacy_owners: &["oneShotCacheHook"],
     },
-    // src/Trainer/EterrasGift.Trainer.Application/Features/TrainerCatalog.cs:255
     FeatureDescriptor {
         key: FeatureKey::Hook(HookId("favor-cache")),
         area: TrainerArea::World,
@@ -1395,11 +1121,7 @@ pub static DESCRIPTORS: &[FeatureDescriptor] = &[
         values: &[],
         fields: &[],
         needs: None,
-        fills_section: false,
-        native_support: NativeSupport::Unsupported,
-        legacy_owners: &["favourCacheHook"],
     },
-    // src/Trainer/EterrasGift.Trainer.Application/Features/TrainerCatalog.cs:257
     FeatureDescriptor {
         key: FeatureKey::Hook(HookId("nemesis")),
         area: TrainerArea::World,
@@ -1410,11 +1132,7 @@ pub static DESCRIPTORS: &[FeatureDescriptor] = &[
         values: &[],
         fields: &[],
         needs: None,
-        fills_section: false,
-        native_support: NativeSupport::Unsupported,
-        legacy_owners: &["nemesisHook"],
     },
-    // src/Trainer/EterrasGift.Trainer.Application/Features/TrainerCatalog.cs:259
     FeatureDescriptor {
         key: FeatureKey::Hook(HookId("mysterious-rift")),
         area: TrainerArea::World,
@@ -1422,7 +1140,7 @@ pub static DESCRIPTORS: &[FeatureDescriptor] = &[
         title: "Mysterious rifts",
         description: "Choose the next eligible time-beast encounter: a portal to another location, or a boss rift in the current zone. Game decides restores normal selection.",
         kind: FeatureKind::Choice,
-        // Portal preserves profiles that enabled the original Boolean toggle.
+        // Portal is the default, so a profile saved while this was an on/off switch keeps its behaviour.
         values: &[FeatureValue {
             label: "Encounter",
             default: "Portal",
@@ -1436,11 +1154,7 @@ pub static DESCRIPTORS: &[FeatureDescriptor] = &[
         }],
         fields: &[],
         needs: None,
-        fills_section: false,
-        native_support: NativeSupport::GameplayOverride(eg_trainer_wire::hooks::GameplayHook::MysteriousRift),
-        legacy_owners: &["nextEncounterEggsHook"],
     },
-    // src/Trainer/EterrasGift.Trainer.Application/Features/TrainerCatalog.cs:261
     FeatureDescriptor {
         key: FeatureKey::Hook(HookId("omen-windows")),
         area: TrainerArea::World,
@@ -1451,11 +1165,7 @@ pub static DESCRIPTORS: &[FeatureDescriptor] = &[
         values: &[],
         fields: &[],
         needs: None,
-        fills_section: false,
-        native_support: NativeSupport::Unsupported,
-        legacy_owners: &["omenWindowHook"],
     },
-    // src/Trainer/EterrasGift.Trainer.Application/Features/TrainerCatalog.cs:263
     FeatureDescriptor {
         key: FeatureKey::Hook(HookId("morditas-timer")),
         area: TrainerArea::World,
@@ -1500,11 +1210,7 @@ pub static DESCRIPTORS: &[FeatureDescriptor] = &[
         ],
         fields: &[],
         needs: None,
-        fills_section: false,
-        native_support: NativeSupport::Unsupported,
-        legacy_owners: &["huntStartHook", "huntTickHook", "huntKillHook"],
     },
-    // src/Trainer/EterrasGift.Trainer.Application/Features/TrainerCatalog.cs:268
     FeatureDescriptor {
         key: FeatureKey::Hook(HookId("monster-density")),
         area: TrainerArea::World,
@@ -1525,11 +1231,7 @@ pub static DESCRIPTORS: &[FeatureDescriptor] = &[
         }],
         fields: &[],
         needs: None,
-        fills_section: false,
-        native_support: NativeSupport::Unsupported,
-        legacy_owners: &["rollSpawnersHook"],
     },
-    // src/Trainer/EterrasGift.Trainer.Application/Features/TrainerCatalog.cs:270
     FeatureDescriptor {
         key: FeatureKey::Hook(HookId("pack-size")),
         area: TrainerArea::World,
@@ -1550,11 +1252,7 @@ pub static DESCRIPTORS: &[FeatureDescriptor] = &[
         }],
         fields: &[],
         needs: None,
-        fills_section: false,
-        native_support: NativeSupport::Unsupported,
-        legacy_owners: &["generateEntitiesHook"],
     },
-    // src/Trainer/EterrasGift.Trainer.Application/Features/TrainerCatalog.cs:273
     FeatureDescriptor {
         key: FeatureKey::Hook(HookId("monster-rarity")),
         area: TrainerArea::World,
@@ -1599,11 +1297,7 @@ pub static DESCRIPTORS: &[FeatureDescriptor] = &[
         ],
         fields: &[],
         needs: None,
-        fills_section: false,
-        native_support: NativeSupport::Unsupported,
-        legacy_owners: &["generateEntitiesHook"],
     },
-    // src/Trainer/EterrasGift.Trainer.Application/Features/TrainerCatalog.cs:277
     FeatureDescriptor {
         key: FeatureKey::Hook(HookId("champions")),
         area: TrainerArea::World,
@@ -1624,11 +1318,7 @@ pub static DESCRIPTORS: &[FeatureDescriptor] = &[
         }],
         fields: &[],
         needs: None,
-        fills_section: false,
-        native_support: NativeSupport::Unsupported,
-        legacy_owners: &["championRollHook"],
     },
-    // src/Trainer/EterrasGift.Trainer.Application/Features/TrainerCatalog.cs:279
     FeatureDescriptor {
         key: FeatureKey::Hook(HookId("eternity-cache-anywhere")),
         area: TrainerArea::World,
@@ -1639,11 +1329,7 @@ pub static DESCRIPTORS: &[FeatureDescriptor] = &[
         values: &[],
         fields: &[],
         needs: None,
-        fills_section: false,
-        native_support: NativeSupport::Unsupported,
-        legacy_owners: &["canUseCacheHook", "uniqueLevelCapHook", "cacheUsedHook"],
     },
-    // src/Trainer/EterrasGift.Trainer.Application/Features/TrainerCatalog.cs:281
     FeatureDescriptor {
         key: FeatureKey::Hook(HookId("reveal-map")),
         area: TrainerArea::World,
@@ -1654,11 +1340,7 @@ pub static DESCRIPTORS: &[FeatureDescriptor] = &[
         values: &[],
         fields: &[],
         needs: None,
-        fills_section: false,
-        native_support: NativeSupport::Unsupported,
-        legacy_owners: &["revealFogHook"],
     },
-    // src/Trainer/EterrasGift.Trainer.Application/Features/TrainerCatalog.cs:283
     FeatureDescriptor {
         key: FeatureKey::Hook(HookId("waypoints")),
         area: TrainerArea::World,
@@ -1669,11 +1351,7 @@ pub static DESCRIPTORS: &[FeatureDescriptor] = &[
         values: &[],
         fields: &[],
         needs: None,
-        fills_section: false,
-        native_support: NativeSupport::Unsupported,
-        legacy_owners: &["selectLocationHook", "waypointTravelHook"],
     },
-    // src/Trainer/EterrasGift.Trainer.Application/Features/TrainerCatalog.cs:285
     FeatureDescriptor {
         key: FeatureKey::Hook(HookId("zoom")),
         area: TrainerArea::World,
@@ -1694,8 +1372,5 @@ pub static DESCRIPTORS: &[FeatureDescriptor] = &[
         }],
         fields: &[],
         needs: None,
-        fills_section: false,
-        native_support: NativeSupport::Unsupported,
-        legacy_owners: &["applyZoomHook"],
     },
 ];

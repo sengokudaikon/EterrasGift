@@ -18,8 +18,8 @@ fn attack_leech_read_binds_admitted_manager_and_preserves_owned_float_bits() {
     let wire = FakeTransport::new(fixture.target.clone(), [fixture.discover(), status(false, 0x1234, 0), done(fields::encode(&expected))]);
     let mut session = fixture.session(&wire, &FakeLog::new([offline()]), GatePolicy::Release);
     session.enable();
-    run(session.connect(now())).unwrap();
-    assert_eq!(run(session.read_attack_leech(now())).unwrap(), expected);
+    run(session.connect()).unwrap();
+    assert_eq!(run(session.read_attack_leech()).unwrap(), expected);
     assert_eq!(
         wire.requests()[2],
         Request::ReadAttackLeech {
@@ -47,8 +47,8 @@ fn attack_leech_global_refusals_revoke_admission_but_local_graph_reasons_remain_
         let wire = FakeTransport::new(fixture.target.clone(), [fixture.discover(), status(false, 0x1234, 0), done(fields::encode(&expected))]);
         let mut session = fixture.session(&wire, &FakeLog::new([offline()]), GatePolicy::Release);
         session.enable();
-        run(session.connect(now())).unwrap();
-        assert_eq!(run(session.read_attack_leech(now())).unwrap(), expected);
+        run(session.connect()).unwrap();
+        assert_eq!(run(session.read_attack_leech()).unwrap(), expected);
         let global = matches!(
             reason,
             AttackLeechUnavailable::OfflineRequired | AttackLeechUnavailable::ManagerAbsent | AttackLeechUnavailable::ManagerChanged
@@ -56,7 +56,7 @@ fn attack_leech_global_refusals_revoke_admission_but_local_graph_reasons_remain_
         assert_eq!(session.state(), if global { SessionState::Disconnected } else { SessionState::Ready });
         assert_eq!(session.runtime_status().is_none(), global);
         if global {
-            assert!(matches!(run(session.read_attack_leech(now())), Err(SessionError::NotConnected)));
+            assert!(matches!(run(session.read_attack_leech()), Err(SessionError::NotConnected)));
         }
         assert_eq!(wire.requests().len(), 3);
     }
@@ -69,11 +69,11 @@ fn attack_leech_rejects_malformed_or_wrong_manager_without_retry() {
         let wire = FakeTransport::new(fixture.target.clone(), [fixture.discover(), status(false, 0x1234, 0), done(payload)]);
         let mut session = fixture.session(&wire, &FakeLog::new([offline()]), GatePolicy::Release);
         session.enable();
-        run(session.connect(now())).unwrap();
-        assert!(matches!(run(session.read_attack_leech(now())), Err(SessionError::Protocol(_))));
+        run(session.connect()).unwrap();
+        assert!(matches!(run(session.read_attack_leech()), Err(SessionError::Protocol(_))));
         assert_eq!(session.state(), SessionState::Disconnected);
         assert!(session.runtime_status().is_none());
-        assert!(run(session.read_attack_leech(now())).is_err());
+        assert!(run(session.read_attack_leech()).is_err());
         assert_eq!(wire.requests().len(), 3);
     }
 }
@@ -88,7 +88,7 @@ fn attack_leech_rechecks_log_and_artifacts_after_reply_and_artifacts_before_io()
         let wire = FakeTransport::new(fixture.target.clone(), [fixture.discover(), status(false, 0x1234, 0)]);
         let mut session = fixture.session(&wire, &log, GatePolicy::Release);
         session.enable();
-        run(session.connect(now())).unwrap();
+        run(session.connect()).unwrap();
         wire.push(Step::Action(
             Box::new(move || {
                 if fault == 0 {
@@ -105,7 +105,7 @@ fn attack_leech_rechecks_log_and_artifacts_after_reply_and_artifacts_before_io()
         if fault == 2 {
             fs::write(&fixture.metadata, b"changed before read").unwrap();
         }
-        let error = run(session.read_attack_leech(now())).unwrap_err();
+        let error = run(session.read_attack_leech()).unwrap_err();
         assert!(matches!(error, SessionError::Identity(_)));
         assert!(session.runtime_status().is_none());
         assert_ne!(session.state(), SessionState::Ready);
@@ -119,12 +119,12 @@ fn attack_leech_dropped_future_stays_busy_and_never_replays() {
     let wire = FakeTransport::new(fixture.target.clone(), [fixture.discover(), status(false, 0x1234, 0), Step::Pending]);
     let mut session = fixture.session(&wire, &FakeLog::new([offline()]), GatePolicy::Release);
     session.enable();
-    run(session.connect(now())).unwrap();
-    let mut read = Box::pin(session.read_attack_leech(now()));
+    run(session.connect()).unwrap();
+    let mut read = Box::pin(session.read_attack_leech());
     assert!(read.as_mut().poll(&mut Context::from_waker(Waker::noop())).is_pending());
     drop(read);
     assert_eq!(session.state(), SessionState::Connecting);
     assert!(session.runtime_status().is_none());
-    assert!(matches!(run(session.read_attack_leech(now())), Err(SessionError::Busy)));
+    assert!(matches!(run(session.read_attack_leech()), Err(SessionError::Busy)));
     assert_eq!(wire.requests().len(), 3);
 }

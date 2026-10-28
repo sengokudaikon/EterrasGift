@@ -31,16 +31,16 @@ impl BackendConnection for Connection {
     fn target(&self) -> &ProcessIdentity {
         &self.target
     }
-    async fn refresh(&mut self, _: Timestamp) -> Result<RuntimeStatus, BackendError> {
+    async fn refresh(&mut self) -> Result<RuntimeStatus, BackendError> {
         panic!("overflow must precede refresh")
     }
-    async fn read_locale(&mut self, _: Timestamp) -> Result<crate::catalog::GameLocale, BackendError> {
+    async fn read_locale(&mut self) -> Result<crate::catalog::GameLocale, BackendError> {
         panic!("no locale")
     }
     fn build_hashes(&self) -> (String, String) {
         panic!("no catalog")
     }
-    async fn read_forge(&mut self, _: Timestamp) -> Result<Option<ForgeSnapshot>, BackendError> {
+    async fn read_forge(&mut self) -> Result<Option<ForgeSnapshot>, BackendError> {
         panic!("no forge")
     }
     async fn disconnect(&mut self) -> Cleanup {
@@ -49,7 +49,7 @@ impl BackendConnection for Connection {
     fn supports_attack_leech_rate(&self) -> bool {
         true
     }
-    async fn set_attack_leech_rate(&mut self, _: Timestamp, _: &AttackLeechPlan, _: &mut dyn WriteControl) -> Result<RateWriteStatus, BackendError> {
+    async fn set_attack_leech_rate(&mut self, _: &AttackLeechPlan, _: &mut dyn WriteControl) -> Result<RateWriteStatus, BackendError> {
         panic!("overflow must precede write")
     }
 }
@@ -106,16 +106,16 @@ fn default_rate_capability_is_false_and_default_submission_is_preflight_only() {
         fn target(&self) -> &ProcessIdentity {
             &self.0.target
         }
-        async fn refresh(&mut self, _: Timestamp) -> Result<RuntimeStatus, BackendError> {
+        async fn refresh(&mut self) -> Result<RuntimeStatus, BackendError> {
             panic!("no refresh")
         }
-        async fn read_locale(&mut self, _: Timestamp) -> Result<crate::catalog::GameLocale, BackendError> {
+        async fn read_locale(&mut self) -> Result<crate::catalog::GameLocale, BackendError> {
             panic!("no locale")
         }
         fn build_hashes(&self) -> (String, String) {
             panic!("no catalog")
         }
-        async fn read_forge(&mut self, _: Timestamp) -> Result<Option<ForgeSnapshot>, BackendError> {
+        async fn read_forge(&mut self) -> Result<Option<ForgeSnapshot>, BackendError> {
             panic!("no forge")
         }
         async fn disconnect(&mut self) -> Cleanup {
@@ -154,6 +154,6 @@ fn default_rate_capability_is_false_and_default_submission_is_preflight_only() {
     let result = tokio::runtime::Builder::new_current_thread()
         .build()
         .unwrap()
-        .block_on(connection.set_attack_leech_rate(Time.now(), &plan, &mut control));
+        .block_on(connection.set_attack_leech_rate(&plan, &mut control));
     assert_eq!(result.unwrap_err().kind, ErrorKind::NotReady);
 }

@@ -19,7 +19,7 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
             .connection
             .as_mut()
             .ok_or_else(|| BackendError::blocked(ErrorKind::NotConnected, "connection released"))?
-            .describe_unique(self.clock.now(), expected.snapshot())
+            .describe_unique(expected.snapshot())
             .await;
         self.superseded(epoch)?;
         self.admit(&target)?;
@@ -69,7 +69,7 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
             .connection
             .as_mut()
             .ok_or_else(|| BackendError::blocked(ErrorKind::NotConnected, "connection released"))?
-            .preview_unique(self.clock.now(), &expected, &draft, &evidence)
+            .preview_unique(&expected, &draft, &evidence)
             .await;
         self.superseded(epoch)?;
         self.admit(&target)?;

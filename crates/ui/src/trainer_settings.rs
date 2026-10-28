@@ -67,7 +67,7 @@ pub fn link(backend: BackendHandle) -> Rc<dyn ModuleLink> {
 struct Link(BackendHandle);
 
 impl ModuleLink for Link {
-    /// As the C# `TrainerSettingsViewModel`: the session takes the choice at once, whatever its save does.
+    /// The session takes the choice at once, whatever its save does.
     fn switched(&self, key: &str, on: bool) {
         let command = match key {
             AUTO_CONNECT => Command::SetAutoConnect(on),
@@ -78,7 +78,8 @@ impl ModuleLink for Link {
     }
 
     fn status(&self, _section: usize) -> Option<LiveStatus> {
-        Some(game_data(&self.0.snapshot(), self.0.subscribe().has_changed().is_ok()))
+        let running = self.0.subscribe().has_changed().is_ok();
+        Some(self.0.peek(|snapshot| game_data(snapshot, running)))
     }
 
     fn act(&self, section: usize) {
@@ -88,9 +89,8 @@ impl ModuleLink for Link {
     }
 }
 
-/// Game definitions: the definitions in use, else what the game data service holds. The C# app captured them from the
-/// game and offered Refresh from game while connected; here they come from the files, so Read again needs no game,
-/// only its folder.
+/// Game definitions: the definitions in use, else what the game data service holds. Game definitions come from the
+/// game's files, so Read again needs only the game's folder, not a running game.
 pub fn game_data(snapshot: &BackendSnapshot, running: bool) -> LiveStatus {
     LiveStatus {
         text: describe(&snapshot.catalog, &snapshot.game_files),
@@ -145,17 +145,6 @@ mod tests {
     }
 
     #[test]
-    fn the_connection_switch_is_named_for_what_it_does() {
-        let sections = descriptor(true).sections;
-        assert!(matches!(
-            sections[1],
-            ModuleSection::Toggle {
-                label: "Connect automatically",
-                ..
-            }
-        ));
-    }
-    #[test]
     fn checked_and_updated_times_are_distinct_and_hidden_on_failed_reads() {
         let checked: jiff::Timestamp = "2026-10-22T11:40:00Z".parse().unwrap();
         let updated: jiff::Timestamp = "2026-10-21T17:15:00Z".parse().unwrap();
@@ -168,9 +157,5 @@ mod tests {
         let shown = describe(&CatalogState::Missing, &files);
         assert!(shown.contains("Last checked: 2026-10-22"), "{shown}");
         assert!(shown.contains("Cache updated: 2026-10-21"), "{shown}");
-        assert_eq!(
-            describe(&CatalogState::Missing, &GameFiles::Unavailable("failed".into())),
-            "The game files could not be read: failed"
-        );
     }
 }

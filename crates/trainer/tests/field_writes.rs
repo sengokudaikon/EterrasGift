@@ -51,7 +51,7 @@ fn only_the_two_source_fields_are_supported_without_advertising_native_support()
         Err(FieldPlanError::UnsupportedField)
     );
     let descriptor = FeatureKey::parse("attack-leech").unwrap().descriptor();
-    assert_eq!(descriptor.native_support, NativeSupport::Unsupported);
+    assert_eq!(descriptor.native_support(), NativeSupport::Unsupported);
     assert_eq!(AttackLeechTarget::AttackRate.descriptor(), &descriptor.fields[0]);
     assert_eq!(AttackLeechTarget::IncreasedLeechRate.descriptor(), &descriptor.fields[1]);
     assert_eq!((descriptor.fields[0].minimum, descriptor.fields[0].maximum), (0.01, 20.0));

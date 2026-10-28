@@ -85,43 +85,41 @@ pub trait BackendConnection: Send + 'static {
     /// Return certainty after entering transport; Err is pre-submission unless
     /// delivery explicitly says MayHaveRun. Confirmed/NotKept require a complete
     /// independent read under renewed admission, not only a native ACK.
-    fn write(&mut self, now: Timestamp, plan: &WritePlan, control: &mut dyn WriteControl) -> impl Future<Output = Result<WriteOutcome<WriteObservation>, BackendError>> + Send {
+    fn write(&mut self, plan: &WritePlan, control: &mut dyn WriteControl) -> impl Future<Output = Result<WriteOutcome<WriteObservation>, BackendError>> + Send {
         async move {
             match plan {
-                WritePlan::Forge(plan) => Ok(self.edit_forge(now, plan, control).await?.map(WriteObservation::forge)),
-                WritePlan::Field(plan) => Ok(self.set_attack_leech_rate(now, plan, control).await?.map(WriteObservation::Field)),
+                WritePlan::Forge(plan) => Ok(self.edit_forge(plan, control).await?.map(WriteObservation::forge)),
+                WritePlan::Field(plan) => Ok(self.set_attack_leech_rate(plan, control).await?.map(WriteObservation::Field)),
             }
         }
     }
-    fn refresh(&mut self, now: Timestamp) -> impl Future<Output = Result<RuntimeStatus, BackendError>> + Send;
-    fn read_locale(&mut self, now: Timestamp) -> impl Future<Output = Result<crate::catalog::GameLocale, BackendError>> + Send;
+    fn refresh(&mut self) -> impl Future<Output = Result<RuntimeStatus, BackendError>> + Send;
+    fn read_locale(&mut self) -> impl Future<Output = Result<crate::catalog::GameLocale, BackendError>> + Send;
     /// The running build's binary and metadata hashes: the game data read from files with the same hashes describes
     /// this game. Definitions are never captured from the game.
     fn build_hashes(&self) -> (String, String);
-    fn read_forge(&mut self, now: Timestamp) -> impl Future<Output = Result<Option<ForgeSnapshot>, BackendError>> + Send;
-    fn describe_implicits(&mut self, _: Timestamp, _: &ForgeSnapshot) -> impl Future<Output = Result<Option<Vec<ModifierSnapshot>>, BackendError>> + Send {
+    fn read_forge(&mut self) -> impl Future<Output = Result<Option<ForgeSnapshot>, BackendError>> + Send;
+    fn describe_implicits(&mut self, _: &ForgeSnapshot) -> impl Future<Output = Result<Option<Vec<ModifierSnapshot>>, BackendError>> + Send {
         async { Ok(None) }
     }
-    fn describe_unique(&mut self, _: Timestamp, _: &ForgeSnapshot) -> impl Future<Output = Result<Option<Vec<ModifierSnapshot>>, BackendError>> + Send {
+    fn describe_unique(&mut self, _: &ForgeSnapshot) -> impl Future<Output = Result<Option<Vec<ModifierSnapshot>>, BackendError>> + Send {
         async { Ok(None) }
     }
     fn preview_unique(
         &mut self,
-        _: Timestamp,
         _: &crate::edits::ExpectedObservation,
         _: &crate::edits::RollEdit,
         _: &crate::mapping::BoundTooltip,
     ) -> impl Future<Output = Result<crate::mapping::BoundPreview, BackendError>> + Send {
         async { Err(BackendError::blocked(ErrorKind::MappingUnavailable, "Unique preview is unavailable.")) }
     }
-    fn resolve_mapping(&mut self, _: Timestamp, _: &crate::edits::ExpectedObservation, _: &MappingRequest) -> impl Future<Output = Result<ValueTable, BackendError>> + Send {
+    fn resolve_mapping(&mut self, _: &crate::edits::ExpectedObservation, _: &MappingRequest) -> impl Future<Output = Result<ValueTable, BackendError>> + Send {
         async { Err(BackendError::blocked(ErrorKind::MappingUnavailable, "Actual values are unavailable for this modifier.")) }
     }
     /// Optional reads may stop between completed exchanges. Implementations
     /// must drain an in-flight exchange and preserve fatal transport failures.
     fn resolve_mapping_observed(
         &mut self,
-        now: Timestamp,
         expected: &crate::edits::ExpectedObservation,
         request: &MappingRequest,
         observer: &mut dyn ReadObserver,
@@ -130,13 +128,13 @@ pub trait BackendConnection: Send + 'static {
             if observer.control() == ReadControl::Stop {
                 return Err(BackendError::blocked(ErrorKind::Superseded, "Value request canceled."));
             }
-            self.resolve_mapping(now, expected, request).await
+            self.resolve_mapping(expected, request).await
         }
     }
     fn supports_read_attack_leech(&self) -> bool {
         false
     }
-    fn read_attack_leech(&mut self, _: Timestamp) -> impl Future<Output = Result<AttackLeechRead, BackendError>> + Send {
+    fn read_attack_leech(&mut self) -> impl Future<Output = Result<AttackLeechRead, BackendError>> + Send {
         async { Err(BackendError::blocked(ErrorKind::NotReady, "attack/leech reads are unavailable")) }
     }
     fn supports_attack_leech_rate(&self) -> bool {
@@ -146,7 +144,7 @@ pub trait BackendConnection: Send + 'static {
     /// Returned status must retain every outcome after entering transport; no retry.
     /// Confirmed requires full projected native acknowledgement and a separate fresh
     /// read under renewed admission. The backend separately checks its current sequence.
-    fn set_attack_leech_rate(&mut self, _: Timestamp, _: &AttackLeechPlan, _: &mut dyn WriteControl) -> impl Future<Output = Result<RateWriteStatus, BackendError>> + Send {
+    fn set_attack_leech_rate(&mut self, _: &AttackLeechPlan, _: &mut dyn WriteControl) -> impl Future<Output = Result<RateWriteStatus, BackendError>> + Send {
         async { Err(BackendError::blocked(ErrorKind::NotReady, "attack/leech writes are unavailable")) }
     }
     fn supports_level_requirement(&self) -> bool {
@@ -192,10 +190,10 @@ pub trait BackendConnection: Send + 'static {
     }
     /// Sets the hook as `request` asks, then answers with the game's own report of it: `Confirmed(on)` when it matches
     /// the request, `NotKept(on)` when it does not.
-    fn set_hook(&mut self, _: Timestamp, _: &HookRequest, _: &mut dyn WriteControl) -> impl Future<Output = Result<WriteOutcome<bool>, BackendError>> + Send {
+    fn set_hook(&mut self, _: &HookRequest, _: &mut dyn WriteControl) -> impl Future<Output = Result<WriteOutcome<bool>, BackendError>> + Send {
         async { Ok(WriteOutcome::refused(HOOK_NOT_AVAILABLE)) }
     }
-    fn edit_forge(&mut self, _: Timestamp, _: &ForgePlan, _: &mut dyn WriteControl) -> impl Future<Output = Result<WriteStatus, BackendError>> + Send {
+    fn edit_forge(&mut self, _: &ForgePlan, _: &mut dyn WriteControl) -> impl Future<Output = Result<WriteStatus, BackendError>> + Send {
         async { Err(BackendError::blocked(ErrorKind::NotReady, "level requirement writes are unavailable")) }
     }
     fn disconnect(&mut self) -> impl Future<Output = Cleanup> + Send;
@@ -210,63 +208,61 @@ impl<T: Transport + Send + 'static> BackendConnection for Session<T> {
     fn is_ready(&self) -> bool {
         self.state() == crate::session::SessionState::Ready
     }
-    async fn write(&mut self, now: Timestamp, plan: &WritePlan, control: &mut dyn WriteControl) -> Result<WriteOutcome<WriteObservation>, BackendError> {
-        Ok(self.write_controlled(now, plan, control).await?)
+    async fn write(&mut self, plan: &WritePlan, control: &mut dyn WriteControl) -> Result<WriteOutcome<WriteObservation>, BackendError> {
+        Ok(self.write_controlled(plan, control).await?)
     }
-    async fn refresh(&mut self, now: Timestamp) -> Result<RuntimeStatus, BackendError> {
-        Session::refresh(self, now).await?;
+    async fn refresh(&mut self) -> Result<RuntimeStatus, BackendError> {
+        Session::refresh(self).await?;
         self.refresh_gameplay_hooks().await?;
         self.runtime_status()
             .copied()
             .ok_or_else(|| BackendError::blocked(ErrorKind::Protocol, "missing runtime status"))
     }
-    async fn read_locale(&mut self, now: Timestamp) -> Result<crate::catalog::GameLocale, BackendError> {
-        Ok(Session::read_locale(self, now).await?)
+    async fn read_locale(&mut self) -> Result<crate::catalog::GameLocale, BackendError> {
+        Ok(Session::read_locale(self).await?)
     }
     fn build_hashes(&self) -> (String, String) {
         (self.profile().binary_hash().to_owned(), self.profile().metadata_hash().to_owned())
     }
-    async fn describe_implicits(&mut self, now: Timestamp, expected: &ForgeSnapshot) -> Result<Option<Vec<ModifierSnapshot>>, BackendError> {
-        Ok(Session::describe_implicits(self, now, expected).await?)
+    async fn describe_implicits(&mut self, expected: &ForgeSnapshot) -> Result<Option<Vec<ModifierSnapshot>>, BackendError> {
+        Ok(Session::describe_implicits(self, expected).await?)
     }
-    async fn describe_unique(&mut self, now: Timestamp, expected: &ForgeSnapshot) -> Result<Option<Vec<ModifierSnapshot>>, BackendError> {
-        Ok(Session::describe_unique(self, now, expected).await?)
+    async fn describe_unique(&mut self, expected: &ForgeSnapshot) -> Result<Option<Vec<ModifierSnapshot>>, BackendError> {
+        Ok(Session::describe_unique(self, expected).await?)
     }
     async fn preview_unique(
         &mut self,
-        now: Timestamp,
         expected: &crate::edits::ExpectedObservation,
         draft: &crate::edits::RollEdit,
         evidence: &crate::mapping::BoundTooltip,
     ) -> Result<crate::mapping::BoundPreview, BackendError> {
-        Ok(Session::preview_unique(self, now, expected, draft, evidence).await?)
+        Ok(Session::preview_unique(self, expected, draft, evidence).await?)
     }
-    async fn resolve_mapping(&mut self, now: Timestamp, expected: &crate::edits::ExpectedObservation, request: &MappingRequest) -> Result<ValueTable, BackendError> {
-        Ok(Session::resolve_mapping(self, now, expected, request).await?)
+    async fn resolve_mapping(&mut self, expected: &crate::edits::ExpectedObservation, request: &MappingRequest) -> Result<ValueTable, BackendError> {
+        Ok(Session::resolve_mapping(self, expected, request).await?)
     }
     async fn resolve_mapping_observed(
         &mut self,
-        now: Timestamp,
         expected: &crate::edits::ExpectedObservation,
         request: &MappingRequest,
         observer: &mut dyn ReadObserver,
     ) -> Result<ValueTable, BackendError> {
-        Ok(Session::resolve_mapping_observed(self, now, expected, request, observer).await?)
+        Ok(Session::resolve_mapping_observed(self, expected, request, observer).await?)
     }
-    async fn read_forge(&mut self, now: Timestamp) -> Result<Option<ForgeSnapshot>, BackendError> {
-        Ok(Session::read_forge(self, now).await?)
+    async fn read_forge(&mut self) -> Result<Option<ForgeSnapshot>, BackendError> {
+        Ok(Session::read_forge(self).await?)
     }
     fn supports_read_attack_leech(&self) -> bool {
         true
     }
-    async fn read_attack_leech(&mut self, now: Timestamp) -> Result<AttackLeechRead, BackendError> {
-        Ok(Session::read_attack_leech(self, now).await?)
+    async fn read_attack_leech(&mut self) -> Result<AttackLeechRead, BackendError> {
+        Ok(Session::read_attack_leech(self).await?)
     }
     fn supports_attack_leech_rate(&self) -> bool {
         true
     }
-    async fn set_attack_leech_rate(&mut self, now: Timestamp, plan: &AttackLeechPlan, control: &mut dyn WriteControl) -> Result<RateWriteStatus, BackendError> {
-        Ok(Session::set_attack_leech_rate_controlled(self, now, plan, control).await?)
+    async fn set_attack_leech_rate(&mut self, plan: &AttackLeechPlan, control: &mut dyn WriteControl) -> Result<RateWriteStatus, BackendError> {
+        Ok(Session::set_attack_leech_rate_controlled(self, plan, control).await?)
     }
     fn supports_level_requirement(&self) -> bool {
         true
@@ -279,7 +275,7 @@ impl<T: Transport + Send + 'static> BackendConnection for Session<T> {
             .and_then(|hook| self.hook_observation(hook))
             .map(|actual| actual.enabled)
     }
-    async fn set_hook(&mut self, _: Timestamp, request: &HookRequest, control: &mut dyn WriteControl) -> Result<WriteOutcome<bool>, BackendError> {
+    async fn set_hook(&mut self, request: &HookRequest, control: &mut dyn WriteControl) -> Result<WriteOutcome<bool>, BackendError> {
         let Some(hook) = eg_trainer_wire::hooks::GameplayHook::from_id(request.id.as_str()) else {
             return Ok(WriteOutcome::refused(HOOK_NOT_AVAILABLE));
         };
@@ -316,8 +312,8 @@ impl<T: Transport + Send + 'static> BackendConnection for Session<T> {
     fn supports_affix_rolls(&self) -> bool {
         true
     }
-    async fn edit_forge(&mut self, now: Timestamp, plan: &ForgePlan, control: &mut dyn WriteControl) -> Result<WriteStatus, BackendError> {
-        Ok(Session::edit_forge_controlled(self, now, plan, control).await?)
+    async fn edit_forge(&mut self, plan: &ForgePlan, control: &mut dyn WriteControl) -> Result<WriteStatus, BackendError> {
+        Ok(Session::edit_forge_controlled(self, plan, control).await?)
     }
     async fn disconnect(&mut self) -> Cleanup {
         Session::disconnect(self).await
@@ -480,11 +476,24 @@ pub struct Capabilities {
     pub affix_change: bool,
     pub affix_list: bool,
 }
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug)]
 pub enum CatalogState {
     Missing,
     Current { generation: u64, data: Arc<GameCatalog> },
     Stale(Arc<GameCatalog>),
+}
+/// Every publish compares the state with the last one, several times a second, and a catalog is large: the same
+/// allocation is equal without reading it. Distinct allocations still compare by content.
+impl PartialEq for CatalogState {
+    fn eq(&self, other: &Self) -> bool {
+        let same = |a: &Arc<GameCatalog>, b: &Arc<GameCatalog>| Arc::ptr_eq(a, b) || **a == **b;
+        match (self, other) {
+            (Self::Missing, Self::Missing) => true,
+            (Self::Current { generation: a, data: x }, Self::Current { generation: b, data: y }) => a == b && same(x, y),
+            (Self::Stale(x), Self::Stale(y)) => same(x, y),
+            _ => false,
+        }
+    }
 }
 impl CatalogState {
     pub fn data(&self) -> Option<&Arc<GameCatalog>> {
@@ -776,8 +785,6 @@ pub enum Command {
     ReadAttackLeech,
     BeginForgeBatch,
     Write(WritePlan),
-    ApplyForge(Box<ForgePlan>),
-    SetAttackLeechRate(Box<AttackLeechPlan>),
     UndoForge(Box<crate::undo::ForgeUndo>),
     /// Shows another profile; only while no game runs.
     SelectProfile(ProfileKey),
@@ -902,6 +909,10 @@ impl BackendHandle {
     }
     pub fn snapshot(&self) -> BackendSnapshot {
         self.snapshots.borrow().clone()
+    }
+    /// The worker still runs: its snapshots can still change.
+    pub fn is_running(&self) -> bool {
+        self.snapshots.has_changed().is_ok()
     }
     pub fn subscribe(&self) -> watch::Receiver<BackendSnapshot> {
         self.snapshots.clone()
@@ -1104,12 +1115,7 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
                     self.read_cancel = envelope.read_cancel;
                     let reading = !matches!(
                         envelope.command,
-                        Command::Write(_)
-                            | Command::ApplyForge(_)
-                            | Command::UndoForge(_)
-                            | Command::SetAttackLeechRate(_)
-                            | Command::SetHookWanted { .. }
-                            | Command::SetHookValues { .. }
+                        Command::Write(_) | Command::UndoForge(_) | Command::SetHookWanted { .. } | Command::SetHookValues { .. }
                     );
                     let result = self.command(envelope.command).await;
                     self.drain_departure().await;
@@ -1323,7 +1329,7 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
             .connection
             .as_mut()
             .ok_or_else(|| BackendError::blocked(ErrorKind::NotConnected, "connection released"))?
-            .read_locale(self.clock.now())
+            .read_locale()
             .await?;
         self.superseded(epoch)?;
         self.admit(target)?;
@@ -1412,8 +1418,6 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
             Command::ReadAttackLeech => self.read_attack_leech().await,
             Command::Write(WritePlan::Forge(plan)) => self.write_forge(*plan).await,
             Command::Write(WritePlan::Field(plan)) => self.set_attack_leech_rate(*plan).await,
-            Command::SetAttackLeechRate(plan) => self.set_attack_leech_rate(*plan).await,
-            Command::ApplyForge(plan) => self.write_forge(*plan).await,
             Command::UndoForge(undo) => self.undo_forge(*undo).await,
             Command::SelectProfile(key) => self.select_profile(key),
             Command::CreateProfile => self.create_profile(),
@@ -1598,7 +1602,7 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
     async fn initialize(&mut self, epoch: u64, target: &ProcessIdentity) -> Result<(), BackendError> {
         let result: Result<(), BackendError> = async {
             self.admit(target)?;
-            let status = self.connection.as_mut().unwrap().refresh(self.clock.now()).await?;
+            let status = self.connection.as_mut().unwrap().refresh().await?;
             self.superseded(epoch)?;
             self.check_status(status)?;
             self.reconcile_hooks();
@@ -1606,11 +1610,11 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
             self.admit(target)?;
             self.state.activity = Some(Activity::ReadingForge);
             self.publish_if_current(epoch)?;
-            let forge = self.connection.as_mut().unwrap().read_forge(self.clock.now()).await?;
+            let forge = self.connection.as_mut().unwrap().read_forge().await?;
             self.superseded(epoch)?;
             self.admit(target)?;
             let implicits = match &forge {
-                Some(item) => self.connection.as_mut().unwrap().describe_implicits(self.clock.now(), item).await?,
+                Some(item) => self.connection.as_mut().unwrap().describe_implicits(item).await?,
                 None => None,
             };
             self.superseded(epoch)?;
@@ -1703,7 +1707,7 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
                 .connection
                 .as_mut()
                 .ok_or_else(|| BackendError::blocked(ErrorKind::NotConnected, "connection released"))?
-                .refresh(self.clock.now())
+                .refresh()
                 .await?;
             self.superseded(epoch)?;
             self.check_status(status)?;
@@ -1727,7 +1731,7 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
                     .ok_or_else(|| BackendError::blocked(ErrorKind::Protocol, "current catalog missing"))?
             };
             self.admit(&target)?;
-            let forge = self.connection.as_mut().unwrap().read_forge(self.clock.now()).await?;
+            let forge = self.connection.as_mut().unwrap().read_forge().await?;
             self.superseded(epoch)?;
             self.admit(&target)?;
             // The game builds an item's implicit text with its tooltip code on its main thread: the monitor keeps the
@@ -1743,7 +1747,7 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
             };
             let implicits = match (&forge, kept) {
                 (_, Some(kept)) => kept,
-                (Some(item), None) => self.connection.as_mut().unwrap().describe_implicits(self.clock.now(), item).await?,
+                (Some(item), None) => self.connection.as_mut().unwrap().describe_implicits(item).await?,
                 (None, None) => None,
             };
             self.superseded(epoch)?;

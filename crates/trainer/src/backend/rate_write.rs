@@ -44,12 +44,7 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
             .ok_or_else(|| BackendError::blocked(ErrorKind::Fault, "attack/leech observation sequence exhausted"))?;
         let target = expected.process.clone();
         self.admit_using_policy(&target, GatePolicy::Release)?;
-        let refreshed = self
-            .connection
-            .as_mut()
-            .ok_or_else(|| super::write::invalid_edit("connection released"))?
-            .refresh(self.clock.now())
-            .await;
+        let refreshed = self.connection.as_mut().ok_or_else(|| super::write::invalid_edit("connection released"))?.refresh().await;
         let status = match refreshed {
             Ok(status) => status,
             Err(error) => {

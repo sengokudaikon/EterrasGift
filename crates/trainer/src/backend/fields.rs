@@ -23,11 +23,11 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
             self.admit(&target)?;
             self.state.activity = Some(Activity::ReadingAttackLeech);
             self.publish_if_current(epoch)?;
-            let status = self.connection.as_mut().unwrap().refresh(self.clock.now()).await?;
+            let status = self.connection.as_mut().unwrap().refresh().await?;
             self.superseded(epoch)?;
             self.check_status(status)?;
             self.admit(&target)?;
-            let read = self.connection.as_mut().unwrap().read_attack_leech(self.clock.now()).await?;
+            let read = self.connection.as_mut().unwrap().read_attack_leech().await?;
             self.superseded(epoch)?;
             self.admit(&target)?;
             if matches!(

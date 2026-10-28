@@ -1,15 +1,11 @@
 //! Owned forge edit planning. This module performs no I/O and authorizes no
-//! native write. Models/rules follow the C# domain and native helper at e1c1ed4.
-//! A prepared edit must still pass the process-bound log/runtime gates, exact
-//! helper admission, main-thread stale check, and strict readback in a future
-//! submission implementation. Uncertain writes must never be retried.
+//! native write. A prepared edit must still pass the process-bound log/runtime
+//! gates, exact helper admission, main-thread stale check, and strict readback.
+//! Uncertain writes must never be retried.
 //!
-//! Sources: `Trainer.Domain/Models/{ItemEdit,AffixEdit}.cs`,
-//! `Trainer.Domain/Rules/{AffixLayout,AffixCompatibility}.cs`,
-//! `Trainer.Application/Editing/{EditWorkflow,EditReadback}.cs`, and
-//! `native/{item,item-edits,affix-edits}.h` in the original app. The two deliberate
-//! corrections are the 12-bit save-ID rule for every rebuilding operation and
-//! the hard 32-affix readable-result bound, even for already malformed layouts.
+//! Every rebuilding operation keeps affix IDs within the 12 bits the game saves,
+//! and no result may exceed the 32 affixes a reader accepts, even when the
+//! observed layout is already malformed.
 
 use crate::catalog::{CatalogIdentity, GameCatalog};
 use eg_trainer_wire::{
@@ -147,8 +143,8 @@ impl ItemEdit {
             Self::UniqueIdentity(e) => e.unrestricted,
         }
     }
-    /// Carry slot references through earlier edits; an absent move keeps its label,
-    /// matching C# Follow. The next preparation still rejects a missing slot.
+    /// Carry slot references through earlier edits; an absent move keeps its label.
+    /// The next preparation still rejects a missing slot.
     pub fn follow(&self, moves: &BTreeMap<u8, u8>) -> Self {
         let moved = |slot: i32| u8::try_from(slot).ok().and_then(|s| moves.get(&s)).map_or(slot, |s| i32::from(*s));
         match self {
@@ -511,8 +507,8 @@ fn definition(catalog: &GameCatalog, id: i32, tier: i32) -> Result<&AffixDefinit
 fn validate_affix(catalog: &GameCatalog, item: &ForgeSnapshot, id: i32, tier: i32, slot: Option<&AffixSnapshot>, allow: bool) -> Result<(), EditError> {
     let d = definition(catalog, id, tier)?;
     let result = compatibility(catalog, item, d, slot, None, false);
-    // C# AllowsEdit permits every incompatibility with this per-edit flag, even
-    // unknown metadata; an absent current definition never gets that exception.
+    // The per-edit override permits every incompatibility, even unknown metadata;
+    // an absent current definition never gets that exception.
     if !result.allowed && !allow {
         return Err(EditError::Incompatible(result.reason));
     }
@@ -711,9 +707,9 @@ pub fn prepare(
     }
     after.affixes = ordered;
     after.fingerprint = after.legacy_fingerprint();
-    // Intentional safety corrections to e1c1ed4: roll-only edits also rebuild
-    // serialization, which stores 12-bit IDs, and an existing unique-capacity
-    // problem must not allow the result to exceed the reader's hard 32 bound.
+    // Roll-only edits also rebuild serialization, which stores 12-bit IDs, and an
+    // existing unique-capacity problem must not let the result exceed the reader's
+    // hard 32 bound.
     if !matches!(
         edit,
         ItemEdit::Status(StatusEdit {
@@ -896,7 +892,7 @@ fn inspect_readback(before: &ForgeSnapshot, edit: &ItemEdit, expected: &ForgeSna
         compare(differences, "classRequirement", &expected.class_requirement, &after.class_requirement)
     }
     compare(differences, "rarity", &expected.rarity, &after.rarity);
-    // The original strict-affix overload omitted set identity. Preserve it here.
+    // Readback compares set identity too.
     compare(differences, "identity", &expected.identity, &after.identity);
     if !matches!(edit, ItemEdit::BaseType(BaseTypeEdit { item_type: Some(_), .. })) {
         compare(differences, "implicitRolls", &expected.implicit_rolls, &after.implicit_rolls)

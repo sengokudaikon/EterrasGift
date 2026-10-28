@@ -1,26 +1,12 @@
-//! What the trainer's pages ask of the game session: the part of the C# app's `GameSessionCoordinator` that the page view
-//! models use, and the characters' profiles that hold the hooks. The app runs on the trainer's worker (`backend_session`)
+//! What the trainer's pages ask of the game session: its connection, the hooks of the shown profile and where they
+//! stand in the game, and the field editors' reads and writes. The app runs on the trainer's worker (`backend_session`)
 //! when it has one, and otherwise on [`Unconnected`], which tells the truth: no offline character is connected, and no
 //! profile is known.
 
 use super::profiles::Profile;
 
-/// Where a hook of the live profile stands in the game (the worker's `HookRun`).
-#[derive(Clone, Debug, PartialEq)]
-pub enum HookState {
-    /// Off in the game: not wanted, or turned off as asked.
-    Off,
-    /// Wanted, waiting its turn.
-    Queued,
-    Applying,
-    /// On in the game, as its own report confirmed.
-    On,
-    /// The last change did not take, for `reason`; `on` is what the game holds.
-    Failed {
-        reason: String,
-        on: bool,
-    },
-}
+/// Where a hook of the live profile stands in the game: the worker's own report.
+pub use eg_trainer::backend::HookRun as HookState;
 
 /// A field as the game answered: unnamed for a fixed editor, named by the game for a listed one (what the character holds).
 #[derive(Clone, Debug, PartialEq)]
@@ -86,7 +72,7 @@ pub trait TrainerSession {
     /// An offline character is connected (the session is Ready or Applying).
     fn is_connected(&self) -> bool;
     /// Why the connected game cannot serve this feature in this version; None when it can, and while nothing is connected
-    /// (the row then waits for a connection, as the C# app's does).
+    /// (the row then waits for a connection).
     fn unavailable(&self, _id: &str) -> Option<&'static str> {
         None
     }

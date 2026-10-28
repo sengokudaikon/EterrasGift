@@ -2,9 +2,9 @@
 //! kept across runs in `moduleSettings.trainer.profiles`. Pure: the worker owns the book (`backend`), and the
 //! composition saves it through a [`ProfileSaver`].
 //!
-//! The C# app kept one set of values for every character (`hookValues`) and turned every switch off with each run.
-//! Here those values are what a character without a profile starts from in play; the key stays for the C# app, which
-//! still reads and writes it.
+//! `settings.json`'s `hookValues` holds one set of values for every character, with every switch off each run. Here
+//! those values are what a character without a profile starts from in play; the key is left as it is, since other
+//! readers of the settings still use it.
 
 use crate::features::{FeatureIntents, HookId, SavedValues};
 use eg_core::game_log::LoggedCharacter;
@@ -14,7 +14,7 @@ use std::{fmt, sync::Arc};
 
 /// The settings key the profiles are saved under, in `moduleSettings.trainer`.
 pub const PROFILES_KEY: &str = "profiles";
-/// The C# app's values for every character, read as the template for a new profile.
+/// `settings.json`'s `hookValues`: values for every character, read as the template for a new profile.
 pub const HOOK_VALUES_KEY: &str = "hookValues";
 
 /// A character as Player.log names it when it loads, case-sensitive as logged. The level is left out: it changes. Two
@@ -53,8 +53,8 @@ pub struct ProfileBook {
 
 impl ProfileBook {
     /// Reads the trainer's settings slice. Whatever the catalog no longer has is dropped: an entry without its name,
-    /// class or cycle, an unknown hook, values of the wrong count (out-of-range ones are fitted, as the C# app's
-    /// were). A second entry for the same character is dropped too, keeping the one played last.
+    /// class or cycle, an unknown hook, values of the wrong count (out-of-range ones are fitted to the catalog). A
+    /// second entry for the same character is dropped too, keeping the one played last.
     pub fn from_settings(slice: Option<&Value>) -> Self {
         let template = FeatureIntents::from_saved(field(slice, HOOK_VALUES_KEY).map(saved_values).unwrap_or_default()).unwrap_or_default();
         let mut profiles: Vec<Profile> = field(slice, PROFILES_KEY)
@@ -92,7 +92,7 @@ impl ProfileBook {
         self.profiles.iter_mut().find(|profile| profile.key == *key).map(|profile| &mut profile.hooks)
     }
 
-    /// What a character without a profile starts from: nothing wanted, with the C# app's values.
+    /// What a character without a profile starts from: nothing wanted, with `settings.json`'s `hookValues`.
     pub fn template(&self) -> &FeatureIntents {
         &self.template
     }

@@ -141,7 +141,7 @@ fn profiles_are_written_beside_the_c_sharp_apps_values_and_read_back_the_same() 
     .unwrap();
     book.write_settings(&mut fields);
     assert_eq!(fields["autoConnect"], json!(false));
-    assert_eq!(fields["hookValues"], json!({ "damage-dealt": [5.0] }), "the C# app's values stay as they are");
+    assert_eq!(fields["hookValues"], json!({ "damage-dealt": [5.0] }), "hookValues stays as it is");
     assert!(!fields.contains_key("PROFILES"), "one spelling of the key");
     let saved = &fields["profiles"][0];
     assert_eq!(

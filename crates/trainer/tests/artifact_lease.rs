@@ -305,7 +305,7 @@ fn session_reuses_one_lease_across_polling_and_public_reads() {
     let (mut session, shared) = connected(&f);
     let initial = session.artifact_bytes_read().unwrap();
     assert!(initial > 8 * 1024 * 1024);
-    assert_eq!(run(session.read_locale(now())).unwrap(), locale());
+    assert_eq!(run(session.read_locale()).unwrap(), locale());
     for _ in 0..12 {
         let mut state = shared.lock().unwrap();
         state.responses.push_back(
@@ -321,9 +321,9 @@ fn session_reuses_one_lease_across_polling_and_public_reads() {
         state.responses.push_back(locale::encode(&locale()).unwrap());
         state.responses.push_back(eg_trainer_wire::forge::encode(None).unwrap());
         drop(state);
-        run(session.refresh(now())).unwrap();
-        run(session.read_locale(now())).unwrap();
-        assert_eq!(run(session.read_forge(now())).unwrap(), None);
+        run(session.refresh()).unwrap();
+        run(session.read_locale()).unwrap();
+        assert_eq!(run(session.read_forge()).unwrap(), None);
         assert_eq!(session.artifact_bytes_read(), Some(initial));
     }
     assert_shared(OpenOptions::new().write(true).open(&f.metadata).unwrap_err());
@@ -341,15 +341,15 @@ fn read_future_drop_retains_session_lease_and_preserves_connecting_barrier() {
     shared.lock().unwrap().pending = true;
     let mut session = Session::new(f.target.clone(), wire, f.profile()).unwrap();
     session.enable();
-    run(session.connect(now())).unwrap();
-    let mut future = Box::pin(session.read_locale(now()));
+    run(session.connect()).unwrap();
+    let mut future = Box::pin(session.read_locale());
     let mut context = Context::from_waker(Waker::noop());
     assert!(future.as_mut().poll(&mut context).is_pending());
     assert_shared(OpenOptions::new().write(true).open(&f.metadata).unwrap_err());
     drop(future);
     assert_shared(OpenOptions::new().write(true).open(&f.metadata).unwrap_err());
     assert_eq!(session.state(), SessionState::Connecting);
-    assert!(matches!(run(session.connect(now())), Err(SessionError::Busy)));
+    assert!(matches!(run(session.connect()), Err(SessionError::Busy)));
     let before = shared.lock().unwrap().requests.len();
     run(session.disconnect());
     assert_eq!(shared.lock().unwrap().requests.len(), before + 1);
@@ -365,9 +365,9 @@ fn runtime_refusal_releases_lease_and_stops_all_further_io() {
     shared.lock().unwrap().refuse_runtime = true;
     let mut session = Session::new(f.target.clone(), wire, f.profile()).unwrap();
     session.enable();
-    run(session.connect(now())).unwrap();
+    run(session.connect()).unwrap();
     assert!(matches!(
-        run(session.read_locale(now())),
+        run(session.read_locale()),
         Err(SessionError::Helper {
             code: ResponseCode::OfflineRequired,
             ..
@@ -396,9 +396,9 @@ fn changed_artifact_before_a_read_is_rejected_before_its_request() {
             .unwrap();
         let mut session = Session::new(f.target.clone(), wire, f.profile()).unwrap();
         session.enable();
-        run(session.connect(now())).unwrap();
+        run(session.connect()).unwrap();
         fs::write(if binary { &f.binary } else { &f.metadata }, b"changed before lease").unwrap();
-        assert!(matches!(run(session.read_locale(now())), Err(SessionError::Identity(_))));
+        assert!(matches!(run(session.read_locale()), Err(SessionError::Identity(_))));
         assert_eq!(session.state(), SessionState::Disconnected);
         assert_eq!(shared.lock().unwrap().requests.len(), 2);
     }
@@ -412,7 +412,7 @@ fn fallback_hashes_unchanged_artifacts_once_rather_than_on_every_read() {
     // No lease holds the files against writes: the fallback is what this checks.
     shared.lock().unwrap().assert_locks = false;
     assert_eq!(session.artifact_bytes_read(), None, "another writer selects the fallback");
-    assert_eq!(run(session.read_locale(now())).unwrap(), locale());
+    assert_eq!(run(session.read_locale()).unwrap(), locale());
     // Connecting and the read checked the files; the content was read once.
     let after_connect = session.artifact_full_validations().unwrap();
     assert_eq!(after_connect, 1);
@@ -431,9 +431,9 @@ fn fallback_hashes_unchanged_artifacts_once_rather_than_on_every_read() {
         state.responses.push_back(locale::encode(&locale()).unwrap());
         state.responses.push_back(eg_trainer_wire::forge::encode(None).unwrap());
         drop(state);
-        run(session.refresh(now())).unwrap();
-        run(session.read_locale(now())).unwrap();
-        assert_eq!(run(session.read_forge(now())).unwrap(), None);
+        run(session.refresh()).unwrap();
+        run(session.read_locale()).unwrap();
+        assert_eq!(run(session.read_forge()).unwrap(), None);
     }
     assert_eq!(session.artifact_full_validations(), Some(after_connect), "unchanged files are not read again");
     run(session.disconnect());
@@ -449,13 +449,13 @@ fn fallback_rehashes_each_read_and_rejects_an_inflight_artifact_change() {
     let writer = OpenOptions::new().read(true).write(true).share_mode(7).open(&f.metadata).unwrap();
     let mut session = Session::new(f.target.clone(), wire, f.profile()).unwrap();
     session.enable();
-    run(session.connect(now())).unwrap();
+    run(session.connect()).unwrap();
     {
         let mut state = shared.lock().unwrap();
         state.assert_locks = false;
         state.replace_metadata = true;
     }
-    assert!(matches!(run(session.read_locale(now())), Err(SessionError::Identity(_))));
+    assert!(matches!(run(session.read_locale()), Err(SessionError::Identity(_))));
     assert_eq!(shared.lock().unwrap().requests.len(), 3);
     assert_eq!(session.state(), SessionState::Disconnected);
     drop(writer);
@@ -468,6 +468,6 @@ fn connected(f: &Fixture) -> (Session<Wire>, Arc<Mutex<WireState>>) {
     let shared = wire.shared.clone();
     let mut session = Session::new(f.target.clone(), wire, f.profile()).unwrap();
     session.enable();
-    run(session.connect(now())).unwrap();
+    run(session.connect()).unwrap();
     (session, shared)
 }

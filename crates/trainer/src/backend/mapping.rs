@@ -38,7 +38,7 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
             .connection
             .as_mut()
             .ok_or_else(|| BackendError::blocked(ErrorKind::NotConnected, "connection released"))?
-            .resolve_mapping_observed(self.clock.now(), &expected, &request, &mut control)
+            .resolve_mapping_observed(&expected, &request, &mut control)
             .await;
         self.superseded(epoch)?;
         // Optional formatting must not resurrect a failed offline/process gate.
@@ -104,7 +104,7 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
             .connection
             .as_mut()
             .ok_or_else(|| BackendError::blocked(ErrorKind::NotConnected, "connection released"))?
-            .read_locale(self.clock.now())
+            .read_locale()
             .await?;
         self.superseded(epoch)?;
         self.admit(target)?;

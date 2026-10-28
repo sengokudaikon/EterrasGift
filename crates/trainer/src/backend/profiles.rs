@@ -271,7 +271,7 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
             .connection
             .as_mut()
             .ok_or_else(|| BackendError::blocked(ErrorKind::NotConnected, "connection released"))?;
-        let (outcome, mut failure) = match connection.set_hook(self.clock.now(), &request, &mut control).await {
+        let (outcome, mut failure) = match connection.set_hook(&request, &mut control).await {
             Ok(outcome) => (outcome, None),
             Err(error) if error.kind == ErrorKind::Superseded && error.delivery != Some(Delivery::MayHaveRun) => {
                 self.state.hooks.insert(id, HookRun::Queued);

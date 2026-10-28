@@ -115,7 +115,7 @@ fn actual_log_pipe_and_session_validate_before_status_and_clear_on_disable() {
         let mut session = Session::new(target, Unverified(client), profile).unwrap();
         assert_eq!(session.state(), SessionState::Disabled);
         session.enable();
-        timeout(Duration::from_secs(5), session.connect(now)).await.unwrap().unwrap();
+        timeout(Duration::from_secs(5), session.connect()).await.unwrap().unwrap();
         assert_eq!(session.state(), SessionState::Ready);
         assert_eq!(session.runtime_status().unwrap().features_on, 2);
         assert_eq!(timeout(Duration::from_secs(5), session.disable()).await.unwrap(), Cleanup::Unconfirmed);

@@ -1,9 +1,9 @@
-//! Pure planning for one attack/leech field, following `native/hooks/combat.h` and the immutable
-//! `attack-leech` editor descriptors. This module performs no I/O and grants no native write authority.
+//! Pure planning for one attack/leech field, following the immutable `attack-leech` editor
+//! descriptors. This module performs no I/O and grants no native write authority.
 //!
-//! Bounds are the source editor's doubles, checked before its float projection. UI steps never
-//! quantize an input. Nonfinite inputs are rejected as in the original runFields entrypoint.
-//! The source's `shortestDecimal(float)` is a display conversion: widening an f32 to f64
+//! Bounds are the editor's doubles, checked before the float projection. UI steps never
+//! quantize an input. Nonfinite inputs are rejected.
+//! Showing a float as its shortest decimal is a display conversion: widening an f32 to f64
 //! is not the same decimal that the user typed (e.g. 1.1 or the 0.01 lower bound). Neither display text
 //! nor widened decimal equality replaces raw-bit observation comparisons.
 //!
@@ -119,7 +119,7 @@ impl AttackLeechPlan {
             return Err(FieldPlanError::InvalidInput(FieldInputError::OutsideEditorRange));
         }
         // Bounds above are intentionally f64. In particular, 0.01_f64 is accepted even though
-        // its projected f32 widens to a double slightly below the editor's original lower bound.
+        // its projected f32 widens to a double slightly below the editor's lower bound.
         let projected_bits = (value as f32).to_bits();
         if target.bits(&before) == projected_bits {
             return Ok(AttackLeechDecision::NoOp);

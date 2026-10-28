@@ -1,8 +1,7 @@
-//! The trainer's pages as plain Rust: the C# app's page view models (`TrainerPages`, `TrainerPageViewModel`,
-//! `HookSwitchViewModel`, `FeatureValueViewModel`, `FieldEditorViewModel`, `HeldItemsViewModel`,
-//! `PlannedFeatureViewModel`) and `RowColumnsPanel`'s split, without any view. `view.rs` shows them.
+//! The trainer's pages as plain Rust: pages, sections, hook rows, field editors, held-item lists and planned features,
+//! and how rows split into columns, without any view, so they are testable alone. `view.rs` shows them.
 
-use super::catalog::{self, Area, Feature, FeatureField, FeatureKind, FeatureValue};
+use super::catalog::{self, Area, Feature, FeatureField, FeatureKind};
 use super::session::{FieldError, FieldRequest, FieldResult, FieldWrite, GameField, HookState, PendingFields, TrainerSession};
 
 /// One trainer page: its sections along the top and the chosen one beneath.
@@ -50,7 +49,7 @@ pub fn build(area: Area, features: &[Feature], planned: bool, session: &dyn Trai
     let mut sections = Vec::new();
     for &section in page.sections {
         let in_section: Vec<&Feature> = features.iter().filter(|f| f.area == area && f.section == section).collect();
-        if in_section.iter().any(|f| f.fills_section && f.presented) {
+        if in_section.iter().any(|f| f.fills_section() && f.presented) {
             sections.push(Section {
                 title: section.to_owned(),
                 content: Content::ItemForge,
@@ -128,44 +127,44 @@ pub struct HookRow {
 
 impl HookRow {
     pub fn new(feature: Feature, session: &dyn TrainerSession) -> HookRow {
-        let saved = session.hook_values(feature.id);
+        let saved = session.hook_values(feature.id());
         let fits = saved.len() == feature.values.len();
         let values: Vec<f64> = feature
             .values
             .iter()
             .enumerate()
-            .map(|(i, value)| if fits { fit(value, saved[i]) } else { start(value) })
+            .map(|(i, value)| if fits { value.fit_saved(saved[i]) } else { value.start })
             .collect();
         let mut row = HookRow { feature, values };
         // A remembered value the catalog no longer allows reaches the helper as the box shows it.
         if fits && saved != row.values {
             row.send(session);
         }
-        if feature.kind == FeatureKind::Choice && !session.is_hook_wanted(feature.id) {
+        if feature.kind == FeatureKind::Choice && !session.is_hook_wanted(feature.id()) {
             row.values[0] = 0.0;
         }
         row
     }
 
     fn send(&self, session: &dyn TrainerSession) {
-        session.set_hook_values(self.feature.id, &self.values);
+        session.set_hook_values(self.feature.id(), &self.values);
     }
 
     pub fn is_on(&self, session: &dyn TrainerSession) -> bool {
-        session.is_hook_wanted(self.feature.id)
+        session.is_hook_wanted(self.feature.id())
     }
 
     /// Its switch and values take changes while a profile shows, except in a connected game this version cannot put it in.
     pub fn can_use(&self, session: &dyn TrainerSession) -> bool {
-        session.shown_profile().is_some() && !(session.is_connected() && session.unavailable(self.feature.id).is_some())
+        session.shown_profile().is_some() && !(session.is_connected() && session.unavailable(self.feature.id()).is_some())
     }
 
     pub fn set_on(&self, session: &dyn TrainerSession, on: bool) {
         // A feature first turned on starts from its defaults, which the helper needs.
-        if on && session.hook_values(self.feature.id).len() != self.values.len() {
+        if on && session.hook_values(self.feature.id()).len() != self.values.len() {
             self.send(session);
         }
-        session.set_hook(self.feature.id, on);
+        session.set_hook(self.feature.id(), on);
     }
 
     /// A number box's value; an emptied box keeps the last number.
@@ -173,7 +172,7 @@ impl HookRow {
         let (Some(value), Some(amount)) = (self.feature.values.get(index), amount) else {
             return;
         };
-        if self.feature.id == "damage-dealt" && amount > 100.0 && amount != 101.0 {
+        if self.feature.id() == "damage-dealt" && amount > 100.0 && amount != 101.0 {
             return;
         }
         self.set_number(session, index, amount.clamp(value.minimum, value.maximum));
@@ -183,7 +182,7 @@ impl HookRow {
     pub fn step(&mut self, session: &dyn TrainerSession, index: usize, direction: i32) {
         if let Some(value) = self.feature.values.get(index) {
             let mut amount = self.values[index] + value.step * f64::from(direction.signum());
-            if self.feature.id == "damage-dealt" && amount > 100.0 {
+            if self.feature.id() == "damage-dealt" && amount > 100.0 {
                 amount = if direction < 0 { 100.0 } else { 101.0 };
             }
             self.set_amount(session, index, Some(amount));
@@ -209,7 +208,7 @@ impl HookRow {
     /// Where it stands in the game while it is wanted on, or until the game lets it go; empty while it is off.
     pub fn status(&self, session: &dyn TrainerSession) -> (String, Tone) {
         let connected = session.is_connected();
-        if connected && let Some(reason) = session.unavailable(self.feature.id) {
+        if connected && let Some(reason) = session.unavailable(self.feature.id()) {
             return (reason.to_owned(), Tone::None);
         }
         let wanted = self.is_on(session);
@@ -220,12 +219,12 @@ impl HookRow {
             };
         }
         let say = |text: &str, tone| (text.to_owned(), tone);
-        match (wanted, session.hook_state(self.feature.id)) {
+        match (wanted, session.hook_state(self.feature.id())) {
             (true, Some(HookState::On)) if self.feature.kind == FeatureKind::Choice => (
                 format!("{} selected in the game.", self.feature.values[0].choices[self.values[0] as usize]),
                 Tone::Confirmed,
             ),
-            (true, Some(HookState::On)) if self.feature.id == "damage-dealt" && self.values == [101.0] => say("One-hit kills on in the game.", Tone::Confirmed),
+            (true, Some(HookState::On)) if self.feature.id() == "damage-dealt" && self.values == [101.0] => say("One-hit kills on in the game.", Tone::Confirmed),
             (true, Some(HookState::On)) => say("On in the game.", Tone::Confirmed),
             (true, Some(HookState::Failed { reason, .. })) => (format!("Could not turn on: {reason}"), Tone::Error),
             (true, Some(HookState::Applying | HookState::Off)) => say("Turning on in the game…", Tone::None),
@@ -247,31 +246,6 @@ pub fn hook_amount(id: &str, text: &str) -> Option<f64> {
 
 pub fn hook_text(id: &str, number: f64) -> String {
     if id == "damage-dealt" && number == 101.0 { "∞".into() } else { plain(number) }
-}
-
-/// A remembered number as the value takes it now: within its range, or a choice it still lists (else its default). The
-/// catalog may have changed since it was saved.
-pub fn fit(value: &FeatureValue, saved: f64) -> f64 {
-    if !value.choices.is_empty() {
-        if saved.fract() == 0.0 && saved >= 0.0 && saved < value.choices.len() as f64 {
-            saved
-        } else {
-            start(value)
-        }
-    } else if saved.is_finite() {
-        saved.clamp(value.minimum, value.maximum)
-    } else {
-        start(value)
-    }
-}
-
-/// Where a value starts: its default number, or its default choice's index.
-pub fn start(value: &FeatureValue) -> f64 {
-    if value.choices.is_empty() {
-        value.default.parse().unwrap_or(0.0)
-    } else {
-        value.choices.iter().position(|choice| *choice == value.default).unwrap_or(0) as f64
-    }
 }
 
 /// One field of an editor: what the game holds, and a draft until Apply.
@@ -477,13 +451,13 @@ impl EditorRow {
     /// Fields can be read and written only while an offline character is connected, when this version can serve them,
     /// and not while the game is answering another request of the row's.
     pub fn can_use(&self, session: &dyn TrainerSession) -> bool {
-        session.is_connected() && session.unavailable(self.feature.id).is_none() && !self.is_busy()
+        session.is_connected() && session.unavailable(self.feature.id()).is_none() && !self.is_busy()
     }
 
     /// Why the row cannot be used, under its title: it waits for a connection, or this version cannot serve it.
     pub fn reason(&self, session: &dyn TrainerSession) -> Option<&'static str> {
         if session.is_connected() {
-            session.unavailable(self.feature.id)
+            session.unavailable(self.feature.id())
         } else {
             Some("Available once an offline character is connected.")
         }
@@ -523,7 +497,7 @@ impl EditorRow {
         if !self.can_use(session) {
             return;
         }
-        match session.read_fields(self.feature.id) {
+        match session.read_fields(self.feature.id()) {
             FieldRequest::Done(result) => self.finish_read(result),
             FieldRequest::Pending(pending) => self.busy = Some((Request::Read, pending)),
         }
@@ -557,7 +531,7 @@ impl EditorRow {
             })
             .collect();
         let labels: Vec<String> = self.fields.iter().map(|f| f.label().to_owned()).collect();
-        match session.write_fields(self.feature.id, &sent) {
+        match session.write_fields(self.feature.id(), &sent) {
             FieldRequest::Done(result) => self.finish_apply(&sent, &labels, result),
             FieldRequest::Pending(pending) => self.busy = Some((Request::Apply(sent, labels), pending)),
         }

@@ -18,15 +18,9 @@ impl<T: Transport> Session<T> {
 
     pub async fn set_gameplay_hook_with_value(&mut self, hook: GameplayHook, on: bool, value: u64, control: &mut dyn WriteControl) -> Result<WriteOutcome<bool>, SessionError> {
         hook.validate_value(value).map_err(SessionError::Protocol)?;
-        if matches!(self.state, SessionState::Connecting | SessionState::Closing) {
-            return Err(SessionError::Busy);
-        }
-        self.require_enabled()?;
-        if self.state != SessionState::Ready {
-            return Err(SessionError::NotConnected);
-        }
-        let dispatcher = self.discovery.as_ref().ok_or(SessionError::NotConnected)?.dispatcher;
-        let expected_manager = self.status.filter(|s| !s.online && s.manager != 0).ok_or(SessionError::NotConnected)?.manager;
+        self.admit()?;
+        let dispatcher = self.dispatcher()?;
+        let expected_manager = self.offline_manager()?;
         self.write_provenance(&dispatcher)?;
         if !control.allowed() {
             return Err(SessionError::Busy);
@@ -127,7 +121,7 @@ impl<T: Transport> Session<T> {
 
     /// Poll only hooks this connection has confirmed; unsupported features need no RPC.
     pub(crate) async fn refresh_gameplay_hooks(&mut self) -> Result<(), SessionError> {
-        let dispatcher = self.discovery.as_ref().ok_or(SessionError::NotConnected)?.dispatcher;
+        let dispatcher = self.dispatcher()?;
         let expected_manager = self.status.ok_or(SessionError::NotConnected)?.manager;
         self.state = SessionState::Connecting;
         let result = async {

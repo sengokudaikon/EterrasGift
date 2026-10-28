@@ -372,7 +372,7 @@ fn only_explicit_write_is_submitted_and_full_confirmation_is_published() {
         assert!(state.capabilities.level_requirement);
         let plan = state.level_requirement_plan(17).unwrap();
         assert_eq!(shared.count("write"), 0);
-        command(&handle, Command::ApplyForge(Box::new(plan.clone()))).await.unwrap();
+        command(&handle, Command::Write(plan.clone().into())).await.unwrap();
         assert_eq!(handle.snapshot().last_write.unwrap().status, WriteStatus::Confirmed(plan.projected().clone()));
         assert!(matches!(handle.snapshot().forge, ForgeState::Item { snapshot, .. } if snapshot.as_ref() == plan.projected()));
         command(&handle, Command::ReadForge).await.unwrap();
@@ -396,7 +396,7 @@ fn a_confirmed_write_publishes_the_item_with_the_games_implicit_text() {
         connected(&handle).await;
         assert_eq!(shared.count("implicits"), 1);
         let plan = handle.snapshot().level_requirement_plan(17).unwrap();
-        command(&handle, Command::ApplyForge(Box::new(plan))).await.unwrap();
+        command(&handle, Command::Write(plan.into())).await.unwrap();
         // The readback is described before it is published: the monitor keeps text only for an unchanged item.
         assert_eq!(shared.count("implicits"), 2);
         assert!(matches!(handle.snapshot().forge, ForgeState::Item { implicits: Some(lines), .. } if lines == vec![line]));
@@ -413,14 +413,11 @@ fn stale_full_observation_and_generation_are_refused_before_write_or_status_io()
         shared.forge_item.lock().unwrap().as_mut().unwrap().name.push_str(" changed");
         command(&handle, Command::ReadForge).await.unwrap();
         let refreshes = shared.count("refresh");
-        assert_eq!(
-            command(&handle, Command::ApplyForge(Box::new(plan.clone()))).await.unwrap_err().kind,
-            ErrorKind::InvalidEdit
-        );
+        assert_eq!(command(&handle, Command::Write(plan.clone().into())).await.unwrap_err().kind, ErrorKind::InvalidEdit);
         assert_eq!(shared.count("refresh"), refreshes);
         command(&handle, Command::Disconnect).await.unwrap();
         command(&handle, Command::Connect).await.unwrap();
-        assert_eq!(command(&handle, Command::ApplyForge(Box::new(plan))).await.unwrap_err().kind, ErrorKind::InvalidEdit);
+        assert_eq!(command(&handle, Command::Write(plan.into())).await.unwrap_err().kind, ErrorKind::InvalidEdit);
         assert_eq!(shared.count("write"), 0);
         shutdown(&handle, worker).await;
     });
@@ -433,7 +430,7 @@ fn manager_changed_during_fresh_status_revokes_session_before_submission() {
         connected(&handle).await;
         let plan = handle.snapshot().level_requirement_plan(17).unwrap();
         shared.status.lock().unwrap().manager = 0x5678;
-        assert_eq!(command(&handle, Command::ApplyForge(Box::new(plan))).await.unwrap_err().kind, ErrorKind::Identity);
+        assert_eq!(command(&handle, Command::Write(plan.into())).await.unwrap_err().kind, ErrorKind::Identity);
         assert_eq!(shared.count("write"), 0);
         assert_eq!(handle.snapshot().phase, Phase::Blocked);
         assert_eq!(handle.snapshot().forge, ForgeState::Unobserved);
@@ -448,7 +445,7 @@ fn cleanup_drains_submitted_write_and_retains_its_outcome_without_publishing_ite
         connected(&handle).await;
         let plan = handle.snapshot().level_requirement_plan(17).unwrap();
         shared.write_block.arm();
-        let write = handle.try_submit(Command::ApplyForge(Box::new(plan.clone()))).unwrap();
+        let write = handle.try_submit(Command::Write(plan.clone().into())).unwrap();
         shared.write_block.wait_started().await;
         assert_eq!(handle.snapshot().last_write.unwrap().status, WriteStatus::Pending);
         let disable = handle.try_submit(Command::Disable).unwrap();
@@ -475,7 +472,7 @@ fn dropped_write_receipt_still_finishes_and_uncertainty_blocks_without_replay() 
         let plan = handle.snapshot().level_requirement_plan(17).unwrap();
         *shared.write_result.lock().unwrap() = Some(WriteStatus::uncertain("lost reply"));
         shared.write_block.arm();
-        drop(handle.try_submit(Command::ApplyForge(Box::new(plan))).unwrap());
+        drop(handle.try_submit(Command::Write(plan.into())).unwrap());
         shared.write_block.wait_started().await;
         shared.write_block.finish();
         wait_phase(&handle, Phase::Blocked).await;
@@ -501,7 +498,7 @@ fn mismatched_connection_confirmation_is_uncertain_even_if_legacy_hash_matches()
         wrong.name.push_str(" unexpected");
         assert_eq!(wrong.fingerprint, plan.projected().fingerprint);
         *shared.write_result.lock().unwrap() = Some(WriteStatus::Confirmed(wrong));
-        assert_eq!(command(&handle, Command::ApplyForge(Box::new(plan))).await.unwrap_err().kind, ErrorKind::WriteUncertain);
+        assert_eq!(command(&handle, Command::Write(plan.into())).await.unwrap_err().kind, ErrorKind::WriteUncertain);
         assert_eq!(handle.snapshot().phase, Phase::Blocked);
         assert_eq!(shared.count("write"), 1);
         shutdown(&handle, worker).await;
@@ -519,7 +516,7 @@ fn success_or_failure_code_cannot_be_reported_as_definite_level_nonexecution() {
                 code,
                 message: "adapter mislabeled a possibly executed operation".into(),
             });
-            let error = command(&handle, Command::ApplyForge(Box::new(plan))).await.unwrap_err();
+            let error = command(&handle, Command::Write(plan.into())).await.unwrap_err();
             assert_eq!(error.kind, ErrorKind::WriteUncertain);
             assert_eq!(error.delivery, Some(Delivery::MayHaveRun));
             let state = handle.snapshot();
@@ -545,7 +542,7 @@ fn write_preflight_refresh_failure_releases_connection_instead_of_retaining_read
             .lock()
             .unwrap()
             .push_back(BackendError::blocked(ErrorKind::Transport, "fresh status unavailable"));
-        assert!(command(&handle, Command::ApplyForge(Box::new(plan))).await.is_err());
+        assert!(command(&handle, Command::Write(plan.into())).await.is_err());
         assert_eq!(handle.snapshot().phase, Phase::Blocked);
         assert!(!handle.snapshot().capabilities.level_requirement);
         assert_eq!(shared.count("write"), 0);
@@ -561,7 +558,7 @@ fn gate_or_not_ready_refresh_failure_revokes_old_ready_state_without_submitting(
             connected(&handle).await;
             let plan = handle.snapshot().level_requirement_plan(17).unwrap();
             shared.read_errors.lock().unwrap().push_back(BackendError::blocked(kind, "fresh status refused"));
-            assert_eq!(command(&handle, Command::ApplyForge(Box::new(plan))).await.unwrap_err().kind, kind);
+            assert_eq!(command(&handle, Command::Write(plan.into())).await.unwrap_err().kind, kind);
             let state = handle.snapshot();
             assert_eq!(state.phase, if kind == ErrorKind::Gate { Phase::WaitingForCharacter } else { Phase::Blocked });
             assert!(state.attached.is_none() && state.runtime_status.is_none());
@@ -581,7 +578,7 @@ fn explicit_undo_uses_a_fresh_reverse_plan_and_consumes_the_last_apply() {
         let (handle, worker) = start(&shared, options());
         connected(&handle).await;
         let plan = handle.snapshot().level_requirement_plan(17).unwrap();
-        command(&handle, Command::ApplyForge(Box::new(plan))).await.unwrap();
+        command(&handle, Command::Write(plan.into())).await.unwrap();
         let undo = handle.snapshot().undo_forge.unwrap();
         assert!(matches!(undo.reverse_edit(), eg_trainer::edits::ItemEdit::Status(edit) if edit.value == 20));
         let fresh = handle.snapshot().forge_undo_plan(&undo).unwrap();
@@ -603,10 +600,10 @@ fn next_apply_replaces_undo_and_old_ui_intent_is_refused_before_io() {
         let (handle, worker) = start(&shared, options());
         connected(&handle).await;
         let plan = handle.snapshot().level_requirement_plan(17).unwrap();
-        command(&handle, Command::ApplyForge(Box::new(plan))).await.unwrap();
+        command(&handle, Command::Write(plan.into())).await.unwrap();
         let old = handle.snapshot().undo_forge.unwrap();
         let plan = handle.snapshot().level_requirement_plan(19).unwrap();
-        command(&handle, Command::ApplyForge(Box::new(plan))).await.unwrap();
+        command(&handle, Command::Write(plan.into())).await.unwrap();
         let refreshes = shared.count("refresh");
         assert_eq!(command(&handle, Command::UndoForge(Box::new(old))).await.unwrap_err().kind, ErrorKind::InvalidEdit);
         assert_eq!(shared.count("refresh"), refreshes);
@@ -622,7 +619,7 @@ fn observed_change_outside_legacy_hash_discards_undo_and_disconnect_cannot_reuse
         let (handle, worker) = start(&shared, options());
         connected(&handle).await;
         let plan = handle.snapshot().level_requirement_plan(17).unwrap();
-        command(&handle, Command::ApplyForge(Box::new(plan))).await.unwrap();
+        command(&handle, Command::Write(plan.into())).await.unwrap();
         let undo = handle.snapshot().undo_forge.unwrap();
         shared.forge_item.lock().unwrap().as_mut().unwrap().name.push_str(" external drift");
         command(&handle, Command::ReadForge).await.unwrap();
@@ -642,7 +639,7 @@ fn uncertain_undo_discards_its_token_and_releases_live_item_without_replay() {
         let (handle, worker) = start(&shared, options());
         connected(&handle).await;
         let plan = handle.snapshot().level_requirement_plan(17).unwrap();
-        command(&handle, Command::ApplyForge(Box::new(plan))).await.unwrap();
+        command(&handle, Command::Write(plan.into())).await.unwrap();
         let undo = handle.snapshot().undo_forge.unwrap();
         *shared.write_result.lock().unwrap() = Some(WriteStatus::uncertain("reverse readback unavailable"));
         assert_eq!(command(&handle, Command::UndoForge(Box::new(undo))).await.unwrap_err().kind, ErrorKind::WriteUncertain);

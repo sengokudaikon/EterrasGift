@@ -1,9 +1,8 @@
-//! The catalog built from the game's shipped files (`eg_game_files`) instead of a live capture: the same definitions,
-//! read the same way, with the same presentation rules and the same reasons where something is unavailable. It needs
-//! no game process. Its identity is the build's binary and metadata hashes; the locale comes from the session that
-//! uses it, since nothing in the catalog is localised. `crate::game_data` reads it in the background and keeps it.
+//! The catalog built from the game's shipped files (`eg_game_files`). It needs no game process. Its identity is the
+//! build's binary and metadata hashes; the locale comes from the session that uses it, since nothing in the catalog is
+//! localised. `crate::game_data` reads it in the background and keeps it.
 //!
-//! The presentation selection mirrors `eg_game_access`'s `catalog_numeric_property`: ordinary properties take their
+//! Each numeric property is presented through the definition that names it: ordinary properties take their
 //! `PropertyList` entry (or its default), ailment chance (43) the stat its ailment's effectiveness selects, and
 //! ability (58), player (98), tracker (123) and idol altar (130) properties their own registries.
 
@@ -19,7 +18,7 @@ use eg_trainer_wire::protocol::ProtocolError;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
-/// The live capture's own reasons, so a file-built catalog reads the same where data is missing.
+/// Reasons shown where file data lacks a value.
 const AFFIX_NAME_REASON: &str = "The generated affix display-name formatter has not been validated";
 const RARITY_REASON: &str = "The localized rarity-name formatter has not been validated";
 const IMPLICIT_TEXT_REASON: &str = "Catalog definitions do not include implicit descriptions";
@@ -54,21 +53,19 @@ pub fn fingerprint(path: &Path) -> Option<Fingerprint> {
 }
 
 fn hash(path: &Path) -> Result<String, String> {
-    let file = std::fs::File::open(path).map_err(|e| format!("{}: {e}", path.display()))?;
-    eg_core::hashes::of_reader(file).map_err(|e| format!("{}: {e}", path.display()))
+    eg_core::hashes::of_file(path).map_err(|e| format!("{}: {e}", path.display()))
 }
 
 /// Reads and builds the catalog for the game in `folder` (the one holding `Last Epoch.exe`).
 pub fn read(folder: &Path) -> Result<FileCatalog, String> {
     let install = eg_game_files::Install::at(folder).map_err(|e| e.to_string())?;
-    let binary = folder.join("GameAssembly.dll");
-    let metadata = install.data_folder().join("il2cpp_data").join("Metadata").join("global-metadata.dat");
+    let binary = install.game_assembly();
+    let metadata = install.metadata();
     // Taken first, so a file that changes while it is read reads as changed afterwards. The hashed binaries are among
-    // them, so a saved catalog is known to be current without hashing them again.
+    // the player sources, so a saved catalog is known to be current without hashing them again.
     let mut paths = install.definition_sources();
     paths.extend(install.player_sources());
     paths.push(install.data_folder().join("build_hash.txt"));
-    paths.extend([binary.clone(), metadata.clone()]);
     let sources = paths.into_iter().map(|path| (fingerprint(&path), path)).map(|(print, path)| (path, print)).collect();
     let binary_hash = hash(&binary)?;
     let metadata_hash = hash(&metadata)?;
@@ -182,7 +179,7 @@ impl FileCatalog {
         self.binary_hash.eq_ignore_ascii_case(binary_hash) && self.metadata_hash.eq_ignore_ascii_case(metadata_hash)
     }
 
-    /// The catalog for a session's locale, through the same builder (and checks) as a live capture.
+    /// The catalog for a session's locale, through the same builder and checks as every catalog.
     pub fn catalog(&self, locale: GameLocale) -> Result<GameCatalog, ProtocolError> {
         let identity = CatalogIdentity {
             binary_hash: self.binary_hash.clone(),

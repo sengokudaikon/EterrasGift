@@ -119,7 +119,7 @@ impl CatalogCache {
     }
 
     /// Saves a fully validated catalog, then the last-key pointer. Retention is
-    /// best effort, as in the original cache: cleanup failure costs disk space.
+    /// best effort: cleanup failure costs disk space.
     pub fn save(&self, catalog: &GameCatalog) -> Result<(), CacheError> {
         let key = identity_key(&catalog.identity)?;
         let bytes = encode(catalog)?;

@@ -14,28 +14,22 @@ impl<T: Transport> Session<T> {
         self.last_write.as_ref()
     }
 
-    pub async fn edit_forge(&mut self, now: Timestamp, plan: &ForgePlan) -> Result<WriteStatus, SessionError> {
-        self.edit_forge_controlled(now, plan, &mut AllowWrite).await
+    pub async fn edit_forge(&mut self, plan: &ForgePlan) -> Result<WriteStatus, SessionError> {
+        self.edit_forge_controlled(plan, &mut AllowWrite).await
     }
-    pub async fn edit_forge_controlled(&mut self, now: Timestamp, plan: &ForgePlan, control: &mut dyn WriteControl) -> Result<WriteStatus, SessionError> {
-        Ok(self.write_controlled(now, &plan.clone().into(), control).await?.map(WriteObservation::into_forge))
+    pub async fn edit_forge_controlled(&mut self, plan: &ForgePlan, control: &mut dyn WriteControl) -> Result<WriteStatus, SessionError> {
+        Ok(self.write_controlled(&plan.clone().into(), control).await?.map(WriteObservation::into_forge))
     }
 
     /// Submit once. Err is pre-submission; all later failures retain certainty.
     /// A native ACK is provisional until a separate admitted read completes.
     /// Dropping this future leaves Pending and blocks further work until cleanup.
-    pub async fn write(&mut self, now: Timestamp, plan: &WritePlan) -> Result<WriteOutcome<WriteObservation>, SessionError> {
-        self.write_controlled(now, plan, &mut AllowWrite).await
+    pub async fn write(&mut self, plan: &WritePlan) -> Result<WriteOutcome<WriteObservation>, SessionError> {
+        self.write_controlled(plan, &mut AllowWrite).await
     }
-    pub async fn write_controlled(&mut self, _now: Timestamp, plan: &WritePlan, control: &mut dyn WriteControl) -> Result<WriteOutcome<WriteObservation>, SessionError> {
-        if matches!(self.state, SessionState::Connecting | SessionState::Closing) {
-            return Err(SessionError::Busy);
-        }
-        self.require_enabled()?;
-        if self.state != SessionState::Ready {
-            return Err(SessionError::NotConnected);
-        }
-        let dispatcher = self.discovery.as_ref().ok_or(SessionError::NotConnected)?.dispatcher;
+    pub async fn write_controlled(&mut self, plan: &WritePlan, control: &mut dyn WriteControl) -> Result<WriteOutcome<WriteObservation>, SessionError> {
+        self.admit()?;
+        let dispatcher = self.dispatcher()?;
         let (request, readback) = self.prepare_write(plan, dispatcher)?;
         self.write_provenance(&dispatcher)?;
         if !control.allowed() {

@@ -146,13 +146,8 @@ impl BuildProfile {
     }
     /// Bind the two local artifacts to the selected process's actual executable directory.
     pub fn validate_target(&self, executable: &Path) -> io::Result<()> {
-        let executable = fs::canonicalize(executable)?;
-        let parent = executable.parent().ok_or_else(|| invalid("executable directory missing"))?;
-        let mut data_name = executable.file_stem().ok_or_else(|| invalid("executable name missing"))?.to_os_string();
-        data_name.push("_Data");
-        let binary = fs::canonicalize(parent.join("GameAssembly.dll"))?;
-        let metadata = fs::canonicalize(parent.join(data_name).join("il2cpp_data/Metadata/global-metadata.dat"))?;
-        if binary != self.binary || metadata != self.metadata {
+        let (binary, metadata) = artifact_paths(executable)?;
+        if fs::canonicalize(binary)? != self.binary || fs::canonicalize(metadata)? != self.metadata {
             return Err(invalid("artifact paths do not belong to selected executable"));
         }
         Ok(())
@@ -247,6 +242,14 @@ fn validate_dispatcher_lease(image: &eg_game_access::artifact::ReadLease, dispat
         return Err(invalid("dispatcher differs from executable game file"));
     }
     Ok(())
+}
+/// The game binary and IL2CPP metadata beside an executable: `GameAssembly.dll`, and the metadata in `<name>_Data`.
+pub(crate) fn artifact_paths(executable: &Path) -> io::Result<(PathBuf, PathBuf)> {
+    let executable = fs::canonicalize(executable)?;
+    let parent = executable.parent().ok_or_else(|| invalid("executable directory missing"))?;
+    let mut data_name = executable.file_stem().ok_or_else(|| invalid("executable name missing"))?.to_os_string();
+    data_name.push("_Data");
+    Ok((parent.join("GameAssembly.dll"), parent.join(data_name).join("il2cpp_data/Metadata/global-metadata.dat")))
 }
 fn invalid(message: &str) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, message)

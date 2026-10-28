@@ -34,7 +34,7 @@ fn ack(plan: &AttackLeechPlan) -> Step {
 fn ready(f: &Fixture, wire: &FakeTransport, log: &FakeLog) -> Session<FakeTransport> {
     let mut session = f.session(wire, log, GatePolicy::Release);
     session.enable();
-    run(session.connect(now())).unwrap();
+    run(session.connect()).unwrap();
     session
 }
 fn mutate(o: &mut AttackLeechObservation, part: usize) {
@@ -63,7 +63,7 @@ fn explicit_rate_change_needs_two_exact_full_observations_preserves_bits_and_rec
         let wire = FakeTransport::new(f.target.clone(), [f.discover(), status(false, 0x1234, 0), ack(&p), ack(&p), clear()]);
         let mut session = ready(&f, &wire, &FakeLog::new([offline()]));
         assert_eq!(
-            run(session.write(now(), &p.clone().into())).unwrap(),
+            run(session.write(&p.clone().into())).unwrap(),
             WriteOutcome::Confirmed(WriteObservation::Field(*p.projected()))
         );
         assert_eq!(session.state(), SessionState::Ready);
@@ -112,9 +112,9 @@ fn malformed_unavailable_and_every_full_ack_drift_are_uncertain_without_independ
         };
         let wire = FakeTransport::new(f.target.clone(), [f.discover(), status(false, 0x1234, 0), done(bytes)]);
         let mut session = ready(&f, &wire, &FakeLog::new([offline()]));
-        assert!(matches!(run(session.set_attack_leech_rate(now(), &p)).unwrap(), RateWriteStatus::Uncertain { .. }));
+        assert!(matches!(run(session.set_attack_leech_rate(&p)).unwrap(), RateWriteStatus::Uncertain { .. }));
         assert_eq!(session.state(), SessionState::Disconnected);
-        assert!(run(session.set_attack_leech_rate(now(), &p)).is_err());
+        assert!(run(session.set_attack_leech_rate(&p)).is_err());
         assert_eq!(wire.requests().len(), 3);
     }
 }
@@ -150,15 +150,15 @@ fn only_trusted_prestore_refusal_or_not_sent_is_definitive_never_a_retry() {
         };
         let wire = FakeTransport::new(f.target.clone(), [f.discover(), status(false, 0x1234, 0), step]);
         let mut session = ready(&f, &wire, &FakeLog::new([offline()]));
-        let result = run(session.set_attack_leech_rate(now(), &p)).unwrap();
+        let result = run(session.set_attack_leech_rate(&p)).unwrap();
         assert_eq!(matches!(result, RateWriteStatus::Uncertain { .. }), fault == 1 || fault >= 7);
         if (2..=4).contains(&fault) {
             assert_eq!(session.state(), SessionState::Ready);
             wire.push(done(fields::encode(&AttackLeechRead::Available(observation()))));
-            assert!(matches!(run(session.read_attack_leech(now())).unwrap(), AttackLeechRead::Available(_)));
+            assert!(matches!(run(session.read_attack_leech()).unwrap(), AttackLeechRead::Available(_)));
             assert_eq!(wire.requests().len(), 4);
         } else {
-            assert!(run(session.set_attack_leech_rate(now(), &p)).is_err());
+            assert!(run(session.set_attack_leech_rate(&p)).is_err());
             assert_eq!(wire.requests().len(), 3);
         }
         assert_eq!(wire.requests().iter().filter(|r| matches!(r, Request::SetAttackLeechRate(_))).count(), 1);
@@ -205,7 +205,7 @@ fn independent_rate_drift_is_known_but_changed_identity_or_failed_reads_are_unce
         };
         let wire = FakeTransport::new(f.target.clone(), [f.discover(), status(false, 0x1234, 0), ack(&p), last]);
         let mut session = ready(&f, &wire, &FakeLog::new([offline()]));
-        let result = run(session.set_attack_leech_rate(now(), &p)).unwrap();
+        let result = run(session.set_attack_leech_rate(&p)).unwrap();
         if (7..=8).contains(&fault) {
             assert_eq!(result, RateWriteStatus::NotKept(actual));
             assert_eq!(session.state(), SessionState::Ready);
@@ -238,7 +238,7 @@ fn artifact_loss_at_either_reply_withholds_confirmation_and_stops_further_io() {
             steps.push(action);
             let wire = FakeTransport::new(f.target.clone(), steps);
             let mut session = ready(&f, &wire, &log);
-            assert!(matches!(run(session.set_attack_leech_rate(now(), &p)).unwrap(), RateWriteStatus::Uncertain { .. }));
+            assert!(matches!(run(session.set_attack_leech_rate(&p)).unwrap(), RateWriteStatus::Uncertain { .. }));
             assert_ne!(session.state(), SessionState::Ready);
             assert_eq!(wire.requests().len(), if readback { 4 } else { 3 });
         }
@@ -258,7 +258,7 @@ fn preflight_wrong_process_manager_or_changed_artifact_has_no_rate_record_or_rpc
         if fault == 2 {
             fs::write(&f.metadata, b"changed before send").unwrap();
         }
-        assert!(matches!(run(session.set_attack_leech_rate(now(), &p)), Err(SessionError::Identity(_))));
+        assert!(matches!(run(session.set_attack_leech_rate(&p)), Err(SessionError::Identity(_))));
         assert!(session.last_rate_write().is_none());
         assert_eq!(wire.requests().len(), 2);
     }
@@ -276,14 +276,14 @@ fn abandonment_at_send_or_read_keeps_pending_and_busy_until_disconnect_makes_unc
         steps.push(Step::Pending);
         let wire = FakeTransport::new(f.target.clone(), steps);
         let mut session = ready(&f, &wire, &FakeLog::new([offline()]));
-        let mut future = Box::pin(session.set_attack_leech_rate(now(), &p));
+        let mut future = Box::pin(session.set_attack_leech_rate(&p));
         assert!(future.as_mut().poll(&mut Context::from_waker(Waker::noop())).is_pending());
         drop(future);
         assert_eq!(session.last_rate_write().unwrap().status, RateWriteStatus::Pending);
         assert_eq!(session.state(), SessionState::Connecting);
-        assert!(matches!(run(session.set_attack_leech_rate(now(), &p)), Err(SessionError::Busy)));
-        assert!(matches!(run(session.read_forge(now())), Err(SessionError::Busy)));
-        assert!(matches!(run(session.read_attack_leech(now())), Err(SessionError::Busy)));
+        assert!(matches!(run(session.set_attack_leech_rate(&p)), Err(SessionError::Busy)));
+        assert!(matches!(run(session.read_forge()), Err(SessionError::Busy)));
+        assert!(matches!(run(session.read_attack_leech()), Err(SessionError::Busy)));
         assert_eq!(wire.requests().len(), if readback { 4 } else { 3 });
         wire.push(clear());
         run(session.disconnect());
@@ -311,7 +311,7 @@ fn cleanup_control_cancels_only_before_unsent_rpcs() {
         }
         let wire = FakeTransport::new(f.target.clone(), steps);
         let mut session = ready(&f, &wire, &FakeLog::new([offline()]));
-        let outcome = run(session.set_attack_leech_rate_controlled(now(), &p, &mut StopAfter(limit)));
+        let outcome = run(session.set_attack_leech_rate_controlled(&p, &mut StopAfter(limit)));
         if limit == 0 {
             assert!(matches!(outcome, Err(SessionError::Busy)));
             assert!(session.last_rate_write().is_none());
@@ -386,32 +386,32 @@ fn rate_and_forge_records_survive_each_other_including_abandoned_second_submissi
             let wire = FakeTransport::new(f.target.clone(), steps);
             let mut session = ready(&f, &wire, &FakeLog::new([offline()]));
             if rate_first {
-                assert!(matches!(run(session.set_attack_leech_rate(now(), &rate)).unwrap(), RateWriteStatus::Confirmed(_)));
+                assert!(matches!(run(session.set_attack_leech_rate(&rate)).unwrap(), RateWriteStatus::Confirmed(_)));
                 let kept = session.last_rate_write().unwrap().clone();
                 if abandon {
-                    let mut future = Box::pin(session.edit_forge(now(), &forge));
+                    let mut future = Box::pin(session.edit_forge(&forge));
                     assert!(future.as_mut().poll(&mut Context::from_waker(Waker::noop())).is_pending());
                     drop(future);
                     assert_eq!(session.last_write().unwrap().status, WriteStatus::Pending);
                     wire.push(clear());
                 } else {
-                    assert!(matches!(run(session.edit_forge(now(), &forge)).unwrap(), WriteStatus::Uncertain { .. }));
+                    assert!(matches!(run(session.edit_forge(&forge)).unwrap(), WriteStatus::Uncertain { .. }));
                 }
                 assert_eq!(session.last_rate_write(), Some(&kept));
                 run(session.disconnect());
                 assert!(matches!(session.last_write().unwrap().status, WriteStatus::Uncertain { .. }));
                 assert_eq!(session.last_rate_write(), Some(&kept));
             } else {
-                assert!(matches!(run(session.edit_forge(now(), &forge)).unwrap(), WriteStatus::Confirmed(_)));
+                assert!(matches!(run(session.edit_forge(&forge)).unwrap(), WriteStatus::Confirmed(_)));
                 let kept = session.last_write().unwrap().clone();
                 if abandon {
-                    let mut future = Box::pin(session.set_attack_leech_rate(now(), &rate));
+                    let mut future = Box::pin(session.set_attack_leech_rate(&rate));
                     assert!(future.as_mut().poll(&mut Context::from_waker(Waker::noop())).is_pending());
                     drop(future);
                     assert_eq!(session.last_rate_write().unwrap().status, RateWriteStatus::Pending);
                     wire.push(clear());
                 } else {
-                    assert!(matches!(run(session.set_attack_leech_rate(now(), &rate)).unwrap(), RateWriteStatus::Uncertain { .. }));
+                    assert!(matches!(run(session.set_attack_leech_rate(&rate)).unwrap(), RateWriteStatus::Uncertain { .. }));
                 }
                 assert_eq!(session.last_write(), Some(&kept));
                 run(session.disconnect());
