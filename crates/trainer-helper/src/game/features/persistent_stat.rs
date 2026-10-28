@@ -1,17 +1,9 @@
 //! One selected scalar on a character accessor. Pinning retains only its managed storage; the hook lifecycle
 //! closes/drains and restores it before releasing the pin, including when the character leaves play.
+use super::stat::StatFeature;
 use crate::game::{GameError, RuntimeAccess, WriteError, target, unsupported};
 use eg_il2cpp_runtime::{AttachedThread, raw};
-use eg_trainer_wire::hooks::GameplayHook;
 use std::{ffi::c_void, ptr::NonNull};
-
-fn feature(hook: GameplayHook) -> Result<&'static super::stat::StatFeature, WriteError> {
-    match hook {
-        GameplayHook::AttackRate => Ok(&super::attack_rate::ATTACK_RATE),
-        GameplayHook::LeechRate => Ok(&super::leech_rate::LEECH_RATE),
-        _ => Err(WriteError::Refused("Not a scalar feature".into())),
-    }
-}
 
 pub struct StatBinding {
     pub receiver: usize,
@@ -34,18 +26,17 @@ impl Drop for StatBinding {
 impl RuntimeAccess {
     /// # Safety
     /// Same attached main-thread graph/lifetime contract as `selected_stat`.
-    pub unsafe fn current_stat(&self, attached: &AttachedThread<'_>, manager: u64, hook: GameplayHook) -> Result<(usize, u32), WriteError> {
+    pub(crate) unsafe fn current_stat(&self, attached: &AttachedThread<'_>, manager: u64, feature: &StatFeature) -> Result<(usize, u32), WriteError> {
         // SAFETY: caller admits the current player's complete synchronous read span.
-        let selected = unsafe { self.selected_stat(attached, manager, feature(hook)?) }?;
+        let selected = unsafe { self.selected_stat(attached, manager, feature) }?;
         Ok((target(&selected.player.stats).map_err(GameError::from)?.as_ptr() as usize, selected.bits))
     }
     /// # Safety
     /// Attached main thread, initialized game statics and exclusive player read span as `player`. The caller keeps
     /// this binding until all gateways using it close and drain, and drops it on an attached runtime thread.
-    pub unsafe fn bind_stat(&self, attached: &AttachedThread<'_>, ownership: raw::Api, manager: u64, hook: GameplayHook) -> Result<StatBinding, WriteError> {
+    pub(crate) unsafe fn bind_stat(&self, attached: &AttachedThread<'_>, ownership: raw::Api, manager: u64, feature: &StatFeature) -> Result<StatBinding, WriteError> {
         // SAFETY: the selected accessor alone is resolved over a rooted, checked current player.
         unsafe {
-            let feature = feature(hook)?;
             let super::stat::SelectedStat { player, stat, bits: baseline } = self.selected_stat(attached, manager, feature)?;
             let object = target(&player.stats).map_err(GameError::from)?;
             let field = self.mutable_field(stat.owner, stat.name, c"Single", 0x0c)?;

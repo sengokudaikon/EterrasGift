@@ -1,0 +1,87 @@
+//! Offhand compatibility bypasses, scoped to the offhand container and its linked-slot check. Item requirements
+//! remain the game's own checks; this feature only changes weapon category and pairing rules.
+use super::hooks::{Behavior, GameplayHookTarget, GroupId, HookFeature, MethodSpec};
+use crate::{game::*, hooks::leaf::LeafEffect};
+
+pub(super) const FEATURE: HookFeature = HookFeature {
+    group: GroupId::Offhand,
+    behavior: Behavior::Leaf,
+    targets,
+};
+
+unsafe fn targets(access: &RuntimeAccess, module: NonNull<u8>, size: usize) -> Result<Vec<GameplayHookTarget>, GameError> {
+    // SAFETY: attached main thread with initialized statics, retained metadata and bounded module.
+    unsafe {
+        let images = access.images()?;
+        let receiver = access.class(&images, c"", c"OffhandItemContainer")?;
+        let receiver = NonNull::new(receiver.cast::<c_void>()).ok_or_else(|| unsupported("offhand receiver class"))?;
+        let owner = access.class(&images, c"", c"OneSlotItemContainerWithCharacterRequirements")?;
+        let linked = access.class(&images, c"", c"LinkedOneSlotItemContainer")?;
+        if (access.class_value)(receiver.as_ptr().cast()) || !(access.assignable)(owner, receiver.as_ptr().cast()) || !(access.assignable)(linked, receiver.as_ptr().cast()) {
+            return Err(unsupported("offhand receiver inheritance"));
+        }
+        let field = access.field(linked, c"linkedSlot")?;
+        let offset = (access.field_offset)(field);
+        if (access.field_flags)(field) & raw::FIELD_ATTRIBUTE_STATIC != 0
+            || access.field_class(field, "hook")? != linked
+            || !(16..=16384).contains(&offset)
+            || !offset.is_multiple_of(8)
+        {
+            return Err(unsupported("offhand linked-slot reference layout"));
+        }
+        let specs = [
+            (
+                MethodSpec {
+                    class: c"OneSlotItemContainerWithCharacterRequirements",
+                    method: c"alternateSufficientBaseTypeConditionFulfilled",
+                    instance: true,
+                    params: &["System.Int32"],
+                    returns: "System.Boolean",
+                },
+                LeafEffect::Boolean(true),
+                Some(receiver),
+                None,
+            ),
+            (
+                MethodSpec {
+                    class: c"OffhandItemContainer",
+                    method: c"IncompatibleDueTo2hWeapon",
+                    instance: false,
+                    params: &["AdditionalBaseTypeProvider", "ItemData", "ItemData"],
+                    returns: "System.Boolean",
+                },
+                LeafEffect::Boolean(false),
+                None,
+                None,
+            ),
+            (
+                MethodSpec {
+                    class: c"LinkedOneSlotItemContainer",
+                    method: c"incompatibleWithItemInLinkedSlot",
+                    instance: true,
+                    params: &["ItemData"],
+                    returns: "System.Boolean",
+                },
+                LeafEffect::Boolean(false),
+                Some(receiver),
+                Some(offset as u32),
+            ),
+            (
+                MethodSpec {
+                    class: c"OffhandItemContainer",
+                    method: c"EnforceWeaponLimitations",
+                    instance: true,
+                    params: &["System.Boolean", "UnityEngine.Vector2Int"],
+                    returns: "System.Void",
+                },
+                LeafEffect::Void,
+                None,
+                None,
+            ),
+        ];
+        specs
+            .into_iter()
+            .map(|(spec, effect, receiver, linked)| Ok(access.hook_method(&spec, module, size)?.leaf(effect, receiver, linked)))
+            .collect()
+    }
+}

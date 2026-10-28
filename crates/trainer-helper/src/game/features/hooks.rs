@@ -1,235 +1,153 @@
-use super::damage::{DamageLayout, OffenseLayout};
+//! Helper-owned patch groups and method contracts. Each feature supplies its own targets and behavior.
+use super::stat::StatFeature;
 use crate::game::*;
 use crate::hooks::leaf::LeafEffect;
-use eg_il2cpp_runtime::AttachedThread;
 use eg_trainer_wire::hooks::GameplayHook;
 
-pub struct GameplayHookTarget {
+/// Ownership of a set of entry patches. Several controls can share a group, and one group can patch several methods.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum GroupId {
+    MysteriousRift,
+    Offhand,
+    Damage,
+    AttackRate,
+    LeechRate,
+}
+impl GroupId {
+    pub(crate) const COUNT: usize = 5;
+}
+
+#[derive(Clone, Copy)]
+pub(crate) enum Behavior {
+    Leaf,
+    Damage,
+    Scalar(&'static StatFeature),
+}
+
+type ResolveTargets = unsafe fn(&RuntimeAccess, NonNull<u8>, usize) -> Result<Vec<GameplayHookTarget>, GameError>;
+
+pub(crate) struct HookFeature {
+    pub group: GroupId,
+    pub behavior: Behavior,
+    pub targets: ResolveTargets,
+}
+
+pub(crate) fn definition(hook: GameplayHook) -> &'static HookFeature {
+    match hook {
+        GameplayHook::MysteriousRift => &super::mysterious_rift::FEATURE,
+        GameplayHook::Offhand => &super::offhand::FEATURE,
+        GameplayHook::IncomingDamage | GameplayHook::DamageDealt => &super::damage::FEATURE,
+        GameplayHook::AttackRate => &super::attack_rate::FEATURE,
+        GameplayHook::LeechRate => &super::leech_rate::FEATURE,
+    }
+}
+
+pub(crate) struct MethodSpec {
+    pub class: &'static CStr,
+    pub method: &'static CStr,
+    pub instance: bool,
+    pub params: &'static [&'static str],
+    pub returns: &'static str,
+}
+
+pub(crate) struct ResolvedMethod {
     pub name: String,
     pub address: NonNull<u8>,
     pub bytes: [u8; 16],
-    pub effect: LeafEffect,
-    pub receiver_class: Option<NonNull<c_void>>,
-    pub linked_offset: Option<u32>,
-    pub stack_argument: bool,
+}
+impl ResolvedMethod {
+    pub(crate) fn leaf(self, effect: LeafEffect, receiver_class: Option<NonNull<c_void>>, linked_offset: Option<u32>) -> GameplayHookTarget {
+        GameplayHookTarget {
+            method: self,
+            effect: TargetEffect::Leaf {
+                effect,
+                receiver_class,
+                linked_offset,
+            },
+        }
+    }
+    pub(crate) fn scalar(self, stack_argument: bool) -> GameplayHookTarget {
+        GameplayHookTarget {
+            method: self,
+            effect: TargetEffect::Scalar { stack_argument },
+        }
+    }
+}
+
+pub(crate) enum TargetEffect {
+    Leaf {
+        effect: LeafEffect,
+        receiver_class: Option<NonNull<c_void>>,
+        linked_offset: Option<u32>,
+    },
+    Scalar {
+        stack_argument: bool,
+    },
+}
+pub(crate) struct GameplayHookTarget {
+    pub method: ResolvedMethod,
+    pub effect: TargetEffect,
 }
 
 impl RuntimeAccess {
-    /// Resolve the concrete targets of one feature without invoking their bodies.
+    /// Resolve one explicitly stated ABI without invoking its body. Feature-specific layouts and receiver rules
+    /// belong to the feature that calls this validator; the return contract never depends on generated code.
     ///
     /// # Safety
-    /// Same retained metadata, attached thread, MethodInfo layout and readable
-    /// GameAssembly span contract as `discover`. Exclusive patch ownership is
-    /// additionally required before using the returned code addresses.
-    pub unsafe fn gameplay_hook_targets(
-        &self,
-        // Not read: holding it proves this thread is attached, which the metadata and static reads below need.
-        _attached: &AttachedThread<'_>,
-        hook: GameplayHook,
-        module_base: NonNull<u8>,
-        module_size: usize,
-    ) -> Result<Vec<GameplayHookTarget>, GameError> {
-        let damage = if hook.is_damage() {
-            // SAFETY: attached main thread, initialized game statics and retained metadata.
-            Some(unsafe { self.damage_layout()? })
-        } else {
-            None
-        };
-        // Only concrete implemented features belong here.
-        let specs: &[(&CStr, &CStr, bool, &[&str], LeafEffect)] = match hook {
-            GameplayHook::IncomingDamage | GameplayHook::DamageDealt => &[(c"BaseHealth", c"HealthDamage", true, &["System.Single"], damage.unwrap().effect())],
-            GameplayHook::MysteriousRift => &[(c"TimeBeastTracker", c"NextEncounterShouldBeEggs", true, &[], LeafEffect::SelectableBoolean)],
-            GameplayHook::AttackRate => &[
-                (c"CharacterStats", c"calculateAttackRate", true, &[], LeafEffect::Void),
-                (
-                    c"CharacterStats",
-                    c"setMainHandAttackRate",
-                    true,
-                    &["System.Single", "System.Boolean", "System.Boolean"],
-                    LeafEffect::Void,
-                ),
-                (c"CharacterStats", c"setOffHandAttackRate", true, &["System.Single", "System.Boolean"], LeafEffect::Void),
-            ],
-            GameplayHook::LeechRate => &[(c"BaseStats", c"ApplyExternalStats", true, &[], LeafEffect::Void)],
-            GameplayHook::Offhand => &[
-                (
-                    c"OneSlotItemContainerWithCharacterRequirements",
-                    c"alternateSufficientBaseTypeConditionFulfilled",
-                    true,
-                    &["System.Int32"],
-                    LeafEffect::Boolean(true),
-                ),
-                (
-                    c"OffhandItemContainer",
-                    c"IncompatibleDueTo2hWeapon",
-                    false,
-                    &["AdditionalBaseTypeProvider", "ItemData", "ItemData"],
-                    LeafEffect::Boolean(false),
-                ),
-                (
-                    c"LinkedOneSlotItemContainer",
-                    c"incompatibleWithItemInLinkedSlot",
-                    true,
-                    &["ItemData"],
-                    LeafEffect::Boolean(false),
-                ),
-                (
-                    c"OffhandItemContainer",
-                    c"EnforceWeaponLimitations",
-                    true,
-                    &["System.Boolean", "UnityEngine.Vector2Int"],
-                    LeafEffect::Void,
-                ),
-            ],
-        };
+    /// Attached thread, retained metadata and MethodInfo layout as `discover`; `module_base..+module_size` is the
+    /// retained readable GameAssembly span. Exclusive patch ownership is required before using the returned address.
+    pub(crate) unsafe fn hook_method(&self, spec: &MethodSpec, module_base: NonNull<u8>, module_size: usize) -> Result<ResolvedMethod, GameError> {
         // SAFETY: caller supplies immutable metadata and a bounded retained module.
         unsafe {
             let images = self.images()?;
-            let mut targets = Vec::new();
-            for &(class, name, instance, params, ref effect) in specs {
-                let owner = self.class(&images, c"", class)?;
-                let scoped = class == c"OneSlotItemContainerWithCharacterRequirements" || class == c"LinkedOneSlotItemContainer";
-                let receiver_class = if scoped {
-                    let receiver = self.class(&images, c"", c"OffhandItemContainer")?;
-                    if (self.class_value)(receiver) || !(self.assignable)(owner, receiver) {
-                        return Err(unsupported("offhand receiver inheritance"));
-                    }
-                    NonNull::new(receiver.cast())
-                } else {
-                    None
-                };
-                let linked_offset = if class == c"LinkedOneSlotItemContainer" {
-                    let field = self.field(owner, c"linkedSlot")?;
-                    let offset = (self.field_offset)(field);
-                    if (self.field_flags)(field) & raw::FIELD_ATTRIBUTE_STATIC != 0
-                        || self.field_class(field, "hook")? != owner
-                        || !(16..=16384).contains(&offset)
-                        || offset % 8 != 0
-                    {
-                        return Err(unsupported("offhand linked-slot reference layout"));
-                    }
-                    Some(offset as u32)
-                } else {
-                    None
-                };
-                let mut found = None;
-                for method in self.methods(owner) {
-                    let method = method?;
-                    let actual = (self.method_name)(method);
-                    if actual.is_null() {
-                        return Err(unsupported("null hook method name"));
-                    }
-                    if metadata_text(actual) != name || (self.method_params)(method) as usize != params.len() {
-                        continue;
-                    }
-                    let returns = (self.method_return)(method);
-                    let mut implementation = 0;
-                    let return_name = match effect {
-                        LeafEffect::Void => "System.Void",
-                        LeafEffect::Generated(_) => "System.Single", // the damage leaf
-                        _ => "System.Boolean",
-                    };
-                    if found.is_some()
-                        || (self.method_instance)(method) != instance
-                        || (self.method_generic)(method)
-                        || (self.method_inflated)(method)
-                        || (self.method_flags)(method, &mut implementation) & (raw::METHOD_ATTRIBUTE_PINVOKE_IMPL | raw::METHOD_ATTRIBUTE_ABSTRACT) != 0
-                        || returns.is_null()
-                        || (self.type_byref)(returns)
-                        || self.type_name(returns)? != return_name
-                    {
-                        return Err(unsupported(format!("hook contract: {}", name.to_string_lossy())));
-                    }
-                    for (index, expected) in params.iter().enumerate() {
-                        let param = (self.method_param)(method, index as u32);
-                        if param.is_null() || (self.type_byref)(param) || self.type_name(param)? != *expected {
-                            return Err(unsupported(format!("hook parameter: {}", name.to_string_lossy())));
-                        }
-                    }
-                    found = Some(method);
+            let owner = self.class(&images, c"", spec.class)?;
+            let mut found = None;
+            for method in self.methods(owner) {
+                let method = method?;
+                let actual = (self.method_name)(method);
+                if actual.is_null() {
+                    return Err(unsupported("null hook method name"));
                 }
-                let method = found.ok_or_else(|| unsupported(format!("missing hook: {}", name.to_string_lossy())))?;
-                let address = read_value::<*mut u8>(method.cast());
-                (address as usize)
-                    .checked_sub(module_base.as_ptr() as usize)
-                    .filter(|offset| offset.checked_add(16).is_some_and(|end| end <= module_size))
-                    .ok_or_else(|| unsupported("hook module range"))?;
-                targets.push(GameplayHookTarget {
-                    name: format!("{}.{}", class.to_string_lossy(), name.to_string_lossy()),
-                    address: NonNull::new(address).ok_or_else(|| unsupported("hook address"))?,
-                    bytes: read_value(address.cast()),
-                    effect: effect.clone(),
-                    stack_argument: instance && params.len() == 3,
-                    receiver_class,
-                    linked_offset,
-                });
+                if metadata_text(actual) != spec.method || (self.method_params)(method) as usize != spec.params.len() {
+                    continue;
+                }
+                let returns = (self.method_return)(method);
+                let mut implementation = 0;
+                if found.is_some()
+                    || (self.method_instance)(method) != spec.instance
+                    || (self.method_generic)(method)
+                    || (self.method_inflated)(method)
+                    || (self.method_flags)(method, &mut implementation) & (raw::METHOD_ATTRIBUTE_PINVOKE_IMPL | raw::METHOD_ATTRIBUTE_ABSTRACT) != 0
+                    || returns.is_null()
+                    || (self.type_byref)(returns)
+                    || self.type_name(returns)? != spec.returns
+                {
+                    return Err(unsupported(format!("hook contract: {}", spec.method.to_string_lossy())));
+                }
+                for (index, expected) in spec.params.iter().enumerate() {
+                    let param = (self.method_param)(method, index as u32);
+                    if param.is_null() || (self.type_byref)(param) || self.type_name(param)? != *expected {
+                        return Err(unsupported(format!("hook parameter: {}", spec.method.to_string_lossy())));
+                    }
+                }
+                found = Some(method);
             }
-            Ok(targets)
-        }
-    }
-}
-
-impl RuntimeAccess {
-    // Called only after offline status admission. No instance or static getters are
-    // invoked by gameplay threads; IL2CPP owns these static-storage allocations.
-    unsafe fn damage_layout(&self) -> Result<DamageLayout, GameError> {
-        // SAFETY: same initialized metadata, attached-thread and readable field contract as status.
-        unsafe {
-            let images = self.images()?;
-            let health = self.class(&images, c"", c"BaseHealth")?;
-            let actor = self.class(&images, c"", c"Actor")?;
-            let field = self.field(health, c"actor")?;
-            let offset = (self.field_offset)(field);
-            if (self.class_value)(health)
-                || (self.field_flags)(field) & raw::FIELD_ATTRIBUTE_STATIC != 0
-                || self.field_class(field, "hook")? != actor
-                || !(16..=16384).contains(&offset)
-                || offset % 8 != 0
-            {
-                return Err(unsupported("health actor reference layout"));
-            }
-            let player_class = self.class(&images, c"", c"PlayerFinder")?;
-            let player = self.static_field(player_class, c"playerActorComponent", "Actor")?;
-            let environment = self.class(&images, c"EHG.Multiplayer", c"GameplayEnvironment")?;
-            let online = self.static_field(environment, c"_isOnlinePlay", "System.Boolean")?;
-            let player_storage = self.hook_static_storage(player_class, player, 8)?;
-            let online_storage = self.hook_static_storage(environment, online, 1)?;
-            Ok(DamageLayout {
-                player_storage,
-                online_storage,
-                actor_offset: offset as u32,
-                offense: Some(OffenseLayout {
-                    current_health: self.hook_field(health, c"currentHealth", "System.Single", 4)?,
-                    alignment_manager: self.hook_field(actor, c"alignmentManager", "AlignmentManager", 8)?,
-                    alignment: self.hook_field(self.class(&images, c"", c"AlignmentManager")?, c"alignment", "Alignment", 8)?,
-                    alignment_id: self.hook_field(self.class(&images, c"", c"Alignment")?, c"alignmentID", "System.Byte", 1)?,
-                    is_foe: self.hook_field(self.class(&images, c"", c"Alignment")?, c"isFoe", "System.Boolean[]", 8)?,
-                }),
+            let method = found.ok_or_else(|| unsupported(format!("missing hook: {}", spec.method.to_string_lossy())))?;
+            let address = read_value::<*mut u8>(method.cast());
+            (address as usize)
+                .checked_sub(module_base.as_ptr() as usize)
+                .filter(|offset| offset.checked_add(16).is_some_and(|end| end <= module_size))
+                .ok_or_else(|| unsupported("hook module range"))?;
+            Ok(ResolvedMethod {
+                name: format!("{}.{}", spec.class.to_string_lossy(), spec.method.to_string_lossy()),
+                address: NonNull::new(address).ok_or_else(|| unsupported("hook address"))?,
+                bytes: read_value(address.cast()),
             })
         }
     }
-    unsafe fn hook_field(&self, owner: Class, name: &CStr, expected: &str, alignment: usize) -> Result<u32, GameError> {
-        // SAFETY: immutable attached metadata, instance fields on readable managed objects.
-        unsafe {
-            let field = self.field(owner, name)?;
-            let offset = (self.field_offset)(field);
-            let ty = (self.field_type)(field);
-            if (self.class_value)(owner)
-                || (self.field_flags)(field) & raw::FIELD_ATTRIBUTE_STATIC != 0
-                || ty.is_null()
-                || (self.type_byref)(ty)
-                || self.type_name(ty)? != expected
-                || !(16..=16384).contains(&offset)
-                || !offset.is_multiple_of(alignment)
-            {
-                return Err(unsupported(format!("damage field layout: {}", name.to_string_lossy())));
-            }
-            Ok(offset as u32)
-        }
-    }
     pub(crate) unsafe fn hook_static_storage(&self, owner: Class, field: Ptr, alignment: usize) -> Result<NonNull<c_void>, GameError> {
-        // SAFETY: static field type/flags validated by caller; initialize through the
-        // public field API, then obtain the owning storage through the public class API.
+        // SAFETY: static field type/flags validated by caller; initialize through the public field API, then obtain
+        // the owning storage through the public class API. The primitive fits in this eight-byte snapshot.
         unsafe {
             let mut snapshot = 0u64;
             (self.static_get)(field, (&raw mut snapshot).cast());

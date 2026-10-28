@@ -71,7 +71,7 @@ unsafe extern "C-unwind" fn native_callback(events: *const MethodInfo) {
                         target,
                         class,
                         &extras,
-                        if hook.is_damage() {
+                        if matches!(hook, GameplayHook::IncomingDamage | GameplayHook::DamageDealt) {
                             Some(crate::game::damage::DamageLayout {
                                 player_storage: NonNull::new(PLAYER_STORAGE.load(SeqCst)).unwrap(),
                                 online_storage: NonNull::new(ONLINE_STORAGE.load(SeqCst)).unwrap(),

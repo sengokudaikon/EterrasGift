@@ -67,11 +67,7 @@ impl<T: Transport> Session<T> {
                     .await
                 {
                     Ok(response) if response.code == ResponseCode::Done => match HookObservation::decode(&response.payload) {
-                        Ok(actual)
-                            if actual.confirmed(actual.enabled)
-                                && hook.validate_value(actual.value).is_ok()
-                                && (actual.patch != eg_trainer_wire::hooks::PatchState::Shared || hook.is_damage()) =>
-                        {
+                        Ok(actual) if actual.confirmed(actual.enabled) && hook.validate_value(actual.value).is_ok() => {
                             self.hooks[hook as usize] = Some(actual);
                             if actual.enabled == on && (!on || actual.value == value) {
                                 WriteOutcome::Confirmed(on)
@@ -138,10 +134,7 @@ impl<T: Transport> Session<T> {
                     })
                     .await?;
                 let actual = HookObservation::decode(&payload).map_err(SessionError::Protocol)?;
-                if !actual.confirmed(actual.enabled)
-                    || hook.validate_value(actual.value).is_err()
-                    || (actual.patch == eg_trainer_wire::hooks::PatchState::Shared && !hook.is_damage())
-                {
+                if !actual.confirmed(actual.enabled) || hook.validate_value(actual.value).is_err() {
                     return Err(SessionError::Identity("Hook flag and entry bytes no longer agree".into()));
                 }
                 if actual.enabled && self.hooks[hook as usize].is_some_and(|previous| previous.enabled && previous.value != actual.value) {

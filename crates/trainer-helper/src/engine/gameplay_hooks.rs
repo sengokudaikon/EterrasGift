@@ -1,112 +1,77 @@
-//! Concrete gameplay effects share this lifecycle; gameplay calls execute only retained generated code.
+//! Entry ownership and transactions for gameplay patch groups. Feature bindings own their effect-specific
+//! settings, receiver retention and observations; this coordinator owns admission, ordering and failure retention.
 use super::*;
-use crate::game::StatBinding;
 use crate::game::{
     GameplayHookTarget,
-    damage::{damage_setting, set_damage},
+    gameplay::{GroupId, definition},
 };
-use crate::hooks::{leaf::LeafGate, scalar::ScalarGate};
 use eg_trainer_wire::hooks::{GameplayHook, HookObservation, PatchState};
-use std::sync::Arc;
 
-struct Installed {
-    hook: RetainedHook,
-    gate: Gate,
-    _binding: Option<Arc<StatBinding>>,
+mod effect;
+use effect::{Effect, FeatureBinding};
+
+struct Group {
+    hooks: Vec<RetainedHook>,
+    effect: Effect,
 }
-enum Gate {
-    Leaf(LeafGate),
-    Scalar(ScalarGate),
-}
-impl Gate {
-    fn leaf(&self) -> &LeafGate {
-        match self {
-            Self::Leaf(gate) => gate,
-            _ => unreachable!("leaf feature"),
+impl Group {
+    /// # Safety
+    /// Closed, validated targets and retained storage as `FeatureBinding::prepare`. No entry is published here.
+    unsafe fn prepare(binding: FeatureBinding, targets: &[GameplayHookTarget]) -> Result<Self, Response> {
+        // SAFETY: feature resolved exact ABIs and retained storage while still closed/unpublished.
+        let effect = unsafe { binding.prepare(targets) }?;
+        let mut prepared = Vec::new();
+        for (index, target) in targets.iter().enumerate() {
+            let method = &target.method;
+            // SAFETY: resolved method and effect implementing its validated ABI; retained before publication.
+            let retained = unsafe { RetainedHook::prepare(method.address, effect.entry(index), &method.bytes) }
+                .map_err(|e| server::failure(ResponseCode::Refused, format!("{}: {e}", method.name)))?;
+            // SAFETY: not yet published, process-owned trampoline with this target's exact ABI.
+            unsafe { effect.set_original(index, retained.trampoline()) };
+            prepared.push(retained);
         }
-    }
-    fn entry(&self) -> *const () {
-        match self {
-            Self::Leaf(gate) => gate.entry(),
-            Self::Scalar(gate) => gate.entry(),
-        }
-    }
-    unsafe fn set_original(&self, original: *const ()) {
-        // SAFETY: the caller supplies the selected gate's exact ABI before publication.
-        unsafe {
-            match self {
-                Self::Leaf(gate) => gate.set_original(original),
-                Self::Scalar(gate) => gate.set_original(original),
-            }
-        }
-    }
-    fn close(&self) {
-        match self {
-            Self::Leaf(gate) => gate.set_enabled(false),
-            Self::Scalar(gate) => gate.close(),
-        }
-    }
-    fn enabled(&self) -> bool {
-        match self {
-            Self::Leaf(gate) => gate.enabled(),
-            Self::Scalar(gate) => gate.enabled(),
-        }
-    }
-    fn value(&self) -> u64 {
-        match self {
-            Self::Leaf(gate) => gate.value(),
-            Self::Scalar(gate) => gate.value(),
-        }
-    }
-    fn restore(&self) -> Result<(), String> {
-        if let Self::Scalar(gate) = self {
-            gate.drain()?;
-            // SAFETY: Installed holds the pin; callers close the gate before restoration.
-            unsafe {
-                gate.restore();
-            }
-        }
-        Ok(())
+        Ok(Self { hooks: prepared, effect })
     }
 }
-// SAFETY: target/trampoline/pages are process-lifetime, not thread-affine. All
-// preparation and transactions are serialized by HOOKS and the hook backend.
-unsafe impl Send for Installed {}
+// SAFETY: entries, trampolines and generated pages are process-lifetime. The serialized owner retains effect storage
+// until close/drain/restore and successful entry restoration; no gameplay call enters helper code.
+unsafe impl Send for Group {}
 struct Hooks {
-    slots: [Option<Vec<Installed>>; GameplayHook::TARGETS],
+    slots: [Option<Group>; GroupId::COUNT],
     manager: u64,
     closing: bool,
 }
 static HOOKS: Mutex<Hooks> = Mutex::new(Hooks {
-    slots: [const { None }; GameplayHook::TARGETS],
+    slots: [const { None }; GroupId::COUNT],
     manager: 0,
     closing: false,
 });
 
 impl Hooks {
     fn clear(&mut self) -> Result<(), String> {
-        // Close every effect before attempting any fallible entry restoration.
-        for slot in self.slots.iter().flatten().flatten() {
-            slot.gate.close();
+        // Close every effect before any fallible restoration. On failure keep every owner and receiver binding.
+        for group in self.slots.iter().flatten() {
+            group.effect.close();
+        }
+        for group in self.slots.iter().flatten() {
+            group.effect.restore()?;
         }
         let changes: Vec<_> = self
             .slots
             .iter()
             .flatten()
-            .flatten()
-            .filter(|slot| slot.hook.state() != HookState::Disabled)
-            .map(|slot| (&slot.hook, false))
+            .flat_map(|group| &group.hooks)
+            .filter(|hook| hook.state() != HookState::Disabled)
+            .map(|hook| (hook, false))
             .collect();
-        // Restore pinned fields even when byte restoration fails; retain their owners on every failure.
-        for group in self.slots.iter().flatten() {
-            group[0].gate.restore()?;
-        }
         if !changes.is_empty() {
             // SAFETY: serialized owner; generated code never enters the helper and is retained.
             unsafe { hooks::commit(&changes) }.map_err(|error| error.to_string())?;
         }
-        for hook in GameplayHook::ALL.into_iter().filter(|hook| hook.is_stat()) {
-            self.slots[hook.target()] = None;
+        for slot in &mut self.slots {
+            if slot.as_ref().is_some_and(|group| !group.effect.keep_when_off()) {
+                *slot = None;
+            }
         }
         Ok(())
     }
@@ -131,22 +96,13 @@ pub(super) fn count() -> u32 {
     let hooks = HOOKS.lock().unwrap_or_else(|p| p.into_inner());
     GameplayHook::ALL
         .into_iter()
-        .filter(|hook| {
-            let actual = observation(hooks.slots[hook.target()].as_deref(), *hook);
-            actual.confirmed(true)
-        })
+        .filter(|hook| observation(hooks.slots[definition(*hook).group as usize].as_ref(), *hook).confirmed(true))
         .count() as u32
 }
 
-/// Caller resolves metadata on the main thread. The mutex fences publication
-/// against control-thread clear/unload; it is never acquired by a gameplay call.
-unsafe fn change(
-    hook: GameplayHook,
-    on: bool,
-    value: u64,
-    binding: Option<StatBinding>,
-    target: impl FnOnce() -> Result<Vec<GameplayHookTarget>, Response>,
-) -> Result<(), Response> {
+/// Caller resolves metadata on the main thread. The mutex fences publication against control-thread clear/unload;
+/// it is never acquired by a gameplay call. A prepared group is retained before any entry transaction can publish it.
+unsafe fn change(hook: GameplayHook, on: bool, value: u64, binding: FeatureBinding, targets: impl FnOnce() -> Result<Vec<GameplayHookTarget>, Response>) -> Result<(), Response> {
     if hook.validate_value(value).is_err() {
         return Err(server::failure(ResponseCode::Refused, "Invalid hook setting"));
     }
@@ -154,111 +110,40 @@ unsafe fn change(
     if hooks.closing || state().stop.load(SeqCst) {
         return Err(server::failure(ResponseCode::NotReady, "Helper stopping; nothing ran"));
     }
-    let slot = &mut hooks.slots[hook.target()];
-    if let (Some(group), Some(binding)) = (slot.as_ref(), binding.as_ref())
-        && group[0]._binding.as_ref().is_some_and(|previous| previous.receiver != binding.receiver)
+    let slot = &mut hooks.slots[definition(hook).group as usize];
+    if let Some(group) = slot.as_ref()
+        && !binding.matches(&group.effect)
     {
         change_group(group, hook, false, hook.default_value())?;
         *slot = None;
     }
     if on && slot.is_none() {
-        let binding = binding.map(Arc::new);
-        let mut prepared: Vec<Installed> = Vec::new();
-        for GameplayHookTarget {
-            name,
-            address,
-            bytes,
-            effect,
-            receiver_class,
-            linked_offset,
-            stack_argument,
-        } in target()?
-        {
-            // SAFETY: metadata validates the ABI/field; the pin outlives closing, draining and restoration.
-            let gate = if let Some(binding) = &binding {
-                let shared = prepared.first().and_then(|slot| match &slot.gate {
-                    Gate::Scalar(gate) => Some(gate),
-                    _ => None,
-                });
-                Gate::Scalar(
-                    // SAFETY: the binding pins the validated scalar and the metadata validates this method's ABI.
-                    unsafe { ScalarGate::prepare(binding.receiver, binding.offset, binding.online, binding.baseline, stack_argument, shared) }
-                        .map_err(|e| server::failure(ResponseCode::Refused, e.to_string()))?,
-                )
-            } else {
-                Gate::Leaf(
-                    // SAFETY: metadata validates the effect ABI and process-lifetime storage.
-                    unsafe { LeafGate::prepare_shared(effect, receiver_class, linked_offset, prepared.first().map(|slot| slot.gate.leaf())) }
-                        .map_err(|e| server::failure(ResponseCode::Refused, e.to_string()))?,
-                )
-            };
-            // SAFETY: resolved method; retained leaf implements its validated argument transformation.
-            let retained = unsafe { RetainedHook::prepare(address, gate.entry(), &bytes) }.map_err(|e| server::failure(ResponseCode::Refused, format!("{name}: {e}")))?;
-            // SAFETY: not yet published, process-owned trampoline.
-            unsafe { gate.set_original(retained.trampoline()) };
-            prepared.push(Installed {
-                hook: retained,
-                gate,
-                _binding: binding.clone(),
-            });
-        }
-        *slot = Some(prepared);
+        let targets = targets()?;
+        // SAFETY: resolved targets and binding; retained as one owner before publishing any entry.
+        *slot = Some(unsafe { Group::prepare(binding, &targets) }?);
     }
     if let Some(group) = slot {
         change_group(group, hook, on, value)?;
-    }
-    if hook.is_stat() && !on {
-        *slot = None;
+        if !on && !group.effect.keep_when_off() {
+            *slot = None;
+        }
     }
     Ok(())
 }
 
-fn change_group(group: &[Installed], hook: GameplayHook, on: bool, value: u64) -> Result<(), Response> {
-    let gate = &group[0].gate;
-    let target_on = on
-        || (hook.is_damage()
-            && GameplayHook::ALL
-                .into_iter()
-                .any(|other| other.is_damage() && other != hook && damage_setting(gate.leaf(), other).0));
-    // A cleared or failed target must never revive stale sibling settings.
-    if hook.is_damage() && !gate.enabled() {
-        for other in GameplayHook::ALL.into_iter().filter(|other| other.is_damage()) {
-            set_damage(gate.leaf(), other, false, other.default_value());
-        }
-    }
-    for slot in group {
-        slot.gate.close();
-    }
-    gate.restore().map_err(|e| server::failure(ResponseCode::Failed, e))?;
-    let changes: Vec<_> = group.iter().map(|slot| (&slot.hook, target_on)).collect();
+fn change_group(group: &Group, hook: GameplayHook, on: bool, value: u64) -> Result<(), Response> {
+    let target_on = group.effect.target_on(hook, on);
+    group.effect.close();
+    group.effect.restore().map_err(|e| server::failure(ResponseCode::Failed, e))?;
+    let changes: Vec<_> = group.hooks.iter().map(|hook| (hook, target_on)).collect();
     // SAFETY: serialized owner retained even on partial failure; entries form one transaction.
     unsafe { hooks::commit(&changes) }.map_err(|e| server::failure(ResponseCode::Failed, e.to_string()))?;
-    if let Gate::Scalar(gate) = gate {
-        if on {
-            // SAFETY: admitted main-thread operation; the installed group owns the pin.
-            unsafe {
-                gate.enable(value);
-            }
-            // SAFETY: the installed group still owns the pin through independent readback.
-            if !unsafe { gate.matches() } {
-                return Err(server::failure(ResponseCode::Failed, "Scalar readback differs"));
-            }
-        }
-    } else {
-        for slot in group {
-            let gate = slot.gate.leaf();
-            if hook.is_damage() {
-                set_damage(gate, hook, on, value);
-            } else {
-                gate.set_value(value);
-            }
-            gate.set_enabled(target_on);
-        }
-    }
-    Ok(())
+    // SAFETY: called only by the admitted main-thread change/observation path (or authored tests), with all storage
+    // retained and the entry transaction complete. Control-thread clear never publishes settings.
+    unsafe { group.effect.publish(hook, on, value, target_on) }
 }
 
-fn observation(group: Option<&[Installed]>, hook: GameplayHook) -> HookObservation {
+fn observation(group: Option<&Group>, hook: GameplayHook) -> HookObservation {
     let Some(group) = group else {
         return HookObservation {
             patch: PatchState::Original,
@@ -266,38 +151,17 @@ fn observation(group: Option<&[Installed]>, hook: GameplayHook) -> HookObservati
             value: hook.default_value(),
         };
     };
-    let (enabled, value) = if hook.is_damage() {
-        damage_setting(group[0].gate.leaf(), hook)
-    } else {
-        (group.iter().all(|slot| slot.gate.enabled()), group[0].gate.value())
-    };
-    let mut patch = group_patch(group.iter().map(|slot| slot.hook.state()));
-    if let Gate::Scalar(gate) = &group[0].gate {
-        // SAFETY: the installed owner retains the pin until close/drain/restore.
-        if enabled && !unsafe { gate.matches() } {
-            patch = PatchState::Unknown;
-        }
-    }
-    if hook.is_damage()
-        && !enabled
-        && patch == PatchState::Patched
-        && GameplayHook::ALL
-            .into_iter()
-            .any(|other| other.is_damage() && damage_setting(group[0].gate.leaf(), other).0)
-    {
-        patch = PatchState::Shared;
-    }
-    HookObservation { patch, enabled, value }
+    group.effect.observation(hook, group_patch(group.hooks.iter().map(RetainedHook::state)))
 }
 
+#[cfg(feature = "fixture")]
 pub(super) fn read(hook: GameplayHook) -> HookObservation {
     let hooks = HOOKS.lock().unwrap_or_else(|p| p.into_inner());
-    observation(hooks.slots[hook.target()].as_deref(), hook)
+    observation(hooks.slots[definition(hook).group as usize].as_ref(), hook)
 }
 
 pub(super) unsafe fn operation(expected_manager: u64, hook: GameplayHook, on: Option<(bool, u64)>) -> Response {
-    // SAFETY: admitted main thread; same runtime/graph lifetime as status. The
-    // supplied manager is compared only, never dereferenced.
+    // SAFETY: admitted main thread; same runtime/graph lifetime as status. The supplied manager is compared only.
     unsafe {
         runtime_operation(|runtime, access, attached| {
             let status = access.status(attached);
@@ -310,40 +174,23 @@ pub(super) unsafe fn operation(expected_manager: u64, hook: GameplayHook, on: Op
                 return Err(server::failure(ResponseCode::Refused, "Character changed; nothing ran"));
             }
             if let Some((on, value)) = on {
-                let binding = if hook.is_stat() && on {
-                    Some(
-                        access
-                            .bind_stat(attached, runtime.ownership, expected_manager, hook)
-                            .map_err(|e| server::failure(e.code(), e.to_string()))?,
-                    )
-                } else {
-                    None
-                };
+                let binding = FeatureBinding::resolve(&access, attached, runtime.ownership, expected_manager, hook, on)?;
                 change(hook, on, value, binding, || {
                     let module = module().map_err(|e| server::failure(ResponseCode::Refused, e))?;
                     let size = image_size(module).map_err(|e| server::failure(ResponseCode::Refused, e))?;
-                    access.gameplay_hook_targets(attached, hook, module, size).map_err(game_failure)
+                    (definition(hook).targets)(&access, module, size).map_err(game_failure)
                 })?;
                 done(Vec::new())
             } else {
-                if hook.is_stat() {
-                    let mut hooks = HOOKS.lock().unwrap_or_else(|p| p.into_inner());
-                    if let Some(group) = &hooks.slots[hook.target()]
-                        && group[0].gate.enabled()
-                    {
-                        // Independent observation reads the current player's selected accessor, not only the pinned old object.
-                        let (receiver, bits) = access
-                            .current_stat(attached, expected_manager, hook)
-                            .map_err(|e| server::failure(e.code(), e.to_string()))?;
-                        if group[0]._binding.as_ref().is_some_and(|binding| binding.receiver != receiver) {
-                            change_group(group, hook, false, hook.default_value())?;
-                            hooks.slots[hook.target()] = None;
-                        } else if bits != (f64::from_bits(group[0].gate.value()) as f32).to_bits() {
-                            return Err(server::failure(ResponseCode::Failed, "Current scalar differs from the persistent override"));
-                        }
-                    }
+                let mut hooks = HOOKS.lock().unwrap_or_else(|p| p.into_inner());
+                let slot = &mut hooks.slots[definition(hook).group as usize];
+                if let Some(group) = slot.as_ref()
+                    && !group.effect.current(&access, attached, expected_manager)?
+                {
+                    change_group(group, hook, false, hook.default_value())?;
+                    *slot = None;
                 }
-                done(read(hook).encode())
+                done(observation(slot.as_ref(), hook).encode())
             }
         })
     }
@@ -359,39 +206,25 @@ pub(super) unsafe fn fixture_change(
     extras: &[*mut u8],
     damage: Option<crate::game::damage::DamageLayout>,
 ) -> Result<(), Response> {
-    // SAFETY: fixture owns executable target and optional class identity for
-    // the process lifetime; scoped calls use readable object-shaped headers.
+    use crate::{game::gameplay::ResolvedMethod, hooks::leaf::LeafEffect};
+    // SAFETY: fixture owns executable targets, optional class identity and readable receiver layouts for process lifetime.
     unsafe {
-        change(hook, on, value, None, || {
-            let mut targets = vec![GameplayHookTarget {
-                name: "fixture eligibility".into(),
+        change(hook, on, value, FeatureBinding::fixture(hook), || {
+            let method = |address: *mut u8, name| ResolvedMethod {
+                name,
                 address: NonNull::new(address).unwrap(),
                 bytes: address.cast::<[u8; 16]>().read_unaligned(),
-                receiver_class,
-                effect: if let Some(layout) = damage {
-                    layout.effect()
-                } else if hook == GameplayHook::MysteriousRift {
-                    crate::hooks::leaf::LeafEffect::SelectableBoolean
-                } else {
-                    crate::hooks::leaf::LeafEffect::Boolean(true)
-                },
-                linked_offset: None,
-                stack_argument: false,
-            }];
+            };
+            let effect = if let Some(layout) = damage {
+                layout.effect()
+            } else if hook == GameplayHook::MysteriousRift {
+                LeafEffect::SelectableBoolean
+            } else {
+                LeafEffect::Boolean(true)
+            };
+            let mut targets = vec![method(address, "fixture eligibility".into()).leaf(effect, receiver_class, None)];
             for (index, &address) in extras.iter().enumerate() {
-                targets.push(GameplayHookTarget {
-                    name: format!("fixture pairing {index}"),
-                    address: NonNull::new(address).unwrap(),
-                    bytes: address.cast::<[u8; 16]>().read_unaligned(),
-                    receiver_class: None,
-                    linked_offset: None,
-                    stack_argument: false,
-                    effect: if index == 0 {
-                        crate::hooks::leaf::LeafEffect::Boolean(false)
-                    } else {
-                        crate::hooks::leaf::LeafEffect::Void
-                    },
-                });
+                targets.push(method(address, format!("fixture pairing {index}")).leaf(if index == 0 { LeafEffect::Boolean(false) } else { LeafEffect::Void }, None, None));
             }
             Ok(targets)
         })
@@ -413,6 +246,72 @@ fn group_patch(states: impl Iterator<Item = HookState>) -> PatchState {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::hooks::scalar::ScalarGate;
+    use effect::Gate;
+    #[test]
+    fn a_leaf_group_prepares_all_entries_and_clear_restores_their_distinct_originals() {
+        use crate::{game::gameplay::ResolvedMethod, hooks::leaf::LeafEffect};
+        #[unsafe(naked)]
+        unsafe extern "C-unwind" fn first() -> bool {
+            core::arch::naked_asm!(
+                "nop",
+                "nop",
+                "nop",
+                "nop",
+                "nop",
+                "xor eax,eax",
+                "ret",
+                "nop",
+                "nop",
+                "nop",
+                "nop",
+                "nop",
+                "nop",
+                "nop",
+                "nop"
+            );
+        }
+        #[unsafe(naked)]
+        unsafe extern "C-unwind" fn second() -> bool {
+            core::arch::naked_asm!("nop", "nop", "nop", "nop", "nop", "mov eax,1", "ret", "nop", "nop", "nop", "nop", "nop");
+        }
+        // SAFETY: authored padded process-lifetime entries with the exact Boolean leaf ABI.
+        let group = unsafe {
+            let targets: Vec<_> = [(first as *mut u8, true), (second as *mut u8, false)]
+                .into_iter()
+                .map(|(entry, answer)| {
+                    ResolvedMethod {
+                        name: "fixture compatibility".into(),
+                        address: NonNull::new(entry).unwrap(),
+                        bytes: entry.cast::<[u8; 16]>().read_unaligned(),
+                    }
+                    .leaf(LeafEffect::Boolean(answer), None, None)
+                })
+                .collect();
+            Group::prepare(FeatureBinding::fixture(GameplayHook::Offhand), &targets).unwrap()
+        };
+        assert!(group.hooks.iter().all(|hook| hook.state() == HookState::Disabled));
+        let mut owner = Hooks {
+            slots: [None, Some(group), None, None, None],
+            manager: 1,
+            closing: false,
+        };
+        let group = owner.slots[GroupId::Offhand as usize].as_ref().unwrap();
+        change_group(group, GameplayHook::Offhand, true, 1).unwrap();
+        assert!(observation(Some(group), GameplayHook::Offhand).confirmed(true));
+        // SAFETY: the installed entries preserve their authored Boolean ABI.
+        unsafe {
+            assert!(std::hint::black_box(first)());
+            assert!(!std::hint::black_box(second)());
+        }
+        owner.clear().unwrap();
+        assert!(observation(owner.slots[GroupId::Offhand as usize].as_ref(), GameplayHook::Offhand).confirmed(false));
+        // SAFETY: clear restored both authored originals before any owner was released.
+        unsafe {
+            assert!(!std::hint::black_box(first)());
+            assert!(std::hint::black_box(second)());
+        }
+    }
     #[test]
     fn scalar_groups_share_lifecycle_but_keep_independent_settings_and_restore_on_clear() {
         use std::sync::atomic::{AtomicU8, AtomicU32};
@@ -462,11 +361,10 @@ mod tests {
                 let gate = ScalarGate::prepare(stats.as_ptr() as usize, offset, &online as *const _ as usize, 0, false, None).unwrap();
                 let hook = RetainedHook::prepare(NonNull::new(entry).unwrap(), gate.entry(), &entry.cast::<[u8; 16]>().read_unaligned()).unwrap();
                 gate.set_original(hook.trampoline());
-                vec![Installed {
-                    hook,
-                    gate: Gate::Scalar(gate),
-                    _binding: None,
-                }]
+                Group {
+                    hooks: vec![hook],
+                    effect: Effect::from_gates(definition(GameplayHook::AttackRate).behavior, vec![Gate::Scalar(gate)]),
+                }
             }
         };
         let mut owner = Hooks {
@@ -474,7 +372,8 @@ mod tests {
             manager: 1,
             closing: false,
         };
-        let set = |owner: &Hooks, hook: GameplayHook, on, value: f64| change_group(owner.slots[hook.target()].as_ref().unwrap(), hook, on, value.to_bits()).unwrap();
+        let set =
+            |owner: &Hooks, hook: GameplayHook, on, value: f64| change_group(owner.slots[definition(hook).group as usize].as_ref().unwrap(), hook, on, value.to_bits()).unwrap();
         set(&owner, GameplayHook::AttackRate, true, 6.0);
         set(&owner, GameplayHook::LeechRate, true, 2.0);
         // SAFETY: the live entries preserve their authored signature and the test owns both fields.
@@ -487,7 +386,7 @@ mod tests {
         set(&owner, GameplayHook::AttackRate, true, 8.0);
         set(&owner, GameplayHook::AttackRate, false, 8.0);
         assert_eq!(f32::from_bits(stats[0].load(SeqCst)), 1.5);
-        assert!(observation(owner.slots[4].as_deref(), GameplayHook::LeechRate).confirmed(true));
+        assert!(observation(owner.slots[4].as_ref(), GameplayHook::LeechRate).confirmed(true));
         owner.clear().unwrap();
         assert_eq!(f32::from_bits(stats[1].load(SeqCst)), 0.3);
         assert!(owner.slots[3].is_none() && owner.slots[4].is_none());
@@ -528,26 +427,26 @@ mod tests {
         let address = NonNull::new(target as *mut u8).unwrap();
         // SAFETY: authored process-lifetime executable and static storage, exact float ABI.
         let group = unsafe {
-            let gate = LeafGate::prepare_override(
-                DamageLayout {
-                    player_storage: NonNull::from(&*player).cast(),
-                    online_storage: NonNull::from(&*online).cast(),
-                    actor_offset: 0,
-                    offense: None,
-                }
-                .effect(),
-                None,
-                None,
+            let method = crate::game::gameplay::ResolvedMethod {
+                name: "fixture damage".into(),
+                address,
+                bytes: address.cast::<[u8; 16]>().as_ptr().read_unaligned(),
+            };
+            Group::prepare(
+                FeatureBinding::fixture(IncomingDamage),
+                &[method.leaf(
+                    DamageLayout {
+                        player_storage: NonNull::from(&*player).cast(),
+                        online_storage: NonNull::from(&*online).cast(),
+                        actor_offset: 0,
+                        offense: None,
+                    }
+                    .effect(),
+                    None,
+                    None,
+                )],
             )
-            .unwrap();
-            let bytes = address.cast::<[u8; 16]>().as_ptr().read_unaligned();
-            let hook = RetainedHook::prepare(address, gate.entry(), &bytes).unwrap();
-            gate.set_original(hook.trampoline());
-            vec![Installed {
-                hook,
-                gate: Gate::Leaf(gate),
-                _binding: None,
-            }]
+            .unwrap()
         };
         let mut owner = Hooks {
             slots: [None, None, Some(group), None, None],
@@ -567,7 +466,7 @@ mod tests {
             assert!(inactive.confirmed(false));
             assert!(observation(Some(group), second).confirmed(true));
             change_group(group, second, false, second.default_value()).unwrap();
-            assert_eq!(group[0].hook.state(), HookState::Disabled);
+            assert_eq!(group.hooks[0].state(), HookState::Disabled);
         }
         change_group(group, IncomingDamage, true, 0).unwrap();
         change_group(group, DamageDealt, true, 101.0f64.to_bits()).unwrap();

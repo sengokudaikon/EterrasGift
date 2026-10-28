@@ -14,6 +14,35 @@ impl WriteControl for AllowWrite {
 }
 
 #[test]
+fn shared_patch_ownership_is_reported_by_the_helper_for_any_disabled_feature() {
+    for hook in GameplayHook::ALL {
+        let fixture = Fixture::rehashing();
+        let shared = || {
+            done(
+                HookObservation {
+                    patch: PatchState::Shared,
+                    enabled: false,
+                    value: hook.default_value(),
+                }
+                .encode(),
+            )
+        };
+        let wire = FakeTransport::new(
+            fixture.target.clone(),
+            [fixture.discover(), status(false, 0x1234, 0), done(vec![]), shared(), status(false, 0x1234, 0), shared()],
+        );
+        let mut session = fixture.session(&wire);
+        session.enable();
+        run(session.connect()).unwrap();
+        assert_eq!(run(session.set_gameplay_hook(hook, false, &mut AllowWrite)).unwrap(), WriteOutcome::Confirmed(false));
+        run(BackendConnection::refresh(&mut session)).unwrap();
+        assert_eq!(session.hook_observation(hook).unwrap().patch, PatchState::Shared);
+        assert_eq!(session.observed_hook(hook), Some(false));
+        assert_eq!(session.state(), SessionState::Ready);
+    }
+}
+
+#[test]
 fn persistent_stats_use_independent_hook_values_and_readback() {
     let fixture = Fixture::rehashing();
     let wire = FakeTransport::new(fixture.target.clone(), [fixture.discover(), status(false, 0x1234, 0)]);

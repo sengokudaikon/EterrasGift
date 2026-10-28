@@ -10,7 +10,7 @@ use crate::game::{
 use eg_il2cpp_runtime::AttachedThread;
 #[cfg(test)]
 mod tests;
-pub(super) struct StatFeature {
+pub(crate) struct StatFeature {
     pub accessor: unsafe fn(&RuntimeAccess, &PlayerFields) -> Result<Stat, PlayerError>,
 }
 

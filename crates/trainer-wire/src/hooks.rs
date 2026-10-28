@@ -21,23 +21,6 @@ impl GameplayHook {
         Self::AttackRate,
         Self::LeechRate,
     ];
-    pub const TARGETS: usize = 5;
-    pub const fn is_stat(self) -> bool {
-        matches!(self, Self::AttackRate | Self::LeechRate)
-    }
-    pub const fn is_damage(self) -> bool {
-        matches!(self, Self::IncomingDamage | Self::DamageDealt)
-    }
-    /// Two damage controls share one patched method.
-    pub const fn target(self) -> usize {
-        if self.is_damage() {
-            2
-        } else if self.is_stat() {
-            self as usize - 1
-        } else {
-            self as usize
-        }
-    }
     pub fn default_value(self) -> u64 {
         if matches!(self, Self::DamageDealt | Self::AttackRate) {
             1.0f64.to_bits()
@@ -85,7 +68,7 @@ pub enum PatchState {
     Original,
     Patched,
     Unknown,
-    /// Entry bytes are patched and another damage feature still owns the target.
+    /// Entry bytes are patched and another feature still owns the patch group.
     Shared,
 }
 

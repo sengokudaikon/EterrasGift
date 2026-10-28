@@ -296,3 +296,25 @@ Targeted authored tests cover independent accessor availability, graph/type/root
 online filtering, the fifth argument, value changes, entry restoration and a delayed original crossing close.
 Session tests cover separate controls, values and readback. Live Last Epoch verification remains pending; no captures
 or real-game run were part of this change.
+
+## Feature ownership cleanup (2026-10-28)
+
+Each implemented hook now has a module that owns its method targets, explicit parameter/return contracts and behavior:
+`mysterious_rift`, `offhand`, `damage`, `attack_rate` and `leech_rate`. The two damage controls share one implementation
+because they transform the same call and must preserve each other's settings. Attack and leech keep independent stat
+selectors beside their recalculation targets; the shared scalar reader/binder accepts a selector without feature IDs.
+
+`features/hooks` retains only the helper-local group identities, feature lookup, resolved target types and common
+metadata validator. A group can own several methods; damage controls select the same group. Patch topology and
+damage/stat classifications have been removed from the wire. The session validates settings and observations and
+accepts the helper's verified Shared state for an off feature without duplicating its ownership map.
+
+`engine/gameplay_hooks` owns admission, retained patch groups, entry transactions and cleanup ordering. Its prepared
+effect adapter owns gateway settings, shared damage semantics and pinned receiver state behind close, restore,
+publish and observation operations. The coordinator no longer branches on damage or stat features. All effects close
+before any restoration; receiver-bound groups are released only after restoration succeeds. Failure keeps the group
+and its pins retained. The generated gateway code and read/apply primitives are unchanged.
+
+Targeted regressions cover multi-entry leaf preparation/restoration, shared damage settings and last-owner disable,
+independent scalar restoration, selected-accessor checks and topology-independent session readback. The fixture build,
+app build and workspace Clippy pass. No captures or live-game run were requested.

@@ -1,5 +1,5 @@
-//! What the trainer offers, built on the accessors and written through `apply`. A feature says which stat or object
-//! it changes and how; reading, checking, storing and reading back are shared.
+//! What the trainer offers, built on the accessors. One-time edits use `apply`; persistent effects use retained
+//! gateways and the shared lifecycle. Each hook feature owns its targets, explicit method contracts and behavior.
 
 mod attack_rate;
 pub mod damage;
@@ -8,6 +8,8 @@ mod forge;
 pub(crate) mod hooks;
 mod leech_rate;
 mod mapping;
+mod mysterious_rift;
+mod offhand;
 pub mod persistent_stat;
 mod stat;
 mod unique;

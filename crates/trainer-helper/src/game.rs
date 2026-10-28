@@ -1,6 +1,6 @@
 //! Last Epoch's runtime, through [`eg_il2cpp_runtime`], in layers:
 //! - `discovery` resolves the game's image, classes and the dispatcher; it reads no object;
-//! - `read` and `apply` are the one way to read the game's objects and the one way to change them, with readback;
+//! - `read` and `apply` share typed object reads and checked one-time edits; retained gateways apply persistent effects;
 //! - `accessors` give typed access to one game object each: the player, the character's stats, the held item, play
 //!   presence, the locale, the item limits. They know nothing of what the trainer offers;
 //! - `features` are what the trainer offers, built on the accessors: stat edits, forge edits, tooltips, hooks.
@@ -35,7 +35,7 @@ pub use accessors::presence;
 pub use apply::WriteError;
 pub use discovery::DiscoveredRuntime;
 use discovery::Images;
-pub use features::{damage, hooks::GameplayHookTarget, persistent_stat::StatBinding};
+pub(crate) use features::{damage, hooks as gameplay, hooks::GameplayHookTarget, persistent_stat::StatBinding};
 
 /// A strong GC root on a managed object, held for one call.
 pub(crate) type Root<'a, 'r> = StrongRoot<'a, 'r>;

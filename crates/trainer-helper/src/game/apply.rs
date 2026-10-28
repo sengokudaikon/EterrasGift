@@ -1,6 +1,6 @@
-//! Changing the game: the one store boundary every feature writes through, and the checks a destination passes first.
-//! A write is checked completely before its store. Once a store has started, every failure is [`WriteError::Failed`]:
-//! the store may have happened, and nothing is retried or rolled back.
+//! Checked one-time object edits: destination validation and the shared store/readback boundary. Persistent scalar
+//! effects reuse destination checks and own restoration through their gateway lifecycle. Once a requested edit's store
+//! starts, every failure is [`WriteError::Failed`]: the store may have happened, and nothing is retried or rolled back.
 
 use super::{Class, GameError, RuntimeAccess};
 use eg_il2cpp_runtime::raw;

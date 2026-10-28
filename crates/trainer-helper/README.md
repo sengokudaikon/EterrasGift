@@ -15,7 +15,7 @@ layout assumption.
 
 The first successful discovery retains pristine dispatcher bytes. Subsequent status/empty-clear
 requests must match this profile, even while the scheduler entry is patched. Stock detour 0.10
-installs from the control thread through the retained transaction wrapper in `eg_game_access::hooks`.
+installs from the control thread through this helper's retained transaction wrapper in `hooks`.
 Owners and registered trampoline unwind tables remain for the process lifetime; copied calls are
 refused. Threads::All uses best-effort suspension, with the limits recorded in the interop notes.
 Its callback calls Unity's original first,
@@ -31,7 +31,8 @@ Status roots the manager wrapper, checks assignability and reads its metadata-va
 It also reads the independent runtime online flag. No native Unity-object pointer is dereferenced.
 Returned manager addresses are ephemeral observations, never managed-object ownership tokens.
 
-The helper supports owned forge, completed locale and attack/leech reads. It reads no definitions catalog: the app
+The helper supports owned Forge edits, completed locale reads and persistent gameplay controls. Attack rate and
+leech rate use independent character accessors and the shared hook lifecycle. It reads no definitions catalog: the app
 reads the definitions from the game's files (`eg-trainer`'s game data), and the catalog and item-limits operations (21
 and 19) are retired.
 EditForge carries status, base/identity and regular affix-roll changes through the shared
@@ -71,10 +72,16 @@ checks literal bounds and independently gates offline/native liveness. One publi
 by exact full readback. Every failure after store entry is uncertain; no RebuildID, game setter or rollback
 runs. Only owned authored Unity validation is claimed. Later game recalculation can replace the level again.
 
-The complete hook feature set is currently empty:
-`features_on = 0` and clear replies contain count zero. No gameplay hook can be enabled; other item,
-stat or gameplay field writes remain unavailable. Before adding effects, their
-runtime-offline/owner-loss cleanup must run and acknowledge completion on the engine thread.
+Gameplay controls cover mysterious-rift selection, offhand compatibility, incoming/outgoing damage and independent
+attack/leech rates. Each module in `game/features` owns its targets, explicit ABI contracts, effect and receiver rules.
+`game/features/hooks` holds the helper's patch-group identities and common method validator; incoming/outgoing damage
+share one group, while offhand and attack rate each own multiple methods. The wire carries feature IDs, settings and
+observations, without knowing patch ownership.
+
+`engine/gameplay_hooks` coordinates admission, entry transactions and cleanup ordering. Its prepared effects adapt
+leaf, shared damage and pinned scalar state to close/restore/publish/observe operations. Clear closes all effects,
+restores receiver state and entry bytes, then releases receiver-bound groups. Every failure retains the affected
+owners and pins. Generated gameplay code stays outside the DLL; the existing dispatcher drain controls helper unload.
 
 The local pipe is `eterras-gift-<PID>`, one bounded request per connection: a 12-byte header and a sequential operation body. Bootstrap binds the controller PID/birth before any request; the kernel-reported
 client PID and retained process handle/start time verify each owner request. Fixture servers

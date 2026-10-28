@@ -6,6 +6,35 @@ use crate::hooks::leaf::{EFFECT_SLOTS, FRAME, GeneratedEffect, LeafEffect, LeafG
 use eg_trainer_wire::hooks::GameplayHook;
 use std::ptr::NonNull;
 
+use super::hooks::{Behavior, GameplayHookTarget, GroupId, HookFeature, MethodSpec};
+use crate::game::*;
+
+pub(super) const FEATURE: HookFeature = HookFeature {
+    group: GroupId::Damage,
+    behavior: Behavior::Damage,
+    targets,
+};
+pub(crate) const CONTROLS: [GameplayHook; 2] = [GameplayHook::IncomingDamage, GameplayHook::DamageDealt];
+
+unsafe fn targets(access: &RuntimeAccess, module: NonNull<u8>, size: usize) -> Result<Vec<GameplayHookTarget>, GameError> {
+    // SAFETY: attached main thread, initialized game statics, retained metadata and bounded module.
+    unsafe {
+        let effect = access.damage_layout()?.effect();
+        let method = access.hook_method(
+            &MethodSpec {
+                class: c"BaseHealth",
+                method: c"HealthDamage",
+                instance: true,
+                params: &["System.Single"],
+                returns: "System.Single",
+            },
+            module,
+            size,
+        )?;
+        Ok(vec![method.leaf(effect, None, None)])
+    }
+}
+
 /// Metadata-validated game storage, retained for the process lifetime.
 #[derive(Clone, Copy)]
 pub struct DamageLayout {
@@ -35,6 +64,66 @@ const OUTGOING: usize = 3;
 const _: () = assert!(OUTGOING < EFFECT_SLOTS);
 /// A setting that is off; every real setting differs.
 const OFF: u64 = u64::MAX;
+
+impl RuntimeAccess {
+    // Called only after offline status admission. No instance or static getters are
+    // invoked by gameplay threads; IL2CPP owns these static-storage allocations.
+    unsafe fn damage_layout(&self) -> Result<DamageLayout, GameError> {
+        // SAFETY: same initialized metadata, attached-thread and readable field contract as status.
+        unsafe {
+            let images = self.images()?;
+            let health = self.class(&images, c"", c"BaseHealth")?;
+            let actor = self.class(&images, c"", c"Actor")?;
+            let field = self.field(health, c"actor")?;
+            let offset = (self.field_offset)(field);
+            if (self.class_value)(health)
+                || (self.field_flags)(field) & raw::FIELD_ATTRIBUTE_STATIC != 0
+                || self.field_class(field, "hook")? != actor
+                || !(16..=16384).contains(&offset)
+                || offset % 8 != 0
+            {
+                return Err(unsupported("health actor reference layout"));
+            }
+            let player_class = self.class(&images, c"", c"PlayerFinder")?;
+            let player = self.static_field(player_class, c"playerActorComponent", "Actor")?;
+            let environment = self.class(&images, c"EHG.Multiplayer", c"GameplayEnvironment")?;
+            let online = self.static_field(environment, c"_isOnlinePlay", "System.Boolean")?;
+            let player_storage = self.hook_static_storage(player_class, player, 8)?;
+            let online_storage = self.hook_static_storage(environment, online, 1)?;
+            Ok(DamageLayout {
+                player_storage,
+                online_storage,
+                actor_offset: offset as u32,
+                offense: Some(OffenseLayout {
+                    current_health: self.hook_field(health, c"currentHealth", "System.Single", 4)?,
+                    alignment_manager: self.hook_field(actor, c"alignmentManager", "AlignmentManager", 8)?,
+                    alignment: self.hook_field(self.class(&images, c"", c"AlignmentManager")?, c"alignment", "Alignment", 8)?,
+                    alignment_id: self.hook_field(self.class(&images, c"", c"Alignment")?, c"alignmentID", "System.Byte", 1)?,
+                    is_foe: self.hook_field(self.class(&images, c"", c"Alignment")?, c"isFoe", "System.Boolean[]", 8)?,
+                }),
+            })
+        }
+    }
+    unsafe fn hook_field(&self, owner: Class, name: &CStr, expected: &str, alignment: usize) -> Result<u32, GameError> {
+        // SAFETY: immutable attached metadata, instance fields on readable managed objects.
+        unsafe {
+            let field = self.field(owner, name)?;
+            let offset = (self.field_offset)(field);
+            let ty = (self.field_type)(field);
+            if (self.class_value)(owner)
+                || (self.field_flags)(field) & raw::FIELD_ATTRIBUTE_STATIC != 0
+                || ty.is_null()
+                || (self.type_byref)(ty)
+                || self.type_name(ty)? != expected
+                || !(16..=16384).contains(&offset)
+                || !offset.is_multiple_of(alignment)
+            {
+                return Err(unsupported(format!("damage field layout: {}", name.to_string_lossy())));
+            }
+            Ok(offset as u32)
+        }
+    }
+}
 
 impl DamageLayout {
     /// The leaf for this layout, with both settings off.
@@ -70,6 +159,20 @@ pub fn damage_setting(gate: &LeafGate, hook: GameplayHook) -> (bool, u64) {
         _ => unreachable!("not a damage feature"),
     };
     (gate.enabled() && value != OFF, if value == OFF { hook.default_value() } else { value })
+}
+
+pub(crate) fn has_other(gate: &LeafGate, hook: GameplayHook) -> bool {
+    CONTROLS.into_iter().any(|other| other != hook && damage_setting(gate, other).0)
+}
+
+/// Clearing or failing a group closes its switch. A later enable must not revive the old sibling settings.
+pub(crate) fn target_on(gate: &LeafGate, hook: GameplayHook, on: bool) -> bool {
+    if !gate.enabled() {
+        for other in CONTROLS {
+            set_damage(gate, other, false, other.default_value());
+        }
+    }
+    on || has_other(gate, hook)
 }
 
 // Windows x64 float(BaseHealth*, float, MethodInfo*): preserve RCX, XMM1 until
