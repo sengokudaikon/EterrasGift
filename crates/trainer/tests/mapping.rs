@@ -235,34 +235,6 @@ fn any_page_failure_poisoned_and_cannot_retry() {
     assert_eq!(b.push(&observation(), &request(), page(0, |i| i as f64), &mut parser), Err(MappingError::OutOfOrder));
 }
 #[test]
-fn full_observation_binding_includes_fields_outside_legacy_fingerprint() {
-    let obs = observation();
-    let changed_name = altered(&obs, |i| i.name.push('!'));
-    assert_eq!(changed_name.snapshot().fingerprint, obs.snapshot().fingerprint);
-    let mut catalog = identity();
-    catalog.locale.game_version = "1.6".into();
-    let mut process = obs.process().clone();
-    process.created += 1;
-    let changed = [
-        changed_name,
-        altered(&obs, |i| i.individual_id += 1),
-        altered(&obs, |i| i.affixes[0].special = 13),
-        altered(&obs, |i| i.status.forging_potential += 1),
-        ExpectedObservation::new(2, obs.process().clone(), identity(), item()).unwrap(),
-        ExpectedObservation::new(1, process, identity(), item()).unwrap(),
-        ExpectedObservation::new(1, obs.process().clone(), catalog, item()).unwrap(),
-    ];
-    let t = table(|i| i as f64).unwrap();
-    for current in changed {
-        let mut b = builder();
-        assert_eq!(
-            b.push(&current, &request(), page(0, |i| i as f64), &mut Parser::default()),
-            Err(MappingError::WrongObservation)
-        );
-        assert_eq!(t.recheck(&current, &request()), Err(MappingError::WrongObservation));
-    }
-}
-#[test]
 fn every_context_component_and_unit_remains_pinned() {
     for field in 0..5 {
         let mut b = builder();

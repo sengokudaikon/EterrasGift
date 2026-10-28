@@ -8,7 +8,7 @@ pub use preparer::{NativePreparer, VerifiedTransport};
 use crate::{
     backend::{BackendError, Connector, ErrorKind, ProcessLocator},
     connect::admission::{LogFactory, SessionConnector},
-    connect::gate::{self, GatePolicy, GateVerdict, LogSource},
+    connect::gate::{self, GateVerdict, LogSource},
     session::Session,
 };
 use eg_game_access::bootstrap::{HelperArtifact, HelperLayout};
@@ -119,7 +119,7 @@ impl<F: LogFactory + Clone> Connector for DesktopConnector<F> {
         // Repeat the gate before opening even local helper inputs. SessionConnector
         // repeats it around preparation and transport as usual.
         let started = eg_core::time::from_filetime(target.created).map_err(|e| BackendError::blocked(ErrorKind::Identity, e.to_string()))?;
-        let decision = gate::evaluate(&self.logs.create(&target)?.read(started), started, now, GatePolicy::Release);
+        let decision = gate::evaluate(&self.logs.create(&target)?.read(started), started, now);
         if decision.verdict != GateVerdict::Allow {
             return Err(BackendError::waiting(ErrorKind::Gate, "Load an offline character to connect."));
         }
@@ -128,7 +128,7 @@ impl<F: LogFactory + Clone> Connector for DesktopConnector<F> {
             let artifact =
                 Arc::new(HelperArtifact::capture(&dll, &self.helper.sha256, &self.helper.source_id).map_err(|e| BackendError::blocked(ErrorKind::Identity, e.to_string()))?);
             let preparer = NativePreparer::new(artifact.clone());
-            self.session = Some(SessionConnector::new(preparer, self.logs.clone(), artifact.source_id(), GatePolicy::Release)?);
+            self.session = Some(SessionConnector::new(preparer, self.logs.clone(), artifact.source_id())?);
         }
         self.session.as_mut().unwrap().connect(target, now).await
     }

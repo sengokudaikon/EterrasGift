@@ -11,11 +11,6 @@ impl LogSource for GameLogReader {
     }
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub enum GatePolicy {
-    #[default]
-    Release,
-}
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum GateVerdict {
     Allow,
@@ -29,7 +24,7 @@ pub struct GateDecision {
     pub log_status: GameLogStatus,
 }
 
-pub fn evaluate(log: &GameLogState, started: Timestamp, now: Timestamp, _policy: GatePolicy) -> GateDecision {
+pub fn evaluate(log: &GameLogState, started: Timestamp, now: Timestamp) -> GateDecision {
     let starting = now.as_nanosecond() - started.as_nanosecond() < 60_000_000_000;
     let (verdict, readiness) = if log.status == GameLogStatus::Current && (log.shell_state.is_some() || starting) {
         (
@@ -75,9 +70,9 @@ mod tests {
                 if let Some((_, Some(event))) = eg_core::game_log::parse(&format!("{now}\tLog\t{message}")) {
                     state = state.apply(event);
                 }
-                assert_ne!(evaluate(&state, started, now, GatePolicy::Release).verdict, GateVerdict::Allow);
+                assert_ne!(evaluate(&state, started, now).verdict, GateVerdict::Allow);
             }
-            let decision = evaluate(&state, started, now, GatePolicy::Release);
+            let decision = evaluate(&state, started, now);
             assert_eq!(
                 (decision.verdict, decision.readiness, decision.log_status),
                 (GateVerdict::Wait, GameReadiness::Online, GameLogStatus::Current)
@@ -92,7 +87,7 @@ mod tests {
                     state = state.apply(event);
                 }
             }
-            assert_eq!(evaluate(&state, started, now, GatePolicy::Release).verdict, GateVerdict::Allow);
+            assert_eq!(evaluate(&state, started, now).verdict, GateVerdict::Allow);
         }
     }
 }

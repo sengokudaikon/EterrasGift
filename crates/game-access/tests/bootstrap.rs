@@ -146,21 +146,6 @@ fn jiff_free_nonce() -> u128 {
 }
 
 #[test]
-#[ignore = "explicit artifact-only evaluator: set EG_HELPER_PATH, EG_HELPER_SHA256, EG_HELPER_SOURCE_ID; never loads target code"]
-fn explicit_compiled_helper_artifact() {
-    let path = std::path::PathBuf::from(std::env::var_os("EG_HELPER_PATH").expect("explicit path"));
-    let sha = std::env::var("EG_HELPER_SHA256").unwrap();
-    let source = std::env::var("EG_HELPER_SOURCE_ID").unwrap();
-    let artifact = HelperArtifact::capture(&path, &sha, &source).unwrap();
-    artifact.verify_unchanged().unwrap();
-    println!(
-        "Validated helper source {source}; bootstrap RVA {:x}; image size {:x}; no DLL loading or process access",
-        artifact.bootstrap_rva(),
-        artifact.image_size()
-    );
-}
-
-#[test]
 fn bootstrap_binds_controller_birth_as_immutable_reply_data() {
     let config = BootstrapConfig::new(11, SOURCE).unwrap().with_owner(42, 123456).unwrap();
     assert_eq!(u32::from_le_bytes(config.bytes()[80..84].try_into().unwrap()), 42);

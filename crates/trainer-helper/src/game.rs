@@ -28,6 +28,8 @@ mod discovery;
 mod dispatcher_thread;
 mod features;
 mod read;
+#[cfg(test)]
+mod test_fakes;
 
 pub use accessors::presence;
 pub use apply::WriteError;

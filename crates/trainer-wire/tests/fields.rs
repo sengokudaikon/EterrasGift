@@ -53,10 +53,7 @@ fn all_typed_unavailable_reasons_have_stable_literal_wire_tags() {
 }
 
 #[test]
-fn strict_header_version_reserved_tags_and_full_lengths() {
-    let mut suffix = AVAILABLE.to_vec();
-    suffix.extend_from_slice(&[0; 4096]);
-    assert!(fields::decode(&suffix).is_err());
+fn strict_header_version_and_reserved_tags() {
     for (index, error) in [
         (0, ProtocolError::InvalidMagic),
         (1, ProtocolError::InvalidMagic),

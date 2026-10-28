@@ -212,6 +212,50 @@ impl<R: Read> Read for Counted<R> {
 mod tests {
     use super::*;
 
+    fn assert_shared(error: io::Error) {
+        assert_eq!(error.raw_os_error(), Some(32), "expected sharing violation: {error}");
+    }
+
+    #[test]
+    fn lease_blocks_writes_delete_and_rename_but_allows_compatible_reads_until_drop() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("owned.bin");
+        fs::write(&path, b"owned immutable bytes").unwrap();
+        let canonical = fs::canonicalize(&path).unwrap();
+        let lease = ReadLease::capture(&canonical, &hashes::of_bytes(&fs::read(&path).unwrap())).unwrap();
+        assert_shared(OpenOptions::new().write(true).open(&path).unwrap_err());
+        assert_shared(fs::remove_file(&path).unwrap_err());
+        assert_shared(fs::rename(&path, temp.path().join("renamed.bin")).unwrap_err());
+        assert!(fs::File::open(&path).is_ok());
+        drop(lease);
+        fs::write(&path, b"released").unwrap();
+        let renamed = temp.path().join("renamed.bin");
+        fs::rename(path, &renamed).unwrap();
+        fs::remove_file(renamed).unwrap();
+    }
+
+    #[test]
+    fn data_byte_counter_proves_metadata_only_path_checks_and_bounded_positional_reads() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("owned.bin");
+        let bytes = vec![42u8; 1024 * 1024 + 17];
+        fs::write(&path, &bytes).unwrap();
+        let lease = ReadLease::capture(&fs::canonicalize(path).unwrap(), &hashes::of_bytes(&bytes)).unwrap();
+        let initial = lease.bytes_read();
+        assert_eq!(initial, bytes.len() as u64);
+        for _ in 0..100 {
+            lease.verify_path().unwrap();
+        }
+        assert_eq!(lease.bytes_read(), initial);
+        let mut output = [0; 16];
+        lease.read_exact_at(3, &mut output).unwrap();
+        assert_eq!(output, [42; 16]);
+        assert_eq!(lease.bytes_read(), initial + 16);
+        assert!(lease.read_exact_at(u64::MAX, &mut output).is_err());
+        assert!(lease.read_exact_at(lease.len() - 1, &mut output).is_err());
+        assert_eq!(lease.bytes_read(), initial + 16);
+    }
+
     #[test]
     fn oversized_sparse_file_is_an_unsupported_optimization_without_reading_its_contents() {
         use windows_sys::Win32::System::IO::DeviceIoControl;

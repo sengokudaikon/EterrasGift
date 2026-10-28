@@ -7,16 +7,13 @@ mod fields;
 mod hooks;
 #[path = "session/mapping.rs"]
 mod mappings;
-#[path = "session/rate_write.rs"]
-mod rate_writes;
 #[path = "session/unique.rs"]
 mod unique;
 #[path = "session/write.rs"]
 mod writes;
-use eg_core::game_log::{GameLogEvent, GameLogState, GameReadiness, LoggedCharacter};
+use eg_core::game_log::GameReadiness;
 use eg_trainer::{
     connect::build::BuildProfile,
-    connect::gate::{GatePolicy, LogSource},
     session::{Cleanup, Session, SessionError, SessionState},
 };
 use eg_trainer_wire::{
@@ -41,55 +38,6 @@ const HELPER_ID: &str = "0123456789abcdef0123456789abcdef0123456789abcdef0123456
 
 fn started() -> Timestamp {
     "2026-10-18T10:00:00Z".parse().unwrap()
-}
-
-#[test]
-fn owned_reads_preserve_artifact_and_cancellation_barriers() {
-    for fault in [0, 2] {
-        let fixture = Fixture::rehashing();
-        let log = FakeLog::new([offline()]);
-        let wire = FakeTransport::new(fixture.target.clone(), [fixture.discover(), status(false, 0x1234, 0)]);
-        let mut session = fixture.session(&wire, &log, GatePolicy::Release);
-        session.enable();
-        run(session.connect()).unwrap();
-        if fault == 0 {
-            fs::write(&fixture.metadata, b"changed metadata").unwrap();
-        }
-        if fault == 2 {
-            wire.push(Step::Pending);
-            let mut future = Box::pin(session.read_locale());
-            let mut context = Context::from_waker(Waker::noop());
-            assert!(future.as_mut().poll(&mut context).is_pending());
-            drop(future);
-            assert_eq!(session.state(), SessionState::Connecting);
-            assert!(matches!(run(session.read_forge()), Err(SessionError::Busy)));
-        } else {
-            assert!(run(session.read_locale()).is_err());
-            assert_eq!(wire.requests().len(), if fault == 0 { 2 } else { 3 });
-            assert_ne!(session.state(), SessionState::Ready);
-        }
-        assert!(session.runtime_status().is_none());
-    }
-}
-
-fn offline() -> GameLogState {
-    GameLogState::started()
-        .apply(GameLogEvent::ShellStateChanged("CharacterSelect".into()))
-        .apply(GameLogEvent::CharacterLoaded(LoggedCharacter {
-            name: "Owned test character".into(),
-            level: Some(23),
-            online: false,
-            cycle: "Legacy".into(),
-            class: "Rogue".into(),
-        }))
-        .apply(GameLogEvent::ShellStateChanged("None".into()))
-}
-
-fn online() -> GameLogState {
-    let mut state = offline();
-    state.readiness = GameReadiness::Online;
-    state.character.as_mut().unwrap().online = true;
-    state
 }
 
 fn done(payload: Vec<u8>) -> Step {
@@ -229,43 +177,6 @@ impl Transport for FakeTransport {
     }
 }
 
-#[derive(Clone)]
-struct FakeLog(Arc<Mutex<Log>>);
-
-struct Log {
-    states: VecDeque<GameLogState>,
-    process_starts: Vec<Timestamp>,
-}
-
-impl FakeLog {
-    fn new(states: impl IntoIterator<Item = GameLogState>) -> Self {
-        Self(Arc::new(Mutex::new(Log {
-            states: states.into_iter().collect(),
-            process_starts: Vec::new(),
-        })))
-    }
-
-    fn set(&self, state: GameLogState) {
-        self.0.lock().unwrap().states = [state].into();
-    }
-
-    fn reads(&self) -> Vec<Timestamp> {
-        self.0.lock().unwrap().process_starts.clone()
-    }
-}
-
-impl LogSource for FakeLog {
-    fn read(&mut self, process_start: Timestamp) -> GameLogState {
-        let mut log = self.0.lock().unwrap();
-        log.process_starts.push(process_start);
-        if log.states.len() > 1 {
-            log.states.pop_front().unwrap()
-        } else {
-            log.states.front().expect("log fixture requires a state").clone()
-        }
-    }
-}
-
 struct Fixture {
     _writers: Vec<fs::File>,
     _temp: tempfile::TempDir,
@@ -354,7 +265,7 @@ impl Fixture {
         done(self.discovery().encode(42).unwrap())
     }
 
-    fn session(&self, wire: &FakeTransport, _log: &FakeLog, _policy: GatePolicy) -> Session<FakeTransport> {
+    fn session(&self, wire: &FakeTransport) -> Session<FakeTransport> {
         Session::new(self.target.clone(), wire.clone(), self.profile()).unwrap()
     }
 }
@@ -366,21 +277,18 @@ fn run<F: Future>(future: F) -> F::Output {
 #[test]
 fn session_is_inert_until_enabled_and_connected() {
     let fixture = Fixture::new();
-    let log = FakeLog::new([online()]);
     let wire = FakeTransport::new(fixture.target.clone(), [fixture.discover(), status(false, 0x1234, 0)]);
-    let mut session = fixture.session(&wire, &log, GatePolicy::Release);
+    let mut session = fixture.session(&wire);
     assert!(matches!(run(session.connect()), Err(SessionError::Disabled)));
     assert!(wire.requests().is_empty());
     session.enable();
     run(session.connect()).unwrap();
     assert_eq!(session.state(), SessionState::Ready);
-    assert!(log.reads().is_empty(), "Player.log admission belongs to the backend");
 }
 
 #[test]
 fn session_rejects_a_transport_bound_to_another_process_identity_before_io() {
     let fixture = Fixture::new();
-    let log = FakeLog::new([offline()]);
     for other in [
         ProcessIdentity {
             pid: 43,
@@ -401,7 +309,6 @@ fn session_rejects_a_transport_bound_to_another_process_identity_before_io() {
             Err(SessionError::Identity(_))
         ));
         assert!(wire.requests().is_empty());
-        assert!(log.reads().is_empty());
     }
 }
 
@@ -423,10 +330,8 @@ fn session_rejects_identical_artifacts_outside_the_target_installation_before_io
         assert_eq!(unrelated.metadata_hash(), expected.metadata_hash());
         assert_eq!(unrelated.helper_build_id(), expected.helper_build_id());
         let wire = FakeTransport::new(fixture.target.clone(), []);
-        let log = FakeLog::new([offline()]);
         assert!(matches!(Session::new(fixture.target.clone(), wire.clone(), unrelated), Err(SessionError::Identity(_))));
         assert!(wire.requests().is_empty());
-        assert!(log.reads().is_empty());
     }
 }
 
@@ -434,14 +339,12 @@ fn session_rejects_identical_artifacts_outside_the_target_installation_before_io
 fn successful_handshake_unloads_on_disable() {
     let fixture = Fixture::new();
     let wire = FakeTransport::new(fixture.target.clone(), [fixture.discover(), status(false, 0x1234, 2), clear()]);
-    let log = FakeLog::new([offline()]);
-    let mut session = fixture.session(&wire, &log, GatePolicy::Release);
+    let mut session = fixture.session(&wire);
     session.enable();
     run(session.connect()).unwrap();
     assert_eq!(session.state(), SessionState::Ready);
     assert_eq!(session.target(), &fixture.target);
     assert_eq!(session.runtime_status().unwrap().features_on, 2);
-    assert!(log.reads().is_empty());
     assert_eq!(run(session.disable()), Cleanup::ConfirmedOff);
     assert_eq!(session.state(), SessionState::Disabled);
     assert_eq!(session.runtime_status(), None);
@@ -457,8 +360,7 @@ fn reconnecting_invalidates_the_previous_cleanup_acknowledgement() {
         fixture.target.clone(),
         [fixture.discover(), status(false, 0x1234, 1), clear(), fixture.discover(), status(false, 0x1234, 3), clear()],
     );
-    let log = FakeLog::new([offline()]);
-    let mut session = fixture.session(&wire, &log, GatePolicy::Release);
+    let mut session = fixture.session(&wire);
     session.enable();
     run(session.connect()).unwrap();
     assert_eq!(run(session.disconnect()), Cleanup::ConfirmedOff);
@@ -485,8 +387,7 @@ fn helper_offline_required_revokes_gameplay_but_allows_owner_unload() {
             payload: b"diagnostic text cannot authorize cleanup".to_vec(),
         })));
         let wire = FakeTransport::new(fixture.target.clone(), steps);
-        let log = FakeLog::new([offline()]);
-        let mut session = fixture.session(&wire, &log, GatePolicy::Release);
+        let mut session = fixture.session(&wire);
         session.enable();
         let result = if during_refresh {
             run(session.connect()).unwrap();
@@ -532,14 +433,12 @@ fn incompatible_discovery_is_rejected_before_status() {
     let missing_field = valid[..valid.len() - 1].to_vec();
     for payload in [wrong_length, wrong_pid, wrong_build, wrong_bytes, missing_field] {
         let wire = FakeTransport::new(fixture.target.clone(), [done(payload)]);
-        let log = FakeLog::new([offline()]);
-        let mut session = fixture.session(&wire, &log, GatePolicy::Release);
+        let mut session = fixture.session(&wire);
         session.enable();
         assert!(run(session.connect()).is_err());
         assert_eq!(session.state(), SessionState::Disconnected);
         assert_eq!(session.runtime_status(), None);
         assert_eq!(wire.requests(), [Request::Discover]);
-        assert!(log.reads().is_empty());
     }
 }
 
@@ -559,8 +458,7 @@ fn artifacts_changed_while_discovery_is_in_flight_prevent_status() {
                 },
             )],
         );
-        let log = FakeLog::new([offline()]);
-        let mut session = fixture.session(&wire, &log, GatePolicy::Release);
+        let mut session = fixture.session(&wire);
         session.enable();
         assert!(matches!(run(session.connect()), Err(SessionError::Identity(_))));
         assert_eq!(wire.requests(), [Request::Discover]);
@@ -576,8 +474,7 @@ fn runtime_online_or_absent_character_releases_attachment_with_only_owner_unload
     ] {
         let fixture = Fixture::new();
         let wire = FakeTransport::new(fixture.target.clone(), [fixture.discover(), status(online, manager, 3)]);
-        let log = FakeLog::new([offline()]);
-        let mut session = fixture.session(&wire, &log, GatePolicy::Release);
+        let mut session = fixture.session(&wire);
         session.enable();
         assert!(matches!(run(session.connect()), Err(SessionError::NotOffline(actual)) if actual == readiness));
         assert_eq!(session.state(), SessionState::Disconnected);
@@ -592,8 +489,7 @@ fn runtime_online_or_absent_character_releases_attachment_with_only_owner_unload
 fn refresh_observing_runtime_online_revokes_readiness_with_only_owner_unload() {
     let fixture = Fixture::new();
     let wire = FakeTransport::new(fixture.target.clone(), [fixture.discover(), status(false, 0x1234, 1), status(true, 0x1234, 1)]);
-    let log = FakeLog::new([offline()]);
-    let mut session = fixture.session(&wire, &log, GatePolicy::Release);
+    let mut session = fixture.session(&wire);
     session.enable();
     run(session.connect()).unwrap();
     assert!(matches!(run(session.refresh()), Err(SessionError::NotOffline(GameReadiness::Online))));
@@ -625,8 +521,7 @@ fn failed_or_incomplete_cleanup_never_claims_features_are_off() {
     ] {
         let fixture = Fixture::new();
         let wire = FakeTransport::new(fixture.target.clone(), [fixture.discover(), status(false, 0x1234, 1), cleanup]);
-        let log = FakeLog::new([offline()]);
-        let mut session = fixture.session(&wire, &log, GatePolicy::Release);
+        let mut session = fixture.session(&wire);
         session.enable();
         run(session.connect()).unwrap();
         assert_eq!(run(session.disconnect()), Cleanup::Unconfirmed);
@@ -642,8 +537,7 @@ fn canceled_attachment_stays_connecting_until_explicit_disconnect() {
     let fixture = Fixture::new();
     // Discovery completes; the Status was submitted but no answer arrived.
     let wire = FakeTransport::new(fixture.target.clone(), [fixture.discover(), Step::Pending, clear()]);
-    let log = FakeLog::new([offline()]);
-    let mut session = fixture.session(&wire, &log, GatePolicy::Release);
+    let mut session = fixture.session(&wire);
     session.enable();
     let mut attaching = Box::pin(session.connect());
     assert!(matches!(attaching.as_mut().poll(&mut Context::from_waker(Waker::noop())), Poll::Pending));
@@ -666,8 +560,7 @@ fn canceled_attachment_stays_connecting_until_explicit_disconnect() {
 fn canceled_discovery_requires_explicit_disconnect_without_cleanup_replay() {
     let fixture = Fixture::new();
     let wire = FakeTransport::new(fixture.target.clone(), [Step::Pending]);
-    let log = FakeLog::new([offline()]);
-    let mut session = fixture.session(&wire, &log, GatePolicy::Release);
+    let mut session = fixture.session(&wire);
     session.enable();
     let mut attaching = Box::pin(session.connect());
     assert!(matches!(attaching.as_mut().poll(&mut Context::from_waker(Waker::noop())), Poll::Pending));
@@ -683,8 +576,7 @@ fn canceled_discovery_requires_explicit_disconnect_without_cleanup_replay() {
 fn canceled_cleanup_remains_closing_until_explicit_disconnect_finishes() {
     let fixture = Fixture::new();
     let wire = FakeTransport::new(fixture.target.clone(), [fixture.discover(), status(false, 0x1234, 1), Step::Pending, clear()]);
-    let log = FakeLog::new([offline()]);
-    let mut session = fixture.session(&wire, &log, GatePolicy::Release);
+    let mut session = fixture.session(&wire);
     session.enable();
     run(session.connect()).unwrap();
     // Disconnect's timeout requires a runtime, but cancellation itself is manual.
@@ -728,8 +620,7 @@ fn helper_failure_codes_preserve_uncertainty_and_do_not_replay_requests() {
                 })),
             ],
         );
-        let log = FakeLog::new([offline()]);
-        let mut session = fixture.session(&wire, &log, GatePolicy::Release);
+        let mut session = fixture.session(&wire);
         session.enable();
         match run(session.connect()).unwrap_err() {
             SessionError::Helper { code: actual, may_have_run, .. } => {
@@ -738,14 +629,7 @@ fn helper_failure_codes_preserve_uncertainty_and_do_not_replay_requests() {
             }
             error => panic!("unexpected session error: {error}"),
         }
-        assert_eq!(
-            session.state(),
-            match code {
-                ResponseCode::NotReady => SessionState::Disconnected,
-                ResponseCode::OfflineRequired => SessionState::Disconnected,
-                _ => SessionState::Disconnected,
-            }
-        );
+        assert_eq!(session.state(), SessionState::Disconnected);
         assert_eq!(wire.requests(), [Request::Discover, Request::Status { dispatcher: fixture.dispatcher }]);
     }
 }
@@ -764,8 +648,7 @@ fn transport_loss_is_not_replayed_and_retains_delivery_information() {
                 })),
             ],
         );
-        let log = FakeLog::new([offline()]);
-        let mut session = fixture.session(&wire, &log, GatePolicy::Release);
+        let mut session = fixture.session(&wire);
         session.enable();
         assert!(matches!(run(session.connect()), Err(SessionError::Transport(error)) if error.delivery == delivery));
         assert_eq!(session.state(), SessionState::Disconnected);
@@ -778,8 +661,7 @@ fn transport_loss_is_not_replayed_and_retains_delivery_information() {
 fn malformed_status_does_not_become_ready_or_trigger_a_replay() {
     let fixture = Fixture::new();
     let wire = FakeTransport::new(fixture.target.clone(), [fixture.discover(), done(vec![0; 15])]);
-    let log = FakeLog::new([offline()]);
-    let mut session = fixture.session(&wire, &log, GatePolicy::Release);
+    let mut session = fixture.session(&wire);
     session.enable();
     assert!(matches!(run(session.connect()), Err(SessionError::Protocol(ProtocolError::InvalidData))));
     assert_eq!(session.state(), SessionState::Disconnected);
@@ -810,10 +692,8 @@ fn profile_requires_file_backed_executable_dispatcher_and_bounded_headers() {
 fn forge_read_requires_enabled_ready_and_offline_admission_before_io() {
     let fixture = Fixture::new();
     let wire = FakeTransport::new(fixture.target.clone(), []);
-    let log = FakeLog::new([offline()]);
-    let mut session = fixture.session(&wire, &log, GatePolicy::Release);
+    let mut session = fixture.session(&wire);
     assert!(matches!(run(session.read_forge()), Err(SessionError::Disabled)));
-    assert!(log.reads().is_empty());
     session.enable();
     assert!(matches!(run(session.read_forge()), Err(SessionError::NotConnected)));
     assert!(wire.requests().is_empty());
@@ -832,8 +712,7 @@ fn forge_read_returns_owned_item_then_empty_without_losing_readiness() {
             done(forge::encode(None).unwrap()),
         ],
     );
-    let log = FakeLog::new([offline()]);
-    let mut session = fixture.session(&wire, &log, GatePolicy::Release);
+    let mut session = fixture.session(&wire);
     session.enable();
     run(session.connect()).unwrap();
     let initial_status = *session.runtime_status().unwrap();
@@ -866,8 +745,7 @@ fn changed_artifacts_prevent_forge_io_and_release_the_session() {
     for change_binary in [false, true] {
         let fixture = Fixture::rehashing();
         let wire = FakeTransport::new(fixture.target.clone(), [fixture.discover(), status(false, 0x1234, 0)]);
-        let log = FakeLog::new([offline()]);
-        let mut session = fixture.session(&wire, &log, GatePolicy::Release);
+        let mut session = fixture.session(&wire);
         session.enable();
         run(session.connect()).unwrap();
         fs::write(if change_binary { &fixture.binary } else { &fixture.metadata }, b"changed before forge read").unwrap();
@@ -899,8 +777,7 @@ fn rejected_forge_reply_blocks_without_replay_and_requires_an_explicit_new_hands
     for (case, reply) in cases.into_iter().enumerate() {
         let fixture = Fixture::new();
         let wire = FakeTransport::new(fixture.target.clone(), [fixture.discover(), status(false, 0x1234, 0), reply]);
-        let log = FakeLog::new([offline()]);
-        let mut session = fixture.session(&wire, &log, GatePolicy::Release);
+        let mut session = fixture.session(&wire);
         session.enable();
         run(session.connect()).unwrap();
         let error = run(session.read_forge()).unwrap_err();
@@ -965,8 +842,7 @@ fn forge_runtime_offline_refusal_waits_without_io_until_an_explicit_connect() {
             })),
         ],
     );
-    let log = FakeLog::new([offline()]);
-    let mut session = fixture.session(&wire, &log, GatePolicy::Release);
+    let mut session = fixture.session(&wire);
     session.enable();
     run(session.connect()).unwrap();
     assert!(matches!(
@@ -996,8 +872,7 @@ fn forge_runtime_offline_refusal_waits_without_io_until_an_explicit_connect() {
 fn canceled_forge_read_remains_busy_until_explicit_disconnect_without_replay() {
     let fixture = Fixture::new();
     let wire = FakeTransport::new(fixture.target.clone(), [fixture.discover(), status(false, 0x1234, 0), Step::Pending, clear()]);
-    let log = FakeLog::new([offline()]);
-    let mut session = fixture.session(&wire, &log, GatePolicy::Release);
+    let mut session = fixture.session(&wire);
     session.enable();
     run(session.connect()).unwrap();
     let mut reading = Box::pin(session.read_forge());
@@ -1042,8 +917,7 @@ fn locale_requires_ready_and_returns_owned_changed_language_with_stable_version(
         ..first.clone()
     };
     let wire = FakeTransport::new(fixture.target.clone(), []);
-    let log = FakeLog::new([offline()]);
-    let mut session = fixture.session(&wire, &log, GatePolicy::Release);
+    let mut session = fixture.session(&wire);
     assert!(matches!(run(session.read_locale()), Err(SessionError::Disabled)));
     session.enable();
     assert!(matches!(run(session.read_locale()), Err(SessionError::NotConnected)));
@@ -1087,8 +961,7 @@ fn unready_or_malformed_locale_requires_explicit_reconnect_without_replay() {
     ] {
         let fixture = Fixture::new();
         let wire = FakeTransport::new(fixture.target.clone(), [fixture.discover(), status(false, 0x1234, 0), step]);
-        let log = FakeLog::new([offline()]);
-        let mut session = fixture.session(&wire, &log, GatePolicy::Release);
+        let mut session = fixture.session(&wire);
         session.enable();
         run(session.connect()).unwrap();
         assert!(run(session.read_locale()).is_err());
@@ -1111,45 +984,11 @@ fn unready_or_malformed_locale_requires_explicit_reconnect_without_replay() {
 }
 
 #[test]
-fn locale_rejects_either_changed_artifact_before_rpc() {
-    for binary in [false, true] {
-        let fixture = Fixture::rehashing();
-        let wire = FakeTransport::new(fixture.target.clone(), [fixture.discover(), status(false, 0x1234, 0)]);
-        let mut session = fixture.session(&wire, &FakeLog::new([offline()]), GatePolicy::Release);
-        session.enable();
-        run(session.connect()).unwrap();
-        fs::write(if binary { &fixture.binary } else { &fixture.metadata }, b"changed before read").unwrap();
-        assert!(matches!(run(session.read_locale()), Err(SessionError::Identity(_))));
-        assert_eq!(session.state(), SessionState::Disconnected);
-        assert_eq!(session.runtime_status(), None);
-        assert_eq!(wire.requests().len(), 2);
-    }
-}
-
-#[test]
-fn canceled_locale_read_preserves_shared_busy_barrier_until_disconnect() {
-    let fixture = Fixture::new();
-    let wire = FakeTransport::new(fixture.target.clone(), [fixture.discover(), status(false, 0x1234, 0), Step::Pending, clear()]);
-    let log = FakeLog::new([offline()]);
-    let mut session = fixture.session(&wire, &log, GatePolicy::Release);
-    session.enable();
-    run(session.connect()).unwrap();
-    let mut reading = Box::pin(session.read_locale());
-    assert!(matches!(reading.as_mut().poll(&mut Context::from_waker(Waker::noop())), Poll::Pending));
-    drop(reading);
-    assert_eq!(session.state(), SessionState::Connecting);
-    assert!(matches!(run(session.read_locale()), Err(SessionError::Busy)));
-    assert!(matches!(run(session.read_forge()), Err(SessionError::Busy)));
-    assert_eq!(wire.requests().len(), 3);
-    assert_eq!(run(session.disconnect()), Cleanup::ConfirmedOff);
-}
-
-#[test]
 fn unload_ack_without_native_departure_evidence_stays_unconfirmed_and_is_not_replayed() {
     let fixture = Fixture::new();
     let wire = FakeTransport::new(fixture.target.clone(), [fixture.discover(), status(false, 0x1234, 0), clear()]);
     wire.0.lock().unwrap().departure_proven = false;
-    let mut session = fixture.session(&wire, &FakeLog::new([offline()]), GatePolicy::Release);
+    let mut session = fixture.session(&wire);
     session.enable();
     run(session.connect()).unwrap();
     assert_eq!(run(session.disconnect()), Cleanup::Unconfirmed);
@@ -1169,7 +1008,7 @@ fn typed_travel_response_keeps_the_lease_but_removes_old_manager_authority() {
         fixture.target.clone(),
         [fixture.discover(), status(false, 0x1234, 0), loading, status(false, 0x5678, 0), clear()],
     );
-    let mut session = fixture.session(&wire, &FakeLog::new([offline()]), GatePolicy::Release);
+    let mut session = fixture.session(&wire);
     session.enable();
     run(session.connect()).unwrap();
     assert!(matches!(run(session.refresh()), Err(SessionError::CharacterLoading)));

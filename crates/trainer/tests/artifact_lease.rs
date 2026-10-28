@@ -1,13 +1,10 @@
 #![cfg(windows)]
 //! Owned Windows files and scripted transports only; no game/process access.
-use eg_core::{
-    game_log::{GameLogState, GameLogStatus, GameReadiness},
-    hashes,
-};
+#[path = "pe_support/mod.rs"]
+mod pe_support;
 use eg_game_access::artifact::ReadLease;
 use eg_trainer::{
     connect::build::BuildProfile,
-    connect::gate::LogSource,
     session::{Session, SessionError, SessionState},
 };
 use eg_trainer_wire::{
@@ -19,12 +16,11 @@ use eg_trainer_wire::{
 use jiff::Timestamp;
 use std::{
     collections::VecDeque,
-    fs::{self, File, OpenOptions},
+    fs::{self, OpenOptions},
     future::{Future, pending},
     os::windows::fs::OpenOptionsExt,
     path::PathBuf,
     sync::{Arc, Mutex},
-    task::{Context, Waker},
 };
 
 const HELPER: &str = "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789";
@@ -59,24 +55,8 @@ impl Fixture {
         fs::write(&metadata, b"owned lease metadata").unwrap();
         let exe = temp.path().join("Owned.exe");
         fs::write(&exe, b"owned identity only").unwrap();
-        let dispatcher = DispatcherSpec {
-            rva: 0x1000,
-            bytes: [0x48, 0x83, 0xec, 0x28, 0x80, 0x3d, 1, 2, 3, 4, 0, 0x75, 0x13, 0x48, 0x8d, 0x0d],
-        };
-        let mut pe = vec![0; 0x400];
-        pe[..2].copy_from_slice(b"MZ");
-        pe[0x3c..0x40].copy_from_slice(&0x80u32.to_le_bytes());
-        pe[0x80..0x84].copy_from_slice(b"PE\0\0");
-        pe[0x84..0x86].copy_from_slice(&0x8664u16.to_le_bytes());
-        pe[0x86..0x88].copy_from_slice(&1u16.to_le_bytes());
-        pe[0x94..0x96].copy_from_slice(&240u16.to_le_bytes());
-        pe[0x98..0x9a].copy_from_slice(&0x20bu16.to_le_bytes());
-        pe[0x194..0x198].copy_from_slice(&0x1000u32.to_le_bytes());
-        pe[0x198..0x19c].copy_from_slice(&0x200u32.to_le_bytes());
-        pe[0x19c..0x1a0].copy_from_slice(&0x200u32.to_le_bytes());
-        pe[0x1ac..0x1b0].copy_from_slice(&0x60000020u32.to_le_bytes());
-        pe[0x200..0x210].copy_from_slice(&dispatcher.bytes);
-        fs::write(&binary, pe).unwrap();
+        let dispatcher = pe_support::dispatcher();
+        fs::write(&binary, pe_support::image(&dispatcher)).unwrap();
         let target = ProcessIdentity {
             pid: 42,
             created: ((now().as_nanosecond() - 120_000_000_000) / 100 + 116_444_736_000_000_000) as u64,
@@ -93,7 +73,7 @@ impl Fixture {
     fn profile(&self) -> BuildProfile {
         BuildProfile::capture(&self.binary, &self.metadata, HELPER).unwrap()
     }
-    fn wire(&self, log: Logs) -> Wire {
+    fn wire(&self) -> Wire {
         let discovery = Discovery {
             build_id: HELPER.into(),
             dispatcher: self.dispatcher,
@@ -122,27 +102,6 @@ impl Fixture {
             })),
             binary: self.binary.clone(),
             metadata: self.metadata.clone(),
-            _log: log,
-        }
-    }
-}
-#[derive(Clone)]
-struct Logs(Arc<Mutex<GameReadiness>>);
-impl Logs {
-    fn new() -> Self {
-        Self(Arc::new(Mutex::new(GameReadiness::Offline)))
-    }
-}
-impl LogSource for Logs {
-    fn read(&mut self, _: Timestamp) -> GameLogState {
-        let readiness = *self.0.lock().unwrap();
-        GameLogState {
-            status: GameLogStatus::Current,
-            readiness,
-            character: None,
-            shell_state: Some("None".into()),
-            offline_mode: Some(readiness == GameReadiness::Offline),
-            problem: None,
         }
     }
 }
@@ -160,7 +119,6 @@ struct Wire {
     shared: Arc<Mutex<WireState>>,
     binary: PathBuf,
     metadata: PathBuf,
-    _log: Logs,
 }
 impl Transport for Wire {
     fn target(&self) -> &ProcessIdentity {
@@ -204,46 +162,6 @@ impl Transport for Wire {
             payload,
         })
     }
-}
-
-#[test]
-fn lease_blocks_writes_delete_and_rename_but_allows_compatible_reads_until_drop() {
-    let temp = tempfile::tempdir().unwrap();
-    let path = temp.path().join("owned.bin");
-    fs::write(&path, b"owned immutable bytes").unwrap();
-    let canonical = fs::canonicalize(&path).unwrap();
-    let lease = ReadLease::capture(&canonical, &hashes::of_bytes(&fs::read(&path).unwrap())).unwrap();
-    assert_shared(OpenOptions::new().write(true).open(&path).unwrap_err());
-    assert_shared(fs::remove_file(&path).unwrap_err());
-    assert_shared(fs::rename(&path, temp.path().join("renamed.bin")).unwrap_err());
-    assert!(File::open(&path).is_ok());
-    drop(lease);
-    fs::write(&path, b"released").unwrap();
-    let renamed = temp.path().join("renamed.bin");
-    fs::rename(path, &renamed).unwrap();
-    fs::remove_file(renamed).unwrap();
-}
-
-#[test]
-fn data_byte_counter_proves_metadata_only_path_checks_and_bounded_positional_reads() {
-    let temp = tempfile::tempdir().unwrap();
-    let path = temp.path().join("owned.bin");
-    let bytes = vec![42u8; 1024 * 1024 + 17];
-    fs::write(&path, &bytes).unwrap();
-    let lease = ReadLease::capture(&fs::canonicalize(path).unwrap(), &hashes::of_bytes(&bytes)).unwrap();
-    let initial = lease.bytes_read();
-    assert_eq!(initial, bytes.len() as u64);
-    for _ in 0..100 {
-        lease.verify_path().unwrap();
-    }
-    assert_eq!(lease.bytes_read(), initial);
-    let mut output = [0; 16];
-    lease.read_exact_at(3, &mut output).unwrap();
-    assert_eq!(output, [42; 16]);
-    assert_eq!(lease.bytes_read(), initial + 16);
-    assert!(lease.read_exact_at(u64::MAX, &mut output).is_err());
-    assert!(lease.read_exact_at(lease.len() - 1, &mut output).is_err());
-    assert_eq!(lease.bytes_read(), initial + 16);
 }
 
 #[test]
@@ -333,34 +251,9 @@ fn session_reuses_one_lease_across_polling_and_public_reads() {
 }
 
 #[test]
-fn read_future_drop_retains_session_lease_and_preserves_connecting_barrier() {
-    let f = Fixture::new();
-    let log = Logs::new();
-    let wire = f.wire(log.clone());
-    let shared = wire.shared.clone();
-    shared.lock().unwrap().pending = true;
-    let mut session = Session::new(f.target.clone(), wire, f.profile()).unwrap();
-    session.enable();
-    run(session.connect()).unwrap();
-    let mut future = Box::pin(session.read_locale());
-    let mut context = Context::from_waker(Waker::noop());
-    assert!(future.as_mut().poll(&mut context).is_pending());
-    assert_shared(OpenOptions::new().write(true).open(&f.metadata).unwrap_err());
-    drop(future);
-    assert_shared(OpenOptions::new().write(true).open(&f.metadata).unwrap_err());
-    assert_eq!(session.state(), SessionState::Connecting);
-    assert!(matches!(run(session.connect()), Err(SessionError::Busy)));
-    let before = shared.lock().unwrap().requests.len();
-    run(session.disconnect());
-    assert_eq!(shared.lock().unwrap().requests.len(), before + 1);
-    assert!(OpenOptions::new().write(true).open(&f.metadata).is_ok());
-}
-
-#[test]
 fn runtime_refusal_releases_lease_and_stops_all_further_io() {
     let f = Fixture::new();
-    let log = Logs::new();
-    let wire = f.wire(log.clone());
+    let wire = f.wire();
     let shared = wire.shared.clone();
     shared.lock().unwrap().refuse_runtime = true;
     let mut session = Session::new(f.target.clone(), wire, f.profile()).unwrap();
@@ -385,8 +278,7 @@ fn runtime_refusal_releases_lease_and_stops_all_further_io() {
 fn changed_artifact_before_a_read_is_rejected_before_its_request() {
     for binary in [true, false] {
         let f = Fixture::new();
-        let log = Logs::new();
-        let wire = f.wire(log.clone());
+        let wire = f.wire();
         let shared = wire.shared.clone();
         let _writer = OpenOptions::new()
             .read(true)
@@ -443,8 +335,7 @@ fn fallback_hashes_unchanged_artifacts_once_rather_than_on_every_read() {
 #[test]
 fn fallback_rehashes_each_read_and_rejects_an_inflight_artifact_change() {
     let f = Fixture::new();
-    let log = Logs::new();
-    let wire = f.wire(log.clone());
+    let wire = f.wire();
     let shared = wire.shared.clone();
     let writer = OpenOptions::new().read(true).write(true).share_mode(7).open(&f.metadata).unwrap();
     let mut session = Session::new(f.target.clone(), wire, f.profile()).unwrap();
@@ -463,8 +354,7 @@ fn fallback_rehashes_each_read_and_rejects_an_inflight_artifact_change() {
 }
 
 fn connected(f: &Fixture) -> (Session<Wire>, Arc<Mutex<WireState>>) {
-    let log = Logs::new();
-    let wire = f.wire(log.clone());
+    let wire = f.wire();
     let shared = wire.shared.clone();
     let mut session = Session::new(f.target.clone(), wire, f.profile()).unwrap();
     session.enable();

@@ -68,14 +68,11 @@ fn each_text_is_bounded_by_utf8_bytes_including_exact_maximum() {
     ] {
         assert!(locale::encode(&locale).is_err());
     }
-    for length in [MAX_TEXT_BYTES as u32 + 1, u32::MAX] {
-        let mut bytes = length.to_le_bytes().to_vec();
-        bytes.extend_from_slice(&[0; 8]);
-        assert!(locale::decode(&bytes).is_err());
-        let mut bytes = vec![2, 0, 0, 0, b'e', b'n'];
-        bytes.extend_from_slice(&length.to_le_bytes());
-        assert!(locale::decode(&bytes).is_err());
-    }
+    // The oversized text is present, so only the decoder's own bound refuses it.
+    let mut bytes = (MAX_TEXT_BYTES as u32 + 1).to_le_bytes().to_vec();
+    bytes.extend_from_slice(&[b'x'; MAX_TEXT_BYTES + 1]);
+    bytes.extend_from_slice(&0_u32.to_le_bytes());
+    assert!(locale::decode(&bytes).is_err());
     assert!(locale::decode(&vec![0; MAX_RESPONSE_SIZE + 1]).is_err());
 }
 

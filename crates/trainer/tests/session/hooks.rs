@@ -16,9 +16,8 @@ impl WriteControl for AllowWrite {
 #[test]
 fn rift_mode_is_sent_and_confirmed_independently_of_enabled_state() {
     let fixture = Fixture::rehashing();
-    let log = FakeLog::new([offline()]);
     let wire = FakeTransport::new(fixture.target.clone(), [fixture.discover(), status(false, 0x1234, 0)]);
-    let mut session = fixture.session(&wire, &log, GatePolicy::Release);
+    let mut session = fixture.session(&wire);
     session.enable();
     run(session.connect()).unwrap();
     for (choice, on, actual_answer, kept) in [(1.0, true, true, true), (2.0, true, false, true), (1.0, true, false, false), (0.0, false, false, true)] {
@@ -48,7 +47,6 @@ fn rift_mode_is_sent_and_confirmed_independently_of_enabled_state() {
 #[test]
 fn monitor_cannot_keep_reporting_portal_when_answer_changes_to_boss() {
     let fixture = Fixture::rehashing();
-    let log = FakeLog::new([offline()]);
     let observation = |value| {
         done(
             HookObservation {
@@ -70,7 +68,7 @@ fn monitor_cannot_keep_reporting_portal_when_answer_changes_to_boss() {
             observation(0),
         ],
     );
-    let mut session = fixture.session(&wire, &log, GatePolicy::Release);
+    let mut session = fixture.session(&wire);
     session.enable();
     run(session.connect()).unwrap();
     run(session.set_gameplay_hook(GameplayHook::MysteriousRift, true, &mut AllowWrite)).unwrap();
@@ -82,9 +80,8 @@ fn monitor_cannot_keep_reporting_portal_when_answer_changes_to_boss() {
 fn each_gameplay_hook_requires_a_separate_readback_for_on_and_off() {
     for hook in GameplayHook::ALL {
         let fixture = Fixture::rehashing();
-        let log = FakeLog::new([offline()]);
         let wire = FakeTransport::new(fixture.target.clone(), [fixture.discover(), status(false, 0x1234, 0)]);
-        let mut session = fixture.session(&wire, &log, GatePolicy::Release);
+        let mut session = fixture.session(&wire);
         session.enable();
         run(session.connect()).unwrap();
         assert!(session.supports_hook(hook));
@@ -132,9 +129,8 @@ fn a_gameplay_hook_ack_cannot_hide_missing_or_inconsistent_readback() {
         .encode(),
     ] {
         let fixture = Fixture::rehashing();
-        let log = FakeLog::new([offline()]);
         let wire = FakeTransport::new(fixture.target.clone(), [fixture.discover(), status(false, 0x1234, 0), done(vec![]), done(payload)]);
-        let mut session = fixture.session(&wire, &log, GatePolicy::Release);
+        let mut session = fixture.session(&wire);
         session.enable();
         run(session.connect()).unwrap();
         assert!(matches!(
@@ -155,9 +151,8 @@ fn hook_cleanup_queued_after_ack_prevents_readback_and_never_retries() {
         }
     }
     let fixture = Fixture::rehashing();
-    let log = FakeLog::new([offline()]);
     let wire = FakeTransport::new(fixture.target.clone(), [fixture.discover(), status(false, 0x1234, 0), done(vec![])]);
-    let mut session = fixture.session(&wire, &log, GatePolicy::Release);
+    let mut session = fixture.session(&wire);
     session.enable();
     run(session.connect()).unwrap();
     assert!(matches!(
@@ -171,7 +166,6 @@ fn hook_cleanup_queued_after_ack_prevents_readback_and_never_retries() {
 #[test]
 fn hook_monitor_reads_actual_disabled_state_after_helper_suspension() {
     let fixture = Fixture::rehashing();
-    let log = FakeLog::new([offline()]);
     let wire = FakeTransport::new(
         fixture.target.clone(),
         [
@@ -197,7 +191,7 @@ fn hook_monitor_reads_actual_disabled_state_after_helper_suspension() {
             ),
         ],
     );
-    let mut session = fixture.session(&wire, &log, GatePolicy::Release);
+    let mut session = fixture.session(&wire);
     session.enable();
     run(session.connect()).unwrap();
     run(session.set_gameplay_hook(GameplayHook::Offhand, true, &mut AllowWrite)).unwrap();
@@ -208,9 +202,8 @@ fn hook_monitor_reads_actual_disabled_state_after_helper_suspension() {
 #[test]
 fn damage_percentage_must_match_independent_readback() {
     let fixture = Fixture::rehashing();
-    let log = FakeLog::new([offline()]);
     let wire = FakeTransport::new(fixture.target.clone(), [fixture.discover(), status(false, 0x1234, 0)]);
-    let mut session = fixture.session(&wire, &log, GatePolicy::Release);
+    let mut session = fixture.session(&wire);
     session.enable();
     run(session.connect()).unwrap();
     for (wanted, actual) in [(0, 0), (50, 50), (100, 100), (25, 50)] {
@@ -238,9 +231,8 @@ fn damage_percentage_must_match_independent_readback() {
 #[test]
 fn outgoing_modes_require_exact_readback_and_off_accepts_a_verified_shared_target() {
     let fixture = Fixture::rehashing();
-    let log = FakeLog::new([offline()]);
     let wire = FakeTransport::new(fixture.target.clone(), [fixture.discover(), status(false, 0x1234, 0)]);
-    let mut session = fixture.session(&wire, &log, GatePolicy::Release);
+    let mut session = fixture.session(&wire);
     session.enable();
     run(session.connect()).unwrap();
     for (wanted, actual, on) in [(0.0f64, 0.0f64, true), (3.125, 3.125, true), (101.0, 101.0, true), (101.0, 100.0, true), (1.0, 1.0, false)] {

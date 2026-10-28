@@ -18,7 +18,7 @@ fn implicit_descriptions_bind_complete_expected_item_and_keep_fixed_lines_after_
         fixture.target.clone(),
         [fixture.discover(), status(false, 0x1234, 0), done(mapping::encode_modifiers(&lines).unwrap())],
     );
-    let mut session = fixture.session(&wire, &FakeLog::new([offline()]), GatePolicy::Release);
+    let mut session = fixture.session(&wire);
     session.enable();
     run(session.connect()).unwrap();
     assert_eq!(run(session.describe_implicits(&item)).unwrap(), Some(lines));
@@ -45,7 +45,7 @@ fn optional_formatting_refusal_preserves_connection_and_later_forge_reads() {
                 done(forge::encode(Some(&item)).unwrap()),
             ],
         );
-        let mut session = fixture.session(&wire, &FakeLog::new([offline()]), GatePolicy::Release);
+        let mut session = fixture.session(&wire);
         session.enable();
         run(session.connect()).unwrap();
         assert_eq!(run(session.describe_implicits(&item)).unwrap(), None);
@@ -62,7 +62,7 @@ fn malformed_or_cross_slot_implicit_mapping_revokes_connection_without_retry() {
             fixture.target.clone(),
             [fixture.discover(), status(false, 0x1234, 0), done(mapping::encode_modifiers(&lines).unwrap())],
         );
-        let mut session = fixture.session(&wire, &FakeLog::new([offline()]), GatePolicy::Release);
+        let mut session = fixture.session(&wire);
         session.enable();
         run(session.connect()).unwrap();
         assert!(matches!(run(session.describe_implicits(&forge_item())), Err(SessionError::Protocol(_))));
@@ -85,7 +85,7 @@ fn optional_description_offline_or_transport_failure_still_revokes_admission() {
     ] {
         let fixture = Fixture::new();
         let wire = FakeTransport::new(fixture.target.clone(), [fixture.discover(), status(false, 0x1234, 0), step]);
-        let mut session = fixture.session(&wire, &FakeLog::new([offline()]), GatePolicy::Release);
+        let mut session = fixture.session(&wire);
         session.enable();
         run(session.connect()).unwrap();
         assert!(run(session.describe_implicits(&forge_item())).is_err());
@@ -93,36 +93,4 @@ fn optional_description_offline_or_transport_failure_still_revokes_admission() {
         assert_eq!(session.runtime_status(), None);
         assert_eq!(wire.requests().len(), 3);
     }
-}
-#[test]
-fn conditional_description_frame_rejects_reserved_bytes_truncation_and_excess() {
-    let fixture = Fixture::new();
-    let request = Request::DescribeImplicits(ForgeDescriptionRequest::new(fixture.dispatcher, 0x1234, forge_item()).unwrap());
-    let frame = request.encode();
-    assert_eq!(Request::decode(&frame).unwrap(), request);
-    for offset in [0, 4, 8, 44, 45, 46, 47] {
-        let mut bad = frame.clone();
-        bad[offset] ^= 0xff;
-        assert!(Request::decode(&bad).is_err());
-    }
-    assert!(Request::decode(&frame[..frame.len() - 1]).is_err());
-    let mut bad = frame;
-    bad.push(0);
-    assert!(Request::decode(&bad).is_err());
-}
-
-#[test]
-fn canceled_description_does_not_replay_or_leave_ready() {
-    let fixture = Fixture::new();
-    let wire = FakeTransport::new(fixture.target.clone(), [fixture.discover(), status(false, 0x1234, 0), Step::Pending]);
-    let mut session = fixture.session(&wire, &FakeLog::new([offline()]), GatePolicy::Release);
-    session.enable();
-    run(session.connect()).unwrap();
-    let expected = forge_item();
-    let mut query = Box::pin(session.describe_implicits(&expected));
-    assert!(query.as_mut().poll(&mut Context::from_waker(Waker::noop())).is_pending());
-    drop(query);
-    assert_eq!(session.state(), SessionState::Connecting);
-    assert!(run(session.describe_implicits(&expected)).is_err());
-    assert_eq!(wire.requests().len(), 3);
 }

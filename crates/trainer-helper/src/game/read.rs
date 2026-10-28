@@ -230,9 +230,10 @@ impl RuntimeAccess {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::game::test_fakes::{self, frees, roots, token};
     use eg_il2cpp_runtime::ThreadContext;
+    use std::cell::Cell;
     use std::ptr::NonNull;
-    use std::{cell::Cell, ffi::c_void};
 
     const PARENT: usize = 0x1000;
     const CHILD: usize = 0x2000;
@@ -244,12 +245,9 @@ mod tests {
     const INT_CLASS: usize = 0xb000;
     const ENUM_BASE_TYPE: usize = 0xd000;
     thread_local! {
-        static ROOTS: Cell<usize> = const { Cell::new(0) };
-        static FREED: Cell<usize> = const { Cell::new(0) };
         static FIELD_CLASS: Cell<usize> = const { Cell::new(CHILD_CLASS) };
         static FIELD_READS: Cell<usize> = const { Cell::new(0) };
         static ASSIGNABLE: Cell<bool> = const { Cell::new(true) };
-        static FAIL_CHILD_ROOT: Cell<bool> = const { Cell::new(false) };
         static RANK: Cell<i32> = const { Cell::new(1) };
         static TYPE_CODE: Cell<i32> = const { Cell::new(0x1d) };
         static ELEMENT: Cell<usize> = const { Cell::new(CHILD_CLASS) };
@@ -263,41 +261,6 @@ mod tests {
         static GLOBAL_ENUM_LOOKUPS: Cell<usize> = const { Cell::new(0) };
         static VALUE_CLASS: Cell<bool> = const { Cell::new(false) };
         static STORES: Cell<usize> = const { Cell::new(0) };
-    }
-    fn token<T>(address: usize) -> *mut T {
-        std::ptr::without_provenance_mut(address)
-    }
-    unsafe extern "C-unwind" fn current() -> *mut raw::Thread {
-        token(0x10)
-    }
-    unsafe extern "C-unwind" fn domain() -> *mut raw::Domain {
-        token(0x20)
-    }
-    unsafe extern "C-unwind" fn attach(_: *mut raw::Domain) -> *mut raw::Thread {
-        panic!("borrowed engine thread must not attach")
-    }
-    unsafe extern "C-unwind" fn detach(_: *mut raw::Thread) {
-        panic!("borrowed engine thread must not detach")
-    }
-    unsafe extern "C-unwind" fn root_new(object: *mut raw::Object, pinned: bool) -> *mut c_void {
-        assert!(!pinned);
-        if object as usize == CHILD && FAIL_CHILD_ROOT.get() {
-            return std::ptr::null_mut();
-        }
-        ROOTS.set(ROOTS.get() + 1);
-        Box::into_raw(Box::new(object)).cast()
-    }
-    unsafe extern "C-unwind" fn root_target(handle: *mut c_void) -> *mut raw::Object {
-        // SAFETY: each handle is a live Box allocated by root_new until its one root_free.
-        unsafe { handle.cast::<*mut raw::Object>().read() }
-    }
-    unsafe extern "C-unwind" fn root_free(handle: *mut c_void) {
-        // SAFETY: StrongRoot releases each handle exactly once, after its last target access.
-        unsafe {
-            drop(Box::from_raw(handle.cast::<*mut raw::Object>()));
-        }
-        ROOTS.set(ROOTS.get() - 1);
-        FREED.set(FREED.get() + 1);
     }
     unsafe extern "C-unwind" fn corlib() -> *const std::ffi::c_void {
         token::<std::ffi::c_void>(0x7000).cast_const()
@@ -321,7 +284,7 @@ mod tests {
             PARENT => token(PARENT_CLASS),
             CHILD => {
                 // Any child metadata query must happen after its strong root was acquired.
-                assert_eq!(ROOTS.get(), 2);
+                assert_eq!(roots(), 2);
                 token(CHILD_CLASS)
             }
             _ => panic!("unexpected fake object"),
@@ -377,7 +340,7 @@ mod tests {
         assert_eq!(object as usize, PARENT);
         assert_eq!(field as usize, 0x8000);
         assert_eq!(value as usize, CHILD, "reference ABI requires the object, not a pointer slot");
-        assert_eq!(ROOTS.get(), 2);
+        assert_eq!(roots(), 2);
         STORES.set(STORES.get() + 1);
     }
     unsafe extern "C-unwind" fn rank(_: *const raw::Class) -> i32 {
@@ -415,12 +378,10 @@ mod tests {
     }
 
     fn fixture() -> (RuntimeAccess, ThreadContext) {
-        assert_eq!(ROOTS.get(), 0);
-        FREED.set(0);
+        let context = test_fakes::thread();
         FIELD_CLASS.set(CHILD_CLASS);
         FIELD_READS.set(0);
         ASSIGNABLE.set(true);
-        FAIL_CHILD_ROOT.set(false);
         RANK.set(1);
         TYPE_CODE.set(0x1d);
         ELEMENT.set(CHILD_CLASS);
@@ -456,18 +417,7 @@ mod tests {
         access.enum_base = enum_base;
         access.type_name = type_name;
         access.runtime_free = runtime_free;
-        let api = raw::Api {
-            domain_get: domain,
-            thread_current: current,
-            thread_attach: attach,
-            thread_detach: detach,
-            gchandle_new: root_new,
-            gchandle_free: root_free,
-            gchandle_get_target: root_target,
-        };
-        // SAFETY: these authored exports implement this test thread's borrowed attachment and
-        // Box-backed handles. Their function code outlives all local roots and the context.
-        (access, unsafe { ThreadContext::new(api) })
+        (access, context)
     }
 
     #[test]
@@ -499,27 +449,16 @@ mod tests {
             ASSIGNABLE.set(false);
             assert!(access.set_reference(&writes, &attached, &parent, c"child", &child).is_err());
             ASSIGNABLE.set(true);
-            let other_runtime = {
-                // A distinct context using the same fake exports is still a different
-                // provenance boundary. Construct without resetting the active roots.
-                let api = raw::Api {
-                    domain_get: domain,
-                    thread_current: current,
-                    thread_attach: attach,
-                    thread_detach: detach,
-                    gchandle_new: root_new,
-                    gchandle_free: root_free,
-                    gchandle_get_target: root_target,
-                };
-                ThreadContext::new(api)
-            };
+            // A distinct context using the same fake exports is still a different
+            // provenance boundary. Construct without resetting the active roots.
+            let other_runtime = ThreadContext::new(test_fakes::api());
             let other_attached = other_runtime.attach().unwrap();
             assert!(access.set_reference(&writes, &other_attached, &parent, c"child", &child).is_err());
             assert_eq!(STORES.get(), 0);
             access.set_reference(&writes, &attached, &parent, c"child", &child).unwrap();
             assert_eq!(STORES.get(), 1);
         }
-        assert_eq!(ROOTS.get(), 0);
+        assert_eq!(roots(), 0);
     }
 
     #[test]
@@ -530,14 +469,13 @@ mod tests {
         let parent = unsafe { attached.root(NonNull::new(token(PARENT)).unwrap()) }.unwrap();
         // SAFETY: all fake runtime references belong to the same attached test thread; no graph races.
         let child = unsafe { access.reference(&attached, &parent, c"child", token(CHILD_CLASS)) }.unwrap().unwrap();
-        assert_eq!(ROOTS.get(), 2);
-        assert_eq!(FIELD_READS.get(), 1);
+        assert_eq!(roots(), 2);
         drop(child);
-        assert_eq!(ROOTS.get(), 1);
-        assert_eq!(FREED.get(), 1);
+        assert_eq!(roots(), 1);
+        assert_eq!(frees(), 1);
         drop(parent);
-        assert_eq!(ROOTS.get(), 0);
-        assert_eq!(FREED.get(), 2);
+        assert_eq!(roots(), 0);
+        assert_eq!(frees(), 2);
     }
     #[test]
     fn reference_validation_error_releases_new_child_root() {
@@ -548,10 +486,10 @@ mod tests {
         ASSIGNABLE.set(false);
         // SAFETY: the fake API returns a rooted object but deliberately rejects its class contract.
         assert!(unsafe { access.reference(&attached, &parent, c"child", token(CHILD_CLASS)) }.is_err());
-        assert_eq!(ROOTS.get(), 1);
-        assert_eq!(FREED.get(), 1);
+        assert_eq!(roots(), 1);
+        assert_eq!(frees(), 1);
         drop(parent);
-        assert_eq!(ROOTS.get(), 0);
+        assert_eq!(roots(), 0);
     }
     #[test]
     fn failed_child_root_does_not_free_or_leak_the_parent() {
@@ -559,18 +497,18 @@ mod tests {
         let attached = context.attach().unwrap();
         // SAFETY: authored immutable fake objects and valid test-runtime handle APIs.
         let parent = unsafe { attached.root(NonNull::new(token(PARENT)).unwrap()) }.unwrap();
-        FAIL_CHILD_ROOT.set(true);
+        test_fakes::fail_root(CHILD);
         // SAFETY: the fake root export deliberately returns failure, before child metadata access.
         assert!(matches!(
             // SAFETY: the fake root export deliberately returns failure, before child metadata access.
             unsafe { access.reference(&attached, &parent, c"child", token(CHILD_CLASS)) },
             Err(eg_il2cpp_runtime::MetadataError::Runtime(eg_il2cpp_runtime::RuntimeError::RootFailed))
         ));
-        assert_eq!(ROOTS.get(), 1);
-        assert_eq!(FREED.get(), 0);
+        assert_eq!(roots(), 1);
+        assert_eq!(frees(), 0);
         drop(parent);
-        assert_eq!(ROOTS.get(), 0);
-        assert_eq!(FREED.get(), 1);
+        assert_eq!(roots(), 0);
+        assert_eq!(frees(), 1);
     }
     #[test]
     fn wider_scalar_metadata_is_rejected_before_writing_destination() {
@@ -583,7 +521,7 @@ mod tests {
         assert!(unsafe { access.primitive::<u8>(&parent, c"value") }.is_err());
         assert_eq!(FIELD_READS.get(), 0);
         drop(parent);
-        assert_eq!(ROOTS.get(), 0);
+        assert_eq!(roots(), 0);
     }
     #[test]
     fn enum_field_resolves_nested_or_namespaced_type_without_a_global_class() {
@@ -603,7 +541,7 @@ mod tests {
         assert_eq!(FIELD_READS.get(), 3);
         assert_eq!(GLOBAL_ENUM_LOOKUPS.get(), 0);
         drop(parent);
-        assert_eq!(ROOTS.get(), 0);
+        assert_eq!(roots(), 0);
     }
     #[test]
     fn enum_name_kind_base_and_storage_are_checked_before_destination_write() {
@@ -627,7 +565,7 @@ mod tests {
             assert_eq!(FIELD_READS.get(), 0);
             assert_eq!(GLOBAL_ENUM_LOOKUPS.get(), 0);
             drop(parent);
-            assert_eq!(ROOTS.get(), 0);
+            assert_eq!(roots(), 0);
         }
     }
     #[test]

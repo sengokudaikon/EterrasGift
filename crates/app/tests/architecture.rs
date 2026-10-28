@@ -41,7 +41,7 @@ fn tier(name: &str) -> Tier {
         "eg-game-files" => Tier::GameFiles,
         "eg-game-access" => Tier::GameAccess,
         "eg-ui" | "eterras-gift" => Tier::Composition,
-        "xtask" | "eg-eval-unity-rust-host" | "eg-persistent-player-client" | "eg-eval-native-abi" | "eg-eval-hooks" | "eg-eval-generated-invoker" => Tier::Tool,
+        "xtask" | "eg-persistent-player-client" => Tier::Tool,
         _ => panic!("Assign the new package {name:?} an explicit architecture tier"),
     }
 }

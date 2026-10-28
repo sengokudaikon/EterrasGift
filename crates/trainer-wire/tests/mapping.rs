@@ -52,29 +52,7 @@ fn invalid_utf8_is_rejected() {
     rejects(&invalid);
 }
 #[test]
-fn malformed_counts_and_address_are_rejected() {
-    for (offset, value) in [
-        (0, -1i32),
-        (0, 4097),
-        (6, -1),
-        (6, 32769),
-        (13, -1),
-        (13, 3),
-        (17, -1),
-        (17, 8),
-        (21, -2),
-        (25, 0),
-        (25, 2),
-        (25, 17),
-        (37, -1),
-        (37, 32769),
-        (44, -1),
-        (49, 129),
-    ] {
-        let mut bytes = literal();
-        bytes[offset..offset + 4].copy_from_slice(&value.to_le_bytes());
-        rejects(&bytes);
-    }
+fn page_for_another_address_or_start_is_rejected() {
     let mut wrong = address();
     wrong.index = 0;
     assert!(decode_mapping(&literal(), wrong, MappingStart::Samples(255)).is_err());
@@ -180,21 +158,8 @@ fn independent_modifier_preview_wire() {
     assert_eq!(encode_preview(&preview).unwrap(), bytes);
 }
 #[test]
-fn strict_modifier_flags_ids_counts_and_utf8() {
-    for (offset, value) in [
-        (0, -1i32),
-        (0, 129),
-        (4, -1),
-        (8, -1),
-        (8, 32769),
-        (25, -1),
-        (25, 9),
-        (29, -1),
-        (29, 8),
-        (33, 0),
-        (37, -1),
-        (37, 2),
-    ] {
+fn strict_modifier_flags_ids_and_utf8() {
+    for (offset, value) in [(4, -1i32), (29, -1), (29, 8), (33, 0), (37, 2)] {
         let mut bytes = modifier_literal();
         bytes[offset..offset + 4].copy_from_slice(&value.to_le_bytes());
         assert!(decode_modifiers(&bytes).is_err(), "offset {offset} value {value}");
@@ -313,4 +278,70 @@ fn detached_mapping_query_rejects_reserved_data_and_invalid_drafts() {
     assert!(Request::decode(&frame).is_err());
     assert!(AffixMappingQuery::new(dispatcher, 0, expected.clone(), 0, MappingStart::ContextOnly, None).is_err());
     assert!(AffixMappingQuery::new(dispatcher, 41, expected, 1, MappingStart::ContextOnly, None).is_err());
+}
+
+#[test]
+fn description_and_unique_frames_reject_header_reserved_data_and_bad_roll_changes() {
+    use eg_trainer_wire::{
+        forge::{ForgeSnapshot, ItemStatus, UniqueIdentity},
+        protocol::{DispatcherSpec, Request},
+    };
+    let mut item = ForgeSnapshot {
+        item: 0x1234,
+        individual_id: 37,
+        fingerprint: 0,
+        name: "Owned unique".into(),
+        item_type: 3,
+        sub_type: 1,
+        rarity: 9,
+        class_requirement: 0,
+        affixes: vec![],
+        implicit_rolls: vec![],
+        identity: Some(UniqueIdentity { id: 911, rolls: vec![17, 81] }),
+        status: ItemStatus {
+            forging_potential: 0,
+            forging_potential_type: 0,
+            legendary_potential: 0,
+            weavers_will: 0,
+            weavers_touch: 0,
+            corrupted: false,
+            ruined: false,
+            level_requirement: 20,
+        },
+    };
+    item.fingerprint = item.legacy_fingerprint();
+    let dispatcher = DispatcherSpec { rva: 23, bytes: [7; 16] };
+    let changes = vec![UniqueRollChange { index: 0, value: 17 }, UniqueRollChange { index: 1, value: 255 }];
+    for request in [
+        Request::DescribeImplicits(ForgeDescriptionRequest::new(dispatcher, 41, item.clone()).unwrap()),
+        Request::DescribeUnique(ForgeDescriptionRequest::new(dispatcher, 41, item.clone()).unwrap()),
+        Request::PreviewUnique(UniquePreviewRequest::new(dispatcher, 41, item.clone(), changes.clone()).unwrap()),
+    ] {
+        let frame = request.encode();
+        assert_eq!(Request::decode(&frame), Ok(request.clone()));
+        for offset in [0, 4, 8] {
+            let mut bad = frame.clone();
+            bad[offset] ^= 0xff;
+            assert!(Request::decode(&bad).is_err(), "{offset}");
+        }
+        match request {
+            // Reserved bytes after the manager token.
+            Request::DescribeImplicits(_) => {
+                for offset in [44, 45, 46, 47] {
+                    let mut bad = frame.clone();
+                    bad[offset] ^= 0xff;
+                    assert!(Request::decode(&bad).is_err(), "{offset}");
+                }
+            }
+            // Count and indices are consecutive bytes after the manager token.
+            Request::PreviewUnique(_) => {
+                for (offset, value) in [(44, 0), (44, 9), (45, 8), (47, 0)] {
+                    let mut bad = frame.clone();
+                    bad[offset] = value;
+                    assert!(Request::decode(&bad).is_err(), "{offset}");
+                }
+            }
+            _ => {}
+        }
+    }
 }

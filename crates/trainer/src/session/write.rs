@@ -1,7 +1,7 @@
 use super::*;
 use crate::{
-    fields::{RateWriteRecord, RateWriteStatus},
-    write::{AllowWrite, ForgePlan, WriteControl, WriteObservation, WriteOutcome, WritePlan, WriteRecord, WriteStatus},
+    fields::{AttackLeechPlan, RateWriteStatus},
+    write::{AllowWrite, ForgePlan, WriteControl, WriteObservation, WriteOutcome, WritePlan, WriteStatus},
 };
 use eg_trainer_wire::{
     rate_write::{AttackLeechRateWrite, RateWriteReply},
@@ -10,8 +10,12 @@ use eg_trainer_wire::{
 };
 
 impl<T: Transport> Session<T> {
-    pub fn last_write(&self) -> Option<&WriteRecord> {
-        self.last_write.as_ref()
+    /// Convenience for the current field planner; the lifecycle is shared.
+    pub async fn set_attack_leech_rate(&mut self, plan: &AttackLeechPlan) -> Result<RateWriteStatus, SessionError> {
+        self.set_attack_leech_rate_controlled(plan, &mut AllowWrite).await
+    }
+    pub async fn set_attack_leech_rate_controlled(&mut self, plan: &AttackLeechPlan, control: &mut dyn WriteControl) -> Result<RateWriteStatus, SessionError> {
+        Ok(self.write_controlled(&plan.clone().into(), control).await?.map(WriteObservation::into_field))
     }
 
     pub async fn edit_forge(&mut self, plan: &ForgePlan) -> Result<WriteStatus, SessionError> {
@@ -37,7 +41,6 @@ impl<T: Transport> Session<T> {
         }
         let runtime = self.status.take();
         self.state = SessionState::Connecting;
-        self.record_write(plan, WriteOutcome::Pending);
         let (mut result, mut healthy) = match self.transport.send(&request).await {
             Ok(response) => (
                 classify_ack(&request, &response),
@@ -108,7 +111,6 @@ impl<T: Transport> Session<T> {
                 self.state = SessionState::Disconnected;
             }
         }
-        self.record_write(plan, result.clone());
         Ok(result)
     }
 
@@ -152,34 +154,6 @@ impl<T: Transport> Session<T> {
             return Err(SessionError::Identity(error.to_string()));
         }
         Ok(())
-    }
-    fn record_write(&mut self, plan: &WritePlan, status: WriteOutcome<WriteObservation>) {
-        match plan {
-            WritePlan::Forge(plan) => {
-                self.last_write = Some(WriteRecord {
-                    plan: (**plan).clone(),
-                    status: status.map(WriteObservation::into_forge),
-                })
-            }
-            WritePlan::Field(plan) => {
-                self.last_rate_write = Some(RateWriteRecord {
-                    plan: (**plan).clone(),
-                    status: status.map(WriteObservation::into_field),
-                })
-            }
-        }
-    }
-    pub(super) fn abandon_pending_write(&mut self) {
-        if let Some(record) = &mut self.last_write
-            && record.status == WriteStatus::Pending
-        {
-            record.status = WriteStatus::uncertain("write future abandoned before complete confirmation; never replay");
-        }
-        if let Some(record) = &mut self.last_rate_write
-            && record.status == RateWriteStatus::Pending
-        {
-            record.status = RateWriteStatus::uncertain("field write future abandoned before complete confirmation; never replay");
-        }
     }
 }
 

@@ -16,7 +16,7 @@ use jiff::Timestamp;
 use crate::{
     backend::{BackendError, Connector, ErrorKind},
     connect::build::BuildProfile,
-    connect::gate::{self, GatePolicy, GateVerdict, LogSource},
+    connect::gate::{self, GateVerdict, LogSource},
     session::Session,
 };
 
@@ -97,12 +97,11 @@ pub struct SessionConnector<P, F> {
     preparer: P,
     logs: F,
     helper_build_id: String,
-    policy: GatePolicy,
     last_attempt: Option<BootstrapAttempt>,
 }
 impl<P: HelperPreparer, F: LogFactory> SessionConnector<P, F> {
     /// No files, processes, logs or remote operations are accessed here.
-    pub fn new(preparer: P, logs: F, helper_build_id: &str, policy: GatePolicy) -> Result<Self, BackendError> {
+    pub fn new(preparer: P, logs: F, helper_build_id: &str) -> Result<Self, BackendError> {
         if !hashes::is_sha256(helper_build_id) {
             return Err(BackendError::blocked(ErrorKind::Identity, "invalid expected helper source build ID"));
         }
@@ -110,7 +109,6 @@ impl<P: HelperPreparer, F: LogFactory> SessionConnector<P, F> {
             preparer,
             logs,
             helper_build_id: helper_build_id.to_ascii_uppercase(),
-            policy,
             last_attempt: None,
         })
     }
@@ -126,7 +124,6 @@ impl<P: HelperPreparer, F: LogFactory> SessionConnector<P, F> {
             started,
             now,
             elapsed: Instant::now(),
-            policy: self.policy,
         };
         admission.check()?;
         let (profile, _files) = capture_profile(target, &self.helper_build_id)?;
@@ -228,7 +225,6 @@ struct Admission<L> {
     started: Timestamp,
     now: Timestamp,
     elapsed: Instant,
-    policy: GatePolicy,
 }
 impl<L> Admission<L> {
     fn time(&self) -> Result<Timestamp, BackendError> {
@@ -238,7 +234,7 @@ impl<L> Admission<L> {
 }
 impl<L: LogSource + Send> AdmissionCheck for Admission<L> {
     fn check(&mut self) -> Result<(), BackendError> {
-        let decision = gate::evaluate(&self.log.read(self.started), self.started, self.time()?, self.policy);
+        let decision = gate::evaluate(&self.log.read(self.started), self.started, self.time()?);
         match decision.verdict {
             GateVerdict::Allow => Ok(()),
             GateVerdict::Wait | GateVerdict::Refuse => Err(BackendError {

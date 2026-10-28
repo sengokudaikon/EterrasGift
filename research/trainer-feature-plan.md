@@ -270,9 +270,9 @@ catch. Invoke the original through its exact `unsafe extern "C-unwind" fn` outsi
 catches. Before-original failure may forward unchanged arguments only if no game-side mutation
 needs recovery. After-original failure must never invoke the original a second time. Rust's
 [catch_unwind contract](https://doc.rust-lang.org/std/panic/fn.catch_unwind.html) does not promise
-transparent foreign-exception propagation. The retained
-[native ABI fixture](../tools/trainer-eval/native-abi/src/lib.rs) deliberately has no catch
-around the foreign throw.
+transparent foreign-exception propagation. The
+native ABI fixture (`native-abi/src/lib.rs`, archived 2026-10-28 in `../EterrasGiftRS-archive/2026-10-28-trainer-eval/`)
+deliberately has no catch around the foreign throw.
 
 The current dispatcher executes original code before entering its counted callback. A new
 gameplay gateway counting the entire handler can strand its count when an original throws

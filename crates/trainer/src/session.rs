@@ -1,7 +1,6 @@
 //! Serialized control session, owned observations and explicit guarded writes. No automatic retry.
 mod hooks;
 mod mapping;
-mod rate_write;
 mod unique;
 mod write;
 use crate::connect::build::{BuildProfile, ProfileLease};
@@ -106,8 +105,6 @@ pub struct Session<T> {
     status: Option<RuntimeStatus>,
     cleanup: Cleanup,
     unload_needed: bool,
-    last_write: Option<crate::write::WriteRecord>,
-    last_rate_write: Option<crate::fields::RateWriteRecord>,
     hooks: [Option<eg_trainer_wire::hooks::HookObservation>; 4],
 }
 impl<T: Transport> Session<T> {
@@ -143,8 +140,6 @@ impl<T: Transport> Session<T> {
             status: None,
             cleanup: Cleanup::NotNeeded,
             unload_needed: false,
-            last_write: None,
-            last_rate_write: None,
         })
     }
     pub fn state(&self) -> SessionState {
@@ -453,7 +448,6 @@ impl<T: Transport> Session<T> {
     /// hook or perform gameplay work. Dropping Session still performs no I/O.
     pub async fn disconnect(&mut self) -> Cleanup {
         let was_disabled = self.state == SessionState::Disabled;
-        self.abandon_pending_write();
         self.status = None;
         self.state = SessionState::Closing;
         // Consume before awaiting: cancellation never causes another Unload send.

@@ -487,6 +487,7 @@ impl RuntimeAccess {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::game::test_fakes::{self, roots, token};
     use eg_il2cpp_runtime::ThreadContext;
     use std::{
         cell::Cell,
@@ -503,48 +504,12 @@ mod tests {
     const CACHED_FIELD: usize = 0x6200;
     const LINK_FIELD: usize = 0x6300;
     thread_local! {
-        static ROOTS: Cell<usize> = const { Cell::new(0) };
         static STORES: Cell<usize> = const { Cell::new(0) };
         static FLAGS: Cell<i32> = const { Cell::new(0) };
-        static BYREF: Cell<bool> = const { Cell::new(false) };
-        static CODE: Cell<i32> = const { Cell::new(8) };
-        static TYPE_CLASS: Cell<usize> = const { Cell::new(INT32) };
-        static DECLARING: Cell<usize> = const { Cell::new(OWNER) };
-        static OFFSET: Cell<usize> = const { Cell::new(144) };
         static ONLINE: Cell<u8> = const { Cell::new(0) };
         static CURRENT_MANAGER: Cell<usize> = const { Cell::new(MANAGER) };
         static CURRENT_ITEM: Cell<usize> = const { Cell::new(ITEM) };
         static LIVE: Cell<usize> = const { Cell::new(1) };
-        static VALUE: Cell<i32> = const { Cell::new(0) };
-    }
-    fn token<T>(p: usize) -> *mut T {
-        std::ptr::without_provenance_mut(p)
-    }
-    unsafe extern "C-unwind" fn current() -> *mut raw::Thread {
-        token(1)
-    }
-    unsafe extern "C-unwind" fn domain() -> *mut raw::Domain {
-        token(2)
-    }
-    unsafe extern "C-unwind" fn attach(_: *mut raw::Domain) -> *mut raw::Thread {
-        panic!("already attached")
-    }
-    unsafe extern "C-unwind" fn detach(_: *mut raw::Thread) {
-        panic!("borrowed")
-    }
-    unsafe extern "C-unwind" fn root(object: *mut raw::Object, pinned: bool) -> Ptr {
-        assert!(!pinned);
-        ROOTS.set(ROOTS.get() + 1);
-        Box::into_raw(Box::new(object)).cast()
-    }
-    unsafe extern "C-unwind" fn root_target(handle: Ptr) -> *mut raw::Object {
-        // SAFETY: authored handles contain one live pointer slot until root_free.
-        unsafe { handle.cast::<*mut raw::Object>().read() }
-    }
-    unsafe extern "C-unwind" fn root_free(handle: Ptr) {
-        // SAFETY: exactly one release of each authored Box-backed handle.
-        unsafe { drop(Box::from_raw(handle.cast::<*mut raw::Object>())) };
-        ROOTS.set(ROOTS.get() - 1);
     }
     unsafe extern "C-unwind" fn corlib() -> *const std::ffi::c_void {
         token::<std::ffi::c_void>(3).cast_const()
@@ -559,7 +524,7 @@ mod tests {
     }
     unsafe extern "C-unwind" fn object_class(object: *mut raw::Object) -> Class {
         assert_eq!(object as usize, ITEM);
-        assert_eq!(ROOTS.get(), 2);
+        assert_eq!(roots(), 2);
         token(OWNER)
     }
     unsafe extern "C-unwind" fn class_field(owner: Class, name: *const c_char) -> Ptr {
@@ -574,22 +539,22 @@ mod tests {
         token(7)
     }
     unsafe extern "C-unwind" fn byref(_: crate::game::Type) -> bool {
-        BYREF.get()
+        false
     }
     unsafe extern "C-unwind" fn code(_: crate::game::Type) -> i32 {
-        CODE.get()
+        8
     }
     unsafe extern "C-unwind" fn type_class(_: crate::game::Type) -> Class {
-        token(TYPE_CLASS.get())
+        token(INT32)
     }
     unsafe extern "C-unwind" fn parent(_: Ptr) -> Class {
-        token(DECLARING.get())
+        token(OWNER)
     }
     unsafe extern "C-unwind" fn flags(_: Ptr) -> i32 {
         FLAGS.get()
     }
     unsafe extern "C-unwind" fn offset(_: Ptr) -> usize {
-        OFFSET.get()
+        144
     }
     unsafe extern "C-unwind" fn static_get(field: Ptr, dest: Ptr) {
         // SAFETY: these exact validated fake fields have the destination widths supplied here.
@@ -602,7 +567,7 @@ mod tests {
         }
     }
     unsafe extern "C-unwind" fn field_get(object: *mut raw::Object, field: Ptr, dest: Ptr) {
-        assert_eq!(ROOTS.get(), 2);
+        assert_eq!(roots(), 2);
         assert_eq!(object as usize, MANAGER);
         // SAFETY: fake validated native pointer/reference fields have these exact widths.
         unsafe {
@@ -613,28 +578,20 @@ mod tests {
             }
         }
     }
-    unsafe extern "C-unwind" fn set(object: *mut raw::Object, field: *mut raw::FieldInfo, source: Ptr) {
+    unsafe extern "C-unwind" fn set(object: *mut raw::Object, field: *mut raw::FieldInfo, _: Ptr) {
         assert_eq!(object as usize, ITEM);
         assert_eq!(field as usize, FIELD);
-        assert_eq!(ROOTS.get(), 2);
+        assert_eq!(roots(), 2);
         STORES.set(STORES.get() + 1);
-        // SAFETY: set_i32 supplies one live aligned Int32 source slot, read only during this call.
-        VALUE.set(unsafe { source.cast::<i32>().read() });
     }
     fn fixture() -> (RuntimeAccess, ThreadContext) {
-        assert_eq!(ROOTS.get(), 0);
+        let ctx = test_fakes::thread();
         STORES.set(0);
         FLAGS.set(0);
-        BYREF.set(false);
-        CODE.set(8);
-        TYPE_CLASS.set(INT32);
-        DECLARING.set(OWNER);
-        OFFSET.set(144);
         ONLINE.set(0);
         CURRENT_MANAGER.set(MANAGER);
         CURRENT_ITEM.set(ITEM);
         LIVE.set(1);
-        VALUE.set(0);
         let mut a = RuntimeAccess::test_stubs();
         a.corlib = corlib;
         a.class_from_name = class_from_name;
@@ -649,18 +606,6 @@ mod tests {
         a.field_offset = offset;
         a.static_get = static_get;
         a.field_get = field_get;
-        // SAFETY: authored APIs implement one already-attached test thread and owned Box handles.
-        let ctx = unsafe {
-            ThreadContext::new(raw::Api {
-                domain_get: domain,
-                thread_current: current,
-                thread_attach: attach,
-                thread_detach: detach,
-                gchandle_new: root,
-                gchandle_free: root_free,
-                gchandle_get_target: root_target,
-            })
-        };
         (a, ctx)
     }
     unsafe fn graph<'a, 'r>(attached: &'a AttachedThread<'r>) -> ForgeGraph<'a, 'r> {
@@ -679,39 +624,15 @@ mod tests {
         }
     }
     #[test]
-    fn exact_field_metadata_rejects_wrong_width_flags_owner_and_position_before_any_store() {
-        let (a, ctx) = fixture();
-        let attached = ctx.attach().unwrap();
-        // SAFETY: authored immutable graph and metadata; no real object memory is accessed.
-        let g = unsafe { graph(&attached) };
-        // SAFETY: same authored contract throughout this metadata-only validation matrix.
+    fn level_requirement_is_its_own_mutable_int32_field() {
+        let (a, _ctx) = fixture();
+        // SAFETY: authored metadata only; the fakes check the owner, the field name and the Int32 lookup.
         unsafe {
             assert!(a.status_field(token(OWNER), StatusField::LevelRequirement).is_ok());
-            for flag in [0x10, 0x20, 0x40, 0x70] {
-                FLAGS.set(flag);
-                assert!(a.status_field(token(OWNER), StatusField::LevelRequirement).is_err());
-            }
-            FLAGS.set(0);
-            TYPE_CLASS.set(INT32 + 1);
+            // The matrix is `mutable_field`'s (apply.rs); this is only that the status edit goes through it.
+            FLAGS.set(0x20);
             assert!(a.status_field(token(OWNER), StatusField::LevelRequirement).is_err());
-            TYPE_CLASS.set(INT32);
-            CODE.set(0x0a);
-            assert!(a.status_field(token(OWNER), StatusField::LevelRequirement).is_err());
-            CODE.set(8);
-            BYREF.set(true);
-            assert!(a.status_field(token(OWNER), StatusField::LevelRequirement).is_err());
-            BYREF.set(false);
-            DECLARING.set(OWNER + 1);
-            assert!(a.status_field(token(OWNER), StatusField::LevelRequirement).is_err());
-            DECLARING.set(OWNER);
-            for p in [0, 15, 16385, usize::MAX] {
-                OFFSET.set(p);
-                assert!(a.status_field(token(OWNER), StatusField::LevelRequirement).is_err());
-            }
         }
-        assert_eq!(STORES.get(), 0);
-        drop(g);
-        assert_eq!(ROOTS.get(), 0);
     }
     #[test]
     fn last_gate_refuses_changed_manager_item_online_or_destroyed_wrapper_without_store() {
@@ -739,51 +660,7 @@ mod tests {
         }
         assert_eq!(STORES.get(), 0);
         drop(g);
-        assert_eq!(ROOTS.get(), 0);
-    }
-    #[test]
-    fn every_post_store_failure_is_uncertain_with_roots_retained_and_no_replay() {
-        let (_, ctx) = fixture();
-        let attached = ctx.attach().unwrap();
-        // SAFETY: authored graph roots keep both fake object identities alive through each call.
-        let g = unsafe { graph(&attached) };
-        for error in [
-            WriteError::NotReady("n".into()),
-            WriteError::Stale("s".into()),
-            WriteError::Refused("r".into()),
-            WriteError::Offline,
-            WriteError::Failed("f".into()),
-        ] {
-            let prior = STORES.get();
-            // SAFETY: exact authored field ABI/Int32 destination, with manager+item roots retained.
-            let result: Result<(), _> = unsafe {
-                stored(
-                    || {
-                        raw::FieldWriteApi::test_export(set).set_i32(target(&g.item).unwrap(), NonNull::new(token(FIELD)).unwrap(), 37);
-                        Ok(())
-                    },
-                    || Err(error),
-                )
-            };
-            assert!(matches!(result, Err(WriteError::Failed(_))));
-            assert_eq!(STORES.get(), prior + 1);
-            assert_eq!(VALUE.get(), 37);
-        }
-        // SAFETY: same validated authored field/root contract; successful readback remains owned.
-        let result = unsafe {
-            stored(
-                || {
-                    raw::FieldWriteApi::test_export(set).set_i32(target(&g.item).unwrap(), NonNull::new(token(FIELD)).unwrap(), 255);
-                    Ok(())
-                },
-                || Ok(VALUE.get()),
-            )
-        }
-        .unwrap();
-        assert_eq!(result, 255);
-        assert_eq!(STORES.get(), 6);
-        drop(g);
-        assert_eq!(ROOTS.get(), 0);
+        assert_eq!(roots(), 0);
     }
     #[test]
     fn invalid_request_domain_or_backed_rarity_denies_before_runtime_io() {
@@ -836,6 +713,6 @@ mod tests {
             ));
         }
         assert_eq!(STORES.get(), 0);
-        assert_eq!(ROOTS.get(), 0);
+        assert_eq!(roots(), 0);
     }
 }

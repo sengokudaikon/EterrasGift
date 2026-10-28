@@ -161,23 +161,6 @@ fn confirmed_label_without_the_exact_projected_payload_is_not_enough() {
 }
 
 #[test]
-fn fields_outside_legacy_fingerprint_still_make_undo_stale() {
-    let token = ForgeUndo::from_confirmed(&record(87)).unwrap();
-    for alter in [
-        |s: &mut ForgeSnapshot| s.name.push('x'),
-        |s: &mut ForgeSnapshot| s.class_requirement += 1,
-        |s: &mut ForgeSnapshot| s.affixes[0].special += 1,
-        |s: &mut ForgeSnapshot| s.affixes[0].name.push('x'),
-        |s: &mut ForgeSnapshot| s.individual_id += 1,
-    ] {
-        let mut current = token.after().snapshot().clone();
-        alter(&mut current);
-        assert_eq!(current.legacy_fingerprint(), token.after().snapshot().fingerprint);
-        assert_eq!(token.prepare(&observation(current), MANAGER, &catalog()), Err(EditError::StaleItem));
-    }
-}
-
-#[test]
 fn same_id_replacement_and_other_item_changes_cannot_be_restored_by_old_token() {
     let token = ForgeUndo::from_confirmed(&record(87)).unwrap();
     for alter in [

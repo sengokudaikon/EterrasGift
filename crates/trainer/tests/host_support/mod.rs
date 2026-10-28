@@ -1,10 +1,8 @@
-use eg_core::game_log::{GameLogState, GameLogStatus, GameReadiness};
 use eg_game_access::bootstrap::HelperArtifact;
 use eg_trainer::{
     backend::{BackendError, ErrorKind},
-    connect::admission::{AdmissionCheck, LogFactory},
+    connect::admission::AdmissionCheck,
     connect::build::BuildProfile,
-    connect::gate::LogSource,
 };
 use eg_trainer_wire::process::ProcessIdentity;
 use std::{
@@ -132,29 +130,5 @@ impl AdmissionCheck for Admission {
         } else {
             Err(BackendError::blocked(ErrorKind::Gate, "authored gate refusal"))
         }
-    }
-}
-#[derive(Clone, Default)]
-pub struct Logs {
-    pub calls: Arc<AtomicUsize>,
-}
-pub struct Log;
-impl LogSource for Log {
-    fn read(&mut self, _: jiff::Timestamp) -> GameLogState {
-        GameLogState {
-            status: GameLogStatus::Current,
-            readiness: GameReadiness::Offline,
-            character: None,
-            shell_state: Some("None".into()),
-            offline_mode: Some(true),
-            problem: None,
-        }
-    }
-}
-impl LogFactory for Logs {
-    type Log = Log;
-    fn create(&mut self, _: &ProcessIdentity) -> Result<Self::Log, BackendError> {
-        self.calls.fetch_add(1, Ordering::SeqCst);
-        Ok(Log)
     }
 }

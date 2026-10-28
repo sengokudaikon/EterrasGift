@@ -1,5 +1,5 @@
 //! The catalog built from a real install's files. Files only: nothing starts, opens or touches the game process.
-//! `EG_LAST_EPOCH=<game folder> cargo test -p eg-trainer --release --test files -- --ignored --nocapture`.
+//! `mise run game-files:install` runs these (`EG_LAST_EPOCH=<game folder>`), after the game-files checks.
 
 use eg_trainer::definitions::catalog::{Availability, GameLocale};
 use std::time::Instant;

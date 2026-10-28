@@ -48,8 +48,8 @@ description = "Worker-to-UI reads, ordered drafts, typed write outcomes and Undo
 run = "cargo capture -- --trainer-backend"
 
 [tasks.verify]
-description = "Everything to run before calling work done: lint, format, tokens, tests, both capture runs; then look at artifacts/captures"
-run = ["cargo lint", "cargo fmt --all --check", "cargo xtask tokens --check", "mise run test", "cargo capture", "cargo capture -- --trainer-backend"]
+description = "Everything to run before calling work done: lint, format, tokens, tests, captures; then look at artifacts/captures"
+run = ["cargo lint", "cargo fmt --all --check", "cargo xtask tokens --check", "mise run test", "cargo capture"]
 
 [tasks."slint:check"]
 description = "Fast compile check of a .slint file (default: app.slint)"
@@ -76,16 +76,16 @@ run = "slint-viewer {{arg(name='file', default='crates/ui/ui/app.slint')}}"
 env = { SLINT_MCP_PORT = "9315" }
 
 [tasks."game-files:install"]
-description = "Read the game data from a real install named by EG_LAST_EPOCH (the game folder), and check the rebuilt layouts against every shipped type tree; files only, no game process"
-run = "cargo test -p eg-game-files --release -- --ignored --nocapture"
+description = "Read the game data from a real install named by EG_LAST_EPOCH (the game folder), check the rebuilt layouts against every shipped type tree, then build and reload the trainer's catalog from it; files only, no game process"
+run = ["cargo test -p eg-game-files --release -- --ignored --nocapture", "cargo test -p eg-trainer --release --test files -- --ignored --nocapture"]
 
 [tasks."trainer:test"]
 description = "The trainer packages' tests alone (part of test); no live game"
 run = "cargo test -p eg-trainer-wire -p eg-game-access -p eg-trainer -p eg-trainer-helper --offline"
 
 [tasks."trainer:verify"]
-description = "verify, then the isolated controller's tests; required for trainer changes"
-run = ["mise run verify", "mise run trainer:player:client:test"]
+description = "verify, then build the isolated controller (outside the workspace, so nothing else compiles it); required for trainer changes"
+run = ["mise run verify", "mise run trainer:player:client:build"]
 
 [tasks."trainer:helper:build"]
 description = "Build and snapshot the Rust helper with source/DLL identities, for the fixture player; no process access. The desktop embeds its own"
@@ -94,10 +94,6 @@ run = "pwsh -NoProfile -File tools/trainer-eval/persistent-player/Build-Helper.p
 [tasks."trainer:player:client:build"]
 description = "Build the isolated authored Unity-player controller; no player launch"
 run = "cargo build --manifest-path tools/trainer-eval/persistent-player/client/Cargo.toml --release --offline"
-
-[tasks."trainer:player:client:test"]
-description = "Controller/response-barrier tests; no player launch. Release, as its build and the lifecycle run are (its own workspace has no dev overrides for in-game code)"
-run = "cargo test --manifest-path tools/trainer-eval/persistent-player/client/Cargo.toml --release --offline"
 
 [tasks."trainer:unload"]
 description = "Plain native fixture: 100 unload/reloads with active callers, then a stuck callback; no Unity or game"

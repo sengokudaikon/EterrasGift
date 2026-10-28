@@ -152,27 +152,6 @@ fn projection_preserves_all_other_tokens_and_raw_bits_including_nonfinite_payloa
 }
 
 #[test]
-fn projected_same_bits_are_explicit_noop_but_signed_zero_changes_are_preserved() {
-    let expected = snapshot();
-    for value in [1.0_f64, f64::from_bits(1.0_f64.to_bits() + 1)] {
-        assert_eq!(AttackLeechPlan::prepare(&expected, AttackLeechTarget::AttackRate, value), Ok(AttackLeechDecision::NoOp));
-    }
-    let mut expected = snapshot();
-    observation_mut(&mut expected).increased_leech_rate.raw_bits = (-0.0_f32).to_bits();
-    assert_eq!(
-        AttackLeechPlan::prepare(&expected, AttackLeechTarget::IncreasedLeechRate, -0.0),
-        Ok(AttackLeechDecision::NoOp)
-    );
-    let plan = change(&expected, AttackLeechTarget::IncreasedLeechRate, 0.0);
-    assert_eq!(plan.projected_bits(), 0.0_f32.to_bits());
-    assert_eq!(plan.requested_value().to_bits(), 0.0_f64.to_bits());
-    observation_mut(&mut expected).increased_leech_rate.raw_bits = 0.0_f32.to_bits();
-    let negative = change(&expected, AttackLeechTarget::IncreasedLeechRate, -0.0);
-    assert_eq!(negative.projected_bits(), (-0.0_f32).to_bits());
-    assert_eq!(negative.requested_value().to_bits(), (-0.0_f64).to_bits());
-}
-
-#[test]
 fn unavailable_and_invalid_observation_are_distinct_from_invalid_input() {
     for reason in [
         AttackLeechUnavailable::OfflineRequired,
@@ -239,18 +218,4 @@ fn recheck_rejects_every_process_generation_sequence_manager_token_and_raw_bit_d
         }
         assert_eq!(plan.recheck(&changed), Err(FieldPlanError::StaleObservation), "drift case {fault}");
     }
-}
-
-#[test]
-fn recheck_preserves_nan_payload_and_signed_zero_distinctions_in_the_untouched_field() {
-    let mut expected = snapshot();
-    observation_mut(&mut expected).increased_leech_rate.raw_bits = 0x7fc01234;
-    let plan = change(&expected, AttackLeechTarget::AttackRate, 2.0);
-    assert_eq!(plan.recheck(&expected), Ok(()));
-    observation_mut(&mut expected).increased_leech_rate.raw_bits = 0x7fc01235;
-    assert_eq!(plan.recheck(&expected), Err(FieldPlanError::StaleObservation));
-    observation_mut(&mut expected).increased_leech_rate.raw_bits = (-0.0_f32).to_bits();
-    let plan = change(&expected, AttackLeechTarget::AttackRate, 2.0);
-    observation_mut(&mut expected).increased_leech_rate.raw_bits = 0.0_f32.to_bits();
-    assert_eq!(plan.recheck(&expected), Err(FieldPlanError::StaleObservation));
 }

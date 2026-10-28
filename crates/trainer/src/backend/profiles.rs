@@ -258,7 +258,7 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
                 this.state.hooks.insert(id, run);
             });
         }
-        self.admit_using_policy(&target, GatePolicy::Release)?;
+        self.admit(&target)?;
         // Superseded before it is sent, a change waits its turn again: a queued cleanup usually ends the connection,
         // and one that does not (automatic connection turned off) lets the monitor go on with it.
         if let Err(error) = self.commit(epoch, |this| {

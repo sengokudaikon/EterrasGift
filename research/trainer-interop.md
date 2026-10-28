@@ -148,7 +148,7 @@ inventory has 68 feature registrations over 74 owners: 54 detour targets, 31 byt
 7 field sets. Gameplay detours follow the caller's thread, not a universal main-thread rule.
 Offline transitions and owner loss must turn effects off and report actual removal failures.
 
-The [detour trial and product checks](../tools/trainer-eval/hook-eval/detour-trial.md) include
+The detour trial and product checks (`hook-eval/detour-trial.md`, archived 2026-10-28 in `../EterrasGiftRS-archive/2026-10-28-trainer-eval/`) include
 the authored Unity ExecuteTasks route: a throwing task with one Rust cleanup, subsequent task
 progress, injected second-target failure with dispatcher recovery, owner-exit restoration and
 reinstallation by a new owner. No actual-game execution or gameplay-specific ABI proof is claimed.
@@ -191,9 +191,9 @@ evidence. `mise run trainer:verify` runs trainer/tier/controller tests, UI tests
 verification with fake-host captures. Native fixture execution remains an explicit, separate
 owned-child check. No live-game access is authorized by a passing fixture.
 
-Retained tools: persistent-player; standalone unity-rust-host with its unity-fixture builder;
-native-inspect/inspect_pe.py; native-abi; and hook-eval for focused ABI regressions. The original
-hook/ABI inventories stay in hooks-fields-audit. One-off loader, bridge, debugger, parser,
+Retained tools: persistent-player (its lifecycle run only). unity-rust-host with its unity-fixture
+builder, native-inspect/inspect_pe.py, native-abi and hook-eval were archived on 2026-10-28 in
+`../EterrasGiftRS-archive/2026-10-28-trainer-eval/`. The original hook/ABI inventories stay in hooks-fields-audit. One-off loader, bridge, debugger, parser,
 main-thread identity and assembly-repair experiments are archived.
 
 Git tag `archive/trainer-evaluations-2026-10-19` at `0a2c4cc` preserves the previous sources and

@@ -10,7 +10,7 @@ use eg_trainer::{
         self, BackendConnection, BackendError, BackendHandle, BackendOptions, Command, Connector, ForgeSnapshot, ItemStatus, Phase, ProcessIdentity, ProcessLocator, RuntimeStatus,
         SystemClock,
     },
-    connect::gate::{GatePolicy, LogSource},
+    connect::gate::LogSource,
     definitions::catalog::{
         AffixDefinition, Availability, CatalogIdentity, DefinitionName, DefinitionNameSource, EXTRACTION_VERSION, GameCatalog, GameLocale, ImplicitDefinition, ItemLimits,
         ItemTypeDefinition, SubTypeDefinition, UniqueDefinition, ValueRange,
@@ -560,7 +560,6 @@ pub(super) fn capture(session: &Session) {
         Logs(data.clone()),
         SystemClock,
         BackendOptions {
-            policy: GatePolicy::Release,
             auto_connect: false,
             poll_interval: Duration::from_secs(60),
             game_data: Some(GameDataHandle::fixed(GameData::Ready(Arc::new(FileCatalog::restore(
@@ -1358,7 +1357,6 @@ pub(super) fn capture_waiting(session: &Session) {
         NoCharacter,
         SystemClock,
         BackendOptions {
-            policy: GatePolicy::Release,
             auto_connect: true,
             poll_interval: Duration::from_secs(60),
             ..Default::default()
@@ -1458,7 +1456,6 @@ pub(super) fn capture_profiles(session: &Session) {
         NoLog,
         SystemClock,
         BackendOptions {
-            policy: GatePolicy::Release,
             auto_connect: false,
             poll_interval: Duration::from_millis(10),
             discovery_interval: Duration::from_millis(10),

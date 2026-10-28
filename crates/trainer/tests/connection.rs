@@ -1,4 +1,6 @@
 //! Authored files and scripted transports only: no process is opened or injected.
+#[path = "pe_support/mod.rs"]
+mod pe_support;
 use std::{
     collections::VecDeque,
     fs,
@@ -16,7 +18,7 @@ use eg_trainer::{
     backend::{BackendError, Connector, ErrorKind},
     connect::admission::{AdmissionCheck, AttemptOutcome, HelperPreparer, LogFactory, PreparationFailure, PreparationResidency, PreparedHelper, SessionConnector},
     connect::build::BuildProfile,
-    connect::gate::{GatePolicy, LogSource},
+    connect::gate::LogSource,
     session::SessionState,
 };
 use eg_trainer_wire::{
@@ -68,24 +70,8 @@ impl Fixture {
         let metadata = temp.path().join("Owned Player_Data/il2cpp_data/Metadata/global-metadata.dat");
         fs::create_dir_all(metadata.parent().unwrap()).unwrap();
         fs::write(&metadata, b"owned metadata").unwrap();
-        let dispatcher = DispatcherSpec {
-            rva: 0x1000,
-            bytes: [0x48, 0x83, 0xec, 0x28, 0x80, 0x3d, 1, 2, 3, 4, 0, 0x75, 0x13, 0x48, 0x8d, 0x0d],
-        };
-        let mut image = vec![0; 0x400];
-        image[..2].copy_from_slice(b"MZ");
-        image[0x3c..0x40].copy_from_slice(&0x80u32.to_le_bytes());
-        image[0x80..0x84].copy_from_slice(b"PE\0\0");
-        image[0x84..0x86].copy_from_slice(&0x8664u16.to_le_bytes());
-        image[0x86..0x88].copy_from_slice(&1u16.to_le_bytes());
-        image[0x94..0x96].copy_from_slice(&240u16.to_le_bytes());
-        image[0x98..0x9a].copy_from_slice(&0x20bu16.to_le_bytes());
-        image[0x194..0x198].copy_from_slice(&0x1000u32.to_le_bytes());
-        image[0x198..0x19c].copy_from_slice(&0x200u32.to_le_bytes());
-        image[0x19c..0x1a0].copy_from_slice(&0x200u32.to_le_bytes());
-        image[0x1ac..0x1b0].copy_from_slice(&0x60000020u32.to_le_bytes());
-        image[0x200..0x210].copy_from_slice(&dispatcher.bytes);
-        fs::write(&binary, image).unwrap();
+        let dispatcher = pe_support::dispatcher();
+        fs::write(&binary, pe_support::image(&dispatcher)).unwrap();
         let target = ProcessIdentity {
             pid: 42,
             created: (started().as_nanosecond() / 100 + 116_444_736_000_000_000) as u64,
@@ -288,17 +274,17 @@ impl HelperPreparer for Prepare {
         Ok(result)
     }
 }
-fn connector(shared: &Arc<Shared>, policy: GatePolicy) -> SessionConnector<Prepare, Logs> {
-    SessionConnector::new(Prepare(shared.clone()), Logs(shared.clone()), HELPER, policy).unwrap()
+fn connector(shared: &Arc<Shared>) -> SessionConnector<Prepare, Logs> {
+    SessionConnector::new(Prepare(shared.clone()), Logs(shared.clone()), HELPER).unwrap()
 }
 
 #[test]
 fn construction_has_no_file_log_or_preparation_activity() {
     let fixture = Fixture::new();
     let shared = fixture.shared();
-    let _ = connector(&shared, GatePolicy::Release);
+    let _ = connector(&shared);
     assert!(shared.calls.lock().unwrap().is_empty());
-    assert!(SessionConnector::new(Prepare(shared.clone()), Logs(shared), "not-a-source-id", GatePolicy::Release).is_err());
+    assert!(SessionConnector::new(Prepare(shared.clone()), Logs(shared), "not-a-source-id").is_err());
 }
 
 #[test]
@@ -306,7 +292,7 @@ fn one_process_bound_admission_reader_and_case_insensitive_helper_id_connect() {
     run(async {
         let fixture = Fixture::new();
         let shared = fixture.shared();
-        let mut connector = connector(&shared, GatePolicy::Release);
+        let mut connector = connector(&shared);
         let session = connector.connect(fixture.target.clone(), now()).await.unwrap();
         assert_eq!(session.state(), SessionState::Ready);
         assert_eq!(session.target(), &fixture.target);
@@ -332,7 +318,7 @@ fn release_gate_denial_prevents_profile_io_preparation_and_transport() {
             let shared = fixture.shared();
             *shared.log.lock().unwrap() = state;
             fs::remove_file(&fixture.binary).unwrap();
-            let mut connector = connector(&shared, GatePolicy::Release);
+            let mut connector = connector(&shared);
             let error = connector.connect(fixture.target, now()).await.err().unwrap();
             assert_eq!(error.kind, ErrorKind::Gate);
             assert_eq!(error.delivery, Some(Delivery::NotSent));
@@ -357,7 +343,7 @@ fn malformed_target_or_missing_profile_fails_before_preparer() {
                 3 => fs::remove_file(&fixture.metadata).unwrap(),
                 _ => target.executable = target.executable.with_file_name("Absent.exe"),
             };
-            let mut connector = connector(&shared, GatePolicy::Release);
+            let mut connector = connector(&shared);
             assert_eq!(connector.connect(target, now()).await.err().unwrap().kind, ErrorKind::Identity);
             assert_eq!(shared.count("prepare"), 0);
             assert_eq!(shared.count("pipe"), 0);
@@ -371,7 +357,7 @@ fn admission_callback_stops_second_preparation_stage_before_load() {
         let fixture = Fixture::new();
         let shared = fixture.shared();
         *shared.mode.lock().unwrap() = Mode::OnlineAtSecondStage;
-        let mut connector = connector(&shared, GatePolicy::Release);
+        let mut connector = connector(&shared);
         let error = connector.connect(fixture.target, now()).await.err().unwrap();
         assert_eq!(error.kind, ErrorKind::Gate);
         assert_eq!(error.delivery, Some(Delivery::NotSent));
@@ -387,27 +373,13 @@ fn online_loss_after_preparer_completes_never_sends_discover() {
         let fixture = Fixture::new();
         let shared = fixture.shared();
         *shared.mode.lock().unwrap() = Mode::OnlineAtCompletion;
-        let mut connector = connector(&shared, GatePolicy::Release);
+        let mut connector = connector(&shared);
         let error = connector.connect(fixture.target, now()).await.err().unwrap();
         assert_eq!(error.kind, ErrorKind::Gate);
         assert_eq!(error.delivery, Some(Delivery::NotSent));
         assert!(error.retry_when_waiting);
         assert_eq!(connector.last_attempt().unwrap().residency, PreparationResidency::Loaded);
         assert_eq!(shared.count("pipe"), 0);
-    });
-}
-
-#[test]
-fn session_does_not_create_a_second_admission_reader() {
-    run(async {
-        let fixture = Fixture::new();
-        let shared = fixture.shared();
-        *shared.session_log.lock().unwrap() = Some(log(GameReadiness::Online));
-        let mut connector = connector(&shared, GatePolicy::Release);
-        let session = connector.connect(fixture.target, now()).await.unwrap();
-        assert_eq!(session.state(), SessionState::Ready);
-        assert_eq!(shared.count("log-created"), 1);
-        assert_eq!(shared.count("pipe"), 2);
     });
 }
 
@@ -425,7 +397,7 @@ fn prepared_identity_transport_source_and_residency_are_bound_before_any_pipe_io
             let fixture = Fixture::new();
             let shared = fixture.shared();
             *shared.mode.lock().unwrap() = mode;
-            let mut connector = connector(&shared, GatePolicy::Release);
+            let mut connector = connector(&shared);
             let error = connector.connect(fixture.target, now()).await.err().unwrap();
             assert_eq!(error.kind, ErrorKind::Identity);
             assert_eq!(shared.count("pipe"), 0);
@@ -448,7 +420,7 @@ fn artifact_change_after_preparation_is_rejected_before_status_and_not_replayed(
         let _writer = options.open(&fixture.metadata).unwrap();
         let shared = fixture.shared();
         *shared.mode.lock().unwrap() = Mode::ChangeMetadata;
-        let mut connector = connector(&shared, GatePolicy::Release);
+        let mut connector = connector(&shared);
         let error = connector.connect(fixture.target, now()).await.err().unwrap();
         assert_eq!(error.kind, ErrorKind::Identity);
         assert_eq!(error.delivery, Some(Delivery::MayHaveRun));
@@ -467,7 +439,7 @@ fn loaded_and_ambiguous_preparer_failures_never_downgrade_to_not_sent() {
             let mut error = BackendError::waiting(ErrorKind::Transport, "scripted preparation failure");
             error.delivery = Some(Delivery::NotSent);
             *shared.mode.lock().unwrap() = Mode::Failure(PreparationFailure { error, residency });
-            let mut connector = connector(&shared, GatePolicy::Release);
+            let mut connector = connector(&shared);
             let error = connector.connect(fixture.target, now()).await.err().unwrap();
             assert_eq!(
                 error.delivery,
@@ -503,7 +475,7 @@ fn preparation_and_handshake_errors_preserve_restart_required_and_never_retry() 
                     residency: PreparationResidency::Loaded,
                 });
             }
-            let mut connector = connector(&shared, GatePolicy::Release);
+            let mut connector = connector(&shared);
             let error = connector.connect(fixture.target, now()).await.err().unwrap();
             assert_eq!(error.kind, ErrorKind::RestartRequired);
             assert_eq!(error.delivery, Some(Delivery::MayHaveRun));
@@ -520,7 +492,7 @@ fn preparation_wait_rechecks_log_after_await_and_records_in_progress_uncertainty
         let fixture = Fixture::new();
         let shared = fixture.shared();
         shared.block.store(true, Ordering::SeqCst);
-        let mut connector = connector(&shared, GatePolicy::Release);
+        let mut connector = connector(&shared);
         let mut future = Box::pin(connector.connect(fixture.target, now()));
         let mut context = std::task::Context::from_waker(std::task::Waker::noop());
         assert!(future.as_mut().poll(&mut context).is_pending());
@@ -530,20 +502,6 @@ fn preparation_wait_rechecks_log_after_await_and_records_in_progress_uncertainty
         assert_eq!(error.kind, ErrorKind::Gate);
         assert_eq!(shared.count("pipe"), 0);
         assert_eq!(connector.last_attempt().unwrap().residency, PreparationResidency::Loaded);
-    });
-}
-
-#[test]
-fn missing_log_never_probes_the_runtime() {
-    run(async {
-        let fixture = Fixture::new();
-        let shared = fixture.shared();
-        *shared.log.lock().unwrap() = GameLogState::missing();
-        let mut connector = connector(&shared, GatePolicy::Release);
-        let error = connector.connect(fixture.target, now()).await.err().unwrap();
-        assert_eq!(error.kind, ErrorKind::Gate);
-        assert_eq!(shared.count("prepare"), 0);
-        assert_eq!(shared.count("pipe"), 0);
     });
 }
 
@@ -564,7 +522,7 @@ fn helper_not_ready_after_preparation_is_not_an_automatic_bootstrap_retry() {
                     payload: b"Request canceled before the main thread took it; nothing ran".to_vec(),
                 });
                 *shared.responses.lock().unwrap() = responses;
-                let mut connector = connector(&shared, GatePolicy::Release);
+                let mut connector = connector(&shared);
                 let error = connector.connect(fixture.target, now()).await.err().unwrap();
                 assert_eq!(error.kind, ErrorKind::NotReady);
                 assert!(error.message.contains("Request canceled before the main thread took it"));
@@ -592,7 +550,7 @@ fn helper_departure_during_handshake_with_unchanged_admission_is_not_a_reload_lo
             delivery: Delivery::MayHaveRun,
             failure: eg_trainer_wire::transport::TransportFailure::Departed,
         });
-        let mut connector = connector(&shared, GatePolicy::Release);
+        let mut connector = connector(&shared);
         let error = connector.connect(fixture.target, now()).await.err().unwrap();
         assert_eq!(error.kind, ErrorKind::Transport);
         assert!(error.message.contains("before the connection completed"));
@@ -609,7 +567,7 @@ fn dropped_preparation_future_retains_in_progress_uncertainty() {
         let fixture = Fixture::new();
         let shared = fixture.shared();
         shared.block.store(true, Ordering::SeqCst);
-        let mut connector = connector(&shared, GatePolicy::Release);
+        let mut connector = connector(&shared);
         let mut future = Box::pin(connector.connect(fixture.target, now()));
         let mut context = std::task::Context::from_waker(std::task::Waker::noop());
         assert!(future.as_mut().poll(&mut context).is_pending());

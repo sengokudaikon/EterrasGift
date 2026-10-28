@@ -133,7 +133,7 @@ the user confirmed that the correction works in the live game. The exact combina
 were not recorded; the authored fixtures separately cover unmet requirements and on/off/unload.
 
 See the [original inventory](../tools/trainer-eval/hooks-fields-audit/hook-inventory.md),
-[hook evaluation](../tools/trainer-eval/hook-eval/README.md) and
+the hook evaluation (archived 2026-10-28 in `../EterrasGiftRS-archive/2026-10-28-trainer-eval/`; `crates/trainer-helper/tests/hooks.rs` replaced it) and
 [interop notes](trainer-interop.md). The former unpatched/bridge experiment narrative and
 artifacts are preserved by `archive/trainer-evaluations-2026-10-19`.
 

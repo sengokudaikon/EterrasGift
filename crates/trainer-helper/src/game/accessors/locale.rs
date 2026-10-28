@@ -260,7 +260,10 @@ impl RuntimeAccess {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::game::{Ptr, Type};
+    use crate::game::{
+        Ptr, Type,
+        test_fakes::{self, frees, roots, token},
+    };
     use eg_il2cpp_runtime::ThreadContext;
     use std::cell::Cell;
     const PARENT: usize = 0x1000;
@@ -268,59 +271,21 @@ mod tests {
     const OWNER: usize = 0x3000;
     const BOX_CLASS: usize = 0x4000;
     thread_local! {
-        static ROOTS: Cell<usize> = const { Cell::new(0) };
-        static FREES: Cell<usize> = const { Cell::new(0) };
         static BOXES: Cell<usize> = const { Cell::new(0) };
         static BYREF: Cell<bool> = const { Cell::new(false) };
         static FLAGS: Cell<i32> = const { Cell::new(0) };
         static FIELD_CLASS: Cell<usize> = const { Cell::new(BOX_CLASS) };
         static VALUE_CLASS: Cell<bool> = const { Cell::new(true) };
         static CCTOR: Cell<bool> = const { Cell::new(false) };
-        static ROOT_FAILURE: Cell<bool> = const { Cell::new(false) };
         static WRONG_BOX: Cell<bool> = const { Cell::new(false) };
         static CHILD_METADATA: Cell<usize> = const { Cell::new(0) };
         static ENUM_BASE_CALLS: Cell<usize> = const { Cell::new(0) };
-    }
-    fn token<T>(address: usize) -> *mut T {
-        std::ptr::without_provenance_mut(address)
-    }
-    unsafe extern "C-unwind" fn current() -> *mut raw::Thread {
-        token(0x10)
-    }
-    unsafe extern "C-unwind" fn domain() -> *mut raw::Domain {
-        token(0x20)
-    }
-    unsafe extern "C-unwind" fn attach(_: *mut raw::Domain) -> *mut raw::Thread {
-        panic!("borrowed fixture thread")
-    }
-    unsafe extern "C-unwind" fn detach(_: *mut raw::Thread) {
-        panic!("borrowed fixture thread")
-    }
-    unsafe extern "C-unwind" fn root_new(object: *mut raw::Object, pinned: bool) -> Ptr {
-        assert!(!pinned);
-        if object as usize == CHILD && ROOT_FAILURE.get() {
-            return std::ptr::null_mut();
-        }
-        ROOTS.set(ROOTS.get() + 1);
-        Box::into_raw(Box::new(object)).cast()
-    }
-    unsafe extern "C-unwind" fn root_target(handle: Ptr) -> *mut raw::Object {
-        // SAFETY: StrongRoot supplies a live Box allocated by this fake root_new.
-        unsafe { handle.cast::<*mut raw::Object>().read() }
-    }
-    unsafe extern "C-unwind" fn root_free(handle: Ptr) {
-        // SAFETY: StrongRoot frees the Box-backed fake handle exactly once.
-        unsafe {
-            drop(Box::from_raw(handle.cast::<*mut raw::Object>()));
-        }
-        ROOTS.set(ROOTS.get() - 1);
-        FREES.set(FREES.get() + 1);
     }
     unsafe extern "C-unwind" fn object_class(object: *mut raw::Object) -> Class {
         match object as usize {
             PARENT => token(OWNER),
             CHILD => {
-                assert_eq!(ROOTS.get(), 2, "metadata must follow rooting");
+                assert_eq!(roots(), 2, "metadata must follow rooting");
                 CHILD_METADATA.set(CHILD_METADATA.get() + 1);
                 token(if WRONG_BOX.get() { 0x5000 } else { BOX_CLASS })
             }
@@ -358,7 +323,7 @@ mod tests {
     }
     unsafe extern "C-unwind" fn box_field(_: Ptr, object: *mut raw::Object) -> *mut raw::Object {
         assert_eq!(object as usize, PARENT);
-        assert_eq!(ROOTS.get(), 1);
+        assert_eq!(roots(), 1);
         BOXES.set(BOXES.get() + 1);
         token(CHILD)
     }
@@ -376,15 +341,13 @@ mod tests {
         panic!("enum_base must never see non-enum class")
     }
     fn fixture() -> (RuntimeAccess, ThreadContext) {
-        assert_eq!(ROOTS.get(), 0);
-        FREES.set(0);
+        let context = test_fakes::thread();
         BOXES.set(0);
         BYREF.set(false);
         FLAGS.set(0);
         FIELD_CLASS.set(BOX_CLASS);
         VALUE_CLASS.set(true);
         CCTOR.set(false);
-        ROOT_FAILURE.set(false);
         WRONG_BOX.set(false);
         CHILD_METADATA.set(0);
         ENUM_BASE_CALLS.set(0);
@@ -404,17 +367,7 @@ mod tests {
         access.class_namespace = class_namespace;
         access.class_enum = not_enum;
         access.enum_base = enum_base;
-        let api = raw::Api {
-            domain_get: domain,
-            thread_current: current,
-            thread_attach: attach,
-            thread_detach: detach,
-            gchandle_new: root_new,
-            gchandle_free: root_free,
-            gchandle_get_target: root_target,
-        };
-        // SAFETY: authored metadata and Box-backed GC handles live on this one borrowed test thread.
-        (access, unsafe { ThreadContext::new(api) })
+        (access, context)
     }
 
     #[test]
@@ -425,14 +378,14 @@ mod tests {
         let parent = unsafe { attached.root(NonNull::new(token(PARENT)).unwrap()) }.unwrap();
         // SAFETY: fake field metadata matches the expected immutable value class with no .cctor.
         let child = unsafe { access.locale_box(&attached, &parent, token(OWNER), c"handle", token(BOX_CLASS)) }.unwrap();
-        assert_eq!(ROOTS.get(), 2);
+        assert_eq!(roots(), 2);
         assert_eq!(BOXES.get(), 1);
         assert_eq!(CHILD_METADATA.get(), 1);
         drop(child);
-        assert_eq!(ROOTS.get(), 1);
+        assert_eq!(roots(), 1);
         drop(parent);
-        assert_eq!(ROOTS.get(), 0);
-        assert_eq!(FREES.get(), 2);
+        assert_eq!(roots(), 0);
+        assert_eq!(frees(), 2);
     }
     #[test]
     fn wrong_field_shape_or_class_initializer_refuses_before_boxing() {
@@ -452,9 +405,9 @@ mod tests {
             // SAFETY: invalid fake metadata must fail before invoking the public boxing export.
             assert!(unsafe { access.locale_box(&attached, &parent, token(OWNER), c"handle", token(BOX_CLASS)) }.is_err());
             assert_eq!(BOXES.get(), 0);
-            assert_eq!(ROOTS.get(), 1);
+            assert_eq!(roots(), 1);
             drop(parent);
-            assert_eq!(ROOTS.get(), 0);
+            assert_eq!(roots(), 0);
         }
     }
     #[test]
@@ -464,15 +417,17 @@ mod tests {
             let attached = context.attach().unwrap();
             // SAFETY: authored immutable parent token and valid handle implementation.
             let parent = unsafe { attached.root(NonNull::new(token(PARENT)).unwrap()) }.unwrap();
-            ROOT_FAILURE.set(root_failure);
+            if root_failure {
+                test_fakes::fail_root(CHILD);
+            }
             WRONG_BOX.set(!root_failure);
             // SAFETY: the fake export returns a live box whose root or identity is deliberately rejected.
             assert!(unsafe { access.locale_box(&attached, &parent, token(OWNER), c"handle", token(BOX_CLASS)) }.is_err());
             assert_eq!(BOXES.get(), 1);
-            assert_eq!(ROOTS.get(), 1);
+            assert_eq!(roots(), 1);
             assert_eq!(CHILD_METADATA.get(), usize::from(!root_failure));
             drop(parent);
-            assert_eq!(ROOTS.get(), 0);
+            assert_eq!(roots(), 0);
         }
     }
     #[test]

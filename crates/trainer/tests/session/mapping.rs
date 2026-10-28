@@ -55,8 +55,8 @@ fn pages() -> Vec<Step> {
         .map(|start| done(mapping::encode_mapping(&page(start)).unwrap()))
         .collect()
 }
-fn ready(fixture: &Fixture, wire: &FakeTransport, log: &FakeLog) -> Session<FakeTransport> {
-    let mut session = fixture.session(wire, log, GatePolicy::Release);
+fn ready(fixture: &Fixture, wire: &FakeTransport) -> Session<FakeTransport> {
+    let mut session = fixture.session(wire);
     session.enable();
     run(session.connect()).unwrap();
     session
@@ -68,7 +68,7 @@ fn complete_sampled_mapping_uses_exact_display_and_full_conditional_queries() {
     let mut steps = vec![fixture.discover(), status(false, 0x1234, 0)];
     steps.extend(pages());
     let wire = FakeTransport::new(fixture.target.clone(), steps);
-    let mut session = ready(&fixture, &wire, &FakeLog::new([offline()]));
+    let mut session = ready(&fixture, &wire);
     let bytes_read = session.artifact_bytes_read();
     let table = run(session.resolve_mapping(&observation, &request())).unwrap();
     assert_eq!(session.artifact_bytes_read(), bytes_read);
@@ -86,7 +86,6 @@ fn complete_sampled_mapping_uses_exact_display_and_full_conditional_queries() {
             && query.start() == if index == 0 { MappingStart::ContextOnly } else { MappingStart::Samples(((index - 1) * 16) as u8) }));
     }
     assert_eq!(session.state(), SessionState::Ready);
-    assert!(session.last_write().is_none());
 }
 #[test]
 fn draft_mapping_changes_only_detached_query_and_retains_original_observation() {
@@ -105,7 +104,7 @@ fn draft_mapping_changes_only_detached_query_and_retains_original_observation() 
     let mut steps = vec![fixture.discover(), status(false, 0x1234, 0)];
     steps.extend(pages());
     let wire = FakeTransport::new(fixture.target.clone(), steps);
-    let mut session = ready(&fixture, &wire, &FakeLog::new([offline()]));
+    let mut session = ready(&fixture, &wire);
     let table = run(session.resolve_mapping(&observation, &request)).unwrap();
     table.recheck(&observation, &request).unwrap();
     for request in &wire.requests()[2..] {
@@ -139,7 +138,7 @@ fn mapping_display_context_and_optional_helper_failures_stay_local() {
         }
         steps.push(done(forge::encode(Some(observation.snapshot())).unwrap()));
         let wire = FakeTransport::new(fixture.target.clone(), steps);
-        let mut session = ready(&fixture, &wire, &FakeLog::new([offline()]));
+        let mut session = ready(&fixture, &wire);
         let failure = run(session.resolve_mapping(&observation, &request()));
         if matches!(fault, 1..=4 | 6) {
             assert!(matches!(failure, Err(SessionError::MappingRetryable(_))), "{fault}");
@@ -154,8 +153,6 @@ fn mapping_display_context_and_optional_helper_failures_stay_local() {
 fn mapping_offline_transport_and_malformed_wire_failures_revoke_without_replay() {
     for failure in 0..3 {
         let fixture = Fixture::new();
-        let log = FakeLog::new([offline()]);
-        let changed = log.clone();
         let last = match failure {
             0 => Step::Reply(Ok(Response {
                 code: ResponseCode::OfflineRequired,
@@ -166,13 +163,6 @@ fn mapping_offline_transport_and_malformed_wire_failures_revoke_without_replay()
                 failure: TransportFailure::Timeout,
             })),
             2 => done(vec![0xff]),
-            3 => Step::Action(
-                Box::new(move || changed.set(online())),
-                Response {
-                    code: ResponseCode::Refused,
-                    payload: b"optional failure".to_vec(),
-                },
-            ),
             _ => unreachable!(),
         };
         let wire = FakeTransport::new(
@@ -184,7 +174,7 @@ fn mapping_offline_transport_and_malformed_wire_failures_revoke_without_replay()
                 last,
             ],
         );
-        let mut session = ready(&fixture, &wire, &log);
+        let mut session = ready(&fixture, &wire);
         let observation = expected(&fixture);
         assert!(run(session.resolve_mapping(&observation, &request())).is_err());
         assert_ne!(session.state(), SessionState::Ready);
@@ -218,7 +208,7 @@ fn canceled_mapping_never_replays_and_artifact_change_between_pages_blocks() {
                 final_step,
             ],
         );
-        let mut session = ready(&fixture, &wire, &FakeLog::new([offline()]));
+        let mut session = ready(&fixture, &wire);
         let observation = expected(&fixture);
         let request = request();
         if cancel {
@@ -264,13 +254,12 @@ fn obsolete_mapping_stops_between_pages_and_keeps_the_drained_session_ready() {
             done(forge::encode(Some(expected(&fixture).snapshot())).unwrap()),
         ],
     );
-    let mut session = ready(&fixture, &wire, &FakeLog::new([offline()]));
+    let mut session = ready(&fixture, &wire);
     let mut observer = Stop(canceled);
     let result = run(session.resolve_mapping_observed(&expected(&fixture), &request(), &mut observer));
     assert!(matches!(result, Err(SessionError::Busy)));
     assert_eq!(session.state(), SessionState::Ready);
     assert_eq!(wire.requests().len(), 4, "the next fifteen pages were not submitted");
-    assert!(session.last_write().is_none());
     assert!(run(session.read_forge()).unwrap().is_some());
     let count = wire.requests().len();
     assert!(run(session.resolve_mapping_observed(&expected(&fixture), &request(), &mut observer)).is_err());
@@ -306,7 +295,7 @@ fn a_stop_at_each_check_around_the_first_page_keeps_the_session_and_its_files_fo
         }
         steps.push(clear());
         let wire = FakeTransport::new(fixture.target.clone(), steps);
-        let mut session = ready(&fixture, &wire, &FakeLog::new([offline()]));
+        let mut session = ready(&fixture, &wire);
         let mut observer = StopAt { calls: 0, stop_at };
         let result = run(session.resolve_mapping_observed(&expected(&fixture), &request(), &mut observer));
         assert!(matches!(result, Err(SessionError::Busy)), "stop at {stop_at}: {result:?}");
@@ -328,7 +317,7 @@ fn an_observer_stop_does_not_turn_a_runtime_refusal_into_a_cancellation() {
         payload: b"offline character required".to_vec(),
     }));
     let wire = FakeTransport::new(fixture.target.clone(), [fixture.discover(), status(false, 0x1234, 0), refusal]);
-    let mut session = ready(&fixture, &wire, &FakeLog::new([offline()]));
+    let mut session = ready(&fixture, &wire);
     // It would stop once the reply is in: the refusal must still be reported as one.
     let mut observer = StopAt { calls: 0, stop_at: 4 };
     assert!(matches!(

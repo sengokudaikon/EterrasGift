@@ -14,8 +14,6 @@ mod fields;
 mod mappings;
 #[path = "backend/profiles.rs"]
 mod profiles;
-#[path = "backend/rate_write.rs"]
-mod rate_writes;
 #[path = "backend/unique.rs"]
 mod unique;
 #[path = "backend/write.rs"]
@@ -31,7 +29,7 @@ use eg_trainer::{
         self, BackendConnection, BackendError, BackendHandle, BackendOptions, CatalogState, Clock, Command, Connector, ErrorKind, ForgeSnapshot, ForgeState, Phase,
         ProcessIdentity, ProcessLocator, RuntimeStatus,
     },
-    connect::gate::{GatePolicy, LogSource},
+    connect::gate::LogSource,
     definitions::catalog::{CatalogIdentity, EXTRACTION_VERSION, GameCatalog},
     session::Cleanup,
 };
@@ -435,7 +433,6 @@ impl Clock for FakeClock {
 }
 fn options() -> BackendOptions {
     BackendOptions {
-        policy: GatePolicy::Release,
         override_enabled: false,
         auto_connect: false,
         poll_interval: Duration::from_millis(5),

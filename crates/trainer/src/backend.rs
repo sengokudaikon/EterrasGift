@@ -11,7 +11,6 @@ mod faults;
 mod fields;
 mod mapping;
 mod profiles;
-mod rate_write;
 mod snapshot;
 mod unique;
 mod write;
@@ -52,7 +51,7 @@ pub use profiles::{HOOK_NOT_AVAILABLE, HookRequest, HookRun, ProfileLock};
 use tokio::sync::{broadcast, mpsc, oneshot, watch};
 
 use crate::{
-    connect::gate::{self, GateDecision, GatePolicy, GateVerdict, LogSource},
+    connect::gate::{self, GateDecision, GateVerdict, LogSource},
     definitions::catalog::{GameCatalog, ResolvedItemName},
     definitions::service::{GameData, GameDataHandle},
     features::profiles::{ProfileBook, ProfileKey, ProfileSaver},
@@ -148,7 +147,6 @@ impl Command {
 
 #[derive(Clone, Debug)]
 pub struct BackendOptions {
-    pub policy: GatePolicy,
     pub auto_connect: bool,
     pub override_enabled: bool,
     pub poll_interval: Duration,
@@ -164,7 +162,6 @@ pub struct BackendOptions {
 impl Default for BackendOptions {
     fn default() -> Self {
         Self {
-            policy: GatePolicy::Release,
             auto_connect: true,
             override_enabled: false,
             poll_interval: Duration::from_millis(250),
@@ -791,15 +788,12 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
         };
     }
     fn admit(&mut self, target: &ProcessIdentity) -> Result<(), BackendError> {
-        self.admit_using_policy(target, self.options.policy)
-    }
-    fn admit_using_policy(&mut self, target: &ProcessIdentity, policy: GatePolicy) -> Result<(), BackendError> {
         let started = eg_core::time::from_filetime(target.created).map_err(|_| BackendError::blocked(ErrorKind::Identity, "invalid process creation time"))?;
         if target.pid == 0 || target.created == 0 || !target.executable.is_absolute() {
             return Err(BackendError::blocked(ErrorKind::Identity, "invalid process identity"));
         }
         let log = self.log.read(started);
-        let decision = gate::evaluate(&log, started, self.clock.now(), policy);
+        let decision = gate::evaluate(&log, started, self.clock.now());
         self.state.gate = Some(decision);
         if decision.verdict == GateVerdict::Allow {
             self.character = log.character.filter(|character| !character.online);

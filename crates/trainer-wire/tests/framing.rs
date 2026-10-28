@@ -2,6 +2,7 @@
 //! trailing byte are refused. Golden bytes and field-level rejections stay with each message's own tests.
 
 use eg_trainer_wire::{
+    definitions::{self, ItemLimits, ValueRange},
     fields::{self, AttackLeechObservation, AttackLeechRead, AttackLeechTarget, AttackLeechUnavailable, ObservedObjectIdentity, ObservedRate},
     forge::{self, AffixSnapshot, ForgeSnapshot, ItemStatus, UniqueIdentity},
     hooks::{GameplayHook, HookObservation, PatchState},
@@ -174,8 +175,13 @@ fn every_request_is_exactly_its_own_frame() {
     for request in requests() {
         let bytes = request.encode();
         exact(&format!("{request:?}"), &bytes, &request, Request::decode);
-        // The header announces the body it carries, and the frame assembler accepts no more.
+        // The header announces the body it carries, and the frame assembler accepts no more and finishes on no less.
         assert_eq!(Request::decode_header(&bytes[..REQUEST_HEADER_SIZE]).unwrap().body_len(), bytes.len() - REQUEST_HEADER_SIZE);
+        if let Some((_, short)) = bytes[REQUEST_HEADER_SIZE..].split_last() {
+            let mut frame = RequestFrame::new(&bytes[..REQUEST_HEADER_SIZE]).unwrap();
+            frame.push(short).unwrap();
+            assert!(frame.finish().is_err());
+        }
         let mut frame = RequestFrame::new(&bytes[..REQUEST_HEADER_SIZE]).unwrap();
         frame.push(&bytes[REQUEST_HEADER_SIZE..]).unwrap();
         assert!(
@@ -211,6 +217,16 @@ fn every_payload_is_exactly_its_own_encoding() {
         game_version: "1.4.2".into(),
     };
     exact("locale", &locale::encode(&locale).unwrap(), &locale, locale::decode);
+
+    let range = ValueRange { minimum: 3, maximum: 211 };
+    let limits = ItemLimits {
+        forging_potential: range,
+        legendary_potential: range,
+        weavers_will: range,
+        weavers_touch: range,
+        level_requirement: range,
+    };
+    exact("item limits", &definitions::encode(&limits).unwrap(), &limits, definitions::decode);
 
     let address = MappingAddress {
         target: MappingTarget::Unique,

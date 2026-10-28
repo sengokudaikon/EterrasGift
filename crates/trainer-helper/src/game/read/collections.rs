@@ -204,7 +204,10 @@ impl RuntimeAccess {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::game::{Ptr, Type};
+    use crate::game::{
+        Ptr, Type,
+        test_fakes::{self, frees, roots, token},
+    };
     use eg_il2cpp_runtime::ThreadContext;
     use std::cell::Cell;
 
@@ -216,10 +219,7 @@ mod tests {
     const ENUM_CLASS: usize = 0x6000;
     const BASE_TYPE: usize = 0x7000;
     thread_local! {
-        static ROOTS: Cell<usize> = const { Cell::new(0) };
-        static FREES: Cell<usize> = const { Cell::new(0) };
         static ARRAY: Cell<usize> = const { Cell::new(0) };
-        static FAIL_SECOND: Cell<bool> = const { Cell::new(false) };
         static RANK: Cell<i32> = const { Cell::new(1) };
         static ELEMENT: Cell<usize> = const { Cell::new(CHILD_CLASS) };
         static READS: Cell<usize> = const { Cell::new(0) };
@@ -229,40 +229,11 @@ mod tests {
         static BASE_CLASS: Cell<usize> = const { Cell::new(BYTE_CLASS) };
         static ENUM_BASE_CALLS: Cell<usize> = const { Cell::new(0) };
     }
-    fn token<T>(value: usize) -> *mut T {
-        std::ptr::without_provenance_mut(value)
-    }
-    unsafe extern "C-unwind" fn current() -> *mut raw::Thread {
-        token(1)
-    }
-    unsafe extern "C-unwind" fn domain() -> *mut raw::Domain {
-        token(2)
-    }
-    unsafe extern "C-unwind" fn root_new(object: *mut raw::Object, pinned: bool) -> Ptr {
-        assert!(!pinned);
-        if object as usize == SECOND && FAIL_SECOND.get() {
-            return std::ptr::null_mut();
-        }
-        ROOTS.set(ROOTS.get() + 1);
-        Box::into_raw(Box::new(object)).cast()
-    }
-    unsafe extern "C-unwind" fn root_target(handle: Ptr) -> *mut raw::Object {
-        // SAFETY: the live handle is a Box allocated by root_new.
-        unsafe { handle.cast::<*mut raw::Object>().read() }
-    }
-    unsafe extern "C-unwind" fn root_free(handle: Ptr) {
-        // SAFETY: StrongRoot frees this fake handle once after its final target access.
-        unsafe {
-            drop(Box::from_raw(handle.cast::<*mut raw::Object>()));
-        }
-        ROOTS.set(ROOTS.get() - 1);
-        FREES.set(FREES.get() + 1);
-    }
     unsafe extern "C-unwind" fn object_class(object: *mut raw::Object) -> Class {
         if object as usize == ARRAY.get() {
             token(ARRAY_CLASS)
         } else {
-            assert!(ROOTS.get() >= if ARRAY.get() == 0 { 1 } else { 2 }, "children must be rooted before metadata");
+            assert!(roots() >= if ARRAY.get() == 0 { 1 } else { 2 }, "children must be rooted before metadata");
             token(CHILD_CLASS)
         }
     }
@@ -344,10 +315,8 @@ mod tests {
         token(BYTE_CLASS)
     }
     fn fixture() -> (RuntimeAccess, ThreadContext) {
-        ROOTS.set(0);
-        FREES.set(0);
+        let context = test_fakes::thread();
         ARRAY.set(0);
-        FAIL_SECOND.set(false);
         RANK.set(1);
         ELEMENT.set(CHILD_CLASS);
         READS.set(0);
@@ -380,17 +349,7 @@ mod tests {
         access.enum_base = enum_base;
         access.corlib = corlib;
         access.class_from_name = class_from_name;
-        let ownership = raw::Api {
-            domain_get: domain,
-            thread_current: current,
-            thread_attach: <raw::ThreadAttach as crate::game::TestExportStub>::test_stub(),
-            thread_detach: <raw::ThreadDetach as crate::game::TestExportStub>::test_stub(),
-            gchandle_new: root_new,
-            gchandle_free: root_free,
-            gchandle_get_target: root_target,
-        };
-        // SAFETY: authored functions implement this borrowed test thread and Box-backed handles.
-        (access, unsafe { ThreadContext::new(ownership) })
+        (access, context)
     }
 
     #[test]
@@ -414,7 +373,7 @@ mod tests {
             // SAFETY: deliberately malformed authored metadata must fail before a static field read.
             assert!(unsafe { access.static_object(&attached, token(0xc000), c"storage", token(CHILD_CLASS)) }.is_err());
             assert_eq!(READS.get(), 0);
-            assert_eq!(ROOTS.get(), 0);
+            assert_eq!(roots(), 0);
         }
     }
 
@@ -432,7 +391,7 @@ mod tests {
             assert!(unsafe { access.values::<u8>(&attached, &list, token(ENUM_CLASS), 8) }.is_err());
             assert_eq!(READS.get(), 0);
             assert_eq!(ENUM_BASE_CALLS.get(), usize::from(!non_enum));
-            assert_eq!(ROOTS.get(), 1);
+            assert_eq!(roots(), 1);
         }
     }
 
@@ -446,22 +405,24 @@ mod tests {
             ARRAY.set(pointer.as_ptr() as usize);
             // SAFETY: storage is a live immutable authored x64 reference array for this operation.
             let array = unsafe { attached.root(pointer) }.unwrap();
-            FAIL_SECOND.set(fail);
+            if fail {
+                test_fakes::fail_root(SECOND);
+            }
             // SAFETY: exports validate this exact authored array layout and rooted identity graph.
             let result = unsafe { access.array(&attached, &array, token(CHILD_CLASS), 3) };
             if fail {
                 assert!(result.is_err());
-                assert_eq!(ROOTS.get(), 1);
-                assert_eq!(FREES.get(), 1);
+                assert_eq!(roots(), 1);
+                assert_eq!(frees(), 1);
             } else {
                 let entries = result.unwrap();
                 assert_eq!(entries.len(), 3);
                 assert!(entries[1].is_none());
-                assert_eq!(ROOTS.get(), 3);
+                assert_eq!(roots(), 3);
                 drop(entries);
             }
             drop(array);
-            assert_eq!(ROOTS.get(), 0);
+            assert_eq!(roots(), 0);
         }
     }
 
@@ -480,7 +441,7 @@ mod tests {
             }
             // SAFETY: invalid metadata must fail before attempting any raw data or header read.
             assert!(unsafe { access.array(&attached, &array, token(CHILD_CLASS), 3) }.is_err());
-            assert_eq!(ROOTS.get(), 1);
+            assert_eq!(roots(), 1);
         }
     }
 }

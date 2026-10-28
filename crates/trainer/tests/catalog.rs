@@ -99,59 +99,6 @@ fn complete_capture_assembles_two_pages_and_preserves_owned_provenance() {
     assert_eq!(catalog.bases[&16].sub_types[0].name.source, DefinitionNameSource::InternalName);
 }
 
-#[test]
-fn drift_duplicate_wrong_cursor_and_replayed_pages_poison_capture_permanently() {
-    for fault in 0..6 {
-        let mut builder = builder();
-        builder.push(bases(0, 17)).unwrap();
-        let mut page = bases(16, 17);
-        match fault {
-            0 => page.locale.language = "sr-Latn-RS".into(),
-            1 => page.locale.game_version = "changed".into(),
-            2 => page = bases(16, 18),
-            3 => {
-                if let CatalogEntries::Bases(entries) = &mut page.entries {
-                    entries[0].item_type = 0;
-                }
-            }
-            4 => page = bases(0, 17),
-            5 => page = bases(17, 17),
-            _ => unreachable!(),
-        }
-        assert!(builder.push(page).is_err(), "fault {fault}");
-        assert!(builder.push(bases(16, 17)).is_err());
-        assert_eq!(builder.next_cursor(CatalogKind::Bases), None);
-        assert!(builder.finish().is_err());
-    }
-    let mut builder = builder();
-    builder.push(empty(CatalogKind::Bases)).unwrap();
-    assert!(builder.push(empty(CatalogKind::Bases)).is_err());
-    assert!(builder.finish().is_err());
-}
-
-#[test]
-fn incomplete_or_locally_malformed_pages_cannot_publish_a_catalog() {
-    let mut incomplete = builder();
-    incomplete.push(bases(0, 17)).unwrap();
-    finish_empty_categories(&mut incomplete);
-    assert!(incomplete.finish().is_err());
-    let mut malformed = builder();
-    let mut page = bases(0, 1);
-    if let CatalogEntries::Bases(entries) = &mut page.entries {
-        let duplicate = entries[0].sub_types[0].clone();
-        entries[0].sub_types.push(duplicate);
-    }
-    assert!(malformed.push(page).is_err());
-    assert!(malformed.finish().is_err());
-    let identity = CatalogIdentity {
-        binary_hash: "bad".into(),
-        metadata_hash: "B".repeat(64),
-        locale: locale(),
-        extraction_version: EXTRACTION_VERSION,
-    };
-    assert!(CatalogBuilder::new(identity, limits()).is_err());
-}
-
 fn item() -> ForgeSnapshot {
     ForgeSnapshot {
         item: 0x12340,

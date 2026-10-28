@@ -1270,21 +1270,4 @@ mod tests {
             assert!(module_span(base, size, rva, len).is_err());
         }
     }
-
-    #[test]
-    #[ignore = "explicit immutable actual-artifact proof; EG_DISPATCHER_BINARY path required; no process access"]
-    fn explicit_actual_game_dispatcher_file_proof() {
-        let path = PathBuf::from(std::env::var_os("EG_DISPATCHER_BINARY").expect("explicit artifact path"));
-        let module = ModuleIdentity::capture(&path, "D5F9FB458F0E9878E697A92B590A586A52FD77E645F8BF87BB4F2B74C6C56567").unwrap();
-        let spec = DispatcherSpec {
-            rva: 0x405C790,
-            bytes: [0x48, 0x83, 0xec, 0x28, 0x80, 0x3d, 0x8d, 0x11, 0x7b, 0x01, 0, 0x75, 0x13, 0x48, 0x8d, 0x0d],
-        };
-        let proof = DispatcherProof::capture(module, &spec).unwrap();
-        assert_eq!(proof.spans[0].1.len(), 81);
-        println!(
-            "Actual artifact only: body/table/unwind {:?}",
-            proof.spans.iter().map(|(rva, bytes)| (*rva, bytes.len(), hashes::of_bytes(bytes))).collect::<Vec<_>>()
-        );
-    }
 }

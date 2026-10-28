@@ -655,7 +655,6 @@ impl Forge {
             WorldLogs,
             SystemClock,
             BackendOptions {
-                policy: GatePolicy::Release,
                 auto_connect: false,
                 poll_interval: Duration::from_secs(60),
                 game_data: Some(GameDataHandle::fixed(GameData::Ready(Arc::new(FileCatalog::restore(

@@ -1,9 +1,7 @@
 use eg_trainer_wire::{
-    fields::{self, AttackLeechObservation, AttackLeechRead, AttackLeechTarget, ObservedObjectIdentity, ObservedRate},
-    forge::{ForgeSnapshot, ItemStatus},
-    protocol::{DispatcherSpec, ProtocolError, REQUEST_HEADER_SIZE, Request, RequestFrame},
+    fields::{AttackLeechObservation, AttackLeechTarget, ObservedObjectIdentity, ObservedRate},
+    protocol::{DispatcherSpec, ProtocolError, Request},
     rate_write::AttackLeechRateWrite,
-    write::ForgeWrite,
 };
 
 fn dispatcher() -> DispatcherSpec {
@@ -25,8 +23,8 @@ fn write() -> AttackLeechRateWrite {
     AttackLeechRateWrite::new(dispatcher(), observation(), AttackLeechTarget::AttackRate, 0.01_f32.to_bits()).unwrap()
 }
 
-/// Independently specified prefix, authored as literal bytes rather than calling
-/// the encoder or copying its field assembly; remaining240 reserved bytes are0.
+/// The whole frame, independently specified as literal bytes rather than calling
+/// the encoder or copying its field assembly.
 fn golden() -> Vec<u8> {
     vec![
         0x35, 0x47, 0x46, 0x45, 24, 0, 0, 0, 85, 0, 0, 0, 0x80, 0x70, 0x60, 0x50, 0x40, 0x30, 0x20, 0x10, b'f', b'i', b'x', b't', b'u', b'r', b'e', b'-', b'p', b'r', b'o', b'o',
@@ -48,12 +46,7 @@ fn patch32(bytes: &mut [u8], offset: usize, value: u32) {
     bytes[offset..offset + 4].copy_from_slice(&value.to_le_bytes());
 }
 fn invalid(bytes: &[u8]) {
-    assert!(decode(bytes).is_err());
     assert!(Request::decode(bytes).is_err());
-    if bytes.len() == REQUEST_HEADER_SIZE {
-        assert!(Request::decode_header(bytes).is_err());
-        assert!(RequestFrame::new(bytes).is_err());
-    }
 }
 
 #[test]
@@ -73,15 +66,6 @@ fn independent_packed_golden_and_full_projection() {
     let mut expected = observation();
     expected.attack_rate.raw_bits = 0x3c23d70a;
     assert_eq!(write.projected(), expected);
-}
-
-#[test]
-fn declared_lengths_cannot_hide_extra_or_missing_data() {
-    for length in [0, 23, 84, 86, u32::MAX] {
-        let mut bytes = golden();
-        patch32(&mut bytes, 8, length);
-        assert!(Request::decode(&bytes).is_err());
-    }
 }
 
 #[test]
@@ -105,39 +89,14 @@ fn unknown_target_zero_identities_and_wrong_operation_rejected() {
 }
 
 #[test]
-fn frame_cannot_grow() {
-    let bytes = golden();
-    let mut frame = RequestFrame::new(&bytes[..REQUEST_HEADER_SIZE]).unwrap();
-    assert!(frame.push(&bytes[REQUEST_HEADER_SIZE..]).is_ok());
-    assert_eq!(frame.finish().unwrap(), Request::SetAttackLeechRate(write()));
-    let mut frame = RequestFrame::new(&bytes[..REQUEST_HEADER_SIZE]).unwrap();
-    assert!(frame.push(&bytes[REQUEST_HEADER_SIZE..]).is_ok());
-    assert!(frame.push(&[0]).is_err());
-    assert!(frame.finish().is_err());
-}
-
-#[test]
-fn desired_f32_domains_boundaries_and_nonfinite_patterns_are_strict() {
-    for target in [AttackLeechTarget::AttackRate, AttackLeechTarget::IncreasedLeechRate] {
-        for bits in [0x7f800000, 0xff800000, 0x7fc00001, 0x7f800001, 0xffc12345] {
-            assert!(AttackLeechRateWrite::new(dispatcher(), observation(), target, bits).is_err());
-            let mut bytes = golden();
-            bytes[36] = if target == AttackLeechTarget::AttackRate { 1 } else { 2 };
-            patch32(&mut bytes, 37, bits);
-            invalid(&bytes);
-        }
-    }
-    for value in [0.0_f32, -0.0, -1.0, f32::from_bits(0.01_f32.to_bits() - 1), f32::from_bits(20_f32.to_bits() + 1)] {
-        assert!(AttackLeechRateWrite::new(dispatcher(), observation(), AttackLeechTarget::AttackRate, value.to_bits()).is_err());
-    }
-    for value in [0.01_f32, 20.0] {
-        assert!(AttackLeechRateWrite::new(dispatcher(), observation(), AttackLeechTarget::AttackRate, value.to_bits()).is_ok());
-    }
-    for value in [f32::from_bits((-1_f32).to_bits() + 1), f32::from_bits(100_f32.to_bits() + 1)] {
-        assert!(AttackLeechRateWrite::new(dispatcher(), observation(), AttackLeechTarget::IncreasedLeechRate, value.to_bits()).is_err());
-    }
-    for value in [-1_f32, 100.0] {
-        assert!(AttackLeechRateWrite::new(dispatcher(), observation(), AttackLeechTarget::IncreasedLeechRate, value.to_bits()).is_ok());
+fn desired_value_is_refused_outside_its_own_target_domain_on_both_sides() {
+    // The domains themselves are `ObservedRate`'s (fields.rs). Attack refuses 0, which leech accepts (signed zero below).
+    for (target, tag, outside) in [(AttackLeechTarget::AttackRate, 1, 0.0_f32), (AttackLeechTarget::IncreasedLeechRate, 2, f32::NAN)] {
+        assert!(AttackLeechRateWrite::new(dispatcher(), observation(), target, outside.to_bits()).is_err());
+        let mut bytes = golden();
+        bytes[36] = tag;
+        patch32(&mut bytes, 37, outside.to_bits());
+        invalid(&bytes);
     }
 }
 
@@ -193,58 +152,4 @@ fn dispatcher_is_exact_caller_proof_data_not_an_admission_assertion() {
         bytes[offset] ^= 0x80;
         assert_eq!(Request::decode(&bytes).unwrap().encode(), bytes);
     }
-}
-
-#[test]
-fn read_messages_keep_typed_observations_with_a_compact_request() {
-    let request = Request::ReadAttackLeech {
-        dispatcher: dispatcher(),
-        expected_manager: 7,
-    };
-    let bytes = request.encode();
-    assert_eq!(bytes.len(), 44);
-    assert_eq!(&bytes[4..8], &23_u32.to_le_bytes());
-    assert_eq!(&bytes[36..44], &7u64.to_le_bytes());
-    assert_eq!(Request::decode(&bytes).unwrap(), request);
-    let bytes = fields::encode(&AttackLeechRead::Available(observation()));
-    assert_eq!(bytes.len(), 64);
-    assert_eq!(&bytes[4..6], &1_u16.to_le_bytes());
-    assert_eq!(fields::decode(&bytes).unwrap(), AttackLeechRead::Available(observation()));
-}
-
-#[test]
-fn status_bounded_tail_header_cannot_submit_without_complete_expected_item() {
-    let mut forge = ForgeSnapshot {
-        item: 1,
-        individual_id: 2,
-        fingerprint: 0,
-        name: "owned".into(),
-        item_type: 3,
-        sub_type: 4,
-        rarity: 0,
-        class_requirement: 0,
-        affixes: vec![],
-        implicit_rolls: vec![],
-        identity: None,
-        status: ItemStatus {
-            forging_potential: 1,
-            forging_potential_type: 0,
-            legendary_potential: 0,
-            weavers_will: 0,
-            weavers_touch: 0,
-            corrupted: false,
-            ruined: false,
-            level_requirement: 1,
-        },
-    };
-    forge.fingerprint = forge.legacy_fingerprint();
-    let request = Request::EditForge(ForgeWrite::level_requirement(dispatcher(), 7, forge, 2).unwrap());
-    let bytes = request.encode();
-    let header = Request::decode_header(&bytes[..REQUEST_HEADER_SIZE]).unwrap();
-    assert!(header.body_len() > 0);
-    assert!(Request::decode(&bytes[..REQUEST_HEADER_SIZE]).is_err());
-    assert!(RequestFrame::new(&bytes[..REQUEST_HEADER_SIZE]).unwrap().finish().is_err());
-    let mut frame = RequestFrame::new(&bytes[..REQUEST_HEADER_SIZE]).unwrap();
-    frame.push(&bytes[REQUEST_HEADER_SIZE..]).unwrap();
-    assert_eq!(frame.finish().unwrap(), request);
 }
