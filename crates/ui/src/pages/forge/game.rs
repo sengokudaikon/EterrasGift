@@ -1,6 +1,6 @@
-//! What the forge asks of the game: the item, the captured game data, value tables, writes and the unique preview. The
-//! production adapter reads owned snapshots and submits commands to the worker.
-//! Write outcomes are typed; accepted commands are polled without blocking the UI.
+//! The game's data as the forge shows it (`Catalog` and its definitions) and the shapes of the game's answers: a lookup
+//! that may still be on its way (`Lookup`) and a typed write outcome (`EditOutcome`). The game itself is
+//! `worker::ForgeGame`.
 
 pub const UNIQUE_LOADING: &str = "Reading unique descriptions…";
 pub const PREVIEW_LOADING: &str = "Updating preview…";
@@ -21,7 +21,7 @@ impl<T> From<Result<T, String>> for Lookup<T> {
     }
 }
 
-use super::item::{AffixDefinition, ForgeItem, ItemEdit, ModifierSnapshot, RollRequest, ValueTable};
+use super::item::{AffixDefinition, ForgeItem};
 pub use eg_trainer::write::WriteOutcome;
 
 /// An independently observed item can be undisplayable by this editor. That
@@ -169,80 +169,6 @@ pub fn modifier_range(minimum: &str, maximum: &str) -> String {
 
 /// A failed request, in the session's words.
 pub type GameError = String;
-
-pub trait ForgeGame {
-    fn catalog(&self) -> &Catalog;
-
-    /// Production and authored captures use the same class, category and idol rules.
-    fn compatibility(&self, item: &ForgeItem, definition: &AffixDefinition, slot: Option<&super::item::AffixState>, unrestricted: bool) -> super::item::Compatibility {
-        super::item::compatibility(item, definition, slot, unrestricted)
-    }
-
-    /// Persistent explanation when an observation provider offers no writes.
-    fn read_only_reason(&self) -> Option<&str> {
-        None
-    }
-
-    /// The item in the forge now, or None when the forge is empty.
-    fn read(&self) -> Option<ForgeItem>;
-
-    /// The session is ready and can write (an offline character, nothing in flight).
-    fn can_write(&self) -> bool {
-        true
-    }
-
-    /// "I know what I'm doing" in Settings.
-    fn unrestricted(&self) -> bool {
-        false
-    }
-
-    /// An already running worker read may finish before the next draft step.
-    fn is_busy(&self) -> bool {
-        false
-    }
-
-    /// The values a roll takes in its context. The editor never computes values itself.
-    fn resolve(&self, item: &ForgeItem, request: &RollRequest) -> Lookup<ValueTable>;
-
-    /// Current draft requests, including tables the editor already cached.
-    /// Disposable value reads outside this set no longer need to run.
-    fn retain_mappings(&self, _: &[RollRequest]) {}
-
-    /// Writes one edit to the item the draft was made on and reads it back.
-    fn write(&mut self, expected: &ForgeItem, edit: &ItemEdit) -> EditOutcome;
-
-    /// Start a new Apply history only when its first edit is confirmed.
-    fn begin_batch(&mut self) -> Result<(), GameError> {
-        Ok(())
-    }
-    fn undo_depth(&self) -> usize {
-        0
-    }
-    fn undo_needs_override(&self) -> bool {
-        false
-    }
-    fn undo_intent(&self) -> Option<ItemEdit> {
-        None
-    }
-    /// Restore the latest canonical token, never a UI-authored reverse write.
-    fn undo(&mut self, _: &ForgeItem) -> EditOutcome {
-        refused("Undo is unavailable for this observation.")
-    }
-
-    /// Completion of the single accepted command. None means still pending.
-    fn poll_write(&mut self) -> Option<EditOutcome> {
-        None
-    }
-
-    fn supports(&self, _: &ItemEdit) -> bool {
-        true
-    }
-
-    /// Discard an unsubmitted preview when its draft is cleared; accepted work still drains.
-    fn clear_unique_preview(&self) {}
-    /// The unique modifiers formatted with drafted rolls.
-    fn preview_unique(&self, expected: &ForgeItem, edit: &ItemEdit) -> Lookup<Vec<ModifierSnapshot>>;
-}
 
 #[cfg(test)]
 mod tests {

@@ -1,11 +1,12 @@
 //! The Item Forge's page state: the rows and fields with their drafts, the ledger and its Ctrl+Z order, Apply and Undo
-//! apply, the pickers and the action bar's message. Every value comes from the game through `ForgeGame`; the editor computes
+//! apply, the pickers and the action bar's message. Every value comes from the game (`worker::ForgeGame`); the editor computes
 //! none.
 
-use super::game::{Catalog, EditOutcome, ForgeGame, LegendaryType, Lookup, WriteOutcome, refused};
+use super::game::{Catalog, EditOutcome, LegendaryType, Lookup, WriteOutcome, refused};
 use super::item::EditPresentation;
 use super::item::{self, AffixDefinition, AffixKind, Category, Compatibility, ForgeItem, ItemEdit, Moves, RollRequest, RollTarget, Seal, StatusField};
 use super::rows::{AffixRow, FieldDraft, FieldKind, FieldOption, RollRow, ValueEditor, base_key, base_of};
+use super::worker::ForgeGame;
 use std::collections::{HashMap, VecDeque};
 use std::rc::Rc;
 
@@ -159,7 +160,7 @@ struct WaitingWrite {
 }
 
 pub struct ForgeEditor {
-    game: Box<dyn ForgeGame>,
+    game: ForgeGame,
     item: Option<ForgeItem>,
     pub affixes: Vec<AffixRow>,
     pub uniques: Vec<RollRow>,
@@ -204,13 +205,7 @@ fn local_time() -> String {
 
 /// The table for `key`, from the cache or else from the game; one still loading is asked again next time. Tables are
 /// shared, so a cell's editor holds the cached one rather than a copy.
-fn table(
-    tables: &mut HashMap<TableKey, Lookup<Rc<item::ValueTable>>>,
-    game: &dyn ForgeGame,
-    key: TableKey,
-    item: &ForgeItem,
-    request: &RollRequest,
-) -> Lookup<Rc<item::ValueTable>> {
+fn table(tables: &mut HashMap<TableKey, Lookup<Rc<item::ValueTable>>>, game: &ForgeGame, key: TableKey, item: &ForgeItem, request: &RollRequest) -> Lookup<Rc<item::ValueTable>> {
     if let Some(table) = tables.get(&key) {
         return table.clone();
     }
@@ -224,7 +219,7 @@ fn table(
 }
 
 impl ForgeEditor {
-    pub fn new(game: Box<dyn ForgeGame>) -> ForgeEditor {
+    pub fn new(game: ForgeGame) -> ForgeEditor {
         let mut editor = ForgeEditor {
             game,
             item: None,
@@ -265,7 +260,7 @@ impl ForgeEditor {
 
     /// Replace an owned observation provider, never a synchronous native call.
     /// Normal refresh rules preserve row identity and invalidate changed items.
-    pub fn observe(&mut self, game: Box<dyn ForgeGame>) {
+    pub fn observe(&mut self, game: ForgeGame) {
         let same_catalog = std::ptr::eq(self.game.catalog(), game.catalog());
         self.game = game;
         if !same_catalog {
@@ -288,6 +283,11 @@ impl ForgeEditor {
 
     pub fn item(&self) -> Option<&ForgeItem> {
         self.item.as_ref()
+    }
+
+    /// A write, or a batch of them, is on its way to the game.
+    pub fn is_writing(&self) -> bool {
+        self.batch.is_some() || self.waiting.is_some()
     }
 
     pub fn has_item(&self) -> bool {
@@ -1863,7 +1863,7 @@ impl ForgeEditor {
             implicits,
             ..
         } = self;
-        let game = game.as_ref();
+        let game = &*game;
         let Some(item) = item.as_ref() else {
             game.retain_mappings(&[]);
             return;

@@ -2,9 +2,10 @@
 //! state is shown again; the row models are updated in place so a row's cells, popups and drags survive the update.
 
 use super::editor::{Cell, ForgeEditor, KindFilter, MessageKind, RowRef};
-use super::game::{self, ForgeGame, Lookup};
+use super::game::{self, Lookup};
 use super::item::{ForgeItem, Seal};
 use super::rows::{FieldKind, ValueEditor};
+use super::worker::ForgeGame;
 use crate::models::update_rows as update;
 use crate::{
     AffixRowView, AppliedEntryView, CellKind, CellRef, DraftEntryView, FieldView, ForgeState, ItemRarity, MainWindow, MenuOptionView, MessageTone, ModifierRowView, PickerRowView,
@@ -72,7 +73,7 @@ pub struct ForgeHandle {
 }
 
 impl ForgeHandle {
-    pub fn observe(&self, game: Box<dyn ForgeGame>) {
+    pub fn observe(&self, game: ForgeGame) {
         self.view.editor.borrow_mut().observe(game);
         self.view.show();
     }
@@ -96,7 +97,7 @@ impl ForgeHandle {
 
 /// Puts an observation provider behind the window's forge. Production uses owned
 /// snapshots and command-based writes; fixtures exercise the same editor flow.
-pub fn attach(window: &MainWindow, game: Box<dyn ForgeGame>) -> ForgeHandle {
+pub fn attach(window: &MainWindow, game: ForgeGame) -> ForgeHandle {
     let view = Rc::new(View {
         editor: RefCell::new(ForgeEditor::new(game)),
         window: window.as_weak(),

@@ -19,6 +19,9 @@ use eg_trainer::{
 };
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
+mod world;
+pub(super) use world::item_captures;
+
 struct Data {
     target: ProcessIdentity,
     item: Mutex<Option<ForgeSnapshot>>,

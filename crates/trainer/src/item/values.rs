@@ -8,9 +8,9 @@
 mod display;
 use crate::item::edit::{ExpectedObservation, ItemEdit, MAX_WRITABLE_AFFIX_ID, RollEdit, RollTarget};
 pub use display::CapturedDisplayParser;
-pub use eg_trainer_wire::mapping::{MappingAddress, MappingStart, MappingTarget, RawMappingPage, RawValueSample};
+pub use eg_trainer_wire::mapping::{MappingAddress, MappingStart, MappingTarget, RawMappingPage, RawValueSample, UniqueRollPreview};
 use eg_trainer_wire::{
-    mapping::{self as wire, ModifierSnapshot, UniqueRollPreview},
+    mapping::{self as wire, ModifierSnapshot},
     protocol::MAX_RESPONSE_SIZE,
 };
 use std::{collections::BTreeSet, fmt};

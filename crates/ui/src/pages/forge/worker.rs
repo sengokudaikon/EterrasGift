@@ -1,9 +1,9 @@
-//! The Item Forge on the trainer's worker: the editor's game (`ObservedGame`) reads the worker's snapshots in place, and
+//! The Item Forge on the trainer's worker: the editor's game (`ForgeGame`) reads the worker's snapshots in place, and
 //! its writes, value tables, previews and unique descriptions are commands whose receipts the writer polls. No game,
 //! pipe or process work runs here.
 use super::{
     ForgeHandle,
-    game::{Catalog, EditOutcome, ForgeGame, GameError, WriteOutcome, refused},
+    game::{Catalog, EditOutcome, GameError, WriteOutcome, refused},
     item::{self, AffixDefinition, AffixKind, Category, ForgeItem, ItemEdit, ModifierSnapshot, RollRequest, ValueTable},
 };
 use crate::{
@@ -28,15 +28,20 @@ const READ_ONLY: &str = "This connection offers no supported item edits.";
 /// binding on their own.
 const POLL: Duration = Duration::from_millis(50);
 
-struct ObservedGame {
+/// The forge's game: the worker's snapshots read in place, and its commands, whose receipts the writer polls.
+pub struct ForgeGame {
     catalog: Arc<Catalog>,
     writer: Rc<RefCell<Writer>>,
 }
-impl ForgeGame for ObservedGame {
-    fn catalog(&self) -> &Catalog {
+impl ForgeGame {
+    /// Production and authored captures use the same class, category and idol rules.
+    pub(crate) fn compatibility(&self, item: &ForgeItem, definition: &AffixDefinition, slot: Option<&item::AffixState>, unrestricted: bool) -> item::Compatibility {
+        item::compatibility(item, definition, slot, unrestricted)
+    }
+    pub(crate) fn catalog(&self) -> &Catalog {
         &self.catalog
     }
-    fn read(&self) -> Option<ForgeItem> {
+    pub(crate) fn read(&self) -> Option<ForgeItem> {
         let writer = self.writer.borrow();
         if !writer.backend.is_running() {
             return None;
@@ -44,22 +49,22 @@ impl ForgeGame for ObservedGame {
         writer.backend.peek(project_item).ok().flatten()
     }
     // The editor asks these per row, option and cell: they read the snapshot in place rather than copy it each time.
-    fn can_write(&self) -> bool {
+    pub(crate) fn can_write(&self) -> bool {
         let writer = self.writer.borrow();
         writer.backend.is_running() && writer.pending.is_none() && writer.backend.peek(|state| state.phase == Phase::Ready && state.activity.is_none())
     }
-    fn unrestricted(&self) -> bool {
+    pub(crate) fn unrestricted(&self) -> bool {
         self.writer.borrow().backend.peek(|state| state.override_enabled)
     }
-    fn is_busy(&self) -> bool {
+    pub(crate) fn is_busy(&self) -> bool {
         let writer = self.writer.borrow();
         writer.backend.is_running() && writer.backend.peek(|state| state.phase == Phase::Ready && state.activity.is_some())
     }
-    fn supports(&self, edit: &ItemEdit) -> bool {
+    pub(crate) fn supports(&self, edit: &ItemEdit) -> bool {
         let writer = self.writer.borrow();
         writer.backend.is_running() && writer.backend.peek(|state| supports(state, edit))
     }
-    fn read_only_reason(&self) -> Option<&str> {
+    pub(crate) fn read_only_reason(&self) -> Option<&str> {
         let capabilities = self.writer.borrow().backend.peek(|state| state.capabilities);
         (!capabilities.status_fields.iter().any(|s| *s)
             && !capabilities.base_change
@@ -69,16 +74,16 @@ impl ForgeGame for ObservedGame {
             && !capabilities.affix_list)
             .then_some(READ_ONLY)
     }
-    fn resolve(&self, item: &ForgeItem, request: &RollRequest) -> super::game::Lookup<ValueTable> {
+    pub(crate) fn resolve(&self, item: &ForgeItem, request: &RollRequest) -> super::game::Lookup<ValueTable> {
         self.writer.borrow_mut().resolve(item, request)
     }
-    fn retain_mappings(&self, requests: &[RollRequest]) {
+    pub(crate) fn retain_mappings(&self, requests: &[RollRequest]) {
         self.writer.borrow_mut().retain_mappings(requests);
     }
-    fn write(&mut self, expected: &ForgeItem, edit: &ItemEdit) -> EditOutcome {
+    pub(crate) fn write(&mut self, expected: &ForgeItem, edit: &ItemEdit) -> EditOutcome {
         self.writer.borrow_mut().submit(expected, edit, false)
     }
-    fn begin_batch(&mut self) -> Result<(), GameError> {
+    pub(crate) fn begin_batch(&mut self) -> Result<(), GameError> {
         self.writer
             .borrow()
             .backend
@@ -86,31 +91,31 @@ impl ForgeGame for ObservedGame {
             .map(|_| ())
             .map_err(|_| "The trainer cannot accept another command.".into())
     }
-    fn undo_depth(&self) -> usize {
+    pub(crate) fn undo_depth(&self) -> usize {
         self.writer.borrow().backend.peek(|state| state.undo_forge_depth)
     }
-    fn undo_needs_override(&self) -> bool {
+    pub(crate) fn undo_needs_override(&self) -> bool {
         self.writer.borrow().backend.peek(|state| state.undo_forge_needs_override)
     }
-    fn undo_intent(&self) -> Option<ItemEdit> {
+    pub(crate) fn undo_intent(&self) -> Option<ItemEdit> {
         self.writer
             .borrow()
             .backend
             .peek(|state| state.forge_undo_plan(state.undo_forge.as_ref()?).ok().map(|plan| plan.edit_intent().clone()))
     }
-    fn undo(&mut self, expected: &ForgeItem) -> EditOutcome {
+    pub(crate) fn undo(&mut self, expected: &ForgeItem) -> EditOutcome {
         let Some(edit) = self.undo_intent() else {
             return refused("The confirmed Undo is no longer available. Check the item and override setting.");
         };
         self.writer.borrow_mut().submit(expected, &edit, true)
     }
-    fn poll_write(&mut self) -> Option<EditOutcome> {
+    pub(crate) fn poll_write(&mut self) -> Option<EditOutcome> {
         self.writer.borrow_mut().poll()
     }
-    fn clear_unique_preview(&self) {
+    pub(crate) fn clear_unique_preview(&self) {
         self.writer.borrow_mut().preview = None;
     }
-    fn preview_unique(&self, item: &ForgeItem, edit: &ItemEdit) -> super::game::Lookup<Vec<ModifierSnapshot>> {
+    pub(crate) fn preview_unique(&self, item: &ForgeItem, edit: &ItemEdit) -> super::game::Lookup<Vec<ModifierSnapshot>> {
         self.writer.borrow_mut().preview(item, edit)
     }
 }
@@ -510,7 +515,7 @@ struct Binding {
 
 /// Puts the forge on the worker. Its snapshot follower keeps the binding alive; the page's hook and the writer's polling
 /// timer hold only weak references.
-pub fn bind(window: &MainWindow, backend: BackendHandle, shell: &ShellHandle, faults: Option<FaultLog>) {
+pub fn bind(window: &MainWindow, backend: BackendHandle, shell: &ShellHandle, faults: Option<FaultLog>) -> ForgeHandle {
     let empty = Arc::new(Catalog::default());
     let writer = Rc::new(RefCell::new(Writer {
         backend: backend.clone(),
@@ -524,10 +529,10 @@ pub fn bind(window: &MainWindow, backend: BackendHandle, shell: &ShellHandle, fa
     }));
     let forge = super::attach(
         window,
-        Box::new(ObservedGame {
+        ForgeGame {
             catalog: empty.clone(),
             writer: writer.clone(),
-        }),
+        },
     );
     let binding = Rc::new(Binding {
         backend,
@@ -568,6 +573,7 @@ pub fn bind(window: &MainWindow, backend: BackendHandle, shell: &ShellHandle, fa
         owner.refresh();
         true
     });
+    binding.forge.clone()
 }
 
 impl Binding {
@@ -586,10 +592,10 @@ impl Binding {
         if !self.backend.is_running() && phase != Phase::Stopped {
             // An unexpected worker failure must not leave apparently live data.
             self.forge_stale.set(false);
-            self.forge.observe(Box::new(ObservedGame {
+            self.forge.observe(ForgeGame {
                 catalog: Arc::new(Catalog::default()),
                 writer: self.writer.clone(),
-            }));
+            });
             return;
         }
         if self.revision.get() == Some(revision) {
@@ -633,10 +639,10 @@ impl Binding {
     /// Puts the latest read and catalog behind the forge and shows it.
     fn observe_forge(&self) {
         let catalog = self.catalog.borrow().1.clone();
-        self.forge.observe(Box::new(ObservedGame {
+        self.forge.observe(ForgeGame {
             catalog,
             writer: self.writer.clone(),
-        }));
+        });
     }
 
     /// Records an item the forge cannot show, once, with the item as the game reported it, so the refused value can be

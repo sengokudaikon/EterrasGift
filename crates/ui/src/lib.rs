@@ -36,8 +36,14 @@ pub struct App {
     pub start: Page,
 }
 
+/// What a window was bound to: captures drive the forge's editor through it.
+pub struct Installed {
+    /// The forge on the trainer's worker, in a run that has one.
+    pub forge: Option<pages::forge::ForgeHandle>,
+}
+
 /// Wires a new window: navigation, the pages and the Windows settings.
-pub fn install(window: &MainWindow, app: App) {
+pub fn install(window: &MainWindow, app: App) -> Installed {
     let trainer_pages = if app.trainer { Page::TRAINER.to_vec() } else { Vec::new() };
     let mut navigation = Navigation::new(app.mods.is_some(), trainer_pages);
     navigation.navigate(app.start);
@@ -54,11 +60,12 @@ pub fn install(window: &MainWindow, app: App) {
     settings::bind_with_close(window, settings, before_close);
     trainer::connection::unbound(window, app.trainer);
     trainer::install(window, trainer_backend.clone());
-    if let Some(backend) = trainer_backend {
+    let forge = trainer_backend.map(|backend| {
         trainer::connection::bind(window, backend.clone(), &shell, decorations);
-        forge::worker::bind(window, backend, &shell, app.faults);
-    }
+        forge::worker::bind(window, backend, &shell, app.faults)
+    });
     apply_system_settings(window);
+    Installed { forge }
 }
 
 /// Windows says nothing when "Animation effects" or high contrast changes, and Slint surfaces no window activation to
