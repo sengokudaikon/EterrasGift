@@ -149,14 +149,14 @@ impl ForgeMutation {
                     name: String::new(),
                 });
                 crate::rules::reorder_affixes(item);
-                item.rarity = crate::rules::affix_list_rarity(item, &item.affixes);
+                (item.rarity, item.status) = crate::rules::affix_list_outcome(item, &item.affixes);
             }
             Self::RemoveAffix { slot, .. } => {
                 if usize::from(slot) < item.affixes.len() {
                     item.affixes.remove(usize::from(slot));
                 }
                 crate::rules::reorder_affixes(item);
-                item.rarity = crate::rules::affix_list_rarity(item, &item.affixes);
+                (item.rarity, item.status) = crate::rules::affix_list_outcome(item, &item.affixes);
             }
             Self::Affix { slot, id, tier, roll, seal, .. } => {
                 if let Some(affix) = item.affixes.get_mut(usize::from(slot)) {
@@ -166,6 +166,7 @@ impl ForgeMutation {
                     affix.seal = i32::from(seal);
                 }
                 crate::rules::reorder_affixes(item);
+                (item.rarity, item.status) = crate::rules::affix_list_outcome(item, &item.affixes);
             }
             Self::AffixRolls { rolls, .. } => {
                 for change in rolls.changes() {

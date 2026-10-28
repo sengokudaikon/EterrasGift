@@ -388,10 +388,38 @@ fn new_layout_problems_are_rejected_but_existing_problems_stay_editable() {
         seal: SealState::Corrupted,
         allow_incompatible: false,
     });
+    // A corrupted affix corrupts the legendary, as the game's corruption does, rather than being refused.
+    let p = prepare(&expected, &c, corrupted, false, None).unwrap();
+    assert!(p.projected().status.corrupted);
+}
+#[test]
+fn a_unique_that_becomes_legendary_spends_legendary_potential_but_keeps_weavers_will() {
+    let c = catalog();
+    let mut plain = unique(item(), 7, 911);
+    plain.affixes.clear();
+    plain.status.legendary_potential = 3;
+    plain.status.weavers_will = 9;
+    refresh(&mut plain);
+    let add = |seal| {
+        ItemEdit::AddAffix(AddAffixEdit {
+            id: 3,
+            tier: 4,
+            roll: 9,
+            seal,
+            kind: AffixKind::Prefix,
+            category: Some(0),
+            allow_incompatible: false,
+        })
+    };
+    let p = prepare(&observation(plain.clone(), &c), &c, add(SealState::Normal), false, None).unwrap();
+    let after = p.projected();
     assert_eq!(
-        prepare(&expected, &c, corrupted, false, None),
-        Err(EditError::NewLayoutProblem(LayoutProblem::LegendaryUncorrupted))
+        (after.rarity, after.status.legendary_potential, after.status.weavers_will, after.status.corrupted),
+        (9, 0, 9, false)
     );
+    // A corrupted affix on an uncorrupted unique makes it a corrupted legendary.
+    let p = prepare(&observation(plain, &c), &c, add(SealState::Corrupted), false, None).unwrap();
+    assert_eq!((p.projected().rarity, p.projected().status.corrupted), (9, true));
 }
 #[test]
 fn existing_unique_capacity_problem_never_escapes_hard_wire_bound_32() {
@@ -453,6 +481,9 @@ fn an_affix_makes_a_unique_legendary_and_losing_the_last_makes_it_unique_again()
     refresh(&mut plain);
     assert_eq!(free_slots(&plain), (2, 2));
     assert_eq!(free_slots(&unique(item(), 8, 912)), (0, 0));
+    let mut idol = plain.clone();
+    idol.item_type = 25;
+    assert_eq!(free_slots(&idol), (0, 0));
     let add = ItemEdit::AddAffix(AddAffixEdit {
         id: 3,
         tier: 4,

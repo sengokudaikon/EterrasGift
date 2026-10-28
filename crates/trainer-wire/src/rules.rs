@@ -5,7 +5,7 @@
 
 use crate::{
     definitions::{ItemLimits, ValueRange},
-    forge::{AffixSnapshot, ForgeSnapshot},
+    forge::{AffixSnapshot, ForgeSnapshot, ItemStatus},
     write::StatusField,
 };
 
@@ -110,12 +110,28 @@ pub(crate) fn reorder_affixes(item: &mut ForgeSnapshot) {
         affix.slot = slot as u8;
     }
 }
+/// The rarity and status an affix list leaves the item: its rarity (`affix_list_rarity`), and what the game's own
+/// crafting does beside it. A unique that becomes legendary spends its legendary potential (a legendary holds none;
+/// Weaver's Will stays), and a legendary that holds a corrupted affix is corrupted, as corruption leaves it: the save
+/// keeps that affix's corruption only on a corrupted legendary.
+pub fn affix_list_outcome(item: &ForgeSnapshot, affixes: &[AffixSnapshot]) -> (u8, ItemStatus) {
+    let rarity = affix_list_rarity(item, affixes);
+    let mut status = item.status.clone();
+    if item.rarity == 7 && rarity == 9 {
+        status.legendary_potential = 0;
+    }
+    if rarity == 9 && affixes.iter().any(|affix| affix.seal == 3) {
+        status.corrupted = true;
+    }
+    (rarity, status)
+}
 /// The rarity an affix list gives. Below unique it is the game's own rule (the native writer invokes the game's rarity
 /// method). A unique that gains an affix is legendary, as the Temporal Sanctum and corruption make it, and a legendary
-/// that loses its last is a unique again (the native writer stores it); a set item stays a set item.
+/// that loses its last is a unique again (the native writer stores it); a set item and a unique idol (there are no
+/// legendary idols) keep their rarity.
 pub fn affix_list_rarity(item: &ForgeSnapshot, affixes: &[AffixSnapshot]) -> u8 {
     match item.rarity {
-        7 | 9 => return if affixes.is_empty() { 7 } else { 9 },
+        7 | 9 if !(25..=33).contains(&item.item_type) => return if affixes.is_empty() { 7 } else { 9 },
         rarity if rarity > 6 => return rarity,
         _ => {}
     }

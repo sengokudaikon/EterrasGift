@@ -325,12 +325,25 @@ impl RuntimeAccess {
                         expected,
                         mutation,
                     )?);
-                    // The game's rarity method covers normal to rare; a unique that gains an affix becomes legendary, and a
-                    // legendary that loses its last a unique, by this store.
+                    // The game's rarity method covers normal to rare. On unique-backed items these stores do what the game's
+                    // crafting does beside the list (`affix_list_outcome`): a unique that gains an affix becomes legendary and
+                    // spends its legendary potential, a legendary that loses its last becomes a unique, and a legendary that
+                    // holds a corrupted affix is corrupted.
                     let mut projected = expected.clone();
                     mutation.project(&mut projected);
-                    if matches!(expected.rarity, 7..=9) && projected.rarity != expected.rarity {
-                        stores.push((self.mutable_field(item_data, c"rarity", c"Byte", 0x05)?, Scalar::U8(projected.rarity)));
+                    if matches!(expected.rarity, 7..=9) {
+                        if projected.rarity != expected.rarity {
+                            stores.push((self.mutable_field(item_data, c"rarity", c"Byte", 0x05)?, Scalar::U8(projected.rarity)));
+                        }
+                        if projected.status.legendary_potential != expected.status.legendary_potential {
+                            stores.push((
+                                self.status_field(item_data, StatusField::LegendaryPotential)?,
+                                Scalar::U8(projected.status.legendary_potential),
+                            ));
+                        }
+                        if projected.status.corrupted != expected.status.corrupted {
+                            stores.push((self.status_field(item_data, StatusField::Corrupted)?, Scalar::U8(u8::from(projected.status.corrupted))));
+                        }
                     }
                 }
                 ForgeMutation::AffixRolls { rolls, .. } => {

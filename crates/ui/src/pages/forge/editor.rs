@@ -1015,11 +1015,12 @@ impl ForgeEditor {
         let Some(item) = drafted else {
             return String::new();
         };
-        if item.rarity == item::SET {
+        if item.rarity == item::SET || (item.rarity == item::UNIQUE && item.idol) {
+            let kind = if item.idol { "unique idol" } else { "set item" };
             return if self.unrestricted() {
-                "No affix slots on a set item.".into()
+                format!("No affix slots on a {kind}.")
             } else {
-                "No affix slots on a set item. Adding needs \"I know what I'm doing\".".into()
+                format!("No affix slots on a {kind}. Adding needs \"I know what I'm doing\".")
             };
         }
         let (prefixes, suffixes) = item.free_slots();
