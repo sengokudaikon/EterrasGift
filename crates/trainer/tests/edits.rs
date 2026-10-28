@@ -446,6 +446,30 @@ fn add_remove_compute_rarity_and_refuse_removing_shifted_id() {
     );
 }
 #[test]
+fn an_affix_makes_a_unique_legendary_and_losing_the_last_makes_it_unique_again() {
+    let c = catalog();
+    let mut plain = unique(item(), 7, 911);
+    plain.affixes.clear();
+    refresh(&mut plain);
+    assert_eq!(free_slots(&plain), (2, 2));
+    assert_eq!(free_slots(&unique(item(), 8, 912)), (0, 0));
+    let add = ItemEdit::AddAffix(AddAffixEdit {
+        id: 3,
+        tier: 4,
+        roll: 9,
+        seal: SealState::Normal,
+        kind: AffixKind::Prefix,
+        category: Some(0),
+        allow_incompatible: false,
+    });
+    // No override: a unique has a legendary's slots.
+    let legendary = prepare(&observation(plain.clone(), &c), &c, add, false, None).unwrap().projected().clone();
+    assert_eq!((legendary.rarity, legendary.affixes.len()), (9, 1));
+    let remove = ItemEdit::RemoveAffix(RemoveAffixEdit { slot: 0, id: 3 });
+    let back = prepare(&observation(legendary, &c), &c, remove, false, None).unwrap();
+    assert_eq!(back.projected().rarity, 7);
+}
+#[test]
 fn override_is_two_distinct_inputs_and_unknown_definition_never_bypasses() {
     let c = catalog();
     let expected = observation(item(), &c);

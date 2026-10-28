@@ -368,8 +368,13 @@ fn affix_values(id: i32, tier: i32, roll: i32) -> Result<(), EditError> {
 pub use eg_trainer_wire::rules::LayoutProblem;
 use eg_trainer_wire::rules::{affix_order_key, layout_problems};
 fn new_problem(item: &ForgeSnapshot, affixes: &[AffixSnapshot]) -> Result<(), EditError> {
+    new_problem_at(item, item.rarity, affixes)
+}
+/// As [`new_problem`], with the list judged at the rarity it leaves the item (a unique that gains an affix is legendary).
+fn new_problem_at(item: &ForgeSnapshot, rarity: u8, affixes: &[AffixSnapshot]) -> Result<(), EditError> {
     let old = layout_problems(item, &item.affixes);
-    match layout_problems(item, affixes).into_iter().find(|p| !old.contains(p)) {
+    let after = ForgeSnapshot { rarity, ..item.clone() };
+    match layout_problems(&after, affixes).into_iter().find(|p| !old.contains(p)) {
         Some(p) => Err(EditError::NewLayoutProblem(p)),
         None => Ok(()),
     }
@@ -379,7 +384,8 @@ fn order(affixes: &mut [AffixSnapshot], rarity: u8) {
 }
 
 pub fn free_slots(item: &ForgeSnapshot) -> (i32, i32) {
-    let each = if matches!(item.rarity, 7 | 8) {
+    // A unique takes a legendary's slots: an affix makes it one.
+    let each = if item.rarity == 8 {
         0
     } else if idol(item.item_type) {
         1
@@ -576,9 +582,9 @@ pub fn prepare(
                 name: String::new(),
                 special: e.category.unwrap_or(0),
             });
-            new_problem(before, &ordered)?;
-            order(&mut ordered, before.rarity);
             after.rarity = eg_trainer_wire::rules::affix_list_rarity(before, &ordered);
+            new_problem_at(before, after.rarity, &ordered)?;
+            order(&mut ordered, before.rarity);
         }
         ItemEdit::RemoveAffix(e) => {
             let slot = index(before, e.slot)?;
@@ -586,9 +592,9 @@ pub fn prepare(
                 return Err(EditError::InvalidValues);
             }
             ordered.remove(slot);
-            new_problem(before, &ordered)?;
-            order(&mut ordered, before.rarity);
             after.rarity = eg_trainer_wire::rules::affix_list_rarity(before, &ordered);
+            new_problem_at(before, after.rarity, &ordered)?;
+            order(&mut ordered, before.rarity);
         }
         ItemEdit::Roll(e) => {
             if e.changes.is_empty()

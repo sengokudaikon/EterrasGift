@@ -1015,19 +1015,24 @@ impl ForgeEditor {
         let Some(item) = drafted else {
             return String::new();
         };
-        if matches!(item.rarity, item::UNIQUE | item::SET) {
+        if item.rarity == item::SET {
             return if self.unrestricted() {
-                "No affix slots on a unique or set item.".into()
+                "No affix slots on a set item.".into()
             } else {
-                "No affix slots on a unique or set item. Adding needs \"I know what I'm doing\".".into()
+                "No affix slots on a set item. Adding needs \"I know what I'm doing\".".into()
             };
         }
         let (prefixes, suffixes) = item.free_slots();
-        format!(
+        let free = format!(
             "Free: {}, {}",
             count(prefixes.max(0) as usize, "prefix", "prefixes"),
             count(suffixes.max(0) as usize, "suffix", "suffixes")
-        )
+        );
+        if item.rarity == item::UNIQUE {
+            format!("{free}. An affix makes it legendary.")
+        } else {
+            free
+        }
     }
 
     pub fn tier_ladder_note(&self) -> &'static str {

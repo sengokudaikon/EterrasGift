@@ -110,10 +110,14 @@ pub(crate) fn reorder_affixes(item: &mut ForgeSnapshot) {
         affix.slot = slot as u8;
     }
 }
-/// Host expectation only: the native writer invokes the game's rarity method.
+/// The rarity an affix list gives. Below unique it is the game's own rule (the native writer invokes the game's rarity
+/// method). A unique that gains an affix is legendary, as the Temporal Sanctum and corruption make it, and a legendary
+/// that loses its last is a unique again (the native writer stores it); a set item stays a set item.
 pub fn affix_list_rarity(item: &ForgeSnapshot, affixes: &[AffixSnapshot]) -> u8 {
-    if item.rarity > 6 {
-        return item.rarity;
+    match item.rarity {
+        7 | 9 => return if affixes.is_empty() { 7 } else { 9 },
+        rarity if rarity > 6 => return rarity,
+        _ => {}
     }
     let seals = affixes.iter().map(|a| a.seal).filter(|s| *s != 0).collect::<std::collections::BTreeSet<_>>();
     affixes.len().saturating_sub(seals.len()).min(4) as u8

@@ -325,6 +325,13 @@ impl RuntimeAccess {
                         expected,
                         mutation,
                     )?);
+                    // The game's rarity method covers normal to rare; a unique that gains an affix becomes legendary, and a
+                    // legendary that loses its last a unique, by this store.
+                    let mut projected = expected.clone();
+                    mutation.project(&mut projected);
+                    if matches!(expected.rarity, 7..=9) && projected.rarity != expected.rarity {
+                        stores.push((self.mutable_field(item_data, c"rarity", c"Byte", 0x05)?, Scalar::U8(projected.rarity)));
+                    }
                 }
                 ForgeMutation::AffixRolls { rolls, .. } => {
                     let class = self.class(&graph.images, c"", c"ItemAffix")?;
