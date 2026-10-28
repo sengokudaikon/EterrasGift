@@ -19,7 +19,9 @@ use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
 /// Reasons shown where file data lacks a value.
-const AFFIX_NAME_REASON: &str = "The generated affix display-name formatter has not been validated";
+const AFFIX_NAME_REASON: &str = "The game's text has no name for this affix";
+/// The game's text the names come from. Like the stored names of bases and uniques, they are English.
+const TEXT_LOCALE: &str = "en";
 const RARITY_REASON: &str = "The localized rarity-name formatter has not been validated";
 const IMPLICIT_TEXT_REASON: &str = "Catalog definitions do not include implicit descriptions";
 
@@ -65,6 +67,7 @@ pub fn read(folder: &Path) -> Result<FileCatalog, String> {
     // the player sources, so a saved catalog is known to be current without hashing them again.
     let mut paths = install.definition_sources();
     paths.extend(install.player_sources());
+    paths.extend(install.text_sources().unwrap_or_default());
     paths.push(install.data_folder().join("build_hash.txt"));
     let sources = paths.into_iter().map(|path| (fingerprint(&path), path)).map(|(print, path)| (path, print)).collect();
     let binary_hash = hash(&binary)?;
@@ -73,6 +76,10 @@ pub fn read(folder: &Path) -> Result<FileCatalog, String> {
     let player = install.player_definitions().map_err(|e| e.to_string())?;
     let build = install.build_hash().unwrap_or_default();
     let mut catalog = build_catalog(binary_hash, metadata_hash, build, &definitions, &player)?;
+    // Names only: a catalog without the game's text still serves, with the stored names.
+    if let Ok(strings) = install.strings(TEXT_LOCALE) {
+        catalog.name_affixes(&strings);
+    }
     catalog.sources = sources;
     Ok(catalog)
 }
@@ -129,6 +136,19 @@ pub fn build_catalog(binary_hash: String, metadata_hash: String, build: String, 
 }
 
 impl FileCatalog {
+    /// The game's own affix names (`Item_Affix_<id>_DisplayName`): the stored ones are internal or stale where the game
+    /// generates its name ("Blood Rage Minion Pack" is "You have Pack Rage").
+    pub fn name_affixes(&mut self, strings: &eg_game_files::Strings) {
+        for affix in &mut self.affixes {
+            if let Some(text) = strings
+                .get("Item_Affixes", &format!("Item_Affix_{}_DisplayName", affix.id))
+                .filter(|text| !text.trim().is_empty())
+            {
+                affix.game_display_name = Availability::Available(text.trim().to_owned());
+            }
+        }
+    }
+
     pub fn affix_count(&self) -> usize {
         self.affixes.len()
     }

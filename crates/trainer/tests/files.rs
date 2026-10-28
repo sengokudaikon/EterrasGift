@@ -42,6 +42,9 @@ fn builds_the_catalog_from_the_install() {
     let Availability::Available(tiers) = &health.numeric else { panic!("affix 25 numeric") };
     assert_eq!((tiers[0].properties[0].minimum, tiers[0].properties[0].maximum), (5.0, 15.0));
     assert_eq!(catalog.limits.forging_potential.maximum, 255);
+    // The game's names, not the stored internal ones ("Blood Rage Minion Pack").
+    assert_eq!(health.game_display_name, Availability::Available("Health".into()));
+    assert_eq!(catalog.affixes[&1138].game_display_name, Availability::Available("You have Pack Rage".into()));
 }
 
 #[test]

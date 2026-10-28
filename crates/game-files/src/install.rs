@@ -96,6 +96,11 @@ impl Install {
         Ok(text.trim().to_owned())
     }
 
+    /// The files [`Install::strings`] reads: every addressable bundle, as the locales are found among them.
+    pub fn text_sources(&self) -> Result<Vec<PathBuf>> {
+        bundles_in(&self.addressables())
+    }
+
     /// The files [`Install::definitions`] reads.
     pub fn definition_sources(&self) -> Vec<PathBuf> {
         vec![self.perma_load(), self.monoscripts()]
