@@ -1,9 +1,5 @@
 //! Field-only attack/leech graph copy; no getters, refreshes or mutations.
-use super::{
-    Class, DiscoveryError, Ptr, RuntimeAccess,
-    forge::{Root, target},
-    unsupported,
-};
+use super::{Class, DiscoveryError, Ptr, RuntimeAccess, forge::Root, target, unsupported};
 use eg_il2cpp_runtime::{AttachedThread, raw};
 use eg_trainer_wire::fields::{AttackLeechObservation, AttackLeechRead, AttackLeechTarget, AttackLeechUnavailable, ObservedObjectIdentity, ObservedRate};
 use std::{ffi::CStr, ptr::NonNull};

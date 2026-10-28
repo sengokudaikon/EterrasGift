@@ -3,12 +3,8 @@
 //! catalog itself comes from the game's files (`eg-trainer`'s game data), never from these reads.
 
 use super::metadata_text;
-use super::{
-    Class, DiscoveryError, Images, RuntimeAccess,
-    forge::{Primitive, Root, target},
-    unsupported,
-};
-use eg_il2cpp_runtime::{AttachedThread, raw};
+use super::{Class, DiscoveryError, Images, RuntimeAccess, forge::Root, target, unsupported};
+use eg_il2cpp_runtime::{AttachedThread, metadata::Primitive, raw};
 use std::{ffi::CStr, ptr::NonNull};
 
 fn collection_count(count: i32, capacity: u32, maximum: u32) -> Result<usize, DiscoveryError> {
@@ -93,7 +89,7 @@ impl RuntimeAccess {
                 return Err(unsupported("catalog reference owner"));
             }
             let field = self.field(owner, name)?;
-            self.reference(attached, parent, name, self.field_class(field, "catalog")?)
+            Ok(self.reference(attached, parent, name, self.field_class(field, "catalog")?)?)
         }
     }
 

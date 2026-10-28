@@ -7,7 +7,7 @@
 // Entry-point contracts cover the shared runtime assumptions. Keep local notes
 // for bounds, ownership and ABI details rather than repeating those contracts.
 
-use eg_il2cpp_runtime::metadata::{Class, MetadataError, Method, Ptr, copy_values, metadata_text, read_value, record_class, write_bytes};
+use eg_il2cpp_runtime::metadata::{Class, MetadataError, Method, Ptr, copy_values, metadata_text, read_value, record_class, target, write_bytes};
 #[cfg(test)]
 use eg_il2cpp_runtime::metadata::{TestExportStub, Type};
 use eg_il2cpp_runtime::{AttachedThread, MetadataApi, RuntimeError, raw};

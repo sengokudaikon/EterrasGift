@@ -1,10 +1,6 @@
 //! Optional implicit text from the methods the game's own item tooltip uses.
 use super::metadata_text;
-use super::{
-    Class, DiscoveryError, Method, RuntimeAccess,
-    forge::{Root, target},
-    unsupported,
-};
+use super::{Class, DiscoveryError, Method, RuntimeAccess, forge::Root, target, unsupported};
 use eg_il2cpp_runtime::{Argument, AttachedThread, InvocationContext, InvocationOutcome, ReturnValue, Scalar, raw};
 use eg_trainer_wire::mapping::{ForgeDescriptionRequest, MAX_TEXT_BYTES, ModifierSnapshot};
 use std::{ffi::CStr, ptr::NonNull};

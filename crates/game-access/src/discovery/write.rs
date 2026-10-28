@@ -5,7 +5,8 @@ mod affix;
 use super::metadata_text;
 use super::{
     Class, DiscoveryError, Ptr, RuntimeAccess,
-    forge::{ForgeGraph, Root, target},
+    forge::{ForgeGraph, Root},
+    target,
 };
 use eg_il2cpp_runtime::{Argument, AttachedThread, InvocationContext, InvocationOutcome, ReturnValue, Scalar, raw};
 use eg_trainer_wire::{

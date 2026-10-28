@@ -10,7 +10,7 @@
 // Entry-point contracts cover the shared runtime assumptions. Keep local notes
 // for bounds, ownership and ABI details rather than repeating those contracts.
 
-use crate::{AttachedThread, RuntimeError, raw};
+use crate::{AttachedThread, RuntimeError, StrongRoot, raw};
 use std::{
     ffi::{CStr, c_char, c_void},
     ptr::NonNull,
@@ -52,6 +52,32 @@ impl From<RuntimeError> for MetadataError {
 pub fn unsupported(contract: impl Into<String>) -> MetadataError {
     MetadataError::Contract(contract.into())
 }
+
+/// The object a root holds; a root without one is a contract failure.
+pub fn target(root: &StrongRoot<'_, '_>) -> Result<NonNull<raw::Object>, MetadataError> {
+    root.target().ok_or_else(|| unsupported("root target"))
+}
+
+mod sealed {
+    pub trait Sealed {}
+}
+
+/// A destination type with exactly one corlib primitive class of its width. Reads check a field against that class, so
+/// no metadata name can select a wider write into the destination. Closed: only this crate implements it.
+pub trait Primitive: sealed::Sealed + Copy + Default {
+    /// The class's name in corlib's `System` namespace.
+    const NAME: &'static CStr;
+}
+
+macro_rules! primitives {
+    ($($ty:ty => $name:literal),+ $(,)?) => { $(
+        impl sealed::Sealed for $ty {}
+        impl Primitive for $ty {
+            const NAME: &'static CStr = $name;
+        }
+    )+ };
+}
+primitives!(u8 => c"Byte", u16 => c"UInt16", u32 => c"UInt32", i32 => c"Int32", f32 => c"Single", usize => c"IntPtr");
 
 // Field descriptors belong to immutable metadata in the retained runtime. Only descriptor lookup is cached; object
 // values and native liveness are always read afresh.
@@ -394,6 +420,141 @@ impl MetadataApi {
                 return Err(unsupported(format!("{label} field {} type/storage", name.to_string_lossy())));
             }
             Ok(field)
+        }
+    }
+
+    /// A nonstatic field of a rooted object's class (or an ancestor) whose type's class is exactly `expected`.
+    ///
+    /// # Safety
+    /// The lookup contract (module docs), with `object` rooted in this runtime.
+    pub unsafe fn instance_field(&self, object: &StrongRoot<'_, '_>, name: &CStr, expected: Class) -> Result<Ptr, MetadataError> {
+        // SAFETY: The receiver is rooted; its field type, instance storage and expected class are checked before returning metadata.
+        unsafe {
+            let class = (self.object_class)(target(object)?.as_ptr());
+            if class.is_null() {
+                return Err(unsupported("object class"));
+            }
+            self.instance_field_in(class, name, expected, "object")
+        }
+    }
+
+    /// Copy one primitive instance field of a rooted object.
+    ///
+    /// # Safety
+    /// The lookup contract (module docs), with `object` rooted in this runtime and its graph unchanged for the copy.
+    pub unsafe fn primitive<T: Primitive>(&self, object: &StrongRoot<'_, '_>, name: &CStr) -> Result<T, MetadataError> {
+        // SAFETY: The receiver is rooted; exact primitive class validation fixes the stack destination's width before FieldGet.
+        unsafe {
+            let class = self.system_class(T::NAME)?;
+            let field = self.instance_field(object, name, class)?;
+            let mut value = T::default();
+            (self.field_get)(target(object)?.as_ptr(), field, (&mut value as *mut T).cast());
+            Ok(value)
+        }
+    }
+
+    /// Copy one Boolean instance field of a rooted object; a byte other than 0 or 1 is a contract failure.
+    ///
+    /// # Safety
+    /// As [`Self::primitive`].
+    pub unsafe fn boolean(&self, object: &StrongRoot<'_, '_>, name: &CStr) -> Result<bool, MetadataError> {
+        // SAFETY: The rooted receiver's exact Boolean field is copied into one byte and validated before conversion to bool.
+        unsafe {
+            let class = self.system_class(c"Boolean")?;
+            let field = self.instance_field(object, name, class)?;
+            let mut value = 0_u8;
+            (self.field_get)(target(object)?.as_ptr(), field, (&mut value as *mut u8).cast());
+            match value {
+                0 => Ok(false),
+                1 => Ok(true),
+                _ => Err(unsupported("Boolean representation")),
+            }
+        }
+    }
+
+    /// Read one reference instance field of a rooted object, declared exactly as `declared`, and root what it holds.
+    /// A null field is `None`; a value that is not a `declared` is a contract failure.
+    ///
+    /// # Safety
+    /// As [`Self::primitive`], with `attached` this runtime's attachment on this thread.
+    pub unsafe fn reference<'a, 'r>(
+        &self,
+        attached: &'a AttachedThread<'r>,
+        object: &StrongRoot<'_, '_>,
+        name: &CStr,
+        declared: Class,
+    ) -> Result<Option<StrongRoot<'a, 'r>>, MetadataError> {
+        // SAFETY: The rooted receiver's reference field is validated; the copied object is rooted before checking assignability.
+        unsafe {
+            if declared.is_null() || (self.class_value)(declared) {
+                return Err(unsupported("reference field class"));
+            }
+            let field = self.instance_field(object, name, declared)?;
+            let mut value = std::ptr::null_mut::<raw::Object>();
+            (self.field_get)(target(object)?.as_ptr(), field, (&mut value as *mut *mut raw::Object).cast());
+            // The parent stays rooted, its field stays unchanged, and the child is rooted before
+            // any further metadata access or allocation. Graph ownership preserves it during rooting.
+            let root = NonNull::new(value).map(|pointer| attached.root(pointer)).transpose()?;
+            if let Some(root) = &root {
+                self.check_object(declared, target(root)?)?;
+            }
+            Ok(root)
+        }
+    }
+
+    /// Store a non-null reference after checking root provenance and mutable reference-field metadata. The field is the
+    /// one whose type's class is exactly the value's class; no conversion.
+    ///
+    /// # Safety
+    /// The [`raw::FieldWriteApi::set_object`] runtime, thread, lifetime and exclusive mutation obligations apply.
+    /// `writes` and `attached` belong to this runtime. Metadata and the rooted graph stay stable throughout validation
+    /// and store.
+    pub unsafe fn set_reference(
+        &self,
+        writes: &raw::FieldWriteApi,
+        attached: &AttachedThread<'_>,
+        object: &StrongRoot<'_, '_>,
+        name: &CStr,
+        value: &StrongRoot<'_, '_>,
+    ) -> Result<(), MetadataError> {
+        // SAFETY: caller establishes the runtime and graph span. The validator rejects value types, incompatible roots
+        // and immutable or noninstance fields before the store.
+        unsafe {
+            let field = self.reference_field(attached, object, name, value)?;
+            writes.set_object(target(object)?, field, target(value)?);
+            Ok(())
+        }
+    }
+
+    unsafe fn reference_field(
+        &self,
+        attached: &AttachedThread<'_>,
+        object: &StrongRoot<'_, '_>,
+        name: &CStr,
+        value: &StrongRoot<'_, '_>,
+    ) -> Result<NonNull<raw::FieldInfo>, MetadataError> {
+        // SAFETY: The receiver and value are rooted; exact mutable reference storage and declaring-class compatibility are checked before returning the field.
+        unsafe {
+            if !object.belongs_to(attached) || !value.belongs_to(attached) {
+                return Err(unsupported("reference store runtime mismatch"));
+            }
+            let actual = (self.object_class)(target(value)?.as_ptr());
+            if actual.is_null() || (self.class_value)(actual) {
+                return Err(unsupported("reference store cannot use a boxed value"));
+            }
+            let field = self.instance_field(object, name, actual)?;
+            let ty = (self.field_type)(field);
+            if (self.field_flags)(field) & (raw::FIELD_ATTRIBUTE_STATIC | raw::FIELD_ATTRIBUTE_INIT_ONLY | raw::FIELD_ATTRIBUTE_LITERAL) != 0
+                || !matches!((self.type_code)(ty), 0x0e | 0x12 | 0x14 | 0x15 | 0x1c | 0x1d)
+            {
+                return Err(unsupported("reference store requires a mutable reference field"));
+            }
+            let owner = (self.field_parent)(field);
+            let receiver = (self.object_class)(target(object)?.as_ptr());
+            if owner.is_null() || receiver.is_null() || !(self.assignable)(owner, receiver) {
+                return Err(unsupported("reference store declaring class"));
+            }
+            NonNull::new(field.cast()).ok_or_else(|| unsupported("reference field absent"))
         }
     }
 

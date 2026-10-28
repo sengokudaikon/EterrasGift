@@ -1,16 +1,12 @@
 //! Observe an already completed locale operation. Initialization/selection getters are never called.
 
 use super::metadata_text;
-use super::{Class, DiscoveryError, RuntimeAccess, unsupported};
+use super::{Class, DiscoveryError, RuntimeAccess, target, unsupported};
 use eg_il2cpp_runtime::{AttachedThread, InvocationContext, InvocationOutcome, ReturnValue, StrongRoot, ValueTypeContract, raw};
 use eg_trainer_wire::locale::GameLocale;
 use std::{ffi::CStr, ptr::NonNull};
 
 type Root<'a, 'r> = StrongRoot<'a, 'r>;
-
-fn target(root: &Root<'_, '_>) -> Result<NonNull<raw::Object>, DiscoveryError> {
-    root.target().ok_or_else(|| unsupported("locale root target"))
-}
 
 fn completed(handle_version: i32, operation_version: i32, status: i32, references: i32) -> Result<(), DiscoveryError> {
     if handle_version != operation_version || status != 1 || references <= 0 {

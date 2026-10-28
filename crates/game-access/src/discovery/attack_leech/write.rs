@@ -170,5 +170,5 @@ impl RuntimeAccess {
 }
 
 fn target_object(graph: &AttackGraph<'_, '_>) -> Result<NonNull<raw::Object>, AttackLeechWriteError> {
-    target(&graph.stats).map_err(AttackLeechWriteError::from)
+    target(&graph.stats).map_err(|error| DiscoveryError::from(error).into())
 }

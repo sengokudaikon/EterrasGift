@@ -1,7 +1,7 @@
 //! Main-thread copies of the current forge graph. No managed/game method is invoked.
 
 use super::metadata_text;
-use super::{Class, DiscoveryError, Images, Ptr, RuntimeAccess, unsupported};
+use super::{Class, DiscoveryError, Images, Ptr, RuntimeAccess, target, unsupported};
 use eg_il2cpp_runtime::{AttachedThread, StrongRoot, raw};
 use eg_trainer_wire::forge::{AffixSnapshot, ForgeSnapshot, ItemStatus, UniqueIdentity};
 use std::{ffi::CStr, ptr::NonNull};
@@ -18,33 +18,6 @@ pub(super) struct ForgeGraph<'a, 'r> {
 }
 
 pub(super) type Root<'a, 'r> = StrongRoot<'a, 'r>;
-
-// Private and closed: each destination type has one exact public runtime primitive class.
-pub(super) trait Primitive: Copy + Default {
-    const NAME: &'static CStr;
-}
-impl Primitive for u8 {
-    const NAME: &'static CStr = c"Byte";
-}
-impl Primitive for u16 {
-    const NAME: &'static CStr = c"UInt16";
-}
-impl Primitive for u32 {
-    const NAME: &'static CStr = c"UInt32";
-}
-impl Primitive for i32 {
-    const NAME: &'static CStr = c"Int32";
-}
-impl Primitive for f32 {
-    const NAME: &'static CStr = c"Single";
-}
-impl Primitive for usize {
-    const NAME: &'static CStr = c"IntPtr";
-}
-
-pub(super) fn target(root: &Root<'_, '_>) -> Result<NonNull<raw::Object>, DiscoveryError> {
-    root.target().ok_or_else(|| unsupported("forge root target"))
-}
 
 fn bounded_count(count: i32, capacity: u32) -> Result<usize, DiscoveryError> {
     if !(0..=32).contains(&count) || capacity > 4096 || count as u32 > capacity {
@@ -66,98 +39,6 @@ fn decode_text(units: &[u16], maximum: usize) -> Result<String, DiscoveryError> 
 }
 
 impl RuntimeAccess {
-    /// Store a non-null reference after checking root provenance and mutable reference-field metadata. Exact class
-    /// identity is required; no conversion.
-    ///
-    /// # Safety
-    /// The [`raw::FieldWriteApi::set_object`] runtime, thread, lifetime and exclusive mutation obligations apply.
-    /// `writes` and `attached` belong to this runtime. Metadata and the rooted graph stay stable throughout validation
-    /// and store.
-    pub(super) unsafe fn set_reference(
-        &self,
-        writes: &raw::FieldWriteApi,
-        attached: &AttachedThread<'_>,
-        object: &Root<'_, '_>,
-        name: &CStr,
-        value: &Root<'_, '_>,
-    ) -> Result<(), DiscoveryError> {
-        // SAFETY: caller establishes the runtime and graph span. The validator rejects value types, incompatible roots
-        // and immutable or noninstance fields before the store.
-        unsafe {
-            let field = self.reference_field(attached, object, name, value)?;
-            let object = object.target().ok_or(DiscoveryError::NotReady("reference receiver unavailable"))?;
-            let value = value.target().ok_or(DiscoveryError::NotReady("reference value unavailable"))?;
-            writes.set_object(object, field, value);
-            Ok(())
-        }
-    }
-
-    unsafe fn reference_field(&self, attached: &AttachedThread<'_>, object: &Root<'_, '_>, name: &CStr, value: &Root<'_, '_>) -> Result<NonNull<raw::FieldInfo>, DiscoveryError> {
-        // SAFETY: The receiver and value are rooted; exact mutable reference storage and declaring-class compatibility are checked before returning the field.
-        unsafe {
-            if !object.belongs_to(attached) || !value.belongs_to(attached) {
-                return Err(unsupported("reference store runtime mismatch"));
-            }
-            let actual = (self.object_class)(target(value)?.as_ptr());
-            if actual.is_null() || (self.class_value)(actual) {
-                return Err(unsupported("reference store cannot use a boxed value"));
-            }
-            let field = self.instance_field(object, name, actual)?;
-            let ty = (self.field_type)(field);
-            if (self.field_flags)(field) & (raw::FIELD_ATTRIBUTE_STATIC | raw::FIELD_ATTRIBUTE_INIT_ONLY | raw::FIELD_ATTRIBUTE_LITERAL) != 0
-                || !matches!((self.type_code)(ty), 0x0e | 0x12 | 0x14 | 0x15 | 0x1c | 0x1d)
-            {
-                return Err(unsupported("reference store requires a mutable reference field"));
-            }
-            let owner = (self.field_parent)(field);
-            let receiver = (self.object_class)(target(object)?.as_ptr());
-            if owner.is_null() || receiver.is_null() || !(self.assignable)(owner, receiver) {
-                return Err(unsupported("reference store declaring class"));
-            }
-            NonNull::new(field.cast()).ok_or_else(|| unsupported("reference field absent"))
-        }
-    }
-    // All internal unsafe helpers inherit read_forge's live attached-runtime and graph access contract.
-    pub(super) unsafe fn instance_field(&self, object: &Root<'_, '_>, name: &CStr, expected: Class) -> Result<Ptr, DiscoveryError> {
-        // SAFETY: The receiver is rooted; its field type, instance storage and expected class are checked before returning metadata.
-        unsafe {
-            let object = target(object)?;
-            let class = (self.object_class)(object.as_ptr());
-            if class.is_null() {
-                return Err(unsupported("forge object class"));
-            }
-            Ok(self.instance_field_in(class, name, expected, "forge")?)
-        }
-    }
-
-    pub(super) unsafe fn primitive<T: Primitive>(&self, object: &Root<'_, '_>, name: &CStr) -> Result<T, DiscoveryError> {
-        // SAFETY: The receiver is rooted; exact primitive class validation fixes the stack destination's width before FieldGet.
-        unsafe {
-            let class = self.system_class(T::NAME)?;
-            let field = self.instance_field(object, name, class)?;
-            let mut value = T::default();
-            // Exact primitive class identity determines the destination's width; user-supplied
-            // metadata names cannot select this type or cause a wider write into its stack slot.
-            (self.field_get)(target(object)?.as_ptr(), field, (&mut value as *mut T).cast());
-            Ok(value)
-        }
-    }
-
-    pub(super) unsafe fn boolean(&self, object: &Root<'_, '_>, name: &CStr) -> Result<bool, DiscoveryError> {
-        // SAFETY: The rooted receiver's exact Boolean field is copied into one byte and validated before conversion to bool.
-        unsafe {
-            let class = self.system_class(c"Boolean")?;
-            let field = self.instance_field(object, name, class)?;
-            let mut value = 0_u8;
-            (self.field_get)(target(object)?.as_ptr(), field, (&mut value as *mut u8).cast());
-            match value {
-                0 => Ok(false),
-                1 => Ok(true),
-                _ => Err(unsupported("forge Boolean representation")),
-            }
-        }
-    }
-
     pub(super) unsafe fn enumeration(&self, object: &Root<'_, '_>, name: &CStr, enum_name: &CStr) -> Result<i32, DiscoveryError> {
         // SAFETY: The rooted receiver's enum name and underlying Int32 metadata are checked before copying into an i32 local.
         unsafe {
@@ -178,31 +59,6 @@ impl RuntimeAccess {
             let mut value = 0_i32;
             (self.field_get)(target(object)?.as_ptr(), field, (&mut value as *mut i32).cast());
             Ok(value)
-        }
-    }
-
-    pub(super) unsafe fn reference<'a, 'r>(
-        &self,
-        attached: &'a AttachedThread<'r>,
-        object: &Root<'_, '_>,
-        name: &CStr,
-        declared: Class,
-    ) -> Result<Option<Root<'a, 'r>>, DiscoveryError> {
-        // SAFETY: The rooted receiver's reference field is validated; the copied object is rooted before checking assignability.
-        unsafe {
-            if declared.is_null() || (self.class_value)(declared) {
-                return Err(unsupported("forge reference field class"));
-            }
-            let field = self.instance_field(object, name, declared)?;
-            let mut value = std::ptr::null_mut::<raw::Object>();
-            (self.field_get)(target(object)?.as_ptr(), field, (&mut value as *mut *mut raw::Object).cast());
-            // The parent stays rooted, its field stays unchanged, and the child is rooted before
-            // any further metadata access or allocation. Graph ownership preserves it during rooting.
-            let root = NonNull::new(value).map(|pointer| attached.root(pointer)).transpose()?;
-            if let Some(root) = &root {
-                self.check_object(declared, target(root)?)?;
-            }
-            Ok(root)
         }
     }
 
@@ -850,7 +706,7 @@ mod tests {
         assert!(matches!(
             // SAFETY: the fake root export deliberately returns failure, before child metadata access.
             unsafe { access.reference(&attached, &parent, c"child", token(CHILD_CLASS)) },
-            Err(DiscoveryError::Runtime(eg_il2cpp_runtime::RuntimeError::RootFailed))
+            Err(eg_il2cpp_runtime::MetadataError::Runtime(eg_il2cpp_runtime::RuntimeError::RootFailed))
         ));
         assert_eq!(ROOTS.get(), 1);
         assert_eq!(FREED.get(), 0);
