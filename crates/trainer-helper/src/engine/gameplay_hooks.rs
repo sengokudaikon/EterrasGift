@@ -1,6 +1,9 @@
 //! Concrete gameplay effects share this lifecycle; gameplay calls execute only retained leaf code.
 use super::*;
-use eg_game_access::discovery::GameplayHookTarget;
+use eg_game_access::discovery::{
+    GameplayHookTarget,
+    damage::{damage_setting, set_damage},
+};
 use eg_game_access::hooks::leaf::LeafGate;
 use eg_trainer_wire::hooks::{GameplayHook, HookObservation, PatchState};
 
@@ -115,11 +118,11 @@ fn change_group(group: &[Installed], hook: GameplayHook, on: bool, value: u64) -
         || (hook.is_damage()
             && GameplayHook::ALL
                 .into_iter()
-                .any(|other| other.is_damage() && other != hook && gate.damage_setting(other).0));
+                .any(|other| other.is_damage() && other != hook && damage_setting(gate, other).0));
     // A cleared or failed target must never revive stale sibling settings.
     if hook.is_damage() && !gate.enabled() {
         for other in GameplayHook::ALL.into_iter().filter(|other| other.is_damage()) {
-            gate.set_damage(other, false, other.default_value());
+            set_damage(gate, other, false, other.default_value());
         }
     }
     for slot in group {
@@ -130,7 +133,7 @@ fn change_group(group: &[Installed], hook: GameplayHook, on: bool, value: u64) -
     unsafe { hooks::commit(&changes) }.map_err(|e| server::failure(ResponseCode::Failed, e.to_string()))?;
     for slot in group {
         if hook.is_damage() {
-            slot.gate.set_damage(hook, on, value);
+            set_damage(&slot.gate, hook, on, value);
         } else {
             slot.gate.set_value(value);
         }
@@ -148,12 +151,12 @@ fn observation(group: Option<&[Installed]>, hook: GameplayHook) -> HookObservati
         };
     };
     let (enabled, value) = if hook.is_damage() {
-        group[0].gate.damage_setting(hook)
+        damage_setting(&group[0].gate, hook)
     } else {
         (group.iter().all(|slot| slot.gate.enabled()), group[0].gate.value())
     };
     let mut patch = group_patch(group.iter().map(|slot| slot.hook.state()));
-    if hook.is_damage() && !enabled && patch == PatchState::Patched && GameplayHook::ALL.into_iter().any(|other| other.is_damage() && group[0].gate.damage_setting(other).0) {
+    if hook.is_damage() && !enabled && patch == PatchState::Patched && GameplayHook::ALL.into_iter().any(|other| other.is_damage() && damage_setting(&group[0].gate, other).0) {
         patch = PatchState::Shared;
     }
     HookObservation { patch, enabled, value }
@@ -200,7 +203,7 @@ pub(super) unsafe fn fixture_change(
     address: *mut u8,
     receiver_class: Option<NonNull<c_void>>,
     extras: &[*mut u8],
-    damage: Option<eg_game_access::hooks::leaf::DamageLayout>,
+    damage: Option<eg_game_access::discovery::damage::DamageLayout>,
 ) -> Result<(), Response> {
     // SAFETY: fixture owns executable target and optional class identity for
     // the process lifetime; scoped calls use readable object-shaped headers.
@@ -212,7 +215,7 @@ pub(super) unsafe fn fixture_change(
                 bytes: address.cast::<[u8; 16]>().read_unaligned(),
                 receiver_class,
                 effect: if let Some(layout) = damage {
-                    eg_game_access::hooks::leaf::LeafEffect::PlayerDamage(layout)
+                    layout.effect()
                 } else if hook == GameplayHook::MysteriousRift {
                     eg_game_access::hooks::leaf::LeafEffect::SelectableBoolean
                 } else {
@@ -256,7 +259,7 @@ mod tests {
     use super::*;
     #[test]
     fn damage_controls_share_one_patch_until_last_off_and_clear_does_not_revive_siblings() {
-        use eg_game_access::hooks::leaf::{DamageLayout, LeafEffect};
+        use eg_game_access::discovery::damage::DamageLayout;
         use eg_trainer_wire::hooks::GameplayHook::{DamageDealt, IncomingDamage};
         use std::sync::atomic::{AtomicU8, AtomicUsize};
         #[unsafe(naked)]
@@ -284,12 +287,13 @@ mod tests {
         // SAFETY: authored process-lifetime executable and static storage, exact float ABI.
         let group = unsafe {
             let gate = LeafGate::prepare_override(
-                LeafEffect::PlayerDamage(DamageLayout {
+                DamageLayout {
                     player_storage: NonNull::from(&*player).cast(),
                     online_storage: NonNull::from(&*online).cast(),
                     actor_offset: 0,
                     offense: None,
-                }),
+                }
+                .effect(),
                 None,
                 None,
             )

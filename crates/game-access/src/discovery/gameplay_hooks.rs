@@ -1,5 +1,6 @@
+use super::damage::{DamageLayout, OffenseLayout};
 use super::*;
-use crate::hooks::leaf::{DamageLayout, LeafEffect, OffenseLayout};
+use crate::hooks::leaf::LeafEffect;
 use eg_trainer_wire::hooks::GameplayHook;
 
 pub struct GameplayHookTarget {
@@ -34,7 +35,7 @@ impl RuntimeAccess {
         };
         // Only concrete implemented features belong here.
         let specs: &[(&CStr, &CStr, bool, &[&str], LeafEffect)] = match hook {
-            GameplayHook::IncomingDamage | GameplayHook::DamageDealt => &[(c"BaseHealth", c"HealthDamage", true, &["System.Single"], LeafEffect::PlayerDamage(damage.unwrap()))],
+            GameplayHook::IncomingDamage | GameplayHook::DamageDealt => &[(c"BaseHealth", c"HealthDamage", true, &["System.Single"], damage.unwrap().effect())],
             GameplayHook::MysteriousRift => &[(c"TimeBeastTracker", c"NextEncounterShouldBeEggs", true, &[], LeafEffect::SelectableBoolean)],
             GameplayHook::Offhand => &[
                 (
@@ -71,7 +72,7 @@ impl RuntimeAccess {
         unsafe {
             let images = self.images()?;
             let mut targets = Vec::new();
-            for &(class, name, instance, params, effect) in specs {
+            for &(class, name, instance, params, ref effect) in specs {
                 let owner = self.class(&images, c"", class)?;
                 let scoped = class == c"OneSlotItemContainerWithCharacterRequirements" || class == c"LinkedOneSlotItemContainer";
                 let receiver_class = if scoped {
@@ -111,7 +112,7 @@ impl RuntimeAccess {
                     let mut implementation = 0;
                     let return_name = match effect {
                         LeafEffect::Void => "System.Void",
-                        LeafEffect::PlayerDamage(_) => "System.Single",
+                        LeafEffect::Generated(_) => "System.Single", // the damage leaf
                         _ => "System.Boolean",
                     };
                     if found.is_some()
@@ -143,7 +144,7 @@ impl RuntimeAccess {
                     name: format!("{}.{}", class.to_string_lossy(), name.to_string_lossy()),
                     address: NonNull::new(address).ok_or_else(|| unsupported("hook address"))?,
                     bytes: read_value(address.cast()),
-                    effect,
+                    effect: effect.clone(),
                     receiver_class,
                     linked_offset,
                 });

@@ -27,6 +27,7 @@ mod dispatcher_thread;
 mod unique;
 pub use attack_leech::AttackLeechWriteError;
 mod catalog;
+pub mod damage;
 mod forge;
 mod limits;
 mod locale;

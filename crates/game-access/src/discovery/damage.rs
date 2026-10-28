@@ -1,10 +1,83 @@
-use super::DamageLayout;
+//! Last Epoch's damage leaf on `float BaseHealth.HealthDamage(float, MethodInfo*)`. One leaf serves two features:
+//! damage the current player takes, scaled to a percentage, and damage dealt to its foes, multiplied or made a one-hit
+//! kill. Its code follows the metadata-validated layout below and keeps its state in the gate's slots.
+
+use crate::hooks::leaf::{EFFECT_SLOTS, FRAME, GeneratedEffect, LeafEffect, LeafGate};
+use eg_trainer_wire::hooks::GameplayHook;
+use std::ptr::NonNull;
+
+/// Metadata-validated game storage, retained for the process lifetime.
+#[derive(Clone, Copy)]
+pub struct DamageLayout {
+    pub player_storage: NonNull<std::ffi::c_void>,
+    pub online_storage: NonNull<std::ffi::c_void>,
+    pub actor_offset: u32,
+    pub offense: Option<OffenseLayout>,
+}
+
+/// Validated instance fields followed on a health-damage call. References must
+/// remain readable for that call, as in the supported game's original handler.
+#[derive(Clone, Copy)]
+pub struct OffenseLayout {
+    pub current_health: u32,
+    pub alignment_manager: u32,
+    pub alignment: u32,
+    pub alignment_id: u32,
+    pub is_foe: u32,
+}
+
+// The leaf's slots: the static storage it reads, the f64 divisor for percentages and the outgoing setting. The incoming
+// setting is the gate's value.
+const PLAYER: usize = 0;
+const ONLINE: usize = 1;
+const HUNDRED: usize = 2;
+const OUTGOING: usize = 3;
+const _: () = assert!(OUTGOING < EFFECT_SLOTS);
+/// A setting that is off; every real setting differs.
+const OFF: u64 = u64::MAX;
+
+impl DamageLayout {
+    /// The leaf for this layout, with both settings off.
+    ///
+    /// The target must be `float(BaseHealth*, float, MethodInfo*)` on Windows x64. Non-null receivers have a readable
+    /// actor reference at `actor_offset`; the two static addresses stay readable until process exit (an aligned pointer
+    /// and a byte). Offense fields additionally require readable actor/alignment/foe-array graphs for the duration of
+    /// the call. Runtime reference stores are atomic and objects do not move.
+    pub fn effect(self) -> LeafEffect {
+        LeafEffect::Generated(GeneratedEffect {
+            code: code(self),
+            slots: [self.player_storage.as_ptr() as u64, self.online_storage.as_ptr() as u64, 100.0f64.to_bits(), OFF],
+        })
+    }
+}
+
+/// Change one damage feature on a damage leaf, keeping the other's setting. Its on state and value publish in one
+/// aligned store.
+pub fn set_damage(gate: &LeafGate, hook: GameplayHook, on: bool, value: u64) {
+    let value = if on { value } else { OFF };
+    match hook {
+        GameplayHook::IncomingDamage => gate.set_value(value),
+        GameplayHook::DamageDealt => gate.set_slot(OUTGOING, value),
+        _ => unreachable!("not a damage feature"),
+    }
+}
+
+/// Whether one damage feature is on, and its value (the feature's default while off).
+pub fn damage_setting(gate: &LeafGate, hook: GameplayHook) -> (bool, u64) {
+    let value = match hook {
+        GameplayHook::IncomingDamage => gate.value(),
+        GameplayHook::DamageDealt => gate.slot(OUTGOING),
+        _ => unreachable!("not a damage feature"),
+    };
+    (gate.enabled() && value != OFF, if value == OFF { hook.default_value() } else { value })
+}
 
 // Windows x64 float(BaseHealth*, float, MethodInfo*): preserve RCX, XMM1 until
-// transformed, and R8. RAX is retained data; RDX/R9/R10/R11/XMM0/XMM2 are scratch.
+// transformed, and R8. RAX is the gate's data block; RDX/R9/R10/R11/XMM0/XMM2 are scratch.
 // No stack, calls, nonvolatile registers or helper addresses: every path tail-calls
 // the original. Near branches keep field-layout growth independent of jump range.
-pub(super) fn code(data: u64, layout: DamageLayout) -> Vec<u8> {
+fn code(layout: DamageLayout) -> Vec<u8> {
+    let f = FRAME;
     #[derive(Clone, Copy)]
     enum Label {
         Original,
@@ -40,17 +113,16 @@ pub(super) fn code(data: u64, layout: DamageLayout) -> Vec<u8> {
     }
     use Label::*;
     let mut c = Code {
-        bytes: vec![0x48, 0xb8],
+        bytes: Vec::new(),
         jumps: vec![],
         labels: [0; 4],
     };
-    c.emit(&data.to_le_bytes());
-    c.emit(&[0x4c, 0x8b, 0x58, 0x18, 0x49, 0x83, 0x3b, 0]); // enable switch
+    c.emit(&[0x4c, 0x8b, 0x58, f.switch, 0x49, 0x83, 0x3b, 0]); // enable switch
     c.jump(0x84, Original);
-    c.emit(&[0x4c, 0x8b, 0x58, 0x30, 0x41, 0x80, 0x3b, 0]); // online byte
+    c.emit(&[0x4c, 0x8b, 0x58, f.effect[ONLINE], 0x41, 0x80, 0x3b, 0]); // online byte
     c.jump(0x85, Original);
     c.null(&[0x48, 0x85, 0xc9]); // this
-    c.emit(&[0x4c, 0x8b, 0x58, 0x28, 0x4d, 0x8b, 0x1b]); // player
+    c.emit(&[0x4c, 0x8b, 0x58, f.effect[PLAYER], 0x4d, 0x8b, 0x1b]); // player
     c.null(&[0x4d, 0x85, 0xdb]);
     c.offset(&[0x4c, 0x8b, 0x91], layout.actor_offset); // actor -> r10
     c.null(&[0x4d, 0x85, 0xd2]);
@@ -58,7 +130,7 @@ pub(super) fn code(data: u64, layout: DamageLayout) -> Vec<u8> {
     c.jump(0x84, Incoming);
     if let Some(layout) = layout.offense {
         // Disabled outgoing effect never follows the alignment graph.
-        c.emit(&[0x48, 0x83, 0x78, 0x40, 0xff]);
+        c.emit(&[0x48, 0x83, 0x78, f.effect[OUTGOING], 0xff]);
         c.jump(0x84, Original);
         c.offset(&[0x4d, 0x8b, 0x9b], layout.alignment_manager);
         c.null(&[0x4d, 0x85, 0xdb]);
@@ -80,7 +152,7 @@ pub(super) fn code(data: u64, layout: DamageLayout) -> Vec<u8> {
         c.jump(0x84, Original);
         c.label(Enemy);
         c.emit(&[0x0f, 0x28, 0xd1]); // preserve original damage in xmm2
-        c.emit(&[0x4c, 0x8b, 0x58, 0x40, 0x49, 0x83, 0xfb, 0xff]);
+        c.emit(&[0x4c, 0x8b, 0x58, f.effect[OUTGOING], 0x49, 0x83, 0xfb, 0xff]);
         c.jump(0x84, Original);
         c.emit(&[0x49, 0xba]); // mov r10, one-hit sentinel
         c.emit(&101.0f64.to_bits().to_le_bytes());
@@ -88,24 +160,24 @@ pub(super) fn code(data: u64, layout: DamageLayout) -> Vec<u8> {
         c.jump(0x84, OneHit);
         c.emit(&[0x66, 0x49, 0x0f, 0x6e, 0xc3]); // movq xmm0,r11 (f64 multiplier)
         c.emit(&[0xf3, 0x0f, 0x5a, 0xc9, 0xf2, 0x0f, 0x59, 0xc8, 0xf2, 0x0f, 0x5a, 0xc9]);
-        c.emit(&[0xff, 0x60, 0x08]); // multiplier mode calls original
+        c.emit(&[0xff, 0x60, f.original]); // multiplier mode calls original
         c.label(OneHit);
         c.emit(&[0x0f, 0x57, 0xc0, 0x0f, 0x2e, 0xd0]); // original damage > 0 (NaN fails)
         c.jump(0x86, Original);
         c.offset(&[0xf3, 0x0f, 0x10, 0x81], layout.current_health);
         c.emit(&[0x0f, 0x2e, 0xc1]); // current health > adjusted damage
         c.jump(0x86, Original);
-        c.emit(&[0x0f, 0x28, 0xc8, 0xff, 0x60, 0x08]); // xmm1=health; original
+        c.emit(&[0x0f, 0x28, 0xc8, 0xff, 0x60, f.original]); // xmm1=health; original
     } else {
-        c.emit(&[0xff, 0x60, 0x08]);
+        c.emit(&[0xff, 0x60, f.original]);
     }
     c.label(Incoming);
-    c.emit(&[0x4c, 0x8b, 0x58, 0x20, 0x49, 0x83, 0xfb, 100]);
+    c.emit(&[0x4c, 0x8b, 0x58, f.answer, 0x49, 0x83, 0xfb, 100]);
     c.jump(0x83, Original); // 100 or disabled sentinel
-    c.emit(&[0x4d, 0x85, 0xdb, 0x75, 6, 0x0f, 0x57, 0xc9, 0xff, 0x60, 0x08]); // zero
-    c.emit(&[0xf2, 0x49, 0x0f, 0x2a, 0xc3, 0xf2, 0x0f, 0x5e, 0x40, 0x38]); // percent/100
+    c.emit(&[0x4d, 0x85, 0xdb, 0x75, 6, 0x0f, 0x57, 0xc9, 0xff, 0x60, f.original]); // zero
+    c.emit(&[0xf2, 0x49, 0x0f, 0x2a, 0xc3, 0xf2, 0x0f, 0x5e, 0x40, f.effect[HUNDRED]]); // percent/100
     c.emit(&[0xf3, 0x0f, 0x5a, 0xc9, 0xf2, 0x0f, 0x59, 0xc8, 0xf2, 0x0f, 0x5a, 0xc9]);
-    c.label(Original); // caller appends jmp [rax+8]
+    c.label(Original); // the gate appends jmp [rax+original]
     for (at, label) in c.jumps {
         let distance = i32::try_from(c.labels[label as usize]).unwrap() - i32::try_from(at + 4).unwrap();
         c.bytes[at..at + 4].copy_from_slice(&distance.to_le_bytes());
@@ -116,7 +188,6 @@ pub(super) fn code(data: u64, layout: DamageLayout) -> Vec<u8> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::hooks::leaf::{LeafEffect, LeafGate, OffenseLayout};
     use eg_trainer_wire::hooks::GameplayHook::{DamageDealt, IncomingDamage};
     use std::{
         cell::Cell,
@@ -203,7 +274,7 @@ mod tests {
             }),
         };
         // SAFETY: owned layout matches every offset and remains readable throughout these scoped calls.
-        let gate = unsafe { LeafGate::prepare_override(LeafEffect::PlayerDamage(layout), None, None).unwrap() };
+        let gate = unsafe { LeafGate::prepare_override(layout.effect(), None, None).unwrap() };
         // SAFETY: exact Windows x64 signature, original remains in this executable.
         unsafe { gate.set_original(original as *const ()) };
         // SAFETY: the leaf preserves this signature and tail-calls the matching original.
@@ -214,15 +285,15 @@ mod tests {
             assert_eq!(health.calls.load(SeqCst), before + 1);
             result
         };
-        gate.set_damage(IncomingDamage, true, 50);
+        set_damage(&gate, IncomingDamage, true, 50);
         gate.set_enabled(true);
         for multiplier in [0.0f64, 1.0, 2.5, 3.125, 100.0] {
-            gate.set_damage(DamageDealt, true, multiplier.to_bits());
+            set_damage(&gate, DamageDealt, true, multiplier.to_bits());
             assert_eq!(hit(&target, 200.0), (200.0 * multiplier) as f32 + 7.0);
             assert_eq!(hit(&target, -200.0), (-200.0 * multiplier) as f32 + 7.0);
             assert_eq!(hit(&mine, 200.0), 107.0);
         }
-        gate.set_damage(DamageDealt, true, 101.0f64.to_bits());
+        set_damage(&gate, DamageDealt, true, 101.0f64.to_bits());
         assert_eq!(hit(&target, 200.0), 1007.0);
         assert_eq!(hit(&target, 2000.0), 2007.0); // never reduce a larger hit
         assert_eq!(hit(&target, 0.0), 7.0);
@@ -255,16 +326,83 @@ mod tests {
         assert_eq!(hit(&target, 200.0), 207.0);
         assert_eq!(hit(&mine, 200.0), 207.0);
         online.store(0, SeqCst);
-        gate.set_damage(DamageDealt, false, 1.0f64.to_bits());
+        set_damage(&gate, DamageDealt, false, 1.0f64.to_bits());
         assert_eq!(hit(&target, 200.0), 207.0);
         assert_eq!(hit(&mine, 200.0), 107.0);
-        gate.set_damage(DamageDealt, true, 2.0f64.to_bits());
-        gate.set_damage(IncomingDamage, false, 50);
+        set_damage(&gate, DamageDealt, true, 2.0f64.to_bits());
+        set_damage(&gate, IncomingDamage, false, 50);
         assert_eq!(hit(&target, 200.0), 407.0);
         assert_eq!(hit(&mine, 200.0), 207.0);
         gate.set_enabled(false);
         assert_eq!(hit(&target, 200.0), 207.0);
         // No future call may observe the scoped fixture graph.
         storage.store(0, SeqCst);
+    }
+
+    #[test]
+    fn incoming_scales_only_the_current_player_and_always_calls_the_original() {
+        #[repr(C)]
+        struct Health {
+            header: [usize; 2],
+            actor: usize,
+            calls: AtomicUsize,
+        }
+        extern "C-unwind" fn original(health: &Health, damage: f32, method: usize) -> f32 {
+            assert_eq!(method, 0x12345678);
+            health.calls.fetch_add(1, SeqCst);
+            damage + 7.0
+        }
+        let player = Box::leak(Box::new(AtomicUsize::new(42)));
+        let online = Box::leak(Box::new(std::sync::atomic::AtomicU8::new(0)));
+        let layout = DamageLayout {
+            player_storage: NonNull::from(&*player).cast(),
+            online_storage: NonNull::from(&*online).cast(),
+            actor_offset: 16,
+            offense: None,
+        };
+        // SAFETY: fixture storage is process-lifetime and every receiver has this layout and exact ABI.
+        let gate = unsafe { LeafGate::prepare_override(layout.effect(), None, None).unwrap() };
+        // SAFETY: matching retained original configured before calls.
+        unsafe { gate.set_original(original as *const ()) };
+        // SAFETY: exact Windows x64 signature of this damage leaf.
+        let call: extern "C-unwind" fn(&Health, f32, usize) -> f32 = unsafe { std::mem::transmute(gate.entry()) };
+        let mine = Health {
+            header: [0; 2],
+            actor: 42,
+            calls: AtomicUsize::new(0),
+        };
+        let other = Health {
+            header: [0; 2],
+            actor: 43,
+            calls: AtomicUsize::new(0),
+        };
+        let hit = |health: &Health, amount| {
+            let before = health.calls.load(SeqCst);
+            let result = call(health, amount, 0x12345678);
+            assert_eq!(health.calls.load(SeqCst), before + 1);
+            result
+        };
+        for percent in [0, 1, 25, 50, 99, 100] {
+            gate.set_value(percent);
+            gate.set_enabled(true);
+            assert_eq!(hit(&mine, 200.0), percent as f32 * 2.0 + 7.0);
+            assert_eq!(hit(&mine, -200.0), -(percent as f32) * 2.0 + 7.0);
+            assert_eq!(hit(&other, 200.0), 207.0);
+        }
+        gate.set_value(0);
+        for amount in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
+            assert_eq!(hit(&mine, amount), 7.0);
+        }
+        player.store(43, SeqCst);
+        assert_eq!(hit(&mine, 200.0), 207.0);
+        assert_eq!(hit(&other, 200.0), 7.0);
+        player.store(0, SeqCst);
+        assert_eq!(hit(&other, 200.0), 207.0);
+        player.store(42, SeqCst);
+        online.store(1, SeqCst);
+        assert_eq!(hit(&mine, 200.0), 207.0);
+        online.store(0, SeqCst);
+        gate.set_enabled(false);
+        assert_eq!(hit(&mine, 200.0), 207.0);
     }
 }

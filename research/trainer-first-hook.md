@@ -156,7 +156,7 @@ state and setting must match independent byte/setting readback. Values publish a
 changing them follows the existing close/transaction/open ordering. Profile, worker, UI,
 helper-side status suspension and unload all use the same path as the first two features.
 
-`LeafEffect::PlayerDamage` extends the retained leaf with the exact Windows x64 ABI:
+The damage leaf (`discovery::damage`, generated code on the retained leaf's `FRAME`) keeps the exact Windows x64 ABI:
 RCX is the health receiver, XMM1 the float amount, R8 the hidden MethodInfo. RAX/R11/XMM0 are
 volatile scratch; the stack is untouched, and the original's XMM0 return is preserved by a
 tail jump. Intermediate percentages calculate in double precision, then convert back to float.
