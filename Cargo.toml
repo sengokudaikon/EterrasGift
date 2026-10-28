@@ -5,7 +5,6 @@ members = ["crates/*"]
 [workspace.package]
 version = "0.1.0"
 edition = "2024"
-rust-version = "1.99"
 publish = false
 
 [workspace.dependencies]
@@ -31,6 +30,8 @@ lz4_flex = { version = "0.14.0", default-features = false, features = ["std", "s
 eg-core = { path = "crates/core" }
 eg-companion = { path = "crates/companion" }
 eg-ui = { path = "crates/ui" }
+eg-trainer = { path = "crates/trainer" }
+eg-trainer-host = { path = "crates/trainer-host" }
 
 [workspace.lints.rust]
 unsafe_op_in_unsafe_fn = "deny"
@@ -40,7 +41,9 @@ all = { level = "warn", priority = -1 }
 undocumented_unsafe_blocks = "warn"
 
 # Code that runs inside the game is built as for a release in every profile: the helper's build-ID getter is checked
-# in its optimised form (`lea rax,[rip+…]; ret`), and no debug assertion or overflow check may fire in the game.
+# in its optimised form (`lea rax,[rip+…]; ret`), and no debug assertion or overflow check may fire in the game. That
+# holds for the helper's own dependencies too (tokio and its I/O, windows-sys, the detour hooks and their decoder),
+# since a dev `mise run run` embeds this build and injects it.
 [profile.dev.package.eg-trainer-helper]
 opt-level = 3
 debug-assertions = false
@@ -55,6 +58,59 @@ overflow-checks = false
 opt-level = 3
 debug-assertions = false
 overflow-checks = false
+
+[profile.dev.package.tokio]
+opt-level = 3
+debug-assertions = false
+overflow-checks = false
+
+[profile.dev.package.mio]
+opt-level = 3
+debug-assertions = false
+overflow-checks = false
+
+[profile.dev.package.socket2]
+opt-level = 3
+debug-assertions = false
+overflow-checks = false
+
+[profile.dev.package.bytes]
+opt-level = 3
+debug-assertions = false
+overflow-checks = false
+
+[profile.dev.package.windows-sys]
+opt-level = 3
+debug-assertions = false
+overflow-checks = false
+
+[profile.dev.package.detour]
+opt-level = 3
+debug-assertions = false
+overflow-checks = false
+
+[profile.dev.package.iced-x86]
+opt-level = 3
+debug-assertions = false
+overflow-checks = false
+
+[profile.dev.package.region]
+opt-level = 3
+debug-assertions = false
+overflow-checks = false
+
+# The captures encode every PNG and fill every pixel on the software renderer: unoptimised, those dominate their run.
+[profile.dev.package.png]
+opt-level = 2
+
+[profile.dev.package.fdeflate]
+opt-level = 2
+
+[profile.dev.package.miniz_oxide]
+opt-level = 2
+
+[profile.dev.package.i-slint-renderer-software]
+opt-level = 2
 
 [profile.release]
 lto = "thin"

@@ -33,17 +33,23 @@ run = "cargo xtask tokens --check"
 description = "Headless PNG captures of the real UI on the fake game host, into artifacts/captures"
 run = "cargo capture"
 
+[tasks.test]
+description = "Every workspace test in the dev profile, on fakes; no live game. The captures run under capture"
+# eg-ui's only integration target is the captures (harness = false), run by `capture`; `test = false` would hide them
+# from `cargo lint` too.
+run = ["cargo test --workspace --exclude eg-ui --offline", "cargo test -p eg-ui --lib --offline"]
+
 [tasks."ui:test"]
-description = "UI presentation and asynchronous editor tests on fake services"
-run = "cargo test -p eg-ui --lib"
+description = "UI presentation and asynchronous editor tests on fake services (part of test)"
+run = "cargo test -p eg-ui --lib --offline"
 
 [tasks."capture:trainer"]
 description = "Worker-to-UI reads, ordered drafts, typed write outcomes and Undo on owned fake sessions"
 run = "cargo capture -- --trainer-backend"
 
 [tasks.verify]
-description = "Everything to run before calling work done; then look at artifacts/captures"
-run = ["cargo lint", "cargo fmt --all --check", "cargo xtask tokens --check", "cargo capture"]
+description = "Everything to run before calling work done: lint, format, tokens, tests, both capture runs; then look at artifacts/captures"
+run = ["cargo lint", "cargo fmt --all --check", "cargo xtask tokens --check", "mise run test", "cargo capture", "cargo capture -- --trainer-backend"]
 
 [tasks."slint:check"]
 description = "Fast compile check of a .slint file (default: app.slint)"
@@ -74,12 +80,12 @@ description = "Read the game data from a real install named by EG_LAST_EPOCH (th
 run = "cargo test -p eg-game-files --release -- --ignored --nocapture"
 
 [tasks."trainer:test"]
-description = "Nightly release trainer fixtures and tier checks; no live game"
-run = "cargo test -p eg-trainer-wire -p eg-game-access -p eg-trainer -p eg-trainer-helper -p eg-trainer-host -p eterras-gift --release --offline"
+description = "The trainer packages' tests alone (part of test); no live game"
+run = "cargo test -p eg-trainer-wire -p eg-game-access -p eg-trainer -p eg-trainer-helper -p eg-trainer-host --offline"
 
 [tasks."trainer:verify"]
-description = "Nightly release trainer/controller tests, then workspace lint, format, tokens and fake-host captures"
-run = ["mise run trainer:test", "mise run trainer:player:client:test", "mise run ui:test", "mise run verify"]
+description = "verify, then the isolated controller's tests; required for trainer changes"
+run = ["mise run verify", "mise run trainer:player:client:test"]
 
 [tasks."trainer:helper:build"]
 description = "Build and snapshot the Rust helper with source/DLL identities, for the fixture player; no process access. The desktop embeds its own"
@@ -90,7 +96,7 @@ description = "Build the isolated authored Unity-player controller; no player la
 run = "cargo build --manifest-path tools/trainer-eval/persistent-player/client/Cargo.toml --release --offline"
 
 [tasks."trainer:player:client:test"]
-description = "Nightly release controller/response-barrier tests; no player launch"
+description = "Controller/response-barrier tests; no player launch. Release, as its build and the lifecycle run are (its own workspace has no dev overrides for in-game code)"
 run = "cargo test --manifest-path tools/trainer-eval/persistent-player/client/Cargo.toml --release --offline"
 
 [tasks."trainer:unload"]

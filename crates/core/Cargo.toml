@@ -3,7 +3,6 @@ name = "eg-core"
 description = "The shared kernel: where the app keeps its files, its settings, fault reports, and what Player.log says. It never names a module."
 version.workspace = true
 edition.workspace = true
-rust-version.workspace = true
 publish.workspace = true
 
 [dependencies]

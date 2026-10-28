@@ -1,6 +1,7 @@
 //! Cargo metadata defines dependency edges, including renamed, target, build and dev
 //! dependencies. Every first-party package, including separate tool workspaces, needs
-//! an explicit tier. Source scans cover imports/re-exports and UI feature areas.
+//! an explicit tier. Source scans cover what Cargo cannot: eg-ui's feature areas, which
+//! share one package's dependencies, and paths within a crate.
 //! These are syntactic guards, not analysis of arbitrary macro expansion.
 use serde_json::Value;
 use std::{
@@ -199,13 +200,15 @@ fn source_imports_and_reexports_preserve_feature_boundaries() {
             continue;
         };
         let relative = source.strip_prefix(&workspace.root).unwrap().to_string_lossy().replace('\\', "/");
-        let area = if relative.starts_with("crates/ui/src/home") || relative.starts_with("crates/ui/src/mods") {
-            Tier::Companion
+        // eg-ui's feature areas: the package may name both tiers, so only these sources keep each to its own.
+        let ui_area = if relative.starts_with("crates/ui/src/home") || relative.starts_with("crates/ui/src/mods") {
+            Some(Tier::Companion)
         } else if relative.starts_with("crates/ui/src/forge") || relative.starts_with("crates/ui/src/trainer") {
-            Tier::Trainer
+            Some(Tier::Trainer)
         } else {
-            tier(&package.name)
+            None
         };
+        let area = ui_area.unwrap_or_else(|| tier(&package.name));
         if !matches!(area, Tier::Shared | Tier::Companion | Tier::Trainer) {
             continue;
         }
@@ -220,13 +223,12 @@ fn source_imports_and_reexports_preserve_feature_boundaries() {
             let Some(first) = path.first() else {
                 continue;
             };
-            if let Some(to) = aliases.get(first.as_str()).or_else(|| names.get(first)) {
+            // Elsewhere a crate can name only its dependencies, which the Cargo test already holds to the tiers.
+            if let Some(to) = ui_area.and_then(|_| aliases.get(first.as_str()).or_else(|| names.get(first))) {
                 assert!(
                     !matches!(
                         (area, to),
-                        (Tier::Shared, Tier::Companion | Tier::Trainer | Tier::GameAccess | Tier::Composition)
-                            | (Tier::Companion, Tier::Trainer | Tier::Wire | Tier::GameAccess)
-                            | (Tier::Trainer, Tier::Companion)
+                        (Tier::Companion, Tier::Trainer | Tier::Wire | Tier::GameAccess) | (Tier::Trainer, Tier::Companion)
                     ),
                     "{relative}: forbidden import/re-export {}",
                     path.join("::")
@@ -252,7 +254,7 @@ fn the_desktop_links_no_il2cpp_code() {
     // cannot resolve artifact dependencies yet; the unit graph can.)
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
     let cargo = std::env::var("CARGO").unwrap_or_else(|_| "cargo".into());
-    let graph = output(&cargo, &["build", "-p", "eterras-gift", "--release", "--unit-graph", "-Z", "unstable-options"], &root);
+    let graph = output(&cargo, &["build", "-p", "eterras-gift", "--unit-graph", "-Z", "unstable-options"], &root);
     let graph: Value = serde_json::from_slice(&graph).unwrap();
     let units = graph["units"].as_array().unwrap();
     let kind = |unit: &Value, kind: &str| unit["target"]["kind"].as_array().unwrap().iter().any(|k| k == kind);

@@ -3,7 +3,6 @@ name = "eg-game-access"
 description = "The trainer's game boundary: explicit IL2CPP ABI and thread-owned runtime access."
 version.workspace = true
 edition.workspace = true
-rust-version.workspace = true
 publish.workspace = true
 
 [features]

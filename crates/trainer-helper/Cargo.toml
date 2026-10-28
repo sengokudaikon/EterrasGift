@@ -3,7 +3,6 @@ name = "eg-trainer-helper"
 description = "Explicitly bootstrapped, retained in-process trainer control helper."
 version.workspace = true
 edition.workspace = true
-rust-version.workspace = true
 publish.workspace = true
 
 [lib]
