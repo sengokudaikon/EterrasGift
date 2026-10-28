@@ -14,6 +14,63 @@ impl WriteControl for AllowWrite {
 }
 
 #[test]
+fn persistent_stats_use_independent_hook_values_and_readback() {
+    let fixture = Fixture::rehashing();
+    let wire = FakeTransport::new(fixture.target.clone(), [fixture.discover(), status(false, 0x1234, 0)]);
+    let mut session = fixture.session(&wire);
+    session.enable();
+    run(session.connect()).unwrap();
+    for (hook, on, value) in [
+        (GameplayHook::AttackRate, true, 1.25f64),
+        (GameplayHook::LeechRate, true, 2.5),
+        (GameplayHook::AttackRate, true, 3.0),
+        (GameplayHook::AttackRate, false, 3.0),
+    ] {
+        wire.push(done(vec![]));
+        wire.push(done(
+            HookObservation {
+                patch: if on { PatchState::Patched } else { PatchState::Original },
+                enabled: on,
+                value: if on { value.to_bits() } else { hook.default_value() },
+            }
+            .encode(),
+        ));
+        let request = HookRequest {
+            id: HookId::parse(hook.id()).unwrap(),
+            on,
+            values: vec![value],
+        };
+        assert_eq!(
+            run(BackendConnection::set_hook(&mut session, &request, &mut AllowWrite)).unwrap(),
+            WriteOutcome::Confirmed(on)
+        );
+        let sent = wire.requests();
+        assert!(matches!(sent[sent.len()-2],Request::SetGameplayHook { hook: actual, on: enabled, value: bits, .. }
+            if actual==hook && enabled==on && bits==value.to_bits()));
+    }
+    assert!(!session.hook_observation(GameplayHook::AttackRate).unwrap().enabled);
+    assert_eq!(session.hook_observation(GameplayHook::LeechRate).unwrap().value, 2.5f64.to_bits());
+    assert!(session.hook_observation(GameplayHook::LeechRate).unwrap().enabled);
+    let sent = wire.requests().len();
+    for (id, value) in [("attack-rate", 0.0), ("leech-rate", f64::NAN), ("leech-rate", 101.0)] {
+        assert!(matches!(
+            run(BackendConnection::set_hook(
+                &mut session,
+                &HookRequest {
+                    id: HookId::parse(id).unwrap(),
+                    on: true,
+                    values: vec![value]
+                },
+                &mut AllowWrite
+            ))
+            .unwrap(),
+            WriteOutcome::NotApplied { .. }
+        ));
+    }
+    assert_eq!(wire.requests().len(), sent);
+}
+
+#[test]
 fn rift_mode_is_sent_and_confirmed_independently_of_enabled_state() {
     let fixture = Fixture::rehashing();
     let wire = FakeTransport::new(fixture.target.clone(), [fixture.discover(), status(false, 0x1234, 0)]);
@@ -98,7 +155,13 @@ fn each_gameplay_hook_requires_a_separate_readback_for_on_and_off() {
             let request = HookRequest {
                 id: HookId::parse(hook.id()).unwrap(),
                 on,
-                values: if hook == GameplayHook::Offhand { vec![] } else { vec![1.0] },
+                values: if hook == GameplayHook::Offhand {
+                    vec![]
+                } else if hook == GameplayHook::LeechRate {
+                    vec![0.0]
+                } else {
+                    vec![1.0]
+                },
             };
             assert_eq!(
                 run(BackendConnection::set_hook(&mut session, &request, &mut AllowWrite)).unwrap(),

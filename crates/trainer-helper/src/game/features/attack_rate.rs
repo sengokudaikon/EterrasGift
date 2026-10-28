@@ -1,9 +1,6 @@
-//! Attack rate: the character's attack rate, on its attack attributes, set to a value the game's editor accepts.
+//! The feature selects only its own character accessor.
 use super::stat::StatFeature;
-use eg_trainer_wire::fields::ObservedRate;
-
 pub(super) const ATTACK_RATE: StatFeature = StatFeature {
-    accepts: ObservedRate::attack_editor_value,
-    stat: |character| character.attack.attack_rate,
-    slot: |observation| &mut observation.attack_rate,
+    // SAFETY: bind_stat establishes the attached metadata contract before resolving the selected accessor.
+    accessor: |access, player| unsafe { Ok(access.attack_attributes(player)?.attack_rate) },
 };

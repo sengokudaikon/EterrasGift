@@ -49,21 +49,6 @@ fn envelope_rejects_unknown_operations_and_unbounded_bodies_before_allocation() 
     assert!(Request::decode(&wrong).is_err());
 }
 #[test]
-fn attack_leech_request_compares_nonzero_manager() {
-    let request = Request::ReadAttackLeech {
-        dispatcher: dispatcher(),
-        expected_manager: 0x1817161514131211,
-    };
-    let mut body = proof();
-    body.extend([0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18]);
-    let mut golden = envelope(23, &body);
-    assert_eq!(request.encode(), golden);
-    assert_eq!(Request::decode(&golden), Ok(request));
-    golden[36..44].fill(0);
-    assert!(Request::decode(&golden).is_err());
-}
-
-#[test]
 fn response_header_is_bounded_before_payload_allocation() {
     let golden = [0x35, 0x47, 0x46, 0x45, 5, 0, 0, 0, 3, 0, 0, 0, b'n', b'o', b'w'];
     let expected = Response {

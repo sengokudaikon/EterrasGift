@@ -11,6 +11,7 @@ pub struct GameplayHookTarget {
     pub effect: LeafEffect,
     pub receiver_class: Option<NonNull<c_void>>,
     pub linked_offset: Option<u32>,
+    pub stack_argument: bool,
 }
 
 impl RuntimeAccess {
@@ -38,6 +39,18 @@ impl RuntimeAccess {
         let specs: &[(&CStr, &CStr, bool, &[&str], LeafEffect)] = match hook {
             GameplayHook::IncomingDamage | GameplayHook::DamageDealt => &[(c"BaseHealth", c"HealthDamage", true, &["System.Single"], damage.unwrap().effect())],
             GameplayHook::MysteriousRift => &[(c"TimeBeastTracker", c"NextEncounterShouldBeEggs", true, &[], LeafEffect::SelectableBoolean)],
+            GameplayHook::AttackRate => &[
+                (c"CharacterStats", c"calculateAttackRate", true, &[], LeafEffect::Void),
+                (
+                    c"CharacterStats",
+                    c"setMainHandAttackRate",
+                    true,
+                    &["System.Single", "System.Boolean", "System.Boolean"],
+                    LeafEffect::Void,
+                ),
+                (c"CharacterStats", c"setOffHandAttackRate", true, &["System.Single", "System.Boolean"], LeafEffect::Void),
+            ],
+            GameplayHook::LeechRate => &[(c"BaseStats", c"ApplyExternalStats", true, &[], LeafEffect::Void)],
             GameplayHook::Offhand => &[
                 (
                     c"OneSlotItemContainerWithCharacterRequirements",
@@ -146,6 +159,7 @@ impl RuntimeAccess {
                     address: NonNull::new(address).ok_or_else(|| unsupported("hook address"))?,
                     bytes: read_value(address.cast()),
                     effect: effect.clone(),
+                    stack_argument: instance && params.len() == 3,
                     receiver_class,
                     linked_offset,
                 });
@@ -213,7 +227,7 @@ impl RuntimeAccess {
             Ok(offset as u32)
         }
     }
-    unsafe fn hook_static_storage(&self, owner: Class, field: Ptr, alignment: usize) -> Result<NonNull<c_void>, GameError> {
+    pub(crate) unsafe fn hook_static_storage(&self, owner: Class, field: Ptr, alignment: usize) -> Result<NonNull<c_void>, GameError> {
         // SAFETY: static field type/flags validated by caller; initialize through the
         // public field API, then obtain the owning storage through the public class API.
         unsafe {

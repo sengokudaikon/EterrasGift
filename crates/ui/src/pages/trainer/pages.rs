@@ -990,11 +990,11 @@ mod tests {
         let slot = Rc::new(RefCell::new(None));
         let game = Game {
             later: Some(slot.clone()),
-            unserved: Some("points-earned"),
+            unserved: Some("currency"),
             ..Game::default()
         };
-        game.fields.borrow_mut().insert("attack-leech", vec![GameField::new("", 1.0), GameField::new("", 0.3)]);
-        let feature = *catalog::feature("attack-leech").unwrap();
+        game.fields.borrow_mut().insert("points-earned", vec![GameField::new("", 1.0), GameField::new("", 0.3)]);
+        let feature = *catalog::feature("points-earned").unwrap();
         let mut row = EditorRow::new(feature, false, &game);
         // Connected: the read is on its way, and everything waits for it.
         assert!(row.is_busy() && !row.can_use(&game) && !row.has_read);
@@ -1025,7 +1025,7 @@ mod tests {
         assert!(row.has_drafts());
 
         // A field set this version cannot serve: read-only, with its reason, and nothing is asked of the game.
-        let unserved = EditorRow::new(*catalog::feature("points-earned").unwrap(), false, &game);
+        let unserved = EditorRow::new(*catalog::feature("currency").unwrap(), false, &game);
         assert!(!unserved.is_busy() && !unserved.can_use(&game));
         assert_eq!(unserved.reason(&game), Some(NOT_AVAILABLE));
         assert_eq!(

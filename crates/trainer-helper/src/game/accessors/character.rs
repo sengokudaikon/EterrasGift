@@ -1,8 +1,7 @@
 //! The character's stats, as two accessors on the player's stats object that know nothing of each other: its attack
 //! attributes, declared on `CharacterStats`, and its leech stats, declared on `BaseStats`.
-use super::player::{Player, PlayerError, PlayerFields, unavailable};
+use super::player::{PlayerError, PlayerFields};
 use crate::game::{Class, Ptr, RuntimeAccess};
-use eg_trainer_wire::fields::{AttackLeechUnavailable as Unavailable, ObservedRate};
 use std::ffi::CStr;
 
 /// One `System.Single` stat: the class that declares it, its name and its field.
@@ -13,8 +12,7 @@ pub(crate) struct Stat {
     pub(crate) field: Ptr,
 }
 
-/// The character's attack attributes. Their stats object must be exactly a `CharacterStats`: other layouts, even with
-/// an inherited field, stay unsupported.
+/// The character's attack attributes, declared on `CharacterStats`.
 pub(crate) struct AttackAttributes {
     pub(crate) attack_rate: Stat,
 }
@@ -55,35 +53,6 @@ impl RuntimeAccess {
         unsafe {
             Ok(LeechStats {
                 increased_leech_rate: self.stat(player.base_stats, c"increasedLeechRate", player.single)?,
-            })
-        }
-    }
-
-    /// The character's attack rate.
-    ///
-    /// # Safety
-    /// As [`RuntimeAccess::player`], with `player`'s roots still held.
-    pub(crate) unsafe fn attack_rate(&self, player: &Player<'_, '_>, attack: &AttackAttributes) -> Result<ObservedRate, PlayerError> {
-        // SAFETY: the stats object is rooted; its exact class is checked before its Single field is copied.
-        unsafe {
-            if (self.object_class)(crate::game::target(&player.stats)?.as_ptr()) != attack.attack_rate.owner {
-                return Err(unavailable(Unavailable::UnsupportedStatsClass));
-            }
-            Ok(ObservedRate {
-                raw_bits: self.single_bits(&player.stats, attack.attack_rate.field)?,
-            })
-        }
-    }
-
-    /// The character's increased leech rate.
-    ///
-    /// # Safety
-    /// As [`RuntimeAccess::player`], with `player`'s roots still held.
-    pub(crate) unsafe fn increased_leech_rate(&self, player: &Player<'_, '_>, leech: &LeechStats) -> Result<ObservedRate, PlayerError> {
-        // SAFETY: the player checked the stats object is a BaseStats, which declares the field.
-        unsafe {
-            Ok(ObservedRate {
-                raw_bits: self.single_bits(&player.stats, leech.increased_leech_rate.field)?,
             })
         }
     }

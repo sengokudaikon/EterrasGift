@@ -6,7 +6,6 @@ mod write;
 use crate::connect::build::{BuildProfile, ProfileLease};
 use eg_core::game_log::GameReadiness;
 use eg_trainer_wire::{
-    fields::{self, AttackLeechRead, AttackLeechUnavailable},
     forge::{self, ForgeSnapshot},
     locale::{self, GameLocale},
     process::ProcessIdentity,
@@ -105,7 +104,7 @@ pub struct Session<T> {
     status: Option<RuntimeStatus>,
     cleanup: Cleanup,
     unload_needed: bool,
-    hooks: [Option<eg_trainer_wire::hooks::HookObservation>; 4],
+    hooks: [Option<eg_trainer_wire::hooks::HookObservation>; eg_trainer_wire::hooks::GameplayHook::ALL.len()],
 }
 impl<T: Transport> Session<T> {
     fn observation_matches(&self, expected: &crate::item::edit::ExpectedObservation) -> bool {
@@ -134,7 +133,7 @@ impl<T: Transport> Session<T> {
             transport,
             profile,
             lease: None,
-            hooks: [None; 4],
+            hooks: [None; eg_trainer_wire::hooks::GameplayHook::ALL.len()],
             state: SessionState::Disabled,
             discovery: None,
             status: None,
@@ -274,45 +273,6 @@ impl<T: Transport> Session<T> {
             Err(error) => Err(error),
         }
     }
-    /// Observe the two actor-stat fields. Identity tokens and raw float bits convey no
-    /// write authority. Feature-local graph unavailability leaves the admitted session ready;
-    /// runtime offline/manager refusal revokes admission even though its typed reason is returned.
-    pub async fn read_attack_leech(&mut self) -> Result<AttackLeechRead, SessionError> {
-        self.admit()?;
-        let expected_manager = self.offline_manager()?;
-        let dispatcher = self.dispatcher()?;
-        let read = match self
-            .read_owned_control(
-                |dispatcher| Request::ReadAttackLeech { dispatcher, expected_manager },
-                |bytes| {
-                    let read = fields::decode(bytes)?;
-                    if matches!(read, AttackLeechRead::Available(observation) if observation.manager.wrapper_token() != expected_manager) {
-                        return Err(ProtocolError::InvalidData);
-                    }
-                    Ok(read)
-                },
-                None,
-            )
-            .await?
-        {
-            OwnedRead::Complete(read) => read,
-            OwnedRead::Stopped => return Err(SessionError::Protocol(ProtocolError::InvalidData)),
-        };
-        if let Err(error) = self.validate_profile(&dispatcher) {
-            self.release_without_io();
-            self.state = SessionState::Disconnected;
-            return Err(SessionError::Identity(error.to_string()));
-        }
-        self.require_enabled()?;
-        if matches!(
-            read,
-            AttackLeechRead::Unavailable(AttackLeechUnavailable::OfflineRequired | AttackLeechUnavailable::ManagerAbsent | AttackLeechUnavailable::ManagerChanged)
-        ) {
-            self.release_without_io();
-            self.state = SessionState::Disconnected;
-        }
-        Ok(read)
-    }
     /// Read only an already-completed runtime locale selection and the game application version.
     /// This does not start localization or wait for its asynchronous initialization.
     pub async fn read_locale(&mut self) -> Result<GameLocale, SessionError> {
@@ -434,7 +394,7 @@ impl<T: Transport> Session<T> {
         })
     }
     fn release_without_io(&mut self) {
-        self.hooks = [None; 4];
+        self.hooks = [None; eg_trainer_wire::hooks::GameplayHook::ALL.len()];
         if self.discovery.take().is_some() {
             self.cleanup = Cleanup::Unconfirmed;
         }

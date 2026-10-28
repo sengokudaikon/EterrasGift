@@ -1,23 +1,11 @@
 use super::*;
-use crate::{
-    fields::{AttackLeechPlan, RateWriteStatus},
-    write::{AllowWrite, ForgePlan, WriteControl, WriteObservation, WriteOutcome, WritePlan, WriteStatus},
-};
+use crate::write::{AllowWrite, ForgePlan, WriteControl, WriteObservation, WriteOutcome, WritePlan, WriteStatus};
 use eg_trainer_wire::{
-    rate_write::{AttackLeechRateWrite, RateWriteReply},
     transport::Delivery,
     write::{ForgeWrite, WriteReply},
 };
 
 impl<T: Transport> Session<T> {
-    /// Convenience for the current field planner; the lifecycle is shared.
-    pub async fn set_attack_leech_rate(&mut self, plan: &AttackLeechPlan) -> Result<RateWriteStatus, SessionError> {
-        self.set_attack_leech_rate_controlled(plan, &mut AllowWrite).await
-    }
-    pub async fn set_attack_leech_rate_controlled(&mut self, plan: &AttackLeechPlan, control: &mut dyn WriteControl) -> Result<RateWriteStatus, SessionError> {
-        Ok(self.write_controlled(&plan.clone().into(), control).await?.map(WriteObservation::into_field))
-    }
-
     pub async fn edit_forge(&mut self, plan: &ForgePlan) -> Result<WriteStatus, SessionError> {
         self.edit_forge_controlled(plan, &mut AllowWrite).await
     }
@@ -124,27 +112,6 @@ impl<T: Transport> Session<T> {
                 let request = ForgeWrite::edit(dispatcher, plan.manager(), expected.snapshot().clone(), plan.mutation()).map_err(SessionError::Protocol)?;
                 Ok((Request::EditForge(request), Request::ReadForge { dispatcher }))
             }
-            WritePlan::Field(plan) => {
-                let expected = plan.before();
-                if expected.process != self.target || self.status.as_ref().is_none_or(|s| s.online || s.manager == 0 || s.manager != expected.manager) {
-                    return Err(SessionError::Identity("field write belongs to a different process or offline manager".into()));
-                }
-                let AttackLeechRead::Available(before) = expected.read else {
-                    return Err(SessionError::Identity("field plan has no complete expected observation".into()));
-                };
-                let target = match plan.target() {
-                    crate::fields::AttackLeechTarget::AttackRate => fields::AttackLeechTarget::AttackRate,
-                    crate::fields::AttackLeechTarget::IncreasedLeechRate => fields::AttackLeechTarget::IncreasedLeechRate,
-                };
-                let request = AttackLeechRateWrite::new(dispatcher, before, target, plan.projected_bits()).map_err(SessionError::Protocol)?;
-                Ok((
-                    Request::SetAttackLeechRate(request),
-                    Request::ReadAttackLeech {
-                        dispatcher,
-                        expected_manager: expected.manager,
-                    },
-                ))
-            }
         }
     }
     pub(super) fn write_provenance(&mut self, dispatcher: &DispatcherSpec) -> Result<(), SessionError> {
@@ -164,21 +131,12 @@ fn classify_ack(request: &Request, response: &eg_trainer_wire::protocol::Respons
             WriteReply::NotApplied { code, message } => WriteOutcome::NotApplied { code, message },
             WriteReply::Uncertain { reason } => WriteOutcome::uncertain(reason),
         },
-        Request::SetAttackLeechRate(request) => match eg_trainer_wire::rate_write::classify_response(response, request) {
-            RateWriteReply::Confirmed(actual) => WriteOutcome::Confirmed(WriteObservation::Field(actual)),
-            RateWriteReply::NotApplied { code, message } => WriteOutcome::NotApplied { code, message },
-            RateWriteReply::Uncertain { reason } => WriteOutcome::uncertain(reason),
-        },
         _ => unreachable!("prepared mutation request"),
     }
 }
 fn decode_readback(plan: &WritePlan, payload: &[u8]) -> WriteOutcome<WriteObservation> {
     let actual = match plan {
         WritePlan::Forge(_) => forge::decode(payload).map(|actual| actual.map(WriteObservation::forge)),
-        WritePlan::Field(_) => fields::decode(payload).map(|actual| match actual {
-            AttackLeechRead::Available(actual) => Some(WriteObservation::Field(actual)),
-            AttackLeechRead::Unavailable(_) => None,
-        }),
     };
     match actual {
         Ok(Some(actual)) => plan.observe(actual),

@@ -8,7 +8,6 @@
 //! Watch snapshots are authoritative; broadcast events can lag and are advisory.
 mod connection;
 mod faults;
-mod fields;
 mod mapping;
 mod profiles;
 mod snapshot;
@@ -34,7 +33,6 @@ pub use crate::session::{ReadControl, ReadObserver};
 use eg_core::game_log::GameReadiness;
 pub use eg_trainer_wire::transport::Delivery;
 pub use eg_trainer_wire::{
-    fields::{AttackLeechObservation, AttackLeechRead, AttackLeechUnavailable, ObservedObjectIdentity, ObservedRate, RateUnavailable},
     forge::{AffixSnapshot, ForgeSnapshot, ItemStatus, UniqueIdentity},
     hooks::GameplayHook,
     mapping::ModifierSnapshot,
@@ -56,7 +54,6 @@ use crate::{
     definitions::service::{GameData, GameDataHandle},
     features::profiles::{ProfileBook, ProfileKey, ProfileSaver},
     features::{FeatureIntents, HookId},
-    fields::{AttackLeechDecision, AttackLeechPlan, AttackLeechTarget, FieldPlanError, RateWriteRecord, RateWriteStatus},
     item::values::{MappingRequest, ValueTable},
     session::{Cleanup, Session, SessionError},
     write::{ForgePlan, WriteControl, WriteObservation, WriteOutcome, WritePlan, WriteRecord, WriteStatus},
@@ -110,7 +107,6 @@ pub enum Command {
         expected: Box<crate::item::edit::ExpectedObservation>,
         request: MappingRequest,
     },
-    ReadAttackLeech,
     BeginForgeBatch,
     Write(WritePlan),
     UndoForge(Box<crate::item::undo::ForgeUndo>),
@@ -324,7 +320,6 @@ where
     next_locale_check: tokio::time::Instant,
     command_epoch: u64,
     read_cancel: Option<Arc<AtomicBool>>,
-    attack_leech_sequence: u64,
     paused: bool,
     faults: Option<eg_core::fault::FaultLog>,
     forge_history: crate::item::undo::ForgeUndoHistory,
@@ -368,10 +363,8 @@ pub fn service<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K
         forge_read_sequence: 0,
         mappings: vec![],
         unique_preview: None,
-        attack_leech: None,
         capabilities: Capabilities::default(),
         last_write: None,
-        last_rate_write: None,
         undo_forge: None,
         undo_forge_depth: 0,
         undo_forge_needs_override: false,
@@ -411,7 +404,6 @@ pub fn service<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K
             next_locale_check: tokio::time::Instant::now(),
             command_epoch: 0,
             read_cancel: None,
-            attack_leech_sequence: 0,
             paused: false,
             faults: None,
             forge_history: Default::default(),
@@ -494,18 +486,6 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
         {
             self.state.unique_preview = None;
         }
-        if self.state.attack_leech.as_ref().is_some_and(|observation| {
-            self.state.phase != Phase::Ready
-                || observation.generation != self.state.generation
-                || self.state.attached.as_ref() != Some(&observation.process)
-                || self
-                    .state
-                    .runtime_status
-                    .as_ref()
-                    .is_none_or(|status| status.online || status.manager == 0 || status.manager != observation.manager)
-        }) {
-            self.state.attack_leech = None;
-        }
         if self.state.undo_forge.as_ref().is_some_and(|undo| {
             self.state.expected_observation().as_ref() != Ok(undo.after())
                 || self.state.runtime_status.as_ref().is_none_or(|status| status.online || status.manager != undo.manager())
@@ -521,8 +501,6 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
         self.state.capabilities = Capabilities {
             gameplay_hooks: GameplayHook::ALL.map(|hook| idle && self.connection.as_ref().is_some_and(|connection| connection.supports_hook(hook))),
             read_forge: ready,
-            read_attack_leech: idle && served.read_attack_leech,
-            attack_leech_rate: idle && served.attack_leech_rate,
             level_requirement: idle && served.level_requirement,
             status_fields: served.status_fields.map(|field| idle && field),
             base_change: idle && served.base_change,
@@ -724,9 +702,7 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
             Command::DescribeUnique { expected } => self.describe_unique(*expected).await,
             Command::PreviewUnique { expected, draft } => self.preview_unique(*expected, draft).await,
             Command::ResolveMapping { expected, request } => self.resolve_mapping(*expected, request).await,
-            Command::ReadAttackLeech => self.read_attack_leech().await,
             Command::Write(WritePlan::Forge(plan)) => self.write_forge(*plan).await,
-            Command::Write(WritePlan::Field(plan)) => self.set_attack_leech_rate(*plan).await,
             Command::UndoForge(undo) => self.undo_forge(*undo).await,
             Command::SelectProfile(key) => self.select_profile(key),
             Command::CreateProfile => self.create_profile(),
@@ -964,9 +940,6 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
             self.state.mappings.clear();
             self.state.unique_preview = None;
         }
-        if self.state.attack_leech.as_ref().is_some_and(|observation| observation.manager != status.manager) {
-            self.state.attack_leech = None;
-        }
         if status.online || status.manager == 0 {
             self.release_without_io();
             self.state.phase = Phase::WaitingForCharacter;
@@ -1133,7 +1106,6 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
             self.state.phase = Phase::WaitingForCharacter;
             self.state.runtime_status = None;
             self.state.forge = ForgeState::Unobserved;
-            self.state.attack_leech = None;
             self.state.undo_forge = None;
             self.state.activity = None;
             self.state.error = Some(error.clone());
@@ -1156,7 +1128,6 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
             self.state.editing = self.state.profiles.profiles().first().map(|profile| profile.key.clone());
         }
         self.forge_history.clear();
-        self.state.attack_leech = None;
         self.state.undo_forge = None;
         if let Some(connection) = self.connection.take() {
             debug_assert!(self.retiring.is_none());

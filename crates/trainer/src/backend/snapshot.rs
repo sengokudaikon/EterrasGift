@@ -124,19 +124,14 @@ pub enum Activity {
     /// Waiting for the game data service (a changed install is read again).
     ReadingGameFiles,
     ReadingForge,
-    ReadingAttackLeech,
     Refreshing,
     WritingForge,
-    WritingAttackLeech,
 }
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Capabilities {
     /// In GameplayHook order; availability comes from this connection, not saved intent.
-    pub gameplay_hooks: [bool; 4],
+    pub gameplay_hooks: [bool; eg_trainer_wire::hooks::GameplayHook::ALL.len()],
     pub read_forge: bool,
-    pub read_attack_leech: bool,
-    /// Narrow operation support, not current observation eligibility or lifetime authority.
-    pub attack_leech_rate: bool,
     /// Operation support on this ready connection. Current item eligibility and
     /// range/observation checks still belong to level_requirement_plan.
     pub level_requirement: bool,
@@ -217,16 +212,6 @@ pub struct RetainedHelper {
     pub target: ProcessIdentity,
     pub residency: HelperResidency,
 }
-/// One owned read bound to its process, connection generation, admitted manager and monotonically
-/// increasing publication sequence. Tokens and raw rates authorize no dereference or write.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct AttackLeechSnapshot {
-    pub process: ProcessIdentity,
-    pub generation: u64,
-    pub sequence: u64,
-    pub manager: u64,
-    pub read: AttackLeechRead,
-}
 /// The game data service's state (`crate::definitions::service`), for the views. A session uses its catalog when it runs the build
 /// the files hold; without it the trainer does not open.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -283,10 +268,8 @@ pub struct BackendSnapshot {
     pub forge_read_sequence: u64,
     pub mappings: Vec<ResolvedMapping>,
     pub unique_preview: Option<ResolvedPreview>,
-    pub attack_leech: Option<AttackLeechSnapshot>,
     pub capabilities: Capabilities,
     pub last_write: Option<WriteRecord>,
-    pub last_rate_write: Option<RateWriteRecord>,
     pub undo_forge: Option<crate::item::undo::ForgeUndo>,
     pub undo_forge_depth: usize,
     pub undo_forge_needs_override: bool,
@@ -343,28 +326,7 @@ impl BackendSnapshot {
                 .as_ref()
                 .filter(|r| &r.plan == plan.as_ref())
                 .map(|r| r.status.clone().map(WriteObservation::forge)),
-            WritePlan::Field(plan) => self
-                .last_rate_write
-                .as_ref()
-                .filter(|r| &r.plan == plan.as_ref())
-                .map(|r| r.status.clone().map(WriteObservation::Field)),
         }
-    }
-    /// Pure CURRENT-player intent from the latest exact owned observation.
-    /// Caller must still submit explicitly; this provides no historical lifetime ticket.
-    pub fn attack_leech_plan(&self, target: AttackLeechTarget, value: f64) -> Result<AttackLeechDecision, FieldPlanError> {
-        let current = self.attack_leech.as_ref().ok_or(FieldPlanError::InvalidObservation)?;
-        if self.phase != Phase::Ready
-            || self.attached.as_ref() != Some(&current.process)
-            || current.generation != self.generation
-            || self
-                .runtime_status
-                .as_ref()
-                .is_none_or(|status| status.online || status.manager == 0 || status.manager != current.manager)
-        {
-            return Err(FieldPlanError::StaleObservation);
-        }
-        AttackLeechPlan::prepare(current, target, value)
     }
     pub fn expected_observation(&self) -> Result<crate::item::edit::ExpectedObservation, crate::item::edit::EditError> {
         use crate::item::edit::{EditError, ExpectedObservation};

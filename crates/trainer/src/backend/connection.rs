@@ -70,9 +70,6 @@ pub trait BackendConnection: Send + 'static {
     ) -> impl Future<Output = Result<ValueTable, BackendError>> + Send {
         async { Err(BackendError::blocked(ErrorKind::MappingUnavailable, "Actual values are unavailable for this modifier.")) }
     }
-    fn read_attack_leech(&mut self) -> impl Future<Output = Result<AttackLeechRead, BackendError>> + Send {
-        async { Err(BackendError::blocked(ErrorKind::NotReady, "attack/leech reads are unavailable")) }
-    }
     fn observed_hook(&self, _: GameplayHook) -> Option<bool> {
         None
     }
@@ -96,8 +93,6 @@ impl<T: Transport + Send + 'static> BackendConnection for Session<T> {
     fn capabilities(&self) -> Capabilities {
         Capabilities {
             read_forge: true,
-            read_attack_leech: true,
-            attack_leech_rate: true,
             level_requirement: true,
             status_fields: [true; 7],
             base_change: true,
@@ -152,9 +147,6 @@ impl<T: Transport + Send + 'static> BackendConnection for Session<T> {
     async fn read_forge(&mut self) -> Result<Option<ForgeSnapshot>, BackendError> {
         Ok(Session::read_forge(self).await?)
     }
-    async fn read_attack_leech(&mut self) -> Result<AttackLeechRead, BackendError> {
-        Ok(Session::read_attack_leech(self).await?)
-    }
     fn observed_hook(&self, hook: GameplayHook) -> Option<bool> {
         self.hook_observation(hook).map(|actual| actual.enabled)
     }
@@ -169,6 +161,7 @@ impl<T: Transport + Send + 'static> BackendConnection for Session<T> {
             (GameplayHook::Offhand, []) => 1,
             (GameplayHook::IncomingDamage, [percent]) if percent.is_finite() && (0.0..=100.0).contains(percent) && percent.fract() == 0.0 => *percent as u64,
             (GameplayHook::DamageDealt, [multiplier]) if multiplier.is_finite() && ((0.0..=100.0).contains(multiplier) || *multiplier == 101.0) => multiplier.to_bits(),
+            (GameplayHook::AttackRate | GameplayHook::LeechRate, [value]) if hook.validate_value(value.to_bits()).is_ok() => value.to_bits(),
             _ => return Ok(WriteOutcome::refused("Invalid hook selection")),
         };
         Ok(self.set_gameplay_hook_with_value(hook, request.on, value, control).await?)

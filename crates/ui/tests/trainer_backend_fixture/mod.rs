@@ -41,24 +41,9 @@ struct Data {
     expected: Mutex<Vec<ForgeSnapshot>>,
     /// How many matching game processes run.
     games: AtomicUsize,
-    /// The character's attack rate and increased leech rate, as raw floats.
-    rates: Mutex<[u32; 2]>,
     gameplay_hooks: [AtomicBool; 3],
     damage_percent: AtomicUsize,
     rift_choice: AtomicUsize,
-}
-impl Data {
-    fn rates(&self) -> backend::AttackLeechObservation {
-        let [attack, leech] = *self.rates.lock().unwrap();
-        let identity = |native| backend::ObservedObjectIdentity::new(12, native).unwrap();
-        backend::AttackLeechObservation {
-            manager: identity(1),
-            actor: identity(2),
-            stats: identity(3),
-            attack_rate: backend::ObservedRate { raw_bits: attack },
-            increased_leech_rate: backend::ObservedRate { raw_bits: leech },
-        }
-    }
 }
 struct Locator(Arc<Data>);
 impl ProcessLocator for Locator {
@@ -104,8 +89,6 @@ impl BackendConnection for OwnedConnection {
     fn capabilities(&self) -> backend::Capabilities {
         backend::Capabilities {
             read_forge: true,
-            read_attack_leech: true,
-            attack_leech_rate: true,
             level_requirement: true,
             status_fields: [true; 7],
             base_change: true,
@@ -127,7 +110,6 @@ impl BackendConnection for OwnedConnection {
         use eg_trainer::write::{WriteObservation, WritePlan};
         match plan {
             WritePlan::Forge(plan) => Ok(self.edit_forge(plan, control).await?.map(WriteObservation::forge)),
-            WritePlan::Field(plan) => Ok(self.set_attack_leech_rate(plan, control).await?.map(WriteObservation::Field)),
         }
     }
     async fn refresh(&mut self) -> Result<RuntimeStatus, BackendError> {
@@ -300,29 +282,11 @@ impl BackendConnection for OwnedConnection {
         }
         Ok(eg_trainer::write::WriteOutcome::Confirmed(request.on))
     }
-    async fn read_attack_leech(&mut self) -> Result<backend::AttackLeechRead, BackendError> {
-        Ok(backend::AttackLeechRead::Available(self.0.rates()))
-    }
     async fn disconnect(&mut self) -> Cleanup {
         Cleanup::ConfirmedOff
     }
 }
 impl OwnedConnection {
-    async fn set_attack_leech_rate(
-        &mut self,
-        plan: &eg_trainer::fields::AttackLeechPlan,
-        _: &mut dyn eg_trainer::write::WriteControl,
-    ) -> Result<eg_trainer::fields::RateWriteStatus, BackendError> {
-        tokio::time::sleep(Duration::from_millis(150)).await;
-        assert_eq!(
-            &backend::AttackLeechRead::Available(self.0.rates()),
-            &plan.before().read,
-            "fresh expected rates for every step"
-        );
-        let projected = *plan.projected();
-        *self.0.rates.lock().unwrap() = [projected.attack_rate.raw_bits, projected.increased_leech_rate.raw_bits];
-        Ok(eg_trainer::write::WriteOutcome::Confirmed(projected))
-    }
     async fn edit_forge(&mut self, plan: &eg_trainer::write::ForgePlan, _: &mut dyn eg_trainer::write::WriteControl) -> Result<eg_trainer::write::WriteStatus, BackendError> {
         use eg_trainer::write::{ResponseCode, WriteOutcome};
         let call = self.0.writes.fetch_add(1, Ordering::SeqCst) + 1;
@@ -548,7 +512,6 @@ pub(super) fn capture(session: &Session) {
         refuse_at: AtomicUsize::new(0),
         expected: Mutex::new(Vec::new()),
         games: AtomicUsize::new(1),
-        rates: Mutex::new([1.0_f32.to_bits(), 0.3_f32.to_bits()]),
         gameplay_hooks: [AtomicBool::new(false), AtomicBool::new(false), AtomicBool::new(false)],
         damage_percent: AtomicUsize::new(50),
         rift_choice: AtomicUsize::new(0),
@@ -614,7 +577,6 @@ pub(super) fn capture(session: &Session) {
     // Connected and empty: the forge says so itself, with nothing about the connection.
     assert_eq!(ui.global::<eg_ui::TrainerState>().get_item_unavailable(), "");
     session.capture(&ui, "backend-forge-empty");
-    combat_rates(session, &ui, &handle, &data);
     gameplay_hooks(session, &ui, &handle, &data);
     *data.item.lock().unwrap() = Some(item("Owned Hatchet Ω", 17));
     command(&handle, Command::ReadForge, || matches!(handle.snapshot().forge, backend::ForgeState::Item { .. }));
@@ -1266,48 +1228,6 @@ fn gameplay_hooks(session: &Session, ui: &MainWindow, handle: &BackendHandle, da
             }
         }
     }
-    ui.global::<Nav>().invoke_navigate("forge".into());
-    settle();
-}
-
-fn combat_rates(session: &Session, ui: &MainWindow, handle: &BackendHandle, data: &Data) {
-    let state = ui.global::<eg_ui::TrainerState>();
-    ui.global::<Nav>().invoke_navigate("combat".into());
-    settle();
-    state.set_section(1);
-    settle();
-    let row = || {
-        (0..state.get_rows().row_count())
-            .find(|&i| state.get_rows().row_data(i).unwrap().title == "Attack and leech rates")
-            .expect("the attack and leech rates row")
-    };
-    let rates = |state: &eg_ui::TrainerState| state.get_rows().row_data(row()).unwrap();
-    wait(|| !rates(&state).unread && rates(&state).can_use);
-    let index = row() as i32;
-    let fields = || state.get_row_models().row_data(row()).unwrap().fields;
-    assert_eq!(fields().row_data(0).unwrap().game_text, "In game: 1");
-    assert_eq!(fields().row_data(1).unwrap().game_text, "In game: 0.3");
-    let hook = state.get_rows().row_data(0).unwrap();
-    assert_eq!((hook.status.as_str(), hook.can_use), ("Not available in this version yet.", false));
-    state.invoke_field_committed(index, 0, "1.1".into());
-    state.invoke_field_committed(index, 1, "2.5".into());
-    assert_eq!(rates(&state).apply_text, "Apply 2 changes");
-    state.invoke_apply(index);
-    // The row waits on the game: Read again, Apply, Discard and the boxes are off until it answers.
-    let pending = rates(&state);
-    assert!(!pending.can_use && !pending.can_apply && !pending.can_discard);
-    state.invoke_discard(index);
-    assert!(rates(&state).has_drafts);
-    wait(|| rates(&state).status == "Confirmed by readback.");
-    assert_eq!(*data.rates.lock().unwrap(), [1.1_f32.to_bits(), 2.5_f32.to_bits()]);
-    assert!(!rates(&state).has_drafts);
-    assert_eq!(fields().row_data(0).unwrap().game_text, "In game: 1.1");
-    assert_eq!(handle.snapshot().phase, Phase::Ready);
-    for _ in 0..3 {
-        settle();
-        ui.window().take_snapshot().expect("render");
-    }
-    session.capture(ui, "backend-combat-rates");
     ui.global::<Nav>().invoke_navigate("forge".into());
     settle();
 }

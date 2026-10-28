@@ -4,7 +4,7 @@ use crate::game::apply::WriteError;
 use crate::game::{Class, GameError, Images, Ptr, Root, RuntimeAccess, read_value, target, unsupported};
 use eg_il2cpp_runtime::{AttachedThread, raw};
 use eg_trainer_wire::{
-    fields::{AttackLeechUnavailable as Unavailable, ObservedObjectIdentity},
+    fields::{ObservedObjectIdentity, PlayerUnavailable as Unavailable},
     protocol::RuntimeStatus,
 };
 use std::ptr::NonNull;

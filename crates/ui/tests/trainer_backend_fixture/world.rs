@@ -500,9 +500,7 @@ impl BackendConnection for WorldConnection {
         }
     }
     async fn write(&mut self, plan: &WritePlan, _: &mut dyn WriteControl) -> Result<WriteOutcome<WriteObservation>, BackendError> {
-        let WritePlan::Forge(plan) = plan else {
-            return Ok(WriteOutcome::refused("The fixture world has no field writes."));
-        };
+        let WritePlan::Forge(plan) = plan;
         self.0.writes.fetch_add(1, Ordering::SeqCst);
         let mut after = plan.projected().clone();
         // The game names the item after its new identity.

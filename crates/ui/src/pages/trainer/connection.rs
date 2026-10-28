@@ -207,7 +207,7 @@ fn status(snapshot: &BackendSnapshot) -> Status {
             ..line("Online mode", advice, &format!("Online mode. {advice}"))
         };
     }
-    let writing = matches!(snapshot.activity, Some(Activity::WritingForge | Activity::WritingAttackLeech));
+    let writing = matches!(snapshot.activity, Some(Activity::WritingForge));
     match snapshot.phase {
         // Connected, the pages show their own bodies; only the navigation's line is said.
         Phase::Ready => line("Connected", "", if writing { "Connected · applying…" } else { "Connected" }),

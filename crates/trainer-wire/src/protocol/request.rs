@@ -1,7 +1,6 @@
 //! Request bodies are sequential fields. Only the common envelope has fixed positions.
 use super::*;
 use crate::{
-    fields::{AttackLeechObservation, AttackLeechTarget, ObservedObjectIdentity, ObservedRate},
     mapping::{AffixMappingDraft, AffixMappingQuery, ForgeDescriptionRequest, MappingStart, UniquePreviewRequest, UniqueRollChange},
     write::{AffixRollChange, AffixRolls, StatusField},
 };
@@ -86,10 +85,6 @@ impl Request {
             Self::ClearHooks { .. } => op::CLEAR_HOOKS,
             Self::ReadForge { .. } => op::READ_FORGE,
             Self::ReadLocale { .. } => op::READ_LOCALE,
-            Self::ReadAttackLeech { expected_manager, .. } => {
-                body.u64(*expected_manager);
-                op::READ_ATTACK_LEECH
-            }
             Self::DescribeImplicits(query) | Self::DescribeUnique(query) => {
                 body.u64(query.manager());
                 body.snapshot(&query.expected);
@@ -125,21 +120,6 @@ impl Request {
                 }
                 body.snapshot(&query.target.expected);
                 op::MAP_ROLL
-            }
-            Self::SetAttackLeechRate(write) => {
-                body.byte(match write.target() {
-                    AttackLeechTarget::AttackRate => 1,
-                    AttackLeechTarget::IncreasedLeechRate => 2,
-                });
-                body.u32(write.desired_bits());
-                let expected = write.expected();
-                for object in [expected.manager, expected.actor, expected.stats] {
-                    body.u64(object.wrapper_token());
-                    body.u64(object.native_token());
-                }
-                body.u32(expected.attack_rate.raw_bits);
-                body.u32(expected.increased_leech_rate.raw_bits);
-                op::SET_ATTACK_LEECH_RATE
             }
             Self::EditForge(write) => {
                 body.u64(write.expected_manager());
@@ -241,10 +221,8 @@ impl Request {
         let exact = match operation {
             op::DISCOVER | op::UNLOAD => Some(0),
             op::STATUS | op::CLEAR_HOOKS | op::READ_FORGE | op::READ_LOCALE => Some(DISPATCHER),
-            op::READ_ATTACK_LEECH => Some(DISPATCHER + 8),
             op::READ_GAMEPLAY_HOOK => Some(DISPATCHER + 8 + 1),
             op::SET_GAMEPLAY_HOOK => Some(DISPATCHER + 8 + 1 + 1 + 8),
-            op::SET_ATTACK_LEECH_RATE => Some(DISPATCHER + 1 + 4 + 3 * 16 + 4 + 4),
             // A conditional item request carries its expected item, whose size varies.
             op::CHANGE_AFFIX
             | op::CHANGE_AFFIX_ROLLS
@@ -312,13 +290,6 @@ impl Request {
             op::CLEAR_HOOKS => Self::ClearHooks { dispatcher },
             op::READ_FORGE => Self::ReadForge { dispatcher },
             op::READ_LOCALE => Self::ReadLocale { dispatcher },
-            op::READ_ATTACK_LEECH => {
-                let expected_manager = body.u64()?;
-                if expected_manager == 0 {
-                    return Err(ProtocolError::InvalidData);
-                }
-                Self::ReadAttackLeech { dispatcher, expected_manager }
-            }
             op::DESCRIBE_UNIQUE | op::DESCRIBE_IMPLICITS => {
                 let manager = body.u64()?;
                 let query = ForgeDescriptionRequest::from_checked(dispatcher, manager, body.snapshot()?)?;
@@ -366,23 +337,6 @@ impl Request {
                     start,
                     draft,
                 )?)
-            }
-            op::SET_ATTACK_LEECH_RATE => {
-                let target = match body.byte()? {
-                    1 => AttackLeechTarget::AttackRate,
-                    2 => AttackLeechTarget::IncreasedLeechRate,
-                    _ => return Err(ProtocolError::InvalidData),
-                };
-                let desired = body.u32()?;
-                let mut object = || ObservedObjectIdentity::new(body.u64()?, body.u64()?);
-                let expected = AttackLeechObservation {
-                    manager: object()?,
-                    actor: object()?,
-                    stats: object()?,
-                    attack_rate: ObservedRate { raw_bits: body.u32()? },
-                    increased_leech_rate: ObservedRate { raw_bits: body.u32()? },
-                };
-                Self::SetAttackLeechRate(AttackLeechRateWrite::new(dispatcher, expected, target, desired)?)
             }
             _ => {
                 let manager = body.u64()?;

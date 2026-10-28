@@ -8,19 +8,44 @@ pub enum GameplayHook {
     Offhand = 1,
     IncomingDamage = 2,
     DamageDealt = 3,
+    AttackRate = 4,
+    LeechRate = 5,
 }
 
 impl GameplayHook {
-    pub const ALL: [Self; 4] = [Self::MysteriousRift, Self::Offhand, Self::IncomingDamage, Self::DamageDealt];
+    pub const ALL: [Self; 6] = [
+        Self::MysteriousRift,
+        Self::Offhand,
+        Self::IncomingDamage,
+        Self::DamageDealt,
+        Self::AttackRate,
+        Self::LeechRate,
+    ];
+    pub const TARGETS: usize = 5;
+    pub const fn is_stat(self) -> bool {
+        matches!(self, Self::AttackRate | Self::LeechRate)
+    }
     pub const fn is_damage(self) -> bool {
         matches!(self, Self::IncomingDamage | Self::DamageDealt)
     }
     /// Two damage controls share one patched method.
     pub const fn target(self) -> usize {
-        if self.is_damage() { 2 } else { self as usize }
+        if self.is_damage() {
+            2
+        } else if self.is_stat() {
+            self as usize - 1
+        } else {
+            self as usize
+        }
     }
     pub fn default_value(self) -> u64 {
-        if self == Self::DamageDealt { 1.0f64.to_bits() } else { 1 }
+        if matches!(self, Self::DamageDealt | Self::AttackRate) {
+            1.0f64.to_bits()
+        } else if self == Self::LeechRate {
+            0.0f64.to_bits()
+        } else {
+            1
+        }
     }
     pub const fn id(self) -> &'static str {
         match self {
@@ -28,6 +53,8 @@ impl GameplayHook {
             Self::Offhand => "offhand",
             Self::IncomingDamage => "incoming-damage",
             Self::DamageDealt => "damage-dealt",
+            Self::AttackRate => "attack-rate",
+            Self::LeechRate => "leech-rate",
         }
     }
     pub fn from_id(id: &str) -> Option<Self> {
@@ -40,6 +67,8 @@ impl GameplayHook {
             Self::Offhand => value == 1,
             Self::DamageDealt => f64::from_bits(value).is_finite() && ((0.0..=100.0).contains(&f64::from_bits(value)) || value == 101.0f64.to_bits()),
             Self::MysteriousRift => value <= 1,
+            Self::AttackRate => f64::from_bits(value).is_finite() && (0.01..=20.0).contains(&f64::from_bits(value)),
+            Self::LeechRate => f64::from_bits(value).is_finite() && (-1.0..=100.0).contains(&f64::from_bits(value)),
         } {
             Ok(value)
         } else {

@@ -39,44 +39,6 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
             }),
         );
     }
-
-    pub(super) fn log_rate_outcome(&self, plan: &AttackLeechPlan, status: &RateWriteStatus) {
-        let Some(faults) = &self.faults else { return };
-        let (outcome, failure, observed) = match status {
-            RateWriteStatus::NotKept(actual) => ("not kept; the readback fields are the game's state", None, Some(actual)),
-            RateWriteStatus::Uncertain { message } => ("unconfirmed; do not automatically retry", Some(message.as_str()), None),
-            _ => return,
-        };
-        let before = plan.before();
-        let details = FaultDetails {
-            code: Some(if observed.is_some() { "EditNotKept" } else { "WriteUncertain" }.into()),
-            write_outcome: Some(outcome.into()),
-            expected: Some(json!({
-                "process": {"pid": before.process.pid, "created": before.process.created, "executable": before.process.executable},
-                "generation": before.generation, "sequence": before.sequence, "manager": before.manager,
-                "observation": match before.read { AttackLeechRead::Available(ref value) => Some(rate(value)), _ => None },
-            })),
-            edit: Some(json!({"target": format!("{:?}", plan.target()), "requested": plan.requested_value(), "projectedBits": plan.projected_bits()})),
-            readback: Some(json!({"observation": observed.map(rate), "projected": rate(plan.projected())})),
-            ..Default::default()
-        };
-        faults.write(
-            "Trainer field write",
-            failure,
-            Some(&details),
-            Some(if observed.is_some() {
-                "The game's observed values are retained. The session may remain connected."
-            } else {
-                "Release the session and explicitly reconnect; never replay this write."
-            }),
-        );
-    }
-}
-
-fn rate(value: &AttackLeechObservation) -> Value {
-    let identity = |value: ObservedObjectIdentity| json!({"wrapper": value.wrapper_token(), "native": value.native_token()});
-    json!({"manager": identity(value.manager), "actor": identity(value.actor), "stats": identity(value.stats),
-        "attackRateBits": value.attack_rate.raw_bits, "increasedLeechRateBits": value.increased_leech_rate.raw_bits})
 }
 
 /// The item as the game reported it, as fault reports record it.

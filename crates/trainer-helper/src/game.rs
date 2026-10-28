@@ -35,7 +35,7 @@ pub use accessors::presence;
 pub use apply::WriteError;
 pub use discovery::DiscoveredRuntime;
 use discovery::Images;
-pub use features::{damage, hooks::GameplayHookTarget};
+pub use features::{damage, hooks::GameplayHookTarget, persistent_stat::StatBinding};
 
 /// A strong GC root on a managed object, held for one call.
 pub(crate) type Root<'a, 'r> = StrongRoot<'a, 'r>;

@@ -48,6 +48,9 @@ unsafe extern "C-unwind" fn native_callback(events: *const MethodInfo) {
                     GameplayHook::MysteriousRift => RIFT.load(SeqCst),
                     GameplayHook::Offhand => OFFHAND.load(SeqCst),
                     GameplayHook::IncomingDamage | GameplayHook::DamageDealt => DAMAGE.load(SeqCst),
+                    GameplayHook::AttackRate | GameplayHook::LeechRate => {
+                        return server::failure(ResponseCode::Refused, "This native fixture has no character stat receiver");
+                    }
                 };
                 let class = if hook == GameplayHook::Offhand {
                     NonNull::new(OFFHAND_CLASS.load(SeqCst))

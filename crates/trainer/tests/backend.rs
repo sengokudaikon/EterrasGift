@@ -8,8 +8,6 @@ use std::{
     },
     time::Duration,
 };
-#[path = "backend/fields.rs"]
-mod fields;
 #[path = "backend/mapping.rs"]
 mod mappings;
 #[path = "backend/profiles.rs"]
@@ -18,7 +16,6 @@ mod profiles;
 mod unique;
 #[path = "backend/write.rs"]
 mod writes;
-use eg_trainer::fields::{AttackLeechDecision, AttackLeechPlan, AttackLeechTarget, RateWriteStatus};
 use eg_trainer::write::{ForgePlan, WriteControl, WriteObservation, WriteOutcome, WritePlan, WriteStatus};
 
 use eg_core::game_log::{GameLogState, GameLogStatus, GameReadiness};
@@ -135,14 +132,7 @@ struct Shared {
     departure_proven: AtomicBool,
     write_block: Block,
     refresh_block: Block,
-    rate_write_block: Block,
-    rate_readback_block: Block,
-    rate_write_enabled: AtomicBool,
-    rate_write_result: Mutex<Option<Result<RateWriteStatus, BackendError>>>,
     write_enabled: AtomicBool,
-    attack_leech_enabled: AtomicBool,
-    attack_leech_read: Mutex<eg_trainer_wire::fields::AttackLeechRead>,
-    attack_leech_block: Block,
     forge_item: Mutex<Option<ForgeSnapshot>>,
     write_result: Mutex<Option<WriteStatus>>,
     hooks_supported: AtomicBool,
@@ -184,16 +174,7 @@ impl Shared {
             departure_proven: AtomicBool::new(true),
             write_block: Block::default(),
             refresh_block: Block::default(),
-            rate_write_block: Block::default(),
-            rate_readback_block: Block::default(),
-            rate_write_enabled: AtomicBool::new(false),
-            rate_write_result: Mutex::new(None),
             write_enabled: AtomicBool::new(false),
-            attack_leech_enabled: AtomicBool::new(false),
-            attack_leech_read: Mutex::new(eg_trainer_wire::fields::AttackLeechRead::Unavailable(
-                eg_trainer_wire::fields::AttackLeechUnavailable::StatsAbsent,
-            )),
-            attack_leech_block: Block::default(),
             forge_item: Mutex::new(None),
             write_result: Mutex::new(None),
             hooks_supported: AtomicBool::new(false),
@@ -268,8 +249,6 @@ impl BackendConnection for Connection {
         let writes = self.shared.write_enabled.load(Ordering::SeqCst);
         backend::Capabilities {
             read_forge: true,
-            read_attack_leech: self.shared.attack_leech_enabled.load(Ordering::SeqCst),
-            attack_leech_rate: self.shared.rate_write_enabled.load(Ordering::SeqCst),
             level_requirement: writes,
             status_fields: [writes; 7],
             base_change: writes,
@@ -283,7 +262,6 @@ impl BackendConnection for Connection {
     async fn write(&mut self, plan: &WritePlan, control: &mut dyn WriteControl) -> Result<WriteOutcome<WriteObservation>, BackendError> {
         match plan {
             WritePlan::Forge(plan) => Ok(self.edit_forge(plan, control).await?.map(WriteObservation::forge)),
-            WritePlan::Field(plan) => Ok(self.set_attack_leech_rate(plan, control).await?.map(WriteObservation::Field)),
         }
     }
     async fn refresh(&mut self) -> Result<RuntimeStatus, BackendError> {
@@ -344,10 +322,6 @@ impl BackendConnection for Connection {
         }
         mappings::table(expected, request)
     }
-    async fn read_attack_leech(&mut self) -> Result<eg_trainer_wire::fields::AttackLeechRead, BackendError> {
-        self.shared.call("attack-leech", &self.shared.attack_leech_block).await;
-        Ok(*self.shared.attack_leech_read.lock().unwrap())
-    }
     fn observed_hook(&self, _: eg_trainer_wire::hooks::GameplayHook) -> Option<bool> {
         self.shared.hooks_suspended.load(Ordering::SeqCst).then_some(false)
     }
@@ -370,30 +344,6 @@ impl BackendConnection for Connection {
     }
 }
 impl Connection {
-    async fn set_attack_leech_rate(&mut self, plan: &AttackLeechPlan, control: &mut dyn WriteControl) -> Result<RateWriteStatus, BackendError> {
-        if !control.allowed() {
-            return Err(BackendError::blocked(ErrorKind::Superseded, "cleanup before rate submission"));
-        }
-        self.shared.call("rate-write", &self.shared.rate_write_block).await;
-        let result = self
-            .shared
-            .rate_write_result
-            .lock()
-            .unwrap()
-            .take()
-            .unwrap_or_else(|| Ok(RateWriteStatus::Confirmed(*plan.projected())));
-        if let Ok(RateWriteStatus::Confirmed(actual) | RateWriteStatus::NotKept(actual)) = &result {
-            // Scripted connection only: model Session's ACK/fresh-read boundary;
-            // this does not claim native ACK or actual IL2CPP execution.
-            *self.shared.attack_leech_read.lock().unwrap() = eg_trainer_wire::fields::AttackLeechRead::Available(*actual);
-            self.shared.record("rate-ack");
-            if !control.allowed() {
-                return Ok(RateWriteStatus::uncertain("cleanup after ACK before independent read"));
-            }
-            self.shared.call("rate-confirmation-read", &self.shared.rate_readback_block).await;
-        }
-        result
-    }
     async fn edit_forge(&mut self, plan: &ForgePlan, control: &mut dyn WriteControl) -> Result<WriteStatus, BackendError> {
         if !control.allowed() {
             return Err(BackendError::blocked(ErrorKind::Superseded, "cleanup before submission"));

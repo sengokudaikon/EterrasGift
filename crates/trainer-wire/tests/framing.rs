@@ -3,7 +3,6 @@
 
 use eg_trainer_wire::{
     definitions::{self, ItemLimits, ValueRange},
-    fields::{self, AttackLeechObservation, AttackLeechRead, AttackLeechTarget, AttackLeechUnavailable, ObservedObjectIdentity, ObservedRate},
     forge::{self, AffixSnapshot, ForgeSnapshot, ItemStatus, UniqueIdentity},
     hooks::{GameplayHook, HookObservation, PatchState},
     locale::{self, GameLocale},
@@ -12,7 +11,6 @@ use eg_trainer_wire::{
         UniquePreviewRequest, UniqueRollChange,
     },
     protocol::{Discovery, DispatcherSpec, ProtocolError, REQUEST_HEADER_SIZE, Request, RequestFrame, Response, ResponseCode},
-    rate_write::AttackLeechRateWrite,
     write::{AffixRollChange, AffixRolls, ForgeMutation, ForgeWrite, StatusField},
 };
 use std::fmt::Debug;
@@ -66,16 +64,6 @@ fn item() -> ForgeSnapshot {
     item
 }
 
-fn observation() -> AttackLeechObservation {
-    AttackLeechObservation {
-        manager: ObservedObjectIdentity::new(0x0102, 0x1112).unwrap(),
-        actor: ObservedObjectIdentity::new(0x2122, 0x3132).unwrap(),
-        stats: ObservedObjectIdentity::new(0x4142, 0x5152).unwrap(),
-        attack_rate: ObservedRate { raw_bits: 0x7fc1_2345 },
-        increased_leech_rate: ObservedRate { raw_bits: 0x8000_0000 },
-    }
-}
-
 fn requests() -> Vec<Request> {
     let dispatcher = dispatcher();
     let edit = |mutation| Request::EditForge(ForgeWrite::edit(dispatcher, 0x99, item(), mutation).unwrap());
@@ -87,10 +75,6 @@ fn requests() -> Vec<Request> {
         Request::ClearHooks { dispatcher },
         Request::ReadForge { dispatcher },
         Request::ReadLocale { dispatcher },
-        Request::ReadAttackLeech {
-            dispatcher,
-            expected_manager: 0x1817_1615_1413_1211,
-        },
         Request::DescribeImplicits(description()),
         Request::DescribeUnique(description()),
         Request::PreviewUnique(UniquePreviewRequest::new(dispatcher, 0x99, item(), vec![UniqueRollChange { index: 1, value: 17 }]).unwrap()),
@@ -148,11 +132,6 @@ fn requests() -> Vec<Request> {
             unrestricted: false,
         }),
     ];
-    for target in [AttackLeechTarget::AttackRate, AttackLeechTarget::IncreasedLeechRate] {
-        requests.push(Request::SetAttackLeechRate(
-            AttackLeechRateWrite::new(dispatcher, observation(), target, 1_f32.to_bits()).unwrap(),
-        ));
-    }
     for hook in GameplayHook::ALL {
         requests.push(Request::SetGameplayHook {
             dispatcher,
@@ -196,7 +175,7 @@ fn every_request_is_exactly_its_own_frame() {
 
 #[test]
 fn retired_operations_are_refused_at_the_header() {
-    for operation in [19_u32, 21] {
+    for operation in [19_u32, 21, 23, 24] {
         let mut header = Request::Status { dispatcher: dispatcher() }.encode();
         header[4..8].copy_from_slice(&operation.to_le_bytes());
         assert!(Request::decode_header(&header[..REQUEST_HEADER_SIZE]).is_err(), "operation {operation}");
@@ -205,11 +184,6 @@ fn retired_operations_are_refused_at_the_header() {
 
 #[test]
 fn every_payload_is_exactly_its_own_encoding() {
-    let available = AttackLeechRead::Available(observation());
-    exact("available fields", &fields::encode(&available), &available, fields::decode);
-    let unavailable = AttackLeechRead::Unavailable(AttackLeechUnavailable::GraphChanged);
-    exact("unavailable fields", &fields::encode(&unavailable), &unavailable, fields::decode);
-
     exact("item", &forge::encode(Some(&item())).unwrap(), &Some(item()), forge::decode);
 
     let locale = GameLocale {

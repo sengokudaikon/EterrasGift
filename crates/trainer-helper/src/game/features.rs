@@ -8,5 +8,6 @@ mod forge;
 pub(crate) mod hooks;
 mod leech_rate;
 mod mapping;
+pub mod persistent_stat;
 mod stat;
 mod unique;

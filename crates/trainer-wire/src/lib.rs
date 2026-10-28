@@ -10,7 +10,6 @@ pub mod locale;
 pub mod mapping;
 pub mod process;
 pub mod protocol;
-pub mod rate_write;
 pub mod rules;
 pub mod transport;
 pub mod write;

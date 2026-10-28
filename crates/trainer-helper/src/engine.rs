@@ -15,7 +15,6 @@ use eg_il2cpp_runtime::{
 };
 use eg_trainer_wire::{
     protocol::{Discovery, DispatcherSpec, Request, Response, ResponseCode, RuntimeStatus},
-    rate_write::AttackLeechRateWrite,
     write::ForgeWrite,
 };
 use std::{
@@ -226,25 +225,6 @@ unsafe fn edit_forge(write: &ForgeWrite) -> Response {
     }
 }
 
-unsafe fn set_attack_leech_rate(write: &AttackLeechRateWrite) -> Response {
-    // SAFETY: the admitted engine main thread calls after the original dispatcher.
-    // The unsafe start contract ASSUMES this conditional CURRENT-player mutation
-    // and exclusive initialized graph/scalar/native lifetime through full readback.
-    // Startup checks do not establish exclusive game-graph access.
-    // Expected wire tokens are comparison data only; RuntimeAccess resolves and
-    // roots the current graph rather than dereferencing them. Its only returned
-    // post-setter error is Failed, which never permits retry or rollback.
-    unsafe {
-        runtime_operation(|runtime, access, attached| {
-            let writer = runtime.writes;
-            let observation = access
-                .set_attack_leech(attached, writer, write.expected(), write.target(), write.desired_value())
-                .map_err(write_failure)?;
-            done(eg_trainer_wire::fields::encode(&eg_trainer_wire::fields::AttackLeechRead::Available(observation)))
-        })
-    }
-}
-
 unsafe fn read_forge() -> Response {
     // SAFETY: called only after the engine original returns on its captured main thread.
     // The startup contract retains runtime code. Absence of concurrent graph mutation is an external
@@ -297,19 +277,6 @@ unsafe fn read_affix_mapping(query: &eg_trainer_wire::mapping::AffixMappingQuery
             let writes = runtime.writes;
             let page = access.read_affix_mapping(attached, writes, invoke, query).map_err(game_failure)?;
             encoded(eg_trainer_wire::mapping::encode_mapping(&page))
-        })
-    }
-}
-
-unsafe fn read_attack_leech(expected_manager: u64) -> Response {
-    // SAFETY: the established engine main thread calls only after the original
-    // dispatcher returns. The unsafe start contract additionally ASSUMES initialized
-    // caches, nonmoving GC and exclusive reference/scalar/native-lifetime access
-    // throughout this rooted field copy; no game getter or refresh is called.
-    unsafe {
-        runtime_operation(|_, access, attached| {
-            let observation = access.read_attack_leech(attached, expected_manager).map_err(game_failure)?;
-            done(eg_trainer_wire::fields::encode(&observation))
         })
     }
 }
@@ -458,14 +425,12 @@ fn after_original(state: &Shared) {
                 // SAFETY: verified callback thread; mapping changes only checked detached copies within the rooted graph span.
                 Request::MapRoll(query) => unsafe { read_affix_mapping(&query) },
                 // SAFETY: verified callback thread and the stable player/stat graph span assumed by unsafe start.
-                Request::ReadAttackLeech { expected_manager, .. } => unsafe { read_attack_leech(expected_manager) },
                 // SAFETY: verified callback thread and the completed locale/trusted-getter assumptions of unsafe start.
                 Request::ReadLocale { .. } => unsafe { read_locale() },
                 // SAFETY: the same established thread plus this narrow operation's
                 // explicit exclusive-write/root/metadata contract described above.
                 Request::EditForge(write) => unsafe { edit_forge(&write) },
                 // SAFETY: verified callback thread and exclusive current-player scalar mutation span assumed by unsafe start.
-                Request::SetAttackLeechRate(write) => unsafe { set_attack_leech_rate(&write) },
                 Request::Discover | Request::Unload | Request::ClearHooks { .. } => server::failure(ResponseCode::Refused, "This request belongs on the control thread"),
             }
         });

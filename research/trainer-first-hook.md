@@ -261,3 +261,38 @@ checks pass for the native leaves (8), shared helper lifecycle (2), wire hook co
 commands (11), and the two affected UI model tests. No captures or live game run.
 The normal debug desktop/helper build is retained for manual verification; no new
 scratch workspace or Unity build was created.
+
+
+## Independent persistent scalar controls (2026-10-28)
+
+Attack rate and increased leech rate now have separate profile switches and absolute values (the previous editor's
+0.01–20 and -1–100 ranges). The combined `attack-leech` field editor, paired snapshots, planner and read/write RPCs
+are retired; operation numbers 23 and 24 remain rejected. Other direct field editors remain unsupported.
+
+Each feature selects one character accessor. `features/stat` resolves and reads just that selected field over the
+rooted current player, using the shared reader. `persistent_stat` validates mutable scalar storage through `apply`
+and pins the managed receiver for the enabled lifetime. Discovery still resolves metadata only.
+
+Shipped-code inspection of GameAssembly SHA-256 `323e9183f3bee600b6c9e1c469218b9de926e9044f2ca3d44fae8a0ec9a91464`:
+- `CharacterStats.calculateAttackRate`, `setMainHandAttackRate(float,bool,bool)` and `setOffHandAttackRate(float,bool)`
+  each write `attackRate`; the weapon setters inline the calculation, so all three entries are covered.
+- `BaseStats.ApplyExternalStats` resets and rebuilds `increasedLeechRate`. Its caller `UpdateStatsInternal` runs
+  notifications afterward, so the override is present before those notifications. Leech consumers read the field
+  directly; replacing `getIncreasedLeechRate` would not cover them.
+
+The shared lifecycle now supports both retained leaves and retained original-first scalar gateways. The latter
+preserves register arguments and, where needed, the fifth stack argument, runs the original once, then records its
+new field value and applies the selected bits only for the pinned receiver while offline. Its unwind table and code
+remain process-owned; no generated path calls helper code. Recalculations are assumed serialized on the game's main
+thread. A pending original may finish after close, but its closed post-call path cannot reapply the override.
+
+Changing a value closes/drains the override, conditionally restores the latest baseline and applies the new value.
+Off, manager loss and unload close admission, drain scalar stores, conditionally restore fields, restore entry bytes
+and release pins. A later independent game write wins over conditional restoration. Failure retains installed owners
+and pins. Independent readback checks patch state, settings and the current player's selected scalar/identity; a
+replacement stats object cannot be confirmed using the old pinned object. These are runtime overrides, not saves.
+
+Targeted authored tests cover independent accessor availability, graph/type/root checks, recalculation, receiver and
+online filtering, the fifth argument, value changes, entry restoration and a delayed original crossing close.
+Session tests cover separate controls, values and readback. Live Last Epoch verification remains pending; no captures
+or real-game run were part of this change.

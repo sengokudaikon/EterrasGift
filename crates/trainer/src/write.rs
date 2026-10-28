@@ -2,13 +2,12 @@
 //! Construction is pure. Only an explicit submission may execute a plan; neither
 //! failure nor a lost reply permits a retry. An address here is an opaque token.
 
-use crate::fields::AttackLeechPlan;
 use crate::{
     definitions::catalog::GameCatalog,
     item::edit::{self, EditError, ExpectedObservation, ItemEdit, PreparedEdit},
 };
+use eg_trainer_wire::forge::ForgeSnapshot;
 pub use eg_trainer_wire::protocol::ResponseCode;
-use eg_trainer_wire::{fields::AttackLeechObservation, forge::ForgeSnapshot};
 
 /// Checked after potentially lengthy local validation and immediately before
 /// entering transport. A false result cancels only work that has not been sent.
@@ -192,24 +191,15 @@ pub struct WriteRecord<P = ForgePlan, T = ForgeSnapshot> {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum WritePlan {
     Forge(Box<ForgePlan>),
-    Field(Box<AttackLeechPlan>),
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum WriteObservation {
     Forge(Box<ForgeSnapshot>),
-    Field(AttackLeechObservation),
 }
 impl WriteObservation {
     pub(crate) fn into_forge(self) -> ForgeSnapshot {
         match self {
             Self::Forge(actual) => *actual,
-            _ => unreachable!("forge plan returned field data"),
-        }
-    }
-    pub(crate) fn into_field(self) -> AttackLeechObservation {
-        match self {
-            Self::Field(actual) => actual,
-            _ => unreachable!("field plan returned forge data"),
         }
     }
     pub fn forge(actual: ForgeSnapshot) -> Self {
@@ -220,14 +210,11 @@ impl WritePlan {
     fn matches(&self, actual: &WriteObservation) -> bool {
         match (self, actual) {
             (Self::Forge(plan), WriteObservation::Forge(actual)) => plan.matches(actual),
-            (Self::Field(plan), WriteObservation::Field(actual)) => actual == plan.projected(),
-            _ => false,
         }
     }
     pub fn projected(&self) -> WriteObservation {
         match self {
             Self::Forge(plan) => WriteObservation::Forge(Box::new(plan.projected().clone())),
-            Self::Field(plan) => WriteObservation::Field(*plan.projected()),
         }
     }
     /// Compare only identity here. Full value equality is checked separately;
@@ -235,11 +222,6 @@ impl WritePlan {
     pub(crate) fn same_target(&self, actual: &WriteObservation) -> bool {
         match (self, actual) {
             (Self::Forge(plan), WriteObservation::Forge(actual)) => actual.item == plan.before().snapshot().item && actual.individual_id == plan.before().snapshot().individual_id,
-            (Self::Field(plan), WriteObservation::Field(actual)) => {
-                let expected = plan.projected();
-                actual.manager == expected.manager && actual.actor == expected.actor && actual.stats == expected.stats
-            }
-            _ => false,
         }
     }
     pub(crate) fn observe(&self, actual: WriteObservation) -> WriteOutcome<WriteObservation> {
@@ -268,10 +250,5 @@ impl WritePlan {
 impl From<ForgePlan> for WritePlan {
     fn from(plan: ForgePlan) -> Self {
         Self::Forge(Box::new(plan))
-    }
-}
-impl From<AttackLeechPlan> for WritePlan {
-    fn from(plan: AttackLeechPlan) -> Self {
-        Self::Field(Box::new(plan))
     }
 }

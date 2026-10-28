@@ -7,7 +7,6 @@
 
 use crate::{
     forge,
-    rate_write::AttackLeechRateWrite,
     write::{ForgeMutation, ForgeWrite, MAX_EXPECTED_BYTES},
 };
 use std::{error::Error, fmt};
@@ -36,8 +35,6 @@ pub mod op {
     pub const CHANGE_IDENTITY: u32 = 17;
     pub const READ_FORGE: u32 = 18;
     pub const READ_LOCALE: u32 = 20;
-    pub const READ_ATTACK_LEECH: u32 = 23;
-    pub const SET_ATTACK_LEECH_RATE: u32 = 24;
     pub const UNLOAD: u32 = 25;
     pub const SET_GAMEPLAY_HOOK: u32 = 26;
     pub const READ_GAMEPLAY_HOOK: u32 = 27;
@@ -111,13 +108,6 @@ pub enum Request {
     DescribeUnique(crate::mapping::ForgeDescriptionRequest),
     PreviewUnique(crate::mapping::UniquePreviewRequest),
     MapRoll(crate::mapping::AffixMappingQuery),
-    /// Conditional CURRENT-player intent; full expected tokens/bits, no lifetime ticket.
-    SetAttackLeechRate(AttackLeechRateWrite),
-    /// Reads cached player fields only; expected_manager is an opaque identity token.
-    ReadAttackLeech {
-        dispatcher: DispatcherSpec,
-        expected_manager: u64,
-    },
 }
 
 impl Request {
@@ -129,13 +119,11 @@ impl Request {
             | Self::ReadGameplayHook { dispatcher, .. }
             | Self::ClearHooks { dispatcher }
             | Self::ReadForge { dispatcher }
-            | Self::ReadLocale { dispatcher }
-            | Self::ReadAttackLeech { dispatcher, .. } => Some(*dispatcher),
+            | Self::ReadLocale { dispatcher } => Some(*dispatcher),
             Self::EditForge(write) => Some(write.dispatcher()),
             Self::DescribeImplicits(query) | Self::DescribeUnique(query) => Some(query.dispatcher),
             Self::PreviewUnique(query) => Some(query.dispatcher()),
             Self::MapRoll(query) => Some(query.dispatcher()),
-            Self::SetAttackLeechRate(write) => Some(write.dispatcher()),
         }
     }
 }

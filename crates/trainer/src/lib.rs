@@ -9,7 +9,6 @@ pub mod backend;
 pub mod connect;
 pub mod definitions;
 pub mod features;
-pub mod fields;
 pub mod item;
 pub mod session;
 pub mod write;

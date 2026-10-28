@@ -45,11 +45,6 @@ pub(crate) fn fail_root(object: usize) {
     FAIL_ROOT.set(object);
 }
 
-/// Handles on `object` report no target from now on.
-pub(crate) fn lose_target(object: usize) {
-    LOST_TARGET.set(object);
-}
-
 pub(crate) unsafe extern "C-unwind" fn domain() -> *mut raw::Domain {
     token(0x20)
 }

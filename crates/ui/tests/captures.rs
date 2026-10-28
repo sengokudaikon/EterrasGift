@@ -1927,8 +1927,8 @@ fn trainer_captures(session: &Session) {
     let ui = setup("forge", 0, 1100, 700, &[character("Mira", "Primalist")]);
     session.capture(&ui, "trainer-setup-forge-1100");
 
-    // A connected game (holding Combat's rates, so its editor reads). A switch turned on says where it stands.
-    let connected = || Some(FakeTrainer::holding(&[("attack-leech", &[("", 1.0), ("", 0.3)])]));
+    // A connected game. A switch turned on says where it stands.
+    let connected = || Some(FakeTrainer::default());
     let ui = open("combat", 1, 1100, 700, connected());
     sizes(&ui, "trainer-combat", &small);
     session.click(628.0, 169.0);
@@ -2040,13 +2040,6 @@ fn trainer_captures(session: &Session) {
     state(&ui).invoke_apply(5);
     show(&ui);
     sizes(&ui, "character-points", &[(680, 580), (940, 580), (1100, 700), (1440, 900), (1920, 1080)]);
-
-    let fake = FakeTrainer::holding(&[("attack-leech", &[("", 1.0), ("", 0.3)])]);
-    let ui = open("combat", 1, 1100, 700, Some(fake));
-    state(&ui).invoke_field_committed(5, 0, "1.1".into());
-    state(&ui).invoke_apply(5);
-    show(&ui);
-    sizes(&ui, "combat-rates", &[(680, 580), (940, 580), (1100, 700), (1920, 1080)]);
 
     let fake = FakeTrainer::holding(&[("currency", &[("", 1200.0), ("", 3.0), ("", 45.0)])]);
     let ui = open("stash", 0, 1100, 700, Some(fake));

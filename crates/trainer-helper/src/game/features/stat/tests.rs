@@ -5,7 +5,7 @@ use crate::game::{
     test_fakes::{self, rooted, rooted_objects, roots, token},
 };
 use eg_il2cpp_runtime::{ThreadContext, raw};
-use eg_trainer_wire::fields::{AttackLeechUnavailable, ObservedObjectIdentity};
+use eg_trainer_wire::fields::PlayerUnavailable;
 use std::ffi::CStr;
 use std::{
     cell::{Cell, RefCell},
@@ -49,25 +49,6 @@ enum Fault {
     ByRef,
     ThreadStatic,
     Missing,
-}
-
-#[derive(Clone, Copy, Debug, Default)]
-enum StoreMode {
-    #[default]
-    Normal,
-    Ignore,
-    OtherBits,
-    Online,
-    MissingManager,
-    ReplacedManager,
-    ManagerNative,
-    DeadManager,
-    ActorEdge,
-    StatsEdge,
-    DeadActor,
-    DeadStats,
-    LostRootTarget,
-    InvalidBoolean,
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -135,9 +116,6 @@ thread_local! {
     static POINTER_READS: Cell<u32> = const { Cell::new(0) };
     static DRIFT: Cell<Drift> = const { Cell::new(Drift::None) };
     static ASSEMBLIES: [Ptr; 1] = const { [std::ptr::without_provenance_mut(9)] };
-    static STORES: Cell<u32> = const { Cell::new(0) };
-    static LAST_STORE: Cell<(usize,u32)> = const { Cell::new((0,0)) };
-    static STORE_MODE: Cell<StoreMode> = const { Cell::new(StoreMode::Normal) };
 }
 
 fn fault(field: usize) -> Option<Fault> {
@@ -356,7 +334,7 @@ unsafe extern "C-unwind" fn field_get(object: *mut raw::Object, field: Ptr, dest
         }
         _ => panic!("unexpected instance field"),
     });
-    if field as usize == LEECH {
+    if matches!(field as usize, ATTACK | LEECH) {
         // Deterministic fake-export seam, not a concurrent real-object data race.
         GRAPH.with_borrow_mut(|graph| match DRIFT.get() {
             Drift::None => {}
@@ -390,9 +368,6 @@ fn fixture() -> (RuntimeAccess, ThreadContext) {
     RATE_READS.set(0);
     POINTER_READS.set(0);
     DRIFT.set(Drift::None);
-    STORES.set(0);
-    LAST_STORE.set((0, 0));
-    STORE_MODE.set(StoreMode::Normal);
     let mut api = RuntimeAccess::test_stubs();
     api.domain_get = test_fakes::domain;
     api.assemblies = assemblies;
@@ -417,45 +392,56 @@ fn fixture() -> (RuntimeAccess, ThreadContext) {
     (api, thread)
 }
 
-fn read(api: &RuntimeAccess, thread: &ThreadContext, expected: u64) -> Result<AttackLeechRead, GameError> {
-    let attached = thread.attach().unwrap();
-    // SAFETY: deterministic same-thread owned fake graph/metadata; every export
-    // validates destination width and root presence, without dereferencing tokens.
-    let result = unsafe { api.read_attack_leech(&attached, expected) };
-    assert_eq!(roots(), 0, "root leaked after read");
-    result
+#[derive(Debug, PartialEq)]
+enum Read {
+    Available(u32),
+    Unavailable(PlayerUnavailable),
 }
-
-#[test]
-fn full_reader_owns_exact_raw_snapshot_and_releases_all_roots() {
-    let (api, thread) = fixture();
-    let AttackLeechRead::Available(value) = read(&api, &thread, MANAGER as u64).unwrap() else {
-        panic!("not available")
-    };
-    assert_eq!(
-        (value.manager.wrapper_token(), value.actor.wrapper_token(), value.stats.wrapper_token()),
-        (MANAGER as u64, ACTOR as u64, STATS as u64)
-    );
-    assert_eq!(
-        (value.manager.native_token(), value.actor.native_token(), value.stats.native_token()),
-        (0xa000, 0xb000, 0xc000)
-    );
-    assert_eq!((value.attack_rate.raw_bits, value.increased_leech_rate.raw_bits), (0x3f8ccccd, 0xbe000000));
-    for bits in [0, 0x80000000, 0x3c23d70a, 0x3c23d709, 0x7f800000, 0x7fc12345, 101_f32.to_bits()] {
-        GRAPH.with_borrow_mut(|graph| {
-            graph.attack = bits;
-            graph.leech = bits;
-        });
-        let AttackLeechRead::Available(snapshot) = read(&api, &thread, MANAGER as u64).unwrap() else {
-            panic!("raw value rejected")
-        };
-        assert_eq!((snapshot.attack_rate.raw_bits, snapshot.increased_leech_rate.raw_bits), (bits, bits));
+fn read_selected(api: &RuntimeAccess, thread: &ThreadContext, expected: u64, feature: &StatFeature) -> Result<Read, GameError> {
+    let attached = thread.attach().unwrap();
+    // SAFETY: deterministic fixture exports validate roots/field widths and never dereference the identity tokens.
+    let result = unsafe { api.selected_stat(&attached, expected, feature) }.map(|selected| Read::Available(selected.bits));
+    assert_eq!(roots(), 0);
+    match result {
+        Ok(read) => Ok(read),
+        Err(PlayerError::Unavailable(reason)) => Ok(Read::Unavailable(reason)),
+        Err(PlayerError::Contract(error)) => Err(error),
     }
 }
-
+fn read(api: &RuntimeAccess, thread: &ThreadContext, expected: u64) -> Result<Read, GameError> {
+    read_selected(api, thread, expected, &super::super::attack_rate::ATTACK_RATE)
+}
+#[test]
+fn each_accessor_reads_without_resolving_the_other_stat() {
+    let (api, thread) = fixture();
+    FAULT.set(Some((LEECH, Fault::Missing)));
+    assert_eq!(read(&api, &thread, MANAGER as u64).unwrap(), Read::Available(0x3f8ccccd));
+    FAULT.set(Some((ATTACK, Fault::Missing)));
+    assert_eq!(
+        read_selected(&api, &thread, MANAGER as u64, &super::super::leech_rate::LEECH_RATE).unwrap(),
+        Read::Available(0xbe000000)
+    );
+}
+#[test]
+fn selected_stat_rejects_wrong_width_owner_and_storage_before_reading() {
+    let (api, thread) = fixture();
+    for fault in [
+        Fault::Type(WRONG_PRIMITIVE),
+        Fault::Parent(FINDER + 500),
+        Fault::ByRef,
+        Fault::ThreadStatic,
+        Fault::Missing,
+        Fault::Flags(0x10),
+        Fault::Flags(0x40),
+    ] {
+        FAULT.set(Some((ATTACK, fault)));
+        assert!(matches!(read(&api, &thread, MANAGER as u64), Err(GameError::Contract(_))));
+        assert_eq!(RATE_READS.get(), 0);
+    }
+}
 #[test]
 fn offline_and_graph_absence_are_typed_before_rate_copy() {
-    use AttackLeechUnavailable::*;
+    use PlayerUnavailable::*;
     let (api, thread) = fixture();
     for (change, reason) in [
         (0, OfflineRequired),
@@ -477,81 +463,19 @@ fn offline_and_graph_absence_are_typed_before_rate_copy() {
             6 => graph.stats_actor = 0,
             _ => unreachable!(),
         });
-        assert_eq!(read(&api, &thread, MANAGER as u64).unwrap(), AttackLeechRead::Unavailable(reason));
+        assert_eq!(read(&api, &thread, MANAGER as u64).unwrap(), Read::Unavailable(reason));
         assert_eq!(RATE_READS.get(), 0);
     }
     GRAPH.set(Graph::default());
     for expected in [0, MANAGER as u64 + 1] {
-        assert_eq!(read(&api, &thread, expected).unwrap(), AttackLeechRead::Unavailable(ManagerChanged));
+        assert_eq!(read(&api, &thread, expected).unwrap(), Read::Unavailable(ManagerChanged));
     }
     for index in 0..3 {
         GRAPH.set(Graph::default());
         GRAPH.with_borrow_mut(|graph| graph.native[index] = 0);
         let expected = if index == 0 { ManagerAbsent } else { NativeObjectDestroyed };
-        assert_eq!(read(&api, &thread, MANAGER as u64).unwrap(), AttackLeechRead::Unavailable(expected));
+        assert_eq!(read(&api, &thread, MANAGER as u64).unwrap(), Read::Unavailable(expected));
     }
-    assert_eq!(RATE_READS.get(), 0);
-}
-
-#[test]
-fn valid_unsupported_stats_classes_are_unavailable_while_wrong_reference_class_is_contract() {
-    let (api, thread) = fixture();
-    for class in [BASE, UNSUPPORTED_BASE, SHADOW_CHARACTER] {
-        GRAPH.with_borrow_mut(|graph| graph.stats_class = class);
-        assert_eq!(
-            read(&api, &thread, MANAGER as u64).unwrap(),
-            AttackLeechRead::Unavailable(AttackLeechUnavailable::UnsupportedStatsClass)
-        );
-        assert_eq!(RATE_READS.get(), 0);
-    }
-    GRAPH.with_borrow_mut(|graph| graph.stats_class = ACTOR_CLASS);
-    assert!(matches!(read(&api, &thread, MANAGER as u64), Err(GameError::Contract(_))));
-    assert_eq!(RATE_READS.get(), 0);
-}
-
-#[test]
-fn wrong_field_width_declaring_owner_storage_and_reference_shape_never_reach_destination() {
-    let (api, thread) = fixture();
-    for field in [
-        ONLINE,
-        MANAGER_STATIC,
-        ACTOR_STATIC,
-        CACHED,
-        MANAGER_ACTOR,
-        ACTOR_MANAGER,
-        ACTOR_STATS,
-        STATS_ACTOR,
-        ATTACK,
-        LEECH,
-    ] {
-        let static_field = field_schema(field).2;
-        for fault in [
-            Fault::Type(WRONG_PRIMITIVE),
-            Fault::Parent(FINDER + 500),
-            Fault::ByRef,
-            Fault::ThreadStatic,
-            Fault::Missing,
-            Fault::Flags(if static_field { 0 } else { 0x10 }),
-            Fault::Flags(0x40),
-        ] {
-            FAULT.set(Some((field, fault)));
-            assert!(matches!(read(&api, &thread, MANAGER as u64), Err(GameError::Contract(_))), "field {field}, {fault:?}");
-            assert_eq!(RATE_READS.get(), 0);
-        }
-    }
-    FAULT.set(None);
-    for class in [FINDER, MANAGER_CLASS, ACTOR_CLASS, BASE, CHARACTER, OBJECT] {
-        VALUE_CLASS.set(class);
-        POINTER_READS.set(0);
-        assert!(matches!(read(&api, &thread, MANAGER as u64), Err(GameError::Contract(_))));
-        assert_eq!(POINTER_READS.get(), 0);
-    }
-    VALUE_CLASS.set(0);
-    SINGLE_CODE.set(0x0d);
-    assert!(matches!(read(&api, &thread, MANAGER as u64), Err(GameError::Contract(_))));
-    GRAPH.with_borrow_mut(|graph| graph.online = 2);
-    SINGLE_CODE.set(0x0c);
-    assert!(matches!(read(&api, &thread, MANAGER as u64), Err(GameError::Contract(_))));
     assert_eq!(RATE_READS.get(), 0);
 }
 
@@ -575,17 +499,17 @@ fn end_gate_rejects_each_identity_edge_and_native_lifetime_drift_without_partial
         GRAPH.set(Graph::default());
         DRIFT.set(drift);
         let expected = match drift {
-            Drift::Online => AttackLeechUnavailable::OfflineRequired,
-            Drift::Manager | Drift::DeadManager => AttackLeechUnavailable::ManagerAbsent,
-            Drift::ReplacedManager | Drift::ManagerNative => AttackLeechUnavailable::ManagerChanged,
-            Drift::Dead => AttackLeechUnavailable::NativeObjectDestroyed,
-            _ => AttackLeechUnavailable::GraphChanged,
+            Drift::Online => PlayerUnavailable::OfflineRequired,
+            Drift::Manager | Drift::DeadManager => PlayerUnavailable::ManagerAbsent,
+            Drift::ReplacedManager | Drift::ManagerNative => PlayerUnavailable::ManagerChanged,
+            Drift::Dead => PlayerUnavailable::NativeObjectDestroyed,
+            _ => PlayerUnavailable::GraphChanged,
         };
-        assert_eq!(read(&api, &thread, MANAGER as u64).unwrap(), AttackLeechRead::Unavailable(expected), "{drift:?}");
+        assert_eq!(read(&api, &thread, MANAGER as u64).unwrap(), Read::Unavailable(expected), "{drift:?}");
     }
     GRAPH.set(Graph::default());
     DRIFT.set(Drift::None);
-    assert!(matches!(read(&api, &thread, MANAGER as u64).unwrap(), AttackLeechRead::Available(_)));
+    assert!(matches!(read(&api, &thread, MANAGER as u64).unwrap(), Read::Available(_)));
 }
 
 #[test]
@@ -619,266 +543,4 @@ fn boolean_intptr_and_single_must_have_exact_value_type_codes_before_any_copy() 
     }
     assert_eq!(POINTER_READS.get(), 0);
     assert_eq!(RATE_READS.get(), 0);
-}
-
-unsafe extern "C-unwind" fn set_rate(object: *mut raw::Object, field: *mut raw::FieldInfo, value: Ptr) {
-    assert_eq!(object as usize, STATS);
-    rooted(MANAGER);
-    rooted(ACTOR);
-    rooted(STATS);
-    assert_eq!(rooted_objects(), 3);
-    assert!(fault(field as usize).is_none());
-    assert!([ATTACK, LEECH].contains(&(field as usize)));
-    // SAFETY: the native candidate passes one initialized aligned f32 value slot
-    // after exact mutable Single/R4 validation. No object token is dereferenced.
-    let bits = unsafe { value.cast::<f32>().read().to_bits() };
-    STORES.set(STORES.get() + 1);
-    LAST_STORE.set((field as usize, bits));
-    GRAPH.with_borrow_mut(|graph| {
-        if !matches!(STORE_MODE.get(), StoreMode::Ignore) {
-            if field as usize == ATTACK {
-                graph.attack = bits;
-            } else {
-                graph.leech = bits;
-            }
-        }
-        match STORE_MODE.get() {
-            StoreMode::Normal | StoreMode::Ignore => {}
-            StoreMode::OtherBits => {
-                if field as usize == ATTACK {
-                    graph.leech ^= 1;
-                } else {
-                    graph.attack ^= 1;
-                }
-            }
-            StoreMode::Online => graph.online = 1,
-            StoreMode::MissingManager => graph.manager = 0,
-            StoreMode::ReplacedManager => graph.manager = MANAGER + 0x1000,
-            StoreMode::ManagerNative => graph.native[0] += 8,
-            StoreMode::DeadManager => graph.native[0] = 0,
-            StoreMode::ActorEdge => graph.actor_manager = 0,
-            StoreMode::StatsEdge => graph.stats_actor = 0,
-            StoreMode::DeadActor => graph.native[1] = 0,
-            StoreMode::DeadStats => graph.native[2] = 0,
-            StoreMode::LostRootTarget => test_fakes::lose_target(STATS),
-            StoreMode::InvalidBoolean => graph.online = 2,
-        }
-    });
-}
-
-fn current_observation(api: &RuntimeAccess, thread: &ThreadContext) -> AttackLeechObservation {
-    let AttackLeechRead::Available(observation) = read(api, thread, MANAGER as u64).unwrap() else {
-        panic!("expected available graph")
-    };
-    observation
-}
-
-fn write_rate(api: &RuntimeAccess, thread: &ThreadContext, expected: &AttackLeechObservation, which: AttackLeechTarget, value: f32) -> Result<AttackLeechObservation, WriteError> {
-    let attached = thread.attach().unwrap();
-    // SAFETY: owned same-thread fake graph/runtime, exact typed export behavior,
-    // explicit single current-field mutation authority; no process operations.
-    let result = unsafe { api.set_attack_leech(&attached, raw::FieldWriteApi::test_export(set_rate), expected, which, value) };
-    assert_eq!(roots(), 0, "writer roots leaked");
-    result
-}
-
-#[test]
-fn full_read_store_full_read_path_changes_exactly_one_f32_with_all_roots_retained() {
-    for (which, field, value) in [
-        (AttackLeechTarget::AttackRate, ATTACK, 1.375_f32),
-        (AttackLeechTarget::IncreasedLeechRate, LEECH, -0.375_f32),
-    ] {
-        let (api, thread) = fixture();
-        let before = current_observation(&api, &thread);
-        let after = write_rate(&api, &thread, &before, which, value).unwrap();
-        assert_eq!(STORES.get(), 1);
-        assert_eq!(LAST_STORE.get(), (field, value.to_bits()));
-        assert_eq!((after.manager, after.actor, after.stats), (before.manager, before.actor, before.stats));
-        if field == ATTACK {
-            assert_eq!(after.attack_rate.raw_bits, value.to_bits());
-            assert_eq!(after.increased_leech_rate, before.increased_leech_rate);
-        } else {
-            assert_eq!(after.increased_leech_rate.raw_bits, value.to_bits());
-            assert_eq!(after.attack_rate, before.attack_rate);
-        }
-        assert_eq!(current_observation(&api, &thread), after);
-        // The old expectation is stale because this store changed its value bits.
-        // This is not a consumed ticket: restoring baseline bits could make an
-        // identical request succeed. The primitive never retries or re-applies.
-        assert!(matches!(write_rate(&api, &thread, &before, which, value), Err(WriteError::Stale(_))));
-        assert_eq!(STORES.get(), 1);
-    }
-}
-
-#[test]
-fn invalid_desired_values_and_exact_noops_refuse_before_any_game_metadata() {
-    let (api, thread) = fixture();
-    let expected = current_observation(&api, &thread);
-    POINTER_READS.set(0);
-    RATE_READS.set(0);
-    // The editor domains are the wire's (`ObservedRate`); here only that each stat asks its own (leech takes zero below).
-    for (which, value) in [(AttackLeechTarget::AttackRate, 0.0), (AttackLeechTarget::IncreasedLeechRate, 100.00001)] {
-        assert!(matches!(write_rate(&api, &thread, &expected, which, value), Err(WriteError::Refused(_))), "{which:?}");
-    }
-    assert!(matches!(
-        write_rate(&api, &thread, &expected, AttackLeechTarget::AttackRate, f32::from_bits(expected.attack_rate.raw_bits)),
-        Err(WriteError::Refused(_))
-    ));
-    assert_eq!((POINTER_READS.get(), RATE_READS.get(), STORES.get()), (0, 0, 0));
-}
-
-#[test]
-fn all_six_expected_tokens_and_both_old_bitpatterns_are_compared_before_store() {
-    let (api, thread) = fixture();
-    let original = current_observation(&api, &thread);
-    for part in 0..8 {
-        let mut expected = original;
-        let identity = match part {
-            0 | 1 => &mut expected.manager,
-            2 | 3 => &mut expected.actor,
-            4 | 5 => &mut expected.stats,
-            _ => &mut expected.manager,
-        };
-        if part < 6 {
-            *identity = ObservedObjectIdentity::new(
-                identity.wrapper_token() ^ if part % 2 == 0 { 8 } else { 0 },
-                identity.native_token() ^ if part % 2 == 1 { 8 } else { 0 },
-            )
-            .unwrap();
-        } else if part == 6 {
-            expected.attack_rate.raw_bits ^= 1;
-        } else {
-            expected.increased_leech_rate.raw_bits ^= 1;
-        }
-        assert!(
-            matches!(write_rate(&api, &thread, &expected, AttackLeechTarget::AttackRate, 2.5), Err(WriteError::Stale(_))),
-            "part {part}"
-        );
-        assert_eq!(STORES.get(), 0);
-    }
-}
-
-#[test]
-fn rate_store_goes_through_the_mutable_field_check() {
-    // Read-only passes the read's checks; only `mutable_field` (apply.rs, which has the matrix) refuses it.
-    let (api, thread) = fixture();
-    let expected = current_observation(&api, &thread);
-    for (which, field) in [(AttackLeechTarget::AttackRate, ATTACK), (AttackLeechTarget::IncreasedLeechRate, LEECH)] {
-        FAULT.set(Some((field, Fault::Flags(0x20))));
-        assert!(matches!(write_rate(&api, &thread, &expected, which, 2.5), Err(WriteError::Refused(_))), "{which:?}");
-    }
-    assert_eq!(STORES.get(), 0);
-}
-
-#[test]
-fn prestore_offline_loading_liveness_drift_and_root_failures_are_definite_no_store() {
-    let (api, thread) = fixture();
-    let expected = current_observation(&api, &thread);
-    GRAPH.with_borrow_mut(|graph| graph.online = 1);
-    assert!(matches!(write_rate(&api, &thread, &expected, AttackLeechTarget::AttackRate, 2.5), Err(WriteError::Offline)));
-    for object in [MANAGER, ACTOR, STATS] {
-        GRAPH.set(Graph::default());
-        test_fakes::fail_root(object);
-        assert!(matches!(
-            write_rate(&api, &thread, &expected, AttackLeechTarget::AttackRate, 2.5),
-            Err(WriteError::NotReady(_))
-        ));
-    }
-    test_fakes::fail_root(0);
-    for case in 0..8 {
-        GRAPH.set(Graph::default());
-        GRAPH.with_borrow_mut(|graph| match case {
-            0 => graph.manager = 0,
-            1 => graph.actor = 0,
-            2 => graph.stats = 0,
-            3 => graph.native[0] = 0,
-            4 => graph.native[1] = 0,
-            5 => graph.native[2] = 0,
-            6 => graph.stats_class = SHADOW_CHARACTER,
-            7 => graph.stats_actor = 0,
-            _ => unreachable!(),
-        });
-        assert!(matches!(
-            write_rate(&api, &thread, &expected, AttackLeechTarget::AttackRate, 2.5),
-            Err(WriteError::Offline | WriteError::NotReady(_) | WriteError::Stale(_) | WriteError::Refused(_))
-        ));
-    }
-    for drift in [
-        Drift::Online,
-        Drift::Manager,
-        Drift::ReplacedManager,
-        Drift::ManagerNative,
-        Drift::DeadManager,
-        Drift::Actor,
-        Drift::Stats,
-        Drift::ManagerActor,
-        Drift::ActorManager,
-        Drift::StatsActor,
-        Drift::Native,
-        Drift::Dead,
-    ] {
-        GRAPH.set(Graph::default());
-        DRIFT.set(drift);
-        assert!(matches!(
-            write_rate(&api, &thread, &expected, AttackLeechTarget::AttackRate, 2.5),
-            Err(WriteError::Offline | WriteError::Stale(_) | WriteError::NotReady(_))
-        ));
-    }
-    assert_eq!(STORES.get(), 0);
-}
-
-#[test]
-fn every_postattempt_fault_is_failed_uncertain_with_one_store_and_no_rollback() {
-    for mode in [
-        StoreMode::Ignore,
-        StoreMode::OtherBits,
-        StoreMode::Online,
-        StoreMode::MissingManager,
-        StoreMode::ReplacedManager,
-        StoreMode::ManagerNative,
-        StoreMode::DeadManager,
-        StoreMode::ActorEdge,
-        StoreMode::StatsEdge,
-        StoreMode::DeadActor,
-        StoreMode::DeadStats,
-        StoreMode::LostRootTarget,
-        StoreMode::InvalidBoolean,
-    ] {
-        let (api, thread) = fixture();
-        let expected = current_observation(&api, &thread);
-        STORE_MODE.set(mode);
-        assert!(
-            matches!(write_rate(&api, &thread, &expected, AttackLeechTarget::AttackRate, 2.5), Err(WriteError::Failed(_))),
-            "{mode:?}"
-        );
-        assert_eq!(STORES.get(), 1);
-        assert_eq!(LAST_STORE.get(), (ATTACK, 2.5_f32.to_bits()));
-        GRAPH.with_borrow(|graph| {
-            assert_eq!(
-                graph.attack,
-                if matches!(mode, StoreMode::Ignore) {
-                    expected.attack_rate.raw_bits
-                } else {
-                    2.5_f32.to_bits()
-                }
-            )
-        });
-    }
-}
-
-#[test]
-fn signed_zero_nan_repair_and_untouched_nan_bits_are_preserved() {
-    let (api, thread) = fixture();
-    GRAPH.with_borrow_mut(|graph| {
-        graph.attack = 0x7fc12345;
-        graph.leech = 0;
-    });
-    let before = current_observation(&api, &thread);
-    let signed = write_rate(&api, &thread, &before, AttackLeechTarget::IncreasedLeechRate, -0.0).unwrap();
-    assert_eq!(signed.increased_leech_rate.raw_bits, 0x80000000);
-    assert_eq!(signed.attack_rate.raw_bits, 0x7fc12345);
-    let repaired = write_rate(&api, &thread, &signed, AttackLeechTarget::AttackRate, 1.5).unwrap();
-    assert_eq!(repaired.attack_rate.raw_bits, 1.5_f32.to_bits());
-    assert_eq!(repaired.increased_leech_rate.raw_bits, 0x80000000);
-    assert_eq!(STORES.get(), 2);
 }
