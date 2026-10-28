@@ -1,8 +1,8 @@
 //! Uniques, properties and set bonuses: the masters Unity stores without type trees (`resources.assets`), read with
 //! layouts rebuilt from the IL2CPP build (`UniqueList`, `PropertyList`, `SetBonusesList`).
 
-use crate::error::{Error, Result};
 use crate::value::Value;
+use eg_binary::{Error, Result};
 use std::collections::BTreeSet;
 
 #[derive(Clone, Debug, PartialEq)]

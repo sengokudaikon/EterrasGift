@@ -2,11 +2,11 @@
 
 use crate::archive::Archive;
 use crate::definitions::{self, Definitions};
-use crate::error::{Error, Result};
 use crate::player::PlayerData;
 use crate::strings::{self, SHARED_TABLE, STRING_TABLE, Strings};
 use crate::uniques::{self, PlayerDefinitions};
 use crate::value::Value;
+use eg_binary::{Error, Result};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 

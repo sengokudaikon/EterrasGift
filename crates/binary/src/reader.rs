@@ -5,21 +5,21 @@ use crate::error::{Error, Result};
 use std::fs::File;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum Endian {
+pub enum Endian {
     Little,
     Big,
 }
 
-pub(crate) struct Reader<'a> {
+pub struct Reader<'a> {
     bytes: &'a [u8],
     position: usize,
-    pub(crate) endian: Endian,
+    pub endian: Endian,
 }
 
 macro_rules! numbers {
     ($($name:ident: $type:ty),* $(,)?) => {
         $(
-            pub(crate) fn $name(&mut self) -> Result<$type> {
+            pub fn $name(&mut self) -> Result<$type> {
                 let bytes = self.take(size_of::<$type>())?.try_into().expect("taken to size");
                 Ok(match self.endian {
                     Endian::Little => <$type>::from_le_bytes(bytes),
@@ -31,23 +31,19 @@ macro_rules! numbers {
 }
 
 impl<'a> Reader<'a> {
-    pub(crate) fn new(bytes: &'a [u8], endian: Endian) -> Self {
+    pub fn new(bytes: &'a [u8], endian: Endian) -> Self {
         Self { bytes, position: 0, endian }
     }
 
-    pub(crate) fn position(&self) -> usize {
+    pub fn position(&self) -> usize {
         self.position
     }
 
-    pub(crate) fn len(&self) -> usize {
-        self.bytes.len()
-    }
-
-    pub(crate) fn remaining(&self) -> usize {
+    pub fn remaining(&self) -> usize {
         self.bytes.len() - self.position
     }
 
-    pub(crate) fn seek(&mut self, position: usize) -> Result<()> {
+    pub fn seek(&mut self, position: usize) -> Result<()> {
         if position > self.bytes.len() {
             return Err(Error::malformed(format!("seek to {position} past the end ({})", self.bytes.len())));
         }
@@ -55,7 +51,7 @@ impl<'a> Reader<'a> {
         Ok(())
     }
 
-    pub(crate) fn take(&mut self, count: usize) -> Result<&'a [u8]> {
+    pub fn take(&mut self, count: usize) -> Result<&'a [u8]> {
         if count > self.remaining() {
             return Err(Error::malformed(format!("{count} bytes needed at {}, {} left", self.position, self.remaining())));
         }
@@ -64,20 +60,20 @@ impl<'a> Reader<'a> {
         Ok(taken)
     }
 
-    /// Moves to the next multiple of `to` (Unity aligns to 4 inside objects and to 16 in bundles).
-    pub(crate) fn align(&mut self, to: usize) -> Result<()> {
+    /// Moves to the next multiple of `to`.
+    pub fn align(&mut self, to: usize) -> Result<()> {
         let padding = (to - self.position % to) % to;
         self.take(padding).map(|_| ())
     }
 
     numbers!(u8: u8, i8: i8, u16: u16, i16: i16, u32: u32, i32: i32, u64: u64, i64: i64, f32: f32, f64: f64);
 
-    pub(crate) fn bool(&mut self) -> Result<bool> {
+    pub fn bool(&mut self) -> Result<bool> {
         Ok(self.u8()? != 0)
     }
 
     /// A count that must fit in what is left, given the smallest size one element can take.
-    pub(crate) fn count(&mut self, element_size: usize) -> Result<usize> {
+    pub fn count(&mut self, element_size: usize) -> Result<usize> {
         let count = self.i32()?;
         let count = usize::try_from(count).map_err(|_| Error::malformed(format!("negative count {count}")))?;
         if count.saturating_mul(element_size.max(1)) > self.remaining() {
@@ -86,7 +82,7 @@ impl<'a> Reader<'a> {
         Ok(count)
     }
 
-    pub(crate) fn cstring(&mut self) -> Result<String> {
+    pub fn cstring(&mut self) -> Result<String> {
         let rest = &self.bytes[self.position..];
         let end = rest
             .iter()
@@ -100,7 +96,7 @@ impl<'a> Reader<'a> {
 
 /// Fills `out` from `at` in `file`, without moving its cursor.
 #[cfg(windows)]
-pub(crate) fn read_at(file: &File, mut at: u64, mut out: &mut [u8]) -> std::io::Result<()> {
+pub fn read_at(file: &File, mut at: u64, mut out: &mut [u8]) -> std::io::Result<()> {
     use std::os::windows::fs::FileExt;
     while !out.is_empty() {
         match file.seek_read(out, at)? {
@@ -114,7 +110,7 @@ pub(crate) fn read_at(file: &File, mut at: u64, mut out: &mut [u8]) -> std::io::
     Ok(())
 }
 #[cfg(unix)]
-pub(crate) fn read_at(file: &File, at: u64, out: &mut [u8]) -> std::io::Result<()> {
+pub fn read_at(file: &File, at: u64, out: &mut [u8]) -> std::io::Result<()> {
     std::os::unix::fs::FileExt::read_exact_at(file, out, at)
 }
 

@@ -2,9 +2,9 @@
 //! MonoBehaviour's script in the bundle that holds the `MonoScript`s.
 
 use crate::bundle::Bundle;
-use crate::error::{Error, Result};
 use crate::serialized::{MONO_BEHAVIOUR, MONO_SCRIPT, Object, SerializedFile, Source};
 use crate::value::Value;
+use eg_binary::{Error, Result};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::rc::Rc;

@@ -2,8 +2,8 @@
 //! `StringTable` per collection (`Item_Affixes_en`), whose entries name their keys by ID in a `SharedTableData`
 //! kept in a bundle shared by every locale.
 
-use crate::error::{Error, Result};
 use crate::value::Value;
+use eg_binary::{Error, Result};
 use std::collections::{BTreeMap, HashMap};
 
 pub(crate) const STRING_TABLE: (&str, &str, &str) = ("Unity.Localization", "UnityEngine.Localization.Tables", "StringTable");

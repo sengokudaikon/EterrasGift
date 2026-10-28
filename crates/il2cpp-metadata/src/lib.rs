@@ -1,20 +1,22 @@
-//! The game's IL2CPP build read as data: `global-metadata.dat` for names, types and fields, `GameAssembly.dll` for the
-//! types those fields have. Together they say what a class looks like, which is what [`crate::layout`] needs to rebuild
-//! the serialized layout of objects stored without type trees.
+//! An IL2CPP build read as data: `global-metadata.dat` (format 39) for names, types and fields, the game assembly for the
+//! types those fields have. Together they say what a class looks like without running it, for example to rebuild how a
+//! serializer laid out an object stored without a type tree.
+
+#![forbid(unsafe_code)]
 
 mod binary;
 mod metadata;
 
-use crate::error::{Error, Result};
-pub(crate) use binary::kind;
+pub use binary::kind;
 use binary::{Binary, RawType};
-pub(crate) use metadata::type_attributes;
-use metadata::{FieldDefinition, Metadata, TypeDefinition};
+use eg_binary::{Error, Result};
+use metadata::{FieldDefinition, Metadata};
+pub use metadata::{TypeDefinition, type_attributes};
 use std::path::Path;
 
 /// A field's type, resolved from the binary.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) enum Ty {
+pub enum Ty {
     /// `bool`, `char`, the integers, `float`, `double`, `IntPtr`, `UIntPtr`: the `Il2CppTypeEnum` kind.
     Primitive(u8),
     String,
@@ -37,35 +39,35 @@ pub(crate) enum Ty {
 }
 
 /// `FieldAttributes` bits used here.
-pub(crate) mod field_attributes {
-    pub(crate) const ACCESS: u16 = 0x7;
-    pub(crate) const PUBLIC: u16 = 0x6;
-    pub(crate) const STATIC: u16 = 0x10;
-    pub(crate) const INIT_ONLY: u16 = 0x20;
-    pub(crate) const LITERAL: u16 = 0x40;
-    pub(crate) const NOT_SERIALIZED: u16 = 0x80;
+pub mod field_attributes {
+    pub const ACCESS: u16 = 0x7;
+    pub const PUBLIC: u16 = 0x6;
+    pub const STATIC: u16 = 0x10;
+    pub const INIT_ONLY: u16 = 0x20;
+    pub const LITERAL: u16 = 0x40;
+    pub const NOT_SERIALIZED: u16 = 0x80;
 }
 
-pub(crate) struct Field<'a> {
-    pub(crate) name: &'a str,
-    pub(crate) ty: Ty,
-    pub(crate) attributes: u16,
+pub struct Field<'a> {
+    pub name: &'a str,
+    pub ty: Ty,
+    pub attributes: u16,
     token: u32,
 }
 
-pub(crate) struct Il2Cpp {
+pub struct Il2Cpp {
     metadata: Metadata,
     binary: Binary,
 }
 
 impl Il2Cpp {
-    pub(crate) fn open(game_assembly: &Path, metadata: &Path) -> Result<Il2Cpp> {
+    pub fn open(game_assembly: &Path, metadata: &Path) -> Result<Il2Cpp> {
         let metadata = Metadata::open(metadata).map_err(|e| e.context("global-metadata.dat"))?;
         let binary = Binary::open(game_assembly, metadata.types.len()).map_err(|e| e.context("GameAssembly.dll"))?;
         Ok(Il2Cpp { metadata, binary })
     }
 
-    pub(crate) fn definition(&self, index: u32) -> Result<&TypeDefinition> {
+    pub fn definition(&self, index: u32) -> Result<&TypeDefinition> {
         self.metadata.type_definition(index)
     }
 
@@ -114,12 +116,12 @@ impl Il2Cpp {
     }
 
     /// The type a metadata type index names.
-    pub(crate) fn type_at(&self, index: u32) -> Result<Ty> {
+    pub fn type_at(&self, index: u32) -> Result<Ty> {
         self.resolve(self.binary.type_at(index)?)
     }
 
     /// `Namespace.Name`, with `Outer/Inner` for nested types, as Cecil names them.
-    pub(crate) fn full_name(&self, index: u32) -> Result<String> {
+    pub fn full_name(&self, index: u32) -> Result<String> {
         let definition = self.definition(index)?;
         if let Some(declaring) = definition.declaring_type {
             let Ty::Definition { index: outer } = self.type_at(declaring)? else {
@@ -135,7 +137,7 @@ impl Il2Cpp {
     }
 
     /// A type definition's own fields, in declaration order, with their types.
-    pub(crate) fn fields(&self, index: u32) -> Result<Vec<Field<'_>>> {
+    pub fn fields(&self, index: u32) -> Result<Vec<Field<'_>>> {
         let definition = self.definition(index)?;
         self.metadata
             .fields_of(definition)
@@ -153,7 +155,7 @@ impl Il2Cpp {
     }
 
     /// The full names of the custom attributes on a type definition, or on one of its fields.
-    pub(crate) fn attributes(&self, definition: u32, field: Option<&Field<'_>>) -> Result<Vec<String>> {
+    pub fn attributes(&self, definition: u32, field: Option<&Field<'_>>) -> Result<Vec<String>> {
         let image = self
             .metadata
             .image_of(definition)
@@ -163,7 +165,7 @@ impl Il2Cpp {
     }
 
     /// The value of an `Int32` constant (`const int`) of `assembly`'s `namespace.class`, from its metadata default.
-    pub(crate) fn int_constant(&self, assembly: &str, namespace: &str, class: &str, field: &str) -> Result<i32> {
+    pub fn int_constant(&self, assembly: &str, namespace: &str, class: &str, field: &str) -> Result<i32> {
         let definition = self.definition(self.find_one(assembly, namespace, class)?)?;
         let field_index = self
             .metadata
@@ -182,7 +184,7 @@ impl Il2Cpp {
 
     /// The one type definition named `namespace.name` (not nested) in the image `assembly`.dll: none or several is an
     /// error.
-    pub(crate) fn find_one(&self, assembly: &str, namespace: &str, name: &str) -> Result<u32> {
+    pub fn find_one(&self, assembly: &str, namespace: &str, name: &str) -> Result<u32> {
         match self.find(assembly, namespace, name).as_slice() {
             [index] => Ok(*index),
             found => Err(Error::data(format!("{} definitions of {namespace}.{name} in {assembly}", found.len()))),

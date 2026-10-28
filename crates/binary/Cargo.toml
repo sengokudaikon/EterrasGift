@@ -1,0 +1,9 @@
+[package]
+name = "eg-binary"
+description = "Bounded reading of binary formats: a byte cursor in either byte order, positioned file reads, and the format errors they share."
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true

@@ -17,16 +17,16 @@ pub enum Error {
 }
 
 impl Error {
-    pub(crate) fn malformed(message: impl Into<String>) -> Self {
+    pub fn malformed(message: impl Into<String>) -> Self {
         Self::Malformed(message.into())
     }
-    pub(crate) fn unsupported(message: impl Into<String>) -> Self {
+    pub fn unsupported(message: impl Into<String>) -> Self {
         Self::Unsupported(message.into())
     }
-    pub(crate) fn data(message: impl Into<String>) -> Self {
+    pub fn data(message: impl Into<String>) -> Self {
         Self::Data(message.into())
     }
-    pub(crate) fn io(path: &std::path::Path, source: std::io::Error) -> Self {
+    pub fn io(path: &std::path::Path, source: std::io::Error) -> Self {
         Self::Io {
             path: path.display().to_string(),
             source,
@@ -34,7 +34,7 @@ impl Error {
     }
 
     /// Prefixes the message with where it happened, keeping the kind. An I/O error keeps its own path instead.
-    pub(crate) fn context(self, place: impl fmt::Display) -> Self {
+    pub fn context(self, place: impl fmt::Display) -> Self {
         match self {
             Self::Io { path, source } => Self::Io { path, source },
             Self::Malformed(m) => Self::Malformed(format!("{place}: {m}")),

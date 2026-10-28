@@ -3,9 +3,7 @@
 //! nothing is loaded or run. The sections are large, so they are read in place: the registration is searched for a
 //! chunk at a time, and records are read through a small cache of pages.
 
-use crate::error::{Error, Result};
-use crate::reader::read_at;
-use crate::reader::{Endian, Reader};
+use eg_binary::{Endian, Error, Reader, Result, read_at};
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::fs::File;
@@ -33,7 +31,7 @@ struct Section {
     raw_size: u64,
 }
 
-pub(crate) struct Binary {
+pub struct Binary {
     file: File,
     path: PathBuf,
     length: u64,
@@ -45,44 +43,44 @@ pub(crate) struct Binary {
 
 /// What an `Il2CppType` record says (Unity 2021.2+ layout: data word, then attributes, kind and flags).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) struct RawType {
-    pub(crate) data: u64,
+pub struct RawType {
+    pub data: u64,
     /// The member attributes of the use (a field's `FieldAttributes`).
-    pub(crate) attributes: u16,
-    pub(crate) kind: u8,
-    pub(crate) by_ref: bool,
+    pub attributes: u16,
+    pub kind: u8,
+    pub by_ref: bool,
 }
 
 /// `Il2CppTypeEnum` kinds used here.
-pub(crate) mod kind {
-    pub(crate) const BOOLEAN: u8 = 0x02;
-    pub(crate) const CHAR: u8 = 0x03;
-    pub(crate) const I1: u8 = 0x04;
-    pub(crate) const U1: u8 = 0x05;
-    pub(crate) const I2: u8 = 0x06;
-    pub(crate) const U2: u8 = 0x07;
-    pub(crate) const I4: u8 = 0x08;
-    pub(crate) const U4: u8 = 0x09;
-    pub(crate) const I8: u8 = 0x0A;
-    pub(crate) const U8: u8 = 0x0B;
-    pub(crate) const R4: u8 = 0x0C;
-    pub(crate) const R8: u8 = 0x0D;
-    pub(crate) const STRING: u8 = 0x0E;
-    pub(crate) const PTR: u8 = 0x0F;
-    pub(crate) const VALUE_TYPE: u8 = 0x11;
-    pub(crate) const CLASS: u8 = 0x12;
-    pub(crate) const VAR: u8 = 0x13;
-    pub(crate) const ARRAY: u8 = 0x14;
-    pub(crate) const GENERIC_INSTANCE: u8 = 0x15;
-    pub(crate) const I: u8 = 0x18;
-    pub(crate) const U: u8 = 0x19;
-    pub(crate) const OBJECT: u8 = 0x1C;
-    pub(crate) const SZ_ARRAY: u8 = 0x1D;
+pub mod kind {
+    pub const BOOLEAN: u8 = 0x02;
+    pub const CHAR: u8 = 0x03;
+    pub const I1: u8 = 0x04;
+    pub const U1: u8 = 0x05;
+    pub const I2: u8 = 0x06;
+    pub const U2: u8 = 0x07;
+    pub const I4: u8 = 0x08;
+    pub const U4: u8 = 0x09;
+    pub const I8: u8 = 0x0A;
+    pub const U8: u8 = 0x0B;
+    pub const R4: u8 = 0x0C;
+    pub const R8: u8 = 0x0D;
+    pub const STRING: u8 = 0x0E;
+    pub const PTR: u8 = 0x0F;
+    pub const VALUE_TYPE: u8 = 0x11;
+    pub const CLASS: u8 = 0x12;
+    pub const VAR: u8 = 0x13;
+    pub const ARRAY: u8 = 0x14;
+    pub const GENERIC_INSTANCE: u8 = 0x15;
+    pub const I: u8 = 0x18;
+    pub const U: u8 = 0x19;
+    pub const OBJECT: u8 = 0x1C;
+    pub const SZ_ARRAY: u8 = 0x1D;
 }
 
 impl Binary {
     /// Reads the data sections and finds the registration whose counts match the metadata's `type_definitions`.
-    pub(crate) fn open(path: &Path, type_definitions: usize) -> Result<Binary> {
+    pub fn open(path: &Path, type_definitions: usize) -> Result<Binary> {
         let mut file = File::open(path).map_err(|e| Error::io(path, e))?;
         let mut head = vec![0; 4096];
         file.read_exact(&mut head).map_err(|e| Error::io(path, e))?;
@@ -255,13 +253,13 @@ impl Binary {
     }
 
     /// The type a metadata type index names.
-    pub(crate) fn type_at(&self, index: u32) -> Result<RawType> {
+    pub fn type_at(&self, index: u32) -> Result<RawType> {
         let address = *self.types.get(index as usize).ok_or_else(|| Error::malformed(format!("type index {index} out of range")))?;
         self.type_from(address)
     }
 
     /// The type at an `Il2CppType*`.
-    pub(crate) fn type_from(&self, address: u64) -> Result<RawType> {
+    pub fn type_from(&self, address: u64) -> Result<RawType> {
         let bytes = self.bytes::<12>(address)?;
         let data = u64::from_le_bytes(bytes[..8].try_into().expect("8 bytes"));
         let bits = u32::from_le_bytes(bytes[8..12].try_into().expect("4 bytes"));
@@ -275,7 +273,7 @@ impl Binary {
     }
 
     /// An `Il2CppGenericClass`: its generic type, and the type arguments of its class instance.
-    pub(crate) fn generic_class(&self, address: u64) -> Result<(RawType, Vec<RawType>)> {
+    pub fn generic_class(&self, address: u64) -> Result<(RawType, Vec<RawType>)> {
         let definition = self.type_from(self.u64(address)?)?;
         let instance = self.u64(address + 8)?;
         let count = self.u64(instance)?;
@@ -288,7 +286,7 @@ impl Binary {
     }
 
     /// The element type and rank of an `Il2CppArrayType`.
-    pub(crate) fn array(&self, address: u64) -> Result<(RawType, u8)> {
+    pub fn array(&self, address: u64) -> Result<(RawType, u8)> {
         let element = self.type_from(self.u64(address)?)?;
         Ok((element, self.bytes::<1>(address + 8)?[0]))
     }

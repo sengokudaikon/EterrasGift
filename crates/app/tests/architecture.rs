@@ -15,9 +15,11 @@ use syn::visit::{self, Visit};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Tier {
+    /// Generic readers that name neither this app nor the game: anything may use them, and they use only each other.
+    Library,
     Shared,
     Wire,
-    /// The game's shipped data files, read without the game: a leaf, like the kernel and the wire.
+    /// The game's shipped data files, read without the game. Like the kernel and the wire, it builds only on libraries.
     GameFiles,
     Companion,
     Trainer,
@@ -28,6 +30,7 @@ enum Tier {
 
 fn tier(name: &str) -> Tier {
     match name {
+        "eg-binary" | "eg-il2cpp-metadata" => Tier::Library,
         "eg-core" => Tier::Shared,
         "eg-companion" => Tier::Companion,
         "eg-trainer" | "eg-trainer-host" | "eg-trainer-helper" => Tier::Trainer,
@@ -128,7 +131,7 @@ fn cargo_dependencies_preserve_the_tiers_including_tools() {
             let from = tier(&package.name);
             let to = tier(dependency);
             assert!(
-                !matches!(from, Tier::Shared | Tier::Wire | Tier::GameFiles),
+                !matches!(from, Tier::Library | Tier::Shared | Tier::Wire | Tier::GameFiles) || to == Tier::Library,
                 "{} depends on first-party {dependency}",
                 package.name
             );

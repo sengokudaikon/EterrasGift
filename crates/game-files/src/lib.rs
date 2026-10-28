@@ -6,7 +6,7 @@
 //! bases, ailments and the idol altar registry) and [`Install::strings`] (the text of one locale).
 //!
 //! Classes stored without type trees (uniques, properties and set bonuses in `resources.assets`) are read by
-//! [`Install::player_definitions`] with layouts rebuilt from the IL2CPP build (`il2cpp`, `layout`): the metadata
+//! [`Install::player_definitions`] with layouts rebuilt from the IL2CPP build (`eg-il2cpp-metadata`, `layout`): the metadata
 //! (format 39) names the fields, `GameAssembly.dll` types them, and Unity's serialization rules lay them out. The
 //! rules are checked against every class the bundles ship a tree for, and every object must decode exactly.
 
@@ -16,12 +16,9 @@ mod archive;
 mod bundle;
 mod common_strings;
 pub mod definitions;
-pub mod error;
-mod il2cpp;
 mod install;
 mod layout;
 mod player;
-mod reader;
 mod serialized;
 mod strings;
 #[cfg(test)]
@@ -31,7 +28,7 @@ pub mod uniques;
 mod value;
 
 pub use definitions::Definitions;
-pub use error::{Error, Result};
+pub use eg_binary::{Error, Result};
 pub use install::Install;
 pub use strings::Strings;
 pub use uniques::PlayerDefinitions;

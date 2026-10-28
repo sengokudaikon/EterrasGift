@@ -3,9 +3,8 @@
 //! read as plausible nonsense.
 
 use crate::common_strings::COMMON_STRINGS;
-use crate::error::{Error, Result};
-use crate::reader::{Endian, Reader};
 use crate::value::Value;
+use eg_binary::{Endian, Error, Reader, Result};
 use std::sync::Arc;
 
 /// Unity's `kAlignBytes`: after this node the stream moves to the next multiple of 4.
@@ -124,7 +123,7 @@ pub fn decode(root: &Node, bytes: &[u8], references: &[ReferenceType]) -> Result
     let mut reader = Reader::new(bytes, Endian::Little);
     let value = read(root, &mut reader, references)?;
     if reader.remaining() != 0 {
-        return Err(Error::data(format!("the {} layout read {} of {} bytes", root.type_name, reader.position(), reader.len())));
+        return Err(Error::data(format!("the {} layout read {} of {} bytes", root.type_name, reader.position(), bytes.len())));
     }
     Ok(value)
 }

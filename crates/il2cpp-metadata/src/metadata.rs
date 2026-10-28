@@ -4,11 +4,10 @@
 //! Each record size is checked against its section, so a layout this reader has wrong is refused, not misread.
 //! Layouts follow Cpp2IL's LibCpp2IL (MIT), the only reader known to handle this format.
 
-use crate::error::{Error, Result};
-use crate::reader::{Endian, Reader};
+use eg_binary::{Endian, Error, Reader, Result};
 
 const MAGIC: u32 = 0xFAB1_1BAF;
-pub(crate) const VERSION: i32 = 39;
+pub const VERSION: i32 = 39;
 
 /// The sections, in header order (format 39 has 31, each offset, size and count).
 const SECTIONS: [&str; 31] = [
@@ -53,54 +52,54 @@ struct Section {
 }
 
 /// `TypeAttributes` bits used here.
-pub(crate) mod type_attributes {
-    pub(crate) const INTERFACE: u32 = 0x20;
-    pub(crate) const ABSTRACT: u32 = 0x80;
-    pub(crate) const SERIALIZABLE: u32 = 0x2000;
+pub mod type_attributes {
+    pub const INTERFACE: u32 = 0x20;
+    pub const ABSTRACT: u32 = 0x80;
+    pub const SERIALIZABLE: u32 = 0x2000;
 }
 
 #[derive(Clone, Debug)]
-pub(crate) struct TypeDefinition {
-    pub(crate) name: String,
-    pub(crate) namespace: String,
+pub struct TypeDefinition {
+    pub name: String,
+    pub namespace: String,
     /// Indices into the binary's type table; `None` where the type has none.
-    pub(crate) declaring_type: Option<u32>,
-    pub(crate) parent: Option<u32>,
-    pub(crate) has_generic_parameters: bool,
-    pub(crate) flags: u32,
-    pub(crate) first_field: u32,
-    pub(crate) field_count: u16,
-    pub(crate) is_value_type: bool,
-    pub(crate) is_enum: bool,
-    pub(crate) token: u32,
+    pub declaring_type: Option<u32>,
+    pub parent: Option<u32>,
+    pub has_generic_parameters: bool,
+    pub flags: u32,
+    pub first_field: u32,
+    pub field_count: u16,
+    pub is_value_type: bool,
+    pub is_enum: bool,
+    pub token: u32,
 }
 
 #[derive(Clone, Debug)]
-pub(crate) struct FieldDefinition {
-    pub(crate) name: String,
-    pub(crate) type_index: u32,
-    pub(crate) token: u32,
+pub struct FieldDefinition {
+    pub name: String,
+    pub type_index: u32,
+    pub token: u32,
 }
 
 #[derive(Clone, Debug)]
-pub(crate) struct Image {
-    pub(crate) name: String,
-    pub(crate) first_type: u32,
-    pub(crate) type_count: u32,
+pub struct Image {
+    pub name: String,
+    pub first_type: u32,
+    pub type_count: u32,
     attribute_start: usize,
     attribute_count: usize,
 }
 
 /// What the file says, parsed. Of its bytes only the two sections read later are kept, attribute data and default
 /// values, so the file is never held whole.
-pub(crate) struct Metadata {
-    pub(crate) types: Vec<TypeDefinition>,
-    pub(crate) fields: Vec<FieldDefinition>,
+pub struct Metadata {
+    pub types: Vec<TypeDefinition>,
+    pub fields: Vec<FieldDefinition>,
     /// Each method's declaring type, all a custom attribute needs of its constructor.
     method_owners: Vec<u32>,
     /// Each generic parameter's position in its owner.
     generic_positions: Vec<u16>,
-    pub(crate) images: Vec<Image>,
+    pub images: Vec<Image>,
     attribute_data: Vec<u8>,
     attribute_ranges: Vec<(u32, u32)>,
     /// Literal fields' default values: field index → (type index, offset into the default value data).
@@ -128,19 +127,19 @@ fn index(reader: &mut Reader<'_>, width: usize) -> Result<Option<u32>> {
 impl Metadata {
     /// Reads the file a section at a time, only the sections it uses, never more than one large section and the names
     /// at once.
-    pub(crate) fn open(path: &std::path::Path) -> Result<Metadata> {
+    pub fn open(path: &std::path::Path) -> Result<Metadata> {
         let file = std::fs::File::open(path).map_err(|e| Error::io(path, e))?;
         let length = file.metadata().map_err(|e| Error::io(path, e))?.len();
         let length = usize::try_from(length).map_err(|_| Error::unsupported("global-metadata.dat too large"))?;
         Self::read(length, |offset, size| {
             let mut out = vec![0; size];
-            crate::reader::read_at(&file, offset as u64, &mut out).map_err(|e| Error::io(path, e))?;
+            eg_binary::read_at(&file, offset as u64, &mut out).map_err(|e| Error::io(path, e))?;
             Ok(out)
         })
     }
 
     #[cfg(test)]
-    pub(crate) fn parse(bytes: Vec<u8>) -> Result<Metadata> {
+    pub fn parse(bytes: Vec<u8>) -> Result<Metadata> {
         Self::read(bytes.len(), |offset, size| Ok(bytes[offset..offset + size].to_vec()))
     }
 
@@ -327,13 +326,13 @@ impl Metadata {
         })
     }
 
-    pub(crate) fn type_definition(&self, index: u32) -> Result<&TypeDefinition> {
+    pub fn type_definition(&self, index: u32) -> Result<&TypeDefinition> {
         self.types
             .get(index as usize)
             .ok_or_else(|| Error::malformed(format!("type definition {index} out of range")))
     }
 
-    pub(crate) fn fields_of(&self, definition: &TypeDefinition) -> &[FieldDefinition] {
+    pub fn fields_of(&self, definition: &TypeDefinition) -> &[FieldDefinition] {
         let start = definition.first_field as usize;
         if definition.field_count == 0 {
             &[]
@@ -343,14 +342,14 @@ impl Metadata {
     }
 
     /// The global index of a type definition's field.
-    pub(crate) fn field_index(&self, definition: &TypeDefinition, name: &str) -> Option<u32> {
+    pub fn field_index(&self, definition: &TypeDefinition, name: &str) -> Option<u32> {
         let found = self.fields_of(definition).iter().position(|f| f.name == name)?;
         Some(definition.first_field + found as u32)
     }
 
     /// A literal field's default: the type index it was written as, and the value as a compressed signed integer
     /// (how format 29+ stores `Int32` constants).
-    pub(crate) fn int_default(&self, field: u32) -> Result<(u32, i32)> {
+    pub fn int_default(&self, field: u32) -> Result<(u32, i32)> {
         let (type_index, offset) = *self.defaults.get(&field).ok_or_else(|| Error::data(format!("field {field} has no default value")))?;
         if offset >= self.default_data.len() {
             return Err(Error::malformed(format!("default value of field {field} out of range")));
@@ -359,7 +358,7 @@ impl Metadata {
         Ok((type_index, signed(compressed_u32(&mut r)?)))
     }
 
-    pub(crate) fn generic_position(&self, parameter: u32) -> Result<u16> {
+    pub fn generic_position(&self, parameter: u32) -> Result<u16> {
         self.generic_positions
             .get(parameter as usize)
             .copied()
@@ -367,12 +366,12 @@ impl Metadata {
     }
 
     /// The image (assembly file) a type definition belongs to.
-    pub(crate) fn image_of(&self, definition: u32) -> Option<&Image> {
+    pub fn image_of(&self, definition: u32) -> Option<&Image> {
         self.images.iter().find(|i| (i.first_type..i.first_type + i.type_count).contains(&definition))
     }
 
     /// The declaring types of the custom attributes on a member (by token) of a type in `image`.
-    pub(crate) fn attribute_types(&self, image: &Image, token: u32) -> Result<Vec<u32>> {
+    pub fn attribute_types(&self, image: &Image, token: u32) -> Result<Vec<u32>> {
         let end = (image.attribute_start + image.attribute_count).min(self.attribute_ranges.len());
         let ranges = &self.attribute_ranges[image.attribute_start.min(end)..end];
         let Ok(found) = ranges.binary_search_by_key(&token, |(t, _)| *t) else {

@@ -2,9 +2,9 @@
 //! (`AffixList.singleAffixes`/`multiAffixes`, `ItemList.EquippableItems` and `idolAltarPropertyList`, `AilmentList`),
 //! field for field.
 
-use crate::error::{Error, Result};
 use crate::uniques::unique_ids;
 use crate::value::Value;
+use eg_binary::{Error, Result};
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Definitions {

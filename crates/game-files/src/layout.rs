@@ -7,9 +7,9 @@
 //! Anything outside these rules ([SerializeReference], fixed buffers, Unity types with native layouts not listed here)
 //! is refused by name rather than guessed. A layout is only trusted once an object decodes with it exactly.
 
-use crate::error::{Error, Result};
-use crate::il2cpp::{Field, Il2Cpp, Ty, field_attributes as fa, kind, type_attributes};
 use crate::typetree::{ALIGN, Node};
+use eg_binary::{Error, Result};
+use eg_il2cpp_metadata::{Field, Il2Cpp, Ty, field_attributes as fa, kind, type_attributes};
 use std::sync::Arc;
 
 /// Past this depth of nested serializable classes Unity writes only a class's primitive fields: no enums, collections

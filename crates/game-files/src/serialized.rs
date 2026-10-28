@@ -3,10 +3,9 @@
 //! metadata; an object's bytes are read when it is decoded, so a file of a hundred megabytes is never held whole.
 
 use crate::bundle::Stream;
-use crate::error::{Error, Result};
-use crate::reader::{Endian, Reader, read_at};
 use crate::typetree::{self, Node, ReferenceType};
 use crate::value::Value;
+use eg_binary::{Endian, Error, Reader, Result, read_at};
 use std::borrow::Cow;
 use std::fs::File;
 use std::path::{Path, PathBuf};

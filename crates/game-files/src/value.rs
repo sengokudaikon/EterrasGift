@@ -1,7 +1,7 @@
 //! A decoded object: what its type tree said, field by field. Accessors fail with the field's name rather than
 //! defaulting, so a game update that moves or retypes a field is reported, never read as zero.
 
-use crate::error::{Error, Result};
+use eg_binary::{Error, Result};
 use std::sync::Arc;
 
 #[derive(Clone, Debug, PartialEq)]

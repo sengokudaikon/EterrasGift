@@ -1319,6 +1319,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "eg-binary"
+version = "0.1.0"
+
+[[package]]
 name = "eg-companion"
 version = "0.1.0"
 dependencies = [
@@ -1363,8 +1367,17 @@ dependencies = [
 name = "eg-game-files"
 version = "0.1.0"
 dependencies = [
+ "eg-binary",
+ "eg-il2cpp-metadata",
  "lz4_flex",
  "tempfile",
+]
+
+[[package]]
+name = "eg-il2cpp-metadata"
+version = "0.1.0"
+dependencies = [
+ "eg-binary",
 ]
 
 [[package]]

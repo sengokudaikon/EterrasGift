@@ -3,8 +3,7 @@
 //! only the header and the tables; reading a file decompresses only the blocks that cover it, and a [`Stream`] reads
 //! any part of one while holding only the few blocks read last.
 
-use crate::error::{Error, Result};
-use crate::reader::{Endian, Reader};
+use eg_binary::{Endian, Error, Reader, Result};
 use std::cell::RefCell;
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
