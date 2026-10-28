@@ -14,12 +14,8 @@ eg-core.workspace = true
 eg-companion.workspace = true
 eg-ui.workspace = true
 eg-trainer.workspace = true
-eg-trainer-host.workspace = true
-# The trainer helper DLL, embedded in the exe. Built for its explicit target so that, when the app is built alone, the
-# desktop does not take the helper's `il2cpp` feature (an artifact dependency on the implicit target merges features
-# with the desktop's own). A build that also selects the helper's own rlib, as `cargo test --workspace` does, still
-# unifies the feature into the desktop's eg-game-access. A path, not `workspace = true`: inheriting drops `artifact` and
-# `target`.
+# The trainer helper DLL, embedded in the exe and built for its explicit target. A path, not `workspace = true`:
+# inheriting drops `artifact` and `target`.
 eg-trainer-helper = { path = "../trainer-helper", artifact = "cdylib", target = "x86_64-pc-windows-msvc" }
 tokio.workspace = true
 slint.workspace = true

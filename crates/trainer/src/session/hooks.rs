@@ -1,5 +1,5 @@
 use super::*;
-use crate::writes::{WriteControl, WriteOutcome};
+use crate::write::{WriteControl, WriteOutcome};
 use eg_trainer_wire::{
     hooks::{GameplayHook, HookObservation},
     transport::Delivery,

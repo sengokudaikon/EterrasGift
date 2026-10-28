@@ -22,7 +22,7 @@ impl<T> From<Result<T, String>> for Lookup<T> {
 }
 
 use super::item::{AffixDefinition, ForgeItem, ItemEdit, ModifierState, RollRequest, ValueTable};
-pub use eg_trainer::writes::WriteOutcome;
+pub use eg_trainer::write::WriteOutcome;
 
 /// An independently observed item can be undisplayable by this editor. That
 /// presentation limitation never downgrades the completed write certainty.

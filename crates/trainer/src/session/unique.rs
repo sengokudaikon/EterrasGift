@@ -1,7 +1,7 @@
 use super::*;
 use crate::{
-    edits::{ExpectedObservation, RollEdit},
-    mapping::{BoundPreview, BoundTooltip},
+    item::edit::{ExpectedObservation, RollEdit},
+    item::values::{BoundPreview, BoundTooltip},
 };
 use eg_trainer_wire::mapping::{ForgeDescriptionRequest, ModifierSnapshot, UniquePreviewRequest, UniqueRollChange};
 impl<T: Transport> Session<T> {

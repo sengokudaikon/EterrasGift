@@ -4,7 +4,7 @@ mod mapping;
 mod rate_write;
 mod unique;
 mod write;
-use crate::profile::{BuildProfile, ProfileLease};
+use crate::connect::build::{BuildProfile, ProfileLease};
 use eg_core::game_log::GameReadiness;
 use eg_trainer_wire::{
     fields::{self, AttackLeechRead, AttackLeechUnavailable},
@@ -106,17 +106,17 @@ pub struct Session<T> {
     status: Option<RuntimeStatus>,
     cleanup: Cleanup,
     unload_needed: bool,
-    last_write: Option<crate::writes::WriteRecord>,
-    last_rate_write: Option<crate::field_writes::RateWriteRecord>,
+    last_write: Option<crate::write::WriteRecord>,
+    last_rate_write: Option<crate::fields::RateWriteRecord>,
     hooks: [Option<eg_trainer_wire::hooks::HookObservation>; 4],
 }
 impl<T: Transport> Session<T> {
-    fn observation_matches(&self, expected: &crate::edits::ExpectedObservation) -> bool {
+    fn observation_matches(&self, expected: &crate::item::edit::ExpectedObservation) -> bool {
         let identity = expected.catalog_identity();
         expected.process() == &self.target
             && identity.binary_hash.eq_ignore_ascii_case(self.profile.binary_hash())
             && identity.metadata_hash.eq_ignore_ascii_case(self.profile.metadata_hash())
-            && identity.extraction_version == crate::catalog::EXTRACTION_VERSION
+            && identity.extraction_version == crate::definitions::catalog::EXTRACTION_VERSION
     }
 
     /// The build this session runs: the hashes its catalog must carry.

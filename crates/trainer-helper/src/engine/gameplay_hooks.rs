@@ -1,10 +1,10 @@
 //! Concrete gameplay effects share this lifecycle; gameplay calls execute only retained leaf code.
 use super::*;
-use eg_game_access::discovery::{
+use crate::game::{
     GameplayHookTarget,
     damage::{damage_setting, set_damage},
 };
-use eg_game_access::hooks::leaf::LeafGate;
+use crate::hooks::leaf::LeafGate;
 use eg_trainer_wire::hooks::{GameplayHook, HookObservation, PatchState};
 
 struct Installed {
@@ -174,7 +174,7 @@ pub(super) unsafe fn operation(expected_manager: u64, hook: GameplayHook, on: Op
         runtime_operation(|_, access, attached| {
             let status = access.status(attached);
             observe(status.as_ref().map_or(0, |s| if s.online { 0 } else { s.manager })).map_err(|e| server::failure(ResponseCode::Failed, e))?;
-            let status = status.map_err(map_discovery)?;
+            let status = status.map_err(game_failure)?;
             if status.online || status.manager == 0 {
                 return Err(server::failure(ResponseCode::OfflineRequired, "Offline character required"));
             }
@@ -185,7 +185,7 @@ pub(super) unsafe fn operation(expected_manager: u64, hook: GameplayHook, on: Op
                 change(hook, on, value, || {
                     let module = module().map_err(|e| server::failure(ResponseCode::Refused, e))?;
                     let size = image_size(module).map_err(|e| server::failure(ResponseCode::Refused, e))?;
-                    access.gameplay_hook_targets(attached, hook, module, size).map_err(map_discovery)
+                    access.gameplay_hook_targets(attached, hook, module, size).map_err(game_failure)
                 })?;
                 done(Vec::new())
             } else {
@@ -203,7 +203,7 @@ pub(super) unsafe fn fixture_change(
     address: *mut u8,
     receiver_class: Option<NonNull<c_void>>,
     extras: &[*mut u8],
-    damage: Option<eg_game_access::discovery::damage::DamageLayout>,
+    damage: Option<crate::game::damage::DamageLayout>,
 ) -> Result<(), Response> {
     // SAFETY: fixture owns executable target and optional class identity for
     // the process lifetime; scoped calls use readable object-shaped headers.
@@ -217,9 +217,9 @@ pub(super) unsafe fn fixture_change(
                 effect: if let Some(layout) = damage {
                     layout.effect()
                 } else if hook == GameplayHook::MysteriousRift {
-                    eg_game_access::hooks::leaf::LeafEffect::SelectableBoolean
+                    crate::hooks::leaf::LeafEffect::SelectableBoolean
                 } else {
-                    eg_game_access::hooks::leaf::LeafEffect::Boolean(true)
+                    crate::hooks::leaf::LeafEffect::Boolean(true)
                 },
                 linked_offset: None,
             }];
@@ -231,9 +231,9 @@ pub(super) unsafe fn fixture_change(
                     receiver_class: None,
                     linked_offset: None,
                     effect: if index == 0 {
-                        eg_game_access::hooks::leaf::LeafEffect::Boolean(false)
+                        crate::hooks::leaf::LeafEffect::Boolean(false)
                     } else {
-                        eg_game_access::hooks::leaf::LeafEffect::Void
+                        crate::hooks::leaf::LeafEffect::Void
                     },
                 });
             }
@@ -259,7 +259,7 @@ mod tests {
     use super::*;
     #[test]
     fn damage_controls_share_one_patch_until_last_off_and_clear_does_not_revive_siblings() {
-        use eg_game_access::discovery::damage::DamageLayout;
+        use crate::game::damage::DamageLayout;
         use eg_trainer_wire::hooks::GameplayHook::{DamageDealt, IncomingDamage};
         use std::sync::atomic::{AtomicU8, AtomicUsize};
         #[unsafe(naked)]

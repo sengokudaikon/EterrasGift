@@ -25,10 +25,10 @@ pub fn crafted_name(rarity: u8) -> &'static str {
     }
 }
 
-pub use eg_trainer::edits::{AffixKind, ItemEdit, RollTarget, SealState as Seal};
+pub use eg_trainer::item::edit::{AffixKind, ItemEdit, RollTarget, SealState as Seal};
 use eg_trainer::{
-    catalog::GameCatalog,
-    edits::{self, ExpectedObservation},
+    definitions::catalog::GameCatalog,
+    item::edit::{self, ExpectedObservation},
 };
 use std::sync::Arc;
 
@@ -190,7 +190,7 @@ pub struct ItemStatus {
     pub ruined: bool,
 }
 
-pub use eg_trainer::edits::StatusField;
+pub use eg_trainer::item::edit::StatusField;
 
 impl ItemStatus {
     pub fn read(&self, field: StatusField) -> u8 {
@@ -261,7 +261,7 @@ impl ForgeItem {
 
     /// Free prefix and suffix slots as the game's crafting counts them.
     pub fn free_slots(&self) -> (i32, i32) {
-        self.context.as_ref().map_or((0, 0), |c| edits::free_slots(c.expected.snapshot()))
+        self.context.as_ref().map_or((0, 0), |c| edit::free_slots(c.expected.snapshot()))
     }
 }
 
@@ -273,10 +273,10 @@ pub fn then(first: &Moves, next: &Moves) -> Moves {
     first.iter().map(|(from, to)| (*from, *next.get(to).unwrap_or(to))).collect()
 }
 
-pub fn roll_changes(changes: impl IntoIterator<Item = (usize, u8)>) -> Vec<edits::RollChange> {
+pub fn roll_changes(changes: impl IntoIterator<Item = (usize, u8)>) -> Vec<edit::RollChange> {
     changes
         .into_iter()
-        .map(|(index, value)| edits::RollChange {
+        .map(|(index, value)| edit::RollChange {
             index: index as i32,
             value: i32::from(value),
         })
@@ -286,17 +286,17 @@ pub fn roll_changes(changes: impl IntoIterator<Item = (usize, u8)>) -> Vec<edits
 /// The rarity the game gives an item becoming a unique or set item: a set item is a set; with affixes, or already
 /// legendary, a legendary; otherwise a unique.
 pub fn identity_rarity(item: &ForgeItem, set_item: bool) -> u8 {
-    item.context.as_ref().map_or(UNIQUE, |context| edits::rarity_for(context.expected.snapshot(), set_item))
+    item.context.as_ref().map_or(UNIQUE, |context| edit::rarity_for(context.expected.snapshot(), set_item))
 }
 
 /// Presentation adapters call the same planner as the worker. No edit rules live here.
 pub trait EditPresentation {
-    fn prepare_view_with_override(&self, before: &ForgeItem, override_enabled: bool) -> Result<edits::PreparedEdit, edits::EditError>;
-    fn prepare_view(&self, before: &ForgeItem) -> Result<edits::PreparedEdit, edits::EditError> {
+    fn prepare_view_with_override(&self, before: &ForgeItem, override_enabled: bool) -> Result<edit::PreparedEdit, edit::EditError>;
+    fn prepare_view(&self, before: &ForgeItem) -> Result<edit::PreparedEdit, edit::EditError> {
         // Preview an explicit override intent; submission rechecks permission.
         self.prepare_view_with_override(before, true)
     }
-    fn project(&self, before: &ForgeItem) -> Result<ForgeItem, edits::EditError>;
+    fn project(&self, before: &ForgeItem) -> Result<ForgeItem, edit::EditError>;
     fn is_valid(&self, before: &ForgeItem) -> bool {
         self.prepare_view(before).is_ok()
     }
@@ -304,7 +304,7 @@ pub trait EditPresentation {
         self.prepare_view(before)
             .ok()
             .and_then(|p| {
-                let reverse = eg_trainer::undo::ForgeUndo::reverse_intent(&p, p.projected()).ok()?;
+                let reverse = eg_trainer::item::undo::ForgeUndo::reverse_intent(&p, p.projected()).ok()?;
                 let after = before.with_snapshot(p.projected().clone()).ok()?;
                 Some(reverse.is_valid(&after))
             })
@@ -318,30 +318,30 @@ pub trait EditPresentation {
 }
 
 impl EditPresentation for ItemEdit {
-    fn prepare_view_with_override(&self, before: &ForgeItem, override_enabled: bool) -> Result<edits::PreparedEdit, edits::EditError> {
-        let context = before.context.as_ref().ok_or(edits::EditError::InvalidObservation)?;
+    fn prepare_view_with_override(&self, before: &ForgeItem, override_enabled: bool) -> Result<edit::PreparedEdit, edit::EditError> {
+        let context = before.context.as_ref().ok_or(edit::EditError::InvalidObservation)?;
         let bindings = |lines: Option<&[ModifierState]>| match lines {
-            Some(lines) => eg_trainer::catalog::Availability::Available(
+            Some(lines) => eg_trainer::definitions::catalog::Availability::Available(
                 lines
                     .iter()
-                    .map(|m| edits::RollBinding {
+                    .map(|m| edit::RollBinding {
                         editable: m.editable,
                         roll_ids: m.roll_ids.iter().map(|i| *i as i32).collect(),
                     })
                     .collect(),
             ),
-            None => eg_trainer::catalog::Availability::Unavailable {
+            None => eg_trainer::definitions::catalog::Availability::Unavailable {
                 reason: "Descriptions unavailable.".into(),
             },
         };
-        let evidence = edits::RollEvidence::from_runtime(
+        let evidence = edit::RollEvidence::from_runtime(
             &context.expected,
             bindings(before.unique.as_ref().map(|u| u.modifiers.as_slice())),
             bindings(before.implicits.as_deref()),
         );
-        edits::prepare(&context.expected, &context.catalog, self.clone(), override_enabled, Some(&evidence))
+        edit::prepare(&context.expected, &context.catalog, self.clone(), override_enabled, Some(&evidence))
     }
-    fn project(&self, before: &ForgeItem) -> Result<ForgeItem, edits::EditError> {
+    fn project(&self, before: &ForgeItem) -> Result<ForgeItem, edit::EditError> {
         let prepared = self.prepare_view(before)?;
         before.with_snapshot(prepared.projected().clone())
     }
@@ -370,8 +370,8 @@ impl ForgeItem {
         item.copy_snapshot(snapshot);
         item
     }
-    pub fn with_snapshot(&self, snapshot: eg_trainer::backend::ForgeSnapshot) -> Result<Self, edits::EditError> {
-        let context = self.context.as_ref().ok_or(edits::EditError::InvalidObservation)?;
+    pub fn with_snapshot(&self, snapshot: eg_trainer::backend::ForgeSnapshot) -> Result<Self, edit::EditError> {
+        let context = self.context.as_ref().ok_or(edit::EditError::InvalidObservation)?;
         let mut after = self.clone();
         after.copy_snapshot(&snapshot);
         after.context = Some(Arc::new(ForgeContext {
@@ -517,14 +517,14 @@ impl Compatibility {
 
 /// Both authored fixtures and production evaluate the canonical class/category/idol rules.
 pub fn compatibility(item: &ForgeItem, definition: &AffixDefinition, slot: Option<&AffixState>, unrestricted: bool) -> Compatibility {
-    use edits::CompatibilityReason as Reason;
+    use edit::CompatibilityReason as Reason;
     let Some(context) = &item.context else { return Compatibility::Unknown };
     let Some(definition) = context.catalog.affixes.get(&definition.id) else {
         return Compatibility::Unknown;
     };
     let snapshot = context.expected.snapshot();
     let slot = slot.and_then(|s| snapshot.affixes.iter().find(|a| usize::from(a.slot) == s.slot));
-    match edits::compatibility(&context.catalog, snapshot, definition, slot, None, unrestricted).reason {
+    match edit::compatibility(&context.catalog, snapshot, definition, slot, None, unrestricted).reason {
         Reason::None => Compatibility::Allowed,
         Reason::Override => Compatibility::Override,
         Reason::ClassRequirement => Compatibility::Rejected(Rejection::ClassRequirement),
@@ -555,7 +555,7 @@ pub fn broken_by_base(item: &ForgeItem, item_type: u16, sub_type: u16, class_req
             affixes: vec![affix.clone()],
             ..item.clone()
         };
-        edits::compatibility(catalog, &alone, definition, Some(affix), Some(item.class_requirement), false).allowed
+        edit::compatibility(catalog, &alone, definition, Some(affix), Some(item.class_requirement), false).allowed
     };
     now.affixes
         .iter()

@@ -34,7 +34,6 @@ eg-core = { path = "crates/core" }
 eg-companion = { path = "crates/companion" }
 eg-ui = { path = "crates/ui" }
 eg-trainer = { path = "crates/trainer" }
-eg-trainer-host = { path = "crates/trainer-host" }
 
 [workspace.lints.rust]
 unsafe_op_in_unsafe_fn = "deny"

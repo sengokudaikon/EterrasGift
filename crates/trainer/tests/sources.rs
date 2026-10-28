@@ -1,42 +1,13 @@
 use eg_core::game_log::{GameLogStatus, GameReadiness};
-use eg_trainer::{
-    backend::{ProcessIdentity, ProcessLocator},
-    connection::LogFactory,
-    sources::{FileLogFactory, WatchProcessLocator},
-};
+use eg_trainer::{backend::ProcessIdentity, connect::admission::LogFactory, connect::sources::FileLogFactory};
 use std::fs;
 
-fn run<F: std::future::Future>(future: F) -> F::Output {
-    tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap().block_on(future)
-}
 fn target() -> ProcessIdentity {
     ProcessIdentity {
         pid: 42,
         created: 134367912000000000,
         executable: std::env::temp_dir().join("authored-game.exe"),
     }
-}
-
-#[test]
-fn published_locator_has_no_process_access_and_tracks_exact_observations_or_source_loss() {
-    let (sender, receiver) = tokio::sync::watch::channel(vec![]);
-    let mut locator = WatchProcessLocator::new(receiver);
-    assert!(run(locator.find()).unwrap().is_empty());
-    let first = target();
-    sender.send_replace(vec![first.clone()]);
-    assert_eq!(run(locator.find()).unwrap(), vec![first.clone()]);
-    let reused = ProcessIdentity {
-        created: first.created + 1,
-        ..first.clone()
-    };
-    sender.send_replace(vec![first, reused.clone()]);
-    assert_eq!(run(locator.find()).unwrap().len(), 2);
-    sender.send_replace(vec![reused.clone()]);
-    assert_eq!(run(locator.find()).unwrap(), vec![reused]);
-    sender.send_replace(vec![]);
-    assert!(run(locator.find()).unwrap().is_empty());
-    drop(sender);
-    assert!(run(locator.find()).is_err());
 }
 
 #[test]

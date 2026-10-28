@@ -1,6 +1,6 @@
 //! Cheat profiles as the trainer pages show them: one per offline character the user kept one for (its name, class and
 //! cycle, as Player.log names it), holding which hooks it wants and their values. The worker owns them
-//! (`eg_trainer::profiles`): it saves them and applies the one in play hook by hook. While no game runs the pages set up
+//! (`eg_trainer::features::profiles`): it saves them and applies the one in play hook by hook. While no game runs the pages set up
 //! the chosen profile; while its character is in play they change it, and the game with it. A character in play without
 //! one has hooks for that connection only, until they are kept as its profile.
 

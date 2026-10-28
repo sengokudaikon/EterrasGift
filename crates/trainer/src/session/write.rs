@@ -1,7 +1,7 @@
 use super::*;
 use crate::{
-    field_writes::{RateWriteRecord, RateWriteStatus},
-    writes::{AllowWrite, ForgePlan, WriteControl, WriteObservation, WriteOutcome, WritePlan, WriteRecord, WriteStatus},
+    fields::{RateWriteRecord, RateWriteStatus},
+    write::{AllowWrite, ForgePlan, WriteControl, WriteObservation, WriteOutcome, WritePlan, WriteRecord, WriteStatus},
 };
 use eg_trainer_wire::{
     rate_write::{AttackLeechRateWrite, RateWriteReply},
@@ -131,8 +131,8 @@ impl<T: Transport> Session<T> {
                     return Err(SessionError::Identity("field plan has no complete expected observation".into()));
                 };
                 let target = match plan.target() {
-                    crate::field_writes::AttackLeechTarget::AttackRate => fields::AttackLeechTarget::AttackRate,
-                    crate::field_writes::AttackLeechTarget::IncreasedLeechRate => fields::AttackLeechTarget::IncreasedLeechRate,
+                    crate::fields::AttackLeechTarget::AttackRate => fields::AttackLeechTarget::AttackRate,
+                    crate::fields::AttackLeechTarget::IncreasedLeechRate => fields::AttackLeechTarget::IncreasedLeechRate,
                 };
                 let request = AttackLeechRateWrite::new(dispatcher, before, target, plan.projected_bits()).map_err(SessionError::Protocol)?;
                 Ok((

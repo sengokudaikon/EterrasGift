@@ -57,6 +57,31 @@ mod windows {
             })
         }
     }
+    /// Every running process: its ID and executable file name. A read-only census; no process is opened.
+    pub fn census() -> io::Result<Vec<(u32, String)>> {
+        use windows_sys::Win32::{Foundation::INVALID_HANDLE_VALUE, System::Diagnostics::ToolHelp::*};
+        // SAFETY: read-only process census; ownership transfers to OwnedHandle.
+        let raw = unsafe { CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0) };
+        if raw == INVALID_HANDLE_VALUE {
+            return Err(io::Error::last_os_error());
+        }
+        // SAFETY: successful snapshot handle is owned exactly once.
+        let snapshot = unsafe { OwnedHandle::from_raw_handle(raw) };
+        // SAFETY: the Win32 plain-data structure requires zero initialization and dwSize.
+        let mut entry: PROCESSENTRY32W = unsafe { std::mem::zeroed() };
+        entry.dwSize = size_of::<PROCESSENTRY32W>() as u32;
+        let mut found = Vec::new();
+        // SAFETY: the snapshot and initialized output structure stay alive throughout iteration.
+        let mut more = unsafe { Process32FirstW(snapshot.as_raw_handle(), &raw mut entry) } != 0;
+        while more {
+            let end = entry.szExeFile.iter().position(|c| *c == 0).unwrap_or(entry.szExeFile.len());
+            found.push((entry.th32ProcessID, String::from_utf16_lossy(&entry.szExeFile[..end])));
+            // SAFETY: same snapshot/output lifetime as above.
+            more = unsafe { Process32NextW(snapshot.as_raw_handle(), &raw mut entry) } != 0;
+        }
+        Ok(found)
+    }
+
     pub fn capture(pid: u32) -> io::Result<ProcessIdentity> {
         Process::open(pid)?.identity()
     }
@@ -65,4 +90,4 @@ mod windows {
 pub(crate) use windows::Process;
 
 #[cfg(windows)]
-pub use windows::capture;
+pub use windows::{capture, census};

@@ -2,7 +2,7 @@
 use eg_trainer::{
     backend::{AttackLeechObservation, AttackLeechRead, AttackLeechSnapshot, AttackLeechUnavailable, ObservedObjectIdentity, ObservedRate, ProcessIdentity},
     features::{FeatureKey, FieldSetId, NativeSupport},
-    field_writes::{AttackLeechDecision, AttackLeechPlan, AttackLeechTarget, FieldInputError, FieldPlanError},
+    fields::{AttackLeechDecision, AttackLeechPlan, AttackLeechTarget, FieldInputError, FieldPlanError},
 };
 
 fn identity(wrapper: u64, native: u64) -> ObservedObjectIdentity {

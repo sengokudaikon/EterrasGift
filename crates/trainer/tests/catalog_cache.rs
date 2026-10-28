@@ -5,8 +5,8 @@ use std::{
 };
 
 use eg_trainer::{
-    catalog::{CatalogIdentity, EXTRACTION_VERSION, GameCatalog, MAX_CATALOG_BYTES},
-    catalog_cache::{CATALOG_FILE, CacheError, CatalogCache, KEPT_BUILDS, POINTER_FILE, identity_key},
+    definitions::cache::{CATALOG_FILE, CacheError, CatalogCache, KEPT_BUILDS, POINTER_FILE, identity_key},
+    definitions::catalog::{CatalogIdentity, EXTRACTION_VERSION, GameCatalog, MAX_CATALOG_BYTES},
 };
 use eg_trainer_wire::{
     catalog::{Availability, DefinitionName, DefinitionNameSource, ItemTypeDefinition, RarityDefinition, SubTypeDefinition},

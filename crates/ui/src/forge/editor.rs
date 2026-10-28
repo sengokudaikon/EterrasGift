@@ -425,7 +425,7 @@ impl ForgeEditor {
         let item = self.item.as_ref()?;
         let identity = self.identity.as_ref().filter(|identity| identity.is_dirty())?;
         match self.identity_edit(item, identity.value() as u16) {
-            ItemEdit::UniqueIdentity(eg_trainer::edits::UniqueIdentityEdit { unique_id, sub_type, rarity, .. }) => {
+            ItemEdit::UniqueIdentity(eg_trainer::item::edit::UniqueIdentityEdit { unique_id, sub_type, rarity, .. }) => {
                 Some((u16::try_from(unique_id).ok()?, u16::try_from(sub_type).ok()?, u8::try_from(rarity).ok()?))
             }
             _ => None,
@@ -444,7 +444,7 @@ impl ForgeEditor {
         self.identity.as_ref().is_some_and(FieldDraft::is_editable)
             && self.can_change_draft()
             && !self.has_other_drafts()
-            && self.game.supports(&ItemEdit::UniqueIdentity(eg_trainer::edits::UniqueIdentityEdit {
+            && self.game.supports(&ItemEdit::UniqueIdentity(eg_trainer::item::edit::UniqueIdentityEdit {
                 unique_id: 0,
                 sub_type: 0,
                 rarity: 7,
@@ -484,7 +484,7 @@ impl ForgeEditor {
         };
         let rarity = item::identity_rarity(item, unique.is_some_and(|unique| unique.is_set));
         let unrestricted = unique.is_some_and(|unique| (rarity == item::LEGENDARY && !unique.can_drop_as_legendary) || !Self::legendary_fits(item, unique));
-        ItemEdit::UniqueIdentity(eg_trainer::edits::UniqueIdentityEdit {
+        ItemEdit::UniqueIdentity(eg_trainer::item::edit::UniqueIdentityEdit {
             unique_id: (unique_id) as i32,
             sub_type: (sub_type) as i32,
             rarity: (rarity) as i32,
@@ -494,9 +494,9 @@ impl ForgeEditor {
 
     /// Whether the unique or set item holds the legendary values the item has (the trainer's own rule).
     fn legendary_fits(item: &ForgeItem, unique: &super::game::UniqueDefinition) -> bool {
-        item.context
-            .as_ref()
-            .is_none_or(|context| eg_trainer::edits::legendary_fits(context.expected.snapshot(), unique.is_set, i32::from(unique.legendary_type == LegendaryType::WeaversWill)))
+        item.context.as_ref().is_none_or(|context| {
+            eg_trainer::item::edit::legendary_fits(context.expected.snapshot(), unique.is_set, i32::from(unique.legendary_type == LegendaryType::WeaversWill))
+        })
     }
 
     /// What the item keeps that this unique or set item never holds, or None when it holds what the item has: the forge's
@@ -528,7 +528,7 @@ impl ForgeEditor {
                 let game = Some(unique.id) == item.identity_id();
                 let edit = self.identity_edit(item, unique.id);
                 let (sub_type, rarity) = match edit {
-                    ItemEdit::UniqueIdentity(eg_trainer::edits::UniqueIdentityEdit { sub_type, rarity, .. }) => (sub_type as u16, rarity as u8),
+                    ItemEdit::UniqueIdentity(eg_trainer::item::edit::UniqueIdentityEdit { sub_type, rarity, .. }) => (sub_type as u16, rarity as u8),
                     _ => (item.sub_type, item.rarity),
                 };
                 let rarity = if game { item.rarity } else { rarity };
@@ -736,7 +736,7 @@ impl ForgeEditor {
         self.base.as_ref().is_some_and(FieldDraft::is_editable)
             && self.can_mutate()
             && !self.has_implicit_drafts()
-            && self.game.supports(&ItemEdit::BaseType(eg_trainer::edits::BaseTypeEdit {
+            && self.game.supports(&ItemEdit::BaseType(eg_trainer::item::edit::BaseTypeEdit {
                 sub_type: 0,
                 allow_incompatible: false,
                 item_type: None,
@@ -985,7 +985,7 @@ impl ForgeEditor {
     /// Adding and removing are drafts like the others: Apply writes them in order with the rest, each step naming the slots
     /// the earlier ones leave.
     pub fn can_change_affix_list(&self) -> bool {
-        self.can_mutate() && self.item.is_some() && self.game.supports(&ItemEdit::RemoveAffix(eg_trainer::edits::RemoveAffixEdit { slot: 0, id: 0 }))
+        self.can_mutate() && self.item.is_some() && self.game.supports(&ItemEdit::RemoveAffix(eg_trainer::item::edit::RemoveAffixEdit { slot: 0, id: 0 }))
     }
 
     pub fn add_affix_tip(&self) -> String {
@@ -1055,7 +1055,7 @@ impl ForgeEditor {
 
     pub fn can_change_affix(&self) -> bool {
         self.can_mutate()
-            && self.game.supports(&ItemEdit::Affix(eg_trainer::edits::AffixEdit {
+            && self.game.supports(&ItemEdit::Affix(eg_trainer::item::edit::AffixEdit {
                 slot: 0,
                 id: 0,
                 tier: 1,
@@ -1134,7 +1134,7 @@ impl ForgeEditor {
             Cell::Affix(row) => {
                 self.can_mutate()
                     && self.affixes.get(row).is_some_and(AffixRow::is_editable)
-                    && self.game.supports(&ItemEdit::Roll(eg_trainer::edits::RollEdit {
+                    && self.game.supports(&ItemEdit::Roll(eg_trainer::item::edit::RollEdit {
                         target: RollTarget::Affix,
                         changes: vec![],
                         allow_incompatible: self.unrestricted(),
@@ -1782,7 +1782,7 @@ impl ForgeEditor {
                 }
             }
         }
-        (!changes.is_empty()).then_some(ItemEdit::Roll(eg_trainer::edits::RollEdit {
+        (!changes.is_empty()).then_some(ItemEdit::Roll(eg_trainer::item::edit::RollEdit {
             target: RollTarget::Unique,
             changes: item::roll_changes(changes),
             allow_incompatible: self.unrestricted(),
@@ -1850,7 +1850,7 @@ impl ForgeEditor {
             return;
         }
         let changes = match self.unique_edit() {
-            Some(ItemEdit::Roll(eg_trainer::edits::RollEdit { changes, .. })) => changes,
+            Some(ItemEdit::Roll(eg_trainer::item::edit::RollEdit { changes, .. })) => changes,
             _ => Vec::new(),
         };
         let unrestricted = self.unrestricted();
@@ -1884,7 +1884,7 @@ impl ForgeEditor {
             let request = RollRequest {
                 target: RollTarget::Affix,
                 index: slot,
-                draft: (id != row.state.id || tier != row.state.tier || seal != row.state.seal).then_some(ItemEdit::Affix(eg_trainer::edits::AffixEdit {
+                draft: (id != row.state.id || tier != row.state.tier || seal != row.state.seal).then_some(ItemEdit::Affix(eg_trainer::item::edit::AffixEdit {
                     slot: (slot) as i32,
                     id: (id) as i32,
                     tier: (tier) as i32,
@@ -1912,7 +1912,7 @@ impl ForgeEditor {
                     target: RollTarget::Unique,
                     index,
                     draft: (!dependencies.is_empty()).then(|| {
-                        ItemEdit::Roll(eg_trainer::edits::RollEdit {
+                        ItemEdit::Roll(eg_trainer::item::edit::RollEdit {
                             target: RollTarget::Unique,
                             changes: item::roll_changes(dependencies.iter().copied()),
                             allow_incompatible: unrestricted,
@@ -2578,7 +2578,7 @@ impl ForgeEditor {
                 format!("No free {slot} slot. Adding past the free slots needs \"I know what I'm doing\" in Settings.")
             });
         }
-        let edit = ItemEdit::AddAffix(eg_trainer::edits::AddAffixEdit {
+        let edit = ItemEdit::AddAffix(eg_trainer::item::edit::AddAffixEdit {
             id: (definition.id) as i32,
             tier: i32::from(tier),
             roll: i32::from(roll),
@@ -2770,7 +2770,7 @@ impl ForgeEditor {
             Ok::<(), String>(())
         };
         for row in removed {
-            let edit = ItemEdit::RemoveAffix(eg_trainer::edits::RemoveAffixEdit {
+            let edit = ItemEdit::RemoveAffix(eg_trainer::item::edit::RemoveAffixEdit {
                 slot: *at.get(&row.slot()).unwrap_or(&row.slot()) as i32,
                 id: i32::from(row.state.id),
             });
@@ -2793,12 +2793,12 @@ impl ForgeEditor {
                 return Err(refused("That affix is no longer in that slot.".into()));
             };
             let edit = match edit {
-                ItemEdit::Affix(eg_trainer::edits::AffixEdit { slot, id, tier, roll, seal, .. })
+                ItemEdit::Affix(eg_trainer::item::edit::AffixEdit { slot, id, tier, roll, seal, .. })
                     if (i32::from(previous.id), i32::from(previous.tier), previous.seal) == (id, tier, seal) =>
                 {
-                    ItemEdit::Roll(eg_trainer::edits::RollEdit {
+                    ItemEdit::Roll(eg_trainer::item::edit::RollEdit {
                         target: RollTarget::Affix,
-                        changes: vec![eg_trainer::edits::RollChange { index: slot, value: roll }],
+                        changes: vec![eg_trainer::item::edit::RollChange { index: slot, value: roll }],
                         allow_incompatible: false,
                     })
                 }
@@ -2850,7 +2850,7 @@ impl ForgeEditor {
             }
         }
         if !implicits.is_empty() {
-            let edit = ItemEdit::Roll(eg_trainer::edits::RollEdit {
+            let edit = ItemEdit::Roll(eg_trainer::item::edit::RollEdit {
                 target: RollTarget::Implicit,
                 changes: item::roll_changes(implicits.iter().flat_map(|row| row.changes())),
                 allow_incompatible: self.unrestricted(),
@@ -2876,12 +2876,12 @@ impl ForgeEditor {
                 _ => match field.read_edit() {
                     // "Allow incompatible affixes" on a base that breaks none needs no override.
                     ItemEdit::BaseType(
-                        rebase @ eg_trainer::edits::BaseTypeEdit {
+                        rebase @ eg_trainer::item::edit::BaseTypeEdit {
                             allow_incompatible: true,
                             item_type: None,
                             ..
                         },
-                    ) if self.broken_by_base(&projected, projected.item_type, rebase.sub_type as u16) == 0 => ItemEdit::BaseType(eg_trainer::edits::BaseTypeEdit {
+                    ) if self.broken_by_base(&projected, projected.item_type, rebase.sub_type as u16) == 0 => ItemEdit::BaseType(eg_trainer::item::edit::BaseTypeEdit {
                         allow_incompatible: false,
                         ..rebase
                     }),
@@ -2890,18 +2890,18 @@ impl ForgeEditor {
             };
             let problem = match &edit {
                 edit if edit.needs_override() && !self.unrestricted() => Some(OVERRIDE_REQUIRED.to_string()),
-                ItemEdit::UniqueIdentity(eg_trainer::edits::UniqueIdentityEdit { rarity: 8, .. }) if !projected.affixes.is_empty() => {
+                ItemEdit::UniqueIdentity(eg_trainer::item::edit::UniqueIdentityEdit { rarity: 8, .. }) if !projected.affixes.is_empty() => {
                     Some("A set item holds no affixes. Remove them first.".into())
                 }
-                ItemEdit::UniqueIdentity(eg_trainer::edits::UniqueIdentityEdit { .. }) if !edit.is_valid(&projected) => Some("That unique does not fit this item.".into()),
-                ItemEdit::Status(eg_trainer::edits::StatusEdit { .. }) if !edit.is_valid(&projected) => Some(format!("{} does not apply to this item.", field.name)),
+                ItemEdit::UniqueIdentity(eg_trainer::item::edit::UniqueIdentityEdit { .. }) if !edit.is_valid(&projected) => Some("That unique does not fit this item.".into()),
+                ItemEdit::Status(eg_trainer::item::edit::StatusEdit { .. }) if !edit.is_valid(&projected) => Some(format!("{} does not apply to this item.", field.name)),
                 // Before the base's own check, which also refuses an equipment-type break without naming it.
-                ItemEdit::BaseType(eg_trainer::edits::BaseTypeEdit {
+                ItemEdit::BaseType(eg_trainer::item::edit::BaseTypeEdit {
                     allow_incompatible: false,
                     item_type: None,
                     sub_type,
                 }) if self.broken_by_base(&projected, projected.item_type, *sub_type as u16) > 0 => Some(BROKEN_BY_BASE.into()),
-                ItemEdit::BaseType(eg_trainer::edits::BaseTypeEdit { .. }) if !edit.is_valid(&projected) => Some("This item's base cannot change.".into()),
+                ItemEdit::BaseType(eg_trainer::item::edit::BaseTypeEdit { .. }) if !edit.is_valid(&projected) => Some("This item's base cannot change.".into()),
                 _ => None,
             };
             if let Some(problem) = problem {

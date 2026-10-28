@@ -1354,11 +1354,9 @@ dependencies = [
 name = "eg-game-access"
 version = "0.1.0"
 dependencies = [
- "detour",
  "eg-core",
- "eg-il2cpp-runtime",
  "eg-trainer-wire",
- "iced-x86",
+ "tempfile",
  "tokio",
  "windows-sys 0.61.2",
 ]
@@ -1405,25 +1403,12 @@ dependencies = [
 name = "eg-trainer-helper"
 version = "0.1.0"
 dependencies = [
+ "detour",
  "eg-game-access",
  "eg-il2cpp-runtime",
  "eg-trainer-wire",
+ "iced-x86",
  "sha2",
- "tokio",
- "windows-sys 0.61.2",
-]
-
-[[package]]
-name = "eg-trainer-host"
-version = "0.1.0"
-dependencies = [
- "eg-core",
- "eg-game-access",
- "eg-trainer",
- "eg-trainer-wire",
- "jiff",
- "serde_json",
- "tempfile",
  "tokio",
  "windows-sys 0.61.2",
 ]
@@ -1517,7 +1502,6 @@ dependencies = [
  "eg-core",
  "eg-trainer",
  "eg-trainer-helper",
- "eg-trainer-host",
  "eg-ui",
  "serde_json",
  "slint",

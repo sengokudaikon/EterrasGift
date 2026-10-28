@@ -1,8 +1,8 @@
 use super::*;
 use eg_core::game_log::LoggedCharacter;
 use eg_trainer::backend::{BackendSnapshot, HOOK_NOT_AVAILABLE, HookRun, ProfileLock};
+use eg_trainer::features::profiles::{ProfileBook, ProfileKey, ProfileSaver};
 use eg_trainer::features::{DESCRIPTORS, FeatureKey, HookId};
-use eg_trainer::profiles::{ProfileBook, ProfileKey, ProfileSaver};
 
 fn hook(id: &str) -> HookId {
     HookId::parse(id).unwrap()
@@ -47,14 +47,14 @@ fn playing(shared: &Shared, name: &str) {
         class: "Primalist".into(),
     });
 }
-/// Mira wants God mode, Damage dealt (at 3) and Zoom; Oren, played before her, wants nothing.
+/// Mira wants God mode, Damage dealt (at 3) and Mysterious rift; Oren, played before her, wants nothing.
 fn book() -> ProfileBook {
     ProfileBook::from_settings(Some(&serde_json::json!({
         "profiles": [
             { "name": "Oren", "class": "Primalist", "cycle": "Legacy", "lastPlayed": "2026-10-17T09:00:00Z", "wanted": [] },
             {
                 "name": "Mira", "class": "Primalist", "cycle": "Legacy", "lastPlayed": "2026-10-18T09:00:00Z",
-                "wanted": ["incoming-damage", "damage-dealt", "zoom"], "values": { "damage-dealt": [3.0] }
+                "wanted": ["incoming-damage", "damage-dealt", "mysterious-rift"], "values": { "damage-dealt": [3.0] }
             }
         ]
     })))
@@ -64,7 +64,7 @@ fn mira_order() -> Vec<HookId> {
     DESCRIPTORS
         .iter()
         .filter_map(|descriptor| match descriptor.key {
-            FeatureKey::Hook(id) if ["incoming-damage", "damage-dealt", "zoom"].contains(&id.as_str()) => Some(id),
+            FeatureKey::Hook(id) if ["incoming-damage", "damage-dealt", "mysterious-rift"].contains(&id.as_str()) => Some(id),
             _ => None,
         })
         .collect()
@@ -114,13 +114,13 @@ fn a_character_without_a_profile_has_hooks_for_this_connection_until_they_are_ke
         assert!(!snapshot.hooks.is_empty() && snapshot.hooks.values().all(|run| *run == HookRun::Off));
         assert_eq!(shared.count("hook"), 0);
 
-        let zoom = hook("zoom");
-        command(&handle, Command::SetHookWanted { id: zoom, on: true }).await.unwrap();
-        command(&handle, Command::SetHookValues { id: zoom, values: vec![-20.] }).await.unwrap();
-        assert_eq!(requested(&shared).last(), Some(&(zoom, true, vec![-20.])));
+        let damage = hook("incoming-damage");
+        command(&handle, Command::SetHookWanted { id: damage, on: true }).await.unwrap();
+        command(&handle, Command::SetHookValues { id: damage, values: vec![20.] }).await.unwrap();
+        assert_eq!(requested(&shared).last(), Some(&(damage, true, vec![20.])));
         let snapshot = handle.snapshot();
-        assert_eq!(snapshot.hooks[&zoom], HookRun::On);
-        assert!(snapshot.shown_hooks().unwrap().is_wanted(zoom));
+        assert_eq!(snapshot.hooks[&damage], HookRun::On);
+        assert!(snapshot.shown_hooks().unwrap().is_wanted(damage));
         assert!(saves.lock().unwrap().is_empty(), "this connection's hooks are not saved");
 
         command(&handle, Command::CreateProfile).await.unwrap();
@@ -130,15 +130,15 @@ fn a_character_without_a_profile_has_hooks_for_this_connection_until_they_are_ke
         assert_eq!(names, ["Ysolde", "Mira", "Oren"]);
         let ysolde = snapshot.profiles.get(&key("Ysolde")).unwrap();
         assert_eq!(
-            (ysolde.last_played, ysolde.hooks.is_wanted(zoom), ysolde.hooks.values(zoom)),
-            (Some(now()), true, &[-20.][..])
+            (ysolde.last_played, ysolde.hooks.is_wanted(damage), ysolde.hooks.values(damage)),
+            (Some(now()), true, &[20.][..])
         );
         assert_eq!(saves.lock().unwrap().last(), Some(&*snapshot.profiles));
         assert_eq!(command(&handle, Command::CreateProfile).await.unwrap_err().kind, ErrorKind::InvalidEdit);
         assert_eq!(shared.count("hook"), 2, "keeping them changes nothing in the game");
-        command(&handle, Command::SetHookWanted { id: zoom, on: false }).await.unwrap();
+        command(&handle, Command::SetHookWanted { id: damage, on: false }).await.unwrap();
         assert!(
-            !saves.lock().unwrap().last().unwrap().get(&key("Ysolde")).unwrap().hooks.is_wanted(zoom),
+            !saves.lock().unwrap().last().unwrap().get(&key("Ysolde")).unwrap().hooks.is_wanted(damage),
             "and changes are saved from now on"
         );
         shutdown(&handle, worker).await;
@@ -288,10 +288,13 @@ fn profiles_change_while_no_game_runs_and_lock_while_one_does_without_opening_it
         wait_until(&handle, |snapshot| snapshot.profile_lock == ProfileLock::Locked).await;
         assert_eq!(handle.snapshot().detected, Some(target()));
         for refused in [
-            Command::SetHookWanted { id: hook("zoom"), on: false },
+            Command::SetHookWanted {
+                id: hook("mysterious-rift"),
+                on: false,
+            },
             Command::SetHookValues {
-                id: hook("zoom"),
-                values: vec![-20.],
+                id: hook("mysterious-rift"),
+                values: vec![1.],
             },
             Command::SelectProfile(key("Oren")),
             Command::DeleteProfile(key("Oren")),
@@ -316,23 +319,32 @@ fn a_live_change_is_saved_and_applied_and_turning_a_hook_off_takes_it_back() {
         let (options, saves) = saving(book());
         let (handle, worker) = start(&shared, options);
         connected(&handle).await;
-        let zoom = hook("zoom");
-        command(&handle, Command::SetHookValues { id: zoom, values: vec![-20.] }).await.unwrap();
+        let damage = hook("incoming-damage");
+        command(&handle, Command::SetHookValues { id: damage, values: vec![20.] }).await.unwrap();
         assert_eq!(shared.count("hook"), 0, "a hook that is off takes its values when it is turned on");
-        command(&handle, Command::SetHookWanted { id: zoom, on: true }).await.unwrap();
-        command(&handle, Command::SetHookValues { id: zoom, values: vec![-30.] }).await.unwrap();
+        command(&handle, Command::SetHookWanted { id: damage, on: true }).await.unwrap();
+        command(&handle, Command::SetHookValues { id: damage, values: vec![30.] }).await.unwrap();
         assert_eq!(
-            command(&handle, Command::SetHookValues { id: zoom, values: vec![-30., 1.] }).await.unwrap_err().kind,
+            command(
+                &handle,
+                Command::SetHookValues {
+                    id: damage,
+                    values: vec![30., 20.]
+                }
+            )
+            .await
+            .unwrap_err()
+            .kind,
             ErrorKind::InvalidEdit
         );
-        assert_eq!(handle.snapshot().hooks[&zoom], HookRun::On);
-        command(&handle, Command::SetHookWanted { id: zoom, on: false }).await.unwrap();
-        assert_eq!(requested(&shared), [(zoom, true, vec![-20.]), (zoom, true, vec![-30.]), (zoom, false, vec![-30.])]);
+        assert_eq!(handle.snapshot().hooks[&damage], HookRun::On);
+        command(&handle, Command::SetHookWanted { id: damage, on: false }).await.unwrap();
+        assert_eq!(requested(&shared), [(damage, true, vec![20.]), (damage, true, vec![30.]), (damage, false, vec![30.])]);
         let snapshot = handle.snapshot();
-        assert_eq!(snapshot.hooks[&zoom], HookRun::Off);
+        assert_eq!(snapshot.hooks[&damage], HookRun::Off);
         let saved = saves.lock().unwrap().last().cloned().unwrap();
         let oren = saved.get(&key("Oren")).unwrap();
-        assert_eq!((oren.hooks.is_wanted(zoom), oren.hooks.values(zoom)), (false, &[-30.][..]));
+        assert_eq!((oren.hooks.is_wanted(damage), oren.hooks.values(damage)), (false, &[30.][..]));
         assert_eq!(
             command(&handle, Command::SelectProfile(key("Mira"))).await.unwrap_err().kind,
             ErrorKind::NotReady,

@@ -1,8 +1,8 @@
 use eg_trainer::{
-    catalog::{CatalogIdentity, EXTRACTION_VERSION, GameCatalog},
-    edits::{EditError, ExpectedObservation, ItemEdit, StatusEdit, StatusField},
-    undo::ForgeUndo,
-    writes::{ForgePlan, WriteRecord, WriteStatus},
+    definitions::catalog::{CatalogIdentity, EXTRACTION_VERSION, GameCatalog},
+    item::edit::{EditError, ExpectedObservation, ItemEdit, StatusEdit, StatusField},
+    item::undo::ForgeUndo,
+    write::{ForgePlan, WriteRecord, WriteStatus},
 };
 use eg_trainer_wire::{
     definitions::{ItemLimits, ValueRange},
@@ -114,7 +114,7 @@ fn fresh_exact_after_observation_prepares_only_the_original_level_with_full_iden
     let confirmed = record(87);
     let token = ForgeUndo::from_confirmed(&confirmed).unwrap();
     assert_eq!(token.manager(), MANAGER);
-    assert!(matches!(token.reverse_edit(), eg_trainer::edits::ItemEdit::Status(edit) if edit.value == 87));
+    assert!(matches!(token.reverse_edit(), eg_trainer::item::edit::ItemEdit::Status(edit) if edit.value == 87));
     assert_eq!(token.after().snapshot(), confirmed.plan.projected());
     let current = observation(confirmed.plan.projected().clone());
     let plan = token.prepare(&current, MANAGER, &catalog()).unwrap();
@@ -306,8 +306,8 @@ fn pure_preparation_failure_preserves_the_owned_token_and_never_changes_the_reco
 
 #[test]
 fn affix_undo_follows_the_reordered_slot_and_rechecks_override() {
-    use eg_trainer::catalog::{AffixDefinition, Availability};
-    use eg_trainer::edits::{AffixEdit, SealState};
+    use eg_trainer::definitions::catalog::{AffixDefinition, Availability};
+    use eg_trainer::item::edit::{AffixEdit, SealState};
     let mut data = catalog();
     for id in [1, 2] {
         data.affixes.insert(

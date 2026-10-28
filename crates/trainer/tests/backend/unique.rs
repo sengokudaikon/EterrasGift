@@ -1,5 +1,5 @@
 use super::*;
-use eg_trainer::edits::{RollChange, RollEdit, RollTarget};
+use eg_trainer::item::edit::{RollChange, RollEdit, RollTarget};
 fn shared() -> Arc<Shared> {
     let shared = writes::writable();
     {

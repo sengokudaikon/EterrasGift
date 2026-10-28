@@ -93,8 +93,8 @@ pub fn forge_record(value: &ForgeSnapshot) -> Value {
     })
 }
 
-fn edit(value: &crate::edits::ItemEdit) -> Value {
-    use crate::edits::ItemEdit;
+fn edit(value: &crate::item::edit::ItemEdit) -> Value {
+    use crate::item::edit::ItemEdit;
     match value {
         ItemEdit::Affix(e) => {
             json!({"kind": "Affix", "slot": e.slot, "id": e.id, "tier": e.tier, "roll": e.roll, "seal": e.seal as i32, "allowIncompatible": e.allow_incompatible})

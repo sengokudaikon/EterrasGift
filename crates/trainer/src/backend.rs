@@ -6,13 +6,18 @@
 //! mapping reads have a separate disposable receipt and stop between RPCs. Cleanup barriers
 //! suppress publication from an earlier operation, then drain it before cleanup.
 //! Watch snapshots are authoritative; broadcast events can lag and are advisory.
+mod connection;
 mod faults;
 mod fields;
 mod mapping;
 mod profiles;
 mod rate_write;
+mod snapshot;
 mod unique;
 mod write;
+
+pub use connection::*;
+pub use snapshot::*;
 
 use std::{
     collections::BTreeMap,
@@ -32,6 +37,7 @@ pub use eg_trainer_wire::transport::Delivery;
 pub use eg_trainer_wire::{
     fields::{AttackLeechObservation, AttackLeechRead, AttackLeechUnavailable, ObservedObjectIdentity, ObservedRate, RateUnavailable},
     forge::{AffixSnapshot, ForgeSnapshot, ItemStatus, UniqueIdentity},
+    hooks::GameplayHook,
     mapping::ModifierSnapshot,
     process::ProcessIdentity,
     protocol::RuntimeStatus,
@@ -46,694 +52,17 @@ pub use profiles::{HOOK_NOT_AVAILABLE, HookRequest, HookRun, ProfileLock};
 use tokio::sync::{broadcast, mpsc, oneshot, watch};
 
 use crate::{
-    catalog::{GameCatalog, ResolvedItemName},
+    connect::gate::{self, GateDecision, GatePolicy, GateVerdict, LogSource},
+    definitions::catalog::{GameCatalog, ResolvedItemName},
+    definitions::service::{GameData, GameDataHandle},
+    features::profiles::{ProfileBook, ProfileKey, ProfileSaver},
     features::{FeatureIntents, HookId},
-    field_writes::{AttackLeechDecision, AttackLeechPlan, AttackLeechTarget, FieldPlanError, RateWriteRecord, RateWriteStatus},
-    game_data::{GameData, GameDataHandle},
-    gate::{self, GateDecision, GatePolicy, GateVerdict, LogSource},
-    mapping::{MappingRequest, ValueTable},
-    profiles::{ProfileBook, ProfileKey, ProfileSaver},
+    fields::{AttackLeechDecision, AttackLeechPlan, AttackLeechTarget, FieldPlanError, RateWriteRecord, RateWriteStatus},
+    item::values::{MappingRequest, ValueTable},
     session::{Cleanup, Session, SessionError},
-    writes::{ForgePlan, WriteControl, WriteObservation, WriteOutcome, WritePlan, WriteRecord, WriteStatus},
+    write::{ForgePlan, WriteControl, WriteObservation, WriteOutcome, WritePlan, WriteRecord, WriteStatus},
 };
 
-pub trait ProcessLocator: Send + 'static {
-    /// Query identities only. A matching filename alone is not an attachment.
-    fn find(&mut self) -> impl Future<Output = Result<Vec<ProcessIdentity>, BackendError>> + Send;
-}
-
-pub trait Connector: Send + 'static {
-    type Connection: BackendConnection;
-    /// Release local resources for processes whose exit was proved, without remote I/O.
-    fn reap_exited(&mut self) -> Vec<ProcessIdentity> {
-        Vec::new()
-    }
-    /// Called only after the backend's process-bound log gate allows access.
-    /// Implementations must repeat admission after preparation and bind the exact
-    /// identity/build/helper. Existing retained modules must never be reinjected.
-    fn connect(&mut self, target: ProcessIdentity, now: Timestamp) -> impl Future<Output = Result<Self::Connection, BackendError>> + Send;
-}
-
-pub const HELPER_RESTART_REQUIRED: &str = "The helper could not leave the game; restart Last Epoch before playing online.";
-
-pub trait BackendConnection: Send + 'static {
-    fn target(&self) -> &ProcessIdentity;
-    /// Connection health is independent of a particular write's certainty.
-    fn is_ready(&self) -> bool {
-        true
-    }
-    /// Return certainty after entering transport; Err is pre-submission unless
-    /// delivery explicitly says MayHaveRun. Confirmed/NotKept require a complete
-    /// independent read under renewed admission, not only a native ACK.
-    fn write(&mut self, plan: &WritePlan, control: &mut dyn WriteControl) -> impl Future<Output = Result<WriteOutcome<WriteObservation>, BackendError>> + Send {
-        async move {
-            match plan {
-                WritePlan::Forge(plan) => Ok(self.edit_forge(plan, control).await?.map(WriteObservation::forge)),
-                WritePlan::Field(plan) => Ok(self.set_attack_leech_rate(plan, control).await?.map(WriteObservation::Field)),
-            }
-        }
-    }
-    fn refresh(&mut self) -> impl Future<Output = Result<RuntimeStatus, BackendError>> + Send;
-    fn read_locale(&mut self) -> impl Future<Output = Result<crate::catalog::GameLocale, BackendError>> + Send;
-    /// The running build's binary and metadata hashes: the game data read from files with the same hashes describes
-    /// this game. Definitions are never captured from the game.
-    fn build_hashes(&self) -> (String, String);
-    fn read_forge(&mut self) -> impl Future<Output = Result<Option<ForgeSnapshot>, BackendError>> + Send;
-    fn describe_implicits(&mut self, _: &ForgeSnapshot) -> impl Future<Output = Result<Option<Vec<ModifierSnapshot>>, BackendError>> + Send {
-        async { Ok(None) }
-    }
-    fn describe_unique(&mut self, _: &ForgeSnapshot) -> impl Future<Output = Result<Option<Vec<ModifierSnapshot>>, BackendError>> + Send {
-        async { Ok(None) }
-    }
-    fn preview_unique(
-        &mut self,
-        _: &crate::edits::ExpectedObservation,
-        _: &crate::edits::RollEdit,
-        _: &crate::mapping::BoundTooltip,
-    ) -> impl Future<Output = Result<crate::mapping::BoundPreview, BackendError>> + Send {
-        async { Err(BackendError::blocked(ErrorKind::MappingUnavailable, "Unique preview is unavailable.")) }
-    }
-    fn resolve_mapping(&mut self, _: &crate::edits::ExpectedObservation, _: &MappingRequest) -> impl Future<Output = Result<ValueTable, BackendError>> + Send {
-        async { Err(BackendError::blocked(ErrorKind::MappingUnavailable, "Actual values are unavailable for this modifier.")) }
-    }
-    /// Optional reads may stop between completed exchanges. Implementations
-    /// must drain an in-flight exchange and preserve fatal transport failures.
-    fn resolve_mapping_observed(
-        &mut self,
-        expected: &crate::edits::ExpectedObservation,
-        request: &MappingRequest,
-        observer: &mut dyn ReadObserver,
-    ) -> impl Future<Output = Result<ValueTable, BackendError>> + Send {
-        async move {
-            if observer.control() == ReadControl::Stop {
-                return Err(BackendError::blocked(ErrorKind::Superseded, "Value request canceled."));
-            }
-            self.resolve_mapping(expected, request).await
-        }
-    }
-    fn supports_read_attack_leech(&self) -> bool {
-        false
-    }
-    fn read_attack_leech(&mut self) -> impl Future<Output = Result<AttackLeechRead, BackendError>> + Send {
-        async { Err(BackendError::blocked(ErrorKind::NotReady, "attack/leech reads are unavailable")) }
-    }
-    fn supports_attack_leech_rate(&self) -> bool {
-        false
-    }
-    /// Err means submission was not attempted, unless it explicitly carries MayHaveRun.
-    /// Returned status must retain every outcome after entering transport; no retry.
-    /// Confirmed requires full projected native acknowledgement and a separate fresh
-    /// read under renewed admission. The backend separately checks its current sequence.
-    fn set_attack_leech_rate(&mut self, _: &AttackLeechPlan, _: &mut dyn WriteControl) -> impl Future<Output = Result<RateWriteStatus, BackendError>> + Send {
-        async { Err(BackendError::blocked(ErrorKind::NotReady, "attack/leech writes are unavailable")) }
-    }
-    fn supports_level_requirement(&self) -> bool {
-        false
-    }
-    fn supports_status(&self, field: crate::edits::StatusField) -> bool {
-        field == crate::edits::StatusField::LevelRequirement && self.supports_level_requirement()
-    }
-    fn supports_base_change(&self) -> bool {
-        false
-    }
-    fn supports_identity_change(&self) -> bool {
-        false
-    }
-    fn supports_affix_list(&self) -> bool {
-        false
-    }
-    fn supports_affix_change(&self) -> bool {
-        false
-    }
-    fn supports_affix_rolls(&self) -> bool {
-        false
-    }
-    fn supports_forge(&self, edit: &crate::edits::ItemEdit) -> bool {
-        match edit {
-            crate::edits::ItemEdit::AddAffix(_) | crate::edits::ItemEdit::RemoveAffix(_) => self.supports_affix_list(),
-            crate::edits::ItemEdit::Affix(_) => self.supports_affix_change(),
-            crate::edits::ItemEdit::Roll(edit) if edit.target == crate::edits::RollTarget::Affix => self.supports_affix_rolls(),
-            crate::edits::ItemEdit::Status(edit) => self.supports_status(edit.field),
-            crate::edits::ItemEdit::BaseType(_) => self.supports_base_change(),
-            crate::edits::ItemEdit::UniqueIdentity(_) => self.supports_identity_change(),
-            _ => false,
-        }
-    }
-    /// Err must mean submission was not attempted (or carry MayHaveRun). Once
-    /// transport is entered, return a certainty-bearing status even on failure.
-    /// Whether this connection implements the feature's native lifecycle.
-    fn supports_hook(&self, _: HookId) -> bool {
-        false
-    }
-    fn observed_hook(&self, _: HookId) -> Option<bool> {
-        None
-    }
-    /// Sets the hook as `request` asks, then answers with the game's own report of it: `Confirmed(on)` when it matches
-    /// the request, `NotKept(on)` when it does not.
-    fn set_hook(&mut self, _: &HookRequest, _: &mut dyn WriteControl) -> impl Future<Output = Result<WriteOutcome<bool>, BackendError>> + Send {
-        async { Ok(WriteOutcome::refused(HOOK_NOT_AVAILABLE)) }
-    }
-    fn edit_forge(&mut self, _: &ForgePlan, _: &mut dyn WriteControl) -> impl Future<Output = Result<WriteStatus, BackendError>> + Send {
-        async { Err(BackendError::blocked(ErrorKind::NotReady, "level requirement writes are unavailable")) }
-    }
-    fn disconnect(&mut self) -> impl Future<Output = Cleanup> + Send;
-    // Dropping a connection performs no I/O. After admission loss the worker
-    // drains only owner shutdown and read-only native departure evidence.
-}
-
-impl<T: Transport + Send + 'static> BackendConnection for Session<T> {
-    fn target(&self) -> &ProcessIdentity {
-        self.target()
-    }
-    fn is_ready(&self) -> bool {
-        self.state() == crate::session::SessionState::Ready
-    }
-    async fn write(&mut self, plan: &WritePlan, control: &mut dyn WriteControl) -> Result<WriteOutcome<WriteObservation>, BackendError> {
-        Ok(self.write_controlled(plan, control).await?)
-    }
-    async fn refresh(&mut self) -> Result<RuntimeStatus, BackendError> {
-        Session::refresh(self).await?;
-        self.refresh_gameplay_hooks().await?;
-        self.runtime_status()
-            .copied()
-            .ok_or_else(|| BackendError::blocked(ErrorKind::Protocol, "missing runtime status"))
-    }
-    async fn read_locale(&mut self) -> Result<crate::catalog::GameLocale, BackendError> {
-        Ok(Session::read_locale(self).await?)
-    }
-    fn build_hashes(&self) -> (String, String) {
-        (self.profile().binary_hash().to_owned(), self.profile().metadata_hash().to_owned())
-    }
-    async fn describe_implicits(&mut self, expected: &ForgeSnapshot) -> Result<Option<Vec<ModifierSnapshot>>, BackendError> {
-        Ok(Session::describe_implicits(self, expected).await?)
-    }
-    async fn describe_unique(&mut self, expected: &ForgeSnapshot) -> Result<Option<Vec<ModifierSnapshot>>, BackendError> {
-        Ok(Session::describe_unique(self, expected).await?)
-    }
-    async fn preview_unique(
-        &mut self,
-        expected: &crate::edits::ExpectedObservation,
-        draft: &crate::edits::RollEdit,
-        evidence: &crate::mapping::BoundTooltip,
-    ) -> Result<crate::mapping::BoundPreview, BackendError> {
-        Ok(Session::preview_unique(self, expected, draft, evidence).await?)
-    }
-    async fn resolve_mapping(&mut self, expected: &crate::edits::ExpectedObservation, request: &MappingRequest) -> Result<ValueTable, BackendError> {
-        Ok(Session::resolve_mapping(self, expected, request).await?)
-    }
-    async fn resolve_mapping_observed(
-        &mut self,
-        expected: &crate::edits::ExpectedObservation,
-        request: &MappingRequest,
-        observer: &mut dyn ReadObserver,
-    ) -> Result<ValueTable, BackendError> {
-        Ok(Session::resolve_mapping_observed(self, expected, request, observer).await?)
-    }
-    async fn read_forge(&mut self) -> Result<Option<ForgeSnapshot>, BackendError> {
-        Ok(Session::read_forge(self).await?)
-    }
-    fn supports_read_attack_leech(&self) -> bool {
-        true
-    }
-    async fn read_attack_leech(&mut self) -> Result<AttackLeechRead, BackendError> {
-        Ok(Session::read_attack_leech(self).await?)
-    }
-    fn supports_attack_leech_rate(&self) -> bool {
-        true
-    }
-    async fn set_attack_leech_rate(&mut self, plan: &AttackLeechPlan, control: &mut dyn WriteControl) -> Result<RateWriteStatus, BackendError> {
-        Ok(Session::set_attack_leech_rate_controlled(self, plan, control).await?)
-    }
-    fn supports_level_requirement(&self) -> bool {
-        true
-    }
-    fn supports_hook(&self, id: HookId) -> bool {
-        eg_trainer_wire::hooks::GameplayHook::from_id(id.as_str()).is_some()
-    }
-    fn observed_hook(&self, id: HookId) -> Option<bool> {
-        eg_trainer_wire::hooks::GameplayHook::from_id(id.as_str())
-            .and_then(|hook| self.hook_observation(hook))
-            .map(|actual| actual.enabled)
-    }
-    async fn set_hook(&mut self, request: &HookRequest, control: &mut dyn WriteControl) -> Result<WriteOutcome<bool>, BackendError> {
-        let Some(hook) = eg_trainer_wire::hooks::GameplayHook::from_id(request.id.as_str()) else {
-            return Ok(WriteOutcome::refused(HOOK_NOT_AVAILABLE));
-        };
-        let value = match (hook, request.values.as_slice()) {
-            (eg_trainer_wire::hooks::GameplayHook::MysteriousRift, [mode]) if *mode == 1.0 => 1,
-            (eg_trainer_wire::hooks::GameplayHook::MysteriousRift, [mode]) if *mode == 2.0 => 0,
-            (eg_trainer_wire::hooks::GameplayHook::MysteriousRift, [mode]) if *mode == 0.0 && !request.on => 1,
-            (eg_trainer_wire::hooks::GameplayHook::Offhand, []) => 1,
-            (eg_trainer_wire::hooks::GameplayHook::IncomingDamage, [percent]) if percent.is_finite() && (0.0..=100.0).contains(percent) && percent.fract() == 0.0 => {
-                *percent as u64
-            }
-            (eg_trainer_wire::hooks::GameplayHook::DamageDealt, [multiplier]) if multiplier.is_finite() && ((0.0..=100.0).contains(multiplier) || *multiplier == 101.0) => {
-                multiplier.to_bits()
-            }
-            _ => return Ok(WriteOutcome::refused("Invalid hook selection")),
-        };
-        Ok(self.set_gameplay_hook_with_value(hook, request.on, value, control).await?)
-    }
-    fn supports_status(&self, _field: crate::edits::StatusField) -> bool {
-        true
-    }
-    fn supports_base_change(&self) -> bool {
-        true
-    }
-    fn supports_identity_change(&self) -> bool {
-        true
-    }
-    fn supports_affix_list(&self) -> bool {
-        true
-    }
-    fn supports_affix_change(&self) -> bool {
-        true
-    }
-    fn supports_affix_rolls(&self) -> bool {
-        true
-    }
-    async fn edit_forge(&mut self, plan: &ForgePlan, control: &mut dyn WriteControl) -> Result<WriteStatus, BackendError> {
-        Ok(Session::edit_forge_controlled(self, plan, control).await?)
-    }
-    async fn disconnect(&mut self) -> Cleanup {
-        Session::disconnect(self).await
-    }
-}
-
-pub trait Clock: Send + 'static {
-    fn now(&self) -> Timestamp;
-}
-pub struct SystemClock;
-impl Clock for SystemClock {
-    fn now(&self) -> Timestamp {
-        Timestamp::now()
-    }
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum ErrorKind {
-    Disabled,
-    NotConnected,
-    NotReady,
-    MultipleProcesses,
-    Gate,
-    Transport,
-    HelperDeparted,
-    CharacterLoading,
-    Protocol,
-    Identity,
-    RestartRequired,
-    Superseded,
-    Stopped,
-    Fault,
-    InvalidEdit,
-    WriteNotApplied,
-    WriteNotKept,
-    WriteUncertain,
-    MappingUnavailable,
-    MappingRetryable,
-}
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct BackendError {
-    pub kind: ErrorKind,
-    pub message: String,
-    pub delivery: Option<Delivery>,
-    pub retry_when_waiting: bool,
-}
-impl BackendError {
-    pub fn blocked(kind: ErrorKind, message: impl Into<String>) -> Self {
-        Self {
-            kind,
-            message: message.into(),
-            delivery: None,
-            retry_when_waiting: false,
-        }
-    }
-    pub fn waiting(kind: ErrorKind, message: impl Into<String>) -> Self {
-        Self {
-            kind,
-            message: message.into(),
-            delivery: None,
-            retry_when_waiting: true,
-        }
-    }
-    fn retryable(&self) -> bool {
-        self.retry_when_waiting && self.delivery != Some(Delivery::MayHaveRun)
-    }
-}
-impl fmt::Display for BackendError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.message)
-    }
-}
-impl std::error::Error for BackendError {}
-impl From<SessionError> for BackendError {
-    fn from(error: SessionError) -> Self {
-        let message = error.to_string();
-        let (kind, delivery, retry_when_waiting) = match error {
-            SessionError::Disabled => (ErrorKind::Disabled, None, false),
-            SessionError::CharacterLoading => (ErrorKind::CharacterLoading, Some(Delivery::NotSent), true),
-            SessionError::Busy => (ErrorKind::NotReady, None, false),
-            SessionError::NotConnected => (ErrorKind::NotConnected, None, false),
-            SessionError::NotOffline(_) => (ErrorKind::Gate, None, true),
-            SessionError::Identity(_) => (ErrorKind::Identity, None, false),
-            SessionError::Protocol(_) => (ErrorKind::Protocol, None, false),
-            SessionError::Mapping(_) => (ErrorKind::MappingUnavailable, None, false),
-            SessionError::MappingRetryable(_) => (ErrorKind::MappingRetryable, None, false),
-            SessionError::Helper {
-                code: ResponseCode::NotReady,
-                may_have_run: false,
-                ..
-            } => (ErrorKind::NotReady, Some(Delivery::NotSent), true),
-            SessionError::Helper {
-                code: ResponseCode::OfflineRequired,
-                may_have_run: false,
-                ..
-            } => (ErrorKind::Gate, Some(Delivery::NotSent), true),
-            SessionError::Helper {
-                code: ResponseCode::RestartRequired,
-                may_have_run,
-                ..
-            } => (ErrorKind::RestartRequired, Some(if may_have_run { Delivery::MayHaveRun } else { Delivery::NotSent }), false),
-            SessionError::Helper { may_have_run, .. } => (ErrorKind::Protocol, Some(if may_have_run { Delivery::MayHaveRun } else { Delivery::NotSent }), false),
-            SessionError::Transport(TransportError {
-                failure: TransportFailure::Departed,
-                delivery,
-            }) => (ErrorKind::HelperDeparted, Some(delivery), true),
-            SessionError::Transport(error) => {
-                let retry = error.delivery == Delivery::NotSent && matches!(error.failure, TransportFailure::Busy | TransportFailure::Missing);
-                (ErrorKind::Transport, Some(error.delivery), retry)
-            }
-        };
-        Self {
-            kind,
-            message,
-            delivery,
-            retry_when_waiting,
-        }
-    }
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Phase {
-    Disabled,
-    Disconnected,
-    WaitingForGame,
-    WaitingForCharacter,
-    Connecting,
-    Ready,
-    Blocked,
-    Closing,
-    Stopped,
-}
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Activity {
-    Connecting,
-    /// Waiting for the game data service (a changed install is read again).
-    ReadingGameFiles,
-    ReadingForge,
-    ReadingAttackLeech,
-    Refreshing,
-    WritingForge,
-    WritingAttackLeech,
-}
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct Capabilities {
-    /// In GameplayHook order; availability comes from this connection, not saved intent.
-    pub gameplay_hooks: [bool; 4],
-    pub read_forge: bool,
-    pub read_attack_leech: bool,
-    /// Narrow operation support, not current observation eligibility or lifetime authority.
-    pub attack_leech_rate: bool,
-    /// Operation support on this ready connection. Current item eligibility and
-    /// range/observation checks still belong to level_requirement_plan.
-    pub level_requirement: bool,
-    /// Per-field status support, independent of the selected item's eligibility.
-    pub status_fields: [bool; 7],
-    pub base_change: bool,
-    pub identity_change: bool,
-    pub affix_rolls: bool,
-    pub affix_change: bool,
-    pub affix_list: bool,
-}
-#[derive(Clone, Debug)]
-pub enum CatalogState {
-    Missing,
-    Current { generation: u64, data: Arc<GameCatalog> },
-    Stale(Arc<GameCatalog>),
-}
-/// Every publish compares the state with the last one, several times a second, and a catalog is large: the same
-/// allocation is equal without reading it. Distinct allocations still compare by content.
-impl PartialEq for CatalogState {
-    fn eq(&self, other: &Self) -> bool {
-        let same = |a: &Arc<GameCatalog>, b: &Arc<GameCatalog>| Arc::ptr_eq(a, b) || **a == **b;
-        match (self, other) {
-            (Self::Missing, Self::Missing) => true,
-            (Self::Current { generation: a, data: x }, Self::Current { generation: b, data: y }) => a == b && same(x, y),
-            (Self::Stale(x), Self::Stale(y)) => same(x, y),
-            _ => false,
-        }
-    }
-}
-impl CatalogState {
-    pub fn data(&self) -> Option<&Arc<GameCatalog>> {
-        match self {
-            Self::Missing => None,
-            Self::Current { data, .. } | Self::Stale(data) => Some(data),
-        }
-    }
-}
-#[derive(Clone, Debug, PartialEq)]
-pub enum ForgeState {
-    Unobserved,
-    NoItem {
-        generation: u64,
-    },
-    Item {
-        generation: u64,
-        snapshot: Arc<ForgeSnapshot>,
-        resolved_name: Option<ResolvedItemName>,
-        implicits: Option<Vec<ModifierSnapshot>>,
-        unique: Option<Result<Vec<ModifierSnapshot>, String>>,
-    },
-}
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum HelperResidency {
-    MayBeLoaded,
-    Loaded,
-    Leaving,
-    Gone,
-    Stuck,
-}
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct RetainedHelper {
-    pub target: ProcessIdentity,
-    pub residency: HelperResidency,
-}
-/// One owned read bound to its process, connection generation, admitted manager and monotonically
-/// increasing publication sequence. Tokens and raw rates authorize no dereference or write.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct AttackLeechSnapshot {
-    pub process: ProcessIdentity,
-    pub generation: u64,
-    pub sequence: u64,
-    pub manager: u64,
-    pub read: AttackLeechRead,
-}
-/// The game data service's state (`crate::game_data`), for the views. A session uses its catalog when it runs the build
-/// the files hold; without it the trainer does not open.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum GameFiles {
-    /// No game folder is known yet.
-    NotConfigured,
-    Reading,
-    Ready {
-        affixes: usize,
-        build: String,
-        checked_at: Option<Timestamp>,
-        updated_at: Option<Timestamp>,
-    },
-    Unavailable(String),
-}
-impl From<&GameData> for GameFiles {
-    fn from(data: &GameData) -> Self {
-        match data {
-            GameData::NoGame => Self::NotConfigured,
-            GameData::Reading => Self::Reading,
-            GameData::Ready(catalog) => Self::Ready {
-                affixes: catalog.affix_count(),
-                build: catalog.build.clone(),
-                checked_at: catalog.checked_at,
-                updated_at: catalog.updated_at,
-            },
-            GameData::Unavailable(reason) => Self::Unavailable(reason.clone()),
-        }
-    }
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub struct BackendSnapshot {
-    pub revision: u64,
-    pub generation: u64,
-    pub enabled: bool,
-    pub monitoring: bool,
-    pub auto_connect: bool,
-    pub override_enabled: bool,
-    pub phase: Phase,
-    pub activity: Option<Activity>,
-    pub detected: Option<ProcessIdentity>,
-    pub attached: Option<ProcessIdentity>,
-    pub retained_helper: Option<RetainedHelper>,
-    pub gate: Option<GateDecision>,
-    pub cleanup: Cleanup,
-    pub runtime_status: Option<RuntimeStatus>,
-    pub error: Option<BackendError>,
-    pub catalog: CatalogState,
-    pub game_files: GameFiles,
-    pub forge: ForgeState,
-    /// Successful owned reads/captures, independent of item equality. This
-    /// allows optional display failures to be retried after Refresh, not in a loop.
-    pub forge_read_sequence: u64,
-    pub mappings: Vec<ResolvedMapping>,
-    pub unique_preview: Option<ResolvedPreview>,
-    pub attack_leech: Option<AttackLeechSnapshot>,
-    pub capabilities: Capabilities,
-    pub last_write: Option<WriteRecord>,
-    pub last_rate_write: Option<RateWriteRecord>,
-    pub undo_forge: Option<crate::undo::ForgeUndo>,
-    pub undo_forge_depth: usize,
-    pub undo_forge_needs_override: bool,
-    /// Every kept cheat profile, the last played first.
-    pub profiles: Arc<ProfileBook>,
-    /// The character the pages show: the profile chosen while no game runs, or the character in play, whose hooks are
-    /// its profile's or, without one, `unsaved`.
-    pub editing: Option<ProfileKey>,
-    /// The hooks of a character in play without a profile: they last this connection unless kept as its profile.
-    pub unsaved: Option<Arc<FeatureIntents>>,
-    pub profile_lock: ProfileLock,
-    /// The live profile's hooks in this connection, every hook by ID; empty while no character is in play.
-    pub hooks: BTreeMap<HookId, HookRun>,
-}
-/// Latest optional preview; matching requires both the full observation and exact draft.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct ResolvedPreview {
-    pub expected: crate::edits::ExpectedObservation,
-    pub draft: crate::edits::RollEdit,
-    pub result: Result<crate::mapping::BoundPreview, String>,
-}
-/// Optional display data for one complete observed item and exact draft query.
-/// Kept in memory only; a changed item, catalog or connection discards it.
-#[derive(Clone, Debug, PartialEq)]
-pub struct ResolvedMapping {
-    pub expected: crate::edits::ExpectedObservation,
-    pub request: MappingRequest,
-    pub result: Result<Arc<ValueTable>, String>,
-    /// Unclassified/transient helper refusal may be retried after the next
-    /// successful owned read. Stable capability failures survive monitor polls.
-    pub retry_on_read: bool,
-}
-impl BackendSnapshot {
-    /// The hooks the pages show: the shown profile's, or those of the character in play for this connection.
-    pub fn shown_hooks(&self) -> Option<&FeatureIntents> {
-        self.editing
-            .as_ref()
-            .and_then(|key| self.profiles.get(key))
-            .map(|profile| &profile.hooks)
-            .or(self.unsaved.as_deref())
-    }
-    pub fn mapping(&self, expected: &crate::edits::ExpectedObservation, request: &MappingRequest) -> Option<&Result<Arc<ValueTable>, String>> {
-        self.mappings
-            .iter()
-            .find(|mapping| mapping.expected.matches(expected) && &mapping.request == request)
-            .map(|mapping| &mapping.result)
-    }
-    /// The outcome for this exact submitted plan. Historical certainty survives
-    /// connection loss; publishing its observation still requires current scope.
-    pub fn write_outcome(&self, plan: &WritePlan) -> Option<WriteOutcome<WriteObservation>> {
-        match plan {
-            WritePlan::Forge(plan) => self
-                .last_write
-                .as_ref()
-                .filter(|r| &r.plan == plan.as_ref())
-                .map(|r| r.status.clone().map(WriteObservation::forge)),
-            WritePlan::Field(plan) => self
-                .last_rate_write
-                .as_ref()
-                .filter(|r| &r.plan == plan.as_ref())
-                .map(|r| r.status.clone().map(WriteObservation::Field)),
-        }
-    }
-    /// Pure CURRENT-player intent from the latest exact owned observation.
-    /// Caller must still submit explicitly; this provides no historical lifetime ticket.
-    pub fn attack_leech_plan(&self, target: AttackLeechTarget, value: f64) -> Result<AttackLeechDecision, FieldPlanError> {
-        let current = self.attack_leech.as_ref().ok_or(FieldPlanError::InvalidObservation)?;
-        if self.phase != Phase::Ready
-            || self.attached.as_ref() != Some(&current.process)
-            || current.generation != self.generation
-            || self
-                .runtime_status
-                .as_ref()
-                .is_none_or(|status| status.online || status.manager == 0 || status.manager != current.manager)
-        {
-            return Err(FieldPlanError::StaleObservation);
-        }
-        AttackLeechPlan::prepare(current, target, value)
-    }
-    pub fn expected_observation(&self) -> Result<crate::edits::ExpectedObservation, crate::edits::EditError> {
-        use crate::edits::{EditError, ExpectedObservation};
-        let (
-            CatalogState::Current { generation, data },
-            ForgeState::Item {
-                generation: item_generation,
-                snapshot,
-                ..
-            },
-            Some(target),
-        ) = (&self.catalog, &self.forge, &self.attached)
-        else {
-            return Err(EditError::InvalidObservation);
-        };
-        if self.phase != Phase::Ready || *generation != self.generation || *item_generation != self.generation {
-            return Err(EditError::IdentityChanged);
-        }
-        ExpectedObservation::new(self.generation, target.clone(), data.identity.clone(), snapshot.as_ref().clone())
-    }
-    pub fn level_requirement_plan(&self, value: i32) -> Result<ForgePlan, crate::edits::EditError> {
-        self.status_plan(crate::edits::StatusField::LevelRequirement, value)
-    }
-    pub fn status_plan(&self, field: crate::edits::StatusField, value: i32) -> Result<ForgePlan, crate::edits::EditError> {
-        self.status_edit_plan(crate::edits::StatusEdit {
-            field,
-            value,
-            unrestricted: false,
-        })
-    }
-    pub fn status_edit_plan(&self, edit: crate::edits::StatusEdit) -> Result<ForgePlan, crate::edits::EditError> {
-        self.forge_plan(crate::edits::ItemEdit::Status(edit))
-    }
-    pub fn forge_plan(&self, edit: crate::edits::ItemEdit) -> Result<ForgePlan, crate::edits::EditError> {
-        use crate::edits::EditError;
-        let expected = self.expected_observation()?;
-        let status = self
-            .runtime_status
-            .filter(|status| !status.online && status.manager != 0)
-            .ok_or(EditError::OfflineRequired)?;
-        let catalog = self.catalog.data().ok_or(EditError::CatalogNotVerified)?;
-        ForgePlan::edit(&expected, status.manager, catalog, edit, self.override_enabled)
-    }
-    pub fn forge_undo_plan(&self, undo: &crate::undo::ForgeUndo) -> Result<ForgePlan, crate::edits::EditError> {
-        use crate::edits::EditError;
-        if self.undo_forge.as_ref() != Some(undo) {
-            return Err(EditError::IdentityChanged);
-        }
-        let current = self.expected_observation()?;
-        let status = self
-            .runtime_status
-            .filter(|status| !status.online && status.manager != 0)
-            .ok_or(EditError::OfflineRequired)?;
-        undo.prepare_with_override(&current, status.manager, self.catalog.data().ok_or(EditError::CatalogNotVerified)?, self.override_enabled)
-    }
-}
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum BackendEvent {
     Connected { generation: u64, target: ProcessIdentity },
@@ -772,20 +101,20 @@ pub enum Command {
     RefreshCatalog,
     ReadForge,
     DescribeUnique {
-        expected: Box<crate::edits::ExpectedObservation>,
+        expected: Box<crate::item::edit::ExpectedObservation>,
     },
     PreviewUnique {
-        expected: Box<crate::edits::ExpectedObservation>,
-        draft: crate::edits::RollEdit,
+        expected: Box<crate::item::edit::ExpectedObservation>,
+        draft: crate::item::edit::RollEdit,
     },
     ResolveMapping {
-        expected: Box<crate::edits::ExpectedObservation>,
+        expected: Box<crate::item::edit::ExpectedObservation>,
         request: MappingRequest,
     },
     ReadAttackLeech,
     BeginForgeBatch,
     Write(WritePlan),
-    UndoForge(Box<crate::undo::ForgeUndo>),
+    UndoForge(Box<crate::item::undo::ForgeUndo>),
     /// Shows another profile; only while no game runs.
     SelectProfile(ProfileKey),
     /// Keeps the hooks of the character in play, which has no profile, as its profile.
@@ -923,7 +252,7 @@ impl BackendHandle {
     pub fn try_submit(&self, command: Command) -> Result<Pending, SubmitError> {
         self.submit(command, None)
     }
-    pub fn try_resolve_mapping(&self, expected: crate::edits::ExpectedObservation, request: MappingRequest) -> Result<MappingRead, SubmitError> {
+    pub fn try_resolve_mapping(&self, expected: crate::item::edit::ExpectedObservation, request: MappingRequest) -> Result<MappingRead, SubmitError> {
         let cancel = Arc::new(AtomicBool::new(false));
         let pending = self.submit(
             Command::ResolveMapping {
@@ -1001,7 +330,7 @@ where
     attack_leech_sequence: u64,
     paused: bool,
     faults: Option<eg_core::fault::FaultLog>,
-    forge_history: crate::undo::ForgeUndoHistory,
+    forge_history: crate::item::undo::ForgeUndoHistory,
     /// The game data service's state, mirrored into `state.game_files`.
     game_data: Option<watch::Receiver<GameData>>,
     /// Whether the last look for the game found one running (any number of them).
@@ -1189,38 +518,21 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
         }
         self.state.undo_forge_depth = if self.state.undo_forge.is_some() { self.forge_history.len() } else { 0 };
         self.state.undo_forge_needs_override = self.state.undo_forge.is_some() && self.forge_history.needs_override();
+        let ready = self.state.phase == Phase::Ready;
+        let idle = ready && self.state.activity.is_none();
+        let served = self.connection.as_ref().map(BackendConnection::capabilities).unwrap_or_default();
         self.state.capabilities = Capabilities {
-            gameplay_hooks: eg_trainer_wire::hooks::GameplayHook::ALL.map(|hook| {
-                self.state.phase == Phase::Ready
-                    && self.state.activity.is_none()
-                    && self
-                        .connection
-                        .as_ref()
-                        .is_some_and(|connection| connection.supports_hook(HookId::parse(hook.id()).expect("catalog hook")))
-            }),
-            read_forge: self.state.phase == Phase::Ready,
-            read_attack_leech: self.state.phase == Phase::Ready
-                && self.state.activity.is_none()
-                && self.connection.as_ref().is_some_and(BackendConnection::supports_read_attack_leech),
-            attack_leech_rate: self.state.phase == Phase::Ready
-                && self.state.activity.is_none()
-                && self.connection.as_ref().is_some_and(BackendConnection::supports_attack_leech_rate),
-            level_requirement: self.state.phase == Phase::Ready
-                && self.state.activity.is_none()
-                && self.connection.as_ref().is_some_and(BackendConnection::supports_level_requirement),
-            base_change: self.state.phase == Phase::Ready && self.state.activity.is_none() && self.connection.as_ref().is_some_and(BackendConnection::supports_base_change),
-            identity_change: self.state.phase == Phase::Ready && self.state.activity.is_none() && self.connection.as_ref().is_some_and(BackendConnection::supports_identity_change),
-            affix_list: self.state.phase == Phase::Ready && self.state.activity.is_none() && self.connection.as_ref().is_some_and(BackendConnection::supports_affix_list),
-            affix_change: self.state.phase == Phase::Ready && self.state.activity.is_none() && self.connection.as_ref().is_some_and(BackendConnection::supports_affix_change),
-            affix_rolls: self.state.phase == Phase::Ready && self.state.activity.is_none() && self.connection.as_ref().is_some_and(BackendConnection::supports_affix_rolls),
-            status_fields: std::array::from_fn(|index| {
-                self.state.phase == Phase::Ready
-                    && self.state.activity.is_none()
-                    && self
-                        .connection
-                        .as_ref()
-                        .is_some_and(|connection| connection.supports_status(crate::edits::StatusField::from_wire(index as u32).expect("seven status fields")))
-            }),
+            gameplay_hooks: GameplayHook::ALL.map(|hook| idle && self.connection.as_ref().is_some_and(|connection| connection.supports_hook(hook))),
+            read_forge: ready,
+            read_attack_leech: idle && served.read_attack_leech,
+            attack_leech_rate: idle && served.attack_leech_rate,
+            level_requirement: idle && served.level_requirement,
+            status_fields: served.status_fields.map(|field| idle && field),
+            base_change: idle && served.base_change,
+            identity_change: idle && served.identity_change,
+            affix_rolls: idle && served.affix_rolls,
+            affix_change: idle && served.affix_change,
+            affix_list: idle && served.affix_list,
         };
         // An unchanged state is not sent again: every observer would wake to redraw the same thing (the monitor reads four
         // times a second).
@@ -1280,7 +592,7 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
     /// The game data for the folder `target` runs from (read again first when `again`, or when its files changed), if
     /// it can describe the running game: none of its files written since the game started. Needs no connection, so a
     /// connect asks before anything is loaded into the game.
-    async fn game_files_for(&mut self, epoch: u64, target: &ProcessIdentity, again: bool) -> Result<Arc<crate::files::FileCatalog>, BackendError> {
+    async fn game_files_for(&mut self, epoch: u64, target: &ProcessIdentity, again: bool) -> Result<Arc<crate::definitions::files::FileCatalog>, BackendError> {
         let not_ready = |reason: String| BackendError::blocked(ErrorKind::NotReady, reason);
         let handle = self
             .options

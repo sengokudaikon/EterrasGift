@@ -1,6 +1,6 @@
 use eg_trainer::{
-    catalog::{CatalogIdentity, EXTRACTION_VERSION, GameCatalog},
-    edits::*,
+    definitions::catalog::{CatalogIdentity, EXTRACTION_VERSION, GameCatalog},
+    item::edit::*,
 };
 use eg_trainer_wire::{
     catalog::{AffixDefinition, Availability, DefinitionName, DefinitionNameSource, ItemTypeDefinition, SubTypeDefinition, UniqueDefinition},
@@ -178,7 +178,7 @@ fn replacement() -> ItemEdit {
 
 #[test]
 fn confirmed_undo_rebases_only_slot_order_and_names_never_a_changed_saved_value() {
-    use eg_trainer::undo::ForgeUndoHistory;
+    use eg_trainer::item::undo::ForgeUndoHistory;
     let catalog = catalog();
     for changed_level in [false, true] {
         let mut history = ForgeUndoHistory::default();
@@ -789,8 +789,8 @@ fn strict_affix_readback_and_preflight_both_include_set_identity() {
 #[test]
 fn forge_base_and_identity_plans_preserve_conditional_reverse_rules() {
     use eg_trainer::{
-        undo::ForgeUndo,
-        writes::{ForgePlan, WriteRecord, WriteStatus},
+        item::undo::ForgeUndo,
+        write::{ForgePlan, WriteRecord, WriteStatus},
     };
     let c = catalog();
     let mut plain = item();
@@ -865,7 +865,7 @@ fn forge_base_and_identity_plans_preserve_conditional_reverse_rules() {
 }
 #[test]
 fn forge_plans_refuse_unimplemented_edits_and_set_identity_changes_are_stale() {
-    use eg_trainer::writes::ForgePlan;
+    use eg_trainer::write::ForgePlan;
     let c = catalog();
     let expected = observation(item(), &c);
     assert!(ForgePlan::edit(&expected, 17, &c, replacement(), true).is_ok());
@@ -895,8 +895,8 @@ fn forge_plans_refuse_unimplemented_edits_and_set_identity_changes_are_stale() {
 #[test]
 fn forge_affix_roll_batch_and_reverse_keep_unselected_state_and_reject_stale_targets() {
     use eg_trainer::{
-        undo::ForgeUndo,
-        writes::{ForgePlan, WriteRecord, WriteStatus},
+        item::undo::ForgeUndo,
+        write::{ForgePlan, WriteRecord, WriteStatus},
     };
     use eg_trainer_wire::write::ForgeMutation;
     let c = catalog();
@@ -943,7 +943,7 @@ fn forge_affix_roll_batch_and_reverse_keep_unselected_state_and_reject_stale_tar
 
 #[test]
 fn level_cache_readback_uses_the_same_exact_rule_in_pure_and_submittable_plans() {
-    use eg_trainer::{edits::ReadbackPolicy, writes::ForgePlan};
+    use eg_trainer::{item::edit::ReadbackPolicy, write::ForgePlan};
     let c = catalog();
     let expected = observation(item(), &c);
     let intent = status(StatusField::LevelRequirement, 80, false);
@@ -968,8 +968,8 @@ fn level_cache_readback_uses_the_same_exact_rule_in_pure_and_submittable_plans()
 #[test]
 fn inserted_sealed_affix_is_undone_at_its_new_slot_even_when_id_already_exists() {
     use eg_trainer::{
-        undo::ForgeUndo,
-        writes::{ForgePlan, WriteRecord, WriteStatus},
+        item::undo::ForgeUndo,
+        write::{ForgePlan, WriteRecord, WriteStatus},
     };
     let c = catalog();
     let before = item();
@@ -1001,8 +1001,8 @@ fn inserted_sealed_affix_is_undone_at_its_new_slot_even_when_id_already_exists()
 #[test]
 fn removed_affix_restore_uses_current_catalog_and_can_require_override() {
     use eg_trainer::{
-        undo::ForgeUndo,
-        writes::{ForgePlan, WriteRecord, WriteStatus},
+        item::undo::ForgeUndo,
+        write::{ForgePlan, WriteRecord, WriteStatus},
     };
     let mut c = catalog();
     let expected = observation(item(), &c);
@@ -1020,8 +1020,8 @@ fn removed_affix_restore_uses_current_catalog_and_can_require_override() {
 #[test]
 fn removing_the_only_unserializable_id_can_repair_an_item_but_cannot_offer_undo() {
     use eg_trainer::{
-        undo::ForgeUndo,
-        writes::{ForgePlan, WriteRecord, WriteStatus},
+        item::undo::ForgeUndo,
+        write::{ForgePlan, WriteRecord, WriteStatus},
     };
     let c = catalog();
     let mut before = item();

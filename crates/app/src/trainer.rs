@@ -3,12 +3,12 @@ use eg_companion::{folders, install};
 use eg_core::fault::FaultLog;
 use eg_core::settings::SettingsStore;
 use eg_core::settings_service::{ModuleSettings, SettingsService};
+use eg_trainer::connect::host::{DesktopConnector, GameProcesses, HelperPackage};
 use eg_trainer::{
     backend::{self, BackendHandle, BackendOptions, Command, SubmitError, SystemClock},
-    profiles::{ProfileBook, ProfileSaver},
-    sources::FileLogFactory,
+    connect::sources::FileLogFactory,
+    features::profiles::{ProfileBook, ProfileSaver},
 };
-use eg_trainer_host::desktop::{DesktopConnector, GameProcesses, HelperPackage};
 use eg_ui::settings::ModuleChoice;
 use eg_ui::trainer_settings;
 use std::{
@@ -67,7 +67,7 @@ impl Module {
             override_enabled: flag(trainer_settings::OVERRIDE, false),
             profiles: ProfileBook::from_settings(saved.as_ref()),
             save_profiles: Some(profile_saver(module)),
-            game_data: Some(eg_trainer::game_data::start(
+            game_data: Some(eg_trainer::definitions::service::start(
                 game.and_then(Path::parent).map(Path::to_path_buf),
                 Some(self.game_data.clone()),
                 Some(faults.clone()),

@@ -1,4 +1,6 @@
-//! No DllMain bootstrap. Start explicitly after loader initialization; exposed code is retained.
+//! The trainer's code inside the game: the pipe server, the dispatch onto the game's main thread, Last Epoch's runtime
+//! (`game`: discovery, reads and writes, accessors, features) and the entry hooks. No DllMain bootstrap: start
+//! explicitly after loader initialization; exposed code is retained.
 #![deny(unsafe_code)]
 
 include!(concat!(env!("OUT_DIR"), "/identity.rs"));
@@ -6,6 +8,12 @@ include!(concat!(env!("OUT_DIR"), "/identity.rs"));
 #[cfg(all(windows, target_arch = "x86_64"))]
 #[allow(unsafe_code)] // Windows/FFI boundary; the rest of the crate denies unsafe.
 mod engine;
+#[cfg(all(windows, target_arch = "x86_64"))]
+#[allow(unsafe_code)] // The live IL2CPP runtime; the rest of the crate denies unsafe.
+pub mod game;
+#[cfg(all(windows, target_arch = "x86_64"))]
+#[allow(unsafe_code)] // Entry-point detours; the rest of the crate denies unsafe.
+pub mod hooks;
 #[cfg(all(windows, target_arch = "x86_64"))]
 #[allow(unsafe_code)] // Windows/FFI boundary; the rest of the crate denies unsafe.
 pub mod server;

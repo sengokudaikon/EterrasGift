@@ -14,9 +14,9 @@ use std::{
 use eg_core::game_log::{GameLogState, GameLogStatus, GameReadiness};
 use eg_trainer::{
     backend::{BackendError, Connector, ErrorKind},
-    connection::{AdmissionCheck, AttemptOutcome, HelperPreparer, LogFactory, PreparationFailure, PreparationResidency, PreparedHelper, SessionConnector},
-    gate::{GatePolicy, LogSource},
-    profile::BuildProfile,
+    connect::admission::{AdmissionCheck, AttemptOutcome, HelperPreparer, LogFactory, PreparationFailure, PreparationResidency, PreparedHelper, SessionConnector},
+    connect::build::BuildProfile,
+    connect::gate::{GatePolicy, LogSource},
     session::SessionState,
 };
 use eg_trainer_wire::{

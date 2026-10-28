@@ -18,7 +18,7 @@ use eg_core::{
 };
 use eg_trainer::{
     backend::{Activity, BackendHandle, BackendSnapshot, CatalogState, Command, ErrorKind, ForgeSnapshot, ForgeState, MappingRead, Pending, Phase, ProfileLock},
-    catalog::{Availability, GameCatalog},
+    definitions::catalog::{Availability, GameCatalog},
 };
 use slint::{ComponentHandle, Timer, TimerMode};
 use std::{
@@ -43,7 +43,7 @@ impl ForgeGame for ObservedGame {
     }
     fn read(&self) -> Option<ForgeItem> {
         let writer = self.writer.borrow();
-        if writer.backend.subscribe().has_changed().is_err() {
+        if !writer.backend.is_running() {
             return None;
         }
         writer.backend.peek(project_item).ok().flatten()
@@ -51,18 +51,18 @@ impl ForgeGame for ObservedGame {
     // The editor asks these per row, option and cell: they read the snapshot in place rather than copy it each time.
     fn can_write(&self) -> bool {
         let writer = self.writer.borrow();
-        writer.backend.subscribe().has_changed().is_ok() && writer.pending.is_none() && writer.backend.peek(|state| state.phase == Phase::Ready && state.activity.is_none())
+        writer.backend.is_running() && writer.pending.is_none() && writer.backend.peek(|state| state.phase == Phase::Ready && state.activity.is_none())
     }
     fn unrestricted(&self) -> bool {
         self.writer.borrow().backend.peek(|state| state.override_enabled)
     }
     fn is_busy(&self) -> bool {
         let writer = self.writer.borrow();
-        writer.backend.subscribe().has_changed().is_ok() && writer.backend.peek(|state| state.phase == Phase::Ready && state.activity.is_some())
+        writer.backend.is_running() && writer.backend.peek(|state| state.phase == Phase::Ready && state.activity.is_some())
     }
     fn supports(&self, edit: &ItemEdit) -> bool {
         let writer = self.writer.borrow();
-        writer.backend.subscribe().has_changed().is_ok() && writer.backend.peek(|state| supports(state, edit))
+        writer.backend.is_running() && writer.backend.peek(|state| supports(state, edit))
     }
     fn read_only_reason(&self) -> Option<&str> {
         let capabilities = self.writer.borrow().backend.peek(|state| state.capabilities);
@@ -128,22 +128,22 @@ struct Writer {
     mappings: Vec<PendingMapping>,
     mapping_read_sequence: Option<u64>,
     preview: Option<PendingPreview>,
-    descriptions: Option<(eg_trainer::edits::ExpectedObservation, u64, Pending)>,
+    descriptions: Option<(eg_trainer::item::edit::ExpectedObservation, u64, Pending)>,
     /// Runs only while there is work (`keep_polling`); its tick refreshes the binding.
     polling: Timer,
     /// The binding's refresh, set once the binding exists; holds it weakly.
     tick: Option<Rc<dyn Fn()>>,
 }
 struct PendingPreview {
-    expected: eg_trainer::edits::ExpectedObservation,
-    draft: eg_trainer::edits::RollEdit,
+    expected: eg_trainer::item::edit::ExpectedObservation,
+    draft: eg_trainer::item::edit::RollEdit,
     starts: Option<std::time::Instant>,
     receipt: Option<Pending>,
     error: Option<String>,
 }
 struct PendingMapping {
-    expected: eg_trainer::edits::ExpectedObservation,
-    request: eg_trainer::mapping::MappingRequest,
+    expected: eg_trainer::item::edit::ExpectedObservation,
+    request: eg_trainer::item::values::MappingRequest,
     receipt: MappingRead,
     error: Option<String>,
 }
@@ -153,7 +153,7 @@ struct PendingEdit {
     edit: ItemEdit,
     undoing: bool,
     before: BackendSnapshot,
-    plan: Option<eg_trainer::writes::ForgePlan>,
+    plan: Option<eg_trainer::write::ForgePlan>,
 }
 impl Writer {
     fn has_pending_work(&self) -> bool {
@@ -205,10 +205,10 @@ impl Writer {
     fn preview(&mut self, item: &ForgeItem, edit: &ItemEdit) -> crate::forge::game::Lookup<Vec<ModifierState>> {
         let result: Result<crate::forge::game::Lookup<Vec<ModifierState>>, GameError> = (|| {
             let draft = match edit {
-                eg_trainer::edits::ItemEdit::Roll(draft) => Some(draft),
+                eg_trainer::item::edit::ItemEdit::Roll(draft) => Some(draft),
                 _ => None,
             };
-            let closed = self.backend.subscribe().has_changed().is_err();
+            let closed = !self.backend.is_running();
             let (expected, cached) = self.backend.peek(|state| -> Result<_, GameError> {
                 if closed || project_item(state).ok().flatten().as_ref().is_none_or(|actual| !actual.same_state(item)) {
                     return Err("The item changed before its preview could be read.".into());
@@ -226,7 +226,7 @@ impl Writer {
             let Some(draft) = draft.cloned() else {
                 return Err("This preview draft is unsupported.".into());
             };
-            if draft.target != eg_trainer::edits::RollTarget::Unique {
+            if draft.target != eg_trainer::item::edit::RollTarget::Unique {
                 return Err("Only unique rolls have a tooltip preview.".into());
             }
             if let Some(cached) = cached {
@@ -286,7 +286,7 @@ impl Writer {
 
     fn resolve(&mut self, item: &ForgeItem, request: &RollRequest) -> crate::forge::game::Lookup<ValueTable> {
         let result: Result<crate::forge::game::Lookup<ValueTable>, GameError> = (|| {
-            use eg_trainer::mapping::{MappingAddress, MappingRequest, MappingTarget};
+            use eg_trainer::item::values::{MappingAddress, MappingRequest, MappingTarget};
             if request.target != item::RollTarget::Affix {
                 return Err("Actual values for this modifier are unavailable in this build.".into());
             }
@@ -298,7 +298,7 @@ impl Writer {
                 },
                 draft: request.draft.clone(),
             });
-            let closed = self.backend.subscribe().has_changed().is_err();
+            let closed = !self.backend.is_running();
             let (read_sequence, expected, ready) = self.backend.peek(|state| -> Result<_, GameError> {
                 if closed || project_item(state).ok().flatten().as_ref().is_none_or(|actual| !actual.same_state(item)) {
                     return Err("The item changed before its values could be read.".into());
@@ -457,7 +457,9 @@ impl Writer {
         }
         let undo = if pending.undoing { state.undo_forge.clone() } else { None };
         let planned = if pending.undoing {
-            undo.as_ref().ok_or(eg_trainer::edits::EditError::StaleItem).and_then(|undo| state.forge_undo_plan(undo))
+            undo.as_ref()
+                .ok_or(eg_trainer::item::edit::EditError::StaleItem)
+                .and_then(|undo| state.forge_undo_plan(undo))
         } else {
             state.forge_plan(pending.edit.clone())
         };
@@ -484,12 +486,12 @@ impl Writer {
 
 fn supports(state: &BackendSnapshot, edit: &ItemEdit) -> bool {
     match edit {
-        ItemEdit::AddAffix(eg_trainer::edits::AddAffixEdit { .. }) | ItemEdit::RemoveAffix(eg_trainer::edits::RemoveAffixEdit { .. }) => state.capabilities.affix_list,
-        ItemEdit::Affix(eg_trainer::edits::AffixEdit { .. }) => state.capabilities.affix_change,
-        ItemEdit::Status(eg_trainer::edits::StatusEdit { field, .. }) => state.capabilities.status_fields[*field as usize],
-        ItemEdit::BaseType(eg_trainer::edits::BaseTypeEdit { .. }) => state.capabilities.base_change,
-        ItemEdit::UniqueIdentity(eg_trainer::edits::UniqueIdentityEdit { .. }) => state.capabilities.identity_change,
-        ItemEdit::Roll(eg_trainer::edits::RollEdit {
+        ItemEdit::AddAffix(eg_trainer::item::edit::AddAffixEdit { .. }) | ItemEdit::RemoveAffix(eg_trainer::item::edit::RemoveAffixEdit { .. }) => state.capabilities.affix_list,
+        ItemEdit::Affix(eg_trainer::item::edit::AffixEdit { .. }) => state.capabilities.affix_change,
+        ItemEdit::Status(eg_trainer::item::edit::StatusEdit { field, .. }) => state.capabilities.status_fields[*field as usize],
+        ItemEdit::BaseType(eg_trainer::item::edit::BaseTypeEdit { .. }) => state.capabilities.base_change,
+        ItemEdit::UniqueIdentity(eg_trainer::item::edit::UniqueIdentityEdit { .. }) => state.capabilities.identity_change,
+        ItemEdit::Roll(eg_trainer::item::edit::RollEdit {
             target: item::RollTarget::Affix, ..
         }) => state.capabilities.affix_rolls,
         _ => false,
@@ -630,7 +632,7 @@ impl Binding {
         let preview_completed = self.writer.borrow_mut().poll_preview();
         // A tick without a new snapshot only settles the editor's receipts; the snapshot is copied only when it changed.
         let (phase, revision) = self.backend.peek(|state| (state.phase, state.revision));
-        if self.backend.subscribe().has_changed().is_err() && phase != Phase::Stopped {
+        if !self.backend.is_running() && phase != Phase::Stopped {
             // An unexpected worker failure must not leave apparently live data.
             if let Some(window) = self.window.upgrade() {
                 let connection = window.global::<Connection>();
@@ -910,7 +912,7 @@ fn project_catalog(data: &GameCatalog) -> Catalog {
     // Presentation-only data. Native write planning always uses the canonical
     // GameCatalog in the worker, never this projection or guessed ranges/text.
     let mut catalog = Catalog::default();
-    let pair = |range: eg_trainer::catalog::ValueRange| (range.minimum, range.maximum);
+    let pair = |range: eg_trainer::definitions::catalog::ValueRange| (range.minimum, range.maximum);
     catalog.limits = Some(forge::game::ItemLimits {
         forging_potential: pair(data.limits.forging_potential),
         legendary_potential: pair(data.limits.legendary_potential),
@@ -1001,7 +1003,7 @@ fn project_catalog(data: &GameCatalog) -> Catalog {
     }
     catalog
 }
-fn value_table(table: &eg_trainer::mapping::ValueTable) -> ValueTable {
+fn value_table(table: &eg_trainer::item::values::ValueTable) -> ValueTable {
     ValueTable {
         label: "Value".into(),
         samples: table

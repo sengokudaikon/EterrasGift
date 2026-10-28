@@ -4,8 +4,8 @@ use crate::{
     lifecycle::Watchdog,
     server::{self, Backend, Shared},
 };
-use eg_game_access::{
-    discovery::{AttackLeechWriteError, DiscoveryError, ForgeWriteError, RuntimeAccess, presence::PlayPresence},
+use crate::{
+    game::{GameError, RuntimeAccess, WriteError, presence::PlayPresence},
     hooks::{self, HookState, RetainedHook, gateway::CallbackGate},
 };
 use eg_il2cpp_runtime::{
@@ -178,10 +178,14 @@ fn encoded(payload: Result<Vec<u8>, impl std::fmt::Display>) -> Result<Response,
     done(payload.map_err(|error| server::failure(ResponseCode::Failed, error.to_string()))?)
 }
 
-fn map_discovery(error: DiscoveryError) -> Response {
+fn write_failure(error: WriteError) -> Response {
+    server::failure(error.code(), error.to_string())
+}
+
+fn game_failure(error: GameError) -> Response {
     let code = match error {
-        DiscoveryError::OfflineRequired => ResponseCode::OfflineRequired,
-        DiscoveryError::NotReady(_) | DiscoveryError::Runtime(_) => ResponseCode::NotReady,
+        GameError::OfflineRequired => ResponseCode::OfflineRequired,
+        GameError::NotReady(_) | GameError::Runtime(_) => ResponseCode::NotReady,
         _ => ResponseCode::Refused,
     };
     server::failure(code, error.to_string())
@@ -194,7 +198,7 @@ unsafe fn read_status() -> Response {
         runtime_operation(|runtime, access, attached| {
             let status_result = access.status(attached);
             gameplay_hooks::observe(status_result.as_ref().map_or(0, |s| if s.online { 0 } else { s.manager })).map_err(|e| server::failure(ResponseCode::Failed, e))?;
-            let mut status = status_result.map_err(map_discovery)?;
+            let mut status = status_result.map_err(game_failure)?;
             status.features_on = gameplay_hooks::count();
             if awaiting_manager(&status) && access.play_presence(attached, runtime.invocation).ok() == Some(PlayPresence::InGame) {
                 return Err(changing_area());
@@ -216,16 +220,7 @@ unsafe fn edit_forge(write: &ForgeWrite) -> Response {
             let invoke = runtime.invocation;
             let snapshot = access
                 .edit_forge(attached, writer, Some(invoke), write.expected_manager(), write.expected(), write.mutation())
-                .map_err(|error| {
-                    let code = match &error {
-                        ForgeWriteError::NotReady(_) => ResponseCode::NotReady,
-                        ForgeWriteError::Stale(_) => ResponseCode::StaleItem,
-                        ForgeWriteError::Refused(_) => ResponseCode::Refused,
-                        ForgeWriteError::Offline => ResponseCode::OfflineRequired,
-                        ForgeWriteError::Failed(_) => ResponseCode::Failed,
-                    };
-                    server::failure(code, error.to_string())
-                })?;
+                .map_err(write_failure)?;
             encoded(eg_trainer_wire::forge::encode(Some(&snapshot)))
         })
     }
@@ -244,16 +239,7 @@ unsafe fn set_attack_leech_rate(write: &AttackLeechRateWrite) -> Response {
             let writer = runtime.writes;
             let observation = access
                 .set_attack_leech(attached, writer, write.expected(), write.target(), write.desired_value())
-                .map_err(|error| {
-                    let code = match &error {
-                        AttackLeechWriteError::NotReady(_) => ResponseCode::NotReady,
-                        AttackLeechWriteError::Stale(_) => ResponseCode::StaleItem,
-                        AttackLeechWriteError::Refused(_) => ResponseCode::Refused,
-                        AttackLeechWriteError::Offline => ResponseCode::OfflineRequired,
-                        AttackLeechWriteError::Failed(_) => ResponseCode::Failed,
-                    };
-                    server::failure(code, error.to_string())
-                })?;
+                .map_err(write_failure)?;
             done(eg_trainer_wire::fields::encode(&eg_trainer_wire::fields::AttackLeechRead::Available(observation)))
         })
     }
@@ -266,7 +252,7 @@ unsafe fn read_forge() -> Response {
     // RuntimeAccess rechecks offline admission and validates/root-copies the entire object graph.
     unsafe {
         runtime_operation(|_, access, attached| {
-            let snapshot = access.read_forge(attached).map_err(map_discovery)?;
+            let snapshot = access.read_forge(attached).map_err(game_failure)?;
             encoded(eg_trainer_wire::forge::encode(snapshot.as_ref()))
         })
     }
@@ -278,7 +264,7 @@ unsafe fn describe_implicits(query: &eg_trainer_wire::mapping::ForgeDescriptionR
     unsafe {
         runtime_operation(|runtime, access, attached| {
             let invoke = runtime.invocation;
-            let descriptions = access.describe_implicits(attached, invoke, query).map_err(map_discovery)?;
+            let descriptions = access.describe_implicits(attached, invoke, query).map_err(game_failure)?;
             encoded(eg_trainer_wire::mapping::encode_modifiers(&descriptions))
         })
     }
@@ -296,7 +282,7 @@ unsafe fn unique_presentation(query: &eg_trainer_wire::mapping::ForgeDescription
             } else {
                 access.describe_unique(attached, invoke, query)
             }
-            .map_err(map_discovery)?;
+            .map_err(game_failure)?;
             encoded(eg_trainer_wire::mapping::encode_modifiers(&descriptions))
         })
     }
@@ -309,7 +295,7 @@ unsafe fn read_affix_mapping(query: &eg_trainer_wire::mapping::AffixMappingQuery
         runtime_operation(|runtime, access, attached| {
             let invoke = runtime.invocation;
             let writes = runtime.writes;
-            let page = access.read_affix_mapping(attached, writes, invoke, query).map_err(map_discovery)?;
+            let page = access.read_affix_mapping(attached, writes, invoke, query).map_err(game_failure)?;
             encoded(eg_trainer_wire::mapping::encode_mapping(&page))
         })
     }
@@ -322,7 +308,7 @@ unsafe fn read_attack_leech(expected_manager: u64) -> Response {
     // throughout this rooted field copy; no game getter or refresh is called.
     unsafe {
         runtime_operation(|_, access, attached| {
-            let observation = access.read_attack_leech(attached, expected_manager).map_err(map_discovery)?;
+            let observation = access.read_attack_leech(attached, expected_manager).map_err(game_failure)?;
             done(eg_trainer_wire::fields::encode(&observation))
         })
     }
@@ -339,7 +325,7 @@ unsafe fn read_locale() -> Response {
     unsafe {
         runtime_operation(|runtime, access, attached| {
             let invocation = runtime.invocation;
-            let locale = access.read_game_locale(attached, invocation).map_err(map_discovery)?;
+            let locale = access.read_game_locale(attached, invocation).map_err(game_failure)?;
             encoded(eg_trainer_wire::locale::encode(&locale))
         })
     }
@@ -501,7 +487,7 @@ impl Backend for Control<'_> {
             return Ok(discovery.clone());
         }
         // SAFETY: exact initialized runtime and current-thread attachment established by bootstrap.
-        let found = unsafe { self.access.discover(self.attached, BUILD_ID.into(), self.module, self.size) }.map_err(map_discovery)?;
+        let found = unsafe { self.access.discover(self.attached, BUILD_ID.into(), self.module, self.size) }.map_err(game_failure)?;
         self.discovery = Some(found.discovery.clone());
         Ok(found.discovery)
     }

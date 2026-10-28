@@ -15,8 +15,8 @@ mod unique;
 mod writes;
 use eg_core::game_log::{GameLogEvent, GameLogState, GameReadiness, LoggedCharacter};
 use eg_trainer::{
-    gate::{GatePolicy, LogSource},
-    profile::BuildProfile,
+    connect::build::BuildProfile,
+    connect::gate::{GatePolicy, LogSource},
     session::{Cleanup, Session, SessionError, SessionState},
 };
 use eg_trainer_wire::{

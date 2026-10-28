@@ -78,7 +78,7 @@ impl ModuleLink for Link {
     }
 
     fn status(&self, _section: usize) -> Option<LiveStatus> {
-        let running = self.0.subscribe().has_changed().is_ok();
+        let running = self.0.is_running();
         Some(self.0.peek(|snapshot| game_data(snapshot, running)))
     }
 

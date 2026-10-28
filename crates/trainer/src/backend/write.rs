@@ -14,7 +14,7 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
     pub(super) async fn write_forge(&mut self, plan: ForgePlan) -> Result<(), BackendError> {
         self.execute_forge(plan, false).await
     }
-    pub(super) async fn undo_forge(&mut self, undo: crate::undo::ForgeUndo) -> Result<(), BackendError> {
+    pub(super) async fn undo_forge(&mut self, undo: crate::item::undo::ForgeUndo) -> Result<(), BackendError> {
         let plan = self.state.forge_undo_plan(&undo).map_err(invalid_edit)?;
         self.execute_forge(plan, true).await
     }
@@ -42,7 +42,7 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
         }
         let epoch = self.command_epoch;
         self.superseded(epoch)?;
-        if !self.connection.as_ref().is_some_and(|connection| connection.supports_forge(plan.edit_intent())) {
+        if !self.connection.as_ref().is_some_and(|connection| connection.capabilities().allows(plan.edit_intent())) {
             return Err(BackendError::blocked(ErrorKind::NotReady, "this Forge edit is unavailable"));
         }
         let current = self.state.expected_observation().map_err(invalid_edit)?;

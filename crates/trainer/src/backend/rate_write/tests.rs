@@ -31,10 +31,19 @@ impl BackendConnection for Connection {
     fn target(&self) -> &ProcessIdentity {
         &self.target
     }
+    fn capabilities(&self) -> Capabilities {
+        Capabilities {
+            attack_leech_rate: true,
+            ..Default::default()
+        }
+    }
+    async fn write(&mut self, _: &WritePlan, _: &mut dyn WriteControl) -> Result<WriteOutcome<WriteObservation>, BackendError> {
+        panic!("overflow must precede write")
+    }
     async fn refresh(&mut self) -> Result<RuntimeStatus, BackendError> {
         panic!("overflow must precede refresh")
     }
-    async fn read_locale(&mut self) -> Result<crate::catalog::GameLocale, BackendError> {
+    async fn read_locale(&mut self) -> Result<crate::definitions::catalog::GameLocale, BackendError> {
         panic!("no locale")
     }
     fn build_hashes(&self) -> (String, String) {
@@ -45,12 +54,6 @@ impl BackendConnection for Connection {
     }
     async fn disconnect(&mut self) -> Cleanup {
         panic!("overflow cannot trigger cleanup IO")
-    }
-    fn supports_attack_leech_rate(&self) -> bool {
-        true
-    }
-    async fn set_attack_leech_rate(&mut self, _: &AttackLeechPlan, _: &mut dyn WriteControl) -> Result<RateWriteStatus, BackendError> {
-        panic!("overflow must precede write")
     }
 }
 #[test]
@@ -109,7 +112,7 @@ fn default_rate_capability_is_false_and_default_submission_is_preflight_only() {
         async fn refresh(&mut self) -> Result<RuntimeStatus, BackendError> {
             panic!("no refresh")
         }
-        async fn read_locale(&mut self) -> Result<crate::catalog::GameLocale, BackendError> {
+        async fn read_locale(&mut self) -> Result<crate::definitions::catalog::GameLocale, BackendError> {
             panic!("no locale")
         }
         fn build_hashes(&self) -> (String, String) {
@@ -129,7 +132,7 @@ fn default_rate_capability_is_false_and_default_submission_is_preflight_only() {
             executable: std::path::PathBuf::from(r"C:\owned\fixture.exe"),
         },
     });
-    assert!(!connection.supports_attack_leech_rate());
+    assert!(!connection.capabilities().attack_leech_rate);
     let id = |n| ObservedObjectIdentity::new(n, n + 1).unwrap();
     let current = AttackLeechSnapshot {
         process: connection.target().clone(),
@@ -154,6 +157,6 @@ fn default_rate_capability_is_false_and_default_submission_is_preflight_only() {
     let result = tokio::runtime::Builder::new_current_thread()
         .build()
         .unwrap()
-        .block_on(connection.set_attack_leech_rate(&plan, &mut control));
+        .block_on(connection.write(&WritePlan::Field(Box::new(plan)), &mut control));
     assert_eq!(result.unwrap_err().kind, ErrorKind::NotReady);
 }

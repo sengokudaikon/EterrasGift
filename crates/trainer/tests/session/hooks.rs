@@ -2,7 +2,7 @@ use super::*;
 use eg_trainer::{
     backend::{BackendConnection, HookRequest},
     features::HookId,
-    writes::{WriteControl, WriteOutcome},
+    write::{WriteControl, WriteOutcome},
 };
 use eg_trainer_wire::hooks::{GameplayHook, HookObservation, PatchState};
 
@@ -87,7 +87,7 @@ fn each_gameplay_hook_requires_a_separate_readback_for_on_and_off() {
         let mut session = fixture.session(&wire, &log, GatePolicy::Release);
         session.enable();
         run(session.connect()).unwrap();
-        assert!(session.supports_hook(HookId::parse(hook.id()).unwrap()));
+        assert!(session.supports_hook(hook));
         for on in [true, false] {
             wire.push(done(vec![]));
             wire.push(done(
@@ -202,7 +202,7 @@ fn hook_monitor_reads_actual_disabled_state_after_helper_suspension() {
     run(session.connect()).unwrap();
     run(session.set_gameplay_hook(GameplayHook::Offhand, true, &mut AllowWrite)).unwrap();
     run(BackendConnection::refresh(&mut session)).unwrap();
-    assert_eq!(session.observed_hook(HookId::parse("offhand").unwrap()), Some(false));
+    assert_eq!(session.observed_hook(GameplayHook::Offhand), Some(false));
 }
 
 #[test]

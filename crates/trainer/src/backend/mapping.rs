@@ -1,5 +1,5 @@
 use super::*;
-use crate::edits::ExpectedObservation;
+use crate::item::edit::ExpectedObservation;
 
 // One entry per possible affix plus a bounded set of current draft variations.
 // Arc snapshots share tables, never clone their 256 sample payloads.
@@ -38,7 +38,7 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
             .connection
             .as_mut()
             .ok_or_else(|| BackendError::blocked(ErrorKind::NotConnected, "connection released"))?
-            .resolve_mapping_observed(&expected, &request, &mut control)
+            .resolve_mapping(&expected, &request, &mut control)
             .await;
         self.superseded(epoch)?;
         // Optional formatting must not resurrect a failed offline/process gate.

@@ -20,19 +20,19 @@ mod rate_writes;
 mod unique;
 #[path = "backend/write.rs"]
 mod writes;
-use eg_trainer::field_writes::{AttackLeechDecision, AttackLeechPlan, AttackLeechTarget, RateWriteStatus};
-use eg_trainer::writes::{ForgePlan, WriteControl, WriteOutcome, WriteStatus};
+use eg_trainer::fields::{AttackLeechDecision, AttackLeechPlan, AttackLeechTarget, RateWriteStatus};
+use eg_trainer::write::{ForgePlan, WriteControl, WriteObservation, WriteOutcome, WritePlan, WriteStatus};
 
 use eg_core::game_log::{GameLogState, GameLogStatus, GameReadiness};
-use eg_trainer::files::FileCatalog;
-use eg_trainer::game_data::{GameData, GameDataHandle};
+use eg_trainer::definitions::files::FileCatalog;
+use eg_trainer::definitions::service::{GameData, GameDataHandle};
 use eg_trainer::{
     backend::{
         self, BackendConnection, BackendError, BackendHandle, BackendOptions, CatalogState, Clock, Command, Connector, ErrorKind, ForgeSnapshot, ForgeState, Phase,
         ProcessIdentity, ProcessLocator, RuntimeStatus,
     },
-    catalog::{CatalogIdentity, EXTRACTION_VERSION, GameCatalog},
-    gate::{GatePolicy, LogSource},
+    connect::gate::{GatePolicy, LogSource},
+    definitions::catalog::{CatalogIdentity, EXTRACTION_VERSION, GameCatalog},
     session::Cleanup,
 };
 use eg_trainer_wire::{
@@ -130,8 +130,8 @@ struct Shared {
     implicit_lines: Mutex<Option<Vec<backend::ModifierSnapshot>>>,
     preview_errors: Mutex<VecDeque<BackendError>>,
     mapping_errors: Mutex<VecDeque<BackendError>>,
-    mapping_result: Mutex<Option<eg_trainer::mapping::ValueTable>>,
-    locale: Mutex<eg_trainer::catalog::GameLocale>,
+    mapping_result: Mutex<Option<eg_trainer::item::values::ValueTable>>,
+    locale: Mutex<eg_trainer::definitions::catalog::GameLocale>,
     hashes: Mutex<(String, String)>,
     disconnect_block: Block,
     departure_proven: AtomicBool,
@@ -266,6 +266,28 @@ impl BackendConnection for Connection {
     fn target(&self) -> &ProcessIdentity {
         &self.target
     }
+    fn capabilities(&self) -> backend::Capabilities {
+        let writes = self.shared.write_enabled.load(Ordering::SeqCst);
+        backend::Capabilities {
+            read_forge: true,
+            read_attack_leech: self.shared.attack_leech_enabled.load(Ordering::SeqCst),
+            attack_leech_rate: self.shared.rate_write_enabled.load(Ordering::SeqCst),
+            level_requirement: writes,
+            status_fields: [writes; 7],
+            base_change: writes,
+            identity_change: writes,
+            ..Default::default()
+        }
+    }
+    fn supports_hook(&self, _: eg_trainer_wire::hooks::GameplayHook) -> bool {
+        self.shared.hooks_supported.load(Ordering::SeqCst)
+    }
+    async fn write(&mut self, plan: &WritePlan, control: &mut dyn WriteControl) -> Result<WriteOutcome<WriteObservation>, BackendError> {
+        match plan {
+            WritePlan::Forge(plan) => Ok(self.edit_forge(plan, control).await?.map(WriteObservation::forge)),
+            WritePlan::Field(plan) => Ok(self.set_attack_leech_rate(plan, control).await?.map(WriteObservation::Field)),
+        }
+    }
     async fn refresh(&mut self) -> Result<RuntimeStatus, BackendError> {
         self.shared.call("refresh", &self.shared.refresh_block).await;
         if let Some(error) = self.shared.read_errors.lock().unwrap().pop_front() {
@@ -273,7 +295,7 @@ impl BackendConnection for Connection {
         }
         Ok(*self.shared.status.lock().unwrap())
     }
-    async fn read_locale(&mut self) -> Result<eg_trainer::catalog::GameLocale, BackendError> {
+    async fn read_locale(&mut self) -> Result<eg_trainer::definitions::catalog::GameLocale, BackendError> {
         self.shared.call("locale", &self.shared.locale_block).await;
         Ok(self.shared.locale.lock().unwrap().clone())
     }
@@ -297,23 +319,24 @@ impl BackendConnection for Connection {
     }
     async fn preview_unique(
         &mut self,
-        expected: &eg_trainer::edits::ExpectedObservation,
-        draft: &eg_trainer::edits::RollEdit,
-        evidence: &eg_trainer::mapping::BoundTooltip,
-    ) -> Result<eg_trainer::mapping::BoundPreview, BackendError> {
+        expected: &eg_trainer::item::edit::ExpectedObservation,
+        draft: &eg_trainer::item::edit::RollEdit,
+        evidence: &eg_trainer::item::values::BoundTooltip,
+    ) -> Result<eg_trainer::item::values::BoundPreview, BackendError> {
         self.shared.call("unique-preview", &self.shared.unique_block).await;
         if let Some(error) = self.shared.preview_errors.lock().unwrap().pop_front() {
             return Err(error);
         }
         let mut lines = self.shared.unique_lines.lock().unwrap().clone().unwrap();
         lines[0].text = format!("Draft {} Ω", draft.changes[0].value);
-        Ok(eg_trainer::mapping::BoundPreview::new(expected, draft.clone(), eg_trainer_wire::mapping::UniqueRollPreview { modifiers: lines }, evidence).unwrap())
+        Ok(eg_trainer::item::values::BoundPreview::new(expected, draft.clone(), eg_trainer_wire::mapping::UniqueRollPreview { modifiers: lines }, evidence).unwrap())
     }
     async fn resolve_mapping(
         &mut self,
-        expected: &eg_trainer::edits::ExpectedObservation,
-        request: &eg_trainer::mapping::MappingRequest,
-    ) -> Result<eg_trainer::mapping::ValueTable, BackendError> {
+        expected: &eg_trainer::item::edit::ExpectedObservation,
+        request: &eg_trainer::item::values::MappingRequest,
+        _: &mut dyn backend::ReadObserver,
+    ) -> Result<eg_trainer::item::values::ValueTable, BackendError> {
         self.shared.call("mapping", &self.shared.mapping_block).await;
         if let Some(error) = self.shared.mapping_errors.lock().unwrap().pop_front() {
             return Err(error);
@@ -323,22 +346,32 @@ impl BackendConnection for Connection {
         }
         mappings::table(expected, request)
     }
-    fn supports_level_requirement(&self) -> bool {
-        self.shared.write_enabled.load(Ordering::SeqCst)
-    }
-    fn supports_status(&self, _field: eg_trainer::edits::StatusField) -> bool {
-        self.supports_level_requirement()
-    }
-    fn supports_read_attack_leech(&self) -> bool {
-        self.shared.attack_leech_enabled.load(Ordering::SeqCst)
-    }
     async fn read_attack_leech(&mut self) -> Result<eg_trainer_wire::fields::AttackLeechRead, BackendError> {
         self.shared.call("attack-leech", &self.shared.attack_leech_block).await;
         Ok(*self.shared.attack_leech_read.lock().unwrap())
     }
-    fn supports_attack_leech_rate(&self) -> bool {
-        self.shared.rate_write_enabled.load(Ordering::SeqCst)
+    fn observed_hook(&self, _: eg_trainer_wire::hooks::GameplayHook) -> Option<bool> {
+        self.shared.hooks_suspended.load(Ordering::SeqCst).then_some(false)
     }
+    async fn set_hook(&mut self, request: &backend::HookRequest, control: &mut dyn WriteControl) -> Result<WriteOutcome<bool>, BackendError> {
+        if !control.allowed() {
+            return Err(BackendError::blocked(ErrorKind::Superseded, "cleanup before submission"));
+        }
+        self.shared.hooks_suspended.store(false, Ordering::SeqCst);
+        self.shared.record("hook");
+        self.shared.hook_requests.lock().unwrap().push(request.clone());
+        self.shared.hook_results.lock().unwrap().pop_front().unwrap_or(Ok(WriteOutcome::Confirmed(request.on)))
+    }
+    async fn disconnect(&mut self) -> Cleanup {
+        self.shared.call("disconnect", &self.shared.disconnect_block).await;
+        if self.shared.departure_proven.load(Ordering::SeqCst) {
+            Cleanup::ConfirmedOff
+        } else {
+            Cleanup::Unconfirmed
+        }
+    }
+}
+impl Connection {
     async fn set_attack_leech_rate(&mut self, plan: &AttackLeechPlan, control: &mut dyn WriteControl) -> Result<RateWriteStatus, BackendError> {
         if !control.allowed() {
             return Err(BackendError::blocked(ErrorKind::Superseded, "cleanup before rate submission"));
@@ -363,12 +396,6 @@ impl BackendConnection for Connection {
         }
         result
     }
-    fn supports_base_change(&self) -> bool {
-        self.supports_level_requirement()
-    }
-    fn supports_identity_change(&self) -> bool {
-        self.supports_level_requirement()
-    }
     async fn edit_forge(&mut self, plan: &ForgePlan, control: &mut dyn WriteControl) -> Result<WriteStatus, BackendError> {
         if !control.allowed() {
             return Err(BackendError::blocked(ErrorKind::Superseded, "cleanup before submission"));
@@ -385,29 +412,6 @@ impl BackendConnection for Connection {
             *self.shared.forge_item.lock().unwrap() = Some(snapshot.clone());
         }
         Ok(result)
-    }
-    fn supports_hook(&self, _: eg_trainer::features::HookId) -> bool {
-        self.shared.hooks_supported.load(Ordering::SeqCst)
-    }
-    fn observed_hook(&self, _: eg_trainer::features::HookId) -> Option<bool> {
-        self.shared.hooks_suspended.load(Ordering::SeqCst).then_some(false)
-    }
-    async fn set_hook(&mut self, request: &backend::HookRequest, control: &mut dyn WriteControl) -> Result<WriteOutcome<bool>, BackendError> {
-        if !control.allowed() {
-            return Err(BackendError::blocked(ErrorKind::Superseded, "cleanup before submission"));
-        }
-        self.shared.hooks_suspended.store(false, Ordering::SeqCst);
-        self.shared.record("hook");
-        self.shared.hook_requests.lock().unwrap().push(request.clone());
-        self.shared.hook_results.lock().unwrap().pop_front().unwrap_or(Ok(WriteOutcome::Confirmed(request.on)))
-    }
-    async fn disconnect(&mut self) -> Cleanup {
-        self.shared.call("disconnect", &self.shared.disconnect_block).await;
-        if self.shared.departure_proven.load(Ordering::SeqCst) {
-            Cleanup::ConfirmedOff
-        } else {
-            Cleanup::Unconfirmed
-        }
     }
 }
 impl Drop for Connection {
@@ -444,7 +448,7 @@ fn options() -> BackendOptions {
 }
 
 /// A catalog built from minimal game-file definitions: one base, one single affix (25, property 7, 5 to 15).
-fn file_catalog() -> Arc<eg_trainer::files::FileCatalog> {
+fn file_catalog() -> Arc<eg_trainer::definitions::files::FileCatalog> {
     use eg_game_files::definitions::{Affix, AffixProperty, AffixTier, Definitions, ItemType, Roll};
     use eg_game_files::uniques::{AbilityRegistry, ItemConstants, PlayerDefinitions, Property, PropertyInfo, PropertyRegistry};
     let info = PropertyInfo {
@@ -527,7 +531,7 @@ fn file_catalog() -> Arc<eg_trainer::files::FileCatalog> {
             max_level: 100,
         },
     };
-    Arc::new(eg_trainer::files::build_catalog("A".repeat(64), "B".repeat(64), "build".into(), &definitions, &player).unwrap())
+    Arc::new(eg_trainer::definitions::files::build_catalog("A".repeat(64), "B".repeat(64), "build".into(), &definitions, &player).unwrap())
 }
 fn start(shared: &Arc<Shared>, options: BackendOptions) -> (BackendHandle, tokio::task::JoinHandle<()>) {
     let (handle, worker) = backend::service(Locator(shared.clone()), Connect(shared.clone()), Logs(shared.clone()), FakeClock, options);
@@ -1113,7 +1117,7 @@ fn unreadable_game_files_keep_the_trainer_closed_and_say_why() {
         // A real service, asked for the fake game's folder, which holds no game.
         let shared = Shared::new();
         let mut options = options();
-        options.game_data = Some(eg_trainer::game_data::start(None, None, None).unwrap());
+        options.game_data = Some(eg_trainer::definitions::service::start(None, None, None).unwrap());
         let (handle, worker) = start(&shared, options);
         assert_eq!(handle.snapshot().game_files, backend::GameFiles::NotConfigured);
         command(&handle, Command::Enable).await.unwrap();
@@ -1132,7 +1136,7 @@ fn read_again_reads_the_files_without_a_connection() {
     run(async {
         let shared = Shared::new();
         let mut options = options();
-        options.game_data = Some(eg_trainer::game_data::start(None, None, None).unwrap());
+        options.game_data = Some(eg_trainer::definitions::service::start(None, None, None).unwrap());
         let (handle, worker) = start(&shared, options);
         command(&handle, Command::RefreshCatalog).await.unwrap();
         assert_eq!(handle.snapshot().game_files, backend::GameFiles::NotConfigured, "no folder yet: nothing to read");

@@ -4,7 +4,7 @@
 //! Captures drive other states through fake sessions of their own. The catalog is `eg_trainer::features`, which `catalog`
 //! adapts.
 //!
-//! The hooks' wanted state and values are the worker's profiles (`eg_trainer::profiles`); this module keeps only the rows
+//! The hooks' wanted state and values are the worker's profiles (`eg_trainer::features::profiles`); this module keeps only the rows
 //! and their binding.
 
 pub mod backend_session;

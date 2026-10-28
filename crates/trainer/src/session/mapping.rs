@@ -1,7 +1,7 @@
 use super::*;
 use crate::{
-    edits::{ExpectedObservation, ItemEdit, RollTarget},
-    mapping::{CapturedDisplayParser, MappingBuilder, MappingError, MappingRequest, ValueTable},
+    item::edit::{ExpectedObservation, ItemEdit, RollTarget},
+    item::values::{CapturedDisplayParser, MappingBuilder, MappingError, MappingRequest, ValueTable},
 };
 use eg_trainer_wire::mapping::{self, AffixMappingDraft, AffixMappingQuery, MappingStart, MappingTarget};
 

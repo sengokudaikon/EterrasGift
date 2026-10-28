@@ -6,8 +6,8 @@ use eg_core::{
 };
 use eg_game_access::artifact::ReadLease;
 use eg_trainer::{
-    gate::LogSource,
-    profile::BuildProfile,
+    connect::build::BuildProfile,
+    connect::gate::LogSource,
     session::{Session, SessionError, SessionState},
 };
 use eg_trainer_wire::{

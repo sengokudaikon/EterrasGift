@@ -1,7 +1,7 @@
 use eg_trainer::{
-    catalog::{CatalogIdentity, EXTRACTION_VERSION},
-    edits::*,
-    mapping::*,
+    definitions::catalog::{CatalogIdentity, EXTRACTION_VERSION},
+    item::edit::*,
+    item::values::*,
 };
 use eg_trainer_wire::{
     forge::{AffixSnapshot, ForgeSnapshot, ItemStatus, UniqueIdentity},

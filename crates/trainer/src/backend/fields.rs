@@ -9,7 +9,7 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
         if self.state.phase != Phase::Ready {
             return Err(BackendError::blocked(ErrorKind::NotConnected, "session is not ready"));
         }
-        if !self.connection.as_ref().is_some_and(BackendConnection::supports_read_attack_leech) {
+        if !self.connection.as_ref().is_some_and(|connection| connection.capabilities().read_attack_leech) {
             return Err(BackendError::blocked(ErrorKind::NotReady, "attack/leech reads are unavailable"));
         }
         let target = self

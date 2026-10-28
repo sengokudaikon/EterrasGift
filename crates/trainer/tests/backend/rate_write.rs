@@ -1,6 +1,6 @@
 use super::*;
 use eg_trainer::backend::Activity;
-use eg_trainer::writes::{WriteObservation, WriteOutcome, WritePlan};
+use eg_trainer::write::{WriteObservation, WriteOutcome, WritePlan};
 use eg_trainer_wire::fields::{AttackLeechObservation, AttackLeechRead, ObservedObjectIdentity, ObservedRate};
 
 #[test]

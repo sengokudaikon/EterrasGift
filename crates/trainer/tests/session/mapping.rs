@@ -1,5 +1,5 @@
 use super::*;
-use eg_trainer::{edits::ExpectedObservation, mapping::MappingRequest};
+use eg_trainer::{item::edit::ExpectedObservation, item::values::MappingRequest};
 use eg_trainer_wire::mapping::{self, MappingAddress, MappingStart, MappingTarget, RawMappingPage, RawValueSample};
 
 fn expected(fixture: &Fixture) -> ExpectedObservation {
@@ -7,14 +7,14 @@ fn expected(fixture: &Fixture) -> ExpectedObservation {
     ExpectedObservation::new(
         1,
         fixture.target.clone(),
-        eg_trainer::catalog::CatalogIdentity {
+        eg_trainer::definitions::catalog::CatalogIdentity {
             binary_hash: profile.binary_hash().into(),
             metadata_hash: profile.metadata_hash().into(),
             locale: GameLocale {
                 language: "en".into(),
                 game_version: "authored".into(),
             },
-            extraction_version: eg_trainer::catalog::EXTRACTION_VERSION,
+            extraction_version: eg_trainer::definitions::catalog::EXTRACTION_VERSION,
         },
         forge_item(),
     )
@@ -90,7 +90,7 @@ fn complete_sampled_mapping_uses_exact_display_and_full_conditional_queries() {
 }
 #[test]
 fn draft_mapping_changes_only_detached_query_and_retains_original_observation() {
-    use eg_trainer::edits::{AffixEdit, ItemEdit, SealState};
+    use eg_trainer::item::edit::{AffixEdit, ItemEdit, SealState};
     let fixture = Fixture::new();
     let mut request = request();
     request.draft = Some(ItemEdit::Affix(AffixEdit {

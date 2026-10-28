@@ -1,5 +1,5 @@
 use super::*;
-use eg_trainer::writes::{WriteObservation, WriteOutcome, WritePlan};
+use eg_trainer::write::{WriteObservation, WriteOutcome, WritePlan};
 use eg_trainer_wire::protocol::ResponseCode;
 
 #[test]
@@ -9,7 +9,7 @@ fn mixed_batch_undo_is_owned_by_the_worker_and_refusal_retains_only_unrestored_s
         let (handle, worker) = start(&shared, options());
         connected(&handle).await;
         command(&handle, Command::BeginForgeBatch).await.unwrap();
-        let plan = handle.snapshot().status_plan(eg_trainer::edits::StatusField::Corrupted, 1).unwrap();
+        let plan = handle.snapshot().status_plan(eg_trainer::item::edit::StatusField::Corrupted, 1).unwrap();
         command(&handle, Command::Write(plan.into())).await.unwrap();
         let plan = handle.snapshot().level_requirement_plan(17).unwrap();
         command(&handle, Command::Write(plan.into())).await.unwrap();
@@ -51,7 +51,7 @@ fn a_new_batch_replaces_previous_undo_only_after_its_first_confirmation() {
         command(&handle, Command::Write(plan.into())).await.unwrap();
         let previous = handle.snapshot().undo_forge.clone();
         command(&handle, Command::BeginForgeBatch).await.unwrap();
-        let plan = handle.snapshot().status_plan(eg_trainer::edits::StatusField::Ruined, 1).unwrap();
+        let plan = handle.snapshot().status_plan(eg_trainer::item::edit::StatusField::Ruined, 1).unwrap();
         *shared.write_result.lock().unwrap() = Some(WriteStatus::NotApplied {
             code: ResponseCode::Refused,
             message: "No store attempted.".into(),
@@ -114,7 +114,7 @@ fn failed_write_evidence_is_persisted_without_event_subscribers_even_during_clea
 
 #[test]
 fn queued_override_revocation_refuses_old_plans_and_undo_before_io() {
-    use eg_trainer::edits::{EditError, StatusEdit, StatusField};
+    use eg_trainer::item::edit::{EditError, StatusEdit, StatusField};
     run(async {
         let shared = writable();
         {
@@ -155,7 +155,7 @@ fn queued_override_revocation_refuses_old_plans_and_undo_before_io() {
 
 #[test]
 fn reducing_above_limit_legendary_will_does_not_offer_an_illegal_increase_as_undo() {
-    use eg_trainer::edits::{StatusEdit, StatusField};
+    use eg_trainer::item::edit::{StatusEdit, StatusField};
     run(async {
         let shared = writable();
         {
@@ -190,7 +190,7 @@ fn status_family_uses_shared_write_outcomes_and_conditional_undo() {
         let shared = writable();
         let (handle, worker) = start(&shared, options());
         connected(&handle).await;
-        for field in [eg_trainer::edits::StatusField::Corrupted, eg_trainer::edits::StatusField::Ruined] {
+        for field in [eg_trainer::item::edit::StatusField::Corrupted, eg_trainer::item::edit::StatusField::Ruined] {
             let before = handle.snapshot();
             assert!(before.capabilities.status_fields[field as usize]);
             let plan = before.status_plan(field, 1).unwrap();
@@ -580,7 +580,7 @@ fn explicit_undo_uses_a_fresh_reverse_plan_and_consumes_the_last_apply() {
         let plan = handle.snapshot().level_requirement_plan(17).unwrap();
         command(&handle, Command::Write(plan.into())).await.unwrap();
         let undo = handle.snapshot().undo_forge.unwrap();
-        assert!(matches!(undo.reverse_edit(), eg_trainer::edits::ItemEdit::Status(edit) if edit.value == 20));
+        assert!(matches!(undo.reverse_edit(), eg_trainer::item::edit::ItemEdit::Status(edit) if edit.value == 20));
         let fresh = handle.snapshot().forge_undo_plan(&undo).unwrap();
         assert_eq!(fresh.before().snapshot().status.level_requirement, 17);
         assert_eq!(fresh.projected().status.level_requirement, 20);
@@ -607,7 +607,7 @@ fn next_apply_replaces_undo_and_old_ui_intent_is_refused_before_io() {
         let refreshes = shared.count("refresh");
         assert_eq!(command(&handle, Command::UndoForge(Box::new(old))).await.unwrap_err().kind, ErrorKind::InvalidEdit);
         assert_eq!(shared.count("refresh"), refreshes);
-        assert!(matches!(handle.snapshot().undo_forge.unwrap().reverse_edit(), eg_trainer::edits::ItemEdit::Status(edit) if edit.value == 17));
+        assert!(matches!(handle.snapshot().undo_forge.unwrap().reverse_edit(), eg_trainer::item::edit::ItemEdit::Status(edit) if edit.value == 17));
         assert_eq!(shared.count("write"), 2);
         shutdown(&handle, worker).await;
     });

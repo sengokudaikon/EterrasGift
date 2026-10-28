@@ -1,11 +1,11 @@
-//! Cheat profiles in the worker (`crate::profiles`): which one the pages show and change, the lock that holds them
+//! Cheat profiles in the worker (`crate::features::profiles`): which one the pages show and change, the lock that holds them
 //! still while a game runs without an offline character in play, and the hooks of the character in play applied one at
 //! a time, each settled by the game's own report. A character without a profile has hooks for the connection only,
 //! until the user keeps them as its profile.
 use super::write::{CurrentIntent, invalid_edit, refusal, write_error};
 use super::*;
+use crate::features::profiles::ProfileKey;
 use crate::features::{DESCRIPTORS, FeatureError, FeatureIntents, FeatureKey, HookId};
-use crate::profiles::ProfileKey;
 
 /// What a wanted hook says while this version cannot apply it.
 pub const HOOK_NOT_AVAILABLE: &str = "Not available in this version yet.";
@@ -72,7 +72,7 @@ fn not_in_play() -> BackendError {
 impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> BackendWorker<P, C, L, K> {
     pub(super) fn reconcile_hooks(&mut self) {
         for id in hook_ids() {
-            if let Some(false) = self.connection.as_ref().and_then(|connection| connection.observed_hook(id))
+            if let Some(false) = self.connection.as_ref().and_then(|connection| id.native().and_then(|hook| connection.observed_hook(hook)))
                 && self.state.hooks.get(&id).is_some_and(HookRun::holds)
             {
                 self.state.hooks.insert(id, if self.wanted(id) { HookRun::Queued } else { HookRun::Off });
@@ -241,7 +241,11 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
         // Nothing to take back from the game, or nothing this version can do there.
         let settled = if !request.on && !holds {
             Some(HookRun::Off)
-        } else if !self.connection.as_ref().is_some_and(|connection| connection.supports_hook(id)) {
+        } else if !self
+            .connection
+            .as_ref()
+            .is_some_and(|connection| id.native().is_some_and(|hook| connection.supports_hook(hook)))
+        {
             Some(HookRun::Failed {
                 reason: HOOK_NOT_AVAILABLE.into(),
                 on: holds,

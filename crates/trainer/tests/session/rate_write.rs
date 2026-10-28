@@ -1,8 +1,8 @@
 use super::*;
 use eg_trainer::{
     backend::AttackLeechSnapshot,
-    field_writes::{AttackLeechDecision, AttackLeechPlan, AttackLeechTarget, RateWriteStatus},
-    writes::{WriteControl, WriteObservation, WriteOutcome},
+    fields::{AttackLeechDecision, AttackLeechPlan, AttackLeechTarget, RateWriteStatus},
+    write::{WriteControl, WriteObservation, WriteOutcome},
 };
 use eg_trainer_wire::fields::{self, AttackLeechObservation, AttackLeechRead, AttackLeechUnavailable, ObservedObjectIdentity, ObservedRate};
 
@@ -325,9 +325,9 @@ fn cleanup_control_cancels_only_before_unsent_rpcs() {
 }
 
 use eg_trainer::{
-    catalog::{CatalogIdentity, EXTRACTION_VERSION, GameCatalog},
-    edits::{ExpectedObservation, ItemEdit, StatusEdit, StatusField},
-    writes::{ForgePlan, WriteStatus},
+    definitions::catalog::{CatalogIdentity, EXTRACTION_VERSION, GameCatalog},
+    item::edit::{ExpectedObservation, ItemEdit, StatusEdit, StatusField},
+    write::{ForgePlan, WriteStatus},
 };
 fn forge_plan(fixture: &Fixture) -> ForgePlan {
     let profile = fixture.profile();

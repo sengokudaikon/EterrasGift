@@ -10,10 +10,10 @@ use super::session::{FieldError, FieldRequest, FieldResult, FieldWrite, GameFiel
 use eg_trainer::backend::{
     AttackLeechObservation, AttackLeechRead, AttackLeechUnavailable, BackendError, BackendHandle, BackendSnapshot, Command, Delivery, ObservedRate, Pending, Phase,
 };
+use eg_trainer::features::profiles::ProfileKey;
 use eg_trainer::features::{FeatureIntents, HookId};
-use eg_trainer::field_writes::{AttackLeechDecision, AttackLeechPlan, AttackLeechTarget, FieldInputError, FieldPlanError, RateWriteRecord};
-use eg_trainer::profiles::ProfileKey;
-use eg_trainer::writes::WriteOutcome;
+use eg_trainer::fields::{AttackLeechDecision, AttackLeechPlan, AttackLeechTarget, FieldInputError, FieldPlanError, RateWriteRecord};
+use eg_trainer::write::WriteOutcome;
 use std::cell::RefCell;
 use std::collections::{BTreeMap, VecDeque};
 

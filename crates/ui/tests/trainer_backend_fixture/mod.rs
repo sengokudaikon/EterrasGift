@@ -2,18 +2,19 @@
 //! preparer, process lookup, real settings, game host or pipe can be reached here.
 use super::*;
 use eg_core::game_log::GameLogStatus;
-use eg_trainer::files::FileCatalog;
-use eg_trainer::game_data::{GameData, GameDataHandle};
+use eg_trainer::backend::GameplayHook;
+use eg_trainer::definitions::files::FileCatalog;
+use eg_trainer::definitions::service::{GameData, GameDataHandle};
 use eg_trainer::{
     backend::{
         self, BackendConnection, BackendError, BackendHandle, BackendOptions, Command, Connector, ForgeSnapshot, ItemStatus, Phase, ProcessIdentity, ProcessLocator, RuntimeStatus,
         SystemClock,
     },
-    catalog::{
+    connect::gate::{GatePolicy, LogSource},
+    definitions::catalog::{
         AffixDefinition, Availability, CatalogIdentity, DefinitionName, DefinitionNameSource, EXTRACTION_VERSION, GameCatalog, GameLocale, ImplicitDefinition, ItemLimits,
         ItemTypeDefinition, SubTypeDefinition, UniqueDefinition, ValueRange,
     },
-    gate::{GatePolicy, LogSource},
     session::Cleanup,
 };
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
@@ -96,6 +97,36 @@ impl BackendConnection for OwnedConnection {
     fn target(&self) -> &ProcessIdentity {
         &self.0.target
     }
+    // The owned connection reads back independently for the editor route.
+    fn capabilities(&self) -> backend::Capabilities {
+        backend::Capabilities {
+            read_forge: true,
+            read_attack_leech: true,
+            attack_leech_rate: true,
+            level_requirement: true,
+            status_fields: [true; 7],
+            base_change: true,
+            identity_change: true,
+            affix_rolls: true,
+            affix_change: true,
+            affix_list: true,
+            ..Default::default()
+        }
+    }
+    fn supports_hook(&self, hook: GameplayHook) -> bool {
+        matches!(hook, GameplayHook::MysteriousRift | GameplayHook::Offhand | GameplayHook::IncomingDamage)
+    }
+    async fn write(
+        &mut self,
+        plan: &eg_trainer::write::WritePlan,
+        control: &mut dyn eg_trainer::write::WriteControl,
+    ) -> Result<eg_trainer::write::WriteOutcome<eg_trainer::write::WriteObservation>, BackendError> {
+        use eg_trainer::write::{WriteObservation, WritePlan};
+        match plan {
+            WritePlan::Forge(plan) => Ok(self.edit_forge(plan, control).await?.map(WriteObservation::forge)),
+            WritePlan::Field(plan) => Ok(self.set_attack_leech_rate(plan, control).await?.map(WriteObservation::Field)),
+        }
+    }
     async fn refresh(&mut self) -> Result<RuntimeStatus, BackendError> {
         if self.0.loading.load(Ordering::SeqCst) {
             return Err(BackendError::waiting(backend::ErrorKind::CharacterLoading, "changing area"));
@@ -106,7 +137,7 @@ impl BackendConnection for OwnedConnection {
             features_on: 0,
         })
     }
-    async fn read_locale(&mut self) -> Result<eg_trainer::catalog::GameLocale, BackendError> {
+    async fn read_locale(&mut self) -> Result<eg_trainer::definitions::catalog::GameLocale, BackendError> {
         Ok(GameLocale {
             language: "en".into(),
             game_version: "owned-ui".into(),
@@ -187,10 +218,11 @@ impl BackendConnection for OwnedConnection {
     }
     async fn resolve_mapping(
         &mut self,
-        expected: &eg_trainer::edits::ExpectedObservation,
-        request: &eg_trainer::mapping::MappingRequest,
-    ) -> Result<eg_trainer::mapping::ValueTable, BackendError> {
-        use eg_trainer::mapping::{DisplayScalarParser, MappingBuilder, MappingStart, RawMappingPage, RawValueSample};
+        expected: &eg_trainer::item::edit::ExpectedObservation,
+        request: &eg_trainer::item::values::MappingRequest,
+        _: &mut dyn backend::ReadObserver,
+    ) -> Result<eg_trainer::item::values::ValueTable, BackendError> {
+        use eg_trainer::item::values::{DisplayScalarParser, MappingBuilder, MappingStart, RawMappingPage, RawValueSample};
         let mode = self.0.mappings.load(Ordering::SeqCst);
         if mode == 0 || mode == 3 {
             self.0.mapping_calls.fetch_add(1, Ordering::SeqCst);
@@ -209,7 +241,7 @@ impl BackendConnection for OwnedConnection {
         tokio::time::sleep(Duration::from_millis(if mode == 2 { 500 } else { 20 })).await;
         let affix = &expected.snapshot().affixes[usize::from(request.address.index)];
         let (id, tier) = match &request.draft {
-            Some(eg_trainer::edits::ItemEdit::Affix(edit)) => (edit.id, edit.tier),
+            Some(eg_trainer::item::edit::ItemEdit::Affix(edit)) => (edit.id, edit.tier),
             _ => (i32::from(affix.id), i32::from(affix.tier)),
         };
         let minimum = id * 100 + tier * 10 + expected.snapshot().individual_id as i32;
@@ -245,30 +277,51 @@ impl BackendConnection for OwnedConnection {
         }
         Ok(builder.finish().unwrap())
     }
-    fn supports_affix_rolls(&self) -> bool {
-        true
+    fn observed_hook(&self, hook: GameplayHook) -> Option<bool> {
+        self.supports_hook(hook).then(|| self.0.gameplay_hooks[hook as usize].load(Ordering::SeqCst))
     }
-    fn supports_affix_list(&self) -> bool {
-        true
+    async fn set_hook(&mut self, request: &backend::HookRequest, control: &mut dyn eg_trainer::write::WriteControl) -> Result<eg_trainer::write::WriteOutcome<bool>, BackendError> {
+        assert!(control.allowed());
+        let index = match request.id.as_str() {
+            "mysterious-rift" => 0,
+            "offhand" => 1,
+            "incoming-damage" => 2,
+            _ => panic!("unsupported fixture hook"),
+        };
+        self.0.gameplay_hooks[index].store(request.on, Ordering::SeqCst);
+        if index == 2 {
+            self.0.damage_percent.store(request.values[0] as usize, Ordering::SeqCst);
+        }
+        if index == 0 {
+            self.0.rift_choice.store(request.values[0] as usize, Ordering::SeqCst);
+        }
+        Ok(eg_trainer::write::WriteOutcome::Confirmed(request.on))
     }
-    fn supports_affix_change(&self) -> bool {
-        true
+    async fn read_attack_leech(&mut self) -> Result<backend::AttackLeechRead, BackendError> {
+        Ok(backend::AttackLeechRead::Available(self.0.rates()))
     }
-    fn supports_base_change(&self) -> bool {
-        true
+    async fn disconnect(&mut self) -> Cleanup {
+        Cleanup::ConfirmedOff
     }
-    fn supports_identity_change(&self) -> bool {
-        true
+}
+impl OwnedConnection {
+    async fn set_attack_leech_rate(
+        &mut self,
+        plan: &eg_trainer::fields::AttackLeechPlan,
+        _: &mut dyn eg_trainer::write::WriteControl,
+    ) -> Result<eg_trainer::fields::RateWriteStatus, BackendError> {
+        tokio::time::sleep(Duration::from_millis(150)).await;
+        assert_eq!(
+            &backend::AttackLeechRead::Available(self.0.rates()),
+            &plan.before().read,
+            "fresh expected rates for every step"
+        );
+        let projected = *plan.projected();
+        *self.0.rates.lock().unwrap() = [projected.attack_rate.raw_bits, projected.increased_leech_rate.raw_bits];
+        Ok(eg_trainer::write::WriteOutcome::Confirmed(projected))
     }
-    fn supports_status(&self, _: eg_trainer::edits::StatusField) -> bool {
-        true
-    }
-    // Owned connection implements independent readback for the editor route.
-    fn supports_level_requirement(&self) -> bool {
-        true
-    }
-    async fn edit_forge(&mut self, plan: &eg_trainer::writes::ForgePlan, _: &mut dyn eg_trainer::writes::WriteControl) -> Result<eg_trainer::writes::WriteStatus, BackendError> {
-        use eg_trainer::writes::{ResponseCode, WriteOutcome};
+    async fn edit_forge(&mut self, plan: &eg_trainer::write::ForgePlan, _: &mut dyn eg_trainer::write::WriteControl) -> Result<eg_trainer::write::WriteStatus, BackendError> {
+        use eg_trainer::write::{ResponseCode, WriteOutcome};
         let call = self.0.writes.fetch_add(1, Ordering::SeqCst) + 1;
         self.0.expected.lock().unwrap().push(plan.before().snapshot().clone());
         tokio::time::sleep(Duration::from_millis(200)).await;
@@ -291,66 +344,6 @@ impl BackendConnection for OwnedConnection {
                 Ok(WriteOutcome::Confirmed(item.clone().unwrap()))
             }
         }
-    }
-    fn supports_hook(&self, id: eg_trainer::features::HookId) -> bool {
-        matches!(id.as_str(), "mysterious-rift" | "offhand" | "incoming-damage")
-    }
-    fn observed_hook(&self, id: eg_trainer::features::HookId) -> Option<bool> {
-        let index = match id.as_str() {
-            "mysterious-rift" => 0,
-            "offhand" => 1,
-            "incoming-damage" => 2,
-            _ => return None,
-        };
-        Some(self.0.gameplay_hooks[index].load(Ordering::SeqCst))
-    }
-    async fn set_hook(
-        &mut self,
-        request: &backend::HookRequest,
-        control: &mut dyn eg_trainer::writes::WriteControl,
-    ) -> Result<eg_trainer::writes::WriteOutcome<bool>, BackendError> {
-        assert!(control.allowed());
-        let index = match request.id.as_str() {
-            "mysterious-rift" => 0,
-            "offhand" => 1,
-            "incoming-damage" => 2,
-            _ => panic!("unsupported fixture hook"),
-        };
-        self.0.gameplay_hooks[index].store(request.on, Ordering::SeqCst);
-        if index == 2 {
-            self.0.damage_percent.store(request.values[0] as usize, Ordering::SeqCst);
-        }
-        if index == 0 {
-            self.0.rift_choice.store(request.values[0] as usize, Ordering::SeqCst);
-        }
-        Ok(eg_trainer::writes::WriteOutcome::Confirmed(request.on))
-    }
-    fn supports_read_attack_leech(&self) -> bool {
-        true
-    }
-    async fn read_attack_leech(&mut self) -> Result<backend::AttackLeechRead, BackendError> {
-        Ok(backend::AttackLeechRead::Available(self.0.rates()))
-    }
-    fn supports_attack_leech_rate(&self) -> bool {
-        true
-    }
-    async fn set_attack_leech_rate(
-        &mut self,
-        plan: &eg_trainer::field_writes::AttackLeechPlan,
-        _: &mut dyn eg_trainer::writes::WriteControl,
-    ) -> Result<eg_trainer::field_writes::RateWriteStatus, BackendError> {
-        tokio::time::sleep(Duration::from_millis(150)).await;
-        assert_eq!(
-            &backend::AttackLeechRead::Available(self.0.rates()),
-            &plan.before().read,
-            "fresh expected rates for every step"
-        );
-        let projected = *plan.projected();
-        *self.0.rates.lock().unwrap() = [projected.attack_rate.raw_bits, projected.increased_leech_rate.raw_bits];
-        Ok(eg_trainer::writes::WriteOutcome::Confirmed(projected))
-    }
-    async fn disconnect(&mut self) -> Cleanup {
-        Cleanup::ConfirmedOff
     }
 }
 /// The definitions the fixture's game files hold.
@@ -1414,7 +1407,7 @@ pub(super) fn capture_waiting(session: &Session) {
 /// at once), another profile can be shown or the shown one deleted, and the moment a game is seen they lock behind the
 /// connection's notice. Automatic connection is off, so the worker only looks for the game; nothing connects.
 pub(super) fn capture_profiles(session: &Session) {
-    use eg_trainer::profiles::{ProfileBook, ProfileSaver};
+    use eg_trainer::features::profiles::{ProfileBook, ProfileSaver};
 
     struct Games(Arc<AtomicUsize>, ProcessIdentity);
     impl ProcessLocator for Games {

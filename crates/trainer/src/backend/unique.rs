@@ -1,7 +1,7 @@
 use super::*;
 use crate::{
-    edits::{ExpectedObservation, RollEdit},
-    mapping::{BoundTooltip, TooltipKind},
+    item::edit::{ExpectedObservation, RollEdit},
+    item::values::{BoundTooltip, TooltipKind},
 };
 impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> BackendWorker<P, C, L, K> {
     pub(super) async fn describe_unique(&mut self, expected: ExpectedObservation) -> Result<(), BackendError> {

@@ -1,8 +1,8 @@
 use super::*;
 use eg_trainer::{
-    catalog::{CatalogIdentity, EXTRACTION_VERSION, GameCatalog},
-    edits::{EditError, ExpectedObservation, ItemEdit, StatusEdit, StatusField},
-    writes::{ForgePlan, WriteControl, WriteObservation, WriteOutcome, WriteStatus},
+    definitions::catalog::{CatalogIdentity, EXTRACTION_VERSION, GameCatalog},
+    item::edit::{EditError, ExpectedObservation, ItemEdit, StatusEdit, StatusField},
+    write::{ForgePlan, WriteControl, WriteObservation, WriteOutcome, WriteStatus},
 };
 
 fn plan(fixture: &Fixture) -> ForgePlan {

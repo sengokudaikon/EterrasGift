@@ -1,7 +1,7 @@
 //! The catalog built from a real install's files. Files only: nothing starts, opens or touches the game process.
 //! `EG_LAST_EPOCH=<game folder> cargo test -p eg-trainer --release --test files -- --ignored --nocapture`.
 
-use eg_trainer::catalog::{Availability, GameLocale};
+use eg_trainer::definitions::catalog::{Availability, GameLocale};
 use std::time::Instant;
 
 #[test]
@@ -9,7 +9,7 @@ use std::time::Instant;
 fn builds_the_catalog_from_the_install() {
     let folder = std::env::var_os("EG_LAST_EPOCH").expect("set EG_LAST_EPOCH to the game folder");
     let started = Instant::now();
-    let files = eg_trainer::files::read(std::path::Path::new(&folder)).unwrap();
+    let files = eg_trainer::definitions::files::read(std::path::Path::new(&folder)).unwrap();
     let catalog = files
         .catalog(GameLocale {
             language: "en".into(),
@@ -47,14 +47,14 @@ fn builds_the_catalog_from_the_install() {
 #[test]
 #[ignore = "reads a Last Epoch install named by EG_LAST_EPOCH"]
 fn a_second_start_loads_the_saved_catalog_instead_of_reading_the_files() {
-    use eg_trainer::game_data::{self, GameData};
+    use eg_trainer::definitions::service::{self, GameData};
     let folder = std::path::PathBuf::from(std::env::var_os("EG_LAST_EPOCH").expect("set EG_LAST_EPOCH to the game folder"));
     let store = tempfile::tempdir().unwrap();
     let runtime = tokio::runtime::Builder::new_current_thread().build().unwrap();
     let mut catalogs = Vec::new();
     for start in ["first start, reads the files", "second start, loads the saved catalog"] {
         let started = Instant::now();
-        let service = game_data::start(None, Some(store.path().to_path_buf()), None).unwrap();
+        let service = service::start(None, Some(store.path().to_path_buf()), None).unwrap();
         let GameData::Ready(catalog) = runtime.block_on(service.for_folder(&folder)) else {
             panic!("{start}: {:?}", service.current());
         };

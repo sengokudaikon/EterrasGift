@@ -1,6 +1,6 @@
 use eg_core::game_log::LoggedCharacter;
+use eg_trainer::features::profiles::{ProfileBook, ProfileKey};
 use eg_trainer::features::{FeatureKey, HookId};
-use eg_trainer::profiles::{ProfileBook, ProfileKey};
 use jiff::Timestamp;
 use serde_json::{Map, Value, json};
 

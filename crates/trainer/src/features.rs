@@ -1,12 +1,14 @@
 //! Immutable feature descriptions and local intent, with no game access. Native support follows from a hook's
 //! identity (`eg_trainer_wire::hooks::GameplayHook`); a descriptor grants no permission to install a hook.
 
+use eg_trainer_wire::hooks::GameplayHook;
 use std::collections::{BTreeMap, BTreeSet};
 use std::error::Error;
 use std::fmt;
 
-mod catalog;
-pub use catalog::{DESCRIPTORS, PAGES};
+pub mod profiles;
+mod registry;
+pub use registry::{DESCRIPTORS, PAGES};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum TrainerArea {
@@ -44,6 +46,11 @@ impl HookId {
 
     pub const fn as_str(self) -> &'static str {
         self.0
+    }
+
+    /// The game hook the helper runs this feature as, if it has one.
+    pub fn native(self) -> Option<GameplayHook> {
+        GameplayHook::from_id(self.0)
     }
 }
 
@@ -165,7 +172,7 @@ impl FeatureDescriptor {
     /// The game hook that runs this feature, if this version has one.
     pub fn native_support(&self) -> NativeSupport {
         match self.key {
-            FeatureKey::Hook(id) => eg_trainer_wire::hooks::GameplayHook::from_id(id.as_str()).map_or(NativeSupport::Unsupported, NativeSupport::GameplayOverride),
+            FeatureKey::Hook(id) => id.native().map_or(NativeSupport::Unsupported, NativeSupport::GameplayOverride),
             _ => NativeSupport::Unsupported,
         }
     }
@@ -222,7 +229,7 @@ impl fmt::Display for FeatureError {
 
 impl Error for FeatureError {}
 
-/// One profile's hooks (`crate::profiles`): those wanted on, and every hook's values. Construction and updates
+/// One profile's hooks (`crate::features::profiles`): those wanted on, and every hook's values. Construction and updates
 /// perform no I/O, and nothing here applies, retries or claims an effect in the game; the worker's `HookRun` says that.
 ///
 /// Every switch starts off and every value at the catalog's default. Saved values are fitted to the catalog

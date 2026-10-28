@@ -81,7 +81,7 @@ run = "cargo test -p eg-game-files --release -- --ignored --nocapture"
 
 [tasks."trainer:test"]
 description = "The trainer packages' tests alone (part of test); no live game"
-run = "cargo test -p eg-trainer-wire -p eg-game-access -p eg-trainer -p eg-trainer-helper -p eg-trainer-host --offline"
+run = "cargo test -p eg-trainer-wire -p eg-game-access -p eg-trainer -p eg-trainer-helper --offline"
 
 [tasks."trainer:verify"]
 description = "verify, then the isolated controller's tests; required for trainer changes"

@@ -1,7 +1,7 @@
 use super::*;
 use eg_trainer::{
-    edits::{ExpectedObservation, RollChange, RollEdit, RollTarget},
-    mapping::{BoundTooltip, TooltipKind},
+    item::edit::{ExpectedObservation, RollChange, RollEdit, RollTarget},
+    item::values::{BoundTooltip, TooltipKind},
 };
 use eg_trainer_wire::{
     forge::UniqueIdentity,
@@ -44,14 +44,14 @@ fn observation(f: &Fixture) -> ExpectedObservation {
     ExpectedObservation::new(
         1,
         f.target.clone(),
-        eg_trainer::catalog::CatalogIdentity {
+        eg_trainer::definitions::catalog::CatalogIdentity {
             binary_hash: profile.binary_hash().into(),
             metadata_hash: profile.metadata_hash().into(),
             locale: GameLocale {
                 language: "en".into(),
                 game_version: "owned".into(),
             },
-            extraction_version: eg_trainer::catalog::EXTRACTION_VERSION,
+            extraction_version: eg_trainer::definitions::catalog::EXTRACTION_VERSION,
         },
         item(),
     )

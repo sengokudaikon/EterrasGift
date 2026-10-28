@@ -1,7 +1,7 @@
 use super::*;
 use crate::{
-    field_writes::{AttackLeechPlan, RateWriteRecord, RateWriteStatus},
-    writes::{AllowWrite, WriteControl, WriteObservation},
+    fields::{AttackLeechPlan, RateWriteRecord, RateWriteStatus},
+    write::{AllowWrite, WriteControl, WriteObservation},
 };
 
 impl<T: Transport> Session<T> {

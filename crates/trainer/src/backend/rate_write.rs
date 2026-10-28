@@ -17,7 +17,7 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
         }
         let epoch = self.command_epoch;
         self.superseded(epoch)?;
-        if !self.connection.as_ref().is_some_and(BackendConnection::supports_attack_leech_rate) {
+        if !self.connection.as_ref().is_some_and(|connection| connection.capabilities().attack_leech_rate) {
             return Err(BackendError::blocked(ErrorKind::NotReady, "attack/leech rate writes are unavailable"));
         }
         let expected = plan.before();

@@ -31,7 +31,7 @@ pub struct FixtureState {
     pub identity: bool,
     pub unrestricted: bool,
     pub writes: Vec<ItemEdit>,
-    history: eg_trainer::undo::ForgeUndoHistory,
+    history: eg_trainer::item::undo::ForgeUndoHistory,
 }
 
 pub struct FixtureGame {
@@ -45,7 +45,7 @@ impl FixtureGame {
     /// Authored display fixtures carry full canonical planner inputs. They do not
     /// implement compatibility, projection or edit validation themselves.
     fn bind(&self, mut item: ForgeItem) -> ForgeItem {
-        use eg_trainer::{backend as native, catalog as data, edits::ExpectedObservation};
+        use eg_trainer::{backend as native, definitions::catalog as data, item::edit::ExpectedObservation};
         let name = |text: &str| data::DefinitionName {
             text: text.into(),
             source: data::DefinitionNameSource::RuntimeDisplay,
@@ -671,7 +671,7 @@ impl ForgeGame for FixtureGame {
                 RollTarget::Implicit => Ok(table("Value", 1.0, 10.0, 0, "{v}", "")),
                 RollTarget::Affix => {
                     let (id, tier) = match request.draft {
-                        Some(ItemEdit::Affix(eg_trainer::edits::AffixEdit { id, tier, .. })) => (id as u16, Some(tier as u8)),
+                        Some(ItemEdit::Affix(eg_trainer::item::edit::AffixEdit { id, tier, .. })) => (id as u16, Some(tier as u8)),
                         _ => item.affix(request.index).map_or((0, None), |affix| (affix.id, Some(affix.tier))),
                     };
                     if state.unmapped.contains(&id) {
@@ -760,7 +760,7 @@ impl FixtureGame {
             after.status = None;
         }
         // The game names the item after its new identity.
-        if let ItemEdit::UniqueIdentity(eg_trainer::edits::UniqueIdentityEdit { unique_id, .. }) = edit
+        if let ItemEdit::UniqueIdentity(eg_trainer::item::edit::UniqueIdentityEdit { unique_id, .. }) = edit
             && let Some(unique) = self.catalog.unique(*unique_id as u16)
         {
             after.name = unique.name.clone();

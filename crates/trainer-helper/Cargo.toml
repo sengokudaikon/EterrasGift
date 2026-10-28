@@ -1,6 +1,6 @@
 [package]
 name = "eg-trainer-helper"
-description = "Explicitly bootstrapped, retained in-process trainer control helper."
+description = "The trainer inside the game: the pipe server, Last Epoch's runtime and the entry hooks."
 version.workspace = true
 edition.workspace = true
 publish.workspace = true
@@ -13,12 +13,17 @@ fixture = []
 
 [dependencies]
 eg-trainer-wire = { path = "../trainer-wire" }
-eg-game-access = { path = "../game-access", features = ["il2cpp"] }
 eg-il2cpp-runtime.workspace = true
+detour = "=0.10.0"
+iced-x86 = { version = "=1.21.0", default-features = false, features = ["std", "decoder", "instr_info"] }
 tokio = { workspace = true, features = ["macros"] }
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { workspace = true, features = ["Win32_Foundation", "Win32_Security", "Win32_Security_Authorization", "Win32_System_Threading", "Win32_System_SystemInformation", "Win32_System_Pipes", "Win32_System_LibraryLoader", "Win32_System_Diagnostics_Debug", "Win32_System_Memory"] }
+
+[dev-dependencies]
+eg-game-access = { path = "../game-access" }
+eg-il2cpp-runtime = { workspace = true, features = ["test-stubs"] }
 
 [build-dependencies]
 sha2.workspace = true

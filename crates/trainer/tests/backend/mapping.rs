@@ -1,7 +1,7 @@
 use super::*;
 use eg_trainer::{
-    edits::ExpectedObservation,
-    mapping::{CapturedDisplayParser, MappingBuilder, MappingRequest, ValueTable},
+    item::edit::ExpectedObservation,
+    item::values::{CapturedDisplayParser, MappingBuilder, MappingRequest, ValueTable},
 };
 use eg_trainer_wire::mapping::{MappingAddress, MappingStart, MappingTarget, RawMappingPage, RawValueSample};
 

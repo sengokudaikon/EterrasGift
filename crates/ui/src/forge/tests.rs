@@ -20,7 +20,7 @@ fn row(editor: &ForgeEditor, id: u16) -> usize {
 #[test]
 fn authored_writes_and_undo_enforce_the_canonical_roll_override_flag() {
     use super::game::{ForgeGame, WriteOutcome};
-    use eg_trainer::edits::{ItemEdit, RollChange, RollEdit, RollTarget};
+    use eg_trainer::item::edit::{ItemEdit, RollChange, RollEdit, RollTarget};
     let mut game = FixtureGame::boots(false);
     let before = game.read().unwrap();
     let edit = ItemEdit::Roll(RollEdit {
@@ -52,7 +52,7 @@ fn capture_compatibility_uses_captured_class_requirements() {
     catalog.affixes.get_mut(&4002).unwrap().class_requirement = 4;
     let mut snapshot = context.expected.snapshot().clone();
     snapshot.class_requirement = 1;
-    context.expected = eg_trainer::edits::ExpectedObservation::new(
+    context.expected = eg_trainer::item::edit::ExpectedObservation::new(
         context.expected.generation(),
         context.expected.process().clone(),
         context.expected.catalog_identity().clone(),
@@ -200,7 +200,7 @@ fn max_tiers_drafts_every_affix_up_to_t7_and_leaves_a_primordial() {
 
 #[test]
 fn an_idol_takes_another_idol_type_only_with_the_override() {
-    use eg_trainer::edits::{BaseTypeEdit, ItemEdit};
+    use eg_trainer::item::edit::{BaseTypeEdit, ItemEdit};
     let editor = ForgeEditor::new(Box::new(FixtureGame::idol()));
     let options = editor.base.as_ref().unwrap().options.clone();
     assert_eq!(
@@ -302,7 +302,7 @@ fn status_fields_flags_and_the_base_are_drafts_applied_level_requirement_last() 
 /// Apply refuses such a base unless the base picker allows it.
 #[test]
 fn a_base_that_breaks_affixes_says_so_and_needs_allowing() {
-    use eg_trainer::edits::{BaseTypeEdit, ItemEdit};
+    use eg_trainer::item::edit::{BaseTypeEdit, ItemEdit};
     let game = FixtureGame::class_ring();
     let state = game.state.clone();
     let mut editor = ForgeEditor::new(Box::new(game));
@@ -356,7 +356,7 @@ fn a_base_that_breaks_affixes_says_so_and_needs_allowing() {
 /// breaks nothing needs no override.
 #[test]
 fn only_affixes_the_base_breaks_count() {
-    use eg_trainer::edits::{BaseTypeEdit, ItemEdit};
+    use eg_trainer::item::edit::{BaseTypeEdit, ItemEdit};
     // On the Sapphire Ring (any class) both class affixes are already incompatible; back to the Gold Ring breaks none.
     let game = FixtureGame::class_ring();
     game.change(|item| item.sub_type = 5);
@@ -381,7 +381,7 @@ fn only_affixes_the_base_breaks_count() {
 /// one Undo apply takes the whole batch back.
 #[test]
 fn adding_and_removing_are_drafts_applied_in_order_and_undone_together() {
-    use eg_trainer::edits::{AddAffixEdit, ItemEdit, RemoveAffixEdit};
+    use eg_trainer::item::edit::{AddAffixEdit, ItemEdit, RemoveAffixEdit};
     let game = FixtureGame::boots(true);
     let state = game.state.clone();
     let mut editor = ForgeEditor::new(Box::new(game));

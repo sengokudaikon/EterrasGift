@@ -2,7 +2,7 @@
 //! Session + actual Player.log reader + real local pipe. All data is authored; no game is selected.
 use eg_game_access::pipe::PipeClient;
 use eg_trainer::{
-    profile::BuildProfile,
+    connect::build::BuildProfile,
     session::{Cleanup, Session, SessionState},
 };
 use eg_trainer_wire::protocol::{Discovery, DispatcherSpec, REQUEST_HEADER_SIZE, Request, Response, ResponseCode, RuntimeStatus};
