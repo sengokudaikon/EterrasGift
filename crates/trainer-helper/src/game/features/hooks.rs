@@ -31,9 +31,11 @@ pub(crate) enum GroupId {
     OmenWindows,
     ClassExperimentals,
     RunePrison,
+    Shards,
+    RunesGlyphs,
 }
 impl GroupId {
-    pub(crate) const COUNT: usize = 23;
+    pub(crate) const COUNT: usize = 25;
 }
 
 #[derive(Clone, Copy)]
@@ -78,6 +80,8 @@ pub(crate) fn definition(hook: GameplayHook) -> &'static HookFeature {
         GameplayHook::OmenWindows => &super::patches::omen_windows::FEATURE,
         GameplayHook::ClassExperimentals => &super::patches::class_experimentals::FEATURE,
         GameplayHook::RunePrison => &super::patches::rune_prison::FEATURE,
+        GameplayHook::Shards => &super::shards::FEATURE,
+        GameplayHook::RunesGlyphs => &super::runes_glyphs::FEATURE,
     }
 }
 

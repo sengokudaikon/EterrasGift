@@ -28,10 +28,12 @@ pub enum GameplayHook {
     OmenWindows = 21,
     ClassExperimentals = 22,
     RunePrison = 23,
+    Shards = 24,
+    RunesGlyphs = 25,
 }
 
 impl GameplayHook {
-    pub const ALL: [Self; 24] = [
+    pub const ALL: [Self; 26] = [
         Self::MysteriousRift,
         Self::Offhand,
         Self::IncomingDamage,
@@ -56,6 +58,8 @@ impl GameplayHook {
         Self::OmenWindows,
         Self::ClassExperimentals,
         Self::RunePrison,
+        Self::Shards,
+        Self::RunesGlyphs,
     ];
     pub fn default_value(self) -> u64 {
         if matches!(self, Self::DamageDealt | Self::AttackRate) {
@@ -92,6 +96,8 @@ impl GameplayHook {
             Self::OmenWindows => "omen-windows",
             Self::ClassExperimentals => "class-experimentals",
             Self::RunePrison => "rune-prison",
+            Self::Shards => "shards",
+            Self::RunesGlyphs => "runes-glyphs",
         }
     }
     pub fn from_id(id: &str) -> Option<Self> {
@@ -119,7 +125,9 @@ impl GameplayHook {
             | Self::Nemesis
             | Self::OmenWindows
             | Self::ClassExperimentals
-            | Self::RunePrison => value == 1,
+            | Self::RunePrison
+            | Self::Shards
+            | Self::RunesGlyphs => value == 1,
             Self::DamageDealt => f64::from_bits(value).is_finite() && ((0.0..=100.0).contains(&f64::from_bits(value)) || value == 101.0f64.to_bits()),
             Self::MysteriousRift => value <= 1,
             Self::AttackRate => f64::from_bits(value).is_finite() && (0.01..=20.0).contains(&f64::from_bits(value)),

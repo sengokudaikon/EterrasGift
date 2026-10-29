@@ -590,7 +590,7 @@ pub static DESCRIPTORS: &[FeatureDescriptor] = &[
         area: TrainerArea::Forge,
         section: "Crafting rules",
         title: "Top up runes and glyphs to 99",
-        description: "A stack in the forge's rune or glyph slot is raised to 99 whenever the game reads it. It stays in your save.",
+        description: "Rune and glyph stacks in one-slot containers, including the forge, are raised to 99 when the game reads their quantity. They stay in your save.",
         kind: FeatureKind::Switch,
         values: &[],
         fields: &[],

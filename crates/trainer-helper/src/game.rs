@@ -35,9 +35,9 @@ pub use accessors::presence;
 pub use apply::WriteError;
 pub use discovery::DiscoveredRuntime;
 use discovery::Images;
-#[cfg(test)]
-pub(crate) use features::zero_mana_cost;
 pub(crate) use features::{damage, hooks as gameplay, hooks::GameplayHookTarget, persistent_stat::StatBinding};
+#[cfg(test)]
+pub(crate) use features::{runes_glyphs, shards, zero_mana_cost};
 
 /// A strong GC root on a managed object, held for one call.
 pub(crate) type Root<'a, 'r> = StrongRoot<'a, 'r>;

@@ -11,7 +11,7 @@ shipping scope stays in [trainer-readiness.md](trainer-readiness.md).
   Last Epoch on 2026-10-27. The other implemented hooks still need live checks; fixtures/static inspection are not
   live proof. Exact combinations covered by those two user checks were not recorded.
 
-**Hooks: 24 Done / 44 Todo (68 current controls). Direct field editors: 0 Done / 6 Todo.** God mode and Damage taken
+**Hooks: 26 Done / 42 Todo (68 current controls). Direct field editors: 0 Done / 6 Todo.** God mode and Damage taken
 are combined as `incoming-damage`; one-hit kills are the ∞ endpoint of `damage-dealt`. The former `attack-leech`
 Read/Apply editor is retired in favor of independent persistent `attack-rate` and `leech-rate` hooks.
 
@@ -27,6 +27,7 @@ The former feature-plan, first-hook and code-patch notes are preserved in
 | Done | Persistent scalar overrides | Selected independent accessors, pinned receiver, recalculation baseline and conditional restoration; attack and leech are the consumers. |
 | Done | Float-result postfix gateway | No mana cost preserves the exact original call and its stack arguments, then adjusts the returned float. |
 | Done | Interior code-patch groups | 17 features / 27 owned ranges; bounded unique patterns, grouped transaction/recovery and actual-byte readback. |
+| Done | Material replenishment leaves | Shards and runes/glyphs mutate stored quantities before the original query; shared online/closed guard and field contracts. |
 | Done | Worker/profile/UI integration | Generic Boolean controls, typed values, separate readback and desired-versus-observed state. |
 | Todo | Mixed activation as one complete feature | Experimental uniques, cache use, waypoints and echo cycle still need their feature-specific detours/table behavior and partial-failure policy. |
 | Todo | New coherent multi-value settings | First consumers: XP multiplier/instant level, faction gains or drop rates. Existing publication covers only the implemented shapes. |
@@ -96,8 +97,8 @@ Behavior reference: [forge.h](../../EterrasGift/native/hooks/forge.h).
 | Status | Feature and target | Behavior | Shared mechanism | Distinguishing targeted check |
 |---|---|---|---|---|
 | Done | `forge-level` — `CraftingManager.CheckForgeCapability` | Remove only the character-versus-item-level rejection branch. Preserve the rest of forging admission and side effects. | First simple consumer of patch groups. | Low level passes that check; unrelated forging restrictions still refuse; off restores the exact branch. |
-| Todo | `shards` — `GlobalDataTracker.GetShardCount` | Walk saved shard entries, raising quantities below 99 before original counts them. Null entries are skipped. This changes inventory; disabling does not restore prior quantities. | Bounded list/array access and scalar stores, later compared with runes/glyphs. | Quantities below/above 99, empty/null entries, count agrees with actual stored quantities. |
-| Todo | `runes-glyphs` — `OneSlotItemContainer.GetQuantity` | Follow content/data and raise quantity to 99 only for rune/glyph item types, then call original. The hook applies to this container class wherever used, not just the visible Forge slot. Off stops replenishment without removing material. | Item-entry descriptors and floor operation if also useful for shards. | Other item types untouched; already-higher counts preserved; stored quantity and returned quantity agree. |
+| Done | `shards` — `GlobalDataTracker.GetShardCount` | Walk existing saved shard entries, raising quantities below 99 before original counts them. Null entries are skipped; traversal uses min(active size, array capacity), with capacity at most 65,536. Inventory is not undone on off. See [material details](#crafting-materials). | Bounded list/array access and scalar stores, later compared with runes/glyphs. | Quantities below/above 99, empty/null entries, count agrees with actual stored quantities. |
+| Done | `runes-glyphs` — `OneSlotItemContainer.GetQuantity` | Follow content/data and raise quantity to 99 only for rune/glyph item types, then call original. Applies to one-slot containers wherever queried, including the Forge. Off stops replenishment without removing material. See [material details](#crafting-materials). | Item-entry descriptors and floor operation if also useful for shards. | Other item types untouched; already-higher counts preserved; stored quantity and returned quantity agree. |
 | Done | `woven-enchanter` — both `ZoneRestrictedCraftingManager.OnUse` overloads | Remove the offline local-use increment in both bodies; preserve other station work and server-account branch behavior. Previous uses are not reset by toggling. | Multi-method patch group and overload validation. | Both overloads stop decrementing remaining uses; failure finding either site leaves neither installed. |
 
 ### Loot
@@ -286,6 +287,40 @@ restores the receiver and adjusts XMM0 only for the current player's mana compon
 frame and unwind metadata remain process-owned. The player/actor/mana graph must stay readable across this
 post-call span. Closing before a delayed original returns suppresses adjustment; no object pin or field restoration
 is needed. Live checks: ordinary and channeled skill off/on/off, with Mana always full and No cooldowns off.
+
+### Crafting materials
+
+`shards` and `runes-glyphs` are independent switches under Forge > Crafting rules, using the same retained leaf,
+entry/readback and profile lifecycle as other supported hooks. Each feature owns its metadata contracts and emitted
+behavior; `features/materials` shares the closed/online guard, checked field offsets, writable Int32 contract and
+small branch emitter. Discovery and generic read/apply do not gain feature-specific operations.
+
+Shards follow `GlobalDataTracker.<stash>` → `LE.Data.Stash.<SavedShards>` → closed framework
+`List<LE.Data.SavedShard>` → its exact reference array. Each existing active non-null shard whose quantity is below
+99 is raised before `GetShardCount` runs. Active population is clamped to capacity as in the original trainer;
+negative/empty size, absent references and backing capacities above the shared collection bound of 65,536 forward
+without replenishment. Unused array slots and quantities already at least 99 remain unchanged. No missing shard
+kinds are created, and the list/version itself is not modified.
+
+Runes/glyphs follow `OneSlotItemContainer.content` → `ItemContainerEntry.data`, check byte item categories 102/103,
+and raise only that entry's stored quantity. Other item types, absent content/data and higher quantities are unchanged.
+The feature covers any one-slot container using this method; the UI description now records that original scope.
+
+Both generated leaves preserve receiver/MethodInfo, use volatile registers without a stack frame, and tail-call the
+original once. Their process-owned code/data survive helper departure. They check enabled/online before following
+the inventory graph, allocate/call no helper/runtime code, and require the called method's retained readable graph,
+aligned writable primitive quantities and game-serialized inventory mutation. Null checks do not provide the
+original C++ guard's access-violation recovery. An already-admitted call can finish across close; the shared entry
+restoration prevents new admissions. Disabling never removes materials already granted, including grants before
+an original call that subsequently throws.
+
+Static inspection of the GameAssembly identified below confirms the count path reads tracker stash, saved shards
+and each shard quantity, and the slot query returns the content entry's stored quantity. Runtime enable resolves
+field types/flags/alignment, the exact List/array element and method signatures; observed addresses/offsets are not
+compiled constants. Targeted authored cases cover active/capacity bounds, null links, signed quantities, item types,
+online/off behavior, original-call count/arguments/failure, independent toggles, actual entry readback, manager loss
+and terminal clear. The session/wire tests cover both IDs through the existing generic switch path. Live gameplay
+verification remains pending: compare stored quantities off/on/off, consume materials and query again, then disconnect.
 
 ### Interior code patches
 

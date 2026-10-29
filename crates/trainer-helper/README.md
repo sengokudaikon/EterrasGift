@@ -96,6 +96,12 @@ inside a changing range. Off, manager loss and unload restore these ranges throu
 detours; failed cleanup retains owners and the helper. The thread-snapshot execution contract and all feature
 distinctions are documented in [trainer features](../../research/trainer-features.md#interior-code-patches).
 
+Shard and rune/glyph replenishment use generated before-original leaves on the same lifecycle. Each feature owns
+its inventory layout and raises only existing stored quantities below 99; the original query then runs once.
+Shared material helpers validate reference/primitive fields and emit the closed/online guard. The shard List/array
+walk is bounded; runes/glyphs require their exact item categories. Off restores entries without removing already
+granted materials. See [crafting materials](../../research/trainer-features.md#crafting-materials).
+
 The local pipe is `eterras-gift-<PID>`, one bounded request per connection: a 12-byte header and a sequential operation body. Bootstrap binds the controller PID/birth before any request; the kernel-reported
 client PID and retained process handle/start time verify each owner request. Fixture servers
 without a bootstrap binding let the first valid Discover claim ownership. Normal per-request EOF preserves ownership. Other living processes receive Refused without

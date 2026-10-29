@@ -673,4 +673,155 @@ mod tests {
             assert_eq!(std::hint::black_box(target)(41, 0, 5.5, false, 0, false, 0), 5.5);
         }
     }
+
+    #[test]
+    fn material_refills_use_independent_entries_and_shared_restore_lifecycle_without_undoing_inventory() {
+        use crate::game::{gameplay::ResolvedMethod, runes_glyphs::SlotLayout, shards::ShardLayout};
+        use std::{cell::Cell, sync::atomic::AtomicU8};
+        #[repr(C)]
+        struct Node {
+            header: [usize; 2],
+            pointer: usize,
+            quantity: Cell<i32>,
+        }
+        #[repr(C)]
+        struct Array {
+            header: [usize; 3],
+            length: usize,
+            items: [usize; 1],
+        }
+        #[unsafe(naked)]
+        unsafe extern "C-unwind" fn shard_count(_: *const Node, _: usize) -> i32 {
+            core::arch::naked_asm!(
+                "nop",
+                "nop",
+                "nop",
+                "nop",
+                "nop",
+                "mov r8,[rcx+16]",
+                "mov r8,[r8+16]",
+                "mov r8,[r8+16]",
+                "mov r8,[r8+32]",
+                "mov eax,[r8+24]",
+                "ret"
+            );
+        }
+        #[unsafe(naked)]
+        unsafe extern "C-unwind" fn slot_quantity(_: *const Node, _: usize) -> i32 {
+            core::arch::naked_asm!("nop", "nop", "nop", "nop", "nop", "mov r8,[rcx+16]", "mov eax,[r8+24]", "ret", "nop", "nop");
+        }
+        let online = AtomicU8::new(0);
+        let shard = Node {
+            header: [0; 2],
+            pointer: 0,
+            quantity: Cell::new(2),
+        };
+        let array = Array {
+            header: [0; 3],
+            length: 1,
+            items: [&shard as *const Node as usize],
+        };
+        let list = Node {
+            header: [0; 2],
+            pointer: &array as *const Array as usize,
+            quantity: Cell::new(1),
+        };
+        let stash = Node {
+            header: [0; 2],
+            pointer: &list as *const Node as usize,
+            quantity: Cell::new(0),
+        };
+        let tracker = Node {
+            header: [0; 2],
+            pointer: &stash as *const Node as usize,
+            quantity: Cell::new(0),
+        };
+        let item = Node {
+            header: [0; 2],
+            pointer: 0,
+            quantity: Cell::new(103),
+        };
+        let entry = Node {
+            header: [0; 2],
+            pointer: &item as *const Node as usize,
+            quantity: Cell::new(3),
+        };
+        let slot = Node {
+            header: [0; 2],
+            pointer: &entry as *const Node as usize,
+            quantity: Cell::new(0),
+        };
+        let shard_layout = ShardLayout {
+            online: NonNull::from(&online).cast(),
+            stash: 16,
+            shards: 16,
+            items: 16,
+            size: 24,
+            quantity: 24,
+        };
+        let slot_layout = SlotLayout {
+            online: NonNull::from(&online).cast(),
+            content: 16,
+            data: 16,
+            item_type: 24,
+            quantity: 24,
+        };
+        let mut owner = Hooks {
+            slots: [const { None }; GroupId::COUNT],
+            manager: 1,
+            closing: false,
+        };
+        for (hook, address, effect) in [
+            (GameplayHook::Shards, shard_count as *mut u8, shard_layout.effect()),
+            (GameplayHook::RunesGlyphs, slot_quantity as *mut u8, slot_layout.effect()),
+        ] {
+            // SAFETY: distinct authored process-lifetime entries, exact i32(instance, MethodInfo) ABI and live graphs.
+            let group = unsafe {
+                let method = ResolvedMethod {
+                    name: hook.id().into(),
+                    address: NonNull::new(address).unwrap(),
+                    bytes: address.cast::<[u8; 16]>().read_unaligned(),
+                };
+                Group::prepare(FeatureBinding::fixture(hook), &[method.leaf(effect, None, None)]).unwrap()
+            };
+            change_group(&group, hook, true, 1).unwrap();
+            owner.slots[definition(hook).group as usize] = Some(group);
+        }
+        // SAFETY: authored targets and reachable cells remain live throughout their installed and restored calls.
+        unsafe {
+            assert_eq!(std::hint::black_box(shard_count)(&tracker, 0), 99);
+            assert_eq!(std::hint::black_box(slot_quantity)(&slot, 0), 99);
+        }
+        let shards = owner.slots[GroupId::Shards as usize].as_ref().unwrap();
+        change_group(shards, GameplayHook::Shards, false, 1).unwrap();
+        assert!(observation(Some(shards), GameplayHook::Shards).confirmed(false));
+        assert!(observation(owner.slots[GroupId::RunesGlyphs as usize].as_ref(), GameplayHook::RunesGlyphs).confirmed(true));
+        assert_eq!(shard.quantity.get(), 99, "disable retains already granted inventory");
+        shard.quantity.set(4);
+        entry.quantity.set(5);
+        // SAFETY: one original entry and one installed leaf, each preserving its original authored ABI.
+        unsafe {
+            assert_eq!(std::hint::black_box(shard_count)(&tracker, 0), 4);
+            assert_eq!(std::hint::black_box(slot_quantity)(&slot, 0), 99);
+        }
+        owner.observe_manager(2).unwrap();
+        for hook in [GameplayHook::Shards, GameplayHook::RunesGlyphs] {
+            assert!(observation(owner.slots[definition(hook).group as usize].as_ref(), hook).confirmed(false));
+        }
+        assert_eq!(entry.quantity.get(), 99);
+        entry.quantity.set(6);
+        // SAFETY: manager loss restored both entries, with the authored receiver graph still alive.
+        unsafe { assert_eq!(std::hint::black_box(slot_quantity)(&slot, 0), 6) };
+        for hook in [GameplayHook::Shards, GameplayHook::RunesGlyphs] {
+            change_group(owner.slots[definition(hook).group as usize].as_ref().unwrap(), hook, true, 1).unwrap();
+        }
+        owner.closing = true;
+        owner.clear().unwrap();
+        assert!(owner.slots.iter().all(Option::is_none));
+        // SAFETY: terminal clear restored originals; no post-unload inventory refill is possible via these entries.
+        unsafe {
+            assert_eq!(std::hint::black_box(shard_count)(&tracker, 0), 4);
+            assert_eq!(std::hint::black_box(slot_quantity)(&slot, 0), 6);
+        }
+    }
 }
