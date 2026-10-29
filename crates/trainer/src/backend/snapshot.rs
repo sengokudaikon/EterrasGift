@@ -293,8 +293,8 @@ pub struct ResolvedPreview {
     pub draft: crate::item::edit::RollEdit,
     pub result: Result<crate::item::values::BoundPreview, String>,
 }
-/// Optional display data for one complete observed item and exact draft query.
-/// Kept in memory only; a changed item, catalog or connection discards it.
+/// Optional display data read from one observed item for an exact draft query. Kept in memory only, while
+/// `MappingRequest::still_holds` says the inputs it sampled are unchanged; another item, catalog or connection discards it.
 #[derive(Clone, Debug, PartialEq)]
 pub struct ResolvedMapping {
     pub expected: crate::item::edit::ExpectedObservation,
@@ -316,7 +316,7 @@ impl BackendSnapshot {
     pub fn mapping(&self, expected: &crate::item::edit::ExpectedObservation, request: &MappingRequest) -> Option<&Result<Arc<ValueTable>, String>> {
         self.mappings
             .iter()
-            .find(|mapping| mapping.expected.matches(expected) && &mapping.request == request)
+            .find(|mapping| &mapping.request == request && request.still_holds(&mapping.expected, expected))
             .map(|mapping| &mapping.result)
     }
     /// The outcome for this exact submitted plan. Historical certainty survives

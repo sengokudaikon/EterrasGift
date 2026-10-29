@@ -820,6 +820,38 @@ fn the_monitor_asks_the_game_only_for_what_may_have_changed() {
 }
 
 #[test]
+fn the_monitor_keeps_implicit_text_while_its_base_and_rolls_are_unchanged() {
+    run(async {
+        let shared = writes::writable();
+        *shared.implicit_lines.lock().unwrap() = Some(vec![]);
+        let (handle, worker) = start(&shared, options());
+        connected(&handle).await;
+        command(&handle, Command::StartMonitoring).await.unwrap();
+        let read = |count: usize| {
+            let shared = shared.clone();
+            async move {
+                let reads = shared.count("forge");
+                while shared.count("forge") < reads + count {
+                    tokio::time::sleep(Duration::from_millis(1)).await;
+                }
+            }
+        };
+        shared.forge_item.lock().unwrap().as_mut().unwrap().status.forging_potential = 3;
+        read(3).await;
+        assert_eq!(shared.count("implicits"), 1, "a status change keeps the text");
+        shared.forge_item.lock().unwrap().as_mut().unwrap().implicit_rolls = vec![9];
+        while shared.count("implicits") < 2 {
+            tokio::time::sleep(Duration::from_millis(1)).await;
+        }
+        read(3).await;
+        assert_eq!(shared.count("implicits"), 2, "a changed roll is described once");
+        command(&handle, Command::ReadForge).await.unwrap();
+        assert_eq!(shared.count("implicits"), 3, "Read again asks for the text");
+        shutdown(&handle, worker).await;
+    });
+}
+
+#[test]
 fn an_idle_monitor_reads_quietly_and_publishes_only_what_changed() {
     run(async {
         let shared = Shared::new();

@@ -96,6 +96,38 @@ fn optional_mapping_is_observation_bound_and_never_changes_write_or_undo_history
     });
 }
 #[test]
+fn a_table_outlives_changes_it_does_not_read_and_goes_with_its_affix() {
+    run(async {
+        let shared = shared();
+        let change = |edit: fn(&mut backend::ForgeSnapshot)| {
+            let mut item = shared.forge_item.lock().unwrap();
+            let item = item.as_mut().unwrap();
+            edit(item);
+            item.fingerprint = item.legacy_fingerprint();
+        };
+        let (handle, worker) = start(&shared, options());
+        connected(&handle).await;
+        command(&handle, command_for(&handle.snapshot())).await.unwrap();
+        let plan = handle.snapshot().level_requirement_plan(17).unwrap();
+        command(&handle, Command::Write(plan.into())).await.unwrap();
+        change(|item| item.affixes[0].roll = 7);
+        command(&handle, Command::ReadForge).await.unwrap();
+        let state = handle.snapshot();
+        assert!(
+            state.mapping(&state.expected_observation().unwrap(), &request()).is_some(),
+            "a status write and its own roll keep the table"
+        );
+        command(&handle, command_for(&state)).await.unwrap();
+        assert_eq!(shared.count("mapping"), 1, "and it is not read again");
+        change(|item| item.affixes[0].tier = 2);
+        command(&handle, Command::ReadForge).await.unwrap();
+        assert!(handle.snapshot().mappings.is_empty(), "another tier is another table");
+        command(&handle, command_for(&handle.snapshot())).await.unwrap();
+        assert_eq!(shared.count("mapping"), 2);
+        shutdown(&handle, worker).await;
+    });
+}
+#[test]
 fn local_mapping_unavailability_is_memoized_but_transport_and_protocol_failures_release() {
     run(async {
         for kind in [

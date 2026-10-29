@@ -381,7 +381,7 @@ fn only_explicit_write_is_submitted_and_full_confirmation_is_published() {
     });
 }
 #[test]
-fn a_confirmed_write_publishes_the_item_with_the_games_implicit_text() {
+fn a_confirmed_write_publishes_the_item_with_the_implicit_text_it_kept() {
     run(async {
         let shared = writable();
         let line = backend::ModifierSnapshot {
@@ -397,8 +397,8 @@ fn a_confirmed_write_publishes_the_item_with_the_games_implicit_text() {
         assert_eq!(shared.count("implicits"), 1);
         let plan = handle.snapshot().level_requirement_plan(17).unwrap();
         command(&handle, Command::Write(plan.into())).await.unwrap();
-        // The readback is described before it is published: the monitor keeps text only for an unchanged item.
-        assert_eq!(shared.count("implicits"), 2);
+        // The write changed neither the base nor the implicit rolls: the game is not asked to describe them again.
+        assert_eq!(shared.count("implicits"), 1);
         assert!(matches!(handle.snapshot().forge, ForgeState::Item { implicits: Some(lines), .. } if lines == vec![line]));
         shutdown(&handle, worker).await;
     });

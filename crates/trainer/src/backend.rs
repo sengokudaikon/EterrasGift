@@ -74,6 +74,23 @@ fn files_changed() -> BackendError {
         "Last Epoch's files changed after it started (a game update?). Restart the game to use the trainer.",
     )
 }
+/// The same item, since changed: writes keep the game's object and its individual ID.
+fn same_item(old: &ForgeSnapshot, new: &ForgeSnapshot) -> bool {
+    old.item == new.item && old.individual_id == new.individual_id
+}
+/// Whether the game would describe the item's unique lines the same: the same base, rarity, unique and rolls.
+fn same_unique_text(old: &ForgeSnapshot, new: &ForgeSnapshot) -> bool {
+    same_item(old, new) && old.item_type == new.item_type && old.sub_type == new.sub_type && old.rarity == new.rarity && old.identity == new.identity
+}
+/// Whether the game would describe the item's implicits the same: the same base, rarity, unique and implicit rolls.
+fn same_implicit_text(old: &ForgeSnapshot, new: &ForgeSnapshot) -> bool {
+    same_item(old, new)
+        && old.item_type == new.item_type
+        && old.sub_type == new.sub_type
+        && old.rarity == new.rarity
+        && old.identity.as_ref().map(|identity| identity.id) == new.identity.as_ref().map(|identity| identity.id)
+        && old.implicit_rolls == new.implicit_rolls
+}
 /// What a read does with the catalog.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum CatalogRead {
@@ -477,7 +494,7 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
         let expected = self.state.expected_observation().ok();
         self.state
             .mappings
-            .retain(|mapping| expected.as_ref().is_some_and(|expected| mapping.expected.matches(expected)));
+            .retain(|mapping| expected.as_ref().is_some_and(|expected| mapping.request.still_holds(&mapping.expected, expected)));
         if self
             .state
             .unique_preview
@@ -1009,14 +1026,9 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
             self.superseded(epoch)?;
             self.admit(&target)?;
             // The game builds an item's implicit text with its tooltip code on its main thread: the monitor keeps the
-            // text it has for an item that has not changed, under the same catalog.
-            let kept = match (&forge, &self.state.forge) {
-                (
-                    Some(item),
-                    ForgeState::Item {
-                        generation, snapshot, implicits, ..
-                    },
-                ) if monitor && !locale_changed && *generation == self.state.generation && **snapshot == *item => Some(implicits.clone()),
+            // text it has while the base and implicit rolls are unchanged, under the same catalog.
+            let kept = match &forge {
+                Some(item) if monitor && !locale_changed => self.kept_implicits(item),
                 _ => None,
             };
             let implicits = match (&forge, kept) {
@@ -1082,12 +1094,22 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
                             snapshot: old,
                             unique,
                             ..
-                        } if *generation == self.state.generation && **old == snapshot => unique.clone(),
+                        } if *generation == self.state.generation && (**old == snapshot || matches!(unique, Some(Ok(_))) && same_unique_text(old, &snapshot)) => unique.clone(),
                         _ => None,
                     },
                     snapshot: Arc::new(snapshot),
                 }
             }
+        }
+    }
+    /// The implicit text the state holds for `item` when the game would build it the same, so a changed item whose base
+    /// and implicit rolls are unchanged is not described again. A failed description is kept only for the same item.
+    fn kept_implicits(&self, item: &ForgeSnapshot) -> Option<Option<Vec<ModifierSnapshot>>> {
+        match &self.state.forge {
+            ForgeState::Item {
+                generation, snapshot, implicits, ..
+            } if *generation == self.state.generation && (**snapshot == *item || implicits.is_some() && same_implicit_text(snapshot, item)) => Some(implicits.clone()),
+            _ => None,
         }
     }
     /// After a failed read of the connected game: a gate or a departure takes the connection back, a superseded read

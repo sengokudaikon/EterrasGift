@@ -84,14 +84,17 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
         let mut describe_failure = None;
         let result = match status {
             WriteStatus::Confirmed(snapshot) | WriteStatus::NotKept(snapshot) => {
-                // The readback is a changed item: the game describes its implicits again before it is published, so the
-                // item and its text arrive together (the monitor keeps text only for an item that has not changed).
-                let implicits = match self.connection.as_mut().unwrap().describe_implicits(&snapshot).await {
-                    Ok(implicits) => implicits,
-                    Err(error) => {
-                        describe_failure = Some(error);
-                        None
-                    }
+                // The item and its text are published together: a write that changed the base or the implicit rolls has
+                // the game describe the implicits again first; any other keeps the text it had.
+                let implicits = match self.kept_implicits(&snapshot) {
+                    Some(kept) => kept,
+                    None => match self.connection.as_mut().unwrap().describe_implicits(&snapshot).await {
+                        Ok(implicits) => implicits,
+                        Err(error) => {
+                            describe_failure = Some(error);
+                            None
+                        }
+                    },
                 };
                 if let Err(error) = self.admit(&target) {
                     // Confirmation is historical. Admission controls publication,

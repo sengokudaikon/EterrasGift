@@ -91,6 +91,46 @@ pub struct MappingRequest {
     pub address: MappingAddress,
     pub draft: Option<ItemEdit>,
 }
+impl MappingRequest {
+    /// Whether a table this request read from `read` still holds for `current`, the same item since changed. The game
+    /// samples one roll on a detached copy of the item: the values depend on the connection, catalog and language, the
+    /// base, rarity, class and unique, and the sampled line, never on the status values, the other affixes or the other
+    /// kinds of roll. A change to those keeps the table, so an Apply re-reads only the tables it touched. Tables are
+    /// display data; writes never read them.
+    pub fn still_holds(&self, read: &ExpectedObservation, current: &ExpectedObservation) -> bool {
+        if read == current {
+            return true;
+        }
+        let (old, new) = (read.snapshot(), current.snapshot());
+        if read.generation() != current.generation()
+            || read.process() != current.process()
+            || read.catalog_identity() != current.catalog_identity()
+            || old.item != new.item
+            || old.individual_id != new.individual_id
+            || old.item_type != new.item_type
+            || old.sub_type != new.sub_type
+            || old.rarity != new.rarity
+            || old.class_requirement != new.class_requirement
+            || old.identity.as_ref().map(|identity| identity.id) != new.identity.as_ref().map(|identity| identity.id)
+        {
+            return false;
+        }
+        let index = usize::from(self.address.index);
+        // The sampled roll itself is what the table varies; every other roll of its kind stays in the key.
+        let others = |rolls: &[u8]| rolls.iter().enumerate().filter(|(i, _)| *i != index).map(|(_, roll)| *roll).collect::<Vec<_>>();
+        match self.address.target {
+            MappingTarget::Affix => {
+                let line = |item: &eg_trainer_wire::forge::ForgeSnapshot| item.affixes.get(index).map(|affix| (affix.id, affix.tier, affix.kind, affix.seal, affix.special));
+                line(old).is_some() && line(old) == line(new)
+            }
+            MappingTarget::Unique => {
+                let rolls = |item: &eg_trainer_wire::forge::ForgeSnapshot| item.identity.as_ref().map(|identity| (identity.rolls.len(), others(&identity.rolls)));
+                rolls(old) == rolls(new)
+            }
+            MappingTarget::Implicit => old.implicit_rolls.len() == new.implicit_rolls.len() && others(&old.implicit_rolls) == others(&new.implicit_rolls),
+        }
+    }
+}
 fn target(target: MappingTarget) -> RollTarget {
     match target {
         MappingTarget::Affix => RollTarget::Affix,
