@@ -502,7 +502,7 @@ impl Nested {
                 .feature
                 .values
                 .iter()
-                .map(|value| ModelRc::new(VecModel::from(value.choices.iter().map(|&choice| SharedString::from(choice)).collect::<Vec<_>>())))
+                .map(|value| ModelRc::new(VecModel::from(value.choices.iter().map(|choice| SharedString::from(choice.get())).collect::<Vec<_>>())))
                 .collect();
         }
         nested.update(row);
@@ -525,7 +525,7 @@ impl Nested {
                     .values
                     .iter()
                     .enumerate()
-                    .map(|(i, value)| value_view(hook.feature.id(), value, hook.values[i], value.label, &self.choices[i]))
+                    .map(|(i, value)| value_view(hook.feature.id(), value, hook.values[i], value.label.get(), &self.choices[i]))
                     .collect();
                 sync(&mut self.listed, views)
             }
@@ -561,7 +561,7 @@ fn tone(tone: Tone) -> FeatureTone {
 
 fn value_view(id: &str, value: &FeatureValue, number: f64, name: &str, choices: &ModelRc<SharedString>) -> FeatureValueView {
     FeatureValueView {
-        label: value.label.into(),
+        label: value.label.get().into(),
         accessible_name: if id == "enemy-damage" && number == 101.0 {
             format!("{name}: one-hit kills").into()
         } else {
@@ -604,7 +604,7 @@ fn view(row: &Row, session: &dyn TrainerSession, nested: &Nested) -> FeatureRowV
         },
         Row::Planned(feature) => FeatureRowView {
             kind: FeatureRowKind::Planned,
-            title: feature.title.into(),
+            title: feature.title.get().into(),
             help: nested.help.clone(),
             details: pages::planned_details(feature).into(),
             ..Default::default()
@@ -614,7 +614,7 @@ fn view(row: &Row, session: &dyn TrainerSession, nested: &Nested) -> FeatureRowV
             let inline = hook.values.len() == 1;
             FeatureRowView {
                 kind: FeatureRowKind::Hook,
-                title: hook.feature.title.into(),
+                title: hook.feature.title.get().into(),
                 help: nested.help.clone(),
                 on: hook.is_on(session),
                 can_use: hook.can_use(session),
@@ -622,7 +622,7 @@ fn view(row: &Row, session: &dyn TrainerSession, nested: &Nested) -> FeatureRowV
                 choice_only: hook.feature.kind == super::catalog::FeatureKind::Choice,
                 // A single value sits on the title line, named for the feature.
                 inline_value: if inline {
-                    value_view(hook.feature.id(), &hook.feature.values[0], hook.values[0], hook.feature.title, &nested.choices[0])
+                    value_view(hook.feature.id(), &hook.feature.values[0], hook.values[0], hook.feature.title.get(), &nested.choices[0])
                 } else {
                     FeatureValueView::default()
                 },
@@ -633,7 +633,7 @@ fn view(row: &Row, session: &dyn TrainerSession, nested: &Nested) -> FeatureRowV
         }
         Row::Editor(editor) => FeatureRowView {
             kind: if editor.listed { FeatureRowKind::Held } else { FeatureRowKind::Editor },
-            title: editor.feature.title.into(),
+            title: editor.feature.title.get().into(),
             help: nested.help.clone(),
             can_use: editor.can_use(session),
             reason: editor.reason(session).unwrap_or_default().into(),

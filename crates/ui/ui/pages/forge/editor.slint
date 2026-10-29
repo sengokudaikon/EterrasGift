@@ -14,6 +14,7 @@ import { FlyoutSurface } from "../../widgets/menu.slint";
 import { MessageTone } from "../common.slint";
 import { ForgeState, ForgeReveal, ForgeCover, ItemRarity, CellKind, MenuOptionView } from "state.slint";
 import { ValueScrubber } from "scrubber.slint";
+import { ForgeText } from "../../strings/forge.slint";
 import {
     CellButton,
     FlagToggle,
@@ -65,7 +66,7 @@ component IdentityEntry inherits MenuRow {
             }
 
             if root.option.in-game: Text {
-                text: "in game";
+                text: ForgeText.in-game;
                 font-size: Tokens.font-size-caption;
                 color: Tokens.text-secondary-brush;
                 vertical-alignment: center;
@@ -109,7 +110,7 @@ component BaseEntry inherits MenuRow {
             }
 
             if root.option.in-game: Text {
-                text: "in game";
+                text: ForgeText.in-game;
                 font-size: Tokens.font-size-caption;
                 color: Tokens.text-secondary-brush;
                 vertical-alignment: center;
@@ -244,7 +245,7 @@ component ChangesToggle inherits Rectangle {
     }
 
     TipTrigger {
-        text: "Show or hide the changes";
+        text: ForgeText.show-or-hide-changes;
         hovered: touch.has-hover;
         focused: focus.has-focus;
     }
@@ -407,7 +408,7 @@ export component ItemForge inherits Rectangle {
         range-measure := VerticalLayout {
 
             Text {
-                text: "Range";
+                text: ForgeText.range;
             }
 
             for affix in ForgeState.affixes: Text {
@@ -460,7 +461,7 @@ export component ItemForge inherits Rectangle {
                     changeable: ForgeState.can-change-identity;
                     tab-stop: true;
                     tip: ForgeState.identity-tip;
-                    label: "Item: " + ForgeState.item-name;
+                    label: ForgeText.item(ForgeState.item-name);
                     clicked => {
                         if (ForgeState.can-change-identity) {
                             ForgeState.identity-search-edited("");
@@ -484,7 +485,7 @@ export component ItemForge inherits Rectangle {
                     min-height: Tokens.line-height-title;
                     vertical-alignment: center;
                     color: ForgeState.identity-drafted ? Tokens.draft-brush : RarityInk.of(ForgeState.name-rarity);
-                    accessible-label: "Item: " + ForgeState.item-name;
+                    accessible-label: ForgeText.item(ForgeState.item-name);
                 }
 
                 // The identity picker: focus starts on the entry the item is; Down leaves the search for the list, the arrows
@@ -546,8 +547,8 @@ export component ItemForge inherits Rectangle {
 
                                 SearchBox {
                                     text: ForgeState.identity-search;
-                                    placeholder: "Name or ID";
-                                    label: "Search uniques and set items";
+                                    placeholder: ForgeText.unique-search-placeholder;
+                                    label: ForgeText.unique-search;
                                     edited(text) => {
                                         ForgeState.identity-search-edited(text);
                                     }
@@ -567,14 +568,14 @@ export component ItemForge inherits Rectangle {
                                         x: Tokens.empty-list-margin.left;
                                         y: Tokens.empty-list-margin.top;
                                         width: parent.width - Tokens.empty-list-margin.left - Tokens.empty-list-margin.right;
-                                        text: "No unique or set item matches.";
+                                        text: ForgeText.no-unique-matches;
                                         color: Tokens.text-muted-brush;
                                         wrap: word-wrap;
                                     }
 
                                     identity-list := FocusScope {
                                         accessible-role: list;
-                                        accessible-label: "Uniques and set items";
+                                        accessible-label: ForgeText.uniques-and-sets;
                                         init => {
                                             self.focus();
                                         }
@@ -640,7 +641,7 @@ export component ItemForge inherits Rectangle {
                                 }
 
                                 Text {
-                                    text: "A unique with affixes becomes legendary, and set items hold no affixes. Rolls, legendary potential and Weaver's Will carry over.";
+                                    text: ForgeText.identity-note;
                                     font-size: Tokens.font-size-caption;
                                     color: Tokens.text-muted-brush;
                                     wrap: word-wrap;
@@ -666,7 +667,7 @@ export component ItemForge inherits Rectangle {
                         drafted: ForgeState.rarity-drafted;
                         changeable: ForgeState.can-change-rarity;
                         tip: ForgeState.rarity-tip;
-                        label: "Rarity: " + ForgeState.rarity-text;
+                        label: ForgeText.rarity-of(ForgeState.rarity-text);
                         clicked => {
                             if (ForgeState.can-change-rarity) {
                                 root.rarity-highlight = ForgeState.option-start(ForgeState.rarity-options);
@@ -686,7 +687,7 @@ export component ItemForge inherits Rectangle {
 
                             FocusScope {
                                 accessible-role: list;
-                                accessible-label: "Rarity";
+                                accessible-label: ForgeText.rarity;
                                 init => {
                                     self.focus();
                                 }
@@ -740,7 +741,7 @@ export component ItemForge inherits Rectangle {
                                                 }
 
                                                 if option.in-game: Text {
-                                                    text: "in game";
+                                                    text: ForgeText.in-game;
                                                     font-size: Tokens.font-size-caption;
                                                     color: Tokens.text-secondary-brush;
                                                     vertical-alignment: center;
@@ -778,7 +779,7 @@ export component ItemForge inherits Rectangle {
                         drafted: ForgeState.base-drafted;
                         changeable: ForgeState.can-change-base;
                         tip: ForgeState.base-tip;
-                        label: "Base: " + ForgeState.base-text;
+                        label: ForgeText.base-of(ForgeState.base-text);
                         clicked => {
                             if (ForgeState.can-change-base) {
                                 root.base-highlight = ForgeState.option-start(ForgeState.base-options);
@@ -863,7 +864,7 @@ export component ItemForge inherits Rectangle {
 
                                     base-scroll := ScrollView {
                                         accessible-role: list;
-                                        accessible-label: "Bases";
+                                        accessible-label: ForgeText.bases;
                                         // Keeps the highlighted entry in view as the keyboard moves it.
                                         function reveal(top: length, height: length) {
                                             if (top + self.content-y < 0) {
@@ -909,7 +910,7 @@ export component ItemForge inherits Rectangle {
                                         spacing: Tokens.space-2;
 
                                         CheckBox {
-                                            text: "Allow incompatible affixes";
+                                            text: ForgeText.allow-incompatible;
                                             checked: ForgeState.base-allow-incompatible;
                                             enabled: ForgeState.base-can-edit;
                                             toggled(on) => {
@@ -921,7 +922,7 @@ export component ItemForge inherits Rectangle {
                                             padding-left: Tokens.check-box-caption-margin.left;
 
                                             Text {
-                                                text: "Lists bases the current affixes can't roll on. Writing one needs \"I know what I'm doing\".";
+                                                text: ForgeText.base-allow-note;
                                                 font-size: Tokens.font-size-caption;
                                                 color: Tokens.text-muted-brush;
                                                 wrap: word-wrap;
@@ -993,7 +994,7 @@ export component ItemForge inherits Rectangle {
                                     image-fit: contain;
                                     source: Tokens.icon-confirmed;
                                     colorize: Tokens.confirmed-brush;
-                                    accessible-label: "Confirmed";
+                                    accessible-label: ForgeText.confirmed;
                                 }
 
                                 if field.stale: Image {
@@ -1003,7 +1004,7 @@ export component ItemForge inherits Rectangle {
                                     image-fit: contain;
                                     source: Tokens.icon-warning;
                                     colorize: Tokens.warning-brush;
-                                    accessible-label: "Stale draft";
+                                    accessible-label: ForgeText.stale-draft;
                                 }
 
                                 if !field.editable: Image {
@@ -1013,7 +1014,7 @@ export component ItemForge inherits Rectangle {
                                     image-fit: contain;
                                     source: Tokens.icon-locked;
                                     colorize: Tokens.text-muted-brush;
-                                    accessible-label: "Read-only";
+                                    accessible-label: ForgeText.read-only;
                                 }
                             }
 
@@ -1071,7 +1072,7 @@ export component ItemForge inherits Rectangle {
                         alignment: start;
 
                         Text {
-                            text: "Implicits";
+                            text: ForgeText.implicits;
                             color: Tokens.text-muted-brush;
                             vertical-alignment: center;
                         }
@@ -1079,7 +1080,7 @@ export component ItemForge inherits Rectangle {
                         HelpButton {
                             y: (parent.height - self.height) / 2;
                             tip: ForgeState.implicit-note;
-                            label: "About implicits";
+                            label: ForgeText.about-implicits;
                         }
                     }
 
@@ -1114,31 +1115,31 @@ export component ItemForge inherits Rectangle {
 
                     Text {
                         width: Tokens.affix-value-column-width;
-                        text: "Value";
+                        text: ForgeText.value;
                         color: Tokens.text-muted-brush;
                     }
 
                     Text {
                         horizontal-stretch: 1;
-                        text: "Affix";
+                        text: ForgeText.affix;
                         color: Tokens.text-muted-brush;
                     }
 
                     if root.wide: Text {
                         width: root.range-width;
-                        text: "Range";
+                        text: ForgeText.range;
                         color: Tokens.text-muted-brush;
                     }
 
                     Text {
                         width: Tokens.affix-tier-column-width;
-                        text: "Tier";
+                        text: ForgeText.tier;
                         color: Tokens.text-muted-brush;
                     }
 
                     Text {
                         width: Tokens.affix-seal-column-width;
-                        text: "Seal";
+                        text: ForgeText.seal;
                         color: Tokens.text-muted-brush;
                     }
 
@@ -1150,7 +1151,7 @@ export component ItemForge inherits Rectangle {
                 // The rows as one named list for a screen reader.
                 Rectangle {
                     accessible-role: list;
-                    accessible-label: "Affixes";
+                    accessible-label: ForgeText.affixes;
 
                     VerticalLayout {
                         spacing: Tokens.row-gap.bottom;
@@ -1177,7 +1178,7 @@ export component ItemForge inherits Rectangle {
 
                         add := Button {
                             width: parent.width;
-                            text: "Add affix";
+                            text: ForgeText.add-affix;
                             icon: Tokens.icon-add;
                             kind: ButtonKind.subtle;
                             enabled: ForgeState.can-change-affix-list;
@@ -1206,7 +1207,7 @@ export component ItemForge inherits Rectangle {
 
                     // Every affix up to its highest tier below the primordial T8, as tier drafts.
                     Button {
-                        text: "Max tiers";
+                        text: ForgeText.max-tiers;
                         kind: ButtonKind.subtle;
                         enabled: ForgeState.can-max-tiers;
                         tip: ForgeState.max-tiers-tip;
@@ -1217,7 +1218,7 @@ export component ItemForge inherits Rectangle {
 
                     // Every roll the forge can edit up to roll 255, the game's perfect roll, as roll drafts.
                     Button {
-                        text: "Max rolls";
+                        text: ForgeText.max-rolls;
                         kind: ButtonKind.subtle;
                         enabled: ForgeState.can-max-rolls;
                         tip: ForgeState.max-rolls-tip;
@@ -1234,10 +1235,10 @@ export component ItemForge inherits Rectangle {
 
                         templates := Button {
                             width: parent.width;
-                            text: "Templates";
+                            text: ForgeText.templates;
                             kind: ButtonKind.subtle;
                             enabled: ForgeState.has-item;
-                            tip: "Draft a saved template onto this item, or save this item as one";
+                            tip: ForgeText.templates-tip;
                             clicked => {
                                 ForgeState.templates-opened();
                                 templates-popup.show();
@@ -1337,7 +1338,7 @@ export component ItemForge inherits Rectangle {
                         spacing: Tokens.space-12;
 
                         Text {
-                            text: "Unique modifiers";
+                            text: ForgeText.unique-modifiers;
                             font-size: Tokens.font-size-section;
                             font-weight: Tokens.emphasis-weight;
                             // The game heads the section in its tertiary body colour; the frame and the glow carry the unique.
@@ -1399,7 +1400,7 @@ export component ItemForge inherits Rectangle {
 
                     Rectangle {
                         accessible-role: list;
-                        accessible-label: "Unique modifiers";
+                        accessible-label: ForgeText.unique-modifiers;
 
                         VerticalLayout {
                             spacing: Tokens.row-gap.bottom;
@@ -1431,7 +1432,7 @@ export component ItemForge inherits Rectangle {
                     padding-left: Tokens.table-header-inset.left;
 
                     Text {
-                        text: "Tiers";
+                        text: ForgeText.tiers;
                         color: Tokens.text-muted-brush;
                     }
                 }
@@ -1465,7 +1466,7 @@ export component ItemForge inherits Rectangle {
                         tiers: ForgeState.affixes[root.selected].tiers;
                         held: ForgeState.affixes[root.selected].tier-index;
                         enabled: ForgeState.affixes[root.selected].can-edit;
-                        label: "Tier for " + ForgeState.affixes[root.selected].name;
+                        label: ForgeText.tier-for(ForgeState.affixes[root.selected].name);
                         picked(index) => {
                             ForgeState.pick-tier(root.selected, index);
                         }
@@ -1564,7 +1565,7 @@ export component ItemForge inherits Rectangle {
                     text: ForgeState.discard-text;
                     kind: ButtonKind.subtle;
                     enabled: ForgeState.can-discard;
-                    tip: "Discard every draft on this item";
+                    tip: ForgeText.discard-all-tip;
                     clicked => {
                         ForgeState.discard-all();
                     }
@@ -1574,7 +1575,7 @@ export component ItemForge inherits Rectangle {
                     text: ForgeState.apply-text;
                     kind: ButtonKind.primary;
                     enabled: ForgeState.can-apply;
-                    tip: "Write the drafts to the game (Ctrl+S)";
+                    tip: ForgeText.apply-tip;
                     clicked => {
                         ForgeState.apply();
                     }

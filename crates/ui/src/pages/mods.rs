@@ -16,6 +16,7 @@ use eg_companion::mods::{
     worker::ModWorker,
 };
 use eg_core::operations::Cancellation;
+use eg_core::phrase::Phrase;
 use eg_core::settings_service::SettingsService;
 use slint::{ComponentHandle, Model, ModelRc, SharedString, VecModel};
 use std::{
@@ -72,10 +73,53 @@ enum Failure {
     Kept,
     Raw,
 }
+const KEPT_FAILED: Phrase = Phrase::new("The change could not be kept: {error}");
+const READING: Phrase = Phrase::new("Reading the mods…");
+const OPEN_FOLDER: Phrase = Phrase::new("Open the Mods folder");
+const NO_GAME: Phrase = Phrase::new("Last Epoch wasn't found. Choose the game executable in Settings.");
+const OPEN_LOG: Phrase = Phrase::new("Open MelonLoader's log from the last game with mods");
+const NO_LOG: Phrase = Phrase::new("No log yet. MelonLoader writes one when you play with mods.");
+const CHANGES_APPLY: Phrase = Phrase::new("Changes apply the next time you play with mods.");
+const NO_VERSION: Phrase = Phrase::new("No version");
+const DID_NOT_LOAD: Phrase = Phrase::new("Didn't load");
+const CANT_LOAD: Phrase = Phrase::new("Can't load");
+const VERSION: Phrase = Phrase::new("Version {version}");
+const VERSION_BY: Phrase = Phrase::new("Version {version} by {author}");
+const NO_VERSION_BY: Phrase = Phrase::new("No version by {author}");
+const DID_NOT_LOAD_LAST_TIME: Phrase = Phrase::new("Didn't load last time. {problem}");
+const BUILDING: Phrase = Phrase::new("Building…");
+const UPDATE: Phrase = Phrase::new("Update");
+const REBUILD: Phrase = Phrase::new("Rebuild");
+const INSTALL_VERSION: Phrase = Phrase::new("Install {version}");
+const INSTALL_BUILD: Phrase = Phrase::new("Install build");
+const FROM_SOURCES: Phrase = Phrase::new("From sources in {folder}");
+const BUILD_NEWER: Phrase = Phrase::new("Build the newer version and install it");
+const BUILD_FROM_PROJECT: Phrase = Phrase::new("Build it from its project and install it");
+const UPDATE_AVAILABLE: Phrase = Phrase::new("Update available.");
+const NOT_BUILT: Phrase = Phrase::new("Not built yet.");
+const LATEST_NOT_INSTALLED: Phrase = Phrase::new("The latest build isn't installed.");
+const LATEST_NOT_INSTALLED_CHANGED: Phrase = Phrase::new("The latest build isn't installed. Its sources changed since.");
+const LATEST_VERSION_NOT_INSTALLED: Phrase = Phrase::new("The latest build ({version}) isn't installed.");
+const LATEST_VERSION_NOT_INSTALLED_CHANGED: Phrase = Phrase::new("The latest build ({version}) isn't installed. Its sources changed since.");
+const SOURCES_CHANGED: Phrase = Phrase::new("Its sources changed since this build.");
+const OTHER_SETTINGS: Phrase = Phrase::new("Other settings");
+const REPEATED: Phrase = Phrase::new("Repeated {count} times, last at {time}");
+const LIBRARY_STOPPED: Phrase = Phrase::new("The mod library stopped.");
+const NO_SDK: Phrase =
+    Phrase::new("Building mods from their sources needs the .NET SDK, which was not found. Install it, or choose its folder in Settings, to see and build the mod projects here.");
+const SOURCES_UNREADABLE: Phrase = Phrase::new("The mod sources in {folder} could not be read: {error}");
+const REMOVED: Phrase = Phrase::new("{name} is removed. Its DLL leaves the Mods folder the next time you play with mods; its settings stay in MelonPreferences.cfg.");
+const ADDED: Phrase = Phrase::new("Added {name}. It loads the next time you play with mods.");
+const PICKER_TITLE: Phrase = Phrase::new("Add a mod");
+const PICKER_FILTER: Phrase = Phrase::new("Mod DLL");
+const PICKER_FAILED: Phrase = Phrase::new("The file picker could not be opened: {error}");
+const BUILD_NEEDS_GAME: Phrase = Phrase::new("{name} is built against the game's MelonLoader, and Last Epoch was not found. Choose the game executable in Settings.");
+const BUILDING_NAME: Phrase = Phrase::new("Building {name}…");
+
 impl Failure {
     fn message(self, error: &io::Error) -> String {
         match self {
-            Failure::Kept => format!("The change could not be kept: {error}"),
+            Failure::Kept => KEPT_FAILED.with(&[("error", error)]),
             Failure::Raw => error.to_string(),
         }
     }
@@ -211,7 +255,7 @@ impl View {
             self.launching.get() || self.services.launcher.is_starting(),
             jiff::Timestamp::now(),
         );
-        state.set_readiness(if self.read.get() { readiness.text.into() } else { "Reading the mods…".into() });
+        state.set_readiness(if self.read.get() { readiness.text.into() } else { READING.get().into() });
         state.set_readiness_facts(ModelRc::new(VecModel::from(if self.read.get() {
             readiness.facts.into_iter().map(SharedString::from).collect::<Vec<_>>()
         } else {
@@ -223,20 +267,20 @@ impl View {
         state.set_can_open_folder(inventory.mods_folder.is_some());
         state.set_can_open_log(inventory.loader_log.is_some());
         let folder_tip = if inventory.mods_folder.is_some() {
-            "Open the Mods folder"
+            OPEN_FOLDER.get()
         } else if self.read.get() {
-            "Last Epoch wasn't found. Choose the game executable in Settings."
+            NO_GAME.get()
         } else {
-            "Reading the mods…"
+            READING.get()
         };
         state.set_open_folder_tip(folder_tip.into());
         state.set_open_log_tip(
             if inventory.loader_log.is_some() {
-                "Open MelonLoader's log from the last game with mods"
+                OPEN_LOG.get()
             } else if inventory.mods_folder.is_none() {
                 folder_tip
             } else {
-                "No log yet. MelonLoader writes one when you play with mods."
+                NO_LOG.get()
             }
             .into(),
         );
@@ -253,7 +297,7 @@ impl View {
         let text = message
             .as_ref()
             .map(|(message, _)| message.as_str())
-            .unwrap_or(if draft_count > 0 { "Changes apply the next time you play with mods." } else { "" });
+            .unwrap_or(if draft_count > 0 { CHANGES_APPLY.get() } else { "" });
         state.set_change_message(text.into());
         state.set_change_tone(if message.as_ref().is_some_and(|(_, error)| *error) {
             MessageTone::Error
@@ -267,13 +311,13 @@ impl View {
                 .iter()
                 .map(|item| ModRow {
                     name: item.name.as_str().into(),
-                    version: item.version.as_deref().unwrap_or("No version").into(),
+                    version: item.version.as_deref().unwrap_or(NO_VERSION.get()).into(),
                     author: item.author.as_deref().unwrap_or_default().into(),
                     enabled: item.installed.enabled,
                     drafted: item.draft_count() > 0,
                     problem: if item.installed.enabled { item.problem.as_deref().unwrap_or_default() } else { "" }.into(),
                     problem_label: if item.installed.enabled && item.problem.is_some() {
-                        if item.loaded_last_time == Some(false) { "Didn't load" } else { "Can't load" }
+                        if item.loaded_last_time == Some(false) { DID_NOT_LOAD.get() } else { CANT_LOAD.get() }
                     } else {
                         ""
                     }
@@ -300,10 +344,11 @@ impl View {
         // The pane's line under the name; the DLL's file name has a line of its own.
         state.set_selected_detail(
             selected
-                .map(|item| {
-                    let version = item.version.as_ref().map_or_else(|| "No version".to_owned(), |version| format!("Version {version}"));
-                    let author = item.author.as_ref().map(|author| format!(" by {author}")).unwrap_or_default();
-                    version + &author
+                .map(|item| match (&item.version, &item.author) {
+                    (Some(version), Some(author)) => VERSION_BY.with(&[("version", version), ("author", author)]),
+                    (Some(version), None) => VERSION.with(&[("version", version)]),
+                    (None, Some(author)) => NO_VERSION_BY.with(&[("author", author)]),
+                    (None, None) => NO_VERSION.into(),
                 })
                 .unwrap_or_default()
                 .into(),
@@ -315,7 +360,7 @@ impl View {
                 .and_then(|item| {
                     item.problem.as_ref().map(|problem| {
                         if item.loaded_last_time == Some(false) {
-                            format!("Didn't load last time. {problem}")
+                            DID_NOT_LOAD_LAST_TIME.with(&[("problem", problem)])
                         } else {
                             problem.clone()
                         }
@@ -334,11 +379,11 @@ impl View {
             .is_some_and(|(build, item)| build.project.update_available(item.project_version.as_deref()));
         state.set_rebuild_text(
             if selected.is_some_and(|item| building.as_ref().is_some_and(|file| file.eq_ignore_ascii_case(&item.installed.file))) {
-                "Building…"
+                BUILDING.get()
             } else if update {
-                "Update"
+                UPDATE.get()
             } else {
-                "Rebuild"
+                REBUILD.get()
             }
             .into(),
         );
@@ -346,14 +391,14 @@ impl View {
             build
                 .zip(selected)
                 .and_then(|(build, item)| build.version.as_ref().filter(|version| Some(version.as_str()) != item.version.as_deref()))
-                .map(|version| format!("Install {version}"))
-                .unwrap_or_else(|| "Install build".into())
+                .map(|version| INSTALL_VERSION.with(&[("version", version)]))
+                .unwrap_or_else(|| INSTALL_BUILD.into())
                 .into(),
         );
         state.set_selected_source(
             build
                 .zip(folder.as_deref())
-                .map(|(build, folder)| format!("From sources in {}", build.project.source_folder(folder)))
+                .map(|(build, folder)| FROM_SOURCES.with(&[("folder", &build.project.source_folder(folder))]))
                 .unwrap_or_default()
                 .into(),
         );
@@ -364,14 +409,7 @@ impl View {
                 .into(),
         );
         state.set_selected_has_sources(build.is_some());
-        state.set_rebuild_tip(
-            if update {
-                "Build the newer version and install it"
-            } else {
-                "Build it from its project and install it"
-            }
-            .into(),
-        );
+        state.set_rebuild_tip(if update { BUILD_NEWER.get() } else { BUILD_FROM_PROJECT.get() }.into());
         state.set_can_install_build(
             build
                 .zip(selected)
@@ -382,20 +420,19 @@ impl View {
                 .zip(selected)
                 .map(|(build, item)| {
                     if update {
-                        "Update available.".to_owned()
+                        UPDATE_AVAILABLE.into()
                     } else if !build.is_built() {
-                        "Not built yet.".to_owned()
+                        NOT_BUILT.into()
                     } else if !build.is_installed(&item.installed.hash) {
-                        let version = build
-                            .version
-                            .as_ref()
-                            .filter(|version| Some(version.as_str()) != item.version.as_deref())
-                            .map(|version| format!(" ({version})"))
-                            .unwrap_or_default();
-                        let changed = if build.changed_since_build { " Its sources changed since." } else { "" };
-                        format!("The latest build{version} isn't installed.{changed}")
+                        let version = build.version.as_ref().filter(|version| Some(version.as_str()) != item.version.as_deref());
+                        match (version, build.changed_since_build) {
+                            (Some(version), true) => LATEST_VERSION_NOT_INSTALLED_CHANGED.with(&[("version", version)]),
+                            (Some(version), false) => LATEST_VERSION_NOT_INSTALLED.with(&[("version", version)]),
+                            (None, true) => LATEST_NOT_INSTALLED_CHANGED.into(),
+                            (None, false) => LATEST_NOT_INSTALLED.into(),
+                        }
                     } else if build.changed_since_build {
-                        "Its sources changed since this build.".to_owned()
+                        SOURCES_CHANGED.into()
                     } else {
                         String::new()
                     }
@@ -410,7 +447,7 @@ impl View {
                     .iter()
                     .enumerate()
                     .map(|(index, setting)| {
-                        let next = setting.group.as_deref().or(group.map(|_| "Other settings"));
+                        let next = setting.group.as_deref().or(group.map(|_| OTHER_SETTINGS.get()));
                         let heading = if next == group { "" } else { next.unwrap_or_default() };
                         group = next;
                         let choices = setting
@@ -482,7 +519,9 @@ impl View {
                                 text: run.line.text.as_str().into(),
                                 error: run.line.is_error,
                                 count: run.count as i32,
-                                count_tip: format!("Repeated {} times, last at {:02}:{:02}:{:02}", run.count, last / 3600, last / 60 % 60, last % 60).into(),
+                                count_tip: REPEATED
+                                    .with(&[("count", &run.count), ("time", &format!("{:02}:{:02}:{:02}", last / 3600, last / 60 % 60, last % 60))])
+                                    .into(),
                             }
                         })
                         .collect()
@@ -579,7 +618,7 @@ impl View {
                 let mut pending = self.pending.borrow_mut();
                 match pending.front().map(|job| job.receive.try_recv()) {
                     Some(Ok(result)) => Some((pending.pop_front().unwrap(), result)),
-                    Some(Err(mpsc::TryRecvError::Disconnected)) => Some((pending.pop_front().unwrap(), Err(io::Error::other("The mod library stopped.")))),
+                    Some(Err(mpsc::TryRecvError::Disconnected)) => Some((pending.pop_front().unwrap(), Err(io::Error::other(LIBRARY_STOPPED.get())))),
                     _ => None,
                 }
             };
@@ -818,7 +857,7 @@ impl View {
                     Ok(sources) => {
                         *view.sources.borrow_mut() = sources;
                         if sdk_missing && !view.sdk_said.replace(true) {
-                            view.say("Building mods from their sources needs the .NET SDK, which was not found. Install it, or choose its folder in Settings, to see and build the mod projects here.", true);
+                            view.say(NO_SDK.get(), true);
                         }
                     }
                     // A read cut short by the app's close says nothing.
@@ -883,7 +922,7 @@ fn holds(keys: &BTreeSet<SettingKey>, setting: &ModSetting) -> bool {
 /// A failed read of the sources folder, said with the folder.
 fn sources_unreadable(folder: Option<&std::path::Path>, error: &SourceError) -> String {
     match folder {
-        Some(folder) => format!("The mod sources in {} could not be read: {error}", folder.display()),
+        Some(folder) => SOURCES_UNREADABLE.with(&[("folder", &folder.display()), ("error", error)]),
         None => error.to_string(),
     }
 }
@@ -1053,9 +1092,7 @@ impl View {
         self.enqueue(move |library| {
             Ok(ChangeResult {
                 removed: library.remove(&file)?,
-                message: Some(format!(
-                    "{name} is removed. Its DLL leaves the Mods folder the next time you play with mods; its settings stay in MelonPreferences.cfg."
-                )),
+                message: Some(REMOVED.with(&[("name", &name)])),
                 ..Default::default()
             })
         });
@@ -1070,7 +1107,7 @@ impl View {
                     .flatten()
                     .map_or_else(|| item.file.clone(), |assembly| assembly.name);
                 Ok(ChangeResult {
-                    message: Some(format!("Added {name}. It loads the next time you play with mods.")),
+                    message: Some(ADDED.with(&[("name", &name)])),
                     select: Some(item.file),
                     ..Default::default()
                 })
@@ -1086,8 +1123,8 @@ impl View {
             return;
         };
         let dialog = rfd::AsyncFileDialog::new()
-            .set_title("Add a mod")
-            .add_filter("Mod DLL", &["dll"])
+            .set_title(PICKER_TITLE.get())
+            .add_filter(PICKER_FILTER.get(), &["dll"])
             .set_parent(&window.window().window_handle());
         let view = self.clone();
         if let Err(error) = slint::spawn_local(async move {
@@ -1095,7 +1132,7 @@ impl View {
                 view.add(file.path().to_owned());
             }
         }) {
-            self.say(format!("The file picker could not be opened: {error}"), true);
+            self.say(PICKER_FAILED.with(&[("error", &error)]), true);
             self.show();
         }
     }
@@ -1107,7 +1144,7 @@ impl View {
         let receive = self.services.worker.enqueue(move |library| Ok(library.locate(&item, folder.as_deref())));
         let view = self.clone();
         background::run(
-            move || receive?.recv().map_err(|_| io::Error::other("The mod library stopped."))?,
+            move || receive?.recv().map_err(|_| io::Error::other(LIBRARY_STOPPED.get()))?,
             move |result: io::Result<PathBuf>| match result {
                 Ok(path) => view.open(path, true, false),
                 Err(error) => {
@@ -1177,10 +1214,7 @@ impl View {
         };
         let root = self.inventory.borrow().mods_folder.as_ref().and_then(|folder| folder.parent()).map(PathBuf::from);
         if root.is_none() && !install_only {
-            self.say(
-                format!("{name} is built against the game's MelonLoader, and Last Epoch was not found. Choose the game executable in Settings."),
-                true,
-            );
+            self.say(BUILD_NEEDS_GAME.with(&[("name", &name)]), true);
             self.show();
             return;
         }
@@ -1193,7 +1227,7 @@ impl View {
         *self.building.borrow_mut() = Some(file.clone());
         // An install only reads the mods again; a build says what it builds while the compiler runs.
         if !install_only {
-            self.say(format!("Building {name}…"), false);
+            self.say(BUILDING_NAME.with(&[("name", &name)]), false);
         }
         self.show();
         let cancel = Cancellation::default();

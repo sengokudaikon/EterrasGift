@@ -1,6 +1,6 @@
 //! `cargo xtask phrases [--check]`: every word the app shows, in one gettext template, `lang/eterras-gift.pot`, for
 //! translators. Two sources, one msgid space without contexts: each `Phrase::new("…")` in the crates' sources (up to
-//! a file's `#[cfg(test)]`), and each `@tr` in the views, read by `slint-tr-extractor`. References name the file only,
+//! a file's first test `#[cfg(…)]`), and each `@tr` in the views, read by `slint-tr-extractor`. References name the file only,
 //! so moving code does not make the template stale; the header carries no date, so `--check` compares as written.
 
 use std::collections::BTreeMap;
@@ -33,12 +33,10 @@ pub fn run(root: &Path, check: bool) -> Result<(), String> {
     for path in &sources {
         let file = relative(root, path);
         let text = fs::read_to_string(path).map_err(|e| format!("{path:?}: {e}"))?;
-        // Comments only talk about phrases.
+        // Comments only talk about phrases, and a file's tests (`#[cfg(test)]`, `#[cfg(all(test, …))]`) show the user nothing.
         let text: String = text
-            .split("#[cfg(test)]")
-            .next()
-            .unwrap_or_default()
             .lines()
+            .take_while(|line| !(line.trim_start().starts_with("#[cfg(") && line.contains("test")))
             .filter(|line| !line.trim_start().starts_with("//"))
             .collect::<Vec<_>>()
             .join(

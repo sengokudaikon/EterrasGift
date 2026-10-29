@@ -19,7 +19,7 @@ pub trait Connector: Send + 'static {
     fn connect(&mut self, target: ProcessIdentity, now: Timestamp) -> impl Future<Output = Result<Self::Connection, BackendError>> + Send;
 }
 
-pub const HELPER_RESTART_REQUIRED: &str = "The helper couldn't leave the game. Restart Last Epoch before playing online.";
+pub const HELPER_RESTART_REQUIRED: eg_core::phrase::Phrase = eg_core::phrase::Phrase::new("The helper couldn't leave the game. Restart Last Epoch before playing online.");
 
 pub trait BackendConnection: Send + 'static {
     fn target(&self) -> &ProcessIdentity;

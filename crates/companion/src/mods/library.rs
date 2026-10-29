@@ -15,6 +15,13 @@ use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
+use eg_core::phrase::Phrase;
+
+const NOT_A_DLL: Phrase = Phrase::new("{file} is not a DLL. A mod is a .dll file; take it out of a downloaded zip first.");
+const NO_MELON_INFO: Phrase = Phrase::new("{file} has no MelonInfo, so it is not a MelonLoader mod. If a mod needs it, it belongs in UserLibs.");
+const CLEARED: Phrase = Phrase::new("{file} was cleared from the library by the last game with mods. Add the DLL again to install it.");
+const CHANGED_WHILE_COPYING: Phrase = Phrase::new("{file} changed while it was being copied. Try again once the build or copy has finished.");
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct InstalledMod {
     pub file: String,
@@ -134,12 +141,10 @@ impl ModLibrary {
     pub fn add(&self, source: &Path, keep_on_off: bool) -> io::Result<InstalledMod> {
         let file = source.file_name().unwrap_or_default().to_string_lossy().into_owned();
         if !is_dll(&file) {
-            return Err(invalid(format!("{file} is not a DLL. A mod is a .dll file; take it out of a downloaded zip first.")));
+            return Err(invalid(NOT_A_DLL.with(&[("file", &file)])));
         }
         if MelonAssembly::read(source)?.is_none() {
-            return Err(invalid(format!(
-                "{file} has no MelonInfo, so it is not a MelonLoader mod. If a mod needs it, it belongs in UserLibs."
-            )));
+            return Err(invalid(NO_MELON_INFO.with(&[("file", &file)])));
         }
         let mut installed = InstalledMod {
             file,
@@ -194,10 +199,7 @@ impl ModLibrary {
                 return Ok(());
             }
             if !self.holds(installed) {
-                return Err(invalid(format!(
-                    "{} was cleared from the library by the last game with mods. Add the DLL again to install it.",
-                    installed.file
-                )));
+                return Err(invalid(CLEARED.with(&[("file", &installed.file)])));
             }
             profile.mods.insert(index.min(profile.mods.len()), installed.clone());
             Ok(())
@@ -481,10 +483,7 @@ fn copy_verified(source: &Path, target: &Path, expected: &str) -> io::Result<()>
     atomic::replace(target, |temporary| {
         fs::copy(source, temporary)?;
         if hash_file(temporary)? != expected {
-            return Err(invalid(format!(
-                "{} changed while it was being copied. Try again once the build or copy has finished.",
-                source.display()
-            )));
+            return Err(invalid(CHANGED_WHILE_COPYING.with(&[("file", &source.display())])));
         }
         Ok(())
     })

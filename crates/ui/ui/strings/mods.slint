@@ -1,0 +1,67 @@
+// The Mods page's words. Every view word is an `@tr` here, never a literal in a view; its English is the gettext msgid,
+// without a context (build.rs and `cargo xtask phrases` agree on that), shared with any phrase that reads the same.
+
+export global ModsText {
+    out property <string> title: @tr("Mods");
+    out property <string> intro: @tr("Mods load only when you play offline with mods.");
+    out property <string> add-mod: @tr("Add mod");
+    out property <string> add-mod-tip: @tr("Add a mod from its DLL file");
+    out property <string> open-folder: @tr("Open folder");
+    out property <string> open-mods-folder: @tr("Open the Mods folder");
+    out property <string> open-log: @tr("Open log");
+    out property <string> installed: @tr("Installed");
+    out property <string> installed-mods: @tr("Installed mods");
+    out property <string> version: @tr("Version");
+    out property <string> toggle-tip: @tr("Turn on or off (Space)");
+    out property <string> changed-since: @tr("Changed since the last game with mods");
+    out property <string> no-mods: @tr("No mods yet");
+    out property <string> no-mods-hint: @tr("Add a mod's DLL, or copy it into the Mods folder.");
+    out property <string> not-installed: @tr("Not installed");
+    out property <string> from-sources-list: @tr("Mods from sources, not installed");
+    out property <string> build-to-turn-on: @tr("Build and install it to turn it on");
+    out property <string> building: @tr("Building…");
+    out property <string> build-and-install: @tr("Build and install");
+    out property <string> build-and-install-tip: @tr("Build it from its project and install it, turned on");
+    out property <string> select-a-mod: @tr("Select a mod to see its details and settings.");
+    out property <string> add-to-see: @tr("Add a mod to see its details and settings here.");
+    out property <string> turn-off: @tr("Turn off");
+    out property <string> turn-on: @tr("Turn on");
+    out property <string> stays-installed: @tr("It stays installed either way");
+    out property <string> show-in-folder: @tr("Show in folder");
+    out property <string> show-in-folder-tip: @tr("Show its DLL in File Explorer");
+    out property <string> remove: @tr("Remove");
+    out property <string> remove-tip: @tr("Remove it (Del). Its settings are kept.");
+    out property <string> install-build-tip: @tr("Install the latest build from its project");
+    out property <string> settings: @tr("Settings");
+    out property <string> last-game: @tr("Last game with mods");
+    out property <string> earlier-build: @tr("These lines are from an earlier build.");
+    out property <string> nothing-logged: @tr("Nothing logged.");
+    out property <string> undo: @tr("Undo");
+    out property <string> undo-tip: @tr("Restore the removed mod (Ctrl+Z)");
+    out property <string> revert-tip: @tr("Go back to what the last game with mods used");
+    out property <string> play: @tr("Play offline with mods");
+    out property <string> play-tip: @tr("Start offline with the mods that are on");
+    // Key names in the row menu.
+    out property <string> key-space: @tr("Space");
+    out property <string> key-delete: @tr("Delete");
+
+    public pure function enabled-of(enabled: int, installed: int) -> string {
+        return @tr("{} of {} on", enabled, installed);
+    }
+
+    public pure function from-sources(count: int) -> string {
+        return @tr("{} from sources", count);
+    }
+
+    public pure function load(name: string) -> string {
+        return @tr("Load {}", name);
+    }
+
+    public pure function revert(count: int) -> string {
+        return @tr("Revert {n} change" | "Revert {n} changes" % count);
+    }
+
+    public pure function repeated(count: int) -> string {
+        return @tr("×{}", count);
+    }
+}

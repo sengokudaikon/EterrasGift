@@ -1,0 +1,40 @@
+// The trainer pages' words. Every view word is an `@tr` here, never a literal in a view; its English is the gettext
+// msgid, without a context (build.rs and `cargo xtask phrases` agree on that), shared with any phrase that reads the same.
+
+export global TrainerText {
+    out property <string> not-connected: @tr("Not connected");
+    out property <string> connect-advice: @tr("Connect to an offline character to use the trainer.");
+    out property <string> read-stash-again: @tr("Read the stash again");
+    out property <string> read-game-again: @tr("Read the game again");
+    out property <string> read-again: @tr("Read again");
+    out property <string> not-read-yet: @tr("Not read yet");
+    out property <string> none-in-stash: @tr("None in your stash.");
+    out property <string> discard: @tr("Discard");
+    out property <string> discard-tip: @tr("Put every value back to what the game holds");
+    out property <string> apply-tip: @tr("Write the changes to the game and read them back");
+    out property <string> not-ported: @tr("Not ported yet");
+    out property <string> profile: @tr("Profile");
+    out property <string> delete-ellipsis: @tr("Delete…");
+    out property <string> delete-profile-tip: @tr("Delete this profile");
+    out property <string> keep-as-profile: @tr("Keep as profile");
+    out property <string> delete: @tr("Delete");
+    out property <string> keep: @tr("Keep");
+    out property <string> warning: @tr("Warning");
+    out property <string> readback-unavailable: @tr("Item readback unavailable");
+    out property <string> item-unavailable: @tr("Item details unavailable");
+    out property <string> forge-empty: @tr("The forge is empty");
+    out property <string> forge-empty-detail: @tr("Place an item in the forge to edit it.");
+
+    public pure function about(title: string) -> string {
+        return @tr("About {}", title);
+    }
+    public pure function keep-for(name: string) -> string {
+        return @tr("Keep these settings for {}", name);
+    }
+    public pure function delete-profile-setup(name: string) -> string {
+        return @tr("Delete {0}'s profile? Next time {0} enters play, everything starts off.", name);
+    }
+    public pure function delete-profile-live(name: string) -> string {
+        return @tr("Delete {}'s profile? Nothing changes in the game until this session ends.", name);
+    }
+}

@@ -7,10 +7,48 @@ use crate::{
     decorations::{Ash, Decorations},
     shell::ShellHandle,
 };
+use eg_core::phrase::Phrase;
 use eg_core::{bloom::BloomPhase, game_log::GameReadiness};
 use eg_trainer::backend::{Activity, BackendHandle, BackendSnapshot, Command, ErrorKind, Phase, ProfileLock};
 use slint::ComponentHandle;
 use std::{cell::Cell, rc::Rc};
+
+const NOT_CONNECTED: Phrase = Phrase::new("Not connected");
+const CONNECT: Phrase = Phrase::new("Connect");
+const RETRY: Phrase = Phrase::new("Retry");
+const CONNECT_ADVICE: Phrase = Phrase::new("Connect to an offline character to use the trainer.");
+const TRAINER_STOPPED: Phrase = Phrase::new("Trainer stopped");
+const STOPPED_ADVICE: Phrase = Phrase::new("Restart Eterra's Gift to connect again. Home and Mods remain available.");
+const CLOSE_EXTRA_GAMES: Phrase = Phrase::new("Close all but one copy of Last Epoch.");
+const CLOSE_EXTRA_GAMES_CONNECT: Phrase = Phrase::new("Close all but one copy of Last Epoch, then connect.");
+const HELPER_LEAVING: Phrase = Phrase::new("The helper is leaving Last Epoch.");
+const LOAD_OFFLINE_FOR_TRAINER: Phrase = Phrase::new("Load an offline character to use the trainer.");
+const READING_GAME_FILES: Phrase = Phrase::new("Reading the game files…");
+const ONLINE_MODE: Phrase = Phrase::new("Online mode");
+const CONNECTED: Phrase = Phrase::new("Connected");
+const APPLYING: Phrase = Phrase::new("Applying changes…");
+const WAITING_FOR_GAME: Phrase = Phrase::new("Waiting for Last Epoch");
+const START_AND_LOAD: Phrase = Phrase::new("Start Last Epoch and load an offline character.");
+const CHANGING_AREA: Phrase = Phrase::new("Changing area");
+const CHANGING_AREA_DETAIL: Phrase = Phrase::new("Waiting for the character to finish changing area.");
+const CHANGING_AREA_NAV: Phrase = Phrase::new("Changing area…");
+const WAITING_FOR_CHARACTER: Phrase = Phrase::new("Waiting for an offline character");
+const LOAD_OFFLINE: Phrase = Phrase::new("Load an offline character.");
+const WAITING_FOR_CHARACTER_NAV: Phrase = Phrase::new("Waiting for a character");
+const CONNECTING: Phrase = Phrase::new("Connecting");
+const CONNECTING_DETAIL: Phrase = Phrase::new("Connecting to the game…");
+const CONNECTING_NAV: Phrase = Phrase::new("Connecting…");
+const EDIT_NOT_CONFIRMED: Phrase = Phrase::new("Edit not confirmed");
+const EDIT_NOT_CONFIRMED_DETAIL: Phrase = Phrase::new(
+    "The edit may have reached the game but couldn't be confirmed. Check the item in the game, then Retry. The edit won't be sent again. Drafts and Undo were cleared.",
+);
+const COULD_NOT_CONNECT: Phrase = Phrase::new("The trainer couldn't connect. Retry when the game is ready.");
+const CONNECTION_STOPPED: Phrase = Phrase::new("Connection stopped");
+const DISCONNECTING: Phrase = Phrase::new("Disconnecting…");
+const TURNING_OFF_EFFECTS: Phrase = Phrase::new("Turning off trainer effects.");
+const TRAINER_OFF: Phrase = Phrase::new("Trainer is off");
+const TRAINER_OFF_ADVICE: Phrase = Phrase::new("Turn the trainer on in Settings and restart Eterra's Gift.");
+const RESTART_TO_CONNECT: Phrase = Phrase::new("Restart Eterra's Gift to connect again.");
 
 /// The connection as a run without the trainer's worker shows it: not connected, in the navigation's foot (only when the
 /// trainer is on) and in place of every trainer page's body. A worker's binding takes both over.
@@ -18,12 +56,12 @@ pub fn unbound(window: &MainWindow, trainer: bool) {
     let connection = window.global::<Connection>();
     connection.set_present(trainer);
     connection.set_connected(false);
-    connection.set_text("Not connected".into());
+    connection.set_text(NOT_CONNECTED.get().into());
     connection.set_show_action(true);
-    connection.set_action_text("Connect".into());
+    connection.set_action_text(CONNECT.get().into());
     let state = window.global::<TrainerState>();
-    state.set_connection_title("Not connected".into());
-    state.set_connection_detail("Connect to an offline character to use the trainer.".into());
+    state.set_connection_title(NOT_CONNECTED.get().into());
+    state.set_connection_detail(CONNECT_ADVICE.get().into());
 }
 
 struct Binding {
@@ -88,10 +126,10 @@ impl Binding {
                 connection.set_connected(false);
                 connection.set_blocked(true);
                 connection.set_show_action(false);
-                connection.set_text("Trainer stopped".into());
+                connection.set_text(TRAINER_STOPPED.get().into());
                 let state = window.global::<TrainerState>();
-                state.set_connection_title("Trainer stopped".into());
-                state.set_connection_detail("Restart Eterra's Gift to connect again. Home and Mods remain available.".into());
+                state.set_connection_title(TRAINER_STOPPED.get().into());
+                state.set_connection_detail(STOPPED_ADVICE.get().into());
                 state.set_connection_stopped(true);
                 state.set_connection_waiting(false);
                 state.set_access(TrainerAccess::Locked);
@@ -123,7 +161,7 @@ impl Binding {
             matches!(snapshot.phase, Phase::Disconnected | Phase::Blocked)
                 || ((!snapshot.auto_connect || !snapshot.monitoring) && matches!(snapshot.phase, Phase::WaitingForGame | Phase::WaitingForCharacter)),
         );
-        connection.set_action_text(if snapshot.phase == Phase::Blocked { "Retry" } else { "Connect" }.into());
+        connection.set_action_text(if snapshot.phase == Phase::Blocked { RETRY.get() } else { CONNECT.get() }.into());
         let state = window.global::<TrainerState>();
         // Not connected, every trainer page shows this in place of its body. Ash drifts during a real wait.
         state.set_access(access(&snapshot));
@@ -166,9 +204,9 @@ struct Status {
 /// `waits` (automatic connection, with the game being watched) decides.
 fn multiple_games(snapshot: &BackendSnapshot) -> &'static str {
     if snapshot.monitoring && snapshot.auto_connect {
-        "Close all but one copy of Last Epoch."
+        CLOSE_EXTRA_GAMES.get()
     } else {
-        "Close all but one copy of Last Epoch, then connect."
+        CLOSE_EXTRA_GAMES_CONNECT.get()
     }
 }
 
@@ -181,15 +219,15 @@ fn online_refused(snapshot: &BackendSnapshot) -> bool {
 fn online_advice(snapshot: &BackendSnapshot) -> &'static str {
     use eg_trainer::backend::{HELPER_RESTART_REQUIRED, HelperResidency};
     match snapshot.retained_helper.as_ref().map(|helper| helper.residency) {
-        Some(HelperResidency::Stuck | HelperResidency::MayBeLoaded | HelperResidency::Loaded) => HELPER_RESTART_REQUIRED,
-        Some(HelperResidency::Leaving) => "The helper is leaving Last Epoch.",
-        Some(HelperResidency::Gone) | None => "Load an offline character to use the trainer.",
+        Some(HelperResidency::Stuck | HelperResidency::MayBeLoaded | HelperResidency::Loaded) => HELPER_RESTART_REQUIRED.get(),
+        Some(HelperResidency::Leaving) => HELPER_LEAVING.get(),
+        Some(HelperResidency::Gone) | None => LOAD_OFFLINE_FOR_TRAINER.get(),
     }
 }
 
 /// The preparation's progress while connecting: the game files, when a changed install is read again.
 fn progress(snapshot: &BackendSnapshot) -> Option<String> {
-    (snapshot.activity == Some(Activity::ReadingGameFiles)).then(|| "Reading the game files…".to_owned())
+    (snapshot.activity == Some(Activity::ReadingGameFiles)).then(|| READING_GAME_FILES.get().to_owned())
 }
 
 fn status(snapshot: &BackendSnapshot) -> Status {
@@ -204,37 +242,37 @@ fn status(snapshot: &BackendSnapshot) -> Status {
         let advice = online_advice(snapshot);
         return Status {
             stopped: true,
-            ..line("Online mode", advice, "Online mode")
+            ..line(ONLINE_MODE.get(), advice, ONLINE_MODE.get())
         };
     }
     let writing = matches!(snapshot.activity, Some(Activity::WritingForge));
     match snapshot.phase {
         // Connected, the pages show their own bodies; only the navigation's line is said.
-        Phase::Ready => line("Connected", "", if writing { "Applying changes…" } else { "Connected" }),
+        Phase::Ready => line(CONNECTED.get(), "", if writing { APPLYING.get() } else { CONNECTED.get() }),
         Phase::WaitingForGame if snapshot.error.as_ref().is_some_and(|error| error.kind == ErrorKind::MultipleProcesses) => Status {
             waiting: Some(BloomPhase::Wilted),
-            ..line("Waiting for Last Epoch", multiple_games(snapshot), multiple_games(snapshot))
+            ..line(WAITING_FOR_GAME.get(), multiple_games(snapshot), multiple_games(snapshot))
         },
         Phase::WaitingForGame => Status {
             waiting: Some(BloomPhase::Wilted),
-            ..line("Waiting for Last Epoch", "Start Last Epoch and load an offline character.", "Waiting for Last Epoch")
+            ..line(WAITING_FOR_GAME.get(), START_AND_LOAD.get(), WAITING_FOR_GAME.get())
         },
         Phase::WaitingForCharacter if snapshot.error.as_ref().is_some_and(|error| error.kind == ErrorKind::CharacterLoading) => Status {
             waiting: Some(BloomPhase::Opening),
-            ..line("Changing area", "Waiting for the character to finish changing area.", "Changing area…")
+            ..line(CHANGING_AREA.get(), CHANGING_AREA_DETAIL.get(), CHANGING_AREA_NAV.get())
         },
         Phase::WaitingForCharacter => Status {
             waiting: Some(BloomPhase::Opening),
-            ..line("Waiting for an offline character", "Load an offline character.", "Waiting for a character")
+            ..line(WAITING_FOR_CHARACTER.get(), LOAD_OFFLINE.get(), WAITING_FOR_CHARACTER_NAV.get())
         },
         Phase::Connecting => {
             let progress = progress(snapshot);
             Status {
                 waiting: Some(BloomPhase::Budding),
                 ..line(
-                    "Connecting",
-                    progress.as_deref().unwrap_or("Connecting to the game…"),
-                    progress.as_deref().unwrap_or("Connecting…"),
+                    CONNECTING.get(),
+                    progress.as_deref().unwrap_or(CONNECTING_DETAIL.get()),
+                    progress.as_deref().unwrap_or(CONNECTING_NAV.get()),
                 )
             }
         }
@@ -242,30 +280,22 @@ fn status(snapshot: &BackendSnapshot) -> Status {
         // says what it means and what to do (Retry is the page's one button).
         Phase::Blocked if snapshot.error.as_ref().is_some_and(|error| error.kind == ErrorKind::WriteUncertain) => Status {
             stopped: true,
-            ..line(
-                "Edit not confirmed",
-                "The edit may have reached the game but couldn't be confirmed. Check the item in the game, then Retry. \
-                 The edit won't be sent again. Drafts and Undo were cleared.",
-                "Edit not confirmed",
-            )
+            ..line(EDIT_NOT_CONFIRMED.get(), EDIT_NOT_CONFIRMED_DETAIL.get(), EDIT_NOT_CONFIRMED.get())
         },
         Phase::Blocked => {
-            let message = snapshot.error.as_ref().map_or_else(
-                || "The trainer couldn't connect. Retry when the game is ready.".to_owned(),
-                |error| sentence(&error.message),
-            );
+            let message = snapshot.error.as_ref().map_or_else(|| COULD_NOT_CONNECT.get().to_owned(), |error| sentence(&error.message));
             Status {
                 stopped: true,
-                ..line("Connection stopped", &message, &message)
+                ..line(CONNECTION_STOPPED.get(), &message, &message)
             }
         }
-        Phase::Closing => line("Disconnecting…", "Turning off trainer effects.", "Disconnecting…"),
-        Phase::Disabled => line("Trainer is off", "Turn the trainer on in Settings and restart Eterra's Gift.", "Trainer is off"),
+        Phase::Closing => line(DISCONNECTING.get(), TURNING_OFF_EFFECTS.get(), DISCONNECTING.get()),
+        Phase::Disabled => line(TRAINER_OFF.get(), TRAINER_OFF_ADVICE.get(), TRAINER_OFF.get()),
         Phase::Stopped => Status {
             stopped: true,
-            ..line("Trainer stopped", "Restart Eterra's Gift to connect again.", "Trainer stopped")
+            ..line(TRAINER_STOPPED.get(), RESTART_TO_CONNECT.get(), TRAINER_STOPPED.get())
         },
-        Phase::Disconnected => line("Not connected", "Connect to an offline character to use the trainer.", "Not connected"),
+        Phase::Disconnected => line(NOT_CONNECTED.get(), CONNECT_ADVICE.get(), NOT_CONNECTED.get()),
     }
 }
 

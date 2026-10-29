@@ -1,0 +1,15 @@
+// Settings' words. Every view word is an `@tr` here, never a literal in a view; its English is the gettext msgid,
+// without a context (build.rs and `cargo xtask phrases` agree on that), shared with any phrase that reads the same.
+
+export global SettingsText {
+    out property <string> settings: @tr("Settings");
+    out property <string> restart-note: @tr("Takes effect after restarting Eterra's Gift.");
+    out property <string> locations: @tr("Locations");
+    out property <string> browse: @tr("Browse…");
+    out property <string> restart-now: @tr("Restart now");
+    out property <string> restart-now-tip: @tr("Restart Eterra's Gift to apply the saved changes");
+    out property <string> retry-save: @tr("Retry save");
+    out property <string> retry-save-tip: @tr("Try saving again");
+    out property <string> save-locations: @tr("Save locations");
+    out property <string> save-locations-tip: @tr("Save the locations above");
+}

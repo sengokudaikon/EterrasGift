@@ -12,6 +12,7 @@ import { FocusRing, TipBubble } from "../../widgets/focus.slint";
 import { FlyoutSurface } from "../../widgets/menu.slint";
 import { ChoiceBox } from "../../widgets/choice-box.slint";
 import { ForgeState } from "state.slint";
+import { ForgeText } from "../../strings/forge.slint";
 import { CheckBox, RadioButton } from "cells.slint";
 
 export global PickerMetrics {
@@ -252,8 +253,8 @@ export component AffixPickerPanel inherits FlyoutSurface {
 
             search := SearchBox {
                 text: ForgeState.picker-search;
-                placeholder: "Name, category or ID";
-                label: "Search affixes";
+                placeholder: ForgeText.affix-search-placeholder;
+                label: ForgeText.affix-search;
                 init => {
                     self.focus-input();
                 }
@@ -280,7 +281,7 @@ export component AffixPickerPanel inherits FlyoutSurface {
                     alignment: start;
 
                     all-kinds := RadioButton {
-                        text: "All";
+                        text: ForgeText.all;
                         checked: ForgeState.picker-filter == 0;
                         chosen => {
                             ForgeState.picker-filter-changed(0);
@@ -291,7 +292,7 @@ export component AffixPickerPanel inherits FlyoutSurface {
                     }
 
                     prefixes := RadioButton {
-                        text: "Prefixes";
+                        text: ForgeText.prefixes;
                         checked: ForgeState.picker-filter == 1;
                         chosen => {
                             ForgeState.picker-filter-changed(1);
@@ -302,7 +303,7 @@ export component AffixPickerPanel inherits FlyoutSurface {
                     }
 
                     suffixes := RadioButton {
-                        text: "Suffixes";
+                        text: ForgeText.suffixes;
                         checked: ForgeState.picker-filter == 2;
                         chosen => {
                             ForgeState.picker-filter-changed(2);
@@ -318,7 +319,7 @@ export component AffixPickerPanel inherits FlyoutSurface {
                     spacing: Tokens.space-8;
 
                     ChoiceBox {
-                        label: "Affix kind";
+                        label: ForgeText.affix-kind;
                         choices: ForgeState.picker-categories;
                         index: ForgeState.picker-category;
                         chosen(index) => {
@@ -327,7 +328,7 @@ export component AffixPickerPanel inherits FlyoutSurface {
                     }
 
                     ChoiceBox {
-                        label: "Class";
+                        label: ForgeText.class;
                         choices: ForgeState.picker-classes;
                         index: ForgeState.picker-class;
                         chosen(index) => {
@@ -340,7 +341,7 @@ export component AffixPickerPanel inherits FlyoutSurface {
                     spacing: Tokens.space-2;
 
                     CheckBox {
-                        text: "Allow incompatible affixes";
+                        text: ForgeText.allow-incompatible;
                         checked: ForgeState.picker-allow;
                         enabled: ForgeState.picker-allow-enabled;
                         toggled(on) => {
@@ -352,7 +353,7 @@ export component AffixPickerPanel inherits FlyoutSurface {
                         padding-left: Tokens.check-box-caption-margin.left;
 
                         Text {
-                            text: "Lists affixes this slot can't roll. Writing one needs \"I know what I'm doing\".";
+                            text: ForgeText.picker-allow-note;
                             font-size: Tokens.font-size-caption;
                             color: Tokens.text-muted-brush;
                             wrap: word-wrap;
@@ -369,14 +370,14 @@ export component AffixPickerPanel inherits FlyoutSurface {
                     x: Tokens.empty-list-margin.left;
                     y: Tokens.empty-list-margin.top;
                     width: parent.width - Tokens.empty-list-margin.left - Tokens.empty-list-margin.right;
-                    text: "No affixes match this search.";
+                    text: ForgeText.no-affix-matches;
                     color: Tokens.text-muted-brush;
                     wrap: word-wrap;
                 }
 
                 list-focus := FocusScope {
                     accessible-role: list;
-                    accessible-label: "Replacement affixes";
+                    accessible-label: ForgeText.replacement-affixes;
                     focus-gained(reason) => {
                         if (reason == FocusReason.tab-navigation) {
                             KeyboardFocus.visible = true;
@@ -496,8 +497,8 @@ export component AffixPickerPanel inherits FlyoutSurface {
 
                 Button {
                     in-flyout: true;
-                    text: "Cancel";
-                    tip: "Keep the current draft (Esc)";
+                    text: ForgeText.cancel;
+                    tip: ForgeText.keep-draft-tip;
                     width: (footer.width - footer.spacing) / 2;
                     clicked => {
                         root.cancel();

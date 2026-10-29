@@ -1,0 +1,116 @@
+// The Item Forge's words. Every view word is an `@tr` here, never a literal in a view; its English is the gettext
+// msgid, without a context (build.rs and `cargo xtask phrases` agree on that), shared with any phrase that reads the same.
+
+export global ForgeText {
+    // Shared marks and states.
+    out property <string> in-game: @tr("in game");
+    out property <string> confirmed: @tr("Confirmed");
+    out property <string> draft: @tr("Draft");
+    out property <string> stale-draft: @tr("Stale draft");
+    out property <string> read-only: @tr("Read-only");
+    out property <string> changed-in-game: @tr("Changed in game. Discard and redo.");
+    out property <string> allow-incompatible: @tr("Allow incompatible affixes");
+    public pure function draft-of(tip: string) -> string { return @tr("Draft: {}", tip); }
+
+    // The item header and its menus.
+    out property <string> show-or-hide-changes: @tr("Show or hide the changes");
+    out property <string> rarity: @tr("Rarity");
+    out property <string> bases: @tr("Bases");
+    out property <string> unique-search-placeholder: @tr("Name or ID");
+    out property <string> unique-search: @tr("Search uniques and set items");
+    out property <string> no-unique-matches: @tr("No unique or set item matches.");
+    out property <string> uniques-and-sets: @tr("Uniques and set items");
+    out property <string> identity-note: @tr("A unique with affixes becomes legendary, and set items hold no affixes. Rolls, legendary potential and Weaver's Will carry over.");
+    out property <string> base-allow-note: @tr("Lists bases the current affixes can't roll on. Writing one needs \"I know what I'm doing\".");
+    public pure function item(name: string) -> string { return @tr("Item: {}", name); }
+    public pure function rarity-of(name: string) -> string { return @tr("Rarity: {}", name); }
+    public pure function base-of(name: string) -> string { return @tr("Base: {}", name); }
+
+    // The tables.
+    out property <string> implicits: @tr("Implicits");
+    out property <string> about-implicits: @tr("About implicits");
+    out property <string> value: @tr("Value");
+    out property <string> affix: @tr("Affix");
+    out property <string> range: @tr("Range");
+    out property <string> tier: @tr("Tier");
+    out property <string> seal: @tr("Seal");
+    out property <string> affixes: @tr("Affixes");
+    out property <string> add-affix: @tr("Add affix");
+    out property <string> max-tiers: @tr("Max tiers");
+    out property <string> max-rolls: @tr("Max rolls");
+    out property <string> unique-modifiers: @tr("Unique modifiers");
+    out property <string> tiers: @tr("Tiers");
+    out property <string> to-be-added: @tr("To be added");
+    out property <string> to-be-removed: @tr("To be removed");
+    out property <string> change-tier: @tr("Change tier");
+    out property <string> change-seal-state: @tr("Change seal state");
+    out property <string> seal-normal: @tr("Normal");
+    out property <string> seal-sealed: @tr("Sealed");
+    out property <string> seal-primordial: @tr("Primordial");
+    out property <string> seal-corrupted: @tr("Corrupted");
+    out property <string> shared-roll: @tr("These lines share one roll in the game, so changing one changes the other.");
+    out property <string> affix-changed-in-game: @tr("The game changed this affix after you drafted it.");
+    out property <string> rolls-changed-in-game: @tr("The game changed these rolls after you drafted them.");
+    out property <string> roll-changed-in-game: @tr("The game changed this roll after you drafted it.");
+    public pure function tier-for(name: string) -> string { return @tr("Tier for {}", name); }
+    public pure function seal-state-for(name: string) -> string { return @tr("Seal state for {}", name); }
+    public pure function replace-named(name: string) -> string { return @tr("Replace {}", name); }
+
+    // An affix row's menu; the Delete key's name, as the menu shows it.
+    out property <string> replace-affix: @tr("Replace affix…");
+    out property <string> discard-draft: @tr("Discard draft");
+    out property <string> keep-affix: @tr("Keep affix");
+    out property <string> remove-affix: @tr("Remove affix");
+    out property <string> delete-key: @tr("Delete");
+
+    // The action bar; its texts that change are Rust's, these are their first values.
+    out property <string> no-drafts: @tr("No drafts");
+    out property <string> changes: @tr("Changes");
+    out property <string> undo: @tr("Undo");
+    out property <string> apply-to-game: @tr("Apply to game");
+    out property <string> discard-all-tip: @tr("Discard every draft on this item");
+    out property <string> apply-tip: @tr("Write the drafts to the game (Ctrl+S)");
+
+    // The changes pane.
+    out property <string> show-this-draft: @tr("Show this draft");
+    out property <string> applied: @tr("Applied");
+    out property <string> nothing-applied: @tr("Nothing applied to this item yet.");
+    public pure function show-draft-for(name: string) -> string { return @tr("Show draft for {}", name); }
+    public pure function discard-draft-for(name: string) -> string { return @tr("Discard the draft for {}", name); }
+
+    // The affix picker.
+    out property <string> affix-search-placeholder: @tr("Name, category or ID");
+    out property <string> affix-search: @tr("Search affixes");
+    out property <string> all: @tr("All");
+    out property <string> prefixes: @tr("Prefixes");
+    out property <string> suffixes: @tr("Suffixes");
+    out property <string> affix-kind: @tr("Affix kind");
+    out property <string> class: @tr("Class");
+    out property <string> picker-allow-note: @tr("Lists affixes this slot can't roll. Writing one needs \"I know what I'm doing\".");
+    out property <string> no-affix-matches: @tr("No affixes match this search.");
+    out property <string> replacement-affixes: @tr("Replacement affixes");
+    out property <string> cancel: @tr("Cancel");
+    out property <string> keep-draft-tip: @tr("Keep the current draft (Esc)");
+
+    // Templates.
+    out property <string> templates: @tr("Templates");
+    out property <string> templates-tip: @tr("Draft a saved template onto this item, or save this item as one");
+    out property <string> no-templates: @tr("No templates yet. Save this item's affixes, or the whole item, below.");
+    out property <string> delete-template: @tr("Delete this template for good?");
+    out property <string> delete: @tr("Delete");
+    out property <string> delete-ellipsis: @tr("Delete…");
+    out property <string> keep: @tr("Keep");
+    out property <string> template-name: @tr("Template name");
+    out property <string> what-to-save: @tr("What to save");
+    out property <string> affixes-only: @tr("Affixes only");
+    out property <string> whole-item: @tr("Whole item");
+    out property <string> replace: @tr("Replace");
+    out property <string> save: @tr("Save");
+    out property <string> save-new-tip: @tr("Save the item as Apply would leave it under this name");
+    public pure function saving-replaces(name: string) -> string { return @tr("Saving replaces \"{}\".", name); }
+    public pure function delete-for-good-tip(name: string) -> string { return @tr("Delete \"{}\"; it can't be brought back", name); }
+    public pure function draft-onto-tip(name: string) -> string { return @tr("Draft \"{}\" onto the item", name); }
+    public pure function keep-named(name: string) -> string { return @tr("Keep \"{}\"", name); }
+    public pure function delete-named(name: string) -> string { return @tr("Delete \"{}\"", name); }
+    public pure function save-replacing-tip(name: string) -> string { return @tr("Save the item as Apply would leave it, in place of \"{}\"", name); }
+}

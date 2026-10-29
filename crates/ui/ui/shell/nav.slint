@@ -8,6 +8,7 @@ import { FocusRing, TipTrigger } from "../widgets/focus.slint";
 import { Button, ButtonKind } from "../widgets/button.slint";
 import { FlyoutSurface } from "../widgets/menu.slint";
 import { ScrollView } from "../widgets/scroll-view.slint";
+import { ShellText } from "../strings/shell.slint";
 
 // The Trainer item's pages on the rail, as a menu beside the item. The current page carries the radio mark. The flyout
 // surface every menu has (Dusk Brown in the strong-line frame over a shadow); the row under the pointer is Wine-Stained
@@ -414,7 +415,7 @@ export component NavPane inherits Rectangle {
                 horizontal-stretch: 1;
 
                 Text {
-                    text: "Eterra's Gift";
+                    text: ShellText.app-name;
                     font-family: Tokens.display-font;
                     font-weight: Tokens.display-weight;
                     letter-spacing: Tokens.tracking-title;
@@ -428,7 +429,7 @@ export component NavPane inherits Rectangle {
             Button {
                 kind: ButtonKind.subtle;
                 icon: root.rail ? Tokens.icon-pane-expand : Tokens.icon-pane-collapse;
-                tip: root.rail ? "Expand navigation" : "Collapse navigation";
+                tip: root.rail ? ShellText.expand-navigation : ShellText.collapse-navigation;
                 // The pointer's tip stands beside the rail; the keyboard's opens below, as everywhere.
                 tip-placement: root.rail ? TipPlacement.right : TipPlacement.below;
                 clicked => {

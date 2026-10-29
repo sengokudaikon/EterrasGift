@@ -8,6 +8,12 @@ use std::io;
 use std::path::Path;
 use std::time::Duration;
 
+use eg_core::phrase::Phrase;
+
+const CLOSED_EARLY: Phrase = Phrase::new("The game closed before MelonLoader finished loading mods.");
+const NO_REASON: Phrase = Phrase::new("MelonLoader read it but did not load it, and its log gives no reason.");
+const NOT_FOUND: Phrase = Phrase::new("MelonLoader did not find it in the Mods folder.");
+
 pub const LOG_LINES_PER_MOD: usize = 50;
 const ASSEMBLY_LOADED: &str = "Melon Assembly loaded: '";
 const HASH_LABEL: &str = "SHA256 Hash:";
@@ -165,21 +171,18 @@ impl MelonLog {
             return None;
         }
         if !self.reached_mods {
-            return Some("The game closed before MelonLoader finished loading mods.".into());
+            return Some(CLOSED_EARLY.into());
         }
         let mentions = Mentions::new(name, file);
         let reason = self
             .lines
             .iter()
             .find(|line| mentions.in_line(line) && !line.text.starts_with(ASSEMBLY_LOADED) && !line.text.starts_with(HASH_LABEL));
-        Some(reason.map(|line| line.text.clone()).unwrap_or_else(|| {
-            if self.found.iter().any(|found| same_file(found, file)) {
-                "MelonLoader read it but did not load it, and its log gives no reason."
-            } else {
-                "MelonLoader did not find it in the Mods folder."
-            }
-            .into()
-        }))
+        Some(
+            reason
+                .map(|line| line.text.clone())
+                .unwrap_or_else(|| if self.found.iter().any(|found| same_file(found, file)) { NO_REASON } else { NOT_FOUND }.into()),
+        )
     }
 }
 

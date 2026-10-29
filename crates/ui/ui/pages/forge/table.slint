@@ -14,6 +14,7 @@ import {
     CellKind,
 } from "state.slint";
 import { ValueScrubber } from "scrubber.slint";
+import { ForgeText } from "../../strings/forge.slint";
 
 // The confirm settle's curve, in one place: Fluent's decelerate (cubic out). An easing can't be a public property in
 // Slint 1.18, so it lives in this file's own global rather than in the generated Tokens.
@@ -60,7 +61,7 @@ export component TierList inherits VerticalLayout {
         }
 
         if tier.in-game: Text {
-            text: "in game";
+            text: ForgeText.in-game;
             font-size: Tokens.font-size-caption;
             color: Tokens.text-secondary-brush;
             vertical-alignment: center;
@@ -277,12 +278,12 @@ export component AffixRowItem inherits Rectangle {
     // The row's context menu, drawn in the app's look (widgets/menu.slint) rather than as a native menu.
     menu := PopupMenu {
         entries: [
-            { title: "Replace affix…", icon: Tokens.icon-replace, disabled: root.affix.added || root.affix.removed },
-            { title: "Discard draft", icon: Tokens.icon-close, disabled: !root.affix.dirty },
+            { title: ForgeText.replace-affix, icon: Tokens.icon-replace, disabled: root.affix.added || root.affix.removed },
+            { title: ForgeText.discard-draft, icon: Tokens.icon-close, disabled: !root.affix.dirty },
             { separator: true },
             root.affix.removed
-                ? { title: "Keep affix", icon: Tokens.icon-undo, disabled: !ForgeState.can-change-affix-list }
-                : { title: "Remove affix", icon: Tokens.icon-remove, gesture: "Delete", disabled: !ForgeState.can-change-affix-list },
+                ? { title: ForgeText.keep-affix, icon: Tokens.icon-undo, disabled: !ForgeState.can-change-affix-list }
+                : { title: ForgeText.remove-affix, icon: Tokens.icon-remove, gesture: ForgeText.delete-key, disabled: !ForgeState.can-change-affix-list },
         ];
         activated(index) => {
             if (index == 0) {
@@ -350,7 +351,7 @@ export component AffixRowItem inherits Rectangle {
                         y: (parent.height - self.height) / 2;
                         width: parent.width - Tokens.cell-outdent.left - Tokens.cell-outdent.right;
                         tip: root.affix.name-tip;
-                        label: "Replace " + root.affix.name;
+                        label: ForgeText.replace-named(root.affix.name);
                         clicked => {
                             root.open-picker();
                         }
@@ -411,7 +412,7 @@ export component AffixRowItem inherits Rectangle {
                                 }
 
                                 Text {
-                                    text: "Confirmed";
+                                    text: ForgeText.confirmed;
                                     font-size: Tokens.font-size-caption;
                                     color: parent.settled ? Tokens.confirmed-brush : Tokens.ash-brush;
                                     animate color {
@@ -437,7 +438,7 @@ export component AffixRowItem inherits Rectangle {
                                 }
 
                                 Text {
-                                    text: root.affix.added ? "To be added" : "To be removed";
+                                    text: root.affix.added ? ForgeText.to-be-added : ForgeText.to-be-removed;
                                     font-size: Tokens.font-size-caption;
                                     color: Tokens.draft-brush;
                                     overflow: elide;
@@ -459,7 +460,7 @@ export component AffixRowItem inherits Rectangle {
                                 }
 
                                 Text {
-                                    text: "Changed in game. Discard and redo.";
+                                    text: ForgeText.changed-in-game;
                                     font-size: Tokens.font-size-caption;
                                     color: Tokens.warning-brush;
                                     overflow: elide;
@@ -502,8 +503,8 @@ export component AffixRowItem inherits Rectangle {
                         y: (parent.height - self.height) / 2;
                         width: parent.width - Tokens.cell-outdent.left - Tokens.cell-outdent.right;
                         enabled: root.affix.can-edit;
-                        tip: "Change tier";
-                        label: "Tier for " + root.affix.name;
+                        tip: ForgeText.change-tier;
+                        label: ForgeText.tier-for(root.affix.name);
                         clicked => {
                             root.open-tiers();
                         }
@@ -571,9 +572,9 @@ export component AffixRowItem inherits Rectangle {
                         y: (parent.height - self.height) / 2;
                         width: parent.width - Tokens.cell-outdent.left - Tokens.cell-outdent.right;
                         enabled: root.affix.can-edit;
-                        tip: "Change seal state";
+                        tip: ForgeText.change-seal-state;
                         hover-tip: root.affix.seal;
-                        label: "Seal state for " + root.affix.name;
+                        label: ForgeText.seal-state-for(root.affix.name);
                         clicked => {
                             root.open-seals();
                         }
@@ -622,7 +623,7 @@ export component AffixRowItem inherits Rectangle {
                             VerticalLayout {
                                 spacing: Tokens.space-2;
 
-                                for seal[index] in ["Normal", "Sealed", "Primordial", "Corrupted"]: MenuRow {
+                                for seal[index] in [ForgeText.seal-normal, ForgeText.seal-sealed, ForgeText.seal-primordial, ForgeText.seal-corrupted]: MenuRow {
                                     held: root.affix.seal-index == index;
                                     highlighted: root.seal-highlight == index;
                                     picked => {
@@ -653,12 +654,12 @@ export component AffixRowItem inherits Rectangle {
                         source: root.affix.stale ? Tokens.icon-warning : Tokens.icon-draft;
                         colorize: root.affix.stale ? Tokens.warning-brush : Tokens.draft-brush;
                         accessible-role: image;
-                        accessible-label: root.affix.stale ? "Stale draft" : "Draft";
+                        accessible-label: root.affix.stale ? ForgeText.stale-draft : ForgeText.draft;
 
                         status-touch := TouchArea { }
 
                         TipTrigger {
-                            text: root.affix.stale ? "The game changed this affix after you drafted it." : "Draft: " + root.affix.draft-tip;
+                            text: root.affix.stale ? ForgeText.affix-changed-in-game : ForgeText.draft-of(root.affix.draft-tip);
                             hovered: status-touch.has-hover;
                         }
                     }
@@ -816,7 +817,7 @@ export component ModifierRowItem inherits Rectangle {
                     }
 
                     Text {
-                        text: "Confirmed";
+                        text: ForgeText.confirmed;
                         font-size: Tokens.font-size-caption;
                         color: parent.settled ? Tokens.confirmed-brush : Tokens.ash-brush;
                     }
@@ -837,7 +838,7 @@ export component ModifierRowItem inherits Rectangle {
                 }
 
                 Text {
-                    text: "Changed in game. Discard and redo.";
+                    text: ForgeText.changed-in-game;
                     font-size: Tokens.font-size-caption;
                     color: Tokens.warning-brush;
                     wrap: word-wrap;
@@ -854,7 +855,7 @@ export component ModifierRowItem inherits Rectangle {
                 linked-touch := TouchArea { }
 
                 TipTrigger {
-                    text: "These lines share one roll in the game, so changing one changes the other.";
+                    text: ForgeText.shared-roll;
                     hovered: linked-touch.has-hover;
                 }
             }
@@ -871,14 +872,14 @@ export component ModifierRowItem inherits Rectangle {
                 source: root.line.stale ? Tokens.icon-warning : Tokens.icon-draft;
                 colorize: root.line.stale ? Tokens.warning-brush : Tokens.draft-brush;
                 accessible-role: image;
-                accessible-label: root.line.stale ? "Stale draft" : "Draft";
+                accessible-label: root.line.stale ? ForgeText.stale-draft : ForgeText.draft;
 
                 icon-touch := TouchArea { }
 
                 TipTrigger {
                     text: root.line.stale
-                        ? (root.on-unique ? "The game changed these rolls after you drafted them." : "The game changed this roll after you drafted it.")
-                        : (root.on-unique ? "Draft" : "Draft: " + root.line.draft-tip);
+                        ? (root.on-unique ? ForgeText.rolls-changed-in-game : ForgeText.roll-changed-in-game)
+                        : (root.on-unique ? ForgeText.draft : ForgeText.draft-of(root.line.draft-tip));
                     hovered: icon-touch.has-hover;
                 }
             }

@@ -3,11 +3,12 @@
 import { Tokens } from "../tokens.slint";
 import { KeyboardFocus } from "../globals.slint";
 import { FocusRing } from "focus.slint";
+import { ShellText } from "../strings/shell.slint";
 
 export component ToggleSwitch inherits Rectangle {
     in property <bool> checked;
-    in property <string> on-text: "On";
-    in property <string> off-text: "Off";
+    in property <string> on-text: ShellText.on;
+    in property <string> off-text: ShellText.off;
     in property <string> label;
     in property <bool> enabled: true;
     callback toggled(bool);

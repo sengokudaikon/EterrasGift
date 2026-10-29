@@ -14,6 +14,19 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, SystemTime};
 
+use eg_core::phrase::Phrase;
+
+const CANCELLED: Phrase = Phrase::new("The operation was cancelled.");
+const CANNOT_START: Phrase = Phrase::new("Cannot start {program}: {error}");
+const OUTPUT_FAILED: Phrase = Phrase::new("Reading build output failed.");
+const ERRORS_FAILED: Phrase = Phrase::new("Reading build errors failed.");
+const EXITED: Phrase = Phrase::new("{program} exited with {code}.\n{output}");
+const SCAN_PANICKED: Phrase = Phrase::new("Reading mod projects panicked.");
+const SCAN_NOT_STARTED: Phrase = Phrase::new("Reading mod projects could not start: {error}");
+const NOT_BUILT: Phrase = Phrase::new("{project} did not build. {message}");
+const NOT_BUILT_ERRORS: Phrase = Phrase::new("{project} did not build: {errors}");
+const NO_OUTPUT: Phrase = Phrase::new("{project} built, but {target} is not there.");
+
 const PROJECT_DEPTH: usize = 3;
 const OUTPUT_LIMIT: usize = 1024 * 1024;
 const POLL: Duration = Duration::from_millis(20);
@@ -92,7 +105,7 @@ pub enum SourceError {
 impl std::fmt::Display for SourceError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Cancelled => f.write_str("The operation was cancelled."),
+            Self::Cancelled => f.write_str(CANCELLED.get()),
             Self::SdkMissing(message) | Self::Failed(message) => f.write_str(message),
         }
     }
@@ -146,7 +159,7 @@ impl ProcessRunner for SystemProcessRunner {
         no_window(&mut command);
         let mut child = command
             .spawn()
-            .map_err(|error| ProcessError::Start(format!("Cannot start {}: {error}", request.executable.display())))?;
+            .map_err(|error| ProcessError::Start(CANNOT_START.with(&[("program", &request.executable.display()), ("error", &error)])))?;
         let stdout = child.stdout.take().expect("stdout was piped");
         let stderr = child.stderr.take().expect("stderr was piped");
         // Drain both pipes concurrently, even after reaching the capture bound, or a noisy compiler can block forever.
@@ -168,8 +181,8 @@ impl ProcessRunner for SystemProcessRunner {
                 }
             }
         };
-        let output = output.join().map_err(|_| ProcessError::Failed("Reading build output failed.".into()));
-        let errors = errors.join().map_err(|_| ProcessError::Failed("Reading build errors failed.".into()));
+        let output = output.join().map_err(|_| ProcessError::Failed(OUTPUT_FAILED.into()));
+        let errors = errors.join().map_err(|_| ProcessError::Failed(ERRORS_FAILED.into()));
         let status = status?;
         let output = output?.map_err(|error| ProcessError::Failed(error.to_string()))?;
         let errors = errors?.map_err(|error| ProcessError::Failed(error.to_string()))?;
@@ -179,11 +192,11 @@ impl ProcessRunner for SystemProcessRunner {
         if !status.success() {
             let name = request.executable.file_name().unwrap_or_default().to_string_lossy();
             let captured = format!("{output}\n{errors}");
-            return Err(ProcessError::Failed(format!(
-                "{name} exited with {}.\n{}",
-                status.code().unwrap_or(-1),
-                bounded_text(&captured, OUTPUT_LIMIT)
-            )));
+            return Err(ProcessError::Failed(EXITED.with(&[
+                ("program", &name),
+                ("code", &status.code().unwrap_or(-1)),
+                ("output", &bounded_text(&captured, OUTPUT_LIMIT)),
+            ])));
         }
         Ok(output.trim().to_owned())
     }
@@ -314,11 +327,11 @@ impl ModSources {
                 let answer = flight.clone();
                 if let Err(error) = std::thread::Builder::new().name("mod-source-scan".into()).spawn(move || {
                     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| owner.find_in(&folder, &executable, &owner.lifetime)))
-                        .unwrap_or_else(|_| Err(SourceError::Failed("Reading mod projects panicked.".into())));
+                        .unwrap_or_else(|_| Err(SourceError::Failed(SCAN_PANICKED.into())));
                     *answer.result.lock().unwrap() = Some(result);
                     answer.ready.notify_all();
                 }) {
-                    *flight.result.lock().unwrap() = Some(Err(SourceError::Failed(format!("Reading mod projects could not start: {error}"))));
+                    *flight.result.lock().unwrap() = Some(Err(SourceError::Failed(SCAN_NOT_STARTED.with(&[("error", &error)]))));
                 }
                 flight
             }
@@ -491,19 +504,18 @@ impl ModSources {
                 let name = project.project_file.file_name().unwrap_or_default().to_string_lossy();
                 let errors = compiler_errors(&message, directory);
                 return Err(SourceError::Failed(if errors.is_empty() {
-                    format!("{name} did not build. {message}")
+                    NOT_BUILT.with(&[("project", &name), ("message", &message)])
                 } else {
-                    format!("{name} did not build: {errors}")
+                    NOT_BUILT_ERRORS.with(&[("project", &name), ("errors", &errors)])
                 }));
             }
         }
         cancelled(cancel)?;
         if !project.target_path.is_file() {
-            return Err(SourceError::Failed(format!(
-                "{} built, but {} is not there.",
-                project.project_file.file_name().unwrap_or_default().to_string_lossy(),
-                project.target_path.display()
-            )));
+            return Err(SourceError::Failed(NO_OUTPUT.with(&[
+                ("project", &project.project_file.file_name().unwrap_or_default().to_string_lossy()),
+                ("target", &project.target_path.display()),
+            ])));
         }
         Ok(project.target_path.clone())
     }

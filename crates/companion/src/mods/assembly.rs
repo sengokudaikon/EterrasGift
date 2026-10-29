@@ -13,6 +13,15 @@ use std::fs;
 use std::io;
 use std::path::Path;
 
+use eg_core::phrase::Phrase;
+
+const UNKNOWN_KIND: Phrase = Phrase::new("Its MelonInfo names a class that is neither a MelonMod nor a MelonPlugin, so MelonLoader will not load it.");
+const OTHER_GAME: Phrase = Phrase::new("It is made for {game} by {developer}, not {this}.");
+const MONO: Phrase = Phrase::new("It is made for Mono games; {game} is an Il2Cpp game.");
+const NOT_WIN64: Phrase = Phrase::new("It is not made for 64-bit Windows.");
+const NEEDS_NEWER: Phrase = Phrase::new("It needs MelonLoader {required} or newer; {installed} is installed.");
+const NEEDS_EXACTLY: Phrase = Phrase::new("It needs exactly MelonLoader {required}; {installed} is installed.");
+
 #[derive(Clone, Debug, Default)]
 pub struct LoaderVersion {
     pub major: i32,
@@ -180,30 +189,25 @@ impl MelonAssembly {
 
     pub fn obstacle(&self, game: &GameIdentity, loader: &LoaderVersion) -> Option<String> {
         if self.kind == MelonKind::Unknown {
-            return Some("Its MelonInfo names a class that is neither a MelonMod nor a MelonPlugin, so MelonLoader will not load it.".into());
+            return Some(UNKNOWN_KIND.into());
         }
         if !self.games.is_empty() && !self.games.iter().any(|declared| declared.fits(game)) {
-            return Some(format!(
-                "It is made for {} by {}, not {}.",
-                self.games[0].name.as_deref().unwrap_or_default(),
-                self.games[0].developer.as_deref().unwrap_or_default(),
-                game.product
-            ));
+            return Some(OTHER_GAME.with(&[
+                ("game", &self.games[0].name.as_deref().unwrap_or_default()),
+                ("developer", &self.games[0].developer.as_deref().unwrap_or_default()),
+                ("this", &game.product),
+            ]));
         }
         if self.domain == MelonDomain::Mono {
-            return Some(format!("It is made for Mono games; {} is an Il2Cpp game.", game.product));
+            return Some(MONO.with(&[("game", &game.product)]));
         }
         if !self.runs_on_windows64 {
-            return Some("It is not made for 64-bit Windows.".into());
+            return Some(NOT_WIN64.into());
         }
         if let Some(required) = &self.required_loader
             && ((required.is_minimum && loader < &required.version) || (!required.is_minimum && !loader.exactly_matches(&required.version)))
         {
-            return Some(if required.is_minimum {
-                format!("It needs MelonLoader {} or newer; {loader} is installed.", required.version)
-            } else {
-                format!("It needs exactly MelonLoader {}; {loader} is installed.", required.version)
-            });
+            return Some(if required.is_minimum { NEEDS_NEWER } else { NEEDS_EXACTLY }.with(&[("required", &required.version), ("installed", loader)]));
         }
         None
     }

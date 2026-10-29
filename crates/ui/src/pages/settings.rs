@@ -1,6 +1,7 @@
 //! The Settings page: module switches that save the moment they flip, and six
 //! locations that wait for "Save locations". `SettingsPage` is the page's state and rules, testable without a window;
 //! `bind` puts it behind the `SettingsState` global.
+use eg_core::phrase::Phrase;
 
 pub mod trainer;
 
@@ -15,16 +16,63 @@ use std::rc::Rc;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
+const NOT_AN_OBJECT: Phrase = Phrase::new("The settings for {module} must be an object.");
+const NOT_TRUE_OR_FALSE: Phrase = Phrase::new("{key} must be true or false in the settings for {module}, which were left unchanged.");
+const GAME_EXECUTABLE: Phrase = Phrase::new("Game executable");
+const USER_DATA_FOLDER: Phrase = Phrase::new("User-data folder");
+const MOD_LIBRARY: Phrase = Phrase::new("Mod library");
+const MOD_SOURCES_FOLDER: Phrase = Phrase::new("Mod sources folder");
+const DOTNET_FOLDER: Phrase = Phrase::new(".NET SDK folder");
+const MELONLOADER_FOLDER: Phrase = Phrase::new("MelonLoader folder");
+const MOD_LIBRARY_FOLDER: Phrase = Phrase::new("Mod library folder");
+const GAME_EXECUTABLE_CAPTION: Phrase = Phrase::new("Leave empty to find the game automatically.");
+const USER_DATA_CAPTION: Phrase =
+    Phrase::new("Fault reports, trainer labels, game definitions and, unless it has its own folder, the mod library. A new folder takes effect after a restart.");
+const MOD_LIBRARY_CAPTION: Phrase = Phrase::new("Every mod version you install, and which mods are on. A new folder takes effect after a restart.");
+const MOD_SOURCES_CAPTION: Phrase = Phrase::new("Your own mod projects, for the Mods page to build and install.");
+const DOTNET_CAPTION: Phrase = Phrase::new("The folder with dotnet.exe, which builds mod projects. Leave empty to find it automatically.");
+const MELONLOADER_CAPTION: Phrase = Phrase::new(
+    "Where games with mods run MelonLoader from. Leave empty for the game folder. Another folder needs a copy of MelonLoader 0.6.6 or later. Takes effect after a restart.",
+);
+const BROWSE_GAME_EXECUTABLE: Phrase = Phrase::new("Browse for the game executable");
+const BROWSE_USER_DATA: Phrase = Phrase::new("Browse for the user-data folder");
+const BROWSE_MOD_LIBRARY: Phrase = Phrase::new("Browse for the mod library folder");
+const BROWSE_MOD_SOURCES: Phrase = Phrase::new("Browse for the mod sources folder");
+const BROWSE_DOTNET: Phrase = Phrase::new("Browse for the .NET SDK folder");
+const BROWSE_MELONLOADER: Phrase = Phrase::new("Browse for the MelonLoader folder");
+const SELECT_GAME_EXECUTABLE: Phrase = Phrase::new("Select the Last Epoch executable");
+const SELECT_USER_DATA: Phrase = Phrase::new("Select user-data folder");
+const SELECT_MOD_LIBRARY: Phrase = Phrase::new("Select the mod library folder");
+const SELECT_MOD_SOURCES: Phrase = Phrase::new("Select the mod sources folder");
+const SELECT_DOTNET: Phrase = Phrase::new("Select the folder with dotnet.exe");
+const SELECT_MELONLOADER: Phrase = Phrase::new("Select the folder MelonLoader runs from");
+const NONE: Phrase = Phrase::new("None");
+const NOT_FOUND: Phrase = Phrase::new("Not found");
+const GAME_FOLDER: Phrase = Phrase::new("The game folder");
+const LOCATIONS_NOT_SAVED: Phrase = Phrase::new("Locations were not saved: {error}");
+const MEMORY_ONLY: Phrase = Phrase::new("Changes last for this run only. Save locations replaces the unreadable file.");
+const SETTINGS_NOT_SAVED: Phrase = Phrase::new("Settings were not saved: {reason}");
+const TURN_ON: Phrase = Phrase::new("{module} on");
+const TURN_OFF: Phrase = Phrase::new("{module} off");
+const AND: Phrase = Phrase::new("{list} and {next}");
+const SAVED_RESTART_BOTH: Phrase = Phrase::new("Saved. Restart Eterra's Gift to use the new locations and turn {turns}.");
+const SAVED_RESTART_LOCATIONS: Phrase = Phrase::new("Saved. Restart Eterra's Gift to use the new locations.");
+const SAVED_RESTART_TURN: Phrase = Phrase::new("Saved. Restart Eterra's Gift to turn {turns}.");
+const LOCATIONS_SAVED: Phrase = Phrase::new("Locations saved.");
+const WINDOWS_EXECUTABLE: Phrase = Phrase::new("Windows executable");
+const EXECUTABLE_PICKER_FAILED: Phrase = Phrase::new("The executable picker could not be opened: {error}");
+const FOLDER_PICKER_FAILED: Phrase = Phrase::new("The folder picker could not be opened: {error}");
+
 /// What Settings shows of a part of the app it can turn on or off, before loading it: a module that is off is never
 /// loaded.
 #[derive(Clone, Debug)]
 pub struct ModuleChoice {
     /// Its settings and its on/off choice are kept under this.
     pub id: &'static str,
-    pub title: &'static str,
-    pub description: &'static str,
+    pub title: Phrase,
+    pub description: Phrase,
     /// How a sentence names it: "the trainer".
-    pub name: &'static str,
+    pub name: Phrase,
     /// Whether it is on without a choice (the trainer: on in a source checkout, off in a release).
     pub default_on: bool,
     /// Why it could not start in this run.
@@ -37,25 +85,26 @@ pub struct ModuleChoice {
 pub enum ModuleSection {
     Toggle {
         key: &'static str,
-        title: &'static str,
+        title: Phrase,
         /// The accessible name, when the title is not it.
-        label: &'static str,
-        description: &'static str,
-        note: &'static str,
+        label: Phrase,
+        description: Phrase,
+        /// Shown when it is not empty.
+        note: Option<Phrase>,
         default: bool,
-        on_text: &'static str,
-        off_text: &'static str,
+        on_text: Phrase,
+        off_text: Phrase,
     },
     Status {
-        title: &'static str,
-        description: &'static str,
+        title: Phrase,
+        description: Phrase,
         /// What it says without a running module behind it.
-        text: &'static str,
-        action: &'static str,
+        text: Phrase,
+        action: Phrase,
         /// The action's tip, shown while it can run.
-        tip: &'static str,
+        tip: Phrase,
         /// Why the action cannot run, beside it while it cannot.
-        unavailable: &'static str,
+        unavailable: Phrase,
     },
 }
 
@@ -89,13 +138,13 @@ impl ModuleChoice {
             return Ok(());
         }
         let Some(fields) = slice.as_object() else {
-            return Err(format!("The settings for {} must be an object.", self.title));
+            return Err(NOT_AN_OBJECT.with(&[("module", &self.title)]));
         };
         for section in &self.sections {
             if let ModuleSection::Toggle { key, .. } = section {
                 for (_, value) in fields.iter().filter(|(name, _)| name.eq_ignore_ascii_case(key)) {
                     if !value.is_boolean() {
-                        return Err(format!("{key} must be true or false in the settings for {}, which were left unchanged.", self.name));
+                        return Err(NOT_TRUE_OR_FALSE.with(&[("key", key), ("module", &self.name)]));
                     }
                 }
             }
@@ -156,56 +205,54 @@ impl Location {
 
     fn label(self) -> &'static str {
         match self {
-            Location::GameExecutable => "Game executable",
-            Location::UserData => "User-data folder",
-            Location::ModLibrary => "Mod library",
-            Location::ModSources => "Mod sources folder",
-            Location::Dotnet => ".NET SDK folder",
-            Location::MelonLoader => "MelonLoader folder",
+            Location::GameExecutable => GAME_EXECUTABLE.get(),
+            Location::UserData => USER_DATA_FOLDER.get(),
+            Location::ModLibrary => MOD_LIBRARY.get(),
+            Location::ModSources => MOD_SOURCES_FOLDER.get(),
+            Location::Dotnet => DOTNET_FOLDER.get(),
+            Location::MelonLoader => MELONLOADER_FOLDER.get(),
         }
     }
 
     /// The box's accessible name.
     fn name(self) -> &'static str {
         match self {
-            Location::ModLibrary => "Mod library folder",
+            Location::ModLibrary => MOD_LIBRARY_FOLDER.get(),
             location => location.label(),
         }
     }
 
     fn caption(self) -> &'static str {
         match self {
-            Location::GameExecutable => "Leave empty to find the game automatically.",
-            Location::UserData => "Fault reports, trainer labels, game definitions and, unless it has its own folder, the mod library. A new folder takes effect after a restart.",
-            Location::ModLibrary => "Every mod version you install, and which mods are on. A new folder takes effect after a restart.",
-            Location::ModSources => "Your own mod projects, for the Mods page to build and install.",
-            Location::Dotnet => "The folder with dotnet.exe, which builds mod projects. Leave empty to find it automatically.",
-            Location::MelonLoader => {
-                "Where games with mods run MelonLoader from. Leave empty for the game folder. Another folder needs a copy of MelonLoader 0.6.6 or later. Takes effect after a restart."
-            }
+            Location::GameExecutable => GAME_EXECUTABLE_CAPTION.get(),
+            Location::UserData => USER_DATA_CAPTION.get(),
+            Location::ModLibrary => MOD_LIBRARY_CAPTION.get(),
+            Location::ModSources => MOD_SOURCES_CAPTION.get(),
+            Location::Dotnet => DOTNET_CAPTION.get(),
+            Location::MelonLoader => MELONLOADER_CAPTION.get(),
         }
     }
 
     fn browse_label(self) -> &'static str {
         match self {
-            Location::GameExecutable => "Browse for the game executable",
-            Location::UserData => "Browse for the user-data folder",
-            Location::ModLibrary => "Browse for the mod library folder",
-            Location::ModSources => "Browse for the mod sources folder",
-            Location::Dotnet => "Browse for the .NET SDK folder",
-            Location::MelonLoader => "Browse for the MelonLoader folder",
+            Location::GameExecutable => BROWSE_GAME_EXECUTABLE.get(),
+            Location::UserData => BROWSE_USER_DATA.get(),
+            Location::ModLibrary => BROWSE_MOD_LIBRARY.get(),
+            Location::ModSources => BROWSE_MOD_SOURCES.get(),
+            Location::Dotnet => BROWSE_DOTNET.get(),
+            Location::MelonLoader => BROWSE_MELONLOADER.get(),
         }
     }
 
     /// The picker's title.
     pub fn picker_title(self) -> &'static str {
         match self {
-            Location::GameExecutable => "Select the Last Epoch executable",
-            Location::UserData => "Select user-data folder",
-            Location::ModLibrary => "Select the mod library folder",
-            Location::ModSources => "Select the mod sources folder",
-            Location::Dotnet => "Select the folder with dotnet.exe",
-            Location::MelonLoader => "Select the folder MelonLoader runs from",
+            Location::GameExecutable => SELECT_GAME_EXECUTABLE.get(),
+            Location::UserData => SELECT_USER_DATA.get(),
+            Location::ModLibrary => SELECT_MOD_LIBRARY.get(),
+            Location::ModSources => SELECT_MOD_SOURCES.get(),
+            Location::Dotnet => SELECT_DOTNET.get(),
+            Location::MelonLoader => SELECT_MELONLOADER.get(),
         }
     }
 }
@@ -272,9 +319,9 @@ impl SettingsPage {
             text(found_game.as_deref()),
             text(Some(&paths.default_user_data_directory)),
             text(Some(&paths.default_mod_library_directory())),
-            paths.mod_sources_directory().map_or_else(|| "None".to_owned(), |path| path.display().to_string()),
-            found_dotnet.map_or_else(|| "Not found".to_owned(), |path| path.display().to_string()),
-            "The game folder".into(),
+            paths.mod_sources_directory().map_or_else(|| NONE.into(), |path| path.display().to_string()),
+            found_dotnet.map_or_else(|| NOT_FOUND.into(), |path| path.display().to_string()),
+            GAME_FOLDER.into(),
         ];
         let message = store.startup_error().unwrap_or_default().to_owned();
         // A folder move saved in an earlier run waits for a restart: Restart now is offered, with nothing to say.
@@ -480,7 +527,7 @@ impl SettingsPage {
                         }
                     }
                 }
-                Err(error) => self.location_error = Some(format!("Locations were not saved: {error}")),
+                Err(error) => self.location_error = Some(LOCATIONS_NOT_SAVED.with(&[("error", &error)])),
             }
             if self.snapshot.pending_location != Some(revision) {
                 self.location_save = None;
@@ -499,12 +546,12 @@ impl SettingsPage {
             SaveOutcome::MemoryOnly => match self.location_error.clone().or_else(|| self.external_error.clone()) {
                 Some(error) => self.set_error(&error),
                 None => {
-                    self.message = "Changes last for this run only. Save locations replaces the unreadable file.".into();
+                    self.message = MEMORY_ONLY.get().into();
                     self.kind = MessageKind::MemoryOnly;
                 }
             },
             SaveOutcome::Failed(reason) | SaveOutcome::Faulted(reason) => {
-                let message = self.location_error.clone().unwrap_or_else(|| format!("Settings were not saved: {reason}"));
+                let message = self.location_error.clone().unwrap_or_else(|| SETTINGS_NOT_SAVED.with(&[("reason", &reason)]));
                 self.set_error(&message);
             }
         }
@@ -542,17 +589,17 @@ impl SettingsPage {
             .filter_map(|module| {
                 let on = saved.modules.get(module.choice.id).copied().unwrap_or(module.choice.default_on);
                 let active = store.startup_modules().get(module.choice.id).copied().unwrap_or(module.choice.default_on);
-                (on != active).then(|| format!("{} {}", module.choice.name, if on { "on" } else { "off" }))
+                (on != active).then(|| if on { TURN_ON } else { TURN_OFF }.with(&[("module", &module.choice.name)]))
             })
-            .collect::<Vec<_>>()
-            .join(" and ");
+            .reduce(|list, next| AND.with(&[("list", &list), ("next", &next)]))
+            .unwrap_or_default();
         self.kind = if paths || !turns.is_empty() { MessageKind::RestartRequired } else { MessageKind::Saved };
         self.message = match (paths, !turns.is_empty()) {
-            (true, true) => format!("Saved. Restart Eterra's Gift to use the new locations and turn {turns}."),
-            (true, false) => "Saved. Restart Eterra's Gift to use the new locations.".into(),
-            (false, true) => format!("Saved. Restart Eterra's Gift to turn {turns}."),
+            (true, true) => SAVED_RESTART_BOTH.with(&[("turns", &turns)]),
+            (true, false) => SAVED_RESTART_LOCATIONS.get().into(),
+            (false, true) => SAVED_RESTART_TURN.with(&[("turns", &turns)]),
             // A location save says so; a switch save, which shows itself, says nothing.
-            (false, false) if self.locations_last => "Locations saved.".into(),
+            (false, false) if self.locations_last => LOCATIONS_SAVED.get().into(),
             (false, false) => String::new(),
         };
     }
@@ -854,8 +901,8 @@ impl View {
             .modules
             .iter()
             .map(|module| ModuleRow {
-                title: module.choice.title.into(),
-                description: module.choice.description.into(),
+                title: module.choice.title.get().into(),
+                description: module.choice.description.get().into(),
                 problem: module.choice.problem.as_deref().unwrap_or_default().into(),
                 enabled: module.enabled,
             })
@@ -880,13 +927,13 @@ impl View {
                         on_text,
                         off_text,
                     } => {
-                        row.title = (*title).into();
-                        row.label = (*label).into();
-                        row.description = (*description).into();
-                        row.note = (*note).into();
+                        row.title = title.get().into();
+                        row.label = label.get().into();
+                        row.description = description.get().into();
+                        row.note = note.map(Phrase::get).unwrap_or_default().into();
                         row.toggle = true;
-                        row.on_text = (*on_text).into();
-                        row.off_text = (*off_text).into();
+                        row.on_text = on_text.get().into();
+                        row.off_text = off_text.get().into();
                         // As the module reads it at start (`main.rs`), so the switch shows what the app does.
                         row.checked = eg_core::settings::module_flag(page.snapshot.store.desired().module_settings.get(module.choice.id), key, *default);
                         if let Some((_, on)) = page.section_edits.get(&(module_index, section_index)) {
@@ -902,16 +949,16 @@ impl View {
                         unavailable,
                     } => {
                         let live = page.links.get(&module_index).and_then(|link| link.status(section_index));
-                        row.title = (*title).into();
-                        row.description = (*description).into();
-                        row.status = live.as_ref().map_or(*text, |live| live.text.as_str()).into();
-                        row.action = (*action).into();
+                        row.title = title.get().into();
+                        row.description = description.get().into();
+                        row.status = live.as_ref().map_or(text.get(), |live| live.text.as_str()).into();
+                        row.action = action.get().into();
                         let available = live.as_ref().is_some_and(|live| live.can_act);
                         row.action_enabled = available && !live.as_ref().is_some_and(|live| live.busy);
                         // The tip while the action can run; the reason beside it only while it is unavailable, not while
                         // it runs.
-                        row.action_tip = if row.action_enabled { (*tip).into() } else { Default::default() };
-                        row.unavailable = if available { Default::default() } else { (*unavailable).into() };
+                        row.action_tip = if row.action_enabled { tip.get().into() } else { Default::default() };
+                        row.unavailable = if available { Default::default() } else { unavailable.get().into() };
                     }
                 }
                 sections.push(row);
@@ -942,7 +989,7 @@ impl View {
         let view = self.clone();
         let picked = slint::spawn_local(async move {
             let picked = if location == Location::GameExecutable {
-                dialog.add_filter("Windows executable", &["exe"]).pick_file().await
+                dialog.add_filter(WINDOWS_EXECUTABLE.get(), &["exe"]).pick_file().await
             } else {
                 dialog.pick_folder().await
             };
@@ -953,8 +1000,12 @@ impl View {
             }
         });
         if let Err(error) = picked {
-            let picker = if location == Location::GameExecutable { "executable picker" } else { "folder picker" };
-            self.page.borrow_mut().report_error(&format!("The {picker} could not be opened: {error}"));
+            let failed = if location == Location::GameExecutable {
+                EXECUTABLE_PICKER_FAILED
+            } else {
+                FOLDER_PICKER_FAILED
+            };
+            self.page.borrow_mut().report_error(&failed.with(&[("error", &error)]));
             self.show();
         }
     }
@@ -969,9 +1020,9 @@ mod tests {
     fn trainer(default_on: bool) -> ModuleChoice {
         ModuleChoice {
             id: "trainer",
-            title: "Trainer",
-            description: "",
-            name: "the trainer",
+            title: Phrase::new("Trainer"),
+            description: Phrase::new("Edits the running game."),
+            name: Phrase::new("the trainer"),
             default_on,
             problem: None,
             sections: Vec::new(),

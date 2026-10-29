@@ -2,7 +2,16 @@
 //! page follows MelonLoader's preparation, how a batch of setting changes is kept, and what the page says about files
 //! changed by hand and builds it installed.
 use crate::launch::launcher::GameLauncher;
+use eg_core::phrase::Phrase;
 use std::{io, path::Path};
+
+const FOUND_ONE: Phrase = Phrase::new("{file} was found in the Mods folder and added, on.");
+const FOUND_MANY: Phrase = Phrase::new("{count} DLLs were found in the Mods folder and added, on.");
+const DELETED_ONE: Phrase = Phrase::new("{file} was deleted from the Mods folder, so it is removed.");
+const DELETED_MANY: Phrase = Phrase::new("{count} DLLs were deleted from the Mods folder, so they are removed.");
+const SAME_BUILD: Phrase = Phrase::new("{name} is installed already: the build is the same.");
+const INSTALLED_ON: Phrase = Phrase::new("Installed {name}. It loads the next time you play with mods.");
+const INSTALLED_OFF: Phrase = Phrase::new("Installed {name}. It is off; turn it on to load it in the next game with mods.");
 
 /// Whether the game runs, and whether it was started with mods: MelonLoader wrote its log after the game started.
 pub fn running_state(launcher: &GameLauncher, log: Option<&Path>) -> (bool, bool) {
@@ -33,13 +42,13 @@ pub fn follow_preparation(was_running: bool, running: bool, modded: bool, prepar
 pub fn by_hand(adopted: &[String], deleted: &[String]) -> Option<String> {
     let added = match adopted {
         [] => None,
-        [file] => Some(format!("{file} was found in the Mods folder and added, on.")),
-        _ => Some(format!("{} DLLs were found in the Mods folder and added, on.", adopted.len())),
+        [file] => Some(FOUND_ONE.with(&[("file", file)])),
+        _ => Some(FOUND_MANY.with(&[("count", &adopted.len())])),
     };
     let removed = match deleted {
         [] => None,
-        [file] => Some(format!("{file} was deleted from the Mods folder, so it is removed.")),
-        _ => Some(format!("{} DLLs were deleted from the Mods folder, so they are removed.", deleted.len())),
+        [file] => Some(DELETED_ONE.with(&[("file", file)])),
+        _ => Some(DELETED_MANY.with(&[("count", &deleted.len())])),
     };
     match (added, removed) {
         (Some(added), Some(removed)) => Some(format!("{added} {removed}")),
@@ -49,14 +58,16 @@ pub fn by_hand(adopted: &[String], deleted: &[String]) -> Option<String> {
 
 /// What the page says once a build is installed.
 pub fn installed_message(name: &str, version: Option<&str>, unchanged: bool, enabled: bool) -> String {
-    let version = version.map(|version| format!(" {version}")).unwrap_or_default();
-    if unchanged {
-        format!("{name}{version} is installed already: the build is the same.")
+    // The name with its version, if it has one, is one value: "Loom 0.2.0".
+    let name = version.map_or_else(|| name.to_owned(), |version| format!("{name} {version}"));
+    let phrase = if unchanged {
+        SAME_BUILD
     } else if enabled {
-        format!("Installed {name}{version}. It loads the next time you play with mods.")
+        INSTALLED_ON
     } else {
-        format!("Installed {name}{version}. It is off; turn it on to load it in the next game with mods.")
-    }
+        INSTALLED_OFF
+    };
+    phrase.with(&[("name", &name)])
 }
 
 /// Keeps every change, even after one fails, and reports the first failure.

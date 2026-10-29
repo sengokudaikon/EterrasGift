@@ -8,6 +8,7 @@ import { Button, ButtonKind } from "../widgets/button.slint";
 import { ToggleSwitch } from "../widgets/toggle.slint";
 import { TextField } from "../widgets/text-field.slint";
 import { ActionBar, MessageTone, SettingGroup, SwitchSetting } from "common.slint";
+import { SettingsText } from "../strings/settings.slint";
 
 export struct LocationSetting {
     label: string,
@@ -92,7 +93,7 @@ export component SettingsPage inherits Rectangle {
                 alignment: start;
 
                 TitleText {
-                    text: "Settings";
+                    text: SettingsText.settings;
                 }
 
                 Rectangle {
@@ -103,7 +104,7 @@ export component SettingsPage inherits Rectangle {
                     SwitchSetting {
                         title: module.title;
                         description: module.description;
-                        note: "Takes effect after restarting Eterra's Gift.";
+                        note: SettingsText.restart-note;
                         problem: module.problem;
                         control-width: switch-measure.preferred-width;
                         ToggleSwitch {
@@ -169,7 +170,7 @@ export component SettingsPage inherits Rectangle {
                         spacing: Tokens.space-16;
 
                         SectionText {
-                            text: "Locations";
+                            text: SettingsText.locations;
                         }
 
                         for location[i] in SettingsState.locations: VerticalLayout {
@@ -192,7 +193,7 @@ export component SettingsPage inherits Rectangle {
                                 }
 
                                 Button {
-                                    text: "Browse…";
+                                    text: SettingsText.browse;
                                     icon: Tokens.icon-folder;
                                     // A screen-reader name; the button shows no tip.
                                     accessible-name: location.browse-label;
@@ -222,24 +223,24 @@ export component SettingsPage inherits Rectangle {
             tone: SettingsState.message-tone;
 
             if SettingsState.can-restart: Button {
-                text: "Restart now";
-                tip: "Restart Eterra's Gift to apply the saved changes";
+                text: SettingsText.restart-now;
+                tip: SettingsText.restart-now-tip;
                 clicked => {
                     SettingsState.restart();
                 }
             }
 
             if SettingsState.can-retry: Button {
-                text: "Retry save";
-                tip: "Try saving again";
+                text: SettingsText.retry-save;
+                tip: SettingsText.retry-save-tip;
                 clicked => { SettingsState.retry(); }
             }
 
             Button {
-                text: "Save locations";
+                text: SettingsText.save-locations;
                 kind: ButtonKind.primary;
                 enabled: SettingsState.locations-changed && !SettingsState.saving-locations;
-                tip: "Save the locations above";
+                tip: SettingsText.save-locations-tip;
                 clicked => {
                     SettingsState.save-locations();
                 }

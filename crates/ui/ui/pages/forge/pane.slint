@@ -6,6 +6,7 @@ import { Tokens } from "../../tokens.slint";
 import { KeyboardFocus } from "../../globals.slint";
 import { FocusRing, TipTrigger } from "../../widgets/focus.slint";
 import { ForgeState } from "state.slint";
+import { ForgeText } from "../../strings/forge.slint";
 
 // A 24px subtle icon button (the compact icon button), with its tip and accessible name.
 export component CompactIconButton inherits Rectangle {
@@ -146,7 +147,7 @@ export component ChangesPane inherits Rectangle {
                             border-radius: Tokens.control-radius;
                             background: entry-touch.has-hover || name-touch.has-hover ? Tokens.draft-hover-brush : transparent;
                             accessible-role: button;
-                            accessible-label: "Show draft for " + entry.name;
+                            accessible-label: ForgeText.show-draft-for(entry.name);
                             accessible-action-default => { ForgeState.show-draft(index); }
 
                             entry-focus := FocusScope {
@@ -232,7 +233,7 @@ export component ChangesPane inherits Rectangle {
                                         }
 
                                         Text {
-                                            text: "Changed in game. Discard and redo.";
+                                            text: ForgeText.changed-in-game;
                                             font-size: Tokens.font-size-caption;
                                             color: Tokens.warning-brush;
                                             vertical-alignment: center;
@@ -245,7 +246,7 @@ export component ChangesPane inherits Rectangle {
 
                                     CompactIconButton {
                                         icon: Tokens.icon-close;
-                                        tip: "Discard the draft for " + entry.name;
+                                        tip: ForgeText.discard-draft-for(entry.name);
                                         clicked => {
                                             ForgeState.discard-entry(index);
                                         }
@@ -254,7 +255,7 @@ export component ChangesPane inherits Rectangle {
                             }
 
                             TipTrigger {
-                                text: name-touch.has-hover ? entry.name : "Show this draft";
+                                text: name-touch.has-hover ? entry.name : ForgeText.show-this-draft;
                                 hovered: entry-touch.has-hover || name-touch.has-hover;
                                 focused: entry-focus.has-focus;
                             }
@@ -270,12 +271,12 @@ export component ChangesPane inherits Rectangle {
                     spacing: Tokens.space-6;
 
                     Text {
-                        text: "Applied";
+                        text: ForgeText.applied;
                         color: Tokens.text-muted-brush;
                     }
 
                     if ForgeState.history.length == 0: Text {
-                        text: "Nothing applied to this item yet.";
+                        text: ForgeText.nothing-applied;
                         font-size: Tokens.font-size-caption;
                         color: Tokens.text-muted-brush;
                         wrap: word-wrap;

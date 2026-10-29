@@ -703,7 +703,7 @@ fn main() {
     let ui = session.open_on(host, true, 1100, 700);
     let home = ui.global::<HomeState>();
     assert!(home.get_message_is_error(), "a conflict stops every start");
-    assert!(home.get_message().starts_with(eg_companion::launch::loader::CONFLICT), "{}", home.get_message());
+    assert!(home.get_message().starts_with("The game folder has both"), "{}", home.get_message());
     assert!(!home.get_can_start() && !home.get_can_start_with_mods(), "every Play waits on the conflict");
     session.capture(&ui, "home-conflict");
 

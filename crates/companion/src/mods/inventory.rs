@@ -9,8 +9,38 @@ use super::{
     preferences::{MelonPreferences, ModSetting, PreferenceKind, PreferenceValue},
 };
 use crate::game::install::{GameIdentity, GameInstall};
-use crate::launch::loader::{self, ModLoaderState, ModLoaderSwitch, melon_paths};
+use crate::launch::loader::{ModLoaderState, ModLoaderSwitch, melon_paths};
+use eg_core::phrase::Phrase;
 use std::path::{Path, PathBuf};
+
+const TURNS_ON: Phrase = Phrase::new("Turns on the next time you play with mods");
+const TURNS_OFF: Phrase = Phrase::new("Turns off the next time you play with mods");
+const BUILD_WAITING: Phrase = Phrase::new("This build is installed the next time you play with mods");
+const NO_GAME: Phrase = Phrase::new("Last Epoch wasn't found. Choose the game executable in Settings.");
+const UNREADABLE: Phrase = Phrase::new("The mods could not be read: {error}");
+const SETTINGS_UNREADABLE: Phrase = Phrase::new("Settings could not be read: {error}");
+const NO_MELON_INFO: Phrase = Phrase::new("{file} has no MelonInfo, so it is not a MelonLoader mod. If a mod needs it, it belongs in UserLibs.");
+const NOT_ASSEMBLY: Phrase = Phrase::new("{file} is not a .NET assembly, so MelonLoader can't load it.");
+const COPY_UNREADABLE: Phrase = Phrase::new("The app's copy of {file} could not be read: {error}");
+const DESCRIPTION_UNREADABLE: Phrase = Phrase::new("{file} describes its settings in a way the app can't read, so they show as MelonPreferences.cfg has them. {error}");
+const CONFLICT: Phrase = Phrase::new("The game folder has both version.dll and version.dll.disabled. Delete the older one.");
+const NO_LOADER: Phrase = Phrase::new("MelonLoader isn't in the game folder, so no mod can load.");
+const NO_SUPPORT_REPAIR_RUNNING: Phrase = Phrase::new("MelonLoader couldn't start its Unity support, so no mod runs. Close Last Epoch and play with mods again to repair it.");
+const NO_SUPPORT_RUNNING: Phrase = Phrase::new("MelonLoader couldn't start its Unity support, so no mod runs. See its log.");
+const NO_SUPPORT_REPAIR: Phrase = Phrase::new("In the last game with mods, MelonLoader couldn't start its Unity support. Playing with mods again repairs it.");
+const NO_SUPPORT: Phrase = Phrase::new("In the last game with mods, MelonLoader couldn't start its Unity support. See its log.");
+const PREPARING: Phrase = Phrase::new("MelonLoader is preparing for this game build, so this game runs without mods. Close it once it's up and play with mods again.");
+const DID_NOT_LOAD: Phrase = Phrase::new("{name} didn't load last time. Turn it off or replace it.");
+const CANT_LOAD: Phrase = Phrase::new("{name} can't load: {problem} Turn it off or replace it.");
+const MANY_CANT_LOAD: Phrase = Phrase::new("{count} mods can't load: {names} and {last}. Turn them off or replace them.");
+const RUNNING: Phrase = Phrase::new("Last Epoch is running. Play with mods once it closes.");
+const LOADER_VERSION: Phrase = Phrase::new("MelonLoader {version}");
+const GAME_VERSION: Phrase = Phrase::new("Last Epoch {version}");
+const WILL_PREPARE: Phrase = Phrase::new("The next game with mods prepares MelonLoader for this game build and runs without mods. Play again once it's up.");
+const NEEDS_REPAIR: Phrase = Phrase::new("MelonLoader's Unity support needs a repair. Play offline with mods repairs it first.");
+const LAST_PLAYED_TODAY: Phrase = Phrase::new("Last played with mods today at {time}");
+const LAST_PLAYED_YESTERDAY: Phrase = Phrase::new("Last played with mods yesterday at {time}");
+const LAST_PLAYED_ON: Phrase = Phrase::new("Last played with mods on {date} at {time}");
 
 #[derive(Clone, Debug)]
 pub struct LoaderReport {
@@ -45,9 +75,9 @@ impl ModReport {
     }
     pub fn state_text(&self) -> &'static str {
         match (self.installed.enabled, self.was_on) {
-            (true, false) => "Turns on the next time you play with mods",
-            (false, true) => "Turns off the next time you play with mods",
-            (true, true) if self.build_waiting => "This build is installed the next time you play with mods",
+            (true, false) => TURNS_ON.get(),
+            (false, true) => TURNS_OFF.get(),
+            (true, true) if self.build_waiting => BUILD_WAITING.get(),
             _ => "",
         }
     }
@@ -68,7 +98,7 @@ pub struct Inventory {
 pub fn read(install: Option<&GameInstall>, library: &ModLibrary, loader_root: Option<&Path>) -> Inventory {
     let Some(install) = install else {
         return Inventory {
-            error: Some("Last Epoch wasn't found. Choose the game executable in Settings.".into()),
+            error: Some(NO_GAME.into()),
             ..Default::default()
         };
     };
@@ -81,7 +111,7 @@ pub fn read(install: Option<&GameInstall>, library: &ModLibrary, loader_root: Op
     let (changes, profile, placed) = match records {
         Ok(value) => value,
         Err(error) => {
-            inventory.error = Some(format!("The mods could not be read: {error}"));
+            inventory.error = Some(UNREADABLE.with(&[("error", &error)]));
             return inventory;
         }
     };
@@ -99,7 +129,7 @@ pub fn read(install: Option<&GameInstall>, library: &ModLibrary, loader_root: Op
         last_game_without_support: log.as_ref().is_some_and(MelonLog::support_failed),
     });
     let preferences = MelonPreferences::load(&melon_paths::preferences(root)).unwrap_or_else(|error| {
-        inventory.settings_problem = Some(format!("Settings could not be read: {error}"));
+        inventory.settings_problem = Some(SETTINGS_UNREADABLE.with(&[("error", &error)]));
         MelonPreferences::parse("").expect("empty preferences")
     });
     let game = install.read_identity().unwrap_or_else(|| GameIdentity {
@@ -113,15 +143,9 @@ pub fn read(install: Option<&GameInstall>, library: &ModLibrary, loader_root: Op
         let facts = library.facts(&installed);
         let (melon, read_problem) = match &facts.melon {
             Ok(Some(melon)) => (Some(melon), None),
-            Ok(None) => (
-                None,
-                Some(format!(
-                    "{} has no MelonInfo, so it is not a MelonLoader mod. If a mod needs it, it belongs in UserLibs.",
-                    installed.file
-                )),
-            ),
-            Err((std::io::ErrorKind::InvalidData, _)) => (None, Some(format!("{} is not a .NET assembly, so MelonLoader can't load it.", installed.file))),
-            Err((_, error)) => (None, Some(format!("The app's copy of {} could not be read: {error}", installed.file))),
+            Ok(None) => (None, Some(NO_MELON_INFO.with(&[("file", &installed.file)]))),
+            Err((std::io::ErrorKind::InvalidData, _)) => (None, Some(NOT_ASSEMBLY.with(&[("file", &installed.file)]))),
+            Err((_, error)) => (None, Some(COPY_UNREADABLE.with(&[("file", &installed.file), ("error", error)]))),
         };
         let description = match &facts.settings {
             Ok(resource) => resource
@@ -132,12 +156,9 @@ pub fn read(install: Option<&GameInstall>, library: &ModLibrary, loader_root: Op
             Err(error) => Err(error.clone()),
         };
         descriptions.push(description.unwrap_or_else(|error| {
-            inventory.settings_problem.get_or_insert_with(|| {
-                format!(
-                    "{} describes its settings in a way the app can't read, so they show as MelonPreferences.cfg has them. {error}",
-                    installed.file
-                )
-            });
+            inventory
+                .settings_problem
+                .get_or_insert_with(|| DESCRIPTION_UNREADABLE.with(&[("file", &installed.file), ("error", &error)]));
             None
         }));
         let name = melon
@@ -259,20 +280,16 @@ impl Inventory {
             return failure(error.clone());
         }
         if missing {
-            return failure(if report.is_some() {
-                format!("{} Delete the older one.", loader::CONFLICT)
-            } else {
-                "MelonLoader isn't in the game folder, so no mod can load.".into()
-            });
+            return failure(if report.is_some() { CONFLICT.into() } else { NO_LOADER.into() });
         }
         let report = report.unwrap();
         if report.last_game_without_support && (!running || modded_run) {
             return failure(
                 match (running, report.core_module_needs_repair) {
-                    (true, true) => "MelonLoader couldn't start its Unity support, so no mod runs. Close Last Epoch and play with mods again to repair it.",
-                    (true, false) => "MelonLoader couldn't start its Unity support, so no mod runs. See its log.",
-                    (false, true) => "In the last game with mods, MelonLoader couldn't start its Unity support. Playing with mods again repairs it.",
-                    _ => "In the last game with mods, MelonLoader couldn't start its Unity support. See its log.",
+                    (true, true) => NO_SUPPORT_REPAIR_RUNNING,
+                    (true, false) => NO_SUPPORT_RUNNING,
+                    (false, true) => NO_SUPPORT_REPAIR,
+                    _ => NO_SUPPORT,
                 }
                 .into(),
             );
@@ -280,7 +297,7 @@ impl Inventory {
         let failing: Vec<_> = self.mods.iter().filter(|item| item.installed.enabled && item.problem.is_some()).collect();
         if report.preparation == LoaderPreparation::WillPrepare && running && modded_run {
             return Readiness {
-                text: "MelonLoader is preparing for this game build, so this game runs without mods. Close it once it's up and play with mods again.".into(),
+                text: PREPARING.into(),
                 facts: Vec::new(),
                 warning: !failing.is_empty(),
                 can_play,
@@ -289,46 +306,45 @@ impl Inventory {
         if let Some(first) = failing.first() {
             return failure(if failing.len() == 1 {
                 if first.loaded_last_time == Some(false) {
-                    format!("{} didn't load last time. Turn it off or replace it.", first.name)
+                    DID_NOT_LOAD.with(&[("name", &first.name)])
                 } else {
-                    format!("{} can't load: {} Turn it off or replace it.", first.name, first.problem.as_deref().unwrap())
+                    CANT_LOAD.with(&[("name", &first.name), ("problem", &first.problem.as_deref().unwrap())])
                 }
             } else {
-                format!(
-                    "{} mods can't load: {} and {}. Turn them off or replace them.",
-                    failing.len(),
-                    failing[..failing.len() - 1].iter().map(|item| item.name.as_str()).collect::<Vec<_>>().join(", "),
-                    failing.last().unwrap().name
-                )
+                MANY_CANT_LOAD.with(&[
+                    ("count", &failing.len()),
+                    ("names", &failing[..failing.len() - 1].iter().map(|item| item.name.as_str()).collect::<Vec<_>>().join(", ")),
+                    ("last", &failing.last().unwrap().name),
+                ])
             });
         }
         if running {
             return Readiness {
-                text: "Last Epoch is running. Play with mods once it closes.".into(),
+                text: RUNNING.into(),
                 facts: Vec::new(),
                 warning: false,
                 can_play,
             };
         }
-        let mut facts = vec![format!("MelonLoader {}", report.version)];
-        facts.extend(version.map(|version| format!("Last Epoch {version}")));
+        let mut facts = vec![LOADER_VERSION.with(&[("version", &report.version)])];
+        facts.extend(version.map(|version| GAME_VERSION.with(&[("version", &version)])));
         let mut text = String::new();
         if report.preparation == LoaderPreparation::WillPrepare {
-            text = "The next game with mods prepares MelonLoader for this game build and runs without mods. Play again once it's up.".into();
+            text = WILL_PREPARE.into();
         } else if report.core_module_needs_repair {
-            text = "MelonLoader's Unity support needs a repair. Play offline with mods repairs it first.".into();
+            text = NEEDS_REPAIR.into();
         } else if let Some(last) = self.last_launch {
             let zone = jiff::tz::TimeZone::system();
             let local = last.to_zoned(zone.clone());
             let today = now.to_zoned(zone).date();
-            let day = if local.date() == today {
-                "today".into()
+            let time = local.strftime("%H:%M").to_string();
+            facts.push(if local.date() == today {
+                LAST_PLAYED_TODAY.with(&[("time", &time)])
             } else if today.yesterday().ok() == Some(local.date()) {
-                "yesterday".into()
+                LAST_PLAYED_YESTERDAY.with(&[("time", &time)])
             } else {
-                format!("on {}", local.strftime("%-d %B"))
-            };
-            facts.push(format!("Last played with mods {day} at {}", local.strftime("%H:%M")));
+                LAST_PLAYED_ON.with(&[("date", &local.strftime("%-d %B")), ("time", &time)])
+            });
         }
         Readiness {
             text,

@@ -13,6 +13,7 @@ import { ListView } from "../../widgets/scroll-view.slint";
 import { TextField } from "../../widgets/text-field.slint";
 import { FactsText } from "../../widgets/text.slint";
 import { ForgeState } from "state.slint";
+import { ForgeText } from "../../strings/forge.slint";
 
 export global TemplateMetrics {
     // A list row: the name over its caption, with its buttons beside them.
@@ -22,7 +23,7 @@ export global TemplateMetrics {
 
     // The line under the form: what saving the typed name would replace, else what the last action did.
     out property <string> message: ForgeState.template-replaces != ""
-        ? "Saving replaces \"\{ForgeState.template-replaces}\"."
+        ? ForgeText.saving-replaces(ForgeState.template-replaces)
         : ForgeState.template-message;
 
     public pure function list-height(rows: int) -> length {
@@ -100,7 +101,7 @@ export component TemplatesPanel inherits FlyoutSurface {
             alignment: start;
 
             Text {
-                text: "Templates";
+                text: ForgeText.templates;
                 font-size: Tokens.font-size-section;
                 font-weight: Tokens.emphasis-weight;
                 color: Tokens.text-brush;
@@ -111,7 +112,7 @@ export component TemplatesPanel inherits FlyoutSurface {
 
                 if ForgeState.template-rows.length == 0: Text {
                     width: parent.width;
-                    text: "No templates yet. Save this item's affixes, or the whole item, below.";
+                    text: ForgeText.no-templates;
                     font-size: Tokens.font-size-caption;
                     color: Tokens.text-muted-brush;
                     wrap: word-wrap;
@@ -147,7 +148,7 @@ export component TemplatesPanel inherits FlyoutSurface {
                             }
 
                             if asking: Text {
-                                text: "Delete this template for good?";
+                                text: ForgeText.delete-template;
                                 font-size: Tokens.font-size-caption;
                                 color: Tokens.text-brush;
                                 overflow: elide;
@@ -161,10 +162,10 @@ export component TemplatesPanel inherits FlyoutSurface {
                         // Asking, the same two buttons become Delete and Keep, so the key that asked lands on Keep.
                         Button {
                             in-flyout: true;
-                            text: asking ? "Delete" : "Draft";
+                            text: asking ? ForgeText.delete : ForgeText.draft;
                             kind: asking ? ButtonKind.primary : ButtonKind.standard;
                             enabled: asking || ForgeState.has-item;
-                            tip: asking ? "Delete \"\{entry.name}\"; it can't be brought back" : "Draft \"\{entry.name}\" onto the item";
+                            tip: asking ? ForgeText.delete-for-good-tip(entry.name) : ForgeText.draft-onto-tip(entry.name);
                             clicked => {
                                 if (asking) {
                                     root.deleting = -1;
@@ -179,9 +180,9 @@ export component TemplatesPanel inherits FlyoutSurface {
 
                         Button {
                             in-flyout: true;
-                            text: asking ? "Keep" : "Delete…";
+                            text: asking ? ForgeText.keep : ForgeText.delete-ellipsis;
                             kind: asking ? ButtonKind.standard : ButtonKind.subtle;
-                            tip: asking ? "Keep \"\{entry.name}\"" : "Delete \"\{entry.name}\"";
+                            tip: asking ? ForgeText.keep-named(entry.name) : ForgeText.delete-named(entry.name);
                             clicked => {
                                 root.deleting = asking ? -1 : index;
                             }
@@ -192,8 +193,8 @@ export component TemplatesPanel inherits FlyoutSurface {
 
             name-field := TextField {
                 text: ForgeState.template-name;
-                placeholder: "Template name";
-                label: "Template name";
+                placeholder: ForgeText.template-name;
+                label: ForgeText.template-name;
                 init => {
                     self.focus();
                 }
@@ -216,8 +217,8 @@ export component TemplatesPanel inherits FlyoutSurface {
                 spacing: Tokens.space-8;
 
                 ChoiceBox {
-                    label: "What to save";
-                    choices: ["Affixes only", "Whole item"];
+                    label: ForgeText.what-to-save;
+                    choices: [ForgeText.affixes-only, ForgeText.whole-item];
                     index: root.kind;
                     horizontal-stretch: 1;
                     chosen(index) => {
@@ -227,12 +228,12 @@ export component TemplatesPanel inherits FlyoutSurface {
 
                 save-button := Button {
                     in-flyout: true;
-                    text: ForgeState.template-replaces != "" ? "Replace" : "Save";
+                    text: ForgeState.template-replaces != "" ? ForgeText.replace : ForgeText.save;
                     kind: ButtonKind.primary;
                     enabled: ForgeState.template-name != "" && ForgeState.has-item;
                     tip: ForgeState.template-replaces != ""
-                        ? "Save the item as Apply would leave it, in place of \"\{ForgeState.template-replaces}\""
-                        : "Save the item as Apply would leave it under this name";
+                        ? ForgeText.save-replacing-tip(ForgeState.template-replaces)
+                        : ForgeText.save-new-tip;
                     clicked => {
                         root.save();
                     }

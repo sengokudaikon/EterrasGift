@@ -1,6 +1,7 @@
 //! Immutable feature descriptions and local intent, with no game access. Native support follows from a hook's
 //! identity (`eg_trainer_wire::hooks::GameplayHook`); a descriptor grants no permission to install a hook.
 
+use eg_core::phrase::Phrase;
 use eg_trainer_wire::hooks::GameplayHook;
 use std::collections::{BTreeMap, BTreeSet};
 use std::error::Error;
@@ -105,13 +106,13 @@ pub enum NativeSupport {
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct FeatureValue {
-    pub label: &'static str,
+    pub label: Phrase,
     /// Display default, including the selected choice's label.
     pub default: &'static str,
     /// Numeric default, or the selected choice's zero-based index.
     pub start: f64,
-    pub choices: &'static [&'static str],
-    pub hint: Option<&'static str>,
+    pub choices: &'static [Phrase],
+    pub hint: Option<Phrase>,
     pub minimum: f64,
     pub maximum: f64,
     /// UI increment only. Values are never rounded to this step.
@@ -144,24 +145,24 @@ impl FeatureValue {
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct FeatureField {
-    pub label: &'static str,
+    pub label: Phrase,
     pub minimum: f64,
     pub maximum: f64,
     pub step: f64,
-    pub group: Option<&'static str>,
+    pub group: Option<Phrase>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct FeatureDescriptor {
     pub key: FeatureKey,
     pub area: TrainerArea,
-    pub section: &'static str,
-    pub title: &'static str,
-    pub description: &'static str,
+    pub section: Phrase,
+    pub title: Phrase,
+    pub description: Phrase,
     pub kind: FeatureKind,
     pub values: &'static [FeatureValue],
     pub fields: &'static [FeatureField],
-    pub needs: Option<&'static str>,
+    pub needs: Option<Phrase>,
 }
 
 impl FeatureDescriptor {
@@ -178,17 +179,17 @@ impl FeatureDescriptor {
     }
     /// What its help says, a line each: what it does, what the game has to be showing for it, and what its values mean.
     pub fn help(&self) -> String {
-        let mut text = self.description.to_owned();
+        let mut text = self.description.get().to_owned();
         if let Some(needs) = self.needs {
             text.push('\n');
-            text.push_str(needs);
+            text.push_str(needs.get());
         }
         for value in self.values {
             if let Some(hint) = value.hint {
                 text.push('\n');
-                text.push_str(value.label);
+                text.push_str(value.label.get());
                 text.push_str(": ");
-                text.push_str(hint);
+                text.push_str(hint.get());
             }
         }
         text
@@ -198,9 +199,9 @@ impl FeatureDescriptor {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct TrainerPage {
     pub area: TrainerArea,
-    pub title: &'static str,
+    pub title: Phrase,
     pub icon: &'static str,
-    pub sections: &'static [&'static str],
+    pub sections: &'static [Phrase],
     pub stacked: bool,
 }
 

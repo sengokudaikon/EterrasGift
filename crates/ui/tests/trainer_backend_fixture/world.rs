@@ -652,13 +652,13 @@ impl Drop for Forge {
 
 /// No value table or unique description is still on its way.
 fn settled(editor: &ForgeEditor) -> bool {
-    editor.affixes.iter().all(|row| row.value.status() != LOADING)
+    editor.affixes.iter().all(|row| row.value.status() != LOADING.get())
         && editor
             .uniques
             .iter()
             .chain(&editor.implicits)
             .flat_map(|row| &row.rolls)
-            .all(|roll| roll.editor.status() != LOADING)
+            .all(|roll| roll.editor.status() != LOADING.get())
 }
 
 impl Forge {

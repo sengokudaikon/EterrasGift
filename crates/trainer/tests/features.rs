@@ -22,8 +22,8 @@ fn ids_are_unique_and_each_key_is_typed_by_its_kind() {
     for descriptor in DESCRIPTORS {
         assert_eq!(FeatureKey::parse(descriptor.key.as_str()), Some(descriptor.key));
         assert_eq!(descriptor.key.descriptor(), descriptor);
-        assert!(!descriptor.title.is_empty());
-        assert!(!descriptor.description.is_empty());
+        assert!(!descriptor.title.get().is_empty());
+        assert!(!descriptor.description.get().is_empty());
         match descriptor.key {
             FeatureKey::Hook(id) => {
                 assert_eq!(HookId::parse(id.as_str()), Some(id));
@@ -79,7 +79,7 @@ fn values_start_where_their_default_says_and_ranges_hold_them() {
             if value.choices.is_empty() {
                 assert_eq!(value.default.parse::<f64>().unwrap(), value.start, "{}", descriptor.key.as_str());
             } else {
-                assert_eq!(value.choices[value.start as usize], value.default, "{}", descriptor.key.as_str());
+                assert_eq!(value.choices[value.start as usize].get(), value.default, "{}", descriptor.key.as_str());
             }
         }
         for field in descriptor.fields {

@@ -77,7 +77,7 @@ impl TrainerSession for BackendSession {
                 }
             })
             .unwrap_or(false);
-        (!served).then_some(NOT_AVAILABLE)
+        (!served).then_some(NOT_AVAILABLE.get())
     }
 
     fn profiles(&self) -> Vec<Profile> {
@@ -169,10 +169,10 @@ impl TrainerSession for BackendSession {
     }
 
     fn read_fields(&self, _: &str) -> FieldRequest {
-        refused(NOT_AVAILABLE)
+        refused(NOT_AVAILABLE.get())
     }
     fn write_fields(&self, _: &str, _: &[FieldWrite]) -> FieldRequest {
-        refused(NOT_AVAILABLE)
+        refused(NOT_AVAILABLE.get())
     }
 }
 

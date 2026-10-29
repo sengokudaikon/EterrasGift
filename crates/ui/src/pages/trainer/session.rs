@@ -4,6 +4,7 @@
 //! profile is known.
 
 use super::profiles::Profile;
+use eg_core::phrase::Phrase;
 
 /// Where a hook of the live profile stands in the game: the worker's own report.
 pub use eg_trainer::backend::HookRun as HookState;
@@ -66,7 +67,7 @@ impl From<FieldResult> for FieldRequest {
 }
 
 /// What a connected row says when this version cannot serve its feature yet.
-pub const NOT_AVAILABLE: &str = "Not available in this version yet.";
+pub const NOT_AVAILABLE: Phrase = Phrase::new("Not available in this version yet.");
 
 pub trait TrainerSession {
     /// An offline character is connected (the session is Ready or Applying).
@@ -115,12 +116,12 @@ pub trait TrainerSession {
 #[derive(Default)]
 pub struct Unconnected;
 
-const NOT_CONNECTED: &str = "No offline character is connected.";
+const NOT_CONNECTED: Phrase = Phrase::new("No offline character is connected.");
 
 /// The refusal of a session with nothing connected: nothing reached the game.
 pub fn not_connected() -> FieldRequest {
     FieldRequest::Done(Err(FieldError {
-        details: NOT_CONNECTED.to_owned(),
+        details: NOT_CONNECTED.into(),
         nothing_sent: true,
     }))
 }

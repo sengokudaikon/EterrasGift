@@ -3,6 +3,30 @@
 
 use super::catalog::{self, Area, Feature, FeatureField, FeatureKind};
 use super::session::{FieldError, FieldRequest, FieldResult, FieldWrite, GameField, HookState, PendingFields, TrainerSession};
+use eg_core::phrase::Phrase;
+
+const TURNS_ON_WHEN: Phrase = Phrase::new("Turns on when {name} enters play.");
+const SELECTED: Phrase = Phrase::new("{choice} selected in the game.");
+const ONE_HIT_KILLS: Phrase = Phrase::new("One-hit kills are on.");
+const ON_IN_GAME: Phrase = Phrase::new("On in the game.");
+const COULD_NOT_TURN_ON: Phrase = Phrase::new("Couldn't turn on: {reason}");
+const TURNING_ON: Phrase = Phrase::new("Turning on…");
+const WAITING_TO_TURN_ON: Phrase = Phrase::new("Waiting to turn on…");
+const COULD_NOT_TURN_OFF: Phrase = Phrase::new("Couldn't turn off: {reason}");
+const TURNING_OFF: Phrase = Phrase::new("Turning off…");
+const NOT_READ_YET: Phrase = Phrase::new("Not read yet");
+const IN_GAME: Phrase = Phrase::new("In game: {value}");
+const CONNECT_FIRST: Phrase = Phrase::new("Connect an offline character first.");
+const APPLY_CHANGES: Phrase = Phrase::new("Apply {count} changes");
+const APPLY: Phrase = Phrase::new("Apply");
+const OTHER_FIELDS_READ: Phrase = Phrase::new("it answered with other fields.");
+const COULD_NOT_READ: Phrase = Phrase::new("Couldn't read from the game: {details}");
+const CONFIRMED: Phrase = Phrase::new("Confirmed.");
+const GAME_KEPT: Phrase = Phrase::new("The game kept {kept}.");
+const NOT_CHANGED: Phrase = Phrase::new("Not changed: {details}");
+const OTHER_FIELDS_WRITE: Phrase = Phrase::new("The game answered with other fields.");
+const READ_AGAIN: Phrase = Phrase::new("{details} Read again to see what the game holds.");
+const STEP: Phrase = Phrase::new("Up and Down change it by {step}");
 
 /// One trainer page: its sections along the top and the chosen one beneath.
 pub struct PageModel {
@@ -51,7 +75,7 @@ pub fn build(area: Area, features: &[Feature], planned: bool, session: &dyn Trai
         let in_section: Vec<&Feature> = features.iter().filter(|f| f.area == area && f.section == section).collect();
         if in_section.iter().any(|f| f.fills_section() && f.presented) {
             sections.push(Section {
-                title: section.to_owned(),
+                title: section.get().to_owned(),
                 content: Content::ItemForge,
             });
             continue;
@@ -70,7 +94,7 @@ pub fn build(area: Area, features: &[Feature], planned: bool, session: &dyn Trai
             .collect();
         if !rows.is_empty() {
             sections.push(Section {
-                title: section.to_owned(),
+                title: section.get().to_owned(),
                 content: Content::Rows(rows),
             });
         }
@@ -88,13 +112,13 @@ pub fn build(area: Area, features: &[Feature], planned: bool, session: &dyn Trai
             }
         }
         sections = vec![Section {
-            title: page.title.to_owned(),
+            title: page.title.get().to_owned(),
             content: Content::Rows(rows),
         }];
     }
     Some(PageModel {
         area,
-        title: page.title,
+        title: page.title.get(),
         sections,
         selected: 0,
     })
@@ -103,9 +127,9 @@ pub fn build(area: Area, features: &[Feature], planned: bool, session: &dyn Trai
 /// A planned row's details: its values and their starting points, or the fields it edits.
 pub fn planned_details(feature: &Feature) -> String {
     if !feature.values.is_empty() {
-        feature.values.iter().map(|v| format!("{} {}", v.label, v.default)).collect::<Vec<_>>().join(", ")
+        feature.values.iter().map(|v| format!("{} {}", v.label.get(), v.default)).collect::<Vec<_>>().join(", ")
     } else {
-        feature.fields.iter().map(|f| f.label).collect::<Vec<_>>().join(", ")
+        feature.fields.iter().map(|f| f.label.get()).collect::<Vec<_>>().join(", ")
     }
 }
 
@@ -214,23 +238,22 @@ impl HookRow {
         let wanted = self.is_on(session);
         if !connected {
             return match session.shown_profile() {
-                Some(profile) if wanted => (format!("Turns on when {} enters play.", profile.name), Tone::None),
+                Some(profile) if wanted => (TURNS_ON_WHEN.with(&[("name", &profile.name)]), Tone::None),
                 _ => (String::new(), Tone::None),
             };
         }
         let say = |text: &str, tone| (text.to_owned(), tone);
         match (wanted, session.hook_state(self.feature.id())) {
-            (true, Some(HookState::On)) if self.feature.kind == FeatureKind::Choice => (
-                format!("{} selected in the game.", self.feature.values[0].choices[self.values[0] as usize]),
-                Tone::Confirmed,
-            ),
-            (true, Some(HookState::On)) if self.feature.id() == "enemy-damage" && self.values == [101.0] => say("One-hit kills are on.", Tone::Confirmed),
-            (true, Some(HookState::On)) => say("On in the game.", Tone::Confirmed),
-            (true, Some(HookState::Failed { reason, .. })) => (format!("Couldn't turn on: {reason}"), Tone::Error),
-            (true, Some(HookState::Applying | HookState::Off)) => say("Turning on…", Tone::None),
-            (true, Some(HookState::Queued) | None) => say("Waiting to turn on…", Tone::None),
-            (false, Some(HookState::Failed { reason, on: true })) => (format!("Couldn't turn off: {reason}"), Tone::Error),
-            (false, Some(HookState::Applying | HookState::On)) => say("Turning off…", Tone::None),
+            (true, Some(HookState::On)) if self.feature.kind == FeatureKind::Choice => {
+                (SELECTED.with(&[("choice", &self.feature.values[0].choices[self.values[0] as usize])]), Tone::Confirmed)
+            }
+            (true, Some(HookState::On)) if self.feature.id() == "enemy-damage" && self.values == [101.0] => say(ONE_HIT_KILLS.get(), Tone::Confirmed),
+            (true, Some(HookState::On)) => say(ON_IN_GAME.get(), Tone::Confirmed),
+            (true, Some(HookState::Failed { reason, .. })) => (COULD_NOT_TURN_ON.with(&[("reason", &reason)]), Tone::Error),
+            (true, Some(HookState::Applying | HookState::Off)) => say(TURNING_ON.get(), Tone::None),
+            (true, Some(HookState::Queued) | None) => say(WAITING_TO_TURN_ON.get(), Tone::None),
+            (false, Some(HookState::Failed { reason, on: true })) => (COULD_NOT_TURN_OFF.with(&[("reason", &reason)]), Tone::Error),
+            (false, Some(HookState::Applying | HookState::On)) => say(TURNING_OFF.get(), Tone::None),
             (false, _) => (String::new(), Tone::None),
         }
     }
@@ -272,7 +295,7 @@ impl FieldShape {
     fn of(field: &FeatureField, label: &str) -> FieldShape {
         FieldShape {
             label: label.to_owned(),
-            group: field.group,
+            group: field.group.map(Phrase::get),
             min: field.minimum,
             max: field.maximum,
             step: field.step,
@@ -353,8 +376,8 @@ impl FieldModel {
 
     pub fn game_text(&self) -> String {
         match self.game {
-            None => "Not read yet".to_owned(),
-            Some(value) => format!("In game: {}", grouped(value)),
+            None => NOT_READ_YET.get().to_owned(),
+            Some(value) => IN_GAME.with(&[("value", &grouped(value))]),
         }
     }
 }
@@ -401,7 +424,7 @@ impl EditorRow {
                 .map(|(i, field)| FieldModel {
                     starts_group: field.group.is_some() && (i == 0 || defined[i - 1].group != field.group),
                     first: i == 0,
-                    ..FieldModel::new(FieldShape::of(field, field.label))
+                    ..FieldModel::new(FieldShape::of(field, field.label.get()))
                 })
                 .collect()
         };
@@ -459,7 +482,7 @@ impl EditorRow {
         if session.is_connected() {
             session.unavailable(self.feature.id())
         } else {
-            Some("Connect an offline character first.")
+            Some(CONNECT_FIRST.get())
         }
     }
 
@@ -478,8 +501,8 @@ impl EditorRow {
 
     pub fn apply_text(&self) -> String {
         match self.fields.iter().filter(|f| f.is_drafted()).count() {
-            drafts if drafts > 1 => format!("Apply {drafts} changes"),
-            _ => "Apply".to_owned(),
+            drafts if drafts > 1 => APPLY_CHANGES.with(&[("count", &drafts)]),
+            _ => APPLY.get().to_owned(),
         }
     }
 
@@ -510,8 +533,8 @@ impl EditorRow {
                 self.say("", Tone::None);
             }
             result => {
-                let details = result.err().map_or_else(|| "it answered with other fields.".to_owned(), |error| error.details);
-                self.say(format!("Couldn't read from the game: {details}"), Tone::Error);
+                let details = result.err().map_or_else(|| OTHER_FIELDS_READ.into(), |error| error.details);
+                self.say(COULD_NOT_READ.with(&[("details", &details)]), Tone::Error);
             }
         }
     }
@@ -565,18 +588,18 @@ impl EditorRow {
                     })
                     .collect();
                 if kept.is_empty() {
-                    self.say("Confirmed.", Tone::Confirmed);
+                    self.say(CONFIRMED.get(), Tone::Confirmed);
                 } else {
-                    self.say(format!("The game kept {}.", kept.join(", ")), Tone::Error);
+                    self.say(GAME_KEPT.with(&[("kept", &kept.join(", "))]), Tone::Error);
                 }
             }
             Err(FieldError { details, nothing_sent: true }) => {
                 // Nothing reached the game; the drafts stay.
-                self.say(format!("Not changed: {details}"), Tone::Error);
+                self.say(NOT_CHANGED.with(&[("details", &details)]), Tone::Error);
             }
             result => {
-                let details = result.err().map_or_else(|| "The game answered with other fields.".to_owned(), |error| error.details);
-                self.say(format!("{details} Read again to see what the game holds."), Tone::Error);
+                let details = result.err().map_or_else(|| OTHER_FIELDS_WRITE.into(), |error| error.details);
+                self.say(READ_AGAIN.with(&[("details", &details)]), Tone::Error);
             }
         }
     }
@@ -606,7 +629,8 @@ impl EditorRow {
             let shape = match self.feature.fields {
                 [only] => *only,
                 _ => FeatureField {
-                    label: "",
+                    // Unused: each row is named by what the game holds.
+                    label: self.feature.title,
                     minimum: 0.0,
                     maximum: i32::MAX as f64,
                     step: 1.0,
@@ -672,7 +696,7 @@ pub fn parse(text: &str) -> Option<f64> {
 
 /// A step as its tip says it ("Up and Down change it by 0.5").
 pub fn step_text(step: f64) -> String {
-    format!("Up and Down change it by {step}")
+    STEP.with(&[("step", &step)])
 }
 
 /// Where each column starts: the split whose tallest column is shortest, at headings when there are any
@@ -807,7 +831,7 @@ mod tests {
                 .iter()
                 .filter_map(|row| if let Row::Heading(title) = row { Some(title.as_str()) } else { None })
                 .collect();
-            assert_eq!(headings, catalog::page(area).sections);
+            assert_eq!(headings, catalog::page(area).sections.iter().map(|section| section.get()).collect::<Vec<_>>());
             let ids: Vec<_> = rows
                 .iter()
                 .filter_map(|row| match row {
@@ -986,7 +1010,7 @@ mod tests {
             true
         }
         fn unavailable(&self, id: &str) -> Option<&'static str> {
-            self.unserved.filter(|unserved| *unserved == id).map(|_| NOT_AVAILABLE)
+            self.unserved.filter(|unserved| *unserved == id).map(|_| NOT_AVAILABLE.get())
         }
         fn is_hook_wanted(&self, _: &str) -> bool {
             true
@@ -1060,7 +1084,7 @@ mod tests {
         // A field set this version cannot serve: read-only, with its reason, and nothing is asked of the game.
         let unserved = EditorRow::new(*catalog::feature("currency").unwrap(), false, &game);
         assert!(!unserved.is_busy() && !unserved.can_use(&game));
-        assert_eq!(unserved.reason(&game), Some(NOT_AVAILABLE));
+        assert_eq!(unserved.reason(&game), Some(NOT_AVAILABLE.get()));
         assert_eq!(
             EditorRow::new(feature, false, &Unconnected).reason(&Unconnected),
             Some("Connect an offline character first.")
@@ -1072,7 +1096,7 @@ mod tests {
             ..Game::default()
         };
         assert!(!hook.can_use(&game));
-        assert_eq!(hook.status(&game), (NOT_AVAILABLE.to_owned(), Tone::None));
+        assert_eq!(hook.status(&game), (NOT_AVAILABLE.get().to_owned(), Tone::None));
     }
 
     #[test]

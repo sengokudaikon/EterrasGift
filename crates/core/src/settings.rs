@@ -4,12 +4,47 @@
 
 use crate::folder_move::{migrate, migration_conflict, probe, relative};
 use crate::paths::{self, AppPaths};
+use crate::phrase::Phrase;
 use crate::{atomic, json, text};
 use serde_json::{Map, Value};
 use std::collections::BTreeMap;
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
+
+const MUST_BE_TEXT: Phrase = Phrase::new("{name} must be text.");
+const MODULE_CHOICE_NOT_BOOL: Phrase = Phrase::new("The modules' choice for {id} must be true or false.");
+const MODULES_NOT_OBJECT: Phrase = Phrase::new("modules must be an object.");
+const MODULE_SETTINGS_NOT_OBJECT: Phrase = Phrase::new("moduleSettings must be an object.");
+const NOT_LOADED: Phrase = Phrase::new("Settings could not be loaded: {reason} Changes last until Eterra's Gift closes. Save locations replaces the file.");
+const EXECUTABLE_NOT_FOUND: Phrase = Phrase::new("The configured game executable was not found. Choose another executable or use automatic detection.");
+const MIGRATION_FAILED: Phrase = Phrase::new("Data migration failed; the previous folder remains active. {error}");
+const LIBRARY_NOT_MOVED: Phrase = Phrase::new("The mod library could not be moved; its previous folder remains active. {error}");
+const GAME_EXECUTABLE: Phrase = Phrase::new("game executable");
+const MOD_SOURCES_FOLDER: Phrase = Phrase::new("mod sources folder");
+const DOTNET_FOLDER: Phrase = Phrase::new(".NET SDK folder");
+const MELONLOADER_FOLDER: Phrase = Phrase::new("MelonLoader folder");
+const USER_DATA_FOLDER: Phrase = Phrase::new("user-data folder");
+const MOD_LIBRARY_FOLDER: Phrase = Phrase::new("mod library folder");
+const CHOOSE_EXECUTABLE: Phrase = Phrase::new("Choose an existing game executable (.exe), or use automatic detection.");
+const CHOOSE_SOURCES_NONE: Phrase = Phrase::new("Choose an existing folder for mod sources, or leave it empty for none.");
+const CHOOSE_SOURCES_CHECKOUT: Phrase = Phrase::new("Choose an existing folder for mod sources, or leave it empty for the mods folder in the source checkout.");
+const CHOOSE_DOTNET: Phrase = Phrase::new("Choose the folder that holds dotnet.exe, or leave it empty to find the .NET SDK automatically.");
+const CHOOSE_MELONLOADER: Phrase = Phrase::new("Choose a folder with MelonLoader in it (a copy of the game's MelonLoader folder), or leave it empty for the game folder.");
+const ONE_AT_A_TIME: Phrase = Phrase::new("Move the user-data folder and the mod library one at a time: save one, restart Eterra's Gift, then change the other.");
+const USER_DATA_NOT_EMPTY: Phrase = Phrase::new("The selected folder already holds {file} with other content. Choose an empty user-data folder.");
+const LIBRARY_NOT_EMPTY: Phrase = Phrase::new("The selected folder already holds {file} with other content. Choose an empty folder for the mod library.");
+const NO_FILE: Phrase = Phrase::new("Could not find file '{path}'.");
+const NO_PATH: Phrase = Phrase::new("Could not find a part of the path '{path}'.");
+const ACCESS_DENIED: Phrase = Phrase::new("Access to the path '{path}' is denied.");
+const IN_USE: Phrase = Phrase::new("The process cannot access the file '{path}' because it is being used by another process.");
+const EXISTS: Phrase = Phrase::new("The file '{path}' already exists.");
+const TOO_LONG: Phrase = Phrase::new("The path '{path}' is too long, or a component of the specified path is too long.");
+const EMPTY_FILE: Phrase = Phrase::new("The settings file is empty.");
+const NOT_JSON: Phrase = Phrase::new("The settings file is not valid JSON ({error}).");
+const UNSUPPORTED_VERSION: Phrase = Phrase::new("Unsupported settings version.");
+const NOT_ABSOLUTE: Phrase = Phrase::new("Settings paths must be absolute and normalized.");
+const FULL_PATH: Phrase = Phrase::new("Enter the full path of the {what}, starting with its drive (such as C:\\), or use Browse.");
 
 /// The settings file's version. Version 1 kept a module's settings at the top level; opening it moves them into the
 /// module's own slice once.
@@ -78,24 +113,24 @@ impl AppSettings {
                 *settings.location_mut(index) = match value {
                     Value::Null => None,
                     Value::String(text) => Some(PathBuf::from(text)),
-                    _ => return Err(format!("{} must be text.", LOCATIONS[index])),
+                    _ => return Err(MUST_BE_TEXT.with(&[("name", &LOCATIONS[index])])),
                 };
             } else if key.eq_ignore_ascii_case("modules") {
                 match value {
                     Value::Null => {}
                     Value::Object(choices) => {
                         for (id, on) in choices {
-                            let on = on.as_bool().ok_or_else(|| format!("The modules' choice for {id} must be true or false."))?;
+                            let on = on.as_bool().ok_or_else(|| MODULE_CHOICE_NOT_BOOL.with(&[("id", id)]))?;
                             settings.modules.insert(id.clone(), on);
                         }
                     }
-                    _ => return Err("modules must be an object.".into()),
+                    _ => return Err(MODULES_NOT_OBJECT.get().into()),
                 }
             } else if key.eq_ignore_ascii_case("moduleSettings") {
                 match value {
                     Value::Null => {}
                     Value::Object(slices) => settings.module_settings = slices.clone(),
-                    _ => return Err("moduleSettings must be an object.".into()),
+                    _ => return Err(MODULE_SETTINGS_NOT_OBJECT.get().into()),
                 }
             } else if !key.eq_ignore_ascii_case("schemaVersion") {
                 settings.extra.insert(key.clone(), value.clone());
@@ -175,13 +210,7 @@ impl SettingsStore {
     pub fn open(root: &Path, file_path: &Path, legacy: &[LegacyModuleSettings]) -> SettingsStore {
         let (settings, upgraded, error) = match read(file_path, legacy) {
             Ok((settings, upgraded)) => (settings, upgraded, None),
-            Err(reason) => (
-                AppSettings::default(),
-                false,
-                Some(format!(
-                    "Settings could not be loaded: {reason} Changes last until Eterra's Gift closes. Save locations replaces the file."
-                )),
-            ),
+            Err(reason) => (AppSettings::default(), false, Some(NOT_LOADED.with(&[("reason", &reason)]))),
         };
         let mut store = SettingsStore {
             file_path: file_path.to_path_buf(),
@@ -207,7 +236,7 @@ impl SettingsStore {
         if let Some(executable) = &store.saved.game_executable
             && !(executable.is_file() && has_extension(executable, "exe"))
         {
-            store.startup_error = Some("The configured game executable was not found. Choose another executable or use automatic detection.".into());
+            store.startup_error = Some(EXECUTABLE_NOT_FOUND.get().into());
         }
         store.run_pending_moves();
         store
@@ -225,7 +254,7 @@ impl SettingsStore {
                     // Failed migration bookkeeping is not user intent. Keep the marker until a later startup
                     // copies the source again, including anything this run still writes there.
                     self.pending = None;
-                    self.startup_error = Some(format!("Data migration failed; the previous folder remains active. {error}"));
+                    self.startup_error = Some(MIGRATION_FAILED.with(&[("error", &error)]));
                 }
             }
         }
@@ -237,7 +266,7 @@ impl SettingsStore {
                 Ok(()) => self.paths = destination,
                 Err(error) => {
                     self.pending = None;
-                    self.startup_error = Some(format!("The mod library could not be moved; its previous folder remains active. {error}"));
+                    self.startup_error = Some(LIBRARY_NOT_MOVED.with(&[("error", &error)]));
                 }
             }
         }
@@ -324,57 +353,51 @@ impl SettingsStore {
     /// Stores the locations, checked first. It is the explicit save that may replace a file that could not be read.
     /// The error is the sentence the page shows after "Locations were not saved: ".
     pub(crate) fn save_locations(&mut self, locations: &Locations) -> Result<(), String> {
-        let executable = normalize(&locations.game_executable, "game executable")?;
+        let executable = normalize(&locations.game_executable, GAME_EXECUTABLE)?;
         if let Some(executable) = &executable
             && !(executable.is_file() && has_extension(executable, "exe"))
         {
-            return Err("Choose an existing game executable (.exe), or use automatic detection.".into());
+            return Err(CHOOSE_EXECUTABLE.get().into());
         }
-        let sources = keep_or(&self.desired().mod_sources_directory, &locations.mod_sources_directory, "mod sources folder")?;
+        let sources = keep_or(&self.desired().mod_sources_directory, &locations.mod_sources_directory, MOD_SOURCES_FOLDER)?;
         if let Some(sources) = &sources
             && !sources.is_dir()
         {
             return Err(if self.paths.mod_sources_directory().is_none() {
-                "Choose an existing folder for mod sources, or leave it empty for none."
+                CHOOSE_SOURCES_NONE.get()
             } else {
-                "Choose an existing folder for mod sources, or leave it empty for the mods folder in the source checkout."
+                CHOOSE_SOURCES_CHECKOUT.get()
             }
             .into());
         }
-        let dotnet = keep_or(&self.desired().dotnet_directory, &locations.dotnet_directory, ".NET SDK folder")?;
+        let dotnet = keep_or(&self.desired().dotnet_directory, &locations.dotnet_directory, DOTNET_FOLDER)?;
         if let Some(dotnet) = &dotnet
             && !dotnet.join("dotnet.exe").is_file()
         {
-            return Err("Choose the folder that holds dotnet.exe, or leave it empty to find the .NET SDK automatically.".into());
+            return Err(CHOOSE_DOTNET.get().into());
         }
-        let loader = keep_or(&self.desired().melon_loader_directory, &locations.melon_loader_directory, "MelonLoader folder")?;
+        let loader = keep_or(&self.desired().melon_loader_directory, &locations.melon_loader_directory, MELONLOADER_FOLDER)?;
         if let Some(loader) = &loader
             && !loader.join("MelonLoader").is_dir()
         {
-            return Err("Choose a folder with MelonLoader in it (a copy of the game's MelonLoader folder), or leave it empty for the game folder.".into());
+            return Err(CHOOSE_MELONLOADER.get().into());
         }
-        let directory = normalize(&locations.user_data_directory, "user-data folder")?;
-        let library = keep_or(&self.desired().mod_library_directory, &locations.mod_library_directory, "mod library folder")?;
+        let directory = normalize(&locations.user_data_directory, USER_DATA_FOLDER)?;
+        let library = keep_or(&self.desired().mod_library_directory, &locations.mod_library_directory, MOD_LIBRARY_FOLDER)?;
         let destination = self.paths.with(directory.as_deref(), library.as_deref());
         let changed = !paths::same_folder(&self.paths.user_data_directory, &destination.user_data_directory);
         // The library's default folder is in the user data, so it follows a user-data move; a folder of its own moves alone.
         let library_destination = self.paths.with(Some(&self.paths.user_data_directory), library.as_deref());
         let library_moves = !paths::same_folder(&self.paths.mod_library_directory, &library_destination.mod_library_directory);
         if changed && library_moves {
-            return Err("Move the user-data folder and the mod library one at a time: save one, restart Eterra's Gift, then change the other.".into());
+            return Err(ONE_AT_A_TIME.get().into());
         }
         // Checked now against everything the move copies, so it cannot fail at the next start and leave the move waiting.
         if changed && let Some(conflict) = migration_conflict(&self.paths.user_data_directory, &destination.user_data_directory).map_err(|e| e.to_string())? {
-            return Err(format!(
-                "The selected folder already holds {} with other content. Choose an empty user-data folder.",
-                relative(&destination.user_data_directory, &conflict)
-            ));
+            return Err(USER_DATA_NOT_EMPTY.with(&[("file", &relative(&destination.user_data_directory, &conflict))]));
         }
         if library_moves && let Some(clash) = migration_conflict(&self.paths.mod_library_directory, &library_destination.mod_library_directory).map_err(|e| e.to_string())? {
-            return Err(format!(
-                "The selected folder already holds {} with other content. Choose an empty folder for the mod library.",
-                relative(&library_destination.mod_library_directory, &clash)
-            ));
+            return Err(LIBRARY_NOT_EMPTY.with(&[("file", &relative(&library_destination.mod_library_directory, &clash))]));
         }
         probe(&destination.user_data_directory).map_err(|e| e.to_string())?;
         if library_moves {
@@ -435,12 +458,12 @@ impl SettingsStore {
 fn describe_io(error: &io::Error, path: &Path) -> String {
     let path = path.display();
     match error.raw_os_error() {
-        Some(2) => format!("Could not find file '{path}'."),
-        Some(3) => format!("Could not find a part of the path '{path}'."),
-        Some(5) => format!("Access to the path '{path}' is denied."),
-        Some(32) => format!("The process cannot access the file '{path}' because it is being used by another process."),
-        Some(80 | 183) => format!("The file '{path}' already exists."),
-        Some(206) => format!("The path '{path}' is too long, or a component of the specified path is too long."),
+        Some(2) => NO_FILE.with(&[("path", &path)]),
+        Some(3) => NO_PATH.with(&[("path", &path)]),
+        Some(5) => ACCESS_DENIED.with(&[("path", &path)]),
+        Some(32) => IN_USE.with(&[("path", &path)]),
+        Some(80 | 183) => EXISTS.with(&[("path", &path)]),
+        Some(206) => TOO_LONG.with(&[("path", &path)]),
         _ => {
             let text = error.to_string();
             let text = text.split(" (os error ").next().unwrap_or(&text).trim_end();
@@ -458,22 +481,22 @@ fn read(file_path: &Path, legacy: &[LegacyModuleSettings]) -> Result<(AppSetting
     };
     let mut document = match serde_json::from_slice::<Value>(text::strip_bom_bytes(&text)) {
         Ok(Value::Object(document)) => document,
-        Ok(_) => return Err("The settings file is empty.".into()),
-        Err(error) => return Err(format!("The settings file is not valid JSON ({error}).")),
+        Ok(_) => return Err(EMPTY_FILE.get().into()),
+        Err(error) => return Err(NOT_JSON.with(&[("error", &error)])),
     };
     let version = json::find(&document, "schemaVersion").and_then(Value::as_i64).unwrap_or(0);
     let upgraded = version == 1;
     if upgraded {
         upgrade(&mut document, legacy);
     } else if version != CURRENT_SCHEMA {
-        return Err("Unsupported settings version.".into());
+        return Err(UNSUPPORTED_VERSION.get().into());
     }
     let settings = AppSettings::from_json(&document)?;
     for index in 0..LOCATIONS.len() {
         if let Some(path) = settings.location(index)
             && std::path::absolute(path).ok().as_deref() != Some(path.as_path())
         {
-            return Err("Settings paths must be absolute and normalized.".into());
+            return Err(NOT_ABSOLUTE.get().into());
         }
     }
     Ok((settings, upgraded))
@@ -525,19 +548,19 @@ pub fn module_flag(record: Option<&Value>, key: &str, default: bool) -> bool {
 }
 
 /// A typed location as the settings keep it: a full path without a trailing separator; None when the box is empty.
-fn normalize(typed: &str, what: &str) -> Result<Option<PathBuf>, String> {
+fn normalize(typed: &str, what: Phrase) -> Result<Option<PathBuf>, String> {
     let trimmed = typed.trim();
     if trimmed.is_empty() {
         return Ok(None);
     }
     if !Path::new(trimmed).is_absolute() {
-        return Err(format!("Enter the full path of the {what}, starting with its drive (such as C:\\), or use Browse."));
+        return Err(FULL_PATH.with(&[("what", &what)]));
     }
     Ok(Some(paths::normalized(Path::new(trimmed))))
 }
 
 /// A location the save may leave as saved (`None`), or the typed one.
-fn keep_or(saved: &Option<PathBuf>, typed: &Option<String>, what: &str) -> Result<Option<PathBuf>, String> {
+fn keep_or(saved: &Option<PathBuf>, typed: &Option<String>, what: Phrase) -> Result<Option<PathBuf>, String> {
     match typed {
         None => Ok(saved.clone()),
         Some(typed) => normalize(typed, what),

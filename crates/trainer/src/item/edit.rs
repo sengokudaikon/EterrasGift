@@ -8,6 +8,7 @@
 //! observed layout is already malformed.
 
 use crate::definitions::catalog::{CatalogIdentity, GameCatalog};
+use eg_core::phrase::Phrase;
 use eg_trainer_wire::{
     catalog::{AffixDefinition, Availability},
     forge::{AffixSnapshot, ForgeSnapshot},
@@ -32,12 +33,8 @@ pub enum SealState {
 impl SealState {
     pub const ALL: [Self; 4] = [Self::Normal, Self::Sealed, Self::Primordial, Self::Corrupted];
     pub fn name(self) -> &'static str {
-        match self {
-            Self::Normal => "Normal",
-            Self::Sealed => "Sealed",
-            Self::Primordial => "Primordial",
-            Self::Corrupted => "Corrupted",
-        }
+        const NAMES: [Phrase; 4] = [Phrase::new("Normal"), Phrase::new("Sealed"), Phrase::new("Primordial"), Phrase::new("Corrupted")];
+        NAMES[self as usize].get()
     }
     pub fn index(self) -> usize {
         self as usize
@@ -51,10 +48,8 @@ pub enum AffixKind {
 }
 impl AffixKind {
     pub fn name(self) -> &'static str {
-        match self {
-            Self::Prefix => "Prefix",
-            Self::Suffix => "Suffix",
-        }
+        const NAMES: [Phrase; 2] = [Phrase::new("Prefix"), Phrase::new("Suffix")];
+        NAMES[self as usize].get()
     }
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

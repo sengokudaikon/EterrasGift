@@ -6,6 +6,7 @@ import { Tokens } from "../../tokens.slint";
 import { KeyboardFocus, TipPlacement } from "../../globals.slint";
 import { FocusRing, TipTrigger } from "../../widgets/focus.slint";
 import { ForgeCover } from "state.slint";
+import { ForgeText } from "../../strings/forge.slint";
 
 // A cell button: plain text until hovered (Dusk Brown in a Weathered Taupe frame). Disabled, it keeps its own colours and
 // only stops answering. Place it outdented by the cell padding so its hover frame reaches past the column.
@@ -235,7 +236,7 @@ export component FlagToggle inherits Rectangle {
             image-fit: contain;
             source: Tokens.icon-confirmed;
             colorize: Tokens.confirmed-brush;
-            accessible-label: "Confirmed";
+            accessible-label: ForgeText.confirmed;
         }
 
         if root.stale: Image {
@@ -245,7 +246,7 @@ export component FlagToggle inherits Rectangle {
             image-fit: contain;
             source: Tokens.icon-warning;
             colorize: Tokens.warning-brush;
-            accessible-label: "Stale draft";
+            accessible-label: ForgeText.stale-draft;
         }
     }
 

@@ -217,8 +217,8 @@ fn bind(state: &ForgeState, view: &Rc<View>) {
     state.on_picker_category_changed(edit!(view, |editor, choice| editor.picker_category(choice.max(0) as usize)));
     state.on_picker_class_changed(edit!(view, |editor, choice| editor.picker_class(choice.max(0) as usize)));
     let names = |names: &mut dyn Iterator<Item = &str>| ModelRc::from(Rc::new(VecModel::from(names.map(SharedString::from).collect::<Vec<_>>())));
-    state.set_picker_categories(names(&mut super::editor::PICKER_CATEGORIES.iter().map(|(name, _)| *name)));
-    state.set_picker_classes(names(&mut super::editor::PICKER_CLASSES.iter().copied()));
+    state.set_picker_categories(names(&mut super::editor::PICKER_CATEGORIES.iter().map(|(name, _)| name.get())));
+    state.set_picker_classes(names(&mut super::editor::PICKER_CLASSES.iter().map(|class| class.get())));
     state.on_picker_select(edit!(view, |editor, index| editor.picker_select(index.max(0) as usize)));
     state.on_use_picker(edit!(view, |editor| editor.use_picker()));
     state.on_cancel_picker(edit!(view, |editor| editor.cancel_picker()));
@@ -589,7 +589,7 @@ impl View {
         state.set_formatting_loading(matches!(formatting, Some(Lookup::Loading)));
         state.set_formatting_error(
             match formatting {
-                Some(Lookup::Loading) => game::UNIQUE_LOADING,
+                Some(Lookup::Loading) => game::UNIQUE_LOADING.get(),
                 Some(Lookup::Unavailable(reason)) => reason.as_str(),
                 Some(Lookup::Ready(())) | None => "",
             }
@@ -724,7 +724,7 @@ impl View {
                         .tier_options(index)
                         .into_iter()
                         .map(|(tier, range, in_game)| TierOption {
-                            label: format!("T{tier}").into(),
+                            label: super::editor::TIER.with(&[("tier", &tier)]).into(),
                             range: range.into(),
                             in_game,
                         })

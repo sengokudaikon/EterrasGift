@@ -3,10 +3,24 @@
 
 use crate::models::update_rows;
 use crate::{MainWindow, Nav, NavOutcome, NavRow, Tokens};
+use eg_core::phrase::Phrase;
 use slint::platform::Key;
 use slint::{ComponentHandle, Image, ModelRc, VecModel, Weak};
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
+
+const HOME: Phrase = Phrase::new("Home");
+const MODS: Phrase = Phrase::new("Mods");
+const CHARACTER: Phrase = Phrase::new("Character");
+const STASH: Phrase = Phrase::new("Stash");
+const COMBAT: Phrase = Phrase::new("Combat");
+const FORGE: Phrase = Phrase::new("Forge");
+const LOOT: Phrase = Phrase::new("Loot");
+const MONOLITH: Phrase = Phrase::new("Monolith");
+const FACTIONS: Phrase = Phrase::new("Factions");
+const WORLD: Phrase = Phrase::new("World");
+const SETTINGS: Phrase = Phrase::new("Settings");
+const TRAINER: Phrase = Phrase::new("Trainer");
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Page {
@@ -68,17 +82,17 @@ impl Page {
 
     pub fn title(self) -> &'static str {
         match self {
-            Page::Home => "Home",
-            Page::Mods => "Mods",
-            Page::Character => "Character",
-            Page::Stash => "Stash",
-            Page::Combat => "Combat",
-            Page::Forge => "Forge",
-            Page::Loot => "Loot",
-            Page::Monolith => "Monolith",
-            Page::Factions => "Factions",
-            Page::World => "World",
-            Page::Settings => "Settings",
+            Page::Home => HOME.get(),
+            Page::Mods => MODS.get(),
+            Page::Character => CHARACTER.get(),
+            Page::Stash => STASH.get(),
+            Page::Combat => COMBAT.get(),
+            Page::Forge => FORGE.get(),
+            Page::Loot => LOOT.get(),
+            Page::Monolith => MONOLITH.get(),
+            Page::Factions => FACTIONS.get(),
+            Page::World => WORLD.get(),
+            Page::Settings => SETTINGS.get(),
         }
     }
 
@@ -476,7 +490,7 @@ impl Shell {
 fn nav_row(navigation: &Navigation, tokens: &Tokens<'_>, node: Node) -> NavRow {
     let (id, title, icon) = match node {
         Node::Page(page) => (page.id(), page.title(), page_icon(tokens, page)),
-        Node::Trainer => ("trainer", "Trainer", tokens.get_icon_trainer()),
+        Node::Trainer => ("trainer", TRAINER.get(), tokens.get_icon_trainer()),
     };
     NavRow {
         id: id.into(),

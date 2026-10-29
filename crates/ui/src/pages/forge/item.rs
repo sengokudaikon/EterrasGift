@@ -1,5 +1,6 @@
 //! Forge presentation. Edit intents, validation, projection and reversal use the trainer domain.
 
+use eg_core::phrase::Phrase;
 use std::collections::BTreeMap;
 
 /// Rarity bytes the game gives unique-backed items; lower bytes follow the unsealed affix count.
@@ -18,10 +19,13 @@ pub fn is_unique_backed(rarity: u8) -> bool {
 
 /// A crafted item's rarity by the game's byte: none is normal, one or two magic, more rare.
 pub fn crafted_name(rarity: u8) -> &'static str {
+    const NORMAL: Phrase = Phrase::new("Normal");
+    const MAGIC: Phrase = Phrase::new("Magic");
+    const RARE: Phrase = Phrase::new("Rare");
     match rarity {
-        0 => "Normal",
-        1 | 2 => "Magic",
-        _ => "Rare",
+        0 => NORMAL.get(),
+        1 | 2 => MAGIC.get(),
+        _ => RARE.get(),
     }
 }
 
@@ -83,16 +87,24 @@ impl Category {
         }
     }
     pub fn name(self) -> std::borrow::Cow<'static, str> {
+        const EXPERIMENTAL: Phrase = Phrase::new("Experimental");
+        const PERSONAL: Phrase = Phrase::new("Personal");
+        const SET: Phrase = Phrase::new("Reforged set");
+        const IDOL_ENCHANTMENT: Phrase = Phrase::new("Idol enchantment");
+        const IDOL_WEAVER: Phrase = Phrase::new("Weaver idol");
+        const CORRUPTED: Phrase = Phrase::new("Corrupted");
+        const UNIQUE_MODIFIER: Phrase = Phrase::new("Unique modifier");
+        const OTHER: Phrase = Phrase::new("Special affix {value}");
         match self {
             Category::Standard => "".into(),
-            Category::Experimental => "Experimental".into(),
-            Category::Personal => "Personal".into(),
-            Category::Set => "Reforged set".into(),
-            Category::IdolEnchantment => "Idol enchantment".into(),
-            Category::IdolWeaver => "Weaver idol".into(),
-            Category::Corrupted => "Corrupted".into(),
-            Category::FakeUniqueMod => "Unique modifier".into(),
-            Category::Other(value) => format!("Special affix {value}").into(),
+            Category::Experimental => EXPERIMENTAL.get().into(),
+            Category::Personal => PERSONAL.get().into(),
+            Category::Set => SET.get().into(),
+            Category::IdolEnchantment => IDOL_ENCHANTMENT.get().into(),
+            Category::IdolWeaver => IDOL_WEAVER.get().into(),
+            Category::Corrupted => CORRUPTED.get().into(),
+            Category::FakeUniqueMod => UNIQUE_MODIFIER.get().into(),
+            Category::Other(value) => OTHER.with(&[("value", &value)]).into(),
         }
     }
 }
@@ -117,13 +129,15 @@ pub struct AffixDefinition {
 impl AffixDefinition {
     /// Its kind as one phrase, e.g. "Reforged set prefix" or "Suffix".
     pub fn kind_description(&self) -> String {
-        kind_phrase(self.kind.name(), self.category)
+        kind_phrase(self.kind, self.category)
     }
 
     /// The picker's caption, each its own text: its kind and the tiers it has, which tell apart affixes that read the
     /// same, e.g. ["Idol enchantment suffix", "T1 only"] and ["Suffix", "T1–T8"].
     pub fn picker_description(&self) -> Vec<String> {
-        let tiers = if self.max_tier <= 1 { "T1 only".to_owned() } else { format!("T1–T{}", self.max_tier) };
+        const ONE_TIER: Phrase = Phrase::new("T1 only");
+        const TIERS: Phrase = Phrase::new("T1–T{max}");
+        let tiers = if self.max_tier <= 1 { ONE_TIER.into() } else { TIERS.with(&[("max", &self.max_tier)]) };
         vec![self.kind_description(), tiers]
     }
 
@@ -134,7 +148,7 @@ impl AffixDefinition {
     pub fn unknown(id: u16) -> AffixDefinition {
         AffixDefinition {
             id,
-            name: format!("Unknown #{id}"),
+            name: UNKNOWN_AFFIX.with(&[("id", &id)]),
             kind: AffixKind::Prefix,
             category: Category::Standard,
             item_types: Vec::new(),
@@ -145,12 +159,31 @@ impl AffixDefinition {
     }
 }
 
-/// A slot's kind and category as one phrase: "Prefix", "Experimental suffix", "Prefix (special affix 9)".
-pub fn kind_phrase(kind: &str, category: Category) -> String {
+const DESCRIPTIONS_UNAVAILABLE: Phrase = Phrase::new("Descriptions unavailable.");
+const UNKNOWN_AFFIX: Phrase = Phrase::new("Unknown #{id}");
+
+/// A slot's kind and category as one phrase: "Prefix", "Experimental suffix", "Prefix (special affix 9)". Each is
+/// whole, so a translation can order and inflect it.
+pub fn kind_phrase(kind: AffixKind, category: Category) -> String {
+    const EXPERIMENTAL: [Phrase; 2] = [Phrase::new("Experimental prefix"), Phrase::new("Experimental suffix")];
+    const PERSONAL: [Phrase; 2] = [Phrase::new("Personal prefix"), Phrase::new("Personal suffix")];
+    const SET: [Phrase; 2] = [Phrase::new("Reforged set prefix"), Phrase::new("Reforged set suffix")];
+    const IDOL_ENCHANTMENT: [Phrase; 2] = [Phrase::new("Idol enchantment prefix"), Phrase::new("Idol enchantment suffix")];
+    const IDOL_WEAVER: [Phrase; 2] = [Phrase::new("Weaver idol prefix"), Phrase::new("Weaver idol suffix")];
+    const CORRUPTED: [Phrase; 2] = [Phrase::new("Corrupted prefix"), Phrase::new("Corrupted suffix")];
+    const UNIQUE_MODIFIER: [Phrase; 2] = [Phrase::new("Unique modifier prefix"), Phrase::new("Unique modifier suffix")];
+    const OTHER: [Phrase; 2] = [Phrase::new("Prefix (special affix {value})"), Phrase::new("Suffix (special affix {value})")];
+    let side = kind as usize;
     match category {
-        Category::Standard => kind.to_owned(),
-        Category::Other(_) => format!("{kind} ({})", category.name().to_lowercase()),
-        _ => format!("{} {}", category.name(), kind.to_lowercase()),
+        Category::Standard => kind.name().to_owned(),
+        Category::Experimental => EXPERIMENTAL[side].into(),
+        Category::Personal => PERSONAL[side].into(),
+        Category::Set => SET[side].into(),
+        Category::IdolEnchantment => IDOL_ENCHANTMENT[side].into(),
+        Category::IdolWeaver => IDOL_WEAVER[side].into(),
+        Category::Corrupted => CORRUPTED[side].into(),
+        Category::FakeUniqueMod => UNIQUE_MODIFIER[side].into(),
+        Category::Other(value) => OTHER[side].with(&[("value", &value)]),
     }
 }
 
@@ -338,7 +371,7 @@ impl EditPresentation for ItemEdit {
                     .collect(),
             ),
             None => eg_trainer::definitions::catalog::Availability::Unavailable {
-                reason: "Descriptions unavailable.".into(),
+                reason: DESCRIPTIONS_UNAVAILABLE.into(),
             },
         };
         let evidence = edit::RollEvidence::from_runtime(
@@ -487,7 +520,15 @@ pub struct Unreadable {
 
 impl std::fmt::Display for Unreadable {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "Unknown {} {}", self.field, self.value)
+        const TIER: Phrase = Phrase::new("Unknown tier {value}");
+        const TYPE: Phrase = Phrase::new("Unknown type {value}");
+        const SEAL: Phrase = Phrase::new("Unknown seal {value}");
+        let phrase = match self.field {
+            "tier" => TIER,
+            "type" => TYPE,
+            _ => SEAL,
+        };
+        f.write_str(&phrase.with(&[("value", &self.value)]))
     }
 }
 
@@ -634,13 +675,16 @@ pub struct ValueTable {
     pub samples: Vec<ValueSample>,
 }
 
+const ROLL_POSITION: Phrase = Phrase::new("Roll position");
+const ROLL: Phrase = Phrase::new("Roll {roll}");
+
 thread_local! {
     static POSITIONS: std::rc::Rc<ValueTable> = std::rc::Rc::new(ValueTable {
-        label: "Roll position".into(),
+        label: ROLL_POSITION.into(),
         samples: (0..=255)
             .map(|roll| ValueSample {
                 value: f64::from(roll),
-                display: format!("Roll {roll}"),
+                display: ROLL.with(&[("roll", &roll)]),
                 effects: Vec::new(),
             })
             .collect(),

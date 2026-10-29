@@ -1,6 +1,8 @@
 // State shared between the views and Rust. Rust owns the truth (crates/ui/src); these globals carry it to the views and
 // carry the user's actions back as callbacks.
 
+import { ShellText } from "strings/shell.slint";
+
 // One row of the navigation pane. `parent` marks the Trainer item, which holds pages but is never a page itself.
 export struct NavRow {
     id: string,
@@ -22,7 +24,7 @@ export global Nav {
     // The Trainer item's pages, listed by the rail's flyout.
     in property <[NavRow]> flyout-pages;
     in property <string> current-page: "home";
-    in property <string> current-title: "Home";
+    in property <string> current-title: ShellText.home;
     in property <bool> pane-open;
     // Rust asks a row to take keyboard focus by setting these; the row clears `focus-row` once it has focus.
     in-out property <int> focus-row: -1;
@@ -44,9 +46,9 @@ export global Connection {
     in property <bool> present;
     in property <bool> connected;
     in property <bool> blocked;
-    in property <string> text: "Not connected";
+    in property <string> text: ShellText.not-connected;
     in property <bool> show-action;
-    in property <string> action-text: "Connect";
+    in property <string> action-text: ShellText.connect;
 
     callback connect();
 }

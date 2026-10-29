@@ -4,6 +4,7 @@ import { ScrollView } from "../widgets/scroll-view.slint";
 import { Tokens } from "../tokens.slint";
 import { FieldFrame } from "../widgets/text-field.slint";
 import { KeyboardFocus } from "../globals.slint";
+import { ModsText } from "../strings/mods.slint";
 import { TitleText, SectionText, SecondaryText, BodyText, LabelText, CaptionText, CaptionTone, FactsText } from "../widgets/text.slint";
 import { Button, ButtonKind } from "../widgets/button.slint";
 import { ToggleSwitch } from "../widgets/toggle.slint";
@@ -39,9 +40,9 @@ export global ModsState {
     in property <bool> can-open-folder: true;
     in property <bool> can-open-log;
     // What Open folder and Open log do, or why they can't yet (shown on the disabled buttons too).
-    in property <string> open-folder-tip: "Open the Mods folder";
-    in property <string> open-log-tip: "No log yet. MelonLoader writes one when you play with mods.";
-    in property <string> readiness: "Reading the mods…";
+    in property <string> open-folder-tip;
+    in property <string> open-log-tip;
+    in property <string> readiness;
     // Short facts beside each other under the readiness sentence: the loader, the game, the last game with mods.
     in property <[string]> readiness-facts;
     in property <MessageTone> readiness-tone: MessageTone.info;
@@ -61,9 +62,9 @@ export global ModsState {
     in property <bool> selected-has-sources;
     in property <bool> can-install-build;
     in property <bool> building;
-    in property <string> rebuild-text: "Rebuild";
+    in property <string> rebuild-text;
     in property <string> rebuild-tip;
-    in property <string> install-build-text: "Install build";
+    in property <string> install-build-text;
     in property <bool> previous-build;
     in property <string> change-message;
     in property <bool> change-is-draft;
@@ -339,7 +340,7 @@ export component ModsPage inherits Rectangle {
 
     version-probe := VerticalLayout {
         visible: false;
-        LabelText { text: "Version"; wrap: no-wrap; }
+        LabelText { text: ModsText.version; wrap: no-wrap; }
         for item in ModsState.mods: CaptionText { text: item.version; wrap: no-wrap; }
     }
     state-probe := VerticalLayout {
@@ -379,8 +380,8 @@ export component ModsPage inherits Rectangle {
                 spacing: Tokens.space-8;
                 padding-bottom: Tokens.preview-header-margin.bottom;
                 // The title's line height; "Mods" never wraps.
-                TitleText { text: "Mods"; height: Tokens.line-height-title; vertical-alignment: center; }
-                SecondaryText { text: "Mods load only when you play offline with mods."; }
+                TitleText { text: ModsText.title; height: Tokens.line-height-title; vertical-alignment: center; }
+                SecondaryText { text: ModsText.intro; }
             }
             // The list's tools: the folder it comes from and the log of the last game. Below the standard class their labels hide
             // and they keep a standard button's padding. Adding is always open: it queues on the
@@ -389,17 +390,17 @@ export component ModsPage inherits Rectangle {
                 spacing: Tokens.space-8; alignment: start;
                 padding-bottom: Tokens.preview-header-margin.bottom;
                 Button {
-                    text: "Add mod"; label-hidden: root.compact; accessible-name: "Add mod"; icon: Tokens.icon-add;
-                    tip: "Add a mod from its DLL file";
+                    text: ModsText.add-mod; label-hidden: root.compact; accessible-name: ModsText.add-mod; icon: Tokens.icon-add;
+                    tip: ModsText.add-mod-tip;
                     clicked => { ModsState.add-mod(); }
                 }
                 Button {
-                    text: "Open folder"; label-hidden: root.compact; accessible-name: "Open the Mods folder"; icon: Tokens.icon-folder;
+                    text: ModsText.open-folder; label-hidden: root.compact; accessible-name: ModsText.open-mods-folder; icon: Tokens.icon-folder;
                     enabled: ModsState.can-open-folder; tip: ModsState.open-folder-tip;
                     clicked => { ModsState.open-folder(); }
                 }
                 Button {
-                    text: "Open log"; label-hidden: root.compact; accessible-name: "Open log"; icon: Tokens.icon-log;
+                    text: ModsText.open-log; label-hidden: root.compact; accessible-name: ModsText.open-log; icon: Tokens.icon-log;
                     enabled: ModsState.can-open-log; tip: ModsState.open-log-tip;
                     clicked => { ModsState.open-log(); }
                 }
@@ -414,11 +415,11 @@ export component ModsPage inherits Rectangle {
             HorizontalLayout {
                 spacing: Tokens.space-8;
                 horizontal-stretch: 1;
-                LabelText { text: "Installed"; horizontal-stretch: 0; vertical-alignment: center; }
-                CaptionText { text: ModsState.installed-count > 0 ? "\{ModsState.enabled-count} of \{ModsState.installed-count} on" : ""; horizontal-stretch: 1; vertical-alignment: center; }
+                LabelText { text: ModsText.installed; horizontal-stretch: 0; vertical-alignment: center; }
+                CaptionText { text: ModsState.installed-count > 0 ? ModsText.enabled-of(ModsState.enabled-count, ModsState.installed-count) : ""; horizontal-stretch: 1; vertical-alignment: center; }
             }
             // The Version column keeps its gap while it is empty, so the name stops 12px earlier.
-            LabelText { text: root.wide ? "Version" : ""; width: root.version-width; wrap: no-wrap; }
+            LabelText { text: root.wide ? ModsText.version : ""; width: root.version-width; wrap: no-wrap; }
             Rectangle { width: root.state-width; }
         }
         // The installed list over the mod projects not installed yet: sized to its rows, it scrolls in what the projects leave it.
@@ -435,7 +436,7 @@ export component ModsPage inherits Rectangle {
                 enabled: ModsState.mods.length > 0;
                 height: ModsState.mods.length * root.row-step;
                 accessible-role: list;
-                accessible-label: "Installed mods";
+                accessible-label: ModsText.installed-mods;
                 focus-gained(reason) => { if (reason == FocusReason.tab-navigation) { KeyboardFocus.visible = true; } if (ModsState.selected-index < 0) { ModsState.select-mod(0); } }
                 key-pressed(event) => {
                     // The keyboard opens the menu under the row; a right-click opens it at the pointer.
@@ -493,7 +494,7 @@ export component ModsPage inherits Rectangle {
                                     checked: item.enabled;
                                     hovered: check-spot.has-hover;
                                     check-spot := RowSpot {
-                                        tip: "Turn on or off (Space)";
+                                        tip: ModsText.toggle-tip;
                                         changed has-hover => { mod-row.spots += self.has-hover ? 1 : -1; }
                                         pressed-down => { mod-row.pick(); }
                                         menu-requested(x, y) => { mod-row.menu-at(x, y); }
@@ -549,10 +550,10 @@ export component ModsPage inherits Rectangle {
                                 if item.drafted: Rectangle {
                                     width: Tokens.icon-size-small;
                                     accessible-role: image;
-                                    accessible-label: "Changed since the last game with mods";
+                                    accessible-label: ModsText.changed-since;
                                     Image { width: Tokens.icon-size-small; height: Tokens.icon-size-small; y: (parent.height - self.height) / 2; image-fit: contain; source: Tokens.icon-draft; colorize: Tokens.draft-brush; }
                                     RowSpot {
-                                        tip: "Changed since the last game with mods";
+                                        tip: ModsText.changed-since;
                                         changed has-hover => { mod-row.spots += self.has-hover ? 1 : -1; }
                                         pressed-down => { mod-row.pick(); }
                                         menu-requested(x, y) => { mod-row.menu-at(x, y); }
@@ -584,12 +585,12 @@ export component ModsPage inherits Rectangle {
             width: root.content-width - Tokens.mods-empty-margin.left - Tokens.mods-empty-margin.right;
             height: self.visible ? self.preferred-height : 0px;
             spacing: Tokens.space-4;
-            Text { text: "No mods yet"; font-size: Tokens.font-size-value; color: Tokens.text-brush; }
-            CaptionText { text: "Add a mod's DLL, or copy it into the Mods folder."; }
+            Text { text: ModsText.no-mods; font-size: Tokens.font-size-value; color: Tokens.text-brush; }
+            CaptionText { text: ModsText.no-mods-hint; }
             if ModsState.is-read && ModsState.mods.length == 0: HorizontalLayout {
                 alignment: start;
                 padding-top: Tokens.empty-action-margin.top;
-                Button { text: "Add mod"; tip: "Add a mod from its DLL file"; clicked => { ModsState.add-mod(); } }
+                Button { text: ModsText.add-mod; tip: ModsText.add-mod-tip; clicked => { ModsState.add-mod(); } }
             }
         }
         // Mod projects in the sources folder that no installed mod builds: not loaded (the box is off and can't be ticked) until built and installed.
@@ -600,15 +601,15 @@ export component ModsPage inherits Rectangle {
             height: ModsState.sources.length == 0 ? 0px : self.preferred-height;
             visible: ModsState.sources.length > 0;
             accessible-role: list;
-            accessible-label: "Mods from sources, not installed";
+            accessible-label: ModsText.from-sources-list;
             if ModsState.sources.length > 0: VerticalLayout {
                 padding-top: Tokens.mod-sources-margin.top;
                 HorizontalLayout {
                     padding-left: Tokens.table-header-inset.left;
                     padding-right: Tokens.table-header-inset.right;
                     spacing: Tokens.space-8;
-                    LabelText { text: "Not installed"; horizontal-stretch: 0; vertical-alignment: center; }
-                    CaptionText { text: "\{ModsState.sources.length} from sources"; vertical-alignment: center; horizontal-stretch: 1; }
+                    LabelText { text: ModsText.not-installed; horizontal-stretch: 0; vertical-alignment: center; }
+                    CaptionText { text: ModsText.from-sources(ModsState.sources.length); vertical-alignment: center; horizontal-stretch: 1; }
                 }
                 // Each row keeps its row gap below it, the last one too.
                 VerticalLayout {
@@ -625,10 +626,10 @@ export component ModsPage inherits Rectangle {
                                 y: (parent.height - self.height) / 2;
                                 checked: false; enabled: false;
                                 accessible-role: checkbox;
-                                accessible-label: "Load " + source.name;
+                                accessible-label: ModsText.load(source.name);
                                 accessible-enabled: false;
                                 check-tip := TouchArea { }
-                                TipTrigger { text: "Build and install it to turn it on"; hovered: check-tip.has-hover; }
+                                TipTrigger { text: ModsText.build-to-turn-on; hovered: check-tip.has-hover; }
                             }
                         }
                         // The name and caption can be elided, with hover tips in full; as one tab stop they say both to the
@@ -665,10 +666,10 @@ export component ModsPage inherits Rectangle {
                             FocusRing { focused: source-focus.has-focus; }
                         }
                         Button {
-                            text: source.busy ? "Building…" : "Build and install";
+                            text: source.busy ? ModsText.building : ModsText.build-and-install;
                             height: Tokens.control-min-height; y: (parent.height - self.height) / 2; horizontal-stretch: 0;
                             enabled: !ModsState.busy && !ModsState.building;
-                            tip: "Build it from its project and install it, turned on";
+                            tip: ModsText.build-and-install-tip;
                             clicked => { ModsState.build-source(index); }
                         }
                     }
@@ -686,7 +687,7 @@ export component ModsPage inherits Rectangle {
                 x: 1px + Tokens.pane-content-margin.left; y: Tokens.pane-content-margin.top;
                 width: parent.width - 1px - Tokens.pane-content-margin.left - Tokens.pane-content-margin.right;
                 height: self.preferred-height;
-                text: ModsState.installed-count > 0 ? "Select a mod to see its details and settings." : "Add a mod to see its details and settings here.";
+                text: ModsState.installed-count > 0 ? ModsText.select-a-mod : ModsText.add-to-see;
             }
             if ModsState.selected-index >= 0: ScrollView {
                 x: 1px;
@@ -753,18 +754,18 @@ export component ModsPage inherits Rectangle {
                         HorizontalLayout {
                             spacing: Tokens.space-8;
                             Button {
-                                text: ModsState.selected-enabled ? "Turn off" : "Turn on"; enabled: !ModsState.busy; horizontal-stretch: 0;
-                                tip: "It stays installed either way";
+                                text: ModsState.selected-enabled ? ModsText.turn-off : ModsText.turn-on; enabled: !ModsState.busy; horizontal-stretch: 0;
+                                tip: ModsText.stays-installed;
                                 clicked => { ModsState.toggle-mod(ModsState.selected-index); }
                             }
                             Button {
-                                icon: Tokens.icon-folder; accessible-name: "Show in folder"; horizontal-stretch: 0; tip: "Show its DLL in File Explorer";
+                                icon: Tokens.icon-folder; accessible-name: ModsText.show-in-folder; horizontal-stretch: 0; tip: ModsText.show-in-folder-tip;
                                 clicked => { ModsState.reveal-mod(ModsState.selected-index); }
                             }
                             Rectangle { horizontal-stretch: 1; }
                             Button {
-                                text: "Remove"; icon: Tokens.icon-delete; kind: ButtonKind.subtle; enabled: !ModsState.busy; horizontal-stretch: 0;
-                                tip: "Remove it (Del). Its settings are kept.";
+                                text: ModsText.remove; icon: Tokens.icon-delete; kind: ButtonKind.subtle; enabled: !ModsState.busy; horizontal-stretch: 0;
+                                tip: ModsText.remove-tip;
                                 clicked => { ModsState.remove-mod(ModsState.selected-index); }
                             }
                         }
@@ -773,7 +774,7 @@ export component ModsPage inherits Rectangle {
                             alignment: start; spacing: Tokens.space-8;
                             if ModsState.can-install-build: Button {
                                 text: ModsState.install-build-text; enabled: !ModsState.busy && !ModsState.building;
-                                tip: "Install the latest build from its project";
+                                tip: ModsText.install-build-tip;
                                 clicked => { ModsState.install-build(ModsState.selected-index); }
                             }
                             Button {
@@ -786,7 +787,7 @@ export component ModsPage inherits Rectangle {
                     if ModsState.settings.length > 0: VerticalLayout {
                         spacing: Tokens.space-6;
                         // "Settings" heads the list unless the mod's own groups do.
-                        if ModsState.settings[0].group == "": LabelText { text: "Settings"; }
+                        if ModsState.settings[0].group == "": LabelText { text: ModsText.settings; }
                         VerticalLayout {
                             for item[index] in ModsState.settings: SettingItem { item: item; index: index; }
                         }
@@ -794,9 +795,9 @@ export component ModsPage inherits Rectangle {
                     // Maximized only: what MelonLoader wrote about this mod, after its settings: what can be changed comes before what happened.
                     if root.wide: VerticalLayout {
                         spacing: Tokens.space-6;
-                        LabelText { text: "Last game with mods"; }
-                        if ModsState.previous-build: CaptionText { text: "These lines are from an earlier build."; }
-                        if ModsState.log-lines.length == 0: CaptionText { text: "Nothing logged."; }
+                        LabelText { text: ModsText.last-game; }
+                        if ModsState.previous-build: CaptionText { text: ModsText.earlier-build; }
+                        if ModsState.log-lines.length == 0: CaptionText { text: ModsText.nothing-logged; }
                         if ModsState.log-lines.length > 0: VerticalLayout {
                             // [time] [error mark, its slot kept on every line so the text column aligns] [text] [×N for a line written N times in a row]
                             for line in ModsState.log-lines: HorizontalLayout {
@@ -808,7 +809,7 @@ export component ModsPage inherits Rectangle {
                                 }
                                 CaptionText { text: line.text; tone: line.error ? CaptionTone.error : CaptionTone.secondary; horizontal-stretch: 1; }
                                 if line.count > 1: CaptionText {
-                                    text: "×\{line.count}"; wrap: no-wrap; vertical-alignment: top;
+                                    text: ModsText.repeated(line.count); wrap: no-wrap; vertical-alignment: top;
                                     count-touch := TouchArea { }
                                     TipTrigger { text: line.count-tip; hovered: count-touch.has-hover; }
                                 }
@@ -861,18 +862,18 @@ export component ModsPage inherits Rectangle {
                 height: Tokens.control-min-height;
                 spacing: Tokens.space-8;
                 if ModsState.can-undo: Button {
-                    text: "Undo"; icon: Tokens.icon-undo; horizontal-stretch: 0; enabled: !ModsState.busy;
-                    tip: "Restore the removed mod (Ctrl+Z)";
+                    text: ModsText.undo; icon: Tokens.icon-undo; horizontal-stretch: 0; enabled: !ModsState.busy;
+                    tip: ModsText.undo-tip;
                     clicked => { ModsState.undo-remove(); }
                 }
                 if ModsState.draft-count > 0: Button {
-                    text: ModsState.draft-count == 1 ? "Revert 1 change" : "Revert \{ModsState.draft-count} changes"; kind: ButtonKind.subtle; horizontal-stretch: 0; enabled: !ModsState.busy;
-                    tip: "Go back to what the last game with mods used";
+                    text: ModsText.revert(ModsState.draft-count); kind: ButtonKind.subtle; horizontal-stretch: 0; enabled: !ModsState.busy;
+                    tip: ModsText.revert-tip;
                     clicked => { ModsState.revert-drafts(); }
                 }
                 Button {
-                    text: "Play offline with mods"; icon: Tokens.icon-play; kind: ButtonKind.primary; horizontal-stretch: 0; enabled: ModsState.can-play;
-                    tip: "Start offline with the mods that are on";
+                    text: ModsText.play; icon: Tokens.icon-play; kind: ButtonKind.primary; horizontal-stretch: 0; enabled: ModsState.can-play;
+                    tip: ModsText.play-tip;
                     clicked => { ModsState.commit-settings(); ModsState.play(); }
                 }
             }
@@ -882,10 +883,10 @@ export component ModsPage inherits Rectangle {
     // The row menu: what the pane's buttons do, with the keys that do it from the list.
     row-menu := PopupMenu {
         entries: [
-            { title: ModsState.selected-enabled ? "Turn off" : "Turn on", gesture: "Space", disabled: ModsState.selected-index < 0 || ModsState.busy },
-            { title: "Show in folder", icon: Tokens.icon-folder, disabled: ModsState.selected-index < 0 },
+            { title: ModsState.selected-enabled ? ModsText.turn-off : ModsText.turn-on, gesture: ModsText.key-space, disabled: ModsState.selected-index < 0 || ModsState.busy },
+            { title: ModsText.show-in-folder, icon: Tokens.icon-folder, disabled: ModsState.selected-index < 0 },
             { separator: true },
-            { title: "Remove", icon: Tokens.icon-delete, gesture: "Delete", disabled: ModsState.selected-index < 0 || ModsState.busy },
+            { title: ModsText.remove, icon: Tokens.icon-delete, gesture: ModsText.key-delete, disabled: ModsState.selected-index < 0 || ModsState.busy },
         ];
         activated(index) => {
             if (index == 0) { ModsState.toggle-mod(ModsState.selected-index); }

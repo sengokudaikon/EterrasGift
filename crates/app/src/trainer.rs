@@ -38,7 +38,7 @@ impl Module {
         // Unreadable trainer settings fail startup rather than falling back to defaults. Off, they are only the
         // reason Settings gives; the module has not attempted to start.
         if let Err(error) = choice.validate(store.saved()) {
-            choice.problem = Some(if chosen { start_failed(faults, choice.title, &error) } else { error });
+            choice.problem = Some(if chosen { start_failed(faults, choice.title.get(), &error) } else { error });
         }
         let game_data = store.paths().module_directory(trainer_settings::ID).join("game-data");
         let templates = store.paths().module_directory(trainer_settings::ID).join("forge-templates");
@@ -62,7 +62,7 @@ impl Module {
         match self.launch(settings, game, no_connect, faults) {
             Ok(runtime) => Some(runtime),
             Err(error) => {
-                self.choice.problem = Some(start_failed(faults, self.choice.title, &error.to_string()));
+                self.choice.problem = Some(start_failed(faults, self.choice.title.get(), &error.to_string()));
                 None
             }
         }

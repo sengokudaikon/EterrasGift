@@ -17,6 +17,7 @@ import { ChoiceBox } from "../widgets/choice-box.slint";
 import { AshField, EterraFrames } from "../decorations.slint";
 import { ItemForge } from "forge/editor.slint";
 import { ForgeState } from "forge/state.slint";
+import { TrainerText } from "../strings/trainer.slint";
 
 // A row is a game hook (a switch, with values), an editor (fields read from the game), a list of what the character holds,
 // a feature not ported yet (a source checkout only), or a section's heading on a page that stacks its sections.
@@ -111,8 +112,8 @@ export global TrainerState {
 
     // What every trainer page shows in place of its body while it waits (`access` locked), and what the Item Forge shows
     // without the game: waiting for the game or a character, connecting, online mode, a stop.
-    in property <string> connection-title: "Not connected";
-    in property <string> connection-detail: "Connect to an offline character to use the trainer.";
+    in property <string> connection-title: TrainerText.not-connected;
+    in property <string> connection-detail: TrainerText.connect-advice;
     // The connection stopped for a reason the user has to fix: the warning mark beside the title.
     in property <bool> connection-stopped;
     // A real wait (for the game, a character, the connection): ash drifts under it.
@@ -484,7 +485,7 @@ component FeatureRow inherits Rectangle {
             x: root.help-below ? Tokens.feature-title-help-margin.left : title.width + Tokens.space-6;
             y: title.y + root.title-height - measure.preferred-height / 2 - self.height / 2;
             help: root.feature.help;
-            label: "About \{root.feature.title}";
+            label: TrainerText.about(root.feature.title);
         }
 
         // A hook: its one value on the title line, named for the feature; its switch at the far right.
@@ -556,8 +557,8 @@ component FeatureRow inherits Rectangle {
             icon: Tokens.icon-refresh;
             kind: ButtonKind.subtle;
             enabled: root.editor && root.feature.can-use;
-            tip: root.held ? "Read the stash again" : "Read the game again";
-            accessible-name: "Read again";
+            tip: root.held ? TrainerText.read-stash-again : TrainerText.read-game-again;
+            accessible-name: TrainerText.read-again;
             clicked => { TrainerState.read(root.row-index); }
         }
 
@@ -576,7 +577,7 @@ component FeatureRow inherits Rectangle {
             y: offline.y + offline.height;
             width: parent.width - self.x;
             height: self.visible ? self.preferred-height : 0px;
-            text: "Not read yet";
+            text: TrainerText.not-read-yet;
         }
 
         empty := CaptionText {
@@ -585,7 +586,7 @@ component FeatureRow inherits Rectangle {
             y: unread.y + unread.height;
             width: parent.width - self.x;
             height: self.visible ? self.preferred-height : 0px;
-            text: "None in your stash.";
+            text: TrainerText.none-in-stash;
         }
 
         fields := VerticalLayout {
@@ -613,10 +614,10 @@ component FeatureRow inherits Rectangle {
             y: root.actions-y;
             width: self.preferred-width;
             height: Tokens.control-min-height;
-            text: "Discard";
+            text: TrainerText.discard;
             kind: ButtonKind.subtle;
             enabled: root.feature.can-discard;
-            tip: "Put every value back to what the game holds";
+            tip: TrainerText.discard-tip;
             clicked => { TrainerState.discard(root.row-index); }
         }
 
@@ -627,7 +628,7 @@ component FeatureRow inherits Rectangle {
             height: Tokens.control-min-height;
             text: root.feature.apply-text;
             enabled: root.feature.can-apply;
-            tip: "Write the changes to the game and read them back";
+            tip: TrainerText.apply-tip;
             clicked => { TrainerState.apply(root.row-index); }
         }
 
@@ -639,7 +640,7 @@ component FeatureRow inherits Rectangle {
             width: parent.width - self.x;
             height: self.preferred-height;
             wrap: no-wrap;
-            text: "Not ported yet";
+            text: TrainerText.not-ported;
         }
 
         details := CaptionText {
@@ -778,7 +779,7 @@ component ProfileBand inherits Rectangle {
             alignment: start;
 
             LabelText {
-                text: "Profile";
+                text: TrainerText.profile;
                 vertical-alignment: center;
             }
 
@@ -786,7 +787,7 @@ component ProfileBand inherits Rectangle {
                 width: self.natural-width;
                 choices: TrainerState.profiles;
                 index: TrainerState.profile-index;
-                label: "Profile";
+                label: TrainerText.profile;
                 enabled: !root.confirming;
                 chosen(index) => {
                     TrainerState.select-profile(index);
@@ -794,9 +795,9 @@ component ProfileBand inherits Rectangle {
             }
 
             if root.setup: Button {
-                text: "Delete…";
+                text: TrainerText.delete-ellipsis;
                 enabled: !root.confirming;
-                tip: "Delete this profile";
+                tip: TrainerText.delete-profile-tip;
                 clicked => {
                     root.confirming = true;
                 }
@@ -808,17 +809,17 @@ component ProfileBand inherits Rectangle {
             }
 
             if !root.setup && !root.kept: Button {
-                text: "Keep as profile";
-                tip: "Keep these settings for \{TrainerState.profile-name}";
+                text: TrainerText.keep-as-profile;
+                tip: TrainerText.keep-for(TrainerState.profile-name);
                 clicked => {
                     TrainerState.keep-profile();
                 }
             }
 
             if !root.setup && root.kept: Button {
-                text: "Delete…";
+                text: TrainerText.delete-ellipsis;
                 enabled: !root.confirming;
-                tip: "Delete this profile";
+                tip: TrainerText.delete-profile-tip;
                 clicked => {
                     root.confirming = true;
                 }
@@ -831,15 +832,15 @@ component ProfileBand inherits Rectangle {
 
             CaptionText {
                 text: root.setup
-                    ? "Delete \{TrainerState.profile-name}'s profile? Next time \{TrainerState.profile-name} enters play, everything starts off."
-                    : "Delete \{TrainerState.profile-name}'s profile? Nothing changes in the game until this session ends.";
+                    ? TrainerText.delete-profile-setup(TrainerState.profile-name)
+                    : TrainerText.delete-profile-live(TrainerState.profile-name);
                 wrap: word-wrap;
                 vertical-alignment: center;
                 horizontal-stretch: 1;
             }
 
             Button {
-                text: "Delete";
+                text: TrainerText.delete;
                 kind: ButtonKind.primary;
                 clicked => {
                     root.confirming = false;
@@ -848,7 +849,7 @@ component ProfileBand inherits Rectangle {
             }
 
             Button {
-                text: "Keep";
+                text: TrainerText.keep;
                 clicked => {
                     root.confirming = false;
                 }
@@ -919,7 +920,7 @@ component TrainerNotice inherits Rectangle {
                             source: Tokens.icon-warning;
                             colorize: Tokens.warning-brush;
                             accessible-role: image;
-                            accessible-label: "Warning";
+                            accessible-label: TrainerText.warning;
                         }
                     }
 
@@ -1010,10 +1011,10 @@ export component TrainerPage inherits Rectangle {
         // item the catalog cannot describe).
         if TrainerState.access == TrainerAccess.live && TrainerState.item-forge && !ForgeState.has-item: TrainerNotice {
             vertical-stretch: 1;
-            title: ForgeState.write-recovery-required ? "Item readback unavailable"
-                : TrainerState.item-unavailable != "" ? "Item details unavailable" : "The forge is empty";
+            title: ForgeState.write-recovery-required ? TrainerText.readback-unavailable
+                : TrainerState.item-unavailable != "" ? TrainerText.item-unavailable : TrainerText.forge-empty;
             detail: ForgeState.write-recovery-required ? ForgeState.message
-                : TrainerState.item-unavailable != "" ? TrainerState.item-unavailable : "Place an item in the forge to edit it.";
+                : TrainerState.item-unavailable != "" ? TrainerState.item-unavailable : TrainerText.forge-empty-detail;
             stopped: ForgeState.write-recovery-required;
             ash-shown: !ForgeState.write-recovery-required;
             ash-still: true;
