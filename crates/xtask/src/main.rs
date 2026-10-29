@@ -1,8 +1,11 @@
 //! Workspace tasks. `cargo xtask tokens [--check]` turns `design/tokens.json` into the Slint `Tokens` global
 //! (`crates/ui/ui/tokens.slint`) and one SVG per icon (`crates/ui/ui/icons/`). With `--check` it writes nothing and
-//! fails when the generated files are out of date.
+//! fails when the generated files are out of date. `cargo xtask phrases [--check]` writes the translators' template
+//! (`lang/eterras-gift.pot`, see `phrases.rs`).
 
 #![forbid(unsafe_code)]
+
+mod phrases;
 
 use serde_json::{Map, Value};
 use std::fmt::Write as _;
@@ -17,7 +20,9 @@ fn main() -> ExitCode {
     let result = match args.iter().map(String::as_str).collect::<Vec<_>>().as_slice() {
         ["tokens"] => tokens(false),
         ["tokens", "--check"] => tokens(true),
-        _ => Err(format!("unknown arguments {args:?}\nusage: cargo xtask tokens [--check]")),
+        ["phrases"] => phrases::run(&workspace_root(), false),
+        ["phrases", "--check"] => phrases::run(&workspace_root(), true),
+        _ => Err(format!("unknown arguments {args:?}\nusage: cargo xtask tokens|phrases [--check]")),
     };
     match result {
         Ok(()) => ExitCode::SUCCESS,

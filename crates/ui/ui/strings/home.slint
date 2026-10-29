@@ -1,0 +1,11 @@
+// Home's words. Every view word is an `@tr` here, never a literal in a view; its English is the gettext msgid,
+// without a context (build.rs and `cargo xtask phrases` agree on that), shared with any phrase that reads the same.
+
+export global HomeText {
+    out property <string> last-epoch: @tr("Last Epoch");
+    out property <string> home: @tr("Home");
+    out property <string> companion: @tr("Companion tools for Last Epoch.");
+    out property <string> play-online: @tr("Play online");
+    out property <string> play-offline: @tr("Play offline");
+    out property <string> play-offline-with-mods: @tr("Play offline with mods");
+}

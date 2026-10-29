@@ -4,6 +4,7 @@ import { Tokens } from "../tokens.slint";
 import { TitleText, SecondaryText, CaptionText, CaptionTone } from "../widgets/text.slint";
 import { Button } from "../widgets/button.slint";
 import { EterraBand, AshField, EterraFrames } from "../decorations.slint";
+import { HomeText } from "../strings/home.slint";
 
 export enum LaunchMode { online, offline, with-mods }
 
@@ -19,9 +20,9 @@ export global HomeState {
     in property <bool> can-start: true;
     in property <bool> can-start-with-mods: true;
     // Why the buttons are disabled, or what each does (the tooltips, shown on disabled buttons too).
-    in property <string> online-tip: "Start through Steam, without mods";
-    in property <string> offline-tip: "Start offline, without mods";
-    in property <string> with-mods-tip: "Start offline with MelonLoader and the mods that are on";
+    in property <string> online-tip;
+    in property <string> offline-tip;
+    in property <string> with-mods-tip;
     // The last start's message, about this one game.
     in property <string> message;
     in property <bool> message-is-error;
@@ -59,12 +60,12 @@ export component HomePage inherits Rectangle {
         spacing: HomeState.has-launcher ? Tokens.space-12 : Tokens.space-8;
 
         TitleText {
-            text: HomeState.has-launcher ? "Last Epoch" : "Home";
+            text: HomeState.has-launcher ? HomeText.last-epoch : HomeText.home;
             horizontal-alignment: center;
         }
 
         if !HomeState.has-launcher: SecondaryText {
-            text: "Companion tools for Last Epoch.";
+            text: HomeText.companion;
             horizontal-alignment: center;
         }
 
@@ -75,7 +76,7 @@ export component HomePage inherits Rectangle {
             spacing: Tokens.space-8;
 
             Button {
-                text: "Play online";
+                text: HomeText.play-online;
                 enabled: HomeState.can-start;
                 tip: HomeState.online-tip;
                 clicked => {
@@ -84,7 +85,7 @@ export component HomePage inherits Rectangle {
             }
 
             Button {
-                text: "Play offline";
+                text: HomeText.play-offline;
                 enabled: HomeState.can-start;
                 tip: HomeState.offline-tip;
                 clicked => {
@@ -93,7 +94,7 @@ export component HomePage inherits Rectangle {
             }
 
             Button {
-                text: "Play offline with mods";
+                text: HomeText.play-offline-with-mods;
                 enabled: HomeState.can-start && HomeState.can-start-with-mods;
                 tip: HomeState.with-mods-tip;
                 clicked => {

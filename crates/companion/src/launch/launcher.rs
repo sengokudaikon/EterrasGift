@@ -7,6 +7,7 @@ use crate::launch::host::{GameHost, LaunchError, LaunchMode, LaunchOutcome};
 use crate::launch::loader::{self, ModLoaderState};
 use eg_core::game_log::GameLogState;
 use eg_core::operations::Cancellation;
+use eg_core::phrase::Phrase;
 use std::path::PathBuf;
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::Duration;
@@ -19,7 +20,14 @@ pub struct LaunchReport {
 }
 
 /// Said while a start with mods waits for MelonLoader, which can take minutes after a game update.
-pub const STARTING_WITH_MODS: &str = "Starting offline with mods. After a game update MelonLoader can take a few minutes.";
+pub const STARTING_WITH_MODS: Phrase = Phrase::new("Starting offline with mods. After a game update MelonLoader can take a few minutes.");
+const CLOSING: Phrase = Phrase::new("The app is closing.");
+const ALREADY_STARTING: Phrase = Phrase::new("Last Epoch is already starting.");
+const DID_NOT_START: Phrase = Phrase::new("Last Epoch didn't start: {reason}");
+const STARTED_ONLINE: Phrase = Phrase::new("Started through Steam, without mods.");
+const STARTED_OFFLINE: Phrase = Phrase::new("Started offline, without mods.");
+const STARTED_WITH_MODS: Phrase = Phrase::new("Started offline with mods.");
+const NO_LOADER_LOG: Phrase = Phrase::new("Started offline with mods, but MelonLoader wrote no log in {minutes} minutes. See MelonLoader/Latest.log.");
 
 pub struct GameLauncher {
     host: Arc<dyn GameHost>,
@@ -83,10 +91,10 @@ impl GameLauncher {
         {
             let mut starting = self.starting.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
             if self.lifetime.is_cancelled() {
-                return refused("The app is closing.");
+                return refused(CLOSING.get());
             }
             if *starting {
-                return refused("Last Epoch is already starting.");
+                return refused(ALREADY_STARTING.get());
             }
             *starting = true;
         }
@@ -107,8 +115,8 @@ impl GameLauncher {
             },
             Err(LaunchError::Refused(reason)) => refused(&reason),
             // Said like any other refusal: a start that fails must not take the page down with it.
-            Err(LaunchError::Failed(reason)) => refused(&format!("Last Epoch didn't start: {reason}")),
-            Err(LaunchError::Cancelled) => refused("The app is closing."),
+            Err(LaunchError::Failed(reason)) => refused(&DID_NOT_START.with(&[("reason", &reason)])),
+            Err(LaunchError::Cancelled) => refused(CLOSING.get()),
         }
     }
 
@@ -133,12 +141,9 @@ fn refused(message: &str) -> LaunchReport {
 
 fn started(mode: LaunchMode, outcome: LaunchOutcome) -> String {
     match (mode, outcome) {
-        (LaunchMode::Online, _) => "Started through Steam, without mods.".into(),
-        (LaunchMode::Offline, _) => "Started offline, without mods.".into(),
-        (_, LaunchOutcome::LoaderStarted) => "Started offline with mods.".into(),
-        _ => format!(
-            "Started offline with mods, but MelonLoader wrote no log in {} minutes. See MelonLoader/Latest.log.",
-            loader::LOADER_TIMEOUT.as_secs() / 60
-        ),
+        (LaunchMode::Online, _) => STARTED_ONLINE.into(),
+        (LaunchMode::Offline, _) => STARTED_OFFLINE.into(),
+        (_, LaunchOutcome::LoaderStarted) => STARTED_WITH_MODS.into(),
+        _ => NO_LOADER_LOG.with(&[("minutes", &(loader::LOADER_TIMEOUT.as_secs() / 60))]),
     }
 }

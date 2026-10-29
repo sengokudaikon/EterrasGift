@@ -1135,7 +1135,7 @@ impl View {
         }
         self.commit_settings();
         self.launching.set(true);
-        self.say(eg_companion::launch::launcher::STARTING_WITH_MODS, false);
+        self.say(eg_companion::launch::launcher::STARTING_WITH_MODS.get(), false);
         self.show();
         let launcher = self.services.launcher.clone();
         let view = self.clone();
