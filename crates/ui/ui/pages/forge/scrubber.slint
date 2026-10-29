@@ -2,6 +2,7 @@
 // value over its range bar, edited in place by dragging, by the arrow keys, or by typing in its popover.
 
 import { Tokens } from "../../tokens.slint";
+import { FieldFrame } from "../../widgets/text-field.slint";
 import { KeyboardFocus } from "../../globals.slint";
 import { TipTrigger } from "../../widgets/focus.slint";
 import { FlyoutSurface } from "../../widgets/menu.slint";
@@ -360,8 +361,14 @@ export component ValueScrubber inherits Rectangle {
                         height: Tokens.control-min-height;
                         border-radius: Tokens.control-radius;
                         border-width: 1px;
-                        border-color: input.has-focus ? Tokens.accent-brush : Tokens.strong-line-brush;
-                        background: Tokens.ground-brush;
+                        background: FieldFrame.background(true, input.has-focus, field-touch.has-hover);
+                        border-color: FieldFrame.border(true, input.has-focus, field-touch.has-hover);
+
+                        field-touch := TouchArea {
+                            clicked => {
+                                input.focus();
+                            }
+                        }
 
                         input := TextInput {
                             x: Tokens.space-10;

@@ -5,6 +5,22 @@ import { Tokens } from "../tokens.slint";
 import { KeyboardFocus } from "../globals.slint";
 import { FocusRing } from "focus.slint";
 
+// Fluent's text box frame on the retinted palette, for every field that takes typing (and the combo box's frame):
+// AltMediumLow at rest in a BaseMedium frame, AltMedium and BaseMediumHigh under the pointer, the ground in the accent
+// frame while focused; frames step up under high contrast. A disabled field is the strong line, ground and frame.
+export global FieldFrame {
+    public pure function background(enabled: bool, focused: bool, hovered: bool) -> brush {
+        return !enabled ? Tokens.strong-line-brush : focused ? Tokens.ground-brush : hovered ? Tokens.raised-brush : Tokens.hover-brush;
+    }
+
+    public pure function border(enabled: bool, focused: bool, hovered: bool) -> brush {
+        return !enabled ? Tokens.strong-line-brush
+            : focused ? Tokens.accent-brush
+            : hovered ? Tokens.fluent-base-medium-high-color
+            : Tokens.high-contrast ? Tokens.text-secondary-brush : Tokens.fluent-base-medium-color;
+    }
+}
+
 export component TextField inherits Rectangle {
     in property <string> text;
     in property <string> placeholder;
@@ -25,10 +41,8 @@ export component TextField inherits Rectangle {
     horizontal-stretch: 1;
     border-radius: Tokens.control-radius;
     border-width: 1px;
-    // Fluent's text box on the retinted palette: AltMediumLow at rest in a BaseMedium frame, AltMedium and
-    // BaseMediumHigh under the pointer, the ground in the accent frame while focused; frames step up under high contrast.
-    background: input.has-focus ? Tokens.ground-brush : touch.has-hover ? Tokens.raised-brush : Tokens.hover-brush;
-    border-color: input.has-focus ? Tokens.accent-brush : touch.has-hover ? Tokens.fluent-base-medium-high-color : (Tokens.high-contrast ? Tokens.text-secondary-brush : Tokens.fluent-base-medium-color);
+    background: FieldFrame.background(root.enabled, input.has-focus, touch.has-hover);
+    border-color: FieldFrame.border(root.enabled, input.has-focus, touch.has-hover);
     forward-focus: input;
 
     touch := TouchArea {

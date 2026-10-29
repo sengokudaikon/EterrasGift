@@ -28,7 +28,7 @@ import {
 } from "table.slint";
 import { AffixPickerPanel, PickerMeasure, PickerMetrics, SearchBox } from "picker.slint";
 import { ChangesPane } from "pane.slint";
-import { TemplatesPanel, TemplateMetrics } from "templates.slint";
+import { TemplatesPanel, TemplateMetrics, TemplatesMeasure } from "templates.slint";
 
 // The game-owned colour of a rarity's names (EpochColor), for item names only.
 global RarityInk {
@@ -1226,30 +1226,45 @@ export component ItemForge inherits Rectangle {
                         }
                     }
 
-                    // The user's item templates: applied as drafts, or the item saved as one.
-                    templates-button := Rectangle {
+                    // The user's item templates: drafted onto the item, or the item saved as one. Absent from the row (no
+                    // width, no spacing) in a run that keeps no templates.
+                    if ForgeState.has-templates: templates-button := Rectangle {
                         width: templates.preferred-width;
                         height: Tokens.control-min-height;
-                        visible: ForgeState.has-templates;
 
                         templates := Button {
                             width: parent.width;
                             text: "Templates";
                             kind: ButtonKind.subtle;
                             enabled: ForgeState.has-item;
-                            tip: "Apply a saved template, or save this item as one";
+                            tip: "Draft a saved template onto this item, or save this item as one";
                             clicked => {
                                 ForgeState.templates-opened();
                                 templates-popup.show();
                             }
                         }
 
-                        // Upward, over the affix table: the button sits low on the page, near the window's foot.
+                        templates-measure := TemplatesMeasure { }
+
+                        property <length> templates-height: TemplateMetrics.height(ForgeState.template-rows.length, templates-measure.message);
+                        // Room between the button and the window's top, and between it and the page's foot.
+                        property <length> room-above: self.absolute-position.y;
+                        property <length> room-below: root.absolute-position.y + root.height - self.absolute-position.y - self.height;
+
+                        // Upward, over the affix table, as the button sits low on the page near the window's foot; below it
+                        // when there is no room above; with room on neither side, as low as the page lets it reach (a popup
+                        // can't leave the window).
+                        property <length> templates-y: self.room-above >= self.templates-height + Tokens.space-4
+                            ? -self.templates-height - Tokens.space-4
+                            : self.room-below >= self.templates-height + Tokens.space-4
+                                ? self.height + Tokens.space-4
+                                : Math.max(-self.room-above, self.height + self.room-below - self.templates-height);
+
                         templates-popup := PopupWindow {
                             x: 0;
-                            y: -self.height - Tokens.space-4;
+                            y: templates-button.templates-y;
                             width: Tokens.replace-flyout-width + Tokens.flyout-padding.left + Tokens.flyout-padding.right;
-                            height: TemplateMetrics.height(ForgeState.template-rows.length);
+                            height: templates-button.templates-height;
                             close-policy: PopupClosePolicy.close-on-click-outside;
 
                             TemplatesPanel {

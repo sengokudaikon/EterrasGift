@@ -232,9 +232,19 @@ fn bind(state: &ForgeState, view: &Rc<View>) {
     let weak = on(view);
     state.on_templates_opened(move || {
         if let Some(view) = weak.upgrade() {
-            view.editor.borrow_mut().template_message.clear();
+            let mut editor = view.editor.borrow_mut();
+            editor.template_message.clear();
+            editor.template_name.clear();
+            drop(editor);
             view.show();
             view.show_templates();
+        }
+    });
+    let weak = on(view);
+    state.on_template_name_edited(move |name| {
+        if let Some(view) = weak.upgrade() {
+            view.editor.borrow_mut().template_name = name.into();
+            view.show_template_name();
         }
     });
     let weak = on(view);
@@ -432,6 +442,19 @@ impl View {
             })
             .collect();
         window.global::<ForgeState>().set_template_rows(ModelRc::from(Rc::new(VecModel::from(rows))));
+        drop(editor);
+        self.show_template_name();
+    }
+
+    /// The name typed for a new template, and the kept one a save under it would replace.
+    fn show_template_name(&self) {
+        let Some(window) = self.window.upgrade() else {
+            return;
+        };
+        let editor = self.editor.borrow();
+        let state = window.global::<ForgeState>();
+        state.set_template_name(editor.template_name.clone().into());
+        state.set_template_replaces(editor.template_replaces().unwrap_or_default().into());
     }
 
     fn show(&self) {

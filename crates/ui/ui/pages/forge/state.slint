@@ -197,6 +197,9 @@ export global ForgeState {
     in property <bool> has-templates;
     in property <[TemplateRowView]> template-rows;
     in property <string> template-message;
+    // The name typed for a new template (Rust clears it once saved), and the kept template a save under it would replace.
+    in property <string> template-name;
+    in property <string> template-replaces;
     in property <string> max-rolls-tip;
     in property <string> affix-list-note;
     in property <string> ladder-note;
@@ -300,6 +303,7 @@ export global ForgeState {
     callback max-tiers();
     callback max-rolls();
     callback templates-opened();
+    callback template-name-edited(string);
     callback template-save(string, bool);
     callback template-apply(int);
     callback template-delete(int);

@@ -1,9 +1,13 @@
-// The item templates flyout: the user's saved templates, each applied as drafts or deleted, and the item saved as a new
-// one (its affixes, or the whole item).
+// The item templates flyout: the user's saved templates, each drafted onto the item or deleted (asked first, in the row), and
+// the item saved as a new one (its affixes, or the whole item). A name that would replace a kept template says so, and
+// Save becomes Replace. The name field takes the keyboard when it opens; Escape backs out of a delete question, then
+// closes it, and the popup gives focus back to the Templates button.
 
 import { Tokens } from "../../tokens.slint";
+import { KeyboardFocus, Tip } from "../../globals.slint";
 import { Button, ButtonKind } from "../../widgets/button.slint";
 import { ChoiceBox } from "../../widgets/choice-box.slint";
+import { TipBubble, TipTrigger } from "../../widgets/focus.slint";
 import { FlyoutSurface } from "../../widgets/menu.slint";
 import { ListView } from "../../widgets/scroll-view.slint";
 import { TextField } from "../../widgets/text-field.slint";
@@ -15,19 +19,43 @@ export global TemplateMetrics {
         + Tokens.space-6 * 2;
     out property <length> caption-line: Tokens.font-size-caption * 4 / 3;
 
+    // The line under the form: what saving the typed name would replace, else what the last action did.
+    out property <string> message: ForgeState.template-replaces != ""
+        ? "Saving replaces \"\{ForgeState.template-replaces}\"."
+        : ForgeState.template-message;
+
     public pure function list-height(rows: int) -> length {
         return rows == 0 ? self.caption-line * 2 : Math.min(Tokens.replace-list-max-height, rows * self.row);
     }
 
-    // The whole flyout for `rows` templates: the title, the list, the name, the kind and Save, and two lines of message.
-    public pure function height(rows: int) -> length {
+    // The whole flyout for `rows` templates: the title, the list, the name, the kind and Save, then the message at its
+    // measured height (none while there is nothing to say).
+    public pure function height(rows: int, message: length) -> length {
         return Tokens.flyout-padding.top + Tokens.flyout-padding.bottom
             + Tokens.font-size-section * 4 / 3
             + self.list-height(rows)
             + Tokens.control-min-height
             + Tokens.control-min-height
-            + self.caption-line * 2
-            + Tokens.space-10 * 4;
+            + Tokens.space-10 * 3
+            + (message > 0 ? Tokens.space-10 + message : 0px);
+    }
+}
+
+// Measures the message as the flyout wraps it; a popup's insides can't be read from outside, so this sits by its opener.
+export component TemplatesMeasure inherits Rectangle {
+    out property <length> message: TemplateMetrics.message == "" ? 0px : text.preferred-height;
+
+    width: 0;
+    height: 0;
+    visible: false;
+
+    text := Text {
+        x: 0;
+        y: 0;
+        width: Tokens.replace-flyout-width;
+        text: TemplateMetrics.message;
+        font-size: Tokens.font-size-caption;
+        wrap: word-wrap;
     }
 }
 
@@ -35,132 +63,189 @@ export component TemplatesPanel inherits FlyoutSurface {
     // After a template is applied: its drafts show on the page, behind the flyout.
     callback done();
 
-    property <string> name;
     property <int> kind;
+    // The row whose Delete was pressed: it asks before it deletes.
+    property <int> deleting: -1;
 
     function save() {
-        if (root.name != "") {
-            ForgeState.template-save(root.name, root.kind == 1);
+        root.deleting = -1;
+        if (ForgeState.template-name != "") {
+            ForgeState.template-save(ForgeState.template-name, root.kind == 1);
         }
     }
 
-    VerticalLayout {
-        padding-left: Tokens.flyout-padding.left;
-        padding-right: Tokens.flyout-padding.right;
-        padding-top: Tokens.flyout-padding.top;
-        padding-bottom: Tokens.flyout-padding.bottom;
-        spacing: Tokens.space-10;
-        alignment: start;
-
-        Text {
-            text: "Templates";
-            font-size: Tokens.font-size-section;
-            font-weight: Tokens.emphasis-weight;
-            color: Tokens.text-brush;
+    // Escape bubbles here from the fields and buttons (the kind list's own popup takes its Escape first).
+    keys := FocusScope {
+        focus-on-click: false;
+        focus-on-tab-navigation: false;
+        key-pressed(event) => {
+            if (event.text == Key.Escape) {
+                if (root.deleting >= 0) {
+                    root.deleting = -1;
+                } else {
+                    root.done();
+                }
+                return accept;
+            }
+            reject
         }
 
-        Rectangle {
-            height: TemplateMetrics.list-height(ForgeState.template-rows.length);
+        VerticalLayout {
+            padding-left: Tokens.flyout-padding.left;
+            padding-right: Tokens.flyout-padding.right;
+            padding-top: Tokens.flyout-padding.top;
+            padding-bottom: Tokens.flyout-padding.bottom;
+            spacing: Tokens.space-10;
+            alignment: start;
 
-            if ForgeState.template-rows.length == 0: Text {
-                width: parent.width;
-                text: "No templates yet. Save this item's affixes, or the whole item, below.";
+            Text {
+                text: "Templates";
+                font-size: Tokens.font-size-section;
+                font-weight: Tokens.emphasis-weight;
+                color: Tokens.text-brush;
+            }
+
+            Rectangle {
+                height: TemplateMetrics.list-height(ForgeState.template-rows.length);
+
+                if ForgeState.template-rows.length == 0: Text {
+                    width: parent.width;
+                    text: "No templates yet. Save this item's affixes, or the whole item, below.";
+                    font-size: Tokens.font-size-caption;
+                    color: Tokens.text-muted-brush;
+                    wrap: word-wrap;
+                }
+
+                if ForgeState.template-rows.length > 0: ListView {
+                    for entry[index] in ForgeState.template-rows: HorizontalLayout {
+                        property <bool> asking: root.deleting == index;
+
+                        height: TemplateMetrics.row;
+                        padding-top: Tokens.space-6;
+                        padding-bottom: Tokens.space-6;
+                        spacing: Tokens.space-8;
+
+                        VerticalLayout {
+                            spacing: Tokens.space-1;
+                            alignment: center;
+                            horizontal-stretch: 1;
+
+                            // Cut to the row, the name says itself in full on hover; the buttons' tips name it for the keyboard.
+                            Text {
+                                text: entry.name;
+                                color: Tokens.text-brush;
+                                overflow: elide;
+
+                                name-touch := TouchArea { }
+
+                                TipTrigger {
+                                    text: entry.name + "\n" + entry.detail;
+                                    hovered: name-touch.has-hover;
+                                    in-flyout: true;
+                                }
+                            }
+
+                            Text {
+                                text: asking ? "Delete this template for good?" : entry.detail;
+                                font-size: Tokens.font-size-caption;
+                                color: asking ? Tokens.text-brush : Tokens.text-muted-brush;
+                                overflow: elide;
+                            }
+                        }
+
+                        // Asking, the same two buttons become Delete and Keep, so the key that asked lands on Keep.
+                        Button {
+                            in-flyout: true;
+                            text: asking ? "Delete" : "Draft";
+                            kind: asking ? ButtonKind.primary : ButtonKind.standard;
+                            enabled: asking || ForgeState.has-item;
+                            tip: asking ? "Delete \"\{entry.name}\"; it can't be brought back" : "Draft \"\{entry.name}\" onto the item";
+                            clicked => {
+                                if (asking) {
+                                    root.deleting = -1;
+                                    ForgeState.template-delete(index);
+                                    name-field.focus();
+                                } else {
+                                    ForgeState.template-apply(index);
+                                    root.done();
+                                }
+                            }
+                        }
+
+                        Button {
+                            in-flyout: true;
+                            text: asking ? "Keep" : "Delete…";
+                            kind: asking ? ButtonKind.standard : ButtonKind.subtle;
+                            tip: asking ? "Keep \"\{entry.name}\"" : "Delete \"\{entry.name}\"";
+                            clicked => {
+                                root.deleting = asking ? -1 : index;
+                            }
+                        }
+                    }
+                }
+            }
+
+            name-field := TextField {
+                text: ForgeState.template-name;
+                placeholder: "Template name";
+                label: "Template name";
+                init => {
+                    self.focus();
+                }
+                edited(text) => {
+                    root.deleting = -1;
+                    ForgeState.template-name-edited(text);
+                }
+                // Enter saves a new name; one that would replace a kept template goes to Replace, which says so.
+                accepted(text) => {
+                    if (ForgeState.template-replaces != "") {
+                        KeyboardFocus.visible = true;
+                        save-button.focus();
+                    } else {
+                        root.save();
+                    }
+                }
+            }
+
+            HorizontalLayout {
+                spacing: Tokens.space-8;
+
+                ChoiceBox {
+                    label: "What to save";
+                    choices: ["Affixes only", "Whole item"];
+                    index: root.kind;
+                    horizontal-stretch: 1;
+                    chosen(index) => {
+                        root.kind = index;
+                    }
+                }
+
+                save-button := Button {
+                    in-flyout: true;
+                    text: ForgeState.template-replaces != "" ? "Replace" : "Save";
+                    kind: ButtonKind.primary;
+                    enabled: ForgeState.template-name != "" && ForgeState.has-item;
+                    tip: ForgeState.template-replaces != ""
+                        ? "Save the item as Apply would leave it, in place of \"\{ForgeState.template-replaces}\""
+                        : "Save the item as Apply would leave it under this name";
+                    clicked => {
+                        root.save();
+                    }
+                }
+            }
+
+            if TemplateMetrics.message != "": Text {
+                text: TemplateMetrics.message;
                 font-size: Tokens.font-size-caption;
-                color: Tokens.text-muted-brush;
+                color: ForgeState.template-replaces != "" ? Tokens.warning-brush : Tokens.text-secondary-brush;
                 wrap: word-wrap;
             }
-
-            if ForgeState.template-rows.length > 0: ListView {
-                for entry[index] in ForgeState.template-rows: HorizontalLayout {
-                    height: TemplateMetrics.row;
-                    padding-top: Tokens.space-6;
-                    padding-bottom: Tokens.space-6;
-                    spacing: Tokens.space-8;
-
-                    VerticalLayout {
-                        spacing: Tokens.space-1;
-                        alignment: center;
-                        horizontal-stretch: 1;
-
-                        Text {
-                            text: entry.name;
-                            color: Tokens.text-brush;
-                            overflow: elide;
-                        }
-
-                        Text {
-                            text: entry.detail;
-                            font-size: Tokens.font-size-caption;
-                            color: Tokens.text-muted-brush;
-                            overflow: elide;
-                        }
-                    }
-
-                    Button {
-                        text: "Apply";
-                        enabled: ForgeState.has-item;
-                        tip: "Draft this template onto the item";
-                        clicked => {
-                            ForgeState.template-apply(index);
-                            root.done();
-                        }
-                    }
-
-                    Button {
-                        text: "Delete";
-                        kind: ButtonKind.subtle;
-                        tip: "Delete this template";
-                        clicked => {
-                            ForgeState.template-delete(index);
-                        }
-                    }
-                }
-            }
         }
+    }
 
-        TextField {
-            text: root.name;
-            placeholder: "Template name";
-            label: "Template name";
-            edited(text) => {
-                root.name = text;
-            }
-            accepted(text) => {
-                root.name = text;
-                root.save();
-            }
-        }
-
-        HorizontalLayout {
-            spacing: Tokens.space-8;
-
-            ChoiceBox {
-                label: "What to save";
-                choices: ["Affixes only", "Whole item"];
-                index: root.kind;
-                horizontal-stretch: 1;
-                chosen(index) => {
-                    root.kind = index;
-                }
-            }
-
-            Button {
-                text: "Save";
-                kind: ButtonKind.primary;
-                enabled: root.name != "" && ForgeState.has-item;
-                tip: "Save the item as Apply would leave it under this name; a template with the name is replaced";
-                clicked => {
-                    root.save();
-                }
-            }
-        }
-
-        Text {
-            text: ForgeState.template-message;
-            font-size: Tokens.font-size-caption;
-            color: Tokens.text-secondary-brush;
-            wrap: word-wrap;
-            height: TemplateMetrics.caption-line * 2;
-        }
+    // Tips raised in here, drawn over the flyout: the window's own bubble would lie under the popup.
+    if Tip.open && Tip.in-flyout: TipBubble {
+        window-width: root.width;
+        window-height: root.height;
     }
 }

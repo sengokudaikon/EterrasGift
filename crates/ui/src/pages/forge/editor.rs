@@ -231,6 +231,8 @@ pub struct ForgeEditor {
     pub templates: Option<TemplateStore>,
     /// What the last template action did, under the templates' list.
     pub template_message: String,
+    /// The name typed for a new template; cleared once it is saved.
+    pub template_name: String,
 }
 
 fn local_time() -> String {
@@ -300,6 +302,7 @@ impl ForgeEditor {
             clock: local_time,
             templates: None,
             template_message: String::new(),
+            template_name: String::new(),
         };
         editor.refresh();
         editor
@@ -328,7 +331,19 @@ impl ForgeEditor {
     /// Saves the item as Apply would leave it under `name`: its affixes, or with `whole` the item too (base, unique and
     /// its rolls, implicit rolls, status). A name already kept is replaced.
     pub fn save_template(&mut self, name: &str, whole: bool) {
-        self.template_message = self.saved_template(name, whole).unwrap_or_else(|problem| problem);
+        self.template_message = match self.saved_template(name, whole) {
+            Ok(message) => {
+                self.template_name.clear();
+                message
+            }
+            Err(problem) => problem,
+        };
+    }
+
+    /// The kept template that saving under the typed name would replace: the same name in any case, or one whose file name
+    /// the typed one shares.
+    pub fn template_replaces(&self) -> Option<String> {
+        self.templates.as_ref()?.taken_by(&self.template_name)
     }
 
     fn saved_template(&self, name: &str, whole: bool) -> Result<String, String> {
@@ -338,6 +353,7 @@ impl ForgeEditor {
             return Err("Name the template first.".into());
         }
         let item = self.drafted_item().or_else(|| self.item.clone()).ok_or("Place an item in the forge first.")?;
+        let replaced = store.taken_by(&name);
         let affixes = item
             .affixes
             .iter()
@@ -372,7 +388,11 @@ impl ForgeEditor {
             item,
         };
         store.save(&template).map_err(|error| format!("The template could not be saved: {error}"))?;
-        Ok(format!("Saved \"{name}\"."))
+        Ok(match replaced {
+            Some(kept) if kept == name => format!("Replaced \"{name}\"."),
+            Some(kept) => format!("Saved \"{name}\" in place of \"{kept}\"."),
+            None => format!("Saved \"{name}\"."),
+        })
     }
 
     pub fn delete_template(&mut self, index: usize) {
@@ -406,8 +426,11 @@ impl ForgeEditor {
 
     fn applied_template(&mut self, template: &ItemTemplate) -> Result<String, String> {
         let item = self.item.clone().ok_or("Place an item in the forge first.")?;
-        if !self.can_mutate() {
-            return Err("The item cannot take drafts now.".into());
+        if self.writing {
+            return Err("Wait for the write in progress to finish, then draft the template.".into());
+        }
+        if !self.can_change_draft() {
+            return Err("The item can't take drafts until the game is ready.".into());
         }
         if self.draft_count() > 0 {
             return Err("Apply or discard the drafts first: a template drafts the whole item.".into());
@@ -425,14 +448,14 @@ impl ForgeEditor {
                         Some(choice) => {
                             self.pick_identity(choice);
                             Ok(format!(
-                                "Drafted the unique of \"{}\" alone: a new unique brings its own modifiers. Apply, then apply the template again for the rest.",
+                                "Drafted only the unique from \"{}\": a new unique brings its own modifiers. Apply it, then draft the template again for the rest.",
                                 template.name
                             ))
                         }
                         None => Err("That template's unique does not fit this item.".into()),
                     };
                 }
-                (Some(_), None) => return Err("Only a unique, set or legendary item can become another one, with the rarity the game gives it.".into()),
+                (Some(_), None) => return Err("That template holds a unique, set or legendary item, and this item is none of them.".into()),
                 _ => {}
             }
             if item.backing().is_none() && whole.sub_type != item.sub_type {
@@ -506,7 +529,12 @@ impl ForgeEditor {
         let drafted = self.draft_count();
         let mut message = match drafted {
             0 => format!("\"{}\" matches the item already.", template.name),
-            _ => format!("Drafted \"{}\": {}. Review them, then Apply.", template.name, count(drafted, "draft", "drafts")),
+            _ => format!(
+                "Drafted \"{}\": {}. Review {}, then Apply.",
+                template.name,
+                count(drafted, "draft", "drafts"),
+                if drafted == 1 { "it" } else { "them" }
+            ),
         };
         if !left_out.is_empty() {
             message.push_str(&format!(" Left out: {}.", left_out.join("; ")));

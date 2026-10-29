@@ -72,4 +72,7 @@ export global Tip {
     in-out property <TipPlacement> placement;
     // The pointer is on the bubble: it stays open while the pointer reads it (WCAG 1.4.13).
     in-out property <bool> bubble-hovered;
+    // Raised inside a flyout's popup: its anchor is in the popup's coordinates, and the window's bubble would lie under
+    // the popup, so the flyout draws the bubble itself (`TipBubble` as its last child) and the window draws none.
+    in-out property <bool> in-flyout;
 }

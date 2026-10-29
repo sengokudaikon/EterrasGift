@@ -2,6 +2,7 @@
 
 import { ScrollView } from "scroll-view.slint";
 import { Tokens } from "../tokens.slint";
+import { FieldFrame } from "text-field.slint";
 import { KeyboardFocus } from "../globals.slint";
 import { FocusRing } from "focus.slint";
 
@@ -16,10 +17,9 @@ export component ReadOnlyTextBox inherits Rectangle {
 
     border-radius: Tokens.control-radius;
     border-width: 1px;
-    // Fluent's text box on the retinted palette: AltMediumLow at rest in a BaseMedium frame, AltMedium and
-    // BaseMediumHigh under the pointer, the ground in the accent frame while focused; frames step up under high contrast.
-    background: input.has-focus ? Tokens.ground-brush : Tokens.hover-brush;
-    border-color: input.has-focus ? Tokens.accent-brush : (Tokens.high-contrast ? Tokens.text-secondary-brush : Tokens.fluent-base-medium-color);
+    // Read-only: the text box's frame without its pointer state.
+    background: FieldFrame.background(true, input.has-focus, false);
+    border-color: FieldFrame.border(true, input.has-focus, false);
     forward-focus: input;
 
     TouchArea {

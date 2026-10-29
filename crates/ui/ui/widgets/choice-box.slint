@@ -3,6 +3,7 @@
 
 import { ScrollView } from "scroll-view.slint";
 import { Tokens } from "../tokens.slint";
+import { FieldFrame } from "text-field.slint";
 import { KeyboardFocus } from "../globals.slint";
 import { FocusRing } from "focus.slint";
 
@@ -30,8 +31,8 @@ export component ChoiceBox inherits Rectangle {
     height: Tokens.control-min-height;
     border-radius: Tokens.control-radius;
     border-width: 1px;
-    // Fluent's combo box on the retinted palette, framed as the text boxes are.
-    border-color: !root.enabled ? Tokens.strong-line-brush : focus.has-focus ? Tokens.accent-brush : touch.has-hover ? Tokens.fluent-base-medium-high-color : (Tokens.high-contrast ? Tokens.text-secondary-brush : Tokens.fluent-base-medium-color);
+    // Fluent's combo box on the retinted palette, framed as the text boxes are; its ground doesn't darken on focus.
+    border-color: FieldFrame.border(root.enabled, focus.has-focus, touch.has-hover);
     background: !root.enabled ? Tokens.strong-line-brush : touch.has-hover ? Tokens.raised-brush : Tokens.hover-brush;
 
     accessible-role: combobox;

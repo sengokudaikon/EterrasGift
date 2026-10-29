@@ -18,12 +18,17 @@ export component Button inherits Rectangle {
     // Where the pointer's tip opens. A keyboard tip opens below unless told otherwise, as `KeyboardToolTips` places it.
     in property <TipPlacement> tip-placement: TipPlacement.below;
     in property <TipPlacement> keyboard-tip-placement: TipPlacement.below;
+    // Inside a flyout's popup, which shows its tip (`Tip.in-flyout`).
+    in property <bool> in-flyout;
     // The name a screen reader hears when the visible text or tip is not it.
     in property <string> accessible-name;
     // A standard button whose label is hidden (compact toolbars): the icon alone, standard padding, the label kept as
     // its name.
     in property <bool> label-hidden;
     callback clicked();
+
+    // `focus()` on a button lands on its focus scope, so a flyout can hand the keyboard to it.
+    forward-focus: focus;
 
     property <bool> has-icon: root.icon.width > 0;
     property <bool> icon-only: root.has-icon && root.text == "";
@@ -131,6 +136,7 @@ export component Button inherits Rectangle {
         focused: focus.has-focus;
         hover-placement: root.tip-placement;
         keyboard-placement: root.keyboard-tip-placement;
+        in-flyout: root.in-flyout;
     }
 
     FocusRing {

@@ -179,6 +179,16 @@ impl TemplateStore {
         eg_core::atomic::write(&self.file(&template.name), text.as_bytes())
     }
 
+    /// The kept template that saving under `name` would replace: the one whose file the name maps to, which may be spelled
+    /// differently ("Wayfarer's set" and "wayfarer_s set" share one).
+    pub fn taken_by(&self, name: &str) -> Option<String> {
+        let file = self.file(name);
+        if ItemTemplate::clean_name(name).is_empty() || !file.exists() {
+            return None;
+        }
+        self.list().into_iter().map(|template| template.name).find(|kept| self.file(kept) == file)
+    }
+
     pub fn delete(&self, name: &str) -> std::io::Result<()> {
         match std::fs::remove_file(self.file(name)) {
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),

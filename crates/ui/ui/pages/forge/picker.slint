@@ -4,9 +4,10 @@
 
 import { ListView } from "../../widgets/scroll-view.slint";
 import { Tokens } from "../../tokens.slint";
-import { KeyboardFocus } from "../../globals.slint";
+import { FieldFrame } from "../../widgets/text-field.slint";
+import { KeyboardFocus, Tip } from "../../globals.slint";
 import { Button, ButtonKind } from "../../widgets/button.slint";
-import { FocusRing } from "../../widgets/focus.slint";
+import { FocusRing, TipBubble } from "../../widgets/focus.slint";
 import { FlyoutSurface } from "../../widgets/menu.slint";
 import { ChoiceBox } from "../../widgets/choice-box.slint";
 import { ForgeState } from "state.slint";
@@ -86,8 +87,20 @@ export component SearchBox inherits Rectangle {
     height: Tokens.control-min-height;
     border-radius: Tokens.control-radius;
     border-width: 1px;
-    background: input.has-focus ? Tokens.ground-brush : Tokens.surface-brush;
-    border-color: input.has-focus ? Tokens.accent-brush : Tokens.strong-line-brush;
+    background: FieldFrame.background(true, input.has-focus, touch.has-hover);
+    border-color: FieldFrame.border(true, input.has-focus, touch.has-hover);
+
+    // The whole box takes the pointer, as a text box does: a click anywhere in it types into the search.
+    touch := TouchArea {
+        pointer-event(event) => {
+            if (event.kind == PointerEventKind.down) {
+                KeyboardFocus.visible = false;
+            }
+        }
+        clicked => {
+            input.focus();
+        }
+    }
 
     Image {
         x: Tokens.search-icon-margin.left;
@@ -483,6 +496,7 @@ export component AffixPickerPanel inherits FlyoutSurface {
                 spacing: Tokens.space-8;
 
                 Button {
+                    in-flyout: true;
                     text: "Cancel";
                     tip: "Keep the current draft (Esc)";
                     width: (footer.width - footer.spacing) / 2;
@@ -502,5 +516,11 @@ export component AffixPickerPanel inherits FlyoutSurface {
                 }
             }
         }
+    }
+
+    // Tips raised in here, drawn over the flyout: the window's own bubble would lie under the popup.
+    if Tip.open && Tip.in-flyout: TipBubble {
+        window-width: root.width;
+        window-height: root.height;
     }
 }

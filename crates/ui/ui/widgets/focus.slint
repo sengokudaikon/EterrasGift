@@ -27,6 +27,8 @@ export component TipTrigger inherits Rectangle {
     in property <bool> focused;
     in property <TipPlacement> hover-placement: TipPlacement.below;
     in property <TipPlacement> keyboard-placement: TipPlacement.below;
+    // Inside a flyout's popup, whose own bubble shows the tip (`Tip.in-flyout`).
+    in property <bool> in-flyout;
 
     property <bool> hover-ready;
     property <bool> keyboard: root.focused && KeyboardFocus.visible;
@@ -48,8 +50,8 @@ export component TipTrigger inherits Rectangle {
     }
     function follow() {
         if (Tip.open && root.owns) {
-            Tip.anchor-x = root.absolute-position.x;
-            Tip.anchor-y = root.absolute-position.y;
+            Tip.anchor-x = root.at-x;
+            Tip.anchor-y = root.at-y;
         }
     }
 
@@ -68,8 +70,9 @@ export component TipTrigger inherits Rectangle {
             Tip.owner += 1;
             root.claim = Tip.owner;
             Tip.text = root.text;
-            Tip.anchor-x = root.absolute-position.x;
-            Tip.anchor-y = root.absolute-position.y;
+            Tip.in-flyout = root.in-flyout;
+            Tip.anchor-x = root.at-x;
+            Tip.anchor-y = root.at-y;
             Tip.anchor-width = root.width;
             Tip.anchor-height = root.height;
             Tip.placement = root.keyboard ? root.keyboard-placement : root.hover-placement;

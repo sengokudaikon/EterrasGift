@@ -1232,7 +1232,7 @@ pub(in super::super) fn item_captures(session: &Session) {
     });
     forge.handle.edit(|editor| {
         editor.apply_template(0);
-        assert_eq!(editor.template_message, "Drafted \"Wayfarer's set\": 1 draft. Review them, then Apply.");
+        assert_eq!(editor.template_message, "Drafted \"Wayfarer's set\": 1 draft. Review it, then Apply.");
         assert_eq!((editor.affixes[0].tier(), editor.affixes[0].roll()), (5, 170));
     });
     settle();
@@ -1241,7 +1241,64 @@ pub(in super::super) fn item_captures(session: &Session) {
     assert_eq!(state.get_template_rows().row_count(), 1);
     session.click(445.0, 472.0);
     session.capture(&forge.ui, "item-templates");
+    // The name field has the keyboard. A name that shares the kept template's file says what it replaces, and Save
+    // becomes Replace; Enter goes to Replace rather than replacing, and a second Enter replaces.
+    session.type_text("WAYFARER'S SET");
+    assert_eq!(state.get_template_replaces(), "Wayfarer's set");
+    session.capture(&forge.ui, "item-templates-replace");
+    session.key(Key::Return);
+    assert_eq!(state.get_template_message(), "", "Enter in the name field does not replace");
+    session.key(Key::Return);
+    assert_eq!(state.get_template_message(), "Saved \"WAYFARER'S SET\" in place of \"Wayfarer's set\".");
+    assert_eq!((state.get_template_name().as_str(), state.get_template_replaces().as_str()), ("", ""));
+    assert_eq!(state.get_template_rows().row_count(), 1);
+    // Escape closes it and gives the keyboard back to Templates, whose Enter opens it again.
     session.key(Key::Escape);
+    session.capture(&forge.ui, "item-templates-escape");
+    session.key(Key::Return);
+    // Delete asks first, in the row; the key that asked lands on Keep, and Escape backs out of the question only.
+    session.key(Key::Backtab);
+    session.key(Key::Return);
+    session.capture(&forge.ui, "item-templates-delete");
+    session.key(Key::Escape);
+    session.key(Key::Return);
+    session.key(Key::Backtab);
+    session.key(Key::Return);
+    assert_eq!(state.get_template_rows().row_count(), 0);
+    assert_eq!(state.get_template_message(), "Deleted \"WAYFARER'S SET\".");
+    session.key(Key::Escape);
+    drop(forge);
+
+    // Many templates in a short window on a one-affix item: the flyout has room on neither side of Templates, so it
+    // stays inside the window.
+    let forge = Forge::open(session, World::boots().change(|item| item.affixes.truncate(1)), 940, 580);
+    let folder = session.folder().join("forge-templates-many");
+    forge.handle.edit(|editor| {
+        editor.templates = Some(eg_trainer::item::template::TemplateStore::new(folder));
+        for name in [
+            "Boots of Haste",
+            "Cold resist",
+            "Crit boots",
+            "Fire resist",
+            "Health stack",
+            "Movement",
+            "A name long enough that the row has to cut it short",
+        ] {
+            editor.save_template(name, false);
+        }
+    });
+    settle();
+    session.click(445.0, 310.0);
+    session.capture(&forge.ui, "item-templates-many-940");
+    session.key(Key::Escape);
+    drop(forge);
+    // The affix list's row as a run with templates has it, at the narrowest window.
+    let forge = Forge::open(session, World::boots(), 680, 580);
+    forge
+        .handle
+        .edit(|editor| editor.templates = Some(eg_trainer::item::template::TemplateStore::new(session.folder().join("forge-templates-many"))));
+    settle();
+    session.capture(&forge.ui, "item-templates-narrow");
     drop(forge);
     // A whole-item template on the legendary: its unique rolls come back with its affixes.
     let forge = Forge::open(session, World::unique(), 1100, 700);

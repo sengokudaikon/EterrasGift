@@ -128,7 +128,7 @@ export component MainWindow inherits Window {
             }
         }
 
-        if Tip.open: TipBubble {
+        if Tip.open && !Tip.in-flyout: TipBubble {
             window-width: root.width;
             window-height: root.height;
         }

@@ -2,6 +2,7 @@
 // (`crates/ui/src/mods.rs`) puts the mod library behind it; disk work belongs to its ordered worker.
 import { ScrollView } from "../widgets/scroll-view.slint";
 import { Tokens } from "../tokens.slint";
+import { FieldFrame } from "../widgets/text-field.slint";
 import { KeyboardFocus } from "../globals.slint";
 import { TitleText, SectionText, SecondaryText, BodyText, LabelText, CaptionText, CaptionTone } from "../widgets/text.slint";
 import { Button, ButtonKind } from "../widgets/button.slint";
@@ -152,10 +153,8 @@ component ModsField inherits Rectangle {
     border-radius: Tokens.control-radius;
     border-width: 1px;
     // A number the cfg can't hold is said under the setting's name; the box keeps its ordinary frame.
-    // AltMediumLow at rest in a BaseMedium frame, AltMedium and BaseMediumHigh under the pointer, the ground in the accent
-    // frame while focused; frames step up under high contrast (as widgets/text-field.slint).
-    background: !root.enabled ? Tokens.strong-line-brush : input.has-focus ? Tokens.ground-brush : touch.has-hover ? Tokens.raised-brush : Tokens.hover-brush;
-    border-color: !root.enabled ? Tokens.strong-line-brush : input.has-focus ? Tokens.accent-brush : touch.has-hover ? Tokens.fluent-base-medium-high-color : (Tokens.high-contrast ? Tokens.text-secondary-brush : Tokens.fluent-base-medium-color);
+    background: FieldFrame.background(root.enabled, input.has-focus, touch.has-hover);
+    border-color: FieldFrame.border(root.enabled, input.has-focus, touch.has-hover);
     accessible-role: text-input;
     accessible-label: root.label;
     accessible-value: root.text;

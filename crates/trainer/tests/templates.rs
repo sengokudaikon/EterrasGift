@@ -79,6 +79,11 @@ fn the_store_keeps_one_file_per_name_whatever_its_case() {
     std::fs::write(store.directory().join("broken.json"), b"{").unwrap();
     let names: Vec<String> = store.list().into_iter().map(|template| template.name).collect();
     assert_eq!(names, ["Amulet: crit/speed?", "boots of haste"]);
+    // Names that share a file name the template a save would replace, however they are spelled.
+    assert_eq!(store.taken_by("BOOTS OF HASTE ").as_deref(), Some("boots of haste"));
+    assert_eq!(store.taken_by("amulet_ crit_speed_").as_deref(), Some("Amulet: crit/speed?"));
+    assert_eq!(store.taken_by("Boots of Speed"), None);
+    assert_eq!(store.taken_by("   "), None);
     store.delete("BOOTS OF HASTE").unwrap();
     store.delete("never saved").unwrap();
     assert_eq!(store.list().len(), 1);
