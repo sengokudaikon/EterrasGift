@@ -668,7 +668,7 @@ pub static DESCRIPTORS: &[FeatureDescriptor] = &[
         area: TrainerArea::Loot,
         section: "Drops",
         title: "Boss loot at full chance",
-        description: "A boss's drop roll always succeeds.",
+        description: "Sets each boss or champion loot group's base drop chance to 100%. Later drop modifiers still apply.",
         kind: FeatureKind::Switch,
         values: &[],
         fields: &[],

@@ -54,7 +54,7 @@ unsafe fn targets(access: &RuntimeAccess, module: NonNull<u8>, size: usize) -> R
         let entry = access.class(&images, c"", c"ItemContainerEntry")?;
         let item = access.class(&images, c"", c"ItemData")?;
         let layout = SlotLayout {
-            online: materials::online_storage(access, &images)?,
+            online: access.hook_online_storage(&images)?,
             content: materials::field_offset(access, slot, c"content", entry, 8)?,
             data: materials::field_offset(access, entry, c"data", item, 8)?,
             item_type: materials::field_offset(access, item, c"itemType", access.system_class(c"Byte")?, 1)?,

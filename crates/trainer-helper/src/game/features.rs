@@ -14,6 +14,7 @@ mod mysterious_rift;
 pub(crate) mod no_mana_cost;
 mod patches;
 pub mod persistent_stat;
+pub(crate) mod results;
 pub(crate) mod runes_glyphs_to_99;
 pub(crate) mod shards_to_99;
 mod stat;

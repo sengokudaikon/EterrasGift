@@ -79,7 +79,7 @@ share one group, while offhand and attack rate each own multiple methods. The wi
 observations, without knowing patch ownership.
 
 `engine/gameplay_hooks` coordinates admission, entry transactions and cleanup ordering. Its prepared effects adapt
-leaf, shared damage, pinned scalar and original-first float-result state to close/restore/publish/observe operations. Clear closes all effects,
+leaf, shared damage, pinned scalar and original-first scalar-result state to close/restore/publish/observe operations. Clear closes all effects,
 restores receiver state and entry bytes, then releases receiver-bound groups. Every failure retains the affected
 owners and pins. Generated gameplay code stays outside the DLL; the existing dispatcher drain controls helper unload.
 
@@ -88,6 +88,12 @@ It answers zero only when the receiver matches the current player's `Actor.mana`
 retained gateway forwards all seven ABI positions, including three stack arguments, and registers its own unwind
 frame. The two five-parameter overloads are distinguished by their complete parameter signatures. No helper frame
 or pinned player identity is retained across the original call; late returns after close keep the original result.
+
+The postfix gateway also serves max random rolls, boss loot chance, tier 7 affixes, ability speed, maximum bonus stability and
+one echo type. Feature-local contracts and predicates live in `game/features/results`; the gateway preserves byte/integer/
+float returns and forwards exactly each declared native argument count, including six stack positions for RollTier.
+It registers matching Windows unwind data and never retries an original. RNG draws and original side effects run
+before adjustment; closed/online paths keep their results. See [result controls](../../research/trainer-features.md#original-first-result-controls).
 
 The 17 patch-only switches share owned interior ranges in `hooks/patch`, with feature-local recipes under
 `game/features/patches`. They prepare complete groups before writing, check unique bounded patterns, reject range

@@ -104,25 +104,6 @@ impl RuntimeAccess {
             })
         }
     }
-    unsafe fn hook_field(&self, owner: Class, name: &CStr, expected: &str, alignment: usize) -> Result<u32, GameError> {
-        // SAFETY: immutable attached metadata, instance fields on readable managed objects.
-        unsafe {
-            let field = self.field(owner, name)?;
-            let offset = (self.field_offset)(field);
-            let ty = (self.field_type)(field);
-            if (self.class_value)(owner)
-                || (self.field_flags)(field) & raw::FIELD_ATTRIBUTE_STATIC != 0
-                || ty.is_null()
-                || (self.type_byref)(ty)
-                || self.type_name(ty)? != expected
-                || !(16..=16384).contains(&offset)
-                || !offset.is_multiple_of(alignment)
-            {
-                return Err(unsupported(format!("damage field layout: {}", name.to_string_lossy())));
-            }
-            Ok(offset as u32)
-        }
-    }
 }
 
 impl DamageLayout {

@@ -78,7 +78,7 @@ unsafe fn targets(access: &RuntimeAccess, module: NonNull<u8>, size: usize) -> R
             return Err(unsupported("saved shards must be references"));
         }
         let layout = ShardLayout {
-            online: materials::online_storage(access, &images)?,
+            online: access.hook_online_storage(&images)?,
             stash: materials::field_offset(access, tracker, c"<stash>k__BackingField", stash, 8)?,
             shards: materials::field_offset(access, stash, c"<SavedShards>k__BackingField", list, 8)?,
             items: materials::field_offset(access, list, c"_items", array, 8)?,

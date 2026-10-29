@@ -33,9 +33,15 @@ pub(crate) enum GroupId {
     RunePrisonComplex,
     ShardsTo99,
     RunesGlyphsTo99,
+    MaxRandomRolls,
+    BossLootChance,
+    Tier7Affixes,
+    MaxBonusStability,
+    AbilitySpeed,
+    OneEchoType,
 }
 impl GroupId {
-    pub(crate) const COUNT: usize = 25;
+    pub(crate) const COUNT: usize = 31;
 }
 
 #[derive(Clone, Copy)]
@@ -82,6 +88,12 @@ pub(crate) fn definition(hook: GameplayHook) -> &'static HookFeature {
         GameplayHook::RunePrisonComplex => &super::patches::rune_prison_complex::FEATURE,
         GameplayHook::ShardsTo99 => &super::shards_to_99::FEATURE,
         GameplayHook::RunesGlyphsTo99 => &super::runes_glyphs_to_99::FEATURE,
+        GameplayHook::MaxRandomRolls => &super::results::max_random_rolls::FEATURE,
+        GameplayHook::BossLootChance => &super::results::boss_loot_chance::FEATURE,
+        GameplayHook::Tier7Affixes => &super::results::tier_7_affixes::FEATURE,
+        GameplayHook::MaxBonusStability => &super::results::max_bonus_stability::FEATURE,
+        GameplayHook::AbilitySpeed => &super::results::ability_speed::FEATURE,
+        GameplayHook::OneEchoType => &super::results::one_echo_type::FEATURE,
     }
 }
 
@@ -157,6 +169,13 @@ impl RuntimeAccess {
         unsafe {
             let images = self.images()?;
             let owner = self.class(&images, c"", spec.class)?;
+            self.hook_method_on(owner, spec, module_base, module_size)
+        }
+    }
+    /// Same contract as hook_method; the caller selects an exact namespace or nested owner from retained metadata.
+    pub(super) unsafe fn hook_method_on(&self, owner: Class, spec: &MethodSpec, module_base: NonNull<u8>, module_size: usize) -> Result<ResolvedMethod, GameError> {
+        // SAFETY: explicit retained owner and the same exact signature/module contract as hook_method.
+        unsafe {
             let method = self.hook_method_contract(owner, spec)?;
             let address = read_value::<*mut u8>(method.cast());
             (address as usize)
@@ -168,6 +187,14 @@ impl RuntimeAccess {
                 address: NonNull::new(address).ok_or_else(|| unsupported("hook address"))?,
                 bytes: read_value(address.cast()),
             })
+        }
+    }
+    pub(super) unsafe fn hook_online_storage(&self, images: &Images) -> Result<NonNull<c_void>, GameError> {
+        // SAFETY: admitted attached thread; initialize the process-owned Boolean static through the public API.
+        unsafe {
+            let environment = self.class(images, c"EHG.Multiplayer", c"GameplayEnvironment")?;
+            let online = self.static_field(environment, c"_isOnlinePlay", "System.Boolean")?;
+            self.hook_static_storage(environment, online, 1)
         }
     }
     // Resolve the complete parameter signature before checking the selected overload's ABI and uniqueness.
@@ -214,6 +241,25 @@ impl RuntimeAccess {
                 found = Some(method);
             }
             found.ok_or_else(|| unsupported(format!("missing hook: {}", spec.method.to_string_lossy())))
+        }
+    }
+    pub(super) unsafe fn hook_field(&self, owner: Class, name: &CStr, expected: &str, alignment: usize) -> Result<u32, GameError> {
+        // SAFETY: immutable attached metadata, instance fields on readable managed objects.
+        unsafe {
+            let field = self.field(owner, name)?;
+            let offset = (self.field_offset)(field);
+            let ty = (self.field_type)(field);
+            if (self.class_value)(owner)
+                || (self.field_flags)(field) & raw::FIELD_ATTRIBUTE_STATIC != 0
+                || ty.is_null()
+                || (self.type_byref)(ty)
+                || self.type_name(ty)? != expected
+                || !(16..=16384).contains(&offset)
+                || !offset.is_multiple_of(alignment)
+            {
+                return Err(unsupported(format!("hook field layout: {}", name.to_string_lossy())));
+            }
+            Ok(offset as u32)
         }
     }
     pub(crate) unsafe fn hook_static_storage(&self, owner: Class, field: Ptr, alignment: usize) -> Result<NonNull<c_void>, GameError> {

@@ -165,7 +165,8 @@ impl<T: Transport + Send + 'static> BackendConnection for Session<T> {
             (_, []) if crate::features::FeatureKey::Hook(request.id).descriptor().kind == crate::features::FeatureKind::Switch && hook.validate_value(1).is_ok() => 1,
             (GameplayHook::IncomingDamage, [percent]) if percent.is_finite() && (0.0..=100.0).contains(percent) && percent.fract() == 0.0 => *percent as u64,
             (GameplayHook::EnemyDamage, [multiplier]) if multiplier.is_finite() && ((0.0..=100.0).contains(multiplier) || *multiplier == 101.0) => multiplier.to_bits(),
-            (GameplayHook::FixedAttackRate | GameplayHook::FixedLeechRate, [value]) if hook.validate_value(value.to_bits()).is_ok() => value.to_bits(),
+            (GameplayHook::FixedAttackRate | GameplayHook::FixedLeechRate | GameplayHook::AbilitySpeed, [value]) if hook.validate_value(value.to_bits()).is_ok() => value.to_bits(),
+            (GameplayHook::OneEchoType, [choice]) if choice.is_finite() && choice.fract() == 0.0 && (0.0..=9.0).contains(choice) => *choice as u64,
             _ => return Ok(WriteOutcome::refused("Invalid hook selection")),
         };
         Ok(self.set_gameplay_hook_with_value(hook, request.on, value, control).await?)

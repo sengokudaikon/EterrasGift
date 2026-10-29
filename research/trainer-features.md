@@ -11,7 +11,7 @@ shipping scope stays in [trainer-readiness.md](trainer-readiness.md).
   Last Epoch on 2026-10-27. The other implemented hooks still need live checks; fixtures/static inspection are not
   live proof. Exact combinations covered by those two user checks were not recorded.
 
-**Hooks: 26 Done / 42 Todo (68 current controls). Direct field editors: 0 Done / 6 Todo.** God mode and Damage taken
+**Hooks: 32 Done / 36 Todo (68 current controls). Direct field editors: 0 Done / 6 Todo.** God mode and Damage taken
 are combined as `incoming-damage`; one-hit kills are the ∞ endpoint of `enemy-damage`. The former `attack-leech`
 Read/Apply editor is retired in favor of independent persistent `fixed-attack-rate` and `fixed-leech-rate` hooks.
 
@@ -38,7 +38,7 @@ only; feature IDs/profile settings and the original gameplay behavior remain ind
 | Done | Helper-owned feature/target ownership | Each feature owns its targets/contracts/semantics; damage controls share one group. The wire carries IDs and settings, not native topology. |
 | Done | Retained leaves and lifecycle | Prepare before publication, close before changes, verify actual entries, restore on manager loss/departure and before unload. Generated gameplay paths do not enter helper code. |
 | Done | Persistent scalar overrides | Selected independent accessors, pinned receiver, recalculation baseline and conditional restoration; attack and leech are the consumers. |
-| Done | Float-result postfix gateway | No mana cost preserves the exact original call and its stack arguments, then adjusts the returned float. |
+| Done | Scalar-result postfix gateway | No mana cost plus six result controls preserve the original call, byte/int/float results and each declared native argument position (up to ten in current features). |
 | Done | Interior code-patch groups | 17 features / 27 owned ranges; bounded unique patterns, grouped transaction/recovery and actual-byte readback. |
 | Done | Material replenishment leaves | Shards and runes/glyphs mutate stored quantities before the original query; shared online/closed guard and field contracts. |
 | Done | Worker/profile/UI integration | Generic Boolean controls, typed values, separate readback and desired-versus-observed state. |
@@ -89,7 +89,7 @@ Behavior reference: [combat.h](../../EterrasGift/native/hooks/combat.h).
 | Todo | `fixed-area` — `Stats.GetIncreasedAreaForAreaSkill` | Return the configured increased-area value for the player's stats, skipping original for that case. Other stats keep original calculation. | Settings and player stats identity; float return. | Player versus minion/monster stats, original call count, changed player identity. |
 | Todo | `no-cooldowns` — `ChargeManager.useCharges` | For the player, keep up to 64 charges, call original with zero amount, then raise lowered charges back if the backing array is still the same. Keep the original shared-cooldown behavior around that adjustment. | Bounded list access. Extract snapshot mechanics only after another matching consumer; policy remains local. | Shared cooldown decreases are restored; increased charges and replaced arrays are preserved; define the original-throw path explicitly. |
 | Done | `no-mana-cost` — exact Ability overload of `BaseMana.getManaCost` | Run the original cost calculation once, then answer zero only for the current player's mana component. Preserve natural mana regeneration/drain and cooldowns. See [mana details](#no-mana-cost). | Full-signature overload query; retained float-result postfix gateway; current player/online predicate. | All seven native argument positions, original side effects and exception, nonplayer/null/online filtering, late return after close. |
-| Todo | `ability-speed` — `UsingAbility.getSpeedMultiplierStat` | Call original, identify player through state/controller/actor, multiply positive configured speed. Preserve abilities whose mutator fixes speed downstream. | Owner-read helpers and float result adjustment. | Enemy state untouched; valid player multiplier; fixed-speed ability still follows its mutator. |
+| Done | `ability-speed` — `UsingAbility.getSpeedMultiplierStat` | Call original, identify player through state/controller/actor, multiply positive configured speed. Preserve abilities whose mutator fixes speed downstream. | Owner-read helpers and float result adjustment. | Enemy state untouched; valid player multiplier; fixed-speed ability still follows its mutator. |
 | Todo | `extra-projectiles` — `ExtraProjectiles.onCreation` and `GetTotalExtraProjectiles` | Mark the locally created extras object per thread while original creation runs; restore the outer mark on return/unwind. Scale the marked object's positive returned count, rounded and capped at one million. | Multi-target ownership; small scoped TLS pattern, later shared with duplicate where appropriate. | Nested extras restore the outer object; unrelated/thread-concurrent queries unchanged; exception clears context. |
 | Todo | `buffs-never-expire` — `StatBuffs.OnUpdateTick` and `AilmentReceiver.OnUpdateTick` | Pass zero time for player buffs. For positive player ailments, keep up to 64 durations, compensate their calculated tick loss before original, then restore durations of surviving entries. Negative ailments and damage/healing must keep ticking. | Bounded collection access and two-target lifecycle. No generic 'skip tick' handler. | Positive/negative mix, local/global speed modifiers, removed entries, more than 64 ailments and original throwing. |
 | Todo | `movement-speed` — `SpeedManager.updateSpeed` and `Stats.GetStatValue` | Mark player stats during speed update. Multiply only the first matching Movespeed query, consuming the mark before calling original. Resolve enum value and forward all nine managed arguments. Preserve the original source's clear-on-exit semantics; review nested updates explicitly. | Scoped context mechanics; long mixed ABI forwarding; multi-target ownership. | Other stats/properties and subsequent reads unaffected; nested update/exception leaves no stale mark. |
@@ -122,10 +122,10 @@ Behavior reference: [loot.h](../../EterrasGift/native/hooks/loot.h).
 |---|---|---|---|---|
 | Todo | `drop-rates` — `DeathItemDrop.OnDeath` | Before original, write item/gold override flags, chances clamped to 0..1 and nonnegative multipliers on the passed drop component. Keep those writes because delayed drop work reads them later. | Shared target with extra rares; coherent four-value settings; field descriptors. | Item/gold settings remain coherent; a delayed original continuation sees the changed component; off does not retroactively undo drops. |
 | Todo | `extra-rare` — same `OnDeath` | Set `guaranteedAdditionalRare` before original on the passed component. Leave it on that dying enemy as the original app does. | Death-drop target and descriptors. | Works independently of drop rates; disabling one keeps the other's target installed; original executes once. |
-| Todo | `boss-loot-chance` — nested `BossLoot.LootGroup.GetDropChance` | Call original with all five managed arguments, then return 1 when active. Preserve original execution; this is the chance before downstream modifiers, not a universal final drop-count override. | Nested-class query; mixed float/integer stack forwarding; result adjustment. | Original called once; rarity/corruption and stack tier arguments forwarded; final result overridden only on. |
-| Todo | `max-random-rolls` — `LE.Core.RngElement.RandomByte` | Call original to advance RNG, then return 255. Preserve the original app's broad scope: other uses of RandomByte are affected too. | Byte-return detour and result adjustment pattern. | RNG state advances identically on/off; return value is a byte; non-item RandomByte calls retain the same broad effect. |
+| Done | `boss-loot-chance` — nested `BossLoot.LootGroup.GetDropChance` | Call original with all five managed arguments, then return 1 when active. Preserve original execution; this is the chance before downstream modifiers, not a universal final drop-count override. | Nested-class query; mixed float/integer stack forwarding; result adjustment. | Original called once; rarity/corruption and stack tier arguments forwarded; final result overridden only on. |
+| Done | `max-random-rolls` — `LE.Core.RngElement.RandomByte` | Call original to advance RNG, then return 255. Preserve the original app's broad scope: other uses of RandomByte are affected too. | Byte-return detour and result adjustment pattern. | RNG state advances identically on/off; return value is a byte; non-item RandomByte calls retain the same broad effect. |
 | Todo | `new-item-rarity` — `GenerateItems.RollBaseItem` | Replace only a caller-supplied rarity of -1 with the selected catalog mapping 0/1/3/7/8. Forward 21 managed parameters, receiver and MethodInfo, including reference/aggregate payloads with validated ABI. Explicitly requested rarity wins. | Long-stack forwarding once proven, settings choice validation. | All 23 native slots survive; explicit unique/blessing/gambler rarity unchanged; only -1 is replaced. |
-| Todo | `tier-7-affixes` — `GenerateItems.RollTier` | Let original consume its RNG, then return internal tier 6. Apply to newly generated affixes, not existing items or Forge edits; this differs from the older cheat-table RebuildID patch. | Long mixed-argument forwarding; result adjustment. | Original RNG advances; returned tier is 6; editing an existing item does not silently change all its tiers. |
+| Done | `tier-7-affixes` — `GenerateItems.RollTier` | Let original consume its RNG, then return internal tier 6. Apply to newly generated affixes, not existing items or Forge edits; this differs from the older cheat-table RebuildID patch. | Long mixed-argument forwarding; result adjustment. | Original RNG advances; returned tier is 6; editing an existing item does not silently change all its tiers. |
 | Done | `pickup-anywhere` — `pickupItem`, `ClickedItem`, `vacuumNearbyStackableItems`, `pickupGold`, `PickupGroundObjectInteraction.initialise` | Patch four distance-refusal paths and set initial `canPickup` true for ground-object interaction. Resolve GroundItemList overloads. Preserve pickup delay and other admission rules. Previously collected items stay collected. | Five-site patch group and overload query. | Item click, materials, gold and delayed ground objects each exercise their own path; one missing site prevents a partial feature. |
 
 ### Monolith
@@ -135,9 +135,9 @@ Behavior reference: [monolith.h](../../EterrasGift/native/hooks/monolith.h).
 | Status | Feature and target | Behavior | Shared mechanism | Distinguishing targeted check |
 |---|---|---|---|---|
 | Todo | `skip-quest-echoes` — `MonolithTimelinePanelManager.SetRunInfo` | Raise run quest completion to at least two and stability to at least the selected difficulty's maximum before original. Validate difficulty indexing. Preserve the original trigger on showing run info; changes belong to the saved run and are not undone on off. | Object/list reads and field stores. | Lower values raised, higher values preserved, invalid difficulty safe fallback, opening the panel triggers original once. |
-| Todo | `max-bonus-stability` — `MonolithZoneManager.getBonusStabilityInRegularEcho` | Call original, then return at least `maxBonusStablity` when active. Preserve the game's first-kill/update trigger rather than adding an immediate write. | Integer result adjustment; one field descriptor. | Original higher result is preserved; first qualifying update reaches maximum; off resumes the game's calculation. |
+| Done | `max-bonus-stability` — `MonolithZoneManager.getBonusStabilityInRegularEcho` | Call original, then return at least `maxBonusStablity` when active. Preserve the game's first-kill/update trigger rather than adding an immediate write. | Integer result adjustment; one field descriptor. | Original higher result is preserved; first qualifying update reaches maximum; off resumes the game's calculation. |
 | Todo | `cycle-echo-types` — `getIslandTypeForNewIsland`, `CalculateModAndZoneForIsland`, `CanHaveSubsequentConnectionsRevealed`, `OnIslandCompleted` table | Cycle the seven original type values; pass tier at least 19 for the related generation calls using per-thread web/tier context; permit subsequent connections; redirect normal/arena completion table entries to Super Beacon. Share type target with echo-type. Restore the table on off. | Shared/multiple target ownership, scoped context, atomic cycle index and checked data patching. Keep the cycle and table decoding specific. | Sequence/wrap, unrelated web, explicit-type precedence, normal/arena reveal behavior, table restoration and partial installation failure. |
-| Todo | `one-echo-type` — same `getIslandTypeForNewIsland` | Map the selected catalog index to the original ten IslandType values and override the original result. Wins over cycling type, while the active cycle's tier and other effects remain. Original still runs. | Shared target with echo-cycle; settings choice validation. | Each index maps correctly; explicit type plus cycle retains tier behavior; removing either feature preserves the other. |
+| Done | `one-echo-type` — same `getIslandTypeForNewIsland` | Map the selected catalog index to the original ten IslandType values and override the original result. Wins over cycling type, while the active cycle's tier and other effects remain. Original still runs. | Shared target with echo-cycle; settings choice validation. | Each index maps correctly; explicit type plus cycle retains tier behavior; removing either feature preserves the other. |
 | Todo | `reveal-objective` — `LE.Gameplay.Monolith.Frontend.MonolithPulse.OnScoreChanged` | Raise incoming score to at least the pulse's threshold before original. Preserve its existing score-change/first-kill trigger; do not add a global objective scan. | Float argument adjustment and object field read. | Below/above threshold, original last-kill argument, next score event after activation; previously revealed objective stays revealed. |
 
 ### Factions
@@ -301,6 +301,45 @@ frame and unwind metadata remain process-owned. The player/actor/mana graph must
 post-call span. Closing before a delayed original returns suppresses adjustment; no object pin or field restoration
 is needed. Live checks: ordinary and channeled skill off/on/off, with Refill mana every tick and No cooldowns off.
 
+### Original-first result controls
+
+Six controls share the extended postfix gateway, with each metadata contract and result predicate kept under
+`features/results/<feature>.rs`:
+
+| Control | Result after one original call | Preserved behavior |
+|---|---|---|
+| Every random roll at its maximum | Byte 255 | Every RandomByte draw still advances RNG; non-item callers are affected, as in the original. |
+| Boss loot at full chance | Float 1 | Nested BossLoot.LootGroup calculation runs with rarity/corruption/tier arguments; later loot modifiers still apply. |
+| Tier 7 affixes on new items | Int32 6 | RollTier advances RNG normally and affects newly generated affixes, leaving existing items/Forge edits alone. |
+| Ability speed multiplier | Original float multiplied by the selected value for the current player's state | Controller/actor identity is read after original; other/missing owners and multiplier zero keep the original result. Downstream fixed-speed mutators still win. |
+| Maximum bonus stability | max(original Int32, zone maximum) | Higher original values survive; the normal next-kill/update trigger is retained. |
+| One echo type | Catalog choice maps to IslandType 0,1,2,3,4,5,7,8,10,11 | Original selection/RNG still runs; only newly generated types change. Cycle echo types' tier, context and reveal-table behavior remain Todo. |
+
+Each declared signature supplies its native argument-position count, including receiver and MethodInfo. The gateway
+copies only the actual stack arguments, preserves the original integer return in R10 while loading its data into
+RAX, and leaves float results in XMM0. Return adjustment runs after a normal return; there is no catch/retry around
+the original. Matching Windows unwind records cover the 40/56/72/88-byte frames used by two/five/seven/ten positions;
+the emitter admits at most twelve positions (104-byte frame), validated with the same virtual-unwind check.
+No path enters helper code, and code/data/unwind/return paths remain process-owned after helper departure.
+
+Every effect checks its retained switch and current online static after the original. Closed/online paths retain
+the original result, including an original that finishes after close. Ability speed additionally relies on the live
+state/controller/actor graph remaining readable over that post-call span; no cached player identity or extra pin is
+introduced. Maximum stability reads the metadata-checked instance Int32. Scalar values/choices publish through the
+existing u64 settings and require exact independent readback; invalid multipliers/indices are rejected before writes.
+
+Static inspection of the GameAssembly/metadata identified below checked all six signatures, native prefixes and
+unwind headers. Important details: RandomByte is in LE.Core; the loot group is nested; RollTier has eight managed
+arguments including a stack float; the echo method takes HashSet<IslandType>, two Int32 enums and a Byte WovenEchoType.
+Enum widths and full parameter names are checked on enable. Unity 6000.4.8f1's local Type.cpp / il2cpp-api.cpp confirm
+the IL generic spelling used by the full-signature query. Runtime lookup uses no observed RVA/field-offset constants.
+
+Targeted native tests cover RNG/original-call counts, byte/int/float results, integer and float register/stack
+arguments through ten positions, original unwind without retry, every choice mapping, player replacement/null/online
+filters and manager-loss/terminal restoration. Existing No mana cost unwind/late-return tests also pass against the
+extended gateway. Session tests cover both numeric and choice validation/mismatched readback. All six UI controls use
+the existing capability/profile path. Live Last Epoch behavior is still unverified.
+
 ### Crafting materials
 
 `shards-to-99` and `runes-glyphs-to-99` are independent switches under Forge > Crafting rules, using the same retained leaf,
@@ -419,8 +458,8 @@ require building a universal handler/ABI/object framework first.
 
 - **Settings and numeric transforms:** XP multiplier/instant level share a target and precedence; faction gains,
   area and cast speed reuse only matching arithmetic/owner lookup. Preserve independent original-call placement.
-- **Post-call results and argument forwarding:** perfect rolls, boss drops and always T7 preserve RNG/original work;
-  force rarity needs its full long signature; map/prophecy distance need validated indirect aggregates.
+- **Further argument forwarding:** force rarity needs its full long signature; map/prophecy distance need validated
+  indirect aggregates. The current scalar-result family is implemented; it does not imply support for hidden results.
 - **Scoped context:** projectiles then duplicate establish nesting/unwind behavior; movement consumes a mark,
   while echo context spans calls. Do not give all three the same cleanup policy.
 - **Temporary shared assets:** prophecy reward count/max LP, then density and pack size/rarity need explicit target

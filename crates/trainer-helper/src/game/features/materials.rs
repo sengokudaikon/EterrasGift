@@ -8,15 +8,6 @@ use crate::{
 pub(super) const FLOOR: u8 = 99;
 pub(super) const MAX_ENTRIES: u32 = 65536;
 
-pub(super) unsafe fn online_storage(access: &RuntimeAccess, images: &Images) -> Result<NonNull<c_void>, GameError> {
-    // SAFETY: admitted attached thread and retained metadata; initialize the process-owned Boolean static.
-    unsafe {
-        let environment = access.class(images, c"EHG.Multiplayer", c"GameplayEnvironment")?;
-        let online = access.static_field(environment, c"_isOnlinePlay", "System.Boolean")?;
-        access.hook_static_storage(environment, online, 1)
-    }
-}
-
 pub(super) unsafe fn field_offset(access: &RuntimeAccess, owner: Class, name: &CStr, expected: Class, alignment: usize) -> Result<u32, GameError> {
     // SAFETY: exact non-byref field class and instance storage are checked before returning the aligned offset.
     unsafe {

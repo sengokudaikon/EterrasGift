@@ -40,6 +40,7 @@ impl ManaCostLayout {
         PostfixEffect {
             code,
             slots: [self.player_storage.as_ptr() as u64, self.online_storage.as_ptr() as u64],
+            positions: 7,
         }
     }
 }

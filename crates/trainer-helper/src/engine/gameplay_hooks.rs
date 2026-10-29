@@ -824,4 +824,53 @@ mod tests {
             assert_eq!(std::hint::black_box(slot_quantity)(&slot, 0), 6);
         }
     }
+
+    #[test]
+    fn integer_result_overrides_use_shared_setting_readback_manager_loss_and_terminal_clear() {
+        use crate::game::{gameplay::ResolvedMethod, results::tier_7_affixes};
+        use std::sync::atomic::AtomicU8;
+        #[unsafe(naked)]
+        unsafe extern "C-unwind" fn target(_: usize, _: usize, _: usize, _: i32, _: bool, _: i32, _: f32, _: usize, _: usize, _: usize) -> i32 {
+            core::arch::naked_asm!("nop", "nop", "nop", "nop", "nop", "mov eax,2", "ret", "nop", "nop", "nop", "nop", "nop");
+        }
+        let online = AtomicU8::new(0);
+        // SAFETY: padded authored ten-position RollTier ABI and retained online byte; no instance graph is read.
+        let group = unsafe {
+            let address = NonNull::new(target as *mut u8).unwrap();
+            let method = ResolvedMethod {
+                name: "fixture RollTier".into(),
+                address,
+                bytes: address.cast::<[u8; 16]>().read_unaligned(),
+            };
+            Group::prepare(
+                FeatureBinding::fixture(GameplayHook::Tier7Affixes),
+                &[method.postfix(tier_7_affixes::effect(NonNull::from(&online).cast()))],
+            )
+            .unwrap()
+        };
+        let mut owner = Hooks {
+            slots: [const { None }; GroupId::COUNT],
+            manager: 1,
+            closing: false,
+        };
+        owner.slots[GroupId::Tier7Affixes as usize] = Some(group);
+        let call = || {
+            // SAFETY: exact authored signature, with the six stack arguments supplied even though original ignores them.
+            unsafe { std::hint::black_box(target)(1, 2, 3, 4, true, 5, 1.25, 6, 7, 8) }
+        };
+        for on in [true, false, true] {
+            let group = owner.slots[GroupId::Tier7Affixes as usize].as_ref().unwrap();
+            change_group(group, GameplayHook::Tier7Affixes, on, 1).unwrap();
+            assert!(observation(Some(group), GameplayHook::Tier7Affixes).confirmed(on));
+            assert_eq!(call(), if on { 6 } else { 2 });
+        }
+        owner.observe_manager(2).unwrap();
+        assert!(observation(owner.slots[GroupId::Tier7Affixes as usize].as_ref(), GameplayHook::Tier7Affixes).confirmed(false));
+        assert_eq!(call(), 2);
+        change_group(owner.slots[GroupId::Tier7Affixes as usize].as_ref().unwrap(), GameplayHook::Tier7Affixes, true, 1).unwrap();
+        owner.closing = true;
+        owner.clear().unwrap();
+        assert!(owner.slots.iter().all(Option::is_none));
+        assert_eq!(call(), 2);
+    }
 }

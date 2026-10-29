@@ -1,4 +1,4 @@
-//! Original-first Windows x64 float-result gateway with three stack argument positions. The original call, result
+//! Original-first Windows x64 scalar-result gateway with up to twelve argument positions. The original call, result
 //! adjustment, return path, state and unwind data remain process-owned. Generated code never enters this DLL.
 use super::{HookError, failure};
 use std::sync::atomic::{AtomicU64, Ordering::SeqCst};
@@ -29,12 +29,15 @@ pub const FRAME: Frame = Frame {
     slots: [std::mem::offset_of!(Data, slots) as u8, (std::mem::offset_of!(Data, slots) + 8) as u8],
 };
 
-/// Code after a normal original return: RAX is Data, RCX is the saved receiver and XMM0 holds the float result.
+/// Code after a normal original return: RAX is Data, RCX is the saved first argument, R10 holds the integer result
+/// and XMM0 holds the float result. Preserve the relevant result on unchanged paths; R10 is copied back to RAX.
 /// Use only volatile registers, preserve RSP and nonvolatile registers, keep every branch inside this code (or to its
 /// end), and fall through to the appended epilogue. There are no helper-code addresses or callback destinations.
 pub struct PostfixEffect {
     pub code: Vec<u8>,
     pub slots: [u64; 2],
+    /// Native positions, including receiver when present and MethodInfo. No hidden return buffer.
+    pub positions: u8,
 }
 
 pub struct PostfixGate {
@@ -44,10 +47,17 @@ pub struct PostfixGate {
 }
 impl PostfixGate {
     /// # Safety
-    /// Windows x64 instance method returning System.Single, seven ABI positions including receiver and MethodInfo,
-    /// and no hidden return buffer. Effect code obeys PostfixEffect's register/branch contract. Its referenced static
+    /// Windows x64 method returning an integer, byte or float scalar, with `positions` argument positions including
+    /// receiver when present and MethodInfo, and no hidden return buffer. Each parameter occupies one native position.
+    /// Effect code obeys PostfixEffect's register/branch contract. Its referenced static
     /// storage remains readable for process lifetime; any object graph it reads is valid over the post-call span.
     pub unsafe fn prepare(effect: &PostfixEffect, shared: Option<&Self>) -> Result<Self, HookError> {
+        if !(1..=12).contains(&effect.positions) {
+            return Err(HookError::UnsupportedPrefix);
+        }
+        let stack = effect.positions.saturating_sub(4);
+        let saved = 32 + stack * 8;
+        let frame = ((saved + 8 + 23) & !15) - 8; // enough storage, with RSP aligned before the call
         // SAFETY: private pages initialized while unpublished; executable/data/unwind pages are retained until exit.
         unsafe {
             let allocation = VirtualAlloc(std::ptr::null(), 8192, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE).cast::<u8>();
@@ -62,9 +72,11 @@ impl PostfixGate {
                 switch: shared.map_or(data as u64, |gate| gate.switch as *const AtomicU64 as u64),
                 slots: effect.slots,
             });
-            // 32-byte home area, three 8-byte stack arguments, saved RCX at +38, padding: 72-byte aligned call frame.
-            let mut code = vec![0x48, 0x83, 0xec, 0x48, 0x48, 0x89, 0x4c, 0x24, 0x38];
-            for (source, destination) in [(0x70u32, 0x20u8), (0x78, 0x28), (0x80, 0x30)] {
+            // Home area, the actual stack arguments, then saved RCX. Never read absent caller arguments.
+            let mut code = vec![0x48, 0x83, 0xec, frame, 0x48, 0x89, 0x4c, 0x24, saved];
+            for index in 0..stack {
+                let source = u32::from(frame) + 40 + u32::from(index) * 8;
+                let destination = 32 + index * 8;
                 code.extend([0x48, 0x8b, 0x84, 0x24]); // mov rax,[rsp+source]
                 code.extend(source.to_le_bytes());
                 code.extend([0x48, 0x89, 0x44, 0x24, destination]);
@@ -72,10 +84,11 @@ impl PostfixGate {
             code.extend([0x48, 0xb8]);
             code.extend((data as u64).to_le_bytes());
             code.extend([0xff, 0x50, std::mem::offset_of!(Data, original) as u8]); // call original once
-            code.extend([0x48, 0x8b, 0x4c, 0x24, 0x38, 0x48, 0xb8]); // restore RCX; reload Data
+            code.extend([0x49, 0x89, 0xc2]); // integer result -> r10 before reloading Data into rax
+            code.extend([0x48, 0x8b, 0x4c, 0x24, saved, 0x48, 0xb8]); // restore RCX; reload Data
             code.extend((data as u64).to_le_bytes());
             code.extend(&effect.code);
-            code.extend([0x48, 0x83, 0xc4, 0x48, 0xc3]);
+            code.extend([0x4c, 0x89, 0xd0, 0x48, 0x83, 0xc4, frame, 0xc3]);
             if code.len() > 4096 {
                 VirtualFree(allocation.cast(), 0, MEM_RELEASE);
                 return Err(HookError::UnsupportedPrefix);
@@ -88,8 +101,9 @@ impl PostfixGate {
                 Anonymous: std::mem::zeroed(),
             });
             (*table).Anonymous.UnwindData = 4096 + 80;
-            // Version 1, prologue 4, one UWOP_ALLOC_SMALL(72). The original can unwind without helper frames/state.
-            std::ptr::copy_nonoverlapping([1u8, 4, 1, 0, 4, 0x82, 0, 0].as_ptr(), allocation.add(4096 + 80), 8);
+            // Version 1, prologue 4, one UWOP_ALLOC_SMALL(frame). No helper frame/state on the unwind path.
+            let allocation_code = ((frame - 8) / 8) << 4 | 2;
+            std::ptr::copy_nonoverlapping([1u8, 4, 1, 0, 4, allocation_code, 0, 0].as_ptr(), allocation.add(4096 + 80), 8);
             let mut old = 0;
             if VirtualProtect(allocation.cast(), 4096, PAGE_EXECUTE_READ, &raw mut old) == 0
                 || FlushInstructionCache(GetCurrentProcess(), allocation.cast(), 4096) == 0
@@ -110,7 +124,7 @@ impl PostfixGate {
         self.entry as *const ()
     }
     /// # Safety
-    /// Original has this gateway's exact seven-position ABI and remains process-owned; set once before publication.
+    /// Original has this gateway's exact declared ABI and remains process-owned; set once before publication.
     pub unsafe fn set_original(&self, original: *const ()) {
         self.data.original.store(original as u64, SeqCst);
     }

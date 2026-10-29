@@ -30,10 +30,16 @@ pub enum GameplayHook {
     RunePrisonComplex = 23,
     ShardsTo99 = 24,
     RunesGlyphsTo99 = 25,
+    MaxRandomRolls = 26,
+    BossLootChance = 27,
+    Tier7Affixes = 28,
+    MaxBonusStability = 29,
+    AbilitySpeed = 30,
+    OneEchoType = 31,
 }
 
 impl GameplayHook {
-    pub const ALL: [Self; 26] = [
+    pub const ALL: [Self; 32] = [
         Self::MysteriousRift,
         Self::AnyOffhand,
         Self::IncomingDamage,
@@ -60,9 +66,15 @@ impl GameplayHook {
         Self::RunePrisonComplex,
         Self::ShardsTo99,
         Self::RunesGlyphsTo99,
+        Self::MaxRandomRolls,
+        Self::BossLootChance,
+        Self::Tier7Affixes,
+        Self::MaxBonusStability,
+        Self::AbilitySpeed,
+        Self::OneEchoType,
     ];
     pub fn default_value(self) -> u64 {
-        if matches!(self, Self::EnemyDamage | Self::FixedAttackRate) {
+        if matches!(self, Self::EnemyDamage | Self::FixedAttackRate | Self::AbilitySpeed) {
             1.0f64.to_bits()
         } else if self == Self::FixedLeechRate {
             0.0f64.to_bits()
@@ -98,6 +110,12 @@ impl GameplayHook {
             Self::RunePrisonComplex => "rune-prison-complex",
             Self::ShardsTo99 => "shards-to-99",
             Self::RunesGlyphsTo99 => "runes-glyphs-to-99",
+            Self::MaxRandomRolls => "max-random-rolls",
+            Self::BossLootChance => "boss-loot-chance",
+            Self::Tier7Affixes => "tier-7-affixes",
+            Self::MaxBonusStability => "max-bonus-stability",
+            Self::AbilitySpeed => "ability-speed",
+            Self::OneEchoType => "one-echo-type",
         }
     }
     pub fn from_id(id: &str) -> Option<Self> {
@@ -127,7 +145,13 @@ impl GameplayHook {
             | Self::ClassExperimentals
             | Self::RunePrisonComplex
             | Self::ShardsTo99
-            | Self::RunesGlyphsTo99 => value == 1,
+            | Self::RunesGlyphsTo99
+            | Self::MaxRandomRolls
+            | Self::BossLootChance
+            | Self::Tier7Affixes
+            | Self::MaxBonusStability => value == 1,
+            Self::AbilitySpeed => f64::from_bits(value).is_finite() && (0.0..=100.0).contains(&f64::from_bits(value)),
+            Self::OneEchoType => value <= 9,
             Self::EnemyDamage => f64::from_bits(value).is_finite() && ((0.0..=100.0).contains(&f64::from_bits(value)) || value == 101.0f64.to_bits()),
             Self::MysteriousRift => value <= 1,
             Self::FixedAttackRate => f64::from_bits(value).is_finite() && (0.01..=20.0).contains(&f64::from_bits(value)),
