@@ -303,6 +303,14 @@ pub struct ResolvedMapping {
     /// Unclassified/transient helper refusal may be retried after the next
     /// successful owned read. Stable capability failures survive monitor polls.
     pub retry_on_read: bool,
+    /// The rolls the sampled unique or implicit line reads, from the game's description of the item.
+    pub line_rolls: Option<Vec<u8>>,
+}
+impl ResolvedMapping {
+    /// Whether the table still holds for the current item (`MappingRequest::still_holds`).
+    pub fn holds_for(&self, current: &crate::item::edit::ExpectedObservation) -> bool {
+        self.request.still_holds(&self.expected, current, self.line_rolls.as_deref())
+    }
 }
 impl BackendSnapshot {
     /// The hooks the pages show: the shown profile's, or those of the character in play for this connection.
@@ -316,7 +324,7 @@ impl BackendSnapshot {
     pub fn mapping(&self, expected: &crate::item::edit::ExpectedObservation, request: &MappingRequest) -> Option<&Result<Arc<ValueTable>, String>> {
         self.mappings
             .iter()
-            .find(|mapping| &mapping.request == request && request.still_holds(&mapping.expected, expected))
+            .find(|mapping| &mapping.request == request && mapping.holds_for(expected))
             .map(|mapping| &mapping.result)
     }
     /// The outcome for this exact submitted plan. Historical certainty survives

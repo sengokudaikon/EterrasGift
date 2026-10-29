@@ -85,6 +85,23 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
                 return Err(error);
             }
         };
+        // The rolls the sampled line reads: its own line, or each line that reads the sampled roll. A line the
+        // description does not name leaves every roll in the key.
+        let line_rolls = tooltip.as_ref().and_then(|tooltip| {
+            let lines: Vec<_> = tooltip
+                .modifiers()
+                .iter()
+                .filter(|m| request.address.line.map_or(m.roll_ids.contains(&request.address.index), |line| m.index == line))
+                .collect();
+            (!lines.is_empty()).then(|| {
+                lines
+                    .iter()
+                    .flat_map(|m| m.roll_ids.iter().copied())
+                    .collect::<std::collections::BTreeSet<u8>>()
+                    .into_iter()
+                    .collect()
+            })
+        });
         self.commit(epoch, |this| {
             if this.state.expected_observation().as_ref() == Ok(&expected) {
                 if this.state.mappings.len() == MAX_MAPPINGS {
@@ -95,6 +112,7 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
                     request,
                     result,
                     retry_on_read,
+                    line_rolls,
                 });
             }
         })

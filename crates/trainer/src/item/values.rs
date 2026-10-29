@@ -94,10 +94,13 @@ pub struct MappingRequest {
 impl MappingRequest {
     /// Whether a table this request read from `read` still holds for `current`, the same item since changed. The game
     /// samples one roll on a detached copy of the item: the values depend on the connection, catalog and language, the
-    /// base, rarity, class and unique, and the sampled line, never on the status values, the other affixes or the other
-    /// kinds of roll. A change to those keeps the table, so an Apply re-reads only the tables it touched. Tables are
+    /// base, rarity, class and unique, and the sampled line, never on the status values, the other affixes or the rolls
+    /// other lines read. A change to those keeps the table, so an Apply re-reads only the tables it touched. Tables are
     /// display data; writes never read them.
-    pub fn still_holds(&self, read: &ExpectedObservation, current: &ExpectedObservation) -> bool {
+    ///
+    /// `line_rolls` are the rolls the sampled line reads, from the game's description of the item; without them every
+    /// roll of the sampled kind is taken to matter.
+    pub fn still_holds(&self, read: &ExpectedObservation, current: &ExpectedObservation, line_rolls: Option<&[u8]>) -> bool {
         if read == current {
             return true;
         }
@@ -116,18 +119,25 @@ impl MappingRequest {
             return false;
         }
         let index = usize::from(self.address.index);
-        // The sampled roll itself is what the table varies; every other roll of its kind stays in the key.
-        let others = |rolls: &[u8]| rolls.iter().enumerate().filter(|(i, _)| *i != index).map(|(_, roll)| *roll).collect::<Vec<_>>();
+        let rolls = |item: &'_ eg_trainer_wire::forge::ForgeSnapshot| -> Option<Vec<u8>> {
+            match self.address.target {
+                MappingTarget::Unique => item.identity.as_ref().map(|identity| identity.rolls.clone()),
+                _ => Some(item.implicit_rolls.clone()),
+            }
+        };
         match self.address.target {
             MappingTarget::Affix => {
                 let line = |item: &eg_trainer_wire::forge::ForgeSnapshot| item.affixes.get(index).map(|affix| (affix.id, affix.tier, affix.kind, affix.seal, affix.special));
                 line(old).is_some() && line(old) == line(new)
             }
-            MappingTarget::Unique => {
-                let rolls = |item: &eg_trainer_wire::forge::ForgeSnapshot| item.identity.as_ref().map(|identity| (identity.rolls.len(), others(&identity.rolls)));
-                rolls(old) == rolls(new)
+            MappingTarget::Unique | MappingTarget::Implicit => {
+                let (Some(old), Some(new)) = (rolls(old), rolls(new)) else {
+                    return false;
+                };
+                // The sampled roll itself is what the table varies.
+                let read = |i: usize| i != index && line_rolls.is_none_or(|line| line.iter().any(|id| usize::from(*id) == i));
+                old.len() == new.len() && (0..old.len()).filter(|i| read(*i)).all(|i| old[i] == new[i])
             }
-            MappingTarget::Implicit => old.implicit_rolls.len() == new.implicit_rolls.len() && others(&old.implicit_rolls) == others(&new.implicit_rolls),
         }
     }
 }

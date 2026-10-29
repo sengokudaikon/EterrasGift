@@ -28,6 +28,7 @@ const PREFIX: i32 = 0;
 const SUFFIX: i32 = 1;
 const STANDARD: i32 = 0;
 const SET: i32 = 3;
+const CORRUPTED: i32 = 6;
 
 /// A game the forge can hold: its definitions, its item and how it answers.
 #[derive(Clone)]
@@ -92,6 +93,7 @@ fn catalog(base_implicits: bool, class_affixes: bool) -> GameCatalog {
         affix(4002, "Cold Resistance", SUFFIX, STANDARD, &[BOOTS], 0),
         affix(4003, "Increased Armour", PREFIX, STANDARD, &[BOOTS], 0),
         affix(4004, "Sentinel's Resolve Reforged", PREFIX, SET, &[BOOTS], 0),
+        affix(4005, "Void Corruption", SUFFIX, CORRUPTED, &[BOOTS], 0),
     ]
     .into_iter()
     .collect();
@@ -1293,6 +1295,20 @@ pub(in super::super) fn item_captures(session: &Session) {
     state.invoke_picker_class_changed(0);
     settle();
     session.key(Key::Escape);
+    // A corrupted affix takes the item's one corrupted slot: the affix holding it is drafted back to a normal one first.
+    // The game adds corrupted affixes only by corruption, so the forge adds one with "I know what I'm doing".
+    command(&forge.backend, Command::SetOverride(true), || forge.backend.snapshot().override_enabled);
+    forge.handle.edit(|editor| {
+        assert!(editor.open_add());
+        editor.picker_allow(true);
+        editor.picker_search("Void");
+        editor.picker_select(0);
+        assert!(editor.picker_status().contains("Fire Resistance becomes a normal affix"), "{}", editor.picker_status());
+        editor.use_picker();
+        assert_eq!(editor.affixes[3].seal(), Seal::Normal);
+        assert_eq!(editor.affixes[4].seal(), Seal::Corrupted);
+        assert_eq!(editor.draft_count(), 2);
+    });
     drop(forge);
 
     // The rarity in the facts line opens the rarity menu (`item-rarity-menu`); the base, the base picker with the implicits

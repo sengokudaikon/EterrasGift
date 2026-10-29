@@ -150,11 +150,8 @@ struct PendingMapping {
 }
 struct PendingEdit {
     receipt: Pending,
-    expected: ForgeItem,
-    edit: ItemEdit,
-    undoing: bool,
     before: BackendSnapshot,
-    plan: Option<eg_trainer::write::ForgePlan>,
+    plan: eg_trainer::write::ForgePlan,
 }
 impl Writer {
     fn has_pending_work(&self) -> bool {
@@ -375,6 +372,8 @@ impl Writer {
         });
         completed
     }
+    /// Plans the edit on the latest read and sends it at once. The helper compares the complete item with the one the
+    /// plan was made on before it stores anything, so an item changed since that read is refused, never overwritten.
     fn submit(&mut self, expected: &ForgeItem, edit: &ItemEdit, undoing: bool) -> EditOutcome {
         if self.pending.is_some() {
             return refused("An item edit is already pending.");
@@ -387,81 +386,17 @@ impl Writer {
         if project_item(&state).ok().flatten().as_ref().is_none_or(|actual| !actual.same_state(expected)) {
             return refused("The item changed. Discard the stale draft and edit it again.");
         }
-        match self.backend.try_submit(Command::ReadForge) {
-            Ok(receipt) => {
-                self.pending = Some(PendingEdit {
-                    receipt,
-                    expected: expected.clone(),
-                    edit: edit.clone(),
-                    undoing,
-                    before: state,
-                    plan: None,
-                });
-                self.keep_polling();
-                WriteOutcome::Pending
-            }
-            Err(_) => refused("The trainer cannot accept another command. Nothing was submitted."),
-        }
-    }
-    fn poll(&mut self) -> Option<EditOutcome> {
-        let result = self.pending.as_mut()?.receipt.try_result()?;
-        let mut pending = self.pending.take().unwrap();
-        let state = self.backend.snapshot();
-        if let Some(plan) = &pending.plan {
-            let record = state.last_write.as_ref().filter(|r| &r.plan == plan);
-            // A failure before admission must not pick up an earlier identical
-            // plan's result. Once a new record exists, it outranks receipt errors.
-            if let Some(record) = record.filter(|r| result.is_ok() || pending.before.last_write.as_ref() != Some(*r)) {
-                if matches!(record.status, WriteOutcome::Pending) {
-                    return Some(WriteOutcome::uncertain("The worker ended without a terminal write outcome."));
-                }
-                return Some(record.status.clone().map(|actual| {
-                    let mut observed = pending.before.clone();
-                    let resolved_name = observed.catalog.data().and_then(|c| c.resolve_item_name(&actual));
-                    observed.forge = ForgeState::Item {
-                        generation: observed.generation,
-                        snapshot: Arc::new(actual),
-                        resolved_name,
-                        implicits: None,
-                        unique: None,
-                    };
-                    // Keep projection failure explicit; never substitute the
-                    // requested presentation for an undisplayable readback.
-                    project_item(&observed).ok().flatten()
-                }));
-            }
-            return Some(match result {
-                Err(error) if error.delivery != Some(eg_trainer::backend::Delivery::MayHaveRun) => refused(error.message),
-                _ => WriteOutcome::uncertain("The worker stopped without a completed write record."),
-            });
-        }
-        if let Err(error) = result {
-            return Some(refused(error.message));
-        }
-        // Full owned snapshots, not the presentation projection alone, protect
-        // fields omitted from the editor. Each draft step obtains a new read.
-        if state.generation != pending.before.generation
-            || state.attached != pending.before.attached
-            || !state
-                .expected_observation()
-                .ok()
-                .zip(pending.before.expected_observation().ok())
-                .is_some_and(|(current, before)| current == before)
-            || project_item(&state).ok().flatten().as_ref().is_none_or(|actual| !actual.same_state(&pending.expected))
-        {
-            return Some(refused("The item changed before submission. Discard the stale draft and edit it again."));
-        }
-        let undo = if pending.undoing { state.undo_forge.clone() } else { None };
-        let planned = if pending.undoing {
+        let undo = if undoing { state.undo_forge.clone() } else { None };
+        let planned = if undoing {
             undo.as_ref()
                 .ok_or(eg_trainer::item::edit::EditError::StaleItem)
                 .and_then(|undo| state.forge_undo_plan(undo))
         } else {
-            state.forge_plan(pending.edit.clone())
+            state.forge_plan(edit.clone())
         };
         let plan = match planned {
             Ok(plan) => plan,
-            Err(error) => return Some(refused(error.to_string())),
+            Err(error) => return refused(error.to_string()),
         };
         let command = match undo {
             Some(undo) => Command::UndoForge(Box::new(undo)),
@@ -469,14 +404,43 @@ impl Writer {
         };
         match self.backend.try_submit(command) {
             Ok(receipt) => {
-                pending.receipt = receipt;
-                pending.plan = Some(plan);
-                pending.before = state;
-                self.pending = Some(pending);
-                None
+                self.pending = Some(PendingEdit { receipt, before: state, plan });
+                self.keep_polling();
+                WriteOutcome::Pending
             }
-            Err(_) => Some(refused("The trainer cannot accept the edit. Nothing was submitted.")),
+            Err(_) => refused("The trainer cannot accept the edit. Nothing was submitted."),
         }
+    }
+    fn poll(&mut self) -> Option<EditOutcome> {
+        let result = self.pending.as_mut()?.receipt.try_result()?;
+        let pending = self.pending.take().unwrap();
+        let state = self.backend.snapshot();
+        let record = state.last_write.as_ref().filter(|r| r.plan == pending.plan);
+        // A failure before admission must not pick up an earlier identical
+        // plan's result. Once a new record exists, it outranks receipt errors.
+        if let Some(record) = record.filter(|r| result.is_ok() || pending.before.last_write.as_ref() != Some(*r)) {
+            if matches!(record.status, WriteOutcome::Pending) {
+                return Some(WriteOutcome::uncertain("The worker ended without a terminal write outcome."));
+            }
+            return Some(record.status.clone().map(|actual| {
+                let mut observed = pending.before.clone();
+                let resolved_name = observed.catalog.data().and_then(|c| c.resolve_item_name(&actual));
+                observed.forge = ForgeState::Item {
+                    generation: observed.generation,
+                    snapshot: Arc::new(actual),
+                    resolved_name,
+                    implicits: None,
+                    unique: None,
+                };
+                // Keep projection failure explicit; never substitute the
+                // requested presentation for an undisplayable readback.
+                project_item(&observed).ok().flatten()
+            }));
+        }
+        Some(match result {
+            Err(error) if error.delivery != Some(eg_trainer::backend::Delivery::MayHaveRun) => refused(error.message),
+            _ => WriteOutcome::uncertain("The worker stopped without a completed write record."),
+        })
     }
 }
 

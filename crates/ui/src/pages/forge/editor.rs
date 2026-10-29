@@ -2946,14 +2946,36 @@ impl ForgeEditor {
     }
 
     /// The addition the picker drafts for a definition, to the item as the other drafts leave it, or why not.
-    /// It starts at tier 5 (or the affix's highest below it) and the middle roll, corrupted where the affix is.
-    fn add_edit(&self, definition: &AffixDefinition) -> Result<ItemEdit, String> {
+    /// It starts at tier 5 (or the affix's highest below it) and the middle roll, corrupted where the affix is. An item
+    /// holds one corrupted affix: a corrupted affix takes that slot, and the row holding it (`Some(row)`) is drafted back
+    /// to a normal affix first.
+    fn add_edit(&self, definition: &AffixDefinition) -> Result<(ItemEdit, Option<usize>), String> {
         let Some(item) = self.drafted_item() else {
             return Err("This affix has no verified definition in the current build.".into());
         };
-        let seal = if definition.category == Category::Corrupted { Seal::Corrupted } else { Seal::Normal };
+        let corrupted = definition.category == Category::Corrupted;
+        let seal = if corrupted { Seal::Corrupted } else { Seal::Normal };
         let allow = self.picker.as_ref().is_some_and(|picker| picker.allow_incompatible);
-        self.addition(&item, definition, 5.min(definition.max_tier.clamp(1, 8)), 128, seal, allow)
+        let tier = 5.min(definition.max_tier.clamp(1, 8));
+        let held = if corrupted {
+            self.affixes.iter().position(|row| !row.is_removed() && row.seal() == Seal::Corrupted)
+        } else {
+            None
+        };
+        let item = match (held, item.affixes.iter().find(|affix| affix.seal == Seal::Corrupted)) {
+            (Some(row), Some(affix)) => ItemEdit::Affix(eg_trainer::item::edit::AffixEdit {
+                slot: affix.slot as i32,
+                id: i32::from(affix.id),
+                tier: i32::from(affix.tier),
+                roll: i32::from(affix.roll),
+                seal: Seal::Normal,
+                allow_incompatible: false,
+            })
+            .project(&item)
+            .map_err(|problem| format!("{} cannot become a normal affix to free the corrupted slot: {problem}", self.affixes[row].name()))?,
+            _ => item,
+        };
+        self.addition(&item, definition, tier, 128, seal, allow).map(|edit| (edit, held))
     }
 
     /// The edit that adds an affix to `item`, or why it may not. Where the game would not roll it, or past the free slots
@@ -3014,8 +3036,17 @@ impl ForgeEditor {
         };
         if picker.adding {
             return match self.add_edit(definition) {
-                Ok(edit) if edit.needs_override() => format!("Added by \"I know what I'm doing\". {NOT_ADDED_HERE}."),
-                Ok(_) => "Fits this item.".into(),
+                Ok((edit, held)) => {
+                    let fits = if edit.needs_override() {
+                        format!("Added by \"I know what I'm doing\". {NOT_ADDED_HERE}.")
+                    } else {
+                        "Fits this item.".into()
+                    };
+                    match held {
+                        Some(row) => format!("{fits} It takes the corrupted slot: {} becomes a normal affix.", self.affixes[row].name()),
+                        None => fits,
+                    }
+                }
                 Err(problem) => problem,
             };
         }
@@ -3064,7 +3095,15 @@ impl ForgeEditor {
         if adding {
             let addition = self.add_edit(&definition);
             self.picker = None;
-            if let Ok(ItemEdit::AddAffix(add)) = addition {
+            if let Ok((ItemEdit::AddAffix(add), held)) = addition {
+                if let Some(row) = held {
+                    let affix = &mut self.affixes[row];
+                    let tier = affix.tier();
+                    if affix.draft_tier(tier, Seal::Normal) {
+                        let uid = affix.uid;
+                        self.edited(RowRef::Affix(uid));
+                    }
+                }
                 let uid = self.uid();
                 self.affixes
                     .push(AffixRow::added(uid, definition, add.tier as u8, add.roll as u8, add.seal, allow_incompatible));

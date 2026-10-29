@@ -492,9 +492,7 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
     fn publish(&mut self) {
         self.state.profile_lock = self.profile_lock();
         let expected = self.state.expected_observation().ok();
-        self.state
-            .mappings
-            .retain(|mapping| expected.as_ref().is_some_and(|expected| mapping.request.still_holds(&mapping.expected, expected)));
+        self.state.mappings.retain(|mapping| expected.as_ref().is_some_and(|expected| mapping.holds_for(expected)));
         if self
             .state
             .unique_preview

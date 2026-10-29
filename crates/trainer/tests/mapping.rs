@@ -456,3 +456,26 @@ fn preview_is_bound_to_full_observation_and_exact_draft() {
     assert_eq!(bound.recheck(&obs, &rolls(RollTarget::Unique, &[(0, 98)])), Err(MappingError::WrongContext));
     assert!(BoundPreview::new(&obs, rolls(RollTarget::Affix, &[(0, 99)]), preview, &tooltip(TooltipKind::Unique)).is_err());
 }
+
+#[test]
+fn a_roll_table_holds_while_the_rolls_its_line_reads_are_unchanged() {
+    let unique = |index: u8| MappingRequest {
+        address: MappingAddress {
+            target: MappingTarget::Unique,
+            index,
+            line: Some(0),
+        },
+        draft: None,
+    };
+    let read = observation();
+    let other_roll = altered(&read, |item| item.identity.as_mut().unwrap().rolls[1] = 1);
+    assert!(unique(0).still_holds(&read, &other_roll, Some(&[0])), "a roll another line reads");
+    assert!(!unique(0).still_holds(&read, &other_roll, Some(&[0, 1])), "a roll the same line reads");
+    assert!(!unique(0).still_holds(&read, &other_roll, None), "without the description every roll counts");
+    let own_roll = altered(&read, |item| item.identity.as_mut().unwrap().rolls[0] = 1);
+    assert!(unique(0).still_holds(&read, &own_roll, None), "the sampled roll itself");
+    let status = altered(&read, |item| item.status.forging_potential = 9);
+    assert!(request().still_holds(&read, &status, None), "status values");
+    let tier = altered(&read, |item| item.affixes[0].tier = 7);
+    assert!(!request().still_holds(&read, &tier, None), "the sampled affix's tier");
+}
