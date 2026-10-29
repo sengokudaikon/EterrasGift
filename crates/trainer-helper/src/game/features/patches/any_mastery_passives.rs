@@ -1,30 +1,22 @@
-//! Apply all bonuses of a worn set during stat recalculation; an unworn set still grants nothing.
+//! Bypass the chosen-mastery mismatch for deeper nodes; other mastery and node prerequisites remain.
 use super::super::hooks::{Behavior, GroupId, HookFeature};
 use super::*;
 pub(crate) const FEATURE: HookFeature = HookFeature {
-    group: GroupId::SetBonus,
+    group: GroupId::AnyMasteryPassives,
     behavior: Behavior::Patch,
     targets,
 };
 const SPECS: &[PatchSpec] = &[PatchSpec::new(
-    "Set bonus check",
+    "Passive mastery lock",
     MethodSpec {
-        class: c"ItemEquipManager",
-        method: c"UpdateStats",
+        class: c"LocalTreeData",
+        method: c"tryToSpendPassivePoint",
         instance: true,
-        params: &[
-            "ItemDataUnpacked",
-            "System.Boolean",
-            "System.Boolean",
-            "System.Single",
-            "System.Single",
-            "System.Single",
-            "System.Single",
-        ],
-        returns: "System.Void",
+        params: &["CharacterClassID", "System.Byte"],
+        returns: "System.Boolean",
     },
-    0x2100,
-    &[0xf, 0x8f, -1, -1, -1, -1, 0x83, -1, -1, -1, 0x75, -1, 0xf3],
+    0x600,
+    &[0xf, 0x85, -1, -1, -1, -1, 0x49, 0x8b, -1, -1, -1, -1, -1, 0x80, -1, -1, -1, -1, -1, -1, 0x75],
     0,
     &[0x90, 0x90, 0x90, 0x90, 0x90, 0x90],
 )];

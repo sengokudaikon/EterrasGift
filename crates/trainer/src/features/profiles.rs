@@ -154,15 +154,75 @@ fn field<'a>(slice: Option<&'a Value>, key: &str) -> Option<&'a Value> {
     slice?.as_object()?.iter().find(|(name, _)| name.eq_ignore_ascii_case(key)).map(|(_, value)| value)
 }
 
-/// `{ "id": [numbers] }`; an entry that is not a list of numbers is dropped.
+/// Feature IDs as the C# app and earlier versions saved them, and each one's ID now: every feature has one name, its
+/// title's words (2026-10-29). Settings are read through this; the profiles are written with the current IDs.
+const RENAMED: &[(&str, &str)] = &[
+    ("xp-multiplier", "experience-multiplier"),
+    ("instant-level", "level-up-per-gain"),
+    ("max-skill-level", "skills-to-level-20"),
+    ("free-skill-points", "unlimited-skill-points"),
+    ("free-passive-points", "unlimited-passive-points"),
+    ("free-weaver-points", "unlimited-weaver-points"),
+    ("passive-chain", "any-mastery-passives"),
+    ("skill-slots", "specialization-slots"),
+    ("item-requirements", "equip-without-requirements"),
+    ("set-bonus", "full-set-bonus"),
+    ("offhand", "any-offhand"),
+    ("primordial-limit", "several-primordials"),
+    ("duplicate", "duplicate-on-drop"),
+    ("damage-dealt", "enemy-damage"),
+    ("cast-speed", "ability-speed"),
+    ("projectiles", "extra-projectiles"),
+    ("area", "fixed-area"),
+    ("attack-rate", "fixed-attack-rate"),
+    ("leech-rate", "fixed-leech-rate"),
+    ("zero-mana-cost", "no-mana-cost"),
+    ("infinite-mana", "refill-mana"),
+    ("endless-buffs", "buffs-never-expire"),
+    ("move-speed", "movement-speed"),
+    ("auto-target", "auto-aim"),
+    ("forge-level", "forge-above-level"),
+    ("shards", "shards-to-99"),
+    ("runes-glyphs", "runes-glyphs-to-99"),
+    ("woven-enchanter", "unlimited-woven-enchanter"),
+    ("boss-drops", "boss-loot-chance"),
+    ("extra-rares", "extra-rare"),
+    ("force-rarity", "new-item-rarity"),
+    ("always-t7", "tier-7-affixes"),
+    ("perfect-rolls", "max-random-rolls"),
+    ("pickup-range", "pickup-anywhere"),
+    ("echo-cycle", "cycle-echo-types"),
+    ("echo-type", "one-echo-type"),
+    ("instant-rank", "rank-up-per-gain"),
+    ("prophecy-any-zone", "prophecy-any-distance"),
+    ("prophecy-rewards", "prophecy-reward-multiplier"),
+    ("hunter-cost", "free-hunter-vendor"),
+    ("rune-prison", "rune-prison-complex"),
+    ("eternity-cache", "endgame-cache"),
+    ("monster-density", "pack-count"),
+    ("waypoints", "any-waypoint"),
+    ("zoom", "camera-distance"),
+];
+
+/// The current ID for one read from the settings.
+fn current_id(id: &str) -> &str {
+    RENAMED.iter().find(|(old, _)| *old == id).map_or(id, |(_, new)| new)
+}
+
+/// `{ "id": [numbers] }`; an entry that is not a list of numbers is dropped. An entry under an old ID takes the current
+/// one, unless the settings also hold the current one.
 fn saved_values(values: &Value) -> Vec<SavedValues> {
-    let mut saved: Vec<_> = values
-        .as_object()
+    let entries = values.as_object();
+    let mut saved: Vec<_> = entries
         .into_iter()
         .flatten()
+        .filter(|(id, _)| current_id(id) == id.as_str() || !entries.is_some_and(|entries| entries.contains_key(current_id(id))))
         .filter_map(|(id, numbers)| {
             let values = numbers.as_array()?.iter().map(Value::as_f64).collect::<Option<Vec<_>>>()?;
-            Some(SavedValues { id: id.clone(), values })
+            Some(SavedValues {
+                id: current_id(id).to_owned(),
+                values,
+            })
         })
         .collect();
     if !saved.iter().any(|s| s.id == "incoming-damage")
@@ -189,7 +249,7 @@ fn profile(entry: &Value, template: &FeatureIntents) -> Option<Profile> {
     // A JSON object holds each ID once, so the values cannot be refused as duplicates.
     let _ = hooks.restore_values(field(Some(entry), "values").map(saved_values).unwrap_or_default());
     for id in field(Some(entry), "wanted").and_then(Value::as_array).into_iter().flatten() {
-        if let Some(id) = id.as_str().and_then(HookId::parse) {
+        if let Some(id) = id.as_str().map(current_id).and_then(HookId::parse) {
             hooks.set_wanted(id, true);
         }
     }
@@ -211,7 +271,7 @@ fn profile(entry: &Value, template: &FeatureIntents) -> Option<Profile> {
         hooks.set_wanted(id, true);
     }
     if wanted.contains(&"one-hit-kill") {
-        let id = HookId::parse("damage-dealt").unwrap();
+        let id = HookId::parse("enemy-damage").unwrap();
         let _ = hooks.set_values(id, &[101.0]);
         hooks.set_wanted(id, true);
     }

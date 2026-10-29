@@ -5,7 +5,7 @@ use crate::game::{GameError, RuntimeAccess};
 use std::ptr::NonNull;
 
 pub(super) const FEATURE: HookFeature = HookFeature {
-    group: GroupId::LeechRate,
+    group: GroupId::FixedLeechRate,
     behavior: Behavior::Scalar(&LEECH_RATE),
     targets,
 };

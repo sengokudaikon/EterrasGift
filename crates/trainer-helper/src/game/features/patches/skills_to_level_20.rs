@@ -1,26 +1,24 @@
-//! Bypass the skill-tree total-point budget while retaining each node and connection requirement.
+//! Set specialized skills to their level-20 XP cap when the game next applies skill experience.
 use super::super::hooks::{Behavior, GroupId, HookFeature};
 use super::*;
 pub(crate) const FEATURE: HookFeature = HookFeature {
-    group: GroupId::FreeSkillPoints,
+    group: GroupId::SkillsToLevel20,
     behavior: Behavior::Patch,
     targets,
 };
 const SPECS: &[PatchSpec] = &[PatchSpec::new(
-    "Skill point check",
+    "Skill experience cap",
     MethodSpec {
         class: c"LocalTreeData",
-        method: c"tryToSpendSkillPoint",
+        method: c"ApplyAbilityXp",
         instance: true,
-        params: &["Ability", "System.Byte"],
-        returns: "System.Boolean",
+        params: &["System.Int32", "System.Boolean"],
+        returns: "System.Void",
     },
-    0x600,
-    &[
-        0xf, 0x8d, -1, -1, -1, -1, 0x33, -1, 0xe8, -1, -1, -1, -1, 0x48, 0x85, -1, 0xf, 0x84, -1, -1, -1, -1, 0x45, 0x33, -1, 0x49, 0x8b,
-    ],
-    0,
-    &[0x90, 0x90, 0x90, 0x90, 0x90, 0x90],
+    0x380,
+    &[0x7f, -1, 0x44, 0x1, -1, -1, 0x39, -1, -1, 0x7e, -1, 0x89, -1, -1, 0x33, -1, 0xf, 0x1f],
+    9,
+    &[0x90, 0x90],
 )];
 unsafe fn targets(access: &RuntimeAccess, module: NonNull<u8>, size: usize) -> Result<Vec<GameplayHookTarget>, GameError> {
     // SAFETY: the shared caller retains the attached runtime, module and exclusive code ownership contract.

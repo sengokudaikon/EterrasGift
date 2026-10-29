@@ -2,7 +2,7 @@
 use super::super::hooks::{Behavior, GroupId, HookFeature};
 use super::*;
 pub(crate) const FEATURE: HookFeature = HookFeature {
-    group: GroupId::HunterCost,
+    group: GroupId::FreeHunterVendor,
     behavior: Behavior::Patch,
     targets,
 };

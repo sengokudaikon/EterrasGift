@@ -101,7 +101,7 @@ impl BackendConnection for OwnedConnection {
         }
     }
     fn supports_hook(&self, hook: GameplayHook) -> bool {
-        matches!(hook, GameplayHook::MysteriousRift | GameplayHook::Offhand | GameplayHook::IncomingDamage)
+        matches!(hook, GameplayHook::MysteriousRift | GameplayHook::AnyOffhand | GameplayHook::IncomingDamage)
     }
     async fn write(
         &mut self,
@@ -278,7 +278,7 @@ impl BackendConnection for OwnedConnection {
         assert!(control.allowed());
         let index = match request.id.as_str() {
             "mysterious-rift" => 0,
-            "offhand" => 1,
+            "any-offhand" => 1,
             "incoming-damage" => 2,
             _ => panic!("unsupported fixture hook"),
         };
@@ -1178,9 +1178,9 @@ fn gameplay_hooks(session: &Session, ui: &MainWindow, handle: &BackendHandle, da
     let state = ui.global::<eg_ui::TrainerState>();
     for on in [true, false] {
         for (index, page, title, id) in [
-            (0, "world", "Mysterious rifts", "mysterious-rift"),
-            (1, "character", "Anything in the offhand", "offhand"),
-            (2, "combat", "Damage taken", "incoming-damage"),
+            (0, "world", "Mysterious Rifts", "mysterious-rift"),
+            (1, "character", "Any item in the offhand", "any-offhand"),
+            (2, "combat", "Damage you take", "incoming-damage"),
         ] {
             ui.global::<Nav>().invoke_navigate(page.into());
             settle();
@@ -1377,7 +1377,7 @@ pub(super) fn capture_profiles(session: &Session) {
     };
     let saved = serde_json::json!({ "profiles": [
         { "name": "Mira", "class": "Primalist", "cycle": "Legacy", "lastPlayed": "2026-10-20T18:00:00Z" },
-        { "name": "Oren", "class": "Sentinel", "cycle": "Legacy", "lastPlayed": "2026-10-19T18:00:00Z", "wanted": ["damage-dealt"] },
+        { "name": "Oren", "class": "Sentinel", "cycle": "Legacy", "lastPlayed": "2026-10-19T18:00:00Z", "wanted": ["enemy-damage"] },
     ]});
     let saves = Arc::new(Mutex::new(Vec::<ProfileBook>::new()));
     let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
@@ -1426,13 +1426,13 @@ pub(super) fn capture_profiles(session: &Session) {
     // No game: the last played profile shows, and its hooks take changes.
     wait(|| state.get_access() == eg_ui::TrainerAccess::Setup && state.get_profile_name() == "Mira");
     assert_eq!(state.get_profiles().row_count(), 2);
-    let damage = || state.get_rows().row_data(3).expect("Damage multiplier");
-    assert_eq!(damage().title, "Damage multiplier");
+    let damage = || state.get_rows().row_data(3).expect("Damage enemies take");
+    assert_eq!(damage().title, "Damage enemies take");
     assert!(damage().can_use && !damage().on);
     state.invoke_hook_toggled(3, true);
     assert!(damage().on, "the switch shows flipped at once");
     let mira = |snapshot: &backend::BackendSnapshot| snapshot.profiles.profiles()[0].hooks.wanted().map(|id| id.as_str()).collect::<Vec<_>>();
-    wait(|| mira(&handle.snapshot()) == ["damage-dealt"] && saves.lock().unwrap().last().is_some_and(|book| *book == *handle.snapshot().profiles));
+    wait(|| mira(&handle.snapshot()) == ["enemy-damage"] && saves.lock().unwrap().last().is_some_and(|book| *book == *handle.snapshot().profiles));
     assert_eq!(damage().status, "Turns on when Mira enters play.");
     for _ in 0..3 {
         settle();
@@ -1442,7 +1442,7 @@ pub(super) fn capture_profiles(session: &Session) {
     // Oren's profile, with his own switch; then Mira's deleted, and Oren's the only one.
     state.invoke_select_profile(1);
     wait(|| state.get_profile_name() == "Oren" && handle.snapshot().editing.as_ref().is_some_and(|key| key.name == "Oren"));
-    assert!(damage().on, "Oren wants Damage multiplier");
+    assert!(damage().on, "Oren wants Damage enemies take");
     state.invoke_select_profile(0);
     wait(|| state.get_profile_name() == "Mira");
     state.invoke_delete_profile();

@@ -50,10 +50,10 @@ fn persistent_stats_use_independent_hook_values_and_readback() {
     session.enable();
     run(session.connect()).unwrap();
     for (hook, on, value) in [
-        (GameplayHook::AttackRate, true, 1.25f64),
-        (GameplayHook::LeechRate, true, 2.5),
-        (GameplayHook::AttackRate, true, 3.0),
-        (GameplayHook::AttackRate, false, 3.0),
+        (GameplayHook::FixedAttackRate, true, 1.25f64),
+        (GameplayHook::FixedLeechRate, true, 2.5),
+        (GameplayHook::FixedAttackRate, true, 3.0),
+        (GameplayHook::FixedAttackRate, false, 3.0),
     ] {
         wire.push(done(vec![]));
         wire.push(done(
@@ -77,11 +77,11 @@ fn persistent_stats_use_independent_hook_values_and_readback() {
         assert!(matches!(sent[sent.len()-2],Request::SetGameplayHook { hook: actual, on: enabled, value: bits, .. }
             if actual==hook && enabled==on && bits==value.to_bits()));
     }
-    assert!(!session.hook_observation(GameplayHook::AttackRate).unwrap().enabled);
-    assert_eq!(session.hook_observation(GameplayHook::LeechRate).unwrap().value, 2.5f64.to_bits());
-    assert!(session.hook_observation(GameplayHook::LeechRate).unwrap().enabled);
+    assert!(!session.hook_observation(GameplayHook::FixedAttackRate).unwrap().enabled);
+    assert_eq!(session.hook_observation(GameplayHook::FixedLeechRate).unwrap().value, 2.5f64.to_bits());
+    assert!(session.hook_observation(GameplayHook::FixedLeechRate).unwrap().enabled);
     let sent = wire.requests().len();
-    for (id, value) in [("attack-rate", 0.0), ("leech-rate", f64::NAN), ("leech-rate", 101.0)] {
+    for (id, value) in [("fixed-attack-rate", 0.0), ("fixed-leech-rate", f64::NAN), ("fixed-leech-rate", 101.0)] {
         assert!(matches!(
             run(BackendConnection::set_hook(
                 &mut session,
@@ -186,7 +186,7 @@ fn each_gameplay_hook_requires_a_separate_readback_for_on_and_off() {
                 on,
                 values: if eg_trainer::features::FeatureKey::Hook(HookId::parse(hook.id()).unwrap()).descriptor().kind == eg_trainer::features::FeatureKind::Switch {
                     vec![]
-                } else if hook == GameplayHook::LeechRate {
+                } else if hook == GameplayHook::FixedLeechRate {
                     vec![0.0]
                 } else {
                     vec![1.0]
@@ -248,10 +248,10 @@ fn hook_cleanup_queued_after_ack_prevents_readback_and_never_retries() {
     session.enable();
     run(session.connect()).unwrap();
     assert!(matches!(
-        run(session.set_gameplay_hook(GameplayHook::Offhand, true, &mut StopAfterAck(true))).unwrap(),
+        run(session.set_gameplay_hook(GameplayHook::AnyOffhand, true, &mut StopAfterAck(true))).unwrap(),
         WriteOutcome::Uncertain { .. }
     ));
-    assert!(run(session.set_gameplay_hook(GameplayHook::Offhand, true, &mut AllowWrite)).is_err());
+    assert!(run(session.set_gameplay_hook(GameplayHook::AnyOffhand, true, &mut AllowWrite)).is_err());
     assert_eq!(wire.requests().len(), 3);
 }
 
@@ -286,9 +286,9 @@ fn hook_monitor_reads_actual_disabled_state_after_helper_suspension() {
     let mut session = fixture.session(&wire);
     session.enable();
     run(session.connect()).unwrap();
-    run(session.set_gameplay_hook(GameplayHook::Offhand, true, &mut AllowWrite)).unwrap();
+    run(session.set_gameplay_hook(GameplayHook::AnyOffhand, true, &mut AllowWrite)).unwrap();
     run(BackendConnection::refresh(&mut session)).unwrap();
-    assert_eq!(session.observed_hook(GameplayHook::Offhand), Some(false));
+    assert_eq!(session.observed_hook(GameplayHook::AnyOffhand), Some(false));
 }
 
 #[test]
@@ -338,7 +338,7 @@ fn outgoing_modes_require_exact_readback_and_off_accepts_a_verified_shared_targe
             .encode(),
         ));
         let request = HookRequest {
-            id: HookId::parse("damage-dealt").unwrap(),
+            id: HookId::parse("enemy-damage").unwrap(),
             on,
             values: vec![wanted],
         };
@@ -350,7 +350,7 @@ fn outgoing_modes_require_exact_readback_and_off_accepts_a_verified_shared_targe
     let before = wire.requests().len();
     for value in [f64::NAN, f64::INFINITY, -1.0, 100.5, 102.0] {
         let request = HookRequest {
-            id: HookId::parse("damage-dealt").unwrap(),
+            id: HookId::parse("enemy-damage").unwrap(),
             on: true,
             values: vec![value],
         };

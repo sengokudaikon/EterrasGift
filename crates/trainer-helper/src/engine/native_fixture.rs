@@ -46,16 +46,16 @@ unsafe extern "C-unwind" fn native_callback(events: *const MethodInfo) {
             Request::SetGameplayHook { hook, on, value, .. } => {
                 let target = match hook {
                     GameplayHook::MysteriousRift => RIFT.load(SeqCst),
-                    GameplayHook::Offhand => OFFHAND.load(SeqCst),
-                    GameplayHook::IncomingDamage | GameplayHook::DamageDealt => DAMAGE.load(SeqCst),
+                    GameplayHook::AnyOffhand => OFFHAND.load(SeqCst),
+                    GameplayHook::IncomingDamage | GameplayHook::EnemyDamage => DAMAGE.load(SeqCst),
                     _ => return server::failure(ResponseCode::Refused, "This native fixture has no target for this feature"),
                 };
-                let class = if hook == GameplayHook::Offhand {
+                let class = if hook == GameplayHook::AnyOffhand {
                     NonNull::new(OFFHAND_CLASS.load(SeqCst))
                 } else {
                     None
                 };
-                let extras = if hook == GameplayHook::Offhand {
+                let extras = if hook == GameplayHook::AnyOffhand {
                     vec![PAIRING.load(SeqCst), ENFORCE.load(SeqCst)]
                 } else {
                     Vec::new()
@@ -69,7 +69,7 @@ unsafe extern "C-unwind" fn native_callback(events: *const MethodInfo) {
                         target,
                         class,
                         &extras,
-                        if matches!(hook, GameplayHook::IncomingDamage | GameplayHook::DamageDealt) {
+                        if matches!(hook, GameplayHook::IncomingDamage | GameplayHook::EnemyDamage) {
                             Some(crate::game::damage::DamageLayout {
                                 player_storage: NonNull::new(PLAYER_STORAGE.load(SeqCst)).unwrap(),
                                 online_storage: NonNull::new(ONLINE_STORAGE.load(SeqCst)).unwrap(),

@@ -5,7 +5,7 @@ use crate::game::{GameError, RuntimeAccess};
 use std::ptr::NonNull;
 
 pub(super) const FEATURE: HookFeature = HookFeature {
-    group: GroupId::AttackRate,
+    group: GroupId::FixedAttackRate,
     behavior: Behavior::Scalar(&ATTACK_RATE),
     targets,
 };

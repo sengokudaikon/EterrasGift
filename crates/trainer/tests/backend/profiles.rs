@@ -47,14 +47,14 @@ fn playing(shared: &Shared, name: &str) {
         class: "Primalist".into(),
     });
 }
-/// Mira wants God mode, Damage dealt (at 3) and Mysterious rift; Oren, played before her, wants nothing.
+/// Mira wants God mode, Damage enemies take (at 3) and Mysterious rift; Oren, played before her, wants nothing.
 fn book() -> ProfileBook {
     ProfileBook::from_settings(Some(&serde_json::json!({
         "profiles": [
             { "name": "Oren", "class": "Primalist", "cycle": "Legacy", "lastPlayed": "2026-10-17T09:00:00Z", "wanted": [] },
             {
                 "name": "Mira", "class": "Primalist", "cycle": "Legacy", "lastPlayed": "2026-10-18T09:00:00Z",
-                "wanted": ["incoming-damage", "damage-dealt", "mysterious-rift"], "values": { "damage-dealt": [3.0] }
+                "wanted": ["incoming-damage", "enemy-damage", "mysterious-rift"], "values": { "enemy-damage": [3.0] }
             }
         ]
     })))
@@ -64,7 +64,7 @@ fn mira_order() -> Vec<HookId> {
     DESCRIPTORS
         .iter()
         .filter_map(|descriptor| match descriptor.key {
-            FeatureKey::Hook(id) if ["incoming-damage", "damage-dealt", "mysterious-rift"].contains(&id.as_str()) => Some(id),
+            FeatureKey::Hook(id) if ["incoming-damage", "enemy-damage", "mysterious-rift"].contains(&id.as_str()) => Some(id),
             _ => None,
         })
         .collect()
@@ -195,7 +195,7 @@ fn wanted_hooks_apply_in_turn_and_one_the_game_refuses_does_not_stop_the_rest() 
         let requests = requested(&shared);
         assert_eq!(requests.iter().map(|request| request.0).collect::<Vec<_>>(), order);
         assert!(requests.iter().all(|request| request.1));
-        let damage = requests.iter().find(|request| request.0 == hook("damage-dealt")).unwrap();
+        let damage = requests.iter().find(|request| request.0 == hook("enemy-damage")).unwrap();
         assert_eq!(damage.2, [3.0], "the profile's values go with the hook");
         let snapshot = handle.snapshot();
         assert_eq!(snapshot.hooks[&order[0]], HookRun::On);
@@ -263,7 +263,7 @@ fn a_hook_this_version_cannot_apply_says_so_without_reaching_the_game() {
                 }
             );
         }
-        assert_eq!(snapshot.hooks[&hook("cast-speed")], HookRun::Off);
+        assert_eq!(snapshot.hooks[&hook("ability-speed")], HookRun::Off);
         assert_eq!(shared.count("hook"), 0);
         shutdown(&handle, worker).await;
     });
@@ -279,9 +279,17 @@ fn profiles_change_while_no_game_runs_and_lock_while_one_does_without_opening_it
         command(&handle, Command::Enable).await.unwrap();
         command(&handle, Command::StartMonitoring).await.unwrap();
         wait_until(&handle, |snapshot| snapshot.profile_lock == ProfileLock::Editable).await;
-        command(&handle, Command::SetHookWanted { id: hook("cast-speed"), on: true }).await.unwrap();
+        command(
+            &handle,
+            Command::SetHookWanted {
+                id: hook("ability-speed"),
+                on: true,
+            },
+        )
+        .await
+        .unwrap();
         let saved = saves.lock().unwrap().last().cloned().unwrap();
-        assert!(saved.get(&key("Mira")).unwrap().hooks.is_wanted(hook("cast-speed")));
+        assert!(saved.get(&key("Mira")).unwrap().hooks.is_wanted(hook("ability-speed")));
 
         // Automatic connection is off: the game is only looked for.
         shared.targets.lock().unwrap().push(target());

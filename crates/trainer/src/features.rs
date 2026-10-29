@@ -291,7 +291,7 @@ impl FeatureIntents {
             });
         }
         for (index, (specification, value)) in descriptor.values.iter().zip(values).enumerate() {
-            if !specification.accepts(*value) || (id.as_str() == "incoming-damage" && value.fract() != 0.0) || (id.as_str() == "damage-dealt" && *value > 100.0 && *value != 101.0)
+            if !specification.accepts(*value) || (id.as_str() == "incoming-damage" && value.fract() != 0.0) || (id.as_str() == "enemy-damage" && *value > 100.0 && *value != 101.0)
             {
                 return Err(FeatureError::InvalidValue { id, index });
             }
@@ -333,7 +333,7 @@ impl FeatureIntents {
                         let fitted = specification.fit_saved(value);
                         if id.as_str() == "incoming-damage" {
                             fitted.round()
-                        } else if id.as_str() == "damage-dealt" && fitted > 100.0 && fitted != 101.0 {
+                        } else if id.as_str() == "enemy-damage" && fitted > 100.0 && fitted != 101.0 {
                             100.0
                         } else {
                             fitted

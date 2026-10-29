@@ -1,24 +1,26 @@
-//! Replace this spend path's virtual unspent-point result with 113; other point reads remain the game's.
+//! Bypass the character-versus-item-level refusal; preserve the remaining Forge admission checks.
 use super::super::hooks::{Behavior, GroupId, HookFeature};
 use super::*;
 pub(crate) const FEATURE: HookFeature = HookFeature {
-    group: GroupId::FreePassivePoints,
+    group: GroupId::ForgeAboveLevel,
     behavior: Behavior::Patch,
     targets,
 };
 const SPECS: &[PatchSpec] = &[PatchSpec::new(
-    "Passive point check",
+    "Forge level check",
     MethodSpec {
-        class: c"LocalTreeData",
-        method: c"tryToSpendPassivePoint",
+        class: c"CraftingManager",
+        method: c"CheckForgeCapability",
         instance: true,
-        params: &["CharacterClassID", "System.Byte"],
+        params: &["System.String&", "System.Boolean&", "System.Boolean&", "System.String&"],
         returns: "System.Boolean",
     },
-    0x600,
-    &[0xff, -1, -1, -1, -1, -1, 0x66, -1, -1, 0xf, 0x84, -1, -1, -1, -1, 0x80, -1, -1, -1, -1, -1, -1, 0x75],
-    0,
-    &[0x31, 0xc0, 0xb0, 0x71, 0x90, 0x90],
+    0x2000,
+    &[
+        0x3b, 0xf8, 0xf, 0x8c, -1, -1, -1, -1, 0x48, 0x8b, 0x45, 0xe8, 0x48, 0x8b, 0x48, 0x10, 0x48, 0x85, 0xc9, 0xf, 0x84,
+    ],
+    2,
+    &[0x90, 0x90, 0x90, 0x90, 0x90, 0x90],
 )];
 unsafe fn targets(access: &RuntimeAccess, module: NonNull<u8>, size: usize) -> Result<Vec<GameplayHookTarget>, GameError> {
     // SAFETY: the shared caller retains the attached runtime, module and exclusive code ownership contract.

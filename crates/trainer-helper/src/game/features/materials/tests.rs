@@ -1,6 +1,6 @@
 use super::*;
 use crate::{
-    game::features::{runes_glyphs::SlotLayout, shards::ShardLayout},
+    game::features::{runes_glyphs_to_99::SlotLayout, shards_to_99::ShardLayout},
     hooks::leaf::LeafGate,
 };
 use std::{

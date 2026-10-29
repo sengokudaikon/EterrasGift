@@ -2,7 +2,7 @@
 use super::super::hooks::{Behavior, GroupId, HookFeature};
 use super::*;
 pub(crate) const FEATURE: HookFeature = HookFeature {
-    group: GroupId::WovenEnchanter,
+    group: GroupId::UnlimitedWovenEnchanter,
     behavior: Behavior::Patch,
     targets,
 };

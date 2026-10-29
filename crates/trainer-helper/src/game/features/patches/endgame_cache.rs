@@ -1,24 +1,26 @@
-//! Set specialized skills to their level-20 XP cap when the game next applies skill experience.
+//! Keep cache eligibility, placement and the RNG call; bypass only the failed-roll branch.
 use super::super::hooks::{Behavior, GroupId, HookFeature};
 use super::*;
 pub(crate) const FEATURE: HookFeature = HookFeature {
-    group: GroupId::MaxSkillLevel,
+    group: GroupId::EndgameCache,
     behavior: Behavior::Patch,
     targets,
 };
 const SPECS: &[PatchSpec] = &[PatchSpec::new(
-    "Skill experience cap",
+    "Endgame cache roll",
     MethodSpec {
-        class: c"LocalTreeData",
-        method: c"ApplyAbilityXp",
+        class: c"RandomOneShotCacheSpawner",
+        method: c"ExecuteSpawn",
         instance: true,
-        params: &["System.Int32", "System.Boolean"],
+        params: &["EncounterPlacementData"],
         returns: "System.Void",
     },
-    0x380,
-    &[0x7f, -1, 0x44, 0x1, -1, -1, 0x39, -1, -1, 0x7e, -1, 0x89, -1, -1, 0x33, -1, 0xf, 0x1f],
-    9,
-    &[0x90, 0x90],
+    0x260,
+    &[
+        0x45, 0x33, 0xc0, 0xf, 0x28, 0xce, 0x48, 0x8b, 0xc8, 0xe8, -1, -1, -1, -1, 0x84, 0xc0, 0xf, 0x84, -1, -1, -1, -1, 0x33, 0xd2, 0x48, 0x8b, 0xcf, 0xe8,
+    ],
+    16,
+    &[0x90, 0x90, 0x90, 0x90, 0x90, 0x90],
 )];
 unsafe fn targets(access: &RuntimeAccess, module: NonNull<u8>, size: usize) -> Result<Vec<GameplayHookTarget>, GameError> {
     // SAFETY: the shared caller retains the attached runtime, module and exclusive code ownership contract.

@@ -562,12 +562,12 @@ fn tone(tone: Tone) -> FeatureTone {
 fn value_view(id: &str, value: &FeatureValue, number: f64, name: &str, choices: &ModelRc<SharedString>) -> FeatureValueView {
     FeatureValueView {
         label: value.label.into(),
-        accessible_name: if id == "damage-dealt" && number == 101.0 {
+        accessible_name: if id == "enemy-damage" && number == 101.0 {
             format!("{name}: one-hit kills").into()
         } else {
             name.into()
         },
-        unit: if id == "damage-dealt" && number == 101.0 { "" } else { value.unit.unwrap_or_default() }.into(),
+        unit: if id == "enemy-damage" && number == 101.0 { "" } else { value.unit.unwrap_or_default() }.into(),
         choice: !value.choices.is_empty(),
         choices: choices.clone(),
         choice_index: number as i32,

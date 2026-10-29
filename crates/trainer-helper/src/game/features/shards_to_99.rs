@@ -6,7 +6,7 @@ use super::{
 use crate::{game::*, hooks::leaf::LeafEffect};
 
 pub(super) const FEATURE: HookFeature = HookFeature {
-    group: GroupId::Shards,
+    group: GroupId::ShardsTo99,
     behavior: Behavior::Leaf,
     targets,
 };

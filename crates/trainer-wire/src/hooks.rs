@@ -5,66 +5,66 @@ use crate::protocol::ProtocolError;
 #[repr(u8)]
 pub enum GameplayHook {
     MysteriousRift = 0,
-    Offhand = 1,
+    AnyOffhand = 1,
     IncomingDamage = 2,
-    DamageDealt = 3,
-    AttackRate = 4,
-    LeechRate = 5,
-    ZeroManaCost = 6,
-    MaxSkillLevel = 7,
-    ItemRequirements = 8,
-    SetBonus = 9,
-    FreeSkillPoints = 10,
-    FreePassivePoints = 11,
-    PassiveChain = 12,
-    FreeWeaverPoints = 13,
-    ForgeLevel = 14,
-    WovenEnchanter = 15,
-    PickupRange = 16,
-    HunterCost = 17,
-    EternityCache = 18,
+    EnemyDamage = 3,
+    FixedAttackRate = 4,
+    FixedLeechRate = 5,
+    NoManaCost = 6,
+    SkillsToLevel20 = 7,
+    EquipWithoutRequirements = 8,
+    FullSetBonus = 9,
+    UnlimitedSkillPoints = 10,
+    UnlimitedPassivePoints = 11,
+    AnyMasteryPassives = 12,
+    UnlimitedWeaverPoints = 13,
+    ForgeAboveLevel = 14,
+    UnlimitedWovenEnchanter = 15,
+    PickupAnywhere = 16,
+    FreeHunterVendor = 17,
+    EndgameCache = 18,
     FavorCache = 19,
     Nemesis = 20,
     OmenWindows = 21,
     ClassExperimentals = 22,
-    RunePrison = 23,
-    Shards = 24,
-    RunesGlyphs = 25,
+    RunePrisonComplex = 23,
+    ShardsTo99 = 24,
+    RunesGlyphsTo99 = 25,
 }
 
 impl GameplayHook {
     pub const ALL: [Self; 26] = [
         Self::MysteriousRift,
-        Self::Offhand,
+        Self::AnyOffhand,
         Self::IncomingDamage,
-        Self::DamageDealt,
-        Self::AttackRate,
-        Self::LeechRate,
-        Self::ZeroManaCost,
-        Self::MaxSkillLevel,
-        Self::ItemRequirements,
-        Self::SetBonus,
-        Self::FreeSkillPoints,
-        Self::FreePassivePoints,
-        Self::PassiveChain,
-        Self::FreeWeaverPoints,
-        Self::ForgeLevel,
-        Self::WovenEnchanter,
-        Self::PickupRange,
-        Self::HunterCost,
-        Self::EternityCache,
+        Self::EnemyDamage,
+        Self::FixedAttackRate,
+        Self::FixedLeechRate,
+        Self::NoManaCost,
+        Self::SkillsToLevel20,
+        Self::EquipWithoutRequirements,
+        Self::FullSetBonus,
+        Self::UnlimitedSkillPoints,
+        Self::UnlimitedPassivePoints,
+        Self::AnyMasteryPassives,
+        Self::UnlimitedWeaverPoints,
+        Self::ForgeAboveLevel,
+        Self::UnlimitedWovenEnchanter,
+        Self::PickupAnywhere,
+        Self::FreeHunterVendor,
+        Self::EndgameCache,
         Self::FavorCache,
         Self::Nemesis,
         Self::OmenWindows,
         Self::ClassExperimentals,
-        Self::RunePrison,
-        Self::Shards,
-        Self::RunesGlyphs,
+        Self::RunePrisonComplex,
+        Self::ShardsTo99,
+        Self::RunesGlyphsTo99,
     ];
     pub fn default_value(self) -> u64 {
-        if matches!(self, Self::DamageDealt | Self::AttackRate) {
+        if matches!(self, Self::EnemyDamage | Self::FixedAttackRate) {
             1.0f64.to_bits()
-        } else if self == Self::LeechRate {
+        } else if self == Self::FixedLeechRate {
             0.0f64.to_bits()
         } else {
             1
@@ -73,31 +73,31 @@ impl GameplayHook {
     pub const fn id(self) -> &'static str {
         match self {
             Self::MysteriousRift => "mysterious-rift",
-            Self::Offhand => "offhand",
+            Self::AnyOffhand => "any-offhand",
             Self::IncomingDamage => "incoming-damage",
-            Self::DamageDealt => "damage-dealt",
-            Self::AttackRate => "attack-rate",
-            Self::LeechRate => "leech-rate",
-            Self::ZeroManaCost => "zero-mana-cost",
-            Self::MaxSkillLevel => "max-skill-level",
-            Self::ItemRequirements => "item-requirements",
-            Self::SetBonus => "set-bonus",
-            Self::FreeSkillPoints => "free-skill-points",
-            Self::FreePassivePoints => "free-passive-points",
-            Self::PassiveChain => "passive-chain",
-            Self::FreeWeaverPoints => "free-weaver-points",
-            Self::ForgeLevel => "forge-level",
-            Self::WovenEnchanter => "woven-enchanter",
-            Self::PickupRange => "pickup-range",
-            Self::HunterCost => "hunter-cost",
-            Self::EternityCache => "eternity-cache",
+            Self::EnemyDamage => "enemy-damage",
+            Self::FixedAttackRate => "fixed-attack-rate",
+            Self::FixedLeechRate => "fixed-leech-rate",
+            Self::NoManaCost => "no-mana-cost",
+            Self::SkillsToLevel20 => "skills-to-level-20",
+            Self::EquipWithoutRequirements => "equip-without-requirements",
+            Self::FullSetBonus => "full-set-bonus",
+            Self::UnlimitedSkillPoints => "unlimited-skill-points",
+            Self::UnlimitedPassivePoints => "unlimited-passive-points",
+            Self::AnyMasteryPassives => "any-mastery-passives",
+            Self::UnlimitedWeaverPoints => "unlimited-weaver-points",
+            Self::ForgeAboveLevel => "forge-above-level",
+            Self::UnlimitedWovenEnchanter => "unlimited-woven-enchanter",
+            Self::PickupAnywhere => "pickup-anywhere",
+            Self::FreeHunterVendor => "free-hunter-vendor",
+            Self::EndgameCache => "endgame-cache",
             Self::FavorCache => "favor-cache",
             Self::Nemesis => "nemesis",
             Self::OmenWindows => "omen-windows",
             Self::ClassExperimentals => "class-experimentals",
-            Self::RunePrison => "rune-prison",
-            Self::Shards => "shards",
-            Self::RunesGlyphs => "runes-glyphs",
+            Self::RunePrisonComplex => "rune-prison-complex",
+            Self::ShardsTo99 => "shards-to-99",
+            Self::RunesGlyphsTo99 => "runes-glyphs-to-99",
         }
     }
     pub fn from_id(id: &str) -> Option<Self> {
@@ -107,31 +107,31 @@ impl GameplayHook {
     pub fn validate_value(self, value: u64) -> Result<u64, ProtocolError> {
         if match self {
             Self::IncomingDamage => value <= 100,
-            Self::Offhand
-            | Self::ZeroManaCost
-            | Self::MaxSkillLevel
-            | Self::ItemRequirements
-            | Self::SetBonus
-            | Self::FreeSkillPoints
-            | Self::FreePassivePoints
-            | Self::PassiveChain
-            | Self::FreeWeaverPoints
-            | Self::ForgeLevel
-            | Self::WovenEnchanter
-            | Self::PickupRange
-            | Self::HunterCost
-            | Self::EternityCache
+            Self::AnyOffhand
+            | Self::NoManaCost
+            | Self::SkillsToLevel20
+            | Self::EquipWithoutRequirements
+            | Self::FullSetBonus
+            | Self::UnlimitedSkillPoints
+            | Self::UnlimitedPassivePoints
+            | Self::AnyMasteryPassives
+            | Self::UnlimitedWeaverPoints
+            | Self::ForgeAboveLevel
+            | Self::UnlimitedWovenEnchanter
+            | Self::PickupAnywhere
+            | Self::FreeHunterVendor
+            | Self::EndgameCache
             | Self::FavorCache
             | Self::Nemesis
             | Self::OmenWindows
             | Self::ClassExperimentals
-            | Self::RunePrison
-            | Self::Shards
-            | Self::RunesGlyphs => value == 1,
-            Self::DamageDealt => f64::from_bits(value).is_finite() && ((0.0..=100.0).contains(&f64::from_bits(value)) || value == 101.0f64.to_bits()),
+            | Self::RunePrisonComplex
+            | Self::ShardsTo99
+            | Self::RunesGlyphsTo99 => value == 1,
+            Self::EnemyDamage => f64::from_bits(value).is_finite() && ((0.0..=100.0).contains(&f64::from_bits(value)) || value == 101.0f64.to_bits()),
             Self::MysteriousRift => value <= 1,
-            Self::AttackRate => f64::from_bits(value).is_finite() && (0.01..=20.0).contains(&f64::from_bits(value)),
-            Self::LeechRate => f64::from_bits(value).is_finite() && (-1.0..=100.0).contains(&f64::from_bits(value)),
+            Self::FixedAttackRate => f64::from_bits(value).is_finite() && (0.01..=20.0).contains(&f64::from_bits(value)),
+            Self::FixedLeechRate => f64::from_bits(value).is_finite() && (-1.0..=100.0).contains(&f64::from_bits(value)),
         } {
             Ok(value)
         } else {

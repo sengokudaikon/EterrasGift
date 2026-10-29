@@ -98,7 +98,7 @@ fn help_joins_description_needs_and_value_hints() {
          Time per kill: As in the game, a kill adds less the longer the hunt has grown."
     );
     assert_eq!(
-        FeatureKey::parse("move-speed").unwrap().descriptor().help(),
+        FeatureKey::parse("movement-speed").unwrap().descriptor().help(),
         "You move faster.\nRe-equip your boots after changing it."
     );
 }
@@ -106,13 +106,13 @@ fn help_joins_description_needs_and_value_hints() {
 #[test]
 fn saved_values_fit_legacy_rules_and_switches_start_off() {
     let state = FeatureIntents::from_saved([
-        saved("xp-multiplier", &[0., 120.]),
-        saved("damage-dealt", &[f64::NAN]),
-        saved("cast-speed", &[f64::INFINITY]),
-        saved("projectiles", &[f64::NEG_INFINITY]),
-        saved("force-rarity", &[2.5]),
-        saved("echo-type", &[9.]),
-        saved("zoom", &[-150.]),
+        saved("experience-multiplier", &[0., 120.]),
+        saved("enemy-damage", &[f64::NAN]),
+        saved("ability-speed", &[f64::INFINITY]),
+        saved("extra-projectiles", &[f64::NEG_INFINITY]),
+        saved("new-item-rarity", &[2.5]),
+        saved("one-echo-type", &[9.]),
+        saved("camera-distance", &[-150.]),
         saved("rune-wardens", &[3.25]),
         saved("drop-rates", &[0.123, 1.25, 0.777, 2.75]),
         saved("unknown", &[f64::NAN]),
@@ -129,13 +129,13 @@ fn saved_values_fit_legacy_rules_and_switches_start_off() {
         }
     }
     for (id, values) in [
-        ("xp-multiplier", vec![1., 100.]),
-        ("damage-dealt", vec![2.]),
-        ("cast-speed", vec![2.]),
-        ("projectiles", vec![2.]),
-        ("force-rarity", vec![3.]),
-        ("echo-type", vec![9.]),
-        ("zoom", vec![-100.]),
+        ("experience-multiplier", vec![1., 100.]),
+        ("enemy-damage", vec![2.]),
+        ("ability-speed", vec![2.]),
+        ("extra-projectiles", vec![2.]),
+        ("new-item-rarity", vec![3.]),
+        ("one-echo-type", vec![9.]),
+        ("camera-distance", vec![-100.]),
         ("rune-wardens", vec![3.25]),
         ("drop-rates", vec![0.123, 1.25, 0.777, 2.75]),
         ("morditas-timer", vec![2., 0.5, 2.]),
@@ -143,15 +143,15 @@ fn saved_values_fit_legacy_rules_and_switches_start_off() {
         assert_eq!(state.values(hook(id)), values, "{id}");
     }
     for invalid in [-1., 5., f64::NAN, f64::INFINITY, f64::NEG_INFINITY, 1.1] {
-        let fitted = FeatureIntents::from_saved([saved("force-rarity", &[invalid])]).unwrap();
-        assert_eq!(fitted.values(hook("force-rarity")), [3.]);
+        let fitted = FeatureIntents::from_saved([saved("new-item-rarity", &[invalid])]).unwrap();
+        assert_eq!(fitted.values(hook("new-item-rarity")), [3.]);
     }
 }
 
 #[test]
 fn live_edits_are_strict_transactional_and_do_not_quantize_steps() {
     let mut state = FeatureIntents::default();
-    let xp = hook("xp-multiplier");
+    let xp = hook("experience-multiplier");
     state.set_wanted(xp, true);
     let before = state.clone();
     for values in [&[5.][..], &[5., f64::NAN], &[5., f64::INFINITY], &[5., 100.01], &[0.99, 5.]] {
@@ -164,14 +164,14 @@ fn live_edits_are_strict_transactional_and_do_not_quantize_steps() {
     assert!(state.set_values(hook("rune-wardens"), &[3.25]).unwrap());
     assert_eq!(state.values(hook("rune-wardens")), [3.25]);
     assert!(state.set_values(hook("drop-rates"), &[0.123, 1.234, 0.456, 7.89]).unwrap());
-    assert!(state.set_values(hook("zoom"), &[-17.25]).unwrap());
+    assert!(state.set_values(hook("camera-distance"), &[-17.25]).unwrap());
     for invalid in [-1., 5., 1.2, f64::NAN, f64::INFINITY] {
         let before = state.clone();
-        assert!(state.set_values(hook("force-rarity"), &[invalid]).is_err());
+        assert!(state.set_values(hook("new-item-rarity"), &[invalid]).is_err());
         assert_eq!(state, before);
     }
-    assert!(state.set_values(hook("force-rarity"), &[0.]).unwrap());
-    assert!(state.set_values(hook("force-rarity"), &[4.]).unwrap());
+    assert!(state.set_values(hook("new-item-rarity"), &[0.]).unwrap());
+    assert!(state.set_values(hook("new-item-rarity"), &[4.]).unwrap());
     assert!(state.is_wanted(xp));
 }
 
@@ -180,21 +180,21 @@ fn duplicate_bulk_ids_reject_everything_including_unknown_and_bad_arity() {
     let mut state = FeatureIntents::default();
     state.set_wanted(hook("incoming-damage"), true);
     let before = state.clone();
-    for duplicate in ["unknown", "currency", "xp-multiplier", "god-mode"] {
+    for duplicate in ["unknown", "currency", "experience-multiplier", "god-mode"] {
         let error = state
-            .restore_values([saved("zoom", &[-42.]), saved(duplicate, &[9.]), saved(duplicate, &[10.])])
+            .restore_values([saved("camera-distance", &[-42.]), saved(duplicate, &[9.]), saved(duplicate, &[10.])])
             .unwrap_err();
         assert_eq!(error, FeatureError::DuplicateId(duplicate.to_owned()));
         assert_eq!(state, before);
     }
-    assert!(state.restore_values([saved("not-present", &[8.]), saved("xp-multiplier", &[9.])]).is_ok());
+    assert!(state.restore_values([saved("not-present", &[8.]), saved("experience-multiplier", &[9.])]).is_ok());
     assert_eq!(state, before);
 }
 
 #[test]
 fn saved_values_carry_only_hooks_with_values_and_leave_switches_to_the_profile() {
     let mut current = FeatureIntents::default();
-    let id = hook("damage-dealt");
+    let id = hook("enemy-damage");
     current.set_values(id, &[3.125]).unwrap();
     current.set_wanted(id, true);
     let saved = current.saved_values();
@@ -206,7 +206,7 @@ fn saved_values_carry_only_hooks_with_values_and_leave_switches_to_the_profile()
     assert_eq!(restored.wanted().count(), 0, "a profile saves its switches itself");
     // Saved data is owned; editing it cannot mutate the source.
     let mut edited = saved;
-    edited.iter_mut().find(|entry| entry.id == "damage-dealt").unwrap().values[0] = 8.;
+    edited.iter_mut().find(|entry| entry.id == "enemy-damage").unwrap().values[0] = 8.;
     assert_eq!(current.values(id), [3.125]);
     assert!(current.set_wanted(id, false));
     assert!(!current.set_wanted(id, false), "already off");
@@ -217,8 +217,8 @@ fn saved_values_carry_only_hooks_with_values_and_leave_switches_to_the_profile()
 fn hooks_sharing_a_game_method_keep_independent_switches() {
     let mut state = FeatureIntents::default();
     state.set_wanted(hook("incoming-damage"), true);
-    state.set_wanted(hook("damage-dealt"), true);
+    state.set_wanted(hook("enemy-damage"), true);
     state.set_wanted(hook("incoming-damage"), false);
-    assert!(state.is_wanted(hook("damage-dealt")));
+    assert!(state.is_wanted(hook("enemy-damage")));
     assert!(HookId::parse("one-hit-kill").is_none());
 }

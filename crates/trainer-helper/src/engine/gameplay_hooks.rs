@@ -297,7 +297,7 @@ mod tests {
                     .leaf(LeafEffect::Boolean(answer), None, None)
                 })
                 .collect();
-            Group::prepare(FeatureBinding::fixture(GameplayHook::Offhand), &targets).unwrap()
+            Group::prepare(FeatureBinding::fixture(GameplayHook::AnyOffhand), &targets).unwrap()
         };
         assert!(group.hooks.iter().all(|hook| hook.state() == HookState::Disabled));
         let mut owner = Hooks {
@@ -305,17 +305,17 @@ mod tests {
             manager: 1,
             closing: false,
         };
-        owner.slots[GroupId::Offhand as usize] = Some(group);
-        let group = owner.slots[GroupId::Offhand as usize].as_ref().unwrap();
-        change_group(group, GameplayHook::Offhand, true, 1).unwrap();
-        assert!(observation(Some(group), GameplayHook::Offhand).confirmed(true));
+        owner.slots[GroupId::AnyOffhand as usize] = Some(group);
+        let group = owner.slots[GroupId::AnyOffhand as usize].as_ref().unwrap();
+        change_group(group, GameplayHook::AnyOffhand, true, 1).unwrap();
+        assert!(observation(Some(group), GameplayHook::AnyOffhand).confirmed(true));
         // SAFETY: the installed entries preserve their authored Boolean ABI.
         unsafe {
             assert!(std::hint::black_box(first)());
             assert!(!std::hint::black_box(second)());
         }
         owner.clear().unwrap();
-        assert!(observation(owner.slots[GroupId::Offhand as usize].as_ref(), GameplayHook::Offhand).confirmed(false));
+        assert!(observation(owner.slots[GroupId::AnyOffhand as usize].as_ref(), GameplayHook::AnyOffhand).confirmed(false));
         // SAFETY: clear restored both authored originals before any owner was released.
         unsafe {
             assert!(!std::hint::black_box(first)());
@@ -373,7 +373,7 @@ mod tests {
                 gate.set_original(hook.trampoline());
                 Group {
                     hooks: vec![Entry::Detour(hook)],
-                    effect: Effect::from_gates(definition(GameplayHook::AttackRate).behavior, vec![Gate::Scalar(gate)]),
+                    effect: Effect::from_gates(definition(GameplayHook::FixedAttackRate).behavior, vec![Gate::Scalar(gate)]),
                 }
             }
         };
@@ -382,12 +382,12 @@ mod tests {
             manager: 1,
             closing: false,
         };
-        owner.slots[GroupId::AttackRate as usize] = Some(group(attack as *mut u8, 0));
-        owner.slots[GroupId::LeechRate as usize] = Some(group(leech as *mut u8, 4));
+        owner.slots[GroupId::FixedAttackRate as usize] = Some(group(attack as *mut u8, 0));
+        owner.slots[GroupId::FixedLeechRate as usize] = Some(group(leech as *mut u8, 4));
         let set =
             |owner: &Hooks, hook: GameplayHook, on, value: f64| change_group(owner.slots[definition(hook).group as usize].as_ref().unwrap(), hook, on, value.to_bits()).unwrap();
-        set(&owner, GameplayHook::AttackRate, true, 6.0);
-        set(&owner, GameplayHook::LeechRate, true, 2.0);
+        set(&owner, GameplayHook::FixedAttackRate, true, 6.0);
+        set(&owner, GameplayHook::FixedLeechRate, true, 2.0);
         // SAFETY: the live entries preserve their authored signature and the test owns both fields.
         unsafe {
             std::hint::black_box(attack)(stats.as_ptr(), 1.5);
@@ -395,10 +395,10 @@ mod tests {
         }
         assert_eq!(f32::from_bits(stats[0].load(SeqCst)), 6.0);
         assert_eq!(f32::from_bits(stats[1].load(SeqCst)), 2.0);
-        set(&owner, GameplayHook::AttackRate, true, 8.0);
-        set(&owner, GameplayHook::AttackRate, false, 8.0);
+        set(&owner, GameplayHook::FixedAttackRate, true, 8.0);
+        set(&owner, GameplayHook::FixedAttackRate, false, 8.0);
         assert_eq!(f32::from_bits(stats[0].load(SeqCst)), 1.5);
-        assert!(observation(owner.slots[4].as_ref(), GameplayHook::LeechRate).confirmed(true));
+        assert!(observation(owner.slots[4].as_ref(), GameplayHook::FixedLeechRate).confirmed(true));
         owner.clear().unwrap();
         assert_eq!(f32::from_bits(stats[1].load(SeqCst)), 0.3);
         assert!(owner.slots[3].is_none() && owner.slots[4].is_none());
@@ -413,7 +413,7 @@ mod tests {
     #[test]
     fn damage_controls_share_one_patch_until_last_off_and_clear_does_not_revive_siblings() {
         use crate::game::damage::DamageLayout;
-        use eg_trainer_wire::hooks::GameplayHook::{DamageDealt, IncomingDamage};
+        use eg_trainer_wire::hooks::GameplayHook::{EnemyDamage, IncomingDamage};
         use std::sync::atomic::{AtomicU8, AtomicUsize};
         #[unsafe(naked)]
         unsafe extern "C-unwind" fn target(_health: *const usize, _damage: f32, _method: usize) -> f32 {
@@ -467,8 +467,8 @@ mod tests {
         };
         owner.slots[GroupId::Damage as usize] = Some(group);
         let group = owner.slots[2].as_ref().unwrap();
-        for first in [IncomingDamage, DamageDealt] {
-            let second = if first == IncomingDamage { DamageDealt } else { IncomingDamage };
+        for first in [IncomingDamage, EnemyDamage] {
+            let second = if first == IncomingDamage { EnemyDamage } else { IncomingDamage };
             change_group(group, first, true, first.default_value()).unwrap();
             change_group(group, second, true, second.default_value()).unwrap();
             assert!(observation(Some(group), first).confirmed(true));
@@ -482,12 +482,12 @@ mod tests {
             assert_eq!(group.hooks[0].state(), HookState::Disabled);
         }
         change_group(group, IncomingDamage, true, 0).unwrap();
-        change_group(group, DamageDealt, true, 101.0f64.to_bits()).unwrap();
+        change_group(group, EnemyDamage, true, 101.0f64.to_bits()).unwrap();
         owner.clear().unwrap();
         let group = owner.slots[2].as_ref().unwrap();
-        change_group(group, DamageDealt, true, 2.5f64.to_bits()).unwrap();
+        change_group(group, EnemyDamage, true, 2.5f64.to_bits()).unwrap();
         assert!(observation(Some(group), IncomingDamage).confirmed(false));
-        assert!(observation(Some(group), DamageDealt).confirmed(true));
+        assert!(observation(Some(group), EnemyDamage).confirmed(true));
         owner.clear().unwrap();
     }
     #[test]
@@ -552,14 +552,14 @@ mod tests {
                     }),
                 })
                 .collect();
-            Group::prepare(FeatureBinding::fixture(GameplayHook::ForgeLevel), &targets).unwrap()
+            Group::prepare(FeatureBinding::fixture(GameplayHook::ForgeAboveLevel), &targets).unwrap()
         };
         let mut owner = Hooks {
             slots: [const { None }; GroupId::COUNT],
             manager: 1,
             closing: false,
         };
-        owner.slots[GroupId::ForgeLevel as usize] = Some(patches);
+        owner.slots[GroupId::ForgeAboveLevel as usize] = Some(patches);
         // SAFETY: separate authored Boolean entry, prepared before either family is published.
         owner.slots[GroupId::MysteriousRift as usize] = Some(unsafe {
             let address = NonNull::new(leaf as *mut u8).unwrap();
@@ -579,10 +579,10 @@ mod tests {
         unsafe {
             assert!(std::hint::black_box(leaf)());
         }
-        let group = owner.slots[GroupId::ForgeLevel as usize].as_ref().unwrap();
+        let group = owner.slots[GroupId::ForgeAboveLevel as usize].as_ref().unwrap();
         for on in [true, false, true] {
-            change_group(group, GameplayHook::ForgeLevel, on, 1).unwrap();
-            assert!(observation(Some(group), GameplayHook::ForgeLevel).confirmed(on));
+            change_group(group, GameplayHook::ForgeAboveLevel, on, 1).unwrap();
+            assert!(observation(Some(group), GameplayHook::ForgeAboveLevel).confirmed(on));
             // SAFETY: both functions retain their original zero-argument u32 ABI.
             unsafe {
                 assert_eq!(std::hint::black_box(first)(), if on { 99 } else { 42 });
@@ -590,7 +590,7 @@ mod tests {
             }
         }
         owner.observe_manager(2).unwrap();
-        assert!(observation(owner.slots[GroupId::ForgeLevel as usize].as_ref(), GameplayHook::ForgeLevel).confirmed(false));
+        assert!(observation(owner.slots[GroupId::ForgeAboveLevel as usize].as_ref(), GameplayHook::ForgeAboveLevel).confirmed(false));
         // SAFETY: manager change restored both immediate bytes, with all owners retained for subsequent clear.
         unsafe {
             assert_eq!(std::hint::black_box(first)(), 42);
@@ -605,7 +605,7 @@ mod tests {
 
     #[test]
     fn mana_cost_uses_the_shared_patch_readback_and_clear_lifecycle() {
-        use crate::game::{gameplay::ResolvedMethod, zero_mana_cost::ManaCostLayout};
+        use crate::game::{gameplay::ResolvedMethod, no_mana_cost::ManaCostLayout};
         use std::sync::atomic::{AtomicU8, AtomicUsize};
         #[repr(C)]
         struct Actor {
@@ -647,19 +647,19 @@ mod tests {
                 address,
                 bytes: address.cast::<[u8; 16]>().as_ptr().read_unaligned(),
             };
-            Group::prepare(FeatureBinding::fixture(GameplayHook::ZeroManaCost), &[method.postfix(layout.effect())]).unwrap()
+            Group::prepare(FeatureBinding::fixture(GameplayHook::NoManaCost), &[method.postfix(layout.effect())]).unwrap()
         };
         let mut owner = Hooks {
             slots: [const { None }; GroupId::COUNT],
             manager: 1,
             closing: false,
         };
-        owner.slots[GroupId::ZeroManaCost as usize] = Some(group);
-        let slot = || GroupId::ZeroManaCost as usize;
+        owner.slots[GroupId::NoManaCost as usize] = Some(group);
+        let slot = || GroupId::NoManaCost as usize;
         let group = owner.slots[slot()].as_ref().unwrap();
         for on in [true, false, true] {
-            change_group(group, GameplayHook::ZeroManaCost, on, 1).unwrap();
-            assert!(observation(Some(group), GameplayHook::ZeroManaCost).confirmed(on));
+            change_group(group, GameplayHook::NoManaCost, on, 1).unwrap();
+            assert!(observation(Some(group), GameplayHook::NoManaCost).confirmed(on));
             // SAFETY: installed entry retains its authored ABI, without touching receiver identity tokens.
             unsafe {
                 assert_eq!(std::hint::black_box(target)(41, 0, 5.5, false, 0, false, 0), if on { 0.0 } else { 5.5 });
@@ -667,7 +667,7 @@ mod tests {
             }
         }
         owner.clear().unwrap();
-        assert!(observation(owner.slots[slot()].as_ref(), GameplayHook::ZeroManaCost).confirmed(false));
+        assert!(observation(owner.slots[slot()].as_ref(), GameplayHook::NoManaCost).confirmed(false));
         // SAFETY: clear restored the original entry and closed the retained post-call path.
         unsafe {
             assert_eq!(std::hint::black_box(target)(41, 0, 5.5, false, 0, false, 0), 5.5);
@@ -676,7 +676,7 @@ mod tests {
 
     #[test]
     fn material_refills_use_independent_entries_and_shared_restore_lifecycle_without_undoing_inventory() {
-        use crate::game::{gameplay::ResolvedMethod, runes_glyphs::SlotLayout, shards::ShardLayout};
+        use crate::game::{gameplay::ResolvedMethod, runes_glyphs_to_99::SlotLayout, shards_to_99::ShardLayout};
         use std::{cell::Cell, sync::atomic::AtomicU8};
         #[repr(C)]
         struct Node {
@@ -772,8 +772,8 @@ mod tests {
             closing: false,
         };
         for (hook, address, effect) in [
-            (GameplayHook::Shards, shard_count as *mut u8, shard_layout.effect()),
-            (GameplayHook::RunesGlyphs, slot_quantity as *mut u8, slot_layout.effect()),
+            (GameplayHook::ShardsTo99, shard_count as *mut u8, shard_layout.effect()),
+            (GameplayHook::RunesGlyphsTo99, slot_quantity as *mut u8, slot_layout.effect()),
         ] {
             // SAFETY: distinct authored process-lifetime entries, exact i32(instance, MethodInfo) ABI and live graphs.
             let group = unsafe {
@@ -792,10 +792,10 @@ mod tests {
             assert_eq!(std::hint::black_box(shard_count)(&tracker, 0), 99);
             assert_eq!(std::hint::black_box(slot_quantity)(&slot, 0), 99);
         }
-        let shards = owner.slots[GroupId::Shards as usize].as_ref().unwrap();
-        change_group(shards, GameplayHook::Shards, false, 1).unwrap();
-        assert!(observation(Some(shards), GameplayHook::Shards).confirmed(false));
-        assert!(observation(owner.slots[GroupId::RunesGlyphs as usize].as_ref(), GameplayHook::RunesGlyphs).confirmed(true));
+        let shards = owner.slots[GroupId::ShardsTo99 as usize].as_ref().unwrap();
+        change_group(shards, GameplayHook::ShardsTo99, false, 1).unwrap();
+        assert!(observation(Some(shards), GameplayHook::ShardsTo99).confirmed(false));
+        assert!(observation(owner.slots[GroupId::RunesGlyphsTo99 as usize].as_ref(), GameplayHook::RunesGlyphsTo99).confirmed(true));
         assert_eq!(shard.quantity.get(), 99, "disable retains already granted inventory");
         shard.quantity.set(4);
         entry.quantity.set(5);
@@ -805,14 +805,14 @@ mod tests {
             assert_eq!(std::hint::black_box(slot_quantity)(&slot, 0), 99);
         }
         owner.observe_manager(2).unwrap();
-        for hook in [GameplayHook::Shards, GameplayHook::RunesGlyphs] {
+        for hook in [GameplayHook::ShardsTo99, GameplayHook::RunesGlyphsTo99] {
             assert!(observation(owner.slots[definition(hook).group as usize].as_ref(), hook).confirmed(false));
         }
         assert_eq!(entry.quantity.get(), 99);
         entry.quantity.set(6);
         // SAFETY: manager loss restored both entries, with the authored receiver graph still alive.
         unsafe { assert_eq!(std::hint::black_box(slot_quantity)(&slot, 0), 6) };
-        for hook in [GameplayHook::Shards, GameplayHook::RunesGlyphs] {
+        for hook in [GameplayHook::ShardsTo99, GameplayHook::RunesGlyphsTo99] {
             change_group(owner.slots[definition(hook).group as usize].as_ref().unwrap(), hook, true, 1).unwrap();
         }
         owner.closing = true;

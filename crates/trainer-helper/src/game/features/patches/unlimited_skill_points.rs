@@ -1,25 +1,25 @@
-//! Keep cache eligibility, placement and the RNG call; bypass only the failed-roll branch.
+//! Bypass the skill-tree total-point budget while retaining each node and connection requirement.
 use super::super::hooks::{Behavior, GroupId, HookFeature};
 use super::*;
 pub(crate) const FEATURE: HookFeature = HookFeature {
-    group: GroupId::EternityCache,
+    group: GroupId::UnlimitedSkillPoints,
     behavior: Behavior::Patch,
     targets,
 };
 const SPECS: &[PatchSpec] = &[PatchSpec::new(
-    "Eternity cache roll",
+    "Skill point check",
     MethodSpec {
-        class: c"RandomOneShotCacheSpawner",
-        method: c"ExecuteSpawn",
+        class: c"LocalTreeData",
+        method: c"tryToSpendSkillPoint",
         instance: true,
-        params: &["EncounterPlacementData"],
-        returns: "System.Void",
+        params: &["Ability", "System.Byte"],
+        returns: "System.Boolean",
     },
-    0x260,
+    0x600,
     &[
-        0x45, 0x33, 0xc0, 0xf, 0x28, 0xce, 0x48, 0x8b, 0xc8, 0xe8, -1, -1, -1, -1, 0x84, 0xc0, 0xf, 0x84, -1, -1, -1, -1, 0x33, 0xd2, 0x48, 0x8b, 0xcf, 0xe8,
+        0xf, 0x8d, -1, -1, -1, -1, 0x33, -1, 0xe8, -1, -1, -1, -1, 0x48, 0x85, -1, 0xf, 0x84, -1, -1, -1, -1, 0x45, 0x33, -1, 0x49, 0x8b,
     ],
-    16,
+    0,
     &[0x90, 0x90, 0x90, 0x90, 0x90, 0x90],
 )];
 unsafe fn targets(access: &RuntimeAccess, module: NonNull<u8>, size: usize) -> Result<Vec<GameplayHookTarget>, GameError> {

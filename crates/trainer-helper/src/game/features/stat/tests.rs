@@ -409,7 +409,7 @@ fn read_selected(api: &RuntimeAccess, thread: &ThreadContext, expected: u64, fea
     }
 }
 fn read(api: &RuntimeAccess, thread: &ThreadContext, expected: u64) -> Result<Read, GameError> {
-    read_selected(api, thread, expected, &super::super::attack_rate::ATTACK_RATE)
+    read_selected(api, thread, expected, &super::super::fixed_attack_rate::ATTACK_RATE)
 }
 #[test]
 fn each_accessor_reads_without_resolving_the_other_stat() {
@@ -418,7 +418,7 @@ fn each_accessor_reads_without_resolving_the_other_stat() {
     assert_eq!(read(&api, &thread, MANAGER as u64).unwrap(), Read::Available(0x3f8ccccd));
     FAULT.set(Some((ATTACK, Fault::Missing)));
     assert_eq!(
-        read_selected(&api, &thread, MANAGER as u64, &super::super::leech_rate::LEECH_RATE).unwrap(),
+        read_selected(&api, &thread, MANAGER as u64, &super::super::fixed_leech_rate::LEECH_RATE).unwrap(),
         Read::Available(0xbe000000)
     );
 }

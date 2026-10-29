@@ -1,20 +1,20 @@
 //! What the trainer offers, built on the accessors. One-time edits use `apply`; persistent effects use retained
 //! gateways and the shared lifecycle. Each hook feature owns its targets, explicit method contracts and behavior.
 
-mod attack_rate;
+mod any_offhand;
 pub mod damage;
 mod descriptions;
+mod fixed_attack_rate;
+mod fixed_leech_rate;
 mod forge;
 pub(crate) mod hooks;
-mod leech_rate;
 mod mapping;
 mod materials;
 mod mysterious_rift;
-mod offhand;
+pub(crate) mod no_mana_cost;
 mod patches;
 pub mod persistent_stat;
-pub(crate) mod runes_glyphs;
-pub(crate) mod shards;
+pub(crate) mod runes_glyphs_to_99;
+pub(crate) mod shards_to_99;
 mod stat;
 mod unique;
-pub(crate) mod zero_mana_cost;

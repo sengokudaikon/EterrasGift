@@ -1,5 +1,5 @@
 //! Last Epoch's damage leaf on `float BaseHealth.HealthDamage(float, MethodInfo*)`. One leaf serves two features:
-//! damage the current player takes, scaled to a percentage, and damage dealt to its foes, multiplied or made a one-hit
+//! damage the current player takes, scaled to a percentage, and damage its foes take, multiplied or made a one-hit
 //! kill. Its code follows the metadata-validated layout below and keeps its state in the gate's slots.
 
 use crate::hooks::leaf::{EFFECT_SLOTS, FRAME, GeneratedEffect, LeafEffect, LeafGate};
@@ -14,7 +14,7 @@ pub(super) const FEATURE: HookFeature = HookFeature {
     behavior: Behavior::Damage,
     targets,
 };
-pub(crate) const CONTROLS: [GameplayHook; 2] = [GameplayHook::IncomingDamage, GameplayHook::DamageDealt];
+pub(crate) const CONTROLS: [GameplayHook; 2] = [GameplayHook::IncomingDamage, GameplayHook::EnemyDamage];
 
 unsafe fn targets(access: &RuntimeAccess, module: NonNull<u8>, size: usize) -> Result<Vec<GameplayHookTarget>, GameError> {
     // SAFETY: attached main thread, initialized game statics, retained metadata and bounded module.
@@ -146,7 +146,7 @@ pub fn set_damage(gate: &LeafGate, hook: GameplayHook, on: bool, value: u64) {
     let value = if on { value } else { OFF };
     match hook {
         GameplayHook::IncomingDamage => gate.set_value(value),
-        GameplayHook::DamageDealt => gate.set_slot(OUTGOING, value),
+        GameplayHook::EnemyDamage => gate.set_slot(OUTGOING, value),
         _ => unreachable!("not a damage feature"),
     }
 }
@@ -155,7 +155,7 @@ pub fn set_damage(gate: &LeafGate, hook: GameplayHook, on: bool, value: u64) {
 pub fn damage_setting(gate: &LeafGate, hook: GameplayHook) -> (bool, u64) {
     let value = match hook {
         GameplayHook::IncomingDamage => gate.value(),
-        GameplayHook::DamageDealt => gate.slot(OUTGOING),
+        GameplayHook::EnemyDamage => gate.slot(OUTGOING),
         _ => unreachable!("not a damage feature"),
     };
     (gate.enabled() && value != OFF, if value == OFF { hook.default_value() } else { value })
@@ -291,7 +291,7 @@ fn code(layout: DamageLayout) -> Vec<u8> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use eg_trainer_wire::hooks::GameplayHook::{DamageDealt, IncomingDamage};
+    use eg_trainer_wire::hooks::GameplayHook::{EnemyDamage, IncomingDamage};
     use std::{
         cell::Cell,
         ptr::NonNull,
@@ -391,12 +391,12 @@ mod tests {
         set_damage(&gate, IncomingDamage, true, 50);
         gate.set_enabled(true);
         for multiplier in [0.0f64, 1.0, 2.5, 3.125, 100.0] {
-            set_damage(&gate, DamageDealt, true, multiplier.to_bits());
+            set_damage(&gate, EnemyDamage, true, multiplier.to_bits());
             assert_eq!(hit(&target, 200.0), (200.0 * multiplier) as f32 + 7.0);
             assert_eq!(hit(&target, -200.0), (-200.0 * multiplier) as f32 + 7.0);
             assert_eq!(hit(&mine, 200.0), 107.0);
         }
-        set_damage(&gate, DamageDealt, true, 101.0f64.to_bits());
+        set_damage(&gate, EnemyDamage, true, 101.0f64.to_bits());
         assert_eq!(hit(&target, 200.0), 1007.0);
         assert_eq!(hit(&target, 2000.0), 2007.0); // never reduce a larger hit
         assert_eq!(hit(&target, 0.0), 7.0);
@@ -429,10 +429,10 @@ mod tests {
         assert_eq!(hit(&target, 200.0), 207.0);
         assert_eq!(hit(&mine, 200.0), 207.0);
         online.store(0, SeqCst);
-        set_damage(&gate, DamageDealt, false, 1.0f64.to_bits());
+        set_damage(&gate, EnemyDamage, false, 1.0f64.to_bits());
         assert_eq!(hit(&target, 200.0), 207.0);
         assert_eq!(hit(&mine, 200.0), 107.0);
-        set_damage(&gate, DamageDealt, true, 2.0f64.to_bits());
+        set_damage(&gate, EnemyDamage, true, 2.0f64.to_bits());
         set_damage(&gate, IncomingDamage, false, 50);
         assert_eq!(hit(&target, 200.0), 407.0);
         assert_eq!(hit(&mine, 200.0), 207.0);

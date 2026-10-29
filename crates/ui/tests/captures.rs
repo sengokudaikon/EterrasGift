@@ -1898,10 +1898,10 @@ fn trainer_captures(session: &Session) {
     session.capture(&ui, "trainer-setup-1100");
     // Profiles: a picker, the last played first; each keeps its own hooks.
     let ui = setup("combat", 1, 1100, 700, &[character("Mira", "Primalist"), character("Oren", "Sentinel")]);
-    // Damage multiplier's switch, under the profile band.
+    // Damage enemies take's switch, under the profile band.
     session.click(628.0, 240.0);
     show(&ui);
-    assert!(on(&ui, 3), "Mira's Damage multiplier switched on in the setup");
+    assert!(on(&ui, 3), "Mira's Damage enemies take switched on in the setup");
     assert_eq!(
         state(&ui).get_rows().row_data(3).map(|row| row.status.to_string()).as_deref(),
         Some("Turns on when Mira enters play.")
@@ -1969,7 +1969,7 @@ fn trainer_captures(session: &Session) {
     session.key(Key::UpArrow);
     session.key(Key::UpArrow);
     show(&ui);
-    assert_eq!(state(&ui).get_rows().row_data(3).expect("Damage multiplier").inline_value.text, "3");
+    assert_eq!(state(&ui).get_rows().row_data(3).expect("Damage enemies take").inline_value.text, "3");
     advance(Duration::from_millis(600));
     show(&ui);
     session.capture(&ui, "trainer-value-stepped-1100");
@@ -1983,7 +1983,7 @@ fn trainer_captures(session: &Session) {
     show(&ui);
     session.type_text("5");
     show(&ui);
-    assert_eq!(state(&ui).get_rows().row_data(3).expect("Damage multiplier").inline_value.text, "1.5");
+    assert_eq!(state(&ui).get_rows().row_data(3).expect("Damage enemies take").inline_value.text, "1.5");
     let ui = open("world", 0, 940, 580, connected());
     session.capture(&ui, "trainer-world-940");
     // The pane open beside the narrowest window: the rows narrow below their width, and long titles wrap with their (?).
@@ -2017,14 +2017,14 @@ fn trainer_captures(session: &Session) {
     // switch, or Tab from the strip and Space, turns nothing on. The same input on shown rows turns both on.
     let on = |ui: &MainWindow, row: usize| state(ui).get_rows().row_data(row).is_some_and(|row| row.on);
     for ready in [true, false] {
-        // Damage multiplier's switch.
+        // Damage enemies take's switch.
         let ui = open("combat", 1, 1100, 700, connected());
         state(&ui).set_rows_ready(ready);
         settle();
         session.click(628.0, 240.0);
         settle();
         assert_eq!(on(&ui, 3), ready, "a click on rows shown: {ready}");
-        // The profile's Delete…, then the first row's (?), its value and its switch: Damage taken's.
+        // The profile's Delete…, then the first row's (?), its value and its switch: Damage you take's.
         let ui = open("combat", 1, 1100, 700, connected());
         state(&ui).set_rows_ready(ready);
         settle();
@@ -2122,13 +2122,13 @@ fn trainer_captures(session: &Session) {
     let mut fake = FakeTrainer::default();
     fake.hooks.insert("incoming-damage".into(), HookState::On);
     fake.hooks.insert(
-        "cast-speed".into(),
+        "ability-speed".into(),
         HookState::Failed {
             reason: "the game's method was not found".into(),
             on: false,
         },
     );
-    for id in ["incoming-damage", "cast-speed"] {
+    for id in ["incoming-damage", "ability-speed"] {
         fake.wanted.borrow_mut().insert(id.into());
     }
     let ui = open("combat", 0, 1100, 700, Some(fake));

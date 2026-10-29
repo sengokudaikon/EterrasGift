@@ -4,7 +4,7 @@ use super::hooks::{Behavior, GameplayHookTarget, GroupId, HookFeature, MethodSpe
 use crate::{game::*, hooks::leaf::LeafEffect};
 
 pub(super) const FEATURE: HookFeature = HookFeature {
-    group: GroupId::Offhand,
+    group: GroupId::AnyOffhand,
     behavior: Behavior::Leaf,
     targets,
 };

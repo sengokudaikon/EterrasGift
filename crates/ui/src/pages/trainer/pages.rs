@@ -172,7 +172,7 @@ impl HookRow {
         let (Some(value), Some(amount)) = (self.feature.values.get(index), amount) else {
             return;
         };
-        if self.feature.id() == "damage-dealt" && amount > 100.0 && amount != 101.0 {
+        if self.feature.id() == "enemy-damage" && amount > 100.0 && amount != 101.0 {
             return;
         }
         self.set_number(session, index, amount.clamp(value.minimum, value.maximum));
@@ -182,7 +182,7 @@ impl HookRow {
     pub fn step(&mut self, session: &dyn TrainerSession, index: usize, direction: i32) {
         if let Some(value) = self.feature.values.get(index) {
             let mut amount = self.values[index] + value.step * f64::from(direction.signum());
-            if self.feature.id() == "damage-dealt" && amount > 100.0 {
+            if self.feature.id() == "enemy-damage" && amount > 100.0 {
                 amount = if direction < 0 { 100.0 } else { 101.0 };
             }
             self.set_amount(session, index, Some(amount));
@@ -224,7 +224,7 @@ impl HookRow {
                 format!("{} selected in the game.", self.feature.values[0].choices[self.values[0] as usize]),
                 Tone::Confirmed,
             ),
-            (true, Some(HookState::On)) if self.feature.id() == "damage-dealt" && self.values == [101.0] => say("One-hit kills on in the game.", Tone::Confirmed),
+            (true, Some(HookState::On)) if self.feature.id() == "enemy-damage" && self.values == [101.0] => say("One-hit kills on in the game.", Tone::Confirmed),
             (true, Some(HookState::On)) => say("On in the game.", Tone::Confirmed),
             (true, Some(HookState::Failed { reason, .. })) => (format!("Could not turn on: {reason}"), Tone::Error),
             (true, Some(HookState::Applying | HookState::Off)) => say("Turning on in the game…", Tone::None),
@@ -237,7 +237,7 @@ impl HookRow {
 }
 
 pub fn hook_amount(id: &str, text: &str) -> Option<f64> {
-    if id == "damage-dealt" && matches!(text.trim().to_ascii_lowercase().as_str(), "∞" | "inf" | "infinity") {
+    if id == "enemy-damage" && matches!(text.trim().to_ascii_lowercase().as_str(), "∞" | "inf" | "infinity") {
         Some(101.0)
     } else {
         parse(text)
@@ -245,7 +245,7 @@ pub fn hook_amount(id: &str, text: &str) -> Option<f64> {
 }
 
 pub fn hook_text(id: &str, number: f64) -> String {
-    if id == "damage-dealt" && number == 101.0 { "∞".into() } else { plain(number) }
+    if id == "enemy-damage" && number == 101.0 { "∞".into() } else { plain(number) }
 }
 
 /// One field of an editor: what the game holds, and a draft until Apply.
@@ -883,45 +883,45 @@ mod tests {
     #[test]
     fn damage_knob_enters_and_leaves_one_hit_mode_and_formats_infinity() {
         let session = Setup::default();
-        let mut row = HookRow::new(*catalog::feature("damage-dealt").unwrap(), &session);
+        let mut row = HookRow::new(*catalog::feature("enemy-damage").unwrap(), &session);
         row.set_amount(&session, 0, Some(100.0));
         row.step(&session, 0, 1);
         assert_eq!(row.values, [101.0]);
-        assert_eq!(hook_text("damage-dealt", row.values[0]), "∞");
+        assert_eq!(hook_text("enemy-damage", row.values[0]), "∞");
         row.step(&session, 0, -1);
         assert_eq!(row.values, [100.0]);
         for text in ["∞", "infinity", "INF"] {
-            row.set_amount(&session, 0, hook_amount("damage-dealt", text));
+            row.set_amount(&session, 0, hook_amount("enemy-damage", text));
             assert_eq!(row.values, [101.0]);
         }
         assert_eq!(hook_amount("incoming-damage", "∞"), None);
         assert_eq!(hook_text("incoming-damage", 100.0), "100");
         row.set_amount(&session, 0, Some(2.5));
         assert_eq!(row.values, [2.5]);
-        assert_eq!(hook_text("damage-dealt", 2.5), "2.5");
+        assert_eq!(hook_text("enemy-damage", 2.5), "2.5");
     }
 
     #[test]
     fn a_hook_says_where_it_stands() {
         // Without a profile there is nothing to set up.
         let none = Unconnected;
-        let row = HookRow::new(*catalog::feature("damage-dealt").unwrap(), &none);
+        let row = HookRow::new(*catalog::feature("enemy-damage").unwrap(), &none);
         assert!(!row.can_use(&none));
         let session = Setup::default();
-        let mut row = HookRow::new(*catalog::feature("damage-dealt").unwrap(), &session);
+        let mut row = HookRow::new(*catalog::feature("enemy-damage").unwrap(), &session);
         assert!(row.can_use(&session));
         assert_eq!(row.values, [2.0]);
         assert_eq!(row.status(&session), (String::new(), Tone::None));
         row.set_on(&session, true);
-        assert_eq!(session.hook_values("damage-dealt"), [2.0]);
+        assert_eq!(session.hook_values("enemy-damage"), [2.0]);
         assert_eq!(row.status(&session).0, "Turns on when Mira enters play.");
         row.set_amount(&session, 0, Some(100.0));
         assert_eq!(row.values, [100.0]);
         row.set_amount(&session, 0, None);
         assert_eq!(row.values, [100.0]);
         row.step(&session, 0, -1);
-        assert_eq!(session.hook_values("damage-dealt"), [99.5]);
-        let mut rarity = HookRow::new(*catalog::feature("force-rarity").unwrap(), &session);
+        assert_eq!(session.hook_values("enemy-damage"), [99.5]);
+        let mut rarity = HookRow::new(*catalog::feature("new-item-rarity").unwrap(), &session);
         assert_eq!(rarity.values, [3.0]);
         rarity.choose(&session, 0, 9);
         assert_eq!(rarity.values, [3.0]);
@@ -935,22 +935,22 @@ mod tests {
             live: true,
             states: BTreeMap::from([
                 ("incoming-damage", HookState::On),
-                ("damage-dealt", HookState::Queued),
-                ("cast-speed", failed(false)),
-                ("move-speed", failed(true)),
-                ("force-rarity", HookState::Applying),
+                ("enemy-damage", HookState::Queued),
+                ("ability-speed", failed(false)),
+                ("movement-speed", failed(true)),
+                ("new-item-rarity", HookState::Applying),
             ]),
             ..Setup::default()
         };
-        for id in ["incoming-damage", "damage-dealt", "cast-speed"] {
+        for id in ["incoming-damage", "enemy-damage", "ability-speed"] {
             live.set_hook(id, true);
         }
         let status = |id| HookRow::new(*catalog::feature(id).unwrap(), &live).status(&live);
         assert_eq!(status("incoming-damage"), ("On in the game.".into(), Tone::Confirmed));
-        assert_eq!(status("damage-dealt").0, "Waiting to turn on…");
-        assert_eq!(status("cast-speed"), ("Could not turn on: the game's method was not found".into(), Tone::Error));
-        assert_eq!(status("move-speed"), ("Could not turn off: the game's method was not found".into(), Tone::Error));
-        assert_eq!(status("force-rarity").0, "Turning off in the game…");
+        assert_eq!(status("enemy-damage").0, "Waiting to turn on…");
+        assert_eq!(status("ability-speed"), ("Could not turn on: the game's method was not found".into(), Tone::Error));
+        assert_eq!(status("movement-speed"), ("Could not turn off: the game's method was not found".into(), Tone::Error));
+        assert_eq!(status("new-item-rarity").0, "Turning off in the game…");
         assert_eq!(status("drop-rates").0, "");
     }
 
@@ -1065,10 +1065,10 @@ mod tests {
             EditorRow::new(feature, false, &Unconnected).reason(&Unconnected),
             Some("Available once an offline character is connected.")
         );
-        let hook = HookRow::new(*catalog::feature("damage-dealt").unwrap(), &game);
+        let hook = HookRow::new(*catalog::feature("enemy-damage").unwrap(), &game);
         assert!(hook.can_use(&game));
         let game = Game {
-            unserved: Some("damage-dealt"),
+            unserved: Some("enemy-damage"),
             ..Game::default()
         };
         assert!(!hook.can_use(&game));

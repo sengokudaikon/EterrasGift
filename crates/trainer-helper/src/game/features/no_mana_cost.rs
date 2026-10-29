@@ -6,7 +6,7 @@ use crate::{
 };
 
 pub(super) const FEATURE: HookFeature = HookFeature {
-    group: GroupId::ZeroManaCost,
+    group: GroupId::NoManaCost,
     behavior: Behavior::Postfix,
     targets,
 };

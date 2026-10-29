@@ -108,20 +108,20 @@ impl RuntimeAccess {
     }
 }
 
+pub(crate) mod any_mastery_passives;
 pub(crate) mod class_experimentals;
-pub(crate) mod eternity_cache;
+pub(crate) mod endgame_cache;
+pub(crate) mod equip_without_requirements;
 pub(crate) mod favor_cache;
-pub(crate) mod forge_level;
-pub(crate) mod free_passive_points;
-pub(crate) mod free_skill_points;
-pub(crate) mod free_weaver_points;
-pub(crate) mod hunter_cost;
-pub(crate) mod item_requirements;
-pub(crate) mod max_skill_level;
+pub(crate) mod forge_above_level;
+pub(crate) mod free_hunter_vendor;
+pub(crate) mod full_set_bonus;
 pub(crate) mod nemesis;
 pub(crate) mod omen_windows;
-pub(crate) mod passive_chain;
-pub(crate) mod pickup_range;
-pub(crate) mod rune_prison;
-pub(crate) mod set_bonus;
-pub(crate) mod woven_enchanter;
+pub(crate) mod pickup_anywhere;
+pub(crate) mod rune_prison_complex;
+pub(crate) mod skills_to_level_20;
+pub(crate) mod unlimited_passive_points;
+pub(crate) mod unlimited_skill_points;
+pub(crate) mod unlimited_weaver_points;
+pub(crate) mod unlimited_woven_enchanter;

@@ -210,13 +210,13 @@ fn reload_a_hundred_times_with_running_callers_then_retain_a_blocked_callback() 
             assert_eq!(discovery.code, ResponseCode::Done);
             let found = Discovery::decode(&discovery.payload, std::process::id()).unwrap();
             assert_eq!(client.send(&Request::Status { dispatcher: found.dispatcher }).await.unwrap().code, ResponseCode::Done);
-            for hook in [GameplayHook::MysteriousRift, GameplayHook::Offhand, GameplayHook::IncomingDamage] {
+            for hook in [GameplayHook::MysteriousRift, GameplayHook::AnyOffhand, GameplayHook::IncomingDamage] {
                 for (on, answer) in [
                     (true, true),
-                    (true, hook == GameplayHook::Offhand),
+                    (true, hook == GameplayHook::AnyOffhand),
                     (true, true),
                     (false, true),
-                    (true, hook == GameplayHook::Offhand),
+                    (true, hook == GameplayHook::AnyOffhand),
                 ] {
                     let value = if hook == GameplayHook::IncomingDamage {
                         if answer { 50 } else { 0 }
@@ -256,9 +256,9 @@ fn reload_a_hundred_times_with_running_callers_then_retain_a_blocked_callback() 
                     // SAFETY: same process-owned targets and retained arguments as running callers.
                     let actual = unsafe {
                         match hook {
-                            GameplayHook::IncomingDamage | GameplayHook::DamageDealt => unreachable!("damage checked above"),
+                            GameplayHook::IncomingDamage | GameplayHook::EnemyDamage => unreachable!("damage checked above"),
                             GameplayHook::MysteriousRift => rift(Arc::as_ptr(&gameplay), 123),
-                            GameplayHook::Offhand => {
+                            GameplayHook::AnyOffhand => {
                                 assert_eq!(pairing(42), !on);
                                 let isolated = Events::default();
                                 enforce(&isolated, 43);
@@ -272,7 +272,7 @@ fn reload_a_hundred_times_with_running_callers_then_retain_a_blocked_callback() 
             }
             if cycle == 0 {
                 assert_eq!(client.send(&Request::ClearHooks { dispatcher: found.dispatcher }).await.unwrap().code, ResponseCode::Done);
-                for hook in [GameplayHook::MysteriousRift, GameplayHook::Offhand, GameplayHook::IncomingDamage] {
+                for hook in [GameplayHook::MysteriousRift, GameplayHook::AnyOffhand, GameplayHook::IncomingDamage] {
                     let read = client
                         .send(&Request::ReadGameplayHook {
                             dispatcher: found.dispatcher,
