@@ -11,10 +11,27 @@ pub enum GameplayHook {
     AttackRate = 4,
     LeechRate = 5,
     ZeroManaCost = 6,
+    MaxSkillLevel = 7,
+    ItemRequirements = 8,
+    SetBonus = 9,
+    FreeSkillPoints = 10,
+    FreePassivePoints = 11,
+    PassiveChain = 12,
+    FreeWeaverPoints = 13,
+    ForgeLevel = 14,
+    WovenEnchanter = 15,
+    PickupRange = 16,
+    HunterCost = 17,
+    EternityCache = 18,
+    FavorCache = 19,
+    Nemesis = 20,
+    OmenWindows = 21,
+    ClassExperimentals = 22,
+    RunePrison = 23,
 }
 
 impl GameplayHook {
-    pub const ALL: [Self; 7] = [
+    pub const ALL: [Self; 24] = [
         Self::MysteriousRift,
         Self::Offhand,
         Self::IncomingDamage,
@@ -22,6 +39,23 @@ impl GameplayHook {
         Self::AttackRate,
         Self::LeechRate,
         Self::ZeroManaCost,
+        Self::MaxSkillLevel,
+        Self::ItemRequirements,
+        Self::SetBonus,
+        Self::FreeSkillPoints,
+        Self::FreePassivePoints,
+        Self::PassiveChain,
+        Self::FreeWeaverPoints,
+        Self::ForgeLevel,
+        Self::WovenEnchanter,
+        Self::PickupRange,
+        Self::HunterCost,
+        Self::EternityCache,
+        Self::FavorCache,
+        Self::Nemesis,
+        Self::OmenWindows,
+        Self::ClassExperimentals,
+        Self::RunePrison,
     ];
     pub fn default_value(self) -> u64 {
         if matches!(self, Self::DamageDealt | Self::AttackRate) {
@@ -41,6 +75,23 @@ impl GameplayHook {
             Self::AttackRate => "attack-rate",
             Self::LeechRate => "leech-rate",
             Self::ZeroManaCost => "zero-mana-cost",
+            Self::MaxSkillLevel => "max-skill-level",
+            Self::ItemRequirements => "item-requirements",
+            Self::SetBonus => "set-bonus",
+            Self::FreeSkillPoints => "free-skill-points",
+            Self::FreePassivePoints => "free-passive-points",
+            Self::PassiveChain => "passive-chain",
+            Self::FreeWeaverPoints => "free-weaver-points",
+            Self::ForgeLevel => "forge-level",
+            Self::WovenEnchanter => "woven-enchanter",
+            Self::PickupRange => "pickup-range",
+            Self::HunterCost => "hunter-cost",
+            Self::EternityCache => "eternity-cache",
+            Self::FavorCache => "favor-cache",
+            Self::Nemesis => "nemesis",
+            Self::OmenWindows => "omen-windows",
+            Self::ClassExperimentals => "class-experimentals",
+            Self::RunePrison => "rune-prison",
         }
     }
     pub fn from_id(id: &str) -> Option<Self> {
@@ -50,7 +101,25 @@ impl GameplayHook {
     pub fn validate_value(self, value: u64) -> Result<u64, ProtocolError> {
         if match self {
             Self::IncomingDamage => value <= 100,
-            Self::Offhand | Self::ZeroManaCost => value == 1,
+            Self::Offhand
+            | Self::ZeroManaCost
+            | Self::MaxSkillLevel
+            | Self::ItemRequirements
+            | Self::SetBonus
+            | Self::FreeSkillPoints
+            | Self::FreePassivePoints
+            | Self::PassiveChain
+            | Self::FreeWeaverPoints
+            | Self::ForgeLevel
+            | Self::WovenEnchanter
+            | Self::PickupRange
+            | Self::HunterCost
+            | Self::EternityCache
+            | Self::FavorCache
+            | Self::Nemesis
+            | Self::OmenWindows
+            | Self::ClassExperimentals
+            | Self::RunePrison => value == 1,
             Self::DamageDealt => f64::from_bits(value).is_finite() && ((0.0..=100.0).contains(&f64::from_bits(value)) || value == 101.0f64.to_bits()),
             Self::MysteriousRift => value <= 1,
             Self::AttackRate => f64::from_bits(value).is_finite() && (0.01..=20.0).contains(&f64::from_bits(value)),

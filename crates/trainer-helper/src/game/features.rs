@@ -10,6 +10,7 @@ mod leech_rate;
 mod mapping;
 mod mysterious_rift;
 mod offhand;
+mod patches;
 pub mod persistent_stat;
 mod stat;
 mod unique;

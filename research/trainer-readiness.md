@@ -1,7 +1,8 @@
 # Trainer shipping scope
 
-The C# implementation at `../EterrasGift` remains the behavior reference. Current architecture,
-interop assumptions and retained evaluation conclusions are in [trainer-interop.md](trainer-interop.md).
+The C# implementation at `../EterrasGift` remains the behavior reference. Feature Done/Todo status and implementation details are maintained in
+[trainer-features.md](trainer-features.md). Runtime assumptions and retained evaluation conclusions are in
+[trainer-interop.md](trainer-interop.md).
 
 The architecture cleanup separates `eg-trainer-wire` (unsafe forbidden) from the optional
 in-process discovery/scheduler build. The helper no longer pulls in the trainer worker. Host
@@ -24,7 +25,7 @@ and mutable instance fields. A generic IL2CPP crate is not a prerequisite for th
 | Reads | Owned rooted forge snapshots, literal limits, completed locale, catalog subset and names/cache; game-built implicit/unique descriptions, private-copy unique previews and sampled regular-affix values | Unique/implicit mapping; getter replacements must match readiness behavior |
 | Forge writes | One EditForge request/ForgePlan/WriteOutcome path: seven status fields, base/subtype, unique/set identity, regular affix-roll batches, unique/set/implicit roll batches (2026-10-28), replacement/tier/seal and add/remove (a unique that gains an affix becomes legendary) | Live confirmation of the 2026-10-28 additions |
 | Editor | Ordered single-edit drafts, fresh reads, Pending/Confirmed/refusal/NotKept/Uncertain, conditional reverse Undo; status/base/identity, replacement/tier/seal, add/remove and regular-affix Value controls connected; unique text and asynchronous preview adapter; unique/set/implicit value tables (ModifierMappingQuery) and rolls | Live confirmation of the unique/implicit sampler |
-| Other features | Independent persistent attack-rate/leech-rate controls; mysterious rift, offhand, No mana cost and combined incoming/outgoing damage with shared retained gateway lifecycle, profile/UI controls, independent patch/flag readback, helper-side suspension and restore before unload | Other six field sets and remaining 61 hook features; live Last Epoch validation of the damage, rate and mana controls |
+| Other features | Independent persistent attack-rate/leech-rate controls; mysterious rift, offhand, No mana cost and combined incoming/outgoing damage with shared retained gateway lifecycle; 17 patch-only controls over 27 ranges (see [feature checklist](trainer-features.md)), profile/UI controls, independent patch/flag readback, helper-side suspension and restore before unload | Other six field sets and remaining 44 hook features; live Last Epoch validation of the damage, rate, mana and interior-patch controls |
 | Hook backend | Stock detour 0.10, retained owners, transaction recovery and registered trampoline unwind tables replace the custom scheduler; authored Unity throwing-task, partial-failure and owner-exit restoration pass | Gameplay-specific ABI/target coverage; accepted best-effort thread suspension remains a limitation |
 
 Ordinary refusal stops the draft and keeps Undo for confirmed steps. Known mismatch clears drafts

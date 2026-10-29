@@ -14,9 +14,26 @@ pub(crate) enum GroupId {
     AttackRate,
     LeechRate,
     ZeroManaCost,
+    MaxSkillLevel,
+    ItemRequirements,
+    SetBonus,
+    FreeSkillPoints,
+    FreePassivePoints,
+    PassiveChain,
+    FreeWeaverPoints,
+    ForgeLevel,
+    WovenEnchanter,
+    PickupRange,
+    HunterCost,
+    EternityCache,
+    FavorCache,
+    Nemesis,
+    OmenWindows,
+    ClassExperimentals,
+    RunePrison,
 }
 impl GroupId {
-    pub(crate) const COUNT: usize = 6;
+    pub(crate) const COUNT: usize = 23;
 }
 
 #[derive(Clone, Copy)]
@@ -25,6 +42,7 @@ pub(crate) enum Behavior {
     Postfix,
     Damage,
     Scalar(&'static StatFeature),
+    Patch,
 }
 
 type ResolveTargets = unsafe fn(&RuntimeAccess, NonNull<u8>, usize) -> Result<Vec<GameplayHookTarget>, GameError>;
@@ -43,6 +61,23 @@ pub(crate) fn definition(hook: GameplayHook) -> &'static HookFeature {
         GameplayHook::AttackRate => &super::attack_rate::FEATURE,
         GameplayHook::LeechRate => &super::leech_rate::FEATURE,
         GameplayHook::ZeroManaCost => &super::zero_mana_cost::FEATURE,
+        GameplayHook::MaxSkillLevel => &super::patches::max_skill_level::FEATURE,
+        GameplayHook::ItemRequirements => &super::patches::item_requirements::FEATURE,
+        GameplayHook::SetBonus => &super::patches::set_bonus::FEATURE,
+        GameplayHook::FreeSkillPoints => &super::patches::free_skill_points::FEATURE,
+        GameplayHook::FreePassivePoints => &super::patches::free_passive_points::FEATURE,
+        GameplayHook::PassiveChain => &super::patches::passive_chain::FEATURE,
+        GameplayHook::FreeWeaverPoints => &super::patches::free_weaver_points::FEATURE,
+        GameplayHook::ForgeLevel => &super::patches::forge_level::FEATURE,
+        GameplayHook::WovenEnchanter => &super::patches::woven_enchanter::FEATURE,
+        GameplayHook::PickupRange => &super::patches::pickup_range::FEATURE,
+        GameplayHook::HunterCost => &super::patches::hunter_cost::FEATURE,
+        GameplayHook::EternityCache => &super::patches::eternity_cache::FEATURE,
+        GameplayHook::FavorCache => &super::patches::favor_cache::FEATURE,
+        GameplayHook::Nemesis => &super::patches::nemesis::FEATURE,
+        GameplayHook::OmenWindows => &super::patches::omen_windows::FEATURE,
+        GameplayHook::ClassExperimentals => &super::patches::class_experimentals::FEATURE,
+        GameplayHook::RunePrison => &super::patches::rune_prison::FEATURE,
     }
 }
 
@@ -94,6 +129,12 @@ pub(crate) enum TargetEffect {
         stack_argument: bool,
     },
     Postfix(PostfixEffect),
+    Patch(CodeChange),
+}
+pub(crate) struct CodeChange {
+    pub address: NonNull<u8>,
+    pub expected: Vec<u8>,
+    pub replacement: Vec<u8>,
 }
 pub(crate) struct GameplayHookTarget {
     pub method: ResolvedMethod,
@@ -126,7 +167,7 @@ impl RuntimeAccess {
         }
     }
     // Resolve the complete parameter signature before checking the selected overload's ABI and uniqueness.
-    unsafe fn hook_method_contract(&self, owner: Class, spec: &MethodSpec) -> Result<Method, GameError> {
+    pub(super) unsafe fn hook_method_contract(&self, owner: Class, spec: &MethodSpec) -> Result<Method, GameError> {
         // SAFETY: immutable attached metadata and class descriptor retained by the caller.
         unsafe {
             let mut found = None;
@@ -145,7 +186,7 @@ impl RuntimeAccess {
                     if param.is_null() {
                         return Err(unsupported("null hook parameter type"));
                     }
-                    if (self.type_byref)(param) || self.type_name(param)? != *expected {
+                    if (self.type_byref)(param) != expected.ends_with('&') || self.type_name(param)? != *expected {
                         params_match = false;
                         break;
                     }

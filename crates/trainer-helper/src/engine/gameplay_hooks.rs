@@ -8,10 +8,12 @@ use crate::game::{
 use eg_trainer_wire::hooks::{GameplayHook, HookObservation, PatchState};
 
 mod effect;
+mod entry;
 use effect::{Effect, FeatureBinding};
+use entry::Entry;
 
 struct Group {
-    hooks: Vec<RetainedHook>,
+    hooks: Vec<Entry>,
     effect: Effect,
 }
 impl Group {
@@ -23,12 +25,19 @@ impl Group {
         let mut prepared = Vec::new();
         for (index, target) in targets.iter().enumerate() {
             let method = &target.method;
+            if let crate::game::gameplay::TargetEffect::Patch(change) = &target.effect {
+                // SAFETY: complete pattern and method bounds checked; still unpublished and exclusively owned.
+                let patch = unsafe { hooks::patch::CodePatch::prepare(change.address, &change.expected, &change.replacement) }
+                    .map_err(|error| server::failure(ResponseCode::Refused, format!("{}: {error}", method.name)))?;
+                prepared.push(Entry::Patch(patch));
+                continue;
+            }
             // SAFETY: resolved method and effect implementing its validated ABI; retained before publication.
             let retained = unsafe { RetainedHook::prepare(method.address, effect.entry(index), &method.bytes) }
                 .map_err(|e| server::failure(ResponseCode::Refused, format!("{}: {e}", method.name)))?;
             // SAFETY: not yet published, process-owned trampoline with this target's exact ABI.
             unsafe { effect.set_original(index, retained.trampoline()) };
-            prepared.push(retained);
+            prepared.push(Entry::Detour(retained));
         }
         Ok(Self { hooks: prepared, effect })
     }
@@ -66,10 +75,10 @@ impl Hooks {
             .collect();
         if !changes.is_empty() {
             // SAFETY: serialized owner; generated code never enters the helper and is retained.
-            unsafe { hooks::commit(&changes) }.map_err(|error| error.to_string())?;
+            unsafe { entry::commit(&changes) }?;
         }
         for slot in &mut self.slots {
-            if slot.as_ref().is_some_and(|group| !group.effect.keep_when_off()) {
+            if self.closing || slot.as_ref().is_some_and(|group| !group.effect.keep_when_off()) {
                 *slot = None;
             }
         }
@@ -137,7 +146,7 @@ fn change_group(group: &Group, hook: GameplayHook, on: bool, value: u64) -> Resu
     group.effect.restore().map_err(|e| server::failure(ResponseCode::Failed, e))?;
     let changes: Vec<_> = group.hooks.iter().map(|hook| (hook, target_on)).collect();
     // SAFETY: serialized owner retained even on partial failure; entries form one transaction.
-    unsafe { hooks::commit(&changes) }.map_err(|e| server::failure(ResponseCode::Failed, e.to_string()))?;
+    unsafe { entry::commit(&changes) }.map_err(|e| server::failure(ResponseCode::Failed, e))?;
     // SAFETY: called only by the admitted main-thread change/observation path (or authored tests), with all storage
     // retained and the entry transaction complete. Control-thread clear never publishes settings.
     unsafe { group.effect.publish(hook, on, value, target_on) }
@@ -151,7 +160,7 @@ fn observation(group: Option<&Group>, hook: GameplayHook) -> HookObservation {
             value: hook.default_value(),
         };
     };
-    group.effect.observation(hook, group_patch(group.hooks.iter().map(RetainedHook::state)))
+    group.effect.observation(hook, group_patch(group.hooks.iter().map(Entry::state)))
 }
 
 #[cfg(feature = "fixture")]
@@ -363,7 +372,7 @@ mod tests {
                 let hook = RetainedHook::prepare(NonNull::new(entry).unwrap(), gate.entry(), &entry.cast::<[u8; 16]>().read_unaligned()).unwrap();
                 gate.set_original(hook.trampoline());
                 Group {
-                    hooks: vec![hook],
+                    hooks: vec![Entry::Detour(hook)],
                     effect: Effect::from_gates(definition(GameplayHook::AttackRate).behavior, vec![Gate::Scalar(gate)]),
                 }
             }
@@ -492,6 +501,106 @@ mod tests {
         }
         assert_eq!(group_patch([HookState::Enabled; 4].into_iter()), PatchState::Patched);
         assert_eq!(group_patch([HookState::Disabled; 4].into_iter()), PatchState::Original);
+    }
+
+    #[test]
+    fn interior_ranges_share_on_off_readback_manager_loss_and_clear_with_detours() {
+        use crate::game::gameplay::{CodeChange, ResolvedMethod, TargetEffect};
+        use crate::hooks::leaf::LeafEffect;
+        #[unsafe(naked)]
+        unsafe extern "C-unwind" fn first() -> u32 {
+            core::arch::naked_asm!("mov eax,42", "ret", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop");
+        }
+        #[unsafe(naked)]
+        unsafe extern "C-unwind" fn second() -> u32 {
+            core::arch::naked_asm!("mov eax,43", "ret", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop");
+        }
+        #[unsafe(naked)]
+        unsafe extern "C-unwind" fn leaf() -> bool {
+            core::arch::naked_asm!(
+                "xor eax,eax",
+                "nop",
+                "nop",
+                "nop",
+                "nop",
+                "ret",
+                "nop",
+                "nop",
+                "nop",
+                "nop",
+                "nop",
+                "nop",
+                "nop",
+                "nop",
+                "nop"
+            );
+        }
+        // SAFETY: authored process-lifetime functions, changing their one-byte immediate only, no interior return edges.
+        let patches = unsafe {
+            let targets: Vec<_> = [(first as *mut u8, 42u8), (second as *mut u8, 43)]
+                .into_iter()
+                .map(|(address, value)| GameplayHookTarget {
+                    method: ResolvedMethod {
+                        name: "fixture patch".into(),
+                        address: NonNull::new(address).unwrap(),
+                        bytes: address.cast::<[u8; 16]>().read_unaligned(),
+                    },
+                    effect: TargetEffect::Patch(CodeChange {
+                        address: NonNull::new(address.add(1)).unwrap(),
+                        expected: vec![value],
+                        replacement: vec![99],
+                    }),
+                })
+                .collect();
+            Group::prepare(FeatureBinding::fixture(GameplayHook::ForgeLevel), &targets).unwrap()
+        };
+        let mut owner = Hooks {
+            slots: [const { None }; GroupId::COUNT],
+            manager: 1,
+            closing: false,
+        };
+        owner.slots[GroupId::ForgeLevel as usize] = Some(patches);
+        // SAFETY: separate authored Boolean entry, prepared before either family is published.
+        owner.slots[GroupId::MysteriousRift as usize] = Some(unsafe {
+            let address = NonNull::new(leaf as *mut u8).unwrap();
+            let method = ResolvedMethod {
+                name: "fixture leaf alongside patches".into(),
+                address,
+                bytes: address.cast::<[u8; 16]>().as_ptr().read_unaligned(),
+            };
+            Group::prepare(
+                FeatureBinding::fixture(GameplayHook::MysteriousRift),
+                &[method.leaf(LeafEffect::SelectableBoolean, None, None)],
+            )
+            .unwrap()
+        });
+        change_group(owner.slots[GroupId::MysteriousRift as usize].as_ref().unwrap(), GameplayHook::MysteriousRift, true, 1).unwrap();
+        // SAFETY: live authored Boolean ABI; its original false result is overridden until manager loss.
+        unsafe {
+            assert!(std::hint::black_box(leaf)());
+        }
+        let group = owner.slots[GroupId::ForgeLevel as usize].as_ref().unwrap();
+        for on in [true, false, true] {
+            change_group(group, GameplayHook::ForgeLevel, on, 1).unwrap();
+            assert!(observation(Some(group), GameplayHook::ForgeLevel).confirmed(on));
+            // SAFETY: both functions retain their original zero-argument u32 ABI.
+            unsafe {
+                assert_eq!(std::hint::black_box(first)(), if on { 99 } else { 42 });
+                assert_eq!(std::hint::black_box(second)(), if on { 99 } else { 43 });
+            }
+        }
+        owner.observe_manager(2).unwrap();
+        assert!(observation(owner.slots[GroupId::ForgeLevel as usize].as_ref(), GameplayHook::ForgeLevel).confirmed(false));
+        // SAFETY: manager change restored both immediate bytes, with all owners retained for subsequent clear.
+        unsafe {
+            assert_eq!(std::hint::black_box(first)(), 42);
+            assert_eq!(std::hint::black_box(second)(), 43);
+            assert!(!std::hint::black_box(leaf)());
+        }
+        assert!(observation(owner.slots[GroupId::MysteriousRift as usize].as_ref(), GameplayHook::MysteriousRift).confirmed(false));
+        owner.closing = true;
+        owner.clear().unwrap();
+        assert!(owner.slots.iter().all(Option::is_none));
     }
 
     #[test]

@@ -6,6 +6,7 @@ use std::{cell::Cell, ffi::c_char};
 thread_local! {
     static COUNT: Cell<usize> = const { Cell::new(2) };
     static WRONG_RETURN: Cell<bool> = const { Cell::new(false) };
+    static BY_REF: Cell<bool> = const { Cell::new(false) };
 }
 unsafe extern "C-unwind" fn methods(_: Class, iter: *mut Ptr) -> Method {
     // SAFETY: the metadata iterator owns this initialized pointer-sized slot.
@@ -42,11 +43,12 @@ unsafe extern "C-unwind" fn no(_: Method) -> bool {
 unsafe extern "C-unwind" fn flags(_: Method, _: *mut u32) -> u32 {
     0
 }
-unsafe extern "C-unwind" fn byref(_: Type) -> bool {
-    false
+unsafe extern "C-unwind" fn byref(ty: Type) -> bool {
+    ty as usize == 1 && BY_REF.get()
 }
 unsafe extern "C-unwind" fn type_name(ty: Type) -> *mut c_char {
     match ty as usize {
+        1 if BY_REF.get() => c"Ability&",
         1 => c"Ability",
         2 => c"System.Single",
         3 => c"System.Boolean",
@@ -88,6 +90,7 @@ fn exact_overload_is_selected_and_ambiguity_or_wrong_return_is_refused() {
     };
     COUNT.set(2);
     WRONG_RETURN.set(false);
+    BY_REF.set(false);
     assert_eq!(resolve().unwrap() as usize, 11);
     COUNT.set(1); // only the AbilityID overload remains
     assert!(resolve().is_err());
@@ -96,4 +99,16 @@ fn exact_overload_is_selected_and_ambiguity_or_wrong_return_is_refused() {
     COUNT.set(2);
     WRONG_RETURN.set(true);
     assert!(resolve().is_err());
+    WRONG_RETURN.set(false);
+    BY_REF.set(true);
+    assert!(resolve().is_err(), "a by-reference overload cannot satisfy a value-parameter contract");
+    let refs = MethodSpec {
+        params: &["Ability&", "System.Single", "System.Boolean", "AbilityMutator", "System.Boolean"],
+        ..spec
+    };
+    // SAFETY: same authored metadata, with an explicit by-reference contract as required by Forge capability.
+    assert_eq!(unsafe { access.hook_method_contract(token(1), &refs) }.unwrap() as usize, 11);
+    BY_REF.set(false);
+    // SAFETY: same authored class/method tokens, deliberately mismatched value versus by-reference contract.
+    assert!(unsafe { access.hook_method_contract(token(1), &refs) }.is_err());
 }

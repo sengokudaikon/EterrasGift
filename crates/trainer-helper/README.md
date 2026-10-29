@@ -89,6 +89,13 @@ retained gateway forwards all seven ABI positions, including three stack argumen
 frame. The two five-parameter overloads are distinguished by their complete parameter signatures. No helper frame
 or pinned player identity is retained across the original call; late returns after close keep the original result.
 
+The 17 patch-only switches share owned interior ranges in `hooks/patch`, with feature-local recipes under
+`game/features/patches`. They prepare complete groups before writing, check unique bounded patterns, reject range
+overlap and verify original/replacement bytes. Transactions allocate before suspending peers and refuse a peer
+inside a changing range. Off, manager loss and unload restore these ranges through the same lifecycle as entry
+detours; failed cleanup retains owners and the helper. The thread-snapshot execution contract and all feature
+distinctions are documented in [trainer features](../../research/trainer-features.md#interior-code-patches).
+
 The local pipe is `eterras-gift-<PID>`, one bounded request per connection: a 12-byte header and a sequential operation body. Bootstrap binds the controller PID/birth before any request; the kernel-reported
 client PID and retained process handle/start time verify each owner request. Fixture servers
 without a bootstrap binding let the first valid Discover claim ownership. Normal per-request EOF preserves ownership. Other living processes receive Refused without

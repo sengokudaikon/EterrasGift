@@ -72,6 +72,7 @@ impl FeatureBinding {
                         ScalarGate::prepare(binding.receiver, binding.offset, binding.online, binding.baseline, *stack_argument, shared).map(Gate::Scalar)
                     }
                     (Behavior::Postfix, TargetEffect::Postfix(effect)) => PostfixGate::prepare(effect, gates.first().map(Gate::postfix)).map(Gate::Postfix),
+                    (Behavior::Patch, TargetEffect::Patch(_)) => Ok(Gate::Patch(AtomicBool::new(false))),
                     _ => return Err(server::failure(ResponseCode::Refused, "Hook target and behavior disagree")),
                 }
             };
@@ -89,6 +90,7 @@ pub(super) enum Gate {
     Leaf(LeafGate),
     Scalar(ScalarGate),
     Postfix(PostfixGate),
+    Patch(AtomicBool),
 }
 impl Gate {
     fn leaf(&self) -> &LeafGate {
@@ -114,6 +116,7 @@ impl Gate {
             Self::Leaf(gate) => gate.enabled(),
             Self::Scalar(gate) => gate.enabled(),
             Self::Postfix(gate) => gate.enabled(),
+            Self::Patch(enabled) => enabled.load(SeqCst),
         }
     }
     fn value(&self) -> u64 {
@@ -121,6 +124,7 @@ impl Gate {
             Self::Leaf(gate) => gate.value(),
             Self::Scalar(gate) => gate.value(),
             Self::Postfix(gate) => gate.value(),
+            Self::Patch(_) => 1,
         }
     }
 }
@@ -141,6 +145,7 @@ impl Effect {
             Gate::Leaf(gate) => gate.entry(),
             Gate::Scalar(gate) => gate.entry(),
             Gate::Postfix(gate) => gate.entry(),
+            Gate::Patch(_) => unreachable!("interior patch has no gateway"),
         }
     }
     /// # Safety
@@ -152,6 +157,7 @@ impl Effect {
                 Gate::Leaf(gate) => gate.set_original(original),
                 Gate::Scalar(gate) => gate.set_original(original),
                 Gate::Postfix(gate) => gate.set_original(original),
+                Gate::Patch(_) => unreachable!("interior patch has no original trampoline"),
             }
         }
     }
@@ -161,6 +167,7 @@ impl Effect {
                 Gate::Leaf(gate) => gate.set_enabled(false),
                 Gate::Scalar(gate) => gate.close(),
                 Gate::Postfix(gate) => gate.set_enabled(false),
+                Gate::Patch(enabled) => enabled.store(false, SeqCst),
             }
         }
     }
@@ -201,6 +208,13 @@ impl Effect {
                     let gate = gate.postfix();
                     gate.set_value(value);
                     gate.set_enabled(target_on);
+                }
+            }
+            Behavior::Patch => {
+                for gate in &self.gates {
+                    if let Gate::Patch(enabled) = gate {
+                        enabled.store(target_on, SeqCst);
+                    }
                 }
             }
             Behavior::Leaf | Behavior::Damage => {

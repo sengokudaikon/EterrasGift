@@ -174,13 +174,17 @@ wrapper verifies hook recovery but cannot guarantee atomicity under arbitrary OS
 prove every caller was suspended. These limits do not require another backend or dependency fork
 under the chosen scope. Handler/chained unwind records remain refused pending an actual target.
 
-The former scheduler/threads.rs is retained as hooks/threads.rs for byte patches: its census,
-suspension failure handling and refusal when a thread is inside the target bytes are unchanged.
-Detour has no public suspension scope for arbitrary stores.
+The 2026-10-29 interior-patch family uses a separate byte transaction behind the same lifecycle. It prepares every
+range before writing, compares actual bytes, retains page/cache uncertainty and recovers pre-transaction bytes on
+failure. Its Toolhelp snapshot opens handles and allocates aligned contexts before suspension; a peer inside a
+changing range refuses the transaction. It cannot establish a complete census in the presence of thread creation,
+and its unsafe boundary excludes execution by snapshot-missed/new threads and return addresses inside a changed
+range. See [interior code patches](trainer-features.md#interior-code-patches) for ownership, cleanup and static verification scope.
 
-The suspended section avoids Rust allocations but still calls Win32 context, protection,
-cache and resume wrappers. Only NtQuerySystemInformation's census stub is checked. Other
-wrappers can be instrumented by overlays/security software and wait on a suspended thread's
+Detour has no public suspension scope for arbitrary stores. The byte backend lives in hooks/patch.rs;
+the former scheduler/threads.rs is no longer retained. Its suspended section avoids Rust allocations
+but still calls Win32 context, protection, cache and resume wrappers. These wrappers can be
+instrumented by overlays/security software and wait on a suspended thread's
 lock; deadlock freedom is not established. The unsafe hook/start contract excludes such
 instrumentation. Checking a few additional NT stubs would not validate the entire wrapper path.
 
