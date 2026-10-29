@@ -1319,7 +1319,7 @@ pub static DESCRIPTORS: &[FeatureDescriptor] = &[
         area: TrainerArea::World,
         section: "Monsters",
         title: "Champions",
-        description: "New zones spawn up to this many champions. The game still places at most three in a zone.",
+        description: "New zones spawn up to this many champions, fewer when the zone already has some. The game never places more than three.",
         kind: FeatureKind::SwitchWithValues,
         values: &[FeatureValue {
             label: "Champions",
@@ -1328,7 +1328,7 @@ pub static DESCRIPTORS: &[FeatureDescriptor] = &[
             choices: &[],
             hint: None,
             minimum: 0.0,
-            maximum: 20.0,
+            maximum: 3.0,
             step: 1.0,
             unit: None,
         }],
