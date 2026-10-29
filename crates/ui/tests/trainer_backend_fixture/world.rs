@@ -59,9 +59,28 @@ fn catalog(base_implicits: bool, class_affixes: bool) -> GameCatalog {
                 item_types: Some(item_types.iter().map(|t| i32::from(*t)).collect()),
                 tier_count: 8,
                 standard_effect: 1.0,
-                numeric: Availability::Unavailable {
-                    reason: "The fixture world has no numeric catalog.".into(),
-                },
+                // Flat ranges that grow with the tier, so the tier menu and the picker show values.
+                numeric: Availability::Available(
+                    (1..=8)
+                        .map(|tier: i32| eg_trainer::definitions::catalog::AffixTier {
+                            properties: vec![eg_trainer::definitions::catalog::NumericProperty {
+                                property: 0,
+                                tags: 0,
+                                special_tag: 0,
+                                extra_tag: 0,
+                                modifier_type: 0,
+                                set_property: false,
+                                minimum: (tier * 10 - 5) as f32,
+                                maximum: (tier * 10 + 4) as f32,
+                                roll_id: -1,
+                                rounding: 1,
+                                display_added_as_percentage: false,
+                                display_added_as_tenth: false,
+                                less_is_better: false,
+                            }],
+                        })
+                        .collect(),
+                ),
             },
         )
     };
@@ -1168,7 +1187,14 @@ pub(in super::super) fn item_captures(session: &Session) {
     settle();
     session.key(Key::DownArrow);
     session.capture(&forge.ui, "item-replace");
-    assert_eq!(forge.ui.global::<ForgeState>().get_picker_status(), "Compatible with this slot");
+    // The verdict, then the picked affix's tier ladder.
+    assert!(
+        forge
+            .ui
+            .global::<ForgeState>()
+            .get_picker_status()
+            .starts_with("Compatible with this slot\nT1\u{a0}+5–\u{2060}14 · T2")
+    );
     session.key(Key::Return);
     assert_eq!(
         forge.ui.global::<ForgeState>().get_drafts().row_data(0).unwrap().summary,
@@ -1193,6 +1219,26 @@ pub(in super::super) fn item_captures(session: &Session) {
     session.click(145.0, row_y(4) - 2.0);
     assert_eq!(forge.ui.global::<ForgeState>().get_picker_title(), "Add affix");
     session.capture(&forge.ui, "item-add-affix");
+    // The kind and class filters narrow the list; each entry shows its T1 range (`item-add-affix-filtered`).
+    let state = forge.ui.global::<ForgeState>();
+    let all = state.get_picker_rows().row_count();
+    state.invoke_picker_category_changed(1);
+    settle();
+    assert!(state.get_picker_rows().row_count() <= all);
+    assert!(state.get_picker_rows().row_data(0).unwrap().detail.contains("T1: +5–14"));
+    state.invoke_picker_select(0);
+    settle();
+    session.capture(&forge.ui, "item-add-affix-filtered");
+    // The kind choice opens its list over the picker (`item-add-affix-kind-list`).
+    session.click(200.0, 387.0);
+    session.capture(&forge.ui, "item-add-affix-kind-list");
+    session.key(Key::Escape);
+    state.invoke_picker_category_changed(0);
+    state.invoke_picker_class_changed(2);
+    settle();
+    assert_eq!(state.get_picker_rows().row_count(), 0, "no fixture affix is Primalist-only");
+    state.invoke_picker_class_changed(0);
+    settle();
     session.key(Key::Escape);
     drop(forge);
 

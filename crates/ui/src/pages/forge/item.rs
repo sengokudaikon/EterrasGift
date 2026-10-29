@@ -110,6 +110,8 @@ pub struct AffixDefinition {
     /// In the current game data with a type the editor can write (prefix or suffix); a placeholder for an ID the game
     /// data lacks is not.
     pub writable: bool,
+    /// The game's class specificity: 0 for any class, bit 0 classless, bits 1–5 the classes (the game's order).
+    pub class_specificity: i32,
 }
 
 impl AffixDefinition {
@@ -138,6 +140,7 @@ impl AffixDefinition {
             item_types: Vec::new(),
             max_tier: 8,
             writable: false,
+            class_specificity: 0,
         }
     }
 }

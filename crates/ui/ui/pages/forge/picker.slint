@@ -8,6 +8,7 @@ import { KeyboardFocus } from "../../globals.slint";
 import { Button, ButtonKind } from "../../widgets/button.slint";
 import { FocusRing } from "../../widgets/focus.slint";
 import { FlyoutSurface } from "../../widgets/menu.slint";
+import { ChoiceBox } from "../../widgets/choice-box.slint";
 import { ForgeState } from "state.slint";
 import { CheckBox, RadioButton } from "cells.slint";
 
@@ -27,7 +28,8 @@ export global PickerMetrics {
         return Tokens.flyout-padding.top + Tokens.flyout-padding.bottom
             + Tokens.font-size-section * 4 / 3 + Tokens.space-2 + self.caption-line
             + Tokens.control-min-height
-            + Tokens.control-min-height + Tokens.space-4 + Tokens.control-min-height + Tokens.space-2 + self.caption-line * 2
+            + Tokens.control-min-height + Tokens.space-4 + Tokens.control-min-height + Tokens.space-4 + Tokens.control-min-height
+            + Tokens.space-2 + self.caption-line * 2
             + self.list-height(rows)
             + self.caption-line
             + Tokens.control-min-height
@@ -293,6 +295,29 @@ export component AffixPickerPanel inherits FlyoutSurface {
                         }
                         arrow(delta) => {
                             root.move-filter(delta);
+                        }
+                    }
+                }
+
+                // The game's affix types and the classes, as two choices side by side.
+                HorizontalLayout {
+                    spacing: Tokens.space-8;
+
+                    ChoiceBox {
+                        label: "Affix kind";
+                        choices: ForgeState.picker-categories;
+                        index: ForgeState.picker-category;
+                        chosen(index) => {
+                            ForgeState.picker-category-changed(index);
+                        }
+                    }
+
+                    ChoiceBox {
+                        label: "Class";
+                        choices: ForgeState.picker-classes;
+                        index: ForgeState.picker-class;
+                        chosen(index) => {
+                            ForgeState.picker-class-changed(index);
                         }
                     }
                 }

@@ -1385,6 +1385,7 @@ mod tests {
             item_types: vec![1],
             max_tier: 8,
             writable: true,
+            class_specificity: 0,
         };
         let state = AffixState {
             slot: 0,

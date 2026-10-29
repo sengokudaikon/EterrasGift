@@ -758,7 +758,38 @@ fn project_catalog(data: &GameCatalog) -> Catalog {
                     .unwrap_or_default(),
                 max_tier: definition.tier_count.min(255) as u8,
                 writable: kind.is_some(),
+                class_specificity: definition.class_requirement,
             });
+            // Each tier's range from the game data, as the C# app formatted it (TierRanges): a tier with a property it
+            // cannot format shows none.
+            if let Availability::Available(tiers) = &definition.numeric {
+                for (index, tier) in tiers.iter().enumerate() {
+                    let properties: Option<Vec<item::TierProperty>> = tier
+                        .properties
+                        .iter()
+                        .map(|property| match property.modifier_type {
+                            _ if property.display_added_as_tenth => None,
+                            1 => Some(item::TierProperty::Increased {
+                                min: f64::from(property.minimum),
+                                max: f64::from(property.maximum),
+                            }),
+                            0 if property.display_added_as_percentage => Some(item::TierProperty::AddedPercent {
+                                min: f64::from(property.minimum),
+                                max: f64::from(property.maximum),
+                            }),
+                            0 => Some(item::TierProperty::Flat {
+                                min: f64::from(property.minimum),
+                                max: f64::from(property.maximum),
+                                whole: property.rounding == 1,
+                            }),
+                            _ => None,
+                        })
+                        .collect();
+                    if let Some(range) = properties.as_deref().and_then(item::format_tier_range) {
+                        catalog.tier_ranges.insert((definition.id, (index + 1) as u8), range);
+                    }
+                }
+            }
         }
     }
     catalog.rarity_names = vec![String::new(); 256];

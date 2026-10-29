@@ -240,6 +240,11 @@ export global ForgeState {
     in property <string> picker-search;
     in property <int> picker-filter;
     in property <bool> picker-allow;
+    // The kind and class filters: their choices (set once) and the chosen ones.
+    in property <[string]> picker-categories;
+    in property <[string]> picker-classes;
+    in property <int> picker-category;
+    in property <int> picker-class;
     in property <bool> picker-allow-enabled;
     in property <[PickerRowView]> picker-rows;
     in property <int> picker-selected: -1;
@@ -290,6 +295,8 @@ export global ForgeState {
     callback picker-search-edited(string);
     callback picker-filter-changed(int);
     callback picker-allow-changed(bool);
+    callback picker-category-changed(int);
+    callback picker-class-changed(int);
     callback picker-select(int);
     callback use-picker();
     callback cancel-picker();

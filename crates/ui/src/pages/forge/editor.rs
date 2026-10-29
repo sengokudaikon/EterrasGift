@@ -81,12 +81,41 @@ pub enum KindFilter {
     Suffixes,
 }
 
+/// The affix picker's kind choices: any, or one of the game's affix types.
+pub const PICKER_CATEGORIES: [(&str, Option<Category>); 9] = [
+    ("Any kind", None),
+    ("Standard", Some(Category::Standard)),
+    ("Experimental", Some(Category::Experimental)),
+    ("Personal", Some(Category::Personal)),
+    ("Set · Reforged", Some(Category::Set)),
+    ("Idol enchantment", Some(Category::IdolEnchantment)),
+    ("Weaver idol", Some(Category::IdolWeaver)),
+    ("Corrupted", Some(Category::Corrupted)),
+    ("Unique modifier", Some(Category::FakeUniqueMod)),
+];
+
+/// The affix picker's class choices: any, affixes no class owns, or one class's own (the game's class order).
+pub const PICKER_CLASSES: [&str; 7] = ["Any class", "No class requirement", "Primalist", "Mage", "Sentinel", "Acolyte", "Rogue"];
+
+/// Whether an affix of class specificity `specificity` (bit 0 classless, bits 1–5 the classes) passes class choice `choice`.
+fn class_fits(specificity: i32, choice: usize) -> bool {
+    match choice {
+        0 => true,
+        1 => specificity & 0b111110 == 0,
+        class => specificity & (1 << (class - 1)) != 0,
+    }
+}
+
 /// The affix picker: replacing a row's affix, or adding one.
 #[derive(Clone, Debug, Default)]
 pub struct Picker {
     pub adding: bool,
     pub search: String,
     pub filter: KindFilter,
+    /// Index into [`PICKER_CATEGORIES`].
+    pub category: usize,
+    /// Index into [`PICKER_CLASSES`].
+    pub class: usize,
     pub allow_incompatible: bool,
     pub selected: Option<u16>,
     /// The catalog's definitions the picker may list, in name order, as indices: those that fit, or all of them with
@@ -2474,6 +2503,55 @@ impl ForgeEditor {
         self.filter_picker(false);
     }
 
+    pub fn picker_category(&mut self, choice: usize) {
+        if let Some(picker) = self.picker.as_mut() {
+            picker.category = choice.min(PICKER_CATEGORIES.len() - 1);
+        }
+        self.filter_picker(false);
+    }
+
+    pub fn picker_class(&mut self, choice: usize) {
+        if let Some(picker) = self.picker.as_mut() {
+            picker.class = choice.min(PICKER_CLASSES.len() - 1);
+        }
+        self.filter_picker(false);
+    }
+
+    /// The tier a picked affix takes, whose values the list shows: T1 for an addition, the row's for a replacement.
+    fn picker_tier(&self) -> u8 {
+        match self.picker.as_ref() {
+            Some(picker) if !picker.adding => self.selected_affix.and_then(|index| self.affixes.get(index)).map_or(1, AffixRow::tier),
+            _ => 1,
+        }
+    }
+
+    /// A picker entry's caption: its kind and tiers, then its value range at the tier it would take, e.g.
+    /// "Suffix · T1–T8 · T1: +5–10".
+    pub fn picker_entry_detail(&self, definition: &AffixDefinition) -> String {
+        let tier = self.picker_tier().min(definition.max_tier.max(1));
+        let range = self.catalog().tier_range(definition.id, tier);
+        if range.is_empty() {
+            definition.picker_description()
+        } else {
+            format!("{} · T{tier}: {range}", definition.picker_description())
+        }
+    }
+
+    /// Every tier's value range of the picked affix, "T1 +5–10 · T2 +11–15 · …"; empty where the game data has none.
+    fn picker_ladder(&self) -> String {
+        let Some(definition) = self.picked() else {
+            return String::new();
+        };
+        (1..=definition.max_tier)
+            .filter_map(|tier| {
+                let range = self.catalog().tier_range(definition.id, tier);
+                // A tier and its range wrap together: a no-break space after the tier, a word joiner after the dash.
+                (!range.is_empty()).then(|| format!("T{tier}\u{a0}{}", range.replace('–', "–\u{2060}")))
+            })
+            .collect::<Vec<_>>()
+            .join(" · ")
+    }
+
     pub fn picker_allow(&mut self, allow: bool) {
         if let Some(picker) = self.picker.as_mut() {
             picker.allow_incompatible = allow;
@@ -2541,6 +2619,8 @@ impl ForgeEditor {
                 KindFilter::Prefixes => definitions[index].kind == AffixKind::Prefix,
                 KindFilter::Suffixes => definitions[index].kind == AffixKind::Suffix,
             })
+            .filter(|&index| PICKER_CATEGORIES[picker.category].1.is_none_or(|category| definitions[index].category == category))
+            .filter(|&index| class_fits(definitions[index].class_specificity, picker.class))
             .collect();
         let selected = picker.selected.filter(|id| list.iter().any(|&index| definitions[index].id == *id));
         let picker = self.picker.as_mut().expect("the picker is open");
@@ -2648,7 +2728,18 @@ impl ForgeEditor {
     }
 
     /// The picker's status caption for the chosen entry.
+    /// The picked affix's verdict, then its tier ladder.
     pub fn picker_status(&self) -> String {
+        let verdict = self.picker_verdict();
+        let ladder = self.picker_ladder();
+        if ladder.is_empty() || verdict.is_empty() {
+            verdict
+        } else {
+            format!("{verdict}\n{ladder}")
+        }
+    }
+
+    fn picker_verdict(&self) -> String {
         let (Some(picker), Some(definition)) = (self.picker.as_ref(), self.picked()) else {
             return String::new();
         };

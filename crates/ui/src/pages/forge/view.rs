@@ -214,6 +214,11 @@ fn bind(state: &ForgeState, view: &Rc<View>) {
         _ => KindFilter::All,
     })));
     state.on_picker_allow_changed(edit!(view, |editor, allow| editor.picker_allow(allow)));
+    state.on_picker_category_changed(edit!(view, |editor, choice| editor.picker_category(choice.max(0) as usize)));
+    state.on_picker_class_changed(edit!(view, |editor, choice| editor.picker_class(choice.max(0) as usize)));
+    let names = |names: &mut dyn Iterator<Item = &str>| ModelRc::from(Rc::new(VecModel::from(names.map(SharedString::from).collect::<Vec<_>>())));
+    state.set_picker_categories(names(&mut super::editor::PICKER_CATEGORIES.iter().map(|(name, _)| *name)));
+    state.set_picker_classes(names(&mut super::editor::PICKER_CLASSES.iter().copied()));
     state.on_picker_select(edit!(view, |editor, index| editor.picker_select(index.max(0) as usize)));
     state.on_use_picker(edit!(view, |editor| editor.use_picker()));
     state.on_cancel_picker(edit!(view, |editor| editor.cancel_picker()));
@@ -772,6 +777,8 @@ impl View {
             KindFilter::Suffixes => 2,
         });
         state.set_picker_allow(picker.allow_incompatible);
+        state.set_picker_category(picker.category as i32);
+        state.set_picker_class(picker.class as i32);
         state.set_picker_allow_enabled(editor.can_mutate());
         // Choosing an entry shows again with the same list; its rows are rebuilt only when the list changes.
         let generation = editor.menu_generation();
@@ -789,7 +796,7 @@ impl View {
                     .picker_list()
                     .map(|definition| PickerRowView {
                         name: definition.name.clone().into(),
-                        detail: definition.picker_description().into(),
+                        detail: editor.picker_entry_detail(definition).into(),
                         reforged: definition.is_reforged(),
                     })
                     .collect(),
