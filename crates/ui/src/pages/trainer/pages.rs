@@ -788,12 +788,45 @@ mod tests {
         assert!(build(Area::Loot, &features, false, &session).is_none());
         let loot = build(Area::Loot, &features, true, &session).unwrap();
         let Content::Rows(rows) = &loot.sections[0].content else { panic!("rows") };
-        assert!(matches!(rows[0], Row::Planned(_)));
+        assert!(matches!(rows.iter().find(|row| !matches!(row, Row::Heading(_))), Some(Row::Planned(_))));
         assert_eq!(
             planned_details(catalog::feature("drop-rates").unwrap()),
             "Item drop chance: 0.1 · Item drop multiplier: 1 · Gold drop chance: 0.1 · Gold drop multiplier: 2"
         );
         assert_eq!(planned_details(catalog::feature("currency").unwrap()), "Gold · Soul embers · Ancient bones");
+    }
+
+    #[test]
+    fn trainer_sections_share_one_list_and_world_puts_monsters_first_without_losing_features() {
+        for area in [Area::Character, Area::Stash, Area::Combat, Area::Loot, Area::Monolith, Area::Factions, Area::World] {
+            let page = build(area, catalog::FEATURES, false, &Unconnected).unwrap();
+            assert!(!page.has_section_strip(), "{area:?}");
+            assert_eq!(page.sections.len(), 1);
+            let Content::Rows(rows) = &page.sections[0].content else { panic!("rows") };
+            let headings: Vec<_> = rows
+                .iter()
+                .filter_map(|row| if let Row::Heading(title) = row { Some(title.as_str()) } else { None })
+                .collect();
+            assert_eq!(headings, catalog::page(area).sections);
+            let ids: Vec<_> = rows
+                .iter()
+                .filter_map(|row| match row {
+                    Row::Heading(_) => None,
+                    Row::Hook(row) => Some(row.feature.id()),
+                    Row::Editor(row) => Some(row.feature.id()),
+                    Row::Planned(feature) => Some(feature.id()),
+                })
+                .collect();
+            let expected: BTreeSet<_> = catalog::FEATURES.iter().filter(|feature| feature.area == area).map(|feature| feature.id()).collect();
+            assert_eq!(ids.len(), expected.len(), "each feature appears once");
+            assert_eq!(ids.into_iter().collect::<BTreeSet<_>>(), expected);
+            if area == Area::World {
+                assert_eq!(headings, ["Monsters", "Encounters", "Dungeons and map"]);
+                let champions = rows.iter().position(|row| matches!(row, Row::Hook(row) if row.feature.id() == "champions")).unwrap();
+                let encounters = rows.iter().position(|row| matches!(row, Row::Heading(title) if title == "Encounters")).unwrap();
+                assert!(champions > 0 && champions < encounters);
+            }
+        }
     }
 
     fn mira() -> Profile {

@@ -14,14 +14,14 @@ pub static PAGES: &[TrainerPage] = &[
         title: "Stash",
         icon: "IconStash",
         sections: &["Currency", "Keys", "Woven echoes", "Duplicate"],
-        stacked: false,
+        stacked: true,
     },
     TrainerPage {
         area: TrainerArea::Combat,
         title: "Combat",
         icon: "IconCombat",
         sections: &["Survival", "Offense", "Resources", "Movement"],
-        stacked: false,
+        stacked: true,
     },
     TrainerPage {
         area: TrainerArea::Forge,
@@ -35,28 +35,28 @@ pub static PAGES: &[TrainerPage] = &[
         title: "Loot",
         icon: "IconLoot",
         sections: &["Drops", "Quality", "Pickup"],
-        stacked: false,
+        stacked: true,
     },
     TrainerPage {
         area: TrainerArea::Monolith,
         title: "Monolith",
         icon: "IconMonolith",
         sections: &["Run", "Echo web"],
-        stacked: false,
+        stacked: true,
     },
     TrainerPage {
         area: TrainerArea::Factions,
         title: "Factions",
         icon: "IconFactions",
         sections: &["Standing", "Prophecies", "Vendors"],
-        stacked: false,
+        stacked: true,
     },
     TrainerPage {
         area: TrainerArea::World,
         title: "World",
         icon: "IconWorld",
-        sections: &["Encounters", "Monsters", "Dungeons", "Map"],
-        stacked: false,
+        sections: &["Monsters", "Encounters", "Dungeons and map"],
+        stacked: true,
     },
 ];
 pub static DESCRIPTORS: &[FeatureDescriptor] = &[
@@ -1317,7 +1317,7 @@ pub static DESCRIPTORS: &[FeatureDescriptor] = &[
     FeatureDescriptor {
         key: FeatureKey::Hook(HookId("champions")),
         area: TrainerArea::World,
-        section: "Encounters",
+        section: "Monsters",
         title: "Champions",
         description: "New zones spawn this many champions.",
         kind: FeatureKind::SwitchWithValues,
@@ -1338,7 +1338,7 @@ pub static DESCRIPTORS: &[FeatureDescriptor] = &[
     FeatureDescriptor {
         key: FeatureKey::Hook(HookId("eternity-cache-anywhere")),
         area: TrainerArea::World,
-        section: "Dungeons",
+        section: "Dungeons and map",
         title: "Unlimited Eternity Cache",
         description: "Use the Temporal Sanctum's Eternity Cache anywhere and as often as you like, with no level cap on its uniques.",
         kind: FeatureKind::Switch,
@@ -1349,7 +1349,7 @@ pub static DESCRIPTORS: &[FeatureDescriptor] = &[
     FeatureDescriptor {
         key: FeatureKey::Hook(HookId("reveal-map")),
         area: TrainerArea::World,
-        section: "Map",
+        section: "Dungeons and map",
         title: "Reveal the zone map",
         description: "The whole map of a zone shows from the start.",
         kind: FeatureKind::Switch,
@@ -1360,7 +1360,7 @@ pub static DESCRIPTORS: &[FeatureDescriptor] = &[
     FeatureDescriptor {
         key: FeatureKey::Hook(HookId("waypoints")),
         area: TrainerArea::World,
-        section: "Map",
+        section: "Dungeons and map",
         title: "Travel anywhere",
         description: "Travel to any place on the map, not only waypoints you have unlocked.",
         kind: FeatureKind::Switch,
@@ -1371,7 +1371,7 @@ pub static DESCRIPTORS: &[FeatureDescriptor] = &[
     FeatureDescriptor {
         key: FeatureKey::Hook(HookId("zoom")),
         area: TrainerArea::World,
-        section: "Map",
+        section: "Dungeons and map",
         title: "Camera distance",
         description: "Sets how far the camera is from your character.",
         kind: FeatureKind::SwitchWithValues,

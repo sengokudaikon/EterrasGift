@@ -1422,14 +1422,14 @@ pub(super) fn capture_profiles(session: &Session) {
     command(&handle, Command::StartMonitoring, || true);
     ui.global::<Nav>().invoke_navigate("combat".into());
     settle();
-    state.set_section(1);
+    state.set_section(0);
     // No game: the last played profile shows, and its hooks take changes.
     wait(|| state.get_access() == eg_ui::TrainerAccess::Setup && state.get_profile_name() == "Mira");
     assert_eq!(state.get_profiles().row_count(), 2);
-    let damage = || state.get_rows().row_data(0).expect("Damage multiplier");
+    let damage = || state.get_rows().row_data(3).expect("Damage multiplier");
     assert_eq!(damage().title, "Damage multiplier");
     assert!(damage().can_use && !damage().on);
-    state.invoke_hook_toggled(0, true);
+    state.invoke_hook_toggled(3, true);
     assert!(damage().on, "the switch shows flipped at once");
     let mira = |snapshot: &backend::BackendSnapshot| snapshot.profiles.profiles()[0].hooks.wanted().map(|id| id.as_str()).collect::<Vec<_>>();
     wait(|| mira(&handle.snapshot()) == ["damage-dealt"] && saves.lock().unwrap().last().is_some_and(|book| *book == *handle.snapshot().profiles));

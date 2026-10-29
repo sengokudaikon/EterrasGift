@@ -1899,11 +1899,11 @@ fn trainer_captures(session: &Session) {
     // Profiles: a picker, the last played first; each keeps its own hooks.
     let ui = setup("combat", 1, 1100, 700, &[character("Mira", "Primalist"), character("Oren", "Sentinel")]);
     // Damage multiplier's switch, under the profile band.
-    session.click(628.0, 169.0);
+    session.click(628.0, 240.0);
     show(&ui);
-    assert!(on(&ui, 0), "Mira's Damage multiplier switched on in the setup");
+    assert!(on(&ui, 3), "Mira's Damage multiplier switched on in the setup");
     assert_eq!(
-        state(&ui).get_rows().row_data(0).map(|row| row.status.to_string()).as_deref(),
+        state(&ui).get_rows().row_data(3).map(|row| row.status.to_string()).as_deref(),
         Some("Turns on when Mira enters play.")
     );
     session.capture(&ui, "trainer-setup-profiles-1100");
@@ -1913,14 +1913,14 @@ fn trainer_captures(session: &Session) {
     session.resize(1100, 700);
     state(&ui).invoke_select_profile(1);
     show(&ui);
-    assert!(!on(&ui, 0), "Oren's profile is not set up yet");
+    assert!(!on(&ui, 3), "Oren's profile is not set up yet");
     assert_eq!(state(&ui).get_profile_caption(), "Hooks switched on here turn on when Oren enters play.");
     state(&ui).invoke_select_profile(0);
     show(&ui);
-    assert!(on(&ui, 0), "Mira's profile kept its switch");
+    assert!(on(&ui, 3), "Mira's profile kept its switch");
     // The profile band's Delete…, and the Delete it asks with.
-    const DELETE: (f32, f32) = (370.0, 86.0);
-    const CONFIRM: (f32, f32) = (679.0, 122.0);
+    const DELETE: (f32, f32) = (370.0, 36.0);
+    const CONFIRM: (f32, f32) = (679.0, 72.0);
     // Delete asks first, in place of the caption; then Mira's profile is gone and Oren's shows.
     session.click(DELETE.0, DELETE.1);
     show(&ui);
@@ -1929,7 +1929,7 @@ fn trainer_captures(session: &Session) {
     show(&ui);
     assert_eq!(state(&ui).get_profiles().row_count(), 1);
     assert_eq!(state(&ui).get_profile_name(), "Oren");
-    assert!(!on(&ui, 0), "Oren's switch is his own");
+    assert!(!on(&ui, 3), "Oren's switch is his own");
     let ui = setup("forge", 0, 1100, 700, &[character("Mira", "Primalist")]);
     session.capture(&ui, "trainer-setup-forge-1100");
 
@@ -1937,7 +1937,7 @@ fn trainer_captures(session: &Session) {
     let connected = || Some(FakeTrainer::default());
     let ui = open("combat", 1, 1100, 700, connected());
     sizes(&ui, "trainer-combat", &small);
-    session.click(628.0, 169.0);
+    session.click(628.0, 240.0);
     show(&ui);
     session.capture(&ui, "trainer-combat-on-1100");
     // Mira in play without a profile: her switches last this session until they are kept as her profile. Kept, the
@@ -1945,12 +1945,12 @@ fn trainer_captures(session: &Session) {
     let fake = connected().expect("a connected game");
     fake.unsaved.set(true);
     let ui = open("combat", 1, 1100, 700, Some(fake));
-    session.click(628.0, 169.0);
+    session.click(628.0, 240.0);
     show(&ui);
     session.capture(&ui, "trainer-live-unsaved-1100");
     assert!(!state(&ui).get_profile_kept());
     assert_eq!(state(&ui).get_profile_index(), -1);
-    const KEEP: (f32, f32) = (320.0, 86.0);
+    const KEEP: (f32, f32) = (320.0, 36.0);
     session.click(KEEP.0, KEEP.1);
     show(&ui);
     assert!(state(&ui).get_profile_kept(), "Keep as profile keeps Mira's hooks");
@@ -1959,31 +1959,31 @@ fn trainer_captures(session: &Session) {
     session.click(LIVE_DELETE.0, LIVE_DELETE.1);
     show(&ui);
     session.capture(&ui, "trainer-live-delete-1100");
-    const LIVE_CONFIRM: (f32, f32) = (678.0, 122.0);
+    const LIVE_CONFIRM: (f32, f32) = (678.0, 72.0);
     session.click(LIVE_CONFIRM.0, LIVE_CONFIRM.1);
     show(&ui);
     assert!(!state(&ui).get_profile_kept(), "the profile is deleted");
-    assert!(state(&ui).get_rows().row_data(0).is_some_and(|row| row.on), "her switch stays on");
+    assert!(state(&ui).get_rows().row_data(3).is_some_and(|row| row.on), "her switch stays on");
     // Up steps a focused box by its step, within its range; the tip says so.
-    session.click(520.0, 169.0);
+    session.click(520.0, 240.0);
     session.key(Key::UpArrow);
     session.key(Key::UpArrow);
     show(&ui);
-    assert_eq!(state(&ui).get_rows().row_data(0).expect("Damage multiplier").inline_value.text, "3");
+    assert_eq!(state(&ui).get_rows().row_data(3).expect("Damage multiplier").inline_value.text, "3");
     advance(Duration::from_millis(600));
     show(&ui);
     session.capture(&ui, "trainer-value-stepped-1100");
     // The rows split anew (here the window narrows from two columns to one) while a number is half typed: the box is the
     // same box, so it keeps its focus and the "1." typed so far, and the next digit lands after it.
     let ui = open("combat", 1, 1440, 900, connected());
-    session.click(520.0, 169.0);
+    session.click(520.0, 240.0);
     session.control_key("a");
     session.type_text("1.");
     session.resize(1100, 700);
     show(&ui);
     session.type_text("5");
     show(&ui);
-    assert_eq!(state(&ui).get_rows().row_data(0).expect("Damage multiplier").inline_value.text, "1.5");
+    assert_eq!(state(&ui).get_rows().row_data(3).expect("Damage multiplier").inline_value.text, "1.5");
     let ui = open("world", 0, 940, 580, connected());
     session.capture(&ui, "trainer-world-940");
     // The pane open beside the narrowest window: the rows narrow below their width, and long titles wrap with their (?).
@@ -1995,9 +1995,6 @@ fn trainer_captures(session: &Session) {
     sizes(&ui, "forge-rules", &[(940, 580), (1100, 700)]);
     let ui = open("loot", 0, 1100, 700, connected());
     session.capture(&ui, "trainer-values-1100");
-    state(&ui).set_section(1);
-    show(&ui);
-    session.capture(&ui, "trainer-values-quality-1100");
 
     // Keyboard: the strip, the profile's Delete…, then the first row's (?) opens its tip under it; Space on the switch
     // turns it on.
@@ -2024,19 +2021,19 @@ fn trainer_captures(session: &Session) {
         let ui = open("combat", 1, 1100, 700, connected());
         state(&ui).set_rows_ready(ready);
         settle();
-        session.click(628.0, 169.0);
+        session.click(628.0, 240.0);
         settle();
-        assert_eq!(on(&ui, 0), ready, "a click on rows shown: {ready}");
-        // The strip, the profile's Delete…, then the first row's (?), its value and its switch.
+        assert_eq!(on(&ui, 3), ready, "a click on rows shown: {ready}");
+        // The profile's Delete…, then the first row's (?), its value and its switch: Damage taken's.
         let ui = open("combat", 1, 1100, 700, connected());
         state(&ui).set_rows_ready(ready);
         settle();
-        for _ in 0..8 {
+        for _ in 0..7 {
             session.key(Key::Tab);
         }
         session.type_text(" ");
         settle();
-        assert_eq!(on(&ui, 0), ready, "Tab and Space on rows shown: {ready}");
+        assert_eq!(on(&ui, 1), ready, "Tab and Space on rows shown: {ready}");
     }
 
     // A connected game: an editor applied and read back.

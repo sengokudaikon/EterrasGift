@@ -18,6 +18,13 @@ Read/Apply editor is retired in favor of independent persistent `attack-rate` an
 The former feature-plan, first-hook and code-patch notes are preserved in
 `../EterrasGiftRS-archive/2026-10-29-trainer-features/`; this file replaces their active tracking.
 
+## Page layout
+
+Character, Stash, Combat, Loot, Monolith, Factions and World use one combined list with section headings, using the
+existing Character page layout and responsive column splitting. Forge keeps its Item / Crafting rules tabs.
+World's groups are Monsters, Encounters, then Dungeons and map. Champions belongs to Monsters. This is presentation
+only; feature IDs/profile settings and the original gameplay behavior remain independent of where rows appear.
+
 ## Shared foundation
 
 | Status | Support | Current scope / next consumer |
