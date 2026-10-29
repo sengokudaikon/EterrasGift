@@ -4,7 +4,7 @@ import { ScrollView } from "../widgets/scroll-view.slint";
 import { Tokens } from "../tokens.slint";
 import { FieldFrame } from "../widgets/text-field.slint";
 import { KeyboardFocus } from "../globals.slint";
-import { TitleText, SectionText, SecondaryText, BodyText, LabelText, CaptionText, CaptionTone } from "../widgets/text.slint";
+import { TitleText, SectionText, SecondaryText, BodyText, LabelText, CaptionText, CaptionTone, FactsText } from "../widgets/text.slint";
 import { Button, ButtonKind } from "../widgets/button.slint";
 import { ToggleSwitch } from "../widgets/toggle.slint";
 import { FocusRing, TipTrigger } from "../widgets/focus.slint";
@@ -268,11 +268,10 @@ component StatusLine inherits Rectangle {
         x: 0; y: Tokens.icon-baseline-nudge.top; width: Tokens.icon-size-small; height: Tokens.icon-size-small;
         image-fit: contain; source: root.icon; colorize: root.icon-ink;
     }
-    facts-row := HorizontalLayout {
+    facts-row := FactsText {
         x: Tokens.icon-size-small + Tokens.space-6; y: 0; width: parent.width - self.x;
         height: root.facts.length > 0 ? self.preferred-height : 0px;
-        alignment: start; spacing: Tokens.space-12;
-        for fact in root.facts: CaptionText { text: fact; color: root.ink; wrap: no-wrap; accessible-role: text; }
+        facts: root.facts; color: root.ink;
     }
     message-text := CaptionText {
         x: Tokens.icon-size-small + Tokens.space-6; y: facts-row.height + root.gap; width: parent.width - self.x;
