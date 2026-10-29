@@ -4,7 +4,6 @@
 /.claude/
 /.impeccable/
 /research/*
-!/research/trainer-readiness.md
 !/research/trainer-interop.md
 !/research/trainer-features.md
 /spec/

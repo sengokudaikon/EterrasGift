@@ -1,4 +1,6 @@
-//! Absolute attack rate, reapplied after every game method that recalculates or sets it.
+//! Absolute attack rate, reapplied after every game method that recalculates or sets it. Hooking `calculateAttackRate`
+//! alone is not enough: `setMainHandAttackRate` and `setOffHandAttackRate` inline the calculation, so all three are
+//! targets.
 use super::hooks::{Behavior, GameplayHookTarget, GroupId, HookFeature, MethodSpec};
 use super::stat::StatFeature;
 use crate::game::{GameError, RuntimeAccess};

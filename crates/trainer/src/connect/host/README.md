@@ -1,7 +1,7 @@
 # Native trainer composition
 
-`eg-trainer-host` supplies the Windows x64 `HelperPreparer` used by
-`eg-trainer::connection::SessionConnector`. Construction is inert. Explicit
+`connect::host` supplies the Windows x64 `HelperPreparer` used by
+`connect::admission::SessionConnector`. Construction is inert. Explicit
 preparation runs on the trainer worker, after the process-bound Player.log gate.
 
 `desktop::GameProcesses` supplies exact query-only process identities and retains

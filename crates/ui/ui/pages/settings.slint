@@ -78,7 +78,7 @@ export component SettingsPage inherits Rectangle {
             vertical-stretch: 1;
             content-width: self.visible-width;
             // Measured from where the body actually ends: a layout's preferred height counts wrapped text inside `if` and
-            // `for` blocks as one line (research/slint.md, "Known pain points").
+            // `for` blocks as one line (research/slint.md, "Found while building the shell").
             content-height: body.y + locations-group.y + locations.y + locations-end.y + Tokens.settings-body-margin.bottom;
 
             // The body's margin sits outside its maximum width. Its height is its own, so where its

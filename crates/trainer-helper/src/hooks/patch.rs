@@ -1,6 +1,11 @@
 //! Owned interior code ranges. Resolve every site before publication; transactions compare actual bytes, suspend
 //! peer threads, write/read back and recover the pre-transaction bytes on failure. No allocation while suspended.
 //! A thread stopped inside a changing range refuses the transaction rather than being relocated into different code.
+//!
+//! Limits, part of the unsafe contract: the Toolhelp snapshot is not a full census (a thread created after it, or a
+//! return address inside a changed range, is not seen), and the suspended section still calls Win32 context,
+//! protection, cache and resume wrappers, which overlays or security software can instrument and which can wait on a
+//! suspended thread's lock. Deadlock freedom is therefore not established.
 use super::{HookState, TRANSACTION};
 use std::{
     ptr::NonNull,

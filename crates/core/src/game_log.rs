@@ -140,6 +140,8 @@ static CHARACTER: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"^Loading character: (?<name>.+) (?<level>\d{1,3}) isOnline: (?<online>True|False), cycle: (?<cycle>[^,]*), class: (?<class>.+)$").unwrap());
 static ONLINE_CHARACTER: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"^Loading character: (?<name>.+) [0-9A-Fa-f]{16} isOnline: True, cycle: (?<cycle>[^,]*), class: (?<class>.+)$").unwrap());
+/// The game logs `Offline Mode: False` however it was started (checked live 2026-10-20): the line carries no
+/// information, and no gate may use it. Offline play is told by the character's `isOnline` instead.
 static LAUNCH_MODE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^Offline Mode: (?<offline>True|False)$").unwrap());
 
 /// Reads a Player.log line: its time when it is one of the game's own (stamped) lines, and the event it carries, if any.

@@ -1,6 +1,7 @@
 //! Registers the copied prefix and stock near jump using the original function's
 //! unwind codes. The stock jump-back is replaced with the old adapter's two
-//! conditional near jumps, preserving flags/registers without epilogue detection.
+//! conditional near jumps, preserving flags/registers without epilogue detection: registering unwind data over the
+//! stock unconditional jump failed the retained RtlVirtualUnwind test at that jump.
 //! Relocated instruction offsets must remain unchanged. A redundant REX byte
 //! stripped from a push is restored when the entire prefix is position-independent.
 //! Handler/chained records keep the ordinary trampoline when offsets are unchanged;

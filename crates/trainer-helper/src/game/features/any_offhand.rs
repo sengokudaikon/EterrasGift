@@ -1,5 +1,10 @@
 //! Offhand compatibility bypasses, scoped to the offhand container and its linked-slot check. Item requirements
 //! remain the game's own checks; this feature only changes weapon category and pairing rules.
+//!
+//! Four targets under one switch. The C++ app replaced only the placement check, which let an item be equipped whose
+//! stats then did not apply; here placement and equipped eligibility answer alike, both pairing directions
+//! (two-handed and linked slot) pass, and `EnforceWeaponLimitations` is skipped, as it inlines the pairing check and
+//! would otherwise move equipment out. Off neither unequips nor recalculates: re-equip to see the change at once.
 use super::hooks::{Behavior, GameplayHookTarget, GroupId, HookFeature, MethodSpec};
 use crate::{game::*, hooks::leaf::LeafEffect};
 

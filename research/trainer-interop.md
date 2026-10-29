@@ -2,8 +2,8 @@
 
 The original C#/C++ app at `../EterrasGift` is the behavior reference. Rust replaces the desktop,
 injection/transport and native helper; it does not require a general safe Unity interop library.
-This document records the execution assumptions and retained findings. Product readiness is in
-[trainer-readiness.md](trainer-readiness.md).
+This document records the execution assumptions and retained findings. Dated investigations are archived in
+`../EterrasGiftRS-archive/` (the connect, loader and travel work of 2026-10-22 in `2026-10-29-docs/`).
 
 ## Runtime boundary
 
@@ -179,7 +179,7 @@ range before writing, compares actual bytes, retains page/cache uncertainty and 
 failure. Its Toolhelp snapshot opens handles and allocates aligned contexts before suspension; a peer inside a
 changing range refuses the transaction. It cannot establish a complete census in the presence of thread creation,
 and its unsafe boundary excludes execution by snapshot-missed/new threads and return addresses inside a changed
-range. See [interior code patches](trainer-features.md#interior-code-patches) for ownership, cleanup and static verification scope.
+range. Ownership, cleanup and verification are in `hooks/patch.rs` and `game/features/patches.rs`.
 
 Detour has no public suspension scope for arbitrary stores. The byte backend lives in hooks/patch.rs;
 the former scheduler/threads.rs is no longer retained. Its suspended section avoids Rust allocations
@@ -188,31 +188,11 @@ instrumented by overlays/security software and wait on a suspended thread's
 lock; deadlock freedom is not established. The unsafe hook/start contract excludes such
 instrumentation. Checking a few additional NT stubs would not validate the entire wrapper path.
 
-## Evidence and archive
-
-Current tests, authored fixture sources and the retained hook regressions are the maintained
-evidence. `mise run trainer:verify` runs trainer/tier/controller tests, UI tests and workspace
-verification with fake-host captures. Native fixture execution remains an explicit, separate
-owned-child check. No live-game access is authorized by a passing fixture.
-
-Retained tools: persistent-player (its lifecycle run only). unity-rust-host with its unity-fixture
-builder, native-inspect/inspect_pe.py, native-abi and hook-eval were archived on 2026-10-28 in
-`../EterrasGiftRS-archive/2026-10-28-trainer-eval/`. The original hook/ABI inventories stay in hooks-fields-audit. One-off loader, bridge, debugger, parser,
-main-thread identity and assembly-repair experiments are archived.
-
-Git tag `archive/trainer-evaluations-2026-10-19` at `0a2c4cc` preserves the previous sources and
-reports. A verified Git bundle and the ignored outputs are also kept locally at
-`%USERPROFILE%/Developer/EterrasGiftRS-archive/2026-10-19-trainer-cleanup/`.
-The latest authored player Build and Assets were copied there and all 319 source/product
-manifest entries were SHA256-verified before pruning. `workspace/` preserves original relative
-paths, and `moves.tsv` lists moved entries/counts/bytes. Moving outputs out of the checkout does
-not reclaim disk space. The active helper package and latest authored build pair remain under
-artifacts; rebuild receipts are local diagnostics, never a runtime `passed` certificate.
+## Forge writes, mappings and previews
 
 Affix list changes call managed Clear/Add for reference barriers. Constructor refusal precedes
 the rewrite; failure after Clear, including the game rarity method, remains Uncertain. The host
 rarity projection is an expectation checked by independent readback; it is not the native writer.
-
 
 Regular-affix mappings use one conditional request shape for context and sixteen sample pages,
 with the artifact lease retained for the connected session. Each page deserializes an owned item copy, rejects
@@ -245,7 +225,6 @@ draft cancels unused queued work. Reloading keeps the last value text visible, b
 table cannot authorize typing or scrubbing. Retryable connection waits remain visible in
 snapshots/events without writing a fault file on each automatic retry.
 
-
 Unique tooltip/preview requests share the conditional full-Forge description envelope. Preview
 adds a nonempty, distinct, storage-bounded list of unique-roll byte changes; it is not EditForge
 and never enters write certainty/history. The native reader calls getUnique(UInt16), validates
@@ -263,66 +242,4 @@ clones roll arrays through the runtime reference barrier before byte stores on t
 Native publication rechecks the full live graph and locale. The latest worker preview is bound
 to both ExpectedObservation and RollEdit; cleanup/generation/item changes discard it. A replaced
 UI draft never displays an earlier draft's text, and dropping its receipt never cancels accepted
-native work or authorizes replay. Production unique mapping and unique/implicit writes remain
-separate unsupported operations.
-
-## Helper departure and travel (2026-10-22)
-
-The helper caches ClientStateManager's static app-state getter and enum literal metadata;
-250 ms checks stop on Login/CharacterSelect or online state, preserve InGame travel, and refuse
-work during unknown state with a three-second departure grace. Bootstrap's 96-byte configuration
-binds controller PID/birth before Discover. No module pins are taken.
-
-CharacterLoading is a pre-store response for a missing offline manager while the app remains
-InGame. Sessions revoke their previous manager/status and editor observations, retain their
-binary lease and transport, and recover through a fresh read. A transport read failure followed
-by proven departure can reconnect later; uncertain writes remain fenced and are never replayed.
-
-`mise run trainer:unload` passed 100 concurrent native reloads plus blocked-callback retention.
-`mise run trainer:player:lifecycle` passed six external Unity 6000.4.8f1 loads, four seconds of
-InGame manager absence, and module-absence/pristine-dispatcher proof after each departure.
-The player never calls a helper export in lifecycle mode, avoiding its own IL2CPP loader reference.
-This is authored fixture evidence; live Last Epoch testing remains deferred until requested.
-
-## Windows loader wrapper and Steam overlay (2026-10-22)
-
-Read-only inspection of the user's reported preflight failure found kernel32!LoadLibraryW
-redirected through a private trampoline into gameoverlayrenderer64.dll. The local wrapper was
-an ordinary x64 RIP-relative import thunk; KernelBase!LoadLibraryW matched both processes.
-Bootstrap now resolves that file-backed local thunk only to the exact declared KernelBase
-export, then verifies the implementation's local file bytes, target module identity and remote
-instructions. It never follows the target's overlay trampoline or changes its hook. Unexpected
-local thunks/import targets and patched implementation bytes still fail before submission.
-
-Game-data freshness distinguishes a successful source-file check from a definitions rebuild.
-The rebuild timestamp is saved in files.json and survives cache reuse; older indexes have an
-unknown timestamp. Failed reads display their error rather than relabeling stale data as current.
-
-## Live callback refusal (2026-10-22)
-
-During the reported connect/wait loop, read-only inspection confirmed the loaded helper's full
-bytes matched the running debug desktop's embedded helper. The process-owned gateway's active
-counter changed, but Shared.main_thread stayed zero and the watchdog never ran. The request
-timed out as NotReady: "Request canceled before the main thread took it; nothing ran". This
-isolates the refusal before queue dispatch, in the managed synchronization-context identity
-check; it does not identify which game/mod replaced or removed the context.
-
-The callback now asks UnityEngine.Object.CurrentThreadIsMainThread, checked as a static zero-arg
-Boolean method on UnityEngine.Object. The initialized Unity6000.4 native predicate and its cold
-icall resolution are supported-target assumptions. The installed metadata contains the method;
-prior retained native inspection of this engine established its OS-thread comparison. No native
-global address, guessed TID or pre-bootstrap main-thread nomination is used.
-
-A NotReady handshake no longer becomes retryable merely because cleanup proved the helper
-gone. Transport departure during a handshake rereads offline admission: a character leaving is
-a normal gate wait; unchanged admission reports a stopped connection and requires explicit Retry.
-Normal departure after an established session still allows automatic connection for the next
-offline character. No submitted gameplay write is retried.
-
-Verification passed: trainer:verify, inspected Settings/Forge captures, and six external Unity
-6000.4.8f1 helper loads whose first Status runs with null or replacement synchronization contexts.
-All departure triggers and the four-second InGame travel check still passed. The fresh selected
-desktop release build embeds the corrected helper. The user confirmed the connection now works
-in live Last Epoch on 2026-10-22; remaining functionality was only described as mostly working,
-so this does not establish complete Forge or gameplay-hook coverage.
-Investigation receipts and cleanup notes: `../EterrasGiftRS-archive/2026-10-22-trainer-connect/NOTES.md`.
+native work or authorizes replay.

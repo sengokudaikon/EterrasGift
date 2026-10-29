@@ -31,15 +31,14 @@ Status roots the manager wrapper, checks assignability and reads its metadata-va
 It also reads the independent runtime online flag. No native Unity-object pointer is dereferenced.
 Returned manager addresses are ephemeral observations, never managed-object ownership tokens.
 
-The helper supports owned Forge edits, completed locale reads and persistent gameplay controls. Attack rate and
-leech rate use independent character accessors and the shared hook lifecycle. It reads no definitions catalog: the app
-reads the definitions from the game's files (`eg-trainer`'s game data), and the catalog and item-limits operations (21
-and 19) are retired.
+The helper supports owned Forge edits, completed locale reads and gameplay hooks. It reads no definitions catalog:
+the app reads the definitions from the game's files (`eg-trainer`'s game data), and the catalog and item-limits
+operations (21 and 19) are retired.
 EditForge carries status, base/identity and regular affix-roll changes through the shared
 submission/readback path. The helper validates the complete expected state and every destination
 before the first store. It roots the selected graph through managed refreshes. A failure after
 mutation begins is Uncertain; there is no automatic rollback or replay. Unsupported operations
-remain refused. See [current scope](../../research/trainer-readiness.md).
+remain refused.
 
 Forge reads copy bounded rooted graphs into owned snapshots: exact storage/element types,
 nested enum metadata and strict string decoding. Roots do not exclude concurrent game writes
@@ -72,41 +71,13 @@ checks literal bounds and independently gates offline/native liveness. One publi
 by exact full readback. Every failure after store entry is uncertain; no RebuildID, game setter or rollback
 runs. Only owned authored Unity validation is claimed. Later game recalculation can replace the level again.
 
-Gameplay controls cover mysterious-rift selection, offhand compatibility, incoming/outgoing damage, independent
-attack/leech rates and No mana cost. Each module in `game/features` owns its targets, explicit ABI contracts, effect and receiver rules.
-`game/features/hooks` holds the helper's patch-group identities and common method validator; incoming/outgoing damage
-share one group, while offhand and attack rate each own multiple methods. The wire carries feature IDs, settings and
-observations, without knowing patch ownership.
-
-`engine/gameplay_hooks` coordinates admission, entry transactions and cleanup ordering. Its prepared effects adapt
-leaf, shared damage, pinned scalar and original-first scalar-result state to close/restore/publish/observe operations. Clear closes all effects,
-restores receiver state and entry bytes, then releases receiver-bound groups. Every failure retains the affected
-owners and pins. Generated gameplay code stays outside the DLL; the existing dispatcher drain controls helper unload.
-
-No mana cost runs `BaseMana.getManaCost(Ability, float, bool, AbilityMutator, bool)` once before adjusting its result.
-It answers zero only when the receiver matches the current player's `Actor.mana` and the online flag is clear. The
-retained gateway forwards all seven ABI positions, including three stack arguments, and registers its own unwind
-frame. The two five-parameter overloads are distinguished by their complete parameter signatures. No helper frame
-or pinned player identity is retained across the original call; late returns after close keep the original result.
-
-The postfix gateway also serves max random rolls, boss loot chance, tier 7 affixes, ability speed, maximum bonus stability and
-one echo type. Feature-local contracts and predicates live in `game/features/results`; the gateway preserves byte/integer/
-float returns and forwards exactly each declared native argument count, including six stack positions for RollTier.
-It registers matching Windows unwind data and never retries an original. RNG draws and original side effects run
-before adjustment; closed/online paths keep their results. See [result controls](../../research/trainer-features.md#original-first-result-controls).
-
-The 17 patch-only switches share owned interior ranges in `hooks/patch`, with feature-local recipes under
-`game/features/patches`. They prepare complete groups before writing, check unique bounded patterns, reject range
-overlap and verify original/replacement bytes. Transactions allocate before suspending peers and refuse a peer
-inside a changing range. Off, manager loss and unload restore these ranges through the same lifecycle as entry
-detours; failed cleanup retains owners and the helper. The thread-snapshot execution contract and all feature
-distinctions are documented in [trainer features](../../research/trainer-features.md#interior-code-patches).
-
-Shard and rune/glyph replenishment use generated before-original leaves on the same lifecycle. Each feature owns
-its inventory layout and raises only existing stored quantities below 99; the original query then runs once.
-Shared material helpers validate reference/primitive fields and emit the closed/online guard. The shard List/array
-walk is bounded; runes/glyphs require their exact item categories. Off restores entries without removing already
-granted materials. See [crafting materials](../../research/trainer-features.md#crafting-materials).
+Gameplay hooks: each module under `game/features` owns its targets, ABI contracts, effect and receiver rules, and
+documents its behaviour in its `//!` docs. `game/features/hooks` maps the wire's feature IDs to those modules and
+their patch groups (several controls can share a group, as the two damage controls do); the wire carries feature
+IDs, settings and observations, never patch ownership. `engine/gameplay_hooks` coordinates admission, entry
+transactions and cleanup ordering: Clear closes all effects, restores receiver state and entry bytes, then releases
+receiver-bound groups, and every failure retains the affected owners and pins. Generated gameplay code stays outside
+the DLL; the existing dispatcher drain controls helper unload.
 
 The local pipe is `eterras-gift-<PID>`, one bounded request per connection: a 12-byte header and a sequential operation body. Bootstrap binds the controller PID/birth before any request; the kernel-reported
 client PID and retained process handle/start time verify each owner request. Fixture servers
