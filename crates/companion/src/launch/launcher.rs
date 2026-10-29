@@ -19,7 +19,7 @@ pub struct LaunchReport {
 }
 
 /// Said while a start with mods waits for MelonLoader, which can take minutes after a game update.
-pub const STARTING_WITH_MODS: &str = "Starting Last Epoch offline with mods. MelonLoader takes a moment, and a few minutes after a game update.";
+pub const STARTING_WITH_MODS: &str = "Starting offline with mods. After a game update MelonLoader can take a few minutes.";
 
 pub struct GameLauncher {
     host: Arc<dyn GameHost>,
@@ -86,7 +86,7 @@ impl GameLauncher {
                 return refused("The app is closing.");
             }
             if *starting {
-                return refused("Last Epoch is starting already.");
+                return refused("Last Epoch is already starting.");
             }
             *starting = true;
         }
@@ -107,7 +107,7 @@ impl GameLauncher {
             },
             Err(LaunchError::Refused(reason)) => refused(&reason),
             // Said like any other refusal: a start that fails must not take the page down with it.
-            Err(LaunchError::Failed(reason)) => refused(&format!("Starting Last Epoch went wrong: {reason}")),
+            Err(LaunchError::Failed(reason)) => refused(&format!("Last Epoch didn't start: {reason}")),
             Err(LaunchError::Cancelled) => refused("The app is closing."),
         }
     }
@@ -133,16 +133,12 @@ fn refused(message: &str) -> LaunchReport {
 
 fn started(mode: LaunchMode, outcome: LaunchOutcome) -> String {
     match (mode, outcome) {
-        (LaunchMode::Online, _) => "Started Last Epoch through Steam, without mods.".into(),
-        (LaunchMode::Offline, _) => "Started Last Epoch offline, without mods.".into(),
-        (_, LaunchOutcome::LoaderStarted) => format!(
-            "Started Last Epoch offline with mods. MelonLoader is running, and its {} is set aside again so a start from Steam stays without mods.",
-            loader::PROXY_NAME
-        ),
+        (LaunchMode::Online, _) => "Started through Steam, without mods.".into(),
+        (LaunchMode::Offline, _) => "Started offline, without mods.".into(),
+        (_, LaunchOutcome::LoaderStarted) => "Started offline with mods.".into(),
         _ => format!(
-            "Started Last Epoch offline with mods, but MelonLoader wrote no log within {} minutes; see MelonLoader/Latest.log. Its {} is set aside again.",
-            loader::LOADER_TIMEOUT.as_secs() / 60,
-            loader::PROXY_NAME
+            "Started offline with mods, but MelonLoader wrote no log in {} minutes. See MelonLoader/Latest.log.",
+            loader::LOADER_TIMEOUT.as_secs() / 60
         ),
     }
 }

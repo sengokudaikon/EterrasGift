@@ -117,7 +117,7 @@ fn stop_during_start(host_panics: bool) {
     let play = thread::spawn(move || catch_unwind(AssertUnwindSafe(|| playing.play(LaunchMode::OfflineWithMods))));
     let lifetime = active.recv_timeout(TIMEOUT).unwrap();
     assert!(launcher.is_starting());
-    assert_eq!(launcher.play(LaunchMode::Offline).message, "Last Epoch is starting already.");
+    assert_eq!(launcher.play(LaunchMode::Offline).message, "Last Epoch is already starting.");
 
     if host_panics {
         // Cancellation requests cleanup without pretending the host has finished it.

@@ -101,16 +101,18 @@ export struct AppliedEntryView { name: string, time: string, summary: string, ef
 export struct MenuOptionView {
     rarity: ItemRarity,
     name: string,
-    detail: string,
+    // Short facts side by side, each its own text, then what stands in the way, as sentences.
+    facts: [string],
+    note: string,
     implicits: string,
     in-game: bool,
     available: bool,
     current: bool
 }
-export struct PickerRowView { name: string, detail: string, reforged: bool }
+export struct PickerRowView { name: string, facts: [string], reforged: bool }
 
-// A saved item template: its name and what it holds.
-export struct TemplateRowView { name: string, detail: string }
+// A saved item template: its name, what it holds, and both in one line for screen readers.
+export struct TemplateRowView { name: string, facts: [string], label: string }
 
 // A cell Rust brought into focus (Show draft, Up/Down) asks the lists to scroll it into view: its top and height in window
 // coordinates. Only the forge's own views read it.
@@ -174,7 +176,7 @@ export global ForgeState {
     in property <bool> base-allow-incompatible;
     // The base field itself can be edited now (its "Allow incompatible affixes" box).
     in property <bool> base-can-edit;
-    in property <string> summary;
+    in property <[string]> summary;
     in property <[FieldView]> fields;
 
     // Implicits.

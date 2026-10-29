@@ -20,24 +20,24 @@ pub fn descriptor(development: bool) -> ModuleChoice {
     ModuleChoice {
         id: ID,
         title: "Trainer",
-        description: "Edits items in the running game for offline characters. It loads a helper into Last Epoch, which leaves when the offline character leaves play or you disconnect. Online characters are always refused.",
+        description: "Edit offline characters and their items in the running game. A helper loads into Last Epoch and leaves when you disconnect or the character leaves play.",
         name: "the trainer",
         default_on: development,
         problem: None,
         sections: vec![
             ModuleSection::Status {
                 title: "Game definitions",
-                description: "Affix and unique definitions read from the game's files and kept until the game updates. The trainer opens only for the game build they were read from.",
+                description: "Affixes and uniques read from the game's files, read again when the game updates.",
                 text: NO_DATA,
                 action: "Read again",
-                tip: "Read the definitions from the game's files again",
-                unavailable: "Available once Last Epoch is found.",
+                tip: "Read the game's files again",
+                unavailable: "Last Epoch wasn't found.",
             },
             ModuleSection::Toggle {
                 key: AUTO_CONNECT,
                 title: "Trainer connection",
                 label: "Connect automatically",
-                description: "Connect the trainer once an offline character is loaded. Mods work independently of this connection.",
+                description: "Connect when an offline character is loaded.",
                 note: "",
                 default: true,
                 on_text: "Automatic",
@@ -47,8 +47,8 @@ pub fn descriptor(development: bool) -> ModuleChoice {
                 key: OVERRIDE,
                 title: "I know what I'm doing",
                 label: "I know what I'm doing",
-                description: "Writes edits the game would not make itself: Weaver, enchantment and corrupted affixes wherever the slot fits, incompatible affixes and bases, another idol size, Weaver's Will on any unique and Weaver's Touch on any idol. With this off, incompatible affixes can still be listed but not written.",
-                note: "Use expendable items. The game may drop or rearrange what it does not support.",
+                description: "Allows edits the game wouldn't make: incompatible affixes and bases, Weaver, enchantment and corrupted affixes in any fitting slot, other idol sizes, Weaver's Will on any unique and Weaver's Touch on any idol.",
+                note: "Use expendable items. The game may drop or rearrange what it doesn't support.",
                 default: false,
                 on_text: "On",
                 off_text: "Off",
@@ -57,7 +57,7 @@ pub fn descriptor(development: bool) -> ModuleChoice {
     }
 }
 
-const NO_DATA: &str = "No game data: Last Epoch was not found";
+const NO_DATA: &str = "Last Epoch wasn't found";
 
 /// The running trainer, as its Settings groups reach it.
 pub fn link(backend: BackendHandle) -> Rc<dyn ModuleLink> {
@@ -101,20 +101,20 @@ pub fn game_data(snapshot: &BackendSnapshot, running: bool) -> LiveStatus {
 
 fn describe(catalog: &CatalogState, files: &GameFiles) -> String {
     let mut text = match (catalog, files) {
-        (_, GameFiles::Reading) => "Reading game files".into(),
+        (_, GameFiles::Reading) => "Reading the game files…".into(),
         (_, GameFiles::Unavailable(reason)) => format!("The game files could not be read: {reason}"),
-        (CatalogState::Current { data, .. } | CatalogState::Stale(data), _) => format!("Current game data · {} affixes", data.affixes.len()),
-        (_, GameFiles::Ready { affixes, .. }) => format!("Game files · {affixes} affixes"),
+        (CatalogState::Current { data, .. } | CatalogState::Stale(data), _) => format!("{} affixes", data.affixes.len()),
+        (_, GameFiles::Ready { affixes, .. }) => format!("{affixes} affixes"),
         (_, GameFiles::NotConfigured) => NO_DATA.into(),
     };
     if let GameFiles::Ready { checked_at, updated_at, .. } = files {
         let time = |value: Option<jiff::Timestamp>| {
             value.map_or_else(
-                || "Not recorded".into(),
+                || "not recorded".into(),
                 |time| time.to_zoned(jiff::tz::TimeZone::system()).strftime("%Y-%m-%d %H:%M:%S %Z").to_string(),
             )
         };
-        text.push_str(&format!("\nLast checked: {}\nCache updated: {}", time(*checked_at), time(*updated_at)));
+        text.push_str(&format!("\nChecked: {}\nUpdated: {}", time(*checked_at), time(*updated_at)));
     }
     text
 }
@@ -131,12 +131,9 @@ mod tests {
             checked_at: None,
             updated_at: None,
         };
-        assert_eq!(describe(&CatalogState::Missing, &GameFiles::NotConfigured), "No game data: Last Epoch was not found");
-        assert_eq!(describe(&CatalogState::Missing, &GameFiles::Reading), "Reading game files");
-        assert_eq!(
-            describe(&CatalogState::Missing, &ready),
-            "Game files · 1156 affixes\nLast checked: Not recorded\nCache updated: Not recorded"
-        );
+        assert_eq!(describe(&CatalogState::Missing, &GameFiles::NotConfigured), "Last Epoch wasn't found");
+        assert_eq!(describe(&CatalogState::Missing, &GameFiles::Reading), "Reading the game files…");
+        assert_eq!(describe(&CatalogState::Missing, &ready), "1156 affixes\nChecked: not recorded\nUpdated: not recorded");
         assert_eq!(
             describe(&CatalogState::Missing, &GameFiles::Unavailable("no Last Epoch_Data".into())),
             "The game files could not be read: no Last Epoch_Data",
@@ -155,7 +152,7 @@ mod tests {
             updated_at: Some(updated),
         };
         let shown = describe(&CatalogState::Missing, &files);
-        assert!(shown.contains("Last checked: 2026-10-22"), "{shown}");
-        assert!(shown.contains("Cache updated: 2026-10-21"), "{shown}");
+        assert!(shown.contains("Checked: 2026-10-22"), "{shown}");
+        assert!(shown.contains("Updated: 2026-10-21"), "{shown}");
     }
 }

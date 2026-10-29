@@ -55,3 +55,21 @@ export component CaptionText inherits Text {
         : tone == CaptionTone.confirmed ? Tokens.confirmed-brush
         : Tokens.text-muted-brush;
 }
+
+// Short facts side by side, each its own text with a gap between them, never glued into one string. One line: the last
+// fact elides when they don't fit.
+export component FactsText inherits HorizontalLayout {
+    in property <[string]> facts;
+    in property <brush> color: Tokens.text-muted-brush;
+    in property <length> font-size: Tokens.font-size-caption;
+    spacing: Tokens.space-12;
+    for fact[index] in root.facts: Text {
+        text: fact;
+        font-size: root.font-size;
+        color: root.color;
+        wrap: no-wrap;
+        overflow: elide;
+        vertical-alignment: center;
+        horizontal-stretch: index == root.facts.length - 1 ? 1 : 0;
+    }
+}

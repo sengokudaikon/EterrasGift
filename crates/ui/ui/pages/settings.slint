@@ -223,7 +223,7 @@ export component SettingsPage inherits Rectangle {
 
             if SettingsState.can-restart: Button {
                 text: "Restart now";
-                tip: "Close Eterra's Gift and start it again, so the saved change takes effect";
+                tip: "Restart Eterra's Gift to apply the saved changes";
                 clicked => {
                     SettingsState.restart();
                 }
@@ -231,7 +231,7 @@ export component SettingsPage inherits Rectangle {
 
             if SettingsState.can-retry: Button {
                 text: "Retry save";
-                tip: "Write the pending settings again";
+                tip: "Try saving again";
                 clicked => { SettingsState.retry(); }
             }
 
@@ -239,7 +239,7 @@ export component SettingsPage inherits Rectangle {
                 text: "Save locations";
                 kind: ButtonKind.primary;
                 enabled: SettingsState.locations-changed && !SettingsState.saving-locations;
-                tip: "Save the locations. The game executable, user-data, mod library and MelonLoader folders take effect after a restart; the mod sources and .NET SDK folders at once.";
+                tip: "Save the locations above";
                 clicked => {
                     SettingsState.save-locations();
                 }

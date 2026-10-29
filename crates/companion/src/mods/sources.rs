@@ -51,11 +51,6 @@ impl ModProject {
             .display()
             .to_string()
     }
-
-    pub fn caption(&self, sources: &Path) -> String {
-        let folder = self.source_folder(sources);
-        self.version.as_ref().map_or_else(|| folder.clone(), |version| format!("{version} · {folder}"))
-    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

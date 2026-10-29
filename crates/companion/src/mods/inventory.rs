@@ -45,9 +45,9 @@ impl ModReport {
     }
     pub fn state_text(&self) -> &'static str {
         match (self.installed.enabled, self.was_on) {
-            (true, false) => "On from the next game with mods",
-            (false, true) => "Off from the next game with mods",
-            (true, true) if self.build_waiting => "This build replaces the one in the Mods folder at the next game with mods",
+            (true, false) => "Turns on the next time you play with mods",
+            (false, true) => "Turns off the next time you play with mods",
+            (true, true) if self.build_waiting => "This build is installed the next time you play with mods",
             _ => "",
         }
     }
@@ -68,7 +68,7 @@ pub struct Inventory {
 pub fn read(install: Option<&GameInstall>, library: &ModLibrary, loader_root: Option<&Path>) -> Inventory {
     let Some(install) = install else {
         return Inventory {
-            error: Some("Last Epoch was not found, so its mods can't be read. Choose the game executable in Settings.".into()),
+            error: Some("Last Epoch wasn't found. Choose the game executable in Settings.".into()),
             ..Default::default()
         };
     };
@@ -237,7 +237,10 @@ pub fn read(install: Option<&GameInstall>, library: &ModLibrary, loader_root: Op
 }
 
 pub struct Readiness {
+    /// What to do or know, as a sentence; empty when all is well.
     pub text: String,
+    /// Short facts shown side by side, each its own text: the loader, the game, the last game with mods.
+    pub facts: Vec<String>,
     pub warning: bool,
     pub can_play: bool,
 }
@@ -246,7 +249,12 @@ impl Inventory {
         let report = self.loader.as_ref();
         let missing = report.is_none_or(|report| report.proxy == ModLoaderState::Conflict);
         let can_play = self.error.is_none() && !missing && !running && !starting;
-        let failure = |text| Readiness { text, warning: true, can_play };
+        let failure = |text| Readiness {
+            text,
+            facts: Vec::new(),
+            warning: true,
+            can_play,
+        };
         if let Some(error) = &self.error {
             return failure(error.clone());
         }
@@ -254,36 +262,40 @@ impl Inventory {
             return failure(if report.is_some() {
                 format!("{} Delete the older one.", loader::CONFLICT)
             } else {
-                "MelonLoader is not in the game folder, so no mod can load. Play offline with mods needs it.".into()
+                "MelonLoader isn't in the game folder, so no mod can load.".into()
             });
         }
         let report = report.unwrap();
         if report.last_game_without_support && (!running || modded_run) {
-            return failure(match (running,report.core_module_needs_repair) {
-                (true,true) => "In this game MelonLoader could not start its Unity support, so no mod runs. Close Last Epoch: the next game with mods repairs the cause, a broken UnityEngine.CoreModule.dll MelonLoader generated for this game build, and loads them.",
-                (true,false) => "In this game MelonLoader could not start its Unity support, so no mod runs. See its log for why.",
-                (false,true) => "In the last game with mods, MelonLoader could not start its Unity support, so no mod ran. The cause, a broken UnityEngine.CoreModule.dll MelonLoader generated for this game build, is repaired when you next play with mods.",
-                _ => "In the last game with mods, MelonLoader could not start its Unity support, so no mod ran. See its log for why."
-            }.into());
+            return failure(
+                match (running, report.core_module_needs_repair) {
+                    (true, true) => "MelonLoader couldn't start its Unity support, so no mod runs. Close Last Epoch and play with mods again to repair it.",
+                    (true, false) => "MelonLoader couldn't start its Unity support, so no mod runs. See its log.",
+                    (false, true) => "In the last game with mods, MelonLoader couldn't start its Unity support. Playing with mods again repairs it.",
+                    _ => "In the last game with mods, MelonLoader couldn't start its Unity support. See its log.",
+                }
+                .into(),
+            );
         }
         let failing: Vec<_> = self.mods.iter().filter(|item| item.installed.enabled && item.problem.is_some()).collect();
         if report.preparation == LoaderPreparation::WillPrepare && running && modded_run {
-            return Readiness { text: "Last Epoch is running while MelonLoader prepares for this game build, which takes about a minute. This game runs without mods: close it once it is up, and the next game with mods loads them.".into(), warning: !failing.is_empty(), can_play };
+            return Readiness {
+                text: "MelonLoader is preparing for this game build, so this game runs without mods. Close it once it's up and play with mods again.".into(),
+                facts: Vec::new(),
+                warning: !failing.is_empty(),
+                can_play,
+            };
         }
         if let Some(first) = failing.first() {
             return failure(if failing.len() == 1 {
                 if first.loaded_last_time == Some(false) {
-                    format!("{} did not load in the last game with mods. Turn it off or replace it before you play.", first.name)
+                    format!("{} didn't load last time. Turn it off or replace it.", first.name)
                 } else {
-                    format!(
-                        "{} can't load: {} Turn it off or replace it before you play.",
-                        first.name,
-                        first.problem.as_deref().unwrap()
-                    )
+                    format!("{} can't load: {} Turn it off or replace it.", first.name, first.problem.as_deref().unwrap())
                 }
             } else {
                 format!(
-                    "{} mods that are on can't load: {} and {}. Turn them off or replace them.",
+                    "{} mods can't load: {} and {}. Turn them off or replace them.",
                     failing.len(),
                     failing[..failing.len() - 1].iter().map(|item| item.name.as_str()).collect::<Vec<_>>().join(", "),
                     failing.last().unwrap().name
@@ -292,16 +304,19 @@ impl Inventory {
         }
         if running {
             return Readiness {
-                text: "Last Epoch is running. Play with mods once it has closed.".into(),
+                text: "Last Epoch is running. Play with mods once it closes.".into(),
+                facts: Vec::new(),
                 warning: false,
                 can_play,
             };
         }
-        let mut text = format!("MelonLoader {} · Last Epoch {}", report.version, version.unwrap_or("(version unavailable)"));
+        let mut facts = vec![format!("MelonLoader {}", report.version)];
+        facts.extend(version.map(|version| format!("Last Epoch {version}")));
+        let mut text = String::new();
         if report.preparation == LoaderPreparation::WillPrepare {
-            text.push_str(". MelonLoader prepares for this game build in the next game with mods: it takes about a minute to start, and runs without mods. Close it once it is up; the game after loads them.");
+            text = "The next game with mods prepares MelonLoader for this game build and runs without mods. Play again once it's up.".into();
         } else if report.core_module_needs_repair {
-            text.push_str(". MelonLoader's UnityEngine.CoreModule.dll for this game build would stop every mod; Play offline with mods repairs it first.");
+            text = "MelonLoader's Unity support needs a repair. Play offline with mods repairs it first.".into();
         } else if let Some(last) = self.last_launch {
             let zone = jiff::tz::TimeZone::system();
             let local = last.to_zoned(zone.clone());
@@ -313,8 +328,13 @@ impl Inventory {
             } else {
                 format!("on {}", local.strftime("%-d %B"))
             };
-            text.push_str(&format!(" · last game with mods {day} at {}", local.strftime("%H:%M")));
+            facts.push(format!("Last played with mods {day} at {}", local.strftime("%H:%M")));
         }
-        Readiness { text, warning: false, can_play }
+        Readiness {
+            text,
+            facts,
+            warning: false,
+            can_play,
+        }
     }
 }

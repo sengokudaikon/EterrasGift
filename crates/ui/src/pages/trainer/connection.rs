@@ -166,9 +166,9 @@ struct Status {
 /// `waits` (automatic connection, with the game being watched) decides.
 fn multiple_games(snapshot: &BackendSnapshot) -> &'static str {
     if snapshot.monitoring && snapshot.auto_connect {
-        "Close extra game instances; the app connects once one is left."
+        "Close all but one copy of Last Epoch."
     } else {
-        "Close extra game instances, then connect again."
+        "Close all but one copy of Last Epoch, then connect."
     }
 }
 
@@ -183,13 +183,13 @@ fn online_advice(snapshot: &BackendSnapshot) -> &'static str {
     match snapshot.retained_helper.as_ref().map(|helper| helper.residency) {
         Some(HelperResidency::Stuck | HelperResidency::MayBeLoaded | HelperResidency::Loaded) => HELPER_RESTART_REQUIRED,
         Some(HelperResidency::Leaving) => "The helper is leaving Last Epoch.",
-        Some(HelperResidency::Gone) | None => "Exit online mode and load an offline character to use the trainer.",
+        Some(HelperResidency::Gone) | None => "Load an offline character to use the trainer.",
     }
 }
 
 /// The preparation's progress while connecting: the game files, when a changed install is read again.
 fn progress(snapshot: &BackendSnapshot) -> Option<String> {
-    (snapshot.activity == Some(Activity::ReadingGameFiles)).then(|| "Reading game files…".to_owned())
+    (snapshot.activity == Some(Activity::ReadingGameFiles)).then(|| "Reading the game files…".to_owned())
 }
 
 fn status(snapshot: &BackendSnapshot) -> Status {
@@ -204,32 +204,28 @@ fn status(snapshot: &BackendSnapshot) -> Status {
         let advice = online_advice(snapshot);
         return Status {
             stopped: true,
-            ..line("Online mode", advice, &format!("Online mode. {advice}"))
+            ..line("Online mode", advice, "Online mode")
         };
     }
     let writing = matches!(snapshot.activity, Some(Activity::WritingForge));
     match snapshot.phase {
         // Connected, the pages show their own bodies; only the navigation's line is said.
-        Phase::Ready => line("Connected", "", if writing { "Connected · applying…" } else { "Connected" }),
+        Phase::Ready => line("Connected", "", if writing { "Applying changes…" } else { "Connected" }),
         Phase::WaitingForGame if snapshot.error.as_ref().is_some_and(|error| error.kind == ErrorKind::MultipleProcesses) => Status {
             waiting: Some(BloomPhase::Wilted),
             ..line("Waiting for Last Epoch", multiple_games(snapshot), multiple_games(snapshot))
         },
         Phase::WaitingForGame => Status {
             waiting: Some(BloomPhase::Wilted),
-            ..line("Waiting for Last Epoch", "Start Last Epoch and load an offline character.", "Waiting for game")
+            ..line("Waiting for Last Epoch", "Start Last Epoch and load an offline character.", "Waiting for Last Epoch")
         },
         Phase::WaitingForCharacter if snapshot.error.as_ref().is_some_and(|error| error.kind == ErrorKind::CharacterLoading) => Status {
             waiting: Some(BloomPhase::Opening),
-            ..line("Changing area", "Waiting for the offline character to finish changing area.", "Changing area…")
+            ..line("Changing area", "Waiting for the character to finish changing area.", "Changing area…")
         },
         Phase::WaitingForCharacter => Status {
             waiting: Some(BloomPhase::Opening),
-            ..line(
-                "Waiting for an offline character",
-                "Load an offline character to continue.",
-                "Waiting for offline character",
-            )
+            ..line("Waiting for an offline character", "Load an offline character.", "Waiting for a character")
         },
         Phase::Connecting => {
             let progress = progress(snapshot);
@@ -238,7 +234,7 @@ fn status(snapshot: &BackendSnapshot) -> Status {
                 ..line(
                     "Connecting",
                     progress.as_deref().unwrap_or("Connecting to the game…"),
-                    progress.as_deref().unwrap_or("Preparing…"),
+                    progress.as_deref().unwrap_or("Connecting…"),
                 )
             }
         }
@@ -248,14 +244,14 @@ fn status(snapshot: &BackendSnapshot) -> Status {
             stopped: true,
             ..line(
                 "Edit not confirmed",
-                "The edit may have reached the game, but it could not be confirmed. Check the item in the game, then Retry to read it again. \
-                 The edit will not be sent again; drafts and Undo were cleared, and details are in the fault log.",
-                "Edit not confirmed. Check the item in the game, then Retry.",
+                "The edit may have reached the game but couldn't be confirmed. Check the item in the game, then Retry. \
+                 The edit won't be sent again. Drafts and Undo were cleared.",
+                "Edit not confirmed",
             )
         },
         Phase::Blocked => {
             let message = snapshot.error.as_ref().map_or_else(
-                || "The trainer could not connect. Retry when the game is ready.".to_owned(),
+                || "The trainer couldn't connect. Retry when the game is ready.".to_owned(),
                 |error| sentence(&error.message),
             );
             Status {
@@ -263,8 +259,8 @@ fn status(snapshot: &BackendSnapshot) -> Status {
                 ..line("Connection stopped", &message, &message)
             }
         }
-        Phase::Closing => line("Disconnecting…", "Finishing requests and turning off trainer effects.", "Disconnecting…"),
-        Phase::Disabled => line("Trainer is off", "Enable the trainer in Settings and restart Eterra's Gift.", "Trainer is off"),
+        Phase::Closing => line("Disconnecting…", "Turning off trainer effects.", "Disconnecting…"),
+        Phase::Disabled => line("Trainer is off", "Turn the trainer on in Settings and restart Eterra's Gift.", "Trainer is off"),
         Phase::Stopped => Status {
             stopped: true,
             ..line("Trainer stopped", "Restart Eterra's Gift to connect again.", "Trainer stopped")

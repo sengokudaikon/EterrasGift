@@ -556,7 +556,7 @@ component FeatureRow inherits Rectangle {
             icon: Tokens.icon-refresh;
             kind: ButtonKind.subtle;
             enabled: root.editor && root.feature.can-use;
-            tip: root.held ? "Read again: what the stash holds now; drafts for what it still holds stay" : "Read again: what the game holds now; drafts that match it are cleared";
+            tip: root.held ? "Read the stash again" : "Read the game again";
             accessible-name: "Read again";
             clicked => { TrainerState.read(root.row-index); }
         }
@@ -616,7 +616,7 @@ component FeatureRow inherits Rectangle {
             text: "Discard";
             kind: ButtonKind.subtle;
             enabled: root.feature.can-discard;
-            tip: "Puts every box back to what the game holds; nothing is written";
+            tip: "Put every value back to what the game holds";
             clicked => { TrainerState.discard(root.row-index); }
         }
 
@@ -627,7 +627,7 @@ component FeatureRow inherits Rectangle {
             height: Tokens.control-min-height;
             text: root.feature.apply-text;
             enabled: root.feature.can-apply;
-            tip: root.held ? "Writes the changed counts through the game, then reads them back" : "Writes the changed fields through the game, then reads them back";
+            tip: "Write the changes to the game and read them back";
             clicked => { TrainerState.apply(root.row-index); }
         }
 
@@ -809,7 +809,7 @@ component ProfileBand inherits Rectangle {
 
             if !root.setup && !root.kept: Button {
                 text: "Keep as profile";
-                tip: "Keep these hooks for \{TrainerState.profile-name}";
+                tip: "Keep these settings for \{TrainerState.profile-name}";
                 clicked => {
                     TrainerState.keep-profile();
                 }
@@ -831,8 +831,8 @@ component ProfileBand inherits Rectangle {
 
             CaptionText {
                 text: root.setup
-                    ? "Delete \{TrainerState.profile-name}'s profile? Its hooks are forgotten; the next time \{TrainerState.profile-name} enters play, every hook starts off."
-                    : "Delete \{TrainerState.profile-name}'s profile? Nothing changes in the game: its hooks last this session, then are forgotten.";
+                    ? "Delete \{TrainerState.profile-name}'s profile? Next time \{TrainerState.profile-name} enters play, everything starts off."
+                    : "Delete \{TrainerState.profile-name}'s profile? Nothing changes in the game until this session ends.";
                 wrap: word-wrap;
                 vertical-alignment: center;
                 horizontal-stretch: 1;
@@ -1013,7 +1013,7 @@ export component TrainerPage inherits Rectangle {
             title: ForgeState.write-recovery-required ? "Item readback unavailable"
                 : TrainerState.item-unavailable != "" ? "Item details unavailable" : "The forge is empty";
             detail: ForgeState.write-recovery-required ? ForgeState.message
-                : TrainerState.item-unavailable != "" ? TrainerState.item-unavailable : "Place an item in the forge to view or edit affixes.";
+                : TrainerState.item-unavailable != "" ? TrainerState.item-unavailable : "Place an item in the forge to edit it.";
             stopped: ForgeState.write-recovery-required;
             ash-shown: !ForgeState.write-recovery-required;
             ash-still: true;

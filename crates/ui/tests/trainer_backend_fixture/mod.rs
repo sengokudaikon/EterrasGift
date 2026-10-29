@@ -570,7 +570,7 @@ pub(super) fn capture(session: &Session) {
     wait(|| handle.snapshot().phase == Phase::WaitingForGame && ui.global::<eg_ui::TrainerState>().get_connection_waiting());
     // Connected by hand (automatic connection off), so it asks for a Connect again rather than saying it waits (C#'s
     // `SessionErrorMessages` `waits`).
-    let multiple = "Close extra game instances, then connect again.";
+    let multiple = "Close all but one copy of Last Epoch, then connect.";
     assert_eq!(ui.global::<eg_ui::Connection>().get_text(), multiple);
     assert_eq!(ui.global::<eg_ui::TrainerState>().get_connection_detail(), multiple);
     session.capture(&ui, "backend-forge-multiple-games");
@@ -1144,10 +1144,10 @@ pub(super) fn capture(session: &Session) {
     wait(|| !ui.global::<eg_ui::ForgeState>().get_has_item());
     assert!(!ui.global::<eg_ui::Connection>().get_connected());
     assert_eq!(data.reads.load(Ordering::SeqCst), before);
-    let advice = "Exit online mode and load an offline character to use the trainer.";
+    let advice = "Load an offline character to use the trainer.";
     assert_eq!(ui.global::<eg_ui::TrainerState>().get_connection_title(), "Online mode");
     assert_eq!(ui.global::<eg_ui::TrainerState>().get_connection_detail(), advice);
-    assert_eq!(ui.global::<eg_ui::Connection>().get_text(), format!("Online mode. {advice}"));
+    assert_eq!(ui.global::<eg_ui::Connection>().get_text(), "Online mode");
     assert!(ui.global::<eg_ui::TrainerState>().get_connection_stopped() && !ui.global::<eg_ui::TrainerState>().get_connection_waiting());
     assert!(ui.global::<eg_ui::Connection>().get_show_action());
     session.capture(&ui, "backend-forge-online-refused");

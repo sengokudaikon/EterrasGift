@@ -11,13 +11,13 @@ use eg_trainer::item::template::{ItemTemplate, TemplateAffix, TemplateItem, Temp
 use std::collections::{HashMap, VecDeque};
 use std::rc::Rc;
 
-pub const OVERRIDE_REQUIRED: &str = "This edit goes past what the game allows. Turn on \"I know what I'm doing\" in Settings to write it. Nothing was applied.";
+pub const OVERRIDE_REQUIRED: &str = "This edit needs \"I know what I'm doing\" in Settings. Nothing was applied.";
 const NOTHING_APPLIED: &str = "Nothing was applied.";
 const BROKEN_BY_BASE: &str = "The new base would make affixes incompatible. Allow incompatible affixes in the base picker to apply it anyway.";
 const INCOMPATIBLE: &str = "Incompatible with this item or slot";
 const NOT_ADDED_HERE: &str = "The game would not add it here";
 const MIXED_HEADING: &str = "Don't do it";
-const MIXED_REASON: &str = "Why? The game has weird rules about compatibility of these two properties: whenever Weaver's Will begins adding affixes, it may crash the game and reset the item state. So just don't waste your time.";
+const MIXED_REASON: &str = "The game has odd rules for these two: once Weaver's Will starts adding affixes, it may crash the game and reset the item.";
 
 fn turn_on_override(action: &str) -> String {
     format!("Turn on \"I know what I'm doing\" in Settings to {action}.")
@@ -88,7 +88,7 @@ pub const PICKER_CATEGORIES: [(&str, Option<Category>); 9] = [
     ("Standard", Some(Category::Standard)),
     ("Experimental", Some(Category::Experimental)),
     ("Personal", Some(Category::Personal)),
-    ("Set · Reforged", Some(Category::Set)),
+    ("Reforged set", Some(Category::Set)),
     ("Idol enchantment", Some(Category::IdolEnchantment)),
     ("Weaver idol", Some(Category::IdolWeaver)),
     ("Corrupted", Some(Category::Corrupted)),
@@ -150,7 +150,8 @@ enum TableKey {
 pub struct RarityOption {
     pub name: String,
     pub exalted: bool,
-    pub detail: String,
+    /// What picking it changes, as a sentence.
+    pub note: String,
     pub available: bool,
     pub in_game: bool,
     pub current: bool,
@@ -315,17 +316,16 @@ impl ForgeEditor {
         self.templates.as_ref().map(TemplateStore::list).unwrap_or_default()
     }
 
-    /// A template's caption: what it holds, e.g. "Whole item · 4 affixes · Health, Movement Speed, …".
-    pub fn template_detail(&self, template: &ItemTemplate) -> String {
+    /// A template's caption, each its own text: what it holds, e.g. ["Whole item", "4 affixes", "Health, Movement Speed, …"].
+    pub fn template_detail(&self, template: &ItemTemplate) -> Vec<String> {
         let names: Vec<String> = template.affixes.iter().take(3).map(|affix| self.catalog().definition(affix.id).name).collect();
         let more = if template.affixes.len() > 3 { ", …" } else { "" };
         let kind = if template.item.is_some() { "Whole item" } else { "Affixes" };
-        let affixes = count(template.affixes.len(), "affix", "affixes");
-        if names.is_empty() {
-            format!("{kind} · {affixes}")
-        } else {
-            format!("{kind} · {affixes} · {}{more}", names.join(", "))
+        let mut facts = vec![kind.to_owned(), count(template.affixes.len(), "affix", "affixes")];
+        if !names.is_empty() {
+            facts.push(format!("{}{more}", names.join(", ")));
         }
+        facts
     }
 
     /// Saves the item as Apply would leave it under `name`: its affixes, or with `whole` the item too (base, unique and
@@ -794,7 +794,7 @@ impl ForgeEditor {
             None => String::new(),
             Some(identity) if !identity.is_editable() => identity.read_only_reason.clone(),
             _ if self.has_other_drafts() => "Apply or discard the other drafts first. A new unique brings its own modifiers.".into(),
-            _ => "Change which unique or set item this is. The rarity follows the game: with affixes it is legendary, and a set item holds none.".into(),
+            _ => "Change which unique or set item this is".into(),
         }
     }
 
@@ -850,7 +850,7 @@ impl ForgeEditor {
             (_, true, false) => "legendary potential",
             _ => "Weaver's Will",
         };
-        Some(format!("keeps {kept} it never holds, which may crash the game and reset the item state"))
+        Some(format!("Keeps {kept} it never holds, which may crash the game and reset the item."))
     }
 
     /// The uniques and set items of the item's type, uniques first, each with the rarity it would end with. A
@@ -869,37 +869,40 @@ impl ForgeEditor {
                     _ => (item.sub_type, item.rarity),
                 };
                 let rarity = if game { item.rarity } else { rarity };
-                let mut detail = vec![self.rarity_label(rarity)];
+                let mut facts = vec![self.rarity_label(rarity)];
+                let mut notes: Vec<String> = Vec::new();
                 if let Some(base) = self.catalog().base(item.item_type, sub_type) {
-                    detail.push(base.name.clone());
+                    facts.push(base.name.clone());
                 }
                 if !unique.is_set {
-                    detail.push(
+                    facts.push(
                         if unique.legendary_type == LegendaryType::WeaversWill {
                             "Weaver's Will"
                         } else {
-                            "legendary potential"
+                            "Legendary potential"
                         }
                         .into(),
                     );
                 }
                 let mut available = true;
                 if !game && unique.is_set && !item.affixes.is_empty() {
-                    detail.push("holds no affixes: remove them first".into());
+                    notes.push("Holds no affixes. Remove them first.".into());
                     available = false;
                 } else if !game {
                     let mut overrides = Vec::new();
                     if rarity == item::LEGENDARY && !unique.can_drop_as_legendary {
-                        overrides.push("never legendary in the game".to_string());
+                        overrides.push("Never legendary in the game.".to_string());
                     }
                     overrides.extend(Self::foreign_legendary(item, unique));
                     if !overrides.is_empty() {
-                        let note = if self.unrestricted() { "" } else { "; needs \"I know what I'm doing\"" };
-                        detail.push(format!("{}{note}", overrides.join("; ")));
+                        notes.extend(overrides);
+                        if !self.unrestricted() {
+                            notes.push("Needs \"I know what I'm doing\".".into());
+                        }
                         available = self.unrestricted();
                     }
                     if !edit.can_reverse(item) {
-                        detail.push("one-way: Undo apply cannot reverse it".into());
+                        notes.push("Undo apply can't reverse it.".into());
                     }
                 }
                 // Anything else the trainer would refuse says why, once the override rules above have had their say.
@@ -908,12 +911,13 @@ impl ForgeEditor {
                     && let Err(error) = edit.prepare_view_with_override(item, self.unrestricted())
                 {
                     available = false;
-                    detail.push(error.to_string());
+                    notes.push(error.to_string());
                 }
                 FieldOption {
                     value: i64::from(unique.id),
                     name: unique.name.clone(),
-                    detail: detail.join(" · "),
+                    facts,
+                    note: notes.join(" "),
                     in_game: game,
                     implicits: String::new(),
                     available,
@@ -1038,9 +1042,9 @@ impl ForgeEditor {
         if !self.is_crafted() {
             String::new()
         } else if self.can_change_rarity() {
-            "Exalted means an affix at T6 or higher; switching it changes affix tiers. Normal, magic and rare follow the number of unsealed affixes.".into()
+            "Switching to or from exalted changes affix tiers. Normal, magic and rare follow the unsealed affix count.".into()
         } else {
-            "Normal, magic and rare follow the number of unsealed affixes; exalted needs an affix at T6 or higher.".into()
+            "Normal, magic and rare follow the unsealed affix count. Exalted needs an affix at T6 or higher.".into()
         }
     }
 
@@ -1082,20 +1086,19 @@ impl ForgeEditor {
 
     pub fn base_tip(&self) -> String {
         match (&self.base, &self.item) {
-            (None, Some(item)) if item::is_unique_backed(item.rarity) => {
-                "Unique, set and legendary bases are fixed: each comes on its own. Changing the unique (the name) brings its base.".into()
-            }
+            (None, Some(item)) if item::is_unique_backed(item.rarity) => "Uniques, set items and legendaries keep their base. Change the unique to change it.".into(),
             (None, _) => String::new(),
             (Some(base), _) if !base.is_editable() => base.read_only_reason.clone(),
             _ if self.has_implicit_drafts() => "Apply or discard the implicit roll drafts first. A new base replaces the implicits.".into(),
-            _ => "Change the base. The game rebuilds implicits and requirements for the new base.".into(),
+            _ => "Change the base. Implicits and requirements follow it.".into(),
         }
     }
 
-    /// The line after the rarity and base: the level requirement where it is no cell, then what the item holds.
-    pub fn summary(&self) -> String {
+    /// The facts after the rarity and base, each its own text: the level requirement where it is no cell, then what the
+    /// item holds.
+    pub fn summary(&self) -> Vec<String> {
         let Some(item) = self.item.as_ref() else {
-            return String::new();
+            return Vec::new();
         };
         let mut parts = Vec::new();
         if let Some(status) = item.status
@@ -1110,12 +1113,12 @@ impl ForgeEditor {
                 .backing()
                 .is_some_and(|unique| matches!(unique.formatting, crate::pages::forge::game::Lookup::Ready(())))
             {
-                format!("{affixes} · {}", count(self.uniques.len(), "unique modifier", "unique modifiers"))
+                format!("{affixes}, {}", count(self.uniques.len(), "unique modifier", "unique modifiers"))
             } else {
                 affixes
             },
         );
-        parts.join(" · ")
+        parts
     }
 
     /// The two rarities tiers can reach on a crafted item with affixes.
@@ -1135,19 +1138,19 @@ impl ForgeEditor {
             .map(|to_exalted| {
                 let plan = if to_exalted == exalted { Vec::new() } else { self.exalted_plan(to_exalted) };
                 let name = |index: usize| self.affixes[index].name();
-                let detail = match (to_exalted, plan.as_slice()) {
+                let note = match (to_exalted, plan.as_slice()) {
                     _ if to_exalted == exalted => String::new(),
                     (_, []) => "No affix on this item has a T6.".into(),
-                    (true, [(only, tier, _)]) if *tier == 6 && self.affixes[*only].state.tier < 6 => format!("Raises {} to T6", name(*only)),
-                    (true, [(only, tier, _)]) => format!("Restores {} to T{tier}", name(*only)),
-                    (true, _) => format!("Restores {} affixes to their tiers in game", plan.len()),
-                    (false, [(only, tier, _)]) => format!("Lowers {} to T{tier}", name(*only)),
-                    _ => format!("Lowers {} affixes below T6", plan.len()),
+                    (true, [(only, tier, _)]) if *tier == 6 && self.affixes[*only].state.tier < 6 => format!("Raises {} to T6.", name(*only)),
+                    (true, [(only, tier, _)]) => format!("Restores {} to T{tier}.", name(*only)),
+                    (true, _) => format!("Restores {} affixes to their tiers in game.", plan.len()),
+                    (false, [(only, tier, _)]) => format!("Lowers {} to T{tier}.", name(*only)),
+                    _ => format!("Lowers {} affixes below T6.", plan.len()),
                 };
                 RarityOption {
                     name: if to_exalted { "Exalted".into() } else { self.drafted_count_rarity(drafted) },
                     exalted: to_exalted,
-                    detail,
+                    note,
                     available: to_exalted == exalted || !plan.is_empty(),
                     in_game: to_exalted == game_exalted,
                     current: to_exalted == exalted,
@@ -1231,8 +1234,8 @@ impl ForgeEditor {
     pub fn max_tiers_tip(&self) -> String {
         match self.max_tier_plan().len() {
             0 => "Every affix is at its highest tier below T8.".into(),
-            1 => "Drafts the affix below its highest tier up to it, at most T7. Primordial affixes stay as they are.".into(),
-            n => format!("Drafts {n} affixes up to their highest tier, at most T7. Primordial affixes stay as they are."),
+            1 => "Draft the affix up to its highest tier, at most T7. Primordial affixes stay.".into(),
+            n => format!("Draft {n} affixes up to their highest tier, at most T7. Primordial affixes stay."),
         }
     }
 
@@ -1278,8 +1281,8 @@ impl ForgeEditor {
     pub fn max_rolls_tip(&self) -> String {
         match self.max_roll_plan().len() {
             0 => "Every roll that can change is at its best.".into(),
-            1 => "Drafts the roll below its best up to roll 255, the game's perfect roll.".into(),
-            n => format!("Drafts {n} rolls up to roll 255, the game's perfect roll: affixes, unique modifiers and implicits."),
+            1 => "Draft the roll up to 255, the game's perfect roll.".into(),
+            n => format!("Draft {n} rolls up to 255, the game's perfect roll."),
         }
     }
 
@@ -1322,9 +1325,9 @@ impl ForgeEditor {
         if self.is_base_drafted() {
             "From the drafted base. Roll positions carry over when it applies."
         } else if self.item.as_ref().is_some_and(|item| item.implicits.is_none()) {
-            "From game data. The game did not describe this item's implicits, so their values cannot reroll."
+            "From game data. The game didn't describe them, so they can't reroll."
         } else {
-            "Set by the base. Values reroll in place; only a base change replaces implicits."
+            "Set by the base. Their values can reroll, and a new base replaces them."
         }
     }
 
@@ -1373,7 +1376,7 @@ impl ForgeEditor {
     pub fn add_affix_tip(&self) -> String {
         match self.item {
             None => String::new(),
-            Some(_) => "Add an affix as a draft. Apply writes it with the other drafts and reads it back; its value can be set once it is added.".into(),
+            Some(_) => "Add an affix as a draft".into(),
         }
     }
 
@@ -2060,7 +2063,7 @@ impl ForgeEditor {
 
     pub fn undo_tip(&self) -> &'static str {
         if self.undo_writes_to_game() {
-            "Write the values from before the last Apply back to the game; each is read back to confirm it"
+            "Write back the values from before the last Apply"
         } else {
             "Undo the last draft change (Ctrl+Z)"
         }
@@ -2139,10 +2142,7 @@ impl ForgeEditor {
     /// Ctrl+Z: draft changes only; past the last one it says where Undo apply is instead of writing.
     pub fn undo_draft_only(&mut self) {
         if !self.undo_draft_step() && self.undo_writes_to_game() {
-            self.say(
-                "No draft changes left to undo. Undo apply writes the values from before the last Apply back to the game.",
-                MessageKind::Info,
-            );
+            self.say("Nothing left to undo. Undo apply writes back the values from before the last Apply.", MessageKind::Info);
         }
     }
 
@@ -2549,7 +2549,7 @@ impl ForgeEditor {
                 status.level_requirement,
                 limits.map(|l| l.level_requirement),
                 "",
-                "Change level requirement. The game does not save it: it recalculates it from the base and affix tiers when the item reloads or is edited again.",
+                "Change the level requirement. The game works it out again when the item reloads or changes.",
                 "",
                 false,
             ));
@@ -2563,7 +2563,7 @@ impl ForgeEditor {
                 None
             });
             let reason = if unique.is_none() {
-                "This unique is not in the captured game data. Refresh game data in Settings."
+                "This unique isn't in the game data. Read the game files again in Settings."
             } else {
                 ""
             };
@@ -2654,7 +2654,7 @@ impl ForgeEditor {
                 status.weavers_will,
                 limits.map(|l| l.weavers_will),
                 &reason(mixed),
-                "Forced Weaver's Will. The game grows and upgrades affixes with it, up to its maximum. 0 takes it off. Observed: after a reload, a unique that has not yet grown an affix holds it as legendary potential of the same value.",
+                "The game grows and upgrades affixes with it, up to its maximum. 0 takes it off. After a reload, a unique that hasn't grown an affix yet shows it as legendary potential.",
                 if mixed { MIXED_HEADING } else { "" },
                 true,
             ));
@@ -2684,7 +2684,7 @@ impl ForgeEditor {
                 status.weavers_touch,
                 limits.map(|l| l.weavers_touch),
                 if enabled { "" } else { &locked },
-                "Weaver's Touch, which enchanting gives an idol. 0 takes it off. The game only uses it on uncorrupted class-specific idol types (Grand, Large, Ornate, Huge, Adorned); on others it is stored but ignored.",
+                "Enchanting gives an idol Weaver's Touch. 0 takes it off. Only uncorrupted Grand, Large, Ornate, Huge and Adorned idols use it.",
                 "",
                 true,
             ));
@@ -2711,24 +2711,26 @@ impl ForgeEditor {
             .flat_map(|definition| definition.bases.iter().map(move |base| (definition, base)))
             .map(|(definition, base)| {
                 let other_type = definition.item_type != item.item_type;
-                let mut detail = vec![format!("Level {}", base.level)];
+                let mut facts = vec![format!("Level {}", base.level)];
                 if other_type {
-                    detail.insert(0, definition.name.clone());
+                    facts.insert(0, definition.name.clone());
                 }
                 if base.corrupted {
-                    detail.push("corrupted base".into());
+                    facts.push("Corrupted base".into());
                 }
                 let broken = self.broken_by_base(item, definition.item_type, base.sub_type);
                 if broken > 0 {
-                    detail.push(count(broken, "incompatible affix", "incompatible affixes"));
-                }
-                if other_type && !unrestricted {
-                    detail.push("needs \"I know what I'm doing\"".into());
+                    facts.push(count(broken, "incompatible affix", "incompatible affixes"));
                 }
                 FieldOption {
                     value: base_key(definition.item_type, base.sub_type),
                     name: base.name.clone(),
-                    detail: detail.join(" · "),
+                    facts,
+                    note: if other_type && !unrestricted {
+                        "Needs \"I know what I'm doing\".".into()
+                    } else {
+                        String::new()
+                    },
                     in_game: !other_type && base.sub_type == item.sub_type,
                     implicits: base.implicits.join("\n"),
                     available: !other_type || unrestricted,
@@ -2822,19 +2824,19 @@ impl ForgeEditor {
         }
     }
 
-    /// A picker entry's caption: its kind and tiers, then its value range at the tier it would take, e.g.
-    /// "Suffix · T1–T8 · T1: +5–10".
-    pub fn picker_entry_detail(&self, definition: &AffixDefinition) -> String {
+    /// A picker entry's caption, each its own text: its kind and tiers, then its value range at the tier it would take,
+    /// e.g. ["Suffix", "T1–T8", "T1 +5–10"].
+    pub fn picker_entry_detail(&self, definition: &AffixDefinition) -> Vec<String> {
         let tier = self.picker_tier().min(definition.max_tier.max(1));
         let range = self.catalog().tier_range(definition.id, tier);
-        if range.is_empty() {
-            definition.picker_description()
-        } else {
-            format!("{} · T{tier}: {range}", definition.picker_description())
+        let mut facts = definition.picker_description();
+        if !range.is_empty() {
+            facts.push(format!("T{tier} {range}"));
         }
+        facts
     }
 
-    /// Every tier's value range of the picked affix, "T1 +5–10 · T2 +11–15 · …"; empty where the game data has none.
+    /// Every tier's value range of the picked affix, "T1 +5–10, T2 +11–15, …"; empty where the game data has none.
     fn picker_ladder(&self) -> String {
         let Some(definition) = self.picked() else {
             return String::new();
@@ -2846,7 +2848,7 @@ impl ForgeEditor {
                 (!range.is_empty()).then(|| format!("T{tier}\u{a0}{}", range.replace('–', "–\u{2060}")))
             })
             .collect::<Vec<_>>()
-            .join(" · ")
+            .join(", ")
     }
 
     pub fn picker_allow(&mut self, allow: bool) {
@@ -2965,7 +2967,7 @@ impl ForgeEditor {
     fn replacement_problem(&self, compatibility: Compatibility, allow_incompatible: bool) -> Option<String> {
         if !compatibility.allows_edit(allow_incompatible) {
             return Some(if compatibility == Compatibility::Unknown {
-                "Compatibility could not be confirmed for this affix.".into()
+                "Compatibility couldn't be confirmed.".into()
             } else {
                 "This affix is incompatible with the selected item or slot.".into()
             });
@@ -3011,7 +3013,7 @@ impl ForgeEditor {
     /// "Allow incompatible affixes" too.
     fn addition(&self, item: &ForgeItem, definition: &AffixDefinition, tier: u8, roll: u8, seal: Seal, allow_incompatible: bool) -> Result<ItemEdit, String> {
         if !definition.writable {
-            return Err("This affix cannot be written: it is missing from the game data, or the editor does not know its type.".into());
+            return Err("This affix can't be written: it's missing from the game data, or its type is unknown.".into());
         }
         let compatibility = self.game.compatibility(item, definition, None, self.unrestricted());
         let (prefixes, suffixes) = item.free_slots();
@@ -3030,7 +3032,7 @@ impl ForgeEditor {
             return Err(if slot_free {
                 format!("{NOT_ADDED_HERE}. {}", turn_on_override("add it anyway"))
             } else {
-                format!("No free {slot} slot. Adding past the free slots needs \"I know what I'm doing\" in Settings.")
+                format!("No free {slot} slot. Adding more needs \"I know what I'm doing\" in Settings.")
             });
         }
         let edit = ItemEdit::AddAffix(eg_trainer::item::edit::AddAffixEdit {
@@ -3082,7 +3084,7 @@ impl ForgeEditor {
             return "Select an affix slot.".into();
         };
         match self.compatibility_of(definition, Some(&slot)) {
-            Compatibility::Override => "Allowed by \"I know what I'm doing\". The game does not roll it here.".into(),
+            Compatibility::Override => "Allowed by \"I know what I'm doing\". The game doesn't roll it here.".into(),
             Compatibility::Allowed => "Compatible with this slot".into(),
             Compatibility::Rejected(_) if !self.unrestricted() => format!("{INCOMPATIBLE}. {}", turn_on_override("use it")),
             Compatibility::Rejected(reason) => match reason {
@@ -3094,7 +3096,7 @@ impl ForgeEditor {
                 item::Rejection::IncompleteData => "The game data is incomplete for this affix, so where it rolls can't be checked.".into(),
             },
             Compatibility::Unknown if !self.unrestricted() => format!("Compatibility could not be confirmed. {}", turn_on_override("use it")),
-            Compatibility::Unknown => "Compatibility could not be confirmed for this affix.".into(),
+            Compatibility::Unknown => "Compatibility couldn't be confirmed.".into(),
         }
     }
 
@@ -3409,7 +3411,7 @@ impl ForgeEditor {
     fn read_affix_edit(&self, row: &AffixRow, item: &ForgeItem, slot: usize) -> Result<ItemEdit, String> {
         let definition = self.catalog().definition(row.draft_id());
         if !definition.writable {
-            return Err("This affix cannot be written: it is missing from the game data, or the editor does not know its type.".into());
+            return Err("This affix can't be written: it's missing from the game data, or its type is unknown.".into());
         }
         if row.tier() > definition.max_tier {
             return Err(format!("This affix supports at most tier {}.", definition.max_tier));
@@ -3441,14 +3443,14 @@ impl ForgeEditor {
             StepRow::Uniques(uids) => {
                 let rows: Vec<&RollRow> = self.uniques.iter().filter(|r| uids.contains(&r.uid)).collect();
                 (
-                    rows.iter().map(|r| r.change_summary()).filter(|t| !t.is_empty()).collect::<Vec<_>>().join(" · "),
+                    rows.iter().map(|r| r.change_summary()).filter(|t| !t.is_empty()).collect::<Vec<_>>().join("\n"),
                     rows.iter().map(|r| r.text.clone()).collect::<Vec<_>>().join("\n"),
                 )
             }
             StepRow::Implicits(uids) => {
                 let rows: Vec<&RollRow> = self.implicits.iter().filter(|r| uids.contains(&r.uid)).collect();
                 (
-                    rows.iter().map(|r| r.change_summary()).filter(|t| !t.is_empty()).collect::<Vec<_>>().join(" · "),
+                    rows.iter().map(|r| r.change_summary()).filter(|t| !t.is_empty()).collect::<Vec<_>>().join("\n"),
                     rows.iter().map(|r| r.effects()).filter(|t| !t.is_empty()).collect::<Vec<_>>().join("\n"),
                 )
             }

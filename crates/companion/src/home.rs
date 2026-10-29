@@ -8,11 +8,11 @@ use eg_core::bloom::BloomPhase;
 use eg_core::game_log::GameReadiness;
 use std::borrow::Cow;
 
-const ONLINE: &str = "Start the game through Steam. MelonLoader is set aside first, so no mod loads online";
-const OFFLINE: &str = "Start the game in offline mode. MelonLoader is set aside first, so no mod loads";
-const WITH_MODS: &str = "Start the game in offline mode with MelonLoader and the mods that are on; needs MelonLoader in the game folder";
-const RUNNING: &str = "Last Epoch is running. Start it again once it has closed.";
-const NO_MOD_LOADER: &str = "Play offline with mods needs MelonLoader in the game folder.";
+const ONLINE: &str = "Start through Steam, without mods";
+const OFFLINE: &str = "Start offline, without mods";
+const WITH_MODS: &str = "Start offline with MelonLoader and the mods that are on";
+const RUNNING: &str = "Last Epoch is already running.";
+const NO_MOD_LOADER: &str = "MelonLoader isn't in the game folder.";
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct HomeModel {
@@ -194,7 +194,7 @@ mod tests {
         assert_eq!(home.message(), Some(STARTING_WITH_MODS));
         home.finish(LaunchReport {
             started: true,
-            message: "Started Last Epoch offline, without mods.".into(),
+            message: "Started offline, without mods.".into(),
         });
         assert!(!home.is_error());
         home.set_phase(BloomPhase::Bloom);
@@ -203,7 +203,7 @@ mod tests {
         assert_eq!(home.message(), None);
         home.finish(LaunchReport {
             started: false,
-            message: "Last Epoch is starting already.".into(),
+            message: "Last Epoch is already starting.".into(),
         });
         assert!(home.is_error());
     }

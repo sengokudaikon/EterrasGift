@@ -12,7 +12,7 @@ pub const PROXY_NAME: &str = "version.dll";
 /// The proxy set aside beside itself, so the game starts without MelonLoader.
 pub const SET_ASIDE_NAME: &str = "version.dll.disabled";
 /// Why nothing is done with MelonLoader while both are there; each place adds what to do.
-pub const CONFLICT: &str = "Both version.dll and version.dll.disabled are in the game folder, so which MelonLoader is current can't be told.";
+pub const CONFLICT: &str = "The game folder has both version.dll and version.dll.disabled.";
 /// How long a start with mods waits for MelonLoader's log before it sets the proxy aside again all the same.
 pub const LOADER_TIMEOUT: Duration = Duration::from_secs(120);
 
@@ -123,11 +123,9 @@ impl ModLoaderSwitch {
         match self.state() {
             ModLoaderState::Conflict => Err(conflict()),
             ModLoaderState::NotInstalled if eg_core::paths::same_folder(&self.loader_root, &self.game_directory) => {
-                Err("MelonLoader is not in the game folder, so no mod can load.".into())
+                Err("MelonLoader isn't in the game folder, so no mod can load.".into())
             }
-            ModLoaderState::NotInstalled => {
-                Err("MelonLoader is not in the MelonLoader folder chosen in Settings, or its version.dll is not in the game folder, so no mod can load.".into())
-            }
+            ModLoaderState::NotInstalled => Err("MelonLoader isn't in the folder chosen in Settings, or its version.dll isn't in the game folder, so no mod can load.".into()),
             state => Ok(state),
         }
     }
@@ -173,7 +171,7 @@ mod tests {
         assert_eq!(switch.state(), ModLoaderState::NotInstalled);
         switch.set_aside().unwrap();
         assert!(game.join(PROXY_NAME).exists(), "another tool's version.dll is left alone");
-        assert_eq!(switch.check_restore().unwrap_err(), "MelonLoader is not in the game folder, so no mod can load.");
+        assert_eq!(switch.check_restore().unwrap_err(), "MelonLoader isn't in the game folder, so no mod can load.");
 
         fs::create_dir(game.join("MelonLoader")).unwrap();
         assert_eq!(switch.state(), ModLoaderState::Active);

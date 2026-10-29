@@ -19,9 +19,9 @@ export global HomeState {
     in property <bool> can-start: true;
     in property <bool> can-start-with-mods: true;
     // Why the buttons are disabled, or what each does (the tooltips, shown on disabled buttons too).
-    in property <string> online-tip: "Start the game through Steam. MelonLoader is set aside first, so no mod loads online";
-    in property <string> offline-tip: "Start the game in offline mode. MelonLoader is set aside first, so no mod loads";
-    in property <string> with-mods-tip: "Start the game in offline mode with MelonLoader and the mods that are on; needs MelonLoader in the game folder";
+    in property <string> online-tip: "Start through Steam, without mods";
+    in property <string> offline-tip: "Start offline, without mods";
+    in property <string> with-mods-tip: "Start offline with MelonLoader and the mods that are on";
     // The last start's message, about this one game.
     in property <string> message;
     in property <bool> message-is-error;
@@ -64,7 +64,7 @@ export component HomePage inherits Rectangle {
         }
 
         if !HomeState.has-launcher: SecondaryText {
-            text: "Companion tools for Last Epoch. New ones appear here as they are added.";
+            text: "Companion tools for Last Epoch.";
             horizontal-alignment: center;
         }
 

@@ -103,9 +103,9 @@ pub fn build(area: Area, features: &[Feature], planned: bool, session: &dyn Trai
 /// A planned row's details: its values and their starting points, or the fields it edits.
 pub fn planned_details(feature: &Feature) -> String {
     if !feature.values.is_empty() {
-        feature.values.iter().map(|v| format!("{}: {}", v.label, v.default)).collect::<Vec<_>>().join(" · ")
+        feature.values.iter().map(|v| format!("{} {}", v.label, v.default)).collect::<Vec<_>>().join(", ")
     } else {
-        feature.fields.iter().map(|f| f.label).collect::<Vec<_>>().join(" · ")
+        feature.fields.iter().map(|f| f.label).collect::<Vec<_>>().join(", ")
     }
 }
 
@@ -224,13 +224,13 @@ impl HookRow {
                 format!("{} selected in the game.", self.feature.values[0].choices[self.values[0] as usize]),
                 Tone::Confirmed,
             ),
-            (true, Some(HookState::On)) if self.feature.id() == "enemy-damage" && self.values == [101.0] => say("One-hit kills on in the game.", Tone::Confirmed),
+            (true, Some(HookState::On)) if self.feature.id() == "enemy-damage" && self.values == [101.0] => say("One-hit kills are on.", Tone::Confirmed),
             (true, Some(HookState::On)) => say("On in the game.", Tone::Confirmed),
-            (true, Some(HookState::Failed { reason, .. })) => (format!("Could not turn on: {reason}"), Tone::Error),
-            (true, Some(HookState::Applying | HookState::Off)) => say("Turning on in the game…", Tone::None),
+            (true, Some(HookState::Failed { reason, .. })) => (format!("Couldn't turn on: {reason}"), Tone::Error),
+            (true, Some(HookState::Applying | HookState::Off)) => say("Turning on…", Tone::None),
             (true, Some(HookState::Queued) | None) => say("Waiting to turn on…", Tone::None),
-            (false, Some(HookState::Failed { reason, on: true })) => (format!("Could not turn off: {reason}"), Tone::Error),
-            (false, Some(HookState::Applying | HookState::On)) => say("Turning off in the game…", Tone::None),
+            (false, Some(HookState::Failed { reason, on: true })) => (format!("Couldn't turn off: {reason}"), Tone::Error),
+            (false, Some(HookState::Applying | HookState::On)) => say("Turning off…", Tone::None),
             (false, _) => (String::new(), Tone::None),
         }
     }
@@ -459,7 +459,7 @@ impl EditorRow {
         if session.is_connected() {
             session.unavailable(self.feature.id())
         } else {
-            Some("Available once an offline character is connected.")
+            Some("Connect an offline character first.")
         }
     }
 
@@ -511,7 +511,7 @@ impl EditorRow {
             }
             result => {
                 let details = result.err().map_or_else(|| "it answered with other fields.".to_owned(), |error| error.details);
-                self.say(format!("Could not read from the game: {details}"), Tone::Error);
+                self.say(format!("Couldn't read from the game: {details}"), Tone::Error);
             }
         }
     }
@@ -565,7 +565,7 @@ impl EditorRow {
                     })
                     .collect();
                 if kept.is_empty() {
-                    self.say("Confirmed by readback.", Tone::Confirmed);
+                    self.say("Confirmed.", Tone::Confirmed);
                 } else {
                     self.say(format!("The game kept {}.", kept.join(", ")), Tone::Error);
                 }
@@ -791,9 +791,9 @@ mod tests {
         assert!(matches!(rows.iter().find(|row| !matches!(row, Row::Heading(_))), Some(Row::Planned(_))));
         assert_eq!(
             planned_details(catalog::feature("drop-rates").unwrap()),
-            "Item drop chance: 0.1 · Item drop multiplier: 1 · Gold drop chance: 0.1 · Gold drop multiplier: 2"
+            "Item drop chance 0.1, Item drop multiplier 1, Gold drop chance 0.1, Gold drop multiplier 2"
         );
-        assert_eq!(planned_details(catalog::feature("currency").unwrap()), "Gold · Soul embers · Ancient bones");
+        assert_eq!(planned_details(catalog::feature("currency").unwrap()), "Gold, Soul embers, Ancient bones");
     }
 
     #[test]
@@ -948,9 +948,9 @@ mod tests {
         let status = |id| HookRow::new(*catalog::feature(id).unwrap(), &live).status(&live);
         assert_eq!(status("incoming-damage"), ("On in the game.".into(), Tone::Confirmed));
         assert_eq!(status("enemy-damage").0, "Waiting to turn on…");
-        assert_eq!(status("ability-speed"), ("Could not turn on: the game's method was not found".into(), Tone::Error));
-        assert_eq!(status("movement-speed"), ("Could not turn off: the game's method was not found".into(), Tone::Error));
-        assert_eq!(status("new-item-rarity").0, "Turning off in the game…");
+        assert_eq!(status("ability-speed"), ("Couldn't turn on: the game's method was not found".into(), Tone::Error));
+        assert_eq!(status("movement-speed"), ("Couldn't turn off: the game's method was not found".into(), Tone::Error));
+        assert_eq!(status("new-item-rarity").0, "Turning off…");
         assert_eq!(status("drop-rates").0, "");
     }
 
@@ -1044,7 +1044,7 @@ mod tests {
         assert!(row.has_drafts());
         *slot.borrow_mut() = Some(Ok(vec![GameField::new("", 1.1), GameField::new("", 0.3)]));
         row.follow(&game);
-        assert_eq!((row.status.as_str(), row.tone), ("Confirmed by readback.", Tone::Confirmed));
+        assert_eq!((row.status.as_str(), row.tone), ("Confirmed.", Tone::Confirmed));
         assert!(!row.has_drafts() && row.can_use(&game));
         // A failed write that sent nothing keeps the drafts.
         row.fields[1].set_amount(Some(2.0));
@@ -1063,7 +1063,7 @@ mod tests {
         assert_eq!(unserved.reason(&game), Some(NOT_AVAILABLE));
         assert_eq!(
             EditorRow::new(feature, false, &Unconnected).reason(&Unconnected),
-            Some("Available once an offline character is connected.")
+            Some("Connect an offline character first.")
         );
         let hook = HookRow::new(*catalog::feature("enemy-damage").unwrap(), &game);
         assert!(hook.can_use(&game));
@@ -1087,7 +1087,7 @@ mod tests {
         assert_eq!(row.fields[1].amount(), Some(65535.0));
         assert_eq!(row.apply_text(), "Apply 2 changes");
         row.apply(&game);
-        assert_eq!((row.status.as_str(), row.tone), ("Confirmed by readback.", Tone::Confirmed));
+        assert_eq!((row.status.as_str(), row.tone), ("Confirmed.", Tone::Confirmed));
         assert!(!row.has_drafts());
         row.fields[0].set_amount(Some(60.0));
         *game.keep.borrow_mut() = Some(40.0);
@@ -1095,7 +1095,7 @@ mod tests {
         assert_eq!(row.status, "The game kept Passive points 40.");
         assert_eq!(
             HookRow::new(*catalog::feature("incoming-damage").unwrap(), &game).status(&game).0,
-            "Could not turn on: the helper is older than the app"
+            "Couldn't turn on: the helper is older than the app"
         );
     }
 

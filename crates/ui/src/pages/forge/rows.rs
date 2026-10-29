@@ -265,10 +265,10 @@ impl ValueEditor {
             return self.status.clone();
         }
         let in_game = match game {
-            Some(game) if game != roll => self.sample_at(game).map(|sample| format!(" · in game {}", sample.display)).unwrap_or_default(),
+            Some(game) if game != roll => self.sample_at(game).map(|sample| format!("\nIn game {}", sample.display)).unwrap_or_default(),
             _ => String::new(),
         };
-        let tip = format!("{} · range {} – {}{in_game}", self.display(roll), self.minimum_text(), self.maximum_text());
+        let tip = format!("{}\nRange {} – {}{in_game}", self.display(roll), self.minimum_text(), self.maximum_text());
         if self.note.is_empty() { tip } else { format!("{tip}\n{}", self.note) }
     }
 
@@ -430,7 +430,7 @@ impl AffixRow {
         self.draft.definition.max_tier.clamp(1, 8)
     }
 
-    /// "type · category · class" of the slot as drafted; for an affix with a value the editor cannot represent, that value.
+    /// The slot's kind as drafted, as one phrase; for an affix with a value the editor cannot represent, that value.
     pub fn detail(&self) -> String {
         if let Some(unknown) = self.state.unknown {
             return unknown.to_string();
@@ -440,7 +440,7 @@ impl AffixRow {
         } else {
             self.state.category
         };
-        super::item::join_parts(&[self.state.kind.name(), &category.name()])
+        super::item::kind_phrase(self.state.kind.name(), category)
     }
 
     pub fn is_reforged(&self) -> bool {
@@ -544,11 +544,12 @@ impl AffixRow {
             return "Removed".into();
         }
         if self.added {
-            let mut parts = vec!["Added".to_string(), format!("Tier {}", self.draft.tier)];
-            if self.draft.seal != Seal::Normal {
-                parts.push(self.draft.seal.name().into());
-            }
-            return parts.join(" · ");
+            let seal = if self.draft.seal == Seal::Normal {
+                String::new()
+            } else {
+                format!(", {}", self.draft.seal.name().to_lowercase())
+            };
+            return format!("Added at tier {}{seal}", self.draft.tier);
         }
         let mut parts = Vec::new();
         if self.is_replaced() {
@@ -566,7 +567,7 @@ impl AffixRow {
         if self.is_seal_drafted() {
             parts.push(format!("{} → {}", self.state.seal.name(), self.draft.seal.name()));
         }
-        parts.join(" · ")
+        parts.join("\n")
     }
 
     pub fn name_tip(&self) -> String {
@@ -870,7 +871,7 @@ impl RollRow {
                 None => format!("{} → {}", roll.label, roll.editor.display(roll.value)),
             })
             .collect::<Vec<_>>()
-            .join(" · ")
+            .join("\n")
     }
 
     pub fn effects(&self) -> String {
@@ -973,7 +974,10 @@ impl RollRow {
 pub struct FieldOption {
     pub value: i64,
     pub name: String,
-    pub detail: String,
+    /// Short facts shown side by side, each its own text.
+    pub facts: Vec<String>,
+    /// What stands in the way or what to know before picking it, as sentences.
+    pub note: String,
     pub in_game: bool,
     pub implicits: String,
     pub available: bool,
@@ -1070,7 +1074,8 @@ impl FieldDraft {
             FieldOption {
                 value: 0,
                 name: off.into(),
-                detail: String::new(),
+                facts: Vec::new(),
+                note: String::new(),
                 in_game: !game,
                 implicits: String::new(),
                 available: true,
@@ -1079,7 +1084,8 @@ impl FieldDraft {
             FieldOption {
                 value: 1,
                 name: on.into(),
-                detail: String::new(),
+                facts: Vec::new(),
+                note: String::new(),
                 in_game: game,
                 implicits: String::new(),
                 available: true,

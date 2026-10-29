@@ -375,7 +375,7 @@ fn readiness_preserves_warning_precedence_without_disabling_user_chosen_modded_s
     inventory.loader.as_mut().unwrap().last_game_without_support = false;
     inventory.loader.as_mut().unwrap().preparation = LoaderPreparation::WillPrepare;
     let ready = inventory.readiness(None, true, true, false, now);
-    assert!(ready.text.starts_with("Last Epoch is running while MelonLoader prepares"));
+    assert!(ready.text.starts_with("MelonLoader is preparing"));
     assert!(ready.warning && !ready.can_play, "a preparation message keeps an enabled mod's warning tone");
     inventory.mods[0].installed.enabled = false;
     assert!(!inventory.readiness(None, true, true, false, now).warning);

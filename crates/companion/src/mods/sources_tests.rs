@@ -376,7 +376,7 @@ fn updates_compare_project_versions_and_installability_compares_hashes() {
     assert!(project.update_available(Some("1.1.0")));
     assert!(!project.update_available(None));
     assert!(!project.update_available(Some("1.2.0")));
-    assert!(project.caption(Path::new("mods")).starts_with("1.2.0 · mods"));
+    assert!(project.source_folder(Path::new("mods")).starts_with("mods"));
     let build = ModBuild {
         project,
         version: Some("99.0.0".into()),

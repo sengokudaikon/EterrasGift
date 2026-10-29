@@ -5,6 +5,7 @@
 import { ListView } from "../../widgets/scroll-view.slint";
 import { Tokens } from "../../tokens.slint";
 import { FieldFrame } from "../../widgets/text-field.slint";
+import { FactsText } from "../../widgets/text.slint";
 import { KeyboardFocus, Tip } from "../../globals.slint";
 import { Button, ButtonKind } from "../../widgets/button.slint";
 import { FocusRing, TipBubble } from "../../widgets/focus.slint";
@@ -351,7 +352,7 @@ export component AffixPickerPanel inherits FlyoutSurface {
                         padding-left: Tokens.check-box-caption-margin.left;
 
                         Text {
-                            text: "Also lists affixes this item or slot can't normally roll. Writing one needs \"I know what I'm doing\" in Settings.";
+                            text: "Lists affixes this slot can't roll. Writing one needs \"I know what I'm doing\".";
                             font-size: Tokens.font-size-caption;
                             color: Tokens.text-muted-brush;
                             wrap: word-wrap;
@@ -451,11 +452,9 @@ export component AffixPickerPanel inherits FlyoutSurface {
                                         wrap: word-wrap;
                                     }
 
-                                    Text {
-                                        text: entry.detail;
-                                        font-size: Tokens.font-size-caption;
+                                    FactsText {
+                                        facts: entry.facts;
                                         color: entry.reforged ? Tokens.reforged-affix-brush : Tokens.text-muted-brush;
-                                        overflow: elide;
                                     }
                                 }
 

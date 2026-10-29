@@ -17,7 +17,7 @@ use eg_companion::mods::{
 };
 use eg_core::operations::Cancellation;
 use eg_core::settings_service::SettingsService;
-use slint::{ComponentHandle, Model, ModelRc, VecModel};
+use slint::{ComponentHandle, Model, ModelRc, SharedString, VecModel};
 use std::{
     cell::{Cell, RefCell},
     collections::{BTreeSet, VecDeque},
@@ -212,6 +212,11 @@ impl View {
             jiff::Timestamp::now(),
         );
         state.set_readiness(if self.read.get() { readiness.text.into() } else { "Reading the mods…".into() });
+        state.set_readiness_facts(ModelRc::new(VecModel::from(if self.read.get() {
+            readiness.facts.into_iter().map(SharedString::from).collect::<Vec<_>>()
+        } else {
+            Vec::new()
+        })));
         state.set_readiness_tone(if readiness.warning { MessageTone::Warning } else { MessageTone::Info });
         state.set_can_play(self.read.get() && readiness.can_play && !self.closing.get());
         state.set_is_read(self.read.get());
@@ -220,9 +225,9 @@ impl View {
         let folder_tip = if inventory.mods_folder.is_some() {
             "Open the Mods folder"
         } else if self.read.get() {
-            "Not available: Last Epoch was not found, so there is no Mods folder. Choose the game executable in Settings."
+            "Last Epoch wasn't found. Choose the game executable in Settings."
         } else {
-            "Available once the mods are read."
+            "Reading the mods…"
         };
         state.set_open_folder_tip(folder_tip.into());
         state.set_open_log_tip(
@@ -231,7 +236,7 @@ impl View {
             } else if inventory.mods_folder.is_none() {
                 folder_tip
             } else {
-                "Not available: MelonLoader writes its log the first time you play with mods."
+                "No log yet. MelonLoader writes one when you play with mods."
             }
             .into(),
         );
@@ -245,11 +250,10 @@ impl View {
         state.set_can_undo(self.removed.borrow().is_some());
         let message = self.message.borrow();
         state.set_change_is_draft(message.is_none() && draft_count > 0);
-        let text = message.as_ref().map(|(message, _)| message.as_str()).unwrap_or(if draft_count > 0 {
-            "Changes since the last game with mods take effect the next time you play with mods."
-        } else {
-            ""
-        });
+        let text = message
+            .as_ref()
+            .map(|(message, _)| message.as_str())
+            .unwrap_or(if draft_count > 0 { "Changes apply the next time you play with mods." } else { "" });
         state.set_change_message(text.into());
         state.set_change_tone(if message.as_ref().is_some_and(|(_, error)| *error) {
             MessageTone::Error
@@ -261,24 +265,19 @@ impl View {
             inventory
                 .mods
                 .iter()
-                .map(|item| {
-                    let version = item.version.as_deref().unwrap_or("No version");
-                    let caption = item.author.as_ref().map_or_else(|| version.to_owned(), |author| format!("{version} · {author}"));
-                    ModRow {
-                        name: item.name.as_str().into(),
-                        version: version.into(),
-                        author: item.author.as_deref().unwrap_or_default().into(),
-                        caption: caption.into(),
-                        enabled: item.installed.enabled,
-                        drafted: item.draft_count() > 0,
-                        problem: if item.installed.enabled { item.problem.as_deref().unwrap_or_default() } else { "" }.into(),
-                        problem_label: if item.installed.enabled && item.problem.is_some() {
-                            if item.loaded_last_time == Some(false) { "Did not load" } else { "Can't load" }
-                        } else {
-                            ""
-                        }
-                        .into(),
+                .map(|item| ModRow {
+                    name: item.name.as_str().into(),
+                    version: item.version.as_deref().unwrap_or("No version").into(),
+                    author: item.author.as_deref().unwrap_or_default().into(),
+                    enabled: item.installed.enabled,
+                    drafted: item.draft_count() > 0,
+                    problem: if item.installed.enabled { item.problem.as_deref().unwrap_or_default() } else { "" }.into(),
+                    problem_label: if item.installed.enabled && item.problem.is_some() {
+                        if item.loaded_last_time == Some(false) { "Didn't load" } else { "Can't load" }
+                    } else {
+                        ""
                     }
+                    .into(),
                 })
                 .collect(),
         );
@@ -290,7 +289,8 @@ impl View {
                 .map(|project| SourceRow {
                     name: project.name.as_str().into(),
                     project: breakable_path(&project.project_file.display().to_string()).into(),
-                    caption: folder.as_deref().map(|folder| project.caption(folder)).unwrap_or_default().into(),
+                    version: project.version.as_deref().unwrap_or_default().into(),
+                    folder: folder.as_deref().map(|folder| project.source_folder(folder)).unwrap_or_default().into(),
                     busy: building.as_ref().is_some_and(|file| file.eq_ignore_ascii_case(&project.file())),
                 })
                 .collect(),
@@ -315,7 +315,7 @@ impl View {
                 .and_then(|item| {
                     item.problem.as_ref().map(|problem| {
                         if item.loaded_last_time == Some(false) {
-                            format!("Did not load in the last game with mods. {problem}")
+                            format!("Didn't load last time. {problem}")
                         } else {
                             problem.clone()
                         }
@@ -366,9 +366,9 @@ impl View {
         state.set_selected_has_sources(build.is_some());
         state.set_rebuild_tip(
             if update {
-                "Build its newer version from its project and install it; it loads the next time you play with mods"
+                "Build the newer version and install it"
             } else {
-                "Build it from its project and install the build; it loads the next time you play with mods"
+                "Build it from its project and install it"
             }
             .into(),
         );
@@ -390,14 +390,10 @@ impl View {
                             .version
                             .as_ref()
                             .filter(|version| Some(version.as_str()) != item.version.as_deref())
-                            .map(|version| format!(", {version},"))
+                            .map(|version| format!(" ({version})"))
                             .unwrap_or_default();
-                        let changed = if build.changed_since_build {
-                            ", and its sources changed since that build."
-                        } else {
-                            "."
-                        };
-                        format!("Its latest build{version} is not installed{changed}")
+                        let changed = if build.changed_since_build { " Its sources changed since." } else { "" };
+                        format!("The latest build{version} isn't installed.{changed}")
                     } else if build.changed_since_build {
                         "Its sources changed since this build.".to_owned()
                     } else {
@@ -486,14 +482,7 @@ impl View {
                                 text: run.line.text.as_str().into(),
                                 error: run.line.is_error,
                                 count: run.count as i32,
-                                count_tip: format!(
-                                    "Written {} times in a row, the last at {:02}:{:02}:{:02}",
-                                    run.count,
-                                    last / 3600,
-                                    last / 60 % 60,
-                                    last % 60
-                                )
-                                .into(),
+                                count_tip: format!("Repeated {} times, last at {:02}:{:02}:{:02}", run.count, last / 3600, last / 60 % 60, last % 60).into(),
                             }
                         })
                         .collect()

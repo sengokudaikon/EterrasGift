@@ -13,9 +13,9 @@ pub struct Profile {
 }
 
 impl Profile {
-    /// How the picker names it: "Mira · Primalist · Legacy".
+    /// How the picker names it: "Mira (Primalist, Legacy)".
     pub fn label(&self) -> String {
-        format!("{} · {} · {}", self.name, self.class, self.cycle)
+        format!("{} ({}, {})", self.name, self.class, self.cycle)
     }
 }
 
@@ -23,13 +23,13 @@ impl Profile {
 /// comes.
 pub fn caption(shown: Option<&Profile>, live: bool, kept: bool) -> String {
     match shown {
-        Some(profile) if live && kept => format!("Changes here apply in the game at once and are kept in {}'s profile.", profile.name),
+        Some(profile) if live && kept => format!("Changes apply at once and are kept in {}'s profile.", profile.name),
         Some(profile) if live => format!(
-            "Changes here apply in the game at once and last this session. Keep them as {name}'s profile to have them each time {name} enters play.",
+            "Changes apply at once and last this session. Keep them as {name}'s profile to have them every time.",
             name = profile.name
         ),
-        Some(profile) => format!("Hooks switched on here turn on when {} enters play.", profile.name),
-        None => "No profiles yet. Keep one for an offline character while it is in play with the trainer connected; its hooks can be set up here after that.".to_owned(),
+        Some(profile) => format!("What you turn on here turns on when {} enters play.", profile.name),
+        None => "No profiles yet. Connect with an offline character in play to keep one.".to_owned(),
     }
 }
 
@@ -44,9 +44,9 @@ mod tests {
             class: "Primalist".into(),
             cycle: "Legacy".into(),
         };
-        assert_eq!(mira.label(), "Mira · Primalist · Legacy");
-        assert_eq!(caption(Some(&mira), false, true), "Hooks switched on here turn on when Mira enters play.");
-        assert_eq!(caption(Some(&mira), true, true), "Changes here apply in the game at once and are kept in Mira's profile.");
+        assert_eq!(mira.label(), "Mira (Primalist, Legacy)");
+        assert_eq!(caption(Some(&mira), false, true), "What you turn on here turns on when Mira enters play.");
+        assert_eq!(caption(Some(&mira), true, true), "Changes apply at once and are kept in Mira's profile.");
         assert!(caption(Some(&mira), true, false).contains("last this session. Keep them as Mira's profile"));
         assert!(caption(None, false, true).starts_with("No profiles yet."));
     }

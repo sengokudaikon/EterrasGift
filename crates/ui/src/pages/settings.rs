@@ -176,14 +176,12 @@ impl Location {
     fn caption(self) -> &'static str {
         match self {
             Location::GameExecutable => "Leave empty to find the game automatically.",
-            Location::UserData => {
-                "Fault reports, the trainer's labels and captured game definitions, and the mod library unless it has a folder of its own. A new folder takes effect after a restart, which copies everything there."
-            }
-            Location::ModLibrary => "A copy of every mod version you install, and which mods are on. A new folder takes effect after a restart, which copies the library there.",
-            Location::ModSources => "Your own mod projects. A mod whose project is here can be rebuilt and its build installed from the Mods page.",
-            Location::Dotnet => "The folder with dotnet.exe, which builds the mod projects. Leave empty to find it automatically.",
+            Location::UserData => "Fault reports, trainer labels, game definitions and, unless it has its own folder, the mod library. A new folder takes effect after a restart.",
+            Location::ModLibrary => "Every mod version you install, and which mods are on. A new folder takes effect after a restart.",
+            Location::ModSources => "Your own mod projects, for the Mods page to build and install.",
+            Location::Dotnet => "The folder with dotnet.exe, which builds mod projects. Leave empty to find it automatically.",
             Location::MelonLoader => {
-                "Where a game with mods runs MelonLoader, its Mods and its UserData from. Leave empty for the game folder. Another folder needs a copy of the game's MelonLoader folder, version 0.6.6 or later; its version.dll stays in the game folder. Takes effect after a restart."
+                "Where games with mods run MelonLoader from. Leave empty for the game folder. Another folder needs a copy of MelonLoader 0.6.6 or later. Takes effect after a restart."
             }
         }
     }
@@ -202,7 +200,7 @@ impl Location {
     /// The picker's title.
     pub fn picker_title(self) -> &'static str {
         match self {
-            Location::GameExecutable => "Select Last Epoch executable",
+            Location::GameExecutable => "Select the Last Epoch executable",
             Location::UserData => "Select user-data folder",
             Location::ModLibrary => "Select the mod library folder",
             Location::ModSources => "Select the mod sources folder",
@@ -501,7 +499,7 @@ impl SettingsPage {
             SaveOutcome::MemoryOnly => match self.location_error.clone().or_else(|| self.external_error.clone()) {
                 Some(error) => self.set_error(&error),
                 None => {
-                    self.message = "Settings changed for this run only. The unreadable file is unchanged; Save locations replaces it.".into();
+                    self.message = "Changes last for this run only. Save locations replaces the unreadable file.".into();
                     self.kind = MessageKind::MemoryOnly;
                 }
             },

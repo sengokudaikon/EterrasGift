@@ -7,6 +7,7 @@ import { ScrollView } from "../../widgets/scroll-view.slint";
 import { Tokens } from "../../tokens.slint";
 import { KeyboardFocus } from "../../globals.slint";
 import { TipTrigger } from "../../widgets/focus.slint";
+import { FactsText } from "../../widgets/text.slint";
 import { Button, ButtonKind } from "../../widgets/button.slint";
 import { FocusRing } from "../../widgets/focus.slint";
 import { FlyoutSurface } from "../../widgets/menu.slint";
@@ -71,11 +72,18 @@ component IdentityEntry inherits MenuRow {
             }
         }
 
+        FactsText {
+            facts: root.option.facts;
+        }
+
+        // Kept in the layout at no height when empty: wrapped text inside an if is measured short (research/slint.md).
         Text {
-            text: root.option.detail;
+            text: root.option.note;
             font-size: Tokens.font-size-caption;
             color: Tokens.text-muted-brush;
             wrap: word-wrap;
+            visible: root.option.note != "";
+            height: root.option.note == "" ? 0px : self.preferred-height;
         }
     }
 }
@@ -118,13 +126,17 @@ component BaseEntry inherits MenuRow {
             height: root.option.implicits == "" ? 0px : self.preferred-height;
         }
 
+        FactsText {
+            facts: root.option.facts;
+        }
+
         Text {
-            text: root.option.detail;
+            text: root.option.note;
             font-size: Tokens.font-size-caption;
             color: Tokens.text-muted-brush;
             wrap: word-wrap;
-            visible: root.option.detail != "";
-            height: root.option.detail == "" ? 0px : self.preferred-height;
+            visible: root.option.note != "";
+            height: root.option.note == "" ? 0px : self.preferred-height;
         }
     }
 }
@@ -232,7 +244,7 @@ component ChangesToggle inherits Rectangle {
     }
 
     TipTrigger {
-        text: "Show or hide pending drafts and applied changes";
+        text: "Show or hide the changes";
         hovered: touch.has-hover;
         focused: focus.has-focus;
     }
@@ -555,7 +567,7 @@ export component ItemForge inherits Rectangle {
                                         x: Tokens.empty-list-margin.left;
                                         y: Tokens.empty-list-margin.top;
                                         width: parent.width - Tokens.empty-list-margin.left - Tokens.empty-list-margin.right;
-                                        text: "No unique or set item matches this search.";
+                                        text: "No unique or set item matches.";
                                         color: Tokens.text-muted-brush;
                                         wrap: word-wrap;
                                     }
@@ -628,7 +640,7 @@ export component ItemForge inherits Rectangle {
                                 }
 
                                 Text {
-                                    text: "The rarity follows the game: a unique with affixes is legendary, and a set item holds none. Rolls, legendary potential and Weaver's Will carry over.";
+                                    text: "A unique with affixes becomes legendary, and set items hold no affixes. Rolls, legendary potential and Weaver's Will carry over.";
                                     font-size: Tokens.font-size-caption;
                                     color: Tokens.text-muted-brush;
                                     wrap: word-wrap;
@@ -641,7 +653,7 @@ export component ItemForge inherits Rectangle {
             }
 
             HorizontalLayout {
-                spacing: Tokens.space-6;
+                spacing: Tokens.space-12;
                 alignment: start;
 
                 Rectangle {
@@ -735,8 +747,8 @@ export component ItemForge inherits Rectangle {
                                                 }
                                             }
 
-                                            if option.detail != "": Text {
-                                                text: option.detail;
+                                            if option.note != "": Text {
+                                                text: option.note;
                                                 font-size: Tokens.font-size-caption;
                                                 color: Tokens.text-muted-brush;
                                                 wrap: word-wrap;
@@ -747,12 +759,6 @@ export component ItemForge inherits Rectangle {
                             }
                         }
                     }
-                }
-
-                if ForgeState.base-text != "": Text {
-                    text: "·";
-                    color: Tokens.text-muted-brush;
-                    vertical-alignment: center;
                 }
 
                 if ForgeState.base-text != "": Rectangle {
@@ -915,7 +921,7 @@ export component ItemForge inherits Rectangle {
                                             padding-left: Tokens.check-box-caption-margin.left;
 
                                             Text {
-                                                text: "Lets you choose a base the current affixes can't normally roll on. Writing it needs \"I know what I'm doing\" in Settings.";
+                                                text: "Lists bases the current affixes can't roll on. Writing one needs \"I know what I'm doing\".";
                                                 font-size: Tokens.font-size-caption;
                                                 color: Tokens.text-muted-brush;
                                                 wrap: word-wrap;
@@ -929,14 +935,8 @@ export component ItemForge inherits Rectangle {
                     }
                 }
 
-                Text {
-                    text: "·";
-                    color: Tokens.text-muted-brush;
-                    vertical-alignment: center;
-                }
-
-                Text {
-                    text: ForgeState.summary;
+                for fact in ForgeState.summary: Text {
+                    text: fact;
                     color: Tokens.text-secondary-brush;
                     vertical-alignment: center;
                 }
@@ -1574,7 +1574,7 @@ export component ItemForge inherits Rectangle {
                     text: ForgeState.apply-text;
                     kind: ButtonKind.primary;
                     enabled: ForgeState.can-apply;
-                    tip: "Write the drafts to the game; each is read back to confirm it (Ctrl+S)";
+                    tip: "Write the drafts to the game (Ctrl+S)";
                     clicked => {
                         ForgeState.apply();
                     }

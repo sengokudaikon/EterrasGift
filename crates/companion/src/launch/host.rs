@@ -205,18 +205,11 @@ impl GameHost for FileGameHost {
 
     fn launch(&self, mode: LaunchMode, install: Option<&GameInstall>, lifetime: &Cancellation) -> Result<LaunchOutcome, LaunchError> {
         if self.find_running().is_some() {
-            return Err(LaunchError::Refused("Last Epoch is running already. Close it first to start it another way.".into()));
+            return Err(LaunchError::Refused("Last Epoch is already running.".into()));
         }
         // Without the game folder, a proxy there could not be set aside, and Steam would start the game with mods.
         let Some(install) = install else {
-            return Err(LaunchError::Refused(
-                if mode == LaunchMode::Online {
-                    "Last Epoch was not found, so the app can't make sure mods stay off online. Choose the game executable in Settings."
-                } else {
-                    "Last Epoch was not found, so it cannot be started offline. Choose the game executable in Settings."
-                }
-                .into(),
-            ));
+            return Err(LaunchError::Refused("Last Epoch wasn't found. Choose the game executable in Settings.".into()));
         };
         let loader = self.switch(install);
         let with_mods = mode == LaunchMode::OfflineWithMods;
@@ -290,10 +283,7 @@ mod tests {
         let install = game(temp.path());
         let host = host(temp.path(), &install);
         let refused = host.launch(LaunchMode::Online, None, &Cancellation::default()).unwrap_err();
-        assert_eq!(
-            refused,
-            LaunchError::Refused("Last Epoch was not found, so the app can't make sure mods stay off online. Choose the game executable in Settings.".into())
-        );
+        assert_eq!(refused, LaunchError::Refused("Last Epoch wasn't found. Choose the game executable in Settings.".into()));
     }
 
     #[test]

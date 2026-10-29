@@ -92,10 +92,10 @@ fn values_start_where_their_default_says_and_ranges_hold_them() {
 fn help_joins_description_needs_and_value_hints() {
     assert_eq!(
         FeatureKey::parse("morditas-timer").unwrap().descriptor().help(),
-        "Gives a Rage of Morditas hunt more time: a longer start, a slower countdown, more time for each kill.\n\
-         Starting time: From the next hunt you start.\n\
-         Timer speed: 1 is the game's own; 0 stops the countdown, so the hunt ends when no foes are left.\n\
-         Time per kill: As in the game, a kill adds less the longer the hunt has grown."
+        "More time in Rage of Morditas hunts: a longer start, a slower countdown and more time per kill.\n\
+         Starting time: From your next hunt.\n\
+         Timer speed: 1 is normal. 0 stops the countdown, and the hunt ends when no foes are left.\n\
+         Time per kill: Kills add less as the hunt goes on, as in the game."
     );
     assert_eq!(
         FeatureKey::parse("movement-speed").unwrap().descriptor().help(),

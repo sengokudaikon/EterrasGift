@@ -5,6 +5,7 @@ code and its tests, and what is still to build in [research/trainer-features.md]
 
 ## 2026-10-29
 
+- UI: text and tooltips rewritten to be short and plain; facts once joined with dots are separate texts.
 - Trainer: six more hooks: Every random roll at its maximum, Boss loot at full chance, Tier 7 affixes on new items,
   Ability speed multiplier, Maximum bonus stability, One echo type.
 - Trainer: 17 code-patch hooks: Skills reach level 20, Unlimited skill/passive/Weaver points, Deeper passives of any

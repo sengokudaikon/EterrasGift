@@ -101,9 +101,7 @@ impl GameHost for FakeGameHost {
 
     fn launch(&self, mode: LaunchMode, install: Option<&GameInstall>, _lifetime: &Cancellation) -> Result<LaunchOutcome, LaunchError> {
         if install.is_none() {
-            return Err(LaunchError::Refused(
-                "Last Epoch was not found, so it cannot be started offline. Choose the game executable in Settings.".into(),
-            ));
+            return Err(LaunchError::Refused("Last Epoch wasn't found. Choose the game executable in Settings.".into()));
         }
         self.state.lock().unwrap().launched.push(mode);
         Ok(LaunchOutcome::Started)
@@ -450,7 +448,7 @@ impl eg_ui::pages::settings::ModuleLink for LinkedTrainer {
     fn switched(&self, _key: &str, _on: bool) {}
     fn status(&self, _section: usize) -> Option<eg_ui::pages::settings::LiveStatus> {
         Some(eg_ui::pages::settings::LiveStatus {
-            text: "Current game data · 1342 affixes\nLast checked: 2026-10-22 13:40:00 CEST\nCache updated: 2026-10-21 19:15:00 CEST".into(),
+            text: "1342 affixes\nChecked: 2026-10-22 13:40:00 CEST\nUpdated: 2026-10-21 19:15:00 CEST".into(),
             can_act: true,
             busy: false,
         })
@@ -667,7 +665,7 @@ fn main() {
     assert_eq!(home.get_phase(), ViewPhase::Budding, "a game on its way in buds");
     assert!(home.get_game_starting(), "ash drifts while the game is on its way in");
     assert!(
-        home.get_message().starts_with("Last Epoch is running") && !home.get_message_is_error(),
+        home.get_message().starts_with("Last Epoch is already running") && !home.get_message_is_error(),
         "Play says why it waits"
     );
     session.capture(&ui, "home-starting");
@@ -698,7 +696,7 @@ fn main() {
     let home = ui.global::<HomeState>();
     assert_eq!(home.get_phase(), ViewPhase::Wilted);
     assert!(home.get_message_is_error(), "a refused start is an error");
-    assert!(home.get_message().starts_with("Last Epoch was not found"), "{}", home.get_message());
+    assert!(home.get_message().starts_with("Last Epoch wasn't found"), "{}", home.get_message());
     session.capture(&ui, "home-launch-error");
     let host = session.host();
     host.with(|game| game.loader = ModLoaderState::Conflict);
@@ -968,7 +966,8 @@ fn capture_mods(session: &Session) {
     let fixture = session.mods_fixture(true);
     fixture.host.with(|game| game.version = None);
     let ui = session.open_mods(&fixture, 1100, 700);
-    assert!(ui.global::<ModsState>().get_readiness().contains("Last Epoch (version unavailable)"));
+    let facts = ui.global::<ModsState>().get_readiness_facts();
+    assert!(facts.iter().all(|fact| !fact.starts_with("Last Epoch")), "an unknown game version is left out");
     assert!(ui.global::<ModsState>().get_can_play(), "an unknown display version does not block a start with mods");
     session.capture(&ui, "mods-version-unavailable-standard");
     session.resize(680, 580);
@@ -1419,10 +1418,7 @@ fn mods_captures(session: &Session) {
     let ui = session.open_mods(&fixture, 1100, 700);
     assert_eq!(names(&ui), ["Ability Ranges", "Flicker Dreams", "Stash Sorter", "Ward Meter"]);
     assert_eq!((state(&ui).get_enabled_count(), state(&ui).get_installed_count()), (3, 4));
-    assert_eq!(
-        state(&ui).get_readiness(),
-        "Stash Sorter did not load in the last game with mods. Turn it off or replace it before you play."
-    );
+    assert_eq!(state(&ui).get_readiness(), "Stash Sorter didn't load last time. Turn it off or replace it.");
     select(&ui, "Flicker Dreams");
     assert_eq!(state(&ui).get_selected_detail(), "Version 0.12.1 by sengokudaikon");
     assert_eq!(
@@ -1432,7 +1428,7 @@ fn mods_captures(session: &Session) {
     let log = state(&ui).get_log_lines().iter().collect::<Vec<_>>();
     assert_eq!(
         (log.len(), log[2].count, log[2].count_tip.as_str(), log[3].error),
-        (4, 3, "Written 3 times in a row, the last at 02:46:52", true)
+        (4, 3, "Repeated 3 times, last at 02:46:52", true)
     );
     sizes(&ui, "mods");
 
@@ -1440,7 +1436,7 @@ fn mods_captures(session: &Session) {
     select(&ui, "Stash Sorter");
     assert_eq!(
         state(&ui).get_selected_problem(),
-        "Did not load in the last game with mods. Failed to load Melon 'Stash Sorter' from '.\\Mods\\StashSorter.dll': built for MelonLoader 0.6.1"
+        "Didn't load last time. Failed to load Melon 'Stash Sorter' from '.\\Mods\\StashSorter.dll': built for MelonLoader 0.6.1"
     );
     session.capture(&ui, "mods-problem");
     session.resize(1920, 1080);
@@ -1450,7 +1446,7 @@ fn mods_captures(session: &Session) {
     // Turning it off is a draft until the next game with mods; so are edited settings, counted with it.
     state(&ui).invoke_toggle_mod(index_of(&ui, "Stash Sorter"));
     wait_for("Stash Sorter off", || !state(&ui).get_selected_enabled() && state(&ui).get_draft_count() == 1);
-    assert_eq!(state(&ui).get_selected_state(), "Off from the next game with mods");
+    assert_eq!(state(&ui).get_selected_state(), "Turns off the next time you play with mods");
     select(&ui, "Flicker Dreams");
     state(&ui).invoke_setting_edited(0, "1.5".into());
     state(&ui).invoke_setting_edited(3, "end".into());
@@ -1578,10 +1574,15 @@ fn mods_captures(session: &Session) {
     let ui = session.open_mods(&fixture, 1100, 700);
     wait_for("sources", || state(&ui).get_sources().row_count() == 2);
     let projects = state(&ui).get_sources().iter().collect::<Vec<_>>();
-    let caption = format!("1.0.0 · {}", Path::new("mods").join("loom").join("src").display());
+    let folder = Path::new("mods").join("loom").join("src").display().to_string();
     assert_eq!(
-        (projects[0].name.as_str(), projects[1].name.as_str(), projects[0].caption.as_str()),
-        ("Loom", "MorditasTithe", caption.as_str())
+        (
+            projects[0].name.as_str(),
+            projects[1].name.as_str(),
+            projects[0].version.as_str(),
+            projects[0].folder.as_str()
+        ),
+        ("Loom", "MorditasTithe", "1.0.0", folder.as_str())
     );
     sizes(&ui, "mods-not-installed");
     *runner.output.lock().unwrap() = Err(format!("  LoomMod.cs(3,1): error CS1002: ; expected [{}]", loom.display()));
@@ -1593,7 +1594,7 @@ fn mods_captures(session: &Session) {
     wait_for("Loom installed", || state(&ui).get_sources().row_count() == 1);
     assert_eq!(
         (state(&ui).get_selected_name().as_str(), state(&ui).get_selected_state().as_str()),
-        ("Loom", "On from the next game with mods")
+        ("Loom", "Turns on the next time you play with mods")
     );
     session.capture(&ui, "mods-not-installed-built");
     drop(ui);
@@ -1617,13 +1618,13 @@ fn mods_captures(session: &Session) {
     wait_for("Flicker's sources", || state(&ui).get_selected_has_sources());
     assert_eq!(
         (state(&ui).get_selected_build_status().as_str(), state(&ui).get_install_build_text().as_str()),
-        ("Its latest build, 0.13.0, is not installed.", "Install 0.13.0")
+        ("The latest build (0.13.0) isn't installed.", "Install 0.13.0")
     );
     session.capture(&ui, "mods-source");
     state(&ui).invoke_install_build(state(&ui).get_selected_index());
     wait_message(&ui, "install build", "Installed Flicker Dreams 0.13.0. It loads the next time you play with mods.");
     wait_for("build waiting", || {
-        state(&ui).get_selected_state() == "This build replaces the one in the Mods folder at the next game with mods"
+        state(&ui).get_selected_state() == "This build is installed the next time you play with mods"
     });
     session.capture(&ui, "mods-build-waiting");
     *runner.output.lock().unwrap() = Err(format!("  Mod.cs(3,1): error CS1002: ; expected [{}]", flicker.display()));
@@ -1914,13 +1915,13 @@ fn trainer_captures(session: &Session) {
     state(&ui).invoke_select_profile(1);
     show(&ui);
     assert!(!on(&ui, 3), "Oren's profile is not set up yet");
-    assert_eq!(state(&ui).get_profile_caption(), "Hooks switched on here turn on when Oren enters play.");
+    assert_eq!(state(&ui).get_profile_caption(), "What you turn on here turns on when Oren enters play.");
     state(&ui).invoke_select_profile(0);
     show(&ui);
     assert!(on(&ui, 3), "Mira's profile kept its switch");
     // The profile band's Delete…, and the Delete it asks with.
     const DELETE: (f32, f32) = (370.0, 36.0);
-    const CONFIRM: (f32, f32) = (679.0, 72.0);
+    const CONFIRM: (f32, f32) = (521.0, 72.0);
     // Delete asks first, in place of the caption; then Mira's profile is gone and Oren's shows.
     session.click(DELETE.0, DELETE.1);
     show(&ui);
@@ -1959,7 +1960,7 @@ fn trainer_captures(session: &Session) {
     session.click(LIVE_DELETE.0, LIVE_DELETE.1);
     show(&ui);
     session.capture(&ui, "trainer-live-delete-1100");
-    const LIVE_CONFIRM: (f32, f32) = (678.0, 72.0);
+    const LIVE_CONFIRM: (f32, f32) = (547.0, 72.0);
     session.click(LIVE_CONFIRM.0, LIVE_CONFIRM.1);
     show(&ui);
     assert!(!state(&ui).get_profile_kept(), "the profile is deleted");

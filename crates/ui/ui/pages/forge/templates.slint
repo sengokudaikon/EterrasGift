@@ -11,6 +11,7 @@ import { TipBubble, TipTrigger } from "../../widgets/focus.slint";
 import { FlyoutSurface } from "../../widgets/menu.slint";
 import { ListView } from "../../widgets/scroll-view.slint";
 import { TextField } from "../../widgets/text-field.slint";
+import { FactsText } from "../../widgets/text.slint";
 import { ForgeState } from "state.slint";
 
 export global TemplateMetrics {
@@ -139,17 +140,21 @@ export component TemplatesPanel inherits FlyoutSurface {
                                 name-touch := TouchArea { }
 
                                 TipTrigger {
-                                    text: entry.name + "\n" + entry.detail;
+                                    text: entry.label;
                                     hovered: name-touch.has-hover;
                                     in-flyout: true;
                                 }
                             }
 
-                            Text {
-                                text: asking ? "Delete this template for good?" : entry.detail;
+                            if asking: Text {
+                                text: "Delete this template for good?";
                                 font-size: Tokens.font-size-caption;
-                                color: asking ? Tokens.text-brush : Tokens.text-muted-brush;
+                                color: Tokens.text-brush;
                                 overflow: elide;
+                            }
+
+                            if !asking: FactsText {
+                                facts: entry.facts;
                             }
                         }
 

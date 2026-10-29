@@ -1196,7 +1196,7 @@ pub(in super::super) fn item_captures(session: &Session) {
             .ui
             .global::<ForgeState>()
             .get_picker_status()
-            .starts_with("Compatible with this slot\nT1\u{a0}+5–\u{2060}14 · T2")
+            .starts_with("Compatible with this slot\nT1\u{a0}+5–\u{2060}14, T2")
     );
     session.key(Key::Return);
     assert_eq!(
@@ -1337,7 +1337,7 @@ pub(in super::super) fn item_captures(session: &Session) {
     state.invoke_picker_category_changed(1);
     settle();
     assert!(state.get_picker_rows().row_count() <= all);
-    assert!(state.get_picker_rows().row_data(0).unwrap().detail.contains("T1: +5–14"));
+    assert!(state.get_picker_rows().row_data(0).unwrap().facts.iter().any(|fact| fact == "T1 +5–14"));
     state.invoke_picker_select(0);
     settle();
     session.capture(&forge.ui, "item-add-affix-filtered");
@@ -1400,8 +1400,11 @@ pub(in super::super) fn item_captures(session: &Session) {
     // refuses it whole until the picker allows it (`item-base-incompatible-refused`).
     let forge = Forge::open(session, World::class_ring(), 1100, 700);
     let options = forge.ui.global::<ForgeState>().get_base_options();
-    assert_eq!(options.row_data(1).unwrap().detail, "Level 28 · 2 incompatible affixes");
-    assert_eq!(options.row_data(2).unwrap().detail, "Level 40 · corrupted base · 1 incompatible affix");
+    assert_eq!(options.row_data(1).unwrap().facts.iter().collect::<Vec<_>>(), ["Level 28", "2 incompatible affixes"]);
+    assert_eq!(
+        options.row_data(2).unwrap().facts.iter().collect::<Vec<_>>(),
+        ["Level 40", "Corrupted base", "1 incompatible affix"]
+    );
     session.click(155.0, 117.0);
     session.capture(&forge.ui, "item-base-picker-incompatible");
     session.key(Key::Escape);
@@ -1456,14 +1459,19 @@ pub(in super::super) fn item_captures(session: &Session) {
                 .find(|option| option.name == name)
                 .unwrap()
         };
-        assert_eq!(option("Fixture Ember Unique").detail, "Unique · Gold Ring · legendary potential");
-        assert!(option("Fixture Ember Unique").available);
         assert_eq!(
-            option("Fixture Woven Unique").detail,
-            "Unique · Gold Ring · Weaver's Will · keeps legendary potential it never holds, which may crash the game and reset the item state; needs \"I know what I'm doing\""
+            option("Fixture Ember Unique").facts.iter().collect::<Vec<_>>(),
+            ["Unique", "Gold Ring", "Legendary potential"]
+        );
+        assert_eq!(option("Fixture Ember Unique").note, "");
+        assert!(option("Fixture Ember Unique").available);
+        assert_eq!(option("Fixture Woven Unique").facts.iter().collect::<Vec<_>>(), ["Unique", "Gold Ring", "Weaver's Will"]);
+        assert_eq!(
+            option("Fixture Woven Unique").note,
+            "Keeps legendary potential it never holds, which may crash the game and reset the item. Needs \"I know what I'm doing\"."
         );
         assert!(!option("Fixture Woven Unique").available);
-        assert!(option("Fixture Set Ring").detail.contains("keeps legendary potential it never holds"));
+        assert!(option("Fixture Set Ring").note.contains("Keeps legendary potential it never holds"));
         assert!(!option("Fixture Set Ring").available);
         session.click(200.0, 84.0);
         session.capture(&forge.ui, &format!("item-identity-override-{width}"));

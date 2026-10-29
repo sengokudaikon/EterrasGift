@@ -436,9 +436,13 @@ impl View {
         let rows: Vec<TemplateRowView> = editor
             .template_list()
             .iter()
-            .map(|template| TemplateRowView {
-                name: template.name.clone().into(),
-                detail: editor.template_detail(template).into(),
+            .map(|template| {
+                let detail = editor.template_detail(template);
+                TemplateRowView {
+                    name: template.name.clone().into(),
+                    label: format!("{}\n{}", template.name, detail.join(", ")).into(),
+                    facts: facts(detail),
+                }
             })
             .collect();
         window.global::<ForgeState>().set_template_rows(ModelRc::from(Rc::new(VecModel::from(rows))));
@@ -490,7 +494,8 @@ impl View {
                 .into_iter()
                 .map(|option| MenuOptionView {
                     name: option.name.clone().into(),
-                    detail: option.detail.clone().into(),
+                    facts: facts(option.facts.clone()),
+                    note: option.note.clone().into(),
                     implicits: SharedString::new(),
                     in_game: option.in_game,
                     available: option.available,
@@ -518,7 +523,8 @@ impl View {
             .into_iter()
             .map(|option| MenuOptionView {
                 name: option.name.into(),
-                detail: option.detail.into(),
+                facts: ModelRc::default(),
+                note: option.note.into(),
                 implicits: SharedString::new(),
                 in_game: option.in_game,
                 available: option.available,
@@ -526,7 +532,7 @@ impl View {
                 rarity: ItemRarity::Normal,
             })
             .collect();
-        state.set_rarity_caption_lines(rarities.iter().filter(|option| !option.detail.is_empty()).count() as i32);
+        state.set_rarity_caption_lines(rarities.iter().filter(|option| !option.note.is_empty()).count() as i32);
         update(&self.models.rarity_options, rarities);
         state.set_base_text(editor.base_text().into());
         state.set_base_drafted(editor.is_base_drafted());
@@ -542,7 +548,8 @@ impl View {
                         .iter()
                         .map(|option| MenuOptionView {
                             name: option.name.clone().into(),
-                            detail: option.detail.clone().into(),
+                            facts: facts(option.facts.clone()),
+                            note: option.note.clone().into(),
                             implicits: option.implicits.clone().into(),
                             in_game: option.in_game,
                             available: option.available,
@@ -557,7 +564,7 @@ impl View {
         }
         state.set_base_allow_incompatible(editor.base.as_ref().is_some_and(|base| base.allow_incompatible));
         state.set_base_can_edit(editor.can_edit_base_field());
-        state.set_summary(editor.summary().into());
+        state.set_summary(facts(editor.summary()));
         self.show_fields(&editor);
 
         state.set_has_implicits(editor.has_implicits());
@@ -871,7 +878,7 @@ impl View {
                     .picker_list()
                     .map(|definition| PickerRowView {
                         name: definition.name.clone().into(),
-                        detail: editor.picker_entry_detail(definition).into(),
+                        facts: facts(editor.picker_entry_detail(definition)),
                         reforged: definition.is_reforged(),
                     })
                     .collect(),
@@ -891,6 +898,11 @@ impl View {
 }
 
 /// The game's rarity code determines its colour independently of localized names.
+/// Facts shown side by side, each its own text.
+fn facts(parts: Vec<String>) -> ModelRc<SharedString> {
+    ModelRc::new(VecModel::from(parts.into_iter().map(SharedString::from).collect::<Vec<_>>()))
+}
+
 fn rarity_of(rarity: u8) -> ItemRarity {
     match rarity {
         9 => ItemRarity::Legendary,

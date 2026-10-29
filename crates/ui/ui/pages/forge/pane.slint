@@ -232,7 +232,7 @@ export component ChangesPane inherits Rectangle {
                                         }
 
                                         Text {
-                                            text: "Changed in game — discard and redo";
+                                            text: "Changed in game. Discard and redo.";
                                             font-size: Tokens.font-size-caption;
                                             color: Tokens.warning-brush;
                                             vertical-alignment: center;
@@ -313,7 +313,7 @@ export component ChangesPane inherits Rectangle {
                                     height: name-line.preferred-height;
 
                                     name-line := HorizontalLayout {
-                                        spacing: Tokens.space-6;
+                                        spacing: Tokens.space-12;
                                         alignment: start;
 
                                         Text {
@@ -326,7 +326,7 @@ export component ChangesPane inherits Rectangle {
                                         }
 
                                         Text {
-                                            text: "·  " + entry.time;
+                                            text: entry.time;
                                             font-size: Tokens.font-size-caption;
                                             color: Tokens.text-muted-brush;
                                             min-width: self.preferred-width;
@@ -338,7 +338,7 @@ export component ChangesPane inherits Rectangle {
                                     name-time-touch := TouchArea { }
 
                                     TipTrigger {
-                                        text: entry.name + "  ·  " + entry.time;
+                                        text: entry.name + "\n" + entry.time;
                                         hovered: name-time-touch.has-hover;
                                     }
                                 }

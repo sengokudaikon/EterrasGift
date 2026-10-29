@@ -87,7 +87,7 @@ impl Category {
             Category::Standard => "".into(),
             Category::Experimental => "Experimental".into(),
             Category::Personal => "Personal".into(),
-            Category::Set => "Set · Reforged".into(),
+            Category::Set => "Reforged set".into(),
             Category::IdolEnchantment => "Idol enchantment".into(),
             Category::IdolWeaver => "Weaver idol".into(),
             Category::Corrupted => "Corrupted".into(),
@@ -115,16 +115,16 @@ pub struct AffixDefinition {
 }
 
 impl AffixDefinition {
-    /// "type · category · class", e.g. "Prefix · Set · Reforged".
+    /// Its kind as one phrase, e.g. "Reforged set prefix" or "Suffix".
     pub fn kind_description(&self) -> String {
-        join_parts(&[self.kind.name(), &self.category.name()])
+        kind_phrase(self.kind.name(), self.category)
     }
 
-    /// The picker's caption: its kind and the tiers it has, which tell apart affixes that read the same, e.g.
-    /// "Suffix · Idol enchantment · T1 only" and "Suffix · T1–T8".
-    pub fn picker_description(&self) -> String {
+    /// The picker's caption, each its own text: its kind and the tiers it has, which tell apart affixes that read the
+    /// same, e.g. ["Idol enchantment suffix", "T1 only"] and ["Suffix", "T1–T8"].
+    pub fn picker_description(&self) -> Vec<String> {
         let tiers = if self.max_tier <= 1 { "T1 only".to_owned() } else { format!("T1–T{}", self.max_tier) };
-        join_parts(&[&self.kind_description(), &tiers])
+        vec![self.kind_description(), tiers]
     }
 
     pub fn is_reforged(&self) -> bool {
@@ -145,8 +145,13 @@ impl AffixDefinition {
     }
 }
 
-pub fn join_parts(parts: &[&str]) -> String {
-    parts.iter().filter(|part| !part.is_empty()).copied().collect::<Vec<_>>().join(" · ")
+/// A slot's kind and category as one phrase: "Prefix", "Experimental suffix", "Prefix (special affix 9)".
+pub fn kind_phrase(kind: &str, category: Category) -> String {
+    match category {
+        Category::Standard => kind.to_owned(),
+        Category::Other(_) => format!("{kind} ({})", category.name().to_lowercase()),
+        _ => format!("{} {}", category.name(), kind.to_lowercase()),
+    }
 }
 
 /// One affix the item holds. Slots are positions in the order the game loads them.

@@ -179,7 +179,7 @@ impl SettingsStore {
                 AppSettings::default(),
                 false,
                 Some(format!(
-                    "Settings could not be loaded: {reason} The file is left as it is, so changes last until Eterra's Gift closes; Save locations replaces it."
+                    "Settings could not be loaded: {reason} Changes last until Eterra's Gift closes. Save locations replaces the file."
                 )),
             ),
         };
