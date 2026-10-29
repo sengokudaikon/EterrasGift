@@ -39,6 +39,7 @@ pub fn run(startup: Startup) -> Result<ExitCode, slint::PlatformError> {
     } else {
         Page::Home
     };
+    let templates = trainer_runtime.as_ref().map(|_| trainer.templates());
     let settings = SettingsPage::new(service.clone(), vec![trainer.choice], found_game, found_dotnet);
     let restart = settings.restart_request();
 
@@ -56,6 +57,7 @@ pub fn run(startup: Startup) -> Result<ExitCode, slint::PlatformError> {
             trainer: trainer_runtime.is_some(),
             trainer_backend: trainer_runtime.as_ref().map(|runtime| runtime.handle.clone()),
             faults: Some(faults.clone()),
+            templates,
             start,
         },
     );

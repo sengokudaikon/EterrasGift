@@ -9,7 +9,7 @@ use super::worker::ForgeGame;
 use crate::models::update_rows as update;
 use crate::{
     AffixRowView, AppliedEntryView, CellKind, CellRef, DraftEntryView, FieldView, ForgeState, ItemRarity, MainWindow, MenuOptionView, MessageTone, ModifierRowView, PickerRowView,
-    TierOption, ValueCell,
+    TemplateRowView, TierOption, ValueCell,
 };
 use slint::{ComponentHandle, Model, ModelRc, SharedString, VecModel, Weak};
 use std::cell::{Cell as Flag, RefCell};
@@ -228,6 +228,39 @@ fn bind(state: &ForgeState, view: &Rc<View>) {
     state.on_discard_all(edit!(view, |editor| editor.discard_all()));
     state.on_max_tiers(edit!(view, |editor| editor.max_tiers()));
     state.on_max_rolls(edit!(view, |editor| editor.max_rolls()));
+    // Templates are read from their folder when the flyout opens and after each change, not with every show.
+    let weak = on(view);
+    state.on_templates_opened(move || {
+        if let Some(view) = weak.upgrade() {
+            view.editor.borrow_mut().template_message.clear();
+            view.show();
+            view.show_templates();
+        }
+    });
+    let weak = on(view);
+    state.on_template_save(move |name, whole| {
+        if let Some(view) = weak.upgrade() {
+            view.editor.borrow_mut().save_template(&name, whole);
+            view.show();
+            view.show_templates();
+        }
+    });
+    let weak = on(view);
+    state.on_template_apply(move |index| {
+        if let Some(view) = weak.upgrade() {
+            view.editor.borrow_mut().apply_template(index.max(0) as usize);
+            view.show();
+            view.show_templates();
+        }
+    });
+    let weak = on(view);
+    state.on_template_delete(move |index| {
+        if let Some(view) = weak.upgrade() {
+            view.editor.borrow_mut().delete_template(index.max(0) as usize);
+            view.show();
+            view.show_templates();
+        }
+    });
     state.on_apply(edit!(view, |editor| editor.apply()));
     state.on_undo(edit!(view, |editor| editor.undo()));
     state.on_undo_draft(edit!(view, |editor| editor.undo_draft_only()));
@@ -384,12 +417,31 @@ impl View {
         state.set_focus_serial(self.focus_serial.get());
     }
 
+    /// The kept templates, read again from their folder.
+    fn show_templates(&self) {
+        let Some(window) = self.window.upgrade() else {
+            return;
+        };
+        let editor = self.editor.borrow();
+        let rows: Vec<TemplateRowView> = editor
+            .template_list()
+            .iter()
+            .map(|template| TemplateRowView {
+                name: template.name.clone().into(),
+                detail: editor.template_detail(template).into(),
+            })
+            .collect();
+        window.global::<ForgeState>().set_template_rows(ModelRc::from(Rc::new(VecModel::from(rows))));
+    }
+
     fn show(&self) {
         let Some(window) = self.window.upgrade() else {
             return;
         };
         let state = window.global::<ForgeState>();
         let editor = self.editor.borrow();
+        state.set_has_templates(editor.templates.is_some());
+        state.set_template_message(editor.template_message.clone().into());
         // The item as Apply would leave it, projected once for everything that reads it.
         let drafted = editor.drafted_item();
         let drafted = drafted.as_ref();

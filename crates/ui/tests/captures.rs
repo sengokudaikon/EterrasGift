@@ -244,6 +244,7 @@ impl Session {
                 trainer: true,
                 trainer_backend: None,
                 faults: None,
+                templates: None,
                 start: Page::Settings,
             },
         );
@@ -269,6 +270,7 @@ impl Session {
                 trainer: true,
                 trainer_backend: None,
                 faults: None,
+                templates: None,
                 start: Page::Settings,
             },
         );
@@ -294,6 +296,7 @@ impl Session {
             trainer: trainer_on,
             trainer_backend: None,
             faults: None,
+            templates: None,
             start: Page::Home,
         };
         eg_ui::install(&ui, app);
@@ -380,6 +383,7 @@ impl Session {
                 trainer: false,
                 trainer_backend: None,
                 faults: None,
+                templates: None,
                 start: Page::Mods,
             },
         );
@@ -734,6 +738,7 @@ fn main() {
             trainer: true,
             trainer_backend: None,
             faults: None,
+            templates: None,
             start: Page::Home,
         },
     );
@@ -776,6 +781,7 @@ fn main() {
             trainer: true,
             trainer_backend: None,
             faults: None,
+            templates: None,
             start: Page::Settings,
         },
     );

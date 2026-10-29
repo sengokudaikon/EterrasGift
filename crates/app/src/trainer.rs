@@ -27,6 +27,8 @@ pub struct Module {
     chosen: bool,
     /// Where the game data read from the install is saved between runs.
     game_data: PathBuf,
+    /// Where the Item Forge keeps the user's item templates.
+    templates: PathBuf,
 }
 
 impl Module {
@@ -39,7 +41,18 @@ impl Module {
             choice.problem = Some(if chosen { start_failed(faults, choice.title, &error) } else { error });
         }
         let game_data = store.paths().module_directory(trainer_settings::ID).join("game-data");
-        Self { choice, chosen, game_data }
+        let templates = store.paths().module_directory(trainer_settings::ID).join("forge-templates");
+        Self {
+            choice,
+            chosen,
+            game_data,
+            templates,
+        }
+    }
+
+    /// The Item Forge's template store.
+    pub fn templates(&self) -> eg_trainer::item::template::TemplateStore {
+        eg_trainer::item::template::TemplateStore::new(self.templates.clone())
     }
 
     pub fn start(&mut self, settings: &SettingsService, game: Option<&Path>, no_connect: bool, faults: &FaultLog) -> Option<Trainer> {

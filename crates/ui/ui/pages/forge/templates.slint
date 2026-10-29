@@ -1,0 +1,166 @@
+// The item templates flyout: the user's saved templates, each applied as drafts or deleted, and the item saved as a new
+// one (its affixes, or the whole item).
+
+import { Tokens } from "../../tokens.slint";
+import { Button, ButtonKind } from "../../widgets/button.slint";
+import { ChoiceBox } from "../../widgets/choice-box.slint";
+import { FlyoutSurface } from "../../widgets/menu.slint";
+import { ListView } from "../../widgets/scroll-view.slint";
+import { TextField } from "../../widgets/text-field.slint";
+import { ForgeState } from "state.slint";
+
+export global TemplateMetrics {
+    // A list row: the name over its caption, with its buttons beside them.
+    out property <length> row: Math.max(Tokens.control-min-height, Tokens.font-size-body * 4 / 3 + Tokens.space-1 + Tokens.font-size-caption * 4 / 3)
+        + Tokens.space-6 * 2;
+    out property <length> caption-line: Tokens.font-size-caption * 4 / 3;
+
+    public pure function list-height(rows: int) -> length {
+        return rows == 0 ? self.caption-line * 2 : Math.min(Tokens.replace-list-max-height, rows * self.row);
+    }
+
+    // The whole flyout for `rows` templates: the title, the list, the name, the kind and Save, and two lines of message.
+    public pure function height(rows: int) -> length {
+        return Tokens.flyout-padding.top + Tokens.flyout-padding.bottom
+            + Tokens.font-size-section * 4 / 3
+            + self.list-height(rows)
+            + Tokens.control-min-height
+            + Tokens.control-min-height
+            + self.caption-line * 2
+            + Tokens.space-10 * 4;
+    }
+}
+
+export component TemplatesPanel inherits FlyoutSurface {
+    // After a template is applied: its drafts show on the page, behind the flyout.
+    callback done();
+
+    property <string> name;
+    property <int> kind;
+
+    function save() {
+        if (root.name != "") {
+            ForgeState.template-save(root.name, root.kind == 1);
+        }
+    }
+
+    VerticalLayout {
+        padding-left: Tokens.flyout-padding.left;
+        padding-right: Tokens.flyout-padding.right;
+        padding-top: Tokens.flyout-padding.top;
+        padding-bottom: Tokens.flyout-padding.bottom;
+        spacing: Tokens.space-10;
+        alignment: start;
+
+        Text {
+            text: "Templates";
+            font-size: Tokens.font-size-section;
+            font-weight: Tokens.emphasis-weight;
+            color: Tokens.text-brush;
+        }
+
+        Rectangle {
+            height: TemplateMetrics.list-height(ForgeState.template-rows.length);
+
+            if ForgeState.template-rows.length == 0: Text {
+                width: parent.width;
+                text: "No templates yet. Save this item's affixes, or the whole item, below.";
+                font-size: Tokens.font-size-caption;
+                color: Tokens.text-muted-brush;
+                wrap: word-wrap;
+            }
+
+            if ForgeState.template-rows.length > 0: ListView {
+                for entry[index] in ForgeState.template-rows: HorizontalLayout {
+                    height: TemplateMetrics.row;
+                    padding-top: Tokens.space-6;
+                    padding-bottom: Tokens.space-6;
+                    spacing: Tokens.space-8;
+
+                    VerticalLayout {
+                        spacing: Tokens.space-1;
+                        alignment: center;
+                        horizontal-stretch: 1;
+
+                        Text {
+                            text: entry.name;
+                            color: Tokens.text-brush;
+                            overflow: elide;
+                        }
+
+                        Text {
+                            text: entry.detail;
+                            font-size: Tokens.font-size-caption;
+                            color: Tokens.text-muted-brush;
+                            overflow: elide;
+                        }
+                    }
+
+                    Button {
+                        text: "Apply";
+                        enabled: ForgeState.has-item;
+                        tip: "Draft this template onto the item";
+                        clicked => {
+                            ForgeState.template-apply(index);
+                            root.done();
+                        }
+                    }
+
+                    Button {
+                        text: "Delete";
+                        kind: ButtonKind.subtle;
+                        tip: "Delete this template";
+                        clicked => {
+                            ForgeState.template-delete(index);
+                        }
+                    }
+                }
+            }
+        }
+
+        TextField {
+            text: root.name;
+            placeholder: "Template name";
+            label: "Template name";
+            edited(text) => {
+                root.name = text;
+            }
+            accepted(text) => {
+                root.name = text;
+                root.save();
+            }
+        }
+
+        HorizontalLayout {
+            spacing: Tokens.space-8;
+
+            ChoiceBox {
+                label: "What to save";
+                choices: ["Affixes only", "Whole item"];
+                index: root.kind;
+                horizontal-stretch: 1;
+                chosen(index) => {
+                    root.kind = index;
+                }
+            }
+
+            Button {
+                text: "Save";
+                kind: ButtonKind.primary;
+                enabled: root.name != "" && ForgeState.has-item;
+                tip: "Save the item as Apply would leave it under this name; a template with the name is replaced";
+                clicked => {
+                    root.save();
+                }
+            }
+        }
+
+        Text {
+            text: ForgeState.template-message;
+            font-size: Tokens.font-size-caption;
+            color: Tokens.text-secondary-brush;
+            wrap: word-wrap;
+            height: TemplateMetrics.caption-line * 2;
+        }
+    }
+}

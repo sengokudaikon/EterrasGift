@@ -109,6 +109,9 @@ export struct MenuOptionView {
 }
 export struct PickerRowView { name: string, detail: string, reforged: bool }
 
+// A saved item template: its name and what it holds.
+export struct TemplateRowView { name: string, detail: string }
+
 // A cell Rust brought into focus (Show draft, Up/Down) asks the lists to scroll it into view: its top and height in window
 // coordinates. Only the forge's own views read it.
 export global ForgeReveal {
@@ -190,6 +193,10 @@ export global ForgeState {
     in property <bool> can-max-tiers;
     in property <string> max-tiers-tip;
     in property <bool> can-max-rolls;
+    // Item templates: whether this run keeps them, the kept ones (read when the flyout opens) and the last action's word.
+    in property <bool> has-templates;
+    in property <[TemplateRowView]> template-rows;
+    in property <string> template-message;
     in property <string> max-rolls-tip;
     in property <string> affix-list-note;
     in property <string> ladder-note;
@@ -292,6 +299,10 @@ export global ForgeState {
     callback open-add() -> bool;
     callback max-tiers();
     callback max-rolls();
+    callback templates-opened();
+    callback template-save(string, bool);
+    callback template-apply(int);
+    callback template-delete(int);
     callback picker-search-edited(string);
     callback picker-filter-changed(int);
     callback picker-allow-changed(bool);

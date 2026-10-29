@@ -32,6 +32,8 @@ pub struct App {
     pub trainer_backend: Option<eg_trainer::backend::BackendHandle>,
     /// Where the trainer's pages record what they refuse; None in tests.
     pub faults: Option<eg_core::fault::FaultLog>,
+    /// Where the Item Forge keeps the user's item templates; None in tests, which set their own.
+    pub templates: Option<eg_trainer::item::template::TemplateStore>,
     /// Home, or Settings when the settings file or a module has something to say.
     pub start: Page,
 }
@@ -62,7 +64,9 @@ pub fn install(window: &MainWindow, app: App) -> Installed {
     trainer::install(window, trainer_backend.clone());
     let forge = trainer_backend.map(|backend| {
         trainer::connection::bind(window, backend.clone(), &shell, decorations);
-        forge::worker::bind(window, backend, &shell, app.faults)
+        let forge = forge::worker::bind(window, backend, &shell, app.faults);
+        forge.edit(|editor| editor.templates = app.templates);
+        forge
     });
     apply_system_settings(window);
     Installed { forge }

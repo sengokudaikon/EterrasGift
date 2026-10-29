@@ -700,6 +700,7 @@ impl Forge {
                 trainer: true,
                 trainer_backend: Some(backend.clone()),
                 faults: None,
+                templates: None,
                 settings: SettingsPage::new(SettingsService::inline(store), vec![eg_ui::pages::settings::trainer::descriptor(true)], None, None),
                 start: Page::Forge,
             },
@@ -1212,6 +1213,58 @@ pub(in super::super) fn item_captures(session: &Session) {
     session.key(Key::Tab);
     session.key(Key::Backtab);
     session.capture(&forge.ui, "item-value-positions");
+    drop(forge);
+
+    // Item templates: the boots' affixes saved, the item changed in the game, the template drafted back onto it; the
+    // flyout lists it (`item-templates`).
+    let forge = Forge::open(session, World::boots(), 1100, 700);
+    let folder = session.folder().join("forge-templates");
+    forge.handle.edit(|editor| {
+        editor.templates = Some(eg_trainer::item::template::TemplateStore::new(folder));
+        editor.save_template("Wayfarer's set", false);
+        assert_eq!(editor.template_message, "Saved \"Wayfarer's set\".");
+    });
+    forge.change(|item| {
+        item.affixes[0].tier = 2;
+        item.affixes[0].roll = 10;
+    });
+    forge.handle.edit(|editor| {
+        editor.apply_template(0);
+        assert_eq!(editor.template_message, "Drafted \"Wayfarer's set\": 1 draft. Review them, then Apply.");
+        assert_eq!((editor.affixes[0].tier(), editor.affixes[0].roll()), (5, 170));
+    });
+    settle();
+    let state = forge.ui.global::<ForgeState>();
+    state.invoke_templates_opened();
+    assert_eq!(state.get_template_rows().row_count(), 1);
+    session.click(445.0, 472.0);
+    session.capture(&forge.ui, "item-templates");
+    session.key(Key::Escape);
+    drop(forge);
+    // A whole-item template on the legendary: its unique rolls come back with its affixes.
+    let forge = Forge::open(session, World::unique(), 1100, 700);
+    let folder = session.folder().join("forge-templates");
+    forge.handle.edit(|editor| {
+        editor.templates = Some(eg_trainer::item::template::TemplateStore::new(folder));
+        editor.save_template("Haste legendary", true);
+    });
+    forge.change(|item| {
+        item.identity.as_mut().unwrap().rolls[1] = 20;
+        item.affixes[0].roll = 3;
+    });
+    forge.handle.edit(|editor| {
+        editor.apply_template(0);
+        assert!(editor.template_message.starts_with("Drafted \"Haste legendary\""), "{}", editor.template_message);
+        assert_eq!(editor.affixes[0].roll(), 170);
+        assert!(
+            editor
+                .uniques
+                .iter()
+                .flat_map(|line| &line.rolls)
+                .filter(|roll| roll.index == 1)
+                .all(|roll| roll.value == 200)
+        );
+    });
     drop(forge);
 
     // Add affix opens the picker to add, its caption the free slots.

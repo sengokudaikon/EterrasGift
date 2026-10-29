@@ -28,6 +28,7 @@ import {
 } from "table.slint";
 import { AffixPickerPanel, PickerMeasure, PickerMetrics, SearchBox } from "picker.slint";
 import { ChangesPane } from "pane.slint";
+import { TemplatesPanel, TemplateMetrics } from "templates.slint";
 
 // The game-owned colour of a rarity's names (EpochColor), for item names only.
 global RarityInk {
@@ -1222,6 +1223,40 @@ export component ItemForge inherits Rectangle {
                         tip: ForgeState.max-rolls-tip;
                         clicked => {
                             ForgeState.max-rolls();
+                        }
+                    }
+
+                    // The user's item templates: applied as drafts, or the item saved as one.
+                    templates-button := Rectangle {
+                        width: templates.preferred-width;
+                        height: Tokens.control-min-height;
+                        visible: ForgeState.has-templates;
+
+                        templates := Button {
+                            width: parent.width;
+                            text: "Templates";
+                            kind: ButtonKind.subtle;
+                            enabled: ForgeState.has-item;
+                            tip: "Apply a saved template, or save this item as one";
+                            clicked => {
+                                ForgeState.templates-opened();
+                                templates-popup.show();
+                            }
+                        }
+
+                        // Upward, over the affix table: the button sits low on the page, near the window's foot.
+                        templates-popup := PopupWindow {
+                            x: 0;
+                            y: -self.height - Tokens.space-4;
+                            width: Tokens.replace-flyout-width + Tokens.flyout-padding.left + Tokens.flyout-padding.right;
+                            height: TemplateMetrics.height(ForgeState.template-rows.length);
+                            close-policy: PopupClosePolicy.close-on-click-outside;
+
+                            TemplatesPanel {
+                                done => {
+                                    templates-popup.close();
+                                }
+                            }
                         }
                     }
 
