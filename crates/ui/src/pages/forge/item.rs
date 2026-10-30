@@ -631,14 +631,8 @@ pub enum TierProperty {
 }
 
 pub fn format_tier_range(properties: &[TierProperty]) -> Option<String> {
-    fn trim(value: f64) -> String {
-        let text = format!("{value:.2}");
-        let text = text.trim_end_matches('0').trim_end_matches('.');
-        if text == "-0" { "0".into() } else { text.into() }
-    }
-    fn percent(value: f64) -> String {
-        trim((value * 1000.0).round() / 10.0)
-    }
+    let trim = |value: f64| eg_core::locale::numbers().plain(value);
+    let percent = |value: f64| trim((value * 1000.0).round() / 10.0);
     fn span(min: String, max: String) -> String {
         if min == max { min } else { format!("{min}–{max}") }
     }
@@ -651,7 +645,7 @@ pub fn format_tier_range(properties: &[TierProperty]) -> Option<String> {
             TierProperty::Increased { min, max } if min.is_finite() && max.is_finite() => Some(span(percent(min), percent(max)) + "%"),
             TierProperty::AddedPercent { min, max } if min.is_finite() && max.is_finite() => Some(format!("+{}%", span(percent(min), percent(max)))),
             TierProperty::Flat { min, max, whole } if min.is_finite() && max.is_finite() => {
-                let number = |value: f64| if whole { format!("{}", value.round()) } else { trim((value * 100.0).round() / 100.0) };
+                let number = |value: f64| trim(if whole { value.round() } else { value });
                 Some(format!("+{}", span(number(min), number(max))))
             }
             _ => None,

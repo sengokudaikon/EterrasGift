@@ -5,7 +5,6 @@
 #[cfg(windows)]
 pub mod artifact;
 pub mod bootstrap;
-pub mod numeric_locale;
 pub mod pe;
 
 #[cfg(windows)]

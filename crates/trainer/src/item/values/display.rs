@@ -3,7 +3,7 @@
 //! The supported game uses the standard CultureInfo symbols for its language;
 //! a custom game NumberFormatInfo remains an unsupported formatting capability.
 use super::DisplayScalarParser;
-use eg_game_access::numeric_locale::NumberSymbols;
+use eg_core::locale::NumberSymbols;
 
 pub struct CapturedDisplayParser {
     language: String,

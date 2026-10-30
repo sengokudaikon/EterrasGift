@@ -8,6 +8,7 @@ use super::profiles::{self, Profile};
 use super::session::TrainerSession;
 use crate::shell::Page;
 use crate::{FeatureFieldView, FeatureRowKind, FeatureRowModels, FeatureRowPlace, FeatureRowView, FeatureTone, FeatureValueView, MainWindow, Nav, Tokens, TrainerState};
+use eg_core::locale::numbers;
 use slint::{ComponentHandle, Model, ModelRc, SharedString, VecModel, Weak};
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -185,10 +186,10 @@ pub fn bind(window: &MainWindow, session: Rc<dyn TrainerSession>, features: Vec<
         controller.hook(row, |hook, session| hook.choose(session, index as usize, choice.max(0) as usize));
     }));
     state.on_field_edited(with(|controller, row, index, text| {
-        controller.field(row, index, |field| field.set_amount(pages::parse(text)));
+        controller.field(row, index, |field| field.set_amount(numbers().parse(text)));
     }));
     state.on_field_committed(with(|controller, row, index, text| {
-        controller.field(row, index, |field| field.set_amount(pages::parse(text)));
+        controller.field(row, index, |field| field.set_amount(numbers().parse(text)));
     }));
     state.on_field_stepped(step(|controller, row, index, direction| {
         controller.field(row, index, |field| field.step(direction));
@@ -616,7 +617,7 @@ fn field_view(field: &FieldModel, listed: bool) -> FeatureFieldView {
     // A held count is a whole number ("#,0"); an editor's field keeps two decimals ("#,0.##").
     let text = field
         .amount()
-        .map(|amount| pages::grouped(if listed { amount.round() } else { amount }))
+        .map(|amount| numbers().grouped(if listed { amount.round() } else { amount }))
         .unwrap_or_default();
     FeatureFieldView {
         label: field.label().into(),

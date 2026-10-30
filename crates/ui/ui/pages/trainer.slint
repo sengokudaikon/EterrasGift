@@ -116,8 +116,9 @@ export global TrainerState {
 
     // What every trainer page shows in place of its body while it waits (`access` locked), and what the Item Forge shows
     // without the game: waiting for the game or a character, connecting, online mode, a stop.
-    in property <string> connection-title: TrainerText.not-connected;
-    in property <string> connection-detail: TrainerText.connect-advice;
+    // Rust's texts, set before the window shows.
+    in property <string> connection-title;
+    in property <string> connection-detail;
     // The connection stopped for a reason the user has to fix: the warning mark beside the title.
     in property <bool> connection-stopped;
     // A real wait (for the game, a character, the connection): ash drifts under it.

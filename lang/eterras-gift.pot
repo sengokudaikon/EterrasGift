@@ -3163,7 +3163,7 @@ msgstr ""
 msgid "Connect"
 msgstr ""
 
-#: crates/ui/src/pages/trainer/connection.rs crates/ui/ui/strings/trainer.slint
+#: crates/ui/src/pages/trainer/connection.rs
 msgid "Connect to an offline character to use the trainer."
 msgstr ""
 
@@ -3203,7 +3203,7 @@ msgstr ""
 msgid "Load an offline character."
 msgstr ""
 
-#: crates/ui/src/pages/trainer/connection.rs crates/ui/ui/strings/trainer.slint
+#: crates/ui/src/pages/trainer/connection.rs
 msgid "Not connected"
 msgstr ""
 
@@ -3276,8 +3276,10 @@ msgid "Apply"
 msgstr ""
 
 #: crates/ui/src/pages/trainer/pages.rs
-msgid "Apply {count} changes"
-msgstr ""
+msgid "Apply {n} change"
+msgid_plural "Apply {n} changes"
+msgstr[0] ""
+msgstr[1] ""
 
 #: crates/ui/src/pages/trainer/pages.rs
 msgid "Confirmed."
@@ -3285,6 +3287,10 @@ msgstr ""
 
 #: crates/ui/src/pages/trainer/pages.rs
 msgid "Connect an offline character first."
+msgstr ""
+
+#: crates/ui/src/pages/trainer/pages.rs
+msgid "Couldn't read from the game: it answered with other fields."
 msgstr ""
 
 #: crates/ui/src/pages/trainer/pages.rs
@@ -3356,15 +3362,16 @@ msgid "Waiting to turn on…"
 msgstr ""
 
 #: crates/ui/src/pages/trainer/pages.rs
-msgid "it answered with other fields."
-msgstr ""
-
-#: crates/ui/src/pages/trainer/pages.rs
 msgid "{choice} selected in the game."
 msgstr ""
 
 #: crates/ui/src/pages/trainer/pages.rs
 msgid "{details} Read again to see what the game holds."
+msgstr ""
+
+#: crates/ui/src/pages/trainer/pages.rs
+msgctxt "a field and the value the game kept"
+msgid "{field} {value}"
 msgstr ""
 
 #: crates/ui/src/pages/trainer/profiles.rs

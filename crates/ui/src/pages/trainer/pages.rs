@@ -3,7 +3,8 @@
 
 use super::catalog::{self, Area, Feature, FeatureField, FeatureKind, FeatureValue};
 use super::session::{FieldError, FieldRequest, FieldResult, FieldWrite, GameField, HookState, PendingFields, TrainerSession};
-use eg_core::phrase::Phrase;
+use eg_core::locale::numbers;
+use eg_core::phrase::{Conjunction, Phrase, Plural, list};
 
 const TURNS_ON_WHEN: Phrase = Phrase::new("Turns on when {name} enters play.");
 const SELECTED: Phrase = Phrase::new("{choice} selected in the game.");
@@ -17,12 +18,13 @@ const TURNING_OFF: Phrase = Phrase::new("Turning off…");
 const NOT_READ_YET: Phrase = Phrase::new("Not read yet");
 const IN_GAME: Phrase = Phrase::new("In game: {value}");
 const CONNECT_FIRST: Phrase = Phrase::new("Connect an offline character first.");
-const APPLY_CHANGES: Phrase = Phrase::new("Apply {count} changes");
+const APPLY_CHANGES: Plural = Plural::new("Apply {n} change", "Apply {n} changes");
 const APPLY: Phrase = Phrase::new("Apply");
-const OTHER_FIELDS_READ: Phrase = Phrase::new("it answered with other fields.");
 const COULD_NOT_READ: Phrase = Phrase::new("Couldn't read from the game: {details}");
+const COULD_NOT_READ_OTHER_FIELDS: Phrase = Phrase::new("Couldn't read from the game: it answered with other fields.");
 const CONFIRMED: Phrase = Phrase::new("Confirmed.");
 const GAME_KEPT: Phrase = Phrase::new("The game kept {kept}.");
+const FIELD_HOLDS: Phrase = Phrase::ctx("a field and the value the game kept", "{field} {value}");
 const NOT_CHANGED: Phrase = Phrase::new("Not changed: {details}");
 const OTHER_FIELDS_WRITE: Phrase = Phrase::new("The game answered with other fields.");
 const READ_AGAIN: Phrase = Phrase::new("{details} Read again to see what the game holds.");
@@ -269,9 +271,9 @@ impl HookRow {
         if hook_amount(self.feature.id(), text).is_some_and(fits) {
             String::new()
         } else if infinite {
-            TYPE_A_NUMBER_OR_INFINITY.with(&[("minimum", &plain(value.minimum)), ("maximum", &plain(100.0))])
+            TYPE_A_NUMBER_OR_INFINITY.with(&[("minimum", &numbers().plain(value.minimum)), ("maximum", &numbers().plain(100.0))])
         } else {
-            TYPE_A_NUMBER.with(&[("minimum", &plain(value.minimum)), ("maximum", &plain(value.maximum))])
+            TYPE_A_NUMBER.with(&[("minimum", &numbers().plain(value.minimum)), ("maximum", &numbers().plain(value.maximum))])
         }
     }
 
@@ -325,7 +327,7 @@ pub fn hook_amount(id: &str, text: &str) -> Option<f64> {
     if id == "enemy-damage" && matches!(text.trim().to_ascii_lowercase().as_str(), "∞" | "inf" | "infinity") {
         Some(101.0)
     } else {
-        parse(text)
+        numbers().parse(text)
     }
 }
 
@@ -362,7 +364,11 @@ pub fn range_text(id: &str, value: &FeatureValue) -> String {
 }
 
 pub fn hook_text(id: &str, number: f64) -> String {
-    if id == "enemy-damage" && number == 101.0 { "∞".into() } else { plain(number) }
+    if id == "enemy-damage" && number == 101.0 {
+        "∞".into()
+    } else {
+        numbers().plain(number)
+    }
 }
 
 /// One field of an editor: what the game holds, and a draft until Apply.
@@ -471,7 +477,7 @@ impl FieldModel {
     pub fn game_text(&self) -> String {
         match self.game {
             None => NOT_READ_YET.get().to_owned(),
-            Some(value) => IN_GAME.with(&[("value", &grouped(value))]),
+            Some(value) => IN_GAME.with(&[("value", &numbers().grouped(value))]),
         }
     }
 }
@@ -595,7 +601,7 @@ impl EditorRow {
 
     pub fn apply_text(&self) -> String {
         match self.fields.iter().filter(|f| f.is_drafted()).count() {
-            drafts if drafts > 1 => APPLY_CHANGES.with(&[("count", &drafts)]),
+            drafts if drafts > 1 => APPLY_CHANGES.count(drafts),
             _ => APPLY.get().to_owned(),
         }
     }
@@ -626,10 +632,8 @@ impl EditorRow {
                 self.show(&read);
                 self.say("", Tone::None);
             }
-            result => {
-                let details = result.err().map_or_else(|| OTHER_FIELDS_READ.into(), |error| error.details);
-                self.say(COULD_NOT_READ.with(&[("details", &details)]), Tone::Error);
-            }
+            Ok(_) => self.say(COULD_NOT_READ_OTHER_FIELDS, Tone::Error),
+            Err(error) => self.say(COULD_NOT_READ.with(&[("details", &error.details)]), Tone::Error),
         }
     }
 
@@ -678,13 +682,13 @@ impl EditorRow {
                     .enumerate()
                     .filter_map(|(i, write)| {
                         let held = if self.listed { held(&read, &write.label) } else { read[i].value };
-                        (write.changes() && !holds(Some(held), write.wanted)).then(|| format!("{} {}", labels[i], grouped(held)))
+                        (write.changes() && !holds(Some(held), write.wanted)).then(|| FIELD_HOLDS.with(&[("field", &labels[i]), ("value", &numbers().grouped(held))]))
                     })
                     .collect();
                 if kept.is_empty() {
                     self.say(CONFIRMED.get(), Tone::Confirmed);
                 } else {
-                    self.say(GAME_KEPT.with(&[("kept", &kept.join(", "))]), Tone::Error);
+                    self.say(GAME_KEPT.with(&[("kept", &list(&kept, Conjunction::And))]), Tone::Error);
                 }
             }
             Err(FieldError { details, nothing_sent: true }) => {
@@ -751,46 +755,9 @@ fn held(read: &[GameField], label: &str) -> f64 {
     read.iter().find(|f| f.label == label).map_or(0.0, |f| f.value)
 }
 
-/// "0.##": at most two decimals, none when whole.
-pub fn plain(value: f64) -> String {
-    let rounded = round2(value);
-    let text = format!("{rounded:.2}");
-    let text = text.trim_end_matches('0').trim_end_matches('.');
-    if text == "-0" { "0".to_owned() } else { text.to_owned() }
-}
-
-/// "#,0.##": thousands grouped, at most two decimals.
-pub fn grouped(value: f64) -> String {
-    let text = plain(value);
-    let (sign, digits) = text.strip_prefix('-').map_or(("", text.as_str()), |rest| ("-", rest));
-    let (whole, fraction) = digits.split_once('.').map_or((digits, None), |(w, f)| (w, Some(f)));
-    let mut out = String::new();
-    for (i, digit) in whole.chars().enumerate() {
-        if i > 0 && (whole.len() - i) % 3 == 0 {
-            out.push(',');
-        }
-        out.push(digit);
-    }
-    match fraction {
-        Some(fraction) => format!("{sign}{out}.{fraction}"),
-        None => format!("{sign}{out}"),
-    }
-}
-
-/// Midpoints round away from zero, as .NET's number formatting does.
-fn round2(value: f64) -> f64 {
-    (value * 100.0).round() / 100.0
-}
-
-/// What a box's text says as a number: grouping commas and spaces are ignored; anything else is no number.
-pub fn parse(text: &str) -> Option<f64> {
-    let cleaned: String = text.chars().filter(|c| *c != ',' && !c.is_whitespace()).collect();
-    cleaned.parse::<f64>().ok().filter(|value| value.is_finite())
-}
-
 /// A step as its tip says it ("Up and Down change it by 0.5").
 pub fn step_text(step: f64) -> String {
-    STEP.with(&[("step", &step)])
+    STEP.with(&[("step", &numbers().plain(step))])
 }
 
 /// Where each column starts: the split whose tallest column is shortest, at headings when there are any
@@ -872,18 +839,7 @@ mod tests {
     use std::rc::Rc;
 
     #[test]
-    fn numbers_format_as_the_csharp_strings() {
-        assert_eq!(plain(2.0), "2");
-        assert_eq!(plain(0.1), "0.1");
-        assert_eq!(plain(-30.0), "-30");
-        assert_eq!(plain(0.125), "0.13");
-        assert_eq!(grouped(12400.0), "12,400");
-        assert_eq!(grouped(1234567.5), "1,234,567.5");
-        assert_eq!(grouped(-1.0), "-1");
-        assert_eq!(grouped(999.0), "999");
-        assert_eq!(parse(" 12,400 "), Some(12400.0));
-        assert_eq!(parse(""), None);
-        assert_eq!(parse("abc"), None);
+    fn steps_read_as_the_csharp_strings() {
         assert_eq!(step_text(0.5), "Up and Down change it by 0.5");
         assert_eq!(step_text(1.0), "Up and Down change it by 1");
         assert_eq!(step_text(0.05), "Up and Down change it by 0.05");
