@@ -1,14 +1,10 @@
 //! How Home and the Mods page start the game in its three ways: one start at a time, each said in one sentence. The
 //! game process itself is never touched; only Steam, the executable and MelonLoader's proxy in the game folder are.
 
-use crate::game::install::GameInstall;
-use crate::game::process::RunningGame;
 use crate::launch::host::{GameHost, LaunchError, LaunchMode, LaunchOutcome};
 use crate::launch::loader::{self, ModLoaderState};
-use eg_core::game_log::GameLogState;
 use eg_core::operations::Cancellation;
 use eg_core::phrase::Phrase;
-use std::path::PathBuf;
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::Duration;
 
@@ -54,35 +50,13 @@ impl GameLauncher {
         *self.starting.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
     }
 
-    pub fn find_install(&self) -> Option<GameInstall> {
-        self.host.find_install()
-    }
-
-    pub fn find_running(&self) -> Option<RunningGame> {
-        self.host.find_running()
-    }
-
-    pub fn loader_root(&self, install: &GameInstall) -> PathBuf {
-        self.host.loader_root(install)
-    }
-
-    /// A best-effort logged version for display, or None when unavailable.
-    pub fn read_game_version(&self, install: &GameInstall) -> Option<String> {
-        self.host.read_game_version(install)
-    }
-
-    pub fn read_log(&self, game: &RunningGame) -> GameLogState {
-        self.host.read_log(game)
+    /// What the launcher starts the game through: finding it, watching it and its mod loader.
+    pub fn host(&self) -> &dyn GameHost {
+        self.host.as_ref()
     }
 
     pub fn read_mod_loader(&self) -> ModLoaderState {
         self.host.read_mod_loader(self.host.find_install().as_ref())
-    }
-
-    /// At startup: sets aside a MelonLoader proxy an earlier start left in place while no game runs. Takes the install
-    /// the caller found (`find_install`), so startup looks for the game once.
-    pub fn settle_mod_loader(&self, install: Option<&GameInstall>) -> bool {
-        self.host.settle_mod_loader(install)
     }
 
     /// Starts the game and says how it went. Blocks while a start with mods waits for MelonLoader, so call it off the

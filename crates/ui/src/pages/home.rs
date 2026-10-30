@@ -108,8 +108,8 @@ impl Home {
         background::run(
             move || {
                 let loader = loader.then(|| launcher.read_mod_loader());
-                let running = launcher.find_running();
-                let phase = HomeModel::phase_of(running.as_ref(), |game| launcher.read_log(game).readiness);
+                let running = launcher.host().find_running();
+                let phase = HomeModel::phase_of(running.as_ref(), |game| launcher.host().read_log(game).readiness);
                 (loader, phase)
             },
             move |(loader, phase)| {

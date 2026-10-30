@@ -20,8 +20,8 @@ import {
     FlagToggle,
     MenuRow,
     CheckBox,
-    HelpButton,
 } from "cells.slint";
+import { HelpButton } from "../../widgets/help-button.slint";
 import {
     AffixRowItem,
     ModifierRowItem,
@@ -1077,10 +1077,18 @@ export component ItemForge inherits Rectangle {
                             vertical-alignment: center;
                         }
 
-                        HelpButton {
+                        // The bare icon's room in the line; the button's frame hangs out around it.
+                        Rectangle {
+                            width: Tokens.icon-size-small;
+                            height: Tokens.icon-size-small;
                             y: (parent.height - self.height) / 2;
-                            tip: ForgeState.implicit-note;
-                            label: ForgeText.about-implicits;
+
+                            HelpButton {
+                                x: -Tokens.compact-icon-button-padding.left;
+                                y: -Tokens.compact-icon-button-padding.top;
+                                help: ForgeState.implicit-note;
+                                label: ForgeText.about-implicits;
+                            }
                         }
                     }
 

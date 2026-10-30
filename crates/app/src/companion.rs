@@ -34,8 +34,8 @@ impl Companion {
     pub fn discover(&self) -> JoinHandle<(Option<PathBuf>, Option<PathBuf>)> {
         let launcher = self.launcher.clone();
         thread::spawn(move || {
-            let install = launcher.find_install();
-            launcher.settle_mod_loader(install.as_ref());
+            let install = launcher.host().find_install();
+            launcher.host().settle_mod_loader(install.as_ref());
             (install.map(|install| install.executable), dotnet::found_directory())
         })
     }

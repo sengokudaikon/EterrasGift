@@ -4,11 +4,12 @@ use std::io;
 
 /// Opens `target` through the Windows shell. The error is Windows' own reason.
 #[cfg(windows)]
-pub fn open(target: &str) -> io::Result<()> {
+pub fn open(target: impl AsRef<std::ffi::OsStr>) -> io::Result<()> {
+    use std::os::windows::ffi::OsStrExt;
     use windows_sys::Win32::UI::Shell::ShellExecuteW;
     use windows_sys::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
     let verb: Vec<u16> = "open\0".encode_utf16().collect();
-    let file: Vec<u16> = target.encode_utf16().chain(Some(0)).collect();
+    let file: Vec<u16> = target.as_ref().encode_wide().chain(Some(0)).collect();
     // SAFETY: the strings are NUL-terminated and outlive the call; the other arguments may be null.
     let result = unsafe { ShellExecuteW(std::ptr::null_mut(), verb.as_ptr(), file.as_ptr(), std::ptr::null(), std::ptr::null(), SW_SHOWNORMAL) };
     // Values above 32 mean success; anything else leaves its reason in the thread's last error.
@@ -16,7 +17,7 @@ pub fn open(target: &str) -> io::Result<()> {
 }
 
 #[cfg(not(windows))]
-pub fn open(_target: &str) -> io::Result<()> {
+pub fn open(_target: impl AsRef<std::ffi::OsStr>) -> io::Result<()> {
     Err(io::Error::new(io::ErrorKind::Unsupported, "Only Windows can open this."))
 }
 
@@ -24,7 +25,7 @@ pub fn open(_target: &str) -> io::Result<()> {
 /// folder first.
 #[cfg(windows)]
 pub fn open_path(path: &std::path::Path, reveal: bool, create: bool) -> io::Result<()> {
-    use std::os::windows::{ffi::OsStrExt, process::CommandExt};
+    use std::os::windows::process::CommandExt;
     if create {
         std::fs::create_dir_all(path)?;
     }
@@ -32,15 +33,7 @@ pub fn open_path(path: &std::path::Path, reveal: bool, create: bool) -> io::Resu
         std::process::Command::new("explorer.exe").arg("/select,").arg(path).creation_flags(0x0800_0000).spawn()?;
         return Ok(());
     }
-    let wide: Vec<u16> = path.as_os_str().encode_wide().chain(Some(0)).collect();
-    let open: Vec<u16> = "open".encode_utf16().chain(Some(0)).collect();
-    // SAFETY: all UTF-16 strings are terminated and live until the call returns; ShellExecute opens the user's selected file.
-    let result = unsafe { windows_sys::Win32::UI::Shell::ShellExecuteW(std::ptr::null_mut(), open.as_ptr(), wide.as_ptr(), std::ptr::null(), std::ptr::null(), 1) };
-    if result as isize <= 32 {
-        Err(io::Error::other(format!("Could not open {} (Windows error {}).", path.display(), result as isize)))
-    } else {
-        Ok(())
-    }
+    open(path)
 }
 
 #[cfg(not(windows))]

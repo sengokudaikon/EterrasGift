@@ -18,34 +18,6 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 const NOT_AN_OBJECT: Phrase = Phrase::new("The settings for {module} must be an object.");
 const NOT_TRUE_OR_FALSE: Phrase = Phrase::new("{key} must be true or false in the settings for {module}, which were left unchanged.");
-const GAME_EXECUTABLE: Phrase = Phrase::new("Game executable");
-const USER_DATA_FOLDER: Phrase = Phrase::new("User-data folder");
-const MOD_LIBRARY: Phrase = Phrase::new("Mod library");
-const MOD_SOURCES_FOLDER: Phrase = Phrase::new("Mod sources folder");
-const DOTNET_FOLDER: Phrase = Phrase::new(".NET SDK folder");
-const MELONLOADER_FOLDER: Phrase = Phrase::new("MelonLoader folder");
-const MOD_LIBRARY_FOLDER: Phrase = Phrase::new("Mod library folder");
-const GAME_EXECUTABLE_CAPTION: Phrase = Phrase::new("Leave empty to find the game automatically.");
-const USER_DATA_CAPTION: Phrase =
-    Phrase::new("Fault reports, trainer labels, game definitions and, unless it has its own folder, the mod library. A new folder takes effect after a restart.");
-const MOD_LIBRARY_CAPTION: Phrase = Phrase::new("Every mod version you install, and which mods are on. A new folder takes effect after a restart.");
-const MOD_SOURCES_CAPTION: Phrase = Phrase::new("Your own mod projects, for the Mods page to build and install.");
-const DOTNET_CAPTION: Phrase = Phrase::new("The folder with dotnet.exe, which builds mod projects. Leave empty to find it automatically.");
-const MELONLOADER_CAPTION: Phrase = Phrase::new(
-    "Where games with mods run MelonLoader from. Leave empty for the game folder. Another folder needs a copy of MelonLoader 0.6.6 or later. Takes effect after a restart.",
-);
-const BROWSE_GAME_EXECUTABLE: Phrase = Phrase::new("Browse for the game executable");
-const BROWSE_USER_DATA: Phrase = Phrase::new("Browse for the user-data folder");
-const BROWSE_MOD_LIBRARY: Phrase = Phrase::new("Browse for the mod library folder");
-const BROWSE_MOD_SOURCES: Phrase = Phrase::new("Browse for the mod sources folder");
-const BROWSE_DOTNET: Phrase = Phrase::new("Browse for the .NET SDK folder");
-const BROWSE_MELONLOADER: Phrase = Phrase::new("Browse for the MelonLoader folder");
-const SELECT_GAME_EXECUTABLE: Phrase = Phrase::new("Select the Last Epoch executable");
-const SELECT_USER_DATA: Phrase = Phrase::new("Select user-data folder");
-const SELECT_MOD_LIBRARY: Phrase = Phrase::new("Select the mod library folder");
-const SELECT_MOD_SOURCES: Phrase = Phrase::new("Select the mod sources folder");
-const SELECT_DOTNET: Phrase = Phrase::new("Select the folder with dotnet.exe");
-const SELECT_MELONLOADER: Phrase = Phrase::new("Select the folder MelonLoader runs from");
 const NONE: Phrase = Phrase::new("None");
 const NOT_FOUND: Phrase = Phrase::new("Not found");
 const GAME_FOLDER: Phrase = Phrase::new("The game folder");
@@ -203,57 +175,60 @@ impl Location {
         }
     }
 
-    fn label(self) -> &'static str {
+    /// What the page says about it: its label, the box's accessible name, its caption, its Browse button's name and the
+    /// picker's title.
+    const fn words(self) -> [Phrase; 5] {
         match self {
-            Location::GameExecutable => GAME_EXECUTABLE.get(),
-            Location::UserData => USER_DATA_FOLDER.get(),
-            Location::ModLibrary => MOD_LIBRARY.get(),
-            Location::ModSources => MOD_SOURCES_FOLDER.get(),
-            Location::Dotnet => DOTNET_FOLDER.get(),
-            Location::MelonLoader => MELONLOADER_FOLDER.get(),
-        }
-    }
-
-    /// The box's accessible name.
-    fn name(self) -> &'static str {
-        match self {
-            Location::ModLibrary => MOD_LIBRARY_FOLDER.get(),
-            location => location.label(),
-        }
-    }
-
-    fn caption(self) -> &'static str {
-        match self {
-            Location::GameExecutable => GAME_EXECUTABLE_CAPTION.get(),
-            Location::UserData => USER_DATA_CAPTION.get(),
-            Location::ModLibrary => MOD_LIBRARY_CAPTION.get(),
-            Location::ModSources => MOD_SOURCES_CAPTION.get(),
-            Location::Dotnet => DOTNET_CAPTION.get(),
-            Location::MelonLoader => MELONLOADER_CAPTION.get(),
-        }
-    }
-
-    fn browse_label(self) -> &'static str {
-        match self {
-            Location::GameExecutable => BROWSE_GAME_EXECUTABLE.get(),
-            Location::UserData => BROWSE_USER_DATA.get(),
-            Location::ModLibrary => BROWSE_MOD_LIBRARY.get(),
-            Location::ModSources => BROWSE_MOD_SOURCES.get(),
-            Location::Dotnet => BROWSE_DOTNET.get(),
-            Location::MelonLoader => BROWSE_MELONLOADER.get(),
+            Location::GameExecutable => [
+                Phrase::new("Game executable"),
+                Phrase::new("Game executable"),
+                Phrase::new("Leave empty to find the game automatically."),
+                Phrase::new("Browse for the game executable"),
+                Phrase::new("Select the Last Epoch executable"),
+            ],
+            Location::UserData => [
+                Phrase::new("User-data folder"),
+                Phrase::new("User-data folder"),
+                Phrase::new("Fault reports, trainer labels, game definitions and, unless it has its own folder, the mod library. A new folder takes effect after a restart."),
+                Phrase::new("Browse for the user-data folder"),
+                Phrase::new("Select user-data folder"),
+            ],
+            Location::ModLibrary => [
+                Phrase::new("Mod library"),
+                Phrase::new("Mod library folder"),
+                Phrase::new("Every mod version you install, and which mods are on. A new folder takes effect after a restart."),
+                Phrase::new("Browse for the mod library folder"),
+                Phrase::new("Select the mod library folder"),
+            ],
+            Location::ModSources => [
+                Phrase::new("Mod sources folder"),
+                Phrase::new("Mod sources folder"),
+                Phrase::new("Your own mod projects, for the Mods page to build and install."),
+                Phrase::new("Browse for the mod sources folder"),
+                Phrase::new("Select the mod sources folder"),
+            ],
+            Location::Dotnet => [
+                Phrase::new(".NET SDK folder"),
+                Phrase::new(".NET SDK folder"),
+                Phrase::new("The folder with dotnet.exe, which builds mod projects. Leave empty to find it automatically."),
+                Phrase::new("Browse for the .NET SDK folder"),
+                Phrase::new("Select the folder with dotnet.exe"),
+            ],
+            Location::MelonLoader => [
+                Phrase::new("MelonLoader folder"),
+                Phrase::new("MelonLoader folder"),
+                Phrase::new(
+                    "Where games with mods run MelonLoader from. Leave empty for the game folder. Another folder needs a copy of MelonLoader 0.6.6 or later. Takes effect after a restart.",
+                ),
+                Phrase::new("Browse for the MelonLoader folder"),
+                Phrase::new("Select the folder MelonLoader runs from"),
+            ],
         }
     }
 
     /// The picker's title.
     pub fn picker_title(self) -> &'static str {
-        match self {
-            Location::GameExecutable => SELECT_GAME_EXECUTABLE.get(),
-            Location::UserData => SELECT_USER_DATA.get(),
-            Location::ModLibrary => SELECT_MOD_LIBRARY.get(),
-            Location::ModSources => SELECT_MOD_SOURCES.get(),
-            Location::Dotnet => SELECT_DOTNET.get(),
-            Location::MelonLoader => SELECT_MELONLOADER.get(),
-        }
+        self.words()[4].get()
     }
 }
 
@@ -861,13 +836,14 @@ impl View {
     }
     fn row(&self, location: Location) -> LocationSetting {
         let page = self.page.borrow();
+        let [label, name, caption, browse, _] = location.words();
         LocationSetting {
-            label: location.label().into(),
-            name: location.name().into(),
+            label: label.get().into(),
+            name: name.get().into(),
             value: page.location(location).into(),
             placeholder: page.placeholder(location).into(),
-            caption: location.caption().into(),
-            browse_label: location.browse_label().into(),
+            caption: caption.get().into(),
+            browse_label: browse.get().into(),
         }
     }
 

@@ -143,7 +143,7 @@ impl FileGameHost {
 
     fn start(&self, mode: LaunchMode, install: &GameInstall) -> Result<(), LaunchError> {
         if mode == LaunchMode::Online {
-            return crate::shell::open(&format!("steam://rungameid/{}", install::STEAM_APP_ID)).map_err(|error| LaunchError::Refused(STEAM_FAILED.with(&[("error", &error)])));
+            return crate::shell::open(format!("steam://rungameid/{}", install::STEAM_APP_ID)).map_err(|error| LaunchError::Refused(STEAM_FAILED.with(&[("error", &error)])));
         }
         self.command(mode, install)
             .spawn()

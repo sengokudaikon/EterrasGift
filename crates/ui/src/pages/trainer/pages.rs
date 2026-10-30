@@ -170,11 +170,8 @@ impl HookRow {
             .enumerate()
             .map(|(i, value)| if fits { value.fit_saved(saved[i]) } else { value.start })
             .collect();
+        // Building a row sends nothing: the worker fits saved values to the registry when it restores a profile.
         let mut row = HookRow { feature, values, scrub: None };
-        // A remembered value the registry no longer allows reaches the helper as the box shows it.
-        if fits && saved != row.values {
-            row.send(session);
-        }
         if feature.kind == FeatureKind::Choice && !session.is_hook_wanted(feature.id()) {
             row.values[0] = 0.0;
         }

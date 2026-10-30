@@ -561,9 +561,9 @@ impl View {
             let result = change(library);
             // On write failure retain an error, then request a fresh observation after all later edits.
             let change = result?;
-            let install = launcher.find_install();
-            let root = install.as_ref().map(|install| launcher.loader_root(install));
-            let version = install.as_ref().and_then(|install| launcher.read_game_version(install));
+            let install = launcher.host().find_install();
+            let root = install.as_ref().map(|install| launcher.host().loader_root(install));
+            let version = install.as_ref().and_then(|install| launcher.host().read_game_version(install));
             let inventory = inventory::read(install.as_ref(), library, root.as_deref());
             let (running, modded) = running_state(&launcher, inventory.loader_log.as_deref());
             let undo_held = undo.as_ref().is_none_or(|item| library.holds(item));

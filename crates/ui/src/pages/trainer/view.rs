@@ -579,11 +579,7 @@ fn sync<T: Clone + PartialEq + 'static>(model: &mut Rc<VecModel<T>>, views: Vec<
         *model = Rc::new(VecModel::from(views));
         return true;
     }
-    for (i, fresh) in views.into_iter().enumerate() {
-        if model.row_data(i).as_ref() != Some(&fresh) {
-            model.set_row_data(i, fresh);
-        }
-    }
+    crate::models::update_rows(model, views);
     false
 }
 
