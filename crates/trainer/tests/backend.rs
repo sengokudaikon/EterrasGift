@@ -116,6 +116,7 @@ struct Shared {
     status: Mutex<RuntimeStatus>,
     connect_errors: Mutex<VecDeque<BackendError>>,
     read_errors: Mutex<VecDeque<BackendError>>,
+    locale_errors: Mutex<VecDeque<BackendError>>,
     connect_block: Block,
     locale_block: Block,
     forge_block: Block,
@@ -158,6 +159,7 @@ impl Shared {
             }),
             connect_errors: Mutex::new(VecDeque::new()),
             read_errors: Mutex::new(VecDeque::new()),
+            locale_errors: Mutex::new(VecDeque::new()),
             connect_block: Block::default(),
             locale_block: Block::default(),
             forge_block: Block::default(),
@@ -273,6 +275,9 @@ impl BackendConnection for Connection {
     }
     async fn read_locale(&mut self) -> Result<eg_trainer::definitions::catalog::GameLocale, BackendError> {
         self.shared.call("locale", &self.shared.locale_block).await;
+        if let Some(error) = self.shared.locale_errors.lock().unwrap().pop_front() {
+            return Err(error);
+        }
         Ok(self.shared.locale.lock().unwrap().clone())
     }
     fn build_hashes(&self) -> (String, String) {

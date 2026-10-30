@@ -139,10 +139,7 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
                 Ok(true)
             }
             Err(error) => {
-                self.handle_connection_gate(&error);
-                if !matches!(error.kind, ErrorKind::Gate | ErrorKind::Superseded) {
-                    self.fail(error.clone(), Some(target.clone()));
-                }
+                self.settle(&error, target.clone());
                 Err(error)
             }
         }

@@ -373,6 +373,29 @@ fn monitor_refreshes_locale_even_when_no_new_value_requests_are_submitted() {
 }
 
 #[test]
+fn a_character_loading_during_the_language_check_keeps_the_connection() {
+    run(async {
+        let shared = shared();
+        let (handle, worker) = start(&shared, options());
+        connected(&handle).await;
+        shared
+            .locale_errors
+            .lock()
+            .unwrap()
+            .push_back(BackendError::waiting(ErrorKind::CharacterLoading, "area transition"));
+        assert_eq!(command(&handle, command_for(&handle.snapshot())).await.unwrap_err().kind, ErrorKind::CharacterLoading);
+        let state = handle.snapshot();
+        assert_eq!(state.phase, Phase::WaitingForCharacter);
+        assert!(state.attached.is_some());
+        assert_eq!(shared.count("disconnect"), 0);
+        command(&handle, Command::ReadForge).await.unwrap();
+        assert_eq!(handle.snapshot().phase, Phase::Ready);
+        assert_eq!(shared.count("connect"), 1);
+        shutdown(&handle, worker).await;
+    });
+}
+
+#[test]
 fn context_change_mid_sample_refreshes_locale_without_caching_the_old_failure() {
     run(async {
         let shared = shared();
