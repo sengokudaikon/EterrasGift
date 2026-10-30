@@ -1,10 +1,10 @@
 //! Scale the player's calculated ability speed; downstream fixed-speed mutators remain the game's decision.
 use super::*;
-use crate::game::gameplay::{Behavior, GroupId, HookFeature};
+use crate::game::gameplay::{Behavior, GameplayHook, HookFeature};
 use crate::hooks::postfix::FRAME;
 
 pub(crate) const FEATURE: HookFeature = HookFeature {
-    group: GroupId::AbilitySpeed,
+    controls: &[GameplayHook::AbilitySpeed],
     behavior: Behavior::Postfix,
     targets,
 };

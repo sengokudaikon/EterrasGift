@@ -1,12 +1,12 @@
 //! Refill rune/glyph stacks in one-slot containers before original quantity queries. Other item types are unchanged.
 use super::{
-    hooks::{Behavior, GameplayHookTarget, GroupId, HookFeature, MethodSpec},
+    hooks::{Behavior, GameplayHook, GameplayHookTarget, HookFeature, MethodSpec},
     materials::{self, Code, FLOOR},
 };
 use crate::{game::*, hooks::leaf::LeafEffect};
 
 pub(super) const FEATURE: HookFeature = HookFeature {
-    group: GroupId::RunesGlyphsTo99,
+    controls: &[GameplayHook::RunesGlyphsTo99],
     behavior: Behavior::Leaf,
     targets,
 };

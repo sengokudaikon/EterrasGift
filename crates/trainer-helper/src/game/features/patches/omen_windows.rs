@@ -1,8 +1,8 @@
 //! Bypass both campaign and Monolith failed-roll branches, preserving both original rolls.
-use super::super::hooks::{Behavior, GroupId, HookFeature};
+use super::super::hooks::{Behavior, GameplayHook, HookFeature};
 use super::*;
 pub(crate) const FEATURE: HookFeature = HookFeature {
-    group: GroupId::OmenWindows,
+    controls: &[GameplayHook::OmenWindows],
     behavior: Behavior::Patch,
     targets,
 };

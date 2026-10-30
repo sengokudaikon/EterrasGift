@@ -1,8 +1,8 @@
 //! Apply all bonuses of a worn set during stat recalculation; an unworn set still grants nothing.
-use super::super::hooks::{Behavior, GroupId, HookFeature};
+use super::super::hooks::{Behavior, GameplayHook, HookFeature};
 use super::*;
 pub(crate) const FEATURE: HookFeature = HookFeature {
-    group: GroupId::FullSetBonus,
+    controls: &[GameplayHook::FullSetBonus],
     behavior: Behavior::Patch,
     targets,
 };

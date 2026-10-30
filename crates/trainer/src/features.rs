@@ -2,7 +2,7 @@
 //! identity (`eg_trainer_wire::hooks::GameplayHook`); a descriptor grants no permission to install a hook.
 
 use eg_core::phrase::Phrase;
-use eg_trainer_wire::hooks::GameplayHook;
+use eg_trainer_wire::hooks::{GameplayHook, ValueKind};
 use std::collections::{BTreeMap, BTreeSet};
 use std::error::Error;
 use std::fmt;
@@ -53,6 +53,21 @@ impl HookId {
     pub fn native(self) -> Option<GameplayHook> {
         GameplayHook::from_id(self.0)
     }
+
+    /// Its value's "without limit" setting, if it has one: a number past its largest, shown as ∞.
+    pub fn infinity(self) -> Option<Infinity> {
+        match self.native()?.value_kind() {
+            ValueKind::Real { max, infinity: Some(value), .. } => Some(Infinity { largest: max, value }),
+            _ => None,
+        }
+    }
+}
+
+/// A value's "without limit" setting (enemy damage's one-hit kills): `value`, past the `largest` number it takes.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Infinity {
+    pub largest: f64,
+    pub value: f64,
 }
 
 /// An interned, registry-validated direct field editor key, separate from hook IDs.
@@ -107,9 +122,7 @@ pub enum NativeSupport {
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct FeatureValue {
     pub label: Phrase,
-    /// Display default, including the selected choice's label.
-    pub default: &'static str,
-    /// Numeric default, or the selected choice's zero-based index.
+    /// Where it starts: a number, or a choice's zero-based index.
     pub start: f64,
     pub choices: &'static [Phrase],
     pub hint: Option<Phrase>,
@@ -121,6 +134,14 @@ pub struct FeatureValue {
 }
 
 impl FeatureValue {
+    /// Where it starts, as shown: the number, or the choice's name.
+    pub fn start_text(&self) -> String {
+        match self.choices.get(self.start as usize) {
+            Some(choice) => choice.get().to_owned(),
+            None => eg_core::locale::numbers().plain(self.start),
+        }
+    }
+
     /// A saved value as this value takes it now: within its range, or a choice it still lists, else its start. The
     /// catalog may have changed since the value was saved.
     pub fn fit_saved(&self, value: f64) -> f64 {
@@ -291,8 +312,7 @@ impl FeatureIntents {
             });
         }
         for (index, (specification, value)) in descriptor.values.iter().zip(values).enumerate() {
-            if !specification.accepts(*value) || (id.as_str() == "incoming-damage" && value.fract() != 0.0) || (id.as_str() == "enemy-damage" && *value > 100.0 && *value != 101.0)
-            {
+            if !specification.accepts(*value) || id.native().is_some_and(|hook| !hook.value_kind().takes(*value)) {
                 return Err(FeatureError::InvalidValue { id, index });
             }
         }
@@ -331,13 +351,7 @@ impl FeatureIntents {
                     .zip(entry.values)
                     .map(|(specification, value)| {
                         let fitted = specification.fit_saved(value);
-                        if id.as_str() == "incoming-damage" {
-                            fitted.round()
-                        } else if id.as_str() == "enemy-damage" && fitted > 100.0 && fitted != 101.0 {
-                            100.0
-                        } else {
-                            fitted
-                        }
+                        id.native().and_then(|hook| hook.value_kind().fit(fitted)).unwrap_or(fitted)
                     })
                     .collect(),
             );

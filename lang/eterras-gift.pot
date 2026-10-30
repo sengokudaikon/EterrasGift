@@ -3402,6 +3402,10 @@ msgstr ""
 msgid "Not available in this version yet."
 msgstr ""
 
+#: crates/ui/src/pages/trainer/view.rs
+msgid "{name}: one-hit kills"
+msgstr ""
+
 #: crates/ui/src/shell.rs crates/ui/ui/strings/home.slint
 msgid "Home"
 msgstr ""

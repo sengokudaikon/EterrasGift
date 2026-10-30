@@ -1,8 +1,8 @@
 //! Replace this spend path's virtual unspent-point result with 113; other point reads remain the game's.
-use super::super::hooks::{Behavior, GroupId, HookFeature};
+use super::super::hooks::{Behavior, GameplayHook, HookFeature};
 use super::*;
 pub(crate) const FEATURE: HookFeature = HookFeature {
-    group: GroupId::UnlimitedPassivePoints,
+    controls: &[GameplayHook::UnlimitedPassivePoints],
     behavior: Behavior::Patch,
     targets,
 };

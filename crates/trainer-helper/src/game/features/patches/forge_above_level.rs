@@ -1,8 +1,8 @@
 //! Bypass the character-versus-item-level refusal; preserve the remaining Forge admission checks.
-use super::super::hooks::{Behavior, GroupId, HookFeature};
+use super::super::hooks::{Behavior, GameplayHook, HookFeature};
 use super::*;
 pub(crate) const FEATURE: HookFeature = HookFeature {
-    group: GroupId::ForgeAboveLevel,
+    controls: &[GameplayHook::ForgeAboveLevel],
     behavior: Behavior::Patch,
     targets,
 };

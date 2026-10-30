@@ -1,11 +1,11 @@
 //! Increased leech rate, reapplied after the game assembles the character's external stats.
-use super::hooks::{Behavior, GameplayHookTarget, GroupId, HookFeature, MethodSpec};
+use super::hooks::{Behavior, GameplayHook, GameplayHookTarget, HookFeature, MethodSpec};
 use super::stat::StatFeature;
 use crate::game::{GameError, RuntimeAccess};
 use std::ptr::NonNull;
 
 pub(super) const FEATURE: HookFeature = HookFeature {
-    group: GroupId::FixedLeechRate,
+    controls: &[GameplayHook::FixedLeechRate],
     behavior: Behavior::Scalar(&LEECH_RATE),
     targets,
 };

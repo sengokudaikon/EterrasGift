@@ -1,8 +1,8 @@
 //! Keep preview and actual Weaver spending consistent; at least one earned Weaver point remains required.
-use super::super::hooks::{Behavior, GroupId, HookFeature};
+use super::super::hooks::{Behavior, GameplayHook, HookFeature};
 use super::*;
 pub(crate) const FEATURE: HookFeature = HookFeature {
-    group: GroupId::UnlimitedWeaverPoints,
+    controls: &[GameplayHook::UnlimitedWeaverPoints],
     behavior: Behavior::Patch,
     targets,
 };

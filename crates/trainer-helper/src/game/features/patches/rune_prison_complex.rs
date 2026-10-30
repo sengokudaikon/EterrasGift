@@ -1,8 +1,8 @@
 //! Bypass the Rune Prison Complex failed-roll branch, preserving level/echo eligibility and the roll itself.
-use super::super::hooks::{Behavior, GroupId, HookFeature};
+use super::super::hooks::{Behavior, GameplayHook, HookFeature};
 use super::*;
 pub(crate) const FEATURE: HookFeature = HookFeature {
-    group: GroupId::RunePrisonComplex,
+    controls: &[GameplayHook::RunePrisonComplex],
     behavior: Behavior::Patch,
     targets,
 };

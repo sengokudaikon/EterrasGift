@@ -1,5 +1,5 @@
 //! Select the next mysterious-rift encounter through the game's Boolean choice.
-use super::hooks::{Behavior, GameplayHookTarget, GroupId, HookFeature, MethodSpec};
+use super::hooks::{Behavior, GameplayHook, GameplayHookTarget, HookFeature, MethodSpec};
 use crate::{
     game::{GameError, RuntimeAccess},
     hooks::leaf::LeafEffect,
@@ -7,7 +7,7 @@ use crate::{
 use std::ptr::NonNull;
 
 pub(super) const FEATURE: HookFeature = HookFeature {
-    group: GroupId::MysteriousRift,
+    controls: &[GameplayHook::MysteriousRift],
     behavior: Behavior::Leaf,
     targets,
 };

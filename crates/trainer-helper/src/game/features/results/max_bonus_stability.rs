@@ -1,9 +1,9 @@
 //! Preserve the original bonus calculation, then raise it to the echo's maximum without lowering a higher result.
 use super::*;
-use crate::game::gameplay::{Behavior, GroupId, HookFeature};
+use crate::game::gameplay::{Behavior, GameplayHook, HookFeature};
 
 pub(crate) const FEATURE: HookFeature = HookFeature {
-    group: GroupId::MaxBonusStability,
+    controls: &[GameplayHook::MaxBonusStability],
     behavior: Behavior::Postfix,
     targets,
 };

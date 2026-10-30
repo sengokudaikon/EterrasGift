@@ -1,8 +1,8 @@
 //! Bypass the Hunter vendor's failed payment precheck at its checked branch, as in the original trainer.
-use super::super::hooks::{Behavior, GroupId, HookFeature};
+use super::super::hooks::{Behavior, GameplayHook, HookFeature};
 use super::*;
 pub(crate) const FEATURE: HookFeature = HookFeature {
-    group: GroupId::FreeHunterVendor,
+    controls: &[GameplayHook::FreeHunterVendor],
     behavior: Behavior::Patch,
     targets,
 };

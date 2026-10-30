@@ -1,9 +1,9 @@
 //! Preserve every RNG draw, then return its maximum byte. Scope intentionally includes non-item RandomByte users.
 use super::*;
-use crate::game::gameplay::{Behavior, GroupId, HookFeature};
+use crate::game::gameplay::{Behavior, GameplayHook, HookFeature};
 
 pub(crate) const FEATURE: HookFeature = HookFeature {
-    group: GroupId::MaxRandomRolls,
+    controls: &[GameplayHook::MaxRandomRolls],
     behavior: Behavior::Postfix,
     targets,
 };

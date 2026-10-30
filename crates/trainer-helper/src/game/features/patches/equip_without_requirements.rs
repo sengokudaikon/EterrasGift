@@ -1,8 +1,8 @@
 //! Bypass equipment class/faction/level refusals, preserving slot compatibility and the primordial limit.
-use super::super::hooks::{Behavior, GroupId, HookFeature};
+use super::super::hooks::{Behavior, GameplayHook, HookFeature};
 use super::*;
 pub(crate) const FEATURE: HookFeature = HookFeature {
-    group: GroupId::EquipWithoutRequirements,
+    controls: &[GameplayHook::EquipWithoutRequirements],
     behavior: Behavior::Patch,
     targets,
 };

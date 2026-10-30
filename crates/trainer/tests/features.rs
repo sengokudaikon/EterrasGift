@@ -1,7 +1,7 @@
 use std::collections::BTreeSet;
 
 use eg_trainer::features::{DESCRIPTORS, FeatureError, FeatureIntents, FeatureKey, FeatureKind, FieldSetId, HookId, NativeSupport, PAGES, SavedValues};
-use eg_trainer_wire::hooks::GameplayHook;
+use eg_trainer_wire::hooks::{GameplayHook, ValueKind};
 
 fn hook(id: &str) -> HookId {
     HookId::parse(id).unwrap()
@@ -60,6 +60,23 @@ fn every_gameplay_hook_runs_exactly_one_hook_feature() {
 }
 
 #[test]
+fn each_hooks_values_are_what_the_helper_takes() {
+    for hook in GameplayHook::ALL {
+        let descriptor = FeatureKey::parse(hook.id()).unwrap().descriptor();
+        let id = hook.id();
+        match (hook.value_kind(), descriptor.values) {
+            (ValueKind::Switch, []) => assert_eq!(descriptor.kind, FeatureKind::Switch, "{id}"),
+            (ValueKind::Percent, [value]) => assert_eq!((value.minimum, value.maximum, value.step, value.choices.len()), (0.0, 100.0, 1.0, 0), "{id}"),
+            (ValueKind::Real { min, max, infinity, .. }, [value]) => {
+                assert_eq!((value.minimum, value.maximum, value.choices.len()), (min, infinity.unwrap_or(max), 0), "{id}");
+            }
+            (ValueKind::Choice(sent), [value]) => assert_eq!(value.choices.len(), sent.len(), "{id}"),
+            (kind, values) => panic!("{id}: {kind:?} with {} values", values.len()),
+        }
+    }
+}
+
+#[test]
 fn every_feature_sits_in_a_section_of_its_areas_one_page() {
     for page in PAGES {
         assert_eq!(PAGES.iter().filter(|other| other.area == page.area).count(), 1);
@@ -71,16 +88,11 @@ fn every_feature_sits_in_a_section_of_its_areas_one_page() {
 }
 
 #[test]
-fn values_start_where_their_default_says_and_ranges_hold_them() {
+fn values_start_in_their_ranges() {
     for descriptor in DESCRIPTORS {
         for value in descriptor.values {
             assert!(value.minimum <= value.maximum && value.step > 0.0, "{}", descriptor.key.as_str());
             assert!(value.accepts(value.start), "{}", descriptor.key.as_str());
-            if value.choices.is_empty() {
-                assert_eq!(value.default.parse::<f64>().unwrap(), value.start, "{}", descriptor.key.as_str());
-            } else {
-                assert_eq!(value.choices[value.start as usize].get(), value.default, "{}", descriptor.key.as_str());
-            }
         }
         for field in descriptor.fields {
             assert!(field.minimum <= field.maximum && field.step > 0.0, "{}", descriptor.key.as_str());

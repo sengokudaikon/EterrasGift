@@ -1,8 +1,8 @@
 //! Supply true at the class-compatibility load while leaving subsequent experimental-item generation intact.
-use super::super::hooks::{Behavior, GroupId, HookFeature};
+use super::super::hooks::{Behavior, GameplayHook, HookFeature};
 use super::*;
 pub(crate) const FEATURE: HookFeature = HookFeature {
-    group: GroupId::ClassExperimentals,
+    controls: &[GameplayHook::ClassExperimentals],
     behavior: Behavior::Patch,
     targets,
 };

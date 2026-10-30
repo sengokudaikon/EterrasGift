@@ -1,8 +1,8 @@
 //! Set specialized skills to their level-20 XP cap when the game next applies skill experience.
-use super::super::hooks::{Behavior, GroupId, HookFeature};
+use super::super::hooks::{Behavior, GameplayHook, HookFeature};
 use super::*;
 pub(crate) const FEATURE: HookFeature = HookFeature {
-    group: GroupId::SkillsToLevel20,
+    controls: &[GameplayHook::SkillsToLevel20],
     behavior: Behavior::Patch,
     targets,
 };

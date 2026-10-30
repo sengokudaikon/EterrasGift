@@ -3,46 +3,7 @@ use super::stat::StatFeature;
 use crate::game::*;
 use crate::hooks::leaf::LeafEffect;
 use crate::hooks::postfix::PostfixEffect;
-use eg_trainer_wire::hooks::GameplayHook;
-
-/// Ownership of a set of entry patches. Several controls can share a group, and one group can patch several methods.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum GroupId {
-    MysteriousRift,
-    AnyOffhand,
-    Damage,
-    FixedAttackRate,
-    FixedLeechRate,
-    NoManaCost,
-    SkillsToLevel20,
-    EquipWithoutRequirements,
-    FullSetBonus,
-    UnlimitedSkillPoints,
-    UnlimitedPassivePoints,
-    AnyMasteryPassives,
-    UnlimitedWeaverPoints,
-    ForgeAboveLevel,
-    UnlimitedWovenEnchanter,
-    PickupAnywhere,
-    FreeHunterVendor,
-    EndgameCache,
-    FavorCache,
-    Nemesis,
-    OmenWindows,
-    ClassExperimentals,
-    RunePrisonComplex,
-    ShardsTo99,
-    RunesGlyphsTo99,
-    MaxRandomRolls,
-    BossLootChance,
-    Tier7Affixes,
-    MaxBonusStability,
-    AbilitySpeed,
-    OneEchoType,
-}
-impl GroupId {
-    pub(crate) const COUNT: usize = 31;
-}
+pub(crate) use eg_trainer_wire::hooks::GameplayHook;
 
 #[derive(Clone, Copy)]
 pub(crate) enum Behavior {
@@ -55,46 +16,79 @@ pub(crate) enum Behavior {
 
 type ResolveTargets = unsafe fn(&RuntimeAccess, NonNull<u8>, usize) -> Result<Vec<GameplayHookTarget>, GameError>;
 
+/// A hook feature: the controls it serves, how it hooks, and how it finds its targets. Several controls can share
+/// one feature (the two damage settings), and one feature can patch several methods.
 pub(crate) struct HookFeature {
-    pub group: GroupId,
+    pub controls: &'static [GameplayHook],
     pub behavior: Behavior,
     pub targets: ResolveTargets,
 }
 
-pub(crate) fn definition(hook: GameplayHook) -> &'static HookFeature {
-    match hook {
-        GameplayHook::MysteriousRift => &super::mysterious_rift::FEATURE,
-        GameplayHook::AnyOffhand => &super::any_offhand::FEATURE,
-        GameplayHook::IncomingDamage | GameplayHook::EnemyDamage => &super::damage::FEATURE,
-        GameplayHook::FixedAttackRate => &super::fixed_attack_rate::FEATURE,
-        GameplayHook::FixedLeechRate => &super::fixed_leech_rate::FEATURE,
-        GameplayHook::NoManaCost => &super::no_mana_cost::FEATURE,
-        GameplayHook::SkillsToLevel20 => &super::patches::skills_to_level_20::FEATURE,
-        GameplayHook::EquipWithoutRequirements => &super::patches::equip_without_requirements::FEATURE,
-        GameplayHook::FullSetBonus => &super::patches::full_set_bonus::FEATURE,
-        GameplayHook::UnlimitedSkillPoints => &super::patches::unlimited_skill_points::FEATURE,
-        GameplayHook::UnlimitedPassivePoints => &super::patches::unlimited_passive_points::FEATURE,
-        GameplayHook::AnyMasteryPassives => &super::patches::any_mastery_passives::FEATURE,
-        GameplayHook::UnlimitedWeaverPoints => &super::patches::unlimited_weaver_points::FEATURE,
-        GameplayHook::ForgeAboveLevel => &super::patches::forge_above_level::FEATURE,
-        GameplayHook::UnlimitedWovenEnchanter => &super::patches::unlimited_woven_enchanter::FEATURE,
-        GameplayHook::PickupAnywhere => &super::patches::pickup_anywhere::FEATURE,
-        GameplayHook::FreeHunterVendor => &super::patches::free_hunter_vendor::FEATURE,
-        GameplayHook::EndgameCache => &super::patches::endgame_cache::FEATURE,
-        GameplayHook::FavorCache => &super::patches::favor_cache::FEATURE,
-        GameplayHook::Nemesis => &super::patches::nemesis::FEATURE,
-        GameplayHook::OmenWindows => &super::patches::omen_windows::FEATURE,
-        GameplayHook::ClassExperimentals => &super::patches::class_experimentals::FEATURE,
-        GameplayHook::RunePrisonComplex => &super::patches::rune_prison_complex::FEATURE,
-        GameplayHook::ShardsTo99 => &super::shards_to_99::FEATURE,
-        GameplayHook::RunesGlyphsTo99 => &super::runes_glyphs_to_99::FEATURE,
-        GameplayHook::MaxRandomRolls => &super::results::max_random_rolls::FEATURE,
-        GameplayHook::BossLootChance => &super::results::boss_loot_chance::FEATURE,
-        GameplayHook::Tier7Affixes => &super::results::tier_7_affixes::FEATURE,
-        GameplayHook::MaxBonusStability => &super::results::max_bonus_stability::FEATURE,
-        GameplayHook::AbilitySpeed => &super::results::ability_speed::FEATURE,
-        GameplayHook::OneEchoType => &super::results::one_echo_type::FEATURE,
+/// Every hook feature. Its place here is its group: the slot that owns its patches while the helper runs.
+pub(crate) const FEATURES: &[&HookFeature] = &[
+    &super::mysterious_rift::FEATURE,
+    &super::any_offhand::FEATURE,
+    &super::damage::FEATURE,
+    &super::fixed_attack_rate::FEATURE,
+    &super::fixed_leech_rate::FEATURE,
+    &super::no_mana_cost::FEATURE,
+    &super::patches::skills_to_level_20::FEATURE,
+    &super::patches::equip_without_requirements::FEATURE,
+    &super::patches::full_set_bonus::FEATURE,
+    &super::patches::unlimited_skill_points::FEATURE,
+    &super::patches::unlimited_passive_points::FEATURE,
+    &super::patches::any_mastery_passives::FEATURE,
+    &super::patches::unlimited_weaver_points::FEATURE,
+    &super::patches::forge_above_level::FEATURE,
+    &super::patches::unlimited_woven_enchanter::FEATURE,
+    &super::patches::pickup_anywhere::FEATURE,
+    &super::patches::free_hunter_vendor::FEATURE,
+    &super::patches::endgame_cache::FEATURE,
+    &super::patches::favor_cache::FEATURE,
+    &super::patches::nemesis::FEATURE,
+    &super::patches::omen_windows::FEATURE,
+    &super::patches::class_experimentals::FEATURE,
+    &super::patches::rune_prison_complex::FEATURE,
+    &super::shards_to_99::FEATURE,
+    &super::runes_glyphs_to_99::FEATURE,
+    &super::results::max_random_rolls::FEATURE,
+    &super::results::boss_loot_chance::FEATURE,
+    &super::results::tier_7_affixes::FEATURE,
+    &super::results::max_bonus_stability::FEATURE,
+    &super::results::ability_speed::FEATURE,
+    &super::results::one_echo_type::FEATURE,
+];
+
+/// Each control's group, checked when the crate builds: every control belongs to exactly one feature.
+const GROUPS: [usize; GameplayHook::COUNT] = {
+    const NONE: usize = usize::MAX;
+    let mut groups = [NONE; GameplayHook::COUNT];
+    let mut group = 0;
+    while group < FEATURES.len() {
+        let controls = FEATURES[group].controls;
+        let mut index = 0;
+        while index < controls.len() {
+            assert!(groups[controls[index] as usize] == NONE, "a control belongs to two features");
+            groups[controls[index] as usize] = group;
+            index += 1;
+        }
+        group += 1;
     }
+    let mut hook = 0;
+    while hook < GameplayHook::COUNT {
+        assert!(groups[hook] != NONE, "a control has no feature");
+        hook += 1;
+    }
+    groups
+};
+
+/// The slot, its feature's place in `FEATURES`, that owns this control's patches.
+pub(crate) const fn slot_of(hook: GameplayHook) -> usize {
+    GROUPS[hook as usize]
+}
+
+pub(crate) fn definition(hook: GameplayHook) -> &'static HookFeature {
+    FEATURES[slot_of(hook)]
 }
 
 pub(crate) struct MethodSpec {

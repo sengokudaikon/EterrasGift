@@ -1,8 +1,8 @@
 //! Bypass the skill-tree total-point budget while retaining each node and connection requirement.
-use super::super::hooks::{Behavior, GroupId, HookFeature};
+use super::super::hooks::{Behavior, GameplayHook, HookFeature};
 use super::*;
 pub(crate) const FEATURE: HookFeature = HookFeature {
-    group: GroupId::UnlimitedSkillPoints,
+    controls: &[GameplayHook::UnlimitedSkillPoints],
     behavior: Behavior::Patch,
     targets,
 };

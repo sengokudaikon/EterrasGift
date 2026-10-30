@@ -2,13 +2,14 @@
 //! fields, and the split of the rows into columns. Rows keep their models between changes, and their place when the
 //! split moves, so a box being typed in keeps its focus while its row follows.
 
-use super::catalog::{Area, Feature, FeatureValue};
+use super::catalog::{self, Area, Feature, FeatureValue};
 use super::pages::{self, Content, EditorRow, FieldModel, HookRow, PageModel, Row, Tone};
 use super::profiles::{self, Profile};
 use super::session::TrainerSession;
 use crate::shell::Page;
 use crate::{FeatureFieldView, FeatureRowKind, FeatureRowModels, FeatureRowPlace, FeatureRowView, FeatureTone, FeatureValueView, MainWindow, Nav, Tokens, TrainerState};
 use eg_core::locale::numbers;
+use eg_core::phrase::Phrase;
 use slint::{ComponentHandle, Model, ModelRc, SharedString, VecModel, Weak};
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -595,14 +596,12 @@ fn tone(tone: Tone) -> FeatureTone {
 }
 
 fn value_view(id: &str, value: &FeatureValue, number: f64, name: &str, choices: &ModelRc<SharedString>) -> FeatureValueView {
+    const ONE_HIT_KILLS: Phrase = Phrase::new("{name}: one-hit kills");
+    let infinite = catalog::infinity(id).is_some_and(|infinity| number == infinity.value);
     FeatureValueView {
         label: value.label.get().into(),
-        accessible_name: if id == "enemy-damage" && number == 101.0 {
-            format!("{name}: one-hit kills").into()
-        } else {
-            name.into()
-        },
-        unit: if id == "enemy-damage" && number == 101.0 { "" } else { value.unit.unwrap_or_default() }.into(),
+        accessible_name: if infinite { ONE_HIT_KILLS.with(&[("name", &name)]).into() } else { name.into() },
+        unit: if infinite { "" } else { value.unit.unwrap_or_default() }.into(),
         choice: !value.choices.is_empty(),
         choices: choices.clone(),
         choice_index: number as i32,

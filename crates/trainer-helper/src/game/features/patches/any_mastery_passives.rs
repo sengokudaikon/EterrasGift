@@ -1,8 +1,8 @@
 //! Bypass the chosen-mastery mismatch for deeper nodes; other mastery and node prerequisites remain.
-use super::super::hooks::{Behavior, GroupId, HookFeature};
+use super::super::hooks::{Behavior, GameplayHook, HookFeature};
 use super::*;
 pub(crate) const FEATURE: HookFeature = HookFeature {
-    group: GroupId::AnyMasteryPassives,
+    controls: &[GameplayHook::AnyMasteryPassives],
     behavior: Behavior::Patch,
     targets,
 };

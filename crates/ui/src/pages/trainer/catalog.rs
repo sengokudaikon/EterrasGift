@@ -1,6 +1,6 @@
 //! Trainer page presentation of the shared feature registry. Native availability comes
 //! from the connected backend; `presented` means that a row view exists.
-use eg_trainer::features::{DESCRIPTORS, FeatureDescriptor};
+use eg_trainer::features::{DESCRIPTORS, FeatureDescriptor, FeatureKey, HookId, Infinity};
 pub use eg_trainer::features::{FeatureField, FeatureKind, FeatureValue, PAGES, TrainerArea as Area, TrainerPage};
 
 /// A feature as the pages list it: its registry descriptor, and whether a row view exists for it.
@@ -13,6 +13,18 @@ impl Feature {
     pub const fn id(&self) -> &'static str {
         self.descriptor.key.as_str()
     }
+    /// Its value's "without limit" setting, shown as ∞, if it has one.
+    pub fn infinity(&self) -> Option<Infinity> {
+        match self.descriptor.key {
+            FeatureKey::Hook(id) => id.infinity(),
+            _ => None,
+        }
+    }
+}
+
+/// The ∞ setting of the hook with this id, if it has one.
+pub fn infinity(id: &str) -> Option<Infinity> {
+    HookId::parse(id)?.infinity()
 }
 impl std::ops::Deref for Feature {
     type Target = FeatureDescriptor;

@@ -1,8 +1,8 @@
 //! Own all five item/label/vacuum/gold/contact sites as one feature; preserve other pickup conditions.
-use super::super::hooks::{Behavior, GroupId, HookFeature};
+use super::super::hooks::{Behavior, GameplayHook, HookFeature};
 use super::*;
 pub(crate) const FEATURE: HookFeature = HookFeature {
-    group: GroupId::PickupAnywhere,
+    controls: &[GameplayHook::PickupAnywhere],
     behavior: Behavior::Patch,
     targets,
 };

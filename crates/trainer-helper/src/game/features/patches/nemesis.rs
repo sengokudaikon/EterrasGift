@@ -1,8 +1,8 @@
 //! Keep Nemesis eligibility, placement and the RNG call; bypass only the failed-roll branch.
-use super::super::hooks::{Behavior, GroupId, HookFeature};
+use super::super::hooks::{Behavior, GameplayHook, HookFeature};
 use super::*;
 pub(crate) const FEATURE: HookFeature = HookFeature {
-    group: GroupId::Nemesis,
+    controls: &[GameplayHook::Nemesis],
     behavior: Behavior::Patch,
     targets,
 };

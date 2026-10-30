@@ -131,7 +131,12 @@ pub fn build(area: Area, features: &[Feature], planned: bool, session: &dyn Trai
 /// A planned row's details: its values and their starting points, or the fields it edits.
 pub fn planned_details(feature: &Feature) -> String {
     if !feature.values.is_empty() {
-        feature.values.iter().map(|v| format!("{} {}", v.label.get(), v.default)).collect::<Vec<_>>().join(", ")
+        feature
+            .values
+            .iter()
+            .map(|v| format!("{} {}", v.label.get(), v.start_text()))
+            .collect::<Vec<_>>()
+            .join(", ")
     } else {
         feature.fields.iter().map(|f| f.label.get()).collect::<Vec<_>>().join(", ")
     }
@@ -202,7 +207,7 @@ impl HookRow {
         let (Some(value), Some(amount)) = (self.feature.values.get(index), amount) else {
             return;
         };
-        if self.feature.id() == "enemy-damage" && amount > 100.0 && amount != 101.0 {
+        if self.feature.infinity().is_some_and(|infinity| amount > infinity.largest && amount != infinity.value) {
             return;
         }
         self.set_number(session, index, amount.clamp(value.minimum, value.maximum));
@@ -213,8 +218,10 @@ impl HookRow {
         if let Some(value) = self.feature.values.get(index) {
             let direction = steps.signum();
             let mut amount = self.values[index] + value.step * f64::from(steps);
-            if self.feature.id() == "enemy-damage" && amount > 100.0 {
-                amount = if direction < 0 { 100.0 } else { 101.0 };
+            if let Some(infinity) = self.feature.infinity()
+                && amount > infinity.largest
+            {
+                amount = if direction < 0 { infinity.largest } else { infinity.value };
             }
             self.set_amount(session, index, Some(amount));
         }
@@ -240,9 +247,11 @@ impl HookRow {
             }
         };
         let mut number = number_at(value, fraction_of(value, start) + delta);
-        // Above 100× the damage enemies take is only ∞.
-        if self.feature.id() == "enemy-damage" && number > 100.0 {
-            number = 101.0;
+        // Past its largest number, a value with ∞ is only ∞.
+        if let Some(infinity) = self.feature.infinity()
+            && number > infinity.largest
+        {
+            number = infinity.value;
         }
         self.values[index] = number;
     }
@@ -266,12 +275,12 @@ impl HookRow {
         let Some(value) = self.feature.values.get(index) else {
             return String::new();
         };
-        let infinite = self.feature.id() == "enemy-damage";
-        let fits = |amount: f64| amount >= value.minimum && amount <= value.maximum && !(infinite && amount > 100.0 && amount != 101.0);
+        let infinity = self.feature.infinity();
+        let fits = |amount: f64| amount >= value.minimum && amount <= value.maximum && !infinity.is_some_and(|infinity| amount > infinity.largest && amount != infinity.value);
         if hook_amount(self.feature.id(), text).is_some_and(fits) {
             String::new()
-        } else if infinite {
-            TYPE_A_NUMBER_OR_INFINITY.with(&[("minimum", &numbers().plain(value.minimum)), ("maximum", &numbers().plain(100.0))])
+        } else if let Some(infinity) = infinity {
+            TYPE_A_NUMBER_OR_INFINITY.with(&[("minimum", &numbers().plain(value.minimum)), ("maximum", &numbers().plain(infinity.largest))])
         } else {
             TYPE_A_NUMBER.with(&[("minimum", &numbers().plain(value.minimum)), ("maximum", &numbers().plain(value.maximum))])
         }
@@ -311,7 +320,7 @@ impl HookRow {
             (true, Some(HookState::On)) if self.feature.kind == FeatureKind::Choice => {
                 (SELECTED.with(&[("choice", &self.feature.values[0].choices[self.values[0] as usize])]), Tone::Confirmed)
             }
-            (true, Some(HookState::On)) if self.feature.id() == "enemy-damage" && self.values == [101.0] => say(ONE_HIT_KILLS.get(), Tone::Confirmed),
+            (true, Some(HookState::On)) if self.feature.infinity().is_some_and(|infinity| self.values == [infinity.value]) => say(ONE_HIT_KILLS.get(), Tone::Confirmed),
             (true, Some(HookState::On)) => say(ON_IN_GAME.get(), Tone::Confirmed),
             (true, Some(HookState::Failed { reason, .. })) => (COULD_NOT_TURN_ON.with(&[("reason", &reason)]), Tone::Error),
             (true, Some(HookState::Applying | HookState::Off)) => say(TURNING_ON.get(), Tone::None),
@@ -324,10 +333,9 @@ impl HookRow {
 }
 
 pub fn hook_amount(id: &str, text: &str) -> Option<f64> {
-    if id == "enemy-damage" && matches!(text.trim().to_ascii_lowercase().as_str(), "∞" | "inf" | "infinity") {
-        Some(101.0)
-    } else {
-        numbers().parse(text)
+    match catalog::infinity(id) {
+        Some(infinity) if matches!(text.trim().to_ascii_lowercase().as_str(), "∞" | "inf" | "infinity") => Some(infinity.value),
+        _ => numbers().parse(text),
     }
 }
 
@@ -359,12 +367,12 @@ fn logarithmic(value: &FeatureValue) -> bool {
 
 /// A hook value's range for its typing popover: "0 – 100%", "0 – ∞".
 pub fn range_text(id: &str, value: &FeatureValue) -> String {
-    let unit = if id == "enemy-damage" { "" } else { value.unit.unwrap_or_default() };
+    let unit = if catalog::infinity(id).is_some() { "" } else { value.unit.unwrap_or_default() };
     format!("{} – {}{unit}", hook_text(id, value.minimum), hook_text(id, value.maximum))
 }
 
 pub fn hook_text(id: &str, number: f64) -> String {
-    if id == "enemy-damage" && number == 101.0 {
+    if catalog::infinity(id).is_some_and(|infinity| number == infinity.value) {
         "∞".into()
     } else {
         numbers().plain(number)

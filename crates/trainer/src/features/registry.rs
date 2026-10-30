@@ -71,7 +71,6 @@ pub static DESCRIPTORS: &[FeatureDescriptor] = &[
         values: &[
             FeatureValue {
                 label: Phrase::new("Character experience"),
-                default: "2",
                 start: 2.0,
                 choices: &[],
                 hint: None,
@@ -82,7 +81,6 @@ pub static DESCRIPTORS: &[FeatureDescriptor] = &[
             },
             FeatureValue {
                 label: Phrase::new("Skill experience"),
-                default: "2",
                 start: 2.0,
                 choices: &[],
                 hint: None,
@@ -318,7 +316,6 @@ pub static DESCRIPTORS: &[FeatureDescriptor] = &[
         kind: FeatureKind::SwitchWithValues,
         values: &[FeatureValue {
             label: Phrase::new("Stack multiplier"),
-            default: "2",
             start: 2.0,
             choices: &[],
             hint: None,
@@ -339,7 +336,6 @@ pub static DESCRIPTORS: &[FeatureDescriptor] = &[
         kind: FeatureKind::SwitchWithValues,
         values: &[FeatureValue {
             label: Phrase::new("Damage taken"),
-            default: "50",
             start: 50.0,
             choices: &[],
             hint: Some(Phrase::new("Whole percentages, from 0 to 100.")),
@@ -360,7 +356,6 @@ pub static DESCRIPTORS: &[FeatureDescriptor] = &[
         kind: FeatureKind::SwitchWithValues,
         values: &[FeatureValue {
             label: Phrase::new("Multiplier"),
-            default: "2",
             start: 2.0,
             choices: &[],
             hint: Some(Phrase::new("0–100×. Step above 100 or type ∞ for one-hit kills.")),
@@ -381,7 +376,6 @@ pub static DESCRIPTORS: &[FeatureDescriptor] = &[
         kind: FeatureKind::SwitchWithValues,
         values: &[FeatureValue {
             label: Phrase::new("Multiplier"),
-            default: "2",
             start: 2.0,
             choices: &[],
             hint: None,
@@ -402,7 +396,6 @@ pub static DESCRIPTORS: &[FeatureDescriptor] = &[
         kind: FeatureKind::SwitchWithValues,
         values: &[FeatureValue {
             label: Phrase::new("Multiplier"),
-            default: "2",
             start: 2.0,
             choices: &[],
             hint: None,
@@ -423,7 +416,6 @@ pub static DESCRIPTORS: &[FeatureDescriptor] = &[
         kind: FeatureKind::SwitchWithValues,
         values: &[FeatureValue {
             label: Phrase::new("Increased area"),
-            default: "3",
             start: 3.0,
             choices: &[],
             hint: Some(Phrase::new("1 is 100% increased area.")),
@@ -444,7 +436,6 @@ pub static DESCRIPTORS: &[FeatureDescriptor] = &[
         kind: FeatureKind::SwitchWithValues,
         values: &[FeatureValue {
             label: Phrase::new("Rate"),
-            default: "1",
             start: 1.0,
             choices: &[],
             hint: None,
@@ -465,7 +456,6 @@ pub static DESCRIPTORS: &[FeatureDescriptor] = &[
         kind: FeatureKind::SwitchWithValues,
         values: &[FeatureValue {
             label: Phrase::new("Increased rate"),
-            default: "0",
             start: 0.0,
             choices: &[],
             hint: None,
@@ -530,7 +520,6 @@ pub static DESCRIPTORS: &[FeatureDescriptor] = &[
         kind: FeatureKind::SwitchWithValues,
         values: &[FeatureValue {
             label: Phrase::new("Multiplier"),
-            default: "2",
             start: 2.0,
             choices: &[],
             hint: None,
@@ -618,7 +607,6 @@ pub static DESCRIPTORS: &[FeatureDescriptor] = &[
         values: &[
             FeatureValue {
                 label: Phrase::new("Item drop chance"),
-                default: "0.1",
                 start: 0.1,
                 choices: &[],
                 hint: None,
@@ -629,7 +617,6 @@ pub static DESCRIPTORS: &[FeatureDescriptor] = &[
             },
             FeatureValue {
                 label: Phrase::new("Item drop multiplier"),
-                default: "1",
                 start: 1.0,
                 choices: &[],
                 hint: None,
@@ -640,7 +627,6 @@ pub static DESCRIPTORS: &[FeatureDescriptor] = &[
             },
             FeatureValue {
                 label: Phrase::new("Gold drop chance"),
-                default: "0.1",
                 start: 0.1,
                 choices: &[],
                 hint: None,
@@ -651,7 +637,6 @@ pub static DESCRIPTORS: &[FeatureDescriptor] = &[
             },
             FeatureValue {
                 label: Phrase::new("Gold drop multiplier"),
-                default: "2",
                 start: 2.0,
                 choices: &[],
                 hint: None,
@@ -695,7 +680,6 @@ pub static DESCRIPTORS: &[FeatureDescriptor] = &[
         kind: FeatureKind::SwitchWithValues,
         values: &[FeatureValue {
             label: Phrase::new("Rarity"),
-            default: "Unique",
             start: 3.0,
             choices: &[
                 Phrase::ctx("rarity", "Normal"),
@@ -823,7 +807,6 @@ pub static DESCRIPTORS: &[FeatureDescriptor] = &[
         kind: FeatureKind::SwitchWithValues,
         values: &[FeatureValue {
             label: Phrase::new("Echo type"),
-            default: "Arena",
             start: 1.0,
             choices: &[
                 Phrase::ctx("echo type", "Normal"),
@@ -839,8 +822,8 @@ pub static DESCRIPTORS: &[FeatureDescriptor] = &[
             ],
             hint: None,
             minimum: 0.0,
-            maximum: 100.0,
-            step: 0.5,
+            maximum: 9.0,
+            step: 1.0,
             unit: None,
         }],
         fields: &[],
@@ -962,7 +945,6 @@ pub static DESCRIPTORS: &[FeatureDescriptor] = &[
         kind: FeatureKind::SwitchWithValues,
         values: &[FeatureValue {
             label: Phrase::new("Multiplier"),
-            default: "2",
             start: 2.0,
             choices: &[],
             hint: None,
@@ -1016,7 +998,6 @@ pub static DESCRIPTORS: &[FeatureDescriptor] = &[
         kind: FeatureKind::SwitchWithValues,
         values: &[FeatureValue {
             label: Phrase::new("Multiplier"),
-            default: "2",
             start: 2.0,
             choices: &[],
             hint: None,
@@ -1059,7 +1040,6 @@ pub static DESCRIPTORS: &[FeatureDescriptor] = &[
         kind: FeatureKind::SwitchWithValues,
         values: &[FeatureValue {
             label: Phrase::new("Rune Wardens"),
-            default: "2",
             start: 2.0,
             choices: &[],
             hint: None,
@@ -1113,7 +1093,6 @@ pub static DESCRIPTORS: &[FeatureDescriptor] = &[
         kind: FeatureKind::SwitchWithValues,
         values: &[FeatureValue {
             label: Phrase::new("Loot Lizards"),
-            default: "3",
             start: 3.0,
             choices: &[],
             hint: None,
@@ -1168,7 +1147,6 @@ pub static DESCRIPTORS: &[FeatureDescriptor] = &[
         // Portal is the default, so a profile saved while this was an on/off switch keeps its behaviour.
         values: &[FeatureValue {
             label: Phrase::new("Encounter"),
-            default: "Portal",
             start: 1.0,
             choices: &[Phrase::new("Game decides"), Phrase::new("Portal"), Phrase::new("Boss")],
             hint: Some(Phrase::new("Spawn rules and scripted encounters still apply.")),
@@ -1201,7 +1179,6 @@ pub static DESCRIPTORS: &[FeatureDescriptor] = &[
         values: &[
             FeatureValue {
                 label: Phrase::new("Starting time"),
-                default: "2",
                 start: 2.0,
                 choices: &[],
                 hint: Some(Phrase::new("From your next hunt.")),
@@ -1212,7 +1189,6 @@ pub static DESCRIPTORS: &[FeatureDescriptor] = &[
             },
             FeatureValue {
                 label: Phrase::new("Timer speed"),
-                default: "0.5",
                 start: 0.5,
                 choices: &[],
                 hint: Some(Phrase::new("1 is normal. 0 stops the countdown, and the hunt ends when no foes are left.")),
@@ -1223,7 +1199,6 @@ pub static DESCRIPTORS: &[FeatureDescriptor] = &[
             },
             FeatureValue {
                 label: Phrase::new("Time per kill"),
-                default: "2",
                 start: 2.0,
                 choices: &[],
                 hint: Some(Phrase::new("Kills add less as the hunt goes on, as in the game.")),
@@ -1245,7 +1220,6 @@ pub static DESCRIPTORS: &[FeatureDescriptor] = &[
         kind: FeatureKind::SwitchWithValues,
         values: &[FeatureValue {
             label: Phrase::new("Multiplier"),
-            default: "2",
             start: 2.0,
             choices: &[],
             hint: None,
@@ -1266,7 +1240,6 @@ pub static DESCRIPTORS: &[FeatureDescriptor] = &[
         kind: FeatureKind::SwitchWithValues,
         values: &[FeatureValue {
             label: Phrase::new("Multiplier"),
-            default: "2",
             start: 2.0,
             choices: &[],
             hint: None,
@@ -1288,7 +1261,6 @@ pub static DESCRIPTORS: &[FeatureDescriptor] = &[
         values: &[
             FeatureValue {
                 label: Phrase::ctx("monster rarity", "Normal"),
-                default: "1",
                 start: 1.0,
                 choices: &[],
                 hint: None,
@@ -1299,7 +1271,6 @@ pub static DESCRIPTORS: &[FeatureDescriptor] = &[
             },
             FeatureValue {
                 label: Phrase::ctx("monster rarity", "Magic"),
-                default: "2",
                 start: 2.0,
                 choices: &[],
                 hint: None,
@@ -1310,7 +1281,6 @@ pub static DESCRIPTORS: &[FeatureDescriptor] = &[
             },
             FeatureValue {
                 label: Phrase::ctx("monster rarity", "Rare"),
-                default: "3",
                 start: 3.0,
                 choices: &[],
                 hint: None,
@@ -1332,7 +1302,6 @@ pub static DESCRIPTORS: &[FeatureDescriptor] = &[
         kind: FeatureKind::SwitchWithValues,
         values: &[FeatureValue {
             label: Phrase::new("Champions"),
-            default: "2",
             start: 2.0,
             choices: &[],
             hint: None,
@@ -1386,7 +1355,6 @@ pub static DESCRIPTORS: &[FeatureDescriptor] = &[
         kind: FeatureKind::SwitchWithValues,
         values: &[FeatureValue {
             label: Phrase::new("Distance"),
-            default: "-30",
             start: -30.0,
             choices: &[],
             hint: Some(Phrase::new("The game's default is -17.5.")),

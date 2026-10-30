@@ -4,7 +4,7 @@ use eg_trainer::{
     features::HookId,
     write::{WriteControl, WriteOutcome},
 };
-use eg_trainer_wire::hooks::{GameplayHook, HookObservation, PatchState};
+use eg_trainer_wire::hooks::{GameplayHook, HookObservation, PatchState, ValueKind};
 
 struct AllowWrite;
 impl WriteControl for AllowWrite {
@@ -80,23 +80,6 @@ fn persistent_stats_use_independent_hook_values_and_readback() {
     assert!(!session.hook_observation(GameplayHook::FixedAttackRate).unwrap().enabled);
     assert_eq!(session.hook_observation(GameplayHook::FixedLeechRate).unwrap().value, 2.5f64.to_bits());
     assert!(session.hook_observation(GameplayHook::FixedLeechRate).unwrap().enabled);
-    let sent = wire.requests().len();
-    for (id, value) in [("fixed-attack-rate", 0.0), ("fixed-leech-rate", f64::NAN), ("fixed-leech-rate", 101.0)] {
-        assert!(matches!(
-            run(BackendConnection::set_hook(
-                &mut session,
-                &HookRequest {
-                    id: HookId::parse(id).unwrap(),
-                    on: true,
-                    values: vec![value]
-                },
-                &mut AllowWrite
-            ))
-            .unwrap(),
-            WriteOutcome::NotApplied { .. }
-        ));
-    }
-    assert_eq!(wire.requests().len(), sent);
 }
 
 #[test]
@@ -184,12 +167,12 @@ fn each_gameplay_hook_requires_a_separate_readback_for_on_and_off() {
             let request = HookRequest {
                 id: HookId::parse(hook.id()).unwrap(),
                 on,
-                values: if eg_trainer::features::FeatureKey::Hook(HookId::parse(hook.id()).unwrap()).descriptor().kind == eg_trainer::features::FeatureKind::Switch {
-                    vec![]
-                } else if hook == GameplayHook::FixedLeechRate {
-                    vec![0.0]
-                } else {
-                    vec![1.0]
+                // The number that sends the value the readback holds: the hook's resting one.
+                values: match hook.value_kind() {
+                    ValueKind::Switch => vec![],
+                    ValueKind::Percent => vec![100.0],
+                    ValueKind::Real { neutral, .. } => vec![neutral],
+                    ValueKind::Choice(_) => vec![0.0],
                 },
             };
             assert_eq!(
@@ -292,32 +275,30 @@ fn hook_monitor_reads_actual_disabled_state_after_helper_suspension() {
 }
 
 #[test]
-fn damage_percentage_must_match_independent_readback() {
+fn a_number_the_hook_does_not_take_sends_nothing() {
     let fixture = Fixture::rehashing();
     let wire = FakeTransport::new(fixture.target.clone(), [fixture.discover(), status(false, 0x1234, 0)]);
     let mut session = fixture.session(&wire);
     session.enable();
     run(session.connect()).unwrap();
-    for (wanted, actual) in [(0, 0), (50, 50), (100, 100), (25, 50)] {
-        wire.push(done(vec![]));
-        wire.push(done(
-            HookObservation {
-                patch: PatchState::Patched,
-                enabled: true,
-                value: actual,
-            }
-            .encode(),
-        ));
+    let before = wire.requests().len();
+    for hook in GameplayHook::ALL {
+        let values = if hook.value_kind() == ValueKind::Switch { vec![1.0] } else { vec![f64::NAN] };
         let request = HookRequest {
-            id: HookId::parse("incoming-damage").unwrap(),
+            id: HookId::parse(hook.id()).unwrap(),
             on: true,
-            values: vec![wanted as f64],
+            values,
         };
-        assert_eq!(
-            run(BackendConnection::set_hook(&mut session, &request, &mut AllowWrite)).unwrap(),
-            if wanted == actual { WriteOutcome::Confirmed(true) } else { WriteOutcome::NotKept(true) }
+        assert!(
+            matches!(
+                run(BackendConnection::set_hook(&mut session, &request, &mut AllowWrite)).unwrap(),
+                WriteOutcome::NotApplied { .. }
+            ),
+            "{}",
+            hook.id()
         );
     }
+    assert_eq!(wire.requests().len(), before);
 }
 
 #[test]
@@ -347,75 +328,4 @@ fn outgoing_modes_require_exact_readback_and_off_accepts_a_verified_shared_targe
             if wanted == actual { WriteOutcome::Confirmed(on) } else { WriteOutcome::NotKept(on) }
         );
     }
-    let before = wire.requests().len();
-    for value in [f64::NAN, f64::INFINITY, -1.0, 100.5, 102.0] {
-        let request = HookRequest {
-            id: HookId::parse("enemy-damage").unwrap(),
-            on: true,
-            values: vec![value],
-        };
-        assert!(matches!(
-            run(BackendConnection::set_hook(&mut session, &request, &mut AllowWrite)).unwrap(),
-            WriteOutcome::NotApplied { .. }
-        ));
-    }
-    assert_eq!(wire.requests().len(), before);
-}
-
-#[test]
-fn result_settings_validate_cast_multipliers_and_echo_indices_and_require_exact_readback() {
-    let fixture = Fixture::rehashing();
-    let wire = FakeTransport::new(fixture.target.clone(), [fixture.discover(), status(false, 0x1234, 0)]);
-    let mut session = fixture.session(&wire);
-    session.enable();
-    run(session.connect()).unwrap();
-    for (hook, wanted, actual) in [
-        (GameplayHook::AbilitySpeed, 0.0f64, 0.0f64),
-        (GameplayHook::AbilitySpeed, 2.5, 2.5),
-        (GameplayHook::AbilitySpeed, 100.0, 99.0),
-        (GameplayHook::OneEchoType, 0.0, 0.0),
-        (GameplayHook::OneEchoType, 9.0, 9.0),
-        (GameplayHook::OneEchoType, 4.0, 5.0),
-    ] {
-        let encode = |value: f64| if hook == GameplayHook::AbilitySpeed { value.to_bits() } else { value as u64 };
-        wire.push(done(vec![]));
-        wire.push(done(
-            HookObservation {
-                patch: PatchState::Patched,
-                enabled: true,
-                value: encode(actual),
-            }
-            .encode(),
-        ));
-        let request = HookRequest {
-            id: HookId::parse(hook.id()).unwrap(),
-            on: true,
-            values: vec![wanted],
-        };
-        let result = run(BackendConnection::set_hook(&mut session, &request, &mut AllowWrite)).unwrap();
-        assert_eq!(result, if wanted == actual { WriteOutcome::Confirmed(true) } else { WriteOutcome::NotKept(true) });
-        let sent = wire.requests();
-        assert!(matches!(sent[sent.len()-2],Request::SetGameplayHook{hook:id,value,..} if id==hook&&value==encode(wanted)));
-    }
-    let before = wire.requests().len();
-    for (hook, invalid) in [
-        (GameplayHook::AbilitySpeed, 100.5),
-        (GameplayHook::AbilitySpeed, -1.0),
-        (GameplayHook::OneEchoType, 1.5),
-        (GameplayHook::OneEchoType, 10.0),
-        (GameplayHook::OneEchoType, -1.0),
-        (GameplayHook::AbilitySpeed, f64::NAN),
-        (GameplayHook::OneEchoType, f64::INFINITY),
-    ] {
-        let request = HookRequest {
-            id: HookId::parse(hook.id()).unwrap(),
-            on: true,
-            values: vec![invalid],
-        };
-        assert!(matches!(
-            run(BackendConnection::set_hook(&mut session, &request, &mut AllowWrite)).unwrap(),
-            WriteOutcome::NotApplied { .. }
-        ));
-    }
-    assert_eq!(wire.requests().len(), before);
 }

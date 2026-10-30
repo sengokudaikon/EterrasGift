@@ -1,10 +1,10 @@
 //! Override newly generated echo types after the original selection; echo cycling remains a separate pending feature.
 use super::*;
-use crate::game::gameplay::{Behavior, GroupId, HookFeature};
+use crate::game::gameplay::{Behavior, GameplayHook, HookFeature};
 use crate::hooks::postfix::FRAME;
 
 pub(crate) const FEATURE: HookFeature = HookFeature {
-    group: GroupId::OneEchoType,
+    controls: &[GameplayHook::OneEchoType],
     behavior: Behavior::Postfix,
     targets,
 };
@@ -21,7 +21,12 @@ const SPEC: MethodSpec = MethodSpec {
     ],
     returns: "IslandType",
 };
+/// The game's IslandType for each of the desktop's choices, in their order.
 pub(crate) const TYPES: [i32; 10] = [0, 1, 2, 3, 4, 5, 7, 8, 10, 11];
+const _: () = assert!(
+    matches!(GameplayHook::OneEchoType.value_kind(), eg_trainer_wire::hooks::ValueKind::Choice(sent) if sent.len() == TYPES.len()),
+    "one IslandType for each choice the pipe takes"
+);
 pub(super) fn effect(online: NonNull<c_void>) -> PostfixEffect {
     let mut c = Code::new(online);
     c.emit(&[0x4c, 0x8b, 0x58, FRAME.value]);

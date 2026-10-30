@@ -1,8 +1,8 @@
 //! Suppress offline local-use increments in both station overloads, preserving the server-account branch.
-use super::super::hooks::{Behavior, GroupId, HookFeature};
+use super::super::hooks::{Behavior, GameplayHook, HookFeature};
 use super::*;
 pub(crate) const FEATURE: HookFeature = HookFeature {
-    group: GroupId::UnlimitedWovenEnchanter,
+    controls: &[GameplayHook::UnlimitedWovenEnchanter],
     behavior: Behavior::Patch,
     targets,
 };

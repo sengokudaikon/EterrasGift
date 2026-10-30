@@ -1,8 +1,8 @@
 //! Keep Weaver/zone eligibility, then replace the final RNG tail-call with true.
-use super::super::hooks::{Behavior, GroupId, HookFeature};
+use super::super::hooks::{Behavior, GameplayHook, HookFeature};
 use super::*;
 pub(crate) const FEATURE: HookFeature = HookFeature {
-    group: GroupId::FavorCache,
+    controls: &[GameplayHook::FavorCache],
     behavior: Behavior::Patch,
     targets,
 };
