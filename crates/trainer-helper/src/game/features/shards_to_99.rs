@@ -79,10 +79,10 @@ unsafe fn targets(access: &RuntimeAccess, module: NonNull<u8>, size: usize) -> R
         }
         let layout = ShardLayout {
             online: access.hook_online_storage(&images)?,
-            stash: materials::field_offset(access, tracker, c"<stash>k__BackingField", stash, 8)?,
-            shards: materials::field_offset(access, stash, c"<SavedShards>k__BackingField", list, 8)?,
-            items: materials::field_offset(access, list, c"_items", array, 8)?,
-            size: materials::field_offset(access, list, c"_size", access.system_class(c"Int32")?, 4)?,
+            stash: access.hook_field_of(tracker, c"<stash>k__BackingField", stash, 8)?,
+            shards: access.hook_field_of(stash, c"<SavedShards>k__BackingField", list, 8)?,
+            items: access.hook_field_of(list, c"_items", array, 8)?,
+            size: access.hook_field_of(list, c"_size", access.system_class(c"Int32")?, 4)?,
             quantity: materials::quantity_offset(access, shard, c"<Quantity>k__BackingField")?,
         };
         let method = access.hook_method(

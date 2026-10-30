@@ -2,23 +2,15 @@
 //! Both targets are i32(instance, MethodInfo): RAX/R8-R11 are scratch; RCX/RDX and the stack stay untouched.
 use crate::{
     game::*,
-    hooks::leaf::{FRAME, GeneratedEffect, LeafEffect},
+    hooks::{
+        emit,
+        leaf::{FRAME, GeneratedEffect, LeafEffect},
+    },
 };
+use std::ops::{Deref, DerefMut};
 
 pub(super) const FLOOR: u8 = 99;
 pub(super) const MAX_ENTRIES: u32 = 65536;
-
-pub(super) unsafe fn field_offset(access: &RuntimeAccess, owner: Class, name: &CStr, expected: Class, alignment: usize) -> Result<u32, GameError> {
-    // SAFETY: exact non-byref field class and instance storage are checked before returning the aligned offset.
-    unsafe {
-        let field = access.instance_field_in(owner, name, expected, "materials")?;
-        let offset = (access.field_offset)(field);
-        if (access.class_value)(owner) || !(16..=16384).contains(&offset) || !offset.is_multiple_of(alignment) {
-            return Err(unsupported("material field layout"));
-        }
-        Ok(offset as u32)
-    }
-}
 
 pub(super) unsafe fn quantity_offset(access: &RuntimeAccess, owner: Class, name: &CStr) -> Result<u32, GameError> {
     // SAFETY: reuse the generic write contract; only an aligned writable declared Int32 is accepted.
@@ -32,59 +24,39 @@ pub(super) unsafe fn quantity_offset(access: &RuntimeAccess, owner: Class, name:
     }
 }
 
+/// A material leaf's code: closed, online and a null receiver each leave the original to run unchanged.
 pub(super) struct Code {
-    pub bytes: Vec<u8>,
-    exits: Vec<usize>,
+    code: emit::Code,
     online: NonNull<c_void>,
 }
 impl Code {
     pub fn new(online: NonNull<c_void>) -> Self {
         let f = FRAME;
-        let mut code = Self {
-            bytes: Vec::new(),
-            exits: Vec::new(),
-            online,
-        };
+        let mut code = emit::Code::default();
         code.emit(&[0x4c, 0x8b, 0x58, f.switch, 0x49, 0x83, 0x3b, 0]);
         code.exit(0x84); // closed
         code.emit(&[0x4c, 0x8b, 0x58, f.effect[0], 0x41, 0x80, 0x3b, 0]);
         code.exit(0x85); // online
         code.emit(&[0x48, 0x85, 0xc9]);
         code.exit(0x84); // null receiver: let the original decide its behavior
-        code
+        Self { code, online }
     }
-    pub fn emit(&mut self, bytes: &[u8]) {
-        self.bytes.extend_from_slice(bytes);
-    }
-    pub fn offset(&mut self, instruction: &[u8], offset: u32) {
-        self.emit(instruction);
-        self.emit(&offset.to_le_bytes());
-    }
-    pub fn branch(&mut self, condition: u8) -> usize {
-        self.emit(&[0x0f, condition]);
-        let at = self.bytes.len();
-        self.emit(&[0; 4]);
-        at
-    }
-    pub fn exit(&mut self, condition: u8) {
-        let at = self.branch(condition);
-        self.exits.push(at);
-    }
-    pub fn bind(&mut self, at: usize) {
-        self.bind_at(at, self.bytes.len());
-    }
-    pub fn bind_at(&mut self, at: usize, target: usize) {
-        let displacement = i32::try_from(target as isize - (at + 4) as isize).expect("bounded material leaf");
-        self.bytes[at..at + 4].copy_from_slice(&displacement.to_le_bytes());
-    }
-    pub fn finish(mut self) -> LeafEffect {
-        for at in std::mem::take(&mut self.exits) {
-            self.bind(at);
-        }
+    pub fn finish(self) -> LeafEffect {
         LeafEffect::Generated(GeneratedEffect {
-            code: self.bytes,
+            code: self.code.finish(),
             slots: [self.online.as_ptr() as u64, 0, 0, 0],
         })
+    }
+}
+impl Deref for Code {
+    type Target = emit::Code;
+    fn deref(&self) -> &emit::Code {
+        &self.code
+    }
+}
+impl DerefMut for Code {
+    fn deref_mut(&mut self) -> &mut emit::Code {
+        &mut self.code
     }
 }
 

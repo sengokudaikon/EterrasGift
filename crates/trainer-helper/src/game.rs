@@ -37,7 +37,7 @@ pub use discovery::DiscoveredRuntime;
 use discovery::Images;
 pub(crate) use features::{damage, registry, registry::GameplayHookTarget, stat::StatBinding};
 #[cfg(test)]
-pub(crate) use features::{no_mana_cost, results, runes_glyphs_to_99, shards_to_99};
+pub(crate) use features::{results, results::no_mana_cost, runes_glyphs_to_99, shards_to_99};
 
 /// A strong GC root on a managed object, held for one call.
 pub(crate) type Root<'a, 'r> = StrongRoot<'a, 'r>;

@@ -10,7 +10,6 @@ mod forge;
 mod mapping;
 mod materials;
 mod mysterious_rift;
-pub(crate) mod no_mana_cost;
 mod patches;
 pub(crate) mod registry;
 pub(crate) mod results;

@@ -5,7 +5,9 @@
 //! thread is not protected during patching. This is an accepted supported-target
 //! limitation, not a proved complete census. No detour allocation is freed.
 pub mod callback;
+pub mod emit;
 pub mod leaf;
+mod page;
 pub mod patch;
 pub mod postfix;
 pub mod scalar;

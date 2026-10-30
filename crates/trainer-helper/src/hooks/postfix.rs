@@ -1,12 +1,8 @@
 //! Original-first Windows x64 scalar-result gateway with up to twelve argument positions. The original call, result
 //! adjustment, return path, state and unwind data remain process-owned. Generated code never enters this DLL.
-use super::{HookError, failure};
+use super::{HookError, page};
 use std::sync::atomic::{AtomicU64, Ordering::SeqCst};
-use windows_sys::Win32::System::{
-    Diagnostics::Debug::{FlushInstructionCache, IMAGE_RUNTIME_FUNCTION_ENTRY, RtlAddFunctionTable},
-    Memory::{MEM_COMMIT, MEM_RELEASE, MEM_RESERVE, PAGE_EXECUTE_READ, PAGE_READWRITE, VirtualAlloc, VirtualFree, VirtualProtect},
-    Threading::GetCurrentProcess,
-};
+use windows_sys::Win32::System::Memory::{MEM_RELEASE, VirtualFree};
 
 #[repr(C)]
 struct Data {
@@ -60,10 +56,7 @@ impl PostfixGate {
         let frame = ((saved + 8 + 23) & !15) - 8; // enough storage, with RSP aligned before the call
         // SAFETY: private pages initialized while unpublished; executable/data/unwind pages are retained until exit.
         unsafe {
-            let allocation = VirtualAlloc(std::ptr::null(), 8192, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE).cast::<u8>();
-            if allocation.is_null() {
-                return Err(failure("allocate postfix gateway"));
-            }
+            let allocation = page::allocate("allocate postfix gateway")?;
             let data = allocation.add(4096).cast::<Data>();
             data.write(Data {
                 enabled: AtomicU64::new(0),
@@ -94,25 +87,8 @@ impl PostfixGate {
                 return Err(HookError::UnsupportedPrefix);
             }
             std::ptr::copy_nonoverlapping(code.as_ptr(), allocation, code.len());
-            let table = allocation.add(4096 + 64).cast::<IMAGE_RUNTIME_FUNCTION_ENTRY>();
-            table.write(IMAGE_RUNTIME_FUNCTION_ENTRY {
-                BeginAddress: 0,
-                EndAddress: code.len() as u32,
-                Anonymous: std::mem::zeroed(),
-            });
-            (*table).Anonymous.UnwindData = 4096 + 80;
-            // Version 1, prologue 4, one UWOP_ALLOC_SMALL(frame). No helper frame/state on the unwind path.
-            let allocation_code = ((frame - 8) / 8) << 4 | 2;
-            std::ptr::copy_nonoverlapping([1u8, 4, 1, 0, 4, allocation_code, 0, 0].as_ptr(), allocation.add(4096 + 80), 8);
-            let mut old = 0;
-            if VirtualProtect(allocation.cast(), 4096, PAGE_EXECUTE_READ, &raw mut old) == 0
-                || FlushInstructionCache(GetCurrentProcess(), allocation.cast(), 4096) == 0
-                || !RtlAddFunctionTable(table, 1, allocation as u64)
-            {
-                let error = failure("publish postfix gateway");
-                VirtualFree(allocation.cast(), 0, MEM_RELEASE);
-                return Err(error);
-            }
+            let table = page::unwind(allocation, code.len(), frame);
+            page::publish(allocation, Some(table), "publish postfix gateway")?;
             Ok(Self {
                 entry: allocation as usize,
                 data: &*data,

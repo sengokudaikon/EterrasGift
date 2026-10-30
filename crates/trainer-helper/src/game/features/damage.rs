@@ -74,26 +74,13 @@ impl RuntimeAccess {
             let images = self.images()?;
             let health = self.class(&images, c"", c"BaseHealth")?;
             let actor = self.class(&images, c"", c"Actor")?;
-            let field = self.field(health, c"actor")?;
-            let offset = (self.field_offset)(field);
-            if (self.class_value)(health)
-                || (self.field_flags)(field) & raw::FIELD_ATTRIBUTE_STATIC != 0
-                || self.field_class(field, "hook")? != actor
-                || !(16..=16384).contains(&offset)
-                || offset % 8 != 0
-            {
-                return Err(unsupported("health actor reference layout"));
-            }
-            let player_class = self.class(&images, c"", c"PlayerFinder")?;
-            let player = self.static_field(player_class, c"playerActorComponent", "Actor")?;
-            let environment = self.class(&images, c"EHG.Multiplayer", c"GameplayEnvironment")?;
-            let online = self.static_field(environment, c"_isOnlinePlay", "System.Boolean")?;
-            let player_storage = self.hook_static_storage(player_class, player, 8)?;
-            let online_storage = self.hook_static_storage(environment, online, 1)?;
+            let offset = self.hook_field_of(health, c"actor", actor, 8)?;
+            let player_storage = self.hook_player_storage(&images)?;
+            let online_storage = self.hook_online_storage(&images)?;
             Ok(DamageLayout {
                 player_storage,
                 online_storage,
-                actor_offset: offset as u32,
+                actor_offset: offset,
                 offense: Some(OffenseLayout {
                     current_health: self.hook_field(health, c"currentHealth", "System.Single", 4)?,
                     alignment_manager: self.hook_field(actor, c"alignmentManager", "AlignmentManager", 8)?,

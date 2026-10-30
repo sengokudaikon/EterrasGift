@@ -82,10 +82,7 @@ impl RuntimeAccess {
             if !(16..=16384).contains(&offset) || !offset.is_multiple_of(4) {
                 return Err(unsupported("scalar field alignment").into());
             }
-            let images = self.images()?;
-            let environment = self.class(&images, c"EHG.Multiplayer", c"GameplayEnvironment")?;
-            let online = self.static_field(environment, c"_isOnlinePlay", "System.Boolean")?;
-            let online = self.hook_static_storage(environment, online, 1)?.as_ptr() as usize;
+            let online = self.hook_online_storage(&self.images()?)?.as_ptr() as usize;
             self.player_unchanged(&player)?;
             let handle = NonNull::new((ownership.gchandle_new)(object.as_ptr(), true)).ok_or_else(|| unsupported("pin scalar receiver"))?;
             Ok(StatBinding {

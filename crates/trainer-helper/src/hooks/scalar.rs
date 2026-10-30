@@ -1,15 +1,10 @@
 //! A retained, original-first gateway for void instance methods. After the game recalculates a scalar, remember
 //! that result and apply the selected bits. No generated path enters this DLL. The owner pins the receiver until
 //! closing and draining the shared state, then conditionally restores the latest game value before releasing it.
-use super::{HookError, failure};
+use super::{HookError, page};
 use std::{
     sync::atomic::{AtomicU32, AtomicU64, Ordering::SeqCst},
     time::{Duration, Instant},
-};
-use windows_sys::Win32::System::{
-    Diagnostics::Debug::{FlushInstructionCache, IMAGE_RUNTIME_FUNCTION_ENTRY, RtlAddFunctionTable},
-    Memory::{MEM_COMMIT, MEM_RELEASE, MEM_RESERVE, PAGE_EXECUTE_READ, PAGE_READWRITE, VirtualAlloc, VirtualFree, VirtualProtect},
-    Threading::GetCurrentProcess,
 };
 
 #[repr(C)]
@@ -40,10 +35,7 @@ impl ScalarGate {
     pub unsafe fn prepare(receiver: usize, offset: u32, online: usize, baseline: u32, stack_argument: bool, shared: Option<&Self>) -> Result<Self, HookError> {
         // SAFETY: private pages, initialized before publication; state/pages survive until process exit.
         unsafe {
-            let allocation = VirtualAlloc(std::ptr::null(), 8192, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE).cast::<u8>();
-            if allocation.is_null() {
-                return Err(failure("allocate scalar gateway"));
-            }
+            let allocation = page::allocate("allocate scalar gateway")?;
             let field = receiver + offset as usize;
             let state = shared.map_or_else(
                 || {
@@ -90,23 +82,8 @@ impl ScalarGate {
             }
             code.extend([0xf0, 0x48, 0xff, 0x48, 0x08, 0x48, 0x83, 0xc4, 0x38, 0xc3]);
             std::ptr::copy_nonoverlapping(code.as_ptr(), allocation, code.len());
-            let table = allocation.add(4096 + 64).cast::<IMAGE_RUNTIME_FUNCTION_ENTRY>();
-            table.write(IMAGE_RUNTIME_FUNCTION_ENTRY {
-                BeginAddress: 0,
-                EndAddress: code.len() as u32,
-                Anonymous: std::mem::zeroed(),
-            });
-            (*table).Anonymous.UnwindData = 4096 + 80;
-            std::ptr::copy_nonoverlapping([1u8, 4, 1, 0, 4, 0x62, 0, 0].as_ptr(), allocation.add(4096 + 80), 8);
-            let mut old = 0;
-            if VirtualProtect(allocation.cast(), 4096, PAGE_EXECUTE_READ, &raw mut old) == 0
-                || FlushInstructionCache(GetCurrentProcess(), allocation.cast(), 4096) == 0
-                || !RtlAddFunctionTable(table, 1, allocation as u64)
-            {
-                let error = failure("publish scalar gateway");
-                VirtualFree(allocation.cast(), 0, MEM_RELEASE);
-                return Err(error);
-            }
+            let table = page::unwind(allocation, code.len(), 0x38);
+            page::publish(allocation, Some(table), "publish scalar gateway")?;
             Ok(Self {
                 entry: allocation as usize,
                 original: &*original,

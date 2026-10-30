@@ -1,16 +1,12 @@
 //! Process-owned leaves: Boolean and void overrides, and effects whose code their owner generates.
 //! They never enter helper code or change the stack; every path ends by tail-calling the original.
-use super::{HookError, failure};
+use super::{HookError, page};
 use std::{
     mem::offset_of,
     ptr::NonNull,
     sync::atomic::{AtomicU64, Ordering::SeqCst},
 };
-use windows_sys::Win32::System::{
-    Diagnostics::Debug::FlushInstructionCache,
-    Memory::{MEM_COMMIT, MEM_RELEASE, MEM_RESERVE, PAGE_EXECUTE_READ, PAGE_READWRITE, VirtualAlloc, VirtualFree, VirtualProtect},
-    Threading::GetCurrentProcess,
-};
+use windows_sys::Win32::System::Memory::{MEM_RELEASE, VirtualFree};
 
 /// How many slots a generated effect has for its own state.
 pub const EFFECT_SLOTS: usize = 4;
@@ -118,10 +114,8 @@ impl LeafGate {
         let f = FRAME;
         // SAFETY: private allocation; code and aligned atomic data fit the two pages.
         unsafe {
-            let allocation = VirtualAlloc(std::ptr::null(), 8192, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE).cast::<u8>();
-            let Some(code) = NonNull::new(allocation) else {
-                return Err(failure("allocate leaf gateway"));
-            };
+            let allocation = page::allocate("allocate leaf gateway")?;
+            let code = NonNull::new(allocation).expect("allocated");
             let data = allocation.add(4096).cast::<Data>();
             data.write(Data {
                 enabled: AtomicU64::new(0),
@@ -179,12 +173,7 @@ impl LeafGate {
                 return Err(HookError::UnsupportedPrefix);
             }
             std::ptr::copy_nonoverlapping(bytes.as_ptr(), allocation, bytes.len());
-            let mut old = 0;
-            if VirtualProtect(allocation.cast(), 4096, PAGE_EXECUTE_READ, &raw mut old) == 0 || FlushInstructionCache(GetCurrentProcess(), allocation.cast(), 4096) == 0 {
-                let error = failure("publish leaf gateway");
-                VirtualFree(allocation.cast(), 0, MEM_RELEASE);
-                return Err(error);
-            }
+            page::publish(allocation, None, "publish leaf gateway")?;
             Ok(Self {
                 entry: code.as_ptr() as usize,
                 data: &*data,

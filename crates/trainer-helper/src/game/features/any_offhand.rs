@@ -25,15 +25,7 @@ unsafe fn targets(access: &RuntimeAccess, module: NonNull<u8>, size: usize) -> R
         if (access.class_value)(receiver.as_ptr().cast()) || !(access.assignable)(owner, receiver.as_ptr().cast()) || !(access.assignable)(linked, receiver.as_ptr().cast()) {
             return Err(unsupported("offhand receiver inheritance"));
         }
-        let field = access.field(linked, c"linkedSlot")?;
-        let offset = (access.field_offset)(field);
-        if (access.field_flags)(field) & raw::FIELD_ATTRIBUTE_STATIC != 0
-            || access.field_class(field, "hook")? != linked
-            || !(16..=16384).contains(&offset)
-            || !offset.is_multiple_of(8)
-        {
-            return Err(unsupported("offhand linked-slot reference layout"));
-        }
+        let offset = access.hook_field_of(linked, c"linkedSlot", linked, 8)?;
         let specs = [
             (
                 MethodSpec {
@@ -69,7 +61,7 @@ unsafe fn targets(access: &RuntimeAccess, module: NonNull<u8>, size: usize) -> R
                 },
                 LeafEffect::Boolean(false),
                 Some(receiver),
-                Some(offset as u32),
+                Some(offset),
             ),
             (
                 MethodSpec {

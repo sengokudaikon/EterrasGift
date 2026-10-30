@@ -45,11 +45,9 @@ unsafe fn targets(access: &RuntimeAccess, module: NonNull<u8>, size: usize) -> R
         let state = access.class(&images, c"", c"State")?;
         let controller = access.class(&images, c"", c"StateController")?;
         access.enum_storage(access.class(&images, c"", c"AT")?, c"Int32", 0x08)?;
-        let finder = access.class(&images, c"", c"PlayerFinder")?;
-        let player = access.static_field(finder, c"playerActorComponent", "Actor")?;
         let layout = Layout {
             online: access.hook_online_storage(&images)?,
-            player: access.hook_static_storage(finder, player, 8)?,
+            player: access.hook_player_storage(&images)?,
             controller: access.hook_field(state, c"controller", "StateController", 8)?,
             actor: access.hook_field(controller, c"actor", "Actor", 8)?,
         };

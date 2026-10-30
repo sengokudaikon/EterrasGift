@@ -61,7 +61,7 @@ pub(crate) const FEATURES: &[&HookFeature] = &[
     &super::damage::FEATURE,
     &super::fixed_attack_rate::FEATURE,
     &super::fixed_leech_rate::FEATURE,
-    &super::no_mana_cost::FEATURE,
+    &super::results::no_mana_cost::FEATURE,
     &super::patches::skills_to_level_20::FEATURE,
     &super::patches::equip_without_requirements::FEATURE,
     &super::patches::full_set_bonus::FEATURE,
@@ -229,6 +229,17 @@ impl RuntimeAccess {
             self.hook_static_storage(environment, online, 1)
         }
     }
+    /// The storage of `PlayerFinder.playerActorComponent`, the actor in play, for code that compares a receiver with it.
+    /// # Safety
+    /// Same contract as `hook_online_storage`.
+    pub(super) unsafe fn hook_player_storage(&self, images: &Images) -> Result<NonNull<c_void>, GameError> {
+        // SAFETY: admitted attached thread; initialize the process-owned reference static through the public API.
+        unsafe {
+            let finder = self.class(images, c"", c"PlayerFinder")?;
+            let player = self.static_field(finder, c"playerActorComponent", "Actor")?;
+            self.hook_static_storage(finder, player, 8)
+        }
+    }
     // Resolve the complete parameter signature before checking the selected overload's ABI and uniqueness.
     pub(super) unsafe fn hook_method_contract(&self, owner: Class, spec: &MethodSpec) -> Result<Method, GameError> {
         // SAFETY: immutable attached metadata and class descriptor retained by the caller.
@@ -273,6 +284,21 @@ impl RuntimeAccess {
                 found = Some(method);
             }
             found.ok_or_else(|| unsupported(format!("missing hook: {}", spec.method.to_string_lossy())))
+        }
+    }
+    /// The offset of `owner`'s instance field `name`, whose type's class is exactly `expected`, aligned to `alignment`
+    /// in a reference object's instance storage.
+    /// # Safety
+    /// Immutable attached metadata; `owner` and `expected` are retained class descriptors.
+    pub(super) unsafe fn hook_field_of(&self, owner: Class, name: &CStr, expected: Class, alignment: usize) -> Result<u32, GameError> {
+        // SAFETY: exact non-byref field class and instance storage are checked before returning the aligned offset.
+        unsafe {
+            let field = self.instance_field_in(owner, name, expected, "hook")?;
+            let offset = (self.field_offset)(field);
+            if (self.class_value)(owner) || !(16..=16384).contains(&offset) || !offset.is_multiple_of(alignment) {
+                return Err(unsupported(format!("hook field layout: {}", name.to_string_lossy())));
+            }
+            Ok(offset as u32)
         }
     }
     pub(super) unsafe fn hook_field(&self, owner: Class, name: &CStr, expected: &str, alignment: usize) -> Result<u32, GameError> {

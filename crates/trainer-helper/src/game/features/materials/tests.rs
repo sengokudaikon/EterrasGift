@@ -316,7 +316,7 @@ fn material_reference_contract_refuses_wrong_type_byref_static_value_owner_and_u
     access.field_offset = offset;
     let resolve = || {
         // SAFETY: immutable authored class/field/type tokens served by the matching fake metadata exports.
-        unsafe { field_offset(&access, token(1), c"content", token(2), 8) }
+        unsafe { access.hook_field_of(token(1), c"content", token(2), 8) }
     };
     assert_eq!(resolve().unwrap(), 16);
     KIND.set(5);

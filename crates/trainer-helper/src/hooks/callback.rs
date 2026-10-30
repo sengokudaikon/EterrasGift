@@ -4,15 +4,10 @@
 //!
 //! Native unwinding out of the post-call callback deliberately strands its count:
 //! unloading then refuses, rather than guessing whether DLL frames remain alive.
-use super::{HookError, failure};
+use super::{HookError, page};
 use std::{
     ptr::NonNull,
     sync::atomic::{AtomicPtr, AtomicU64, Ordering::SeqCst},
-};
-use windows_sys::Win32::System::{
-    Diagnostics::Debug::{FlushInstructionCache, IMAGE_RUNTIME_FUNCTION_ENTRY, RtlAddFunctionTable},
-    Memory::{MEM_COMMIT, MEM_RELEASE, MEM_RESERVE, PAGE_EXECUTE_READ, PAGE_READWRITE, VirtualAlloc, VirtualFree, VirtualProtect},
-    Threading::GetCurrentProcess,
 };
 
 #[repr(C)]
@@ -40,10 +35,8 @@ impl CallbackGate {
         // SAFETY: fresh private allocation, layout below fits two pages. The
         // function table is registered only after code and data are initialized.
         unsafe {
-            let allocation = VirtualAlloc(std::ptr::null(), 8192, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE).cast::<u8>();
-            let Some(code) = NonNull::new(allocation) else {
-                return Err(failure("allocate callback gateway"));
-            };
+            let allocation = page::allocate("allocate callback gateway")?;
+            let code = NonNull::new(allocation).expect("allocated");
             let data = allocation.add(4096).cast::<Data>();
             data.write(Data {
                 destination: AtomicPtr::new(callback.cast_mut()),
@@ -62,24 +55,8 @@ impl CallbackGate {
             bytes.extend([0xf0, 0x48, 0xff, 0x48, 0x08, 0x48, 0x83, 0xc4, 0x38, 0xc3]);
             std::ptr::copy_nonoverlapping(bytes.as_ptr(), allocation, bytes.len());
             allocation.add(128).write(0xc3); // closed destination: retained no-op ret
-            let table = allocation.add(4096 + 64).cast::<IMAGE_RUNTIME_FUNCTION_ENTRY>();
-            table.write(IMAGE_RUNTIME_FUNCTION_ENTRY {
-                BeginAddress: 0,
-                EndAddress: bytes.len() as u32,
-                Anonymous: std::mem::zeroed(),
-            });
-            (*table).Anonymous.UnwindData = 4096 + 80;
-            // UWOP_ALLOC_SMALL(56), prologue sub rsp,38 at offset four.
-            std::ptr::copy_nonoverlapping([1u8, 4, 1, 0, 4, 0x62, 0, 0].as_ptr(), allocation.add(4096 + 80), 8);
-            let mut old = 0;
-            if VirtualProtect(allocation.cast(), 4096, PAGE_EXECUTE_READ, &raw mut old) == 0
-                || FlushInstructionCache(GetCurrentProcess(), allocation.cast(), 4096) == 0
-                || !RtlAddFunctionTable(table, 1, allocation as u64)
-            {
-                let error = failure("publish callback gateway code/unwind");
-                VirtualFree(allocation.cast(), 0, MEM_RELEASE);
-                return Err(error);
-            }
+            let table = page::unwind(allocation, bytes.len(), 0x38);
+            page::publish(allocation, Some(table), "publish callback gateway code/unwind")?;
             Ok(Self { code, data: &*data })
         }
     }
