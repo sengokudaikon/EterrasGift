@@ -7,7 +7,6 @@
 !/research/trainer-interop.md
 !/research/trainer-features.md
 /spec/
-# design/ is local reference material (C# captures and theme sources), except the token source xtask reads.
-/design/*
-!/design/tokens.json
+# design/ is local reference material (the C# app's captures).
+/design/
 /.idea/

@@ -13,7 +13,6 @@ slint = "=1.18.1"
 slint-build = "=1.18.1"
 image = { version = "0.25.10", default-features = false, features = ["png"] }
 serde_json = { version = "1.0.154", features = ["preserve_order"] }
-kurbo = "0.13.1"
 windows-sys = "0.61.2"
 jiff = "0.2.38"
 regex = "1.13.1"

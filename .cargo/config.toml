@@ -1,5 +1,5 @@
 [alias]
-# cargo xtask tokens [--check]: regenerate crates/ui/ui/tokens.slint, the icons and the radial gradients from design/tokens.json
+# cargo xtask phrases [--check]: collect every shown word into lang/eterras-gift.pot
 xtask = "run --quiet -p xtask --"
 # Warnings are errors: a warning left in passes unnoticed in every later build.
 lint = "clippy --workspace --all-targets -- -D warnings"

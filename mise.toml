@@ -21,14 +21,6 @@ run = "cargo fmt --all"
 description = "Fail if anything is unformatted"
 run = "cargo fmt --all --check"
 
-[tasks.tokens]
-description = "Regenerate tokens.slint and the icons from design/tokens.json"
-run = "cargo xtask tokens"
-
-[tasks."tokens:check"]
-description = "Fail if tokens.slint or the icons are stale"
-run = "cargo xtask tokens --check"
-
 [tasks.phrases]
 description = "Collect every word the app shows (Rust phrases and the views' @tr) into lang/eterras-gift.pot"
 run = "cargo xtask phrases"
@@ -56,8 +48,8 @@ description = "Worker-to-UI reads, ordered drafts, typed write outcomes and Undo
 run = "cargo capture -- --trainer-backend"
 
 [tasks.verify]
-description = "Everything to run before calling work done: lint, format, tokens, phrases, tests, captures; then look at artifacts/captures"
-run = ["cargo lint", "cargo fmt --all --check", "cargo xtask tokens --check", "cargo xtask phrases --check", "mise run test", "cargo capture"]
+description = "Everything to run before calling work done: lint, format, phrases, tests, captures; then look at artifacts/captures"
+run = ["cargo lint", "cargo fmt --all --check", "cargo xtask phrases --check", "mise run test", "cargo capture"]
 
 [tasks."slint:check"]
 description = "Fast compile check of a .slint file (default: app.slint)"

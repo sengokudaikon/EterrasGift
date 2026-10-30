@@ -1305,8 +1305,8 @@ export component ItemForge inherits Rectangle {
                 width: root.unique-beside ? root.lists-width - root.table-width - Tokens.unique-section-beside-margin.left : root.lists-width;
                 height: ForgeState.has-unique ? unique-layout.preferred-height : 0px;
                 visible: ForgeState.has-unique;
-                // The tooltip's ground with its header glow in the top-left corner (an elliptical gradient, generated as an
-                // image by `cargo xtask tokens`); the copper frame is drawn over both.
+                // The tooltip's ground with its header glow in the top-left corner (an elliptical gradient, drawn as an
+                // SVG, gradients/unique-surface-brush.svg); the copper frame is drawn over both.
                 background: Tokens.unique-surface-brush-ground;
                 border-radius: Tokens.control-radius;
                 clip: true;
