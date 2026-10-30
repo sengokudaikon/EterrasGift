@@ -14,8 +14,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-const CONFIG_MAGIC: u32 = 0x4547_4253;
-pub const CONFIG_SIZE: usize = 96;
+pub const CONFIG_SIZE: usize = eg_trainer_wire::bootstrap::SIZE;
 const MAX_HELPER_BYTES: u64 = 128 * 1024 * 1024;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -58,9 +57,11 @@ fn invalid<T>(reason: &'static str) -> Result<T> {
     Err(BootstrapError::Invalid(reason))
 }
 
-/// Initialized wire storage, retained until the target thread's termination is proved.
+/// Initialized wire storage (`eg_trainer_wire::bootstrap`, the helper's own layout), retained until the target
+/// thread's termination is proved.
 #[derive(Clone, Debug)]
 pub struct BootstrapConfig {
+    config: eg_trainer_wire::bootstrap::BootstrapConfig,
     bytes: [u8; CONFIG_SIZE],
 }
 impl BootstrapConfig {
@@ -68,35 +69,40 @@ impl BootstrapConfig {
         if pid == 0 || !eg_trainer_wire::protocol::is_build_id(source_id) {
             return invalid("PID or source ID");
         }
-        let mut bytes = [0; CONFIG_SIZE];
-        for (at, value) in [(0, CONFIG_MAGIC), (4, CONFIG_SIZE as u32), (8, pid)] {
-            bytes[at..at + 4].copy_from_slice(&value.to_le_bytes());
-        }
-        bytes[12..16].copy_from_slice(&(-1_i32).to_le_bytes());
-        bytes[16..80].copy_from_slice(source_id.as_bytes());
-        Ok(Self { bytes })
+        let build_id = source_id.as_bytes().try_into().or_else(|_| invalid("source ID length"))?;
+        Ok(Self::of(eg_trainer_wire::bootstrap::BootstrapConfig::new(pid, build_id)))
+    }
+    fn of(config: eg_trainer_wire::bootstrap::BootstrapConfig) -> Self {
+        Self { config, bytes: config.to_bytes() }
     }
     /// Bind the owning controller before the first pipe exchange, so its death
     /// also stops a helper whose Discover handshake never completed.
-    pub fn with_owner(mut self, pid: u32, created: u64) -> Result<Self> {
+    pub fn with_owner(self, pid: u32, created: u64) -> Result<Self> {
         if pid == 0 || created == 0 {
             return invalid("controller identity");
         }
-        self.bytes[80..84].copy_from_slice(&pid.to_le_bytes());
-        self.bytes[88..96].copy_from_slice(&created.to_le_bytes());
-        Ok(self)
+        Ok(Self::of(eg_trainer_wire::bootstrap::BootstrapConfig {
+            owner_pid: pid,
+            owner_created: created,
+            ..self.config
+        }))
     }
     pub fn bytes(&self) -> &[u8; CONFIG_SIZE] {
         &self.bytes
     }
     pub fn decode_reply(&self, exit_code: u32, result: &[u8]) -> Result<BootstrapReply> {
         let result: &[u8; CONFIG_SIZE] = result.try_into().map_err(|_| BootstrapError::Invalid("configuration reply size"))?;
-        if result[..12] != self.bytes[..12] || result[16..] != self.bytes[16..] {
+        let reply = eg_trainer_wire::bootstrap::BootstrapConfig::from_bytes(result);
+        // Only the status is the helper's to write.
+        if (eg_trainer_wire::bootstrap::BootstrapConfig {
+            status: self.config.status,
+            ..reply
+        }) != self.config
+        {
             return invalid("configuration immutable fields changed");
         }
-        let status = i32::from_le_bytes(result[12..16].try_into().unwrap());
-        if exit_code != 0 || status != 0 {
-            return Err(BootstrapError::Rejected { exit_code, status });
+        if exit_code != 0 || reply.status != 0 {
+            return Err(BootstrapError::Rejected { exit_code, status: reply.status });
         }
         Ok(BootstrapReply::Started)
     }
