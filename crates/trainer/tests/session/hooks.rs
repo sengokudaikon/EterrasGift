@@ -153,7 +153,7 @@ fn each_gameplay_hook_requires_a_separate_readback_for_on_and_off() {
         let mut session = fixture.session(&wire);
         session.enable();
         run(session.connect()).unwrap();
-        assert!(session.supports_hook(hook));
+        assert!(session.capabilities().gameplay_hooks[hook as usize]);
         for on in [true, false] {
             wire.push(done(vec![]));
             wire.push(done(

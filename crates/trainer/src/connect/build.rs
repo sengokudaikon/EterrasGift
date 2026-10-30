@@ -9,7 +9,7 @@ use std::{
 };
 
 #[derive(Clone, Debug)]
-pub struct BuildProfile {
+pub struct BuildIdentity {
     binary: PathBuf,
     metadata: PathBuf,
     binary_hash: String,
@@ -18,7 +18,7 @@ pub struct BuildProfile {
     files: Weak<ConnectionFiles>,
 }
 
-impl PartialEq for BuildProfile {
+impl PartialEq for BuildIdentity {
     fn eq(&self, other: &Self) -> bool {
         self.binary == other.binary
             && self.metadata == other.metadata
@@ -27,7 +27,7 @@ impl PartialEq for BuildProfile {
             && self.helper_build_id == other.helper_build_id
     }
 }
-impl Eq for BuildProfile {}
+impl Eq for BuildIdentity {}
 #[derive(Debug)]
 pub(crate) struct ConnectionFiles {
     #[cfg(windows)]
@@ -37,11 +37,11 @@ pub(crate) struct ConnectionFiles {
 }
 
 /// Session-scoped validation authority. Construction is checked; fields and
-/// retained handles are private. A cloned equal profile may use the same lease.
+/// retained handles are private. A cloned equal build may use the same lease.
 /// Windows pins read-only objects; where it can't (and on other platforms) the
 /// files are hashed again whenever their size or times differ from the last check.
-pub struct ProfileLease {
-    profile: BuildProfile,
+pub struct ArtifactLease {
+    build: BuildIdentity,
     dispatcher: DispatcherSpec,
     storage: LeaseStorage,
 }
@@ -53,7 +53,7 @@ enum LeaseStorage {
     },
     Rehash(Mutex<Rehashed>),
 }
-/// What the fallback last proved: both files' fingerprints when their content last hashed to the profile's.
+/// What the fallback last proved: both files' fingerprints when their content last hashed to the build's.
 #[derive(Default)]
 struct Rehashed {
     proven: Option<(Fingerprint, Fingerprint)>,
@@ -76,7 +76,7 @@ fn fingerprint(path: &Path) -> io::Result<Fingerprint> {
         created: std::os::windows::fs::MetadataExt::creation_time(&metadata),
     })
 }
-impl ProfileLease {
+impl ArtifactLease {
     pub fn bytes_read(&self) -> Option<u64> {
         match &self.storage {
             #[cfg(windows)]
@@ -93,7 +93,7 @@ impl ProfileLease {
         }
     }
 }
-impl BuildProfile {
+impl BuildIdentity {
     /// Files only. The process/log gate still runs before any transport/process query.
     pub fn capture(binary: &Path, metadata: &Path, helper_build_id: &str) -> io::Result<Self> {
         if !hashes::is_sha256(helper_build_id) {
@@ -124,7 +124,7 @@ impl BuildProfile {
             })();
             match opened {
                 Ok(files) => {
-                    let profile = Self {
+                    let build = Self {
                         binary,
                         metadata,
                         binary_hash: files.binary.sha256().into(),
@@ -132,13 +132,13 @@ impl BuildProfile {
                         helper_build_id: helper_build_id.to_ascii_uppercase(),
                         files: Arc::downgrade(&files),
                     };
-                    return Ok((profile, Some(files)));
+                    return Ok((build, Some(files)));
                 }
                 Err(error) if error.kind() == io::ErrorKind::Unsupported || matches!(error.raw_os_error(), Some(32 | 33)) => {}
                 Err(error) => return Err(error),
             }
         }
-        Self::capture(binary, metadata, helper_build_id).map(|profile| (profile, None))
+        Self::capture(binary, metadata, helper_build_id).map(|build| (build, None))
     }
     #[cfg(windows)]
     pub fn binary_lease(&self) -> Option<Arc<eg_game_access::artifact::ReadLease>> {
@@ -171,7 +171,7 @@ impl BuildProfile {
         validate_dispatcher(&image, dispatcher)
     }
 
-    pub fn capture_lease(&self, dispatcher: &DispatcherSpec) -> io::Result<ProfileLease> {
+    pub fn capture_lease(&self, dispatcher: &DispatcherSpec) -> io::Result<ArtifactLease> {
         #[cfg(windows)]
         let storage = match (|| -> io::Result<LeaseStorage> {
             let (binary, metadata) = match self.files.upgrade() {
@@ -192,17 +192,17 @@ impl BuildProfile {
         };
         #[cfg(not(windows))]
         let storage = LeaseStorage::Rehash(Mutex::default());
-        let lease = ProfileLease {
-            profile: self.clone(),
+        let lease = ArtifactLease {
+            build: self.clone(),
             dispatcher: *dispatcher,
             storage,
         };
         self.validate_lease(dispatcher, &lease)?;
         Ok(lease)
     }
-    pub(crate) fn validate_lease(&self, dispatcher: &DispatcherSpec, lease: &ProfileLease) -> io::Result<()> {
-        if &lease.profile != self || &lease.dispatcher != dispatcher {
-            return Err(invalid("artifact lease belongs to another profile or dispatcher"));
+    pub(crate) fn validate_lease(&self, dispatcher: &DispatcherSpec, lease: &ArtifactLease) -> io::Result<()> {
+        if &lease.build != self || &lease.dispatcher != dispatcher {
+            return Err(invalid("artifact lease belongs to another build or dispatcher"));
         }
         match &lease.storage {
             #[cfg(windows)]

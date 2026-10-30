@@ -9,7 +9,7 @@ use eg_trainer::item::edit::{ExpectedObservation, ItemEdit, RollEdit};
 use eg_trainer::item::values::{
     BoundPreview, BoundTooltip, DisplayScalarParser, MappingBuilder, MappingRequest, MappingStart, MappingTarget, RawMappingPage, RawValueSample, UniqueRollPreview, ValueTable,
 };
-use eg_trainer::write::{WriteControl, WriteObservation, WriteOutcome, WritePlan};
+use eg_trainer::write::{ForgePlan, WriteControl, WriteOutcome, WriteStatus};
 use eg_ui::pages::forge::{
     ForgeHandle,
     editor::{Cell, ForgeEditor},
@@ -521,8 +521,7 @@ impl BackendConnection for WorldConnection {
             ..Default::default()
         }
     }
-    async fn write(&mut self, plan: &WritePlan, _: &mut dyn WriteControl) -> Result<WriteOutcome<WriteObservation>, BackendError> {
-        let WritePlan::Forge(plan) = plan;
+    async fn write(&mut self, plan: &ForgePlan, _: &mut dyn WriteControl) -> Result<WriteStatus, BackendError> {
         self.0.writes.fetch_add(1, Ordering::SeqCst);
         let mut after = plan.projected().clone();
         // The game names the item after its new identity.
@@ -533,7 +532,7 @@ impl BackendConnection for WorldConnection {
             after.fingerprint = after.legacy_fingerprint();
         }
         *self.0.item.lock().unwrap() = after.clone();
-        Ok(WriteOutcome::Confirmed(WriteObservation::forge(after)))
+        Ok(WriteOutcome::Confirmed(after))
     }
     async fn refresh(&mut self) -> Result<RuntimeStatus, BackendError> {
         Ok(RuntimeStatus {

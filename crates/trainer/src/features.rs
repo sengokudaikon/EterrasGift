@@ -143,7 +143,7 @@ impl FeatureValue {
     }
 
     /// A saved value as this value takes it now: within its range, or a choice it still lists, else its start. The
-    /// catalog may have changed since the value was saved.
+    /// registry may have changed since the value was saved.
     pub fn fit_saved(&self, value: f64) -> f64 {
         if self.choices.is_empty() {
             if value.is_finite() { value.clamp(self.minimum, self.maximum) } else { self.start }
@@ -253,7 +253,7 @@ impl Error for FeatureError {}
 /// One profile's hooks (`crate::features::profiles`): those wanted on, and every hook's values. Construction and updates
 /// perform no I/O, and nothing here applies, retries or claims an effect in the game; the worker's `HookRun` says that.
 ///
-/// Every switch starts off and every value at the catalog's default. Saved values are fitted to the catalog
+/// Every switch starts off and every value at the registry's default. Saved values are fitted to the registry
 /// (`restore_values`); live edits are validated strictly (`set_values`).
 #[derive(Clone, Debug, PartialEq)]
 pub struct FeatureIntents {
@@ -328,7 +328,7 @@ impl FeatureIntents {
         Ok(changed || wanted_changed)
     }
 
-    /// Unknown IDs, non-value features and changed arities are dropped: they belong to a catalog this version no longer
+    /// Unknown IDs, non-value features and changed arities are dropped: they belong to a registry this version no longer
     /// has. Duplicate IDs (even unknown ones) reject the whole input. Wanted switches are independent and stay intact.
     pub fn restore_values(&mut self, saved: impl IntoIterator<Item = SavedValues>) -> Result<bool, FeatureError> {
         let mut seen = BTreeSet::new();

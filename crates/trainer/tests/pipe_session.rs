@@ -4,7 +4,7 @@
 mod pe_support;
 use eg_game_access::pipe::PipeClient;
 use eg_trainer::{
-    connect::build::BuildProfile,
+    connect::build::BuildIdentity,
     session::{Cleanup, Session, SessionState},
 };
 use eg_trainer_wire::protocol::{Discovery, REQUEST_HEADER_SIZE, Request, Response, ResponseCode, RuntimeStatus};
@@ -86,7 +86,7 @@ fn pipe_and_session_validate_before_status_and_clear_on_disable() {
     }
     let target = eg_game_access::process::capture(child.0.id()).unwrap();
     let build_id = "A".repeat(64);
-    let profile = BuildProfile::capture(&binary, &metadata, &build_id).unwrap();
+    let profile = BuildIdentity::capture(&binary, &metadata, &build_id).unwrap();
     let runtime = tokio::runtime::Builder::new_current_thread().enable_io().enable_time().build().unwrap();
     runtime.block_on(async {
         let client = PipeClient::with_timeouts(target.clone(), Duration::from_secs(3), Duration::from_secs(3));

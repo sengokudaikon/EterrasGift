@@ -1,17 +1,17 @@
-//! The trainer's pages: the catalog of features, the page and row models, and their binding to
+//! The trainer's pages: the feature registry, the page and row models, and their binding to
 //! `pages/trainer.slint`. With the trainer's worker they run on its snapshots
 //! (`backend_session`); without one, on `session::Unconnected`, which tells the truth: no offline character is connected.
-//! Captures drive other states through fake sessions of their own. The catalog is `eg_trainer::features`, which `catalog`
+//! Captures drive other states through fake sessions of their own. The registry is `eg_trainer::features`, which `registry`
 //! adapts.
 //!
 //! The hooks' wanted state and values are the worker's profiles (`eg_trainer::features::profiles`); this module keeps only the rows
 //! and their binding.
 
 pub mod backend_session;
-pub mod catalog;
 pub mod connection;
 pub mod pages;
 pub mod profiles;
+pub mod registry;
 pub mod session;
 mod view;
 
@@ -27,10 +27,10 @@ use std::rc::Rc;
 /// Row presentation and native availability are separate; the backend decides what can run.
 pub fn install(window: &MainWindow, backend: Option<BackendHandle>) {
     let Some(backend) = backend else {
-        bind(window, Rc::new(session::Unconnected), catalog::FEATURES.to_vec(), false);
+        bind(window, Rc::new(session::Unconnected), registry::FEATURES.to_vec(), false);
         return;
     };
-    let pages = bind(window, Rc::new(backend_session::BackendSession::new(backend.clone())), catalog::FEATURES.to_vec(), false).downgrade();
+    let pages = bind(window, Rc::new(backend_session::BackendSession::new(backend.clone())), registry::FEATURES.to_vec(), false).downgrade();
     follow(&backend, move || pages.upgrade().map(|pages| pages.refresh()).is_some());
 }
 

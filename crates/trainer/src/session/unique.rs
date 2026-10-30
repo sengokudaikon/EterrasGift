@@ -16,8 +16,7 @@ impl<T: Transport> Session<T> {
             Ok(modifiers) => {
                 let count = expected.identity.as_ref().map_or(0, |i| i.rolls.len());
                 if modifiers.iter().any(|m| m.roll_ids.iter().any(|id| usize::from(*id) >= count)) {
-                    self.release_without_io();
-                    self.state = SessionState::Disconnected;
+                    self.revoke();
                     return Err(SessionError::Protocol(ProtocolError::InvalidData));
                 }
                 Ok(Some(modifiers))
@@ -49,8 +48,7 @@ impl<T: Transport> Session<T> {
             Ok(modifiers) => match prepared.with_reply(eg_trainer_wire::mapping::UniqueRollPreview { modifiers }) {
                 Ok(preview) => Ok(preview),
                 Err(_) => {
-                    self.release_without_io();
-                    self.state = SessionState::Disconnected;
+                    self.revoke();
                     Err(SessionError::Protocol(ProtocolError::InvalidData))
                 }
             },

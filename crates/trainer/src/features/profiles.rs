@@ -52,8 +52,8 @@ pub struct ProfileBook {
 }
 
 impl ProfileBook {
-    /// Reads the trainer's settings slice. Whatever the catalog no longer has is dropped: an entry without its name,
-    /// class or cycle, an unknown hook, values of the wrong count (out-of-range ones are fitted to the catalog). A
+    /// Reads the trainer's settings slice. Whatever the registry no longer has is dropped: an entry without its name,
+    /// class or cycle, an unknown hook, values of the wrong count (out-of-range ones are fitted to the registry). A
     /// second entry for the same character is dropped too, keeping the one played last.
     pub fn from_settings(slice: Option<&Value>) -> Self {
         let template = FeatureIntents::from_saved(field(slice, HOOK_VALUES_KEY).map(saved_values).unwrap_or_default()).unwrap_or_default();

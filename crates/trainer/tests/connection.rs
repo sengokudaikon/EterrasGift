@@ -17,7 +17,7 @@ use eg_core::game_log::{GameLogState, GameLogStatus, GameReadiness};
 use eg_trainer::{
     backend::{BackendError, Connector, ErrorKind},
     connect::admission::{AdmissionCheck, AttemptOutcome, HelperPreparer, LogFactory, PreparationFailure, PreparationResidency, PreparedHelper, SessionConnector},
-    connect::build::BuildProfile,
+    connect::build::BuildIdentity,
     connect::gate::LogSource,
     session::SessionState,
 };
@@ -226,7 +226,7 @@ impl Transport for Wire {
 struct Prepare(Arc<Shared>);
 impl HelperPreparer for Prepare {
     type Transport = Wire;
-    async fn prepare(&mut self, target: &ProcessIdentity, profile: &BuildProfile, admission: &mut dyn AdmissionCheck) -> Result<PreparedHelper<Wire>, PreparationFailure> {
+    async fn prepare(&mut self, target: &ProcessIdentity, profile: &BuildIdentity, admission: &mut dyn AdmissionCheck) -> Result<PreparedHelper<Wire>, PreparationFailure> {
         self.0.record("prepare");
         assert!(profile.helper_build_id().eq_ignore_ascii_case(HELPER));
         assert!(eg_core::hashes::is_sha256(profile.binary_hash()));

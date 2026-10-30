@@ -63,9 +63,7 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
             intent: self.intent.clone(),
             epoch,
         };
-        let write_plan = WritePlan::from(plan.clone());
-        let (status, failure) = self.submit_write(&write_plan, &mut control).await;
-        let status = status.map(WriteObservation::into_forge);
+        let (status, failure) = self.submit_write(&plan, &mut control).await;
         self.log_forge_outcome(&plan, &status);
         self.state.last_write = Some(WriteRecord {
             plan: plan.clone(),
@@ -153,26 +151,20 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
     /// What every write checks again right before it is sent: the gate, a fresh status from the helper, and the
     /// same character manager its plan was made for.
     async fn recheck_before_write(&mut self, epoch: u64, target: &ProcessIdentity, manager: u64) -> Result<(), BackendError> {
-        self.admit(target)?;
-        let refreshed = self.connection.as_mut().ok_or_else(|| invalid_edit("connection released"))?.refresh().await;
-        let status = match refreshed {
+        let status = match self.call(epoch, target, async |connection| connection.refresh().await).await? {
             Ok(status) => status,
             Err(error) => {
-                self.handle_connection_gate(&error);
-                if !matches!(error.kind, ErrorKind::Gate | ErrorKind::HelperDeparted | ErrorKind::CharacterLoading) {
-                    self.fail(error.clone(), Some(target.clone()));
-                }
+                self.settle(&error, target.clone());
                 return Err(error);
             }
         };
-        self.superseded(epoch)?;
         self.check_status(status)?;
         if status.manager != manager {
             return Err(BackendError::blocked(ErrorKind::Identity, "character manager changed before write"));
         }
         self.admit(target)
     }
-    pub(super) async fn submit_write(&mut self, plan: &WritePlan, control: &mut dyn WriteControl) -> (WriteOutcome<WriteObservation>, Option<BackendError>) {
+    pub(super) async fn submit_write(&mut self, plan: &ForgePlan, control: &mut dyn WriteControl) -> (WriteStatus, Option<BackendError>) {
         let (status, mut failure) = match self.connection.as_mut().unwrap().write(plan, control).await {
             Ok(status) => (status, None),
             Err(error) => {

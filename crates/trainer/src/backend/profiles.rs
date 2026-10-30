@@ -1,14 +1,11 @@
-//! Cheat profiles in the worker (`crate::features::profiles`): which one the pages show and change, the lock that holds them
-//! still while a game runs without an offline character in play, and the hooks of the character in play applied one at
-//! a time, each settled by the game's own report. A character without a profile has hooks for the connection only,
-//! until the user keeps them as its profile.
-use super::write::{CurrentIntent, invalid_edit, refusal, write_error};
+//! Cheat profiles in the worker (`crate::features::profiles`): which one the pages show and change, and the lock that
+//! holds them still while a game runs without an offline character in play. A character without a profile has hooks
+//! for the connection only, until the user keeps them as its profile. Applying them is `hooks.rs`'s.
+use super::hooks::{HookRun, hook_ids};
+use super::write::invalid_edit;
 use super::*;
 use crate::features::profiles::ProfileKey;
-use crate::features::{DESCRIPTORS, FeatureError, FeatureIntents, FeatureKey, HookId};
-
-/// What a wanted hook says while this version cannot apply it.
-pub const HOOK_NOT_AVAILABLE: &str = "Not available in this version yet.";
+use crate::features::{FeatureError, FeatureIntents, FeatureKey, HookId};
 
 /// Whether the profiles can change, and which one is live.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -21,46 +18,6 @@ pub enum ProfileLock {
     Live(ProfileKey),
 }
 
-/// A hook of the character in play, in this connection.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum HookRun {
-    /// Off in the game: not wanted, or turned off as asked.
-    Off,
-    /// Wanted, waiting its turn.
-    Queued,
-    Applying,
-    /// On in the game, as its own report confirmed.
-    On,
-    /// The last change did not take, for `reason`. `on` is what the game holds: its report, or what it held before
-    /// when nothing reached it.
-    Failed {
-        reason: String,
-        on: bool,
-    },
-}
-
-impl HookRun {
-    /// Whether the game may hold the hook on.
-    fn holds(&self) -> bool {
-        matches!(self, Self::On | Self::Failed { on: true, .. })
-    }
-}
-
-/// One hook as the game should have it.
-#[derive(Clone, Debug, PartialEq)]
-pub struct HookRequest {
-    pub id: HookId,
-    pub on: bool,
-    pub values: Vec<f64>,
-}
-
-fn hook_ids() -> impl Iterator<Item = HookId> {
-    DESCRIPTORS.iter().filter_map(|descriptor| match descriptor.key {
-        FeatureKey::Hook(id) => Some(id),
-        _ => None,
-    })
-}
-
 fn locked() -> BackendError {
     BackendError::blocked(ErrorKind::NotReady, "Profiles change while no game runs, or for the offline character in play.")
 }
@@ -70,16 +27,6 @@ fn not_in_play() -> BackendError {
 }
 
 impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> BackendWorker<P, C, L, K> {
-    pub(super) fn reconcile_hooks(&mut self) {
-        for id in hook_ids() {
-            if let Some(false) = self.connection.as_ref().and_then(|connection| id.native().and_then(|hook| connection.observed_hook(hook)))
-                && self.state.hooks.get(&id).is_some_and(HookRun::holds)
-            {
-                self.state.hooks.insert(id, if self.wanted(id) { HookRun::Queued } else { HookRun::Off });
-            }
-        }
-    }
-
     pub(super) fn profile_lock(&self) -> ProfileLock {
         match &self.live {
             Some(key) if self.state.phase == Phase::Ready => ProfileLock::Live(key.clone()),
@@ -182,12 +129,12 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
     }
 
     /// The hooks of the character in play: its profile's, or this connection's.
-    fn live_hooks(&self) -> Option<&FeatureIntents> {
+    pub(super) fn live_hooks(&self) -> Option<&FeatureIntents> {
         let key = self.live.as_ref()?;
         self.state.profiles.get(key).map(|profile| &profile.hooks).or(self.state.unsaved.as_deref())
     }
 
-    fn wanted(&self, id: HookId) -> bool {
+    pub(super) fn wanted(&self, id: HookId) -> bool {
         self.live_hooks().is_some_and(|hooks| hooks.is_wanted(id))
     }
 
@@ -214,138 +161,5 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
         self.live = Some(key.clone());
         self.state.editing = Some(key);
         self.state.hooks = hook_ids().map(|id| (id, if self.wanted(id) { HookRun::Queued } else { HookRun::Off })).collect();
-    }
-
-    /// Applies the hooks still waiting their turn, in the pages' order. Stops at the first that leaves the session
-    /// unusable or its outcome unknown; one the game refuses says why, and the rest go on.
-    pub(super) async fn apply_queued(&mut self, epoch: u64) -> Result<(), BackendError> {
-        for id in hook_ids() {
-            if self.state.hooks.get(&id) == Some(&HookRun::Queued) {
-                self.superseded(epoch)?;
-                self.apply_hook(epoch, id).await?;
-            }
-        }
-        Ok(())
-    }
-
-    async fn apply_hook(&mut self, epoch: u64, id: HookId) -> Result<(), BackendError> {
-        let (Some(hooks), Some(target)) = (self.live_hooks(), self.state.attached.clone()) else {
-            return Err(BackendError::blocked(ErrorKind::NotConnected, "no offline character in play"));
-        };
-        let request = HookRequest {
-            id,
-            on: hooks.is_wanted(id),
-            values: hooks.values(id).to_vec(),
-        };
-        let holds = self.state.hooks.get(&id).is_some_and(HookRun::holds);
-        // Nothing to take back from the game, or nothing this version can do there.
-        let settled = if !request.on && !holds {
-            Some(HookRun::Off)
-        } else if !self
-            .connection
-            .as_ref()
-            .is_some_and(|connection| id.native().is_some_and(|hook| connection.supports_hook(hook)))
-        {
-            Some(HookRun::Failed {
-                reason: HOOK_NOT_AVAILABLE.into(),
-                on: holds,
-            })
-        } else {
-            None
-        };
-        if let Some(run) = settled {
-            return self.commit(epoch, |this| {
-                this.state.hooks.insert(id, run);
-            });
-        }
-        self.admit(&target)?;
-        // Superseded before it is sent, a change waits its turn again: a queued cleanup usually ends the connection,
-        // and one that does not (automatic connection turned off) lets the monitor go on with it.
-        if let Err(error) = self.commit(epoch, |this| {
-            this.state.hooks.insert(id, HookRun::Applying);
-        }) {
-            self.state.hooks.insert(id, HookRun::Queued);
-            return Err(error);
-        }
-        let mut control = CurrentIntent {
-            intent: self.intent.clone(),
-            epoch,
-        };
-        let connection = self
-            .connection
-            .as_mut()
-            .ok_or_else(|| BackendError::blocked(ErrorKind::NotConnected, "connection released"))?;
-        let (outcome, mut failure) = match connection.set_hook(&request, &mut control).await {
-            Ok(outcome) => (outcome, None),
-            Err(error) if error.kind == ErrorKind::Superseded && error.delivery != Some(Delivery::MayHaveRun) => {
-                self.state.hooks.insert(id, HookRun::Queued);
-                return Err(error);
-            }
-            Err(error) => (
-                if error.delivery == Some(Delivery::MayHaveRun) {
-                    WriteOutcome::uncertain(error.message.clone())
-                } else {
-                    WriteOutcome::refused(error.message.clone())
-                },
-                Some(error),
-            ),
-        };
-        let run = match outcome {
-            WriteOutcome::Confirmed(on) if on == request.on => {
-                if on {
-                    HookRun::On
-                } else {
-                    HookRun::Off
-                }
-            }
-            WriteOutcome::Confirmed(on) | WriteOutcome::NotKept(on) => HookRun::Failed {
-                reason: format!("The game's report has it {} after the change.", if on { "on" } else { "off" }),
-                on,
-            },
-            WriteOutcome::NotApplied { code, message } => {
-                failure = failure.or_else(|| refusal(code, &message));
-                HookRun::Failed { reason: message, on: holds }
-            }
-            WriteOutcome::Uncertain { message } => return Err(self.hook_uncertain(id, &message, target)),
-            WriteOutcome::Pending => return Err(self.hook_uncertain(id, "the helper gave no outcome", target)),
-        };
-        // Refused while the character loads: nothing reached the game, and the hook waits for it, as a read does.
-        let run = match &failure {
-            Some(error) if error.kind == ErrorKind::CharacterLoading => HookRun::Queued,
-            _ => run,
-        };
-        // What the game answered stands even when cleanup is queued; it is published with the next snapshot then.
-        self.state.hooks.insert(id, run);
-        self.publish_if_current(epoch)?;
-        match failure {
-            None => Ok(()),
-            Some(error) if matches!(error.kind, ErrorKind::Gate | ErrorKind::HelperDeparted | ErrorKind::CharacterLoading) => {
-                self.handle_connection_gate(&error);
-                Err(error)
-            }
-            Some(error)
-                if matches!(
-                    error.kind,
-                    ErrorKind::Transport | ErrorKind::Protocol | ErrorKind::Identity | ErrorKind::RestartRequired | ErrorKind::Fault
-                ) =>
-            {
-                self.fail(error.clone(), Some(target));
-                Err(error)
-            }
-            // Refused before anything reached the game: the hook says why, and the session goes on.
-            Some(_) => Ok(()),
-        }
-    }
-
-    /// A change that may have reached the game ends the session, as an uncertain write does: nothing more is applied,
-    /// and the helper leaves, until Retry.
-    fn hook_uncertain(&mut self, id: HookId, message: &str, target: ProcessIdentity) -> BackendError {
-        let error = write_error(
-            ErrorKind::WriteUncertain,
-            format!("{}: {message}", FeatureKey::Hook(id).descriptor().title),
-            Delivery::MayHaveRun,
-        );
-        self.fail(error.clone(), Some(target));
-        error
     }
 }

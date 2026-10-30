@@ -40,7 +40,7 @@ fn lines() -> Vec<ModifierSnapshot> {
     ]
 }
 fn observation(f: &Fixture) -> ExpectedObservation {
-    let profile = f.profile();
+    let profile = f.build();
     ExpectedObservation::new(
         1,
         f.target.clone(),

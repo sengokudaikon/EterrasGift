@@ -11,7 +11,7 @@ mod unique;
 mod writes;
 use eg_core::game_log::GameReadiness;
 use eg_trainer::{
-    connect::build::BuildProfile,
+    connect::build::BuildIdentity,
     session::{Cleanup, Session, SessionError, SessionState},
 };
 use eg_trainer_wire::{
@@ -248,8 +248,8 @@ impl Fixture {
         fixture
     }
 
-    fn profile(&self) -> BuildProfile {
-        BuildProfile::capture(&self.binary, &self.metadata, HELPER_ID).unwrap()
+    fn build(&self) -> BuildIdentity {
+        BuildIdentity::capture(&self.binary, &self.metadata, HELPER_ID).unwrap()
     }
 
     fn discovery(&self) -> Discovery {
@@ -264,7 +264,7 @@ impl Fixture {
     }
 
     fn session(&self, wire: &FakeTransport) -> Session<FakeTransport> {
-        Session::new(self.target.clone(), wire.clone(), self.profile()).unwrap()
+        Session::new(self.target.clone(), wire.clone(), self.build()).unwrap()
     }
 }
 
@@ -303,7 +303,7 @@ fn session_rejects_a_transport_bound_to_another_process_identity_before_io() {
     ] {
         let wire = FakeTransport::new(other, []);
         assert!(matches!(
-            Session::new(fixture.target.clone(), wire.clone(), fixture.profile()),
+            Session::new(fixture.target.clone(), wire.clone(), fixture.build()),
             Err(SessionError::Identity(_))
         ));
         assert!(wire.requests().is_empty());
@@ -316,12 +316,12 @@ fn session_rejects_identical_artifacts_outside_the_target_installation_before_io
     let other_installation = Fixture::new();
     let copied_metadata = fixture._temp.path().join("replacement-metadata.dat");
     fs::copy(&fixture.metadata, &copied_metadata).unwrap();
-    let expected = fixture.profile();
+    let expected = fixture.build();
     for unrelated in [
-        other_installation.profile(),
-        BuildProfile::capture(&other_installation.binary, &fixture.metadata, HELPER_ID).unwrap(),
-        BuildProfile::capture(&fixture.binary, &other_installation.metadata, HELPER_ID).unwrap(),
-        BuildProfile::capture(&fixture.binary, &copied_metadata, HELPER_ID).unwrap(),
+        other_installation.build(),
+        BuildIdentity::capture(&other_installation.binary, &fixture.metadata, HELPER_ID).unwrap(),
+        BuildIdentity::capture(&fixture.binary, &other_installation.metadata, HELPER_ID).unwrap(),
+        BuildIdentity::capture(&fixture.binary, &copied_metadata, HELPER_ID).unwrap(),
     ] {
         // The content hashes and helper ID match; only installation provenance differs.
         assert_eq!(unrelated.binary_hash(), expected.binary_hash());
@@ -669,20 +669,20 @@ fn malformed_status_does_not_become_ready_or_trigger_a_replay() {
 #[test]
 fn profile_requires_file_backed_executable_dispatcher_and_bounded_headers() {
     let fixture = Fixture::new();
-    fixture.profile().validate(&fixture.dispatcher).unwrap();
+    fixture.build().validate(&fixture.dispatcher).unwrap();
     for rva in [0_u64, 0x11f1, 0x1200, u64::MAX] {
-        assert!(fixture.profile().validate(&DispatcherSpec { rva, ..fixture.dispatcher }).is_err());
+        assert!(fixture.build().validate(&DispatcherSpec { rva, ..fixture.dispatcher }).is_err());
     }
     let original = fs::read(&fixture.binary).unwrap();
     for (index, value) in [(0x84, 0x4c), (0x99, 0x01), (0x188 + 39, 0x40)] {
         let mut malformed = original.clone();
         malformed[index] = value;
         fs::write(&fixture.binary, malformed).unwrap();
-        assert!(fixture.profile().validate(&fixture.dispatcher).is_err());
+        assert!(fixture.build().validate(&fixture.dispatcher).is_err());
     }
     for length in [0, 0x3f, 0x80, 0x98, 0x188, 0x20f] {
         fs::write(&fixture.binary, &original[..length]).unwrap();
-        assert!(fixture.profile().validate(&fixture.dispatcher).is_err());
+        assert!(fixture.build().validate(&fixture.dispatcher).is_err());
     }
 }
 

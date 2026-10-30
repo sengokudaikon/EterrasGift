@@ -20,7 +20,7 @@ fn construction_is_inert_and_offline_denial_precedes_target_or_file_access() {
         let fixture = Fixture::new();
         let mut native = preparer(&fixture);
         let mut denied = Admission::new(false);
-        let failure = native.prepare(&fixture.target, &fixture.profile, &mut denied).await.err().unwrap();
+        let failure = native.prepare(&fixture.target, &fixture.build, &mut denied).await.err().unwrap();
         assert_eq!(failure.error.kind, ErrorKind::Gate);
         assert_eq!(failure.residency, PreparationResidency::NotLoaded);
         assert_eq!(native.retained_targets(), 0);
@@ -31,9 +31,9 @@ fn construction_is_inert_and_offline_denial_precedes_target_or_file_access() {
 fn mismatched_source_is_refused_before_process_access() {
     support::run(async {
         let fixture = Fixture::new();
-        let profile = fixture.profile_with_source(&"a".repeat(64));
+        let build = fixture.profile_with_source(&"a".repeat(64));
         let mut native = preparer(&fixture);
-        let failure = native.prepare(&fixture.target, &profile, &mut Admission::new(true)).await.err().unwrap();
+        let failure = native.prepare(&fixture.target, &build, &mut Admission::new(true)).await.err().unwrap();
         assert_eq!(failure.error.kind, ErrorKind::Identity);
         assert_eq!(failure.residency, PreparationResidency::NotLoaded);
         assert_eq!(native.retained_targets(), 0);
@@ -47,7 +47,7 @@ fn local_preflight_failure_is_retryable_without_reserving_a_loaded_generation() 
         let mut native = preparer(&fixture);
         for _ in 0..2 {
             // No UnityPlayer.dll exists: refusal happens before any OpenProcess.
-            let failure = native.prepare(&fixture.target, &fixture.profile, &mut Admission::new(true)).await.err().unwrap();
+            let failure = native.prepare(&fixture.target, &fixture.build, &mut Admission::new(true)).await.err().unwrap();
             assert_eq!(failure.error.kind, ErrorKind::Identity);
             assert_eq!(failure.residency, PreparationResidency::NotLoaded);
             assert_eq!(native.retained_targets(), 0);

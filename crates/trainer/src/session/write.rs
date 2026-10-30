@@ -1,5 +1,5 @@
 use super::*;
-use crate::write::{AllowWrite, ForgePlan, WriteControl, WriteObservation, WriteOutcome, WritePlan, WriteStatus};
+use crate::write::{AllowWrite, ForgePlan, WriteControl, WriteOutcome, WriteStatus};
 use eg_trainer_wire::{
     transport::Delivery,
     write::{ForgeWrite, WriteReply},
@@ -9,21 +9,14 @@ impl<T: Transport> Session<T> {
     pub async fn edit_forge(&mut self, plan: &ForgePlan) -> Result<WriteStatus, SessionError> {
         self.edit_forge_controlled(plan, &mut AllowWrite).await
     }
-    pub async fn edit_forge_controlled(&mut self, plan: &ForgePlan, control: &mut dyn WriteControl) -> Result<WriteStatus, SessionError> {
-        Ok(self.write_controlled(&plan.clone().into(), control).await?.map(WriteObservation::into_forge))
-    }
-
     /// Submit once. Err is pre-submission; all later failures retain certainty.
     /// A native ACK is provisional until a separate admitted read completes.
     /// Dropping this future leaves Pending and blocks further work until cleanup.
-    pub async fn write(&mut self, plan: &WritePlan) -> Result<WriteOutcome<WriteObservation>, SessionError> {
-        self.write_controlled(plan, &mut AllowWrite).await
-    }
-    pub async fn write_controlled(&mut self, plan: &WritePlan, control: &mut dyn WriteControl) -> Result<WriteOutcome<WriteObservation>, SessionError> {
+    pub async fn edit_forge_controlled(&mut self, plan: &ForgePlan, control: &mut dyn WriteControl) -> Result<WriteStatus, SessionError> {
         self.admit()?;
         let dispatcher = self.dispatcher()?;
         let (request, readback) = self.prepare_write(plan, dispatcher)?;
-        self.write_provenance(&dispatcher)?;
+        self.provenance(&dispatcher)?;
         if !control.allowed() {
             return Err(SessionError::Busy);
         }
@@ -48,7 +41,7 @@ impl<T: Transport> Session<T> {
         };
         // A trusted pre-store refusal stays definitive after admission loss.
         // No further native I/O follows a failed gate or changed artifact.
-        if let Err(error) = self.write_provenance(&dispatcher) {
+        if let Err(error) = self.provenance(&dispatcher) {
             healthy = false;
             if matches!(result, WriteOutcome::Confirmed(_)) {
                 result = WriteOutcome::uncertain(format!("write reply lost confirmation provenance: {error}"));
@@ -64,7 +57,7 @@ impl<T: Transport> Session<T> {
                     Err(error) => WriteOutcome::uncertain(format!("write sent but independent readback failed: {error}")),
                 };
                 if matches!(result, WriteOutcome::Confirmed(_) | WriteOutcome::NotKept(_))
-                    && let Err(error) = self.write_provenance(&dispatcher)
+                    && let Err(error) = self.provenance(&dispatcher)
                 {
                     result = WriteOutcome::uncertain(format!("independent readback lost confirmation provenance: {error}"));
                 }
@@ -102,43 +95,28 @@ impl<T: Transport> Session<T> {
         Ok(result)
     }
 
-    fn prepare_write(&self, plan: &WritePlan, dispatcher: DispatcherSpec) -> Result<(Request, Request), SessionError> {
-        match plan {
-            WritePlan::Forge(plan) => {
-                let expected = plan.before();
-                if !self.observation_matches(expected) || self.status.as_ref().is_none_or(|status| status.online || status.manager != plan.manager()) {
-                    return Err(SessionError::Identity("write belongs to a different runtime, manager or catalog".into()));
-                }
-                let request = ForgeWrite::edit(dispatcher, plan.manager(), expected.snapshot().clone(), plan.mutation()).map_err(SessionError::Protocol)?;
-                Ok((Request::EditForge(request), Request::ReadForge { dispatcher }))
-            }
+    fn prepare_write(&self, plan: &ForgePlan, dispatcher: DispatcherSpec) -> Result<(Request, Request), SessionError> {
+        let expected = plan.before();
+        if !self.observation_matches(expected) || self.status.as_ref().is_none_or(|status| status.online || status.manager != plan.manager()) {
+            return Err(SessionError::Identity("write belongs to a different runtime, manager or catalog".into()));
         }
-    }
-    pub(super) fn write_provenance(&mut self, dispatcher: &DispatcherSpec) -> Result<(), SessionError> {
-        if let Err(error) = self.validate_profile(dispatcher) {
-            self.release_without_io();
-            self.state = SessionState::Disconnected;
-            return Err(SessionError::Identity(error.to_string()));
-        }
-        Ok(())
+        let request = ForgeWrite::edit(dispatcher, plan.manager(), expected.snapshot().clone(), plan.mutation()).map_err(SessionError::Protocol)?;
+        Ok((Request::EditForge(request), Request::ReadForge { dispatcher }))
     }
 }
 
-fn classify_ack(request: &Request, response: &eg_trainer_wire::protocol::Response) -> WriteOutcome<WriteObservation> {
+fn classify_ack(request: &Request, response: &eg_trainer_wire::protocol::Response) -> WriteStatus {
     match request {
         Request::EditForge(request) => match eg_trainer_wire::write::classify_response(response, request) {
-            WriteReply::Confirmed(actual) => WriteOutcome::Confirmed(WriteObservation::forge(actual)),
+            WriteReply::Confirmed(actual) => WriteOutcome::Confirmed(actual),
             WriteReply::NotApplied { code, message } => WriteOutcome::NotApplied { code, message },
             WriteReply::Uncertain { reason } => WriteOutcome::uncertain(reason),
         },
         _ => unreachable!("prepared mutation request"),
     }
 }
-fn decode_readback(plan: &WritePlan, payload: &[u8]) -> WriteOutcome<WriteObservation> {
-    let actual = match plan {
-        WritePlan::Forge(_) => forge::decode(payload).map(|actual| actual.map(WriteObservation::forge)),
-    };
-    match actual {
+fn decode_readback(plan: &ForgePlan, payload: &[u8]) -> WriteStatus {
+    match forge::decode(payload) {
         Ok(Some(actual)) => plan.observe(actual),
         Ok(None) => WriteOutcome::uncertain("independent readback has no complete target observation"),
         Err(error) => WriteOutcome::uncertain(format!("invalid independent write readback: {error}")),

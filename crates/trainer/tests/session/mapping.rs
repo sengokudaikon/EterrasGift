@@ -3,7 +3,7 @@ use eg_trainer::{item::edit::ExpectedObservation, item::values::MappingRequest};
 use eg_trainer_wire::mapping::{self, MappingAddress, MappingStart, MappingTarget, RawMappingPage, RawValueSample};
 
 fn expected(fixture: &Fixture) -> ExpectedObservation {
-    let profile = fixture.profile();
+    let profile = fixture.build();
     ExpectedObservation::new(
         1,
         fixture.target.clone(),

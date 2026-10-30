@@ -35,15 +35,12 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
         if self.state.mapping(&expected, &request).is_some() {
             return Ok(());
         }
-        let result = self
-            .connection
-            .as_mut()
-            .ok_or_else(|| BackendError::blocked(ErrorKind::NotConnected, "connection released"))?
-            .resolve_mapping(&expected, &request, tooltip.as_ref(), &mut control)
-            .await;
-        self.superseded(epoch)?;
         // Optional formatting must not resurrect a failed offline/process gate.
-        self.admit(&target)?;
+        let result = self
+            .call(epoch, &target, async |connection| {
+                connection.resolve_mapping(&expected, &request, tooltip.as_ref(), &mut control).await
+            })
+            .await?;
         if let Ok(table) = &result
             && let Err(error) = table.recheck(&expected, &request)
         {
@@ -78,10 +75,7 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
                 (Err(error.message), retry)
             }
             Err(error) => {
-                self.handle_connection_gate(&error);
-                if !matches!(error.kind, ErrorKind::Gate | ErrorKind::HelperDeparted | ErrorKind::CharacterLoading) {
-                    self.fail(error.clone(), Some(target));
-                }
+                self.settle(&error, target);
                 return Err(error);
             }
         };
@@ -118,15 +112,7 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
         })
     }
     pub(super) async fn locale_changed(&mut self, epoch: u64, target: &ProcessIdentity) -> Result<bool, BackendError> {
-        self.admit(target)?;
-        let locale = self
-            .connection
-            .as_mut()
-            .ok_or_else(|| BackendError::blocked(ErrorKind::NotConnected, "connection released"))?
-            .read_locale()
-            .await?;
-        self.superseded(epoch)?;
-        self.admit(target)?;
+        let locale = self.call(epoch, target, async |connection| connection.read_locale().await).await??;
         Ok(self.state.catalog.data().is_none_or(|data| data.identity.locale != locale))
     }
     async fn refresh_mapping_locale(&mut self, epoch: u64, target: &ProcessIdentity) -> Result<bool, BackendError> {

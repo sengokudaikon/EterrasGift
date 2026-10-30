@@ -21,7 +21,7 @@ impl<T: Transport> Session<T> {
         self.admit()?;
         let dispatcher = self.dispatcher()?;
         let expected_manager = self.offline_manager()?;
-        self.write_provenance(&dispatcher)?;
+        self.provenance(&dispatcher)?;
         if !control.allowed() {
             return Err(SessionError::Busy);
         }
@@ -50,7 +50,7 @@ impl<T: Transport> Session<T> {
             },
             Err(error) => WriteOutcome::uncertain(error.to_string()),
         };
-        let provenance = self.write_provenance(&dispatcher);
+        let provenance = self.provenance(&dispatcher);
         if matches!(outcome, WriteOutcome::Confirmed(_)) {
             outcome = if let Err(error) = provenance.as_ref() {
                 WriteOutcome::uncertain(format!("Hook reply lost confirmation provenance: {error}"))
@@ -82,7 +82,7 @@ impl<T: Transport> Session<T> {
                 }
             };
             if matches!(outcome, WriteOutcome::Confirmed(_) | WriteOutcome::NotKept(_))
-                && let Err(error) = self.write_provenance(&dispatcher)
+                && let Err(error) = self.provenance(&dispatcher)
             {
                 outcome = WriteOutcome::uncertain(format!("Hook readback lost confirmation provenance: {error}"));
             }
@@ -109,8 +109,7 @@ impl<T: Transport> Session<T> {
                 self.status = None;
             }
         } else {
-            self.release_without_io();
-            self.state = SessionState::Disconnected;
+            self.revoke();
         }
         Ok(outcome)
     }
@@ -125,7 +124,7 @@ impl<T: Transport> Session<T> {
                 if self.hooks[hook as usize].is_none() {
                     continue;
                 }
-                self.write_provenance(&dispatcher)?;
+                self.provenance(&dispatcher)?;
                 let payload = self
                     .request(&Request::ReadGameplayHook {
                         dispatcher,
@@ -140,7 +139,7 @@ impl<T: Transport> Session<T> {
                 if actual.enabled && self.hooks[hook as usize].is_some_and(|previous| previous.enabled && previous.value != actual.value) {
                     return Err(SessionError::Identity("Hook selection changed since confirmation".into()));
                 }
-                self.write_provenance(&dispatcher)?;
+                self.provenance(&dispatcher)?;
                 self.hooks[hook as usize] = Some(actual);
             }
             Ok(())
@@ -149,8 +148,7 @@ impl<T: Transport> Session<T> {
         if result.is_ok() {
             self.state = SessionState::Ready;
         } else if !matches!(result, Err(SessionError::CharacterLoading)) {
-            self.release_without_io();
-            self.state = SessionState::Disconnected;
+            self.revoke();
         }
         result
     }

@@ -85,9 +85,10 @@ impl BackendConnection for OwnedConnection {
     fn target(&self) -> &ProcessIdentity {
         &self.0.target
     }
-    // The owned connection reads back independently for the editor route.
+    // The owned connection reads back independently for the editor route; it serves three hooks.
     fn capabilities(&self) -> backend::Capabilities {
         backend::Capabilities {
+            gameplay_hooks: GameplayHook::ALL.map(|hook| matches!(hook, GameplayHook::MysteriousRift | GameplayHook::AnyOffhand | GameplayHook::IncomingDamage)),
             read_forge: true,
             level_requirement: true,
             status_fields: [true; 7],
@@ -97,21 +98,10 @@ impl BackendConnection for OwnedConnection {
             modifier_rolls: true,
             affix_change: true,
             affix_list: true,
-            ..Default::default()
         }
     }
-    fn supports_hook(&self, hook: GameplayHook) -> bool {
-        matches!(hook, GameplayHook::MysteriousRift | GameplayHook::AnyOffhand | GameplayHook::IncomingDamage)
-    }
-    async fn write(
-        &mut self,
-        plan: &eg_trainer::write::WritePlan,
-        control: &mut dyn eg_trainer::write::WriteControl,
-    ) -> Result<eg_trainer::write::WriteOutcome<eg_trainer::write::WriteObservation>, BackendError> {
-        use eg_trainer::write::{WriteObservation, WritePlan};
-        match plan {
-            WritePlan::Forge(plan) => Ok(self.edit_forge(plan, control).await?.map(WriteObservation::forge)),
-        }
+    async fn write(&mut self, plan: &eg_trainer::write::ForgePlan, control: &mut dyn eg_trainer::write::WriteControl) -> Result<eg_trainer::write::WriteStatus, BackendError> {
+        self.edit_forge(plan, control).await
     }
     async fn refresh(&mut self) -> Result<RuntimeStatus, BackendError> {
         if self.0.loading.load(Ordering::SeqCst) {
@@ -272,7 +262,7 @@ impl BackendConnection for OwnedConnection {
         Ok(builder.finish().unwrap())
     }
     fn observed_hook(&self, hook: GameplayHook) -> Option<bool> {
-        self.supports_hook(hook).then(|| self.0.gameplay_hooks[hook as usize].load(Ordering::SeqCst))
+        self.capabilities().gameplay_hooks[hook as usize].then(|| self.0.gameplay_hooks[hook as usize].load(Ordering::SeqCst))
     }
     async fn set_hook(&mut self, request: &backend::HookRequest, control: &mut dyn eg_trainer::write::WriteControl) -> Result<eg_trainer::write::WriteOutcome<bool>, BackendError> {
         assert!(control.allowed());

@@ -6,7 +6,7 @@ use super::residency::{RESTART_REQUIRED, Residency};
 use crate::{
     backend::{BackendError, ErrorKind},
     connect::admission::{AdmissionCheck, HelperPreparer, PreparationFailure, PreparationResidency, PreparedHelper},
-    connect::build::BuildProfile,
+    connect::build::BuildIdentity,
 };
 use eg_game_access::{
     bootstrap::{
@@ -36,7 +36,7 @@ struct RuntimeRecord {
 }
 struct Retained {
     target: ProcessIdentity,
-    profile: BuildProfile,
+    build: BuildIdentity,
     state: RetainedState,
 }
 enum RetainedState {
@@ -116,12 +116,12 @@ impl NativePreparer {
             .find(|entry| entry.target == *target)
             .map_or(PreparationResidency::NotLoaded, Retained::residency)
     }
-    fn prepare_once(&mut self, target: &ProcessIdentity, profile: &BuildProfile, admission: &mut dyn AdmissionCheck) -> Result<Arc<Mutex<RuntimeRecord>>, PreparationFailure> {
+    fn prepare_once(&mut self, target: &ProcessIdentity, build: &BuildIdentity, admission: &mut dyn AdmissionCheck) -> Result<Arc<Mutex<RuntimeRecord>>, PreparationFailure> {
         let known = self.known_residency(target);
         admission.check().map_err(|error| failed(error, known))?;
-        if !profile.helper_build_id().eq_ignore_ascii_case(self.artifact.source_id()) {
+        if !build.helper_build_id().eq_ignore_ascii_case(self.artifact.source_id()) {
             return Err(failed(
-                BackendError::blocked(ErrorKind::Identity, "helper artifact source differs from session profile"),
+                BackendError::blocked(ErrorKind::Identity, "helper artifact source differs from session's build"),
                 known,
             ));
         }
@@ -138,9 +138,9 @@ impl NativePreparer {
             }
         }
         if let Some(entry) = self.retained.iter().find(|entry| entry.target == *target) {
-            if entry.profile != *profile {
+            if entry.build != *build {
                 return Err(failed(
-                    BackendError::blocked(ErrorKind::Identity, "retained load belongs to another artifact profile"),
+                    BackendError::blocked(ErrorKind::Identity, "retained load belongs to another build"),
                     entry.residency(),
                 ));
             }
@@ -162,11 +162,11 @@ impl NativePreparer {
             };
         }
         let modules = (|| {
-            profile.validate_target(&target.executable).map_err(identity_error)?;
+            build.validate_target(&target.executable).map_err(identity_error)?;
             let folder = target.executable.parent().ok_or_else(|| identity_error("game directory missing"))?;
-            let game = match profile.binary_lease() {
+            let game = match build.binary_lease() {
                 Some(lease) => ModuleIdentity::from_lease(lease),
-                None => ModuleIdentity::capture(&folder.join("GameAssembly.dll"), profile.binary_hash()),
+                None => ModuleIdentity::capture(&folder.join("GameAssembly.dll"), build.binary_hash()),
             }
             .map_err(game_build_error)?;
             let unity_path = folder.join("UnityPlayer.dll");
@@ -181,7 +181,7 @@ impl NativePreparer {
         // replay fence; PendingCall independently retains any submitted allocation.
         self.retained.push(Retained {
             target: target.clone(),
-            profile: profile.clone(),
+            build: build.clone(),
             state: RetainedState::Attempting,
         });
         let result = RemoteHelper::start(
@@ -250,10 +250,10 @@ impl HelperPreparer for NativePreparer {
     async fn prepare(
         &mut self,
         target: &ProcessIdentity,
-        profile: &BuildProfile,
+        build: &BuildIdentity,
         admission: &mut dyn AdmissionCheck,
     ) -> Result<PreparedHelper<Self::Transport>, PreparationFailure> {
-        let runtime = self.prepare_once(target, profile, admission)?;
+        let runtime = self.prepare_once(target, build, admission)?;
         Ok(PreparedHelper {
             target: target.clone(),
             helper_build_id: self.artifact.source_id().into(),
@@ -418,7 +418,7 @@ mod tests {
     }
 
     #[test]
-    fn unfinished_attempts_preserve_process_birth_profile_and_replay_fence_without_a_slot_limit() {
+    fn unfinished_attempts_preserve_process_birth_build_and_replay_fence_without_a_slot_limit() {
         support::run(async {
             let fixture = support::Fixture::new();
             // SAFETY: only authored replay records are inspected; no target is opened.
@@ -426,13 +426,13 @@ mod tests {
             for pid in 1..=12 {
                 native.retained.push(Retained {
                     target: ProcessIdentity { pid, ..fixture.target.clone() },
-                    profile: fixture.profile.clone(),
+                    build: fixture.build.clone(),
                     state: RetainedState::Attempting,
                 });
             }
             let target = native.retained[0].target.clone();
             let mut admission = support::Admission::new(true);
-            let failure = native.prepare(&target, &fixture.profile, &mut admission).await.err().unwrap();
+            let failure = native.prepare(&target, &fixture.build, &mut admission).await.err().unwrap();
             assert_eq!(failure.residency, PreparationResidency::MayBeLoaded);
             assert_eq!(failure.error.kind, ErrorKind::RestartRequired);
             assert_eq!(native.retained_targets(), 12);
@@ -442,7 +442,7 @@ mod tests {
             };
             assert_eq!(native.known_residency(&changed_birth), PreparationResidency::NotLoaded);
             admission.allow = false;
-            let denied = native.prepare(&target, &fixture.profile, &mut admission).await.err().unwrap();
+            let denied = native.prepare(&target, &fixture.build, &mut admission).await.err().unwrap();
             assert_eq!(denied.error.kind, ErrorKind::Gate);
             assert_eq!(denied.residency, PreparationResidency::MayBeLoaded);
         });
@@ -456,7 +456,7 @@ mod tests {
             // SAFETY: preflight rejects authored files; no process is opened.
             let mut native = NativePreparer::new(fixture.artifact.clone());
             let mut admission = support::Admission::new(true);
-            let failure = native.prepare(&fixture.target, &fixture.profile, &mut admission).await.err().unwrap();
+            let failure = native.prepare(&fixture.target, &fixture.build, &mut admission).await.err().unwrap();
             assert_eq!(failure.error.message, "This Last Epoch version isn't supported yet.");
             assert_eq!(failure.error.kind, ErrorKind::Identity);
             assert_eq!(failure.residency, PreparationResidency::NotLoaded);

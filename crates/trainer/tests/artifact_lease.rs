@@ -4,7 +4,7 @@
 mod pe_support;
 use eg_game_access::artifact::ReadLease;
 use eg_trainer::{
-    connect::build::BuildProfile,
+    connect::build::BuildIdentity,
     session::{Session, SessionError, SessionState},
 };
 use eg_trainer_wire::{
@@ -70,8 +70,8 @@ impl Fixture {
             dispatcher,
         }
     }
-    fn profile(&self) -> BuildProfile {
-        BuildProfile::capture(&self.binary, &self.metadata, HELPER).unwrap()
+    fn build(&self) -> BuildIdentity {
+        BuildIdentity::capture(&self.binary, &self.metadata, HELPER).unwrap()
     }
     fn wire(&self) -> Wire {
         let discovery = Discovery {
@@ -167,9 +167,9 @@ impl Transport for Wire {
 #[test]
 fn wrong_hash_or_replaced_artifacts_fail_and_failed_capture_drops_partial_locks() {
     let f = Fixture::new();
-    let profile = f.profile();
+    let build = f.build();
     fs::write(&f.metadata, b"replacement").unwrap();
-    assert!(profile.capture_lease(&f.dispatcher).is_err());
+    assert!(build.capture_lease(&f.dispatcher).is_err());
     assert!(OpenOptions::new().write(true).open(&f.binary).is_ok());
     assert!(ReadLease::capture(&fs::canonicalize(&f.binary).unwrap(), &"0".repeat(64)).is_err());
     assert!(OpenOptions::new().write(true).open(&f.binary).is_ok());
@@ -178,24 +178,24 @@ fn wrong_hash_or_replaced_artifacts_fail_and_failed_capture_drops_partial_locks(
 #[test]
 fn dispatcher_and_executable_section_are_validated_against_the_retained_file() {
     let f = Fixture::new();
-    let profile = f.profile();
+    let build = f.build();
     for rva in [0, 0x11f1, u64::MAX] {
-        assert!(profile.capture_lease(&DispatcherSpec { rva, ..f.dispatcher }).is_err());
+        assert!(build.capture_lease(&DispatcherSpec { rva, ..f.dispatcher }).is_err());
     }
     let mut wrong = f.dispatcher;
     wrong.bytes[0] ^= 1;
-    assert!(profile.capture_lease(&wrong).is_err());
+    assert!(build.capture_lease(&wrong).is_err());
     let mut bytes = fs::read(&f.binary).unwrap();
     bytes[0x1af] = 0x40;
     fs::write(&f.binary, &bytes).unwrap();
-    assert!(f.profile().capture_lease(&f.dispatcher).is_err());
+    assert!(f.build().capture_lease(&f.dispatcher).is_err());
 }
 
 #[test]
 fn profile_lease_has_constant_validation_bytes_and_releases_both_files() {
     let f = Fixture::new();
-    let profile = f.profile();
-    let lease = profile.capture_lease(&f.dispatcher).unwrap();
+    let build = f.build();
+    let lease = build.capture_lease(&f.dispatcher).unwrap();
     let content = fs::metadata(&f.binary).unwrap().len() + fs::metadata(&f.metadata).unwrap().len();
     assert!((content..=content + 4096).contains(&lease.bytes_read().unwrap()));
     assert_shared(OpenOptions::new().write(true).open(&f.metadata).unwrap_err());
@@ -207,9 +207,9 @@ fn profile_lease_has_constant_validation_bytes_and_releases_both_files() {
 #[test]
 fn existing_writer_selects_explicit_full_hash_fallback_instead_of_claiming_a_lease() {
     let f = Fixture::new();
-    let profile = f.profile();
+    let build = f.build();
     let writer = OpenOptions::new().read(true).write(true).share_mode(7).open(&f.metadata).unwrap();
-    let lease = profile.capture_lease(&f.dispatcher).unwrap();
+    let lease = build.capture_lease(&f.dispatcher).unwrap();
     assert_eq!(lease.bytes_read(), None);
     drop(lease);
     drop(writer);
@@ -256,7 +256,7 @@ fn runtime_refusal_releases_lease_and_stops_all_further_io() {
     let wire = f.wire();
     let shared = wire.shared.clone();
     shared.lock().unwrap().refuse_runtime = true;
-    let mut session = Session::new(f.target.clone(), wire, f.profile()).unwrap();
+    let mut session = Session::new(f.target.clone(), wire, f.build()).unwrap();
     session.enable();
     run(session.connect()).unwrap();
     assert!(matches!(
@@ -286,7 +286,7 @@ fn changed_artifact_before_a_read_is_rejected_before_its_request() {
             .share_mode(7)
             .open(if binary { &f.binary } else { &f.metadata })
             .unwrap();
-        let mut session = Session::new(f.target.clone(), wire, f.profile()).unwrap();
+        let mut session = Session::new(f.target.clone(), wire, f.build()).unwrap();
         session.enable();
         run(session.connect()).unwrap();
         fs::write(if binary { &f.binary } else { &f.metadata }, b"changed before lease").unwrap();
@@ -338,7 +338,7 @@ fn fallback_rehashes_each_read_and_rejects_an_inflight_artifact_change() {
     let wire = f.wire();
     let shared = wire.shared.clone();
     let writer = OpenOptions::new().read(true).write(true).share_mode(7).open(&f.metadata).unwrap();
-    let mut session = Session::new(f.target.clone(), wire, f.profile()).unwrap();
+    let mut session = Session::new(f.target.clone(), wire, f.build()).unwrap();
     session.enable();
     run(session.connect()).unwrap();
     {
@@ -356,7 +356,7 @@ fn fallback_rehashes_each_read_and_rejects_an_inflight_artifact_change() {
 fn connected(f: &Fixture) -> (Session<Wire>, Arc<Mutex<WireState>>) {
     let wire = f.wire();
     let shared = wire.shared.clone();
-    let mut session = Session::new(f.target.clone(), wire, f.profile()).unwrap();
+    let mut session = Session::new(f.target.clone(), wire, f.build()).unwrap();
     session.enable();
     run(session.connect()).unwrap();
     (session, shared)

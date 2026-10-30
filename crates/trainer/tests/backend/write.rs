@@ -1,5 +1,5 @@
 use super::*;
-use eg_trainer::write::{WriteObservation, WriteOutcome, WritePlan};
+use eg_trainer::write::WriteOutcome;
 use eg_trainer_wire::protocol::ResponseCode;
 
 #[test]
@@ -208,7 +208,7 @@ fn status_family_uses_shared_write_outcomes_and_conditional_undo() {
 }
 
 #[test]
-fn generic_forge_write_publishes_known_different_state_without_undo_or_reconnect() {
+fn a_forge_write_publishes_known_different_state_without_undo_or_reconnect() {
     run(async {
         let shared = writable();
         let (handle, worker) = start(&shared, options());
@@ -220,15 +220,11 @@ fn generic_forge_write_publishes_known_different_state_without_undo_or_reconnect
         actual.name.push_str(" changed by the game");
         actual.fingerprint = actual.legacy_fingerprint();
         *shared.write_result.lock().unwrap() = Some(WriteStatus::NotKept(actual.clone()));
-        let generic = WritePlan::from(plan);
-        assert_eq!(command(&handle, Command::Write(generic.clone())).await.unwrap_err().kind, ErrorKind::WriteNotKept);
+        assert_eq!(command(&handle, Command::Write(Box::new(plan.clone()))).await.unwrap_err().kind, ErrorKind::WriteNotKept);
         let state = handle.snapshot();
         assert_eq!(state.phase, Phase::Ready);
         assert_eq!(state.generation, original.generation);
-        assert_eq!(
-            state.write_outcome(&generic),
-            Some(WriteOutcome::NotKept(WriteObservation::Forge(Box::new(actual.clone()))))
-        );
+        assert_eq!(state.write_outcome(&plan), Some(WriteOutcome::NotKept(actual.clone())));
         assert!(matches!(state.forge, ForgeState::Item { snapshot, .. } if *snapshot == actual));
         assert!(state.undo_forge.is_none());
         let next = handle.snapshot().level_requirement_plan(16).unwrap();
@@ -290,16 +286,16 @@ fn turning_automatic_connection_off_leaves_a_write_in_a_ready_session_alone() {
         let shared = writable();
         let (handle, worker) = start(&shared, options());
         connected(&handle).await;
-        let plan = WritePlan::from(handle.snapshot().level_requirement_plan(17).unwrap());
+        let plan = handle.snapshot().level_requirement_plan(17).unwrap();
         shared.write_block.arm();
-        let receipt = handle.try_submit(Command::Write(plan.clone())).unwrap();
+        let receipt = handle.try_submit(Command::Write(Box::new(plan.clone()))).unwrap();
         shared.write_block.wait_started().await;
         let switch = handle.try_submit(Command::SetAutoConnect(false)).unwrap();
         shared.write_block.finish();
         receipt.wait().await.unwrap();
         switch.wait().await.unwrap();
         let state = handle.snapshot();
-        assert_eq!(state.write_outcome(&plan), Some(WriteOutcome::Confirmed(plan.projected())));
+        assert_eq!(state.write_outcome(&plan), Some(WriteOutcome::Confirmed(plan.projected().clone())));
         assert!(matches!(state.forge, ForgeState::Item { .. }), "the confirmed item is published");
         assert_eq!((state.phase, state.auto_connect), (Phase::Ready, false));
         assert_eq!(shared.count("disconnect"), 0);
@@ -313,16 +309,16 @@ fn forge_confirmation_survives_later_gate_loss_without_publishing_a_live_item() 
         let shared = writable();
         let (handle, worker) = start(&shared, options());
         connected(&handle).await;
-        let plan = WritePlan::from(handle.snapshot().level_requirement_plan(17).unwrap());
+        let plan = handle.snapshot().level_requirement_plan(17).unwrap();
         shared.write_block.arm();
-        let receipt = handle.try_submit(Command::Write(plan.clone())).unwrap();
+        let receipt = handle.try_submit(Command::Write(Box::new(plan.clone()))).unwrap();
         shared.write_block.wait_started().await;
         assert_eq!(handle.snapshot().write_outcome(&plan), Some(WriteOutcome::Pending));
         *shared.log.lock().unwrap() = log(GameReadiness::Online);
         shared.write_block.finish();
         assert_eq!(receipt.wait().await.unwrap_err().kind, ErrorKind::Gate);
         let state = handle.snapshot();
-        assert_eq!(state.write_outcome(&plan), Some(WriteOutcome::Confirmed(plan.projected())));
+        assert_eq!(state.write_outcome(&plan), Some(WriteOutcome::Confirmed(plan.projected().clone())));
         assert!(matches!(state.forge, ForgeState::Unobserved));
         assert!(state.undo_forge.is_none());
         assert_eq!(shared.count("write"), 1);

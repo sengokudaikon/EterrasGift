@@ -1661,8 +1661,8 @@ fn mods_captures(session: &Session) {
 /// The trainer's pages: as the app shows them with no session (nothing connected), and in states
 /// only a connected game has, through a fake session that answers reads and writes from its own fields.
 fn trainer_captures(session: &Session) {
-    use eg_ui::pages::trainer::catalog::{Area, FEATURES};
     use eg_ui::pages::trainer::profiles::Profile;
+    use eg_ui::pages::trainer::registry::{Area, FEATURES};
     use eg_ui::pages::trainer::session::{FieldRequest, FieldWrite, GameField, HookState, TrainerSession, not_connected};
     use eg_ui::{Connection, TrainerAccess, TrainerState};
     use std::cell::{Cell, RefCell};

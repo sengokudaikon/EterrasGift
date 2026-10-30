@@ -5,9 +5,10 @@
 //! runs to completion; dropping an ordinary receipt is not cancellation. Optional
 //! mapping reads have a separate disposable receipt and stop between RPCs. Cleanup barriers
 //! suppress publication from an earlier operation, then drain it before cleanup.
-//! Watch snapshots are authoritative; broadcast events can lag and are advisory.
+//! The watch snapshot is the worker's one report of its state.
 mod connection;
 mod faults;
+mod hooks;
 mod mapping;
 mod profiles;
 mod snapshot;
@@ -44,9 +45,10 @@ use eg_trainer_wire::{
     transport::{Transport, TransportError, TransportFailure},
 };
 pub use faults::forge_record;
+pub use hooks::{HOOK_NOT_AVAILABLE, HookRequest, HookRun};
 use jiff::Timestamp;
-pub use profiles::{HOOK_NOT_AVAILABLE, HookRequest, HookRun, ProfileLock};
-use tokio::sync::{broadcast, mpsc, oneshot, watch};
+pub use profiles::ProfileLock;
+use tokio::sync::{mpsc, oneshot, watch};
 
 use crate::{
     connect::gate::{self, GateDecision, GateVerdict, LogSource},
@@ -56,16 +58,14 @@ use crate::{
     features::{FeatureIntents, HookId},
     item::values::{MappingRequest, ValueTable},
     session::{Cleanup, Session, SessionError},
-    write::{ForgePlan, WriteControl, WriteObservation, WriteOutcome, WritePlan, WriteRecord, WriteStatus},
+    write::{ForgePlan, WriteControl, WriteOutcome, WriteRecord, WriteStatus},
 };
 
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum BackendEvent {
-    Connected { generation: u64, target: ProcessIdentity },
-    Released { generation: u64, cleanup: Cleanup },
-    ReadPublished { generation: u64 },
-    Fault(BackendError),
-    Stopped,
+fn superseded() -> BackendError {
+    BackendError::blocked(ErrorKind::Superseded, "operation superseded by queued cleanup")
+}
+fn released() -> BackendError {
+    BackendError::blocked(ErrorKind::NotConnected, "connection released")
 }
 /// The game's files changed after it started: it may run an older build than they hold.
 fn files_changed() -> BackendError {
@@ -125,7 +125,7 @@ pub enum Command {
         request: MappingRequest,
     },
     BeginForgeBatch,
-    Write(WritePlan),
+    Write(Box<ForgePlan>),
     UndoForge(Box<crate::item::undo::ForgeUndo>),
     /// Shows another profile; only while no game runs.
     SelectProfile(ProfileKey),
@@ -196,7 +196,6 @@ struct Envelope {
 pub struct BackendHandle {
     commands: mpsc::Sender<Envelope>,
     snapshots: watch::Receiver<BackendSnapshot>,
-    events: broadcast::Sender<BackendEvent>,
     intent: Arc<Mutex<u64>>,
     handles: Arc<AtomicUsize>,
 }
@@ -256,9 +255,6 @@ impl BackendHandle {
     pub fn subscribe(&self) -> watch::Receiver<BackendSnapshot> {
         self.snapshots.clone()
     }
-    pub fn subscribe_events(&self) -> broadcast::Receiver<BackendEvent> {
-        self.events.subscribe()
-    }
     pub fn try_submit(&self, command: Command) -> Result<Pending, SubmitError> {
         self.submit(command, None)
     }
@@ -309,7 +305,6 @@ impl Clone for BackendHandle {
         Self {
             commands: self.commands.clone(),
             snapshots: self.snapshots.clone(),
-            events: self.events.clone(),
             intent: self.intent.clone(),
             handles: self.handles.clone(),
         }
@@ -327,7 +322,6 @@ where
     options: BackendOptions,
     commands: mpsc::Receiver<Envelope>,
     snapshots: watch::Sender<BackendSnapshot>,
-    events: broadcast::Sender<BackendEvent>,
     intent: Arc<Mutex<u64>>,
     state: BackendSnapshot,
     connection: Option<C::Connection>,
@@ -393,13 +387,11 @@ pub fn service<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K
     };
     let (sender, commands) = mpsc::channel(32);
     let (snapshots, receiver) = watch::channel(state.clone());
-    let (events, _) = broadcast::channel(64);
     let intent = Arc::new(Mutex::new(0));
     (
         BackendHandle {
             commands: sender,
             snapshots: receiver,
-            events: events.clone(),
             intent: intent.clone(),
             handles: Arc::new(AtomicUsize::new(1)),
         },
@@ -411,7 +403,6 @@ pub fn service<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K
             options,
             commands,
             snapshots,
-            events,
             intent,
             state,
             connection: None,
@@ -483,11 +474,16 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
         *self.intent.lock().unwrap_or_else(|p| p.into_inner())
     }
     fn superseded(&self, epoch: u64) -> Result<(), BackendError> {
-        if epoch != self.epoch() {
-            Err(BackendError::blocked(ErrorKind::Superseded, "operation superseded by queued cleanup"))
-        } else {
-            Ok(())
-        }
+        if epoch != self.epoch() { Err(superseded()) } else { Ok(()) }
+    }
+    /// One call into the connected game: admitted before it, and after it answers still the current intent and
+    /// still admitted. The call's own result is the caller's to settle.
+    async fn call<T>(&mut self, epoch: u64, target: &ProcessIdentity, op: impl AsyncFnOnce(&mut C::Connection) -> T) -> Result<T, BackendError> {
+        self.admit(target)?;
+        let result = op(self.connection.as_mut().ok_or_else(released)?).await;
+        self.superseded(epoch)?;
+        self.admit(target)?;
+        Ok(result)
     }
     fn publish(&mut self) {
         self.state.profile_lock = self.profile_lock();
@@ -514,7 +510,7 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
         let idle = ready && self.state.activity.is_none();
         let served = self.connection.as_ref().map(BackendConnection::capabilities).unwrap_or_default();
         self.state.capabilities = Capabilities {
-            gameplay_hooks: GameplayHook::ALL.map(|hook| idle && self.connection.as_ref().is_some_and(|connection| connection.supports_hook(hook))),
+            gameplay_hooks: served.gameplay_hooks.map(|hook| idle && hook),
             read_forge: ready,
             level_requirement: idle && served.level_requirement,
             status_fields: served.status_fields.map(|field| idle && field),
@@ -551,7 +547,7 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
         let intent = self.intent.clone();
         let guard = intent.lock().unwrap_or_else(|p| p.into_inner());
         if *guard != epoch {
-            return Err(BackendError::blocked(ErrorKind::Superseded, "operation superseded by queued cleanup"));
+            return Err(superseded());
         }
         self.publish();
         Ok(())
@@ -560,14 +556,11 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
         let intent = self.intent.clone();
         let guard = intent.lock().unwrap_or_else(|p| p.into_inner());
         if *guard != epoch {
-            return Err(BackendError::blocked(ErrorKind::Superseded, "operation superseded by queued cleanup"));
+            return Err(superseded());
         }
         change(self);
         self.publish();
         Ok(())
-    }
-    fn event(&self, event: BackendEvent) {
-        let _ = self.events.send(event);
     }
     /// Mirrors the game data service's state into the snapshot, for the views.
     fn mirror_game_data(&mut self) {
@@ -619,23 +612,11 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
     /// labelled with the game's language.
     async fn catalog_for(&mut self, epoch: u64, target: &ProcessIdentity, again: bool) -> Result<GameCatalog, BackendError> {
         let files = self.game_files_for(epoch, target, again).await?;
-        let connection = self
-            .connection
-            .as_mut()
-            .ok_or_else(|| BackendError::blocked(ErrorKind::NotConnected, "connection released"))?;
-        let (binary, metadata) = connection.build_hashes();
+        let (binary, metadata) = self.connection.as_mut().ok_or_else(released)?.build_hashes();
         if !files.matches(&binary, &metadata) {
             return Err(files_changed());
         }
-        self.admit(target)?;
-        let locale = self
-            .connection
-            .as_mut()
-            .ok_or_else(|| BackendError::blocked(ErrorKind::NotConnected, "connection released"))?
-            .read_locale()
-            .await?;
-        self.superseded(epoch)?;
-        self.admit(target)?;
+        let locale = self.call(epoch, target, async |connection| connection.read_locale().await).await??;
         files
             .catalog(locale)
             .map_err(|e| BackendError::blocked(ErrorKind::Protocol, format!("The game data was refused for this session: {e:?}")))
@@ -718,7 +699,7 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
             Command::DescribeUnique { expected } => self.describe_unique(*expected).await,
             Command::PreviewUnique { expected, draft } => self.preview_unique(*expected, draft).await,
             Command::ResolveMapping { expected, request } => self.resolve_mapping(*expected, request).await,
-            Command::Write(WritePlan::Forge(plan)) => self.write_forge(*plan).await,
+            Command::Write(plan) => self.write_forge(*plan).await,
             Command::UndoForge(undo) => self.undo_forge(*undo).await,
             Command::SelectProfile(key) => self.select_profile(key),
             Command::CreateProfile => self.create_profile(),
@@ -908,15 +889,11 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
             self.admit(target)?;
             self.state.activity = Some(Activity::ReadingForge);
             self.publish_if_current(epoch)?;
-            let forge = self.connection.as_mut().unwrap().read_forge().await?;
-            self.superseded(epoch)?;
-            self.admit(target)?;
+            let forge = self.call(epoch, target, async |connection| connection.read_forge().await).await??;
             let implicits = match &forge {
-                Some(item) => self.connection.as_mut().unwrap().describe_implicits(item).await?,
+                Some(item) => self.call(epoch, target, async |connection| connection.describe_implicits(item).await).await??,
                 None => None,
             };
-            self.superseded(epoch)?;
-            self.admit(target)?;
             let data = Arc::new(catalog);
             let mut forge = self.forge_state(forge, &data);
             if let ForgeState::Item { implicits: observed, .. } = &mut forge {
@@ -939,10 +916,6 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
                 // The character in play is shown in the same snapshot that says Ready.
                 this.enter_play();
             })?;
-            self.event(BackendEvent::Connected {
-                generation: self.state.generation,
-                target: target.clone(),
-            });
             Ok(())
         }
         .await;
@@ -992,12 +965,7 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
                 self.state.activity = Some(Activity::Refreshing);
                 self.publish_if_current(epoch)?;
             }
-            let status = self
-                .connection
-                .as_mut()
-                .ok_or_else(|| BackendError::blocked(ErrorKind::NotConnected, "connection released"))?
-                .refresh()
-                .await?;
+            let status = self.connection.as_mut().ok_or_else(released)?.refresh().await?;
             self.superseded(epoch)?;
             self.check_status(status)?;
             self.reconcile_hooks();
@@ -1019,10 +987,7 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
                     .cloned()
                     .ok_or_else(|| BackendError::blocked(ErrorKind::Protocol, "current catalog missing"))?
             };
-            self.admit(&target)?;
-            let forge = self.connection.as_mut().unwrap().read_forge().await?;
-            self.superseded(epoch)?;
-            self.admit(&target)?;
+            let forge = self.call(epoch, &target, async |connection| connection.read_forge().await).await??;
             // The game builds an item's implicit text with its tooltip code on its main thread: the monitor keeps the
             // text it has while the base and implicit rolls are unchanged, under the same catalog.
             let kept = match &forge {
@@ -1031,11 +996,9 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
             };
             let implicits = match (&forge, kept) {
                 (_, Some(kept)) => kept,
-                (Some(item), None) => self.connection.as_mut().unwrap().describe_implicits(item).await?,
+                (Some(item), None) => self.call(epoch, &target, async |connection| connection.describe_implicits(item).await).await??,
                 (None, None) => None,
             };
-            self.superseded(epoch)?;
-            self.admit(&target)?;
             let mut forge = self.forge_state(forge, &data);
             if let ForgeState::Item { implicits: observed, .. } = &mut forge {
                 *observed = implicits;
@@ -1064,9 +1027,6 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
                     this.state.forge_read_sequence = this.state.forge_read_sequence.wrapping_add(1);
                 }
             })?;
-            self.event(BackendEvent::ReadPublished {
-                generation: self.state.generation,
-            });
             Ok(())
         }
         .await;
@@ -1191,8 +1151,7 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
             self.blocked = target;
             self.state.phase = Phase::Blocked;
         }
-        self.state.error = Some(error.clone());
-        self.event(BackendEvent::Fault(error));
+        self.state.error = Some(error);
         self.publish();
     }
     fn recover_departed_read(&mut self) {
@@ -1252,12 +1211,5 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
             Phase::Disabled
         };
         self.publish();
-        self.event(BackendEvent::Released {
-            generation: self.state.generation,
-            cleanup: self.state.cleanup,
-        });
-        if stop {
-            self.event(BackendEvent::Stopped);
-        }
     }
 }

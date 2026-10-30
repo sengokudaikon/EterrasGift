@@ -15,7 +15,7 @@ use jiff::Timestamp;
 
 use crate::{
     backend::{BackendError, Connector, ErrorKind},
-    connect::build::BuildProfile,
+    connect::build::BuildIdentity,
     connect::gate::{self, GateVerdict, LogSource},
     session::Session,
 };
@@ -68,7 +68,7 @@ pub trait HelperPreparer: Send + 'static {
     fn prepare(
         &mut self,
         target: &ProcessIdentity,
-        profile: &BuildProfile,
+        build: &BuildIdentity,
         admission: &mut dyn AdmissionCheck,
     ) -> impl Future<Output = Result<PreparedHelper<Self::Transport>, PreparationFailure>> + Send;
 }
@@ -126,12 +126,12 @@ impl<P: HelperPreparer, F: LogFactory> SessionConnector<P, F> {
             elapsed: Instant::now(),
         };
         admission.check()?;
-        let (profile, _files) = capture_profile(target, &self.helper_build_id)?;
+        let (build, _files) = capture_build(target, &self.helper_build_id)?;
         admission.check()?;
         // Mark uncertainty before awaiting: even a caller that drops this future
         // cannot mistake a partially executed preparer for an unloaded helper.
         self.last_attempt.as_mut().unwrap().residency = PreparationResidency::MayBeLoaded;
-        let prepared = match self.preparer.prepare(target, &profile, &mut admission).await {
+        let prepared = match self.preparer.prepare(target, &build, &mut admission).await {
             Ok(prepared) => prepared,
             Err(failure) => {
                 self.last_attempt.as_mut().unwrap().residency = failure.residency;
@@ -150,10 +150,10 @@ impl<P: HelperPreparer, F: LogFactory> SessionConnector<P, F> {
                 "prepared helper or transport belongs to another process identity",
             ));
         }
-        if prepared.residency != PreparationResidency::Loaded || !prepared.helper_build_id.eq_ignore_ascii_case(profile.helper_build_id()) {
+        if prepared.residency != PreparationResidency::Loaded || !prepared.helper_build_id.eq_ignore_ascii_case(build.helper_build_id()) {
             return Err(BackendError::blocked(ErrorKind::Identity, "prepared helper source build or residency mismatch"));
         }
-        let mut session = Session::new(target.clone(), prepared.transport, profile)?;
+        let mut session = Session::new(target.clone(), prepared.transport, build)?;
         session.enable();
         if let Err(error) = session.connect().await {
             if matches!(error, crate::session::SessionError::CharacterLoading) {
@@ -252,8 +252,8 @@ fn process_start(target: &ProcessIdentity) -> Result<Timestamp, BackendError> {
     }
     eg_core::time::from_filetime(target.created).map_err(|_| BackendError::blocked(ErrorKind::Identity, "invalid process creation time"))
 }
-fn capture_profile(target: &ProcessIdentity, helper_build_id: &str) -> Result<(BuildProfile, Option<std::sync::Arc<crate::connect::build::ConnectionFiles>>), BackendError> {
-    // The profile is captured from the artifacts beside this executable, so it belongs to the target by construction.
+fn capture_build(target: &ProcessIdentity, helper_build_id: &str) -> Result<(BuildIdentity, Option<std::sync::Arc<crate::connect::build::ConnectionFiles>>), BackendError> {
+    // The build is captured from the artifacts beside this executable, so it belongs to the target by construction.
     let (binary, metadata) = crate::connect::build::artifact_paths(&target.executable).map_err(|e| BackendError::blocked(ErrorKind::Identity, e.to_string()))?;
-    BuildProfile::capture_connection(&binary, &metadata, helper_build_id).map_err(|e| BackendError::blocked(ErrorKind::Identity, e.to_string()))
+    BuildIdentity::capture_connection(&binary, &metadata, helper_build_id).map_err(|e| BackendError::blocked(ErrorKind::Identity, e.to_string()))
 }

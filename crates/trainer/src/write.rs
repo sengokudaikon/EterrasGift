@@ -202,50 +202,18 @@ impl<T> WriteOutcome<T> {
 }
 pub type WriteStatus = WriteOutcome<ForgeSnapshot>;
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct WriteRecord<P = ForgePlan, T = ForgeSnapshot> {
-    pub plan: P,
-    pub status: WriteOutcome<T>,
+pub struct WriteRecord {
+    pub plan: ForgePlan,
+    pub status: WriteStatus,
 }
 
-/// The service accepts domain plans; native operation numbers stay internal.
-/// More supported edits/field sets extend these variants, not the outcome model.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum WritePlan {
-    Forge(Box<ForgePlan>),
-}
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum WriteObservation {
-    Forge(Box<ForgeSnapshot>),
-}
-impl WriteObservation {
-    pub(crate) fn into_forge(self) -> ForgeSnapshot {
-        match self {
-            Self::Forge(actual) => *actual,
-        }
-    }
-    pub fn forge(actual: ForgeSnapshot) -> Self {
-        Self::Forge(Box::new(actual))
-    }
-}
-impl WritePlan {
-    fn matches(&self, actual: &WriteObservation) -> bool {
-        match (self, actual) {
-            (Self::Forge(plan), WriteObservation::Forge(actual)) => plan.matches(actual),
-        }
-    }
-    pub fn projected(&self) -> WriteObservation {
-        match self {
-            Self::Forge(plan) => WriteObservation::Forge(Box::new(plan.projected().clone())),
-        }
-    }
+impl ForgePlan {
     /// Compare only identity here. Full value equality is checked separately;
     /// neither tokens nor this check establish native lifetime across requests.
-    pub(crate) fn same_target(&self, actual: &WriteObservation) -> bool {
-        match (self, actual) {
-            (Self::Forge(plan), WriteObservation::Forge(actual)) => actual.item == plan.before().snapshot().item && actual.individual_id == plan.before().snapshot().individual_id,
-        }
+    pub(crate) fn same_target(&self, actual: &ForgeSnapshot) -> bool {
+        actual.item == self.before().snapshot().item && actual.individual_id == self.before().snapshot().individual_id
     }
-    pub(crate) fn observe(&self, actual: WriteObservation) -> WriteOutcome<WriteObservation> {
+    pub(crate) fn observe(&self, actual: ForgeSnapshot) -> WriteStatus {
         if self.matches(&actual) {
             WriteOutcome::Confirmed(actual)
         } else if self.same_target(&actual) {
@@ -254,7 +222,7 @@ impl WritePlan {
             WriteOutcome::uncertain("independent readback belongs to a different target")
         }
     }
-    pub(crate) fn completed(&self, outcome: WriteOutcome<WriteObservation>) -> WriteOutcome<WriteObservation> {
+    pub(crate) fn completed(&self, outcome: WriteStatus) -> WriteStatus {
         match outcome {
             WriteOutcome::Confirmed(actual) if self.matches(&actual) => WriteOutcome::Confirmed(actual),
             WriteOutcome::NotKept(actual) if self.same_target(&actual) && !self.matches(&actual) => WriteOutcome::NotKept(actual),
@@ -266,10 +234,5 @@ impl WritePlan {
             } => WriteOutcome::uncertain("connection mislabeled a success/failure code as pre-store refusal"),
             outcome => outcome,
         }
-    }
-}
-impl From<ForgePlan> for WritePlan {
-    fn from(plan: ForgePlan) -> Self {
-        Self::Forge(Box::new(plan))
     }
 }

@@ -294,9 +294,9 @@ impl Request {
     }
     pub(super) fn decode_body(operation: u32, bytes: &[u8]) -> Result<Self, ProtocolError> {
         let mut body = Reader::new(bytes);
-        if matches!(operation, 6 | 25) {
+        if matches!(operation, op::DISCOVER | op::UNLOAD) {
             body.finish()?;
-            return Ok(if operation == 6 { Self::Discover } else { Self::Unload });
+            return Ok(if operation == op::DISCOVER { Self::Discover } else { Self::Unload });
         }
         let dispatcher = DispatcherSpec {
             rva: body.u64()?,
@@ -309,7 +309,7 @@ impl Request {
                     return Err(ProtocolError::InvalidData);
                 }
                 let hook = crate::hooks::GameplayHook::decode(body.byte()?)?;
-                if operation == 26 {
+                if operation == op::SET_GAMEPLAY_HOOK {
                     Self::SetGameplayHook {
                         dispatcher,
                         expected_manager,

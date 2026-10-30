@@ -16,7 +16,7 @@ mod profiles;
 mod unique;
 #[path = "backend/write.rs"]
 mod writes;
-use eg_trainer::write::{ForgePlan, WriteControl, WriteObservation, WriteOutcome, WritePlan, WriteStatus};
+use eg_trainer::write::{ForgePlan, WriteControl, WriteOutcome, WriteStatus};
 
 use eg_core::game_log::{GameLogState, GameLogStatus, GameReadiness};
 use eg_trainer::definitions::files::FileCatalog;
@@ -255,16 +255,12 @@ impl BackendConnection for Connection {
             status_fields: [writes; 7],
             base_change: writes,
             identity_change: writes,
+            gameplay_hooks: [self.shared.hooks_supported.load(Ordering::SeqCst); eg_trainer_wire::hooks::GameplayHook::COUNT],
             ..Default::default()
         }
     }
-    fn supports_hook(&self, _: eg_trainer_wire::hooks::GameplayHook) -> bool {
-        self.shared.hooks_supported.load(Ordering::SeqCst)
-    }
-    async fn write(&mut self, plan: &WritePlan, control: &mut dyn WriteControl) -> Result<WriteOutcome<WriteObservation>, BackendError> {
-        match plan {
-            WritePlan::Forge(plan) => Ok(self.edit_forge(plan, control).await?.map(WriteObservation::forge)),
-        }
+    async fn write(&mut self, plan: &ForgePlan, control: &mut dyn WriteControl) -> Result<WriteStatus, BackendError> {
+        self.edit_forge(plan, control).await
     }
     async fn refresh(&mut self) -> Result<RuntimeStatus, BackendError> {
         self.shared.call("refresh", &self.shared.refresh_block).await;

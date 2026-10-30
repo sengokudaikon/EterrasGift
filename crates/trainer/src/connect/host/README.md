@@ -32,7 +32,7 @@ native main thread. Only then is the callback's Windows ID retained for dispatch
 The managed SynchronizationContext.Current can be null or replaced by game/mod code.
 The original ExecuteTasks still runs first; worker calls cannot claim the queue.
 
-Preparation retains a registry keyed by process birth/path and artifact profile.
+Preparation retains a registry keyed by process birth/path and build identity.
 It reserves an entry before native startup, reuses a loaded helper and fences any
 unfinished/uncertain attempt. Factual NotSent failures release the reservation.
 `RemoteFailure`/`PendingCall` retain unfinished calls and their input allocations;

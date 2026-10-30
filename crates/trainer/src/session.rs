@@ -3,7 +3,7 @@ mod hooks;
 mod mapping;
 mod unique;
 mod write;
-use crate::connect::build::{BuildProfile, ProfileLease};
+use crate::connect::build::{ArtifactLease, BuildIdentity};
 use eg_core::game_log::GameReadiness;
 use eg_trainer_wire::{
     forge::{self, ForgeSnapshot},
@@ -97,8 +97,8 @@ fn readiness_message(readiness: GameReadiness) -> &'static str {
 pub struct Session<T> {
     target: ProcessIdentity,
     transport: T,
-    profile: BuildProfile,
-    lease: Option<ProfileLease>,
+    build: BuildIdentity,
+    lease: Option<ArtifactLease>,
     state: SessionState,
     discovery: Option<Discovery>,
     status: Option<RuntimeStatus>,
@@ -110,28 +110,28 @@ impl<T: Transport> Session<T> {
     fn observation_matches(&self, expected: &crate::item::edit::ExpectedObservation) -> bool {
         let identity = expected.catalog_identity();
         expected.process() == &self.target
-            && identity.binary_hash.eq_ignore_ascii_case(self.profile.binary_hash())
-            && identity.metadata_hash.eq_ignore_ascii_case(self.profile.metadata_hash())
+            && identity.binary_hash.eq_ignore_ascii_case(self.build.binary_hash())
+            && identity.metadata_hash.eq_ignore_ascii_case(self.build.metadata_hash())
             && identity.extraction_version == crate::definitions::catalog::EXTRACTION_VERSION
     }
 
     /// The build this session runs: the hashes its catalog must carry.
-    pub fn profile(&self) -> &BuildProfile {
-        &self.profile
+    pub fn build(&self) -> &BuildIdentity {
+        &self.build
     }
 
-    pub fn new(target: ProcessIdentity, transport: T, profile: BuildProfile) -> Result<Self, SessionError> {
+    pub fn new(target: ProcessIdentity, transport: T, build: BuildIdentity) -> Result<Self, SessionError> {
         if transport.target() != &target {
             return Err(SessionError::Identity("transport belongs to a different process identity".into()));
         }
         if target.pid == 0 || target.created == 0 || !target.executable.is_absolute() {
             return Err(SessionError::Identity("invalid process identity".into()));
         }
-        profile.validate_target(&target.executable).map_err(|e| SessionError::Identity(e.to_string()))?;
+        build.validate_target(&target.executable).map_err(|e| SessionError::Identity(e.to_string()))?;
         Ok(Self {
             target,
             transport,
-            profile,
+            build,
             lease: None,
             hooks: [None; eg_trainer_wire::hooks::GameplayHook::ALL.len()],
             state: SessionState::Disabled,
@@ -153,11 +153,11 @@ impl<T: Transport> Session<T> {
     /// Content bytes read by the retained artifact lease, for I/O diagnostics.
     /// None when disconnected or when the platform requires full revalidation.
     pub fn artifact_bytes_read(&self) -> Option<u64> {
-        self.lease.as_ref().and_then(ProfileLease::bytes_read)
+        self.lease.as_ref().and_then(ArtifactLease::bytes_read)
     }
     /// With the hashing fallback, how often the artifacts were read whole.
     pub fn artifact_full_validations(&self) -> Option<u64> {
-        self.lease.as_ref().and_then(ProfileLease::full_validations)
+        self.lease.as_ref().and_then(ArtifactLease::full_validations)
     }
     pub fn cleanup(&self) -> Cleanup {
         self.cleanup
@@ -217,10 +217,10 @@ impl<T: Transport> Session<T> {
         self.cleanup = Cleanup::Unconfirmed;
         let payload = self.request(&Request::Discover).await?;
         let discovery = Discovery::decode(&payload, self.target.pid).map_err(SessionError::Protocol)?;
-        if !discovery.build_id.eq_ignore_ascii_case(self.profile.helper_build_id()) {
+        if !discovery.build_id.eq_ignore_ascii_case(self.build.helper_build_id()) {
             return Err(SessionError::Identity("loaded helper source build ID differs; restart required".into()));
         }
-        self.lease = Some(self.profile.capture_lease(&discovery.dispatcher).map_err(|e| SessionError::Identity(e.to_string()))?);
+        self.lease = Some(self.build.capture_lease(&discovery.dispatcher).map_err(|e| SessionError::Identity(e.to_string()))?);
         self.discovery = Some(discovery);
         // A prior cleanup acknowledgement does not describe a newly attached helper session.
         self.cleanup = Cleanup::Unconfirmed;
@@ -263,8 +263,7 @@ impl<T: Transport> Session<T> {
                         || m.roll_ids.len() > 1
                         || m.roll_ids.iter().any(|id| usize::from(*id) >= expected.implicit_rolls.len() || u32::from(*id) != m.index)
                 }) {
-                    self.release_without_io();
-                    self.state = SessionState::Disconnected;
+                    self.revoke();
                     return Err(SessionError::Protocol(ProtocolError::InvalidData));
                 }
                 Ok(Some(modifiers))
@@ -295,11 +294,7 @@ impl<T: Transport> Session<T> {
             return Ok(OwnedRead::Stopped);
         }
         let dispatcher = self.dispatcher()?;
-        if let Err(error) = self.validate_profile(&dispatcher) {
-            self.release_without_io();
-            self.state = SessionState::Disconnected;
-            return Err(SessionError::Identity(error.to_string()));
-        }
+        self.provenance(&dispatcher)?;
         if observer.as_mut().is_some_and(|observer| observer.control() == ReadControl::Stop) {
             return Ok(OwnedRead::Stopped);
         }
@@ -313,11 +308,7 @@ impl<T: Transport> Session<T> {
         let result = self.request(&request).await.and_then(|bytes| decode(&bytes).map_err(SessionError::Protocol));
         match result {
             Ok(snapshot) => {
-                if let Err(error) = self.validate_profile(&dispatcher) {
-                    self.release_without_io();
-                    self.state = SessionState::Disconnected;
-                    return Err(SessionError::Identity(error.to_string()));
-                }
+                self.provenance(&dispatcher)?;
                 self.status = status;
                 self.state = SessionState::Ready;
                 if observer.as_mut().is_some_and(|observer| observer.control() == ReadControl::Stop) {
@@ -344,17 +335,13 @@ impl<T: Transport> Session<T> {
             }
         }
     }
-    fn validate_profile(&self, dispatcher: &DispatcherSpec) -> std::io::Result<()> {
+    fn check_lease(&self, dispatcher: &DispatcherSpec) -> std::io::Result<()> {
         let lease = self.lease.as_ref().ok_or_else(|| std::io::Error::other("session artifact lease missing"))?;
-        self.profile.validate_lease(dispatcher, lease)
+        self.build.validate_lease(dispatcher, lease)
     }
     async fn read_status(&mut self) -> Result<(), SessionError> {
         let dispatcher = self.dispatcher()?;
-        if let Err(error) = self.validate_profile(&dispatcher) {
-            self.release_without_io();
-            self.state = SessionState::Disconnected;
-            return Err(SessionError::Identity(error.to_string()));
-        }
+        self.provenance(&dispatcher)?;
         let bytes = self.request(&Request::Status { dispatcher }).await?;
         let status = RuntimeStatus::decode(&bytes).map_err(SessionError::Protocol)?;
         let readiness = if status.manager == 0 {
@@ -366,8 +353,7 @@ impl<T: Transport> Session<T> {
         };
         self.status = Some(status);
         if readiness != GameReadiness::Offline {
-            self.release_without_io();
-            self.state = SessionState::Disconnected;
+            self.revoke();
             return Err(SessionError::NotOffline(readiness));
         }
         self.state = SessionState::Ready;
@@ -384,14 +370,26 @@ impl<T: Transport> Session<T> {
             return Err(SessionError::CharacterLoading);
         }
         if response.code == ResponseCode::OfflineRequired {
-            self.release_without_io();
-            self.state = SessionState::Disconnected;
+            self.revoke();
         }
         Err(SessionError::Helper {
             code: response.code,
             message: String::from_utf8_lossy(&response.payload).into_owned(),
             may_have_run: response.code == ResponseCode::Failed,
         })
+    }
+    /// The session ends here, without a word to the helper: the caller saw it can't go on.
+    fn revoke(&mut self) {
+        self.release_without_io();
+        self.state = SessionState::Disconnected;
+    }
+    /// The artifact the dispatcher answers from is still the one this session was admitted with; else it ends.
+    fn provenance(&mut self, dispatcher: &DispatcherSpec) -> Result<(), SessionError> {
+        if let Err(error) = self.check_lease(dispatcher) {
+            self.revoke();
+            return Err(SessionError::Identity(error.to_string()));
+        }
+        Ok(())
     }
     fn release_without_io(&mut self) {
         self.hooks = [None; eg_trainer_wire::hooks::GameplayHook::ALL.len()];

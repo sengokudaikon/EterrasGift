@@ -2,9 +2,9 @@
 //! fields, and the split of the rows into columns. Rows keep their models between changes, and their place when the
 //! split moves, so a box being typed in keeps its focus while its row follows.
 
-use super::catalog::{self, Area, Feature, FeatureValue};
 use super::pages::{self, Content, EditorRow, FieldModel, HookRow, PageModel, Row, Tone};
 use super::profiles::{self, Profile};
+use super::registry::{self, Area, Feature, FeatureValue};
 use super::session::TrainerSession;
 use crate::shell::Page;
 use crate::{FeatureFieldView, FeatureRowKind, FeatureRowModels, FeatureRowPlace, FeatureRowView, FeatureTone, FeatureValueView, MainWindow, Nav, Tokens, TrainerState};
@@ -40,7 +40,7 @@ impl WeakPages {
     }
 }
 
-/// Shows the trainer's pages on `session`. `features` is the catalog; `planned` lists features that are not ported yet
+/// Shows the trainer's pages on `session`. `features` is the registry; `planned` lists features that are not ported yet
 /// (a source checkout). Binding again replaces the previous binding.
 pub fn bind(window: &MainWindow, session: Rc<dyn TrainerSession>, features: Vec<Feature>, planned: bool) -> Pages {
     let layout = Rc::new(RefCell::new(Layout {
@@ -485,7 +485,7 @@ impl Controller {
                 editor.follow(&*session);
             }
             if let Row::Hook(hook) = row
-                && hook.feature.kind == super::catalog::FeatureKind::Choice
+                && hook.feature.kind == super::registry::FeatureKind::Choice
                 && !session.is_busy()
             {
                 *hook = pages::HookRow::new(hook.feature, &*session);
@@ -597,7 +597,7 @@ fn tone(tone: Tone) -> FeatureTone {
 
 fn value_view(id: &str, value: &FeatureValue, number: f64, name: &str, choices: &ModelRc<SharedString>) -> FeatureValueView {
     const ONE_HIT_KILLS: Phrase = Phrase::new("{name}: one-hit kills");
-    let infinite = catalog::infinity(id).is_some_and(|infinity| number == infinity.value);
+    let infinite = registry::infinity(id).is_some_and(|infinity| number == infinity.value);
     FeatureValueView {
         label: value.label.get().into(),
         accessible_name: if infinite { ONE_HIT_KILLS.with(&[("name", &name)]).into() } else { name.into() },
@@ -655,7 +655,7 @@ fn view(row: &Row, session: &dyn TrainerSession, nested: &Nested) -> FeatureRowV
                 on: hook.is_on(session),
                 can_use: hook.can_use(session),
                 has_inline: inline,
-                choice_only: hook.feature.kind == super::catalog::FeatureKind::Choice,
+                choice_only: hook.feature.kind == super::registry::FeatureKind::Choice,
                 // A single value sits on the title line, named for the feature.
                 inline_value: if inline {
                     value_view(hook.feature.id(), &hook.feature.values[0], hook.values[0], hook.feature.title.get(), &nested.choices[0])

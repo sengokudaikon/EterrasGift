@@ -2,7 +2,7 @@ use eg_game_access::bootstrap::HelperArtifact;
 use eg_trainer::{
     backend::{BackendError, ErrorKind},
     connect::admission::AdmissionCheck,
-    connect::build::BuildProfile,
+    connect::build::BuildIdentity,
 };
 use eg_trainer_wire::process::ProcessIdentity;
 use std::{
@@ -64,7 +64,7 @@ fn image() -> Vec<u8> {
 pub struct Fixture {
     pub temp: tempfile::TempDir,
     pub target: ProcessIdentity,
-    pub profile: BuildProfile,
+    pub build: BuildIdentity,
     pub artifact: Arc<HelperArtifact>,
 }
 impl Fixture {
@@ -86,11 +86,11 @@ impl Fixture {
             created: 134053344000000000,
             executable,
         };
-        let profile = BuildProfile::capture(&binary, &metadata, SOURCE).unwrap();
-        Self { temp, target, profile, artifact }
+        let build = BuildIdentity::capture(&binary, &metadata, SOURCE).unwrap();
+        Self { temp, target, build, artifact }
     }
-    pub fn profile_with_source(&self, source: &str) -> BuildProfile {
-        BuildProfile::capture(
+    pub fn profile_with_source(&self, source: &str) -> BuildIdentity {
+        BuildIdentity::capture(
             &self.temp.path().join("GameAssembly.dll"),
             &self.temp.path().join("Authored_Data/il2cpp_data/Metadata/global-metadata.dat"),
             source,

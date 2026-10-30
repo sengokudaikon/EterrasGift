@@ -2,14 +2,14 @@ use super::*;
 use eg_trainer::{
     definitions::catalog::{CatalogIdentity, EXTRACTION_VERSION, GameCatalog},
     item::edit::{ExpectedObservation, ItemEdit, StatusEdit, StatusField},
-    write::{ForgePlan, WriteControl, WriteObservation, WriteOutcome, WriteStatus},
+    write::{ForgePlan, WriteControl, WriteOutcome, WriteStatus},
 };
 
 fn plan(fixture: &Fixture) -> ForgePlan {
     plan_with_version(fixture, EXTRACTION_VERSION)
 }
 fn plan_with_version(fixture: &Fixture, extraction_version: u32) -> ForgePlan {
-    let profile = fixture.profile();
+    let profile = fixture.build();
     let catalog = GameCatalog {
         identity: CatalogIdentity {
             binary_hash: profile.binary_hash().into(),
@@ -52,7 +52,7 @@ fn obsolete_catalog_write_is_refused_before_submission_without_recording_a_write
     let plan = plan_with_version(&f, EXTRACTION_VERSION + 1);
     let wire = FakeTransport::new(f.target.clone(), [f.discover(), status(false, 0x1234, 0)]);
     let mut s = ready(&f, &wire);
-    assert!(matches!(run(s.write(&plan.into())), Err(SessionError::Identity(_))));
+    assert!(matches!(run(s.edit_forge(&plan)), Err(SessionError::Identity(_))));
     assert_eq!(wire.requests().len(), 2);
     assert_eq!(s.state(), SessionState::Ready);
 }
@@ -71,10 +71,7 @@ fn explicit_write_requires_exact_readback() {
         ],
     );
     let mut session = ready(&f, &wire);
-    assert_eq!(
-        run(session.write(&plan.clone().into())).unwrap(),
-        WriteOutcome::Confirmed(WriteObservation::Forge(Box::new(plan.projected().clone())))
-    );
+    assert_eq!(run(session.edit_forge(&plan)).unwrap(), WriteOutcome::Confirmed(plan.projected().clone()));
     assert_eq!(session.state(), SessionState::Ready);
     assert_eq!(wire.requests().len(), 4);
     assert!(matches!(&wire.requests()[2], Request::EditForge(request) if request.expected() == plan.before().snapshot() && request.expected_manager() == 0x1234));
@@ -102,7 +99,7 @@ fn readback_of_a_replaced_forge_item_is_unknown_even_with_equal_values() {
             ],
         );
         let mut session = ready(&f, &wire);
-        assert!(matches!(run(session.write(&plan.into())).unwrap(), WriteOutcome::Uncertain { .. }));
+        assert!(matches!(run(session.edit_forge(&plan)).unwrap(), WriteOutcome::Uncertain { .. }));
         assert_eq!(session.state(), SessionState::Disconnected);
         assert_eq!(wire.requests().len(), 4);
     }

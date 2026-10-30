@@ -27,17 +27,14 @@ pub trait BackendConnection: Send + 'static {
     fn is_ready(&self) -> bool {
         true
     }
-    /// The reads and edits this connection serves, whatever the worker is doing; the worker offers them only while
-    /// ready and idle. Hooks are asked one by one (`supports_hook`); `gameplay_hooks` is the worker's to fill.
+    /// The reads, edits and hooks this connection serves, whatever the worker is doing; the worker offers them only
+    /// while ready and idle.
     fn capabilities(&self) -> Capabilities {
         Capabilities::default()
     }
-    fn supports_hook(&self, _: GameplayHook) -> bool {
-        false
-    }
     /// Return certainty after entering transport; Err is pre-submission unless delivery explicitly says MayHaveRun.
     /// Confirmed/NotKept require a complete independent read under renewed admission, not only a native ACK. No retry.
-    fn write(&mut self, _: &WritePlan, _: &mut dyn WriteControl) -> impl Future<Output = Result<WriteOutcome<WriteObservation>, BackendError>> + Send {
+    fn write(&mut self, _: &ForgePlan, _: &mut dyn WriteControl) -> impl Future<Output = Result<WriteStatus, BackendError>> + Send {
         async { Err(BackendError::blocked(ErrorKind::NotReady, "writes are unavailable")) }
     }
     fn refresh(&mut self) -> impl Future<Output = Result<RuntimeStatus, BackendError>> + Send;
@@ -103,14 +100,11 @@ impl<T: Transport + Send + 'static> BackendConnection for Session<T> {
             modifier_rolls: true,
             affix_change: true,
             affix_list: true,
-            ..Capabilities::default()
+            gameplay_hooks: [true; GameplayHook::COUNT],
         }
     }
-    fn supports_hook(&self, _: GameplayHook) -> bool {
-        true
-    }
-    async fn write(&mut self, plan: &WritePlan, control: &mut dyn WriteControl) -> Result<WriteOutcome<WriteObservation>, BackendError> {
-        Ok(self.write_controlled(plan, control).await?)
+    async fn write(&mut self, plan: &ForgePlan, control: &mut dyn WriteControl) -> Result<WriteStatus, BackendError> {
+        Ok(self.edit_forge_controlled(plan, control).await?)
     }
     async fn refresh(&mut self) -> Result<RuntimeStatus, BackendError> {
         Session::refresh(self).await?;
@@ -123,7 +117,7 @@ impl<T: Transport + Send + 'static> BackendConnection for Session<T> {
         Ok(Session::read_locale(self).await?)
     }
     fn build_hashes(&self) -> (String, String) {
-        (self.profile().binary_hash().to_owned(), self.profile().metadata_hash().to_owned())
+        (self.build().binary_hash().to_owned(), self.build().metadata_hash().to_owned())
     }
     async fn describe_implicits(&mut self, expected: &ForgeSnapshot) -> Result<Option<Vec<ModifierSnapshot>>, BackendError> {
         Ok(Session::describe_implicits(self, expected).await?)

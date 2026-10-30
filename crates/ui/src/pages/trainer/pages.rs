@@ -1,7 +1,7 @@
 //! The trainer's pages as plain Rust: pages, sections, hook rows, field editors, held-item lists and planned features,
 //! and how rows split into columns, without any view, so they are testable alone. `view.rs` shows them.
 
-use super::catalog::{self, Area, Feature, FeatureField, FeatureKind, FeatureValue};
+use super::registry::{self, Area, Feature, FeatureField, FeatureKind, FeatureValue};
 use super::session::{FieldError, FieldRequest, FieldResult, FieldWrite, GameField, HookState, PendingFields, TrainerSession};
 use eg_core::locale::numbers;
 use eg_core::phrase::{Conjunction, Phrase, Plural, list};
@@ -70,10 +70,10 @@ pub enum Row {
     Planned(Feature),
 }
 
-/// Builds a page from the catalog. Every ported feature has a row; a feature that is not ported is listed as a placeholder
+/// Builds a page from the registry. Every ported feature has a row; a feature that is not ported is listed as a placeholder
 /// when `planned` (a source checkout). Returns None when the page would have nothing on it.
 pub fn build(area: Area, features: &[Feature], planned: bool, session: &dyn TrainerSession) -> Option<PageModel> {
-    let page = catalog::page(area);
+    let page = registry::page(area);
     let mut sections = Vec::new();
     for &section in page.sections {
         let in_section: Vec<&Feature> = features.iter().filter(|f| f.area == area && f.section == section).collect();
@@ -171,7 +171,7 @@ impl HookRow {
             .map(|(i, value)| if fits { value.fit_saved(saved[i]) } else { value.start })
             .collect();
         let mut row = HookRow { feature, values, scrub: None };
-        // A remembered value the catalog no longer allows reaches the helper as the box shows it.
+        // A remembered value the registry no longer allows reaches the helper as the box shows it.
         if fits && saved != row.values {
             row.send(session);
         }
@@ -333,7 +333,7 @@ impl HookRow {
 }
 
 pub fn hook_amount(id: &str, text: &str) -> Option<f64> {
-    match catalog::infinity(id) {
+    match registry::infinity(id) {
         Some(infinity) if matches!(text.trim().to_ascii_lowercase().as_str(), "∞" | "inf" | "infinity") => Some(infinity.value),
         _ => numbers().parse(text),
     }
@@ -367,12 +367,12 @@ fn logarithmic(value: &FeatureValue) -> bool {
 
 /// A hook value's range for its typing popover: "0 – 100%", "0 – ∞".
 pub fn range_text(id: &str, value: &FeatureValue) -> String {
-    let unit = if catalog::infinity(id).is_some() { "" } else { value.unit.unwrap_or_default() };
+    let unit = if registry::infinity(id).is_some() { "" } else { value.unit.unwrap_or_default() };
     format!("{} – {}{unit}", hook_text(id, value.minimum), hook_text(id, value.maximum))
 }
 
 pub fn hook_text(id: &str, number: f64) -> String {
-    if catalog::infinity(id).is_some_and(|infinity| number == infinity.value) {
+    if registry::infinity(id).is_some_and(|infinity| number == infinity.value) {
         "∞".into()
     } else {
         numbers().plain(number)
@@ -389,7 +389,7 @@ pub struct FieldModel {
     draft: Option<f64>,
 }
 
-/// A field's name and range: the catalog's, or for a listed editor its one field named by the game.
+/// A field's name and range: the registry's, or for a listed editor its one field named by the game.
 #[derive(Clone, Debug, PartialEq)]
 pub struct FieldShape {
     pub label: String,
@@ -499,7 +499,7 @@ fn holds(held: Option<f64>, wanted: f64) -> bool {
 
 /// An editor's row: fields read from the game, typed as drafts, applied through the game's own methods and read back. It
 /// reads when the game connects and on Read again; nothing is written until Apply. A listed editor's fields are what the
-/// game lists (what the character holds), named by the game and shaped by the catalog's one field. A read or write the game
+/// game lists (what the character holds), named by the game and shaped by the registry's one field. A read or write the game
 /// answers later keeps the row busy until it does: Read again, Apply and the boxes wait, and so does Discard.
 pub struct EditorRow {
     pub feature: Feature,
@@ -717,7 +717,7 @@ impl EditorRow {
         }
     }
 
-    /// A fixed set answers with its catalog's fields, unnamed; a listed one with any number, each named once.
+    /// A fixed set answers with its registry's fields, unnamed; a listed one with any number, each named once.
     fn fits(&self, read: &[GameField]) -> bool {
         if self.listed {
             let mut names: Vec<&str> = read.iter().map(|f| f.label.as_str()).collect();
@@ -854,34 +854,34 @@ mod tests {
     }
 
     #[test]
-    fn pages_follow_the_catalog() {
+    fn pages_follow_the_registry() {
         let session = Unconnected;
-        let character = build(Area::Character, catalog::FEATURES, false, &session).unwrap();
+        let character = build(Area::Character, registry::FEATURES, false, &session).unwrap();
         assert!(!character.has_section_strip());
         let Content::Rows(rows) = &character.sections[0].content else { panic!("rows") };
         assert!(matches!(&rows[0], Row::Heading(title) if title == "Progression"));
         assert_eq!(rows.iter().filter(|row| matches!(row, Row::Heading(_))).count(), 3);
-        let forge = build(Area::Forge, catalog::FEATURES, false, &session).unwrap();
+        let forge = build(Area::Forge, registry::FEATURES, false, &session).unwrap();
         assert_eq!(forge.sections.iter().map(|s| s.title.as_str()).collect::<Vec<_>>(), ["Item", "Crafting rules"]);
         assert!(matches!(forge.sections[0].content, Content::ItemForge));
         // A feature that is not ported shows only in a source checkout.
-        let mut features = catalog::FEATURES.to_vec();
+        let mut features = registry::FEATURES.to_vec();
         features.iter_mut().filter(|f| f.area == Area::Loot).for_each(|f| f.presented = false);
         assert!(build(Area::Loot, &features, false, &session).is_none());
         let loot = build(Area::Loot, &features, true, &session).unwrap();
         let Content::Rows(rows) = &loot.sections[0].content else { panic!("rows") };
         assert!(matches!(rows.iter().find(|row| !matches!(row, Row::Heading(_))), Some(Row::Planned(_))));
         assert_eq!(
-            planned_details(catalog::feature("drop-rates").unwrap()),
+            planned_details(registry::feature("drop-rates").unwrap()),
             "Item drop chance 0.1, Item drop multiplier 1, Gold drop chance 0.1, Gold drop multiplier 2"
         );
-        assert_eq!(planned_details(catalog::feature("currency").unwrap()), "Gold, Soul embers, Ancient bones");
+        assert_eq!(planned_details(registry::feature("currency").unwrap()), "Gold, Soul embers, Ancient bones");
     }
 
     #[test]
     fn trainer_sections_share_one_list_and_world_puts_monsters_first_without_losing_features() {
         for area in [Area::Character, Area::Stash, Area::Combat, Area::Loot, Area::Monolith, Area::Factions, Area::World] {
-            let page = build(area, catalog::FEATURES, false, &Unconnected).unwrap();
+            let page = build(area, registry::FEATURES, false, &Unconnected).unwrap();
             assert!(!page.has_section_strip(), "{area:?}");
             assert_eq!(page.sections.len(), 1);
             let Content::Rows(rows) = &page.sections[0].content else { panic!("rows") };
@@ -889,7 +889,7 @@ mod tests {
                 .iter()
                 .filter_map(|row| if let Row::Heading(title) = row { Some(title.as_str()) } else { None })
                 .collect();
-            assert_eq!(headings, catalog::page(area).sections.iter().map(|section| section.get()).collect::<Vec<_>>());
+            assert_eq!(headings, registry::page(area).sections.iter().map(|section| section.get()).collect::<Vec<_>>());
             let ids: Vec<_> = rows
                 .iter()
                 .filter_map(|row| match row {
@@ -899,7 +899,7 @@ mod tests {
                     Row::Planned(feature) => Some(feature.id()),
                 })
                 .collect();
-            let expected: BTreeSet<_> = catalog::FEATURES.iter().filter(|feature| feature.area == area).map(|feature| feature.id()).collect();
+            let expected: BTreeSet<_> = registry::FEATURES.iter().filter(|feature| feature.area == area).map(|feature| feature.id()).collect();
             assert_eq!(ids.len(), expected.len(), "each feature appears once");
             assert_eq!(ids.into_iter().collect::<BTreeSet<_>>(), expected);
             if area == Area::World {
@@ -967,7 +967,7 @@ mod tests {
     #[test]
     fn damage_knob_enters_and_leaves_one_hit_mode_and_formats_infinity() {
         let session = Setup::default();
-        let mut row = HookRow::new(*catalog::feature("enemy-damage").unwrap(), &session);
+        let mut row = HookRow::new(*registry::feature("enemy-damage").unwrap(), &session);
         row.set_amount(&session, 0, Some(100.0));
         row.step(&session, 0, 1);
         assert_eq!(row.values, [101.0]);
@@ -987,7 +987,7 @@ mod tests {
 
     #[test]
     fn a_value_bar_is_proportional_but_logarithmic_for_wide_multipliers() {
-        let value = |id: &str| catalog::feature(id).unwrap().values[0];
+        let value = |id: &str| registry::feature(id).unwrap().values[0];
         // A percentage and a short multiplier are in proportion to their range.
         let taken = value("incoming-damage");
         assert_eq!(fraction_of(&taken, 50.0), 0.5);
@@ -1013,7 +1013,7 @@ mod tests {
     #[test]
     fn a_drag_shows_its_value_and_sends_it_once_when_it_ends() {
         let session = Setup::default();
-        let mut row = HookRow::new(*catalog::feature("incoming-damage").unwrap(), &session);
+        let mut row = HookRow::new(*registry::feature("incoming-damage").unwrap(), &session);
         let before = session.sends.get();
         for delta in [0.05, 0.1, 0.2] {
             row.scrub(0, delta);
@@ -1028,7 +1028,7 @@ mod tests {
         row.end_scrub(&session, 0, true);
         assert_eq!((row.values.as_slice(), session.sends.get()), ([70.0].as_slice(), before + 1));
         // The far end of the damage enemies take is ∞, never 100.5.
-        let mut enemy = HookRow::new(*catalog::feature("enemy-damage").unwrap(), &session);
+        let mut enemy = HookRow::new(*registry::feature("enemy-damage").unwrap(), &session);
         enemy.scrub(0, 0.9999);
         assert_eq!(enemy.values, [101.0]);
     }
@@ -1036,7 +1036,7 @@ mod tests {
     #[test]
     fn keys_step_the_ends_and_typing_says_what_it_takes() {
         let session = Setup::default();
-        let mut row = HookRow::new(*catalog::feature("incoming-damage").unwrap(), &session);
+        let mut row = HookRow::new(*registry::feature("incoming-damage").unwrap(), &session);
         row.step(&session, 0, 5);
         assert_eq!(row.values, [55.0], "Shift steps five");
         row.step_to_end(&session, 0, true);
@@ -1046,7 +1046,7 @@ mod tests {
         assert_eq!(row.check(0, "25"), "");
         assert_eq!(row.check(0, "250"), "Type a number from 0 to 100.");
         assert_eq!(row.check(0, "lots"), "Type a number from 0 to 100.");
-        let mut enemy = HookRow::new(*catalog::feature("enemy-damage").unwrap(), &session);
+        let mut enemy = HookRow::new(*registry::feature("enemy-damage").unwrap(), &session);
         enemy.step_to_end(&session, 0, true);
         assert_eq!(enemy.values, [101.0], "End is ∞");
         assert_eq!(enemy.check(0, "∞"), "");
@@ -1057,10 +1057,10 @@ mod tests {
     fn a_hook_says_where_it_stands() {
         // Without a profile there is nothing to set up.
         let none = Unconnected;
-        let row = HookRow::new(*catalog::feature("enemy-damage").unwrap(), &none);
+        let row = HookRow::new(*registry::feature("enemy-damage").unwrap(), &none);
         assert!(!row.can_use(&none));
         let session = Setup::default();
-        let mut row = HookRow::new(*catalog::feature("enemy-damage").unwrap(), &session);
+        let mut row = HookRow::new(*registry::feature("enemy-damage").unwrap(), &session);
         assert!(row.can_use(&session));
         assert_eq!(row.values, [2.0]);
         assert_eq!(row.status(&session), (String::new(), Tone::None));
@@ -1073,7 +1073,7 @@ mod tests {
         assert_eq!(row.values, [100.0]);
         row.step(&session, 0, -1);
         assert_eq!(session.hook_values("enemy-damage"), [99.5]);
-        let mut rarity = HookRow::new(*catalog::feature("new-item-rarity").unwrap(), &session);
+        let mut rarity = HookRow::new(*registry::feature("new-item-rarity").unwrap(), &session);
         assert_eq!(rarity.values, [3.0]);
         rarity.choose(&session, 0, 9);
         assert_eq!(rarity.values, [3.0]);
@@ -1097,7 +1097,7 @@ mod tests {
         for id in ["incoming-damage", "enemy-damage", "ability-speed"] {
             live.set_hook(id, true);
         }
-        let status = |id| HookRow::new(*catalog::feature(id).unwrap(), &live).status(&live);
+        let status = |id| HookRow::new(*registry::feature(id).unwrap(), &live).status(&live);
         assert_eq!(status("incoming-damage"), ("On in the game.".into(), Tone::Confirmed));
         assert_eq!(status("enemy-damage").0, "Waiting to turn on…");
         assert_eq!(status("ability-speed"), ("Couldn't turn on: the game's method was not found".into(), Tone::Error));
@@ -1179,7 +1179,7 @@ mod tests {
             ..Game::default()
         };
         game.fields.borrow_mut().insert("points-earned", vec![GameField::new("", 1.0), GameField::new("", 0.3)]);
-        let feature = *catalog::feature("points-earned").unwrap();
+        let feature = *registry::feature("points-earned").unwrap();
         let mut row = EditorRow::new(feature, false, &game);
         // Connected: the read is on its way, and everything waits for it.
         assert!(row.is_busy() && !row.can_use(&game) && !row.has_read);
@@ -1210,14 +1210,14 @@ mod tests {
         assert!(row.has_drafts());
 
         // A field set this version cannot serve: read-only, with its reason, and nothing is asked of the game.
-        let unserved = EditorRow::new(*catalog::feature("currency").unwrap(), false, &game);
+        let unserved = EditorRow::new(*registry::feature("currency").unwrap(), false, &game);
         assert!(!unserved.is_busy() && !unserved.can_use(&game));
         assert_eq!(unserved.reason(&game), Some(NOT_AVAILABLE.get()));
         assert_eq!(
             EditorRow::new(feature, false, &Unconnected).reason(&Unconnected),
             Some("Connect an offline character first.")
         );
-        let hook = HookRow::new(*catalog::feature("enemy-damage").unwrap(), &game);
+        let hook = HookRow::new(*registry::feature("enemy-damage").unwrap(), &game);
         assert!(hook.can_use(&game));
         let game = Game {
             unserved: Some("enemy-damage"),
@@ -1231,7 +1231,7 @@ mod tests {
     fn an_editor_reads_drafts_and_applies() {
         let game = Game::default();
         game.fields.borrow_mut().insert("points-earned", vec![GameField::new("", 48.0), GameField::new("", 30.0)]);
-        let mut row = EditorRow::new(*catalog::feature("points-earned").unwrap(), false, &game);
+        let mut row = EditorRow::new(*registry::feature("points-earned").unwrap(), false, &game);
         assert!(row.has_read);
         assert_eq!(row.fields[0].game_text(), "In game: 48");
         row.fields[0].set_amount(Some(50.0));
@@ -1246,7 +1246,7 @@ mod tests {
         row.apply(&game);
         assert_eq!(row.status, "The game kept Passive points 40.");
         assert_eq!(
-            HookRow::new(*catalog::feature("incoming-damage").unwrap(), &game).status(&game).0,
+            HookRow::new(*registry::feature("incoming-damage").unwrap(), &game).status(&game).0,
             "Couldn't turn on: the helper is older than the app"
         );
     }
@@ -1257,7 +1257,7 @@ mod tests {
         game.fields
             .borrow_mut()
             .insert("keys", vec![GameField::new("Arena Key", 3.0), GameField::new("Black Market Token", 12.0)]);
-        let mut row = EditorRow::new(*catalog::feature("keys").unwrap(), true, &game);
+        let mut row = EditorRow::new(*registry::feature("keys").unwrap(), true, &game);
         assert_eq!(row.fields.iter().map(FieldModel::label).collect::<Vec<_>>(), ["Arena Key", "Black Market Token"]);
         row.fields[1].set_amount(Some(20.0));
         game.fields.borrow_mut().insert("keys", vec![GameField::new("Black Market Token", 12.0)]);

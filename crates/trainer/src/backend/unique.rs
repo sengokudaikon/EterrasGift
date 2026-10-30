@@ -14,15 +14,7 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
             return Ok(());
         }
         let target = expected.process().clone();
-        self.admit(&target)?;
-        let result = self
-            .connection
-            .as_mut()
-            .ok_or_else(|| BackendError::blocked(ErrorKind::NotConnected, "connection released"))?
-            .describe_unique(expected.snapshot())
-            .await;
-        self.superseded(epoch)?;
-        self.admit(&target)?;
+        let result = self.call(epoch, &target, async |connection| connection.describe_unique(expected.snapshot()).await).await?;
         let result = match result {
             Ok(Some(lines)) => {
                 if let Err(error) = BoundTooltip::new(&expected, TooltipKind::Unique, lines.clone()) {
@@ -34,10 +26,7 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
             }
             Ok(None) => Err("Localized descriptions are unavailable.".into()),
             Err(error) => {
-                self.handle_connection_gate(&error);
-                if !matches!(error.kind, ErrorKind::Gate | ErrorKind::HelperDeparted | ErrorKind::CharacterLoading) {
-                    self.fail(error.clone(), Some(target));
-                }
+                self.settle(&error, target);
                 return Err(error);
             }
         };
@@ -64,15 +53,9 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
         }
         .map_err(|e| BackendError::blocked(ErrorKind::MappingUnavailable, e.to_string()))?;
         let target = expected.process().clone();
-        self.admit(&target)?;
         let result = self
-            .connection
-            .as_mut()
-            .ok_or_else(|| BackendError::blocked(ErrorKind::NotConnected, "connection released"))?
-            .preview_unique(&expected, &draft, &evidence)
-            .await;
-        self.superseded(epoch)?;
-        self.admit(&target)?;
+            .call(epoch, &target, async |connection| connection.preview_unique(&expected, &draft, &evidence).await)
+            .await?;
         let result = match result {
             Ok(preview) => {
                 if let Err(error) = preview.recheck(&expected, &draft) {
@@ -88,10 +71,7 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
                 Err(error.message)
             }
             Err(error) => {
-                self.handle_connection_gate(&error);
-                if !matches!(error.kind, ErrorKind::Gate | ErrorKind::HelperDeparted | ErrorKind::CharacterLoading) {
-                    self.fail(error.clone(), Some(target));
-                }
+                self.settle(&error, target);
                 return Err(error);
             }
         };

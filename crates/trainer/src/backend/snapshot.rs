@@ -130,7 +130,7 @@ pub enum Activity {
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Capabilities {
     /// In GameplayHook order; availability comes from this connection, not saved intent.
-    pub gameplay_hooks: [bool; eg_trainer_wire::hooks::GameplayHook::ALL.len()],
+    pub gameplay_hooks: [bool; eg_trainer_wire::hooks::GameplayHook::COUNT],
     pub read_forge: bool,
     /// Operation support on this ready connection. Current item eligibility and
     /// range/observation checks still belong to level_requirement_plan.
@@ -329,14 +329,8 @@ impl BackendSnapshot {
     }
     /// The outcome for this exact submitted plan. Historical certainty survives
     /// connection loss; publishing its observation still requires current scope.
-    pub fn write_outcome(&self, plan: &WritePlan) -> Option<WriteOutcome<WriteObservation>> {
-        match plan {
-            WritePlan::Forge(plan) => self
-                .last_write
-                .as_ref()
-                .filter(|r| &r.plan == plan.as_ref())
-                .map(|r| r.status.clone().map(WriteObservation::forge)),
-        }
+    pub fn write_outcome(&self, plan: &ForgePlan) -> Option<WriteStatus> {
+        self.last_write.as_ref().filter(|r| &r.plan == plan).map(|r| r.status.clone())
     }
     pub fn expected_observation(&self) -> Result<crate::item::edit::ExpectedObservation, crate::item::edit::EditError> {
         use crate::item::edit::{EditError, ExpectedObservation};
