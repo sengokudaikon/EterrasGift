@@ -6,58 +6,8 @@ import { FieldFrame } from "../../widgets/text-field.slint";
 import { KeyboardFocus } from "../../globals.slint";
 import { TipTrigger } from "../../widgets/focus.slint";
 import { FlyoutSurface } from "../../widgets/menu.slint";
+import { RangeBar } from "../../widgets/range-bar.slint";
 import { ForgeState, ForgeReveal, ForgeCover, ValueCell, CellRef } from "state.slint";
-
-// Where a value sits inside the game's own minimum and maximum, with the game's value and the draft as separate ticks.
-export component RangeBar inherits Rectangle {
-    in property <float> fraction;
-    in property <float> game-fraction;
-    in property <bool> game-tick;
-    in property <bool> draft;
-    // Under the pointer or scrubbing: the track thickens.
-    in property <bool> active;
-    in property <bool> on-unique;
-
-    property <length> track: root.active ? Tokens.range-bar-track-thickness-active : Tokens.range-bar-track-thickness;
-    property <length> tick: Tokens.range-bar-tick-width;
-
-    height: Tokens.range-bar-height;
-
-    Rectangle {
-        x: 0;
-        y: Math.round((root.height - root.track) / 1px / 2) * 1px;
-        width: root.width;
-        height: root.track;
-        border-radius: root.track / 2;
-        background: Tokens.range-track-brush;
-    }
-
-    Rectangle {
-        x: 0;
-        y: Math.round((root.height - root.track) / 1px / 2) * 1px;
-        width: Math.max(root.track, root.width * Math.clamp(root.fraction, 0, 1));
-        height: root.track;
-        border-radius: root.track / 2;
-        background: root.draft ? Tokens.draft-brush : Tokens.range-fill-brush;
-    }
-
-    // The game's value stays as a full-height tick while a draft moves away from it.
-    if root.game-tick: Rectangle {
-        x: Math.round(Math.clamp(root.game-fraction, 0, 1) * (root.width - root.tick) / 1px) * 1px;
-        y: 0;
-        width: root.tick;
-        height: root.height;
-        background: Tokens.text-brush;
-    }
-
-    if root.draft: Rectangle {
-        x: Math.round(Math.clamp(root.fraction, 0, 1) * (root.width - root.tick) / 1px) * 1px;
-        y: 0;
-        width: root.tick;
-        height: root.height;
-        background: Tokens.draft-brush;
-    }
-}
 
 // The value cell: one tab stop. Drag scrubs (Shift is four times finer), Left and Right step one attainable value (Shift
 // five), Home and End jump to the ends, Enter, F2 or a click without dragging opens the popover.

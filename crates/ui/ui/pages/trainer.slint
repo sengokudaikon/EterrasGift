@@ -13,6 +13,7 @@ import { FocusRing } from "../widgets/focus.slint";
 import { BodyText, LabelText, CaptionText, CaptionTone, TitleText } from "../widgets/text.slint";
 import { HelpButton } from "../widgets/help-button.slint";
 import { NumberBox } from "../widgets/number-box.slint";
+import { ValueSlider } from "../widgets/value-slider.slint";
 import { ChoiceBox } from "../widgets/choice-box.slint";
 import { AshField, EterraFrames } from "../decorations.slint";
 import { ItemForge } from "forge/editor.slint";
@@ -36,6 +37,9 @@ export struct FeatureValueView {
     choice-index: int,
     text: string,
     step-tip: string,
+    // Where it sits on its bar (0 to 1), and its "minimum – maximum" for the typing popover.
+    fraction: float,
+    range: string,
 }
 
 // An editor's field: its name over what the game holds, and its box (a draft until Apply).
@@ -143,9 +147,14 @@ export global TrainerState {
     callback row-measured(int, length);
 
     callback hook-toggled(int, bool);
-    callback value-edited(int, int, string);
     callback value-committed(int, int, string);
     callback value-stepped(int, int, int);
+    // A hook value's cell: a drag's distance as a share of its range (sent once, when it ends; true when cancelled), the
+    // ends, and why a typed text is no value (empty when it is one).
+    callback value-scrubbed(int, int, float);
+    callback value-scrub-ended(int, int, bool);
+    callback value-stepped-to-end(int, int, bool);
+    pure callback value-checked(int, int, string) -> string;
     callback value-chosen(int, int, int);
     callback field-edited(int, int, string);
     callback field-committed(int, int, string);
@@ -289,18 +298,25 @@ component ValueLine inherits Rectangle {
         wrap: word-wrap;
     }
 
-    if !root.value.choice: NumberBox {
+    if !root.value.choice: ValueSlider {
+        width: Tokens.feature-field-width;
         x: root.value-right - self.width;
         y: (parent.height - self.height) / 2;
-        value: root.value.text;
+        text: root.value.text;
         unit: root.value.unit;
+        fraction: root.value.fraction;
+        range: root.value.range;
         label: root.value.accessible-name;
         accessible-description: root.help;
         tip: root.value.step-tip;
         enabled: root.enabled;
-        edited(text) => { TrainerState.value-edited(root.row-index, root.value-index, text); }
+        vertical-steps: true;
+        scrubbed(delta) => { TrainerState.value-scrubbed(root.row-index, root.value-index, delta); }
+        scrub-ended(cancelled) => { TrainerState.value-scrub-ended(root.row-index, root.value-index, cancelled); }
+        stepped(steps) => { TrainerState.value-stepped(root.row-index, root.value-index, steps); }
+        stepped-to-end(end) => { TrainerState.value-stepped-to-end(root.row-index, root.value-index, end); }
         committed(text) => { TrainerState.value-committed(root.row-index, root.value-index, text); }
-        stepped(direction) => { TrainerState.value-stepped(root.row-index, root.value-index, direction); }
+        checked(text) => { return TrainerState.value-checked(root.row-index, root.value-index, text); }
     }
 
     if root.value.choice: ChoiceBox {
@@ -489,18 +505,25 @@ component FeatureRow inherits Rectangle {
         }
 
         // A hook: its one value on the title line, named for the feature; its switch at the far right.
-        if root.hook && root.feature.has-inline && !root.feature.inline-value.choice: NumberBox {
+        if root.hook && root.feature.has-inline && !root.feature.inline-value.choice: ValueSlider {
+            width: Tokens.feature-field-width;
             x: root.value-right - self.width;
             y: root.top + (root.line - self.height) / 2;
-            value: root.feature.inline-value.text;
+            text: root.feature.inline-value.text;
             unit: root.feature.inline-value.unit;
+            fraction: root.feature.inline-value.fraction;
+            range: root.feature.inline-value.range;
             label: root.feature.inline-value.accessible-name;
             accessible-description: root.feature.help;
             tip: root.feature.inline-value.step-tip;
             enabled: root.feature.can-use;
-            edited(text) => { TrainerState.value-edited(root.row-index, 0, text); }
+            vertical-steps: true;
+            scrubbed(delta) => { TrainerState.value-scrubbed(root.row-index, 0, delta); }
+            scrub-ended(cancelled) => { TrainerState.value-scrub-ended(root.row-index, 0, cancelled); }
+            stepped(steps) => { TrainerState.value-stepped(root.row-index, 0, steps); }
+            stepped-to-end(end) => { TrainerState.value-stepped-to-end(root.row-index, 0, end); }
             committed(text) => { TrainerState.value-committed(root.row-index, 0, text); }
-            stepped(direction) => { TrainerState.value-stepped(root.row-index, 0, direction); }
+            checked(text) => { return TrainerState.value-checked(root.row-index, 0, text); }
         }
 
         if root.hook && root.feature.has-inline && root.feature.inline-value.choice: ChoiceBox {

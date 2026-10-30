@@ -1,0 +1,322 @@
+// A value cell for a number that lives inside a known range (the trainer's hook values): the value over its range bar,
+// edited in place as the forge's value cell is (`pages/forge/scrubber.slint`). Drag scrubs (Shift is four times finer),
+// Left and Right step (Shift five steps), Up and Down too where `vertical-steps`, Home and End jump to the ends, and
+// Enter, F2 or a click without dragging opens a popover to type it.
+//
+// Rust owns the number. A drag shows where it would land (`scrubbed`, the distance as a share of the range) in the draft
+// colour and commits once, when it ends (`scrub-ended`); Escape mid-drag puts it back. The popover commits what it
+// typed on Enter, or on a click away while the text is a value (`checked` says why it isn't); Escape drops it. The
+// widget has no words of its own: every one comes in through its properties.
+
+import { Tokens } from "../tokens.slint";
+import { KeyboardFocus } from "../globals.slint";
+import { TipTrigger } from "focus.slint";
+import { FlyoutSurface } from "menu.slint";
+import { RangeBar } from "range-bar.slint";
+import { FieldFrame } from "text-field.slint";
+
+export component ValueSlider inherits Rectangle {
+    // The value as Rust formats it, its muted unit, and where it sits on the bar (0 to 1).
+    in property <string> text;
+    in property <string> unit;
+    in property <float> fraction;
+    in property <bool> enabled: true;
+    // Up and Down step it too (no row navigation takes them).
+    in property <bool> vertical-steps;
+    // Its name, its tip (hover and keyboard), and the popover's "minimum – maximum" line.
+    in property <string> label;
+    in property <string> tip;
+    in property <string> range;
+    callback scrubbed(float);
+    callback scrub-ended(bool);
+    callback stepped(int);
+    callback stepped-to-end(bool);
+    callback committed(string);
+    // Why the typed text is no value, or empty when it is one.
+    pure callback checked(string) -> string;
+
+    property <bool> pressed;
+    property <bool> scrubbing;
+    property <length> press-x;
+    property <bool> keyboard-focus: focus.has-focus && KeyboardFocus.visible;
+    property <length> bar-y: value-line.preferred-height + Tokens.space-4;
+    property <bool> popup-open: popup.is-open;
+    // The popover's text, and whether Enter or Escape already settled it before it closed.
+    property <string> typed;
+    property <string> error: root.checked(root.typed);
+    property <bool> settled;
+    // The popover is placed when it opens; when the cell moves (the rows split anew, the page scrolls), it closes
+    // without committing rather than float away from its value.
+    property <length> at-x: root.absolute-position.x;
+    property <length> at-y: root.absolute-position.y;
+
+    changed at-x => {
+        root.drop-input();
+    }
+    changed at-y => {
+        root.drop-input();
+    }
+    // A click away commits a value and drops anything else.
+    changed popup-open => {
+        if (!root.popup-open && !root.settled && root.error == "") {
+            root.committed(root.typed);
+        }
+    }
+
+    function open-input() {
+        if (root.enabled) {
+            root.typed = root.text;
+            root.settled = false;
+            popup.show();
+        }
+    }
+
+    function drop-input() {
+        if (root.popup-open) {
+            root.settled = true;
+            popup.close();
+        }
+    }
+
+    function end-gesture(cancelled: bool) {
+        if (root.scrubbing) {
+            root.scrub-ended(cancelled);
+        }
+        root.pressed = false;
+        root.scrubbing = false;
+    }
+
+    accessible-role: slider;
+    accessible-label: root.label;
+    accessible-value: root.text;
+    accessible-enabled: root.enabled;
+    forward-focus: focus;
+
+    height: root.bar-y + Tokens.range-bar-height;
+
+    // The band behind the bar while it can be dragged and is under the pointer, dragged or focused.
+    Rectangle {
+        x: Tokens.aura-outdent.left;
+        y: root.bar-y + Tokens.aura-outdent.top;
+        width: root.width - Tokens.aura-outdent.left - Tokens.aura-outdent.right;
+        height: Tokens.range-bar-height - Tokens.aura-outdent.top - Tokens.aura-outdent.bottom;
+        border-radius: Tokens.control-radius;
+        background: root.enabled && (touch.has-hover || root.scrubbing || root.keyboard-focus) ? Tokens.aura-brush : transparent;
+    }
+
+    value-line := HorizontalLayout {
+        x: 0;
+        y: 0;
+        width: root.width;
+        height: self.preferred-height;
+        spacing: Tokens.space-4;
+        alignment: start;
+
+        Text {
+            text: root.text;
+            font-size: Tokens.font-size-value;
+            color: !root.enabled ? Tokens.text-muted-brush : root.scrubbing ? Tokens.draft-brush : Tokens.text-brush;
+            vertical-alignment: center;
+        }
+
+        if root.unit != "": Text {
+            text: root.unit;
+            font-size: Tokens.font-size-value;
+            color: Tokens.text-muted-brush;
+            vertical-alignment: center;
+        }
+    }
+
+    RangeBar {
+        x: 0;
+        y: root.bar-y;
+        width: root.width;
+        fraction: root.fraction;
+        draft: root.scrubbing;
+        active: root.enabled && (touch.has-hover || root.scrubbing);
+    }
+
+    focus := FocusScope {
+        focus-gained(reason) => {
+            if (reason == FocusReason.tab-navigation) {
+                KeyboardFocus.visible = true;
+            }
+        }
+        key-pressed(event) => {
+            if (root.pressed) {
+                // Escape mid-drag puts the value back where the drag began.
+                if (event.text == Key.Escape) {
+                    root.end-gesture(true);
+                    return accept;
+                }
+                return reject;
+            }
+            if (!root.enabled || event.modifiers.control || event.modifiers.alt || event.modifiers.meta) {
+                return reject;
+            }
+            if (event.text == Key.LeftArrow || (root.vertical-steps && event.text == Key.DownArrow)) {
+                root.stepped(event.modifiers.shift ? -Tokens.scrub-large-step : -1);
+                return accept;
+            }
+            if (event.text == Key.RightArrow || (root.vertical-steps && event.text == Key.UpArrow)) {
+                root.stepped(event.modifiers.shift ? Tokens.scrub-large-step : 1);
+                return accept;
+            }
+            if (event.text == Key.Home) {
+                root.stepped-to-end(false);
+                return accept;
+            }
+            if (event.text == Key.End) {
+                root.stepped-to-end(true);
+                return accept;
+            }
+            if (event.text == Key.Return || event.text == Key.F2) {
+                root.open-input();
+                return accept;
+            }
+            reject
+        }
+
+        touch := TouchArea {
+            mouse-cursor: root.enabled ? MouseCursor.ew-resize : MouseCursor.default;
+            pointer-event(event) => {
+                if (event.kind == PointerEventKind.down && event.button == PointerEventButton.left) {
+                    KeyboardFocus.visible = false;
+                    focus.focus();
+                    root.pressed = true;
+                    root.scrubbing = false;
+                    root.press-x = self.mouse-x;
+                } else if (event.kind == PointerEventKind.move && root.pressed && root.enabled) {
+                    if (root.scrubbing || Math.abs(self.mouse-x - root.press-x) >= Tokens.scrub-threshold) {
+                        root.scrubbing = true;
+                        root.scrubbed((self.mouse-x - root.press-x) / (Tokens.scrub-span * (event.modifiers.shift ? Tokens.scrub-fine-factor : 1)));
+                    }
+                } else if (event.kind == PointerEventKind.up && event.button == PointerEventButton.left && root.pressed) {
+                    if (root.scrubbing) {
+                        root.end-gesture(false);
+                    } else {
+                        root.pressed = false;
+                        root.open-input();
+                    }
+                } else if (event.kind == PointerEventKind.cancel && root.pressed) {
+                    root.end-gesture(false);
+                }
+            }
+        }
+    }
+
+    TipTrigger {
+        text: root.tip;
+        hovered: touch.has-hover && !root.pressed;
+        focused: focus.has-focus;
+    }
+
+    // Keyboard focus frames the whole cell, value and bar.
+    Rectangle {
+        x: Tokens.aura-outdent.left;
+        y: Tokens.aura-outdent.top;
+        width: root.width - Tokens.aura-outdent.left - Tokens.aura-outdent.right;
+        height: root.height - Tokens.aura-outdent.top - Tokens.aura-outdent.bottom;
+        border-radius: Tokens.control-radius;
+        border-width: root.keyboard-focus ? 1px : 0px;
+        border-color: Tokens.focus-brush;
+    }
+
+    // The popover: the name, the text box (all selected), "minimum – maximum", and why the text is no value.
+    popup := PopupWindow {
+        x: Tokens.aura-outdent.left;
+        y: root.height - Tokens.aura-outdent.bottom + Tokens.space-4;
+        width: Tokens.value-flyout-width + Tokens.flyout-padding.left + Tokens.flyout-padding.right;
+        height: Tokens.flyout-padding.top + Tokens.flyout-padding.bottom + Tokens.font-size-caption * 4 / 3 + Tokens.control-min-height
+            + Tokens.font-size-caption * 4 / 3 + Tokens.space-6 * 2
+            + (root.error != "" ? Tokens.space-6 + Tokens.font-size-caption * 8 / 3 : 0px);
+        close-policy: PopupClosePolicy.close-on-click-outside;
+
+        FlyoutSurface {
+            FocusScope {
+                capture-key-pressed(event) => {
+                    if (event.text == Key.Escape) {
+                        root.settled = true;
+                        popup.close();
+                        focus.focus();
+                        return accept;
+                    }
+                    reject
+                }
+
+                VerticalLayout {
+                    padding-left: Tokens.flyout-padding.left;
+                    padding-right: Tokens.flyout-padding.right;
+                    padding-top: Tokens.flyout-padding.top;
+                    padding-bottom: Tokens.flyout-padding.bottom;
+                    spacing: Tokens.space-6;
+                    alignment: start;
+
+                    Text {
+                        text: root.label;
+                        font-size: Tokens.font-size-caption;
+                        color: Tokens.text-muted-brush;
+                        overflow: elide;
+                    }
+
+                    Rectangle {
+                        height: Tokens.control-min-height;
+                        border-radius: Tokens.control-radius;
+                        border-width: 1px;
+                        background: FieldFrame.background(true, input.has-focus, field-touch.has-hover);
+                        border-color: FieldFrame.border(true, input.has-focus, field-touch.has-hover);
+
+                        field-touch := TouchArea {
+                            clicked => {
+                                input.focus();
+                            }
+                        }
+
+                        input := TextInput {
+                            x: Tokens.space-10;
+                            width: parent.width - Tokens.space-10 * 2;
+                            text: root.typed;
+                            single-line: true;
+                            font-size: Tokens.font-size-value;
+                            color: Tokens.text-brush;
+                            selection-background-color: Tokens.accent-pressed-color;
+                            selection-foreground-color: Tokens.on-accent-color;
+                            vertical-alignment: center;
+                            accessible-label: root.label;
+                            init => {
+                                self.focus();
+                                self.select-all();
+                            }
+                            edited => {
+                                root.typed = self.text;
+                            }
+                            // Enter commits a value; anything else keeps the popover open with its reason.
+                            accepted => {
+                                if (root.error == "") {
+                                    root.settled = true;
+                                    root.committed(root.typed);
+                                    popup.close();
+                                    focus.focus();
+                                }
+                            }
+                        }
+                    }
+
+                    Text {
+                        text: root.range;
+                        font-size: Tokens.font-size-caption;
+                        color: Tokens.text-muted-brush;
+                        overflow: elide;
+                    }
+
+                    if root.error != "": Text {
+                        text: root.error;
+                        font-size: Tokens.font-size-caption;
+                        color: Tokens.error-brush;
+                        wrap: word-wrap;
+                    }
+                }
+            }
+        }
+    }
+}

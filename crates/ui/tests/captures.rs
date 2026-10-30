@@ -1965,26 +1965,50 @@ fn trainer_captures(session: &Session) {
     show(&ui);
     assert!(!state(&ui).get_profile_kept(), "the profile is deleted");
     assert!(state(&ui).get_rows().row_data(3).is_some_and(|row| row.on), "her switch stays on");
-    // Up steps a focused box by its step, within its range; the tip says so.
+    // A click on a value's cell opens its popover; Escape closes it and leaves the cell focused, where Up steps the value
+    // by its step, within its range; the tip says so.
+    let damage = |ui: &MainWindow| state(ui).get_rows().row_data(3).expect("Damage enemies take").inline_value;
     session.click(520.0, 240.0);
+    session.key(Key::Escape);
     session.key(Key::UpArrow);
     session.key(Key::UpArrow);
     show(&ui);
-    assert_eq!(state(&ui).get_rows().row_data(3).expect("Damage enemies take").inline_value.text, "3");
+    assert_eq!(damage(&ui).text, "3");
     advance(Duration::from_millis(600));
     show(&ui);
     session.capture(&ui, "trainer-value-stepped-1100");
-    // The rows split anew (here the window narrows from two columns to one) while a number is half typed: the box is the
-    // same box, so it keeps its focus and the "1." typed so far, and the next digit lands after it.
+    // A drag shows where it would land, in the draft colour, on a bar that is logarithmic for 0–100× (1–5× takes a fair
+    // share of it), and reaches the game once, when it ends.
+    let at = |x: f32| LogicalPosition::new(x, 240.0);
+    let button = PointerEventButton::Left;
+    session.window.dispatch_event(WindowEvent::PointerMoved { position: at(520.0) });
+    session.window.dispatch_event(WindowEvent::PointerPressed { position: at(520.0), button });
+    for step in 1..=4 {
+        session.window.dispatch_event(WindowEvent::PointerMoved {
+            position: at(520.0 + 15.0 * step as f32),
+        });
+    }
+    settle();
+    show(&ui);
+    session.capture(&ui, "trainer-value-scrub-1100");
+    session.window.dispatch_event(WindowEvent::PointerReleased { position: at(580.0), button });
+    settle();
+    show(&ui);
+    assert_eq!(damage(&ui).text, "21.5");
+    // Typing: the popover opens with the value selected, and Enter sends what was typed. When the rows split anew while a
+    // number is half typed (here the window narrows from two columns to one), the popover closes and sends nothing.
     let ui = open("combat", 1, 1440, 900, connected());
     session.click(520.0, 240.0);
-    session.control_key("a");
-    session.type_text("1.");
+    session.type_text("1.5");
+    session.capture(&ui, "trainer-value-typing");
+    session.key(Key::Return);
+    show(&ui);
+    assert_eq!(damage(&ui).text, "1.5");
+    session.click(520.0, 240.0);
+    session.type_text("4");
     session.resize(1100, 700);
     show(&ui);
-    session.type_text("5");
-    show(&ui);
-    assert_eq!(state(&ui).get_rows().row_data(3).expect("Damage enemies take").inline_value.text, "1.5");
+    assert_eq!(damage(&ui).text, "1.5");
     let ui = open("world", 0, 940, 580, connected());
     session.capture(&ui, "trainer-world-940");
     // The pane open beside the narrowest window: the rows narrow below their width, and long titles wrap with their (?).

@@ -3302,6 +3302,14 @@ msgid "Turns on when {name} enters play."
 msgstr ""
 
 #: crates/ui/src/pages/trainer/pages.rs
+msgid "Type a number from {minimum} to {maximum}, or ∞."
+msgstr ""
+
+#: crates/ui/src/pages/trainer/pages.rs
+msgid "Type a number from {minimum} to {maximum}."
+msgstr ""
+
+#: crates/ui/src/pages/trainer/pages.rs
 msgid "Up and Down change it by {step}"
 msgstr ""
 

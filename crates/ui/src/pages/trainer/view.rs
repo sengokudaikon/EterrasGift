@@ -129,10 +129,7 @@ pub fn bind(window: &MainWindow, session: Rc<dyn TrainerSession>, features: Vec<
             controller.refresh();
         }
     });
-    // A value reaches the game while it is typed, once it reads as a number; committing an emptied box keeps the last one.
-    state.on_value_edited(with(|controller, row, index, text| {
-        controller.hook(row, |hook, session| hook.set_amount(session, index as usize, pages::hook_amount(hook.feature.id(), text)));
-    }));
+    // A typed value reaches the game once committed (its popover checked it first).
     state.on_value_committed(with(|controller, row, index, text| {
         controller.hook(row, |hook, session| hook.set_amount(session, index as usize, pages::hook_amount(hook.feature.id(), text)));
     }));
@@ -147,6 +144,43 @@ pub fn bind(window: &MainWindow, session: Rc<dyn TrainerSession>, features: Vec<
     state.on_value_stepped(step(|controller, row, index, direction| {
         controller.hook(row, |hook, session| hook.step(session, index as usize, direction));
     }));
+    state.on_value_stepped_to_end({
+        let controller = controller.clone();
+        move |row, index, end| {
+            let mut controller = controller.borrow_mut();
+            controller.hook(row, |hook, session| hook.step_to_end(session, index as usize, end));
+            controller.refresh();
+        }
+    });
+    // A drag shows where it would land and sends once, when it ends.
+    state.on_value_scrubbed({
+        let controller = controller.clone();
+        move |row, index, delta| {
+            let mut controller = controller.borrow_mut();
+            controller.hook(row, |hook, _| hook.scrub(index as usize, f64::from(delta)));
+            controller.refresh();
+        }
+    });
+    state.on_value_scrub_ended({
+        let controller = controller.clone();
+        move |row, index, cancelled| {
+            let mut controller = controller.borrow_mut();
+            controller.hook(row, |hook, session| hook.end_scrub(session, index as usize, cancelled));
+            controller.refresh();
+        }
+    });
+    // A binding asks this: a controller already borrowed (Rust mid-update) answers that the text is fine, for now.
+    state.on_value_checked({
+        let controller = controller.clone();
+        move |row, index, text| {
+            let Ok(mut controller) = controller.try_borrow_mut() else {
+                return SharedString::new();
+            };
+            let mut reason = String::new();
+            controller.hook(row, |hook, _| reason = hook.check(index as usize, &text));
+            reason.into()
+        }
+    });
     state.on_value_chosen(step(|controller, row, index, choice| {
         controller.hook(row, |hook, session| hook.choose(session, index as usize, choice.max(0) as usize));
     }));
@@ -573,6 +607,8 @@ fn value_view(id: &str, value: &FeatureValue, number: f64, name: &str, choices: 
         choice_index: number as i32,
         text: pages::hook_text(id, number).into(),
         step_tip: pages::step_text(value.step).into(),
+        fraction: pages::fraction_of(value, number) as f32,
+        range: pages::range_text(id, value).into(),
     }
 }
 

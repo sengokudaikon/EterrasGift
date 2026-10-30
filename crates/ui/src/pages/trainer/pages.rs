@@ -1,7 +1,7 @@
 //! The trainer's pages as plain Rust: pages, sections, hook rows, field editors, held-item lists and planned features,
 //! and how rows split into columns, without any view, so they are testable alone. `view.rs` shows them.
 
-use super::catalog::{self, Area, Feature, FeatureField, FeatureKind};
+use super::catalog::{self, Area, Feature, FeatureField, FeatureKind, FeatureValue};
 use super::session::{FieldError, FieldRequest, FieldResult, FieldWrite, GameField, HookState, PendingFields, TrainerSession};
 use eg_core::phrase::Phrase;
 
@@ -27,6 +27,8 @@ const NOT_CHANGED: Phrase = Phrase::new("Not changed: {details}");
 const OTHER_FIELDS_WRITE: Phrase = Phrase::new("The game answered with other fields.");
 const READ_AGAIN: Phrase = Phrase::new("{details} Read again to see what the game holds.");
 const STEP: Phrase = Phrase::new("Up and Down change it by {step}");
+const TYPE_A_NUMBER: Phrase = Phrase::new("Type a number from {minimum} to {maximum}.");
+const TYPE_A_NUMBER_OR_INFINITY: Phrase = Phrase::new("Type a number from {minimum} to {maximum}, or ∞.");
 
 /// One trainer page: its sections along the top and the chosen one beneath.
 pub struct PageModel {
@@ -147,6 +149,8 @@ pub struct HookRow {
     pub feature: Feature,
     /// What the helper is sent: a number, or a choice's index.
     pub values: Vec<f64>,
+    /// A drag on a value's cell: which value, and where it began. Its values are shown, and sent when it ends.
+    scrub: Option<(usize, f64)>,
 }
 
 impl HookRow {
@@ -159,7 +163,7 @@ impl HookRow {
             .enumerate()
             .map(|(i, value)| if fits { value.fit_saved(saved[i]) } else { value.start })
             .collect();
-        let mut row = HookRow { feature, values };
+        let mut row = HookRow { feature, values, scrub: None };
         // A remembered value the catalog no longer allows reaches the helper as the box shows it.
         if fits && saved != row.values {
             row.send(session);
@@ -202,14 +206,72 @@ impl HookRow {
         self.set_number(session, index, amount.clamp(value.minimum, value.maximum));
     }
 
-    /// Up and Down: the box's step either way, within its range.
-    pub fn step(&mut self, session: &dyn TrainerSession, index: usize, direction: i32) {
+    /// The arrow keys: `steps` of the value's step either way (Shift takes five), within its range.
+    pub fn step(&mut self, session: &dyn TrainerSession, index: usize, steps: i32) {
         if let Some(value) = self.feature.values.get(index) {
-            let mut amount = self.values[index] + value.step * f64::from(direction.signum());
+            let direction = steps.signum();
+            let mut amount = self.values[index] + value.step * f64::from(steps);
             if self.feature.id() == "enemy-damage" && amount > 100.0 {
                 amount = if direction < 0 { 100.0 } else { 101.0 };
             }
             self.set_amount(session, index, Some(amount));
+        }
+    }
+
+    /// Home and End: the value's minimum or maximum (∞ for the damage enemies take).
+    pub fn step_to_end(&mut self, session: &dyn TrainerSession, index: usize, end: bool) {
+        if let Some(value) = self.feature.values.get(index) {
+            self.set_amount(session, index, Some(if end { value.maximum } else { value.minimum }));
+        }
+    }
+
+    /// A drag on a value's cell, `delta` of its bar from where it began: the value it reaches shows, unsent.
+    pub fn scrub(&mut self, index: usize, delta: f64) {
+        let Some(value) = self.feature.values.get(index) else {
+            return;
+        };
+        let start = match self.scrub {
+            Some((scrubbed, start)) if scrubbed == index => start,
+            _ => {
+                self.scrub = Some((index, self.values[index]));
+                self.values[index]
+            }
+        };
+        let mut number = number_at(value, fraction_of(value, start) + delta);
+        // Above 100× the damage enemies take is only ∞.
+        if self.feature.id() == "enemy-damage" && number > 100.0 {
+            number = 101.0;
+        }
+        self.values[index] = number;
+    }
+
+    /// The drag's end: what it reached is sent once, or, cancelled, the value goes back to where it began.
+    #[allow(clippy::float_cmp)]
+    pub fn end_scrub(&mut self, session: &dyn TrainerSession, index: usize, cancelled: bool) {
+        if let Some((scrubbed, start)) = self.scrub.take()
+            && scrubbed == index
+        {
+            if cancelled || self.values[index] == start {
+                self.values[index] = start;
+            } else {
+                self.send(session);
+            }
+        }
+    }
+
+    /// Why a typed text is no value for it, or empty when it is one.
+    pub fn check(&self, index: usize, text: &str) -> String {
+        let Some(value) = self.feature.values.get(index) else {
+            return String::new();
+        };
+        let infinite = self.feature.id() == "enemy-damage";
+        let fits = |amount: f64| amount >= value.minimum && amount <= value.maximum && !(infinite && amount > 100.0 && amount != 101.0);
+        if hook_amount(self.feature.id(), text).is_some_and(fits) {
+            String::new()
+        } else if infinite {
+            TYPE_A_NUMBER_OR_INFINITY.with(&[("minimum", &plain(value.minimum)), ("maximum", &plain(100.0))])
+        } else {
+            TYPE_A_NUMBER.with(&[("minimum", &plain(value.minimum)), ("maximum", &plain(value.maximum))])
         }
     }
 
@@ -265,6 +327,38 @@ pub fn hook_amount(id: &str, text: &str) -> Option<f64> {
     } else {
         parse(text)
     }
+}
+
+/// Where a hook value sits on its cell's bar, 0 to 1: in proportion to its range, except a wide multiplier's (× over
+/// more than 20 between its ends: 0–100×, the experience rates), whose bar is logarithmic, so that 1–5× takes a fair
+/// share of it rather than its first few pixels.
+pub fn fraction_of(value: &FeatureValue, number: f64) -> f64 {
+    let span = value.maximum - value.minimum;
+    if span <= 0.0 {
+        return 0.0;
+    }
+    let offset = (number - value.minimum).clamp(0.0, span);
+    if logarithmic(value) { offset.ln_1p() / span.ln_1p() } else { offset / span }
+}
+
+/// The value at a place on its bar: on a whole step (from 0, so a rate from 0.01 still lands on 1), within its range.
+pub fn number_at(value: &FeatureValue, fraction: f64) -> f64 {
+    let span = value.maximum - value.minimum;
+    let fraction = fraction.clamp(0.0, 1.0);
+    let offset = if logarithmic(value) { (fraction * span.ln_1p()).exp_m1() } else { fraction * span };
+    let stepped = ((value.minimum + offset) / value.step).round() * value.step;
+    // To millionths, so that steps of 0.1 don't drift (0.30000000000000004).
+    ((stepped * 1e6).round() / 1e6).clamp(value.minimum, value.maximum)
+}
+
+fn logarithmic(value: &FeatureValue) -> bool {
+    value.unit == Some("×") && value.maximum - value.minimum > 20.0
+}
+
+/// A hook value's range for its typing popover: "0 – 100%", "0 – ∞".
+pub fn range_text(id: &str, value: &FeatureValue) -> String {
+    let unit = if id == "enemy-damage" { "" } else { value.unit.unwrap_or_default() };
+    format!("{} – {}{unit}", hook_text(id, value.minimum), hook_text(id, value.maximum))
 }
 
 pub fn hook_text(id: &str, number: f64) -> String {
@@ -868,6 +962,7 @@ mod tests {
         states: BTreeMap<&'static str, HookState>,
         wanted: RefCell<BTreeSet<String>>,
         values: RefCell<BTreeMap<String, Vec<f64>>>,
+        sends: std::cell::Cell<usize>,
     }
 
     impl TrainerSession for Setup {
@@ -891,6 +986,7 @@ mod tests {
             self.values.borrow().get(id).cloned().unwrap_or_default()
         }
         fn set_hook_values(&self, id: &str, values: &[f64]) {
+            self.sends.set(self.sends.get() + 1);
             self.values.borrow_mut().insert(id.to_owned(), values.to_vec());
         }
         fn hook_state(&self, id: &str) -> Option<HookState> {
@@ -923,6 +1019,74 @@ mod tests {
         row.set_amount(&session, 0, Some(2.5));
         assert_eq!(row.values, [2.5]);
         assert_eq!(hook_text("enemy-damage", 2.5), "2.5");
+    }
+
+    #[test]
+    fn a_value_bar_is_proportional_but_logarithmic_for_wide_multipliers() {
+        let value = |id: &str| catalog::feature(id).unwrap().values[0];
+        // A percentage and a short multiplier are in proportion to their range.
+        let taken = value("incoming-damage");
+        assert_eq!(fraction_of(&taken, 50.0), 0.5);
+        assert_eq!(number_at(&taken, 0.5), 50.0);
+        let pack = value("duplicate-on-drop");
+        assert_eq!(fraction_of(&pack, 1.0), 0.0);
+        assert_eq!(number_at(&pack, 1.0), 20.0);
+        // 0–100× (here 0–∞): 2× is a quarter of the way along, not 2%, and the ends stay the ends.
+        let enemy = value("enemy-damage");
+        assert!((0.2..0.3).contains(&fraction_of(&enemy, 2.0)), "{}", fraction_of(&enemy, 2.0));
+        assert_eq!(number_at(&enemy, fraction_of(&enemy, 2.0)), 2.0);
+        assert_eq!((number_at(&enemy, 0.0), number_at(&enemy, 1.0)), (0.0, 101.0));
+        // Every place lands on a whole step, from 0: a rate from 0.01 by 0.1 still reaches 1, and nothing drifts.
+        let rate = value("fixed-attack-rate");
+        assert_eq!(number_at(&rate, fraction_of(&rate, 1.0)), 1.0);
+        assert_eq!(number_at(&rate, 0.0), 0.01);
+        let distance = value("camera-distance");
+        assert_eq!(number_at(&distance, fraction_of(&distance, -17.5)), -17.5);
+        assert_eq!(range_text("enemy-damage", &enemy), "0 – ∞");
+        assert_eq!(range_text("incoming-damage", &taken), "0 – 100%");
+    }
+
+    #[test]
+    fn a_drag_shows_its_value_and_sends_it_once_when_it_ends() {
+        let session = Setup::default();
+        let mut row = HookRow::new(*catalog::feature("incoming-damage").unwrap(), &session);
+        let before = session.sends.get();
+        for delta in [0.05, 0.1, 0.2] {
+            row.scrub(0, delta);
+        }
+        assert_eq!(row.values, [70.0]);
+        assert_eq!(session.sends.get(), before, "nothing reaches the game while it is dragged");
+        row.end_scrub(&session, 0, false);
+        assert_eq!((session.sends.get(), session.hook_values("incoming-damage")), (before + 1, vec![70.0]));
+        // Escape mid-drag: back where it began, nothing sent.
+        row.scrub(0, -0.5);
+        assert_eq!(row.values, [20.0]);
+        row.end_scrub(&session, 0, true);
+        assert_eq!((row.values.as_slice(), session.sends.get()), ([70.0].as_slice(), before + 1));
+        // The far end of the damage enemies take is ∞, never 100.5.
+        let mut enemy = HookRow::new(*catalog::feature("enemy-damage").unwrap(), &session);
+        enemy.scrub(0, 0.9999);
+        assert_eq!(enemy.values, [101.0]);
+    }
+
+    #[test]
+    fn keys_step_the_ends_and_typing_says_what_it_takes() {
+        let session = Setup::default();
+        let mut row = HookRow::new(*catalog::feature("incoming-damage").unwrap(), &session);
+        row.step(&session, 0, 5);
+        assert_eq!(row.values, [55.0], "Shift steps five");
+        row.step_to_end(&session, 0, true);
+        assert_eq!(row.values, [100.0]);
+        row.step_to_end(&session, 0, false);
+        assert_eq!(row.values, [0.0]);
+        assert_eq!(row.check(0, "25"), "");
+        assert_eq!(row.check(0, "250"), "Type a number from 0 to 100.");
+        assert_eq!(row.check(0, "lots"), "Type a number from 0 to 100.");
+        let mut enemy = HookRow::new(*catalog::feature("enemy-damage").unwrap(), &session);
+        enemy.step_to_end(&session, 0, true);
+        assert_eq!(enemy.values, [101.0], "End is ∞");
+        assert_eq!(enemy.check(0, "∞"), "");
+        assert_eq!(enemy.check(0, "100.5"), "Type a number from 0 to 100, or ∞.");
     }
 
     #[test]

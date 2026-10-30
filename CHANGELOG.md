@@ -3,6 +3,11 @@
 What the rewrite can do, newest first, one line per feature. Add a line when a feature lands; details live in the
 code and its tests, and what is still to build in [research/trainer-features.md](research/trainer-features.md).
 
+## 2026-10-30
+
+- Trainer: hook values are value cells, as affix values are: the value over its range bar, dragged (sent once, on
+  release), stepped with the arrow keys, Home/End, or typed in a popover; 0–100× multipliers have a logarithmic bar.
+
 ## 2026-10-29
 
 - UI: text and tooltips rewritten to be short and plain; facts once joined with dots are separate texts.
