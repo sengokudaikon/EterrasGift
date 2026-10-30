@@ -72,8 +72,9 @@ by exact full readback. Every failure after store entry is uncertain; no Rebuild
 runs. Only owned authored Unity validation is claimed. Later game recalculation can replace the level again.
 
 Gameplay hooks: each module under `game/features` owns its targets, ABI contracts, effect and receiver rules, and
-documents its behaviour in its `//!` docs. `game/features/hooks` maps the wire's feature IDs to those modules and
-their patch groups (several controls can share a group, as the two damage controls do); the wire carries feature
+documents its behaviour in its `//!` docs. `game/features/registry` lists those features (`FEATURES`), each with the
+controls it serves; a feature's place is its patch group (several controls can share one, as the two damage controls
+do). The wire carries feature
 IDs, settings and observations, never patch ownership. `engine/gameplay_hooks` coordinates admission, entry
 transactions and cleanup ordering: Clear closes all effects, restores receiver state and entry bytes, then releases
 receiver-bound groups, and every failure retains the affected owners and pins. Generated gameplay code stays outside

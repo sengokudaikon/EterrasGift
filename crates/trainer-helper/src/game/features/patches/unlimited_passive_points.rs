@@ -1,11 +1,6 @@
 //! Replace this spend path's virtual unspent-point result with 113; other point reads remain the game's.
-use super::super::hooks::{Behavior, GameplayHook, HookFeature};
 use super::*;
-pub(crate) const FEATURE: HookFeature = HookFeature {
-    controls: &[GameplayHook::UnlimitedPassivePoints],
-    behavior: Behavior::Patch,
-    targets,
-};
+pub(crate) const FEATURE: HookFeature = HookFeature::patches(&[GameplayHook::UnlimitedPassivePoints], SPECS);
 const SPECS: &[PatchSpec] = &[PatchSpec::new(
     "Passive point check",
     MethodSpec {
@@ -20,7 +15,3 @@ const SPECS: &[PatchSpec] = &[PatchSpec::new(
     0,
     &[0x31, 0xc0, 0xb0, 0x71, 0x90, 0x90],
 )];
-unsafe fn targets(access: &RuntimeAccess, module: NonNull<u8>, size: usize) -> Result<Vec<GameplayHookTarget>, GameError> {
-    // SAFETY: the shared caller retains the attached runtime, module and exclusive code ownership contract.
-    unsafe { access.patch_targets(SPECS, module, size) }
-}

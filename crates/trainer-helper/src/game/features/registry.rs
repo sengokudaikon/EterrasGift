@@ -21,7 +21,37 @@ type ResolveTargets = unsafe fn(&RuntimeAccess, NonNull<u8>, usize) -> Result<Ve
 pub(crate) struct HookFeature {
     pub controls: &'static [GameplayHook],
     pub behavior: Behavior,
-    pub targets: ResolveTargets,
+    pub targets: Targets,
+}
+
+/// How a feature finds what it changes: its own resolver, or the code patches it lists.
+pub(crate) enum Targets {
+    Resolve(ResolveTargets),
+    Patches(&'static [super::patches::PatchSpec]),
+}
+
+impl HookFeature {
+    /// A feature that only patches code, as `specs` lists it.
+    pub(crate) const fn patches(controls: &'static [GameplayHook], specs: &'static [super::patches::PatchSpec]) -> Self {
+        Self {
+            controls,
+            behavior: Behavior::Patch,
+            targets: Targets::Patches(specs),
+        }
+    }
+
+    /// # Safety
+    /// Attached immutable runtime metadata, a retained readable GameAssembly of `size` bytes at `module`, and exclusive
+    /// ownership of the code it may patch, as each resolver states.
+    pub(crate) unsafe fn targets(&self, access: &RuntimeAccess, module: NonNull<u8>, size: usize) -> Result<Vec<GameplayHookTarget>, GameError> {
+        // SAFETY: the caller's contract is each resolver's.
+        unsafe {
+            match self.targets {
+                Targets::Resolve(resolve) => resolve(access, module, size),
+                Targets::Patches(specs) => access.patch_targets(specs, module, size),
+            }
+        }
+    }
 }
 
 /// Every hook feature. Its place here is its group: the slot that owns its patches while the helper runs.
@@ -97,6 +127,14 @@ pub(crate) struct MethodSpec {
     pub instance: bool,
     pub params: &'static [&'static str],
     pub returns: &'static str,
+}
+impl MethodSpec {
+    /// Its native argument positions: the receiver when it has one, its parameters, and the MethodInfo.
+    pub(crate) const fn positions(&self) -> u8 {
+        let positions = self.params.len() + self.instance as usize + 1;
+        assert!(positions <= u8::MAX as usize, "bounded explicit method contract");
+        positions as u8
+    }
 }
 
 pub(crate) struct ResolvedMethod {

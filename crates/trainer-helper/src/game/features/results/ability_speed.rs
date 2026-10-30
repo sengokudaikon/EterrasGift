@@ -1,12 +1,12 @@
 //! Scale the player's calculated ability speed; downstream fixed-speed mutators remain the game's decision.
 use super::*;
-use crate::game::gameplay::{Behavior, GameplayHook, HookFeature};
+use crate::game::registry::{Behavior, GameplayHook, HookFeature, Targets};
 use crate::hooks::postfix::FRAME;
 
 pub(crate) const FEATURE: HookFeature = HookFeature {
     controls: &[GameplayHook::AbilitySpeed],
     behavior: Behavior::Postfix,
-    targets,
+    targets: Targets::Resolve(targets),
 };
 const SPEC: MethodSpec = MethodSpec {
     class: c"UsingAbility",

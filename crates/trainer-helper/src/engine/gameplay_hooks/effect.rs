@@ -4,7 +4,7 @@ use super::*;
 use crate::{
     game::{
         RuntimeAccess, StatBinding, damage,
-        gameplay::{Behavior, HookFeature, TargetEffect},
+        registry::{Behavior, HookFeature, TargetEffect},
     },
     hooks::{leaf::LeafGate, postfix::PostfixGate, scalar::ScalarGate},
 };

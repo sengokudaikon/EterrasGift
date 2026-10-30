@@ -1,7 +1,7 @@
 //! Absolute attack rate, reapplied after every game method that recalculates or sets it. Hooking `calculateAttackRate`
 //! alone is not enough: `setMainHandAttackRate` and `setOffHandAttackRate` inline the calculation, so all three are
 //! targets.
-use super::hooks::{Behavior, GameplayHook, GameplayHookTarget, HookFeature, MethodSpec};
+use super::registry::{Behavior, GameplayHook, GameplayHookTarget, HookFeature, MethodSpec, Targets};
 use super::stat::StatFeature;
 use crate::game::{GameError, RuntimeAccess};
 use std::ptr::NonNull;
@@ -9,7 +9,7 @@ use std::ptr::NonNull;
 pub(super) const FEATURE: HookFeature = HookFeature {
     controls: &[GameplayHook::FixedAttackRate],
     behavior: Behavior::Scalar(&ATTACK_RATE),
-    targets,
+    targets: Targets::Resolve(targets),
 };
 pub(super) const ATTACK_RATE: StatFeature = StatFeature {
     // SAFETY: bind_stat establishes the attached metadata contract before resolving the selected accessor.

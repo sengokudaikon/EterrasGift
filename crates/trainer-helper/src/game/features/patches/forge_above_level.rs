@@ -1,11 +1,6 @@
 //! Bypass the character-versus-item-level refusal; preserve the remaining Forge admission checks.
-use super::super::hooks::{Behavior, GameplayHook, HookFeature};
 use super::*;
-pub(crate) const FEATURE: HookFeature = HookFeature {
-    controls: &[GameplayHook::ForgeAboveLevel],
-    behavior: Behavior::Patch,
-    targets,
-};
+pub(crate) const FEATURE: HookFeature = HookFeature::patches(&[GameplayHook::ForgeAboveLevel], SPECS);
 const SPECS: &[PatchSpec] = &[PatchSpec::new(
     "Forge level check",
     MethodSpec {
@@ -22,7 +17,3 @@ const SPECS: &[PatchSpec] = &[PatchSpec::new(
     2,
     &[0x90, 0x90, 0x90, 0x90, 0x90, 0x90],
 )];
-unsafe fn targets(access: &RuntimeAccess, module: NonNull<u8>, size: usize) -> Result<Vec<GameplayHookTarget>, GameError> {
-    // SAFETY: the shared caller retains the attached runtime, module and exclusive code ownership contract.
-    unsafe { access.patch_targets(SPECS, module, size) }
-}

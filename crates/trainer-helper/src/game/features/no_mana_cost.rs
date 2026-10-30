@@ -1,5 +1,5 @@
 //! Let the game calculate an ability's cost once, then answer zero only for the current player's mana component.
-use super::hooks::{Behavior, GameplayHook, GameplayHookTarget, HookFeature, MethodSpec};
+use super::registry::{Behavior, GameplayHook, GameplayHookTarget, HookFeature, MethodSpec, Targets};
 use crate::{
     game::*,
     hooks::postfix::{FRAME, PostfixEffect},
@@ -8,7 +8,7 @@ use crate::{
 pub(super) const FEATURE: HookFeature = HookFeature {
     controls: &[GameplayHook::NoManaCost],
     behavior: Behavior::Postfix,
-    targets,
+    targets: Targets::Resolve(targets),
 };
 
 /// Static player/online storage is process-owned. The supported game retains the actor/mana graph for this call,
@@ -40,10 +40,18 @@ impl ManaCostLayout {
         PostfixEffect {
             code,
             slots: [self.player_storage.as_ptr() as u64, self.online_storage.as_ptr() as u64],
-            positions: 7,
+            positions: SPEC.positions(),
         }
     }
 }
+
+const SPEC: MethodSpec = MethodSpec {
+    class: c"BaseMana",
+    method: c"getManaCost",
+    instance: true,
+    params: &["Ability", "System.Single", "System.Boolean", "AbilityMutator", "System.Boolean"],
+    returns: "System.Single",
+};
 
 unsafe fn targets(access: &RuntimeAccess, module: NonNull<u8>, size: usize) -> Result<Vec<GameplayHookTarget>, GameError> {
     // SAFETY: attached main thread, initialized game statics, retained metadata and bounded module.
@@ -71,17 +79,7 @@ unsafe fn targets(access: &RuntimeAccess, module: NonNull<u8>, size: usize) -> R
             online_storage: access.hook_static_storage(environment, online, 1)?,
             mana_offset: offset as u32,
         };
-        let method = access.hook_method(
-            &MethodSpec {
-                class: c"BaseMana",
-                method: c"getManaCost",
-                instance: true,
-                params: &["Ability", "System.Single", "System.Boolean", "AbilityMutator", "System.Boolean"],
-                returns: "System.Single",
-            },
-            module,
-            size,
-        )?;
+        let method = access.hook_method(&SPEC, module, size)?;
         Ok(vec![method.postfix(layout.effect())])
     }
 }

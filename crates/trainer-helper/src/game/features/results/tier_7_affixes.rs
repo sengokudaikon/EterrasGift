@@ -1,11 +1,11 @@
 //! Advance the game's affix RNG normally, then return internal tier six for newly generated affixes.
 use super::*;
-use crate::game::gameplay::{Behavior, GameplayHook, HookFeature};
+use crate::game::registry::{Behavior, GameplayHook, HookFeature, Targets};
 
 pub(crate) const FEATURE: HookFeature = HookFeature {
     controls: &[GameplayHook::Tier7Affixes],
     behavior: Behavior::Postfix,
-    targets,
+    targets: Targets::Resolve(targets),
 };
 const SPEC: MethodSpec = MethodSpec {
     class: c"GenerateItems",

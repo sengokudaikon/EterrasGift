@@ -6,13 +6,13 @@ use crate::hooks::leaf::{EFFECT_SLOTS, FRAME, GeneratedEffect, LeafEffect, LeafG
 use eg_trainer_wire::hooks::GameplayHook;
 use std::ptr::NonNull;
 
-use super::hooks::{Behavior, GameplayHookTarget, HookFeature, MethodSpec};
+use super::registry::{Behavior, GameplayHookTarget, HookFeature, MethodSpec, Targets};
 use crate::game::*;
 
 pub(super) const FEATURE: HookFeature = HookFeature {
     controls: &CONTROLS,
     behavior: Behavior::Damage,
-    targets,
+    targets: Targets::Resolve(targets),
 };
 pub(crate) const CONTROLS: [GameplayHook; 2] = [GameplayHook::IncomingDamage, GameplayHook::EnemyDamage];
 

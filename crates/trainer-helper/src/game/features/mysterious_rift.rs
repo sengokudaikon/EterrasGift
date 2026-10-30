@@ -1,5 +1,5 @@
 //! Select the next mysterious-rift encounter through the game's Boolean choice.
-use super::hooks::{Behavior, GameplayHook, GameplayHookTarget, HookFeature, MethodSpec};
+use super::registry::{Behavior, GameplayHook, GameplayHookTarget, HookFeature, MethodSpec, Targets};
 use crate::{
     game::{GameError, RuntimeAccess},
     hooks::leaf::LeafEffect,
@@ -9,7 +9,7 @@ use std::ptr::NonNull;
 pub(super) const FEATURE: HookFeature = HookFeature {
     controls: &[GameplayHook::MysteriousRift],
     behavior: Behavior::Leaf,
-    targets,
+    targets: Targets::Resolve(targets),
 };
 
 unsafe fn targets(access: &RuntimeAccess, module: NonNull<u8>, size: usize) -> Result<Vec<GameplayHookTarget>, GameError> {

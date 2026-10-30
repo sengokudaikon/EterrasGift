@@ -1,11 +1,6 @@
 //! Keep preview and actual Weaver spending consistent; at least one earned Weaver point remains required.
-use super::super::hooks::{Behavior, GameplayHook, HookFeature};
 use super::*;
-pub(crate) const FEATURE: HookFeature = HookFeature {
-    controls: &[GameplayHook::UnlimitedWeaverPoints],
-    behavior: Behavior::Patch,
-    targets,
-};
+pub(crate) const FEATURE: HookFeature = HookFeature::patches(&[GameplayHook::UnlimitedWeaverPoints], SPECS);
 const SPECS: &[PatchSpec] = &[
     PatchSpec::new(
         "Weaver preview point check",
@@ -58,7 +53,3 @@ const SPECS: &[PatchSpec] = &[
         &[0x31, 0xc0, 0x90, 0x90],
     ),
 ];
-unsafe fn targets(access: &RuntimeAccess, module: NonNull<u8>, size: usize) -> Result<Vec<GameplayHookTarget>, GameError> {
-    // SAFETY: the shared caller retains the attached runtime, module and exclusive code ownership contract.
-    unsafe { access.patch_targets(SPECS, module, size) }
-}

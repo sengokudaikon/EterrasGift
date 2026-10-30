@@ -1,11 +1,6 @@
 //! Keep Weaver/zone eligibility, then replace the final RNG tail-call with true.
-use super::super::hooks::{Behavior, GameplayHook, HookFeature};
 use super::*;
-pub(crate) const FEATURE: HookFeature = HookFeature {
-    controls: &[GameplayHook::FavorCache],
-    behavior: Behavior::Patch,
-    targets,
-};
+pub(crate) const FEATURE: HookFeature = HookFeature::patches(&[GameplayHook::FavorCache], SPECS);
 const SPECS: &[PatchSpec] = &[PatchSpec::new(
     "Favor cache roll",
     MethodSpec {
@@ -22,7 +17,3 @@ const SPECS: &[PatchSpec] = &[PatchSpec::new(
     24,
     &[0xb0, 0x1, 0xc3, 0x90, 0x90],
 )];
-unsafe fn targets(access: &RuntimeAccess, module: NonNull<u8>, size: usize) -> Result<Vec<GameplayHookTarget>, GameError> {
-    // SAFETY: the shared caller retains the attached runtime, module and exclusive code ownership contract.
-    unsafe { access.patch_targets(SPECS, module, size) }
-}

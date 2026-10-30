@@ -3,7 +3,7 @@
 use super::*;
 use crate::game::{
     GameplayHookTarget,
-    gameplay::{FEATURES, definition, slot_of},
+    registry::{FEATURES, definition, slot_of},
 };
 use eg_trainer_wire::hooks::{GameplayHook, HookObservation, PatchState};
 
@@ -25,7 +25,7 @@ impl Group {
         let mut prepared = Vec::new();
         for (index, target) in targets.iter().enumerate() {
             let method = &target.method;
-            if let crate::game::gameplay::TargetEffect::Patch(change) = &target.effect {
+            if let crate::game::registry::TargetEffect::Patch(change) = &target.effect {
                 // SAFETY: complete pattern and method bounds checked; still unpublished and exclusively owned.
                 let patch = unsafe { hooks::patch::CodePatch::prepare(change.address, &change.expected, &change.replacement) }
                     .map_err(|error| server::failure(ResponseCode::Refused, format!("{}: {error}", method.name)))?;
@@ -187,7 +187,7 @@ pub(super) unsafe fn operation(expected_manager: u64, hook: GameplayHook, on: Op
                 change(hook, on, value, binding, || {
                     let module = module().map_err(|e| server::failure(ResponseCode::Refused, e))?;
                     let size = image_size(module).map_err(|e| server::failure(ResponseCode::Refused, e))?;
-                    (definition(hook).targets)(&access, module, size).map_err(game_failure)
+                    definition(hook).targets(&access, module, size).map_err(game_failure)
                 })?;
                 done(Vec::new())
             } else {
@@ -215,7 +215,7 @@ pub(super) unsafe fn fixture_change(
     extras: &[*mut u8],
     damage: Option<crate::game::damage::DamageLayout>,
 ) -> Result<(), Response> {
-    use crate::{game::gameplay::ResolvedMethod, hooks::leaf::LeafEffect};
+    use crate::{game::registry::ResolvedMethod, hooks::leaf::LeafEffect};
     // SAFETY: fixture owns executable targets, optional class identity and readable receiver layouts for process lifetime.
     unsafe {
         change(hook, on, value, FeatureBinding::fixture(hook), || {
@@ -259,7 +259,7 @@ mod tests {
     use effect::Gate;
     #[test]
     fn a_leaf_group_prepares_all_entries_and_clear_restores_their_distinct_originals() {
-        use crate::{game::gameplay::ResolvedMethod, hooks::leaf::LeafEffect};
+        use crate::{game::registry::ResolvedMethod, hooks::leaf::LeafEffect};
         #[unsafe(naked)]
         unsafe extern "C-unwind" fn first() -> bool {
             core::arch::naked_asm!(
@@ -438,7 +438,7 @@ mod tests {
         let address = NonNull::new(target as *mut u8).unwrap();
         // SAFETY: authored process-lifetime executable and static storage, exact float ABI.
         let group = unsafe {
-            let method = crate::game::gameplay::ResolvedMethod {
+            let method = crate::game::registry::ResolvedMethod {
                 name: "fixture damage".into(),
                 address,
                 bytes: address.cast::<[u8; 16]>().as_ptr().read_unaligned(),
@@ -504,7 +504,7 @@ mod tests {
 
     #[test]
     fn interior_ranges_share_on_off_readback_manager_loss_and_clear_with_detours() {
-        use crate::game::gameplay::{CodeChange, ResolvedMethod, TargetEffect};
+        use crate::game::registry::{CodeChange, ResolvedMethod, TargetEffect};
         use crate::hooks::leaf::LeafEffect;
         #[unsafe(naked)]
         unsafe extern "C-unwind" fn first() -> u32 {
@@ -604,7 +604,7 @@ mod tests {
 
     #[test]
     fn mana_cost_uses_the_shared_patch_readback_and_clear_lifecycle() {
-        use crate::game::{gameplay::ResolvedMethod, no_mana_cost::ManaCostLayout};
+        use crate::game::{no_mana_cost::ManaCostLayout, registry::ResolvedMethod};
         use std::sync::atomic::{AtomicU8, AtomicUsize};
         #[repr(C)]
         struct Actor {
@@ -675,7 +675,7 @@ mod tests {
 
     #[test]
     fn material_refills_use_independent_entries_and_shared_restore_lifecycle_without_undoing_inventory() {
-        use crate::game::{gameplay::ResolvedMethod, runes_glyphs_to_99::SlotLayout, shards_to_99::ShardLayout};
+        use crate::game::{registry::ResolvedMethod, runes_glyphs_to_99::SlotLayout, shards_to_99::ShardLayout};
         use std::{cell::Cell, sync::atomic::AtomicU8};
         #[repr(C)]
         struct Node {
@@ -826,7 +826,7 @@ mod tests {
 
     #[test]
     fn integer_result_overrides_use_shared_setting_readback_manager_loss_and_terminal_clear() {
-        use crate::game::{gameplay::ResolvedMethod, results::tier_7_affixes};
+        use crate::game::{registry::ResolvedMethod, results::tier_7_affixes};
         use std::sync::atomic::AtomicU8;
         #[unsafe(naked)]
         unsafe extern "C-unwind" fn target(_: usize, _: usize, _: usize, _: i32, _: bool, _: i32, _: f32, _: usize, _: usize, _: usize) -> i32 {

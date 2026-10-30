@@ -1,12 +1,12 @@
 //! Override newly generated echo types after the original selection; echo cycling remains a separate pending feature.
 use super::*;
-use crate::game::gameplay::{Behavior, GameplayHook, HookFeature};
+use crate::game::registry::{Behavior, GameplayHook, HookFeature, Targets};
 use crate::hooks::postfix::FRAME;
 
 pub(crate) const FEATURE: HookFeature = HookFeature {
     controls: &[GameplayHook::OneEchoType],
     behavior: Behavior::Postfix,
-    targets,
+    targets: Targets::Resolve(targets),
 };
 const SPEC: MethodSpec = MethodSpec {
     class: c"EchoWeb",

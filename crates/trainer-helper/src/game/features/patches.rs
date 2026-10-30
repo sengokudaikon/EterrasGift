@@ -1,6 +1,6 @@
 //! Shared resolver for explicit feature-owned code recipes. Metadata, method bounds and a unique full pattern are
 //! checked before any write; the native owner/transaction layer retains the original bytes and performs readback.
-use super::hooks::{CodeChange, GameplayHookTarget, MethodSpec, ResolvedMethod, TargetEffect};
+use super::registry::{CodeChange, GameplayHook, GameplayHookTarget, HookFeature, MethodSpec, ResolvedMethod, TargetEffect};
 use crate::{game::*, hooks::patch::find_unique};
 
 pub(crate) struct PatchSpec {
@@ -33,7 +33,7 @@ impl PatchSpec {
 impl RuntimeAccess {
     /// # Safety
     /// Attached immutable runtime metadata, retained readable GameAssembly and exclusive patch ownership as hook_method.
-    unsafe fn patch_targets(&self, specs: &[PatchSpec], module: NonNull<u8>, size: usize) -> Result<Vec<GameplayHookTarget>, GameError> {
+    pub(super) unsafe fn patch_targets(&self, specs: &[PatchSpec], module: NonNull<u8>, size: usize) -> Result<Vec<GameplayHookTarget>, GameError> {
         // SAFETY: the caller holds the complete metadata/module span. No object or game method is accessed.
         unsafe {
             let images = self.images()?;

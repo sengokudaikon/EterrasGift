@@ -1,11 +1,11 @@
 //! Preserve every RNG draw, then return its maximum byte. Scope intentionally includes non-item RandomByte users.
 use super::*;
-use crate::game::gameplay::{Behavior, GameplayHook, HookFeature};
+use crate::game::registry::{Behavior, GameplayHook, HookFeature, Targets};
 
 pub(crate) const FEATURE: HookFeature = HookFeature {
     controls: &[GameplayHook::MaxRandomRolls],
     behavior: Behavior::Postfix,
-    targets,
+    targets: Targets::Resolve(targets),
 };
 const SPEC: MethodSpec = MethodSpec {
     class: c"RngElement",

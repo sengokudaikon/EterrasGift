@@ -38,7 +38,7 @@ Each row retains the concrete behavior, useful shared mechanism and distinguishi
 readback, manager-loss and unload requirements apply to every implemented feature. Value ranges/arity remain owned
 by [the catalog](../crates/trainer/src/features/registry.rs); native support is declared by
 [GameplayHook](../crates/trainer-wire/src/hooks.rs) and resolved in
-[helper features](../crates/trainer-helper/src/game/features/hooks.rs).
+[helper features](../crates/trainer-helper/src/game/features/registry.rs).
 
 ### Character
 

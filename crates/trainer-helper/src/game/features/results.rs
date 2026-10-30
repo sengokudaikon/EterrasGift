@@ -1,5 +1,5 @@
 //! Shared original-first result emission. Features own their signatures, predicates and transformations.
-use super::hooks::MethodSpec;
+use super::registry::MethodSpec;
 use crate::{
     game::*,
     hooks::postfix::{FRAME, PostfixEffect},
@@ -60,7 +60,7 @@ impl Code {
         PostfixEffect {
             code: self.bytes,
             slots: [self.online.as_ptr() as u64, extra],
-            positions: u8::try_from(spec.params.len() + usize::from(spec.instance) + 1).expect("bounded explicit method contract"),
+            positions: spec.positions(),
         }
     }
 }

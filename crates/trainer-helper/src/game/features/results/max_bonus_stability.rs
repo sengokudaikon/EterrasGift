@@ -1,11 +1,11 @@
 //! Preserve the original bonus calculation, then raise it to the echo's maximum without lowering a higher result.
 use super::*;
-use crate::game::gameplay::{Behavior, GameplayHook, HookFeature};
+use crate::game::registry::{Behavior, GameplayHook, HookFeature, Targets};
 
 pub(crate) const FEATURE: HookFeature = HookFeature {
     controls: &[GameplayHook::MaxBonusStability],
     behavior: Behavior::Postfix,
-    targets,
+    targets: Targets::Resolve(targets),
 };
 const SPEC: MethodSpec = MethodSpec {
     class: c"MonolithZoneManager",

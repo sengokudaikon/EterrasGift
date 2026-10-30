@@ -1,11 +1,6 @@
 //! Bypass the skill-tree total-point budget while retaining each node and connection requirement.
-use super::super::hooks::{Behavior, GameplayHook, HookFeature};
 use super::*;
-pub(crate) const FEATURE: HookFeature = HookFeature {
-    controls: &[GameplayHook::UnlimitedSkillPoints],
-    behavior: Behavior::Patch,
-    targets,
-};
+pub(crate) const FEATURE: HookFeature = HookFeature::patches(&[GameplayHook::UnlimitedSkillPoints], SPECS);
 const SPECS: &[PatchSpec] = &[PatchSpec::new(
     "Skill point check",
     MethodSpec {
@@ -22,7 +17,3 @@ const SPECS: &[PatchSpec] = &[PatchSpec::new(
     0,
     &[0x90, 0x90, 0x90, 0x90, 0x90, 0x90],
 )];
-unsafe fn targets(access: &RuntimeAccess, module: NonNull<u8>, size: usize) -> Result<Vec<GameplayHookTarget>, GameError> {
-    // SAFETY: the shared caller retains the attached runtime, module and exclusive code ownership contract.
-    unsafe { access.patch_targets(SPECS, module, size) }
-}

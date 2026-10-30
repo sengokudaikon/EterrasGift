@@ -24,7 +24,7 @@ pub mod server;
 pub use engine::{eg_helper_bootstrap, eg_helper_build_id};
 
 #[cfg(all(windows, target_arch = "x86_64"))]
-mod lifecycle;
+mod watchdog;
 
 /// One diagnostic line on the game's stderr, for native harnesses. Never panics: `eprintln!` panics when the write
 /// fails, and on a thread without a surrounding catch that aborts the game.

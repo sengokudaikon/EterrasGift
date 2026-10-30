@@ -5,13 +5,13 @@
 //! stats then did not apply; here placement and equipped eligibility answer alike, both pairing directions
 //! (two-handed and linked slot) pass, and `EnforceWeaponLimitations` is skipped, as it inlines the pairing check and
 //! would otherwise move equipment out. Off neither unequips nor recalculates: re-equip to see the change at once.
-use super::hooks::{Behavior, GameplayHook, GameplayHookTarget, HookFeature, MethodSpec};
+use super::registry::{Behavior, GameplayHook, GameplayHookTarget, HookFeature, MethodSpec, Targets};
 use crate::{game::*, hooks::leaf::LeafEffect};
 
 pub(super) const FEATURE: HookFeature = HookFeature {
     controls: &[GameplayHook::AnyOffhand],
     behavior: Behavior::Leaf,
-    targets,
+    targets: Targets::Resolve(targets),
 };
 
 unsafe fn targets(access: &RuntimeAccess, module: NonNull<u8>, size: usize) -> Result<Vec<GameplayHookTarget>, GameError> {

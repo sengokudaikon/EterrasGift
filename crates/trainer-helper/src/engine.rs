@@ -2,12 +2,12 @@ mod gameplay_hooks;
 use crate::dispatch::{Dispatcher, Pending};
 use crate::{
     BUILD_ID, BUILD_ID_C,
-    lifecycle::Watchdog,
     server::{self, Backend, Shared},
+    watchdog::Watchdog,
 };
 use crate::{
     game::{GameError, RuntimeAccess, WriteError, presence::PlayPresence},
-    hooks::{self, HookState, RetainedHook, gateway::CallbackGate},
+    hooks::{self, HookState, RetainedHook, callback::CallbackGate},
 };
 use eg_il2cpp_runtime::{
     AttachedThread, ThreadContext,

@@ -1,11 +1,6 @@
 //! Apply all bonuses of a worn set during stat recalculation; an unworn set still grants nothing.
-use super::super::hooks::{Behavior, GameplayHook, HookFeature};
 use super::*;
-pub(crate) const FEATURE: HookFeature = HookFeature {
-    controls: &[GameplayHook::FullSetBonus],
-    behavior: Behavior::Patch,
-    targets,
-};
+pub(crate) const FEATURE: HookFeature = HookFeature::patches(&[GameplayHook::FullSetBonus], SPECS);
 const SPECS: &[PatchSpec] = &[PatchSpec::new(
     "Set bonus check",
     MethodSpec {
@@ -28,7 +23,3 @@ const SPECS: &[PatchSpec] = &[PatchSpec::new(
     0,
     &[0x90, 0x90, 0x90, 0x90, 0x90, 0x90],
 )];
-unsafe fn targets(access: &RuntimeAccess, module: NonNull<u8>, size: usize) -> Result<Vec<GameplayHookTarget>, GameError> {
-    // SAFETY: the shared caller retains the attached runtime, module and exclusive code ownership contract.
-    unsafe { access.patch_targets(SPECS, module, size) }
-}

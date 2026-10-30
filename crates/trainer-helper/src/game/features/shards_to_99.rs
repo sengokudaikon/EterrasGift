@@ -1,14 +1,14 @@
 //! Raise existing saved shard quantities before the game's count, preserving its original work and result.
 use super::{
-    hooks::{Behavior, GameplayHook, GameplayHookTarget, HookFeature, MethodSpec},
     materials::{self, Code, FLOOR, MAX_ENTRIES},
+    registry::{Behavior, GameplayHook, GameplayHookTarget, HookFeature, MethodSpec, Targets},
 };
 use crate::{game::*, hooks::leaf::LeafEffect};
 
 pub(super) const FEATURE: HookFeature = HookFeature {
     controls: &[GameplayHook::ShardsTo99],
     behavior: Behavior::Leaf,
-    targets,
+    targets: Targets::Resolve(targets),
 };
 
 #[derive(Clone, Copy)]

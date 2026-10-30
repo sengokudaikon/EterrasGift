@@ -1,11 +1,6 @@
 //! Keep cache eligibility, placement and the RNG call; bypass only the failed-roll branch.
-use super::super::hooks::{Behavior, GameplayHook, HookFeature};
 use super::*;
-pub(crate) const FEATURE: HookFeature = HookFeature {
-    controls: &[GameplayHook::EndgameCache],
-    behavior: Behavior::Patch,
-    targets,
-};
+pub(crate) const FEATURE: HookFeature = HookFeature::patches(&[GameplayHook::EndgameCache], SPECS);
 const SPECS: &[PatchSpec] = &[PatchSpec::new(
     "Endgame cache roll",
     MethodSpec {
@@ -22,7 +17,3 @@ const SPECS: &[PatchSpec] = &[PatchSpec::new(
     16,
     &[0x90, 0x90, 0x90, 0x90, 0x90, 0x90],
 )];
-unsafe fn targets(access: &RuntimeAccess, module: NonNull<u8>, size: usize) -> Result<Vec<GameplayHookTarget>, GameError> {
-    // SAFETY: the shared caller retains the attached runtime, module and exclusive code ownership contract.
-    unsafe { access.patch_targets(SPECS, module, size) }
-}

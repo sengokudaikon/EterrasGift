@@ -1,11 +1,6 @@
 //! Set specialized skills to their level-20 XP cap when the game next applies skill experience.
-use super::super::hooks::{Behavior, GameplayHook, HookFeature};
 use super::*;
-pub(crate) const FEATURE: HookFeature = HookFeature {
-    controls: &[GameplayHook::SkillsToLevel20],
-    behavior: Behavior::Patch,
-    targets,
-};
+pub(crate) const FEATURE: HookFeature = HookFeature::patches(&[GameplayHook::SkillsToLevel20], SPECS);
 const SPECS: &[PatchSpec] = &[PatchSpec::new(
     "Skill experience cap",
     MethodSpec {
@@ -20,7 +15,3 @@ const SPECS: &[PatchSpec] = &[PatchSpec::new(
     9,
     &[0x90, 0x90],
 )];
-unsafe fn targets(access: &RuntimeAccess, module: NonNull<u8>, size: usize) -> Result<Vec<GameplayHookTarget>, GameError> {
-    // SAFETY: the shared caller retains the attached runtime, module and exclusive code ownership contract.
-    unsafe { access.patch_targets(SPECS, module, size) }
-}

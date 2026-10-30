@@ -1,11 +1,6 @@
 //! Supply true at the class-compatibility load while leaving subsequent experimental-item generation intact.
-use super::super::hooks::{Behavior, GameplayHook, HookFeature};
 use super::*;
-pub(crate) const FEATURE: HookFeature = HookFeature {
-    controls: &[GameplayHook::ClassExperimentals],
-    behavior: Behavior::Patch,
-    targets,
-};
+pub(crate) const FEATURE: HookFeature = HookFeature::patches(&[GameplayHook::ClassExperimentals], SPECS);
 const SPECS: &[PatchSpec] = &[PatchSpec::new(
     "Experimental items class check",
     MethodSpec {
@@ -20,7 +15,3 @@ const SPECS: &[PatchSpec] = &[PatchSpec::new(
     0,
     &[0x31, 0xc0, 0xb0, 0x1],
 )];
-unsafe fn targets(access: &RuntimeAccess, module: NonNull<u8>, size: usize) -> Result<Vec<GameplayHookTarget>, GameError> {
-    // SAFETY: the shared caller retains the attached runtime, module and exclusive code ownership contract.
-    unsafe { access.patch_targets(SPECS, module, size) }
-}
