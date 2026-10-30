@@ -8,9 +8,9 @@
 //! observed layout is already malformed.
 
 use crate::definitions::catalog::{CatalogIdentity, GameCatalog};
+use crate::definitions::entries::{AffixDefinition, Availability};
 use eg_core::phrase::Phrase;
 use eg_trainer_wire::{
-    catalog::{AffixDefinition, Availability},
     forge::{AffixSnapshot, ForgeSnapshot},
     process::ProcessIdentity,
 };

@@ -1,7 +1,7 @@
-//! Owned, paginated definition snapshots. Names retain their source; unavailable
-//! formatter/numeric data is explicit and never replaced with guessed values.
+//! The catalog's entries (bases, affixes, uniques, rarities) and the bounded page form the cache keeps them in.
+//! Names retain their source; unavailable formatter/numeric data is explicit and never replaced with guessed values.
 //!
-//! Wire: LE u32 kind/cursor/total, locale language/version texts, entry count,
+//! Pages: LE u32 kind/cursor/total, locale language/version texts, entry count,
 //! then typed entries in declaration order below. Texts and vectors have LE u32
 //! lengths; integers/f32 are LE, bools are single 0/1 bytes. Availability is a
 //! single byte (0 = reason text, 1 = value). Optional equipment lists use a 0/1
@@ -10,11 +10,10 @@
 //! locale/total and reject duplicate identities across pages of one capture.
 //! This schema preserves unknown enum/flag values and signed/reversed ranges.
 
-#![forbid(unsafe_code)]
-
 use std::collections::BTreeSet;
 
-use crate::{
+pub use eg_trainer_wire::forge::MAX_IMPLICITS;
+use eg_trainer_wire::{
     locale::GameLocale,
     protocol::{MAX_RESPONSE_SIZE, ProtocolError},
 };
@@ -22,7 +21,6 @@ use crate::{
 pub const MAX_PAGE_ENTRIES: usize = 16;
 pub const MAX_TEXT_BYTES: usize = 4096;
 pub const MAX_SUB_TYPES: usize = 1024;
-pub const MAX_IMPLICITS: usize = 8;
 pub const MAX_EQUIPMENT_TYPES: usize = 128;
 pub const MAX_AFFIX_TIERS: usize = 128;
 pub const MAX_PROPERTIES: usize = 128;

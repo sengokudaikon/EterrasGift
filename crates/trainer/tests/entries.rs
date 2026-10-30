@@ -1,4 +1,5 @@
-use eg_trainer_wire::{catalog::*, locale::GameLocale, protocol::MAX_RESPONSE_SIZE};
+use eg_trainer::definitions::entries::*;
+use eg_trainer_wire::{locale::GameLocale, protocol::MAX_RESPONSE_SIZE};
 
 fn name(text: &str) -> DefinitionName {
     DefinitionName {

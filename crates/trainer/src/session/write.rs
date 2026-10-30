@@ -1,6 +1,7 @@
 use super::*;
 use crate::write::{AllowWrite, ForgePlan, WriteControl, WriteOutcome, WriteStatus};
 use eg_trainer_wire::{
+    protocol::Response,
     transport::Delivery,
     write::{ForgeWrite, WriteReply},
 };
@@ -20,11 +21,28 @@ impl<T: Transport> Session<T> {
         if !control.allowed() {
             return Err(SessionError::Busy);
         }
+        let acknowledged = |response: &Response| classify_ack(&request, response);
+        let observed = |_: &mut Self, payload: &[u8]| decode_readback(plan, payload);
+        Ok(self.mutate(dispatcher, &request, &readback, control, acknowledged, observed).await)
+    }
+
+    /// A mutation, submitted once, then read back independently: only after an acknowledgement that confirms it, under
+    /// the same artifact lease, and while no cleanup is queued. The session stays usable after an outcome that is
+    /// certain and reports what the game holds; anything else, or a lost lease, ends it.
+    pub(super) async fn mutate<O>(
+        &mut self,
+        dispatcher: DispatcherSpec,
+        request: &Request,
+        readback: &Request,
+        control: &mut dyn WriteControl,
+        acknowledged: impl FnOnce(&Response) -> WriteOutcome<O>,
+        observed: impl FnOnce(&mut Self, &[u8]) -> WriteOutcome<O>,
+    ) -> WriteOutcome<O> {
         let runtime = self.status.take();
         self.state = SessionState::Connecting;
-        let (mut result, mut healthy) = match self.transport.send(&request).await {
+        let (mut result, mut healthy) = match self.transport.send(request).await {
             Ok(response) => (
-                classify_ack(&request, &response),
+                acknowledged(&response),
                 !matches!(response.code, ResponseCode::OfflineRequired | ResponseCode::RestartRequired),
             ),
             Err(error) => {
@@ -51,8 +69,8 @@ impl<T: Transport> Session<T> {
             if !control.allowed() {
                 result = WriteOutcome::uncertain("write acknowledged before queued cleanup; separate readback was not submitted");
             } else {
-                result = match self.transport.send(&readback).await {
-                    Ok(response) if response.code == ResponseCode::Done => decode_readback(plan, &response.payload),
+                result = match self.transport.send(readback).await {
+                    Ok(response) if response.code == ResponseCode::Done => observed(self, &response.payload),
                     Ok(response) => WriteOutcome::uncertain(format!("write sent but independent readback was refused: {:?}", response.code)),
                     Err(error) => WriteOutcome::uncertain(format!("write sent but independent readback failed: {error}")),
                 };
@@ -74,25 +92,19 @@ impl<T: Transport> Session<T> {
                     }
             );
         if reusable {
-            self.status = if matches!(
+            let loading = matches!(
                 result,
                 WriteOutcome::NotApplied {
                     code: ResponseCode::CharacterLoading,
                     ..
                 }
-            ) {
-                None
-            } else {
-                runtime
-            };
+            );
+            self.status = if loading { None } else { runtime };
             self.state = SessionState::Ready;
         } else {
-            self.release_without_io();
-            if self.state == SessionState::Connecting {
-                self.state = SessionState::Disconnected;
-            }
+            self.revoke();
         }
-        Ok(result)
+        result
     }
 
     fn prepare_write(&self, plan: &ForgePlan, dispatcher: DispatcherSpec) -> Result<(Request, Request), SessionError> {
@@ -105,7 +117,7 @@ impl<T: Transport> Session<T> {
     }
 }
 
-fn classify_ack(request: &Request, response: &eg_trainer_wire::protocol::Response) -> WriteStatus {
+fn classify_ack(request: &Request, response: &Response) -> WriteStatus {
     match request {
         Request::EditForge(request) => match eg_trainer_wire::write::classify_response(response, request) {
             WriteReply::Confirmed(actual) => WriteOutcome::Confirmed(actual),

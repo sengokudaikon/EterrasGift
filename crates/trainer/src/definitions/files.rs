@@ -11,9 +11,9 @@ use crate::definitions::catalog::{
     GameCatalog, GameLocale, ImplicitDefinition, ItemLimits, ItemTypeDefinition, NumericProperty, RarityDefinition, SubTypeDefinition, UniqueDefinition, UniqueNumericData,
     ValueRange,
 };
+use crate::definitions::entries::MAX_PAGE_ENTRIES;
 use eg_game_files::definitions::{Ailment, Definitions};
 use eg_game_files::uniques::{PlayerDefinitions, Property, PropertyInfo};
-use eg_trainer_wire::catalog::MAX_PAGE_ENTRIES;
 use eg_trainer_wire::protocol::ProtocolError;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};

@@ -4,15 +4,16 @@
 //! The adapter requires definition graphs to remain immutable during a capture.
 //! No partial catalog is published and no name fallback overwrites the raw observation.
 
-use eg_trainer_wire::{catalog, forge::ForgeSnapshot, protocol::ProtocolError};
+use crate::definitions::entries;
+pub use crate::definitions::entries::{
+    AffixDefinition, AffixTier, Availability, CatalogEntries, CatalogKind, CatalogPage, DefinitionName, DefinitionNameSource, ImplicitDefinition, ItemTypeDefinition,
+    NumericProperty, RarityDefinition, SubTypeDefinition, UniqueDefinition, UniqueNumericData,
+};
 pub use eg_trainer_wire::{
-    catalog::{
-        AffixDefinition, AffixTier, Availability, CatalogEntries, CatalogKind, CatalogPage, DefinitionName, DefinitionNameSource, ImplicitDefinition, ItemTypeDefinition,
-        NumericProperty, RarityDefinition, SubTypeDefinition, UniqueDefinition, UniqueNumericData,
-    },
     definitions::{ItemLimits, ValueRange},
     locale::GameLocale,
 };
+use eg_trainer_wire::{forge::ForgeSnapshot, protocol::ProtocolError};
 use std::collections::{BTreeMap, BTreeSet};
 
 pub const EXTRACTION_VERSION: u32 = 5;
@@ -133,7 +134,7 @@ impl CatalogBuilder {
         }
         // The encoder applies the same complete validation to locally constructed pages as
         // the wire decoder. Its bounded size also supplies a conservative aggregate budget.
-        let bytes = catalog::encode(&page)?.len();
+        let bytes = entries::encode(&page)?.len();
         self.bytes = self.bytes.checked_add(bytes).filter(|n| *n <= MAX_CATALOG_BYTES).ok_or(ProtocolError::InvalidData)?;
         let progress = &mut self.progress[page.kind as usize];
         if progress.total.is_some_and(|total| total != page.total) || page.cursor != progress.cursor || progress.total.is_some_and(|total| progress.cursor == total) {

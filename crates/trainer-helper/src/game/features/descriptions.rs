@@ -206,7 +206,7 @@ impl RuntimeAccess {
             let mut lines = Vec::new();
             if let Some(list) = value {
                 self.exact(&list, list_class)?;
-                let implicits = self.list(attached, &list, element, eg_trainer_wire::catalog::MAX_IMPLICITS as u32)?;
+                let implicits = self.list(attached, &list, element, eg_trainer_wire::forge::MAX_IMPLICITS as u32)?;
                 if !implicits.is_empty() {
                     let base = self.implicit_definitions(attached, api, images)?;
                     let builder = self.class(images, c"LE.UI.Tooltips", c"ItemTooltipContentBuilder")?;

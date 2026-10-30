@@ -16,9 +16,9 @@ use std::{
     time::SystemTime,
 };
 
+use crate::definitions::entries::{self, CatalogEntries, CatalogKind, CatalogPage, MAX_PAGE_ENTRIES};
 use eg_core::{atomic, hashes};
 use eg_trainer_wire::{
-    catalog::{self, CatalogEntries, CatalogKind, CatalogPage, MAX_PAGE_ENTRIES},
     definitions,
     locale::GameLocale,
     protocol::{MAX_RESPONSE_SIZE, ProtocolError},
@@ -278,7 +278,7 @@ fn emit_pages<'a, T: Clone + 'a>(
             total,
             entries,
         };
-        let payload = catalog::encode(&page)?;
+        let payload = entries::encode(&page)?;
         builder.push(page)?;
         number(bytes, payload.len() as u32)?;
         append(bytes, &payload)?;
@@ -338,8 +338,8 @@ fn decode(bytes: &[u8]) -> Result<GameCatalog, CacheError> {
         binary_hash: r.text(64)?,
         metadata_hash: r.text(64)?,
         locale: GameLocale {
-            language: r.text(catalog::MAX_TEXT_BYTES)?,
-            game_version: r.text(catalog::MAX_TEXT_BYTES)?,
+            language: r.text(entries::MAX_TEXT_BYTES)?,
+            game_version: r.text(entries::MAX_TEXT_BYTES)?,
         },
         extraction_version: r.number()?,
     };
@@ -354,7 +354,7 @@ fn decode(bytes: &[u8]) -> Result<GameCatalog, CacheError> {
         if length > MAX_RESPONSE_SIZE {
             return Err(CacheError::InvalidData);
         }
-        builder.push(catalog::decode(r.bytes(length)?)?)?;
+        builder.push(entries::decode(r.bytes(length)?)?)?;
     }
     if !r.0.is_empty() {
         return Err(CacheError::InvalidData);

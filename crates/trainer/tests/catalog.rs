@@ -1,6 +1,8 @@
 use eg_trainer::definitions::catalog::{CatalogBuilder, CatalogIdentity, EXTRACTION_VERSION, ItemNameSource};
+use eg_trainer::definitions::entries::{
+    Availability, CatalogEntries, CatalogKind, CatalogPage, DefinitionName, DefinitionNameSource, ItemTypeDefinition, SubTypeDefinition, UniqueDefinition,
+};
 use eg_trainer_wire::{
-    catalog::{Availability, CatalogEntries, CatalogKind, CatalogPage, DefinitionName, DefinitionNameSource, ItemTypeDefinition, SubTypeDefinition, UniqueDefinition},
     definitions::{ItemLimits, ValueRange},
     forge::{ForgeSnapshot, ItemStatus, UniqueIdentity},
     locale::GameLocale,

@@ -259,7 +259,7 @@ impl<T: Transport> Session<T> {
         match result {
             Ok(modifiers) => {
                 if modifiers.iter().any(|m| {
-                    m.index as usize >= eg_trainer_wire::catalog::MAX_IMPLICITS
+                    m.index as usize >= eg_trainer_wire::forge::MAX_IMPLICITS
                         || m.roll_ids.len() > 1
                         || m.roll_ids.iter().any(|id| usize::from(*id) >= expected.implicit_rolls.len() || u32::from(*id) != m.index)
                 }) {

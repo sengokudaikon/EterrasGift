@@ -2,7 +2,7 @@ use super::*;
 use crate::write::{WriteControl, WriteOutcome};
 use eg_trainer_wire::{
     hooks::{GameplayHook, HookObservation},
-    transport::Delivery,
+    protocol::Response,
 };
 
 impl<T: Transport> Session<T> {
@@ -25,7 +25,6 @@ impl<T: Transport> Session<T> {
         if !control.allowed() {
             return Err(SessionError::Busy);
         }
-        self.state = SessionState::Connecting;
         let request = Request::SetGameplayHook {
             dispatcher,
             expected_manager,
@@ -33,85 +32,33 @@ impl<T: Transport> Session<T> {
             on,
             value,
         };
-        let mut outcome = match self.transport.send(&request).await {
-            Ok(response) => match response.code {
-                ResponseCode::Done if response.payload.is_empty() => WriteOutcome::Confirmed(on),
-                ResponseCode::NotReady | ResponseCode::Refused | ResponseCode::CharacterLoading | ResponseCode::OfflineRequired | ResponseCode::RestartRequired => {
-                    WriteOutcome::NotApplied {
-                        code: response.code,
-                        message: String::from_utf8_lossy(&response.payload).into_owned(),
-                    }
-                }
-                _ => WriteOutcome::uncertain("Hook change returned no valid acknowledgement"),
-            },
-            Err(error) if error.delivery == Delivery::NotSent => WriteOutcome::NotApplied {
-                code: ResponseCode::NotReady,
-                message: error.to_string(),
-            },
-            Err(error) => WriteOutcome::uncertain(error.to_string()),
+        let readback = Request::ReadGameplayHook {
+            dispatcher,
+            expected_manager,
+            hook,
         };
-        let provenance = self.provenance(&dispatcher);
-        if matches!(outcome, WriteOutcome::Confirmed(_)) {
-            outcome = if let Err(error) = provenance.as_ref() {
-                WriteOutcome::uncertain(format!("Hook reply lost confirmation provenance: {error}"))
-            } else if !control.allowed() {
-                WriteOutcome::uncertain("Hook acknowledged before queued cleanup; independent readback was not submitted")
-            } else {
-                match self
-                    .transport
-                    .send(&Request::ReadGameplayHook {
-                        dispatcher,
-                        expected_manager,
-                        hook,
-                    })
-                    .await
-                {
-                    Ok(response) if response.code == ResponseCode::Done => match HookObservation::decode(&response.payload) {
-                        Ok(actual) if actual.confirmed(actual.enabled) && hook.validate_value(actual.value).is_ok() => {
-                            self.hooks[hook as usize] = Some(actual);
-                            if actual.enabled == on && (!on || actual.value == value) {
-                                WriteOutcome::Confirmed(on)
-                            } else {
-                                WriteOutcome::NotKept(actual.enabled)
-                            }
-                        }
-                        _ => WriteOutcome::uncertain("Hook flag and entry bytes did not agree"),
-                    },
-                    Ok(response) => WriteOutcome::uncertain(format!("Hook readback refused: {:?}", response.code)),
-                    Err(error) => WriteOutcome::uncertain(format!("Hook readback failed: {error}")),
-                }
-            };
-            if matches!(outcome, WriteOutcome::Confirmed(_) | WriteOutcome::NotKept(_))
-                && let Err(error) = self.provenance(&dispatcher)
-            {
-                outcome = WriteOutcome::uncertain(format!("Hook readback lost confirmation provenance: {error}"));
-            }
-        }
-        let reusable = provenance.is_ok()
-            && matches!(
-                outcome,
-                WriteOutcome::Confirmed(_)
-                    | WriteOutcome::NotKept(_)
-                    | WriteOutcome::NotApplied {
-                        code: ResponseCode::NotReady | ResponseCode::Refused | ResponseCode::CharacterLoading,
-                        ..
-                    }
-            );
-        if reusable {
-            self.state = SessionState::Ready;
-            if matches!(
-                outcome,
+        let acknowledged = |response: &Response| match response.code {
+            ResponseCode::Done if response.payload.is_empty() => WriteOutcome::Confirmed(on),
+            ResponseCode::NotReady | ResponseCode::Refused | ResponseCode::CharacterLoading | ResponseCode::OfflineRequired | ResponseCode::RestartRequired => {
                 WriteOutcome::NotApplied {
-                    code: ResponseCode::CharacterLoading,
-                    ..
+                    code: response.code,
+                    message: String::from_utf8_lossy(&response.payload).into_owned(),
                 }
-            ) {
-                self.status = None;
             }
-        } else {
-            self.revoke();
-        }
-        Ok(outcome)
+            _ => WriteOutcome::uncertain("Hook change returned no valid acknowledgement"),
+        };
+        let observed = |session: &mut Self, payload: &[u8]| match HookObservation::decode(payload) {
+            Ok(actual) if actual.confirmed(actual.enabled) && hook.validate_value(actual.value).is_ok() => {
+                session.hooks[hook as usize] = Some(actual);
+                if actual.enabled == on && (!on || actual.value == value) {
+                    WriteOutcome::Confirmed(on)
+                } else {
+                    WriteOutcome::NotKept(actual.enabled)
+                }
+            }
+            _ => WriteOutcome::uncertain("Hook flag and entry bytes did not agree"),
+        };
+        Ok(self.mutate(dispatcher, &request, &readback, control, acknowledged, observed).await)
     }
 
     /// Poll only hooks this connection has confirmed; unsupported features need no RPC.

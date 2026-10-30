@@ -19,6 +19,9 @@
 
 use crate::protocol::{MAX_RESPONSE_SIZE, ProtocolError};
 
+/// The most implicits an item carries: the helper's bound on what it reads, the desktop's on what it keeps.
+pub const MAX_IMPLICITS: usize = 8;
+
 pub const MAX_AFFIXES: usize = 32;
 pub const MAX_IMPLICIT_ROLLS: usize = 3;
 pub const MAX_UNIQUE_ROLLS: usize = 8;

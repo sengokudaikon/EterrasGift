@@ -1,7 +1,6 @@
 //! Shared owned messages and bounded codecs. No process, loader or IL2CPP access.
 #![forbid(unsafe_code)]
 
-pub mod catalog;
 pub mod definitions;
 pub mod fields;
 pub mod forge;

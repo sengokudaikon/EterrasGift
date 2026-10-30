@@ -4,12 +4,12 @@ use std::{
     time::{Duration, SystemTime},
 };
 
+use eg_trainer::definitions::entries::{Availability, DefinitionName, DefinitionNameSource, ItemTypeDefinition, RarityDefinition, SubTypeDefinition};
 use eg_trainer::{
     definitions::cache::{CATALOG_FILE, CacheError, CatalogCache, KEPT_BUILDS, POINTER_FILE, identity_key},
     definitions::catalog::{CatalogIdentity, EXTRACTION_VERSION, GameCatalog, MAX_CATALOG_BYTES},
 };
 use eg_trainer_wire::{
-    catalog::{Availability, DefinitionName, DefinitionNameSource, ItemTypeDefinition, RarityDefinition, SubTypeDefinition},
     definitions::{ItemLimits, ValueRange},
     locale::GameLocale,
 };

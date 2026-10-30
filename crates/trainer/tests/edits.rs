@@ -1,9 +1,9 @@
+use eg_trainer::definitions::entries::{AffixDefinition, Availability, DefinitionName, DefinitionNameSource, ItemTypeDefinition, SubTypeDefinition, UniqueDefinition};
 use eg_trainer::{
     definitions::catalog::{CatalogIdentity, EXTRACTION_VERSION, GameCatalog},
     item::edit::*,
 };
 use eg_trainer_wire::{
-    catalog::{AffixDefinition, Availability, DefinitionName, DefinitionNameSource, ItemTypeDefinition, SubTypeDefinition, UniqueDefinition},
     definitions::{ItemLimits, ValueRange},
     forge::{AffixSnapshot, ForgeSnapshot, ItemStatus, UniqueIdentity},
     locale::GameLocale,
