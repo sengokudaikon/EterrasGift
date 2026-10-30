@@ -19,10 +19,12 @@ pub fn run(startup: Startup) -> Result<ExitCode, slint::PlatformError> {
     let store = SettingsStore::open(&startup.root, &startup.settings_file, &[trainer_settings::LEGACY]);
     let faults = FaultLog::new(&startup.root, Some(&store.paths().log_directory()));
     startup::install_panic_hook(faults.clone());
-    let mut trainer = trainer::Module::new(&store, &faults);
     let companion = Companion::new(&store);
     let discovery = companion.discover();
     let window = MainWindow::new();
+    // Everything the window and the trainer's checks say from here on is in the user's language.
+    eg_ui::select_language();
+    let mut trainer = trainer::Module::new(&store, &faults);
     // Discovery may be setting a mod-loader proxy aside: it finishes even when the window cannot open. A panic in it
     // has already been reported by the hook.
     let found = discovery.join();

@@ -19,9 +19,9 @@ pub fn is_unique_backed(rarity: u8) -> bool {
 
 /// A crafted item's rarity by the game's byte: none is normal, one or two magic, more rare.
 pub fn crafted_name(rarity: u8) -> &'static str {
-    const NORMAL: Phrase = Phrase::new("Normal");
-    const MAGIC: Phrase = Phrase::new("Magic");
-    const RARE: Phrase = Phrase::new("Rare");
+    const NORMAL: Phrase = Phrase::ctx("rarity", "Normal");
+    const MAGIC: Phrase = Phrase::ctx("rarity", "Magic");
+    const RARE: Phrase = Phrase::ctx("rarity", "Rare");
     match rarity {
         0 => NORMAL.get(),
         1 | 2 => MAGIC.get(),
@@ -92,7 +92,7 @@ impl Category {
         const SET: Phrase = Phrase::new("Reforged set");
         const IDOL_ENCHANTMENT: Phrase = Phrase::new("Idol enchantment");
         const IDOL_WEAVER: Phrase = Phrase::new("Weaver idol");
-        const CORRUPTED: Phrase = Phrase::new("Corrupted");
+        const CORRUPTED: Phrase = Phrase::ctx("affix category", "Corrupted");
         const UNIQUE_MODIFIER: Phrase = Phrase::new("Unique modifier");
         const OTHER: Phrase = Phrase::new("Special affix {value}");
         match self {

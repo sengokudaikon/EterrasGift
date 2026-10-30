@@ -186,10 +186,9 @@ impl FeatureDescriptor {
         }
         for value in self.values {
             if let Some(hint) = value.hint {
+                const VALUE_HINT: Phrase = Phrase::new("{value}: {hint}");
                 text.push('\n');
-                text.push_str(value.label.get());
-                text.push_str(": ");
-                text.push_str(hint.get());
+                text.push_str(&VALUE_HINT.with(&[("value", &value.label), ("hint", &hint)]));
             }
         }
         text

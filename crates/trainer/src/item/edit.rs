@@ -33,7 +33,12 @@ pub enum SealState {
 impl SealState {
     pub const ALL: [Self; 4] = [Self::Normal, Self::Sealed, Self::Primordial, Self::Corrupted];
     pub fn name(self) -> &'static str {
-        const NAMES: [Phrase; 4] = [Phrase::new("Normal"), Phrase::new("Sealed"), Phrase::new("Primordial"), Phrase::new("Corrupted")];
+        const NAMES: [Phrase; 4] = [
+            Phrase::ctx("seal", "Normal"),
+            Phrase::ctx("seal", "Sealed"),
+            Phrase::ctx("seal", "Primordial"),
+            Phrase::ctx("seal", "Corrupted"),
+        ];
         NAMES[self as usize].get()
     }
     pub fn index(self) -> usize {

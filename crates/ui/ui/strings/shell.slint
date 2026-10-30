@@ -1,12 +1,10 @@
 // The window's and the shared widgets' words. Every view word is an `@tr` here, never a literal in a view; its English is
-// the gettext msgid, without a context (build.rs and `cargo xtask phrases` agree on that), shared with any phrase that
-// reads the same.
+// the gettext msgid, shared with any Rust phrase that reads the same. Only English that means two things takes a context,
+// `@tr("key" => "Delete")`, as `Phrase::ctx` does (build.rs and `cargo xtask phrases` agree on that). A text Rust sets
+// has no first value here: Rust's phrase is its one source.
 
 export global ShellText {
     out property <string> app-name: @tr("Eterra's Gift");
-    out property <string> home: @tr("Home");
-    out property <string> not-connected: @tr("Not connected");
-    out property <string> connect: @tr("Connect");
     out property <string> expand-navigation: @tr("Expand navigation");
     out property <string> collapse-navigation: @tr("Collapse navigation");
     out property <string> on: @tr("On");

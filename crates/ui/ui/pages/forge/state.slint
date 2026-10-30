@@ -223,19 +223,19 @@ export global ForgeState {
     in-out property <bool> pane-class-known;
     in-out property <bool> pane-narrow;
     in property <[DraftEntryView]> drafts;
-    in property <string> draft-count-text: ForgeText.no-drafts;
+    in property <string> draft-count-text;
     in property <[AppliedEntryView]> history;
 
     // The action bar.
     in property <string> message;
     in property <MessageTone> message-tone;
-    in property <string> changes-text: ForgeText.changes;
-    in property <string> undo-text: ForgeText.undo;
+    in property <string> changes-text;
+    in property <string> undo-text;
     in property <string> undo-tip;
     in property <bool> can-undo;
     in property <string> discard-text;
     in property <bool> can-discard;
-    in property <string> apply-text: ForgeText.apply-to-game;
+    in property <string> apply-text;
     in property <bool> can-apply;
 
     // The value popover, for the one cell typing; typing ended elsewhere (Undo, an item change) closes it.

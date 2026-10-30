@@ -14,6 +14,11 @@ pub mod shell;
 #[allow(unsafe_code)] // Windows/FFI boundary; the rest of the crate denies unsafe.
 pub mod system;
 
+/// The translations the build script bundled from `lang/`, as the Rust phrases read them.
+mod translations {
+    include!(concat!(env!("OUT_DIR"), "/translations.rs"));
+}
+
 use eg_companion::launch::launcher::GameLauncher;
 use pages::settings::SettingsPage;
 use pages::{forge, home, mods, settings, trainer};
@@ -42,6 +47,19 @@ pub struct App {
 pub struct Installed {
     /// The forge on the trainer's worker, in a run that has one.
     pub forge: Option<pages::forge::ForgeHandle>,
+}
+
+/// Shows the app in the user's language when a translation has it, else in English: the views through Slint's bundled
+/// catalog and the Rust phrases through the same catalog's table, chosen once for both. Call it as soon as the first
+/// window exists, before any page or message is built.
+pub fn select_language() {
+    let Ok(translations) = eg_core::phrase::Translations::new(translations::CATALOGS) else {
+        return;
+    };
+    let language = sys_locale::get_locale().and_then(|locale| translations.choose(&locale));
+    translations.select(language);
+    // Fails only when no translation is bundled, and English needs none.
+    let _ = slint::select_bundled_translation(language.unwrap_or(""));
 }
 
 /// Wires a new window: navigation, the pages and the Windows settings.
@@ -102,4 +120,12 @@ where
     let tokens = window.global::<Tokens>();
     tokens.set_high_contrast(system::high_contrast());
     tokens.set_motion(system::animations_enabled());
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn every_bundled_translation_reads() {
+        eg_core::phrase::Translations::new(super::translations::CATALOGS).unwrap();
+    }
 }

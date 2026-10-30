@@ -1,7 +1,9 @@
 //! `cargo xtask phrases [--check]`: every word the app shows, in one gettext template, `lang/eterras-gift.pot`, for
-//! translators. Two sources, one msgid space without contexts: each `Phrase::new("…")` in the crates' sources (up to
-//! a file's first test `#[cfg(…)]`), and each `@tr` in the views, read by `slint-tr-extractor`. References name the file only,
-//! so moving code does not make the template stale; the header carries no date, so `--check` compares as written.
+//! translators. Two sources, one msgid space: each `Phrase::new("…")`, `Phrase::ctx("…", "…")` and
+//! `Plural::new("…", "…")` in the crates' sources (up to a file's `#[cfg(test)]`), and each `@tr` in the views, read by
+//! `slint-tr-extractor`; a context (`Phrase::ctx`, `@tr("ctx" => …)`) is the entry's msgctxt. References name files
+//! only, so moving code does not make the template stale; the header carries no date, so `--check` compares as
+//! written.
 
 use std::collections::BTreeMap;
 use std::fs;
@@ -11,6 +13,14 @@ use std::process::Command;
 const TEMPLATE: &str = "lang/eterras-gift.pot";
 const NEWLINE: &str = "\r\n";
 
+/// One phrase as the sources write it: its context, its English (a plural's singular) and a plural's other form.
+#[derive(Debug, PartialEq)]
+struct Found {
+    context: Option<String>,
+    msgid: String,
+    plural: Option<String>,
+}
+
 /// One msgid with where it comes from.
 #[derive(Default)]
 struct Entry {
@@ -19,10 +29,10 @@ struct Entry {
 }
 
 pub fn run(root: &Path, check: bool) -> Result<(), String> {
-    let mut entries: BTreeMap<String, Entry> = BTreeMap::new();
-    let mut add = |msgid: String, plural: Option<String>, file: String| {
-        let entry = entries.entry(msgid).or_default();
-        entry.plural = entry.plural.take().or(plural);
+    let mut entries: BTreeMap<(Option<String>, String), Entry> = BTreeMap::new();
+    let mut add = |found: Found, file: String| {
+        let entry = entries.entry((found.context, found.msgid)).or_default();
+        entry.plural = entry.plural.take().or(found.plural);
         if !entry.files.contains(&file) {
             entry.files.push(file);
         }
@@ -36,7 +46,7 @@ pub fn run(root: &Path, check: bool) -> Result<(), String> {
         // Comments only talk about phrases, and a file's tests (`#[cfg(test)]`, `#[cfg(all(test, …))]`) show the user nothing.
         let text: String = text
             .lines()
-            .take_while(|line| !(line.trim_start().starts_with("#[cfg(") && line.contains("test")))
+            .take_while(|line| !["#[cfg(test)]", "#[cfg(all(test,"].iter().any(|start| line.trim_start().starts_with(start)))
             .filter(|line| !line.trim_start().starts_with("//"))
             .collect::<Vec<_>>()
             .join(
@@ -44,16 +54,16 @@ pub fn run(root: &Path, check: bool) -> Result<(), String> {
 ",
             );
         let text = text.as_str();
-        for msgid in rust_phrases(text).map_err(|e| format!("{file}: {e}"))? {
-            add(msgid, None, file.clone());
+        for found in rust_phrases(text).map_err(|e| format!("{file}: {e}"))? {
+            add(found, file.clone());
         }
     }
-    for (msgid, plural, file) in view_phrases(root)? {
-        add(msgid, plural, file);
+    for (found, file) in view_phrases(root)? {
+        add(found, file);
     }
 
     // Grouped by where each first appears, so a page's words sit together.
-    let mut ordered: Vec<(&String, &Entry)> = entries.iter().collect();
+    let mut ordered: Vec<(&(Option<String>, String), &Entry)> = entries.iter().collect();
     ordered.sort_by(|a, b| (&a.1.files[0], a.0).cmp(&(&b.1.files[0], b.0)));
     let mut out = String::new();
     let mut line = |text: &str| {
@@ -68,9 +78,12 @@ pub fn run(root: &Path, check: bool) -> Result<(), String> {
     line("\"Content-Type: text/plain; charset=UTF-8\\n\"");
     line("\"Content-Transfer-Encoding: 8bit\\n\"");
     line("\"Plural-Forms: nplurals=2; plural=(n != 1);\\n\"");
-    for (msgid, entry) in ordered {
+    for ((context, msgid), entry) in ordered {
         line("");
         line(&format!("#: {}", entry.files.join(" ")));
+        if let Some(context) = context {
+            line(&format!("msgctxt {}", quote(context)));
+        }
         line(&format!("msgid {}", quote(msgid)));
         match &entry.plural {
             Some(plural) => {
@@ -121,15 +134,40 @@ fn relative(root: &Path, path: &Path) -> String {
     path.strip_prefix(root).unwrap_or(path).to_string_lossy().replace('\\', "/")
 }
 
-/// The English of each `Phrase::new("…")`: one plain or raw string literal, as the type's docs ask.
-fn rust_phrases(text: &str) -> Result<Vec<String>, String> {
+/// Each `Phrase::new("…")`, `Phrase::ctx("…", "…")` and `Plural::new("…", "…")`: plain or raw string literals, as
+/// the types' docs ask.
+fn rust_phrases(text: &str) -> Result<Vec<Found>, String> {
+    const CALLS: [&str; 3] = ["Phrase::new(", "Phrase::ctx(", "Plural::new("];
     let mut found = Vec::new();
     let mut rest = text;
-    while let Some(at) = rest.find("Phrase::new(") {
-        rest = rest[at + "Phrase::new(".len()..].trim_start();
-        let (literal, after) = rust_literal(rest).ok_or_else(|| format!("Phrase::new without a string literal near {:?}", &rest[..rest.len().min(40)]))?;
-        found.push(literal);
-        rest = after;
+    while let Some((at, call)) = CALLS.iter().filter_map(|call| rest.find(call).map(|at| (at, *call))).min() {
+        rest = &rest[at + call.len()..];
+        let mut literal = |first: bool| {
+            if !first {
+                rest = rest.trim_start().strip_prefix(',').ok_or_else(|| format!("{call} takes two string literals"))?;
+            }
+            let (text, after) = rust_literal(rest.trim_start()).ok_or_else(|| format!("{call} without a string literal near {:?}", &rest[..rest.len().min(40)]))?;
+            rest = after;
+            Ok::<_, String>(text)
+        };
+        let first = literal(true)?;
+        found.push(match call {
+            "Phrase::new(" => Found {
+                context: None,
+                msgid: first,
+                plural: None,
+            },
+            "Phrase::ctx(" => Found {
+                context: Some(first),
+                msgid: literal(false)?,
+                plural: None,
+            },
+            _ => Found {
+                context: None,
+                msgid: first,
+                plural: Some(literal(false)?),
+            },
+        });
     }
     Ok(found)
 }
@@ -174,8 +212,8 @@ fn rust_literal(text: &str) -> Option<(String, &str)> {
     None
 }
 
-/// The views' `@tr` strings, as `slint-tr-extractor` reads them, with the file each is in.
-fn view_phrases(root: &Path) -> Result<Vec<(String, Option<String>, String)>, String> {
+/// The views' `@tr` strings, as `slint-tr-extractor` reads them, with each file they are in.
+fn view_phrases(root: &Path) -> Result<Vec<(Found, String)>, String> {
     let mut views = Vec::new();
     slint_files(&root.join("crates/ui/ui"), &mut views)?;
     views.sort();
@@ -196,12 +234,17 @@ fn view_phrases(root: &Path) -> Result<Vec<(String, Option<String>, String)>, St
     let text = text.map_err(|e| format!("{output:?}: {e}"))?;
     let mut found = Vec::new();
     for block in text.replace("\r\n", "\n").split("\n\n") {
-        let mut file = None;
+        let mut files: Vec<String> = Vec::new();
         let mut fields: BTreeMap<&str, String> = BTreeMap::new();
         let mut current = None;
         for line in block.lines() {
-            if let Some(reference) = line.strip_prefix("#: ") {
-                file = reference.split_whitespace().next().map(|at| at.rsplit_once(':').map_or(at, |(path, _)| path).to_owned());
+            if let Some(references) = line.strip_prefix("#: ") {
+                for at in references.split_whitespace() {
+                    let file = at.rsplit_once(':').map_or(at, |(path, _)| path).to_owned();
+                    if !files.contains(&file) {
+                        files.push(file);
+                    }
+                }
             } else if let Some((key, value)) = line.split_once(' ').filter(|(key, _)| matches!(*key, "msgid" | "msgid_plural" | "msgctxt")) {
                 fields.insert(key, po_string(value)?);
                 current = Some(key);
@@ -214,13 +257,16 @@ fn view_phrases(root: &Path) -> Result<Vec<(String, Option<String>, String)>, St
                 current = None;
             }
         }
-        if fields.contains_key("msgctxt") {
-            return Err(format!("a view's @tr has a context; the catalog has none: {block}"));
-        }
-        if let (Some(msgid), Some(file)) = (fields.remove("msgid"), file)
-            && !msgid.is_empty()
-        {
-            found.push((msgid, fields.remove("msgid_plural"), file));
+        if let Some(msgid) = fields.remove("msgid").filter(|msgid| !msgid.is_empty()) {
+            let (context, plural) = (fields.remove("msgctxt"), fields.remove("msgid_plural"));
+            for file in files {
+                let found_here = Found {
+                    context: context.clone(),
+                    msgid: msgid.clone(),
+                    plural: plural.clone(),
+                };
+                found.push((found_here, file));
+            }
         }
     }
     Ok(found)
@@ -280,13 +326,32 @@ fn quote(text: &str) -> String {
 mod tests {
     use super::*;
 
+    fn msgids(text: &str) -> Vec<String> {
+        rust_phrases(text).unwrap().into_iter().map(|found| found.msgid).collect()
+    }
+
     #[test]
     fn rust_literals_unescape_as_rust_does() {
-        assert_eq!(rust_phrases(r#"const A: Phrase = Phrase::new("Say \"hi\"\n{name}");"#).unwrap(), ["Say \"hi\"\n{name}"]);
-        assert_eq!(rust_phrases("Phrase::new(\"one \\\n        two\")").unwrap(), ["one two"]);
-        assert_eq!(rust_phrases(r###"Phrase::new(r#"raw "quoted""#)"###).unwrap(), ["raw \"quoted\""]);
-        assert_eq!(rust_phrases(r#"Phrase::new("T1\u{a0}only")"#).unwrap(), ["T1\u{a0}only"]);
+        assert_eq!(msgids(r#"const A: Phrase = Phrase::new("Say \"hi\"\n{name}");"#), ["Say \"hi\"\n{name}"]);
+        assert_eq!(msgids("Phrase::new(\"one \\\n        two\")"), ["one two"]);
+        assert_eq!(msgids(r###"Phrase::new(r#"raw "quoted""#)"###), ["raw \"quoted\""]);
+        assert_eq!(msgids(r#"Phrase::new("T1\u{a0}only")"#), ["T1\u{a0}only"]);
         assert!(rust_phrases("Phrase::new(NAME)").is_err());
+    }
+
+    #[test]
+    fn contexts_and_plurals_are_read_in_order() {
+        let found = rust_phrases("Plural::new(\"{n} mod\", \"{n} mods\") Phrase::ctx(\"key\",\n    \"Delete\") Phrase::new(\"Delete\")").unwrap();
+        let entry = |context: Option<&str>, msgid: &str, plural: Option<&str>| Found {
+            context: context.map(Into::into),
+            msgid: msgid.into(),
+            plural: plural.map(Into::into),
+        };
+        assert_eq!(
+            found,
+            [entry(None, "{n} mod", Some("{n} mods")), entry(Some("key"), "Delete", None), entry(None, "Delete", None)]
+        );
+        assert!(rust_phrases(r#"Phrase::ctx("key")"#).is_err());
     }
 
     #[test]

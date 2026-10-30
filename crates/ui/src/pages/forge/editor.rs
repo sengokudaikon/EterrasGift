@@ -7,7 +7,7 @@ use super::item::EditPresentation;
 use super::item::{self, AffixDefinition, AffixKind, Category, Compatibility, ForgeItem, ItemEdit, Moves, RollRequest, RollTarget, Seal, StatusField};
 use super::rows::{AffixRow, FieldDraft, FieldKind, FieldOption, RollRow, ValueEditor, base_key, base_of};
 use super::worker::ForgeGame;
-use eg_core::phrase::Phrase;
+use eg_core::phrase::{Conjunction, Phrase, Plural, list};
 use eg_trainer::item::template::{ItemTemplate, TemplateAffix, TemplateItem, TemplateStatus, TemplateStore};
 use std::collections::{HashMap, VecDeque};
 use std::rc::Rc;
@@ -55,26 +55,12 @@ const CORRUPTED: Phrase = Phrase::new("Corrupted");
 const RUIN: Phrase = Phrase::new("Ruin");
 const NOT_RUINED: Phrase = Phrase::new("Not ruined");
 const RUINED: Phrase = Phrase::new("Ruined");
-const AFFIXES: [Phrase; 2] = [Phrase::new("{n} affix"), Phrase::new("{n} affixes")];
-const DRAFTS: [Phrase; 2] = [Phrase::new("{n} draft"), Phrase::new("{n} drafts")];
-const UNIQUE_MODIFIERS: [Phrase; 2] = [Phrase::new("{n} unique modifier"), Phrase::new("{n} unique modifiers")];
-const PREFIXES: [Phrase; 2] = [Phrase::new("{n} prefix"), Phrase::new("{n} prefixes")];
-const SUFFIXES: [Phrase; 2] = [Phrase::new("{n} suffix"), Phrase::new("{n} suffixes")];
-const INCOMPATIBLE_AFFIXES: [Phrase; 2] = [Phrase::new("{n} incompatible affix"), Phrase::new("{n} incompatible affixes")];
-
-/// A count with its noun, singular for one: each form a whole phrase, so a translation can place the number.
-fn count(count: usize, forms: [Phrase; 2]) -> String {
-    forms[usize::from(count != 1)].with(&[("n", &count)])
-}
-
-/// Items joined by a conjunction phrase ("{list} and {item}"), as English runs them: "a and b and c".
-fn joined(items: &[String], conjunction: Phrase) -> String {
-    let mut items = items.iter();
-    let first = items.next().cloned().unwrap_or_default();
-    items.fold(first, |list, item| conjunction.with(&[("list", &list), ("item", item)]))
-}
-const AND: Phrase = Phrase::new("{list} and {item}");
-const OR: Phrase = Phrase::new("{list} or {item}");
+const AFFIXES: Plural = Plural::new("{n} affix", "{n} affixes");
+const DRAFTS: Plural = Plural::new("{n} draft", "{n} drafts");
+const UNIQUE_MODIFIERS: Plural = Plural::new("{n} unique modifier", "{n} unique modifiers");
+const PREFIXES: Plural = Plural::new("{n} prefix", "{n} prefixes");
+const SUFFIXES: Plural = Plural::new("{n} suffix", "{n} suffixes");
+const INCOMPATIBLE_AFFIXES: Plural = Plural::new("{n} incompatible affix", "{n} incompatible affixes");
 
 /// What the action bar's message says, so it shows one icon for it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
@@ -140,7 +126,7 @@ pub const PICKER_CATEGORIES: [(Phrase, Option<Category>); 9] = [
     (Phrase::new("Reforged set"), Some(Category::Set)),
     (Phrase::new("Idol enchantment"), Some(Category::IdolEnchantment)),
     (Phrase::new("Weaver idol"), Some(Category::IdolWeaver)),
-    (Phrase::new("Corrupted"), Some(Category::Corrupted)),
+    (Phrase::ctx("affix category", "Corrupted"), Some(Category::Corrupted)),
     (Phrase::new("Unique modifier"), Some(Category::FakeUniqueMod)),
 ];
 
@@ -383,7 +369,7 @@ impl ForgeEditor {
         const AFFIXES_ONLY: Phrase = Phrase::new("Affixes");
         let more = if template.affixes.len() > 3 { ", …" } else { "" };
         let kind = if template.item.is_some() { WHOLE_ITEM } else { AFFIXES_ONLY };
-        let mut facts = vec![kind.into(), count(template.affixes.len(), AFFIXES)];
+        let mut facts = vec![kind.into(), AFFIXES.count(template.affixes.len())];
         if !names.is_empty() {
             facts.push(format!("{}{more}", names.join(", ")));
         }
@@ -503,10 +489,12 @@ impl ForgeEditor {
             Phrase::new("Drafted only the unique from \"{name}\": a new unique brings its own modifiers. Apply it, then draft the template again for the rest.");
         const UNIQUE_MISFITS: Phrase = Phrase::new("That template's unique does not fit this item.");
         const NOT_BACKED: Phrase = Phrase::new("That template holds a unique, set or legendary item, and this item is none of them.");
-        const THE_BASE: Phrase = Phrase::new("the base");
+        const BASE: Phrase = Phrase::new("Base");
         const MATCHES: Phrase = Phrase::new("\"{name}\" matches the item already.");
-        const DRAFTED_ONE: Phrase = Phrase::new("Drafted \"{name}\": 1 draft. Review it, then Apply.");
-        const DRAFTED_MANY: Phrase = Phrase::new("Drafted \"{name}\": {n} drafts. Review them, then Apply.");
+        const DRAFTED: Plural = Plural::new(
+            "Drafted \"{name}\": {n} draft. Review it, then Apply.",
+            "Drafted \"{name}\": {n} drafts. Review them, then Apply.",
+        );
         const LEFT_OUT: Phrase = Phrase::new("Left out: {items}.");
         let item = self.item.clone().ok_or(NO_ITEM.get())?;
         if self.writing {
@@ -546,7 +534,7 @@ impl ForgeEditor {
                     .and_then(|base| base.options.iter().position(|option| option.value == key && option.available))
                 {
                     Some(option) => self.pick_base(option),
-                    None => left_out.push(THE_BASE.into()),
+                    None => left_out.push(BASE.into()),
                 }
             }
             let status = whole.status;
@@ -565,7 +553,7 @@ impl ForgeEditor {
                     continue;
                 }
                 if !self.can_change_field(index) {
-                    left_out.push(field.name.to_lowercase());
+                    left_out.push(field.name.clone());
                     continue;
                 }
                 if self.fields[index].set(value) {
@@ -609,8 +597,7 @@ impl ForgeEditor {
         let drafted = self.draft_count();
         let mut message = match drafted {
             0 => MATCHES.with(&[("name", &template.name)]),
-            1 => DRAFTED_ONE.with(&[("name", &template.name)]),
-            n => DRAFTED_MANY.with(&[("name", &template.name), ("n", &n)]),
+            n => DRAFTED.with(n, &[("name", &template.name)]),
         };
         if !left_out.is_empty() {
             message.push(' ');
@@ -668,7 +655,10 @@ impl ForgeEditor {
                     self.edited(RowRef::Affix(uid));
                 }
                 Ok(_) => {}
-                Err(problem) => left_out.push(format!("{} ({})", definition.name, problem.trim_end_matches('.'))),
+                Err(problem) => {
+                    const NOT_ADDED: Phrase = Phrase::new("{name} ({problem})");
+                    left_out.push(NOT_ADDED.with(&[("name", &definition.name), ("problem", &problem)]));
+                }
             }
         }
     }
@@ -881,9 +871,9 @@ impl ForgeEditor {
 
     /// The game's name for a unique-backed rarity.
     fn rarity_label(&self, rarity: u8) -> String {
-        const LEGENDARY: Phrase = Phrase::new("Legendary");
-        const SET: Phrase = Phrase::new("Set");
-        const UNIQUE: Phrase = Phrase::new("Unique");
+        const LEGENDARY: Phrase = Phrase::ctx("rarity", "Legendary");
+        const SET: Phrase = Phrase::ctx("rarity", "Set");
+        const UNIQUE: Phrase = Phrase::ctx("rarity", "Unique");
         self.catalog().rarity_name(rarity).unwrap_or_else(|| {
             match rarity {
                 item::LEGENDARY => LEGENDARY,
@@ -1199,13 +1189,13 @@ impl ForgeEditor {
             parts.push(LEVEL.with(&[("level", &status.level_requirement)]));
         }
         const AND_MODIFIERS: Phrase = Phrase::new("{affixes}, {modifiers}");
-        let affixes = count(self.affixes.iter().filter(|row| !row.is_removed()).count(), AFFIXES);
+        let affixes = AFFIXES.count(self.affixes.iter().filter(|row| !row.is_removed()).count());
         parts.push(
             if item
                 .backing()
                 .is_some_and(|unique| matches!(unique.formatting, crate::pages::forge::game::Lookup::Ready(())))
             {
-                AND_MODIFIERS.with(&[("affixes", &affixes), ("modifiers", &count(self.uniques.len(), UNIQUE_MODIFIERS))])
+                AND_MODIFIERS.with(&[("affixes", &affixes), ("modifiers", &UNIQUE_MODIFIERS.count(self.uniques.len()))])
             } else {
                 affixes
             },
@@ -1331,12 +1321,13 @@ impl ForgeEditor {
 
     pub fn max_tiers_tip(&self) -> String {
         const TIERS_AT_BEST: Phrase = Phrase::new("Every affix is at its highest tier below T8.");
-        const TIER_ONE: Phrase = Phrase::new("Draft the affix up to its highest tier, at most T7. Primordial affixes stay.");
-        const TIERS_MANY: Phrase = Phrase::new("Draft {n} affixes up to their highest tier, at most T7. Primordial affixes stay.");
+        const TIERS: Plural = Plural::new(
+            "Draft the affix up to its highest tier, at most T7. Primordial affixes stay.",
+            "Draft {n} affixes up to their highest tier, at most T7. Primordial affixes stay.",
+        );
         match self.max_tier_plan().len() {
             0 => TIERS_AT_BEST.into(),
-            1 => TIER_ONE.into(),
-            n => TIERS_MANY.with(&[("n", &n)]),
+            n => TIERS.count(n),
         }
     }
 
@@ -1381,12 +1372,10 @@ impl ForgeEditor {
 
     pub fn max_rolls_tip(&self) -> String {
         const ROLLS_AT_BEST: Phrase = Phrase::new("Every roll that can change is at its best.");
-        const ROLL_ONE: Phrase = Phrase::new("Draft the roll up to 255, the game's perfect roll.");
-        const ROLLS_MANY: Phrase = Phrase::new("Draft {n} rolls up to 255, the game's perfect roll.");
+        const ROLLS: Plural = Plural::new("Draft the roll up to 255, the game's perfect roll.", "Draft {n} rolls up to 255, the game's perfect roll.");
         match self.max_roll_plan().len() {
             0 => ROLLS_AT_BEST.into(),
-            1 => ROLL_ONE.into(),
-            n => ROLLS_MANY.with(&[("n", &n)]),
+            n => ROLLS.count(n),
         }
     }
 
@@ -1513,8 +1502,8 @@ impl ForgeEditor {
         const FREE_UNIQUE: Phrase = Phrase::new("Free: {prefixes}, {suffixes}. An affix makes it legendary.");
         let (prefixes, suffixes) = item.free_slots();
         let values: [(&str, &dyn std::fmt::Display); 2] = [
-            ("prefixes", &count(prefixes.max(0) as usize, PREFIXES)),
-            ("suffixes", &count(suffixes.max(0) as usize, SUFFIXES)),
+            ("prefixes", &PREFIXES.count(prefixes.max(0) as usize)),
+            ("suffixes", &SUFFIXES.count(suffixes.max(0) as usize)),
         ];
         if item.rarity == item::UNIQUE { FREE_UNIQUE.with(&values) } else { FREE.with(&values) }
     }
@@ -2123,16 +2112,15 @@ impl ForgeEditor {
         self.draft_order.clear();
         self.picker = None;
         self.say_preview("", false, false);
-        const ONE_DISCARDED: Phrase = Phrase::new("Draft discarded.");
-        const MANY_DISCARDED: Phrase = Phrase::new("{n} drafts discarded.");
-        self.say(if count == 1 { ONE_DISCARDED.into() } else { MANY_DISCARDED.with(&[("n", &count)]) }, MessageKind::Info);
+        const DISCARDED: Plural = Plural::new("Draft discarded.", "{n} drafts discarded.");
+        self.say(DISCARDED.count(count), MessageKind::Info);
         self.resolve_tables();
     }
 
     pub fn draft_count_text(&self) -> String {
         let drafts = self.draft_count();
         const NO_DRAFTS: Phrase = Phrase::new("No drafts");
-        if drafts == 0 { NO_DRAFTS.into() } else { count(drafts, DRAFTS) }
+        if drafts == 0 { NO_DRAFTS.into() } else { DRAFTS.count(drafts) }
     }
 
     pub fn changes_text(&self) -> String {
@@ -2144,16 +2132,15 @@ impl ForgeEditor {
 
     pub fn discard_text(&self) -> String {
         let drafts = self.draft_count();
-        const DISCARD_ONE: Phrase = Phrase::new("Discard draft");
-        const DISCARD_MANY: Phrase = Phrase::new("Discard {n} drafts");
-        if drafts == 1 { DISCARD_ONE.into() } else { DISCARD_MANY.with(&[("n", &drafts)]) }
+        const DISCARD: Plural = Plural::new("Discard draft", "Discard {n} drafts");
+        DISCARD.count(drafts)
     }
 
     pub fn apply_text(&self) -> String {
         let drafts = self.draft_count();
-        const APPLY_MANY: Phrase = Phrase::new("Apply {n} drafts");
+        const APPLY_MANY: Plural = Plural::new("Apply {n} draft", "Apply {n} drafts");
         const APPLY: Phrase = Phrase::new("Apply to game");
-        if drafts > 1 { APPLY_MANY.with(&[("n", &drafts)]) } else { APPLY.into() }
+        if drafts > 1 { APPLY_MANY.count(drafts) } else { APPLY.into() }
     }
 
     pub fn can_apply(&self) -> bool {
@@ -2347,7 +2334,7 @@ impl ForgeEditor {
             String::new()
         } else {
             const LINKED: Phrase = Phrase::new("Linked with {names}");
-            LINKED.with(&[("names", &joined(&others, AND))])
+            LINKED.with(&[("names", &list(&others, Conjunction::And))])
         }
     }
 
@@ -2514,14 +2501,17 @@ impl ForgeEditor {
             self.selected_affix = (!self.affixes.is_empty()).then_some(0);
         }
         if discarded > 0 {
-            const CHANGED_ONE: Phrase = Phrase::new("The forge item changed, so its draft was discarded.");
-            const CHANGED_MANY: Phrase = Phrase::new("The forge item changed, so its {n} drafts were discarded.");
-            self.say(if discarded == 1 { CHANGED_ONE.into() } else { CHANGED_MANY.with(&[("n", &discarded)]) }, MessageKind::Info);
+            const CHANGED: Plural = Plural::new(
+                "The forge item changed, so its draft was discarded.",
+                "The forge item changed, so its {n} drafts were discarded.",
+            );
+            self.say(CHANGED.count(discarded), MessageKind::Info);
         } else if !lost.is_empty() {
-            const LOST_ONE: Phrase = Phrase::new("The item changed in the game and no longer has {missing}, so that draft was discarded.");
-            const LOST_MANY: Phrase = Phrase::new("The item changed in the game and no longer has {missing}, so those drafts were discarded.");
-            let phrase = if lost.len() == 1 { LOST_ONE } else { LOST_MANY };
-            self.say(phrase.with(&[("missing", &joined(&lost, OR))]), MessageKind::Info);
+            const LOST: Plural = Plural::new(
+                "The item changed in the game and no longer has {missing}, so that draft was discarded.",
+                "The item changed in the game and no longer has {missing}, so those drafts were discarded.",
+            );
+            self.say(LOST.with(lost.len(), &[("missing", &list(&lost, Conjunction::Or))]), MessageKind::Info);
         }
         // What fits depends on the item, so an open picker judges its list again.
         self.filter_picker(true);
@@ -2841,7 +2831,7 @@ impl ForgeEditor {
                 }
                 let broken = self.broken_by_base(item, definition.item_type, base.sub_type);
                 if broken > 0 {
-                    facts.push(count(broken, INCOMPATIBLE_AFFIXES));
+                    facts.push(INCOMPATIBLE_AFFIXES.count(broken));
                 }
                 FieldOption {
                     value: base_key(definition.item_type, base.sub_type),
@@ -3883,15 +3873,13 @@ impl ForgeEditor {
     }
 
     fn finish_batch(&mut self, failure: Option<String>) {
-        const LAST_RESTORED: Phrase = Phrase::new("Last applied edit restored");
-        const MANY_RESTORED: Phrase = Phrase::new("{n} applied edits restored");
+        const EDITS_RESTORED: Plural = Plural::new("Last applied edit restored", "{n} applied edits restored");
         const RESTORED: Phrase = Phrase::new("Restored");
         const STEP_FAILED: Phrase = Phrase::new("{completed} of {total} drafts applied and confirmed; {step} was not applied. {message}");
         const SOME_RESTORED: Phrase = Phrase::new("{completed} of {total} edits restored. {message}");
         const SOME_APPLIED: Phrase = Phrase::new("{completed} of {total} drafts applied and confirmed. {message}");
         const ALL_RESTORED: Phrase = Phrase::new("Previous values restored; readback confirmed.");
-        const ONE_CONFIRMED: Phrase = Phrase::new("Edit readback confirmed: {names}.");
-        const MANY_CONFIRMED: Phrase = Phrase::new("{total} drafts applied. Edit readback confirmed for each: {names}.");
+        const CONFIRMED: Plural = Plural::new("Edit readback confirmed: {names}.", "{n} drafts applied. Edit readback confirmed for each: {names}.");
         const ONE_WAY: Phrase = Phrase::new("This change is one-way: the game would not give the old rarity back, so Undo apply cannot reverse it.");
         let Some(batch) = self.batch.take() else {
             return;
@@ -3914,11 +3902,7 @@ impl ForgeEditor {
                     0,
                     AppliedEntry {
                         name: UNDO.into(),
-                        summary: if batch.completed == 1 {
-                            LAST_RESTORED.into()
-                        } else {
-                            MANY_RESTORED.with(&[("n", &batch.completed)])
-                        },
+                        summary: EDITS_RESTORED.count(batch.completed),
                         outcome: RESTORED.into(),
                         time: (self.clock)(),
                         effect: String::new(),
@@ -3944,12 +3928,7 @@ impl ForgeEditor {
         } else if batch.undoing {
             self.say(ALL_RESTORED, MessageKind::Confirmed);
         } else {
-            let names = batch.names.join(", ");
-            let mut message = if batch.total == 1 {
-                ONE_CONFIRMED.with(&[("names", &names)])
-            } else {
-                MANY_CONFIRMED.with(&[("total", &batch.total), ("names", &names)])
-            };
+            let mut message = CONFIRMED.with(batch.total, &[("names", &list(&batch.names, Conjunction::And))]);
             if batch.one_way {
                 message.push(' ');
                 message.push_str(ONE_WAY.get());

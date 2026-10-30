@@ -11,6 +11,10 @@ publish = false
 # Slint is pinned exactly: point releases have broken APIs before (research/slint.md).
 slint = "=1.18.1"
 slint-build = "=1.18.1"
+# The parser slint-build bundles translations with, so the Rust phrases' table takes what the views take.
+rspolib = "=0.1.2"
+# The user's locale, read as Slint reads it to pick a bundled translation.
+sys-locale = "0.3.2"
 image = { version = "0.25.10", default-features = false, features = ["png"] }
 serde_json = { version = "1.0.154", features = ["preserve_order"] }
 windows-sys = "0.61.2"

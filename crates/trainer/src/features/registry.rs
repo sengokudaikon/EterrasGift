@@ -697,7 +697,13 @@ pub static DESCRIPTORS: &[FeatureDescriptor] = &[
             label: Phrase::new("Rarity"),
             default: "Unique",
             start: 3.0,
-            choices: &[Phrase::new("Normal"), Phrase::new("Magic"), Phrase::new("Rare"), Phrase::new("Unique"), Phrase::new("Set")],
+            choices: &[
+                Phrase::ctx("rarity", "Normal"),
+                Phrase::ctx("rarity", "Magic"),
+                Phrase::ctx("rarity", "Rare"),
+                Phrase::ctx("rarity", "Unique"),
+                Phrase::ctx("rarity", "Set"),
+            ],
             hint: None,
             minimum: 0.0,
             maximum: 100.0,
@@ -820,7 +826,7 @@ pub static DESCRIPTORS: &[FeatureDescriptor] = &[
             default: "Arena",
             start: 1.0,
             choices: &[
-                Phrase::new("Normal"),
+                Phrase::ctx("echo type", "Normal"),
                 Phrase::new("Arena"),
                 Phrase::new("Shade"),
                 Phrase::new("Beacon"),
@@ -1281,7 +1287,7 @@ pub static DESCRIPTORS: &[FeatureDescriptor] = &[
         kind: FeatureKind::SwitchWithValues,
         values: &[
             FeatureValue {
-                label: Phrase::new("Normal"),
+                label: Phrase::ctx("monster rarity", "Normal"),
                 default: "1",
                 start: 1.0,
                 choices: &[],
@@ -1292,7 +1298,7 @@ pub static DESCRIPTORS: &[FeatureDescriptor] = &[
                 unit: Some("×"),
             },
             FeatureValue {
-                label: Phrase::new("Magic"),
+                label: Phrase::ctx("monster rarity", "Magic"),
                 default: "2",
                 start: 2.0,
                 choices: &[],
@@ -1303,7 +1309,7 @@ pub static DESCRIPTORS: &[FeatureDescriptor] = &[
                 unit: Some("×"),
             },
             FeatureValue {
-                label: Phrase::new("Rare"),
+                label: Phrase::ctx("monster rarity", "Rare"),
                 default: "3",
                 start: 3.0,
                 choices: &[],

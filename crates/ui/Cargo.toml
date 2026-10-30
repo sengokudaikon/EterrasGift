@@ -12,6 +12,7 @@ rfd.workspace = true
 jiff.workspace = true
 serde_json.workspace = true
 slint = { workspace = true, features = ["raw-window-handle-06"] }
+sys-locale.workspace = true
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { workspace = true, features = ["Win32_UI_WindowsAndMessaging", "Win32_UI_Accessibility", "Win32_Graphics_Dwm"] }
@@ -20,6 +21,7 @@ raw-window-handle.workspace = true
 
 [build-dependencies]
 slint-build.workspace = true
+rspolib.workspace = true
 
 [dev-dependencies]
 image.workspace = true

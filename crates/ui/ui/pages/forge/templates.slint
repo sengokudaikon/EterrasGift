@@ -162,7 +162,7 @@ export component TemplatesPanel inherits FlyoutSurface {
                         // Asking, the same two buttons become Delete and Keep, so the key that asked lands on Keep.
                         Button {
                             in-flyout: true;
-                            text: asking ? ForgeText.delete : ForgeText.draft;
+                            text: asking ? ForgeText.delete : ForgeText.draft-action;
                             kind: asking ? ButtonKind.primary : ButtonKind.standard;
                             enabled: asking || ForgeState.has-item;
                             tip: asking ? ForgeText.delete-for-good-tip(entry.name) : ForgeText.draft-onto-tip(entry.name);

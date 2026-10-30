@@ -10,7 +10,7 @@ use super::{
 };
 use crate::game::install::{GameIdentity, GameInstall};
 use crate::launch::loader::{ModLoaderState, ModLoaderSwitch, melon_paths};
-use eg_core::phrase::Phrase;
+use eg_core::phrase::{Conjunction, Phrase, Plural, list};
 use std::path::{Path, PathBuf};
 
 const TURNS_ON: Phrase = Phrase::new("Turns on the next time you play with mods");
@@ -32,7 +32,10 @@ const NO_SUPPORT: Phrase = Phrase::new("In the last game with mods, MelonLoader 
 const PREPARING: Phrase = Phrase::new("MelonLoader is preparing for this game build, so this game runs without mods. Close it once it's up and play with mods again.");
 const DID_NOT_LOAD: Phrase = Phrase::new("{name} didn't load last time. Turn it off or replace it.");
 const CANT_LOAD: Phrase = Phrase::new("{name} can't load: {problem} Turn it off or replace it.");
-const MANY_CANT_LOAD: Phrase = Phrase::new("{count} mods can't load: {names} and {last}. Turn them off or replace them.");
+const MANY_CANT_LOAD: Plural = Plural::new(
+    "{n} mod can't load: {names}. Turn it off or replace it.",
+    "{n} mods can't load: {names}. Turn them off or replace them.",
+);
 const RUNNING: Phrase = Phrase::new("Last Epoch is running. Play with mods once it closes.");
 const LOADER_VERSION: Phrase = Phrase::new("MelonLoader {version}");
 const GAME_VERSION: Phrase = Phrase::new("Last Epoch {version}");
@@ -311,11 +314,8 @@ impl Inventory {
                     CANT_LOAD.with(&[("name", &first.name), ("problem", &first.problem.as_deref().unwrap())])
                 }
             } else {
-                MANY_CANT_LOAD.with(&[
-                    ("count", &failing.len()),
-                    ("names", &failing[..failing.len() - 1].iter().map(|item| item.name.as_str()).collect::<Vec<_>>().join(", ")),
-                    ("last", &failing.last().unwrap().name),
-                ])
+                let names: Vec<&str> = failing.iter().map(|item| item.name.as_str()).collect();
+                MANY_CANT_LOAD.with(failing.len(), &[("names", &list(&names, Conjunction::And))])
             });
         }
         if running {

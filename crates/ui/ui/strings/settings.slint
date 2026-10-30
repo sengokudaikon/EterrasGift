@@ -1,5 +1,6 @@
 // Settings' words. Every view word is an `@tr` here, never a literal in a view; its English is the gettext msgid,
-// without a context (build.rs and `cargo xtask phrases` agree on that), shared with any phrase that reads the same.
+// shared with any phrase that reads the same. A context only tells apart English that means two things
+// (see shell.slint).
 
 export global SettingsText {
     out property <string> settings: @tr("Settings");

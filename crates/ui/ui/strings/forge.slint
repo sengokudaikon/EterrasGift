@@ -1,11 +1,13 @@
 // The Item Forge's words. Every view word is an `@tr` here, never a literal in a view; its English is the gettext
-// msgid, without a context (build.rs and `cargo xtask phrases` agree on that), shared with any phrase that reads the same.
+// msgid, shared with any phrase that reads the same. A context only tells apart English that means two things
+// (see shell.slint).
 
 export global ForgeText {
     // Shared marks and states.
     out property <string> in-game: @tr("in game");
     out property <string> confirmed: @tr("Confirmed");
     out property <string> draft: @tr("Draft");
+    out property <string> draft-action: @tr("verb" => "Draft");
     out property <string> stale-draft: @tr("Stale draft");
     out property <string> read-only: @tr("Read-only");
     out property <string> changed-in-game: @tr("Changed in game. Discard and redo.");
@@ -44,10 +46,10 @@ export global ForgeText {
     out property <string> to-be-removed: @tr("To be removed");
     out property <string> change-tier: @tr("Change tier");
     out property <string> change-seal-state: @tr("Change seal state");
-    out property <string> seal-normal: @tr("Normal");
-    out property <string> seal-sealed: @tr("Sealed");
-    out property <string> seal-primordial: @tr("Primordial");
-    out property <string> seal-corrupted: @tr("Corrupted");
+    out property <string> seal-normal: @tr("seal" => "Normal");
+    out property <string> seal-sealed: @tr("seal" => "Sealed");
+    out property <string> seal-primordial: @tr("seal" => "Primordial");
+    out property <string> seal-corrupted: @tr("seal" => "Corrupted");
     out property <string> shared-roll: @tr("These lines share one roll in the game, so changing one changes the other.");
     out property <string> affix-changed-in-game: @tr("The game changed this affix after you drafted it.");
     out property <string> rolls-changed-in-game: @tr("The game changed these rolls after you drafted them.");
@@ -61,13 +63,9 @@ export global ForgeText {
     out property <string> discard-draft: @tr("Discard draft");
     out property <string> keep-affix: @tr("Keep affix");
     out property <string> remove-affix: @tr("Remove affix");
-    out property <string> delete-key: @tr("Delete");
+    out property <string> delete-key: @tr("key" => "Delete");
 
-    // The action bar; its texts that change are Rust's, these are their first values.
-    out property <string> no-drafts: @tr("No drafts");
-    out property <string> changes: @tr("Changes");
-    out property <string> undo: @tr("Undo");
-    out property <string> apply-to-game: @tr("Apply to game");
+    // The action bar; its texts that change are Rust's.
     out property <string> discard-all-tip: @tr("Discard every draft on this item");
     out property <string> apply-tip: @tr("Write the drafts to the game (Ctrl+S)");
 

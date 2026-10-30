@@ -216,10 +216,6 @@ msgid "Turns on the next time you play with mods"
 msgstr ""
 
 #: crates/companion/src/mods/inventory.rs
-msgid "{count} mods can't load: {names} and {last}. Turn them off or replace them."
-msgstr ""
-
-#: crates/companion/src/mods/inventory.rs
 msgid "{file} describes its settings in a way the app can't read, so they show as MelonPreferences.cfg has them. {error}"
 msgstr ""
 
@@ -238,6 +234,12 @@ msgstr ""
 #: crates/companion/src/mods/inventory.rs
 msgid "{name} didn't load last time. Turn it off or replace it."
 msgstr ""
+
+#: crates/companion/src/mods/inventory.rs
+msgid "{n} mod can't load: {names}. Turn it off or replace it."
+msgid_plural "{n} mods can't load: {names}. Turn them off or replace them."
+msgstr[0] ""
+msgstr[1] ""
 
 #: crates/companion/src/mods/library.rs
 msgid "{file} changed while it was being copied. Try again once the build or copy has finished."
@@ -272,14 +274,6 @@ msgid "Installed {name}. It loads the next time you play with mods."
 msgstr ""
 
 #: crates/companion/src/mods/page.rs
-msgid "{count} DLLs were deleted from the Mods folder, so they are removed."
-msgstr ""
-
-#: crates/companion/src/mods/page.rs
-msgid "{count} DLLs were found in the Mods folder and added, on."
-msgstr ""
-
-#: crates/companion/src/mods/page.rs
 msgid "{file} was deleted from the Mods folder, so it is removed."
 msgstr ""
 
@@ -290,6 +284,18 @@ msgstr ""
 #: crates/companion/src/mods/page.rs
 msgid "{name} is installed already: the build is the same."
 msgstr ""
+
+#: crates/companion/src/mods/page.rs
+msgid "{n} DLL was deleted from the Mods folder, so it is removed."
+msgid_plural "{n} DLLs were deleted from the Mods folder, so they are removed."
+msgstr[0] ""
+msgstr[1] ""
+
+#: crates/companion/src/mods/page.rs
+msgid "{n} DLL was found in the Mods folder and added, on."
+msgid_plural "{n} DLLs were found in the Mods folder and added, on."
+msgstr[0] ""
+msgstr[1] ""
 
 #: crates/companion/src/mods/preferences.rs
 msgid "Enter a number from {min} to {max}."
@@ -387,6 +393,31 @@ msgstr ""
 
 #: crates/companion/src/mods/worker.rs crates/ui/src/pages/mods.rs
 msgid "The mod library stopped."
+msgstr ""
+
+#: crates/core/src/phrase.rs
+msgctxt "a list of two"
+msgid "{first} and {second}"
+msgstr ""
+
+#: crates/core/src/phrase.rs
+msgctxt "a list of two"
+msgid "{first} or {second}"
+msgstr ""
+
+#: crates/core/src/phrase.rs
+msgctxt "a longer list, before its last item"
+msgid "{list}, {item}"
+msgstr ""
+
+#: crates/core/src/phrase.rs
+msgctxt "a longer list, its last item"
+msgid "{list} and {last}"
+msgstr ""
+
+#: crates/core/src/phrase.rs
+msgctxt "a longer list, its last item"
+msgid "{list} or {last}"
 msgstr ""
 
 #: crates/core/src/settings.rs crates/ui/src/pages/settings.rs
@@ -523,6 +554,10 @@ msgstr ""
 
 #: crates/trainer/src/backend/connection.rs
 msgid "The helper couldn't leave the game. Restart Last Epoch before playing online."
+msgstr ""
+
+#: crates/trainer/src/features.rs
+msgid "{value}: {hint}"
 msgstr ""
 
 #: crates/trainer/src/features/registry.rs
@@ -1009,10 +1044,6 @@ msgstr ""
 msgid "Loot Lizards"
 msgstr ""
 
-#: crates/trainer/src/features/registry.rs crates/ui/src/pages/forge/item.rs
-msgid "Magic"
-msgstr ""
-
 #: crates/trainer/src/features/registry.rs
 msgid "Maximum bonus stability"
 msgstr ""
@@ -1133,10 +1164,6 @@ msgstr ""
 msgid "No mana cost"
 msgstr ""
 
-#: crates/trainer/src/features/registry.rs crates/trainer/src/item/edit.rs crates/ui/src/pages/forge/item.rs crates/ui/ui/strings/forge.slint
-msgid "Normal"
-msgstr ""
-
 #: crates/trainer/src/features/registry.rs
 msgid "Offense"
 msgstr ""
@@ -1221,10 +1248,6 @@ msgstr ""
 msgid "Rank, favor and reputation"
 msgstr ""
 
-#: crates/trainer/src/features/registry.rs crates/ui/src/pages/forge/item.rs
-msgid "Rare"
-msgstr ""
-
 #: crates/trainer/src/features/registry.rs crates/ui/ui/strings/forge.slint
 msgid "Rarity"
 msgstr ""
@@ -1283,10 +1306,6 @@ msgstr ""
 
 #: crates/trainer/src/features/registry.rs
 msgid "Sanctuary of Eterra"
-msgstr ""
-
-#: crates/trainer/src/features/registry.rs crates/ui/src/pages/forge/editor.rs
-msgid "Set"
 msgstr ""
 
 #: crates/trainer/src/features/registry.rs
@@ -1413,10 +1432,6 @@ msgstr ""
 msgid "Trees"
 msgstr ""
 
-#: crates/trainer/src/features/registry.rs crates/ui/src/pages/forge/editor.rs
-msgid "Unique"
-msgstr ""
-
 #: crates/trainer/src/features/registry.rs
 msgid "Uniques from prophecies drop with 4 legendary potential."
 msgstr ""
@@ -1509,24 +1524,77 @@ msgstr ""
 msgid "Your rank, favor and reputation with each faction you've joined."
 msgstr ""
 
-#: crates/trainer/src/item/edit.rs crates/ui/src/pages/forge/editor.rs crates/ui/src/pages/forge/item.rs crates/ui/ui/strings/forge.slint
-msgid "Corrupted"
+#: crates/trainer/src/features/registry.rs
+msgctxt "echo type"
+msgid "Normal"
+msgstr ""
+
+#: crates/trainer/src/features/registry.rs
+msgctxt "monster rarity"
+msgid "Magic"
+msgstr ""
+
+#: crates/trainer/src/features/registry.rs
+msgctxt "monster rarity"
+msgid "Normal"
+msgstr ""
+
+#: crates/trainer/src/features/registry.rs
+msgctxt "monster rarity"
+msgid "Rare"
+msgstr ""
+
+#: crates/trainer/src/features/registry.rs crates/ui/src/pages/forge/item.rs
+msgctxt "rarity"
+msgid "Magic"
+msgstr ""
+
+#: crates/trainer/src/features/registry.rs crates/ui/src/pages/forge/item.rs
+msgctxt "rarity"
+msgid "Normal"
+msgstr ""
+
+#: crates/trainer/src/features/registry.rs crates/ui/src/pages/forge/item.rs
+msgctxt "rarity"
+msgid "Rare"
+msgstr ""
+
+#: crates/trainer/src/features/registry.rs crates/ui/src/pages/forge/editor.rs
+msgctxt "rarity"
+msgid "Set"
+msgstr ""
+
+#: crates/trainer/src/features/registry.rs crates/ui/src/pages/forge/editor.rs
+msgctxt "rarity"
+msgid "Unique"
 msgstr ""
 
 #: crates/trainer/src/item/edit.rs
 msgid "Prefix"
 msgstr ""
 
+#: crates/trainer/src/item/edit.rs
+msgid "Suffix"
+msgstr ""
+
 #: crates/trainer/src/item/edit.rs crates/ui/ui/strings/forge.slint
+msgctxt "seal"
+msgid "Corrupted"
+msgstr ""
+
+#: crates/trainer/src/item/edit.rs crates/ui/ui/strings/forge.slint
+msgctxt "seal"
+msgid "Normal"
+msgstr ""
+
+#: crates/trainer/src/item/edit.rs crates/ui/ui/strings/forge.slint
+msgctxt "seal"
 msgid "Primordial"
 msgstr ""
 
 #: crates/trainer/src/item/edit.rs crates/ui/ui/strings/forge.slint
+msgctxt "seal"
 msgid "Sealed"
-msgstr ""
-
-#: crates/trainer/src/item/edit.rs
-msgid "Suffix"
 msgstr ""
 
 #: crates/ui/src/pages/forge/editor.rs
@@ -1585,16 +1653,22 @@ msgstr ""
 msgid "Apply or discard the other drafts first. A new unique brings its own modifiers."
 msgstr ""
 
-#: crates/ui/src/pages/forge/editor.rs crates/ui/ui/strings/forge.slint
+#: crates/ui/src/pages/forge/editor.rs
 msgid "Apply to game"
 msgstr ""
 
 #: crates/ui/src/pages/forge/editor.rs
-msgid "Apply {n} drafts"
-msgstr ""
+msgid "Apply {n} draft"
+msgid_plural "Apply {n} drafts"
+msgstr[0] ""
+msgstr[1] ""
 
 #: crates/ui/src/pages/forge/editor.rs
 msgid "Applying to game… Waiting for independent readback."
+msgstr ""
+
+#: crates/ui/src/pages/forge/editor.rs crates/ui/src/pages/forge/rows.rs
+msgid "Base"
 msgstr ""
 
 #: crates/ui/src/pages/forge/editor.rs
@@ -1609,7 +1683,7 @@ msgstr ""
 msgid "Change which unique or set item this is"
 msgstr ""
 
-#: crates/ui/src/pages/forge/editor.rs crates/ui/ui/strings/forge.slint
+#: crates/ui/src/pages/forge/editor.rs
 msgid "Changes"
 msgstr ""
 
@@ -1634,6 +1708,10 @@ msgid "Confirmed"
 msgstr ""
 
 #: crates/ui/src/pages/forge/editor.rs
+msgid "Corrupted"
+msgstr ""
+
+#: crates/ui/src/pages/forge/editor.rs
 msgid "Corrupted base"
 msgstr ""
 
@@ -1647,11 +1725,9 @@ msgstr ""
 
 #: crates/ui/src/pages/forge/editor.rs crates/ui/ui/strings/forge.slint
 msgid "Discard draft"
-msgstr ""
-
-#: crates/ui/src/pages/forge/editor.rs
-msgid "Discard {n} drafts"
-msgstr ""
+msgid_plural "Discard {n} drafts"
+msgstr[0] ""
+msgstr[1] ""
 
 #: crates/ui/src/pages/forge/editor.rs
 msgid "Don't do it"
@@ -1659,7 +1735,9 @@ msgstr ""
 
 #: crates/ui/src/pages/forge/editor.rs
 msgid "Draft discarded."
-msgstr ""
+msgid_plural "{n} drafts discarded."
+msgstr[0] ""
+msgstr[1] ""
 
 #: crates/ui/src/pages/forge/editor.rs
 msgid "Draft for {name} discarded."
@@ -1671,27 +1749,21 @@ msgstr ""
 
 #: crates/ui/src/pages/forge/editor.rs
 msgid "Draft the affix up to its highest tier, at most T7. Primordial affixes stay."
-msgstr ""
+msgid_plural "Draft {n} affixes up to their highest tier, at most T7. Primordial affixes stay."
+msgstr[0] ""
+msgstr[1] ""
 
 #: crates/ui/src/pages/forge/editor.rs
 msgid "Draft the roll up to 255, the game's perfect roll."
-msgstr ""
+msgid_plural "Draft {n} rolls up to 255, the game's perfect roll."
+msgstr[0] ""
+msgstr[1] ""
 
 #: crates/ui/src/pages/forge/editor.rs
-msgid "Draft {n} affixes up to their highest tier, at most T7. Primordial affixes stay."
-msgstr ""
-
-#: crates/ui/src/pages/forge/editor.rs
-msgid "Draft {n} rolls up to 255, the game's perfect roll."
-msgstr ""
-
-#: crates/ui/src/pages/forge/editor.rs
-msgid "Drafted \"{name}\": 1 draft. Review it, then Apply."
-msgstr ""
-
-#: crates/ui/src/pages/forge/editor.rs
-msgid "Drafted \"{name}\": {n} drafts. Review them, then Apply."
-msgstr ""
+msgid "Drafted \"{name}\": {n} draft. Review it, then Apply."
+msgid_plural "Drafted \"{name}\": {n} drafts. Review them, then Apply."
+msgstr[0] ""
+msgstr[1] ""
 
 #: crates/ui/src/pages/forge/editor.rs
 msgid "Drafted only the unique from \"{name}\": a new unique brings its own modifiers. Apply it, then draft the template again for the rest."
@@ -1699,7 +1771,9 @@ msgstr ""
 
 #: crates/ui/src/pages/forge/editor.rs
 msgid "Edit readback confirmed: {names}."
-msgstr ""
+msgid_plural "{n} drafts applied. Edit readback confirmed for each: {names}."
+msgstr[0] ""
+msgstr[1] ""
 
 #: crates/ui/src/pages/forge/editor.rs
 msgid "Enchanting gives an idol Weaver's Touch. 0 takes it off. Only uncorrupted Grand, Large, Ornate, Huge and Adorned idols use it."
@@ -1815,7 +1889,9 @@ msgstr ""
 
 #: crates/ui/src/pages/forge/editor.rs
 msgid "Last applied edit restored"
-msgstr ""
+msgid_plural "{n} applied edits restored"
+msgstr[0] ""
+msgstr[1] ""
 
 #: crates/ui/src/pages/forge/editor.rs
 msgid "Last draft change undone."
@@ -1823,10 +1899,6 @@ msgstr ""
 
 #: crates/ui/src/pages/forge/editor.rs
 msgid "Left out: {items}."
-msgstr ""
-
-#: crates/ui/src/pages/forge/editor.rs
-msgid "Legendary"
 msgstr ""
 
 #: crates/ui/src/pages/forge/editor.rs
@@ -1893,7 +1965,7 @@ msgstr ""
 msgid "No class requirement"
 msgstr ""
 
-#: crates/ui/src/pages/forge/editor.rs crates/ui/ui/strings/forge.slint
+#: crates/ui/src/pages/forge/editor.rs
 msgid "No drafts"
 msgstr ""
 
@@ -2043,11 +2115,9 @@ msgstr ""
 
 #: crates/ui/src/pages/forge/editor.rs
 msgid "The forge item changed, so its draft was discarded."
-msgstr ""
-
-#: crates/ui/src/pages/forge/editor.rs
-msgid "The forge item changed, so its {n} drafts were discarded."
-msgstr ""
+msgid_plural "The forge item changed, so its {n} drafts were discarded."
+msgstr[0] ""
+msgstr[1] ""
 
 #: crates/ui/src/pages/forge/editor.rs
 msgid "The forge item is no longer available."
@@ -2087,11 +2157,9 @@ msgstr ""
 
 #: crates/ui/src/pages/forge/editor.rs
 msgid "The item changed in the game and no longer has {missing}, so that draft was discarded."
-msgstr ""
-
-#: crates/ui/src/pages/forge/editor.rs
-msgid "The item changed in the game and no longer has {missing}, so those drafts were discarded."
-msgstr ""
+msgid_plural "The item changed in the game and no longer has {missing}, so those drafts were discarded."
+msgstr[0] ""
+msgstr[1] ""
 
 #: crates/ui/src/pages/forge/editor.rs
 msgid "The new base would make affixes incompatible. Allow incompatible affixes in the base picker to apply it anyway."
@@ -2169,7 +2237,7 @@ msgstr ""
 msgid "T{tier} {range}"
 msgstr ""
 
-#: crates/ui/src/pages/forge/editor.rs crates/ui/ui/strings/forge.slint
+#: crates/ui/src/pages/forge/editor.rs crates/ui/ui/strings/mods.slint
 msgid "Undo"
 msgstr ""
 
@@ -2238,10 +2306,6 @@ msgid "Write back the values from before the last Apply"
 msgstr ""
 
 #: crates/ui/src/pages/forge/editor.rs
-msgid "the base"
-msgstr ""
-
-#: crates/ui/src/pages/forge/editor.rs
 msgid "the game gave no usable values"
 msgstr ""
 
@@ -2266,15 +2330,11 @@ msgid "{fits} It takes the corrupted slot: {name} becomes a normal affix."
 msgstr ""
 
 #: crates/ui/src/pages/forge/editor.rs
-msgid "{list} and {item}"
-msgstr ""
-
-#: crates/ui/src/pages/forge/editor.rs
-msgid "{list} or {item}"
-msgstr ""
-
-#: crates/ui/src/pages/forge/editor.rs
 msgid "{name} (read only)"
+msgstr ""
+
+#: crates/ui/src/pages/forge/editor.rs
+msgid "{name} ({problem})"
 msgstr ""
 
 #: crates/ui/src/pages/forge/editor.rs
@@ -2293,68 +2353,54 @@ msgstr ""
 msgid "{name}: {problem}"
 msgstr ""
 
-#: crates/ui/src/pages/forge/editor.rs
+#: crates/ui/src/pages/forge/editor.rs crates/ui/src/pages/settings/trainer.rs
 msgid "{n} affix"
-msgstr ""
-
-#: crates/ui/src/pages/forge/editor.rs
-msgid "{n} affixes"
-msgstr ""
-
-#: crates/ui/src/pages/forge/editor.rs
-msgid "{n} applied edits restored"
-msgstr ""
+msgid_plural "{n} affixes"
+msgstr[0] ""
+msgstr[1] ""
 
 #: crates/ui/src/pages/forge/editor.rs
 msgid "{n} draft"
-msgstr ""
-
-#: crates/ui/src/pages/forge/editor.rs
-msgid "{n} drafts"
-msgstr ""
-
-#: crates/ui/src/pages/forge/editor.rs
-msgid "{n} drafts discarded."
-msgstr ""
+msgid_plural "{n} drafts"
+msgstr[0] ""
+msgstr[1] ""
 
 #: crates/ui/src/pages/forge/editor.rs
 msgid "{n} incompatible affix"
-msgstr ""
-
-#: crates/ui/src/pages/forge/editor.rs
-msgid "{n} incompatible affixes"
-msgstr ""
+msgid_plural "{n} incompatible affixes"
+msgstr[0] ""
+msgstr[1] ""
 
 #: crates/ui/src/pages/forge/editor.rs
 msgid "{n} prefix"
-msgstr ""
-
-#: crates/ui/src/pages/forge/editor.rs
-msgid "{n} prefixes"
-msgstr ""
+msgid_plural "{n} prefixes"
+msgstr[0] ""
+msgstr[1] ""
 
 #: crates/ui/src/pages/forge/editor.rs
 msgid "{n} suffix"
-msgstr ""
-
-#: crates/ui/src/pages/forge/editor.rs
-msgid "{n} suffixes"
-msgstr ""
+msgid_plural "{n} suffixes"
+msgstr[0] ""
+msgstr[1] ""
 
 #: crates/ui/src/pages/forge/editor.rs
 msgid "{n} unique modifier"
-msgstr ""
-
-#: crates/ui/src/pages/forge/editor.rs
-msgid "{n} unique modifiers"
-msgstr ""
+msgid_plural "{n} unique modifiers"
+msgstr[0] ""
+msgstr[1] ""
 
 #: crates/ui/src/pages/forge/editor.rs
 msgid "{problem} Nothing was applied."
 msgstr ""
 
+#: crates/ui/src/pages/forge/editor.rs crates/ui/src/pages/forge/item.rs
+msgctxt "affix category"
+msgid "Corrupted"
+msgstr ""
+
 #: crates/ui/src/pages/forge/editor.rs
-msgid "{total} drafts applied. Edit readback confirmed for each: {names}."
+msgctxt "rarity"
+msgid "Legendary"
 msgstr ""
 
 #: crates/ui/src/pages/forge/game.rs
@@ -2495,10 +2541,6 @@ msgstr ""
 
 #: crates/ui/src/pages/forge/rows.rs
 msgid "Added when you apply"
-msgstr ""
-
-#: crates/ui/src/pages/forge/rows.rs
-msgid "Base"
 msgstr ""
 
 #: crates/ui/src/pages/forge/rows.rs
@@ -3097,10 +3139,6 @@ msgstr ""
 msgid "the trainer"
 msgstr ""
 
-#: crates/ui/src/pages/settings/trainer.rs
-msgid "{count} affixes"
-msgstr ""
-
 #: crates/ui/src/pages/trainer/connection.rs
 msgid "Applying changes…"
 msgstr ""
@@ -3121,7 +3159,7 @@ msgstr ""
 msgid "Close all but one copy of Last Epoch."
 msgstr ""
 
-#: crates/ui/src/pages/trainer/connection.rs crates/ui/ui/strings/shell.slint
+#: crates/ui/src/pages/trainer/connection.rs
 msgid "Connect"
 msgstr ""
 
@@ -3165,7 +3203,7 @@ msgstr ""
 msgid "Load an offline character."
 msgstr ""
 
-#: crates/ui/src/pages/trainer/connection.rs crates/ui/ui/strings/shell.slint
+#: crates/ui/src/pages/trainer/connection.rs crates/ui/ui/strings/trainer.slint
 msgid "Not connected"
 msgstr ""
 
@@ -3365,7 +3403,7 @@ msgstr ""
 msgid "Mods"
 msgstr ""
 
-#: crates/ui/src/shell.rs crates/ui/ui/strings/mods.slint
+#: crates/ui/src/shell.rs crates/ui/ui/strings/mods.slint crates/ui/ui/strings/settings.slint
 msgid "Settings"
 msgstr ""
 
@@ -3429,7 +3467,7 @@ msgstr ""
 msgid "Class"
 msgstr ""
 
-#: crates/ui/ui/strings/forge.slint
+#: crates/ui/ui/strings/forge.slint crates/ui/ui/strings/trainer.slint
 msgid "Delete"
 msgstr ""
 
@@ -3445,7 +3483,7 @@ msgstr ""
 msgid "Delete this template for good?"
 msgstr ""
 
-#: crates/ui/ui/strings/forge.slint
+#: crates/ui/ui/strings/forge.slint crates/ui/ui/strings/trainer.slint
 msgid "Delete…"
 msgstr ""
 
@@ -3477,7 +3515,7 @@ msgstr ""
 msgid "Item: {}"
 msgstr ""
 
-#: crates/ui/ui/strings/forge.slint
+#: crates/ui/ui/strings/forge.slint crates/ui/ui/strings/trainer.slint
 msgid "Keep"
 msgstr ""
 
@@ -3677,6 +3715,16 @@ msgstr ""
 msgid "in game"
 msgstr ""
 
+#: crates/ui/ui/strings/forge.slint crates/ui/ui/strings/mods.slint
+msgctxt "key"
+msgid "Delete"
+msgstr ""
+
+#: crates/ui/ui/strings/forge.slint
+msgctxt "verb"
+msgid "Draft"
+msgstr ""
+
 #: crates/ui/ui/strings/home.slint
 msgid "Companion tools for Last Epoch."
 msgstr ""
@@ -3689,7 +3737,7 @@ msgstr ""
 msgid "Play offline"
 msgstr ""
 
-#: crates/ui/ui/strings/home.slint
+#: crates/ui/ui/strings/home.slint crates/ui/ui/strings/mods.slint
 msgid "Play offline with mods"
 msgstr ""
 

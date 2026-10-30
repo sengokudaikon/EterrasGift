@@ -3,7 +3,7 @@
 //! moment they flip, and Game definitions follows the session's catalog.
 
 use crate::pages::settings::{LiveStatus, ModuleChoice, ModuleLink, ModuleSection};
-use eg_core::phrase::Phrase;
+use eg_core::phrase::{Phrase, Plural};
 use eg_core::settings::LegacyModuleSettings;
 use eg_trainer::backend::{Activity, BackendHandle, BackendSnapshot, CatalogState, Command, GameFiles};
 use std::rc::Rc;
@@ -32,7 +32,7 @@ const OFF: Phrase = Phrase::new("Off");
 const NO_DATA: Phrase = Phrase::new("Last Epoch wasn't found");
 const READING: Phrase = Phrase::new("Reading the game files…");
 const UNREADABLE: Phrase = Phrase::new("The game files could not be read: {reason}");
-const AFFIXES: Phrase = Phrase::new("{count} affixes");
+const AFFIXES: Plural = Plural::new("{n} affix", "{n} affixes");
 const NOT_RECORDED: Phrase = Phrase::new("not recorded");
 const CHECKED: Phrase = Phrase::new("Checked: {time}");
 const UPDATED: Phrase = Phrase::new("Updated: {time}");
@@ -131,8 +131,8 @@ fn describe(catalog: &CatalogState, files: &GameFiles) -> String {
     let mut text = match (catalog, files) {
         (_, GameFiles::Reading) => READING.into(),
         (_, GameFiles::Unavailable(reason)) => UNREADABLE.with(&[("reason", reason)]),
-        (CatalogState::Current { data, .. } | CatalogState::Stale(data), _) => AFFIXES.with(&[("count", &data.affixes.len())]),
-        (_, GameFiles::Ready { affixes, .. }) => AFFIXES.with(&[("count", affixes)]),
+        (CatalogState::Current { data, .. } | CatalogState::Stale(data), _) => AFFIXES.count(data.affixes.len()),
+        (_, GameFiles::Ready { affixes, .. }) => AFFIXES.count(*affixes),
         (_, GameFiles::NotConfigured) => NO_DATA.into(),
     };
     if let GameFiles::Ready { checked_at, updated_at, .. } = files {

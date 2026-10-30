@@ -1,5 +1,6 @@
 // The Mods page's words. Every view word is an `@tr` here, never a literal in a view; its English is the gettext msgid,
-// without a context (build.rs and `cargo xtask phrases` agree on that), shared with any phrase that reads the same.
+// shared with any phrase that reads the same. A context only tells apart English that means two things
+// (see shell.slint).
 
 export global ModsText {
     out property <string> title: @tr("Mods");
@@ -43,7 +44,7 @@ export global ModsText {
     out property <string> play-tip: @tr("Start offline with the mods that are on");
     // Key names in the row menu.
     out property <string> key-space: @tr("Space");
-    out property <string> key-delete: @tr("Delete");
+    out property <string> key-delete: @tr("key" => "Delete");
 
     public pure function enabled-of(enabled: int, installed: int) -> string {
         return @tr("{} of {} on", enabled, installed);

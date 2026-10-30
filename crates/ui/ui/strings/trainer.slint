@@ -1,5 +1,6 @@
 // The trainer pages' words. Every view word is an `@tr` here, never a literal in a view; its English is the gettext
-// msgid, without a context (build.rs and `cargo xtask phrases` agree on that), shared with any phrase that reads the same.
+// msgid, shared with any phrase that reads the same. A context only tells apart English that means two things
+// (see shell.slint).
 
 export global TrainerText {
     out property <string> not-connected: @tr("Not connected");

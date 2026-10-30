@@ -5,6 +5,8 @@ code and its tests, and what is still to build in [research/trainer-features.md]
 
 ## 2026-10-30
 
+- UI: ready for translations: a `lang/<language>/LC_MESSAGES/eg-ui.po` reaches the views and the Rust phrases alike,
+  with contexts for words that mean two things, each language's plural forms, and lists joined in its own words.
 - Trainer: hook values are value cells, as affix values are: the value over its range bar, dragged (sent once, on
   release), stepped with the arrow keys, Home/End, or typed in a popover; 0–100× multipliers have a logarithmic bar.
 
