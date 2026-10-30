@@ -15,9 +15,11 @@ impl Entry {
         }
     }
 }
+/// Activation commits one feature's group, whose entries are all of one kind, as one native transaction; a change that
+/// turns entries on and mixes kinds is refused before anything is written. Cleanup (every change off) may span both
+/// kinds: each kind's restore is attempted, and the first failure is reported. Failure retains every owner.
 /// # Safety
-/// Every owned range/ABI and native transaction's thread contract holds. Current callers activate one homogeneous
-/// feature group; clear restores all groups. Failure retains every owner, including after partial cleanup.
+/// Every owned range/ABI and native transaction's thread contract holds.
 pub(super) unsafe fn commit(changes: &[(&Entry, bool)]) -> Result<(), String> {
     let detours: Vec<_> = changes
         .iter()
@@ -33,14 +35,23 @@ pub(super) unsafe fn commit(changes: &[(&Entry, bool)]) -> Result<(), String> {
             _ => None,
         })
         .collect();
-    // SAFETY: serialized lifecycle owner retains the whole family before publication and on every failure.
-    unsafe {
-        if !detours.is_empty() {
-            hooks::commit(&detours).map_err(|error| error.to_string())?;
-        }
-        if !patches.is_empty() {
-            patch::commit(&patches).map_err(|error| error.to_string())?;
-        }
+    if !detours.is_empty() && !patches.is_empty() && changes.iter().any(|(_, on)| *on) {
+        return Err("a hook change mixes entry detours and code patches".into());
     }
-    Ok(())
+    // SAFETY: serialized lifecycle owner retains the whole family before publication and on every failure.
+    let (detoured, patched) = unsafe {
+        (
+            if detours.is_empty() {
+                Ok(())
+            } else {
+                hooks::commit(&detours).map_err(|error| error.to_string())
+            },
+            if patches.is_empty() {
+                Ok(())
+            } else {
+                patch::commit(&patches).map_err(|error| error.to_string())
+            },
+        )
+    };
+    detoured.and(patched)
 }

@@ -195,6 +195,15 @@ impl RuntimeAccess {
         }
     }
 
+    /// Whether `graph` still holds the item a request was made for: the same manager and an unchanged snapshot. The
+    /// snapshot is read only when the manager is the same.
+    /// # Safety
+    /// Same contract as `forge_snapshot`.
+    pub(crate) unsafe fn forge_unchanged(&self, attached: &AttachedThread<'_>, graph: &ForgeGraph<'_, '_>, manager: u64, expected: &ForgeSnapshot) -> Result<bool, GameError> {
+        // SAFETY: the caller's forge_snapshot contract.
+        unsafe { Ok(target(&graph.manager)?.as_ptr() as u64 == manager && self.forge_snapshot(attached, graph)? == *expected) }
+    }
+
     pub(crate) unsafe fn forge_snapshot(&self, attached: &AttachedThread<'_>, graph: &ForgeGraph<'_, '_>) -> Result<ForgeSnapshot, GameError> {
         // SAFETY: Existing graph roots retain the selected item and arrays while exact typed fields are copied.
         unsafe {

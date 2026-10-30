@@ -250,7 +250,7 @@ impl RuntimeAccess {
         // SAFETY: The caller excludes graph changes; roots retain the selected item, private copy and tooltip results across calls.
         unsafe {
             let graph = self.forge_graph(attached)?.ok_or(GameError::NotReady("forge item absent"))?;
-            if target(&graph.manager)?.as_ptr() as u64 != request.manager() || self.forge_snapshot(attached, &graph)? != *request.expected() {
+            if !self.forge_unchanged(attached, &graph, request.manager(), request.expected())? {
                 return Err(unsupported("forge changed before unique description"));
             }
             if !matches!(request.expected().rarity, 7..=9) {
@@ -289,10 +289,7 @@ impl RuntimeAccess {
                 original
             };
             let current = self.forge_graph(attached)?.ok_or(GameError::NotReady("forge removed during unique description"))?;
-            if target(&current.manager)?.as_ptr() as u64 != request.manager()
-                || self.forge_snapshot(attached, &current)? != *request.expected()
-                || self.read_game_locale(attached, api)? != locale
-            {
+            if !self.forge_unchanged(attached, &current, request.manager(), request.expected())? || self.read_game_locale(attached, api)? != locale {
                 return Err(unsupported("forge or locale changed during unique description"));
             }
             Ok(result)

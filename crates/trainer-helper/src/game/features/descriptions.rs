@@ -140,7 +140,7 @@ impl RuntimeAccess {
         // SAFETY: The caller supplies the main-thread immutable graph span; selected and detached items stay rooted across tooltip calls.
         unsafe {
             let graph = self.forge_graph(attached)?.ok_or(GameError::NotReady("forge item absent"))?;
-            if target(&graph.manager)?.as_ptr() as u64 != request.manager() || self.forge_snapshot(attached, &graph)? != *request.expected() {
+            if !self.forge_unchanged(attached, &graph, request.manager(), request.expected())? {
                 return Err(unsupported("forge changed before implicit description"));
             }
             let mut modifiers = Vec::new();
@@ -160,7 +160,7 @@ impl RuntimeAccess {
             // Calls may run managed callbacks. Never publish text for an item or
             // graph that changed while producing it, even if its roots survived.
             let current = self.forge_graph(attached)?.ok_or(GameError::NotReady("forge item removed during formatting"))?;
-            if target(&current.manager)?.as_ptr() as u64 != request.manager() || self.forge_snapshot(attached, &current)? != *request.expected() {
+            if !self.forge_unchanged(attached, &current, request.manager(), request.expected())? {
                 return Err(unsupported("forge changed during implicit description"));
             }
             eg_trainer_wire::mapping::encode_modifiers(&modifiers).map_err(|e| unsupported(e.to_string()))?;

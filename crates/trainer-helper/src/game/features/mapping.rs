@@ -560,7 +560,7 @@ impl RuntimeAccess {
         // SAFETY: The caller supplies the main-thread immutable graph span; selected and detached items stay rooted across each sampled call.
         unsafe {
             let graph = self.forge_graph(attached)?.ok_or(GameError::NotReady("forge item absent"))?;
-            if target(&graph.manager)?.as_ptr() as u64 != query.manager() || self.forge_snapshot(attached, &graph)? != *query.expected() {
+            if !self.forge_unchanged(attached, &graph, query.manager(), query.expected())? {
                 return Err(unsupported("forge changed before mapping"));
             }
             let locale = self.read_game_locale(attached, api)?;
@@ -607,10 +607,7 @@ impl RuntimeAccess {
                 }
             }
             let current = self.forge_graph(attached)?.ok_or(GameError::NotReady("forge removed during mapping"))?;
-            if target(&current.manager)?.as_ptr() as u64 != query.manager()
-                || self.forge_snapshot(attached, &current)? != *query.expected()
-                || self.read_game_locale(attached, api)? != locale
-            {
+            if !self.forge_unchanged(attached, &current, query.manager(), query.expected())? || self.read_game_locale(attached, api)? != locale {
                 return Err(unsupported("forge or locale changed during mapping"));
             }
             let page = RawMappingPage {
@@ -642,7 +639,7 @@ impl RuntimeAccess {
         // SAFETY: The caller supplies the main-thread immutable graph span; selected and detached items stay rooted across each sampled call.
         unsafe {
             let graph = self.forge_graph(attached)?.ok_or(GameError::NotReady("forge item absent"))?;
-            if target(&graph.manager)?.as_ptr() as u64 != query.manager() || self.forge_snapshot(attached, &graph)? != *query.expected() {
+            if !self.forge_unchanged(attached, &graph, query.manager(), query.expected())? {
                 return Err(unsupported("forge changed before mapping"));
             }
             let address = query.address();
@@ -709,10 +706,7 @@ impl RuntimeAccess {
                 }
             }
             let current = self.forge_graph(attached)?.ok_or(GameError::NotReady("forge removed during mapping"))?;
-            if target(&current.manager)?.as_ptr() as u64 != query.manager()
-                || self.forge_snapshot(attached, &current)? != *query.expected()
-                || self.read_game_locale(attached, api)? != locale
-            {
+            if !self.forge_unchanged(attached, &current, query.manager(), query.expected())? || self.read_game_locale(attached, api)? != locale {
                 return Err(unsupported("forge or locale changed during mapping"));
             }
             let page = RawMappingPage {
