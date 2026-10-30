@@ -1,0 +1,98 @@
+// Fluent's check box, retinted: Antique Brass with a Brass Shadow check when ticked.
+
+import { FocusRing } from "focus.slint";
+import { KeyboardFocus } from "../globals.slint";
+import { Tokens } from "../tokens.slint";
+
+export component CheckBox inherits Rectangle {
+    in property <string> text;
+    in property <bool> checked;
+    in property <bool> enabled: true;
+    callback toggled(bool);
+
+    accessible-role: checkbox;
+    accessible-label: root.text;
+    accessible-checkable: true;
+    accessible-checked: root.checked;
+    accessible-action-default => { root.toggled(!root.checked); }
+
+    height: Tokens.control-min-height;
+    width: layout.preferred-width;
+
+    layout := HorizontalLayout {
+        spacing: Tokens.space-8;
+        alignment: start;
+
+        box := Rectangle {
+            width: Tokens.icon-size-nav;
+            height: Tokens.icon-size-nav;
+            y: (parent.height - self.height) / 2;
+            border-radius: Tokens.control-radius;
+            border-width: 1px;
+            border-color: !root.enabled ? Tokens.text-disabled-brush : root.checked ? Tokens.accent-brush : touch.has-hover ? Tokens.text-brush : Tokens.text-secondary-brush;
+            background: !root.enabled ? Tokens.ground-brush : root.checked ? (touch.has-hover ? Tokens.accent-pressed-brush : Tokens.accent-brush) : Tokens.ground-brush;
+
+            if root.checked: Path {
+                x: Tokens.space-4;
+                y: Tokens.space-4;
+                width: Tokens.space-12;
+                height: Tokens.space-12;
+                stroke: Tokens.on-accent-brush;
+                stroke-width: Tokens.space-2;
+                MoveTo {
+                    x: 0;
+                    y: Tokens.space-6 / 1px;
+                }
+
+                LineTo {
+                    x: Tokens.space-4 / 1px;
+                    y: Tokens.space-10 / 1px;
+                }
+
+                LineTo {
+                    x: Tokens.space-12 / 1px;
+                    y: Tokens.space-2 / 1px;
+                }
+            }
+
+            FocusRing {
+                focused: focus.has-focus;
+            }
+        }
+
+        Text {
+            text: root.text;
+            color: root.enabled ? Tokens.text-brush : Tokens.text-disabled-brush;
+            vertical-alignment: center;
+        }
+    }
+
+    focus := FocusScope {
+        enabled: root.enabled;
+        focus-gained(reason) => {
+            if (reason == FocusReason.tab-navigation) {
+                KeyboardFocus.visible = true;
+            }
+        }
+        key-pressed(event) => {
+            if (event.text == " ") {
+                root.toggled(!root.checked);
+                return accept;
+            }
+            reject
+        }
+
+        touch := TouchArea {
+            enabled: root.enabled;
+            pointer-event(event) => {
+                if (event.kind == PointerEventKind.down) {
+                    KeyboardFocus.visible = false;
+                }
+            }
+            clicked => {
+                focus.focus();
+                root.toggled(!root.checked);
+            }
+        }
+    }
+}

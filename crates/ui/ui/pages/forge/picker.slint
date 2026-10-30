@@ -13,7 +13,9 @@ import { FlyoutSurface } from "../../widgets/menu.slint";
 import { ChoiceBox } from "../../widgets/choice-box.slint";
 import { ForgeState } from "state.slint";
 import { ForgeText } from "../../strings/forge.slint";
-import { CheckBox, RadioButton } from "cells.slint";
+import { CheckBox } from "../../widgets/check-box.slint";
+import { RadioButton } from "../../widgets/radio-button.slint";
+import { SearchBox } from "../../widgets/search-box.slint";
 
 export global PickerMetrics {
     // A list row: the name over its kind, 7px above and below.
@@ -66,96 +68,6 @@ export component PickerMeasure inherits Rectangle {
         text: ForgeState.picker-status;
         font-size: Tokens.font-size-caption;
         wrap: word-wrap;
-    }
-}
-
-// The search box: a muted search icon inside its left edge and a placeholder naming what it searches.
-export component SearchBox inherits Rectangle {
-    in property <string> text;
-    in property <string> placeholder;
-    in property <string> label;
-    callback edited(string);
-    callback down();
-    callback accepted();
-
-    public function focus-input() {
-        input.focus();
-    }
-
-    accessible-role: text-input;
-    accessible-label: root.label;
-    accessible-value: root.text;
-
-    height: Tokens.control-min-height;
-    border-radius: Tokens.control-radius;
-    border-width: 1px;
-    background: FieldFrame.background(true, input.has-focus, touch.has-hover);
-    border-color: FieldFrame.border(true, input.has-focus, touch.has-hover);
-
-    // The whole box takes the pointer, as a text box does: a click anywhere in it types into the search.
-    touch := TouchArea {
-        pointer-event(event) => {
-            if (event.kind == PointerEventKind.down) {
-                KeyboardFocus.visible = false;
-            }
-        }
-        clicked => {
-            input.focus();
-        }
-    }
-
-    Image {
-        x: Tokens.search-icon-margin.left;
-        y: (parent.height - self.height) / 2;
-        width: Tokens.icon-size;
-        height: Tokens.icon-size;
-        image-fit: contain;
-        source: Tokens.icon-search;
-        colorize: Tokens.text-muted-brush;
-    }
-
-    Rectangle {
-        x: Tokens.search-icon-margin.left + Tokens.icon-size + Tokens.search-icon-margin.right + Tokens.space-4;
-        width: parent.width - self.x - Tokens.space-10;
-        clip: true;
-
-        if root.text == "": Text {
-            x: 0;
-            width: parent.width;
-            text: root.placeholder;
-            color: Tokens.text-muted-brush;
-            vertical-alignment: center;
-            overflow: elide;
-        }
-
-        FocusScope {
-            capture-key-pressed(event) => {
-                if (event.text == Key.DownArrow) {
-                    root.down();
-                    return accept;
-                }
-                reject
-            }
-
-            input := TextInput {
-                text: root.text;
-                single-line: true;
-                color: Tokens.text-brush;
-                selection-background-color: Tokens.accent-pressed-color;
-                selection-foreground-color: Tokens.on-accent-color;
-                vertical-alignment: center;
-                edited => {
-                    root.edited(self.text);
-                }
-                accepted => {
-                    root.accepted();
-                }
-            }
-        }
-    }
-
-    FocusRing {
-        focused: input.has-focus;
     }
 }
 

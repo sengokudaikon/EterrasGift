@@ -1,0 +1,64 @@
+// A 24px subtle icon button (the compact icon button), with its tip and accessible name.
+
+import { FocusRing, TipTrigger } from "focus.slint";
+import { KeyboardFocus } from "../globals.slint";
+import { Tokens } from "../tokens.slint";
+
+export component CompactIconButton inherits Rectangle {
+    in property <image> icon;
+    in property <string> tip;
+    callback clicked();
+
+    accessible-role: button;
+    accessible-label: root.tip;
+    accessible-action-default => { root.clicked(); }
+
+    width: Tokens.compact-icon-button-size;
+    height: Tokens.compact-icon-button-size;
+    border-radius: Tokens.control-radius;
+    background: touch.pressed ? Tokens.selected-brush : touch.has-hover ? Tokens.hover-brush : transparent;
+
+    Image {
+        width: Tokens.icon-size-small;
+        height: Tokens.icon-size-small;
+        image-fit: contain;
+        source: root.icon;
+        colorize: touch.has-hover ? Tokens.text-brush : Tokens.text-secondary-brush;
+    }
+
+    focus := FocusScope {
+        focus-gained(reason) => {
+            if (reason == FocusReason.tab-navigation) {
+                KeyboardFocus.visible = true;
+            }
+        }
+        key-pressed(event) => {
+            if (event.text == Key.Return || event.text == " ") {
+                root.clicked();
+                return accept;
+            }
+            reject
+        }
+
+        touch := TouchArea {
+            pointer-event(event) => {
+                if (event.kind == PointerEventKind.down) {
+                    KeyboardFocus.visible = false;
+                }
+            }
+            clicked => {
+                root.clicked();
+            }
+        }
+    }
+
+    TipTrigger {
+        text: root.tip;
+        hovered: touch.has-hover;
+        focused: focus.has-focus;
+    }
+
+    FocusRing {
+        focused: focus.has-focus;
+    }
+}

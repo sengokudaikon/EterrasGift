@@ -1,0 +1,94 @@
+// Fluent's radio button, retinted: an Antique Brass ring around a Brass Shadow dot when chosen.
+
+import { FocusRing } from "focus.slint";
+import { KeyboardFocus } from "../globals.slint";
+import { Tokens } from "../tokens.slint";
+
+export component RadioButton inherits Rectangle {
+    in property <string> text;
+    in property <bool> checked;
+    callback chosen();
+    // Left / Up (-1) or Right / Down (1): the group moves to its neighbour.
+    callback arrow(int);
+
+    public function focus-button() {
+        focus.focus();
+    }
+
+    accessible-role: radio-button;
+    accessible-label: root.text;
+    accessible-checkable: true;
+    accessible-checked: root.checked;
+    accessible-action-default => { root.chosen(); }
+
+    height: Tokens.control-min-height;
+    width: layout.preferred-width;
+
+    layout := HorizontalLayout {
+        spacing: Tokens.space-8;
+        alignment: start;
+
+        Rectangle {
+            width: Tokens.icon-size-nav;
+            height: Tokens.icon-size-nav;
+            y: (parent.height - self.height) / 2;
+            border-radius: self.width / 2;
+            border-width: root.checked ? 0px : 1px;
+            border-color: touch.has-hover ? Tokens.text-brush : Tokens.text-secondary-brush;
+            background: root.checked ? Tokens.accent-brush : Tokens.ground-brush;
+
+            if root.checked: Rectangle {
+                width: Tokens.space-8;
+                height: Tokens.space-8;
+                border-radius: self.width / 2;
+                background: Tokens.on-accent-brush;
+            }
+
+            FocusRing {
+                focused: focus.has-focus;
+                radius: parent.width / 2;
+            }
+        }
+
+        Text {
+            text: root.text;
+            color: Tokens.text-brush;
+            vertical-alignment: center;
+        }
+    }
+
+    focus := FocusScope {
+        focus-gained(reason) => {
+            if (reason == FocusReason.tab-navigation) {
+                KeyboardFocus.visible = true;
+            }
+        }
+        key-pressed(event) => {
+            if (event.text == " ") {
+                root.chosen();
+                return accept;
+            }
+            if (event.text == Key.LeftArrow || event.text == Key.UpArrow) {
+                root.arrow(-1);
+                return accept;
+            }
+            if (event.text == Key.RightArrow || event.text == Key.DownArrow) {
+                root.arrow(1);
+                return accept;
+            }
+            reject
+        }
+
+        touch := TouchArea {
+            pointer-event(event) => {
+                if (event.kind == PointerEventKind.down) {
+                    KeyboardFocus.visible = false;
+                }
+            }
+            clicked => {
+                focus.focus();
+                root.chosen();
+            }
+        }
+    }
+}
