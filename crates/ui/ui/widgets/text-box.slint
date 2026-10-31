@@ -9,6 +9,12 @@ import { FocusRing } from "focus.slint";
 export component ReadOnlyTextBox inherits Rectangle {
     in property <string> text;
     in property <string> label;
+    callback copy-all();
+    copy-all => {
+        input.select-all();
+        input.copy();
+        input.clear-selection();
+    }
 
     accessible-role: text-input;
     accessible-label: root.label;

@@ -37,6 +37,8 @@ pub struct App {
     pub trainer_backend: Option<eg_trainer::backend::BackendHandle>,
     /// Where the trainer's pages record what they refuse; None in tests.
     pub faults: Option<eg_core::fault::FaultLog>,
+    /// Explicit file sources; tests supply their own or leave the viewer unconfigured.
+    pub logs: Option<pages::logs::LogFiles>,
     /// Where the Item Forge keeps the user's item templates; None in tests, which set their own.
     pub templates: Option<eg_trainer::item::template::TemplateStore>,
     /// Home, or Settings when the settings file or a module has something to say.
@@ -73,6 +75,7 @@ pub fn install(window: &MainWindow, app: App) -> Installed {
     home::bind(window, app.launcher, &shell, decorations.clone());
     let before_close = app.mods.map(|page| mods::bind(window, page, &shell));
     let trainer_backend = app.trainer_backend.filter(|_| app.trainer);
+    pages::logs::bind(window, app.logs, trainer_backend.clone(), &shell);
     // The trainer's switches reach its session as they flip; Game definitions follows its game data.
     let settings = match &trainer_backend {
         Some(backend) => app.settings.link(settings::trainer::ID, settings::trainer::link(backend.clone())),

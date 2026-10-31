@@ -234,12 +234,13 @@ impl<L> Admission<L> {
 }
 impl<L: LogSource + Send> AdmissionCheck for Admission<L> {
     fn check(&mut self) -> Result<(), BackendError> {
-        let decision = gate::evaluate(&self.log.read(self.started), self.started, self.time()?);
+        let log = self.log.read(self.started);
+        let decision = gate::evaluate(&log, self.started, self.time()?);
         match decision.verdict {
             GateVerdict::Allow => Ok(()),
             GateVerdict::Wait | GateVerdict::Refuse => Err(BackendError {
                 kind: ErrorKind::Gate,
-                message: format!("offline admission before preparation: {:?} ({:?})", decision.readiness, decision.log_status),
+                message: gate::refusal_message(&log),
                 delivery: Some(Delivery::NotSent),
                 retry_when_waiting: decision.verdict == GateVerdict::Wait,
             }),

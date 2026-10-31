@@ -563,6 +563,53 @@ fn release_log_gate_precedes_connector_and_ambiguous_processes_never_connect() {
 }
 
 #[test]
+fn entering_offline_play_without_a_character_load_explains_why_connection_is_blocked() {
+    run(async {
+        let shared = Shared::new();
+        let mut state = GameLogState::started();
+        // The observed game log enters play without a Loading character line.
+        for message in [
+            "Offline Mode: False",
+            "[Network] Initializing network service group for offline client.",
+            "ShellSceneManager: State transition SplashScreen -> Login",
+            "ShellSceneManager: State transition Login -> CharacterSelect",
+            "ClientStateManager: Application state changed to InGame.",
+            "ShellSceneManager: State transition CharacterSelect -> None",
+        ] {
+            if let Some((_, Some(event))) = eg_core::game_log::parse(&format!("{}\tLog\t{message}", now())) {
+                state = state.apply(event);
+            }
+        }
+        assert_eq!(state.status, GameLogStatus::Unrecognized);
+        *shared.log.lock().unwrap() = state;
+        let (handle, worker) = start(&shared, options());
+        command(&handle, Command::Enable).await.unwrap();
+        let error = command(&handle, Command::Connect).await.unwrap_err();
+        assert_eq!(error.kind, ErrorKind::Gate);
+        assert_eq!(
+            error.message,
+            "Last Epoch entered play without logging which character was loaded. Return to character select and load an offline character again."
+        );
+        assert_eq!(handle.snapshot().phase, Phase::Blocked);
+        assert_eq!(shared.count("connect"), 0);
+        assert!(!error.retry_when_waiting);
+
+        let loaded = eg_core::game_log::parse(&format!(
+            "{}\tLog\tLoading character: Fresh Character 1 isOnline: False, cycle: Swordfish, class: Mage",
+            now()
+        ))
+        .unwrap()
+        .1
+        .unwrap();
+        let state = shared.log.lock().unwrap().clone().apply(loaded);
+        *shared.log.lock().unwrap() = state;
+        command(&handle, Command::Retry).await.unwrap();
+        assert_eq!(handle.snapshot().phase, Phase::Ready);
+        shutdown(&handle, worker).await;
+    });
+}
+
+#[test]
 fn initial_catalog_and_forge_publish_together_with_explicit_read_only_capabilities() {
     run(async {
         let shared = Shared::new();

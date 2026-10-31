@@ -701,6 +701,7 @@ impl Forge {
                 trainer: true,
                 trainer_backend: Some(backend.clone()),
                 faults: None,
+                logs: None,
                 templates: None,
                 settings: SettingsPage::new(SettingsService::inline(store), vec![eg_ui::pages::settings::trainer::descriptor(true)], None, None),
                 start: Page::Forge,

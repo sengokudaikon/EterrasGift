@@ -59,6 +59,10 @@ pub fn run(startup: Startup) -> Result<ExitCode, slint::PlatformError> {
             trainer: trainer_runtime.is_some(),
             trainer_backend: trainer_runtime.as_ref().map(|runtime| runtime.handle.clone()),
             faults: Some(faults.clone()),
+            logs: Some(eg_ui::pages::logs::LogFiles {
+                game: eg_companion::game::folders::player_log(),
+                reports: faults.directories().collect(),
+            }),
             templates,
             start,
         },

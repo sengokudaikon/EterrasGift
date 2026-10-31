@@ -2755,6 +2755,55 @@ msgstr ""
 msgid "{error} Details are in the fault log."
 msgstr ""
 
+#: crates/ui/src/pages/logs.rs
+msgid "Could not read {path}: {error}"
+msgstr ""
+
+#: crates/ui/src/pages/logs.rs crates/ui/ui/strings/shell.slint
+msgid "Eterra's Gift"
+msgstr ""
+
+#: crates/ui/src/pages/logs.rs crates/ui/ui/strings/home.slint
+msgid "Last Epoch"
+msgstr ""
+
+#: crates/ui/src/pages/logs.rs
+msgid "No fault reports have been written."
+msgstr ""
+
+#: crates/ui/src/pages/logs.rs
+msgid "No log files are configured for this run."
+msgstr ""
+
+#: crates/ui/src/pages/logs.rs
+msgid "Refreshes every two seconds while open."
+msgstr ""
+
+#: crates/ui/src/pages/logs.rs
+msgid "Showing the latest part of the log. Refreshes every two seconds while open."
+msgstr ""
+
+#: crates/ui/src/pages/logs.rs
+msgid "Showing up to eight recent fault reports. Refreshes every two seconds while open."
+msgstr ""
+
+#: crates/ui/src/pages/logs.rs
+msgid "The trainer is not running."
+msgstr ""
+
+#: crates/ui/src/pages/logs.rs
+msgid "This log is empty."
+msgstr ""
+
+#: crates/ui/src/pages/logs.rs
+msgid ""
+"Trainer connection\n"
+"State: {phase}\n"
+"Process: {process}\n"
+"Game log: {gate}\n"
+"Error: {error}\n"
+msgstr ""
+
 #: crates/ui/src/pages/mods.rs
 msgid "Add a mod"
 msgstr ""
@@ -3442,6 +3491,10 @@ msgstr ""
 msgid "Home"
 msgstr ""
 
+#: crates/ui/src/shell.rs crates/ui/ui/strings/logs.slint
+msgid "Logs"
+msgstr ""
+
 #: crates/ui/src/shell.rs crates/ui/ui/strings/mods.slint
 msgid "Mods"
 msgstr ""
@@ -3773,10 +3826,6 @@ msgid "Companion tools for Last Epoch."
 msgstr ""
 
 #: crates/ui/ui/strings/home.slint
-msgid "Last Epoch"
-msgstr ""
-
-#: crates/ui/ui/strings/home.slint
 msgid "Play offline"
 msgstr ""
 
@@ -3786,6 +3835,30 @@ msgstr ""
 
 #: crates/ui/ui/strings/home.slint
 msgid "Play online"
+msgstr ""
+
+#: crates/ui/ui/strings/logs.slint
+msgid "Connection details, fault reports and the game's own log."
+msgstr ""
+
+#: crates/ui/ui/strings/logs.slint
+msgid "Copy"
+msgstr ""
+
+#: crates/ui/ui/strings/logs.slint
+msgid "Copy the displayed log"
+msgstr ""
+
+#: crates/ui/ui/strings/logs.slint
+msgid "Log source"
+msgstr ""
+
+#: crates/ui/ui/strings/logs.slint
+msgid "Reading logs…"
+msgstr ""
+
+#: crates/ui/ui/strings/logs.slint
+msgid "Refresh"
 msgstr ""
 
 #: crates/ui/ui/strings/mods.slint
@@ -3984,10 +4057,6 @@ msgstr ""
 
 #: crates/ui/ui/strings/shell.slint
 msgid "Collapse navigation"
-msgstr ""
-
-#: crates/ui/ui/strings/shell.slint
-msgid "Eterra's Gift"
 msgstr ""
 
 #: crates/ui/ui/strings/shell.slint

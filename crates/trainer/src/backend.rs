@@ -768,11 +768,11 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
         let log = self.log.read(started);
         let decision = gate::evaluate(&log, started, self.clock.now());
         self.state.gate = Some(decision);
-        if decision.verdict == GateVerdict::Allow {
-            self.character = log.character.filter(|character| !character.online);
-        }
         match decision.verdict {
-            GateVerdict::Allow => Ok(()),
+            GateVerdict::Allow => {
+                self.character = log.character.filter(|character| !character.online);
+                Ok(())
+            }
             GateVerdict::Wait | GateVerdict::Refuse => {
                 self.release_without_io();
                 self.state.phase = if decision.verdict == GateVerdict::Refuse {
@@ -784,7 +784,7 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
                 };
                 let error = BackendError {
                     kind: ErrorKind::Gate,
-                    message: format!("offline admission: {:?}", decision.readiness),
+                    message: gate::refusal_message(&log),
                     delivery: None,
                     retry_when_waiting: decision.verdict == GateVerdict::Wait,
                 };

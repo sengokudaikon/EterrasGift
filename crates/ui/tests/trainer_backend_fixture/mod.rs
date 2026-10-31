@@ -543,6 +543,7 @@ pub(super) fn capture(session: &Session) {
             trainer: true,
             trainer_backend: Some(handle.clone()),
             faults: Some(eg_core::fault::FaultLog::with_fallbacks(&folder.join("app"), Some(&folder.join("logs")), vec![])),
+            logs: None,
             templates: None,
             settings: SettingsPage::new(SettingsService::inline(store), vec![eg_ui::pages::settings::trainer::descriptor(true)], None, None),
             start: Page::Forge,
@@ -1293,6 +1294,7 @@ pub(super) fn capture_waiting(session: &Session) {
             trainer: true,
             trainer_backend: Some(handle.clone()),
             faults: None,
+            logs: None,
             templates: None,
             settings: SettingsPage::new(SettingsService::inline(store), vec![eg_ui::pages::settings::trainer::descriptor(true)], None, None),
             start: Page::Forge,
@@ -1323,6 +1325,143 @@ pub(super) fn capture_waiting(session: &Session) {
     command(&handle, Command::Shutdown, || handle.snapshot().phase == Phase::Stopped);
     worker.join().unwrap();
     // Not hidden: hiding the last window asks the event loop to quit, and the captures go on in this one.
+}
+
+/// The bug button, connection evidence and file viewer use only explicit files and a gate that never reaches a game.
+pub(super) fn capture_logs(session: &Session) {
+    struct Games(ProcessIdentity);
+    impl ProcessLocator for Games {
+        async fn find(&mut self) -> Result<Vec<ProcessIdentity>, BackendError> {
+            Ok(vec![self.0.clone()])
+        }
+    }
+    struct Unrecognized;
+    impl LogSource for Unrecognized {
+        fn read(&mut self, _: jiff::Timestamp) -> GameLogState {
+            GameLogState {
+                status: GameLogStatus::Unrecognized,
+                readiness: GameReadiness::NoCharacter,
+                shell_state: Some("None".into()),
+                character: None,
+                offline_mode: Some(false),
+                problem: None,
+            }
+        }
+    }
+    struct Unreached;
+    impl Connector for Unreached {
+        type Connection = OwnedConnection;
+        async fn connect(&mut self, _: ProcessIdentity, _: jiff::Timestamp) -> Result<OwnedConnection, BackendError> {
+            panic!("the log viewer's unrecognized character must stop before connecting")
+        }
+    }
+    let folder = session.folder();
+    let faults = eg_core::fault::FaultLog::with_fallbacks(&folder, Some(&folder.join("logs")), vec![]);
+    faults
+        .write("Connecting to Last Epoch", Some("The helper did not respond before the deadline."), None, None)
+        .unwrap();
+    let game = folder.join("Player.log");
+    std::fs::write(
+        &game,
+        concat!(
+            "2026-10-31T09:50:41.1316925+00:00\tLog\t[Network] Initializing network service group for offline client.\n",
+            "2026-10-31T09:51:30.3635725+00:00\tLog\tShellSceneManager: State transition Login -> CharacterSelect\n",
+            "2026-10-31T09:51:54.0677482+00:00\tLog\tClientStateManager: Application state changed to InGame.\n",
+            "2026-10-31T09:51:54.0761642+00:00\tLog\tShellSceneManager: State transition CharacterSelect -> None\n",
+            "2026-10-31T09:51:55.4458361+00:00\tLog\tEnvironment manager is initialized in the scene: Z12\n",
+        ),
+    )
+    .unwrap();
+    let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+    let (handle, worker) = backend::service(
+        Games(ProcessIdentity {
+            pid: 42,
+            created: 134_369_000_000_000_000,
+            executable: folder.join("owned-never-opened.exe"),
+        }),
+        Unreached,
+        Unrecognized,
+        SystemClock,
+        BackendOptions {
+            poll_interval: Duration::from_secs(60),
+            ..Default::default()
+        },
+    );
+    let worker = std::thread::spawn(move || runtime.block_on(worker.run()));
+    let ui = MainWindow::new().unwrap();
+    let store = SettingsStore::open(&folder, &folder.join("settings.json"), &[]);
+    eg_ui::install(
+        &ui,
+        App {
+            launcher: None,
+            mods: None,
+            trainer: true,
+            trainer_backend: Some(handle.clone()),
+            settings: SettingsPage::new(SettingsService::inline(store), vec![eg_ui::pages::settings::trainer::descriptor(true)], None, None),
+            faults: None,
+            templates: None,
+            logs: Some(eg_ui::pages::logs::LogFiles {
+                game: game.clone(),
+                reports: faults.directories().collect(),
+            }),
+            start: Page::Home,
+        },
+    );
+    ui.global::<Tokens>().set_motion(false);
+    session.window.set_size(PhysicalSize::new(1100, 700));
+    ui.show().unwrap();
+    command(&handle, Command::Enable, || handle.snapshot().phase == Phase::Disconnected);
+    command(&handle, Command::Connect, || handle.snapshot().phase == Phase::Blocked);
+
+    // Keyboard navigation reaches the bug button beside Settings, including on the collapsed rail.
+    session.key(Key::Tab);
+    session.key(Key::Tab);
+    session.key(Key::End);
+    session.key(Key::UpArrow);
+    assert_eq!(ui.global::<Nav>().get_current_page(), "logs");
+    let state = ui.global::<eg_ui::LogsState>();
+    assert!(state.get_text().contains("Unrecognized"));
+    assert!(state.get_text().contains("without logging which character"));
+    assert!(state.get_text().contains("The helper did not respond"));
+    for (width, height, size) in [(1100, 700, ""), (940, 580, "-compact"), (680, 580, "-narrow"), (1920, 1080, "-maximized")] {
+        session.resize(width, height);
+        session.capture(&ui, &format!("logs-app{size}"));
+    }
+    session.resize(1100, 700);
+
+    // The real Copy button selects and copies all displayed text through the fake platform's clipboard.
+    session.key(Key::Tab); // Retry in the navigation foot.
+    session.key(Key::Tab);
+    session.key(Key::Tab);
+    session.key(Key::Tab);
+    session.key(Key::Return);
+    assert_eq!(CAPTURE_CLIPBOARD.with_borrow(Clone::clone), state.get_text().as_str());
+
+    state.invoke_source_chosen(1);
+    assert!(state.get_text().contains("offline client"));
+    session.capture(&ui, "logs-game");
+    session.resize(680, 580);
+    session.capture(&ui, "logs-game-narrow");
+    use std::io::Write;
+    std::fs::OpenOptions::new()
+        .append(true)
+        .open(&game)
+        .unwrap()
+        .write_all(b"newly appended log line\n")
+        .unwrap();
+    state.invoke_refresh();
+    assert!(state.get_text().ends_with("newly appended log line\n"));
+    std::fs::remove_file(&game).unwrap();
+    state.invoke_refresh();
+    assert!(state.get_text().is_empty());
+    assert!(state.get_notice().contains("Could not read"));
+    session.capture(&ui, "logs-game-missing");
+    std::fs::write(&game, "").unwrap();
+    state.invoke_refresh();
+    assert_eq!(state.get_notice(), "This log is empty.");
+    session.capture(&ui, "logs-game-empty");
+    command(&handle, Command::Shutdown, || handle.snapshot().phase == Phase::Stopped);
+    worker.join().unwrap();
 }
 
 /// The trainer's profiles on the real worker, with no game running: the pages set up the shown profile (its switch saved
@@ -1399,6 +1538,7 @@ pub(super) fn capture_profiles(session: &Session) {
             trainer: true,
             trainer_backend: Some(handle.clone()),
             faults: None,
+            logs: None,
             templates: None,
             settings: SettingsPage::new(SettingsService::inline(store), vec![eg_ui::pages::settings::trainer::descriptor(true)], None, None),
             start: Page::Combat,

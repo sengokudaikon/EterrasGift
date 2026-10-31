@@ -131,6 +131,7 @@ static UI_EVENTS: std::sync::Mutex<std::collections::VecDeque<UiEvent>> = std::s
 static QUIT_REQUESTED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 thread_local! {
     static CAPTURE_WINDOW: std::cell::RefCell<std::rc::Weak<MinimalSoftwareWindow>> = const { std::cell::RefCell::new(std::rc::Weak::new()) };
+    static CAPTURE_CLIPBOARD: std::cell::RefCell<String> = const { std::cell::RefCell::new(String::new()) };
 }
 struct CaptureEventLoop;
 impl slint::platform::EventLoopProxy for CaptureEventLoop {
@@ -154,6 +155,12 @@ impl slint::platform::EventLoopProxy for CaptureEventLoop {
 }
 
 impl Platform for CapturePlatform {
+    fn set_clipboard_text(&self, text: &str, _: slint::platform::Clipboard) {
+        CAPTURE_CLIPBOARD.with_borrow_mut(|clipboard| *clipboard = text.to_owned());
+    }
+    fn clipboard_text(&self, _: slint::platform::Clipboard) -> Option<String> {
+        Some(CAPTURE_CLIPBOARD.with_borrow(Clone::clone))
+    }
     fn new_event_loop_proxy(&self) -> Option<Box<dyn slint::platform::EventLoopProxy>> {
         Some(Box::new(CaptureEventLoop))
     }
@@ -242,6 +249,7 @@ impl Session {
                 trainer: true,
                 trainer_backend: None,
                 faults: None,
+                logs: None,
                 templates: None,
                 start: Page::Settings,
             },
@@ -268,6 +276,7 @@ impl Session {
                 trainer: true,
                 trainer_backend: None,
                 faults: None,
+                logs: None,
                 templates: None,
                 start: Page::Settings,
             },
@@ -294,6 +303,7 @@ impl Session {
             trainer: trainer_on,
             trainer_backend: None,
             faults: None,
+            logs: None,
             templates: None,
             start: Page::Home,
         };
@@ -381,6 +391,7 @@ impl Session {
                 trainer: false,
                 trainer_backend: None,
                 faults: None,
+                logs: None,
                 templates: None,
                 start: Page::Mods,
             },
@@ -510,6 +521,10 @@ fn main() {
     let session = Session { window, out, data };
     // No event loop runs here, so work the pages hand to a thread runs at once instead.
     eg_ui::background::run_inline(true);
+    if std::env::args().any(|arg| arg == "--logs") {
+        trainer_backend_fixture::capture_logs(&session);
+        return;
+    }
     if std::env::args().any(|arg| arg == "--trainer-backend") {
         trainer_backend_fixture::capture_waiting(&session);
         trainer_backend_fixture::capture_profiles(&session);
@@ -522,6 +537,8 @@ fn main() {
         trainer_backend_fixture::capture_waiting(&session);
         return;
     }
+
+    trainer_backend_fixture::capture_logs(&session);
 
     // Every page at every window class.
     let ui = session.open(true, 1100, 700);
@@ -580,10 +597,11 @@ fn main() {
         "expanding the pane reveals the current trainer page"
     );
     session.capture(&ui, "nav-short-trainer-open");
-    // From Settings, Up reaches the last trainer page, which the rows scroll into view.
+    // From Settings, Up passes Logs and reaches the last trainer page, which scrolls into view.
     session.key(Key::Tab);
     session.key(Key::Tab);
     session.key(Key::End);
+    session.key(Key::UpArrow);
     session.key(Key::UpArrow);
     session.capture(&ui, "nav-short-keyboard-scroll");
 
@@ -736,6 +754,7 @@ fn main() {
             trainer: true,
             trainer_backend: None,
             faults: None,
+            logs: None,
             templates: None,
             start: Page::Home,
         },
@@ -779,6 +798,7 @@ fn main() {
             trainer: true,
             trainer_backend: None,
             faults: None,
+            logs: None,
             templates: None,
             start: Page::Settings,
         },

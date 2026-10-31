@@ -3,6 +3,7 @@
 
 pub mod forge;
 pub mod home;
+pub mod logs;
 pub mod mods;
 pub mod settings;
 pub mod trainer;

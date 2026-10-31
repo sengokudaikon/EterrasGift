@@ -1,0 +1,65 @@
+// File contents are bounded and read away from the UI thread. The viewer uses the app's selectable text box.
+import { Tokens } from "../tokens.slint";
+import { TitleText, SecondaryText, CaptionText } from "../widgets/text.slint";
+import { Button } from "../widgets/button.slint";
+import { ChoiceBox } from "../widgets/choice-box.slint";
+import { ReadOnlyTextBox } from "../widgets/text-box.slint";
+import { LogsText } from "../strings/logs.slint";
+
+export global LogsState {
+    in property <[string]> sources;
+    in property <int> source;
+    in property <string> location;
+    in property <string> text;
+    in property <string> notice;
+    in property <bool> loading;
+    callback source-chosen(int);
+    callback refresh();
+}
+
+export component LogsPage inherits Rectangle {
+    in property <bool> compact;
+
+    VerticalLayout {
+        padding-left: root.compact ? Tokens.settings-body-compact-margin.left : Tokens.settings-body-margin.left;
+        padding-right: root.compact ? Tokens.settings-body-compact-margin.right : Tokens.settings-body-margin.right;
+        padding-top: Tokens.settings-body-margin.top;
+        padding-bottom: Tokens.settings-body-margin.bottom;
+        spacing: Tokens.space-12;
+
+        TitleText { text: LogsText.title; }
+        SecondaryText { text: LogsText.description; }
+
+        HorizontalLayout {
+            spacing: Tokens.space-8;
+            ChoiceBox {
+                choices: LogsState.sources;
+                index: LogsState.source;
+                label: LogsText.source;
+                width: self.natural-width;
+                chosen(index) => { LogsState.source-chosen(index); }
+            }
+            Rectangle { horizontal-stretch: 1; }
+            Button {
+                text: LogsText.refresh;
+                icon: Tokens.icon-refresh;
+                enabled: !LogsState.loading;
+                clicked => { LogsState.refresh(); }
+            }
+            Button {
+                text: LogsText.copy;
+                tip: LogsText.copy-tip;
+                enabled: LogsState.text != "" && !LogsState.loading;
+                clicked => { contents.copy-all(); }
+            }
+        }
+
+        CaptionText { text: LogsState.location; }
+        contents := ReadOnlyTextBox {
+            text: LogsState.text;
+            label: LogsText.title;
+            vertical-stretch: 1;
+        }
+        CaptionText { text: LogsState.loading ? LogsText.loading : LogsState.notice; }
+    }
+}

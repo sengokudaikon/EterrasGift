@@ -20,6 +20,7 @@ const MONOLITH: Phrase = Phrase::new("Monolith");
 const FACTIONS: Phrase = Phrase::new("Factions");
 const WORLD: Phrase = Phrase::new("World");
 const SETTINGS: Phrase = Phrase::new("Settings");
+const LOGS: Phrase = Phrase::new("Logs");
 const TRAINER: Phrase = Phrase::new("Trainer");
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -34,6 +35,7 @@ pub enum Page {
     Monolith,
     Factions,
     World,
+    Logs,
     Settings,
 }
 
@@ -50,7 +52,7 @@ impl Page {
         Page::World,
     ];
 
-    const ALL: [Page; 11] = [
+    const ALL: [Page; 12] = [
         Page::Home,
         Page::Mods,
         Page::Character,
@@ -61,6 +63,7 @@ impl Page {
         Page::Monolith,
         Page::Factions,
         Page::World,
+        Page::Logs,
         Page::Settings,
     ];
 
@@ -76,6 +79,7 @@ impl Page {
             Page::Monolith => "monolith",
             Page::Factions => "factions",
             Page::World => "world",
+            Page::Logs => "logs",
             Page::Settings => "settings",
         }
     }
@@ -92,6 +96,7 @@ impl Page {
             Page::Monolith => MONOLITH.get(),
             Page::Factions => FACTIONS.get(),
             Page::World => WORLD.get(),
+            Page::Logs => LOGS.get(),
             Page::Settings => SETTINGS.get(),
         }
     }
@@ -211,9 +216,9 @@ impl Navigation {
         rows
     }
 
-    /// The foot: Settings, as Windows apps keep it.
+    /// Diagnostics and Settings stay at the foot, available from every page.
     pub fn footer(&self) -> Vec<Node> {
-        vec![Node::Page(Page::Settings)]
+        vec![Node::Page(Page::Logs), Node::Page(Page::Settings)]
     }
 
     /// Rows and foot as the keyboard sees them: one list.
@@ -515,6 +520,7 @@ fn page_icon(tokens: &Tokens<'_>, page: Page) -> Image {
         Page::Monolith => tokens.get_icon_monolith(),
         Page::Factions => tokens.get_icon_factions(),
         Page::World => tokens.get_icon_world(),
+        Page::Logs => tokens.get_icon_bug(),
         Page::Settings => tokens.get_icon_settings(),
     }
 }
@@ -564,9 +570,11 @@ mod tests {
         assert_eq!(nav.key(1, NavKey::Down), Outcome::Handled { focus: Some(2) });
         assert_eq!(nav.current(), Page::Mods, "landing on the Trainer item does not navigate");
         assert_eq!(nav.key(2, NavKey::Down), Outcome::Handled { focus: Some(3) });
-        assert_eq!(nav.current(), Page::Settings, "rows and foot are one list");
-        assert_eq!(nav.key(3, NavKey::Down), Outcome::Handled { focus: None });
-        assert_eq!(nav.key(3, NavKey::First), Outcome::Handled { focus: Some(0) });
+        assert_eq!(nav.current(), Page::Logs, "rows and foot are one list");
+        assert_eq!(nav.key(3, NavKey::Down), Outcome::Handled { focus: Some(4) });
+        assert_eq!(nav.current(), Page::Settings);
+        assert_eq!(nav.key(4, NavKey::Down), Outcome::Handled { focus: None });
+        assert_eq!(nav.key(4, NavKey::First), Outcome::Handled { focus: Some(0) });
         assert_eq!(nav.current(), Page::Home);
     }
 
@@ -629,6 +637,6 @@ mod tests {
     fn a_run_without_the_trainer_has_no_trainer_item() {
         let nav = Navigation::new(false, Vec::new());
         assert_eq!(ids(&nav.rows()), ["home"]);
-        assert_eq!(ids(&nav.footer()), ["settings"]);
+        assert_eq!(ids(&nav.footer()), ["logs", "settings"]);
     }
 }

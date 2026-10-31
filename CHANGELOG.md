@@ -6,6 +6,8 @@ code and its tests, and what is still to build in [research/trainer-features.md]
 ## 2026-10-31
 
 - Trainer: Movement speed multiplier, scoped to the local player's movement update without changing unrelated stat queries.
+- Logs: a bug button beside Settings opens connection diagnostics, fault reports and the game log, with Refresh and Copy.
+- Trainer: connection failures explain missing or unrecognized game-log evidence and how to recover.
 - Trainer: Several primordial items, bypassing the local equip limit and the matching stat-suppression checks.
 - Trainer: Fixed increased area for the current player's area skills, preserving other actors' calculations.
 - Trainer: Refill mana before each player tick; normal regeneration and drains still run.

@@ -47,6 +47,12 @@ impl FaultLog {
         }
     }
 
+    /// The chosen report folder followed by the recovery locations, in write order.
+    pub fn directories(&self) -> impl Iterator<Item = PathBuf> + '_ {
+        let first = self.log_directory.clone().unwrap_or_else(|| paths::app_paths(&self.root, None, None).log_directory());
+        std::iter::once(first).chain(self.fallbacks.iter().cloned())
+    }
+
     /// Writes a report; returns where, or None when no folder took it.
     /// `failure` is the full text of what went wrong (an error and its causes, or a panic with its backtrace).
     pub fn write(&self, operation: &str, failure: Option<&str>, details: Option<&FaultDetails>, recovery: Option<&str>) -> Option<PathBuf> {
@@ -78,8 +84,7 @@ impl FaultLog {
         );
         let text = serde_json::to_string_pretty(&Value::Object(report)).ok()?;
         let name = format!("fault-{}-{}.json", now.strftime("%Y%m%d-%H%M%S"), uuid::Uuid::new_v4().simple());
-        let first = self.log_directory.clone().unwrap_or_else(|| paths::app_paths(&self.root, None, None).log_directory());
-        std::iter::once(first).chain(self.fallbacks.iter().cloned()).find_map(|directory| {
+        self.directories().find_map(|directory| {
             std::fs::create_dir_all(&directory).ok()?;
             let path = directory.join(&name);
             let mut file = OpenOptions::new().write(true).create_new(true).open(&path).ok()?;
