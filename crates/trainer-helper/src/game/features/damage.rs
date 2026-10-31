@@ -2,19 +2,28 @@
 //! damage the current player takes, scaled to a percentage, and damage its foes take, multiplied or made a one-hit
 //! kill. Its code follows the metadata-validated layout below and keeps its state in the gate's slots.
 
-use crate::hooks::leaf::{EFFECT_SLOTS, FRAME, GeneratedEffect, LeafEffect, LeafGate};
+use crate::hooks::leaf::{EFFECT_SLOTS, FRAME, GeneratedEffect, LeafEffect};
 use eg_trainer_wire::hooks::GameplayHook;
 use std::ptr::NonNull;
 
-use super::registry::{Behavior, GameplayHookTarget, HookFeature, MethodSpec, Targets};
+use super::registry::{Behavior, ControlSetting, GameplayHookTarget, HookFeature, MethodSpec, OFF, SharedSettings, Targets};
 use crate::game::*;
 
 pub(super) const FEATURE: HookFeature = HookFeature {
-    controls: &CONTROLS,
-    behavior: Behavior::Damage,
+    controls: &SETTINGS.controls::<2>(),
+    behavior: Behavior::SharedLeaf(&SETTINGS),
     targets: Targets::Resolve(targets),
 };
-pub(crate) const CONTROLS: [GameplayHook; 2] = [GameplayHook::IncomingDamage, GameplayHook::EnemyDamage];
+const SETTINGS: SharedSettings = SharedSettings(&[
+    ControlSetting {
+        hook: GameplayHook::IncomingDamage,
+        slot: None,
+    },
+    ControlSetting {
+        hook: GameplayHook::EnemyDamage,
+        slot: Some(OUTGOING),
+    },
+]);
 
 unsafe fn targets(access: &RuntimeAccess, module: NonNull<u8>, size: usize) -> Result<Vec<GameplayHookTarget>, GameError> {
     // SAFETY: attached main thread, initialized game statics, retained metadata and bounded module.
@@ -62,8 +71,6 @@ const ONLINE: usize = 1;
 const HUNDRED: usize = 2;
 const OUTGOING: usize = 3;
 const _: () = assert!(OUTGOING < EFFECT_SLOTS);
-/// A setting that is off; every real setting differs.
-const OFF: u64 = u64::MAX;
 
 impl RuntimeAccess {
     // Called only after offline status admission. No instance or static getters are
@@ -106,41 +113,6 @@ impl DamageLayout {
             slots: [self.player_storage.as_ptr() as u64, self.online_storage.as_ptr() as u64, 100.0f64.to_bits(), OFF],
         })
     }
-}
-
-/// Change one damage feature on a damage leaf, keeping the other's setting. Its on state and value publish in one
-/// aligned store.
-pub fn set_damage(gate: &LeafGate, hook: GameplayHook, on: bool, value: u64) {
-    let value = if on { value } else { OFF };
-    match hook {
-        GameplayHook::IncomingDamage => gate.set_value(value),
-        GameplayHook::EnemyDamage => gate.set_slot(OUTGOING, value),
-        _ => unreachable!("not a damage feature"),
-    }
-}
-
-/// Whether one damage feature is on, and its value (the feature's default while off).
-pub fn damage_setting(gate: &LeafGate, hook: GameplayHook) -> (bool, u64) {
-    let value = match hook {
-        GameplayHook::IncomingDamage => gate.value(),
-        GameplayHook::EnemyDamage => gate.slot(OUTGOING),
-        _ => unreachable!("not a damage feature"),
-    };
-    (gate.enabled() && value != OFF, if value == OFF { hook.default_value() } else { value })
-}
-
-pub(crate) fn has_other(gate: &LeafGate, hook: GameplayHook) -> bool {
-    CONTROLS.into_iter().any(|other| other != hook && damage_setting(gate, other).0)
-}
-
-/// Clearing or failing a group closes its switch. A later enable must not revive the old sibling settings.
-pub(crate) fn target_on(gate: &LeafGate, hook: GameplayHook, on: bool) -> bool {
-    if !gate.enabled() {
-        for other in CONTROLS {
-            set_damage(gate, other, false, other.default_value());
-        }
-    }
-    on || has_other(gate, hook)
 }
 
 // Windows x64 float(BaseHealth*, float, MethodInfo*): preserve RCX, XMM1 until
@@ -259,6 +231,7 @@ fn code(layout: DamageLayout) -> Vec<u8> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::hooks::leaf::LeafGate;
     use eg_trainer_wire::hooks::GameplayHook::{EnemyDamage, IncomingDamage};
     use std::{
         cell::Cell,
@@ -356,15 +329,15 @@ mod tests {
             assert_eq!(health.calls.load(SeqCst), before + 1);
             result
         };
-        set_damage(&gate, IncomingDamage, true, 50);
+        SETTINGS.set(&gate, IncomingDamage, true, 50);
         gate.set_enabled(true);
         for multiplier in [0.0f64, 1.0, 2.5, 3.125, 100.0] {
-            set_damage(&gate, EnemyDamage, true, multiplier.to_bits());
+            SETTINGS.set(&gate, EnemyDamage, true, multiplier.to_bits());
             assert_eq!(hit(&target, 200.0), (200.0 * multiplier) as f32 + 7.0);
             assert_eq!(hit(&target, -200.0), (-200.0 * multiplier) as f32 + 7.0);
             assert_eq!(hit(&mine, 200.0), 107.0);
         }
-        set_damage(&gate, EnemyDamage, true, 101.0f64.to_bits());
+        SETTINGS.set(&gate, EnemyDamage, true, 101.0f64.to_bits());
         assert_eq!(hit(&target, 200.0), 1007.0);
         assert_eq!(hit(&target, 2000.0), 2007.0); // never reduce a larger hit
         assert_eq!(hit(&target, 0.0), 7.0);
@@ -397,11 +370,11 @@ mod tests {
         assert_eq!(hit(&target, 200.0), 207.0);
         assert_eq!(hit(&mine, 200.0), 207.0);
         online.store(0, SeqCst);
-        set_damage(&gate, EnemyDamage, false, 1.0f64.to_bits());
+        SETTINGS.set(&gate, EnemyDamage, false, 1.0f64.to_bits());
         assert_eq!(hit(&target, 200.0), 207.0);
         assert_eq!(hit(&mine, 200.0), 107.0);
-        set_damage(&gate, EnemyDamage, true, 2.0f64.to_bits());
-        set_damage(&gate, IncomingDamage, false, 50);
+        SETTINGS.set(&gate, EnemyDamage, true, 2.0f64.to_bits());
+        SETTINGS.set(&gate, IncomingDamage, false, 50);
         assert_eq!(hit(&target, 200.0), 407.0);
         assert_eq!(hit(&mine, 200.0), 207.0);
         gate.set_enabled(false);

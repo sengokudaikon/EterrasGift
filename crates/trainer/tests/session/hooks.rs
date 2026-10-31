@@ -14,6 +14,49 @@ impl WriteControl for AllowWrite {
 }
 
 #[test]
+fn experience_pair_is_one_write_and_each_lane_must_match_independent_readback() {
+    let hook = GameplayHook::ExperienceMultiplier;
+    let value = hook.value_kind().encode(&[2.5, 7.25]).unwrap();
+    let wrong = hook.value_kind().encode(&[2.5, 7.0]).unwrap();
+    let fixture = Fixture::rehashing();
+    let wire = FakeTransport::new(fixture.target.clone(), [fixture.discover(), status(false, 0x1234, 0)]);
+    let mut session = fixture.session(&wire);
+    session.enable();
+    run(session.connect()).unwrap();
+    for (actual, expected) in [(value, WriteOutcome::Confirmed(true)), (wrong, WriteOutcome::NotKept(true))] {
+        wire.push(done(vec![]));
+        wire.push(done(
+            HookObservation {
+                patch: PatchState::Patched,
+                enabled: true,
+                value: actual,
+            }
+            .encode(),
+        ));
+        let request = HookRequest {
+            id: HookId::parse(hook.id()).unwrap(),
+            on: true,
+            values: vec![2.5, 7.25],
+        };
+        assert_eq!(run(BackendConnection::set_hook(&mut session, &request, &mut AllowWrite)).unwrap(), expected);
+        let sent = wire.requests();
+        assert!(matches!(sent[sent.len()-2], Request::SetGameplayHook { hook: actual, value: packed, .. } if actual == hook && packed == value));
+        assert!(matches!(sent[sent.len()-1], Request::ReadGameplayHook { hook: actual, .. } if actual == hook));
+    }
+    let before = wire.requests().len();
+    let request = HookRequest {
+        id: HookId::parse(hook.id()).unwrap(),
+        on: true,
+        values: vec![2.5, f64::NAN],
+    };
+    assert!(matches!(
+        run(BackendConnection::set_hook(&mut session, &request, &mut AllowWrite)).unwrap(),
+        WriteOutcome::NotApplied { .. }
+    ));
+    assert_eq!(wire.requests().len(), before);
+}
+
+#[test]
 fn shared_patch_ownership_is_reported_by_the_helper_for_any_disabled_feature() {
     for hook in GameplayHook::ALL {
         let fixture = Fixture::rehashing();
@@ -172,6 +215,7 @@ fn each_gameplay_hook_requires_a_separate_readback_for_on_and_off() {
                     ValueKind::Switch => vec![],
                     ValueKind::Percent => vec![100.0],
                     ValueKind::Real { neutral, .. } => vec![neutral],
+                    ValueKind::RealPair { neutral, .. } => vec![f64::from(neutral); 2],
                     ValueKind::Choice(_) => vec![0.0],
                 },
             };

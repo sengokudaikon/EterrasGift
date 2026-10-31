@@ -7,6 +7,7 @@ mod descriptions;
 mod fixed_attack_rate;
 mod fixed_leech_rate;
 mod forge;
+pub(crate) mod gains;
 mod mapping;
 mod materials;
 mod mysterious_rift;

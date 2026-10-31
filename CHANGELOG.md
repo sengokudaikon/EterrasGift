@@ -5,6 +5,10 @@ code and its tests, and what is still to build in [research/trainer-features.md]
 
 ## 2026-10-30
 
+- Trainer: independent character and skill experience multipliers, published together and applied to the current player.
+- Trainer: Level up on every experience gain; takes precedence over character multiplication and keeps skill multiplication.
+- Trainer: Favor and reputation multiplier, applied before the game derives reputation from favor.
+- Trainer: Rank up on every reputation gain, using the remainder to the next rank and the game's normal rank-up path.
 - UI: ready for translations: a `lang/<language>/LC_MESSAGES/eg-ui.po` reaches the views and the Rust phrases alike,
   with contexts for words that mean two things, each language's plural forms, and lists joined in its own words.
 - Trainer: hook values are value cells, as affix values are: the value over its range bar, dragged (sent once, on

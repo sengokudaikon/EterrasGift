@@ -3,7 +3,7 @@
 use super::*;
 use crate::{
     game::{
-        RuntimeAccess, StatBinding, damage,
+        RuntimeAccess, StatBinding,
         registry::{Behavior, HookFeature, TargetEffect},
     },
     hooks::{leaf::LeafGate, postfix::PostfixGate, scalar::ScalarGate},
@@ -56,7 +56,7 @@ impl FeatureBinding {
             let gate = unsafe {
                 match (&self.feature.behavior, &target.effect) {
                     (
-                        Behavior::Leaf | Behavior::Damage,
+                        Behavior::Leaf | Behavior::SharedLeaf(_),
                         TargetEffect::Leaf {
                             effect,
                             receiver_class,
@@ -185,7 +185,7 @@ impl Effect {
     }
     pub(super) fn target_on(&self, hook: GameplayHook, on: bool) -> bool {
         match self.behavior {
-            Behavior::Damage => damage::target_on(self.gates[0].leaf(), hook, on),
+            Behavior::SharedLeaf(settings) => settings.target_on(self.gates[0].leaf(), hook, on),
             _ => on,
         }
     }
@@ -217,11 +217,11 @@ impl Effect {
                     }
                 }
             }
-            Behavior::Leaf | Behavior::Damage => {
+            Behavior::Leaf | Behavior::SharedLeaf(_) => {
                 for gate in &self.gates {
                     let gate = gate.leaf();
                     match self.behavior {
-                        Behavior::Damage => damage::set_damage(gate, hook, on, value),
+                        Behavior::SharedLeaf(settings) => settings.set(gate, hook, on, value),
                         _ => gate.set_value(value),
                     }
                     gate.set_enabled(target_on);
@@ -233,7 +233,7 @@ impl Effect {
     pub(super) fn observation(&self, hook: GameplayHook, mut patch: PatchState) -> HookObservation {
         let first = &self.gates[0];
         let (enabled, value) = match self.behavior {
-            Behavior::Damage => damage::damage_setting(first.leaf(), hook),
+            Behavior::SharedLeaf(settings) => settings.setting(first.leaf(), hook),
             _ => (self.gates.iter().all(Gate::enabled), first.value()),
         };
         if let Gate::Scalar(gate) = first {
@@ -242,7 +242,11 @@ impl Effect {
                 patch = PatchState::Unknown;
             }
         }
-        if matches!(self.behavior, Behavior::Damage) && !enabled && patch == PatchState::Patched && damage::has_other(first.leaf(), hook) {
+        if let Behavior::SharedLeaf(settings) = self.behavior
+            && !enabled
+            && patch == PatchState::Patched
+            && settings.has_other(first.leaf(), hook)
+        {
             patch = PatchState::Shared;
         }
         HookObservation { patch, enabled, value }

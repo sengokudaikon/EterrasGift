@@ -127,7 +127,7 @@ pub enum Activity {
     Refreshing,
     WritingForge,
 }
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Capabilities {
     /// In GameplayHook order; availability comes from this connection, not saved intent.
     pub gameplay_hooks: [bool; eg_trainer_wire::hooks::GameplayHook::COUNT],
@@ -144,6 +144,22 @@ pub struct Capabilities {
     pub modifier_rolls: bool,
     pub affix_change: bool,
     pub affix_list: bool,
+}
+impl Default for Capabilities {
+    fn default() -> Self {
+        Self {
+            gameplay_hooks: [false; eg_trainer_wire::hooks::GameplayHook::COUNT],
+            read_forge: false,
+            level_requirement: false,
+            status_fields: [false; 7],
+            base_change: false,
+            identity_change: false,
+            affix_rolls: false,
+            modifier_rolls: false,
+            affix_change: false,
+            affix_list: false,
+        }
+    }
 }
 impl Capabilities {
     /// Whether these capabilities include `edit`.

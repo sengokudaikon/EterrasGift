@@ -36,6 +36,10 @@ pub enum GameplayHook {
     MaxBonusStability = 29,
     AbilitySpeed = 30,
     OneEchoType = 31,
+    ExperienceMultiplier = 32,
+    LevelUpPerGain = 33,
+    FactionGains = 34,
+    RankUpPerGain = 35,
 }
 
 /// What a hook's value is: how the desktop's number for it is sent, which values the helper takes, and the one it
@@ -49,6 +53,8 @@ pub enum ValueKind {
     /// An `f64` (sent as its bits) from `min` to `max`, or exactly `infinity`, a number past `max` that means "without
     /// limit"; `neutral` changes nothing.
     Real { min: f64, max: f64, infinity: Option<f64>, neutral: f64 },
+    /// Two finite single-precision numbers, low word first, published together in one aligned 64-bit store.
+    RealPair { min: f64, max: f64, neutral: f32 },
     /// One of the desktop's choices, by index, each sent as its value here.
     Choice(&'static [u64]),
 }
@@ -60,6 +66,7 @@ impl ValueKind {
             Self::Switch => 1,
             Self::Percent => 100,
             Self::Real { neutral, .. } => neutral.to_bits(),
+            Self::RealPair { neutral, .. } => neutral.to_bits() as u64 | ((neutral.to_bits() as u64) << 32),
             Self::Choice(values) => values[0],
         }
     }
@@ -69,6 +76,7 @@ impl ValueKind {
             Self::Switch => value == 1,
             Self::Percent => value <= 100,
             Self::Real { .. } => self.takes(f64::from_bits(value)),
+            Self::RealPair { .. } => [value as u32, (value >> 32) as u32].into_iter().all(|bits| self.takes(f64::from(f32::from_bits(bits)))),
             Self::Choice(values) => values.contains(&value),
         }
     }
@@ -80,6 +88,7 @@ impl ValueKind {
                 Self::Switch => false,
                 Self::Percent => number.fract() == 0.0 && (0.0..=100.0).contains(&number),
                 Self::Real { min, max, infinity, .. } => (min..=max).contains(&number) || Some(number) == infinity,
+                Self::RealPair { min, max, .. } => (min..=max).contains(&number),
                 Self::Choice(values) => number.fract() == 0.0 && number >= 0.0 && number < values.len() as f64,
             }
     }
@@ -89,6 +98,7 @@ impl ValueKind {
         let fitted = match self {
             Self::Percent => number.round().clamp(0.0, 100.0),
             Self::Real { min, max, infinity, .. } if Some(number) != infinity => number.clamp(min, max),
+            Self::RealPair { min, max, .. } => number.clamp(min, max),
             _ => number,
         };
         self.takes(fitted).then_some(fitted)
@@ -100,6 +110,10 @@ impl ValueKind {
             (Self::Switch, []) => Some(1),
             (Self::Percent, [number]) if self.takes(*number) => Some(*number as u64),
             (Self::Real { .. }, [number]) if self.takes(*number) => Some(number.to_bits()),
+            (Self::RealPair { .. }, [first, second]) if self.takes(*first) && self.takes(*second) => {
+                let packed = u64::from((*first as f32).to_bits()) | (u64::from((*second as f32).to_bits()) << 32);
+                self.accepts(packed).then_some(packed)
+            }
             (Self::Choice(values), [number]) if self.takes(*number) => Some(values[*number as usize]),
             _ => None,
         }
@@ -181,11 +195,23 @@ pub const SPECS: [HookSpec; GameplayHook::COUNT] = {
         switch(MaxBonusStability, "max-bonus-stability"),
         real(AbilitySpeed, "ability-speed", 0.0, 100.0, 1.0),
         spec(OneEchoType, "one-echo-type", ValueKind::Choice(&[0, 1, 2, 3, 4, 5, 6, 7, 8, 9])),
+        spec(
+            ExperienceMultiplier,
+            "experience-multiplier",
+            ValueKind::RealPair {
+                min: 1.0,
+                max: 100.0,
+                neutral: 1.0,
+            },
+        ),
+        switch(LevelUpPerGain, "level-up-per-gain"),
+        real(FactionGains, "faction-gains", 0.0, 100.0, 1.0),
+        switch(RankUpPerGain, "rank-up-per-gain"),
     ]
 };
 
 impl GameplayHook {
-    pub const COUNT: usize = 32;
+    pub const COUNT: usize = 36;
     /// Every hook by its number on the pipe, checked against [`SPECS`] when the crate builds.
     pub const ALL: [Self; Self::COUNT] = {
         let mut all = [Self::MysteriousRift; Self::COUNT];
@@ -301,6 +327,25 @@ mod tests {
         let rift = GameplayHook::MysteriousRift.value_kind();
         assert_eq!([0.0, 1.0, 2.0, 3.0].map(|choice| rift.encode(&[choice])), [Some(1), Some(1), Some(0), None]);
         assert_eq!((ValueKind::Switch.encode(&[]), ValueKind::Switch.encode(&[1.0])), (Some(1), None));
+    }
+
+    #[test]
+    fn real_pairs_encode_both_lanes_and_reject_invalid_values_or_arity() {
+        let kind = GameplayHook::ExperienceMultiplier.value_kind();
+        let packed = kind.encode(&[2.5, 7.25]).unwrap();
+        assert_eq!([packed as u32, (packed >> 32) as u32].map(f32::from_bits), [2.5, 7.25]);
+        assert!(kind.accepts(packed));
+        for values in [&[][..], &[2.0], &[2.0, 3.0, 4.0], &[0.0, 2.0], &[2.0, 101.0], &[f64::NAN, 2.0], &[2.0, f64::INFINITY]] {
+            assert!(kind.encode(values).is_none(), "{values:?}");
+        }
+        for bad in [f32::NAN, f32::INFINITY, 0.0, 101.0] {
+            for packed in [
+                u64::from(bad.to_bits()) | (u64::from(2.0f32.to_bits()) << 32),
+                u64::from(2.0f32.to_bits()) | (u64::from(bad.to_bits()) << 32),
+            ] {
+                assert!(GameplayHook::ExperienceMultiplier.validate_value(packed).is_err());
+            }
+        }
     }
 
     #[test]

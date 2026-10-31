@@ -29,9 +29,15 @@ impl Code {
     }
     /// An unconditional jump to the end of the code.
     pub fn done(&mut self) {
+        let at = self.jump();
+        self.exits.push(at);
+    }
+    /// An unconditional rel32 jump, bound later in the same way as a conditional branch.
+    pub fn jump(&mut self) -> usize {
         self.emit(&[0xe9]);
-        self.exits.push(self.bytes.len());
+        let at = self.bytes.len();
         self.emit(&[0; 4]);
+        at
     }
     /// A test, then an exit when it sets ZF (a null register).
     pub fn nonnull(&mut self, test: &[u8]) {

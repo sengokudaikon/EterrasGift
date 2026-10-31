@@ -27,7 +27,7 @@ only; feature IDs/profile settings and the original gameplay behavior remain ind
 | Status | Support | Current scope / next consumer |
 |---|---|---|
 | Todo | Mixed activation as one complete feature | Experimental uniques, cache use, waypoints and echo cycle still need their feature-specific detours/table behavior and partial-failure policy. |
-| Todo | New coherent multi-value settings | First consumers: experience multiplier/level up on every gain, faction gains or drop rates. Existing publication covers only the implemented shapes. |
+| Todo | Coherent settings larger than a pair | Drop rates (four values), Morditas timer and monster rarity (three). The XP pair already publishes as one atomic word; do not extend it with unsynchronized payload accesses. |
 | Todo | Scoped context | Projectiles, then duplicate; movement consumes one matching read and needs its own policy. |
 | Todo | Temporary asset mutation/restoration | Prophecy rewards/max LP, then density and pack size/rarity; settle threading and native-unwind behavior with those consumers. |
 | Todo | Additional ABI/caller adapters | Validate indirect aggregates, long signatures, hidden result storage and champion caller identity when their features arrive. |
@@ -48,8 +48,6 @@ Behavior reference: [character.h](../../EterrasGift/native/hooks/character.h).
 |---|---|---|---|---|
 | Todo | `specialization-slots` — `PlayerFinder.getPlayerActor` | Call original, raise the returned actor's `localTreeData.numberOfUnlockedSlots` to at least five. On disabling, recount through `LocalTreeData.updateUnlockedSlots` on the main thread when a character still exists. Avoid the folded byte getter. | Detour lifecycle; object descriptors. Keep recount and its timing feature-specific. | A level/load recount is raised again; off restores the natural count; missing character needs no stale-object write. |
 | Todo | `several-primordials` — `ItemContainersManager.NumberOfEquippedPrimordialItems` | Return zero only for the local containers manager; forward other managers. Resolve the local identity outside metadata discovery in the hot path. | Local-identity publication/lookup where its freshness contract fits; integer-return detour. | Another manager keeps its count; replacement of the local manager invalidates the old identity. |
-| Todo | `experience-multiplier` — `ExperienceTracker.GainExp` | Scale positive character and ability XP separately for the player's tracker; round and cap as the original does, preserving gains already above `INT32_MAX`. Forward favor XP unchanged. Share this handler with instant level. | Settings pair; shared-target ownership; numeric conversion helpers only where semantics match. | Independent multipliers, nonpositive gains, large gains, nonplayer tracker and simultaneous instant level. |
-| Todo | `level-up-per-gain` — same `GainExp` | Read current and next-level XP on the player's tracker. A positive character gain becomes at least the remaining requirement. This wins over the character XP multiplier; the skill multiplier still applies. | Same target and owner lookup as XP multiplier. Keep precedence in this handler. | Zero gain stays zero; character multiplier loses precedence; skill XP remains scaled. |
 
 ### Combat
 
@@ -99,8 +97,6 @@ Behavior reference: [factions.h](../../EterrasGift/native/hooks/factions.h).
 
 | Status | Feature and target | Behavior | Shared mechanism | Distinguishing targeted check |
 |---|---|---|---|---|
-| Todo | `faction-gains` — `LE.Factions.Faction.GainFavor` | Multiply positive favor only when `ignoreMultiplier` is false; round/clamp to nonnegative `Int32`. Let original handle joined faction, rank scaling, favor cap and resulting reputation. | Settings, integer argument transformation, proven rounding helper. | Ignore flags, nonpositive gains, max bound and resulting reputation; no duplicate reputation multiplication. |
-| Todo | `rank-up-per-gain` — `LE.Factions.Faction.GainReputation` | For positive gain, read rank requirements and current reputation; replace gain with the positive remainder to the next rank. Forward unchanged when unavailable or not positive. This can reduce a gain that would otherwise cover multiple ranks. | Bounded array/object reads; same arithmetic helpers only if their semantics fit. | Invalid/top rank, missing requirement, remainder <=0, large original gain; exactly the source's replacement behavior. |
 | Todo | `prophecy-any-distance` — `LE.Factions.CircleOfFortune.IsPlayerInRangeOf` | Return true when active; otherwise call original. This is combat prophecy distance, not removal of a zone requirement (the C# ID was `prophecy-any-zone`). Position is an aggregate passed indirectly and must be validated. | Boolean-return lifecycle once the indirect value argument is checked. | Out-of-range completion succeeds, original skipped only on, position forwarded correctly off. |
 | Todo | `prophecy-uses` — `LE.Factions.ProphecySlot.TryTriggerReward` | Save completed charges; call original with the actual out parameter; after a successful trigger restore only charges that decreased. Keep original return and `chargesConsumed` output. | Small snapshot mechanics if they match another feature. Success-dependent restoration remains specific. | Failed trigger, increased charges, multiple consumed charges, exact out value; explicitly decide the original-throw case. |
 | Todo | `prophecy-max-lp` — `ProphecySlotReward.SpawnRewardForPlayer` | Temporarily raise generic reward minimum LP to at least four, call original, restore the previous asset value even on native unwind. Share handler with reward multiplier; prove the eight-byte Nullable lens ABI. | Shared target; scoped restoration mechanism established with this family. | Shared asset remains pristine after normal/throwing calls; existing LP above four preserved; absent generic item. |
@@ -147,8 +143,8 @@ The Forge item editor follows its own planner/private-preview path; its remainin
 These groups identify the next useful extraction points; they do not
 require building a universal handler/ABI/object framework first.
 
-- **Settings and numeric transforms:** Experience multiplier/Level up on every gain share a target and precedence; faction
-  gains and fixed area reuse only matching arithmetic/owner lookup. Preserve independent original-call placement.
+- **Settings and numeric transforms:** fixed area and larger drop/monster settings reuse only matching arithmetic,
+  publication and owner lookup from implemented gains. Preserve each feature's original-call placement.
 - **Further argument forwarding:** new item rarity needs its full long signature; map/prophecy distance need validated
   indirect aggregates. The current scalar-result family is implemented; it does not imply support for hidden results.
 - **Scoped context:** projectiles then duplicate establish nesting/unwind behavior; movement consumes a mark,

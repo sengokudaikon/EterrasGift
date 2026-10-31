@@ -4,12 +4,14 @@ use crate::game::*;
 use crate::hooks::leaf::LeafEffect;
 use crate::hooks::postfix::PostfixEffect;
 pub(crate) use eg_trainer_wire::hooks::GameplayHook;
+mod shared;
+pub(crate) use shared::{ControlSetting, OFF, SharedSettings};
 
 #[derive(Clone, Copy)]
 pub(crate) enum Behavior {
     Leaf,
     Postfix,
-    Damage,
+    SharedLeaf(&'static SharedSettings),
     Scalar(&'static StatFeature),
     Patch,
 }
@@ -87,6 +89,9 @@ pub(crate) const FEATURES: &[&HookFeature] = &[
     &super::results::max_bonus_stability::FEATURE,
     &super::results::ability_speed::FEATURE,
     &super::results::one_echo_type::FEATURE,
+    &super::gains::experience_multiplier::FEATURE,
+    &super::gains::faction_gains::FEATURE,
+    &super::gains::rank_up_per_gain::FEATURE,
 ];
 
 /// Each control's group, checked when the crate builds: every control belongs to exactly one feature.

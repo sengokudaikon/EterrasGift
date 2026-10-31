@@ -70,6 +70,11 @@ fn each_hooks_values_are_what_the_helper_takes() {
             (ValueKind::Real { min, max, infinity, .. }, [value]) => {
                 assert_eq!((value.minimum, value.maximum, value.choices.len()), (min, infinity.unwrap_or(max), 0), "{id}");
             }
+            (ValueKind::RealPair { min, max, .. }, [first, second]) => {
+                for value in [first, second] {
+                    assert_eq!((value.minimum, value.maximum, value.choices.len()), (min, max, 0), "{id}");
+                }
+            }
             (ValueKind::Choice(sent), [value]) => assert_eq!(value.choices.len(), sent.len(), "{id}"),
             (kind, values) => panic!("{id}: {kind:?} with {} values", values.len()),
         }

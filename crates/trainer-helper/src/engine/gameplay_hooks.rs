@@ -503,6 +503,101 @@ mod tests {
     }
 
     #[test]
+    fn experience_controls_share_lifecycle_readback_manager_loss_and_terminal_clear() {
+        use crate::game::{gains::experience_multiplier::Layout, registry::ResolvedMethod};
+        use eg_trainer_wire::hooks::GameplayHook::{ExperienceMultiplier, LevelUpPerGain};
+        use std::{
+            mem::offset_of,
+            sync::atomic::{AtomicI64, AtomicU8, AtomicUsize},
+        };
+        #[repr(C)]
+        struct Tracker {
+            actor: usize,
+            current: i64,
+            next: i64,
+            gains: [AtomicI64; 3],
+            calls: AtomicUsize,
+        }
+        extern "C-unwind" fn original(tracker: &Tracker, character: i64, skill: i64, favor: i64, method: usize) {
+            assert_eq!(method, 0x12345678);
+            for (slot, value) in tracker.gains.iter().zip([character, skill, favor]) {
+                slot.store(value, SeqCst);
+            }
+            tracker.calls.fetch_add(1, SeqCst);
+        }
+        #[unsafe(naked)]
+        unsafe extern "C-unwind" fn target(_: &Tracker, _: i64, _: i64, _: i64, _: usize) {
+            core::arch::naked_asm!("nop", "nop", "nop", "nop", "nop", "jmp {}", sym original);
+        }
+        let online = AtomicU8::new(0);
+        let player = AtomicUsize::new(42);
+        let tracker = Tracker {
+            actor: 42,
+            current: 90,
+            next: 100,
+            gains: [const { AtomicI64::new(0) }; 3],
+            calls: AtomicUsize::new(0),
+        };
+        let layout = Layout {
+            online: NonNull::from(&online).cast(),
+            player: NonNull::from(&player).cast(),
+            actor: offset_of!(Tracker, actor) as u32,
+            current: offset_of!(Tracker, current) as u32,
+            next: offset_of!(Tracker, next) as u32,
+        };
+        // SAFETY: distinct authored executable and matching layout/ABI, retained until every entry is restored.
+        let group = unsafe {
+            let address = NonNull::new(target as *mut u8).unwrap();
+            let method = ResolvedMethod {
+                name: "fixture experience".into(),
+                address,
+                bytes: address.cast::<[u8; 16]>().read_unaligned(),
+            };
+            Group::prepare(FeatureBinding::fixture(ExperienceMultiplier), &[method.leaf(layout.effect(), None, None)]).unwrap()
+        };
+        let mut owner = Hooks {
+            slots: [const { None }; FEATURES.len()],
+            manager: 1,
+            closing: false,
+        };
+        let slot = slot_of(ExperienceMultiplier);
+        owner.slots[slot] = Some(group);
+        let pair = ExperienceMultiplier.value_kind().encode(&[2.0, 3.0]).unwrap();
+        let call = || {
+            let before = tracker.calls.load(SeqCst);
+            // SAFETY: full exact five-position ABI; the owner retains all gateways and fixture storage.
+            unsafe { std::hint::black_box(target)(&tracker, 1, 1, 7, 0x12345678) };
+            assert_eq!(tracker.calls.load(SeqCst), before + 1);
+            tracker.gains.each_ref().map(|value| value.load(SeqCst))
+        };
+        let group = owner.slots[slot].as_ref().unwrap();
+        change_group(group, ExperienceMultiplier, true, pair).unwrap();
+        assert_eq!(call(), [2, 3, 7]);
+        assert_eq!(observation(Some(group), ExperienceMultiplier).value, pair);
+        change_group(group, LevelUpPerGain, true, 1).unwrap();
+        assert_eq!(call(), [10, 3, 7]);
+        change_group(group, ExperienceMultiplier, false, pair).unwrap();
+        assert_eq!(call(), [10, 1, 7]);
+        assert_eq!(observation(Some(group), ExperienceMultiplier).patch, PatchState::Shared);
+        assert!(observation(Some(group), ExperienceMultiplier).confirmed(false));
+        change_group(group, LevelUpPerGain, false, 1).unwrap();
+        assert_eq!(group.hooks[0].state(), HookState::Disabled);
+        assert_eq!(call(), [1, 1, 7]);
+        change_group(group, ExperienceMultiplier, true, pair).unwrap();
+        change_group(group, LevelUpPerGain, true, 1).unwrap();
+        owner.observe_manager(2).unwrap();
+        assert_eq!(call(), [1, 1, 7]);
+        let group = owner.slots[slot].as_ref().unwrap();
+        change_group(group, LevelUpPerGain, true, 1).unwrap();
+        assert!(observation(Some(group), ExperienceMultiplier).confirmed(false), "manager loss cannot revive a sibling");
+        assert_eq!(call(), [10, 1, 7]);
+        owner.closing = true;
+        owner.clear().unwrap();
+        assert!(owner.slots.iter().all(Option::is_none));
+        assert_eq!(call(), [1, 1, 7]);
+    }
+
+    #[test]
     fn interior_ranges_share_on_off_readback_manager_loss_and_clear_with_detours() {
         use crate::game::registry::{CodeChange, ResolvedMethod, TargetEffect};
         use crate::hooks::leaf::LeafEffect;

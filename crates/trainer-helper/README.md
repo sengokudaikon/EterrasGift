@@ -73,12 +73,19 @@ runs. Only owned authored Unity validation is claimed. Later game recalculation 
 
 Gameplay hooks: each module under `game/features` owns its targets, ABI contracts, effect and receiver rules, and
 documents its behaviour in its `//!` docs. `game/features/registry` lists those features (`FEATURES`), each with the
-controls it serves; a feature's place is its patch group (several controls can share one, as the two damage controls
-do). The wire carries feature
+controls it serves; a feature's place is its patch group (several controls can share one, as damage and experience
+do). Shared leaf settings map each control to its own atomic word, including independent readback and last-owner
+removal; the coordinator has no feature-specific sibling handling. The wire carries feature
 IDs, settings and observations, never patch ownership. `engine/gameplay_hooks` coordinates admission, entry
 transactions and cleanup ordering: Clear closes all effects, restores receiver state and entry bytes, then releases
 receiver-bound groups, and every failure retains the affected owners and pins. Generated gameplay code stays outside
 the DLL; the existing dispatcher drain controls helper unload.
+
+`game/features/gains` holds before-original progression hooks: character/skill experience and level-up share one
+target, while favor and rank gains retain their own targets. The XP pair is two finite f32 values in one aligned
+64-bit publication, loaded once per call; arithmetic uses f64 with explicit integer caps. These leaves preserve all
+other arguments and tail-call the original once, including on closed/online paths. Original exceptions pass straight
+through, with no retry or helper return frame. The game owns level/rank changes, favor-derived reputation and saves.
 
 The local pipe is `eterras-gift-<PID>`, one bounded request per connection: a 12-byte header and a sequential operation body. Bootstrap binds the controller PID/birth before any request; the kernel-reported
 client PID and retained process handle/start time verify each owner request. Fixture servers
