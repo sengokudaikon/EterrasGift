@@ -13,7 +13,7 @@ pub(crate) struct PatchSpec {
     state_machine: Option<&'static CStr>,
 }
 impl PatchSpec {
-    const fn new(name: &'static str, method: MethodSpec, search: usize, pattern: &'static [i16], at: usize, replacement: &'static [u8]) -> Self {
+    pub(super) const fn new(name: &'static str, method: MethodSpec, search: usize, pattern: &'static [i16], at: usize, replacement: &'static [u8]) -> Self {
         Self {
             name,
             method,

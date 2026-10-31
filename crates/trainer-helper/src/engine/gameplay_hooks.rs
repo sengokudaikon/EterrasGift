@@ -145,7 +145,7 @@ fn change_group(group: &Group, hook: GameplayHook, on: bool, value: u64) -> Resu
     group.effect.close();
     group.effect.restore().map_err(|e| server::failure(ResponseCode::Failed, e))?;
     let changes: Vec<_> = group.hooks.iter().map(|hook| (hook, target_on)).collect();
-    // SAFETY: serialized owner retained even on partial failure; entries form one transaction.
+    // SAFETY: serialized owner retained even on partial failure; mixed entries use checked compensation while closed.
     unsafe { entry::commit(&changes) }.map_err(|e| server::failure(ResponseCode::Failed, e))?;
     // SAFETY: called only by the admitted main-thread change/observation path (or authored tests), with all storage
     // retained and the entry transaction complete. Control-thread clear never publishes settings.
@@ -251,6 +251,9 @@ fn group_patch(states: impl Iterator<Item = HookState>) -> PatchState {
         PatchState::Unknown
     }
 }
+
+#[cfg(test)]
+mod mixed;
 
 #[cfg(test)]
 mod tests {

@@ -105,6 +105,10 @@ impl RetainedHook {
     pub fn trampoline(&self) -> *const () {
         self.raw.trampoline()
     }
+    pub(crate) fn range(&self) -> std::ops::Range<usize> {
+        let start = self.target.as_ptr() as usize;
+        start..start + 5
+    }
     fn entry(&self) -> [u8; 5] {
         // SAFETY: prepare's caller retains the target and excludes competing entry writers.
         unsafe { std::slice::from_raw_parts(self.target.as_ptr(), 5).try_into().unwrap() }

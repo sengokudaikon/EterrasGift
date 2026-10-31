@@ -83,6 +83,13 @@ transactions and cleanup ordering: Clear closes all effects, restores receiver s
 receiver-bound groups, and every failure retains the affected owners and pins. Generated gameplay code stays outside
 the DLL; the existing dispatcher drain controls helper unload.
 
+Mixed leaf/patch features use the same group and independent byte readback. Their gateways stay closed while the
+detour transaction runs, then the interior-patch transaction; a later failure restores the previous detour states.
+These are compensating transactions, not one simultaneous write: interior patches can briefly take effect before
+the final settings publication. Cleanup attempts both kinds and keeps every owner if any restore fails. Waypoints,
+experimental uniques and Eternity Cache anywhere each resolve their complete target set before activation; their
+specific exclusions and checked code recipes stay in their feature modules.
+
 `game/features/gains` holds before-original progression hooks: character/skill experience and level-up share one
 target, while favor and rank gains retain their own targets. The XP pair is two finite f32 values in one aligned
 64-bit publication, loaded once per call; arithmetic uses f64 with explicit integer caps. These leaves preserve all

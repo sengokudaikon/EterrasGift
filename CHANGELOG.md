@@ -5,6 +5,9 @@ code and its tests, and what is still to build in [research/trainer-features.md]
 
 ## 2026-10-31
 
+- Trainer: Travel to locked waypoints, preserving the original excluded-location rule and restoring both travel checks when off.
+- Trainer: Always an experimental unique from eligible Rune Prisons, with both chance checks bypassed and item-level requirements preserved.
+- Trainer: Eternity Cache anywhere and repeatedly for the local player, using the game's highest unique-level cap.
 - Forge: the affix picker filters by slot, level, stat tags and source as well, keeps unique modifiers out until asked or searched for by name, and its rows show pills with the rest in a tip.
 - Forge: a unique's modifiers as affixes: with "I know what I'm doing" on, the picker lists them under Unique modifier (search by the unique's name), with permanent IDs, and the helper adds those in use to the game's list.
 - Trainer: Movement speed multiplier, scoped to the local player's movement update without changing unrelated stat queries.

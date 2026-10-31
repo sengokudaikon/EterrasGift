@@ -45,7 +45,7 @@ impl FeatureBinding {
     }
     /// # Safety
     /// Targets have validated method ABIs and storage layouts, and process-lifetime code/static addresses. A scalar
-    /// binding pins its receiver until closing/draining/restoration; every target in a group uses the same family.
+    /// binding pins its receiver until closing/draining/restoration. Leaf groups may also own interior code patches.
     pub(super) unsafe fn prepare(self, targets: &[GameplayHookTarget]) -> Result<Effect, Response> {
         if targets.is_empty() {
             return Err(server::failure(ResponseCode::Refused, "Hook group has no targets"));
@@ -63,7 +63,7 @@ impl FeatureBinding {
                             linked_offset,
                         },
                     ) => {
-                        let shared = gates.first().map(Gate::leaf);
+                        let shared = gates.iter().find(|gate| matches!(gate, Gate::Leaf(_))).map(Gate::leaf);
                         LeafGate::prepare_shared(effect.clone(), *receiver_class, *linked_offset, shared).map(Gate::Leaf)
                     }
                     (Behavior::Scalar(_), TargetEffect::Scalar { stack_argument }) => {
@@ -72,7 +72,7 @@ impl FeatureBinding {
                         ScalarGate::prepare(binding.receiver, binding.offset, binding.online, binding.baseline, *stack_argument, shared).map(Gate::Scalar)
                     }
                     (Behavior::Postfix, TargetEffect::Postfix(effect)) => PostfixGate::prepare(effect, gates.first().map(Gate::postfix)).map(Gate::Postfix),
-                    (Behavior::Patch, TargetEffect::Patch(_)) => Ok(Gate::Patch(AtomicBool::new(false))),
+                    (Behavior::Leaf | Behavior::Patch, TargetEffect::Patch(_)) => Ok(Gate::Patch(AtomicBool::new(false))),
                     _ => return Err(server::failure(ResponseCode::Refused, "Hook target and behavior disagree")),
                 }
             };
@@ -219,19 +219,24 @@ impl Effect {
             }
             Behavior::Leaf | Behavior::SharedLeaf(_) => {
                 for gate in &self.gates {
-                    let gate = gate.leaf();
-                    match self.behavior {
-                        Behavior::SharedLeaf(settings) => settings.set(gate, hook, on, value),
-                        _ => gate.set_value(value),
+                    match gate {
+                        Gate::Leaf(gate) => {
+                            match self.behavior {
+                                Behavior::SharedLeaf(settings) => settings.set(gate, hook, on, value),
+                                _ => gate.set_value(value),
+                            }
+                            gate.set_enabled(target_on);
+                        }
+                        Gate::Patch(enabled) => enabled.store(target_on, SeqCst),
+                        _ => unreachable!("leaf or interior patch"),
                     }
-                    gate.set_enabled(target_on);
                 }
             }
         }
         Ok(())
     }
     pub(super) fn observation(&self, hook: GameplayHook, mut patch: PatchState) -> HookObservation {
-        let first = &self.gates[0];
+        let first = self.gates.iter().find(|gate| !matches!(gate, Gate::Patch(_))).unwrap_or(&self.gates[0]);
         let (enabled, value) = match self.behavior {
             Behavior::SharedLeaf(settings) => settings.setting(first.leaf(), hook),
             _ => (self.gates.iter().all(Gate::enabled), first.value()),

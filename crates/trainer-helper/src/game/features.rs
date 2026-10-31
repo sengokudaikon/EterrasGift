@@ -2,8 +2,11 @@
 //! gateways and the shared lifecycle. Each hook feature owns its targets, explicit method contracts and behavior.
 
 mod any_offhand;
+pub(crate) mod any_waypoint;
 pub mod damage;
 mod descriptions;
+pub(crate) mod eternity_cache_anywhere;
+pub(crate) mod experimental_uniques;
 mod fixed_attack_rate;
 mod fixed_leech_rate;
 mod forge;

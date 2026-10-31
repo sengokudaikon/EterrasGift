@@ -354,6 +354,17 @@ fn test_write(_: usize) -> Result<(), PatchError> {
 #[cfg(test)]
 thread_local! {static FAIL_WRITE:std::cell::Cell<Option<usize>>=const{std::cell::Cell::new(None)};}
 #[cfg(test)]
+pub(crate) fn with_write_failure<T>(index: usize, operation: impl FnOnce() -> T) -> T {
+    struct Reset(Option<usize>);
+    impl Drop for Reset {
+        fn drop(&mut self) {
+            FAIL_WRITE.set(self.0);
+        }
+    }
+    let _reset = Reset(FAIL_WRITE.replace(Some(index)));
+    operation()
+}
+#[cfg(test)]
 fn test_write(index: usize) -> Result<(), PatchError> {
     if FAIL_WRITE.get() == Some(index) { Err(PatchError::OwnershipLost) } else { Ok(()) }
 }

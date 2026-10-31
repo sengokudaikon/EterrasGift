@@ -20,7 +20,7 @@ pub(crate) struct Receiver {
     pub component: Option<u32>,
 }
 impl Receiver {
-    fn effect(self, emit: impl FnOnce(&mut emit::Code)) -> LeafEffect {
+    pub(super) fn effect(self, emit: impl FnOnce(&mut emit::Code)) -> LeafEffect {
         let mut c = emit::Code::default();
         c.emit(&[0x4c, 0x8b, 0x58, FRAME.switch, 0x49, 0x83, 0x3b, 0]);
         c.exit(0x84);
