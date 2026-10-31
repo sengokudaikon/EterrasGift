@@ -95,6 +95,7 @@ pub(crate) const FEATURES: &[&HookFeature] = &[
     &super::player_only::several_primordials::FEATURE,
     &super::player_only::fixed_area::FEATURE,
     &super::player_only::refill_mana::FEATURE,
+    &super::results::movement_speed::FEATURE,
 ];
 
 /// Each control's group, checked when the crate builds: every control belongs to exactly one feature.

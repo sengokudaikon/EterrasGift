@@ -139,6 +139,7 @@ fn persistent_stats_use_independent_hook_values_and_readback() {
     for (hook, on, value) in [
         (GameplayHook::FixedAttackRate, true, 1.25f64),
         (GameplayHook::FixedLeechRate, true, 2.5),
+        (GameplayHook::MovementSpeed, true, 2.5),
         (GameplayHook::FixedAttackRate, true, 3.0),
         (GameplayHook::FixedAttackRate, false, 3.0),
     ] {

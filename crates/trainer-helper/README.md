@@ -92,6 +92,11 @@ Several primordials returns zero from the local counter used by equip and stat c
 the configured value for the player's stats; Refill mana converts the player's current maximum before each normal
 tick. Other receivers and closed/online paths forward unchanged. No helper callback or cached component is retained.
 
+Movement speed selects updateSpeed's checked, single movement-stat call inside `Stats.GetStatValue`. The retained
+postfix gateway preserves all eleven native positions, the original property register and caller return address;
+no thread-local mark or helper frame spans the original. Unsupported call recipes refuse activation. Nested calls
+are independent, and normal recalculation (such as re-equipping boots) applies an on/off or value change.
+
 The local pipe is `eterras-gift-<PID>`, one bounded request per connection: a 12-byte header and a sequential operation body. Bootstrap binds the controller PID/birth before any request; the kernel-reported
 client PID and retained process handle/start time verify each owner request. Fixture servers
 without a bootstrap binding let the first valid Discover claim ownership. Normal per-request EOF preserves ownership. Other living processes receive Refused without

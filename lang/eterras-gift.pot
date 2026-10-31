@@ -1145,6 +1145,10 @@ msgid "Multiplies the monsters in each pack. Bosses and other lone monsters stay
 msgstr ""
 
 #: crates/trainer/src/features/registry.rs
+msgid "Multiplies your movement speed. Zero keeps the normal speed."
+msgstr ""
+
+#: crates/trainer/src/features/registry.rs
 msgid "Mysterious Rifts"
 msgstr ""
 
@@ -1530,10 +1534,6 @@ msgstr ""
 
 #: crates/trainer/src/features/registry.rs
 msgid "Woven echoes"
-msgstr ""
-
-#: crates/trainer/src/features/registry.rs
-msgid "You move faster."
 msgstr ""
 
 #: crates/trainer/src/features/registry.rs

@@ -28,7 +28,7 @@ only; feature IDs/profile settings and the original gameplay behavior remain ind
 |---|---|---|
 | Todo | Mixed activation as one complete feature | Experimental uniques, cache use, waypoints and echo cycle still need their feature-specific detours/table behavior and partial-failure policy. |
 | Todo | Coherent settings larger than a pair | Drop rates (four values), Morditas timer and monster rarity (three). The XP pair already publishes as one atomic word; do not extend it with unsynchronized payload accesses. |
-| Todo | Scoped context | Projectiles, then duplicate; movement consumes one matching read and needs its own policy. |
+| Todo | Scoped context | Projectiles, then duplicate and echo cycling. Movement uses its checked, single native call site and needs no retained mark. |
 | Todo | Temporary asset mutation/restoration | Prophecy rewards/max LP, then density and pack size/rarity; settle threading and native-unwind behavior with those consumers. |
 | Todo | Additional ABI/caller adapters | Validate indirect aggregates, long signatures, hidden result storage and champion caller identity when their features arrive. |
 
@@ -57,7 +57,6 @@ Behavior reference: [combat.h](../../EterrasGift/native/hooks/combat.h).
 | Todo | `no-cooldowns` — `ChargeManager.useCharges` | For the player, keep up to 64 charges, call original with zero amount, then raise lowered charges back if the backing array is still the same. Keep the original shared-cooldown behavior around that adjustment. | Bounded list access. Extract snapshot mechanics only after another matching consumer; policy remains local. | Shared cooldown decreases are restored; increased charges and replaced arrays are preserved; define the original-throw path explicitly. |
 | Todo | `extra-projectiles` — `ExtraProjectiles.onCreation` and `GetTotalExtraProjectiles` | Mark the locally created extras object per thread while original creation runs; restore the outer mark on return/unwind. Scale the marked object's positive returned count, rounded and capped at one million. | Multi-target ownership; small scoped TLS pattern, later shared with duplicate where appropriate. | Nested extras restore the outer object; unrelated/thread-concurrent queries unchanged; exception clears context. |
 | Todo | `buffs-never-expire` — `StatBuffs.OnUpdateTick` and `AilmentReceiver.OnUpdateTick` | Pass zero time for player buffs. For positive player ailments, keep up to 64 durations, compensate their calculated tick loss before original, then restore durations of surviving entries. Negative ailments and damage/healing must keep ticking. | Bounded collection access and two-target lifecycle. No generic 'skip tick' handler. | Positive/negative mix, local/global speed modifiers, removed entries, more than 64 ailments and original throwing. |
-| Todo | `movement-speed` — `SpeedManager.updateSpeed` and `Stats.GetStatValue` | Mark player stats during speed update. Multiply only the first matching Movespeed query, consuming the mark before calling original. Resolve enum value and forward all nine managed arguments. Preserve the original source's clear-on-exit semantics; review nested updates explicitly. | Scoped context mechanics; long mixed ABI forwarding; multi-target ownership. | Other stats/properties and subsequent reads unaffected; nested update/exception leaves no stale mark. |
 | Todo | `auto-aim` — base and Fireball `getProjectileAutoAim`, `getNewTargetPositionWithAutoTarget`, `Alignment.nearestActorInRange` | Implement player ownership and exclusions for minion, movement, traversal and transform abilities; return VeryHigh aim, pass 360-degree angle, and maximum range in the respective paths. Fireball needs its own override. The constructor method returns Vector3 through hidden storage. | Four-target ownership, enum/field discovery and proven aggregate ABI support. Keep targeting decisions explicit. | All exclusions, Fireball override, creator fallback, nonplayer target and exact Vector3 return-buffer behavior. |
 
 ### Stash
@@ -144,8 +143,8 @@ require building a universal handler/ABI/object framework first.
   publication and owner lookup from implemented gains. Preserve each feature's original-call placement.
 - **Further argument forwarding:** new item rarity needs its full long signature; map/prophecy distance need validated
   indirect aggregates. The current scalar-result family is implemented; it does not imply support for hidden results.
-- **Scoped context:** projectiles then duplicate establish nesting/unwind behavior; movement consumes a mark,
-  while echo context spans calls. Do not give all three the same cleanup policy.
+- **Scoped context:** projectiles then duplicate establish nesting/unwind behavior, while echo context spans calls.
+  Keep each feature's cleanup policy explicit; the movement hook uses caller selection instead of a mark.
 - **Temporary shared assets:** prophecy reward count/max LP, then density and pack size/rarity need explicit target
   serialization and restoration on native unwind. Cooldown/ailment/prophecy-charge throw behavior must be decided
   against the original's normal-return-only restoration rather than silently promising universal rollback.

@@ -25,7 +25,14 @@ pub const FRAME: Frame = Frame {
     slots: [std::mem::offset_of!(Data, slots) as u8, (std::mem::offset_of!(Data, slots) + 8) as u8],
 };
 
-/// Code after a normal original return: RAX is Data, RCX is the saved first argument, R10 holds the integer result
+/// The original caller's return address is at `[RSP + frame_size(positions)]` during effect execution.
+pub const fn frame_size(positions: u8) -> u8 {
+    assert!(positions >= 1 && positions <= 12);
+    let saved = 32 + positions.saturating_sub(4) * 8;
+    ((saved + 8 + 23) & !15) - 8
+}
+
+/// Code after a normal original return: RAX is Data, RCX/RDX are the original argument registers, R10 holds the integer result
 /// and XMM0 holds the float result. Preserve the relevant result on unchanged paths; R10 is copied back to RAX.
 /// Use only volatile registers, preserve RSP and nonvolatile registers, keep every branch inside this code (or to its
 /// end), and fall through to the appended epilogue. There are no helper-code addresses or callback destinations.
@@ -53,7 +60,8 @@ impl PostfixGate {
         }
         let stack = effect.positions.saturating_sub(4);
         let saved = 32 + stack * 8;
-        let frame = ((saved + 8 + 23) & !15) - 8; // enough storage, with RSP aligned before the call
+        let frame = frame_size(effect.positions);
+        let second = frame + 16; // this callee's incoming RDX home slot, outside the original's outgoing frame
         // SAFETY: private pages initialized while unpublished; executable/data/unwind pages are retained until exit.
         unsafe {
             let allocation = page::allocate("allocate postfix gateway")?;
@@ -67,6 +75,7 @@ impl PostfixGate {
             });
             // Home area, the actual stack arguments, then saved RCX. Never read absent caller arguments.
             let mut code = vec![0x48, 0x83, 0xec, frame, 0x48, 0x89, 0x4c, 0x24, saved];
+            code.extend([0x48, 0x89, 0x54, 0x24, second]); // save RDX in our caller-provided home area
             for index in 0..stack {
                 let source = u32::from(frame) + 40 + u32::from(index) * 8;
                 let destination = 32 + index * 8;
@@ -78,7 +87,7 @@ impl PostfixGate {
             code.extend((data as u64).to_le_bytes());
             code.extend([0xff, 0x50, std::mem::offset_of!(Data, original) as u8]); // call original once
             code.extend([0x49, 0x89, 0xc2]); // integer result -> r10 before reloading Data into rax
-            code.extend([0x48, 0x8b, 0x4c, 0x24, saved, 0x48, 0xb8]); // restore RCX; reload Data
+            code.extend([0x48, 0x8b, 0x4c, 0x24, saved, 0x48, 0x8b, 0x54, 0x24, second, 0x48, 0xb8]); // restore RCX/RDX; reload Data
             code.extend((data as u64).to_le_bytes());
             code.extend(&effect.code);
             code.extend([0x4c, 0x89, 0xd0, 0x48, 0x83, 0xc4, frame, 0xc3]);

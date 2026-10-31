@@ -385,7 +385,7 @@ pub static DESCRIPTORS: &[FeatureDescriptor] = &[
         TrainerArea::Combat,
         Phrase::new("Movement"),
         Phrase::new("Movement speed multiplier"),
-        Phrase::new("You move faster."),
+        Phrase::new("Multiplies your movement speed. Zero keeps the normal speed."),
     )
     .with_values(FeatureKind::SwitchWithValues, &[number(Phrase::new("Multiplier"), 2.0, 0.0, 100.0, 0.5, Some("×"))])
     .needing(Phrase::new("Re-equip your boots after changing it.")),

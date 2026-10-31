@@ -503,6 +503,71 @@ mod tests {
     }
 
     #[test]
+    fn movement_speed_caller_selection_uses_shared_readback_manager_loss_and_terminal_clear() {
+        use crate::game::{
+            registry::ResolvedMethod,
+            results::movement_speed::{
+                Layout,
+                tests::{Stat, callsite, invoke, original},
+            },
+        };
+        use std::sync::atomic::{AtomicU8, AtomicUsize};
+        #[unsafe(naked)]
+        unsafe extern "C-unwind" fn target(_: usize, _: u8, _: i32, _: f32, _: f32, _: f32, _: u8, _: i32, _: bool, _: bool, _: usize) -> f32 {
+            core::arch::naked_asm!(".rept 16", "nop", ".endr", "jmp {}", sym original);
+        }
+        let online = AtomicU8::new(0);
+        let stats = AtomicUsize::new(42);
+        let player = AtomicUsize::new(&stats as *const _ as usize);
+        let layout = Layout {
+            online: NonNull::from(&online).cast(),
+            player: NonNull::from(&player).cast(),
+            stats: 0,
+            property: 9,
+            caller: callsite(NonNull::from(&online).cast(), target as *const ()),
+        };
+        // SAFETY: distinct authored executable with the exact stat ABI and a graph retained until entry restoration.
+        let group = unsafe {
+            let address = NonNull::new(target as *mut u8).unwrap();
+            let method = ResolvedMethod {
+                name: "fixture movement stat".into(),
+                address,
+                bytes: address.cast::<[u8; 16]>().read_unaligned(),
+            };
+            Group::prepare(FeatureBinding::fixture(GameplayHook::MovementSpeed), &[method.postfix(layout.effect())]).unwrap()
+        };
+        let mut owner = Hooks {
+            slots: [const { None }; FEATURES.len()],
+            manager: 1,
+            closing: false,
+        };
+        let hook = GameplayHook::MovementSpeed;
+        let slot = slot_of(hook);
+        owner.slots[slot] = Some(group);
+        // SAFETY: the authored unsafe naked target obeys exactly Stat's ABI and is retained for every fixture call.
+        let call: Stat = unsafe { std::mem::transmute(target as *const ()) };
+        assert_eq!(invoke(call, 42, 9), 6.25);
+        for (on, multiplier, expected) in [(true, 2.5f64, 15.625), (true, 0.0, 6.25), (true, 0.5, 3.125), (false, 0.5, 6.25), (true, 3.0, 18.75)] {
+            let group = owner.slots[slot].as_ref().unwrap();
+            change_group(group, hook, on, multiplier.to_bits()).unwrap();
+            let actual = observation(Some(group), hook);
+            assert!(actual.confirmed(on));
+            assert_eq!(actual.value, multiplier.to_bits());
+            assert_eq!(invoke(call, 42, 9), expected);
+            assert_eq!(invoke(call, 43, 9), 6.25);
+        }
+        owner.observe_manager(2).unwrap();
+        assert!(observation(owner.slots[slot].as_ref(), hook).confirmed(false));
+        assert_eq!(invoke(call, 42, 9), 6.25);
+        change_group(owner.slots[slot].as_ref().unwrap(), hook, true, 2.0f64.to_bits()).unwrap();
+        assert_eq!(invoke(call, 42, 9), 12.5);
+        owner.closing = true;
+        owner.clear().unwrap();
+        assert!(owner.slots.iter().all(Option::is_none));
+        assert_eq!(invoke(call, 42, 9), 6.25);
+    }
+
+    #[test]
     fn player_only_controls_keep_independent_patches_and_clear_on_manager_loss_and_unload() {
         use crate::game::{
             player_only::{self, Receiver},

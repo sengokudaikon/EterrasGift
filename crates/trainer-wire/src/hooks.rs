@@ -43,6 +43,7 @@ pub enum GameplayHook {
     SeveralPrimordials = 36,
     FixedArea = 37,
     RefillMana = 38,
+    MovementSpeed = 39,
 }
 
 /// What a hook's value is: how the desktop's number for it is sent, which values the helper takes, and the one it
@@ -213,11 +214,12 @@ pub const SPECS: [HookSpec; GameplayHook::COUNT] = {
         switch(SeveralPrimordials, "several-primordials"),
         real(FixedArea, "fixed-area", 0.0, 50.0, 0.0),
         switch(RefillMana, "refill-mana"),
+        real(MovementSpeed, "movement-speed", 0.0, 100.0, 1.0),
     ]
 };
 
 impl GameplayHook {
-    pub const COUNT: usize = 39;
+    pub const COUNT: usize = 40;
     /// Every hook by its number on the pipe, checked against [`SPECS`] when the crate builds.
     pub const ALL: [Self; Self::COUNT] = {
         let mut all = [Self::MysteriousRift; Self::COUNT];

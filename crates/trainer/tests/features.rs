@@ -116,7 +116,7 @@ fn help_joins_description_needs_and_value_hints() {
     );
     assert_eq!(
         FeatureKey::parse("movement-speed").unwrap().descriptor().help(),
-        "You move faster.\nRe-equip your boots after changing it."
+        "Multiplies your movement speed. Zero keeps the normal speed.\nRe-equip your boots after changing it."
     );
 }
 
