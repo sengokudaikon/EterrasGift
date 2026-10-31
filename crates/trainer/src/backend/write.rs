@@ -49,6 +49,9 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
         let manager = self.state.runtime_status.ok_or_else(|| invalid_edit("runtime status missing"))?.manager;
         plan.recheck(&current, manager, self.state.override_enabled).map_err(invalid_edit)?;
         let target = current.process().clone();
+        if let (Some(id), Some(data)) = (super::new_affixes::edit_affix(plan.edit_intent()), self.state.catalog.data().cloned()) {
+            self.register_added(epoch, &target, &data, vec![id]).await?;
+        }
         self.recheck_before_write(epoch, &target, plan.manager()).await?;
         self.commit(epoch, |this| {
             this.state.activity = Some(Activity::WritingForge);

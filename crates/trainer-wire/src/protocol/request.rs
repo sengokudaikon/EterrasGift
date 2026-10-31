@@ -4,6 +4,7 @@ use crate::{
     mapping::{
         AffixMappingDraft, AffixMappingQuery, ForgeDescriptionRequest, MappingAddress, MappingStart, MappingTarget, ModifierMappingQuery, UniquePreviewRequest, UniqueRollChange,
     },
+    new_affixes::{MAX_PER_REQUEST, MAX_PROPERTIES, MAX_TEXT, NewAffix, StatLine},
     write::{AffixRollChange, AffixRolls, RollArray, StatusField},
 };
 
@@ -82,6 +83,26 @@ impl Request {
                 body.u64(*expected_manager);
                 body.byte(*hook as u8);
                 op::READ_GAMEPLAY_HOOK
+            }
+            Self::RegisterAffixes { expected_manager, affixes, .. } => {
+                body.u64(*expected_manager);
+                body.byte(affixes.len() as u8);
+                for affix in affixes {
+                    body.u16(affix.id);
+                    body.blob(affix.name.as_bytes());
+                    body.blob(affix.display_name.as_bytes());
+                    body.byte(affix.properties.len() as u8);
+                    for line in &affix.properties {
+                        body.byte(line.property);
+                        body.byte(line.special_tag);
+                        body.u32(line.tags as u32);
+                        body.u32(line.extra_tag as u32);
+                        body.u32(line.modifier_type as u32);
+                        body.u32(line.minimum.to_bits());
+                        body.u32(line.maximum.to_bits());
+                    }
+                }
+                op::REGISTER_AFFIXES
             }
             Self::Status { .. } => op::STATUS,
             Self::ClearHooks { .. } => op::CLEAR_HOOKS,
@@ -273,7 +294,8 @@ impl Request {
             | op::DESCRIBE_IMPLICITS
             | op::ADD_AFFIX
             | op::REMOVE_AFFIX
-            | op::CHANGE_IDENTITY => None,
+            | op::CHANGE_IDENTITY
+            | op::REGISTER_AFFIXES => None,
             _ => return Err(ProtocolError::InvalidData),
         };
         let valid = match exact {
@@ -323,6 +345,22 @@ impl Request {
                         expected_manager,
                         hook,
                     }
+                }
+            }
+            op::REGISTER_AFFIXES => {
+                let expected_manager = body.u64()?;
+                let count = usize::from(body.byte()?);
+                if expected_manager == 0 || !(1..=MAX_PER_REQUEST).contains(&count) {
+                    return Err(ProtocolError::InvalidData);
+                }
+                let mut affixes = Vec::with_capacity(count);
+                for _ in 0..count {
+                    affixes.push(new_affix(&mut body)?);
+                }
+                Self::RegisterAffixes {
+                    dispatcher,
+                    expected_manager,
+                    affixes,
                 }
             }
             op::STATUS => Self::Status { dispatcher },
@@ -464,6 +502,42 @@ impl Request {
         body.finish()?;
         Ok(request)
     }
+}
+
+fn new_affix(body: &mut Reader<'_>) -> Result<NewAffix, ProtocolError> {
+    let id = body.u16()?;
+    let mut text = || -> Result<String, ProtocolError> {
+        let length = body.u32()? as usize;
+        if length > MAX_TEXT {
+            return Err(ProtocolError::InvalidData);
+        }
+        std::str::from_utf8(body.take(length)?).map(str::to_owned).map_err(|_| ProtocolError::InvalidData)
+    };
+    let (name, display_name) = (text()?, text()?);
+    let count = usize::from(body.byte()?);
+    if !(1..=MAX_PROPERTIES).contains(&count) {
+        return Err(ProtocolError::InvalidData);
+    }
+    let mut properties = Vec::with_capacity(count);
+    for _ in 0..count {
+        properties.push(StatLine {
+            property: body.byte()?,
+            special_tag: body.byte()?,
+            tags: body.u32()? as i32,
+            extra_tag: body.u32()? as i32,
+            modifier_type: body.u32()? as i32,
+            minimum: f32::from_bits(body.u32()?),
+            maximum: f32::from_bits(body.u32()?),
+        });
+    }
+    let affix = NewAffix {
+        id,
+        name,
+        display_name,
+        properties,
+    };
+    affix.validate()?;
+    Ok(affix)
 }
 
 /// A roll batch: its count, then each index and position.

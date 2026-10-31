@@ -7,13 +7,15 @@
 //! ability (58), player (98), tracker (123) and idol altar (130) properties their own registries.
 
 use crate::definitions::catalog::{
-    AffixDefinition, AffixTier, Availability, CatalogBuilder, CatalogEntries, CatalogIdentity, CatalogKind, CatalogPage, DefinitionName, DefinitionNameSource, EXTRACTION_VERSION,
-    GameCatalog, GameLocale, ImplicitDefinition, ItemLimits, ItemTypeDefinition, NumericProperty, RarityDefinition, SubTypeDefinition, UniqueDefinition, UniqueNumericData,
-    ValueRange,
+    AffixDefinition, AffixSource, AffixTier, Availability, CatalogBuilder, CatalogEntries, CatalogIdentity, CatalogKind, CatalogPage, DefinitionName, DefinitionNameSource,
+    EXTRACTION_VERSION, GameCatalog, GameLocale, ImplicitDefinition, ItemLimits, ItemTypeDefinition, NumericProperty, RarityDefinition, SubTypeDefinition, UniqueDefinition,
+    UniqueNumericData, ValueRange,
 };
 use crate::definitions::entries::MAX_PAGE_ENTRIES;
+use crate::definitions::unique_mods;
 use eg_game_files::definitions::{Ailment, Definitions};
 use eg_game_files::uniques::{PlayerDefinitions, Property, PropertyInfo};
+use eg_trainer_wire::new_affixes::TIERS;
 use eg_trainer_wire::protocol::ProtocolError;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -26,6 +28,8 @@ const AFFIX_NAME_REASON: &str = "The game's text has no name for this affix";
 const TEXT_LOCALE: &str = "en";
 const RARITY_REASON: &str = "The localized rarity-name formatter has not been validated";
 const IMPLICIT_TEXT_REASON: &str = "Catalog definitions do not include implicit descriptions";
+/// `SpecialAffixType.FakeUniqueMod`, the picker's "Unique modifier".
+const FAKE_UNIQUE_MOD: i32 = 7;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct FileCatalog {
@@ -46,6 +50,8 @@ pub struct FileCatalog {
     sources: Vec<(PathBuf, Option<Fingerprint>)>,
     /// The game's names in each language it ships, by its locale code; a session's catalog takes its language's.
     names: BTreeMap<String, Arc<LocalNames>>,
+    /// Why this reading holds no unique modifiers as affixes: their ledger could not be read or saved.
+    pub ledger_problem: Option<String>,
 }
 
 pub type Fingerprint = (u64, SystemTime);
@@ -162,6 +168,11 @@ fn hash(path: &Path) -> Result<String, String> {
 
 /// Reads and builds the catalog for the game in `folder` (the one holding `Last Epoch.exe`).
 pub fn read(folder: &Path) -> Result<FileCatalog, String> {
+    read_with_ledger(folder, None)
+}
+
+/// As [`read`], with the uniques' modifiers as affixes under the IDs of the ledger at `ledger`.
+pub fn read_with_ledger(folder: &Path, ledger: Option<&Path>) -> Result<FileCatalog, String> {
     let install = eg_game_files::Install::at(folder).map_err(|e| e.to_string())?;
     let binary = install.game_assembly();
     let metadata = install.metadata();
@@ -178,6 +189,9 @@ pub fn read(folder: &Path) -> Result<FileCatalog, String> {
     let player = install.player_definitions().map_err(|e| e.to_string())?;
     let build = install.build_hash().unwrap_or_default();
     let mut catalog = build_catalog(binary_hash, metadata_hash, build, &definitions, &player)?;
+    if let Some(ledger) = ledger {
+        catalog.ledger_problem = catalog.add_unique_mods(ledger, &definitions, &player).err();
+    }
     // Names only: a catalog without the game's text still serves, with the stored names.
     if let Ok(strings) = install.strings(TEXT_LOCALE) {
         catalog.name_affixes(&strings);
@@ -237,6 +251,7 @@ pub fn build_catalog(binary_hash: String, metadata_hash: String, build: String, 
         rarities,
         sources: Vec::new(),
         names: BTreeMap::new(),
+        ledger_problem: None,
     };
     // Validate now, with a placeholder locale, so a catalog that is built is one that a session can use.
     catalog
@@ -249,6 +264,27 @@ pub fn build_catalog(binary_hash: String, metadata_hash: String, build: String, 
 }
 
 impl FileCatalog {
+    /// Adds each unique's modifiers as affixes of their own (`unique_mods`). The ledger is saved first: no ID is offered
+    /// before it is permanent, and on any failure nothing is added.
+    fn add_unique_mods(&mut self, ledger: &Path, definitions: &Definitions, player: &PlayerDefinitions) -> Result<(), String> {
+        let mut ledger = unique_mods::Ledger::open(ledger)?;
+        let presentation = Presentation { definitions, player };
+        let shipped = definitions.affixes.iter().map(|a| a.id).collect();
+        let item_types: Vec<i32> = definitions.item_types.iter().map(|t| i32::from(t.id)).collect();
+        let mut added = Vec::new();
+        for unique in &player.uniques {
+            let groups = unique_mods::groups(unique);
+            for (group, key) in groups.iter().zip(unique_mods::keys(unique.id, &groups)) {
+                if let Some(affix) = unique_mod_affix(unique, group, &key, &mut ledger, &shipped, &item_types, &presentation)? {
+                    added.push(affix);
+                }
+            }
+        }
+        ledger.save()?;
+        self.affixes.extend(added);
+        Ok(())
+    }
+
     /// The game's own affix names (`Item_Affix_<id>_DisplayName`): the stored ones are internal or stale where the game
     /// generates its name ("Blood Rage Minion Pack" is "You have Pack Rage").
     pub fn name_affixes(&mut self, strings: &eg_game_files::Strings) {
@@ -294,6 +330,7 @@ impl FileCatalog {
             rarities: saved.rarities.into_values().collect(),
             sources,
             names: BTreeMap::new(),
+            ledger_problem: None,
         }
     }
 
@@ -486,7 +523,7 @@ struct RawProperty {
     roll_id: i32,
 }
 
-fn ordinary(property: u8) -> bool {
+pub fn ordinary(property: u8) -> bool {
     !matches!(property, 43 | 58 | 98 | 123 | 130)
 }
 
@@ -656,7 +693,90 @@ fn affix(affix: &eg_game_files::definitions::Affix, presentation: &Presentation<
         tier_count: affix.tiers.len() as u16,
         standard_effect: affix.standard_effect,
         numeric: tiers,
+        level_requirement: affix.level_requirement,
+        source: None,
     })
+}
+
+/// The level a unique asks for: its own where it overrides its base's, else its lowest base's (the game's item list).
+fn unique_level(unique: &eg_game_files::uniques::Unique, definitions: &Definitions) -> i32 {
+    if unique.override_level_requirement {
+        return i32::from(unique.level_requirement);
+    }
+    definitions
+        .item_types
+        .iter()
+        .find(|item_type| item_type.id == unique.item_type)
+        .into_iter()
+        .flat_map(|item_type| &item_type.sub_types)
+        .filter(|sub| unique.sub_types.iter().any(|id| u16::from(*id) == sub.id))
+        .map(|sub| sub.level_requirement)
+        .min()
+        .unwrap_or(0)
+}
+
+/// One group of a unique's modifiers as a catalog affix, or none if the game could not present it or it has no ID.
+fn unique_mod_affix(
+    unique: &eg_game_files::uniques::Unique,
+    group: &unique_mods::Group<'_>,
+    key: &str,
+    ledger: &mut unique_mods::Ledger,
+    shipped: &std::collections::BTreeSet<u16>,
+    item_types: &[i32],
+    presentation: &Presentation<'_>,
+) -> Result<Option<AffixDefinition>, String> {
+    let lines = unique_mods::stat_lines(group);
+    let properties = all(lines.iter().map(|line| {
+        presentation.numeric(RawProperty {
+            property: line.property,
+            tags: line.tags,
+            special_tag: line.special_tag,
+            extra_tag: line.extra_tag,
+            modifier_type: line.modifier_type,
+            set_property: false,
+            minimum: line.minimum,
+            maximum: line.maximum,
+            roll_id: -1,
+        })
+    }))
+    .map_err(|e| format!("unique {}: {e}", unique.id))?;
+    let Availability::Available(properties) = properties else {
+        return Ok(None);
+    };
+    let Some(id) = ledger.assign(key, shipped) else {
+        return Ok(None);
+    };
+    // A one-line affix without text lets the game write its name; several lines need one to show.
+    let named: Vec<String> = lines
+        .iter()
+        .map(|line| {
+            // The special registries' entries have no name here; the game writes their text once it holds the affix.
+            if ordinary(line.property) {
+                presentation.stat(line.property).name.clone()
+            } else {
+                format!("Special effect {}", line.tags)
+            }
+        })
+        .collect();
+    let display = group.line.clone().unwrap_or_else(|| if lines.len() > 1 { named.join(", ") } else { String::new() });
+    let shown = if display.is_empty() { named.join(", ") } else { display.clone() };
+    let source = stored_name(&unique.display_name, &unique.name).text;
+    let line: String = shown.chars().take(400).collect();
+    Ok(Some(AffixDefinition {
+        id,
+        raw_name: unique_mods::internal_name(&source, &shown),
+        raw_display_name: display.chars().take(400).collect(),
+        game_display_name: Availability::Available(format!("{source}: {line}")),
+        kind: 0,
+        special: FAKE_UNIQUE_MOD,
+        class_requirement: 1,
+        item_types: Some(item_types.to_vec()),
+        tier_count: TIERS as u16,
+        standard_effect: 1.0,
+        numeric: Availability::Available(vec![AffixTier { properties }; TIERS]),
+        level_requirement: unique_level(unique, presentation.definitions),
+        source: Some(AffixSource { unique: unique.id, line }),
+    }))
 }
 
 fn unique(unique: &eg_game_files::uniques::Unique, presentation: &Presentation<'_>) -> Result<UniqueDefinition, String> {
@@ -718,6 +838,7 @@ pub(crate) fn test_catalog(sources: Vec<(PathBuf, Option<Fingerprint>)>) -> File
         rarities: vec![],
         sources,
         names: BTreeMap::new(),
+        ledger_problem: None,
     }
 }
 

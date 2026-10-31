@@ -243,3 +243,22 @@ Native publication rechecks the full live graph and locale. The latest worker pr
 to both ExpectedObservation and RollEdit; cleanup/generation/item changes discard it. A replaced
 UI draft never displays an earlier draft's text, and dropping its receipt never cancels accepted
 native work or authorizes replay.
+
+## Added affix definitions
+
+`AffixList` keeps no ID index: `GetAffix` scans `singleAffixes`, then `multiAffixes`, and returns null on a miss. Loom
+(`../EterrasGift/mods/loom/src/Game/HeraldVariants.cs`) has appended `SingleAffix` entries this way and cleared `allAffixes`,
+which rebuilds lazily. Unlike Loom, the helper arrives after a character's items have loaded, which has these consequences,
+read from the 2026-10-21 build's disassembly and not yet seen live:
+
+- `ItemData.loadAffixFromSerialisation` constructs every saved affix with no existence check. On a miss the `ItemAffix`
+  constructor falls back to affix 25 (Health) for what it derives (`GetAffix(id) ?? GetAffix(0x19)`), and keeps the stored ID;
+  only its later replacement path writes 25 into the ID.
+- `ItemEquipManager.UpdateStats` and `ItemContainersManager.StatsFromEquipment` skip a null definition, so an affix the list
+  lacks is inert. Of `GetAffix`'s 105 callers, 5 were sampled.
+- `affixExistsForID`'s only caller guards a legacy shard value (0xFF), not regular affixes.
+- `IsUniqueEquipped` has one caller, a set tooltip; `UpdateStats` applies unique mods from `UniqueList.getMods`, and also calls
+  `CharacterMutator.UniqueSetOrLegendaryEquipped`, which was not read.
+
+Added entries are removed on the control thread before the dispatcher is restored, so no entry outlives the helper while an
+online character could load. Each array is swapped whole, so a main-thread reader keeps a valid one.

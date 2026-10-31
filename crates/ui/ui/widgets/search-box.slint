@@ -17,6 +17,13 @@ export component SearchBox inherits Rectangle {
         input.focus();
     }
 
+    // Empties the box. The input's text is its own once typed in, so a caller's `text` alone can't.
+    public function clear() {
+        input.text = "";
+        root.edited("");
+        input.focus();
+    }
+
     accessible-role: text-input;
     accessible-label: root.label;
     accessible-value: root.text;

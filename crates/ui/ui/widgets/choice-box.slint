@@ -14,6 +14,8 @@ export component ChoiceBox inherits Rectangle {
     in property <bool> enabled: true;
     // Shown while `index` holds no choice (a value the list doesn't name); empty by default.
     in property <string> fallback-text;
+    // Off its default, as a filter in force is: the selected ground in its brass frame.
+    in property <bool> active;
     callback chosen(int);
 
     // The width its choice needs, and at least a field's (a combo box sizes to what it shows): Fluent's 12px padding,
@@ -32,8 +34,8 @@ export component ChoiceBox inherits Rectangle {
     border-radius: Tokens.control-radius;
     border-width: 1px;
     // Fluent's combo box on the retinted palette, framed as the text boxes are; its ground doesn't darken on focus.
-    border-color: FieldFrame.border(root.enabled, focus.has-focus, touch.has-hover);
-    background: !root.enabled ? Tokens.strong-line-brush : touch.has-hover ? Tokens.raised-brush : Tokens.hover-brush;
+    border-color: root.active && root.enabled ? Tokens.accent-brush : FieldFrame.border(root.enabled, focus.has-focus, touch.has-hover);
+    background: !root.enabled ? Tokens.strong-line-brush : root.active ? Tokens.selected-brush : touch.has-hover ? Tokens.raised-brush : Tokens.hover-brush;
 
     accessible-role: combobox;
     accessible-label: root.label;

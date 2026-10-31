@@ -1420,6 +1420,9 @@ mod tests {
             max_tier: 8,
             writable: true,
             class_specificity: 0,
+            level: 0,
+            source: None,
+            stat_tags: 0,
         };
         let state = AffixState {
             slot: 0,

@@ -1,0 +1,220 @@
+// Several picks from a list: ChoiceBox's look, with a list of ticks that stays open while they change. One keyboard stop
+// that opens it; in the list Up and Down move, Space or Enter tick, Escape closes.
+
+import { ScrollView } from "scroll-view.slint";
+import { Tokens } from "../tokens.slint";
+import { FieldFrame } from "text-field.slint";
+import { KeyboardFocus } from "../globals.slint";
+import { FocusRing } from "focus.slint";
+
+export component MultiChoiceBox inherits Rectangle {
+    in property <[string]> choices;
+    // Whether each choice is ticked, in `choices`' order.
+    in property <[bool]> checked;
+    in property <string> label;
+    // What it holds, in words: nothing ticked, or what is.
+    in property <string> summary;
+    // Off its default, as a filter in force is: the selected ground in its brass frame.
+    in property <bool> active;
+    callback toggled(int, bool);
+
+    property <int> highlighted;
+
+    function open() {
+        root.highlighted = 0;
+        popup.show();
+    }
+
+    function toggle(index: int) {
+        root.toggled(index, !root.checked[index]);
+    }
+
+    height: Tokens.control-min-height;
+    border-radius: Tokens.control-radius;
+    border-width: 1px;
+    border-color: root.active ? Tokens.accent-brush : FieldFrame.border(true, focus.has-focus, touch.has-hover);
+    background: root.active ? Tokens.selected-brush : touch.has-hover ? Tokens.raised-brush : Tokens.hover-brush;
+
+    accessible-role: combobox;
+    accessible-label: root.label;
+    accessible-value: root.summary;
+    accessible-action-default => { root.open(); }
+
+    Text {
+        x: Tokens.space-12;
+        width: parent.width - self.x - Tokens.combo-box-glyph-column-width;
+        height: parent.height;
+        text: root.summary;
+        color: Tokens.text-brush;
+        vertical-alignment: center;
+        overflow: elide;
+    }
+
+    Image {
+        x: parent.width - Tokens.space-10 - self.width;
+        y: (parent.height - self.height) / 2;
+        width: Tokens.icon-size-tiny;
+        height: Tokens.icon-size-tiny;
+        image-fit: contain;
+        source: Tokens.icon-chevron-down;
+        colorize: Tokens.text-secondary-brush;
+    }
+
+    focus := FocusScope {
+        focus-gained(reason) => {
+            if (reason == FocusReason.tab-navigation) {
+                KeyboardFocus.visible = true;
+            }
+        }
+        key-pressed(event) => {
+            if (event.text == Key.Return || event.text == " " || (event.text == Key.F4 && !event.modifiers.alt)
+                || ((event.text == Key.DownArrow || event.text == Key.UpArrow) && event.modifiers.alt)) {
+                root.open();
+                return accept;
+            }
+            reject
+        }
+
+        touch := TouchArea {
+            pointer-event(event) => {
+                if (event.kind == PointerEventKind.down) {
+                    KeyboardFocus.visible = false;
+                }
+            }
+            clicked => {
+                focus.focus();
+                root.open();
+            }
+        }
+    }
+
+    FocusRing {
+        focused: focus.has-focus;
+    }
+
+    popup := PopupWindow {
+        x: 0;
+        y: root.height + Tokens.space-2;
+        width: Math.max(root.width, Tokens.value-flyout-width);
+        height: Math.min(root.choices.length, Tokens.multi-choice-visible-rows) * Tokens.control-min-height + Tokens.space-8;
+        close-policy: PopupClosePolicy.close-on-click-outside;
+
+        Rectangle {
+            background: Tokens.raised-brush;
+            border-width: 1px;
+            border-color: Tokens.strong-line-brush;
+            border-radius: Tokens.control-radius;
+
+            FocusScope {
+                init => {
+                    self.focus();
+                }
+                key-pressed(event) => {
+                    if (event.text == Key.Escape || (event.text == Key.F4 && !event.modifiers.alt)
+                        || ((event.text == Key.DownArrow || event.text == Key.UpArrow) && event.modifiers.alt)) {
+                        popup.close();
+                        return accept;
+                    }
+                    if (event.text == Key.UpArrow) {
+                        root.highlighted = Math.max(0, root.highlighted - 1);
+                        return accept;
+                    }
+                    if (event.text == Key.DownArrow) {
+                        root.highlighted = Math.min(root.choices.length - 1, root.highlighted + 1);
+                        return accept;
+                    }
+                    if (event.text == Key.Home) {
+                        root.highlighted = 0;
+                        return accept;
+                    }
+                    if (event.text == Key.End) {
+                        root.highlighted = root.choices.length - 1;
+                        return accept;
+                    }
+                    if (event.text == Key.Return || event.text == " ") {
+                        root.toggle(root.highlighted);
+                        return accept;
+                    }
+                    reject
+                }
+
+                ScrollView {
+                    x: Tokens.space-4;
+                    y: Tokens.space-4;
+                    width: parent.width - Tokens.space-8;
+                    height: parent.height - Tokens.space-8;
+                    content-width: self.visible-width;
+                    content-height: root.choices.length * Tokens.control-min-height;
+                    content-y: -Math.max(0px, root.highlighted * Tokens.control-min-height - self.visible-height + Tokens.control-min-height);
+
+                    VerticalLayout {
+                        for choice[i] in root.choices: Rectangle {
+                            height: Tokens.control-min-height;
+                            border-radius: Tokens.control-radius;
+                            background: root.highlighted == i ? Tokens.selected-brush : transparent;
+                            accessible-role: checkbox;
+                            accessible-label: choice;
+                            accessible-checkable: true;
+                            accessible-checked: root.checked[i];
+                            accessible-action-default => { root.toggle(i); }
+
+                            // Fluent's check box glyph at the row's scale, as `CheckBox` draws it.
+                            Rectangle {
+                                x: Tokens.space-8;
+                                y: (parent.height - self.height) / 2;
+                                width: Tokens.icon-size;
+                                height: Tokens.icon-size;
+                                border-radius: Tokens.control-radius;
+                                border-width: 1px;
+                                border-color: root.checked[i] ? Tokens.accent-brush : Tokens.text-secondary-brush;
+                                background: root.checked[i] ? Tokens.accent-brush : Tokens.ground-brush;
+
+                                if root.checked[i]: Path {
+                                    x: Tokens.space-2;
+                                    y: Tokens.space-2;
+                                    width: Tokens.space-12;
+                                    height: Tokens.space-12;
+                                    stroke: Tokens.on-accent-brush;
+                                    stroke-width: Tokens.space-2;
+                                    MoveTo {
+                                        x: 0;
+                                        y: Tokens.space-6 / 1px;
+                                    }
+
+                                    LineTo {
+                                        x: Tokens.space-4 / 1px;
+                                        y: Tokens.space-10 / 1px;
+                                    }
+
+                                    LineTo {
+                                        x: Tokens.space-12 / 1px;
+                                        y: Tokens.space-2 / 1px;
+                                    }
+                                }
+                            }
+
+                            Text {
+                                x: Tokens.space-8 + Tokens.icon-size + Tokens.space-8;
+                                width: parent.width - self.x - Tokens.space-8;
+                                text: choice;
+                                color: Tokens.text-brush;
+                                vertical-alignment: center;
+                                overflow: elide;
+                            }
+
+                            TouchArea {
+                                moved => {
+                                    root.highlighted = i;
+                                }
+                                clicked => {
+                                    root.highlighted = i;
+                                    root.toggle(i);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

@@ -5,6 +5,8 @@ code and its tests, and what is still to build in [research/trainer-features.md]
 
 ## 2026-10-31
 
+- Forge: the affix picker filters by slot, level, stat tags and source as well, keeps unique modifiers out until asked or searched for by name, and its rows show pills with the rest in a tip.
+- Forge: a unique's modifiers as affixes: with "I know what I'm doing" on, the picker lists them under Unique modifier (search by the unique's name), with permanent IDs, and the helper adds those in use to the game's list.
 - Trainer: Movement speed multiplier, scoped to the local player's movement update without changing unrelated stat queries.
 - Logs: a bug button beside Settings opens connection diagnostics, fault reports and the game log, with Refresh and Copy.
 - Trainer: connection failures explain missing or unrecognized game-log evidence and how to recover.

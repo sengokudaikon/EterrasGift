@@ -531,6 +531,11 @@ fn main() {
         trainer_backend_fixture::capture(&session);
         return;
     }
+    // The affix picker alone (`cargo capture -- --picker`), for work on it.
+    if std::env::args().any(|arg| arg == "--picker") {
+        trainer_backend_fixture::picker_captures(&session);
+        return;
+    }
     // The Item Forge alone (`cargo capture -- --forge`), for work on its views.
     if std::env::args().any(|arg| arg == "--forge") {
         trainer_backend_fixture::item_captures(&session);

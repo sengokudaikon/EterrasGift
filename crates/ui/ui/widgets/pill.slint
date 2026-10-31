@@ -1,0 +1,123 @@
+// Small framed labels. `Pill` names a fact and takes no input. `FilterChip` is a pill that does something: it removes the
+// filter it names (with a close mark) or runs a short action.
+
+import { FocusRing, TipTrigger } from "focus.slint";
+import { KeyboardFocus } from "../globals.slint";
+import { Tokens } from "../tokens.slint";
+
+// Neutral for a plain fact. Reforged and unique name game content, in the game's own colours.
+export enum PillTone { neutral, reforged, unique }
+
+// One pill: its words and tone. Long words elide; a caller says the whole fact elsewhere.
+export struct PillView { text: string, tone: PillTone }
+
+export component Pill inherits Rectangle {
+    in property <string> text;
+    in property <PillTone> tone: PillTone.neutral;
+
+    height: Tokens.pill-height;
+    // At most its words; a row out of room shrinks it to the padding and a few letters, which elide.
+    preferred-width: words.preferred-width + Tokens.pill-padding.left + Tokens.pill-padding.right + 2px;
+    min-width: Tokens.pill-min-width;
+    horizontal-stretch: 0;
+    border-radius: Tokens.control-radius;
+    border-width: 1px;
+    border-color: root.tone == PillTone.unique ? Tokens.pill-unique-border-brush
+        : Tokens.strong-line-brush;
+
+    words := Text {
+        x: Tokens.pill-padding.left;
+        width: parent.width - Tokens.pill-padding.left - Tokens.pill-padding.right;
+        height: parent.height;
+        text: root.text;
+        font-size: Tokens.font-size-caption;
+        color: root.tone == PillTone.unique ? Tokens.rarity-unique-brush
+            : root.tone == PillTone.reforged ? Tokens.reforged-affix-brush
+            : Tokens.text-secondary-brush;
+        vertical-alignment: center;
+        overflow: elide;
+    }
+}
+
+export component FilterChip inherits Rectangle {
+    in property <string> text;
+    // The name a screen reader hears, and the tip.
+    in property <string> tip;
+    // A close mark: pressing it takes the filter away.
+    in property <bool> removable;
+    // Inside a flyout's popup, which shows its tip (`Tip.in-flyout`).
+    in property <bool> in-flyout;
+    callback clicked();
+
+    height: Tokens.pill-chip-height;
+    preferred-width: words.preferred-width + Tokens.pill-padding.left + Tokens.pill-padding.right + 2px
+        + (root.removable ? Tokens.icon-size-tiny + Tokens.space-4 : 0px);
+    min-width: Tokens.pill-min-width;
+    horizontal-stretch: 0;
+    border-radius: Tokens.control-radius;
+    border-width: 1px;
+    border-color: touch.has-hover ? Tokens.accent-brush : Tokens.accent-trim-brush;
+    background: touch.pressed ? Tokens.selected-brush : touch.has-hover ? Tokens.raised-brush : transparent;
+
+    accessible-role: button;
+    accessible-label: root.tip != "" ? root.tip : root.text;
+    accessible-action-default => { root.clicked(); }
+
+    words := Text {
+        x: Tokens.pill-padding.left;
+        width: parent.width - Tokens.pill-padding.left - Tokens.pill-padding.right - (root.removable ? Tokens.icon-size-tiny + Tokens.space-4 : 0px);
+        height: parent.height;
+        text: root.text;
+        font-size: Tokens.font-size-caption;
+        color: Tokens.text-brush;
+        vertical-alignment: center;
+        overflow: elide;
+    }
+
+    if root.removable: Image {
+        x: parent.width - Tokens.pill-padding.right - self.width;
+        y: (parent.height - self.height) / 2;
+        width: Tokens.icon-size-tiny;
+        height: Tokens.icon-size-tiny;
+        image-fit: contain;
+        source: Tokens.icon-close;
+        colorize: touch.has-hover ? Tokens.text-brush : Tokens.text-secondary-brush;
+    }
+
+    focus := FocusScope {
+        focus-gained(reason) => {
+            if (reason == FocusReason.tab-navigation) {
+                KeyboardFocus.visible = true;
+            }
+        }
+        key-pressed(event) => {
+            if (event.text == Key.Return || event.text == " " || (root.removable && event.text == Key.Delete)) {
+                root.clicked();
+                return accept;
+            }
+            reject
+        }
+
+        touch := TouchArea {
+            pointer-event(event) => {
+                if (event.kind == PointerEventKind.down) {
+                    KeyboardFocus.visible = false;
+                }
+            }
+            clicked => {
+                root.clicked();
+            }
+        }
+    }
+
+    TipTrigger {
+        text: root.tip;
+        hovered: touch.has-hover;
+        focused: focus.has-focus;
+        in-flyout: root.in-flyout;
+    }
+
+    FocusRing {
+        focused: focus.has-focus;
+    }
+}

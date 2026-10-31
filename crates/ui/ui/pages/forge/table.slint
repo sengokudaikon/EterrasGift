@@ -22,7 +22,7 @@ global Settle {
     out property <easing> curve: cubic-bezier(0.215, 0.61, 0.355, 1);
 }
 import { CellButton, MenuRow } from "cells.slint";
-import { AffixPickerPanel, PickerMeasure, PickerMetrics } from "picker.slint";
+import { AffixPickerPanel, PickerMetrics } from "picker.slint";
 
 // The tiers as menu rows: "T5", its range in the game's format, "in game" on the tier the game holds.
 export component TierList inherits VerticalLayout {
@@ -469,13 +469,12 @@ export component AffixRowItem inherits Rectangle {
                         }
                     }
 
-                    picker-measure := PickerMeasure { }
 
                     picker-popup := PopupWindow {
                         x: Tokens.cell-outdent.left;
                         y: (parent.height + name-cell.height) / 2 + Tokens.space-4;
-                        width: Tokens.replace-flyout-width + Tokens.flyout-padding.left + Tokens.flyout-padding.right;
-                        height: PickerMetrics.height(ForgeState.picker-rows.length) + picker-measure.extra;
+                        width: PickerMetrics.width;
+                        height: PickerMetrics.height;
                         close-policy: PopupClosePolicy.close-on-click-outside;
 
                         AffixPickerPanel {

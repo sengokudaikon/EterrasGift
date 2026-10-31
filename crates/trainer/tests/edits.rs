@@ -26,6 +26,8 @@ fn definition(id: u16, kind: i32) -> AffixDefinition {
         numeric: Availability::Unavailable {
             reason: "No numeric invocation".into(),
         },
+        level_requirement: 0,
+        source: None,
     }
 }
 fn name() -> DefinitionName {

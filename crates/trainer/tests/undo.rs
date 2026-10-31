@@ -307,6 +307,8 @@ fn affix_undo_follows_the_reordered_slot_and_rechecks_override() {
                 tier_count: 8,
                 standard_effect: 1.0,
                 numeric: Availability::Unavailable { reason: "not mapped".into() },
+                level_requirement: 0,
+                source: None,
             },
         );
     }

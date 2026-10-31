@@ -85,6 +85,8 @@ fn affix() -> AffixDefinition {
         tier_count: 1,
         standard_effect: -1.25,
         numeric: Availability::Available(vec![AffixTier { properties: vec![property()] }]),
+        level_requirement: -7,
+        source: None,
     }
 }
 fn unique() -> UniqueDefinition {
@@ -143,6 +145,15 @@ fn complete_owned_shapes_roundtrip_without_interpreting_unknown_enums_or_range_o
         // An empty equipment list is not the absent one.
         CatalogEntries::Affixes(vec![AffixDefinition {
             item_types: Some(vec![]),
+            ..affix()
+        }]),
+        // A unique modifier keeps its unique and its own words.
+        CatalogEntries::Affixes(vec![AffixDefinition {
+            level_requirement: 87,
+            source: Some(AffixSource {
+                unique: 65535,
+                line: "15–30% more 内部".into(),
+            }),
             ..affix()
         }]),
         CatalogEntries::Uniques(vec![unique()]),

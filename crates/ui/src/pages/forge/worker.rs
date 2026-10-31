@@ -61,6 +61,9 @@ impl ForgeGame {
     pub(crate) fn catalog(&self) -> &Catalog {
         &self.catalog
     }
+    pub(crate) fn shared_catalog(&self) -> Arc<Catalog> {
+        self.catalog.clone()
+    }
     pub(crate) fn read(&self) -> Option<ForgeItem> {
         let writer = self.writer.borrow();
         if !writer.backend.is_running() {
@@ -650,6 +653,8 @@ fn available_text(text: &Availability<String>) -> Option<&str> {
         Availability::Unavailable { .. } => None,
     }
 }
+const UNKNOWN_UNIQUE: Phrase = Phrase::new("Unique #{id}");
+
 fn project_catalog(data: &GameCatalog) -> Catalog {
     // Presentation-only data. Native write planning always uses the canonical
     // GameCatalog in the worker, never this projection or guessed ranges/text.
@@ -735,6 +740,24 @@ fn project_catalog(data: &GameCatalog) -> Catalog {
                 max_tier: definition.tier_count.min(255) as u8,
                 writable: kind.is_some(),
                 class_specificity: definition.class_requirement,
+                level: definition.level_requirement.clamp(0, 255) as u8,
+                // From the session's catalog, so the unique reads as the rest of the session does; a definition naming
+                // a unique the catalog lacks keeps the ID it has.
+                source: definition.source.as_ref().map(|source| {
+                    let unique = data.uniques.get(&source.unique);
+                    item::AffixSource {
+                        unique: source.unique,
+                        name: unique.map_or_else(|| UNKNOWN_UNIQUE.with(&[("id", &source.unique)]), |unique| unique.name.text.clone()),
+                        item_type: unique.map_or(0, |unique| u16::from(unique.item_type)),
+                        line: source.line.clone(),
+                    }
+                }),
+                stat_tags: match &definition.numeric {
+                    Availability::Available(tiers) => tiers
+                        .first()
+                        .map_or(0, |tier| super::picker::stat_tags(tier.properties.iter().map(|line| (line.property, line.tags)))),
+                    Availability::Unavailable { .. } => 0,
+                },
             });
             // Each tier's range from the game data, as the C# app formatted it (TierRanges): a tier with a property it
             // cannot format shows none.

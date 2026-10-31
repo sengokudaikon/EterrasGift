@@ -40,6 +40,7 @@ pub mod op {
     pub const READ_GAMEPLAY_HOOK: u32 = 27;
     pub const CHANGE_MODIFIER_ROLLS: u32 = 28;
     pub const MAP_MODIFIER_ROLL: u32 = 29;
+    pub const REGISTER_AFFIXES: u32 = 30;
 }
 
 pub const MAGIC: u32 = 0x4546_4735;
@@ -111,6 +112,12 @@ pub enum Request {
     PreviewUnique(crate::mapping::UniquePreviewRequest),
     MapRoll(crate::mapping::AffixMappingQuery),
     MapModifierRoll(crate::mapping::ModifierMappingQuery),
+    /// Adds affix definitions to the game's list; one it already holds as ours stays.
+    RegisterAffixes {
+        dispatcher: DispatcherSpec,
+        expected_manager: u64,
+        affixes: Vec<crate::new_affixes::NewAffix>,
+    },
 }
 
 impl Request {
@@ -119,6 +126,7 @@ impl Request {
             Self::Discover | Self::Unload => None,
             Self::Status { dispatcher }
             | Self::SetGameplayHook { dispatcher, .. }
+            | Self::RegisterAffixes { dispatcher, .. }
             | Self::ReadGameplayHook { dispatcher, .. }
             | Self::ClearHooks { dispatcher }
             | Self::ReadForge { dispatcher }

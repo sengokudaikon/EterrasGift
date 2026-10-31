@@ -11,6 +11,7 @@ pub(crate) mod gains;
 mod mapping;
 mod materials;
 mod mysterious_rift;
+mod new_affixes;
 mod patches;
 pub(crate) mod player_only;
 pub(crate) mod registry;

@@ -5,7 +5,8 @@
 //! then typed entries in declaration order below. Texts and vectors have LE u32
 //! lengths; integers/f32 are LE, bools are single 0/1 bytes. Availability is a
 //! single byte (0 = reason text, 1 = value). Optional equipment lists use a 0/1
-//! byte then the list when present. DefinitionName is text then u32 source.
+//! byte then the list when present, an optional affix source a 0/1 byte then
+//! u16 unique and text line. DefinitionName is text then u32 source.
 //! Pages contain exactly min(16, total-cursor) entries. The caller must pin
 //! locale/total and reject duplicate identities across pages of one capture.
 //! This schema preserves unknown enum/flag values and signed/reversed ranges.
@@ -116,6 +117,18 @@ pub struct AffixDefinition {
     pub tier_count: u16,
     pub standard_effect: f32,
     pub numeric: Availability<Vec<AffixTier>>,
+    /// The item level it needs: the game's own for a shipped affix, its source unique's for a unique modifier.
+    pub level_requirement: i32,
+    /// The unique it was made from; none for an affix the game ships.
+    pub source: Option<AffixSource>,
+}
+
+/// Where a unique modifier comes from.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AffixSource {
+    pub unique: u16,
+    /// The modifier's own words, without the unique's name.
+    pub line: String,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -519,7 +532,16 @@ fn write_affix(w: &mut Writer, a: &AffixDefinition) -> Result<(), ProtocolError>
     }
     w.u16(a.tier_count)?;
     w.float(a.standard_effect)?;
-    w.available(&a.numeric, |w, v| w.list(v, MAX_AFFIX_TIERS, |w, t| w.list(&t.properties, MAX_PROPERTIES, write_property)))
+    w.available(&a.numeric, |w, v| w.list(v, MAX_AFFIX_TIERS, |w, t| w.list(&t.properties, MAX_PROPERTIES, write_property)))?;
+    w.i32(a.level_requirement)?;
+    match &a.source {
+        None => w.u8(0),
+        Some(source) => {
+            w.u8(1)?;
+            w.u16(source.unique)?;
+            w.text(&source.line)
+        }
+    }
 }
 fn read_affix(r: &mut Reader<'_>) -> Result<AffixDefinition, ProtocolError> {
     Ok(AffixDefinition {
@@ -544,6 +566,15 @@ fn read_affix(r: &mut Reader<'_>) -> Result<AffixDefinition, ProtocolError> {
                 })
             })
         })?,
+        level_requirement: r.i32()?,
+        source: match r.u8()? {
+            0 => None,
+            1 => Some(AffixSource {
+                unique: r.u16()?,
+                line: r.text()?,
+            }),
+            _ => return invalid(),
+        },
     })
 }
 fn write_unique(w: &mut Writer, u: &UniqueDefinition) -> Result<(), ProtocolError> {

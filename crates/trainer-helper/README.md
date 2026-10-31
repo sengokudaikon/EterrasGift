@@ -31,7 +31,9 @@ Status roots the manager wrapper, checks assignability and reads its metadata-va
 It also reads the independent runtime online flag. No native Unity-object pointer is dereferenced.
 Returned manager addresses are ephemeral observations, never managed-object ownership tokens.
 
-The helper supports owned Forge edits, completed locale reads and gameplay hooks. It reads no definitions catalog:
+The helper supports owned Forge edits, completed locale reads and gameplay hooks. It also adds affix definitions the
+desktop sends (a unique's modifiers, `game/features/new_affixes.rs`) and takes them out again before it leaves.
+It reads no definitions catalog:
 the app reads the definitions from the game's files (`eg-trainer`'s game data), and the catalog and item-limits
 operations (21 and 19) are retired.
 EditForge carries status, base/identity and regular affix-roll changes through the shared

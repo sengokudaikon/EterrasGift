@@ -10,6 +10,7 @@ use eg_trainer_wire::{
         self, AffixMappingDraft, AffixMappingQuery, ForgeDescriptionRequest, MappingAddress, MappingStart, MappingTarget, ModifierMappingQuery, ModifierSnapshot, RawMappingPage,
         RawValueSample, UniquePreviewRequest, UniqueRollChange,
     },
+    new_affixes::{self, NewAffix, StatLine},
     protocol::{Discovery, DispatcherSpec, ProtocolError, REQUEST_HEADER_SIZE, Request, RequestFrame, Response, ResponseCode},
     write::{AffixRollChange, AffixRolls, ForgeMutation, ForgeWrite, RollArray, StatusField},
 };
@@ -297,4 +298,84 @@ fn every_payload_is_exactly_its_own_encoding() {
         payload: b"no".to_vec(),
     };
     exact("response", &response.encode().unwrap(), &response, Response::decode);
+}
+
+fn new_affix() -> NewAffix {
+    let line = StatLine {
+        property: 98,
+        special_tag: 2,
+        tags: -471,
+        extra_tag: 7,
+        modifier_type: 1,
+        minimum: -1.5,
+        maximum: 0.25,
+    };
+    NewAffix {
+        id: *new_affixes::ID_RANGES[0].start(),
+        name: "EG Exsanguinous: Potions".into(),
+        display_name: "15-30% increased speed".into(),
+        properties: vec![line; 3],
+    }
+}
+
+#[test]
+fn registered_affixes_round_trip_with_three_or_more_lines() {
+    let request = Request::RegisterAffixes {
+        dispatcher: dispatcher(),
+        expected_manager: 9,
+        affixes: vec![
+            new_affix(),
+            NewAffix {
+                display_name: String::new(),
+                properties: new_affix().properties[..1].to_vec(),
+                ..new_affix()
+            },
+        ],
+    };
+    exact("register affixes", &request.encode(), &request, Request::decode);
+}
+
+#[test]
+fn a_registered_affix_is_refused_outside_its_contract() {
+    let encoded = |change: fn(&mut NewAffix)| {
+        let mut affix = new_affix();
+        change(&mut affix);
+        Request::RegisterAffixes {
+            dispatcher: dispatcher(),
+            expected_manager: 9,
+            affixes: vec![affix],
+        }
+        .encode()
+    };
+    type Change = fn(&mut NewAffix);
+    let cases: [(&str, Change); 7] = [
+        ("a shipped ID", |a| a.id = 25),
+        ("Loom's block", |a| a.id = 3000),
+        ("past what a save holds", |a| a.id = 4096),
+        ("no marker", |a| a.name = "Exsanguinous".into()),
+        ("several lines without a name", |a| a.display_name.clear()),
+        ("no line", |a| a.properties.clear()),
+        ("a value that is no number", |a| a.properties[0].minimum = f32::NAN),
+    ];
+    for (name, change) in cases {
+        assert!(Request::decode(&encoded(change)).is_err(), "{name}");
+    }
+    let none = Request::RegisterAffixes {
+        dispatcher: dispatcher(),
+        expected_manager: 9,
+        affixes: vec![],
+    };
+    assert!(Request::decode(&none.encode()).is_err(), "an empty request");
+    let too_many = Request::RegisterAffixes {
+        dispatcher: dispatcher(),
+        expected_manager: 9,
+        affixes: vec![new_affix(); new_affixes::MAX_PER_REQUEST + 1],
+    };
+    assert!(Request::decode(&too_many.encode()).is_err(), "more than a request holds");
+    let no_character = Request::RegisterAffixes {
+        dispatcher: dispatcher(),
+        expected_manager: 0,
+        affixes: vec![new_affix()],
+    };
+    assert!(Request::decode(&no_character.encode()).is_err(), "no character to check");
 }

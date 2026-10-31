@@ -1,108 +1,71 @@
-// The affix picker (DESIGN.md "Menus and Affix Picker"): replaces a row's affix as a draft, or adds
-// one, which is written at once. The title and caption, the search, All / Prefixes / Suffixes, the incompatible toggle
-// with its caption, the list, the status, then Cancel and the primary in equal halves.
+// The affix picker (DESIGN.md "Menus and Affix Picker"): replaces a row's affix as a draft, or adds one. The title and
+// caption, the search, the filters with the ones in force as chips, the list, then the status, "Allow incompatible affixes"
+// and Cancel and the primary in equal halves. The flyout keeps one size as it filters: the list takes what the rest
+// leaves, and its rows are one fixed height, so a list of thousands scrolls without measuring them.
+//
+// A row's name and pills are all it shows; the rest is its tip. The pointer raises the tip by resting on the row (on its
+// (?) in a narrow window, where a tip would hide the short list), and the keyboard by moving the selection to it.
 
 import { ListView } from "../../widgets/scroll-view.slint";
 import { Tokens } from "../../tokens.slint";
-import { FieldFrame } from "../../widgets/text-field.slint";
-import { FactsText } from "../../widgets/text.slint";
-import { KeyboardFocus, Tip } from "../../globals.slint";
+import { KeyboardFocus, Tip, WindowSize } from "../../globals.slint";
 import { Button, ButtonKind } from "../../widgets/button.slint";
-import { FocusRing, TipBubble } from "../../widgets/focus.slint";
+import { FocusRing, TipBubble, TipTrigger } from "../../widgets/focus.slint";
 import { FlyoutSurface } from "../../widgets/menu.slint";
 import { ChoiceBox } from "../../widgets/choice-box.slint";
+import { MultiChoiceBox } from "../../widgets/multi-choice-box.slint";
 import { ForgeState } from "state.slint";
 import { ForgeText } from "../../strings/forge.slint";
 import { CheckBox } from "../../widgets/check-box.slint";
-import { RadioButton } from "../../widgets/radio-button.slint";
+import { HelpButton } from "../../widgets/help-button.slint";
+import { FilterChip, Pill } from "../../widgets/pill.slint";
 import { SearchBox } from "../../widgets/search-box.slint";
 
 export global PickerMetrics {
-    // A list row: the name over its kind, 7px above and below.
-    out property <length> row: Tokens.catalog-entry-margin.top + Tokens.catalog-entry-margin.bottom + Tokens.font-size-body * 4 / 3
-        + Tokens.space-1 + Tokens.font-size-caption * 4 / 3 + Tokens.row-padding.top + 2px;
     out property <length> caption-line: Tokens.font-size-caption * 4 / 3;
-
-    public pure function list-height(rows: int) -> length {
-        return rows == 0 ? Tokens.font-size-body * 4 / 3 + Tokens.empty-list-margin.top + Tokens.empty-list-margin.bottom
-            : Math.min(Tokens.replace-list-max-height, rows * self.row + Math.max(0, rows - 1) * Tokens.space-2);
-    }
-
-    // The whole flyout for a list of `rows`.
-    public pure function height(rows: int) -> length {
-        return Tokens.flyout-padding.top + Tokens.flyout-padding.bottom
-            + Tokens.font-size-section * 4 / 3 + Tokens.space-2 + self.caption-line
-            + Tokens.control-min-height
-            + Tokens.control-min-height + Tokens.space-4 + Tokens.control-min-height + Tokens.space-4 + Tokens.control-min-height
-            + Tokens.space-2 + self.caption-line * 2
-            + self.list-height(rows)
-            + self.caption-line
-            + Tokens.control-min-height
-            + Tokens.space-10 * 5;
-    }
-}
-
-// The picker's wrapped caption lines, measured at the flyout's width: what they add over one line each, for the flyout's
-// height (a PopupWindow needs one, and can't be measured from outside).
-export component PickerMeasure inherits Rectangle {
-    out property <length> extra: Math.max(0px, subtitle.preferred-height - PickerMetrics.caption-line)
-        + Math.max(0px, status.preferred-height - PickerMetrics.caption-line);
-
-    width: 0;
-    height: 0;
-    visible: false;
-
-    subtitle := Text {
-        x: 0;
-        y: 0;
-        width: Tokens.replace-flyout-width;
-        text: ForgeState.picker-subtitle;
-        font-size: Tokens.font-size-caption;
-        wrap: word-wrap;
-    }
-
-    status := Text {
-        x: 0;
-        y: 0;
-        width: Tokens.replace-flyout-width;
-        text: ForgeState.picker-status;
-        font-size: Tokens.font-size-caption;
-        wrap: word-wrap;
-    }
+    // A narrow window gets the short flyout: its filters folded and its rows' tips behind a (?).
+    out property <bool> narrow: WindowSize.width < Tokens.narrow-window-width;
+    out property <length> width: (self.narrow ? Tokens.replace-flyout-width : Tokens.affix-picker-width) + Tokens.flyout-padding.left + Tokens.flyout-padding.right;
+    // A PopupWindow needs a size and is clipped to the window, so this keeps it inside.
+    out property <length> height: WindowSize.height > 0 ? Math.min(Tokens.affix-picker-height, WindowSize.height - 2 * Tokens.affix-picker-window-margin) : Tokens.affix-picker-height;
 }
 
 export component AffixPickerPanel inherits FlyoutSurface {
     // The picker closed itself (used, cancelled or dismissed with Escape).
     callback done();
 
+    // A tip left from the last time the picker was open has no row to answer to.
+    init => {
+        Tip.open = false;
+    }
+
+    function close-tip() {
+        if (Tip.in-flyout) {
+            Tip.open = false;
+        }
+    }
+
     function cancel() {
+        root.close-tip();
         ForgeState.cancel-picker();
         root.done();
     }
 
     function use-entry() {
         if (ForgeState.can-use-picker) {
+            root.close-tip();
             ForgeState.use-picker();
             root.done();
         }
     }
 
-    // Left / Right (or Up / Down) on a kind filter moves to its neighbour, as a radio group does.
-    function move-filter(delta: int) {
-        let next = Math.clamp(ForgeState.picker-filter + delta, 0, 2);
-        ForgeState.picker-filter-changed(next);
-        if (next == 0) {
-            all-kinds.focus-button();
-        } else if (next == 1) {
-            prefixes.focus-button();
-        } else {
-            suffixes.focus-button();
-        }
-    }
+    // The filter grid: folded behind Filters in a narrow window, unfolded otherwise.
+    property <bool> filters-open: !PickerMetrics.narrow;
 
     // The entry last brought into view exactly, by the entry itself.
     property <int> revealed: -1;
     property <int> selected: ForgeState.picker-selected;
+    property <int> row-count: ForgeState.picker-rows.length;
 
     // Keeps the selected entry in view as the keyboard moves it: exactly, from an entry the list has built.
     function reveal-entry(index: int, top: length, height: length) {
@@ -114,18 +77,30 @@ export component AffixPickerPanel inherits FlyoutSurface {
         }
     }
 
-    // The list builds only the entries in view, so a selection outside them is first scrolled to where the average entry
-    // puts it (as the standard ListView does); the entry, built there, then brings itself in exactly.
-    changed selected => {
-        if (root.selected >= 0 && root.selected != root.revealed && ForgeState.picker-rows.length > 0) {
-            let average = list-scroll.content-height / ForgeState.picker-rows.length;
-            let top = root.selected * average;
+    // The list builds only the entries in view, so a selection outside them is first scrolled to where its row lies; the
+    // entry, built there, then brings itself in exactly.
+    function reveal-selected() {
+        if (root.selected >= 0 && root.row-count > 0) {
+            let row = list-scroll.content-height / root.row-count;
+            let top = root.selected * row;
             if (top + list-scroll.content-y < 0) {
                 list-scroll.content-y = -top;
-            } else if (top + average + list-scroll.content-y > list-scroll.visible-height) {
-                list-scroll.content-y = list-scroll.visible-height - top - average;
+            } else if (top + row + list-scroll.content-y > list-scroll.visible-height) {
+                list-scroll.content-y = list-scroll.visible-height - top - row;
             }
         }
+    }
+
+    changed selected => {
+        if (root.selected != root.revealed) {
+            root.reveal-selected();
+        }
+    }
+    // Another list starts from its top, or from what stays selected in it.
+    changed row-count => {
+        root.close-tip();
+        list-scroll.content-y = 0;
+        root.reveal-selected();
     }
 
     keys := FocusScope {
@@ -142,8 +117,7 @@ export component AffixPickerPanel inherits FlyoutSurface {
             padding-right: Tokens.flyout-padding.right;
             padding-top: Tokens.flyout-padding.top;
             padding-bottom: Tokens.flyout-padding.bottom;
-            spacing: Tokens.space-10;
-            alignment: start;
+            spacing: Tokens.space-8;
 
             VerticalLayout {
                 spacing: Tokens.space-2;
@@ -163,129 +137,212 @@ export component AffixPickerPanel inherits FlyoutSurface {
                 }
             }
 
-            search := SearchBox {
-                text: ForgeState.picker-search;
-                placeholder: ForgeText.affix-search-placeholder;
-                label: ForgeText.affix-search;
-                init => {
-                    self.focus-input();
-                }
-                edited(text) => {
-                    ForgeState.picker-search-edited(text);
-                }
-                // Down leaves the search for the list; Enter in the search does nothing, so typing never picks.
-                down => {
-                    if (ForgeState.picker-rows.length > 0) {
-                        if (ForgeState.picker-selected < 0) {
-                            ForgeState.picker-select(0);
+            HorizontalLayout {
+                spacing: Tokens.space-8;
+
+                search := SearchBox {
+                    text: ForgeState.picker-search;
+                    placeholder: ForgeText.affix-search-placeholder;
+                    label: ForgeText.affix-search;
+                    horizontal-stretch: 1;
+                    init => {
+                        self.focus-input();
+                    }
+                    edited(text) => {
+                        ForgeState.picker-search-edited(text);
+                    }
+                    // Down leaves the search for the list; Enter in the search does nothing, so typing never picks.
+                    down => {
+                        if (ForgeState.picker-rows.length > 0) {
+                            if (ForgeState.picker-selected < 0) {
+                                ForgeState.picker-select(0);
+                            }
+                            KeyboardFocus.visible = true;
+                            list-focus.focus();
                         }
-                        KeyboardFocus.visible = true;
-                        list-focus.focus();
+                    }
+                }
+
+                if PickerMetrics.narrow: Button {
+                    in-flyout: true;
+                    text: ForgeText.filters;
+                    tip: ForgeText.filters-tip;
+                    horizontal-stretch: 0;
+                    clicked => {
+                        root.close-tip();
+                        root.filters-open = !root.filters-open;
                     }
                 }
             }
 
-            VerticalLayout {
+            // The filters on a grid of equal cells, so each sits where it did as their words change. Its choices say what
+            // they filter when they hold no choice ("Any slot"); one off its default takes the selected ground in its brass frame.
+            if root.filters-open: Rectangle {
+                property <int> columns: PickerMetrics.narrow ? 2 : 4;
+                property <length> gap: Tokens.space-4;
+                property <length> cell: (self.width - (self.columns - 1) * self.gap) / self.columns;
+                pure function at-x(index: int) -> length {
+                    return Math.mod(index, self.columns) * (self.cell + self.gap);
+                }
+                pure function at-y(index: int) -> length {
+                    return Math.floor(index / self.columns) * (Tokens.control-min-height + self.gap);
+                }
+
+                height: self.at-y(6) + Tokens.control-min-height;
+
+                ChoiceBox {
+                    x: parent.at-x(0);
+                    y: parent.at-y(0);
+                    width: parent.cell;
+                    label: ForgeText.slot;
+                    choices: ForgeState.picker-slots;
+                    index: ForgeState.picker-slot;
+                    fallback-text: ForgeState.picker-slot-text;
+                    active: ForgeState.picker-slot-active;
+                    chosen(index) => {
+                        ForgeState.picker-slot-changed(index);
+                    }
+                }
+
+                ChoiceBox {
+                    x: parent.at-x(1);
+                    y: parent.at-y(1);
+                    width: parent.cell;
+                    label: ForgeText.level;
+                    choices: ForgeState.picker-levels;
+                    index: ForgeState.picker-level;
+                    active: ForgeState.picker-level > 0;
+                    chosen(index) => {
+                        ForgeState.picker-level-changed(index);
+                    }
+                }
+
+                ChoiceBox {
+                    x: parent.at-x(2);
+                    y: parent.at-y(2);
+                    width: parent.cell;
+                    label: ForgeText.source;
+                    choices: ForgeState.picker-sources;
+                    index: ForgeState.picker-source;
+                    fallback-text: ForgeState.picker-source-text;
+                    active: ForgeState.picker-source-active;
+                    chosen(index) => {
+                        ForgeState.picker-source-changed(index);
+                    }
+                }
+
+                MultiChoiceBox {
+                    x: parent.at-x(3);
+                    y: parent.at-y(3);
+                    width: parent.cell;
+                    label: ForgeText.stat-tags;
+                    choices: ForgeState.picker-tags;
+                    checked: ForgeState.picker-tags-on;
+                    summary: ForgeState.picker-tags-text;
+                    active: ForgeState.picker-tags-active;
+                    toggled(index, on) => {
+                        ForgeState.picker-tag-toggled(index, on);
+                    }
+                }
+
+                ChoiceBox {
+                    x: parent.at-x(4);
+                    y: parent.at-y(4);
+                    width: parent.cell;
+                    label: ForgeText.side;
+                    choices: ForgeState.picker-sides;
+                    index: ForgeState.picker-filter;
+                    active: ForgeState.picker-filter > 0;
+                    chosen(index) => {
+                        ForgeState.picker-filter-changed(index);
+                    }
+                }
+
+                ChoiceBox {
+                    x: parent.at-x(5);
+                    y: parent.at-y(5);
+                    width: parent.cell;
+                    label: ForgeText.affix-kind;
+                    choices: ForgeState.picker-categories;
+                    index: ForgeState.picker-category;
+                    active: ForgeState.picker-category > 0;
+                    chosen(index) => {
+                        ForgeState.picker-category-changed(index);
+                    }
+                }
+
+                ChoiceBox {
+                    x: parent.at-x(6);
+                    y: parent.at-y(6);
+                    width: parent.cell;
+                    label: ForgeText.class;
+                    choices: ForgeState.picker-classes;
+                    index: ForgeState.picker-class;
+                    active: ForgeState.picker-class > 0;
+                    chosen(index) => {
+                        ForgeState.picker-class-changed(index);
+                    }
+                }
+            }
+
+            // The filters in force: each chip clears its own. One line; a row out of room shrinks them, their words in the tip.
+            if ForgeState.picker-chips.length > 0: HorizontalLayout {
                 spacing: Tokens.space-4;
+                alignment: start;
 
-                HorizontalLayout {
-                    spacing: Tokens.space-12;
-                    alignment: start;
-
-                    all-kinds := RadioButton {
-                        text: ForgeText.all;
-                        checked: ForgeState.picker-filter == 0;
-                        chosen => {
-                            ForgeState.picker-filter-changed(0);
-                        }
-                        arrow(delta) => {
-                            root.move-filter(delta);
-                        }
-                    }
-
-                    prefixes := RadioButton {
-                        text: ForgeText.prefixes;
-                        checked: ForgeState.picker-filter == 1;
-                        chosen => {
-                            ForgeState.picker-filter-changed(1);
-                        }
-                        arrow(delta) => {
-                            root.move-filter(delta);
-                        }
-                    }
-
-                    suffixes := RadioButton {
-                        text: ForgeText.suffixes;
-                        checked: ForgeState.picker-filter == 2;
-                        chosen => {
-                            ForgeState.picker-filter-changed(2);
-                        }
-                        arrow(delta) => {
-                            root.move-filter(delta);
+                for chip[index] in ForgeState.picker-chips: FilterChip {
+                    text: chip;
+                    tip: ForgeText.remove-filter(chip);
+                    removable: true;
+                    in-flyout: true;
+                    clicked => {
+                        ForgeState.picker-chip-removed(index);
+                        if (index >= ForgeState.picker-chips.length) {
+                            search.focus-input();
                         }
                     }
                 }
+            }
 
-                // The game's affix types and the classes, as two choices side by side.
-                HorizontalLayout {
-                    spacing: Tokens.space-8;
+            // How many are listed, the offer of what the default Source holds back, and the way back to the defaults.
+            HorizontalLayout {
+                spacing: Tokens.space-8;
+                height: Tokens.pill-chip-height;
 
-                    ChoiceBox {
-                        label: ForgeText.affix-kind;
-                        choices: ForgeState.picker-categories;
-                        index: ForgeState.picker-category;
-                        chosen(index) => {
-                            ForgeState.picker-category-changed(index);
-                        }
-                    }
+                Text {
+                    text: ForgeState.picker-count;
+                    font-size: Tokens.font-size-caption;
+                    color: Tokens.text-secondary-brush;
+                    vertical-alignment: center;
+                    horizontal-stretch: 0;
+                }
 
-                    ChoiceBox {
-                        label: ForgeText.class;
-                        choices: ForgeState.picker-classes;
-                        index: ForgeState.picker-class;
-                        chosen(index) => {
-                            ForgeState.picker-class-changed(index);
-                        }
+                if ForgeState.picker-hidden != "": FilterChip {
+                    text: ForgeState.picker-hidden;
+                    tip: ForgeText.show-uniques-tip;
+                    in-flyout: true;
+                    clicked => {
+                        ForgeState.picker-show-uniques();
                     }
                 }
 
-                VerticalLayout {
-                    spacing: Tokens.space-2;
+                Rectangle {
+                    horizontal-stretch: 1;
+                }
 
-                    CheckBox {
-                        text: ForgeText.allow-incompatible;
-                        checked: ForgeState.picker-allow;
-                        enabled: ForgeState.picker-allow-enabled;
-                        toggled(on) => {
-                            ForgeState.picker-allow-changed(on);
-                        }
-                    }
-
-                    HorizontalLayout {
-                        padding-left: Tokens.check-box-caption-margin.left;
-
-                        Text {
-                            text: ForgeText.picker-allow-note;
-                            font-size: Tokens.font-size-caption;
-                            color: Tokens.text-muted-brush;
-                            wrap: word-wrap;
-                            height: PickerMetrics.caption-line * 2;
-                        }
+                if ForgeState.picker-chips.length > 0 && ForgeState.picker-rows.length > 0: FilterChip {
+                    text: ForgeText.clear-filters;
+                    in-flyout: true;
+                    clicked => {
+                        ForgeState.picker-clear-filters();
+                        search.focus-input();
                     }
                 }
             }
 
             Rectangle {
-                height: PickerMetrics.list-height(ForgeState.picker-rows.length);
-
-                if ForgeState.picker-rows.length == 0: Text {
-                    x: Tokens.empty-list-margin.left;
-                    y: Tokens.empty-list-margin.top;
-                    width: parent.width - Tokens.empty-list-margin.left - Tokens.empty-list-margin.right;
-                    text: ForgeText.no-affix-matches;
-                    color: Tokens.text-muted-brush;
-                    wrap: word-wrap;
-                }
+                vertical-stretch: 1;
+                min-height: Tokens.affix-picker-list-min-height;
 
                 list-focus := FocusScope {
                     accessible-role: list;
@@ -316,31 +373,30 @@ export component AffixPickerPanel inherits FlyoutSurface {
                     }
 
                     // A ListView builds only the entries in view, so a search over the whole catalogue rebuilds a screenful
-                    // rather than every affix. Each entry carries the 2px gap under it, as a ListView has no spacing.
+                    // rather than every affix. Each entry carries the gap under it, as a ListView has no spacing.
                     list-scroll := ListView {
                         // The focus scope around it is the named list.
                         accessible-role: none;
 
                         for entry[index] in ForgeState.picker-rows: Rectangle {
                             property <bool> chosen: ForgeState.picker-selected == index;
-                            property <length> entry-height: Math.max(PickerMetrics.row, entry-layout.preferred-height);
                             // An entry built or chosen while selected scrolls itself into view exactly, after the list's
-                            // estimate brought it near (`reveal-index`).
+                            // estimate brought it near (`reveal-selected`).
                             init => {
                                 if (self.chosen) {
-                                    root.reveal-entry(index, self.y, self.entry-height);
+                                    root.reveal-entry(index, self.y, Tokens.affix-picker-row-height);
                                 }
                             }
                             changed chosen => {
                                 if (self.chosen) {
-                                    root.reveal-entry(index, self.y, self.entry-height);
+                                    root.reveal-entry(index, self.y, Tokens.affix-picker-row-height);
                                 }
                             }
-                            height: self.entry-height + (index < ForgeState.picker-rows.length - 1 ? Tokens.space-2 : 0px);
+                            height: Tokens.affix-picker-row-height + (index < ForgeState.picker-rows.length - 1 ? Tokens.space-2 : 0px);
 
                             Rectangle {
                                 y: 0;
-                                height: parent.entry-height;
+                                height: Tokens.affix-picker-row-height;
                                 border-radius: Tokens.control-radius;
                                 border-width: 1px;
                                 border-color: parent.chosen ? Tokens.accent-brush : transparent;
@@ -349,25 +405,34 @@ export component AffixPickerPanel inherits FlyoutSurface {
                                 background: parent.chosen || entry-touch.has-hover ? Tokens.selected-brush : transparent;
                                 accessible-role: list-item;
                                 accessible-label: entry.name;
+                                accessible-description: entry.spoken;
                                 accessible-item-selected: parent.chosen;
 
-                                entry-layout := VerticalLayout {
-                                    padding-left: Tokens.row-padding.left;
-                                    padding-right: Tokens.row-padding.right;
-                                    padding-top: Tokens.catalog-entry-margin.top;
-                                    padding-bottom: Tokens.catalog-entry-margin.bottom;
-                                    spacing: Tokens.space-1;
-                                    alignment: center;
+                                // A (?) keeps this much of a narrow row's right end, clear of the scroll bar that opens over it.
+                                property <length> help-room: PickerMetrics.narrow ? Tokens.icon-size-small + Tokens.compact-icon-button-padding.left + Tokens.compact-icon-button-padding.right + Tokens.scroll-bar-size : 0px;
 
-                                    Text {
-                                        text: entry.name;
-                                        color: Tokens.text-brush;
-                                        wrap: word-wrap;
-                                    }
+                                Text {
+                                    x: Tokens.row-padding.left;
+                                    y: Tokens.space-6;
+                                    width: parent.width - Tokens.row-padding.left - Tokens.row-padding.right - parent.help-room;
+                                    height: Tokens.affix-picker-name-height;
+                                    text: entry.name;
+                                    color: Tokens.text-brush;
+                                    vertical-alignment: center;
+                                    overflow: elide;
+                                }
 
-                                    FactsText {
-                                        facts: entry.facts;
-                                        color: entry.reforged ? Tokens.reforged-affix-brush : Tokens.text-muted-brush;
+                                HorizontalLayout {
+                                    x: Tokens.row-padding.left;
+                                    y: Tokens.space-6 + Tokens.affix-picker-name-height + Tokens.space-4;
+                                    width: parent.width - Tokens.row-padding.left - Tokens.row-padding.right - parent.help-room;
+                                    height: Tokens.pill-height;
+                                    spacing: Tokens.space-4;
+                                    alignment: start;
+
+                                    for pill in entry.pills: Pill {
+                                        text: pill.text;
+                                        tone: pill.tone;
                                     }
                                 }
 
@@ -387,9 +452,79 @@ export component AffixPickerPanel inherits FlyoutSurface {
                                     }
                                 }
 
+                                if PickerMetrics.narrow: HelpButton {
+                                    x: parent.width - self.width - Tokens.scroll-bar-size;
+                                    y: (parent.height - self.height) / 2;
+                                    help: entry.detail;
+                                    label: ForgeText.about-affix(entry.name);
+                                    in-flyout: true;
+                                    tab-stop: false;
+                                }
+
+                                // Over the row's right part, so its tip hangs clear of the names the pointer runs down.
+                                TipTrigger {
+                                    x: parent.width * 0.4;
+                                    width: parent.width * 0.6;
+                                    text: entry.detail;
+                                    hovered: !PickerMetrics.narrow && entry-touch.has-hover;
+                                    focused: list-focus.has-focus && ForgeState.picker-selected == index;
+                                    in-flyout: true;
+                                }
+
                                 FocusRing {
                                     focused: list-focus.has-focus && ForgeState.picker-selected == index;
                                 }
+                            }
+                        }
+                    }
+                }
+
+                // Why the list is empty, and the ways out it has.
+                if ForgeState.picker-rows.length == 0: VerticalLayout {
+                    x: Tokens.empty-list-margin.left;
+                    y: Tokens.empty-list-margin.top;
+                    width: parent.width - Tokens.empty-list-margin.left - Tokens.empty-list-margin.right;
+                    alignment: start;
+                    spacing: Tokens.space-8;
+
+                    Text {
+                        text: ForgeState.picker-empty-reason;
+                        color: Tokens.text-secondary-brush;
+                        wrap: word-wrap;
+                    }
+
+                    HorizontalLayout {
+                        alignment: start;
+                        spacing: Tokens.space-8;
+
+                        if ForgeState.picker-empty-clear-search: Button {
+                            in-flyout: true;
+                            text: ForgeText.clear-search;
+                            clicked => {
+                                search.clear();
+                            }
+                        }
+
+                        if ForgeState.picker-empty-clear-filters: Button {
+                            in-flyout: true;
+                            text: ForgeText.clear-filters;
+                            clicked => {
+                                ForgeState.picker-clear-filters();
+                                search.focus-input();
+                            }
+                        }
+                    }
+
+                    if ForgeState.picker-empty-allow: HorizontalLayout {
+                        alignment: start;
+
+                        Button {
+                            in-flyout: true;
+                            text: ForgeText.list-incompatible;
+                            tip: ForgeText.picker-allow-note;
+                            clicked => {
+                                ForgeState.picker-allow-changed(true);
+                                search.focus-input();
                             }
                         }
                     }
@@ -401,6 +536,27 @@ export component AffixPickerPanel inherits FlyoutSurface {
                 font-size: Tokens.font-size-caption;
                 color: Tokens.text-secondary-brush;
                 wrap: word-wrap;
+            }
+
+            HorizontalLayout {
+                spacing: Tokens.space-6;
+                alignment: start;
+
+                CheckBox {
+                    text: ForgeText.allow-incompatible;
+                    checked: ForgeState.picker-allow;
+                    enabled: ForgeState.picker-allow-enabled;
+                    toggled(on) => {
+                        ForgeState.picker-allow-changed(on);
+                    }
+                }
+
+                HelpButton {
+                    y: (parent.height - self.height) / 2;
+                    help: ForgeText.picker-allow-note;
+                    label: ForgeText.about-allow-incompatible;
+                    in-flyout: true;
+                }
             }
 
             // Two equal halves: stretch alone shares only the space left after each button's own width.

@@ -11,6 +11,10 @@ export component HelpButton inherits Rectangle {
     in property <string> help;
     // Its accessible name ("About …").
     in property <string> label;
+    // Inside a flyout's popup, which shows its tip (`Tip.in-flyout`).
+    in property <bool> in-flyout;
+    // Off for a button repeated down a list, whose row gives the keyboard the same words: Tab passes it by.
+    in property <bool> tab-stop: true;
 
     width: Tokens.icon-size-small + Tokens.compact-icon-button-padding.left + Tokens.compact-icon-button-padding.right;
     height: Tokens.icon-size-small + Tokens.compact-icon-button-padding.top + Tokens.compact-icon-button-padding.bottom;
@@ -52,6 +56,7 @@ export component HelpButton inherits Rectangle {
             Tip.owner += 1;
             root.claim = Tip.owner;
             Tip.text = root.help;
+            Tip.in-flyout = root.in-flyout;
             Tip.anchor-x = root.absolute-position.x;
             Tip.anchor-y = root.absolute-position.y;
             Tip.anchor-width = root.width;
@@ -72,6 +77,7 @@ export component HelpButton inherits Rectangle {
     }
 
     focus := FocusScope {
+        focus-on-tab-navigation: root.tab-stop;
         focus-gained(reason) => {
             if (reason == FocusReason.tab-navigation) {
                 KeyboardFocus.visible = true;
@@ -108,6 +114,7 @@ export component HelpButton inherits Rectangle {
         text: root.help;
         hovered: touch.has-hover;
         focused: focus.has-focus;
+        in-flyout: root.in-flyout;
     }
 
     FocusRing {

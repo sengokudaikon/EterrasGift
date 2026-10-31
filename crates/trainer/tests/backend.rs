@@ -141,6 +141,9 @@ struct Shared {
     /// Answers to hook changes in turn; without one the game confirms what was asked.
     hook_results: Mutex<VecDeque<Result<WriteOutcome<bool>, BackendError>>>,
     hook_requests: Mutex<Vec<backend::HookRequest>>,
+    /// The affix IDs the game was asked to add, in order.
+    new_affixes: Mutex<Vec<u16>>,
+    register_errors: Mutex<VecDeque<BackendError>>,
     active: AtomicUsize,
     maximum: AtomicUsize,
     aborted: AtomicUsize,
@@ -183,6 +186,8 @@ impl Shared {
             hooks_suspended: AtomicBool::new(false),
             hook_results: Mutex::new(VecDeque::new()),
             hook_requests: Mutex::new(vec![]),
+            new_affixes: Mutex::new(vec![]),
+            register_errors: Mutex::new(VecDeque::new()),
             active: AtomicUsize::new(0),
             maximum: AtomicUsize::new(0),
             aborted: AtomicUsize::new(0),
@@ -285,6 +290,14 @@ impl BackendConnection for Connection {
             return Err(error);
         }
         Ok(self.shared.forge_item.lock().unwrap().clone())
+    }
+    async fn register_affixes(&mut self, affixes: &[eg_trainer_wire::new_affixes::NewAffix]) -> Result<(), BackendError> {
+        self.shared.record("register");
+        if let Some(error) = self.shared.register_errors.lock().unwrap().pop_front() {
+            return Err(error);
+        }
+        self.shared.new_affixes.lock().unwrap().extend(affixes.iter().map(|affix| affix.id));
+        Ok(())
     }
     async fn describe_implicits(&mut self, _: &ForgeSnapshot) -> Result<Option<Vec<backend::ModifierSnapshot>>, BackendError> {
         self.shared.record("implicits");
@@ -1299,4 +1312,120 @@ fn catalog_states_compare_by_allocation_first_and_then_by_content() {
     other.identity.binary_hash = "C".repeat(64);
     assert_ne!(CatalogState::Stale(data.clone()), CatalogState::Stale(Arc::new(other)));
     assert_eq!(CatalogState::Missing, CatalogState::Missing);
+}
+
+/// A catalog holding two added affixes, 1500 and 1501, and options that keep the ones in use in `in_use`.
+fn with_added_affixes(in_use: std::path::PathBuf) -> BackendOptions {
+    use eg_trainer::definitions::catalog::{AffixDefinition, AffixTier, Availability, NumericProperty};
+    let mut catalog = catalog();
+    for id in [1500, 1501] {
+        let properties = vec![NumericProperty {
+            property: 98,
+            tags: 471,
+            special_tag: 0,
+            extra_tag: 0,
+            modifier_type: 0,
+            set_property: false,
+            minimum: 1.0,
+            maximum: 1.0,
+            roll_id: -1,
+            rounding: 0,
+            display_added_as_percentage: false,
+            display_added_as_tenth: false,
+            less_is_better: false,
+        }];
+        catalog.affixes.insert(
+            id,
+            AffixDefinition {
+                id,
+                raw_name: format!("EG Fractured Crown: {id}"),
+                raw_display_name: "You have no ward".into(),
+                game_display_name: Availability::Available("Fractured Crown: You have no ward".into()),
+                kind: 0,
+                special: 7,
+                class_requirement: 1,
+                item_types: Some(vec![3]),
+                tier_count: 7,
+                standard_effect: 1.0,
+                numeric: Availability::Available(vec![AffixTier { properties }; 7]),
+                level_requirement: 0,
+                source: None,
+            },
+        );
+    }
+    BackendOptions {
+        game_data: Some(GameDataHandle::fixed(GameData::Ready(Arc::new(FileCatalog::restore(catalog, "build".into(), vec![]))))),
+        unique_mods_in_use: Some(in_use),
+        ..options()
+    }
+}
+
+#[test]
+fn the_affixes_in_use_and_on_the_item_reach_the_game_once_per_connection() {
+    run(async {
+        let folder = tempfile::tempdir().unwrap();
+        let in_use = folder.path().join("in-use.json");
+        std::fs::write(&in_use, "[1501]").unwrap();
+        let shared = writes::writable();
+        shared.forge_item.lock().unwrap().as_mut().unwrap().affixes = vec![eg_trainer_wire::forge::AffixSnapshot {
+            slot: 0,
+            id: 1500,
+            tier: 1,
+            roll: 0,
+            kind: 0,
+            seal: 0,
+            name: "Fractured Crown".into(),
+            special: 7,
+        }];
+        let (handle, worker) = start(&shared, with_added_affixes(in_use.clone()));
+        connected(&handle).await;
+        assert_eq!(*shared.new_affixes.lock().unwrap(), [1501, 1500], "what was in use, then what the item holds");
+        command(&handle, Command::ReadForge).await.unwrap();
+        assert_eq!(shared.count("register"), 1, "the game holds them for this connection");
+        assert_eq!(std::fs::read_to_string(&in_use).unwrap(), "[1500,1501]", "the next run adds them before the item is read");
+        shutdown(&handle, worker).await;
+    });
+}
+
+#[test]
+fn a_refused_affix_is_asked_for_once_and_leaves_the_connection_ready() {
+    run(async {
+        let folder = tempfile::tempdir().unwrap();
+        let in_use = folder.path().join("in-use.json");
+        std::fs::write(&in_use, "[1501]").unwrap();
+        let shared = Shared::new();
+        shared
+            .register_errors
+            .lock()
+            .unwrap()
+            .push_back(BackendError::blocked(ErrorKind::Protocol, "Affix ID 1501 is the game's or another mod's"));
+        let (handle, worker) = start(&shared, with_added_affixes(in_use.clone()));
+        connected(&handle).await;
+        command(&handle, Command::ReadForge).await.unwrap();
+        assert_eq!(shared.count("register"), 1);
+        assert_eq!(handle.snapshot().phase, Phase::Ready);
+        assert_eq!(std::fs::read_to_string(&in_use).unwrap(), "[1501]");
+        shutdown(&handle, worker).await;
+    });
+}
+
+#[test]
+fn an_affix_between_areas_is_asked_for_again() {
+    run(async {
+        let folder = tempfile::tempdir().unwrap();
+        let in_use = folder.path().join("in-use.json");
+        std::fs::write(&in_use, "[1501]").unwrap();
+        let shared = Shared::new();
+        shared
+            .register_errors
+            .lock()
+            .unwrap()
+            .push_back(BackendError::blocked(ErrorKind::NotReady, "Previous main-thread request is still running"));
+        let (handle, worker) = start(&shared, with_added_affixes(in_use));
+        connected(&handle).await;
+        assert!(shared.new_affixes.lock().unwrap().is_empty());
+        command(&handle, Command::ReadForge).await.unwrap();
+        assert_eq!(*shared.new_affixes.lock().unwrap(), [1501]);
+        shutdown(&handle, worker).await;
+    });
 }

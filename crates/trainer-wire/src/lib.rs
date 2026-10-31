@@ -8,6 +8,7 @@ pub mod forge;
 pub mod hooks;
 pub mod locale;
 pub mod mapping;
+pub mod new_affixes;
 pub mod process;
 pub mod protocol;
 pub mod rules;

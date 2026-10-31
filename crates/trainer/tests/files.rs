@@ -49,6 +49,46 @@ fn builds_the_catalog_from_the_install() {
 
 #[test]
 #[ignore = "reads a Last Epoch install named by EG_LAST_EPOCH"]
+fn uniques_become_affixes_with_permanent_ids() {
+    use eg_trainer::definitions::{files, unique_mods};
+    use eg_trainer_wire::new_affixes::ID_RANGES;
+    let folder = std::path::PathBuf::from(std::env::var_os("EG_LAST_EPOCH").expect("set EG_LAST_EPOCH to the game folder"));
+    let store = tempfile::tempdir().unwrap();
+    let ledger = store.path().join(unique_mods::LEDGER_FILE);
+    let locale = GameLocale {
+        language: "en".into(),
+        game_version: String::new(),
+    };
+    let added = |files: &files::FileCatalog| {
+        let catalog = files.catalog(locale.clone()).unwrap();
+        catalog.affixes.into_values().filter(|a| unique_mods::is_added(a.id)).collect::<Vec<_>>()
+    };
+    let first = files::read_with_ledger(&folder, Some(&ledger)).unwrap();
+    assert_eq!(first.ledger_problem, None);
+    let affixes = added(&first);
+    let wires: Vec<_> = affixes.iter().filter_map(unique_mods::new_affix).collect();
+    assert_eq!(wires.len(), affixes.len(), "every added affix is one the helper can add");
+    let capacity = ID_RANGES.into_iter().flatten().count();
+    let by_size = wires.iter().fold(std::collections::BTreeMap::<usize, usize>::new(), |mut sizes, affix| {
+        *sizes.entry(affix.properties.len()).or_default() += 1;
+        sizes
+    });
+    println!("{} of {capacity} IDs; lines per affix {by_size:?}", wires.len());
+    assert!(wires.len() < capacity, "the range holds them all, with room for new uniques");
+    let named = |text: &str| wires.iter().filter(|a| a.display_name.contains(text)).map(|a| a.name.clone()).collect::<Vec<_>>();
+    println!("{:?}", named("You have no ward"));
+    let no_ward = wires.iter().find(|a| a.display_name == "You have no ward").expect("Fractured Crown's line");
+    assert_eq!((no_ward.properties.len(), no_ward.properties[0].property, no_ward.properties[0].tags), (1, 98, 471));
+    assert_eq!((no_ward.properties[0].minimum, no_ward.properties[0].maximum), (1.0, 1.0));
+    for affix in wires.iter().filter(|a| a.properties.len() >= 3).take(5) {
+        println!("{} lines: {}", affix.properties.len(), affix.name);
+    }
+    let again = files::read_with_ledger(&folder, Some(&ledger)).unwrap();
+    assert_eq!(added(&again), affixes, "a second reading gives each the same ID");
+}
+
+#[test]
+#[ignore = "reads a Last Epoch install named by EG_LAST_EPOCH"]
 fn a_second_start_loads_the_saved_catalog_instead_of_reading_the_files() {
     use eg_trainer::definitions::service::{self, GameData};
     let folder = std::path::PathBuf::from(std::env::var_os("EG_LAST_EPOCH").expect("set EG_LAST_EPOCH to the game folder"));

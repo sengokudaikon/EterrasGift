@@ -5,6 +5,7 @@
 use super::game::{Catalog, EditOutcome, LegendaryType, Lookup, WriteOutcome, refused};
 use super::item::EditPresentation;
 use super::item::{self, AffixDefinition, AffixKind, Category, Compatibility, ForgeItem, ItemEdit, Moves, RollRequest, RollTarget, Seal, StatusField};
+use super::picker::{self, Chip, Filters, Index, KindFilter, LevelChoice, PICKER_CATEGORIES, PICKER_CLASSES, Query, SourceChoice};
 use super::rows::{AffixRow, FieldDraft, FieldKind, FieldOption, RollRow, ValueEditor, base_key, base_of};
 use super::worker::ForgeGame;
 use eg_core::phrase::{Conjunction, Phrase, Plural, list};
@@ -109,65 +110,48 @@ pub struct AppliedEntry {
     pub effect: String,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
-pub enum KindFilter {
-    #[default]
-    All,
-    Prefixes,
-    Suffixes,
-}
-
-/// The affix picker's kind choices: any, or one of the game's affix types.
-pub const PICKER_CATEGORIES: [(Phrase, Option<Category>); 9] = [
-    (Phrase::new("Any kind"), None),
-    (Phrase::new("Standard"), Some(Category::Standard)),
-    (Phrase::new("Experimental"), Some(Category::Experimental)),
-    (Phrase::new("Personal"), Some(Category::Personal)),
-    (Phrase::new("Reforged set"), Some(Category::Set)),
-    (Phrase::new("Idol enchantment"), Some(Category::IdolEnchantment)),
-    (Phrase::new("Weaver idol"), Some(Category::IdolWeaver)),
-    (Phrase::ctx("affix category", "Corrupted"), Some(Category::Corrupted)),
-    (Phrase::new("Unique modifier"), Some(Category::FakeUniqueMod)),
-];
-
-/// The affix picker's class choices: any, affixes no class owns, or one class's own (the game's class order).
-pub const PICKER_CLASSES: [Phrase; 7] = [
-    Phrase::new("Any class"),
-    Phrase::new("No class requirement"),
-    Phrase::new("Primalist"),
-    Phrase::new("Mage"),
-    Phrase::new("Sentinel"),
-    Phrase::new("Acolyte"),
-    Phrase::new("Rogue"),
-];
-
-/// Whether an affix of class specificity `specificity` (bit 0 classless, bits 1–5 the classes) passes class choice `choice`.
-fn class_fits(specificity: i32, choice: usize) -> bool {
-    match choice {
-        0 => true,
-        1 => specificity & 0b111110 == 0,
-        class => specificity & (1 << (class - 1)) != 0,
-    }
-}
-
-/// The affix picker: replacing a row's affix, or adding one.
+/// The affix picker: replacing a row's affix, or adding one. Its filters and rows are `picker`'s.
 #[derive(Clone, Debug, Default)]
 pub struct Picker {
     pub adding: bool,
     pub search: String,
-    pub filter: KindFilter,
-    /// Index into [`PICKER_CATEGORIES`].
-    pub category: usize,
-    /// Index into [`PICKER_CLASSES`].
-    pub class: usize,
+    pub filters: Filters,
     pub allow_incompatible: bool,
     pub selected: Option<u16>,
+    /// The item's type and the types its shape also takes: the slot the filter starts on is the first.
+    pub own_types: Vec<u16>,
+    /// The level the item requires, which Level can hold affixes to.
+    pub item_level: Option<u8>,
     /// The catalog's definitions the picker may list, in name order, as indices: those that fit, or all of them with
     /// "Allow incompatible affixes". Judged when the picker opens, when that box changes or when the catalog does; a
     /// keystroke only searches them.
     candidates: Vec<usize>,
-    /// The candidates the search and the kind filter leave, as indices into the catalog's definitions.
+    /// The candidates the search and the filters leave, as indices into the catalog's definitions.
     list: Vec<usize>,
+    /// Unique modifiers that pass all but the default Source.
+    pub hidden_uniques: usize,
+    /// The uniques Source offers, in the order it lists them: those among the candidates, within the slot.
+    pub source_uniques: Vec<(u16, String)>,
+}
+
+impl Picker {
+    pub fn own_slot(&self) -> Option<u16> {
+        self.own_types.first().copied()
+    }
+
+    /// The search and filters as one query.
+    fn query<'a>(&'a self, search: &'a str) -> Query<'a> {
+        Query {
+            filters: &self.filters,
+            search,
+            own_types: &self.own_types,
+            item_level: self.item_level,
+        }
+    }
+
+    pub fn level_choices(&self) -> Vec<(LevelChoice, String)> {
+        picker::level_choices(self.item_level)
+    }
 }
 
 /// Which value table a cell reads: the roll and the draft context the game reads it in.
@@ -265,8 +249,8 @@ pub struct ForgeEditor {
     tables: HashMap<TableKey, Lookup<Rc<item::ValueTable>>>,
     /// Each identity option's lowercased name and id, which the identity search matches, kept with the options.
     identity_keys: Vec<String>,
-    /// Each catalog definition's lowercased name, category and id, which the affix picker's search matches.
-    definition_keys: Vec<String>,
+    /// What the affix picker computes once per catalog: each definition's search key, the slots and the stat tags.
+    picker_index: Index,
     /// Counts changes to the base and identity options and to the catalog, so the view rebuilds its menus only then.
     menu_generation: u64,
     /// The local time a confirmed write is listed with.
@@ -344,7 +328,7 @@ impl ForgeEditor {
             next_uid: 1,
             tables: HashMap::new(),
             identity_keys: Vec::new(),
-            definition_keys: Vec::new(),
+            picker_index: Index::default(),
             menu_generation: 0,
             clock: local_time,
             templates: None,
@@ -670,7 +654,7 @@ impl ForgeEditor {
         self.game = game;
         if !same_catalog {
             self.menu_generation += 1;
-            self.definition_keys.clear();
+            self.picker_index = Index::default();
             // The picker lists the catalog's definitions by index.
             self.filter_picker(true);
         }
@@ -684,6 +668,11 @@ impl ForgeEditor {
 
     pub fn catalog(&self) -> &Catalog {
         self.game.catalog()
+    }
+
+    /// The catalog, for what outlives this borrow (the picker's rows, built as the list asks).
+    pub fn shared_catalog(&self) -> std::sync::Arc<Catalog> {
+        self.game.shared_catalog()
     }
 
     pub fn item(&self) -> Option<&ForgeItem> {
@@ -2867,15 +2856,14 @@ impl ForgeEditor {
         }
     }
 
-    /// Opens the picker to replace a row's affix: a fresh search, All, nothing chosen. An added affix is chosen again by
-    /// removing it and adding another; one Apply removes has nothing to replace.
+    /// Opens the picker to replace a row's affix: a fresh search, the default filters, nothing chosen. An added affix is
+    /// chosen again by removing it and adding another; one Apply removes has nothing to replace.
     pub fn open_replace(&mut self, row: usize) -> bool {
         self.select_affix(Some(row));
         if !self.can_change_affix() || !self.affixes.get(row).is_some_and(|row| !row.added && row.is_editable()) {
             return false;
         }
-        self.picker = Some(Picker::default());
-        self.filter_picker(true);
+        self.open_picker(false);
         true
     }
 
@@ -2883,12 +2871,30 @@ impl ForgeEditor {
         if !self.can_change_affix_list() {
             return false;
         }
+        self.open_picker(true);
+        true
+    }
+
+    fn open_picker(&mut self, adding: bool) {
+        let (own_types, item_level) = self.picker_item();
         self.picker = Some(Picker {
-            adding: true,
+            adding,
+            filters: Filters::for_slot(own_types.first().copied()),
+            own_types,
+            item_level,
             ..Picker::default()
         });
         self.filter_picker(true);
-        true
+    }
+
+    /// The item's slots, its own first, and the level it requires.
+    fn picker_item(&self) -> (Vec<u16>, Option<u8>) {
+        let Some(item) = self.item.as_ref() else {
+            return (Vec::new(), None);
+        };
+        let shared = u8::try_from(item.item_type).map_or(&[][..], |item_type| eg_trainer::item::edit::shared_slots(item_type, item.sub_type));
+        let own = std::iter::once(item.item_type).chain(shared.iter().filter_map(|slot| u16::try_from(*slot).ok())).collect();
+        (own, item.status.map(|status| status.level_requirement))
     }
 
     pub fn cancel_picker(&mut self) {
@@ -2902,67 +2908,154 @@ impl ForgeEditor {
         self.filter_picker(false);
     }
 
-    pub fn picker_filter(&mut self, filter: KindFilter) {
+    /// Changes the filters and lists again; `slot_changed` also takes Source's uniques again, which follow the slot.
+    fn change_filters(&mut self, change: impl FnOnce(&mut Picker)) {
         if let Some(picker) = self.picker.as_mut() {
-            picker.filter = filter;
+            let slot = picker.filters.slot;
+            change(picker);
+            if picker.filters.slot != slot {
+                self.refresh_source_uniques();
+            }
         }
         self.filter_picker(false);
+    }
+
+    fn refresh_source_uniques(&mut self) {
+        let definitions = &self.game.catalog().definitions;
+        if let Some(picker) = self.picker.as_mut() {
+            picker.source_uniques = picker::source_uniques(&picker.candidates, definitions, picker.filters.slot, &picker.own_types);
+        }
+    }
+
+    pub fn picker_filter(&mut self, filter: KindFilter) {
+        self.change_filters(|picker| picker.filters.side = filter);
     }
 
     pub fn picker_category(&mut self, choice: usize) {
-        if let Some(picker) = self.picker.as_mut() {
-            picker.category = choice.min(PICKER_CATEGORIES.len() - 1);
-        }
-        self.filter_picker(false);
+        self.change_filters(|picker| picker.filters.category = choice.min(PICKER_CATEGORIES.len() - 1));
     }
 
     pub fn picker_class(&mut self, choice: usize) {
-        if let Some(picker) = self.picker.as_mut() {
-            picker.class = choice.min(PICKER_CLASSES.len() - 1);
-        }
-        self.filter_picker(false);
+        self.change_filters(|picker| picker.filters.class = choice.min(PICKER_CLASSES.len() - 1));
     }
 
-    /// The tier a picked affix takes, whose values the list shows: T1 for an addition, the row's for a replacement.
-    fn picker_tier(&self) -> u8 {
-        match self.picker.as_ref() {
-            Some(picker) if !picker.adding => self.selected_affix.and_then(|index| self.affixes.get(index)).map_or(1, AffixRow::tier),
-            _ => 1,
-        }
+    /// Slot's choice: 0 any slot, then the index's slots in order.
+    pub fn picker_slot(&mut self, choice: usize) {
+        let slot = choice.checked_sub(1).and_then(|index| self.picker_index.slots.get(index)).map(|(slot, _)| *slot);
+        self.change_filters(|picker| picker.filters.slot = slot);
     }
 
-    /// A picker entry's caption, each its own text: its kind and tiers, then its value range at the tier it would take,
-    /// e.g. ["Suffix", "T1–T8", "T1 +5–10"].
-    pub fn picker_entry_detail(&self, definition: &AffixDefinition) -> Vec<String> {
-        let tier = self.picker_tier().min(definition.max_tier.max(1));
-        let range = self.catalog().tier_range(definition.id, tier);
-        let mut facts = definition.picker_description();
-        if !range.is_empty() {
-            const TIER_RANGE: Phrase = Phrase::new("T{tier} {range}");
-            facts.push(TIER_RANGE.with(&[("tier", &tier), ("range", &range)]));
-        }
-        facts
+    pub fn picker_level(&mut self, choice: usize) {
+        self.change_filters(|picker| {
+            if let Some((level, _)) = picker.level_choices().get(choice) {
+                picker.filters.level = *level;
+            }
+        });
     }
 
-    /// Every tier's value range of the picked affix, "T1 +5–10, T2 +11–15, …"; empty where the game data has none.
-    fn picker_ladder(&self) -> String {
-        let Some(definition) = self.picked() else {
-            return String::new();
+    /// Source's choice: the three fixed ones, then the uniques it lists.
+    pub fn picker_source(&mut self, choice: usize) {
+        self.change_filters(|picker| {
+            let source = match choice {
+                0 => SourceChoice::Game,
+                1 => SourceChoice::Uniques,
+                2 => SourceChoice::All,
+                unique => match picker.source_uniques.get(unique - 3) {
+                    Some((unique, _)) => SourceChoice::Unique(*unique),
+                    None => return,
+                },
+            };
+            picker.filters.set_source(source);
+        });
+    }
+
+    /// Turns a stat tag on or off, by its place among the tags in use.
+    pub fn picker_tag(&mut self, choice: usize, on: bool) {
+        let Some(tag) = self.picker_index.tags.get(choice).copied() else {
+            return;
         };
-        (1..=definition.max_tier)
-            .filter_map(|tier| {
-                let range = self.catalog().tier_range(definition.id, tier);
-                // A tier and its range wrap together: a no-break space after the tier, a word joiner after the dash.
-                const LADDER_STEP: Phrase = Phrase::new("T{tier}\u{a0}{range}");
-                (!range.is_empty()).then(|| LADDER_STEP.with(&[("tier", &tier), ("range", &range.replace('–', "–\u{2060}"))]))
-            })
-            .collect::<Vec<_>>()
-            .join(", ")
+        self.change_filters(|picker| {
+            if on {
+                picker.filters.tags |= 1u64 << tag;
+            } else {
+                picker.filters.tags &= !(1u64 << tag);
+            }
+        });
     }
 
+    /// Clears the filter behind an active-filter chip, by its place in the row.
+    pub fn picker_remove_chip(&mut self, chip: usize) {
+        self.change_filters(|picker| {
+            let own = picker.own_slot();
+            if let Some(found) = picker::chips(&picker.filters, own).get(chip).copied() {
+                picker::clear_chip(&mut picker.filters, found, own);
+            }
+        });
+    }
+
+    pub fn picker_clear_filters(&mut self) {
+        self.change_filters(|picker| picker.filters = Filters::for_slot(picker.own_slot()));
+    }
+
+    /// Lists the unique modifiers the default Source holds back, as well as what it lists.
+    pub fn picker_show_uniques(&mut self) {
+        self.change_filters(|picker| picker.filters.set_source(SourceChoice::All));
+    }
+
+    /// What the view shows for each active filter, in the row's order.
+    pub fn picker_chips(&self) -> Vec<(Chip, String)> {
+        let Some(picker) = self.picker.as_ref() else {
+            return Vec::new();
+        };
+        picker::chips(&picker.filters, picker.own_slot())
+            .into_iter()
+            .map(|chip| (chip, picker::chip_text(chip, &picker.filters, self.catalog())))
+            .collect()
+    }
+
+    /// The slots Slot offers, by the index's order.
+    pub fn picker_slots(&self) -> &[(u16, String)] {
+        &self.picker_index.slots
+    }
+
+    /// The stat tags in use, by their place among [`picker::STAT_TAGS`].
+    pub fn picker_tags(&self) -> &[usize] {
+        &self.picker_index.tags
+    }
+
+    /// Why an open picker lists nothing, and the ways out; none while it lists something.
+    pub fn picker_empty(&self) -> Option<picker::Empty> {
+        let picker = self.picker.as_ref()?;
+        if !picker.list.is_empty() {
+            return None;
+        }
+        let search = picker.search.to_lowercase();
+        let query = picker.query(&search);
+        let definitions = &self.catalog().definitions;
+        // Only an empty list asks, so this rare pass over the whole catalog costs nothing while typing.
+        let more_if_allowed = !picker.allow_incompatible && {
+            let all: Vec<usize> = (0..definitions.len()).collect();
+            !picker::run(&query, &all, definitions, &self.picker_index.keys).list.is_empty()
+        };
+        Some(picker::empty(&query, picker.own_slot(), picker.candidates.len(), more_if_allowed, self.unrestricted()))
+    }
+
+    /// Every tier's value range of the picked affix; empty where the game data has none.
+    fn picker_ladder(&self) -> String {
+        self.picked().map_or_else(String::new, |definition| picker::ladder(definition, self.catalog()))
+    }
+
+    /// "Allow incompatible affixes" is for what this slot can't roll, so it opens the Slot filter while that sits on its
+    /// default, and closing it puts the default back.
     pub fn picker_allow(&mut self, allow: bool) {
         if let Some(picker) = self.picker.as_mut() {
             picker.allow_incompatible = allow;
+            let own = picker.own_slot();
+            if allow && picker.filters.slot == own {
+                picker.filters.slot = None;
+            } else if !allow && picker.filters.slot.is_none() {
+                picker.filters.slot = own;
+            }
         }
         self.filter_picker(true);
     }
@@ -2985,19 +3078,26 @@ impl ForgeEditor {
         self.picker.iter().flat_map(|picker| picker.list.iter()).filter_map(|&index| definitions.get(index))
     }
 
-    /// Lists the definitions the search and the kind filter leave of the candidates; `rejudge` first judges again which
+    /// Lists the definitions the search and the filters leave of the candidates; `rejudge` first judges again which
     /// definitions fit the item, as when the picker opens.
     fn filter_picker(&mut self, rejudge: bool) {
+        if rejudge {
+            // The item can change under an open picker; a Slot on its default follows it.
+            let (own_types, item_level) = self.picker_item();
+            if let Some(picker) = self.picker.as_mut() {
+                if picker.filters.slot == picker.own_slot() {
+                    picker.filters.slot = own_types.first().copied();
+                }
+                picker.own_types = own_types;
+                picker.item_level = item_level;
+            }
+        }
         let Some(picker) = self.picker.as_ref() else {
             return;
         };
         let definitions = &self.game.catalog().definitions;
-        if self.definition_keys.len() != definitions.len() {
-            // The separator never comes from a search box, so no match spans two parts.
-            self.definition_keys = definitions
-                .iter()
-                .map(|definition| format!("{}\0{}\0{}", definition.name.to_lowercase(), definition.category.name().to_lowercase(), definition.id))
-                .collect();
+        if self.picker_index.keys.len() != definitions.len() {
+            self.picker_index = Index::build(self.game.catalog());
         }
         let candidates = if rejudge {
             let slot = if picker.adding { None } else { self.slot_state() };
@@ -3015,28 +3115,24 @@ impl ForgeEditor {
             None
         };
         let search = picker.search.to_lowercase();
-        let list: Vec<usize> = candidates
-            .as_ref()
-            .unwrap_or(&picker.candidates)
-            .iter()
-            .copied()
-            .filter(|&index| definitions.get(index).is_some())
-            .filter(|&index| search.is_empty() || self.definition_keys[index].contains(&search))
-            .filter(|&index| match picker.filter {
-                KindFilter::All => true,
-                KindFilter::Prefixes => definitions[index].kind == AffixKind::Prefix,
-                KindFilter::Suffixes => definitions[index].kind == AffixKind::Suffix,
-            })
-            .filter(|&index| PICKER_CATEGORIES[picker.category].1.is_none_or(|category| definitions[index].category == category))
-            .filter(|&index| class_fits(definitions[index].class_specificity, picker.class))
-            .collect();
-        let selected = picker.selected.filter(|id| list.iter().any(|&index| definitions[index].id == *id));
+        let outcome = picker::run(
+            &picker.query(&search),
+            candidates.as_ref().unwrap_or(&picker.candidates),
+            definitions,
+            &self.picker_index.keys,
+        );
+        let selected = picker.selected.filter(|id| outcome.list.iter().any(|&index| definitions[index].id == *id));
+        let rejudged = candidates.is_some();
         let picker = self.picker.as_mut().expect("the picker is open");
         if let Some(candidates) = candidates {
             picker.candidates = candidates;
         }
         picker.selected = selected;
-        picker.list = list;
+        picker.list = outcome.list;
+        picker.hidden_uniques = outcome.hidden_uniques;
+        if rejudged {
+            self.refresh_source_uniques();
+        }
     }
 
     pub fn picker_title(&self) -> &'static str {

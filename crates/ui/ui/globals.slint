@@ -2,6 +2,13 @@
 // carry the user's actions back as callbacks.
 
 
+// The window's size, for a popup that sizes itself to it: a PopupWindow is placed in the window, but nothing inside it can
+// ask how large that is. MainWindow keeps these current.
+export global WindowSize {
+    in-out property <length> width;
+    in-out property <length> height;
+}
+
 // One row of the navigation pane. `parent` marks the Trainer item, which holds pages but is never a page itself.
 export struct NavRow {
     id: string,

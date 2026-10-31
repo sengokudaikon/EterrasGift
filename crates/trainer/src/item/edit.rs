@@ -463,17 +463,19 @@ fn weaver_idol(item: &ForgeSnapshot) -> bool {
 fn accepts_category(item: &ForgeSnapshot, slot: i32, affix: i32) -> bool {
     slot == affix || (weaver_idol(item) && matches!(slot, 0 | 5) && matches!(affix, 0 | 5))
 }
+/// The equipment types whose affixes an item also takes beyond its own: some idol shapes take a larger shape's.
+pub fn shared_slots(item_type: u8, sub_type: u16) -> &'static [i32] {
+    if !(10..=14).contains(&sub_type) && sub_type != 17 {
+        return &[];
+    }
+    match item_type {
+        29 => &[31, 33],
+        30 => &[32],
+        _ => &[],
+    }
+}
 fn equipment(allowed: &[i32], item: &ForgeSnapshot) -> bool {
-    allowed.contains(&i32::from(item.item_type))
-        || if (10..=14).contains(&item.sub_type) || item.sub_type == 17 {
-            match item.item_type {
-                29 => allowed.iter().any(|t| matches!(t, 31 | 33)),
-                30 => allowed.contains(&32),
-                _ => false,
-            }
-        } else {
-            false
-        }
+    allowed.contains(&i32::from(item.item_type)) || shared_slots(item.item_type, item.sub_type).iter().any(|t| allowed.contains(t))
 }
 fn matches_class(requirement: i32, specificity: i32) -> bool {
     requirement == 31

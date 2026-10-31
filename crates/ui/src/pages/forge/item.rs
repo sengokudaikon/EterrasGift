@@ -124,21 +124,31 @@ pub struct AffixDefinition {
     pub writable: bool,
     /// The game's class specificity: 0 for any class, bit 0 classless, bits 1–5 the classes (the game's order).
     pub class_specificity: i32,
+    /// The item level it needs; a unique modifier's is its unique's.
+    pub level: u8,
+    /// The unique it was made from; none for an affix the game ships.
+    pub source: Option<AffixSource>,
+    /// Its stat tags (`picker::STAT_TAGS`), for the picker.
+    pub stat_tags: u64,
+}
+
+/// Where a unique modifier comes from.
+#[derive(Clone, Debug, PartialEq)]
+pub struct AffixSource {
+    pub unique: u16,
+    pub name: String,
+    /// The unique's equipment type.
+    pub item_type: u16,
+    /// The modifier's own words.
+    pub line: String,
 }
 
 impl AffixDefinition {
-    /// Its kind as one phrase, e.g. "Reforged set prefix" or "Suffix".
-    pub fn kind_description(&self) -> String {
-        kind_phrase(self.kind, self.category)
-    }
-
-    /// The picker's caption, each its own text: its kind and the tiers it has, which tell apart affixes that read the
-    /// same, e.g. ["Idol enchantment suffix", "T1 only"] and ["Suffix", "T1–T8"].
-    pub fn picker_description(&self) -> Vec<String> {
+    /// The tiers it has, which tell apart affixes that read the same: "T1 only", "T1–T8".
+    pub fn tiers_text(&self) -> String {
         const ONE_TIER: Phrase = Phrase::new("T1 only");
         const TIERS: Phrase = Phrase::new("T1–T{max}");
-        let tiers = if self.max_tier <= 1 { ONE_TIER.into() } else { TIERS.with(&[("max", &self.max_tier)]) };
-        vec![self.kind_description(), tiers]
+        if self.max_tier <= 1 { ONE_TIER.into() } else { TIERS.with(&[("max", &self.max_tier)]) }
     }
 
     pub fn is_reforged(&self) -> bool {
@@ -155,6 +165,9 @@ impl AffixDefinition {
             max_tier: 8,
             writable: false,
             class_specificity: 0,
+            level: 0,
+            source: None,
+            stat_tags: 0,
         }
     }
 }

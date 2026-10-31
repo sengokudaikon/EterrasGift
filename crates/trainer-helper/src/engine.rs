@@ -39,6 +39,8 @@ use windows_sys::Win32::System::{
 use std::sync::atomic::AtomicPtr;
 
 static PRESENCE_ERROR_REPORTED: AtomicBool = AtomicBool::new(false);
+/// Whether this load asked for affixes to be added: without that, leaving the game touches no list.
+static AFFIXES_REGISTERED: AtomicBool = AtomicBool::new(false);
 static WATCHDOG: Mutex<Watchdog> = Mutex::new(Watchdog::new());
 
 static STARTED: AtomicBool = AtomicBool::new(false);
@@ -221,6 +223,19 @@ unsafe fn edit_forge(write: &ForgeWrite) -> Response {
                 .edit_forge(attached, writer, Some(invoke), write.expected_manager(), write.expected(), write.mutation())
                 .map_err(write_failure)?;
             encoded(eg_trainer_wire::forge::encode(Some(&snapshot)))
+        })
+    }
+}
+
+unsafe fn register_affixes(expected_manager: u64, affixes: &[eg_trainer_wire::new_affixes::NewAffix]) -> Response {
+    AFFIXES_REGISTERED.store(true, SeqCst);
+    // SAFETY: only the established main thread calls this after original returns, under the start contract edit_forge relies on.
+    unsafe {
+        runtime_operation(|runtime, access, attached| {
+            access
+                .register_affixes(attached, runtime.writes, runtime.invocation, expected_manager, affixes)
+                .map_err(write_failure)?;
+            done(Vec::new())
         })
     }
 }
@@ -443,6 +458,8 @@ fn after_original(state: &Shared) {
                 // SAFETY: the same established thread plus this narrow operation's
                 // explicit exclusive-write/root/metadata contract described above.
                 Request::EditForge(write) => unsafe { edit_forge(&write) },
+                // SAFETY: as EditForge: the admitted main thread, and the operation rechecks the offline manager.
+                Request::RegisterAffixes { expected_manager, affixes, .. } => unsafe { register_affixes(expected_manager, &affixes) },
                 // SAFETY: verified callback thread and exclusive current-player scalar mutation span assumed by unsafe start.
                 Request::Discover | Request::Unload | Request::ClearHooks { .. } => server::failure(ResponseCode::Refused, "This request belongs on the control thread"),
             }
@@ -524,7 +541,19 @@ impl Backend for Control<'_> {
     }
     fn restore(&mut self) -> Result<(), String> {
         gameplay_hooks::clear(true)?;
-        restore_and_drain(self.hook, self.gate.as_ref())
+        let restored = restore_and_drain(self.hook, self.gate.as_ref());
+        // Nothing of the helper's stays in the game's lists, once no helper callback can be running. A failure is reported
+        // and does not keep the helper in: the entries are the game's own managed objects and run no code of ours. A drain
+        // that failed leaves them: a callback may still be adding, and the helper stays loaded, which already says restart.
+        if restored.is_ok() && AFFIXES_REGISTERED.load(SeqCst) {
+            // SAFETY: this control thread is attached to the retained runtime; each array is swapped whole.
+            let removed =
+                unsafe { Runtime::retained(self.module).and_then(|runtime| self.access.remove_registered_affixes(self.attached, runtime.writes).map_err(|e| e.to_string())) };
+            if let Err(error) = removed {
+                crate::report(format_args!("EG_HELPER_AFFIX_RESTORE {error}"));
+            }
+        }
+        restored
     }
 }
 

@@ -106,6 +106,15 @@ impl Catalog {
             .unwrap_or_else(|| AffixDefinition::unknown(id))
     }
 
+    /// A source unique's name, as its modifiers carry it.
+    pub fn source_name(&self, unique: u16) -> String {
+        self.definitions
+            .iter()
+            .filter_map(|definition| definition.source.as_ref())
+            .find(|source| source.unique == unique)
+            .map_or_else(String::new, |source| source.name.clone())
+    }
+
     pub fn tier_range(&self, id: u16, tier: u8) -> String {
         self.tier_ranges.get(&(id, tier)).cloned().unwrap_or_default()
     }

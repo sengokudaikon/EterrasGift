@@ -272,6 +272,24 @@ impl<T: Transport> Session<T> {
             Err(error) => Err(error),
         }
     }
+    /// Adds these definitions to the game's list, a few at a time. A refusal leaves the session ready and the list as it
+    /// was for that batch: an affix that could not be added is simply not offered by the game.
+    pub async fn register_affixes(&mut self, affixes: &[eg_trainer_wire::new_affixes::NewAffix]) -> Result<(), SessionError> {
+        for batch in affixes.chunks(eg_trainer_wire::new_affixes::MAX_PER_REQUEST) {
+            let expected_manager = self.offline_manager()?;
+            for affix in batch {
+                affix.validate().map_err(SessionError::Protocol)?;
+            }
+            let request = |dispatcher| Request::RegisterAffixes {
+                dispatcher,
+                expected_manager,
+                affixes: batch.to_vec(),
+            };
+            self.read_owned(request, |bytes| if bytes.is_empty() { Ok(()) } else { Err(ProtocolError::InvalidData) })
+                .await?;
+        }
+        Ok(())
+    }
     /// Read only an already-completed runtime locale selection and the game application version.
     /// This does not start localization or wait for its asynchronous initialization.
     pub async fn read_locale(&mut self) -> Result<GameLocale, SessionError> {
@@ -303,7 +321,12 @@ impl<T: Transport> Session<T> {
         let request = request(dispatcher);
         let optional_description = matches!(
             request,
-            Request::DescribeImplicits(_) | Request::DescribeUnique(_) | Request::PreviewUnique(_) | Request::MapRoll(_) | Request::MapModifierRoll(_)
+            Request::DescribeImplicits(_)
+                | Request::DescribeUnique(_)
+                | Request::PreviewUnique(_)
+                | Request::MapRoll(_)
+                | Request::MapModifierRoll(_)
+                | Request::RegisterAffixes { .. }
         );
         let result = self.request(&request).await.and_then(|bytes| decode(&bytes).map_err(SessionError::Protocol));
         match result {

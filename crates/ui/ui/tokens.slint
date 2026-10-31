@@ -245,6 +245,28 @@ export global Tokens {
     out property <length> replace-flyout-width: 380px;
     out property <length> replace-list-max-height: 300px;
 
+    // The affix picker in a window wider than narrow, which has room for its filters' columns, and how tall it may grow: the window's height less a margin rules below that, and its list takes what the rest leaves
+    out property <length> affix-picker-width: 620px;
+    out property <length> affix-picker-height: 640px;
+    out property <length> affix-picker-window-margin: 8px;
+
+    // A picker row: its name's line over its pills, 6 above and below, one fixed height so a list of thousands never measures its rows
+    out property <length> affix-picker-row-height: 56px;
+    out property <length> affix-picker-name-height: 18px;
+    out property <length> affix-picker-list-min-height: 112px;
+
+    // A fact's pill in a row and a filter's chip above the list, the chip tall enough to aim at; no pill shrinks past a few letters
+    out property <length> pill-height: 20px;
+    out property <length> pill-chip-height: 24px;
+    out property <length> pill-min-width: 36px;
+    out property <Inset> pill-padding: { left: 6px, top: 0px, right: 6px, bottom: 0px };
+
+    // A pill naming a unique wears the game's unique frame, stepped up in a contrast theme
+    out property <brush> pill-unique-border-brush: high-contrast ? high-contrast-strong-line-brush : unique-border-brush;
+
+    // How many ticks a several-picks list shows before it scrolls
+    out property <int> multi-choice-visible-rows: 10;
+
     // Waiting: ash drifting up the empty editor. A low frame rate beside the game; one mote per this many square pixels, capped; about a fifth are embers, brighter and with a faint glow this many radii wide
     out property <int> ash-frames-per-second: 24;
     out property <float> ash-mote-area: 11000;

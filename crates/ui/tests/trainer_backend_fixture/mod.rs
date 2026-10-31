@@ -20,7 +20,7 @@ use eg_trainer::{
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 mod world;
-pub(super) use world::item_captures;
+pub(super) use world::{item_captures, picker_captures};
 
 struct Data {
     target: ProcessIdentity,
@@ -406,6 +406,8 @@ fn fixture_catalog() -> GameCatalog {
                         tier_count: 8,
                         standard_effect: 0.0,
                         numeric: Availability::Unavailable { reason: "not mapped".into() },
+                        level_requirement: 0,
+                        source: None,
                     },
                 )
             })

@@ -8,6 +8,7 @@
 pub mod editor;
 pub mod game;
 pub mod item;
+pub mod picker;
 pub mod rows;
 mod view;
 pub mod worker;

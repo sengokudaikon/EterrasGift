@@ -169,12 +169,15 @@ impl Service {
                 catalog.checked_at = Some(jiff::Timestamp::now());
                 GameData::Ready(Arc::new(catalog))
             }
-            None => match files::read(folder) {
+            None => match files::read_with_ledger(folder, self.store.as_ref().map(Store::ledger).as_deref()) {
                 Ok(mut catalog) => {
                     let now = jiff::Timestamp::now();
                     catalog.checked_at = Some(now);
                     catalog.updated_at = Some(now);
-                    if let Some(Err(e)) = self.store.as_ref().map(|store| store.save(folder, &catalog)) {
+                    if let Some(problem) = catalog.ledger_problem.clone() {
+                        // Not saved: the next start tries the ledger again rather than reusing a catalog without them.
+                        self.fault::<()>("Reading the unique modifier IDs", &problem);
+                    } else if let Some(Err(e)) = self.store.as_ref().map(|store| store.save(folder, &catalog)) {
                         self.fault::<()>("Saving the game data", &e);
                     }
                     GameData::Ready(Arc::new(catalog))
@@ -209,6 +212,10 @@ impl Store {
             cache: CatalogCache::new(directory.join("catalog")),
             directory,
         }
+    }
+
+    fn ledger(&self) -> PathBuf {
+        self.directory.join(crate::definitions::unique_mods::LEDGER_FILE)
     }
 
     fn identity(binary_hash: &str, metadata_hash: &str) -> CatalogIdentity {

@@ -10,6 +10,7 @@ mod connection;
 mod faults;
 mod hooks;
 mod mapping;
+mod new_affixes;
 mod profiles;
 mod snapshot;
 mod unique;
@@ -171,6 +172,8 @@ pub struct BackendOptions {
     /// The profiles as saved, and where a change to them goes; without a saver they last for the run.
     pub profiles: ProfileBook,
     pub save_profiles: Option<ProfileSaver>,
+    /// Where the unique modifiers in use are kept between runs; without it they last for the run.
+    pub unique_mods_in_use: Option<std::path::PathBuf>,
 }
 impl Default for BackendOptions {
     fn default() -> Self {
@@ -183,6 +186,7 @@ impl Default for BackendOptions {
             game_data: None,
             profiles: ProfileBook::default(),
             save_profiles: None,
+            unique_mods_in_use: None,
         }
     }
 }
@@ -342,6 +346,10 @@ where
     character: Option<eg_core::game_log::LoggedCharacter>,
     /// The profile of the character in play in this connection.
     live: Option<ProfileKey>,
+    /// The added affixes in use, kept between runs.
+    in_use: crate::definitions::unique_mods::InUse,
+    /// Those this connection has had the game add, or has given up on.
+    registered: std::collections::BTreeSet<u16>,
 }
 
 pub fn service<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock>(
@@ -352,6 +360,7 @@ pub fn service<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K
     options: BackendOptions,
 ) -> (BackendHandle, BackendWorker<P, C, L, K>) {
     let game_data = options.game_data.as_ref().map(GameDataHandle::subscribe);
+    let in_use = crate::definitions::unique_mods::InUse::open(options.unique_mods_in_use.clone());
     let state = BackendSnapshot {
         revision: 0,
         generation: 0,
@@ -419,6 +428,8 @@ pub fn service<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K
             games_running: false,
             character: None,
             live: None,
+            in_use,
+            registered: std::collections::BTreeSet::new(),
         },
     )
 }
@@ -868,6 +879,7 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
             return Err(error);
         }
         self.connection = Some(connection);
+        self.registered.clear();
         self.state.attached = Some(target.clone());
         self.state.retained_helper = Some(RetainedHelper {
             target: target.clone(),
@@ -890,6 +902,7 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
             self.state.activity = Some(Activity::ReadingForge);
             self.publish_if_current(epoch)?;
             let forge = self.call(epoch, target, async |connection| connection.read_forge().await).await??;
+            self.register_in_play(epoch, target, &catalog, forge.as_ref()).await?;
             let implicits = match &forge {
                 Some(item) => self.call(epoch, target, async |connection| connection.describe_implicits(item).await).await??,
                 None => None,
@@ -988,6 +1001,7 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
                     .ok_or_else(|| BackendError::blocked(ErrorKind::Protocol, "current catalog missing"))?
             };
             let forge = self.call(epoch, &target, async |connection| connection.read_forge().await).await??;
+            self.register_in_play(epoch, &target, &data, forge.as_ref()).await?;
             // The game builds an item's implicit text with its tooltip code on its main thread: the monitor keeps the
             // text it has while the base and implicit rolls are unchanged, under the same catalog.
             let kept = match &forge {

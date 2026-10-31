@@ -4,6 +4,7 @@
 
 import { MessageTone } from "../common.slint";
 import { ForgeText } from "../../strings/forge.slint";
+import { PillView } from "../../widgets/pill.slint";
 
 // Which value editor a cell edits: an affix row's value, a roll of a unique or implicit line, or a numeric item field.
 export enum CellKind { affix, unique, implicit, field }
@@ -110,7 +111,9 @@ export struct MenuOptionView {
     available: bool,
     current: bool
 }
-export struct PickerRowView { name: string, facts: [string], reforged: bool }
+// An affix picker's row: its name, its facts as pills, all the rest for its tip, one fact a line, and pills and tip together
+// for a screen reader.
+export struct PickerRowView { name: string, pills: [PillView], detail: string, spoken: string }
 
 // A saved item template: its name, what it holds, and both in one line for screen readers.
 export struct TemplateRowView { name: string, facts: [string], label: string }
@@ -253,11 +256,36 @@ export global ForgeState {
     in property <string> picker-search;
     in property <int> picker-filter;
     in property <bool> picker-allow;
-    // The kind and class filters: their choices (set once) and the chosen ones.
+    // The filters: each one's choices and the chosen one; a choice its list no longer holds shows its `-text`.
+    in property <[string]> picker-sides;
     in property <[string]> picker-categories;
     in property <[string]> picker-classes;
     in property <int> picker-category;
     in property <int> picker-class;
+    in property <[string]> picker-slots;
+    in property <int> picker-slot;
+    in property <string> picker-slot-text;
+    in property <bool> picker-slot-active;
+    in property <[string]> picker-levels;
+    in property <int> picker-level;
+    in property <[string]> picker-sources;
+    in property <int> picker-source;
+    in property <string> picker-source-text;
+    in property <bool> picker-source-active;
+    in property <[string]> picker-tags;
+    in property <[bool]> picker-tags-on;
+    in property <string> picker-tags-text;
+    in property <bool> picker-tags-active;
+    // The filters in force, off their defaults, each with what it takes to clear it.
+    in property <[string]> picker-chips;
+    in property <string> picker-count;
+    // The offer to list the unique modifiers the default Source holds back; empty when none are.
+    in property <string> picker-hidden;
+    // Why the list is empty, and which ways out it offers.
+    in property <string> picker-empty-reason;
+    in property <bool> picker-empty-clear-search;
+    in property <bool> picker-empty-clear-filters;
+    in property <bool> picker-empty-allow;
     in property <bool> picker-allow-enabled;
     in property <[PickerRowView]> picker-rows;
     in property <int> picker-selected: -1;
@@ -315,6 +343,13 @@ export global ForgeState {
     callback picker-allow-changed(bool);
     callback picker-category-changed(int);
     callback picker-class-changed(int);
+    callback picker-slot-changed(int);
+    callback picker-level-changed(int);
+    callback picker-source-changed(int);
+    callback picker-tag-toggled(int, bool);
+    callback picker-chip-removed(int);
+    callback picker-clear-filters();
+    callback picker-show-uniques();
     callback picker-select(int);
     callback use-picker();
     callback cancel-picker();

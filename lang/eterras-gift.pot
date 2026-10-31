@@ -1641,10 +1641,6 @@ msgstr ""
 msgid "A set item holds no affixes. Remove them first."
 msgstr ""
 
-#: crates/ui/src/pages/forge/editor.rs
-msgid "Acolyte"
-msgstr ""
-
 #: crates/ui/src/pages/forge/editor.rs crates/ui/ui/strings/forge.slint
 msgid "Add affix"
 msgstr ""
@@ -1663,14 +1659,6 @@ msgstr ""
 
 #: crates/ui/src/pages/forge/editor.rs
 msgid "Allowed by \"I know what I'm doing\". The game doesn't roll it here."
-msgstr ""
-
-#: crates/ui/src/pages/forge/editor.rs
-msgid "Any class"
-msgstr ""
-
-#: crates/ui/src/pages/forge/editor.rs
-msgid "Any kind"
 msgstr ""
 
 #: crates/ui/src/pages/forge/editor.rs
@@ -1831,10 +1819,6 @@ msgstr ""
 msgid "Exalted"
 msgstr ""
 
-#: crates/ui/src/pages/forge/editor.rs crates/ui/src/pages/forge/item.rs
-msgid "Experimental"
-msgstr ""
-
 #: crates/ui/src/pages/forge/editor.rs
 msgid "Fits this item."
 msgstr ""
@@ -1861,10 +1845,6 @@ msgstr ""
 
 #: crates/ui/src/pages/forge/editor.rs
 msgid "Holds no affixes. Remove them first."
-msgstr ""
-
-#: crates/ui/src/pages/forge/editor.rs crates/ui/src/pages/forge/item.rs
-msgid "Idol enchantment"
 msgstr ""
 
 #: crates/ui/src/pages/forge/editor.rs
@@ -1937,7 +1917,7 @@ msgstr ""
 msgid "Legendary potential"
 msgstr ""
 
-#: crates/ui/src/pages/forge/editor.rs
+#: crates/ui/src/pages/forge/editor.rs crates/ui/ui/strings/forge.slint
 msgid "Level requirement"
 msgstr ""
 
@@ -1955,10 +1935,6 @@ msgstr ""
 
 #: crates/ui/src/pages/forge/editor.rs
 msgid "Lowers {n} affixes below T6."
-msgstr ""
-
-#: crates/ui/src/pages/forge/editor.rs
-msgid "Mage"
 msgstr ""
 
 #: crates/ui/src/pages/forge/editor.rs
@@ -1994,10 +1970,6 @@ msgid "No affix slots on a unique idol. Adding needs \"I know what I'm doing\"."
 msgstr ""
 
 #: crates/ui/src/pages/forge/editor.rs
-msgid "No class requirement"
-msgstr ""
-
-#: crates/ui/src/pages/forge/editor.rs
 msgid "No drafts"
 msgstr ""
 
@@ -2029,10 +2001,6 @@ msgstr ""
 msgid "Nothing was applied."
 msgstr ""
 
-#: crates/ui/src/pages/forge/editor.rs crates/ui/src/pages/forge/item.rs
-msgid "Personal"
-msgstr ""
-
 #: crates/ui/src/pages/forge/editor.rs
 msgid "Place an item in the forge first."
 msgstr ""
@@ -2046,15 +2014,7 @@ msgid "Previous values restored; readback confirmed."
 msgstr ""
 
 #: crates/ui/src/pages/forge/editor.rs
-msgid "Primalist"
-msgstr ""
-
-#: crates/ui/src/pages/forge/editor.rs
 msgid "Raises {name} to T6."
-msgstr ""
-
-#: crates/ui/src/pages/forge/editor.rs crates/ui/src/pages/forge/item.rs
-msgid "Reforged set"
 msgstr ""
 
 #: crates/ui/src/pages/forge/editor.rs
@@ -2075,10 +2035,6 @@ msgstr ""
 
 #: crates/ui/src/pages/forge/editor.rs
 msgid "Restores {n} affixes to their tiers in game."
-msgstr ""
-
-#: crates/ui/src/pages/forge/editor.rs
-msgid "Rogue"
 msgstr ""
 
 #: crates/ui/src/pages/forge/editor.rs
@@ -2106,15 +2062,7 @@ msgid "Select an affix to see its tiers."
 msgstr ""
 
 #: crates/ui/src/pages/forge/editor.rs
-msgid "Sentinel"
-msgstr ""
-
-#: crates/ui/src/pages/forge/editor.rs
 msgid "Set by the base. Their values can reroll, and a new base replaces them."
-msgstr ""
-
-#: crates/ui/src/pages/forge/editor.rs
-msgid "Standard"
 msgstr ""
 
 #: crates/ui/src/pages/forge/editor.rs
@@ -2261,14 +2209,6 @@ msgstr ""
 msgid "T{tier}"
 msgstr ""
 
-#: crates/ui/src/pages/forge/editor.rs
-msgid "T{tier} {range}"
-msgstr ""
-
-#: crates/ui/src/pages/forge/editor.rs
-msgid "T{tier} {range}"
-msgstr ""
-
 #: crates/ui/src/pages/forge/editor.rs crates/ui/ui/strings/mods.slint
 msgid "Undo"
 msgstr ""
@@ -2289,15 +2229,11 @@ msgstr ""
 msgid "Undo the last draft change (Ctrl+Z)"
 msgstr ""
 
-#: crates/ui/src/pages/forge/editor.rs crates/ui/src/pages/forge/item.rs
-msgid "Unique modifier"
-msgstr ""
-
 #: crates/ui/src/pages/forge/editor.rs
 msgid "Unique modifier rolls changed in the game after you drafted them. Discard those drafts and edit them again. Nothing was applied."
 msgstr ""
 
-#: crates/ui/src/pages/forge/editor.rs crates/ui/ui/strings/forge.slint
+#: crates/ui/src/pages/forge/editor.rs crates/ui/src/pages/forge/picker.rs crates/ui/ui/strings/forge.slint
 msgid "Unique modifiers"
 msgstr ""
 
@@ -2311,10 +2247,6 @@ msgstr ""
 
 #: crates/ui/src/pages/forge/editor.rs
 msgid "Wait for the write in progress to finish, then draft the template."
-msgstr ""
-
-#: crates/ui/src/pages/forge/editor.rs crates/ui/src/pages/forge/item.rs
-msgid "Weaver idol"
 msgstr ""
 
 #: crates/ui/src/pages/forge/editor.rs
@@ -2385,7 +2317,7 @@ msgstr ""
 msgid "{name}: {problem}"
 msgstr ""
 
-#: crates/ui/src/pages/forge/editor.rs crates/ui/src/pages/settings/trainer.rs
+#: crates/ui/src/pages/forge/editor.rs crates/ui/src/pages/forge/picker.rs crates/ui/src/pages/settings/trainer.rs
 msgid "{n} affix"
 msgid_plural "{n} affixes"
 msgstr[0] ""
@@ -2425,11 +2357,6 @@ msgstr[1] ""
 msgid "{problem} Nothing was applied."
 msgstr ""
 
-#: crates/ui/src/pages/forge/editor.rs crates/ui/src/pages/forge/item.rs
-msgctxt "affix category"
-msgid "Corrupted"
-msgstr ""
-
 #: crates/ui/src/pages/forge/editor.rs
 msgctxt "rarity"
 msgid "Legendary"
@@ -2459,6 +2386,10 @@ msgstr ""
 msgid "Descriptions unavailable."
 msgstr ""
 
+#: crates/ui/src/pages/forge/item.rs crates/ui/src/pages/forge/picker.rs
+msgid "Experimental"
+msgstr ""
+
 #: crates/ui/src/pages/forge/item.rs
 msgid "Experimental prefix"
 msgstr ""
@@ -2467,12 +2398,20 @@ msgstr ""
 msgid "Experimental suffix"
 msgstr ""
 
+#: crates/ui/src/pages/forge/item.rs crates/ui/src/pages/forge/picker.rs
+msgid "Idol enchantment"
+msgstr ""
+
 #: crates/ui/src/pages/forge/item.rs
 msgid "Idol enchantment prefix"
 msgstr ""
 
 #: crates/ui/src/pages/forge/item.rs
 msgid "Idol enchantment suffix"
+msgstr ""
+
+#: crates/ui/src/pages/forge/item.rs crates/ui/src/pages/forge/picker.rs
+msgid "Personal"
 msgstr ""
 
 #: crates/ui/src/pages/forge/item.rs
@@ -2485,6 +2424,10 @@ msgstr ""
 
 #: crates/ui/src/pages/forge/item.rs
 msgid "Prefix (special affix {value})"
+msgstr ""
+
+#: crates/ui/src/pages/forge/item.rs crates/ui/src/pages/forge/picker.rs
+msgid "Reforged set"
 msgstr ""
 
 #: crates/ui/src/pages/forge/item.rs
@@ -2519,6 +2462,10 @@ msgstr ""
 msgid "T1–T{max}"
 msgstr ""
 
+#: crates/ui/src/pages/forge/item.rs crates/ui/src/pages/forge/picker.rs
+msgid "Unique modifier"
+msgstr ""
+
 #: crates/ui/src/pages/forge/item.rs
 msgid "Unique modifier prefix"
 msgstr ""
@@ -2543,12 +2490,331 @@ msgstr ""
 msgid "Unknown type {value}"
 msgstr ""
 
+#: crates/ui/src/pages/forge/item.rs crates/ui/src/pages/forge/picker.rs
+msgid "Weaver idol"
+msgstr ""
+
 #: crates/ui/src/pages/forge/item.rs
 msgid "Weaver idol prefix"
 msgstr ""
 
 #: crates/ui/src/pages/forge/item.rs
 msgid "Weaver idol suffix"
+msgstr ""
+
+#: crates/ui/src/pages/forge/item.rs crates/ui/src/pages/forge/picker.rs
+msgctxt "affix category"
+msgid "Corrupted"
+msgstr ""
+
+#: crates/ui/src/pages/forge/picker.rs
+msgid "Acolyte"
+msgstr ""
+
+#: crates/ui/src/pages/forge/picker.rs
+msgid "Ailment"
+msgstr ""
+
+#: crates/ui/src/pages/forge/picker.rs
+msgid "All sources"
+msgstr ""
+
+#: crates/ui/src/pages/forge/picker.rs
+msgid "Any class"
+msgstr ""
+
+#: crates/ui/src/pages/forge/picker.rs
+msgid "Any kind"
+msgstr ""
+
+#: crates/ui/src/pages/forge/picker.rs
+msgid "Any level"
+msgstr ""
+
+#: crates/ui/src/pages/forge/picker.rs
+msgid "Any slot"
+msgstr ""
+
+#: crates/ui/src/pages/forge/picker.rs
+msgid "Any tag"
+msgstr ""
+
+#: crates/ui/src/pages/forge/picker.rs
+msgid "Armor"
+msgstr ""
+
+#: crates/ui/src/pages/forge/picker.rs
+msgid "Attributes"
+msgstr ""
+
+#: crates/ui/src/pages/forge/picker.rs
+msgid "Block"
+msgstr ""
+
+#: crates/ui/src/pages/forge/picker.rs
+msgid "Bow"
+msgstr ""
+
+#: crates/ui/src/pages/forge/picker.rs
+msgid "Buff"
+msgstr ""
+
+#: crates/ui/src/pages/forge/picker.rs
+msgid "Channelling"
+msgstr ""
+
+#: crates/ui/src/pages/forge/picker.rs
+msgid "Class: {classes}"
+msgstr ""
+
+#: crates/ui/src/pages/forge/picker.rs
+msgid "Cold"
+msgstr ""
+
+#: crates/ui/src/pages/forge/picker.rs
+msgid "Critical strike"
+msgstr ""
+
+#: crates/ui/src/pages/forge/picker.rs
+msgid "Curse"
+msgstr ""
+
+#: crates/ui/src/pages/forge/picker.rs
+msgid "Damage"
+msgstr ""
+
+#: crates/ui/src/pages/forge/picker.rs
+msgid "Damage over time"
+msgstr ""
+
+#: crates/ui/src/pages/forge/picker.rs
+msgid "Dodge"
+msgstr ""
+
+#: crates/ui/src/pages/forge/picker.rs
+msgid "Elemental"
+msgstr ""
+
+#: crates/ui/src/pages/forge/picker.rs
+msgid "Endurance"
+msgstr ""
+
+#: crates/ui/src/pages/forge/picker.rs
+msgid "Fire"
+msgstr ""
+
+#: crates/ui/src/pages/forge/picker.rs
+msgid "Fits this item"
+msgstr ""
+
+#: crates/ui/src/pages/forge/picker.rs
+msgid "Fits this item (level {level})"
+msgstr ""
+
+#: crates/ui/src/pages/forge/picker.rs
+msgid "From {name}"
+msgstr ""
+
+#: crates/ui/src/pages/forge/picker.rs
+msgid "From {unique} ({slot})"
+msgstr ""
+
+#: crates/ui/src/pages/forge/picker.rs
+msgid "Full health"
+msgstr ""
+
+#: crates/ui/src/pages/forge/picker.rs
+msgid "Game affixes"
+msgstr ""
+
+#: crates/ui/src/pages/forge/picker.rs
+msgid "Health"
+msgstr ""
+
+#: crates/ui/src/pages/forge/picker.rs
+msgid "High health"
+msgstr ""
+
+#: crates/ui/src/pages/forge/picker.rs
+msgid "Item type {id}"
+msgstr ""
+
+#: crates/ui/src/pages/forge/picker.rs
+msgid "Lightning"
+msgstr ""
+
+#: crates/ui/src/pages/forge/picker.rs
+msgid "Low health"
+msgstr ""
+
+#: crates/ui/src/pages/forge/picker.rs
+msgid "Mage"
+msgstr ""
+
+#: crates/ui/src/pages/forge/picker.rs
+msgid "Mana"
+msgstr ""
+
+#: crates/ui/src/pages/forge/picker.rs
+msgid "Melee"
+msgstr ""
+
+#: crates/ui/src/pages/forge/picker.rs
+msgid "Minion"
+msgstr ""
+
+#: crates/ui/src/pages/forge/picker.rs
+msgid "Necrotic"
+msgstr ""
+
+#: crates/ui/src/pages/forge/picker.rs
+msgid "No affix fits this item."
+msgstr ""
+
+#: crates/ui/src/pages/forge/picker.rs
+msgid "No affix matches these filters."
+msgstr ""
+
+#: crates/ui/src/pages/forge/picker.rs
+msgid "No affix matches this search with these filters."
+msgstr ""
+
+#: crates/ui/src/pages/forge/picker.rs
+msgid "No affix matches this search."
+msgstr ""
+
+#: crates/ui/src/pages/forge/picker.rs
+msgid "No class requirement"
+msgstr ""
+
+#: crates/ui/src/pages/forge/picker.rs
+msgid "On hit"
+msgstr ""
+
+#: crates/ui/src/pages/forge/picker.rs
+msgid "Physical"
+msgstr ""
+
+#: crates/ui/src/pages/forge/picker.rs
+msgid "Poison"
+msgstr ""
+
+#: crates/ui/src/pages/forge/picker.rs
+msgid "Potion"
+msgstr ""
+
+#: crates/ui/src/pages/forge/picker.rs crates/ui/ui/strings/forge.slint
+msgid "Prefix or suffix"
+msgstr ""
+
+#: crates/ui/src/pages/forge/picker.rs
+msgid "Prefixes"
+msgstr ""
+
+#: crates/ui/src/pages/forge/picker.rs
+msgid "Primalist"
+msgstr ""
+
+#: crates/ui/src/pages/forge/picker.rs
+msgid "Requires level {level}"
+msgstr ""
+
+#: crates/ui/src/pages/forge/picker.rs
+msgid "Resistance"
+msgstr ""
+
+#: crates/ui/src/pages/forge/picker.rs
+msgid "Rogue"
+msgstr ""
+
+#: crates/ui/src/pages/forge/picker.rs
+msgid "Rolls on {slots}"
+msgstr ""
+
+#: crates/ui/src/pages/forge/picker.rs
+msgid "Rolls on {slots} and {more} more"
+msgstr ""
+
+#: crates/ui/src/pages/forge/picker.rs
+msgid "Sentinel"
+msgstr ""
+
+#: crates/ui/src/pages/forge/picker.rs
+msgid "Show {n} unique modifier"
+msgid_plural "Show {n} unique modifiers"
+msgstr[0] ""
+msgstr[1] ""
+
+#: crates/ui/src/pages/forge/picker.rs
+msgid "Skill"
+msgstr ""
+
+#: crates/ui/src/pages/forge/picker.rs
+msgid "Slot: {name}"
+msgstr ""
+
+#: crates/ui/src/pages/forge/picker.rs
+msgid "Speed"
+msgstr ""
+
+#: crates/ui/src/pages/forge/picker.rs
+msgid "Spell"
+msgstr ""
+
+#: crates/ui/src/pages/forge/picker.rs
+msgid "Standard"
+msgstr ""
+
+#: crates/ui/src/pages/forge/picker.rs
+msgid "Stun"
+msgstr ""
+
+#: crates/ui/src/pages/forge/picker.rs
+msgid "Suffixes"
+msgstr ""
+
+#: crates/ui/src/pages/forge/picker.rs
+msgid "Tags: {tags}"
+msgstr ""
+
+#: crates/ui/src/pages/forge/picker.rs
+msgid "These affixes roll on another slot."
+msgstr ""
+
+#: crates/ui/src/pages/forge/picker.rs
+msgid "Throwing"
+msgstr ""
+
+#: crates/ui/src/pages/forge/picker.rs
+msgid "Totem"
+msgstr ""
+
+#: crates/ui/src/pages/forge/picker.rs
+msgid "Transform"
+msgstr ""
+
+#: crates/ui/src/pages/forge/picker.rs
+msgid "T{tier} {range}"
+msgstr ""
+
+#: crates/ui/src/pages/forge/picker.rs
+msgid "Unique modifiers need \"I know what I'm doing\" in Settings."
+msgstr ""
+
+#: crates/ui/src/pages/forge/picker.rs
+msgid "Up to level {level}"
+msgstr ""
+
+#: crates/ui/src/pages/forge/picker.rs
+msgid "Void"
+msgstr ""
+
+#: crates/ui/src/pages/forge/picker.rs
+msgid "Ward"
+msgstr ""
+
+#: crates/ui/src/pages/forge/picker.rs
+msgid "{slot} +{more}"
 msgstr ""
 
 #: crates/ui/src/pages/forge/rows.rs
@@ -2745,6 +3011,10 @@ msgstr ""
 
 #: crates/ui/src/pages/forge/worker.rs
 msgid "This roll is unsupported."
+msgstr ""
+
+#: crates/ui/src/pages/forge/worker.rs
+msgid "Unique #{id}"
 msgstr ""
 
 #: crates/ui/src/pages/forge/worker.rs
@@ -3512,6 +3782,14 @@ msgid "About implicits"
 msgstr ""
 
 #: crates/ui/ui/strings/forge.slint
+msgid "About incompatible affixes"
+msgstr ""
+
+#: crates/ui/ui/strings/forge.slint crates/ui/ui/strings/trainer.slint
+msgid "About {}"
+msgstr ""
+
+#: crates/ui/ui/strings/forge.slint
 msgid "Affix"
 msgstr ""
 
@@ -3521,10 +3799,6 @@ msgstr ""
 
 #: crates/ui/ui/strings/forge.slint
 msgid "Affixes only"
-msgstr ""
-
-#: crates/ui/ui/strings/forge.slint
-msgid "All"
 msgstr ""
 
 #: crates/ui/ui/strings/forge.slint
@@ -3561,6 +3835,14 @@ msgstr ""
 
 #: crates/ui/ui/strings/forge.slint
 msgid "Class"
+msgstr ""
+
+#: crates/ui/ui/strings/forge.slint
+msgid "Clear filters"
+msgstr ""
+
+#: crates/ui/ui/strings/forge.slint
+msgid "Clear search"
 msgstr ""
 
 #: crates/ui/ui/strings/forge.slint crates/ui/ui/strings/trainer.slint
@@ -3608,6 +3890,10 @@ msgid "Draft: {}"
 msgstr ""
 
 #: crates/ui/ui/strings/forge.slint
+msgid "Filters"
+msgstr ""
+
+#: crates/ui/ui/strings/forge.slint
 msgid "Item: {}"
 msgstr ""
 
@@ -3628,7 +3914,15 @@ msgid "Keep the current draft (Esc)"
 msgstr ""
 
 #: crates/ui/ui/strings/forge.slint
-msgid "Lists affixes this slot can't roll. Writing one needs \"I know what I'm doing\"."
+msgid "List incompatible affixes"
+msgstr ""
+
+#: crates/ui/ui/strings/forge.slint
+msgid "List unique modifiers too"
+msgstr ""
+
+#: crates/ui/ui/strings/forge.slint
+msgid "Lists affixes this item can't roll. Writing one needs \"I know what I'm doing\"."
 msgstr ""
 
 #: crates/ui/ui/strings/forge.slint
@@ -3648,11 +3942,7 @@ msgid "Name or ID"
 msgstr ""
 
 #: crates/ui/ui/strings/forge.slint
-msgid "Name, category or ID"
-msgstr ""
-
-#: crates/ui/ui/strings/forge.slint
-msgid "No affixes match this search."
+msgid "Name, unique, category or ID"
 msgstr ""
 
 #: crates/ui/ui/strings/forge.slint
@@ -3665,10 +3955,6 @@ msgstr ""
 
 #: crates/ui/ui/strings/forge.slint
 msgid "Nothing applied to this item yet."
-msgstr ""
-
-#: crates/ui/ui/strings/forge.slint
-msgid "Prefixes"
 msgstr ""
 
 #: crates/ui/ui/strings/forge.slint
@@ -3685,6 +3971,10 @@ msgstr ""
 
 #: crates/ui/ui/strings/forge.slint
 msgid "Remove affix"
+msgstr ""
+
+#: crates/ui/ui/strings/forge.slint
+msgid "Remove filter: {}"
 msgstr ""
 
 #: crates/ui/ui/strings/forge.slint
@@ -3744,7 +4034,19 @@ msgid "Show or hide the changes"
 msgstr ""
 
 #: crates/ui/ui/strings/forge.slint
+msgid "Show or hide the filters"
+msgstr ""
+
+#: crates/ui/ui/strings/forge.slint
 msgid "Show this draft"
+msgstr ""
+
+#: crates/ui/ui/strings/forge.slint
+msgid "Slot"
+msgstr ""
+
+#: crates/ui/ui/strings/forge.slint
+msgid "Source"
 msgstr ""
 
 #: crates/ui/ui/strings/forge.slint
@@ -3752,7 +4054,7 @@ msgid "Stale draft"
 msgstr ""
 
 #: crates/ui/ui/strings/forge.slint
-msgid "Suffixes"
+msgid "Stat tags"
 msgstr ""
 
 #: crates/ui/ui/strings/forge.slint
@@ -4061,10 +4363,6 @@ msgstr ""
 
 #: crates/ui/ui/strings/shell.slint
 msgid "Expand navigation"
-msgstr ""
-
-#: crates/ui/ui/strings/trainer.slint
-msgid "About {}"
 msgstr ""
 
 #: crates/ui/ui/strings/trainer.slint

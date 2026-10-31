@@ -82,6 +82,8 @@ fn catalog(base_implicits: bool, class_affixes: bool) -> GameCatalog {
                         })
                         .collect(),
                 ),
+                level_requirement: 0,
+                source: None,
             },
         )
     };
@@ -156,25 +158,36 @@ fn catalog(base_implicits: bool, class_affixes: bool) -> GameCatalog {
             weavers_touch: range(5, 14),
             level_requirement: range(0, 100),
         },
-        bases: [(
-            RING as u8,
-            ItemTypeDefinition {
-                item_type: RING as u8,
-                name: name("Ring"),
-                sub_types: vec![
-                    base(
-                        2,
-                        "Gold Ring",
-                        20,
-                        false,
-                        class(SENTINEL),
-                        implicits(vec![line("+10 Armor", "+16 Armor"), line("+5% Cold Resistance", "+5% Cold Resistance")]),
-                    ),
-                    base(5, "Sapphire Ring", 28, false, 0, implicits(vec![line("+12% Fire Resistance", "+18% Fire Resistance")])),
-                    base(9, "Obsidian Ring", 40, true, class(ACOLYTE), Vec::new()),
-                ],
-            },
-        )]
+        bases: [
+            (
+                RING as u8,
+                ItemTypeDefinition {
+                    item_type: RING as u8,
+                    name: name("Ring"),
+                    sub_types: vec![
+                        base(
+                            2,
+                            "Gold Ring",
+                            20,
+                            false,
+                            class(SENTINEL),
+                            implicits(vec![line("+10 Armor", "+16 Armor"), line("+5% Cold Resistance", "+5% Cold Resistance")]),
+                        ),
+                        base(5, "Sapphire Ring", 28, false, 0, implicits(vec![line("+12% Fire Resistance", "+18% Fire Resistance")])),
+                        base(9, "Obsidian Ring", 40, true, class(ACOLYTE), Vec::new()),
+                    ],
+                },
+            ),
+            // Named for the picker's rows; no base of its own to change to.
+            (
+                BOOTS as u8,
+                ItemTypeDefinition {
+                    item_type: BOOTS as u8,
+                    name: name("Boots"),
+                    sub_types: Vec::new(),
+                },
+            ),
+        ]
         .into_iter()
         .collect(),
         affixes,
@@ -1331,18 +1344,18 @@ pub(in super::super) fn item_captures(session: &Session) {
     session.click(145.0, row_y(4) - 2.0);
     assert_eq!(forge.ui.global::<ForgeState>().get_picker_title(), "Add affix");
     session.capture(&forge.ui, "item-add-affix");
-    // The kind and class filters narrow the list; each entry shows its T1 range (`item-add-affix-filtered`).
+    // The kind and class filters narrow the list; each entry's tip holds its ranges (`item-add-affix-filtered`).
     let state = forge.ui.global::<ForgeState>();
     let all = state.get_picker_rows().row_count();
     state.invoke_picker_category_changed(1);
     settle();
     assert!(state.get_picker_rows().row_count() <= all);
-    assert!(state.get_picker_rows().row_data(0).unwrap().facts.iter().any(|fact| fact == "T1 +5–14"));
+    assert!(state.get_picker_rows().row_data(0).unwrap().detail.contains("T1\u{a0}+5–\u{2060}14"));
     state.invoke_picker_select(0);
     settle();
     session.capture(&forge.ui, "item-add-affix-filtered");
     // The kind choice opens its list over the picker (`item-add-affix-kind-list`).
-    session.click(200.0, 387.0);
+    session.click(300.0, 215.0);
     session.capture(&forge.ui, "item-add-affix-kind-list");
     session.key(Key::Escape);
     state.invoke_picker_category_changed(0);
@@ -1367,6 +1380,7 @@ pub(in super::super) fn item_captures(session: &Session) {
         assert_eq!(editor.draft_count(), 2);
     });
     drop(forge);
+    picker_captures(session);
 
     // The rarity in the facts line opens the rarity menu (`item-rarity-menu`); the base, the base picker with the implicits
     // each base grants (`implicits-base-picker`) and, over the status drafts with the base drafted, on the drafted base
@@ -1493,7 +1507,471 @@ pub(in super::super) fn item_captures(session: &Session) {
     session.click(NAME_X, row_y(3));
     assert!(forge.ui.global::<ForgeState>().get_picker_open());
     assert!(!forge.ui.global::<ForgeState>().get_can_apply());
-    session.click(900.0, 500.0);
+    session.click(1000.0, 500.0);
     assert!(!forge.ui.global::<ForgeState>().get_picker_open(), "a click outside cancels the picker");
     assert!(forge.ui.global::<ForgeState>().get_can_apply());
+}
+
+const BODY_ARMOR: u16 = 1;
+const HELMET: u16 = 0;
+const BELT: u16 = 2;
+const GLOVES: u16 = 4;
+const SHIELD: u16 = 18;
+const RELIC: u16 = 22;
+const ARMOUR_SLOTS: &[u16] = &[HELMET, BODY_ARMOR, BELT, BOOTS, GLOVES, SHIELD, RING, AMULET];
+const EXPERIMENTAL: i32 = 1;
+const PERSONAL: i32 = 2;
+const PRIMALIST: i32 = 1 << 1;
+const FAKE_UNIQUE_MOD: i32 = 7;
+const UNIQUE_MOD_TIERS: usize = 7;
+
+/// A catalog shaped as the game's is for the picker: shipped affixes with their levels and stat lines (the real affixes'
+/// property numbers and `AT` flags), then a unique's modifiers: plain stats a shipped affix also has, and one of several
+/// lines. `filler` adds as many more of each to reach the real catalog's size.
+fn picker_catalog(filler: Option<(u16, usize)>) -> GameCatalog {
+    use eg_trainer::definitions::catalog::{AffixSource, AffixTier, NumericProperty};
+    const WHOLE: i32 = 1;
+    let tier = |lines: &[(u8, i32)], minimum: f32, maximum: f32| AffixTier {
+        properties: lines
+            .iter()
+            .map(|(property, tags)| NumericProperty {
+                property: *property,
+                tags: *tags,
+                special_tag: 0,
+                extra_tag: 0,
+                modifier_type: 0,
+                set_property: false,
+                minimum,
+                maximum,
+                roll_id: -1,
+                rounding: WHOLE,
+                display_added_as_percentage: false,
+                display_added_as_tenth: false,
+                less_is_better: false,
+            })
+            .collect(),
+    };
+    let shipped = |id: u16, text: &str, kind: i32, special: i32, slots: &[u16], class: i32, level: i32, lines: &[(u8, i32)]| {
+        let definition = AffixDefinition {
+            id,
+            raw_name: text.into(),
+            raw_display_name: text.into(),
+            game_display_name: Availability::Available(text.into()),
+            kind,
+            special,
+            class_requirement: class,
+            item_types: Some(slots.iter().map(|slot| i32::from(*slot)).collect()),
+            tier_count: 8,
+            standard_effect: 1.0,
+            numeric: Availability::Available((1..=8).map(|n: i32| tier(lines, (n * 10 - 5) as f32, (n * 10 + 4) as f32)).collect()),
+            level_requirement: level,
+            source: None,
+        };
+        (id, definition)
+    };
+    let modifier = |id: u16, unique: u16, unique_name: &str, line: &str, level: i32, lines: &[(u8, i32)]| {
+        let definition = AffixDefinition {
+            id,
+            raw_name: eg_trainer::definitions::unique_mods::internal_name(unique_name, line),
+            raw_display_name: line.into(),
+            game_display_name: Availability::Available(format!("{unique_name}: {line}")),
+            kind: PREFIX,
+            special: FAKE_UNIQUE_MOD,
+            class_requirement: 1,
+            // A unique modifier rolls anywhere.
+            item_types: Some((0..=33).collect()),
+            tier_count: UNIQUE_MOD_TIERS as u16,
+            standard_effect: 1.0,
+            numeric: Availability::Available(vec![tier(lines, 15.0, 30.0); UNIQUE_MOD_TIERS]),
+            level_requirement: level,
+            source: Some(AffixSource { unique, line: line.into() }),
+        };
+        (id, definition)
+    };
+    let mut affixes: BTreeMap<u16, AffixDefinition> = [
+        shipped(25, "Health", SUFFIX, STANDARD, ARMOUR_SLOTS, 0, 0, &[(7, 0)]),
+        shipped(13, "Fire Resistance", SUFFIX, STANDARD, ARMOUR_SLOTS, 0, 0, &[(13, 0)]),
+        shipped(17, "Cold Resistance", SUFFIX, STANDARD, ARMOUR_SLOTS, 0, 8, &[(14, 0)]),
+        shipped(19, "Poison Resistance", SUFFIX, STANDARD, ARMOUR_SLOTS, 0, 10, &[(28, 0)]),
+        shipped(4001, "Void Resistance", SUFFIX, STANDARD, ARMOUR_SLOTS, 0, 6, &[(26, 0)]),
+        shipped(4000, "Increased Movement Speed", PREFIX, STANDARD, &[BOOTS], 0, 0, &[(9, 0)]),
+        shipped(31, "Added Armor", SUFFIX, STANDARD, &[HELMET, BODY_ARMOR, BOOTS, GLOVES, SHIELD], 0, 0, &[(10, 0)]),
+        shipped(8, "Added Dodge Rating", SUFFIX, STANDARD, &[HELMET, BODY_ARMOR, BELT, BOOTS, GLOVES], 0, 0, &[(11, 0)]),
+        shipped(27, "Increased Cooldown Recovery Speed", SUFFIX, STANDARD, &[BOOTS, BELT], 0, 6, &[(70, 0)]),
+        shipped(12, "Increased Fire Damage", PREFIX, STANDARD, &[BOOTS, RING], 0, 0, &[(0, 8)]),
+        shipped(38, "Increased Spell Damage", PREFIX, STANDARD, &[RING, AMULET], 0, 0, &[(0, 256)]),
+        shipped(150, "Increased Fire Spell Damage", PREFIX, STANDARD, &[BOOTS, RING], 0, 42, &[(0, 8 | 256)]),
+        shipped(2, "Increased Melee Attack Speed", PREFIX, STANDARD, &[GLOVES], 0, 0, &[(2, 512)]),
+        shipped(160, "Increased Healing Effectiveness", PREFIX, STANDARD, &[RELIC], 0, 15, &[(44, 0)]),
+        shipped(
+            21,
+            "Primalist Added Spell Damage With Tempest Strike",
+            PREFIX,
+            STANDARD,
+            &[BOOTS],
+            PRIMALIST,
+            26,
+            &[(58, 270)],
+        ),
+        shipped(1148, "Caretaker's Regrowth Reforged", PREFIX, SET, &[BOOTS], 0, 0, &[(17, 0)]),
+        shipped(700, "Experimental Stride", PREFIX, EXPERIMENTAL, &[BOOTS], 0, 0, &[(9, 0)]),
+        shipped(710, "Personal Stride", PREFIX, PERSONAL, &[BOOTS], 0, 0, &[(9, 0)]),
+        shipped(4005, "Void Corruption", SUFFIX, CORRUPTED, &[BOOTS], 0, 0, &[(26, 16)]),
+        // Fractured Crown's modifiers: plain stats a shipped affix also has.
+        modifier(1500, 1, "Fractured Crown", "Health", 20, &[(7, 0)]),
+        modifier(1501, 1, "Fractured Crown", "Fire Resistance", 20, &[(13, 0)]),
+        // One modifier of three stat lines, read by one roll.
+        modifier(
+            1502,
+            11,
+            "Exsanguinous",
+            "15-30% increased attack speed, cast speed and movement speed",
+            52,
+            &[(2, 65536), (3, 65536), (9, 65536)],
+        ),
+        modifier(1503, 11, "Exsanguinous", "You have no ward", 52, &[(98, 451)]),
+        modifier(1504, 77, "Wayfarer's Boots", "Health", 34, &[(7, 0)]),
+        modifier(1505, 77, "Wayfarer's Boots", "Cannot be slowed below base movement speed", 34, &[(98, 70)]),
+        modifier(1506, 77, "Wayfarer's Boots", "Increased Movement Speed", 34, &[(9, 0)]),
+        modifier(1507, 2, "Snowblind", "Cold Resistance", 10, &[(14, 0)]),
+        modifier(
+            1508,
+            3,
+            "Artor's Legacy",
+            "Summons a Wraithlord that fights beside you until it dies or you leave the area, and it scales with your minion damage",
+            44,
+            &[(58, 146)],
+        ),
+    ]
+    .into_iter()
+    .collect();
+    let mut uniques = catalog(false, false).uniques;
+    let unique = |id: u16, text: &str, item_type: u16| {
+        (
+            id,
+            UniqueDefinition {
+                id,
+                name: name(text),
+                item_type: item_type as u8,
+                sub_types: vec![0],
+                is_set_item: false,
+                set_id: 0,
+                legendary_type: 0,
+                can_drop_as_legendary: true,
+                is_pre_corrupted: false,
+                numeric: Availability::Unavailable {
+                    reason: "The fixture world has no unique numeric catalog.".into(),
+                },
+            },
+        )
+    };
+    uniques.extend([
+        unique(1, "Fractured Crown", HELMET),
+        unique(2, "Snowblind", HELMET),
+        unique(3, "Artor's Legacy", HELMET),
+        unique(11, "Exsanguinous", BODY_ARMOR),
+    ]);
+    if let Some((uniques_wanted, modifiers_wanted)) = filler {
+        for index in 0..uniques_wanted {
+            uniques.extend([unique(1000 + index, &format!("Filler Unique {index}"), [HELMET, BOOTS, RING][usize::from(index) % 3])]);
+        }
+        let ids: Vec<u16> = (0..=u16::MAX)
+            .filter(|id| eg_trainer::definitions::unique_mods::is_added(*id) && !affixes.contains_key(id))
+            .take(modifiers_wanted)
+            .collect();
+        for (index, id) in ids.into_iter().enumerate() {
+            let source = index as u16 % uniques_wanted;
+            affixes.extend([modifier(
+                id,
+                1000 + source,
+                &format!("Filler Unique {source}"),
+                &format!("Filler line {index}"),
+                10,
+                &[(7, 0)],
+            )]);
+        }
+        for index in 0..1100u16 {
+            let filler = shipped(
+                5000 + index,
+                &format!("Filler affix {index}"),
+                i32::from(index % 2),
+                STANDARD,
+                ARMOUR_SLOTS,
+                0,
+                i32::from(index % 80),
+                &[(0, 1 << (index % 8))],
+            );
+            affixes.extend([filler]);
+        }
+    }
+    let base = |item_type: u16, text: &str| {
+        (
+            item_type as u8,
+            ItemTypeDefinition {
+                item_type: item_type as u8,
+                name: name(text),
+                sub_types: vec![],
+            },
+        )
+    };
+    GameCatalog {
+        bases: [
+            base(HELMET, "Helmet"),
+            base(BODY_ARMOR, "Body Armor"),
+            base(BELT, "Belt"),
+            base(BOOTS, "Boots"),
+            base(GLOVES, "Gloves"),
+            base(SHIELD, "Shield"),
+            base(RING, "Ring"),
+            base(AMULET, "Amulet"),
+            base(RELIC, "Relic"),
+        ]
+        .into_iter()
+        .collect(),
+        affixes,
+        uniques,
+        ..catalog(false, false)
+    }
+}
+
+impl World {
+    /// Boots at level 42 in a catalog with the picker's real problem: shipped affixes and unique modifiers repeating them.
+    fn picker(filler: Option<(u16, usize)>) -> World {
+        let mut item = World::boots().item;
+        item.affixes = vec![
+            affix(0, 25, 5, 170, SUFFIX, Seal::Normal, STANDARD, "Health"),
+            affix(1, 1148, 3, 200, PREFIX, Seal::Normal, SET, "Caretaker's Regrowth Reforged"),
+            affix(2, 4000, 1, 100, PREFIX, Seal::Sealed, STANDARD, "Increased Movement Speed"),
+            affix(3, 4001, 4, 230, SUFFIX, Seal::Corrupted, STANDARD, "Void Resistance"),
+        ];
+        item.status = status(21, 42);
+        item.fingerprint = item.legacy_fingerprint();
+        World {
+            catalog: picker_catalog(filler),
+            item,
+            ..World::boots()
+        }
+    }
+}
+
+/// The picker over a catalog with its real problem, with "I know what I'm doing" on, as unique modifiers need.
+fn open_picker(session: &Session, filler: Option<(u16, usize)>, width: u32, height: u32) -> Forge {
+    let forge = Forge::open(session, World::picker(filler), width, height);
+    command(&forge.backend, Command::SetOverride(true), || forge.backend.snapshot().override_enabled);
+    forge.settle();
+    session.click(145.0, 262.0 + 54.0 * 4.0 - 2.0);
+    assert!(forge.ui.global::<ForgeState>().get_picker_open(), "Add affix opens the picker");
+    forge
+}
+
+fn picker_names(state: &ForgeState) -> Vec<String> {
+    let rows = state.get_picker_rows();
+    (0..rows.row_count()).map(|index| rows.row_data(index).unwrap().name.to_string()).collect()
+}
+
+fn tag_index(state: &ForgeState, name: &str) -> i32 {
+    let tags = state.get_picker_tags();
+    (0..tags.row_count()).find(|index| tags.row_data(*index).unwrap() == name).expect("the tag is in use") as i32
+}
+
+/// Rests the pointer until a tip's delay has passed, with a frame after each move as the app would draw.
+fn hover(forge: &Forge, x: f32, y: f32) {
+    let moved = |x: f32, y: f32| {
+        forge.ui.window().dispatch_event(WindowEvent::PointerMoved {
+            position: LogicalPosition::new(x, y),
+        });
+        settle();
+        forge.ui.window().take_snapshot().expect("render");
+        settle();
+    };
+    moved(x, y);
+    moved(x + 1.0, y);
+    std::thread::sleep(Duration::from_millis(450));
+    settle();
+    forge.ui.window().take_snapshot().expect("render");
+    settle();
+}
+
+/// The affix picker: its default, its filters, a search that reaches a unique, its detail, an empty result, a narrow
+/// window and high contrast (`item-picker-*`), then a keystroke over the real catalog's size.
+pub(in super::super) fn picker_captures(session: &Session) {
+    let forge = open_picker(session, None, 1100, 700);
+    let state = forge.ui.global::<ForgeState>();
+    assert!(state.get_picker_rows().row_count() > 0);
+    assert!(
+        picker_names(&state).iter().all(|name| name != "You have no ward"),
+        "unique modifiers stay out of the default"
+    );
+    assert!(state.get_picker_hidden().contains("unique modifier"), "{}", state.get_picker_hidden());
+    session.capture(&forge.ui, "item-picker-default");
+    // Stat tags opens a list of ticks that stays open while they change; Source lists the uniques after its fixed choices.
+    session.click(635.0, 181.0);
+    session.click(610.0, 283.0);
+    forge.ui.window().take_snapshot().expect("render");
+    assert!(state.get_picker_tags_on().iter().any(|on| on), "a tick stays in the open list");
+    session.capture(&forge.ui, "item-picker-tags-list");
+    session.key(Key::Escape);
+    assert!(state.get_picker_open(), "Escape closes the list, not the picker");
+    state.invoke_picker_clear_filters();
+    settle();
+    session.click(484.0, 181.0);
+    session.capture(&forge.ui, "item-picker-source-list");
+    session.key(Key::Escape);
+
+    // The filters narrow the list, each shown as a chip; a chip clears its own and Clear filters the rest.
+    state.invoke_picker_level_changed(3);
+    state.invoke_picker_tag_toggled(tag_index(&state, "Fire"), true);
+    state.invoke_picker_filter_changed(1);
+    settle();
+    assert_eq!(picker_names(&state), ["Increased Fire Damage"], "level 40 or under, Fire, prefixes");
+    assert_eq!(state.get_picker_chips().row_count(), 3);
+    session.capture(&forge.ui, "item-picker-filtered");
+    // Real clicks: the first chip (Level), then Clear filters, with a frame drawn first as the app would.
+    forge.ui.window().take_snapshot().expect("render");
+    session.click(150.0, 253.0);
+    assert_eq!(state.get_picker_chips().row_count(), 2);
+    assert_eq!(state.get_picker_level(), 0, "the first chip was Level");
+    forge.ui.window().take_snapshot().expect("render");
+    session.click(668.0, 285.0);
+    assert_eq!(state.get_picker_chips().row_count(), 0);
+
+    // "Allow incompatible affixes" opens Slot, since it is for what this slot can't roll, and closing it puts Slot back.
+    let boots = state.get_picker_slot();
+    state.invoke_picker_allow_changed(true);
+    settle();
+    assert_eq!(state.get_picker_slot(), 0, "Any slot");
+    assert!(
+        picker_names(&state).iter().any(|name| name == "Increased Melee Attack Speed"),
+        "a glove affix, listed for boots"
+    );
+    state.invoke_picker_allow_changed(false);
+    settle();
+    assert_eq!(state.get_picker_slot(), boots);
+
+    // Source: unique modifiers from any slot, by the game's stats and one of several lines.
+    state.invoke_picker_source_changed(1);
+    state.invoke_picker_slot_changed(0);
+    settle();
+    assert!(picker_names(&state).iter().any(|name| name == "You have no ward"), "Source: Unique modifiers, Any slot");
+    session.capture(&forge.ui, "item-picker-uniques");
+    state.invoke_picker_clear_filters();
+    settle();
+
+    // Typing a unique's name reaches its modifiers on another slot, with no other step; its stat alone does not.
+    session.click(300.0, 141.0);
+    session.type_text("Fractured");
+    assert_eq!(picker_names(&state), ["Fire Resistance", "Health"]);
+    session.capture(&forge.ui, "item-picker-unique-search");
+    forge.handle.edit(|editor| editor.picker_search("cold resistance"));
+    settle();
+    assert_eq!(picker_names(&state), ["Cold Resistance"], "the shipped one alone: Snowblind's duplicate stays out");
+    forge.handle.edit(|editor| editor.picker_search(""));
+    settle();
+    drop(forge);
+
+    // The detail: resting on a row, then the keyboard moving onto one.
+    let forge = open_picker(session, None, 1100, 700);
+    let state = forge.ui.global::<ForgeState>();
+    hover(&forge, 300.0, 300.0);
+    session.capture(&forge.ui, "item-picker-hover");
+    forge.ui.window().dispatch_event(WindowEvent::PointerMoved {
+        position: LogicalPosition::new(1090.0, 690.0),
+    });
+    settle();
+    std::thread::sleep(Duration::from_millis(250));
+    settle();
+    session.key(Key::DownArrow);
+    session.key(Key::DownArrow);
+    settle();
+    forge.ui.window().take_snapshot().expect("render");
+    settle();
+    assert_eq!(state.get_picker_selected(), 1);
+    session.capture(&forge.ui, "item-picker-keyboard");
+    session.key(Key::Escape);
+    drop(forge);
+
+    // An empty result says why and offers a way out.
+    let forge = open_picker(session, None, 1100, 700);
+    let state = forge.ui.global::<ForgeState>();
+    session.type_text("no such affix");
+    assert_eq!(state.get_picker_rows().row_count(), 0);
+    assert_eq!(state.get_picker_empty_reason(), "No affix matches this search.");
+    assert!(state.get_picker_empty_clear_search());
+    session.capture(&forge.ui, "item-picker-empty");
+    session.click(163.0, 323.0);
+    assert!(state.get_picker_rows().row_count() > 0, "Clear search brings the list back");
+    assert_eq!(state.get_picker_search(), "");
+    state.invoke_picker_slot_changed(state.get_picker_slots().iter().position(|slot| slot == "Relic").unwrap() as i32);
+    settle();
+    assert_eq!(state.get_picker_rows().row_count(), 0, "with Allow off, a relic's affixes don't fit boots");
+    assert_eq!(state.get_picker_empty_reason(), "These affixes roll on another slot.");
+    assert!(state.get_picker_empty_allow() && state.get_picker_empty_clear_filters());
+    session.capture(&forge.ui, "item-picker-empty-slot");
+    drop(forge);
+
+    // High contrast: frames and muted words step up.
+    let forge = open_picker(session, None, 1100, 700);
+    forge.ui.global::<eg_ui::Tokens>().set_high_contrast(true);
+    settle();
+    session.capture(&forge.ui, "item-picker-high-contrast");
+    forge.ui.global::<eg_ui::Tokens>().set_high_contrast(false);
+    settle();
+    drop(forge);
+
+    // Without "I know what I'm doing" they are not on offer: nothing is counted as held back, and asking for them says why.
+    let forge = Forge::open(session, World::picker(None), 1100, 700);
+    session.click(145.0, 262.0 + 54.0 * 4.0 - 2.0);
+    let state = forge.ui.global::<ForgeState>();
+    assert_eq!(state.get_picker_hidden(), "");
+    state.invoke_picker_source_changed(1);
+    settle();
+    assert_eq!(state.get_picker_empty_reason(), "Unique modifiers need \"I know what I'm doing\" in Settings.");
+    assert!(state.get_picker_empty_clear_filters() && !state.get_picker_empty_allow());
+    session.capture(&forge.ui, "item-picker-needs-override");
+    drop(forge);
+
+    // A narrow window folds the filters behind a button and gives each row a (?).
+    let forge = open_picker(session, None, 680, 580);
+    let state = forge.ui.global::<ForgeState>();
+    session.capture(&forge.ui, "item-picker-narrow");
+    session.click(462.0, 181.0);
+    forge.ui.window().take_snapshot().expect("render");
+    settle();
+    session.capture(&forge.ui, "item-picker-narrow-help");
+    session.click(456.0, 97.0);
+    forge.ui.window().take_snapshot().expect("render");
+    settle();
+    session.capture(&forge.ui, "item-picker-narrow-filters");
+    session.click(456.0, 97.0);
+    session.click(250.0, 97.0);
+    session.type_text("Exsanguinous");
+    assert_eq!(state.get_picker_rows().row_count(), 2);
+    session.capture(&forge.ui, "item-picker-narrow-search");
+    drop(forge);
+
+    // A keystroke over the real catalog's size: the filter and a screenful of rows, not a row per definition.
+    let forge = open_picker(session, Some((400, 2165)), 1100, 700);
+    let state = forge.ui.global::<ForgeState>();
+    let definitions = forge.handle.edit(|editor| editor.catalog().definitions.len());
+    assert!(definitions > 3000, "{definitions}");
+    for search in ["f", "fi", "fil", "filler", "filler line 2000", ""] {
+        let started = std::time::Instant::now();
+        forge.handle.edit(|editor| editor.picker_search(search));
+        let filtered = started.elapsed();
+        forge.ui.window().take_snapshot().expect("render");
+        println!(
+            "picker over {definitions} definitions, {search:?}: filtered in {filtered:?}, drawn by {:?}, {} rows",
+            started.elapsed(),
+            state.get_picker_rows().row_count()
+        );
+    }
+    state.invoke_picker_source_changed(2);
+    state.invoke_picker_slot_changed(0);
+    settle();
+    let started = std::time::Instant::now();
+    session.scroll(300.0, 300.0, -3000.0);
+    forge.ui.window().take_snapshot().expect("render");
+    println!("picker: scrolled {} rows and drew them in {:?}", state.get_picker_rows().row_count(), started.elapsed());
+    session.capture(&forge.ui, "item-picker-long-list");
+    drop(forge);
 }

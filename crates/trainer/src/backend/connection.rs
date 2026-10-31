@@ -69,6 +69,10 @@ pub trait BackendConnection: Send + 'static {
     ) -> impl Future<Output = Result<ValueTable, BackendError>> + Send {
         async { Err(BackendError::blocked(ErrorKind::MappingUnavailable, "Actual values are unavailable for this modifier.")) }
     }
+    /// Adds these definitions to the game's list; one it already holds stays. A connection without a game has nothing to add to.
+    fn register_affixes(&mut self, _: &[eg_trainer_wire::new_affixes::NewAffix]) -> impl Future<Output = Result<(), BackendError>> + Send {
+        async { Ok(()) }
+    }
     fn observed_hook(&self, _: GameplayHook) -> Option<bool> {
         None
     }
@@ -144,6 +148,9 @@ impl<T: Transport + Send + 'static> BackendConnection for Session<T> {
     }
     async fn read_forge(&mut self) -> Result<Option<ForgeSnapshot>, BackendError> {
         Ok(Session::read_forge(self).await?)
+    }
+    async fn register_affixes(&mut self, affixes: &[eg_trainer_wire::new_affixes::NewAffix]) -> Result<(), BackendError> {
+        Ok(Session::register_affixes(self, affixes).await?)
     }
     fn observed_hook(&self, hook: GameplayHook) -> Option<bool> {
         self.hook_observation(hook).map(|actual| actual.enabled)

@@ -28,7 +28,7 @@ import {
     TierLadder,
     MenuMetrics,
 } from "table.slint";
-import { AffixPickerPanel, PickerMeasure, PickerMetrics } from "picker.slint";
+import { AffixPickerPanel, PickerMetrics } from "picker.slint";
 import { SearchBox } from "../../widgets/search-box.slint";
 import { ChangesPane } from "pane.slint";
 import { TemplatesPanel, TemplateMetrics, TemplatesMeasure } from "templates.slint";
@@ -403,7 +403,6 @@ export component ItemForge inherits Rectangle {
             }
         }
 
-        add-measure := PickerMeasure { }
 
         // The Range column takes the widest range of the rows, as a shared size group does.
         range-measure := VerticalLayout {
@@ -1202,8 +1201,8 @@ export component ItemForge inherits Rectangle {
                         add-popup := PopupWindow {
                             x: 0;
                             y: parent.height + Tokens.space-4;
-                            width: Tokens.replace-flyout-width + Tokens.flyout-padding.left + Tokens.flyout-padding.right;
-                            height: PickerMetrics.height(ForgeState.picker-rows.length) + add-measure.extra;
+                            width: PickerMetrics.width;
+                            height: PickerMetrics.height;
                             close-policy: PopupClosePolicy.close-on-click-outside;
 
                             AffixPickerPanel {

@@ -77,16 +77,26 @@ export global ForgeText {
     public pure function discard-draft-for(name: string) -> string { return @tr("Discard the draft for {}", name); }
 
     // The affix picker.
-    out property <string> affix-search-placeholder: @tr("Name, category or ID");
+    out property <string> affix-search-placeholder: @tr("Name, unique, category or ID");
     out property <string> affix-search: @tr("Search affixes");
-    out property <string> all: @tr("All");
-    out property <string> prefixes: @tr("Prefixes");
-    out property <string> suffixes: @tr("Suffixes");
     out property <string> affix-kind: @tr("Affix kind");
     out property <string> class: @tr("Class");
-    out property <string> picker-allow-note: @tr("Lists affixes this slot can't roll. Writing one needs \"I know what I'm doing\".");
-    out property <string> no-affix-matches: @tr("No affixes match this search.");
+    out property <string> side: @tr("Prefix or suffix");
+    out property <string> slot: @tr("Slot");
+    out property <string> level: @tr("Level requirement");
+    out property <string> source: @tr("Source");
+    out property <string> stat-tags: @tr("Stat tags");
+    out property <string> filters: @tr("Filters");
+    out property <string> filters-tip: @tr("Show or hide the filters");
+    out property <string> clear-filters: @tr("Clear filters");
+    out property <string> clear-search: @tr("Clear search");
+    out property <string> list-incompatible: @tr("List incompatible affixes");
+    out property <string> show-uniques-tip: @tr("List unique modifiers too");
+    out property <string> picker-allow-note: @tr("Lists affixes this item can't roll. Writing one needs \"I know what I'm doing\".");
+    out property <string> about-allow-incompatible: @tr("About incompatible affixes");
     out property <string> replacement-affixes: @tr("Replacement affixes");
+    public pure function remove-filter(name: string) -> string { return @tr("Remove filter: {}", name); }
+    public pure function about-affix(name: string) -> string { return @tr("About {}", name); }
     out property <string> cancel: @tr("Cancel");
     out property <string> keep-draft-tip: @tr("Keep the current draft (Esc)");
 

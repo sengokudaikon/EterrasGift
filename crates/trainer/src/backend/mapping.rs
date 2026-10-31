@@ -35,6 +35,9 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
         if self.state.mapping(&expected, &request).is_some() {
             return Ok(());
         }
+        if let (Some(id), Some(data)) = (request.draft.as_ref().and_then(super::new_affixes::edit_affix), self.state.catalog.data().cloned()) {
+            self.register_added(epoch, &target, &data, vec![id]).await?;
+        }
         // Optional formatting must not resurrect a failed offline/process gate.
         let result = self
             .call(epoch, &target, async |connection| {

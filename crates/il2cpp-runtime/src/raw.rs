@@ -26,17 +26,25 @@ pub const METHOD_ATTRIBUTE_ABSTRACT: u32 = 0x0400;
 pub const METHOD_ATTRIBUTE_PINVOKE_IMPL: u32 = 0x2000;
 
 pub type FieldSetValue = unsafe extern "C-unwind" fn(*mut Object, *mut FieldInfo, *mut c_void);
+pub type ElementBarrier = unsafe extern "C-unwind" fn(*mut Object, *mut *mut c_void, *mut c_void);
 
 /// The mutation export is deliberately separate from read-only runtime access.
 #[derive(Clone, Copy)]
 pub struct FieldWriteApi {
     field_set_value: FieldSetValue,
+    element_barrier: ElementBarrier,
 }
 
 impl FieldWriteApi {
     #[cfg(any(test, feature = "test-stubs"))]
     pub fn test_export(field_set_value: FieldSetValue) -> Self {
-        Self { field_set_value }
+        unsafe extern "C-unwind" fn no_element_stores(_: *mut Object, _: *mut *mut c_void, _: *mut c_void) {
+            panic!("this test stores no array elements");
+        }
+        Self {
+            field_set_value,
+            element_barrier: no_element_stores,
+        }
     }
 
     /// Store one reference in an instance field.
@@ -50,7 +58,30 @@ impl FieldWriteApi {
         // the object pointer itself, not the address of a pointer slot as scalar stores do.
         unsafe { (self.field_set_value)(object.as_ptr(), field.as_ptr(), value.as_ptr().cast()) };
     }
-    /// Resolve the exact Unity 6000.4 export without performing a write.
+    /// Store null in an instance reference field.
+    ///
+    /// # Safety
+    /// As [`Self::set_object`], without a value.
+    pub unsafe fn clear_object(&self, object: NonNull<Object>, field: NonNull<FieldInfo>) {
+        // SAFETY: caller validates the destination; SetValueRaw(deref_pointer=false) stores the pointer it is given.
+        unsafe { (self.field_set_value)(object.as_ptr(), field.as_ptr(), std::ptr::null_mut()) };
+    }
+
+    /// Store one reference in a reference array, through the runtime's write barrier.
+    ///
+    /// # Safety
+    /// The set_i32 runtime, thread, lifetime and exclusive mutation obligations apply. `array` is a rooted
+    /// single-dimension reference array whose elements start `header` bytes in, `index` is within its length, and `value`
+    /// is rooted and of a class its element type accepts.
+    pub unsafe fn set_element(&self, array: NonNull<Object>, header: usize, index: usize, value: NonNull<Object>) {
+        // SAFETY: caller establishes the array's layout and the slot's bounds; references are pointer-sized.
+        unsafe {
+            let slot = array.as_ptr().cast::<u8>().add(header + index * std::mem::size_of::<usize>()).cast::<*mut c_void>();
+            (self.element_barrier)(array.as_ptr(), slot, value.as_ptr().cast());
+        }
+    }
+
+    /// Resolve the exact Unity 6000.4 exports without performing a write.
     ///
     /// # Safety
     /// The resolver must return this named export with its exact ABI, from the same live
@@ -58,9 +89,13 @@ impl FieldWriteApi {
     pub unsafe fn resolve(mut symbol: impl FnMut(&'static CStr) -> Option<NonNull<c_void>>) -> Result<Self, MissingExport> {
         let name = c"il2cpp_field_set_value";
         let address = symbol(name).ok_or(MissingExport(name))?;
+        let barrier_name = c"il2cpp_gc_wbarrier_set_field";
+        let barrier = symbol(barrier_name).ok_or(MissingExport(barrier_name))?;
         Ok(Self {
-            // SAFETY: the caller establishes the named export's ABI and lifetime.
+            // SAFETY: the caller establishes the named exports' ABI and lifetime.
             field_set_value: unsafe { std::mem::transmute::<*mut c_void, FieldSetValue>(address.as_ptr()) },
+            // SAFETY: as above.
+            element_barrier: unsafe { std::mem::transmute::<*mut c_void, ElementBarrier>(barrier.as_ptr()) },
         })
     }
 

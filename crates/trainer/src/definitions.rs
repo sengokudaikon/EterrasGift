@@ -6,3 +6,4 @@ pub mod catalog;
 pub mod entries;
 pub mod files;
 pub mod service;
+pub mod unique_mods;

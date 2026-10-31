@@ -1,19 +1,87 @@
 //! The forge in the window: `ForgeEditor` behind the `ForgeState` global. Every edit goes to the editor and the whole
 //! state is shown again; the row models are updated in place so a row's cells, popups and drags survive the update.
 
-use super::editor::{Cell, ForgeEditor, KindFilter, MessageKind, RowRef};
-use super::game::{self, Lookup};
+use super::editor::{Cell, ForgeEditor, MessageKind, RowRef};
+use super::game::{self, Catalog, Lookup};
 use super::item::{ForgeItem, Seal};
+use super::picker::{self, KindFilter, SourceChoice, Tone};
 use super::rows::{FieldKind, ValueEditor};
 use super::worker::ForgeGame;
 use crate::models::update_rows as update;
 use crate::{
     AffixRowView, AppliedEntryView, CellKind, CellRef, DraftEntryView, FieldView, ForgeState, ItemRarity, MainWindow, MenuOptionView, MessageTone, ModifierRowView, PickerRowView,
-    TemplateRowView, TierOption, ValueCell,
+    PillTone, PillView, TemplateRowView, TierOption, ValueCell,
 };
-use slint::{ComponentHandle, Model, ModelRc, SharedString, VecModel, Weak};
+use slint::{ComponentHandle, Model, ModelNotify, ModelRc, ModelTracker, SharedString, VecModel, Weak};
+use std::any::Any;
 use std::cell::{Cell as Flag, RefCell};
 use std::rc::Rc;
+use std::sync::Arc;
+
+/// What the picker lists, and what its rows are built from.
+#[derive(Default)]
+struct Listed {
+    indices: Vec<usize>,
+    catalog: Option<Arc<Catalog>>,
+    slot: Option<u16>,
+    own_types: Vec<u16>,
+}
+
+/// The affix picker's rows, built as the list asks for each. The list builds only the rows in view, so a keystroke over
+/// the whole catalog costs its filter and a screenful of rows, not a row for every definition.
+#[derive(Default)]
+struct PickerRows {
+    listed: RefCell<Listed>,
+    notify: ModelNotify,
+}
+
+impl PickerRows {
+    fn replace(&self, listed: Listed) {
+        *self.listed.borrow_mut() = listed;
+        self.notify.reset();
+    }
+}
+
+impl Model for PickerRows {
+    type Data = PickerRowView;
+
+    fn row_count(&self) -> usize {
+        self.listed.borrow().indices.len()
+    }
+
+    fn row_data(&self, row: usize) -> Option<PickerRowView> {
+        let listed = self.listed.borrow();
+        let catalog = listed.catalog.as_ref()?;
+        let definition = catalog.definitions.get(*listed.indices.get(row)?)?;
+        let entry = picker::entry(definition, catalog, listed.slot, &listed.own_types);
+        let pills: Vec<PillView> = entry
+            .pills
+            .into_iter()
+            .map(|(text, tone)| PillView {
+                text: text.into(),
+                tone: match tone {
+                    Tone::Neutral => PillTone::Neutral,
+                    Tone::Reforged => PillTone::Reforged,
+                    Tone::Unique => PillTone::Unique,
+                },
+            })
+            .collect();
+        Some(PickerRowView {
+            name: entry.name.into(),
+            pills: ModelRc::new(VecModel::from(pills)),
+            spoken: entry.spoken.into(),
+            detail: entry.detail.into(),
+        })
+    }
+
+    fn model_tracker(&self) -> &dyn ModelTracker {
+        &self.notify
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+}
 
 /// The models a row keeps across updates, so its repeated cells are not rebuilt under the pointer.
 #[derive(Default)]
@@ -31,8 +99,17 @@ struct Models {
     rarity_options: Rc<VecModel<MenuOptionView>>,
     base_options: Rc<VecModel<MenuOptionView>>,
     identity_options: Rc<VecModel<MenuOptionView>>,
-    picker_rows: Rc<VecModel<PickerRowView>>,
+    picker_rows: Rc<PickerRows>,
+    picker_slots: Rc<VecModel<SharedString>>,
+    picker_levels: Rc<VecModel<SharedString>>,
+    picker_sources: Rc<VecModel<SharedString>>,
+    picker_tags: Rc<VecModel<SharedString>>,
+    picker_tags_on: Rc<VecModel<bool>>,
+    picker_chips: Rc<VecModel<SharedString>>,
 }
+
+/// The menu generation, the definitions the picker lists and the slot their rows name.
+type BuiltPicker = (u64, Vec<usize>, Option<u16>);
 
 /// What each menu model was last built from: a scrub or a keystroke rebuilds none of them unless that changed.
 #[derive(Default)]
@@ -43,8 +120,7 @@ struct Built {
     base: RefCell<Option<(u64, i64)>>,
     /// Per affix row, what its tier list shows.
     tiers: RefCell<Vec<Option<TierKey>>>,
-    /// The menu generation and the definitions the picker lists.
-    picker: RefCell<Option<(u64, Vec<usize>)>>,
+    picker: RefCell<Option<BuiltPicker>>,
 }
 
 /// What a row's tier list depends on: the affix drafted, its highest tier and the game's own, and the catalog.
@@ -117,6 +193,12 @@ pub fn attach(window: &MainWindow, game: ForgeGame) -> ForgeHandle {
     state.set_base_options(ModelRc::from(view.models.base_options.clone()));
     state.set_identity_options(ModelRc::from(view.models.identity_options.clone()));
     state.set_picker_rows(ModelRc::from(view.models.picker_rows.clone()));
+    state.set_picker_slots(ModelRc::from(view.models.picker_slots.clone()));
+    state.set_picker_levels(ModelRc::from(view.models.picker_levels.clone()));
+    state.set_picker_sources(ModelRc::from(view.models.picker_sources.clone()));
+    state.set_picker_tags(ModelRc::from(view.models.picker_tags.clone()));
+    state.set_picker_tags_on(ModelRc::from(view.models.picker_tags_on.clone()));
+    state.set_picker_chips(ModelRc::from(view.models.picker_chips.clone()));
     bind(&state, &view);
     view.show();
     ForgeHandle { view }
@@ -216,9 +298,17 @@ fn bind(state: &ForgeState, view: &Rc<View>) {
     state.on_picker_allow_changed(edit!(view, |editor, allow| editor.picker_allow(allow)));
     state.on_picker_category_changed(edit!(view, |editor, choice| editor.picker_category(choice.max(0) as usize)));
     state.on_picker_class_changed(edit!(view, |editor, choice| editor.picker_class(choice.max(0) as usize)));
+    state.on_picker_slot_changed(edit!(view, |editor, choice| editor.picker_slot(choice.max(0) as usize)));
+    state.on_picker_level_changed(edit!(view, |editor, choice| editor.picker_level(choice.max(0) as usize)));
+    state.on_picker_source_changed(edit!(view, |editor, choice| editor.picker_source(choice.max(0) as usize)));
+    state.on_picker_tag_toggled(edit!(view, |editor, choice, on| editor.picker_tag(choice.max(0) as usize, on)));
+    state.on_picker_chip_removed(edit!(view, |editor, chip| editor.picker_remove_chip(chip.max(0) as usize)));
+    state.on_picker_clear_filters(edit!(view, |editor| editor.picker_clear_filters()));
+    state.on_picker_show_uniques(edit!(view, |editor| editor.picker_show_uniques()));
     let names = |names: &mut dyn Iterator<Item = &str>| ModelRc::from(Rc::new(VecModel::from(names.map(SharedString::from).collect::<Vec<_>>())));
-    state.set_picker_categories(names(&mut super::editor::PICKER_CATEGORIES.iter().map(|(name, _)| name.get())));
-    state.set_picker_classes(names(&mut super::editor::PICKER_CLASSES.iter().map(|class| class.get())));
+    state.set_picker_sides(names(&mut picker::PICKER_SIDES.iter().map(|side| side.get())));
+    state.set_picker_categories(names(&mut picker::PICKER_CATEGORIES.iter().map(|(name, _)| name.get())));
+    state.set_picker_classes(names(&mut picker::PICKER_CLASSES.iter().map(|class| class.get())));
     state.on_picker_select(edit!(view, |editor, index| editor.picker_select(index.max(0) as usize)));
     state.on_use_picker(edit!(view, |editor| editor.use_picker()));
     state.on_cancel_picker(edit!(view, |editor| editor.cancel_picker()));
@@ -853,15 +943,17 @@ impl View {
         state.set_picker_title(editor.picker_title().into());
         state.set_picker_subtitle(editor.picker_subtitle_of(drafted).into());
         state.set_picker_search(picker.search.clone().into());
-        state.set_picker_filter(match picker.filter {
+        let filters = &picker.filters;
+        state.set_picker_filter(match filters.side {
             KindFilter::All => 0,
             KindFilter::Prefixes => 1,
             KindFilter::Suffixes => 2,
         });
         state.set_picker_allow(picker.allow_incompatible);
-        state.set_picker_category(picker.category as i32);
-        state.set_picker_class(picker.class as i32);
+        state.set_picker_category(filters.category as i32);
+        state.set_picker_class(filters.class as i32);
         state.set_picker_allow_enabled(editor.can_mutate());
+        self.show_picker_choices(state, editor, picker);
         // Choosing an entry shows again with the same list; its rows are rebuilt only when the list changes.
         let generation = editor.menu_generation();
         let listed = editor.picker_indices();
@@ -870,21 +962,27 @@ impl View {
             .picker
             .borrow()
             .as_ref()
-            .is_some_and(|(built, indices)| *built == generation && indices.as_slice() == listed);
+            .is_some_and(|(built, indices, slot)| *built == generation && indices.as_slice() == listed && *slot == filters.slot);
         if !built {
-            update(
-                &self.models.picker_rows,
-                editor
-                    .picker_list()
-                    .map(|definition| PickerRowView {
-                        name: definition.name.clone().into(),
-                        facts: facts(editor.picker_entry_detail(definition)),
-                        reforged: definition.is_reforged(),
-                    })
-                    .collect(),
-            );
-            *self.built.picker.borrow_mut() = Some((generation, listed.to_vec()));
+            self.models.picker_rows.replace(Listed {
+                indices: listed.to_vec(),
+                catalog: Some(editor.shared_catalog()),
+                slot: filters.slot,
+                own_types: picker.own_types.clone(),
+            });
+            *self.built.picker.borrow_mut() = Some((generation, listed.to_vec(), filters.slot));
         }
+        state.set_picker_count(picker::count_text(listed.len()).into());
+        state.set_picker_hidden(if picker.hidden_uniques > 0 {
+            picker::hidden_text(picker.hidden_uniques).into()
+        } else {
+            SharedString::new()
+        });
+        let empty = editor.picker_empty();
+        state.set_picker_empty_reason(empty.as_ref().map_or_else(SharedString::new, |empty| empty.reason.as_str().into()));
+        state.set_picker_empty_clear_search(empty.as_ref().is_some_and(|empty| empty.clear_search));
+        state.set_picker_empty_clear_filters(empty.as_ref().is_some_and(|empty| empty.clear_filters));
+        state.set_picker_empty_allow(empty.as_ref().is_some_and(|empty| empty.allow));
         state.set_picker_selected(
             picker
                 .selected
@@ -894,6 +992,58 @@ impl View {
         state.set_picker_status(editor.picker_status().into());
         state.set_picker_action(editor.picker_action().into());
         state.set_can_use_picker(editor.can_use_picker());
+    }
+
+    /// The filter bar's choices and what each holds. The models are updated in place, so a list open over the picker
+    /// survives a change.
+    fn show_picker_choices(&self, state: &ForgeState, editor: &ForgeEditor, picker: &super::editor::Picker) {
+        let filters = &picker.filters;
+        let shared = |text: &str| SharedString::from(text);
+        let catalog = editor.catalog();
+
+        let slots = editor.picker_slots();
+        let mut choices = vec![shared(picker::ANY_SLOT.get())];
+        choices.extend(slots.iter().map(|(_, name)| shared(name)));
+        update(&self.models.picker_slots, choices);
+        state.set_picker_slot(
+            filters
+                .slot
+                .map_or(0, |slot| slots.iter().position(|(id, _)| *id == slot).map_or(-1, |index| index as i32 + 1)),
+        );
+        state.set_picker_slot_text(filters.slot.map_or_else(SharedString::new, |slot| picker::slot_name(catalog, slot).into()));
+        state.set_picker_slot_active(filters.slot != picker.own_slot());
+
+        let levels = picker.level_choices();
+        update(&self.models.picker_levels, levels.iter().map(|(_, text)| shared(text)).collect());
+        state.set_picker_level(levels.iter().position(|(level, _)| *level == filters.level).map_or(0, |index| index as i32));
+
+        let mut sources: Vec<SharedString> = picker::source_words().iter().map(|word| shared(word)).collect();
+        sources.extend(picker.source_uniques.iter().map(|(_, name)| shared(name)));
+        update(&self.models.picker_sources, sources);
+        let source = filters.effective_source();
+        state.set_picker_source(match source {
+            SourceChoice::Game => 0,
+            SourceChoice::Uniques => 1,
+            SourceChoice::All => 2,
+            SourceChoice::Unique(unique) => picker.source_uniques.iter().position(|(id, _)| *id == unique).map_or(-1, |index| index as i32 + 3),
+        });
+        state.set_picker_source_text(if let SourceChoice::Unique(unique) = source {
+            catalog.source_name(unique).into()
+        } else {
+            SharedString::new()
+        });
+        state.set_picker_source_active(source != SourceChoice::Game);
+
+        let tags = editor.picker_tags();
+        update(&self.models.picker_tags, tags.iter().map(|tag| shared(picker::STAT_TAGS[*tag].name.get())).collect());
+        update(&self.models.picker_tags_on, tags.iter().map(|tag| filters.tags & (1u64 << tag) != 0).collect());
+        state.set_picker_tags_text(picker::tags_summary(filters).into());
+        state.set_picker_tags_active(filters.tags != 0);
+
+        update(
+            &self.models.picker_chips,
+            editor.picker_chips().into_iter().map(|(_, text)| SharedString::from(text)).collect(),
+        );
     }
 }
 

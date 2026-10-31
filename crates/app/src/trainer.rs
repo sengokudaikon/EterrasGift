@@ -85,6 +85,7 @@ impl Module {
                 Some(self.game_data.clone()),
                 Some(faults.clone()),
             )?),
+            unique_mods_in_use: Some(self.game_data.join(eg_trainer::definitions::unique_mods::IN_USE_FILE)),
             ..Default::default()
         };
         let process_name = game
