@@ -47,7 +47,6 @@ Behavior reference: [character.h](../../EterrasGift/native/hooks/character.h).
 | Status | Feature and target | Behavior | Shared mechanism | Distinguishing targeted check |
 |---|---|---|---|---|
 | Todo | `specialization-slots` — `PlayerFinder.getPlayerActor` | Call original, raise the returned actor's `localTreeData.numberOfUnlockedSlots` to at least five. On disabling, recount through `LocalTreeData.updateUnlockedSlots` on the main thread when a character still exists. Avoid the folded byte getter. | Detour lifecycle; object descriptors. Keep recount and its timing feature-specific. | A level/load recount is raised again; off restores the natural count; missing character needs no stale-object write. |
-| Todo | `several-primordials` — `ItemContainersManager.NumberOfEquippedPrimordialItems` | Return zero only for the local containers manager; forward other managers. Resolve the local identity outside metadata discovery in the hot path. | Local-identity publication/lookup where its freshness contract fits; integer-return detour. | Another manager keeps its count; replacement of the local manager invalidates the old identity. |
 
 ### Combat
 
@@ -55,8 +54,6 @@ Behavior reference: [combat.h](../../EterrasGift/native/hooks/combat.h).
 
 | Status | Feature and target | Behavior | Shared mechanism | Distinguishing targeted check |
 |---|---|---|---|---|
-| Todo | `refill-mana` — `BaseMana.OnUpdateTick` | Match the player's mana component, store its current mana from its maximum before the original tick. Preserve the original tick; this is not a promise that every later instant has full mana. | Player/component lookup; field descriptors; mixed float/void gateway. | Player starts tick full, enemy unchanged, maximum changes followed; original tick still runs. |
-| Todo | `fixed-area` — `Stats.GetIncreasedAreaForAreaSkill` | Return the configured increased-area value for the player's stats, skipping original for that case. Other stats keep original calculation. | Settings and player stats identity; float return. | Player versus minion/monster stats, original call count, changed player identity. |
 | Todo | `no-cooldowns` — `ChargeManager.useCharges` | For the player, keep up to 64 charges, call original with zero amount, then raise lowered charges back if the backing array is still the same. Keep the original shared-cooldown behavior around that adjustment. | Bounded list access. Extract snapshot mechanics only after another matching consumer; policy remains local. | Shared cooldown decreases are restored; increased charges and replaced arrays are preserved; define the original-throw path explicitly. |
 | Todo | `extra-projectiles` — `ExtraProjectiles.onCreation` and `GetTotalExtraProjectiles` | Mark the locally created extras object per thread while original creation runs; restore the outer mark on return/unwind. Scale the marked object's positive returned count, rounded and capped at one million. | Multi-target ownership; small scoped TLS pattern, later shared with duplicate where appropriate. | Nested extras restore the outer object; unrelated/thread-concurrent queries unchanged; exception clears context. |
 | Todo | `buffs-never-expire` — `StatBuffs.OnUpdateTick` and `AilmentReceiver.OnUpdateTick` | Pass zero time for player buffs. For positive player ailments, keep up to 64 durations, compensate their calculated tick loss before original, then restore durations of surviving entries. Negative ailments and damage/healing must keep ticking. | Bounded collection access and two-target lifecycle. No generic 'skip tick' handler. | Positive/negative mix, local/global speed modifiers, removed entries, more than 64 ailments and original throwing. |
@@ -143,7 +140,7 @@ The Forge item editor follows its own planner/private-preview path; its remainin
 These groups identify the next useful extraction points; they do not
 require building a universal handler/ABI/object framework first.
 
-- **Settings and numeric transforms:** fixed area and larger drop/monster settings reuse only matching arithmetic,
+- **Settings and numeric transforms:** larger drop/monster settings reuse only matching arithmetic,
   publication and owner lookup from implemented gains. Preserve each feature's original-call placement.
 - **Further argument forwarding:** new item rarity needs its full long signature; map/prophecy distance need validated
   indirect aggregates. The current scalar-result family is implemented; it does not imply support for hidden results.

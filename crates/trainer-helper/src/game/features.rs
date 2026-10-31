@@ -12,6 +12,7 @@ mod mapping;
 mod materials;
 mod mysterious_rift;
 mod patches;
+pub(crate) mod player_only;
 pub(crate) mod registry;
 pub(crate) mod results;
 pub(crate) mod runes_glyphs_to_99;

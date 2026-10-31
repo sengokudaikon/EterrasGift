@@ -38,7 +38,7 @@ use discovery::Images;
 #[cfg(any(test, feature = "fixture"))]
 pub(crate) use features::damage;
 #[cfg(test)]
-pub(crate) use features::{gains, results, results::no_mana_cost, runes_glyphs_to_99, shards_to_99};
+pub(crate) use features::{gains, player_only, results, results::no_mana_cost, runes_glyphs_to_99, shards_to_99};
 pub(crate) use features::{registry, registry::GameplayHookTarget, stat::StatBinding};
 
 /// A strong GC root on a managed object, held for one call.

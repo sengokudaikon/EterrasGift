@@ -92,6 +92,9 @@ pub(crate) const FEATURES: &[&HookFeature] = &[
     &super::gains::experience_multiplier::FEATURE,
     &super::gains::faction_gains::FEATURE,
     &super::gains::rank_up_per_gain::FEATURE,
+    &super::player_only::several_primordials::FEATURE,
+    &super::player_only::fixed_area::FEATURE,
+    &super::player_only::refill_mana::FEATURE,
 ];
 
 /// Each control's group, checked when the crate builds: every control belongs to exactly one feature.
@@ -243,6 +246,17 @@ impl RuntimeAccess {
             let finder = self.class(images, c"", c"PlayerFinder")?;
             let player = self.static_field(finder, c"playerActorComponent", "Actor")?;
             self.hook_static_storage(finder, player, 8)
+        }
+    }
+    /// Process-owned storage of the current local item manager; no getter runs on the gameplay caller.
+    /// # Safety
+    /// Same contract as `hook_online_storage`.
+    pub(super) unsafe fn hook_manager_storage(&self, images: &Images) -> Result<NonNull<c_void>, GameError> {
+        // SAFETY: admitted attached thread; resolve and initialize the exact reference static through the public API.
+        unsafe {
+            let finder = self.class(images, c"", c"PlayerFinder")?;
+            let manager = self.static_field(finder, c"localItemContainersManager", "ItemContainersManager")?;
+            self.hook_static_storage(finder, manager, 8)
         }
     }
     // Resolve the complete parameter signature before checking the selected overload's ABI and uniqueness.

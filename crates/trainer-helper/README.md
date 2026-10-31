@@ -87,6 +87,11 @@ target, while favor and rank gains retain their own targets. The XP pair is two 
 other arguments and tail-call the original once, including on closed/online paths. Original exceptions pass straight
 through, with no retry or helper return frame. The game owns level/rank changes, favor-derived reputation and saves.
 
+`game/features/player_only` shares a fresh receiver check for local item-manager and actor-component leaves.
+Several primordials returns zero from the local counter used by equip and stat checks; Fixed increased area returns
+the configured value for the player's stats; Refill mana converts the player's current maximum before each normal
+tick. Other receivers and closed/online paths forward unchanged. No helper callback or cached component is retained.
+
 The local pipe is `eterras-gift-<PID>`, one bounded request per connection: a 12-byte header and a sequential operation body. Bootstrap binds the controller PID/birth before any request; the kernel-reported
 client PID and retained process handle/start time verify each owner request. Fixture servers
 without a bootstrap binding let the first valid Discover claim ownership. Normal per-request EOF preserves ownership. Other living processes receive Refused without

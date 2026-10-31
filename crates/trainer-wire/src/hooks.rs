@@ -40,6 +40,9 @@ pub enum GameplayHook {
     LevelUpPerGain = 33,
     FactionGains = 34,
     RankUpPerGain = 35,
+    SeveralPrimordials = 36,
+    FixedArea = 37,
+    RefillMana = 38,
 }
 
 /// What a hook's value is: how the desktop's number for it is sent, which values the helper takes, and the one it
@@ -207,11 +210,14 @@ pub const SPECS: [HookSpec; GameplayHook::COUNT] = {
         switch(LevelUpPerGain, "level-up-per-gain"),
         real(FactionGains, "faction-gains", 0.0, 100.0, 1.0),
         switch(RankUpPerGain, "rank-up-per-gain"),
+        switch(SeveralPrimordials, "several-primordials"),
+        real(FixedArea, "fixed-area", 0.0, 50.0, 0.0),
+        switch(RefillMana, "refill-mana"),
     ]
 };
 
 impl GameplayHook {
-    pub const COUNT: usize = 36;
+    pub const COUNT: usize = 39;
     /// Every hook by its number on the pipe, checked against [`SPECS`] when the crate builds.
     pub const ALL: [Self; Self::COUNT] = {
         let mut all = [Self::MysteriousRift; Self::COUNT];

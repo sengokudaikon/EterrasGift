@@ -14,6 +14,50 @@ impl WriteControl for AllowWrite {
 }
 
 #[test]
+fn fixed_area_sends_its_value_and_confirms_it_from_independent_readback() {
+    let hook = GameplayHook::FixedArea;
+    let fixture = Fixture::rehashing();
+    let wire = FakeTransport::new(fixture.target.clone(), [fixture.discover(), status(false, 0x1234, 0)]);
+    let mut session = fixture.session(&wire);
+    session.enable();
+    run(session.connect()).unwrap();
+    for (wanted, actual, confirmed) in [(0.0f64, 0.0f64, true), (3.5, 3.5, true), (50.0, 50.0, true), (3.5, 3.0, false)] {
+        wire.push(done(vec![]));
+        wire.push(done(
+            HookObservation {
+                patch: PatchState::Patched,
+                enabled: true,
+                value: actual.to_bits(),
+            }
+            .encode(),
+        ));
+        let request = HookRequest {
+            id: HookId::parse(hook.id()).unwrap(),
+            on: true,
+            values: vec![wanted],
+        };
+        let outcome = run(BackendConnection::set_hook(&mut session, &request, &mut AllowWrite)).unwrap();
+        assert_eq!(outcome, if confirmed { WriteOutcome::Confirmed(true) } else { WriteOutcome::NotKept(true) });
+        let sent = wire.requests();
+        assert!(matches!(sent[sent.len()-2], Request::SetGameplayHook { hook: actual, value, .. } if actual == hook && value == wanted.to_bits()));
+        assert!(matches!(sent[sent.len()-1], Request::ReadGameplayHook { hook: actual, .. } if actual == hook));
+    }
+    let before = wire.requests().len();
+    for value in [-0.5, 50.5, f64::NAN, f64::INFINITY] {
+        let request = HookRequest {
+            id: HookId::parse(hook.id()).unwrap(),
+            on: true,
+            values: vec![value],
+        };
+        assert!(matches!(
+            run(BackendConnection::set_hook(&mut session, &request, &mut AllowWrite)).unwrap(),
+            WriteOutcome::NotApplied { .. }
+        ));
+    }
+    assert_eq!(wire.requests().len(), before);
+}
+
+#[test]
 fn experience_pair_is_one_write_and_each_lane_must_match_independent_readback() {
     let hook = GameplayHook::ExperienceMultiplier;
     let value = hook.value_kind().encode(&[2.5, 7.25]).unwrap();

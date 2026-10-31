@@ -364,7 +364,7 @@ pub static DESCRIPTORS: &[FeatureDescriptor] = &[
         TrainerArea::Combat,
         Phrase::new("Resources"),
         Phrase::new("Refill mana every tick"),
-        Phrase::new("Your mana stays full."),
+        Phrase::new("Refills your mana before each tick. Regeneration and drains still run."),
     ),
     switch(
         "no-cooldowns",

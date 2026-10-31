@@ -556,6 +556,38 @@ msgstr ""
 msgid "The helper couldn't leave the game. Restart Last Epoch before playing online."
 msgstr ""
 
+#: crates/trainer/src/connect/gate.rs
+msgid "Last Epoch entered play without logging which character was loaded. Return to character select and load an offline character again."
+msgstr ""
+
+#: crates/trainer/src/connect/gate.rs
+msgid "Last Epoch's Player.log belongs to an earlier game session. Restart Last Epoch with logging enabled."
+msgstr ""
+
+#: crates/trainer/src/connect/gate.rs
+msgid "Last Epoch's Player.log could not be read, so an offline character cannot be confirmed."
+msgstr ""
+
+#: crates/trainer/src/connect/gate.rs
+msgid "Last Epoch's Player.log could not be read: {reason}"
+msgstr ""
+
+#: crates/trainer/src/connect/gate.rs
+msgid "Last Epoch's Player.log does not identify the current character, so an offline character cannot be confirmed."
+msgstr ""
+
+#: crates/trainer/src/connect/gate.rs
+msgid "Last Epoch's Player.log was not found, so an offline character cannot be confirmed."
+msgstr ""
+
+#: crates/trainer/src/connect/gate.rs
+msgid "Load an offline character to connect to the trainer."
+msgstr ""
+
+#: crates/trainer/src/connect/gate.rs
+msgid "Waiting for Last Epoch to finish starting."
+msgstr ""
+
 #: crates/trainer/src/features.rs
 msgid "{value}: {hint}"
 msgstr ""
@@ -1269,6 +1301,10 @@ msgid "Refill mana every tick"
 msgstr ""
 
 #: crates/trainer/src/features/registry.rs
+msgid "Refills your mana before each tick. Regeneration and drains still run."
+msgstr ""
+
+#: crates/trainer/src/features/registry.rs
 msgid "Removes the range limit on picking up items and collecting crafting materials."
 msgstr ""
 
@@ -1514,10 +1550,6 @@ msgstr ""
 
 #: crates/trainer/src/features/registry.rs
 msgid "Your gold, soul embers and ancient bones."
-msgstr ""
-
-#: crates/trainer/src/features/registry.rs
-msgid "Your mana stays full."
 msgstr ""
 
 #: crates/trainer/src/features/registry.rs

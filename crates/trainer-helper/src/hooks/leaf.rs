@@ -1,5 +1,5 @@
 //! Process-owned leaves: Boolean and void overrides, and effects whose code their owner generates.
-//! They never enter helper code or change the stack; every path ends by tail-calling the original.
+//! They never enter helper code or change the stack; paths return a scalar/void override or tail-call the original.
 use super::{HookError, page};
 use std::{
     mem::offset_of,
@@ -63,8 +63,8 @@ pub enum LeafEffect {
 
 /// An effect the fixed leaves don't cover, as code its owner writes against [`FRAME`]. The gate loads RAX with the data
 /// block before the code and appends `jmp [rax+original]` after it, and adds no checks of its own: the code tests the
-/// switch itself. Every path preserves the target's arguments and ends in that jump or another to the original; branches
-/// stay inside the code, which uses only volatile registers and never the stack.
+/// switch itself. Forwarded paths preserve the target's arguments; an override may return directly with the target's
+/// exact scalar/void return ABI. Branches stay inside the code, which uses only volatile registers and never the stack.
 #[derive(Clone)]
 pub struct GeneratedEffect {
     pub code: Vec<u8>,

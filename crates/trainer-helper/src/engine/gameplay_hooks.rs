@@ -503,6 +503,138 @@ mod tests {
     }
 
     #[test]
+    fn player_only_controls_keep_independent_patches_and_clear_on_manager_loss_and_unload() {
+        use crate::game::{
+            player_only::{self, Receiver},
+            registry::ResolvedMethod,
+        };
+        use eg_trainer_wire::hooks::GameplayHook::{FixedArea, RefillMana, SeveralPrimordials};
+        use std::{
+            cell::Cell,
+            mem::offset_of,
+            sync::atomic::{AtomicU8, AtomicUsize},
+        };
+        #[repr(C)]
+        struct Mana {
+            maximum: i32,
+            current: Cell<f32>,
+        }
+        #[repr(C)]
+        struct Actor {
+            stats: usize,
+            mana: usize,
+        }
+        extern "C-unwind" fn count_original(_: usize, method: usize) -> i32 {
+            assert_eq!(method, 0xabcd);
+            3
+        }
+        extern "C-unwind" fn area_original(_: usize, tags: i32, method: usize) -> f32 {
+            assert_eq!((tags, method), (42, 0xabcd));
+            2.25
+        }
+        extern "C-unwind" fn tick_original(mana: &Mana, delta: f32, method: usize) {
+            assert_eq!((delta, method), (1.25, 0xabcd));
+            mana.current.set(mana.current.get() - delta);
+        }
+        // Distinct authored entry points with complete, straight-line prefixes for the real detour owner.
+        macro_rules! target {
+            ($name:ident, $original:ident, ($($arg:ty),*) -> $ret:ty) => {
+                #[unsafe(naked)]
+                unsafe extern "C-unwind" fn $name($(_: $arg),*) -> $ret {
+                    core::arch::naked_asm!(".rept 16", "nop", ".endr", "jmp {}", sym $original);
+                }
+            };
+        }
+        target!(count, count_original, (usize, usize) -> i32);
+        target!(area, area_original, (usize, i32, usize) -> f32);
+        target!(tick, tick_original, (&Mana, f32, usize) -> ());
+        let online = AtomicU8::new(0);
+        let manager = AtomicUsize::new(7);
+        let mana = Mana {
+            maximum: 100,
+            current: Cell::new(10.0),
+        };
+        let actor = Actor {
+            stats: 42,
+            mana: &mana as *const _ as usize,
+        };
+        let player = AtomicUsize::new(&actor as *const _ as usize);
+        let receiver = |storage: &AtomicUsize, component| Receiver {
+            online: NonNull::from(&online).cast(),
+            storage: NonNull::from(storage).cast(),
+            component,
+        };
+        let controls = [SeveralPrimordials, FixedArea, RefillMana];
+        let values = [1, 3.5f64.to_bits(), 1];
+        let effects = [
+            player_only::several_primordials::effect(receiver(&manager, None)),
+            player_only::fixed_area::effect(receiver(&player, Some(offset_of!(Actor, stats) as u32))),
+            player_only::refill_mana::Layout {
+                receiver: receiver(&player, Some(offset_of!(Actor, mana) as u32)),
+                maximum: offset_of!(Mana, maximum) as u32,
+                current: offset_of!(Mana, current) as u32,
+            }
+            .effect(),
+        ];
+        let mut owner = Hooks {
+            slots: [const { None }; FEATURES.len()],
+            manager: 1,
+            closing: false,
+        };
+        for ((hook, address), effect) in controls.into_iter().zip([count as *mut u8, area as *mut u8, tick as *mut u8]).zip(effects) {
+            // SAFETY: exact authored ABI and owned executable; every referenced object remains live through cleanup.
+            let group = unsafe {
+                let address = NonNull::new(address).unwrap();
+                let method = ResolvedMethod {
+                    name: hook.id().into(),
+                    address,
+                    bytes: address.cast::<[u8; 16]>().read_unaligned(),
+                };
+                Group::prepare(FeatureBinding::fixture(hook), &[method.leaf(effect, None, None)]).unwrap()
+            };
+            owner.slots[slot_of(hook)] = Some(group);
+        }
+        let calls = |expected_count, expected_area, expected_mana| {
+            mana.current.set(10.0);
+            // SAFETY: all entries retain their exact authored ABI, including Single in XMM1 on the tick.
+            unsafe {
+                assert_eq!(std::hint::black_box(count)(7, 0xabcd), expected_count);
+                assert_eq!(std::hint::black_box(area)(42, 42, 0xabcd), expected_area);
+                std::hint::black_box(tick)(&mana, 1.25, 0xabcd);
+            }
+            assert_eq!(mana.current.get(), expected_mana);
+        };
+        calls(3, 2.25, 8.75);
+        for (hook, value) in controls.into_iter().zip(values) {
+            let group = owner.slots[slot_of(hook)].as_ref().unwrap();
+            change_group(group, hook, true, value).unwrap();
+            assert!(observation(Some(group), hook).confirmed(true));
+            assert_eq!(observation(Some(group), hook).value, value);
+        }
+        calls(0, 3.5, 98.75);
+        let primordials = owner.slots[slot_of(SeveralPrimordials)].as_ref().unwrap();
+        change_group(primordials, SeveralPrimordials, false, 1).unwrap();
+        assert!(observation(Some(primordials), SeveralPrimordials).confirmed(false));
+        calls(3, 3.5, 98.75);
+        let area = owner.slots[slot_of(FixedArea)].as_ref().unwrap();
+        change_group(area, FixedArea, true, 6.25f64.to_bits()).unwrap();
+        assert_eq!(observation(Some(area), FixedArea).value, 6.25f64.to_bits());
+        calls(3, 6.25, 98.75);
+        owner.observe_manager(2).unwrap();
+        for hook in controls {
+            assert!(observation(owner.slots[slot_of(hook)].as_ref(), hook).confirmed(false));
+        }
+        calls(3, 2.25, 8.75);
+        for (hook, value) in controls.into_iter().zip(values) {
+            change_group(owner.slots[slot_of(hook)].as_ref().unwrap(), hook, true, value).unwrap();
+        }
+        owner.closing = true;
+        owner.clear().unwrap();
+        assert!(owner.slots.iter().all(Option::is_none));
+        calls(3, 2.25, 8.75);
+    }
+
+    #[test]
     fn experience_controls_share_lifecycle_readback_manager_loss_and_terminal_clear() {
         use crate::game::{gains::experience_multiplier::Layout, registry::ResolvedMethod};
         use eg_trainer_wire::hooks::GameplayHook::{ExperienceMultiplier, LevelUpPerGain};

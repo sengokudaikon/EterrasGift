@@ -3,6 +3,12 @@
 What the rewrite can do, newest first, one line per feature. Add a line when a feature lands; details live in the
 code and its tests, and what is still to build in [research/trainer-features.md](research/trainer-features.md).
 
+## 2026-10-31
+
+- Trainer: Several primordial items, bypassing the local equip limit and the matching stat-suppression checks.
+- Trainer: Fixed increased area for the current player's area skills, preserving other actors' calculations.
+- Trainer: Refill mana before each player tick; normal regeneration and drains still run.
+
 ## 2026-10-30
 
 - Trainer: independent character and skill experience multipliers, published together and applied to the current player.
