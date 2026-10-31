@@ -1,5 +1,5 @@
-//! The game's rules for an item that both processes enforce: the desktop when it plans an edit, the helper before it
-//! stores one. They decide nothing the game decides itself.
+//! Item eligibility and editing ranges shared by the desktop planner and the helper's pre-store guard.
+//! Generated roll limits are data; remaining Weaver counters and the explicit override use their editing policy below.
 
 #![forbid(unsafe_code)]
 
@@ -10,10 +10,23 @@ use crate::{
 };
 
 impl StatusField {
+    /// Weaver values are remaining counters, so spent values below their generated minimum are valid.
+    /// The explicit override permits the entire stored byte rather than only the generated roll range.
+    pub fn editing_range(self, natural: ValueRange, unrestricted: bool) -> ValueRange {
+        if matches!(self, Self::WeaversWill | Self::WeaversTouch) {
+            ValueRange {
+                minimum: 0,
+                maximum: if unrestricted { u8::MAX } else { natural.maximum },
+            }
+        } else {
+            natural
+        }
+    }
+
     pub fn requires_definition(self, item: &ForgeSnapshot) -> bool {
         matches!(self, Self::LegendaryPotential | Self::WeaversWill) && item.rarity == 7
     }
-    /// Game status rules shared by planning and the native pre-store guard.
+    /// Status write rules shared by planning and the native pre-store guard.
     /// `legendary_type` comes from the captured catalog on the host and getUnique
     /// inside the game. Neither an override nor an absent definition guesses it.
     pub fn allows(self, item: &ForgeSnapshot, limits: &ItemLimits, value: i32, unrestricted: bool, legendary_type: Option<i32>) -> bool {
@@ -21,25 +34,21 @@ impl StatusField {
             return false;
         }
         let status = &item.status;
-        let in_range = |range: ValueRange| (i32::from(range.minimum)..=i32::from(range.maximum)).contains(&value);
+        let in_range = |range: ValueRange| self.editing_range(range, unrestricted).contains(value as u8);
         match self {
             Self::ForgingPotential => !matches!(item.rarity, 7..=9) && in_range(limits.forging_potential),
             Self::LevelRequirement => !matches!(item.rarity, 7..=9) && in_range(limits.level_requirement),
             Self::Corrupted | Self::Ruined => matches!(value, 0 | 1),
-            Self::WeaversTouch => unrestricted && (25..=33).contains(&item.item_type) && (value == 0 || in_range(limits.weavers_touch)),
+            Self::WeaversTouch => unrestricted && (25..=33).contains(&item.item_type),
             Self::LegendaryPotential | Self::WeaversWill => {
                 let will = self == Self::WeaversWill;
                 if will && unrestricted && item.rarity == 9 {
-                    value <= i32::from(status.weavers_will.max(limits.weavers_will.maximum)) && (status.weavers_will > 0 || status.legendary_potential == 0 || value == 0)
+                    status.weavers_will > 0 || status.legendary_potential == 0 || value == 0
                 } else if item.rarity == 7 {
                     let forced = will && unrestricted && legendary_type == Some(0);
                     (legendary_type == Some(i32::from(will)) || forced)
                         && (if will { status.legendary_potential == 0 } else { status.weavers_will == 0 })
-                        && (if will {
-                            in_range(limits.weavers_will) || (forced && value == 0)
-                        } else {
-                            in_range(limits.legendary_potential)
-                        })
+                        && (if will { in_range(limits.weavers_will) } else { in_range(limits.legendary_potential) })
                 } else {
                     false
                 }

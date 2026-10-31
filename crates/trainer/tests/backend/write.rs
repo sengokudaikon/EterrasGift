@@ -121,13 +121,14 @@ fn queued_override_revocation_refuses_old_plans_and_undo_before_io() {
             let mut item = shared.forge_item.lock().unwrap();
             let item = item.as_mut().unwrap();
             item.item_type = 25;
+            item.status.weavers_touch = 1;
             item.fingerprint = item.legacy_fingerprint();
         }
         let (handle, worker) = start(&shared, options());
         connected(&handle).await;
         let edit = StatusEdit {
             field: StatusField::WeaversTouch,
-            value: 10,
+            value: 255,
             unrestricted: true,
         };
         assert_eq!(handle.snapshot().status_edit_plan(edit.clone()), Err(EditError::OverrideRequired));
@@ -148,13 +149,13 @@ fn queued_override_revocation_refuses_old_plans_and_undo_before_io() {
         assert_eq!(shared.count("write"), 1);
         command(&handle, Command::SetOverride(true)).await.unwrap();
         command(&handle, Command::UndoForge(Box::new(undo))).await.unwrap();
-        assert_eq!(shared.forge_item.lock().unwrap().as_ref().unwrap().status.weavers_touch, 0);
+        assert_eq!(shared.forge_item.lock().unwrap().as_ref().unwrap().status.weavers_touch, 1);
         shutdown(&handle, worker).await;
     });
 }
 
 #[test]
-fn reducing_above_limit_legendary_will_does_not_offer_an_illegal_increase_as_undo() {
+fn override_legendary_will_uses_the_stored_byte_range_including_undo() {
     use eg_trainer::item::edit::{StatusEdit, StatusField};
     run(async {
         let shared = writable();
@@ -178,8 +179,10 @@ fn reducing_above_limit_legendary_will_does_not_offer_an_illegal_increase_as_und
             })
             .unwrap();
         command(&handle, Command::Write(plan.into())).await.unwrap();
-        assert!(handle.snapshot().undo_forge.is_none());
+        let undo = handle.snapshot().undo_forge.clone().unwrap();
         assert!(matches!(handle.snapshot().last_write.as_ref().map(|r| &r.status), Some(WriteStatus::Confirmed(item)) if item.status.weavers_will == 80));
+        command(&handle, Command::UndoForge(Box::new(undo))).await.unwrap();
+        assert_eq!(shared.forge_item.lock().unwrap().as_ref().unwrap().status.weavers_will, 255);
         shutdown(&handle, worker).await;
     });
 }

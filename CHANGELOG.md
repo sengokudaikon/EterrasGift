@@ -5,6 +5,7 @@ code and its tests, and what is still to build in [research/trainer-features.md]
 
 ## 2026-10-31
 
+- Forge: spent Weaver counters remain editable below their generated minimum; the override allows Weaver's Touch and Weaver's Will from 0 to 255.
 - Trainer: Loot Lizard count applies to new zone calculations without refilling encounters already consumed.
 - Trainer: Rune Warden count is an independent control on the same verified encounter lifecycle.
 - Trainer: Champions count overrides only the champion spawner's roll and preserves the game's placement limit.

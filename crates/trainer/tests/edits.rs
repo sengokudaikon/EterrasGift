@@ -714,7 +714,41 @@ fn status_uses_game_limits_and_native_unique_rules_instead_of_ui_byte_limits() {
     refresh(&mut i);
     let expected = observation(i, &c);
     assert!(prepare(&expected, &c, status(StatusField::WeaversWill, 80, true), true, None).is_ok());
-    assert!(prepare(&expected, &c, status(StatusField::WeaversWill, 81, true), true, None).is_err());
+    assert!(prepare(&expected, &c, status(StatusField::WeaversWill, 255, true), true, None).is_ok());
+}
+#[test]
+fn weaver_counters_allow_spent_values_and_override_byte_values() {
+    let c = catalog();
+    let mut i = item();
+    i.item_type = 25;
+    i.status.weavers_touch = 1;
+    refresh(&mut i);
+    let expected = observation(i, &c);
+    for value in [0, 1, 3, 78, 255] {
+        let edit = status(StatusField::WeaversTouch, value, true);
+        assert_eq!(prepare(&expected, &c, edit.clone(), false, None), Err(EditError::OverrideRequired));
+        let prepared = prepare(&expected, &c, edit, true, None).unwrap();
+        assert_eq!(i32::from(prepared.projected().status.weavers_touch), value);
+        assert!(prepared.inspect_readback(Some(prepared.projected())).confirmed());
+    }
+    for value in [-1, 256] {
+        assert_eq!(
+            prepare(&expected, &c, status(StatusField::WeaversTouch, value, true), true, None),
+            Err(EditError::InvalidStatus)
+        );
+    }
+    let mut i = unique(item(), 7, 913);
+    i.status.weavers_will = 1;
+    refresh(&mut i);
+    let expected = observation(i, &c);
+    for value in [0, 1, 49] {
+        assert!(prepare(&expected, &c, status(StatusField::WeaversWill, value, false), false, None).is_ok());
+    }
+    assert_eq!(
+        prepare(&expected, &c, status(StatusField::WeaversWill, 255, false), false, None),
+        Err(EditError::InvalidStatus)
+    );
+    assert!(prepare(&expected, &c, status(StatusField::WeaversWill, 255, true), true, None).is_ok());
 }
 #[test]
 fn idol_type_changes_need_override_and_identity_changes_follow_game_rarity() {

@@ -2670,7 +2670,7 @@ impl ForgeEditor {
                     reason,
                     "",
                     "",
-                    false,
+                    self.unrestricted(),
                 )),
                 Some(LegendaryType::LegendaryPotential) => {
                     let mixed = reason.is_empty() && status.weavers_will > 0;
@@ -2760,14 +2760,13 @@ impl ForgeEditor {
         }
         if item.rarity == item::LEGENDARY && (enabled || status.weavers_will > 0) {
             let mixed = enabled && status.legendary_potential > 0 && status.weavers_will == 0;
-            let maximum = limits.map_or(0, |l| l.weavers_will.1).max(status.weavers_will);
             let uid = self.uid();
             self.fields.push(FieldDraft::number(
                 uid,
                 StatusField::WeaversWill,
                 WEAVERS_WILL.get(),
                 status.weavers_will,
-                Some((0, maximum)),
+                limits.map(|l| l.weavers_will),
                 &reason(mixed),
                 LEGENDARY_WILL_NOTE.get(),
                 if mixed { MIXED_HEADING.get() } else { "" },

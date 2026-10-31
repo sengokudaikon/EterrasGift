@@ -251,11 +251,16 @@ fn potential_and_weaver_rules_keep_literal_bounds_identity_and_override_distinct
         (StatusField::LegendaryPotential, 7, true, Some(0), false),
         (StatusField::LegendaryPotential, 1, true, Some(1), false),
         (StatusField::WeaversWill, 49, false, Some(1), true),
-        (StatusField::WeaversWill, 0, false, Some(1), false),
+        (StatusField::WeaversWill, 0, false, Some(1), true),
+        (StatusField::WeaversWill, 1, false, Some(1), true),
+        (StatusField::WeaversWill, 50, false, Some(1), false),
+        (StatusField::WeaversWill, 255, true, Some(1), true),
         (StatusField::WeaversWill, 10, false, Some(0), false),
         (StatusField::WeaversWill, 10, true, Some(0), true),
         (StatusField::WeaversWill, 0, true, Some(0), true),
-        (StatusField::WeaversWill, 50, true, Some(0), false),
+        (StatusField::WeaversWill, 255, true, Some(0), true),
+        (StatusField::WeaversWill, -1, true, Some(0), false),
+        (StatusField::WeaversWill, 256, true, Some(0), false),
         (StatusField::WeaversWill, 10, true, None, false),
         (StatusField::WeaversWill, 10, true, Some(99), false),
     ] {
@@ -272,11 +277,22 @@ fn potential_and_weaver_rules_keep_literal_bounds_identity_and_override_distinct
     item.status.weavers_will = 80;
     item.status.legendary_potential = 1;
     assert!(StatusField::WeaversWill.allows(&item, &limits, 79, true, None));
-    assert!(!StatusField::WeaversWill.allows(&item, &limits, 81, true, None));
+    assert!(StatusField::WeaversWill.allows(&item, &limits, 255, true, None));
     item.status.weavers_will = 0;
     assert!(!StatusField::WeaversWill.allows(&item, &limits, 10, true, None));
     item.item_type = 25;
-    for (value, flag, expected) in [(0, true, true), (4, true, true), (77, true, true), (3, true, false), (78, true, false), (4, false, false)] {
+    item.status.weavers_touch = 1;
+    for (value, flag, expected) in [
+        (0, true, true),
+        (1, true, true),
+        (4, true, true),
+        (77, true, true),
+        (78, true, true),
+        (255, true, true),
+        (-1, true, false),
+        (256, true, false),
+        (1, false, false),
+    ] {
         assert_eq!(StatusField::WeaversTouch.allows(&item, &limits, value, flag, None), expected);
     }
     item.item_type = 24;

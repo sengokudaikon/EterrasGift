@@ -4,6 +4,7 @@
 use super::game::Lookup;
 use super::item::{AffixDefinition, AffixState, ItemEdit, ModifierSnapshot, RollTarget, Seal, StatusField, ValueSample, ValueTable};
 use eg_core::phrase::Phrase;
+use eg_trainer::definitions::catalog::ValueRange;
 use std::rc::Rc;
 
 /// The status a value cell shows until its table arrives.
@@ -1076,15 +1077,17 @@ impl FieldDraft {
         }
     }
 
-    /// A whole number within the game's own range; a value outside it shows as it is, read-only.
+    /// A whole number within the shared editing range; generated Weaver minima are not remaining-counter limits.
     #[allow(clippy::too_many_arguments)]
-    pub fn number(uid: u64, field: StatusField, name: &str, game: u8, range: Option<(u8, u8)>, reason: &str, note: &str, heading: &str, allow_zero: bool) -> FieldDraft {
+    pub fn number(uid: u64, field: StatusField, name: &str, game: u8, range: Option<(u8, u8)>, reason: &str, note: &str, heading: &str, unrestricted: bool) -> FieldDraft {
         let mut reason = reason.to_string();
-        let mut range = range;
+        let mut range = range.map(|(minimum, maximum)| {
+            let range = field.editing_range(ValueRange { minimum, maximum }, unrestricted);
+            (range.minimum, range.maximum)
+        });
         if let Some((minimum, maximum)) = range
             && !(minimum..=maximum).contains(&game)
             && reason.is_empty()
-            && !(allow_zero && game == 0)
         {
             reason = OUTSIDE_RANGE.with(&[("value", &game), ("minimum", &minimum), ("maximum", &maximum)]);
             range = Some((minimum.min(game), maximum.max(game)));
@@ -1096,9 +1099,9 @@ impl FieldDraft {
         let mut draft = FieldDraft::new(uid, FieldKind::Number, Some(field), name, i64::from(game), Vec::new(), reason);
         draft.note = note.into();
         draft.read_only_heading = heading.into();
-        draft.unrestricted = allow_zero;
+        draft.unrestricted = unrestricted;
         let mut editor = ValueEditor::new(Some(name.to_string()));
-        editor.set_mapping(Lookup::Ready(Rc::new(integer_table(minimum, maximum, allow_zero))), true);
+        editor.set_mapping(Lookup::Ready(Rc::new(integer_table(minimum, maximum))), true);
         draft.editor = Some(editor);
         draft
     }
@@ -1368,13 +1371,13 @@ pub fn base_of(key: i64) -> (u16, u16) {
     (((key >> 16) & 0xFFFF) as u16, (key & 0xFFFF) as u16)
 }
 
-/// Each roll position stands for one whole value; with `allow_zero` position 0 is 0 and those below the minimum hold it.
-fn integer_table(minimum: u8, maximum: u8, allow_zero: bool) -> ValueTable {
+/// Each roll position stands for one whole value, clamped to the editable range.
+fn integer_table(minimum: u8, maximum: u8) -> ValueTable {
     ValueTable {
         label: VALUE.into(),
         samples: (0..=255u8)
             .map(|position| {
-                let value = if allow_zero && position == 0 { 0 } else { position.clamp(minimum, maximum) };
+                let value = position.clamp(minimum, maximum);
                 ValueSample {
                     value: f64::from(value),
                     display: value.to_string(),
@@ -1506,6 +1509,42 @@ mod tests {
         assert!(!row.is_value_drafted());
         assert_eq!(row.was(), "");
         assert_eq!(row.change_summary(), "Normal → Sealed");
+    }
+
+    #[test]
+    fn weaver_counters_below_generated_minima_stay_editable() {
+        for field in [StatusField::WeaversTouch, StatusField::WeaversWill] {
+            for game in [0, 1, 4, 14, 255] {
+                let mut draft = FieldDraft::number(1, field, "Weaver", game, Some((5, 14)), "", "", "", true);
+                assert!(draft.is_editable(), "{field:?}/{game}");
+                let editor = draft.editor.as_ref().unwrap();
+                assert_eq!(editor.value(game), f64::from(game));
+                assert_eq!(editor.parse("0"), Some(0.0));
+                assert_eq!(editor.parse("1"), Some(1.0));
+                assert_eq!(editor.parse("255"), Some(255.0));
+                assert_eq!(editor.parse("-1"), None);
+                assert_eq!(editor.parse("256"), None);
+                let next = if game == 255 { 1 } else { 255 };
+                assert!(draft.set_roll(next));
+                assert_eq!(
+                    draft.read_edit(),
+                    ItemEdit::Status(eg_trainer::item::edit::StatusEdit {
+                        field,
+                        value: i32::from(next),
+                        unrestricted: true,
+                    })
+                );
+            }
+        }
+        let draft = FieldDraft::number(1, StatusField::WeaversWill, "Weaver", 1, Some((5, 28)), "", "", "", false);
+        assert!(draft.is_editable());
+        let editor = draft.editor.as_ref().unwrap();
+        assert_eq!(editor.parse("0"), Some(0.0));
+        assert_eq!(editor.parse("1"), Some(1.0));
+        assert_eq!(editor.parse("29"), None);
+        let draft = FieldDraft::number(1, StatusField::WeaversTouch, "Weaver", 1, Some((5, 14)), "Override required", "", "", true);
+        assert!(!draft.is_editable());
+        assert_eq!(draft.tip(), "Override required");
     }
 
     #[test]
