@@ -223,6 +223,7 @@ fn every_supported_frame_size_has_matching_windows_unwind_metadata() {
     use windows_sys::Win32::System::Diagnostics::Debug::{CONTEXT, RtlLookupFunctionEntry, RtlVirtualUnwind};
     for (positions, frame) in [(2, 40), (5, 56), (7, 72), (10, 88), (12, 104)] {
         let effect = PostfixEffect {
+            before: Vec::new(),
             code: vec![],
             slots: [0; 2],
             positions,
@@ -260,6 +261,7 @@ fn every_supported_frame_size_has_matching_windows_unwind_metadata() {
         let rejected = unsafe {
             PostfixGate::prepare(
                 &PostfixEffect {
+                    before: Vec::new(),
                     code: vec![],
                     slots: [0; 2],
                     positions,

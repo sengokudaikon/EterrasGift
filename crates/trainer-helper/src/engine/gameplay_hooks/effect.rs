@@ -71,7 +71,9 @@ impl FeatureBinding {
                         let shared = gates.first().map(Gate::scalar);
                         ScalarGate::prepare(binding.receiver, binding.offset, binding.online, binding.baseline, *stack_argument, shared).map(Gate::Scalar)
                     }
-                    (Behavior::Postfix, TargetEffect::Postfix(effect)) => PostfixGate::prepare(effect, gates.first().map(Gate::postfix)).map(Gate::Postfix),
+                    (Behavior::Postfix | Behavior::SharedPostfix(_), TargetEffect::Postfix(effect)) => {
+                        PostfixGate::prepare(effect, gates.first().map(Gate::postfix)).map(Gate::Postfix)
+                    }
                     (Behavior::Leaf | Behavior::Patch, TargetEffect::Patch(_)) => Ok(Gate::Patch(AtomicBool::new(false))),
                     _ => return Err(server::failure(ResponseCode::Refused, "Hook target and behavior disagree")),
                 }
@@ -186,6 +188,7 @@ impl Effect {
     pub(super) fn target_on(&self, hook: GameplayHook, on: bool) -> bool {
         match self.behavior {
             Behavior::SharedLeaf(settings) => settings.target_on(self.gates[0].leaf(), hook, on),
+            Behavior::SharedPostfix(settings) => settings.target_on(self.gates[0].postfix(), hook, on),
             _ => on,
         }
     }
@@ -203,10 +206,13 @@ impl Effect {
                 }
             }
             Behavior::Scalar(_) => {}
-            Behavior::Postfix => {
+            Behavior::Postfix | Behavior::SharedPostfix(_) => {
                 for gate in &self.gates {
                     let gate = gate.postfix();
-                    gate.set_value(value);
+                    match self.behavior {
+                        Behavior::SharedPostfix(settings) => settings.set(gate, hook, on, value),
+                        _ => gate.set_value(value),
+                    }
                     gate.set_enabled(target_on);
                 }
             }
@@ -239,6 +245,7 @@ impl Effect {
         let first = self.gates.iter().find(|gate| !matches!(gate, Gate::Patch(_))).unwrap_or(&self.gates[0]);
         let (enabled, value) = match self.behavior {
             Behavior::SharedLeaf(settings) => settings.setting(first.leaf(), hook),
+            Behavior::SharedPostfix(settings) => settings.setting(first.postfix(), hook),
             _ => (self.gates.iter().all(Gate::enabled), first.value()),
         };
         if let Gate::Scalar(gate) = first {
@@ -247,11 +254,12 @@ impl Effect {
                 patch = PatchState::Unknown;
             }
         }
-        if let Behavior::SharedLeaf(settings) = self.behavior
-            && !enabled
-            && patch == PatchState::Patched
-            && settings.has_other(first.leaf(), hook)
-        {
+        let has_other = match self.behavior {
+            Behavior::SharedLeaf(settings) => settings.has_other(first.leaf(), hook),
+            Behavior::SharedPostfix(settings) => settings.has_other(first.postfix(), hook),
+            _ => false,
+        };
+        if !enabled && patch == PatchState::Patched && has_other {
             patch = PatchState::Shared;
         }
         HookObservation { patch, enabled, value }

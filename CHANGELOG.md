@@ -5,6 +5,10 @@ code and its tests, and what is still to build in [research/trainer-features.md]
 
 ## 2026-10-31
 
+- Trainer: Loot Lizard count applies to new zone calculations without refilling encounters already consumed.
+- Trainer: Rune Warden count is an independent control on the same verified encounter lifecycle.
+- Trainer: Champions count overrides only the champion spawner's roll and preserves the game's placement limit.
+- Trainer: Encounter forcing hooks resolve the game's nested placement-data type correctly.
 - Trainer: Travel to locked waypoints, preserving the original excluded-location rule and restoring both travel checks when off.
 - Trainer: Always an experimental unique from eligible Rune Prisons, with both chance checks bypassed and item-level requirements preserved.
 - Trainer: Eternity Cache anywhere and repeatedly for the local player, using the game's highest unique-level cap.

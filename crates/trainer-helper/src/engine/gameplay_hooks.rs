@@ -253,6 +253,8 @@ fn group_patch(states: impl Iterator<Item = HookState>) -> PatchState {
 }
 
 #[cfg(test)]
+mod encounters;
+#[cfg(test)]
 mod mixed;
 
 #[cfg(test)]

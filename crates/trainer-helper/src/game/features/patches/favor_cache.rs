@@ -7,7 +7,7 @@ const SPECS: &[PatchSpec] = &[PatchSpec::new(
         class: c"RandomFavourCacheSpawner",
         method: c"CanSpawn",
         instance: true,
-        params: &["EncounterPlacementData"],
+        params: &["RandomEncounterTypes.EncounterPlacementData"],
         returns: "System.Boolean",
     },
     0x120,

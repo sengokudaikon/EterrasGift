@@ -1,4 +1,4 @@
-//! Original-first Windows x64 scalar-result gateway with up to twelve argument positions. The original call, result
+//! Original-first Windows x64 scalar/void gateway with up to twelve argument positions. The original call, result
 //! adjustment, return path, state and unwind data remain process-owned. Generated code never enters this DLL.
 use super::{HookError, page};
 use std::sync::atomic::{AtomicU64, Ordering::SeqCst};
@@ -10,7 +10,7 @@ struct Data {
     original: AtomicU64,
     value: AtomicU64,
     switch: u64,
-    slots: [u64; 2],
+    slots: [AtomicU64; 2],
 }
 
 /// Byte displacements from RAX for the feature's post-call code.
@@ -32,11 +32,21 @@ pub const fn frame_size(positions: u8) -> u8 {
     ((saved + 8 + 23) & !15) - 8
 }
 
+/// Two per-call words in this gateway's incoming home area. RDX uses the intervening home slot. These words are
+/// outside the original callee's outgoing frame, survive its calls, and need no extra stack allocation/unwind code.
+pub const fn snapshots(positions: u8) -> [u8; 2] {
+    [frame_size(positions) + 8, frame_size(positions) + 24]
+}
+
 /// Code after a normal original return: RAX is Data, RCX/RDX are the original argument registers, R10 holds the integer result
 /// and XMM0 holds the float result. Preserve the relevant result on unchanged paths; R10 is copied back to RAX.
 /// Use only volatile registers, preserve RSP and nonvolatile registers, keep every branch inside this code (or to its
 /// end), and fall through to the appended epilogue. There are no helper-code addresses or callback destinations.
 pub struct PostfixEffect {
+    /// Optional before-original snapshot code. RAX is Data; preserve it, the argument registers (including XMM0..3)
+    /// and outgoing stack arguments. Scratch R10/R11 and flags only; write per-call state through `snapshots`.
+    /// Like post-call code, branches remain internal or fall through. No helper callback runs around the original.
+    pub before: Vec<u8>,
     pub code: Vec<u8>,
     pub slots: [u64; 2],
     /// Native positions, including receiver when present and MethodInfo. No hidden return buffer.
@@ -50,7 +60,7 @@ pub struct PostfixGate {
 }
 impl PostfixGate {
     /// # Safety
-    /// Windows x64 method returning an integer, byte or float scalar, with `positions` argument positions including
+    /// Windows x64 method returning an integer, byte, float scalar or void, with `positions` argument positions including
     /// receiver when present and MethodInfo, and no hidden return buffer. Each parameter occupies one native position.
     /// Effect code obeys PostfixEffect's register/branch contract. Its referenced static
     /// storage remains readable for process lifetime; any object graph it reads is valid over the post-call span.
@@ -71,7 +81,7 @@ impl PostfixGate {
                 original: AtomicU64::new(0),
                 value: AtomicU64::new(1),
                 switch: shared.map_or(data as u64, |gate| gate.switch as *const AtomicU64 as u64),
-                slots: effect.slots,
+                slots: effect.slots.map(AtomicU64::new),
             });
             // Home area, the actual stack arguments, then saved RCX. Never read absent caller arguments.
             let mut code = vec![0x48, 0x83, 0xec, frame, 0x48, 0x89, 0x4c, 0x24, saved];
@@ -85,6 +95,7 @@ impl PostfixGate {
             }
             code.extend([0x48, 0xb8]);
             code.extend((data as u64).to_le_bytes());
+            code.extend(&effect.before);
             code.extend([0xff, 0x50, std::mem::offset_of!(Data, original) as u8]); // call original once
             code.extend([0x49, 0x89, 0xc2]); // integer result -> r10 before reloading Data into rax
             code.extend([0x48, 0x8b, 0x4c, 0x24, saved, 0x48, 0x8b, 0x54, 0x24, second, 0x48, 0xb8]); // restore RCX/RDX; reload Data
@@ -125,4 +136,13 @@ impl PostfixGate {
     pub fn set_value(&self, value: u64) {
         self.data.value.store(value, SeqCst);
     }
+    pub fn slot(&self, slot: usize) -> u64 {
+        self.data.slots[slot].load(SeqCst)
+    }
+    pub fn set_slot(&self, slot: usize, value: u64) {
+        self.data.slots[slot].store(value, SeqCst);
+    }
 }
+
+#[cfg(test)]
+mod tests;

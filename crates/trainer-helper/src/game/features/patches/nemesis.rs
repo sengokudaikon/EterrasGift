@@ -7,7 +7,7 @@ const SPECS: &[PatchSpec] = &[PatchSpec::new(
         class: c"RandomNemesisSpawner",
         method: c"ExecuteSpawn",
         instance: true,
-        params: &["EncounterPlacementData"],
+        params: &["RandomEncounterTypes.EncounterPlacementData"],
         returns: "System.Void",
     },
     0x640,

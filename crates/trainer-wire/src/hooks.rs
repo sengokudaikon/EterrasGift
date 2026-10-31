@@ -47,6 +47,9 @@ pub enum GameplayHook {
     AnyWaypoint = 40,
     ExperimentalUniques = 41,
     EternityCacheAnywhere = 42,
+    LootLizards = 43,
+    RuneWardens = 44,
+    Champions = 45,
 }
 
 /// What a hook's value is: how the desktop's number for it is sent, which values the helper takes, and the one it
@@ -221,11 +224,14 @@ pub const SPECS: [HookSpec; GameplayHook::COUNT] = {
         switch(AnyWaypoint, "any-waypoint"),
         switch(ExperimentalUniques, "experimental-uniques"),
         switch(EternityCacheAnywhere, "eternity-cache-anywhere"),
+        real(LootLizards, "loot-lizards", 0.0, 20.0, 1.0),
+        real(RuneWardens, "rune-wardens", 0.0, 20.0, 1.0),
+        real(Champions, "champions", 0.0, 3.0, 1.0),
     ]
 };
 
 impl GameplayHook {
-    pub const COUNT: usize = 43;
+    pub const COUNT: usize = 46;
     /// Every hook by its number on the pipe, checked against [`SPECS`] when the crate builds.
     pub const ALL: [Self; Self::COUNT] = {
         let mut all = [Self::MysteriousRift; Self::COUNT];

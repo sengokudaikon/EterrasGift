@@ -12,6 +12,7 @@ pub(crate) enum Behavior {
     Leaf,
     Postfix,
     SharedLeaf(&'static SharedSettings),
+    SharedPostfix(&'static SharedSettings),
     Scalar(&'static StatFeature),
     Patch,
 }
@@ -99,6 +100,8 @@ pub(crate) const FEATURES: &[&HookFeature] = &[
     &super::any_waypoint::FEATURE,
     &super::experimental_uniques::FEATURE,
     &super::eternity_cache_anywhere::FEATURE,
+    &super::encounter_counts::FEATURE,
+    &super::champions::FEATURE,
 ];
 
 /// Each control's group, checked when the crate builds: every control belongs to exactly one feature.

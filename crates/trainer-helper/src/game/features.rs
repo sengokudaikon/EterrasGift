@@ -3,8 +3,10 @@
 
 mod any_offhand;
 pub(crate) mod any_waypoint;
+pub(crate) mod champions;
 pub mod damage;
 mod descriptions;
+pub(crate) mod encounter_counts;
 pub(crate) mod eternity_cache_anywhere;
 pub(crate) mod experimental_uniques;
 mod fixed_attack_rate;
@@ -17,6 +19,7 @@ mod mysterious_rift;
 mod new_affixes;
 mod patches;
 pub(crate) mod player_only;
+mod postfix;
 pub(crate) mod registry;
 pub(crate) mod results;
 pub(crate) mod runes_glyphs_to_99;
