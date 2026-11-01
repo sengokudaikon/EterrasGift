@@ -543,9 +543,9 @@ pub(super) fn capture(session: &Session) {
     eg_ui::install(
         &ui,
         App {
-            launcher: Some(Arc::new(GameLauncher::new(session.host()))),
             background: session.background.clone(),
             game: None,
+            launcher: Some(Arc::new(GameLauncher::new(session.host()))),
             mods: None,
             trainer: true,
             trainer_backend: Some(handle.clone()),
@@ -596,6 +596,8 @@ pub(super) fn capture(session: &Session) {
     assert_eq!(ui.global::<eg_ui::ForgeState>().get_affixes().row_count(), 1);
     ui.global::<eg_ui::ForgeState>().invoke_apply();
     assert_eq!(handle.snapshot().last_write, None);
+    // The roll's values follow the item, in an answer of their own.
+    wait(|| ui.global::<eg_ui::ForgeState>().get_can_max_rolls());
     session.capture(&ui, "backend-forge-ready");
     session.resize(680, 580);
     session.capture(&ui, "backend-forge-ready-narrow");
@@ -896,8 +898,11 @@ pub(super) fn capture(session: &Session) {
     assert_eq!(forge.get_implicits().row_data(0).unwrap().text, "Armour +17 Ω");
     assert_eq!(forge.get_implicits().row_data(1).unwrap().text, "Ward +5");
     assert!(!forge.get_can_apply());
-    let value = forge.get_implicits().row_data(0).unwrap().rolls.row_data(0).unwrap();
-    assert!(value.mapped && value.editable && value.display == "Roll 44");
+    // The roll's values follow the lines, in an answer of their own.
+    let first_roll = || forge.get_implicits().row_data(0).unwrap().rolls.row_data(0).unwrap();
+    wait(|| first_roll().mapped);
+    let value = first_roll();
+    assert!(value.editable && value.display == "Roll 44");
     session.capture(&ui, "backend-forge-implicit-descriptions");
     session.resize(680, 580);
     session.capture(&ui, "backend-forge-implicit-descriptions-narrow");
@@ -1296,9 +1301,9 @@ pub(super) fn capture_waiting(session: &Session) {
     eg_ui::install(
         &ui,
         App {
-            launcher: Some(Arc::new(GameLauncher::new(session.host()))),
             background: session.background.clone(),
             game: None,
+            launcher: Some(Arc::new(GameLauncher::new(session.host()))),
             mods: None,
             trainer: true,
             trainer_backend: Some(handle.clone()),
@@ -1402,9 +1407,9 @@ pub(super) fn capture_logs(session: &Session) {
     eg_ui::install(
         &ui,
         App {
-            launcher: None,
             background: session.background.clone(),
             game: None,
+            launcher: None,
             mods: None,
             trainer: true,
             trainer_backend: Some(handle.clone()),
@@ -1549,9 +1554,9 @@ pub(super) fn capture_profiles(session: &Session) {
     eg_ui::install(
         &ui,
         App {
-            launcher: Some(Arc::new(GameLauncher::new(session.host()))),
             background: session.background.clone(),
             game: None,
+            launcher: Some(Arc::new(GameLauncher::new(session.host()))),
             mods: None,
             trainer: true,
             trainer_backend: Some(handle.clone()),

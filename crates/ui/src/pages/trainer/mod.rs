@@ -1,24 +1,17 @@
-//! The trainer's pages: the feature registry, the page and row models, and their binding to
-//! `pages/trainer.slint`. With the trainer's worker they run on its snapshots
-//! (`backend_session`); without one, on `session::Unconnected`, which tells the truth: no offline character is connected.
-//! Captures drive other states through fake sessions of their own. The registry is `eg_trainer::features`, which `registry`
-//! adapts.
-//!
-//! The hooks' wanted state and values are the worker's profiles (`eg_trainer::features::profiles`); this module keeps only the rows
-//! and their binding.
+//! The trainer's pages in the window: their binding to `pages/trainer.slint`. What they show and how they answer is
+//! `eg_trainer::screens`. With the trainer's worker they run on its snapshots; without one, on `Unconnected`, which tells
+//! the truth: no offline character is connected. Captures drive other states through fake sessions of their own.
 
-pub mod backend_session;
 pub mod connection;
-pub mod pages;
-pub mod profiles;
-pub mod registry;
-pub mod session;
 mod view;
 
-pub use view::{Pages, WeakPages, bind};
+pub use view::{Pages, bind};
 
 use crate::MainWindow;
 use eg_trainer::backend::BackendHandle;
+use eg_trainer::screens::backend_session::BackendSession;
+use eg_trainer::screens::registry;
+use eg_trainer::screens::session::Unconnected;
 use std::rc::Rc;
 
 /// Binds the trainer's pages, on the worker when there is one; the worker keeps the profiles. Navigation offers the pages
@@ -26,25 +19,12 @@ use std::rc::Rc;
 /// TODO(trainer): list planned features (`presented: false`) in a source checkout, once the composition says it is one.
 /// Row presentation and native availability are separate; the backend decides what can run.
 pub fn install(window: &MainWindow, backend: Option<BackendHandle>) {
-    let Some(backend) = backend else {
-        bind(window, Rc::new(session::Unconnected), registry::FEATURES.to_vec(), false);
-        return;
-    };
-    let pages = bind(window, Rc::new(backend_session::BackendSession::new(backend.clone())), registry::FEATURES.to_vec(), false).downgrade();
-    follow(&backend, move || pages.upgrade().map(|pages| pages.refresh()).is_some());
-}
-
-/// Calls `changed` on every worker snapshot until the worker ends or `changed` says its owner is gone. Without an event
-/// loop there is nothing to show, and nothing follows.
-pub(crate) fn follow(backend: &BackendHandle, mut changed: impl FnMut() -> bool + 'static) {
-    let mut updates = backend.subscribe();
-    let spawned = slint::spawn_local(async move {
-        loop {
-            let ended = updates.changed().await.is_err();
-            if !changed() || ended {
-                break;
-            }
+    match backend {
+        Some(backend) => {
+            bind(window, Rc::new(BackendSession::new(backend.clone())), registry::FEATURES.to_vec(), false, Some(backend));
         }
-    });
-    drop(spawned);
+        None => {
+            bind(window, Rc::new(Unconnected), registry::FEATURES.to_vec(), false, None);
+        }
+    }
 }

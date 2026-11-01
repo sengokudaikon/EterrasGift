@@ -9,13 +9,13 @@ use eg_trainer::item::edit::{ExpectedObservation, ItemEdit, RollEdit};
 use eg_trainer::item::values::{
     BoundPreview, BoundTooltip, DisplayScalarParser, MappingBuilder, MappingRequest, MappingStart, MappingTarget, RawMappingPage, RawValueSample, UniqueRollPreview, ValueTable,
 };
-use eg_trainer::write::{ForgePlan, WriteControl, WriteOutcome, WriteStatus};
-use eg_ui::pages::forge::{
-    ForgeHandle,
+use eg_trainer::screens::forge::{
     editor::{Cell, ForgeEditor},
     item::Seal,
     rows::Loading,
 };
+use eg_trainer::write::{ForgePlan, WriteControl, WriteOutcome, WriteStatus};
+use eg_ui::pages::forge::ForgeHandle;
 use eg_ui::{ForgeState, Nav, Tip};
 use slint::platform::{PointerEventButton, WindowEvent};
 use slint::{LogicalPosition, Model};
@@ -671,7 +671,7 @@ fn settled(editor: &ForgeEditor) -> bool {
         && editor
             .uniques
             .iter()
-            .chain(&editor.implicits)
+            .chain(editor.implicits.iter())
             .flat_map(|row| &row.rolls)
             .all(|roll| roll.editor.status() != Loading.get())
 }
@@ -712,9 +712,9 @@ impl Forge {
         let installed = eg_ui::install(
             &ui,
             App {
-                launcher: None,
                 background: session.background.clone(),
                 game: None,
+                launcher: None,
                 mods: None,
                 trainer: true,
                 trainer_backend: Some(backend.clone()),

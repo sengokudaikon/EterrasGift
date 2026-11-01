@@ -1,8 +1,7 @@
-//! The window's pages, one module each beside its `.slint` file in `ui/pages/`. Home, Logs, Mods and Settings are `spiderland`
-//! hosts: the page's state and rules live in a Slint-free feature (`eg_companion::home`, `eg_core::logs`), and the module here
-//! shows it and performs its effects, as the guide in `libs/spiderland/README.md` lays out; `home` and `eg_companion::home` are the
-//! worked example. `crates/app/tests/architecture.rs` holds a page's views to it: only the page's root reads its global. The
-//! trainer's pages and the Item Forge come onto it later.
+//! The window's pages, one module each beside its `.slint` file in `ui/pages/`: the page's state and rules live in a
+//! Slint-free feature (`eg_companion::home`, `eg_core::logs`), and the module here shows it and performs its effects, as the
+//! guide in `libs/spiderland/README.md` lays out; `home` and `eg_companion::home` are the worked example.
+//! `crates/app/tests/architecture.rs` holds a page's views to it: only the page's root reads its global.
 
 pub mod forge;
 pub mod home;

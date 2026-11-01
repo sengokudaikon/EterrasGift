@@ -1,5 +1,6 @@
 //! The Slint UI: the `.slint` sources under `ui/`, compiled by `build.rs`, and the Rust that puts the app's state behind
-//! them: navigation, the pages (`pages`), Eterra's decorations, and the Windows settings the design reacts to.
+//! them: navigation, the pages rewritten on `spiderland` (`pages`), Eterra's decorations, and the Windows settings the design
+//! reacts to.
 
 // Deny, not forbid: the code Slint generates allows unsafe for its vtables, and forbid refuses that.
 #![deny(unsafe_code)]
@@ -7,7 +8,6 @@
 slint::include_modules!();
 
 pub mod decorations;
-mod models;
 pub mod pages;
 pub mod shell;
 pub mod system;
@@ -89,9 +89,7 @@ pub fn install(window: &MainWindow, app: App) -> Installed {
     trainer::install(window, trainer_backend.clone());
     let forge = trainer_backend.map(|backend| {
         trainer::connection::bind(window, backend.clone(), &shell, decorations);
-        let forge = forge::worker::bind(window, backend, &shell, app.faults);
-        forge.edit(|editor| editor.templates = app.templates);
-        forge
+        forge::bind(window, backend, &shell, app.faults, app.templates)
     });
     apply_system_settings(window);
     Installed { forge }
