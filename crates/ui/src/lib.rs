@@ -55,12 +55,12 @@ pub struct Installed {
 /// catalog, the Rust phrases through the same catalog's table and the app's numbers in its symbols, chosen once for all. Call it as soon as the first
 /// window exists, before any page or message is built.
 pub fn select_language() {
-    let Ok(translations) = eg_core::phrase::Translations::new(translations::CATALOGS) else {
+    let Ok(translations) = eg_i18n::Translations::new(translations::CATALOGS) else {
         return;
     };
     let language = sys_locale::get_locale().and_then(|locale| translations.choose(&locale));
     translations.select(language);
-    eg_core::locale::select(language);
+    eg_i18n::locale::select(language);
     // Fails only when no translation is bundled, and English needs none.
     let _ = slint::select_bundled_translation(language.unwrap_or(""));
 }
@@ -130,6 +130,6 @@ where
 mod tests {
     #[test]
     fn every_bundled_translation_reads() {
-        eg_core::phrase::Translations::new(super::translations::CATALOGS).unwrap();
+        eg_i18n::Translations::new(super::translations::CATALOGS).unwrap();
     }
 }

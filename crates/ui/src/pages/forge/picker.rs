@@ -12,7 +12,7 @@
 
 use super::game::Catalog;
 use super::item::{AffixDefinition, AffixKind, Category, effects_said};
-use eg_core::phrase::{Conjunction, Phrase, Plural, list};
+use eg_i18n::{Conjunction, Phrase, list, phrases};
 use std::collections::BTreeMap;
 
 /// A search this long may bring in a unique's modifiers by the unique's name; a shorter one would match too many names.
@@ -266,11 +266,11 @@ impl Index {
 
 /// A slot's name in the game's words.
 pub fn slot_name(catalog: &Catalog, slot: u16) -> String {
-    const UNNAMED: Phrase = Phrase::new("Item type {id}");
+    phrases! { Unnamed: "Item type {id}" }
     catalog
         .item_type(slot)
         .filter(|definition| !definition.name.is_empty())
-        .map_or_else(|| UNNAMED.with(&[("id", &slot)]), |definition| definition.name.clone())
+        .map_or_else(|| Unnamed.with(&[("id", &slot)]), |definition| definition.name.clone())
 }
 
 /// What the search and filters apply to.
@@ -383,24 +383,30 @@ pub fn source_uniques(candidates: &[usize], definitions: &[AffixDefinition], slo
 
 /// The level choices for an item that requires `item_level`, each with its words.
 pub fn level_choices(item_level: Option<u8>) -> Vec<(LevelChoice, String)> {
-    const ANY: Phrase = Phrase::new("Any level");
-    const FITS: Phrase = Phrase::new("Fits this item (level {level})");
-    const UP_TO: Phrase = Phrase::new("Up to level {level}");
-    std::iter::once((LevelChoice::Any, ANY.into()))
-        .chain(item_level.map(|level| (LevelChoice::FitsItem, FITS.with(&[("level", &level)]))))
-        .chain(LEVEL_CAPS.iter().map(|level| (LevelChoice::UpTo(*level), UP_TO.with(&[("level", level)]))))
+    phrases! {
+        Any: "Any level"
+        Fits: "Fits this item (level {level})"
+        UpTo: "Up to level {level}"
+    }
+    std::iter::once((LevelChoice::Any, Any.into()))
+        .chain(item_level.map(|level| (LevelChoice::FitsItem, Fits.with(&[("level", &level)]))))
+        .chain(LEVEL_CAPS.iter().map(|level| (LevelChoice::UpTo(*level), UpTo.with(&[("level", level)]))))
         .collect()
 }
 
-/// Slot's first choice.
-pub const ANY_SLOT: Phrase = Phrase::new("Any slot");
+phrases! {
+    /// Slot's first choice.
+    pub AnySlot: "Any slot"
+}
 
 /// The fixed Source choices, before the uniques.
 pub fn source_words() -> [&'static str; 3] {
-    const GAME: Phrase = Phrase::new("Game affixes");
-    const UNIQUES: Phrase = Phrase::new("Unique modifiers");
-    const ALL: Phrase = Phrase::new("All sources");
-    [GAME.get(), UNIQUES.get(), ALL.get()]
+    phrases! {
+        Game: "Game affixes"
+        Uniques: "Unique modifiers"
+        All: "All sources"
+    }
+    [Game.get(), Uniques.get(), All.get()]
 }
 
 /// A filter an active-filter chip stands for; removing the chip clears it.
@@ -455,22 +461,24 @@ pub fn clear_chip(filters: &mut Filters, chip: Chip, own_slot: Option<u16>) {
 
 /// A chip's words: each names its filter's value.
 pub fn chip_text(chip: Chip, filters: &Filters, catalog: &Catalog) -> String {
-    const SLOT: Phrase = Phrase::new("Slot: {name}");
-    const FITS_ITEM: Phrase = Phrase::new("Fits this item");
-    const UP_TO: Phrase = Phrase::new("Up to level {level}");
-    const FROM: Phrase = Phrase::new("From {name}");
+    phrases! {
+        Slot: "Slot: {name}"
+        FitsItem: "Fits this item"
+        UpTo: "Up to level {level}"
+        From: "From {name}"
+    }
     match chip {
         Chip::Side => PICKER_SIDES[filters.side as usize].into(),
         Chip::Category => PICKER_CATEGORIES[filters.category].0.into(),
         Chip::Class => PICKER_CLASSES[filters.class].into(),
-        Chip::Slot => filters.slot.map_or_else(|| ANY_SLOT.into(), |slot| SLOT.with(&[("name", &slot_name(catalog, slot))])),
+        Chip::Slot => filters.slot.map_or_else(|| AnySlot.into(), |slot| Slot.with(&[("name", &slot_name(catalog, slot))])),
         Chip::Level => match filters.level {
-            LevelChoice::UpTo(level) => UP_TO.with(&[("level", &level)]),
-            _ => FITS_ITEM.into(),
+            LevelChoice::UpTo(level) => UpTo.with(&[("level", &level)]),
+            _ => FitsItem.into(),
         },
         Chip::Tag(index) => STAT_TAGS[index].name.into(),
         Chip::Source => match filters.source {
-            SourceChoice::Unique(unique) => FROM.with(&[("name", &catalog.source_name(unique))]),
+            SourceChoice::Unique(unique) => From.with(&[("name", &catalog.source_name(unique))]),
             SourceChoice::All => source_words()[2].to_owned(),
             _ => source_words()[1].to_owned(),
         },
@@ -479,23 +487,23 @@ pub fn chip_text(chip: Chip, filters: &Filters, catalog: &Catalog) -> String {
 
 /// What Tags shows: "Any tag", or the tags chosen.
 pub fn tags_summary(filters: &Filters) -> String {
-    const ANY_TAG: Phrase = Phrase::new("Any tag");
+    phrases! { AnyTag: "Any tag" }
     let names: Vec<&str> = (0..STAT_TAGS.len())
         .filter(|index| filters.tags & (1u64 << index) != 0)
         .map(|index| STAT_TAGS[index].name.get())
         .collect();
-    if names.is_empty() { ANY_TAG.into() } else { names.join(", ") }
+    if names.is_empty() { AnyTag.into() } else { names.join(", ") }
 }
 
 /// The list's size and the unique modifiers the default Source keeps out, for the line above it.
 pub fn count_text(count: usize) -> String {
-    const COUNT: Plural = Plural::new("{n} affix", "{n} affixes");
-    COUNT.count(count)
+    phrases! { Count: "{n} affix" | "{n} affixes" }
+    Count.count(count)
 }
 
 pub fn hidden_text(hidden: usize) -> String {
-    const HIDDEN: Plural = Plural::new("Show {n} unique modifier", "Show {n} unique modifiers");
-    HIDDEN.count(hidden)
+    phrases! { Hidden: "Show {n} unique modifier" | "Show {n} unique modifiers" }
+    Hidden.count(hidden)
 }
 
 /// What an empty list says and which ways out it offers.
@@ -510,27 +518,29 @@ pub struct Empty {
 /// Why nothing is listed. `candidates` is how many definitions the item let through; `more_if_allowed` whether "Allow
 /// incompatible affixes" would list any under this search and these filters; `unrestricted` is "I know what I'm doing".
 pub fn empty(query: &Query<'_>, own_slot: Option<u16>, candidates: usize, more_if_allowed: bool, unrestricted: bool) -> Empty {
-    const NOTHING_FITS: Phrase = Phrase::new("No affix fits this item.");
-    const NEEDS_OVERRIDE: Phrase = Phrase::new("Unique modifiers need \"I know what I'm doing\" in Settings.");
-    const OTHER_SLOT: Phrase = Phrase::new("These affixes roll on another slot.");
-    const SEARCH_AND_FILTERS: Phrase = Phrase::new("No affix matches this search with these filters.");
-    const SEARCH: Phrase = Phrase::new("No affix matches this search.");
-    const FILTERS: Phrase = Phrase::new("No affix matches these filters.");
+    phrases! {
+        NothingFits: "No affix fits this item."
+        NeedsOverride: "Unique modifiers need \"I know what I'm doing\" in Settings."
+        OtherSlot: "These affixes roll on another slot."
+        SearchAndFilters: "No affix matches this search with these filters."
+        Search: "No affix matches this search."
+        Filters: "No affix matches these filters."
+    }
     let has_filters = !chips(query.filters, own_slot).is_empty();
     let has_search = !query.search.is_empty();
     let locked_out = query.filters.only_uniques() && !unrestricted;
     let reason: String = if locked_out {
-        NEEDS_OVERRIDE.into()
+        NeedsOverride.into()
     } else if candidates == 0 {
-        NOTHING_FITS.into()
+        NothingFits.into()
     } else if more_if_allowed && query.filters.slot.is_some_and(|slot| Some(slot) != own_slot) {
-        OTHER_SLOT.into()
+        OtherSlot.into()
     } else if has_search && has_filters {
-        SEARCH_AND_FILTERS.into()
+        SearchAndFilters.into()
     } else if has_search {
-        SEARCH.into()
+        Search.into()
     } else {
-        FILTERS.into()
+        Filters.into()
     };
     Empty {
         reason,
@@ -561,7 +571,7 @@ pub struct Entry {
 
 /// The slot a row names: the one the Slot filter asks for when it rolls there, else its first, and how many more.
 fn slot_pill(definition: &AffixDefinition, catalog: &Catalog, slot: Option<u16>, own_types: &[u16]) -> Option<String> {
-    const MORE: Phrase = Phrase::new("{slot} +{more}");
+    phrases! { More: "{slot} +{more}" }
     if let Some(source) = &definition.source {
         return Some(slot_name(catalog, source.item_type));
     }
@@ -572,7 +582,7 @@ fn slot_pill(definition: &AffixDefinition, catalog: &Catalog, slot: Option<u16>,
         .or_else(|| types.first().copied())?;
     let name = slot_name(catalog, first);
     Some(if types.len() > 1 {
-        MORE.with(&[("slot", &name), ("more", &(types.len() - 1))])
+        More.with(&[("slot", &name), ("more", &(types.len() - 1))])
     } else {
         name
     })
@@ -582,7 +592,7 @@ fn slot_pill(definition: &AffixDefinition, catalog: &Catalog, slot: Option<u16>,
 /// unique modifier's do); empty where the game data has none.
 pub fn ladder(definition: &AffixDefinition, catalog: &Catalog, base: Option<(u16, u16)>) -> String {
     // A tier and its range wrap together: a no-break space after the tier, a word joiner after the dash.
-    const LADDER_STEP: Phrase = Phrase::new("T{tier}\u{a0}{range}");
+    phrases! { LadderStep: "T{tier}\u{a0}{range}" }
     let ranges: Vec<(u8, String)> = (1..=definition.max_tier)
         .filter_map(|tier| {
             let range = catalog.tier_range(definition.id, tier, base);
@@ -593,7 +603,7 @@ pub fn ladder(definition: &AffixDefinition, catalog: &Catalog, base: Option<(u16
         [(_, first), rest @ ..] if rest.iter().all(|(_, range)| range == first) => first.clone(),
         _ => ranges
             .iter()
-            .map(|(tier, range)| LADDER_STEP.with(&[("tier", tier), ("range", range)]))
+            .map(|(tier, range)| LadderStep.with(&[("tier", tier), ("range", range)]))
             .collect::<Vec<_>>()
             .join(", "),
     }
@@ -605,12 +615,14 @@ const LISTED_SLOTS: usize = 8;
 /// A definition as the list shows it. `slot` is the Slot filter's, so the row names what was asked for; `base` is the item's,
 /// so its values read as they would on it.
 pub fn entry(definition: &AffixDefinition, catalog: &Catalog, slot: Option<u16>, own_types: &[u16], base: Option<(u16, u16)>) -> Entry {
-    const FROM: Phrase = Phrase::new("From {unique} ({slot})");
-    const ROLLS_ON: Phrase = Phrase::new("Rolls on {slots}");
-    const ROLLS_ON_MORE: Phrase = Phrase::new("Rolls on {slots} and {more} more");
-    const LEVEL: Phrase = Phrase::new("Requires level {level}");
-    const CLASSES: Phrase = Phrase::new("Class: {classes}");
-    const TAGS: Phrase = Phrase::new("Tags: {tags}");
+    phrases! {
+        From: "From {unique} ({slot})"
+        RollsOn: "Rolls on {slots}"
+        RollsOnMore: "Rolls on {slots} and {more} more"
+        Level: "Requires level {level}"
+        Classes: "Class: {classes}"
+        Tags: "Tags: {tags}"
+    }
 
     let name = definition.source.as_ref().map_or_else(|| definition.name.clone(), |source| source.line.clone());
     let mut pills = Vec::with_capacity(5);
@@ -645,35 +657,35 @@ pub fn entry(definition: &AffixDefinition, catalog: &Catalog, slot: Option<u16>,
         }
     }
     match &definition.source {
-        Some(source) => lines.push(FROM.with(&[("unique", &source.name), ("slot", &slot_name(catalog, source.item_type))])),
+        Some(source) => lines.push(From.with(&[("unique", &source.name), ("slot", &slot_name(catalog, source.item_type))])),
         None if !definition.item_types.is_empty() => {
             let shown: Vec<String> = definition.item_types.iter().take(LISTED_SLOTS).map(|slot| slot_name(catalog, *slot)).collect();
             let more = definition.item_types.len().saturating_sub(LISTED_SLOTS);
             let slots = list(&shown, Conjunction::And);
             lines.push(if more == 0 {
-                ROLLS_ON.with(&[("slots", &slots)])
+                RollsOn.with(&[("slots", &slots)])
             } else {
-                ROLLS_ON_MORE.with(&[("slots", &shown.join(", ")), ("more", &more)])
+                RollsOnMore.with(&[("slots", &shown.join(", ")), ("more", &more)])
             });
         }
         None => {}
     }
     if definition.level > 0 {
-        lines.push(LEVEL.with(&[("level", &definition.level)]));
+        lines.push(Level.with(&[("level", &definition.level)]));
     }
     let classes: Vec<&str> = (2..PICKER_CLASSES.len())
         .filter(|choice| definition.class_specificity & (1 << (choice - 1)) != 0)
         .map(|choice| PICKER_CLASSES[choice].get())
         .collect();
     if !classes.is_empty() {
-        lines.push(CLASSES.with(&[("classes", &classes.join(", "))]));
+        lines.push(Classes.with(&[("classes", &classes.join(", "))]));
     }
     let tags: Vec<&str> = (0..STAT_TAGS.len())
         .filter(|index| definition.stat_tags & (1u64 << index) != 0)
         .map(|index| STAT_TAGS[index].name.get())
         .collect();
     if !tags.is_empty() {
-        lines.push(TAGS.with(&[("tags", &tags.join(", "))]));
+        lines.push(Tags.with(&[("tags", &tags.join(", "))]));
     }
     // A unique modifier's values are on its lines above.
     let ranges = if definition.source.is_some() && !definition.effects.is_empty() {

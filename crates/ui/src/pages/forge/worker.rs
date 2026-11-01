@@ -11,7 +11,7 @@ use crate::{
     shell::{Page, ShellHandle},
 };
 use eg_core::fault::{FaultDetails, FaultLog};
-use eg_core::phrase::Phrase;
+use eg_i18n::phrases;
 use eg_trainer::{
     backend::{BackendHandle, BackendSnapshot, CatalogState, Command, ForgeSnapshot, ForgeState, MappingRead, Pending, Phase},
     definitions::catalog::{Availability, GameCatalog},
@@ -24,26 +24,28 @@ use std::{
     time::Duration,
 };
 
-const READ_ONLY: Phrase = Phrase::new("This connection offers no supported item edits.");
-const BUSY: Phrase = Phrase::new("The trainer cannot accept another command.");
-const UNDO_GONE: Phrase = Phrase::new("The confirmed Undo is no longer available. Check the item and override setting.");
-const PREVIEW_ITEM_CHANGED: Phrase = Phrase::new("The item changed before its preview could be read.");
-const PREVIEW_UNSUPPORTED: Phrase = Phrase::new("This preview draft is unsupported.");
-const PREVIEW_UNIQUE_ONLY: Phrase = Phrase::new("Only unique rolls have a tooltip preview.");
-const PREVIEW_BUSY: Phrase = Phrase::new("The trainer cannot accept another preview request.");
-const VALUES_ITEM_CHANGED: Phrase = Phrase::new("The item changed before its values could be read.");
-const ROLL_UNSUPPORTED: Phrase = Phrase::new("This roll is unsupported.");
-const VALUES_BUSY: Phrase = Phrase::new("The trainer cannot accept another value request.");
-const EDIT_PENDING: Phrase = Phrase::new("An item edit is already pending.");
-const EDIT_UNAVAILABLE: Phrase = Phrase::new("This edit is unavailable in this build.");
-const ITEM_CHANGED: Phrase = Phrase::new("The item changed. Discard the stale draft and edit it again.");
-const EDIT_NOT_ACCEPTED: Phrase = Phrase::new("The trainer cannot accept the edit. Nothing was submitted.");
-const NO_TERMINAL_OUTCOME: Phrase = Phrase::new("The worker ended without a terminal write outcome.");
-const NO_WRITE_RECORD: Phrase = Phrase::new("The worker stopped without a completed write record.");
-const SEE_FAULT_LOG: Phrase = Phrase::new("{error} Details are in the fault log.");
-const CATALOG_UNAVAILABLE: Phrase = Phrase::new("Catalog unavailable.");
-const UNNAMED_ITEM: Phrase = Phrase::new("Unnamed item");
-const VALUE: Phrase = Phrase::new("Value");
+phrases! {
+    ReadOnly: "This connection offers no supported item edits."
+    Busy: "The trainer cannot accept another command."
+    UndoGone: "The confirmed Undo is no longer available. Check the item and override setting."
+    PreviewItemChanged: "The item changed before its preview could be read."
+    PreviewUnsupported: "This preview draft is unsupported."
+    PreviewUniqueOnly: "Only unique rolls have a tooltip preview."
+    PreviewBusy: "The trainer cannot accept another preview request."
+    ValuesItemChanged: "The item changed before its values could be read."
+    RollUnsupported: "This roll is unsupported."
+    ValuesBusy: "The trainer cannot accept another value request."
+    EditPending: "An item edit is already pending."
+    EditUnavailable: "This edit is unavailable in this build."
+    ItemChanged: "The item changed. Discard the stale draft and edit it again."
+    EditNotAccepted: "The trainer cannot accept the edit. Nothing was submitted."
+    NoTerminalOutcome: "The worker ended without a terminal write outcome."
+    NoWriteRecord: "The worker stopped without a completed write record."
+    SeeFaultLog: "{error} Details are in the fault log."
+    CatalogUnavailable: "Catalog unavailable."
+    UnnamedItem: "Unnamed item"
+    Value: "Value"
+}
 /// How often local receipts and the preview's debounce are looked at while the writer has work; snapshots wake the
 /// binding on their own.
 const POLL: Duration = Duration::from_millis(50);
@@ -96,7 +98,7 @@ impl ForgeGame {
             && !capabilities.modifier_rolls
             && !capabilities.affix_change
             && !capabilities.affix_list)
-            .then_some(READ_ONLY.get())
+            .then_some(ReadOnly.get())
     }
     pub(crate) fn resolve(&self, item: &ForgeItem, request: &RollRequest) -> super::game::Lookup<ValueTable> {
         self.writer.borrow_mut().resolve(item, request)
@@ -108,7 +110,7 @@ impl ForgeGame {
         self.writer.borrow_mut().submit(expected, edit, false)
     }
     pub(crate) fn begin_batch(&mut self) -> Result<(), GameError> {
-        self.writer.borrow().backend.try_submit(Command::BeginForgeBatch).map(|_| ()).map_err(|_| BUSY.into())
+        self.writer.borrow().backend.try_submit(Command::BeginForgeBatch).map(|_| ()).map_err(|_| Busy.into())
     }
     pub(crate) fn undo_depth(&self) -> usize {
         self.writer.borrow().backend.peek(|state| state.undo_forge_depth)
@@ -124,7 +126,7 @@ impl ForgeGame {
     }
     pub(crate) fn undo(&mut self, expected: &ForgeItem) -> EditOutcome {
         let Some(edit) = self.undo_intent() else {
-            return refused(UNDO_GONE);
+            return refused(UndoGone);
         };
         self.writer.borrow_mut().submit(expected, &edit, true)
     }
@@ -227,7 +229,7 @@ impl Writer {
             let closed = !self.backend.is_running();
             let (expected, cached) = self.backend.peek(|state| -> Result<_, GameError> {
                 if closed || project_item(state).ok().flatten().as_ref().is_none_or(|actual| !actual.same_state(item)) {
-                    return Err(PREVIEW_ITEM_CHANGED.into());
+                    return Err(PreviewItemChanged.into());
                 }
                 let expected = state.expected_observation().map_err(|e| e.to_string())?;
                 let cached = state
@@ -238,10 +240,10 @@ impl Writer {
                 Ok((expected, cached))
             })?;
             let Some(draft) = draft.cloned() else {
-                return Err(PREVIEW_UNSUPPORTED.into());
+                return Err(PreviewUnsupported.into());
             };
             if draft.target != eg_trainer::item::edit::RollTarget::Unique {
-                return Err(PREVIEW_UNIQUE_ONLY.into());
+                return Err(PreviewUniqueOnly.into());
             }
             if let Some(cached) = cached {
                 return cached.map(super::game::Lookup::Ready);
@@ -283,7 +285,7 @@ impl Writer {
             }) {
                 Ok(receipt) => preview.receipt = Some(receipt),
                 Err(_) => {
-                    preview.error = Some(PREVIEW_BUSY.into());
+                    preview.error = Some(PreviewBusy.into());
                     return true;
                 }
             }
@@ -312,7 +314,7 @@ impl Writer {
             let closed = !self.backend.is_running();
             let (read_sequence, expected, ready) = self.backend.peek(|state| -> Result<_, GameError> {
                 if closed || project_item(state).ok().flatten().as_ref().is_none_or(|actual| !actual.same_state(item)) {
-                    return Err(VALUES_ITEM_CHANGED.into());
+                    return Err(ValuesItemChanged.into());
                 }
                 let expected = state.expected_observation().map_err(|error| error.to_string());
                 let ready = expected
@@ -331,7 +333,7 @@ impl Writer {
                 self.mappings.retain(|pending| pending.error.is_none());
             }
             let expected = expected?;
-            let request = mapping.ok_or(ROLL_UNSUPPORTED.get())?;
+            let request = mapping.ok_or(RollUnsupported.get())?;
             self.mappings
                 .retain(|pending| pending.expected == expected && (pending.request.address != request.address || pending.request == request));
             if let Some(result) = ready {
@@ -342,7 +344,7 @@ impl Writer {
                 return Err(error);
             }
             if !self.mappings.iter().any(|pending| pending.expected == expected && pending.request == request) && self.pending.is_none() {
-                let receipt = self.backend.try_resolve_mapping(expected.clone(), request.clone()).map_err(|_| VALUES_BUSY.get())?;
+                let receipt = self.backend.try_resolve_mapping(expected.clone(), request.clone()).map_err(|_| ValuesBusy.get())?;
                 self.mappings.push(PendingMapping {
                     expected,
                     request,
@@ -391,15 +393,15 @@ impl Writer {
     /// plan was made on before it stores anything, so an item changed since that read is refused, never overwritten.
     fn submit(&mut self, expected: &ForgeItem, edit: &ItemEdit, undoing: bool) -> EditOutcome {
         if self.pending.is_some() {
-            return refused(EDIT_PENDING);
+            return refused(EditPending);
         }
         self.mappings.clear();
         let state = self.backend.snapshot();
         if !supports(&state, edit) {
-            return refused(EDIT_UNAVAILABLE);
+            return refused(EditUnavailable);
         }
         if project_item(&state).ok().flatten().as_ref().is_none_or(|actual| !actual.same_state(expected)) {
-            return refused(ITEM_CHANGED);
+            return refused(ItemChanged);
         }
         let undo = if undoing { state.undo_forge.clone() } else { None };
         let planned = if undoing {
@@ -423,7 +425,7 @@ impl Writer {
                 self.keep_polling();
                 WriteOutcome::Pending
             }
-            Err(_) => refused(EDIT_NOT_ACCEPTED),
+            Err(_) => refused(EditNotAccepted),
         }
     }
     fn poll(&mut self) -> Option<EditOutcome> {
@@ -435,7 +437,7 @@ impl Writer {
         // plan's result. Once a new record exists, it outranks receipt errors.
         if let Some(record) = record.filter(|r| result.is_ok() || pending.before.last_write.as_ref() != Some(*r)) {
             if matches!(record.status, WriteOutcome::Pending) {
-                return Some(WriteOutcome::uncertain(NO_TERMINAL_OUTCOME));
+                return Some(WriteOutcome::uncertain(NoTerminalOutcome));
             }
             return Some(record.status.clone().map(|actual| {
                 let mut observed = pending.before.clone();
@@ -454,7 +456,7 @@ impl Writer {
         }
         Some(match result {
             Err(error) if error.delivery != Some(eg_trainer::backend::Delivery::MayHaveRun) => refused(error.message),
-            _ => WriteOutcome::uncertain(NO_WRITE_RECORD),
+            _ => WriteOutcome::uncertain(NoWriteRecord),
         })
     }
 }
@@ -643,7 +645,7 @@ impl Binding {
                 Some("The forge shows the reason in place of the item. Nothing was sent to the game."),
             );
         }
-        SEE_FAULT_LOG.with(&[("error", &error)])
+        SeeFaultLog.with(&[("error", &error)])
     }
 }
 
@@ -653,7 +655,7 @@ fn available_text(text: &Availability<String>) -> Option<&str> {
         Availability::Unavailable { .. } => None,
     }
 }
-const UNKNOWN_UNIQUE: Phrase = Phrase::new("Unique #{id}");
+phrases! { UnknownUnique: "Unique #{id}" }
 
 fn project_catalog(data: &GameCatalog) -> Catalog {
     // Presentation-only data. Native write planning always uses the canonical
@@ -757,7 +759,7 @@ fn project_catalog(data: &GameCatalog) -> Catalog {
                     let unique = data.uniques.get(&source.unique);
                     item::AffixSource {
                         unique: source.unique,
-                        name: unique.map_or_else(|| UNKNOWN_UNIQUE.with(&[("id", &source.unique)]), |unique| unique.name.text.clone()),
+                        name: unique.map_or_else(|| UnknownUnique.with(&[("id", &source.unique)]), |unique| unique.name.text.clone()),
                         item_type: unique.map_or(0, |unique| u16::from(unique.item_type)),
                         // A modifier with no text of its own says what its lines do.
                         line: match (source.line.is_empty(), said.is_empty()) {
@@ -814,7 +816,7 @@ fn project_catalog(data: &GameCatalog) -> Catalog {
 }
 fn value_table(table: &eg_trainer::item::values::ValueTable) -> ValueTable {
     ValueTable {
-        label: VALUE.into(),
+        label: Value.into(),
         samples: table
             .samples()
             .iter()
@@ -845,10 +847,10 @@ fn project_item(state: &BackendSnapshot) -> Result<Option<ForgeItem>, String> {
     };
     let context = Arc::new(item::ForgeContext {
         expected: state.expected_observation().map_err(|e| e.to_string())?,
-        catalog: state.catalog.data().cloned().ok_or(CATALOG_UNAVAILABLE.get())?,
+        catalog: state.catalog.data().cloned().ok_or(CatalogUnavailable.get())?,
     });
     let name = resolved_name.as_ref().map_or_else(
-        || if snapshot.name.is_empty() { UNNAMED_ITEM.into() } else { snapshot.name.clone() },
+        || if snapshot.name.is_empty() { UnnamedItem.into() } else { snapshot.name.clone() },
         |name| name.text.clone(),
     );
     let mut item = ForgeItem::observed(context, name);

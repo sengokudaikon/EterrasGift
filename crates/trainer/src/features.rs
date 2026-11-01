@@ -1,7 +1,7 @@
 //! Immutable feature descriptions and local intent, with no game access. Native support follows from a hook's
 //! identity (`eg_trainer_wire::hooks::GameplayHook`); a descriptor grants no permission to install a hook.
 
-use eg_core::phrase::Phrase;
+use eg_i18n::{Phrase, phrases};
 use eg_trainer_wire::hooks::{GameplayHook, ValueKind};
 use std::collections::{BTreeMap, BTreeSet};
 use std::error::Error;
@@ -138,7 +138,7 @@ impl FeatureValue {
     pub fn start_text(&self) -> String {
         match self.choices.get(self.start as usize) {
             Some(choice) => choice.get().to_owned(),
-            None => eg_core::locale::numbers().plain(self.start),
+            None => eg_i18n::locale::numbers().plain(self.start),
         }
     }
 
@@ -207,9 +207,9 @@ impl FeatureDescriptor {
         }
         for value in self.values {
             if let Some(hint) = value.hint {
-                const VALUE_HINT: Phrase = Phrase::new("{value}: {hint}");
+                phrases! { ValueHint: "{value}: {hint}" }
                 text.push('\n');
-                text.push_str(&VALUE_HINT.with(&[("value", &value.label), ("hint", &hint)]));
+                text.push_str(&ValueHint.with(&[("value", &value.label), ("hint", &hint)]));
             }
         }
         text

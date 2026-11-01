@@ -3,39 +3,38 @@
 //! moment they flip, and Game definitions follows the session's catalog.
 
 use crate::pages::settings::{LiveStatus, ModuleChoice, ModuleLink, ModuleSection};
-use eg_core::phrase::{Phrase, Plural};
 use eg_core::settings::LegacyModuleSettings;
+use eg_i18n::phrases;
 use eg_trainer::backend::{Activity, BackendHandle, BackendSnapshot, CatalogState, Command, GameFiles};
 use std::rc::Rc;
 
-const TRAINER: Phrase = Phrase::new("Trainer");
-const TRAINER_DESCRIPTION: Phrase =
-    Phrase::new("Edit offline characters and their items in the running game. A helper loads into Last Epoch and leaves when you disconnect or the character leaves play.");
-const THE_TRAINER: Phrase = Phrase::new("the trainer");
-const GAME_DEFINITIONS: Phrase = Phrase::new("Game definitions");
-const GAME_DEFINITIONS_DESCRIPTION: Phrase = Phrase::new("Affixes and uniques read from the game's files, read again when the game updates.");
-const READ_AGAIN: Phrase = Phrase::new("Read again");
-const READ_AGAIN_TIP: Phrase = Phrase::new("Read the game's files again");
-const NOT_FOUND: Phrase = Phrase::new("Last Epoch wasn't found.");
-const CONNECTION: Phrase = Phrase::new("Trainer connection");
-const CONNECT_AUTOMATICALLY: Phrase = Phrase::new("Connect automatically");
-const CONNECTION_DESCRIPTION: Phrase = Phrase::new("Connect when an offline character is loaded.");
-const AUTOMATIC: Phrase = Phrase::new("Automatic");
-const MANUAL: Phrase = Phrase::new("Manual");
-const OVERRIDE_TITLE: Phrase = Phrase::new("I know what I'm doing");
-const OVERRIDE_DESCRIPTION: Phrase = Phrase::new(
-    "Allows edits the game wouldn't make: incompatible affixes and bases, Weaver, enchantment and corrupted affixes in any fitting slot, other idol sizes, Weaver's Will on any unique and Weaver's Touch on any idol.",
-);
-const OVERRIDE_NOTE: Phrase = Phrase::new("Use expendable items. The game may drop or rearrange what it doesn't support.");
-const ON: Phrase = Phrase::new("On");
-const OFF: Phrase = Phrase::new("Off");
-const NO_DATA: Phrase = Phrase::new("Last Epoch wasn't found");
-const READING: Phrase = Phrase::new("Reading the game files…");
-const UNREADABLE: Phrase = Phrase::new("The game files could not be read: {reason}");
-const AFFIXES: Plural = Plural::new("{n} affix", "{n} affixes");
-const NOT_RECORDED: Phrase = Phrase::new("not recorded");
-const CHECKED: Phrase = Phrase::new("Checked: {time}");
-const UPDATED: Phrase = Phrase::new("Updated: {time}");
+phrases! {
+    Trainer: "Trainer"
+    TrainerDescription: "Edit offline characters and their items in the running game. A helper loads into Last Epoch and leaves when you disconnect or the character leaves play."
+    TheTrainer: "the trainer"
+    GameDefinitions: "Game definitions"
+    GameDefinitionsDescription: "Affixes and uniques read from the game's files, read again when the game updates."
+    ReadAgain: "Read again"
+    ReadAgainTip: "Read the game's files again"
+    NotFound: "Last Epoch wasn't found."
+    Connection: "Trainer connection"
+    ConnectAutomatically: "Connect automatically"
+    ConnectionDescription: "Connect when an offline character is loaded."
+    Automatic: "Automatic"
+    Manual: "Manual"
+    OverrideTitle: "I know what I'm doing"
+    OverrideDescription: "Allows edits the game wouldn't make: incompatible affixes and bases, Weaver, enchantment and corrupted affixes in any fitting slot, other idol sizes, Weaver's Will on any unique and Weaver's Touch on any idol."
+    OverrideNote: "Use expendable items. The game may drop or rearrange what it doesn't support."
+    On: "On"
+    Off: "Off"
+    NoData: "Last Epoch wasn't found"
+    Reading: "Reading the game files…"
+    Unreadable: "The game files could not be read: {reason}"
+    Affixes: "{n} affix" | "{n} affixes"
+    NotRecorded: "not recorded"
+    Checked: "Checked: {time}"
+    Updated: "Updated: {time}"
+}
 
 pub const ID: &str = "trainer";
 pub const AUTO_CONNECT: &str = "autoConnect";
@@ -49,39 +48,39 @@ pub const LEGACY: LegacyModuleSettings = LegacyModuleSettings {
 pub fn descriptor(development: bool) -> ModuleChoice {
     ModuleChoice {
         id: ID,
-        title: TRAINER,
-        description: TRAINER_DESCRIPTION,
-        name: THE_TRAINER,
+        title: Trainer,
+        description: TrainerDescription,
+        name: TheTrainer,
         default_on: development,
         problem: None,
         sections: vec![
             ModuleSection::Status {
-                title: GAME_DEFINITIONS,
-                description: GAME_DEFINITIONS_DESCRIPTION,
-                text: NO_DATA,
-                action: READ_AGAIN,
-                tip: READ_AGAIN_TIP,
-                unavailable: NOT_FOUND,
+                title: GameDefinitions,
+                description: GameDefinitionsDescription,
+                text: NoData,
+                action: ReadAgain,
+                tip: ReadAgainTip,
+                unavailable: NotFound,
             },
             ModuleSection::Toggle {
                 key: AUTO_CONNECT,
-                title: CONNECTION,
-                label: CONNECT_AUTOMATICALLY,
-                description: CONNECTION_DESCRIPTION,
+                title: Connection,
+                label: ConnectAutomatically,
+                description: ConnectionDescription,
                 note: None,
                 default: true,
-                on_text: AUTOMATIC,
-                off_text: MANUAL,
+                on_text: Automatic,
+                off_text: Manual,
             },
             ModuleSection::Toggle {
                 key: OVERRIDE,
-                title: OVERRIDE_TITLE,
-                label: OVERRIDE_TITLE,
-                description: OVERRIDE_DESCRIPTION,
-                note: Some(OVERRIDE_NOTE),
+                title: OverrideTitle,
+                label: OverrideTitle,
+                description: OverrideDescription,
+                note: Some(OverrideNote),
                 default: false,
-                on_text: ON,
-                off_text: OFF,
+                on_text: On,
+                off_text: Off,
             },
         ],
     }
@@ -129,20 +128,20 @@ pub fn game_data(snapshot: &BackendSnapshot, running: bool) -> LiveStatus {
 
 fn describe(catalog: &CatalogState, files: &GameFiles) -> String {
     let mut text = match (catalog, files) {
-        (_, GameFiles::Reading) => READING.into(),
-        (_, GameFiles::Unavailable(reason)) => UNREADABLE.with(&[("reason", reason)]),
-        (CatalogState::Current { data, .. } | CatalogState::Stale(data), _) => AFFIXES.count(data.affixes.len()),
-        (_, GameFiles::Ready { affixes, .. }) => AFFIXES.count(*affixes),
-        (_, GameFiles::NotConfigured) => NO_DATA.into(),
+        (_, GameFiles::Reading) => Reading.into(),
+        (_, GameFiles::Unavailable(reason)) => Unreadable.with(&[("reason", reason)]),
+        (CatalogState::Current { data, .. } | CatalogState::Stale(data), _) => Affixes.count(data.affixes.len()),
+        (_, GameFiles::Ready { affixes, .. }) => Affixes.count(*affixes),
+        (_, GameFiles::NotConfigured) => NoData.into(),
     };
     if let GameFiles::Ready { checked_at, updated_at, .. } = files {
         let time = |value: Option<jiff::Timestamp>| {
             value.map_or_else(
-                || NOT_RECORDED.into(),
+                || NotRecorded.into(),
                 |time| time.to_zoned(jiff::tz::TimeZone::system()).strftime("%Y-%m-%d %H:%M:%S %Z").to_string(),
             )
         };
-        for line in [CHECKED.with(&[("time", &time(*checked_at))]), UPDATED.with(&[("time", &time(*updated_at))])] {
+        for line in [Checked.with(&[("time", &time(*checked_at))]), Updated.with(&[("time", &time(*updated_at))])] {
             text.push('\n');
             text.push_str(&line);
         }

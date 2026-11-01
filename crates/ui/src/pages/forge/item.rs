@@ -1,6 +1,6 @@
 //! Forge presentation. Edit intents, validation, projection and reversal use the trainer domain.
 
-use eg_core::phrase::Phrase;
+use eg_i18n::{Phrase, phrases};
 use std::collections::BTreeMap;
 
 /// Rarity bytes the game gives unique-backed items; lower bytes follow the unsealed affix count.
@@ -19,13 +19,15 @@ pub fn is_unique_backed(rarity: u8) -> bool {
 
 /// A crafted item's rarity by the game's byte: none is normal, one or two magic, more rare.
 pub fn crafted_name(rarity: u8) -> &'static str {
-    const NORMAL: Phrase = Phrase::ctx("rarity", "Normal");
-    const MAGIC: Phrase = Phrase::ctx("rarity", "Magic");
-    const RARE: Phrase = Phrase::ctx("rarity", "Rare");
+    phrases! {
+        Normal: "rarity" => "Normal"
+        Magic: "rarity" => "Magic"
+        Rare: "rarity" => "Rare"
+    }
     match rarity {
-        0 => NORMAL.get(),
-        1 | 2 => MAGIC.get(),
-        _ => RARE.get(),
+        0 => Normal.get(),
+        1 | 2 => Magic.get(),
+        _ => Rare.get(),
     }
 }
 
@@ -87,24 +89,26 @@ impl Category {
         }
     }
     pub fn name(self) -> std::borrow::Cow<'static, str> {
-        const EXPERIMENTAL: Phrase = Phrase::new("Experimental");
-        const PERSONAL: Phrase = Phrase::new("Personal");
-        const SET: Phrase = Phrase::new("Reforged set");
-        const IDOL_ENCHANTMENT: Phrase = Phrase::new("Idol enchantment");
-        const IDOL_WEAVER: Phrase = Phrase::new("Weaver idol");
-        const CORRUPTED: Phrase = Phrase::ctx("affix category", "Corrupted");
-        const UNIQUE_MODIFIER: Phrase = Phrase::new("Unique modifier");
-        const OTHER: Phrase = Phrase::new("Special affix {value}");
+        phrases! {
+            Experimental: "Experimental"
+            Personal: "Personal"
+            Set: "Reforged set"
+            IdolEnchantment: "Idol enchantment"
+            IdolWeaver: "Weaver idol"
+            Corrupted: "affix category" => "Corrupted"
+            UniqueModifier: "Unique modifier"
+            Other: "Special affix {value}"
+        }
         match self {
             Category::Standard => "".into(),
-            Category::Experimental => EXPERIMENTAL.get().into(),
-            Category::Personal => PERSONAL.get().into(),
-            Category::Set => SET.get().into(),
-            Category::IdolEnchantment => IDOL_ENCHANTMENT.get().into(),
-            Category::IdolWeaver => IDOL_WEAVER.get().into(),
-            Category::Corrupted => CORRUPTED.get().into(),
-            Category::FakeUniqueMod => UNIQUE_MODIFIER.get().into(),
-            Category::Other(value) => OTHER.with(&[("value", &value)]).into(),
+            Category::Experimental => Experimental.get().into(),
+            Category::Personal => Personal.get().into(),
+            Category::Set => Set.get().into(),
+            Category::IdolEnchantment => IdolEnchantment.get().into(),
+            Category::IdolWeaver => IdolWeaver.get().into(),
+            Category::Corrupted => Corrupted.get().into(),
+            Category::FakeUniqueMod => UniqueModifier.get().into(),
+            Category::Other(value) => Other.with(&[("value", &value)]).into(),
         }
     }
 }
@@ -163,9 +167,11 @@ pub struct AffixSource {
 impl AffixDefinition {
     /// The tiers it has, which tell apart affixes that read the same: "T1 only", "T1–T8".
     pub fn tiers_text(&self) -> String {
-        const ONE_TIER: Phrase = Phrase::new("T1 only");
-        const TIERS: Phrase = Phrase::new("T1–T{max}");
-        if self.max_tier <= 1 { ONE_TIER.into() } else { TIERS.with(&[("max", &self.max_tier)]) }
+        phrases! {
+            OneTier: "T1 only"
+            Tiers: "T1–T{max}"
+        }
+        if self.max_tier <= 1 { OneTier.into() } else { Tiers.with(&[("max", &self.max_tier)]) }
     }
 
     pub fn is_reforged(&self) -> bool {
@@ -175,7 +181,7 @@ impl AffixDefinition {
     pub fn unknown(id: u16) -> AffixDefinition {
         AffixDefinition {
             id,
-            name: UNKNOWN_AFFIX.with(&[("id", &id)]),
+            name: UnknownAffix.with(&[("id", &id)]),
             kind: AffixKind::Prefix,
             category: Category::Standard,
             item_types: Vec::new(),
@@ -191,8 +197,10 @@ impl AffixDefinition {
     }
 }
 
-const DESCRIPTIONS_UNAVAILABLE: Phrase = Phrase::new("Descriptions unavailable.");
-const UNKNOWN_AFFIX: Phrase = Phrase::new("Unknown #{id}");
+phrases! {
+    DescriptionsUnavailable: "Descriptions unavailable."
+    UnknownAffix: "Unknown #{id}"
+}
 
 /// A slot's kind and category as one phrase: "Prefix", "Experimental suffix", "Prefix (special affix 9)". Each is
 /// whole, so a translation can order and inflect it.
@@ -403,7 +411,7 @@ impl EditPresentation for ItemEdit {
                     .collect(),
             ),
             None => eg_trainer::definitions::catalog::Availability::Unavailable {
-                reason: DESCRIPTIONS_UNAVAILABLE.into(),
+                reason: DescriptionsUnavailable.into(),
             },
         };
         let evidence = edit::RollEvidence::from_runtime(
@@ -552,13 +560,15 @@ pub struct Unreadable {
 
 impl std::fmt::Display for Unreadable {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        const TIER: Phrase = Phrase::new("Unknown tier {value}");
-        const TYPE: Phrase = Phrase::new("Unknown type {value}");
-        const SEAL: Phrase = Phrase::new("Unknown seal {value}");
+        phrases! {
+            Tier: "Unknown tier {value}"
+            Type: "Unknown type {value}"
+            Seal: "Unknown seal {value}"
+        }
         let phrase = match self.field {
-            "tier" => TIER,
-            "type" => TYPE,
-            _ => SEAL,
+            "tier" => Tier,
+            "type" => Type,
+            _ => Seal,
         };
         f.write_str(&phrase.with(&[("value", &self.value)]))
     }
@@ -692,7 +702,7 @@ impl TierProperty {
 }
 
 pub fn format_tier_range(properties: &[TierProperty]) -> Option<String> {
-    let trim = |value: f64| eg_core::locale::numbers().plain(value);
+    let trim = |value: f64| eg_i18n::locale::numbers().plain(value);
     let percent = |value: f64| trim((value * 1000.0).round() / 10.0);
     fn span(min: String, max: String) -> String {
         if min == max { min } else { format!("{min}–{max}") }
@@ -730,16 +740,18 @@ pub struct ValueTable {
     pub samples: Vec<ValueSample>,
 }
 
-const ROLL_POSITION: Phrase = Phrase::new("Roll position");
-const ROLL: Phrase = Phrase::new("Roll {roll}");
+phrases! {
+    RollPosition: "Roll position"
+    Roll: "Roll {roll}"
+}
 
 thread_local! {
     static POSITIONS: std::rc::Rc<ValueTable> = std::rc::Rc::new(ValueTable {
-        label: ROLL_POSITION.into(),
+        label: RollPosition.into(),
         samples: (0..=255)
             .map(|roll| ValueSample {
                 value: f64::from(roll),
-                display: ROLL.with(&[("roll", &roll)]),
+                display: Roll.with(&[("roll", &roll)]),
                 effects: Vec::new(),
             })
             .collect(),

@@ -3,45 +3,47 @@
 
 use super::game::Lookup;
 use super::item::{AffixDefinition, AffixState, ItemEdit, ModifierSnapshot, RollTarget, Seal, StatusField, ValueSample, ValueTable};
-use eg_core::phrase::Phrase;
+use eg_i18n::phrases;
 use eg_trainer::definitions::catalog::ValueRange;
 use std::rc::Rc;
 
-/// The status a value cell shows until its table arrives.
-pub const LOADING: Phrase = Phrase::new("Loading actual values…");
-/// An added affix's value cell: the game reads values for affixes it holds.
-pub const ADDED_VALUE: Phrase = Phrase::new("Its value can be set once Apply has added it.");
-const NO_VALUES: Phrase = Phrase::new("Actual values are unavailable for this value.");
-const VALUES_UNAVAILABLE: Phrase = Phrase::new("Actual values unavailable: {reason}");
-const POSITIONS_INSTEAD: Phrase = Phrase::new("Actual values unavailable ({reason}). Editing the roll position.");
-const FIXED: Phrase = Phrase::new("Fixed: the roll does not change this value.");
-const VALUE: Phrase = Phrase::new("Value");
-const VALUE_NUMBERED: Phrase = Phrase::new("Value {n}");
-const IN_GAME: Phrase = Phrase::new("In game {value}");
-const RANGE: Phrase = Phrase::new("Range {minimum} – {maximum}");
-const ENTER_VALUE: Phrase = Phrase::new("Enter a value from {minimum} to {maximum}.");
-const WAS: Phrase = Phrase::new("was {value}");
-const REMOVED: Phrase = Phrase::new("Removed");
-const ADDED: Phrase = Phrase::new("Added at tier {tier}");
-const ADDED_SEALED: Phrase = Phrase::new("Added at tier {tier}, {seal}");
-const TIER_CHANGE: Phrase = Phrase::new("Tier {from} → {to}");
-const VALUE_CHANGE: Phrase = Phrase::new("Value {from} → {to}");
-const VALUE_SET: Phrase = Phrase::new("Value → {to}");
-const AFFIX_STALE: Phrase = Phrase::new("The game changed this affix after you drafted it.");
-const ADDED_ON_APPLY: Phrase = Phrase::new("Added when you apply");
-const REMOVED_ON_APPLY: Phrase = Phrase::new("Removed when you apply");
-const REPLACE: Phrase = Phrase::new("Replace with another affix");
-const FIXED_VALUE: Phrase = Phrase::new("Fixed value");
-const ROLL_UNAVAILABLE: Phrase = Phrase::new("Roll unavailable");
-const OUTSIDE_RANGE: Phrase = Phrase::new("{value} is outside the game's range of {minimum}–{maximum}.");
-const REFRESH_TO_EDIT: Phrase = Phrase::new("Refresh game data in Settings to edit this value.");
-const NO_OTHER_IDENTITY: Phrase = Phrase::new("No other unique or set item of this item type is known. Refresh game data in Settings.");
-const IDENTITY: Phrase = Phrase::new("Identity");
-const NO_OTHER_BASE: Phrase = Phrase::new("No other base of this item type is known. Refresh game data in Settings.");
-const BASE: Phrase = Phrase::new("Base");
-const VALUE_STALE: Phrase = Phrase::new("The game changed this value after you drafted it.");
-const FLAG_ONLY: Phrase = Phrase::new("Sets only the {flag} flag. The game's own {name} effects are not applied.");
-const CHANGE: Phrase = Phrase::new("Change {name}");
+phrases! {
+    /// The status a value cell shows until its table arrives.
+    pub Loading: "Loading actual values…"
+    /// An added affix's value cell: the game reads values for affixes it holds.
+    pub AddedValue: "Its value can be set once Apply has added it."
+    NoValues: "Actual values are unavailable for this value."
+    ValuesUnavailable: "Actual values unavailable: {reason}"
+    PositionsInstead: "Actual values unavailable ({reason}). Editing the roll position."
+    Fixed: "Fixed: the roll does not change this value."
+    Value: "Value"
+    ValueNumbered: "Value {n}"
+    InGame: "In game {value}"
+    Range: "Range {minimum} – {maximum}"
+    EnterValue: "Enter a value from {minimum} to {maximum}."
+    Was: "was {value}"
+    Removed: "Removed"
+    Added: "Added at tier {tier}"
+    AddedSealed: "Added at tier {tier}, {seal}"
+    TierChange: "Tier {from} → {to}"
+    ValueChange: "Value {from} → {to}"
+    ValueSet: "Value → {to}"
+    AffixStale: "The game changed this affix after you drafted it."
+    AddedOnApply: "Added when you apply"
+    RemovedOnApply: "Removed when you apply"
+    Replace: "Replace with another affix"
+    FixedValue: "Fixed value"
+    RollUnavailable: "Roll unavailable"
+    OutsideRange: "{value} is outside the game's range of {minimum}–{maximum}."
+    RefreshToEdit: "Refresh game data in Settings to edit this value."
+    NoOtherIdentity: "No other unique or set item of this item type is known. Refresh game data in Settings."
+    Identity: "Identity"
+    NoOtherBase: "No other base of this item type is known. Refresh game data in Settings."
+    Base: "Base"
+    ValueStale: "The game changed this value after you drafted it."
+    FlagOnly: "Sets only the {flag} flag. The game's own {name} effects are not applied."
+    Change: "Change {name}"
+}
 
 /// Folds a drag's edits into the one Undo step its first edit makes, and tells whether that step is still the row's latest.
 #[derive(Clone, Debug, Default)]
@@ -107,7 +109,7 @@ impl ValueEditor {
         ValueEditor {
             table: None,
             loading: true,
-            status: LOADING.into(),
+            status: Loading.into(),
             game_table: None,
             label,
             note: String::new(),
@@ -166,16 +168,16 @@ impl ValueEditor {
             }
             Lookup::Ready(_) => {
                 self.table = None;
-                self.status = NO_VALUES.into();
+                self.status = NoValues.into();
             }
             Lookup::Loading => {
                 // Keep the last display while replacement samples arrive. Its
                 // stale scale cannot authorize typing, stepping or dragging.
-                self.status = LOADING.into();
+                self.status = Loading.into();
             }
             Lookup::Unavailable(reason) => {
                 self.table = None;
-                self.status = VALUES_UNAVAILABLE.with(&[("reason", &reason)]);
+                self.status = ValuesUnavailable.with(&[("reason", &reason)]);
             }
         }
         self.typing = false;
@@ -184,12 +186,12 @@ impl ValueEditor {
     /// The roll positions 0 to 255 in place of the game's values, which it could not give (`reason`).
     pub fn set_positions(&mut self, reason: &str, game_context: bool) {
         self.set_mapping(Lookup::Ready(ValueTable::positions()), game_context);
-        self.note = POSITIONS_INSTEAD.with(&[("reason", &reason)]);
+        self.note = PositionsInstead.with(&[("reason", &reason)]);
     }
 
     /// A value the roll does not change: no value, scale or input.
     pub fn set_fixed(&mut self) {
-        self.defer(FIXED.get());
+        self.defer(Fixed.get());
         self.fixed = true;
     }
 
@@ -215,7 +217,7 @@ impl ValueEditor {
         self.label
             .clone()
             .or_else(|| self.table.as_ref().map(|table| table.label.clone()))
-            .unwrap_or_else(|| VALUE.into())
+            .unwrap_or_else(|| Value.into())
     }
 
     pub fn sample_at(&self, roll: u8) -> Option<&ValueSample> {
@@ -300,11 +302,11 @@ impl ValueEditor {
         let in_game = match game {
             Some(game) if game != roll => self
                 .sample_at(game)
-                .map(|sample| format!("\n{}", IN_GAME.with(&[("value", &sample.display)])))
+                .map(|sample| format!("\n{}", InGame.with(&[("value", &sample.display)])))
                 .unwrap_or_default(),
             _ => String::new(),
         };
-        let range = RANGE.with(&[("minimum", &self.minimum_text()), ("maximum", &self.maximum_text())]);
+        let range = Range.with(&[("minimum", &self.minimum_text()), ("maximum", &self.maximum_text())]);
         let tip = format!("{}\n{range}{in_game}", self.display(roll));
         if self.note.is_empty() { tip } else { format!("{tip}\n{}", self.note) }
     }
@@ -329,7 +331,7 @@ impl ValueEditor {
 
     pub fn input_error(&self) -> String {
         if self.has_invalid_input() {
-            ENTER_VALUE.with(&[("minimum", &self.minimum_text()), ("maximum", &self.maximum_text())])
+            EnterValue.with(&[("minimum", &self.minimum_text()), ("maximum", &self.maximum_text())])
         } else {
             String::new()
         }
@@ -423,7 +425,7 @@ impl AffixRow {
         let mut row = AffixRow::new(uid, state, definition);
         row.added = true;
         row.draft.allows_incompatible = allows_incompatible;
-        row.value.defer(ADDED_VALUE.get());
+        row.value.defer(AddedValue.get());
         row
     }
 
@@ -567,7 +569,7 @@ impl AffixRow {
 
     pub fn was(&self) -> String {
         match self.game_value() {
-            Some(was) if self.is_value_drafted() && was != self.value.display(self.draft.roll) => format!("  {}", WAS.with(&[("value", &was)])),
+            Some(was) if self.is_value_drafted() && was != self.value.display(self.draft.roll) => format!("  {}", Was.with(&[("value", &was)])),
             _ => String::new(),
         }
     }
@@ -578,25 +580,25 @@ impl AffixRow {
             return String::new();
         }
         if self.draft.removed {
-            return REMOVED.into();
+            return Removed.into();
         }
         if self.added {
             if self.draft.seal == Seal::Normal {
-                return ADDED.with(&[("tier", &self.draft.tier)]);
+                return Added.with(&[("tier", &self.draft.tier)]);
             }
-            return ADDED_SEALED.with(&[("tier", &self.draft.tier), ("seal", &self.draft.seal.name().to_lowercase())]);
+            return AddedSealed.with(&[("tier", &self.draft.tier), ("seal", &self.draft.seal.name().to_lowercase())]);
         }
         let mut parts = Vec::new();
         if self.is_replaced() {
             parts.push(format!("{} → {}", self.original_name(), self.name()));
         }
         if self.is_tier_drafted() {
-            parts.push(TIER_CHANGE.with(&[("from", &self.state.tier), ("to", &self.draft.tier)]));
+            parts.push(TierChange.with(&[("from", &self.state.tier), ("to", &self.draft.tier)]));
         }
         let now = self.value.display(self.draft.roll);
         match self.game_value() {
-            Some(was) if self.is_value_drafted() && !self.is_replaced() && self.value.has_mapping() && was != now => parts.push(VALUE_CHANGE.with(&[("from", &was), ("to", &now)])),
-            _ if self.is_roll_drafted() => parts.push(VALUE_SET.with(&[("to", &now)])),
+            Some(was) if self.is_value_drafted() && !self.is_replaced() && self.value.has_mapping() && was != now => parts.push(ValueChange.with(&[("from", &was), ("to", &now)])),
+            _ if self.is_roll_drafted() => parts.push(ValueSet.with(&[("to", &now)])),
             _ => {}
         }
         if self.is_seal_drafted() {
@@ -606,11 +608,11 @@ impl AffixRow {
     }
 
     pub fn name_tip(&self) -> String {
-        let stale = if self.is_stale() { AFFIX_STALE.get() } else { "" };
+        let stale = if self.is_stale() { AffixStale.get() } else { "" };
         let action = match (self.added, self.draft.removed) {
-            (true, _) => ADDED_ON_APPLY.get(),
-            (_, true) => REMOVED_ON_APPLY.get(),
-            _ => REPLACE.get(),
+            (true, _) => AddedOnApply.get(),
+            (_, true) => RemovedOnApply.get(),
+            _ => Replace.get(),
         };
         [self.name(), self.detail(), stale.to_string(), action.to_string()]
             .into_iter()
@@ -835,7 +837,7 @@ impl RollRow {
         seen.into_iter()
             .enumerate()
             .map(|(ordinal, index)| {
-                let label = if several { VALUE_NUMBERED.with(&[("n", &(ordinal + 1))]) } else { VALUE.into() };
+                let label = if several { ValueNumbered.with(&[("n", &(ordinal + 1))]) } else { Value.into() };
                 RollDraft {
                     index,
                     label: label.clone(),
@@ -852,9 +854,9 @@ impl RollRow {
 
     pub fn read_only_text(&self) -> &'static str {
         if self.state.editable && self.state.roll_ids.is_empty() {
-            FIXED_VALUE.get()
+            FixedValue.get()
         } else {
-            ROLL_UNAVAILABLE.get()
+            RollUnavailable.get()
         }
     }
 
@@ -892,7 +894,7 @@ impl RollRow {
 
     pub fn was(&self, roll: &RollDraft) -> String {
         match self.game_roll(roll.index) {
-            Some(game) if game != roll.value => roll.editor.sample_at(game).map(|sample| WAS.with(&[("value", &sample.display)])).unwrap_or_default(),
+            Some(game) if game != roll.value => roll.editor.sample_at(game).map(|sample| Was.with(&[("value", &sample.display)])).unwrap_or_default(),
             _ => String::new(),
         }
     }
@@ -1089,11 +1091,11 @@ impl FieldDraft {
             && !(minimum..=maximum).contains(&game)
             && reason.is_empty()
         {
-            reason = OUTSIDE_RANGE.with(&[("value", &game), ("minimum", &minimum), ("maximum", &maximum)]);
+            reason = OutsideRange.with(&[("value", &game), ("minimum", &minimum), ("maximum", &maximum)]);
             range = Some((minimum.min(game), maximum.max(game)));
         }
         if range.is_none() && reason.is_empty() {
-            reason = REFRESH_TO_EDIT.into();
+            reason = RefreshToEdit.into();
         }
         let (minimum, maximum) = range.unwrap_or((game, game.saturating_add(1)));
         let mut draft = FieldDraft::new(uid, FieldKind::Number, Some(field), name, i64::from(game), Vec::new(), reason);
@@ -1134,16 +1136,16 @@ impl FieldDraft {
 
     pub fn identity(uid: u64, game: i64, options: Vec<FieldOption>) -> FieldDraft {
         let reason = if options.iter().all(|option| option.value == game) {
-            NO_OTHER_IDENTITY.into()
+            NoOtherIdentity.into()
         } else {
             String::new()
         };
-        FieldDraft::new(uid, FieldKind::Identity, None, IDENTITY.get(), game, options, reason)
+        FieldDraft::new(uid, FieldKind::Identity, None, Identity.get(), game, options, reason)
     }
 
     pub fn base(uid: u64, game: i64, options: Vec<FieldOption>) -> FieldDraft {
-        let reason = if options.len() < 2 { NO_OTHER_BASE.into() } else { String::new() };
-        FieldDraft::new(uid, FieldKind::Base, None, BASE.get(), game, options, reason)
+        let reason = if options.len() < 2 { NoOtherBase.into() } else { String::new() };
+        FieldDraft::new(uid, FieldKind::Base, None, Base.get(), game, options, reason)
     }
 
     pub fn value(&self) -> i64 {
@@ -1200,7 +1202,7 @@ impl FieldDraft {
 
     pub fn was(&self) -> String {
         if self.is_dirty() {
-            format!("  {}", WAS.with(&[("value", &self.format(self.game))]))
+            format!("  {}", Was.with(&[("value", &self.format(self.game))]))
         } else {
             String::new()
         }
@@ -1218,7 +1220,7 @@ impl FieldDraft {
         if !self.is_editable() {
             self.read_only_reason.clone()
         } else if self.is_stale() {
-            VALUE_STALE.into()
+            ValueStale.into()
         } else {
             self.note.clone()
         }
@@ -1233,9 +1235,9 @@ impl FieldDraft {
             return self.tip_note();
         }
         match self.kind {
-            FieldKind::Flag => FLAG_ONLY.with(&[("flag", &self.on_name().to_lowercase()), ("name", &self.name.to_lowercase())]),
+            FieldKind::Flag => FlagOnly.with(&[("flag", &self.on_name().to_lowercase()), ("name", &self.name.to_lowercase())]),
             _ if !self.note.is_empty() => self.note.clone(),
-            _ => CHANGE.with(&[("name", &self.name.to_lowercase())]),
+            _ => Change.with(&[("name", &self.name.to_lowercase())]),
         }
     }
 
@@ -1374,7 +1376,7 @@ pub fn base_of(key: i64) -> (u16, u16) {
 /// Each roll position stands for one whole value, clamped to the editable range.
 fn integer_table(minimum: u8, maximum: u8) -> ValueTable {
     ValueTable {
-        label: VALUE.into(),
+        label: Value.into(),
         samples: (0..=255u8)
             .map(|position| {
                 let value = position.clamp(minimum, maximum);
@@ -1460,14 +1462,14 @@ mod tests {
         assert!(row.value.table().is_none());
         assert!(row.value.nearest(37.0, 171).is_none());
         assert!(row.value.parse("37").is_none());
-        assert_eq!(row.value.status(), LOADING.get());
+        assert_eq!(row.value.status(), Loading.get());
         assert!(!row.value.has_mapping());
         assert!(row.value.game_table.is_some());
         row.value.set_mapping(ready(table(30.0, 50.0)), false);
         assert!(row.value.has_mapping(), "an identical table becomes editable again after reload");
         assert_eq!(row.value.status(), "");
-        row.value.set_mapping(Lookup::Unavailable(LOADING.into()), false);
-        assert_eq!(row.value.status(), format!("Actual values unavailable: {LOADING}"));
+        row.value.set_mapping(Lookup::Unavailable(Loading.into()), false);
+        assert_eq!(row.value.status(), format!("Actual values unavailable: {Loading}"));
     }
 
     #[test]

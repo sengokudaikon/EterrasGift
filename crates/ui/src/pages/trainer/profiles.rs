@@ -3,13 +3,15 @@
 //! (`eg_trainer::features::profiles`): it saves them and applies the one in play hook by hook. While no game runs the pages set up
 //! the chosen profile; while its character is in play they change it, and the game with it. A character in play without
 //! one has hooks for that connection only, until they are kept as its profile.
-use eg_core::phrase::Phrase;
+use eg_i18n::phrases;
 
-const KEPT: Phrase = Phrase::new("Changes apply at once and are kept in {name}'s profile.");
-const SESSION_ONLY: Phrase = Phrase::new("Changes apply at once and last this session. Keep them as {name}'s profile to have them every time.");
-const SETUP: Phrase = Phrase::new("What you turn on here turns on when {name} enters play.");
-const NO_PROFILES: Phrase = Phrase::new("No profiles yet. Connect with an offline character in play to keep one.");
-const LABEL: Phrase = Phrase::new("{name} ({class}, {cycle})");
+phrases! {
+    Kept: "Changes apply at once and are kept in {name}'s profile."
+    SessionOnly: "Changes apply at once and last this session. Keep them as {name}'s profile to have them every time."
+    Setup: "What you turn on here turns on when {name} enters play."
+    NoProfiles: "No profiles yet. Connect with an offline character in play to keep one."
+    Label: "{name} ({class}, {cycle})"
+}
 
 /// A character's profile, by the words that name it; the three together are its key.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -22,7 +24,7 @@ pub struct Profile {
 impl Profile {
     /// How the picker names it: "Mira (Primalist, Legacy)".
     pub fn label(&self) -> String {
-        LABEL.with(&[("name", &self.name), ("class", &self.class), ("cycle", &self.cycle)])
+        Label.with(&[("name", &self.name), ("class", &self.class), ("cycle", &self.cycle)])
     }
 }
 
@@ -30,10 +32,10 @@ impl Profile {
 /// comes.
 pub fn caption(shown: Option<&Profile>, live: bool, kept: bool) -> String {
     match shown {
-        Some(profile) if live && kept => KEPT.with(&[("name", &profile.name)]),
-        Some(profile) if live => SESSION_ONLY.with(&[("name", &profile.name)]),
-        Some(profile) => SETUP.with(&[("name", &profile.name)]),
-        None => NO_PROFILES.into(),
+        Some(profile) if live && kept => Kept.with(&[("name", &profile.name)]),
+        Some(profile) if live => SessionOnly.with(&[("name", &profile.name)]),
+        Some(profile) => Setup.with(&[("name", &profile.name)]),
+        None => NoProfiles.into(),
     }
 }
 

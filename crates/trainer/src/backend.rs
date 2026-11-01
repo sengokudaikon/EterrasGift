@@ -834,7 +834,7 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
             .as_ref()
             .is_some_and(|helper| helper.target == target && helper.residency == HelperResidency::Stuck)
         {
-            let error = BackendError::blocked(ErrorKind::RestartRequired, HELPER_RESTART_REQUIRED);
+            let error = BackendError::blocked(ErrorKind::RestartRequired, HelperRestartRequired);
             self.state.phase = Phase::Blocked;
             self.state.error = Some(error.clone());
             self.publish();
@@ -1201,7 +1201,7 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
         self.state.phase = if gone { phase } else { Phase::Blocked };
         if !gone {
             self.blocked = Some(target);
-            self.state.error = Some(BackendError::blocked(ErrorKind::RestartRequired, HELPER_RESTART_REQUIRED));
+            self.state.error = Some(BackendError::blocked(ErrorKind::RestartRequired, HelperRestartRequired));
         }
         self.publish();
     }

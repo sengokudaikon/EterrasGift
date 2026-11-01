@@ -2,7 +2,7 @@
 //! admit a fresh load; uncertainty permanently fences this process (pid + creation time).
 use std::time::{Duration, Instant};
 
-pub(super) use crate::backend::HELPER_RESTART_REQUIRED as RESTART_REQUIRED;
+pub(super) use crate::backend::HelperRestartRequired;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Residency {

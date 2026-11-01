@@ -9,7 +9,7 @@ fn main() {
         // and the views' @tr strings share one catalog.
         .with_default_translation_context(slint_build::DefaultTranslationContext::None);
     // Translations are bundled from lang/<language>/LC_MESSAGES/eg-ui.po: into the views by Slint, and into a table
-    // for the Rust phrases (`eg_core::phrase::Catalog`), read with the parser Slint uses and taking the entries it
+    // for the Rust phrases (`eg_i18n::Catalog`), read with the parser Slint uses and taking the entries it
     // takes. Slint refuses a folder with none, and the template (lang/eterras-gift.pot) is not a translation.
     let lang = Path::new("../../lang");
     println!("cargo:rerun-if-changed={}", lang.display());
@@ -21,7 +21,7 @@ fn main() {
         .map(|entry| entry.file_name().to_string_lossy().into_owned())
         .collect();
     languages.sort();
-    let mut table = String::from("pub static CATALOGS: &[eg_core::phrase::Catalog] = &[\n");
+    let mut table = String::from("pub static CATALOGS: &[eg_i18n::Catalog] = &[\n");
     for language in &languages {
         let path = lang.join(language).join("LC_MESSAGES/eg-ui.po");
         let catalog = rspolib::pofile(path.as_path()).unwrap_or_else(|error| panic!("{}: {error}", path.display()));
@@ -34,7 +34,7 @@ fn main() {
                     .find_map(|part| part.split_once('=').filter(|(key, _)| key.trim() == "plural").map(|(_, rule)| rule.trim()))
             })
             .unwrap_or("n != 1");
-        writeln!(table, "    eg_core::phrase::Catalog {{ language: {language:?}, plural: {plural:?}, entries: &[").unwrap();
+        writeln!(table, "    eg_i18n::Catalog {{ language: {language:?}, plural: {plural:?}, entries: &[").unwrap();
         for entry in catalog.translated_entries() {
             let forms = match &entry.msgstr {
                 Some(text) => vec![text.as_str()],

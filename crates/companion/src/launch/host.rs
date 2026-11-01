@@ -9,23 +9,23 @@ use crate::mods::loader_state::{self, LoaderInstall};
 use crate::mods::worker::ModWorker;
 use eg_core::game_log::{GameLogReader, GameLogState};
 use eg_core::operations::Cancellation;
-use eg_core::phrase::Phrase;
+use eg_i18n::phrases;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::Mutex;
 use std::time::{Duration, SystemTime};
 
-const STEAM_FAILED: Phrase = Phrase::new("Steam could not start the game: {error}");
-const START_FAILED: Phrase = Phrase::new("The game could not be started: {error}");
-const NO_LIBRARY: Phrase = Phrase::new("The mod library is not available, so the game cannot be started with mods.");
-const VERSION_UNKNOWN: Phrase = Phrase::new("version unknown");
-const STAGED_TOO_OLD: Phrase = Phrase::new(
-    "The MelonLoader in {folder} ({version}) can't run from a folder outside the game; that needs MelonLoader {minimum} or later. Update it there, or clear the MelonLoader folder in Settings.",
-);
-const NOT_READY: Phrase = Phrase::new("The mods could not be made ready, so the game was not started: {error}");
-const RUNNING: Phrase = Phrase::new("Last Epoch is already running.");
-const NO_GAME: Phrase = Phrase::new("Last Epoch wasn't found. Choose the game executable in Settings.");
-const NOT_SET_ASIDE: Phrase = Phrase::new("MelonLoader's proxy could not be set aside. A start from Steam may still load mods: {error}");
+phrases! {
+    SteamFailed: "Steam could not start the game: {error}"
+    StartFailed: "The game could not be started: {error}"
+    NoLibrary: "The mod library is not available, so the game cannot be started with mods."
+    VersionUnknown: "version unknown"
+    StagedTooOld: "The MelonLoader in {folder} ({version}) can't run from a folder outside the game; that needs MelonLoader {minimum} or later. Update it there, or clear the MelonLoader folder in Settings."
+    NotReady: "The mods could not be made ready, so the game was not started: {error}"
+    Running: "Last Epoch is already running."
+    NoGame: "Last Epoch wasn't found. Choose the game executable in Settings."
+    NotSetAside: "MelonLoader's proxy could not be set aside. A start from Steam may still load mods: {error}"
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum LaunchMode {
@@ -143,27 +143,27 @@ impl FileGameHost {
 
     fn start(&self, mode: LaunchMode, install: &GameInstall) -> Result<(), LaunchError> {
         if mode == LaunchMode::Online {
-            return crate::shell::open(format!("steam://rungameid/{}", install::STEAM_APP_ID)).map_err(|error| LaunchError::Refused(STEAM_FAILED.with(&[("error", &error)])));
+            return crate::shell::open(format!("steam://rungameid/{}", install::STEAM_APP_ID)).map_err(|error| LaunchError::Refused(SteamFailed.with(&[("error", &error)])));
         }
         self.command(mode, install)
             .spawn()
             .map(drop)
-            .map_err(|error| LaunchError::Refused(START_FAILED.with(&[("error", &error)])))
+            .map_err(|error| LaunchError::Refused(StartFailed.with(&[("error", &error)])))
     }
 
     /// Makes Mods\ match the library and writes waiting setting changes, before MelonLoader can read either, and
     /// repairs the UnityEngine.CoreModule.dll MelonLoader generated for this game build if it would stop every mod.
     fn prepare_mods(&self, install: &GameInstall) -> Result<(), LaunchError> {
         let Some(mods) = &self.mods else {
-            return Err(LaunchError::Refused(NO_LIBRARY.into()));
+            return Err(LaunchError::Refused(NoLibrary.into()));
         };
         let root = self.loader_root(install);
         if self.staged(install) {
             let staged = LoaderInstall::find(&root);
             let minimum = LoaderVersion::new(0, 6, 6);
             if staged.as_ref().is_none_or(|loader| loader.version < minimum) {
-                let version = staged.map_or_else(|| VERSION_UNKNOWN.into(), |loader| loader.version.to_string());
-                return Err(LaunchError::Refused(STAGED_TOO_OLD.with(&[
+                let version = staged.map_or_else(|| VersionUnknown.into(), |loader| loader.version.to_string());
+                return Err(LaunchError::Refused(StagedTooOld.with(&[
                     ("folder", &root.display()),
                     ("version", &version),
                     ("minimum", &minimum),
@@ -177,7 +177,7 @@ impl FileGameHost {
             }
             Ok(())
         })
-        .map_err(|error| LaunchError::Refused(NOT_READY.with(&[("error", &error)])))
+        .map_err(|error| LaunchError::Refused(NotReady.with(&[("error", &error)])))
     }
 
     /// A note that cannot be written does not undo a successful game start.
@@ -218,11 +218,11 @@ impl GameHost for FileGameHost {
 
     fn launch(&self, mode: LaunchMode, install: Option<&GameInstall>, lifetime: &Cancellation) -> Result<LaunchOutcome, LaunchError> {
         if self.find_running().is_some() {
-            return Err(LaunchError::Refused(RUNNING.into()));
+            return Err(LaunchError::Refused(Running.into()));
         }
         // Without the game folder, a proxy there could not be set aside, and Steam would start the game with mods.
         let Some(install) = install else {
-            return Err(LaunchError::Refused(NO_GAME.into()));
+            return Err(LaunchError::Refused(NoGame.into()));
         };
         let loader = self.switch(install);
         let with_mods = mode == LaunchMode::OfflineWithMods;
@@ -268,7 +268,7 @@ impl GameHost for FileGameHost {
 }
 
 fn finish_mod_launch(loader: &ModLoaderSwitch, result: Result<LaunchOutcome, LaunchError>) -> Result<LaunchOutcome, LaunchError> {
-    loader.set_aside().map_err(|error| LaunchError::Failed(NOT_SET_ASIDE.with(&[("error", &error)])))?;
+    loader.set_aside().map_err(|error| LaunchError::Failed(NotSetAside.with(&[("error", &error)])))?;
     result
 }
 
@@ -305,7 +305,7 @@ mod tests {
         fs::write(install.directory().join(loader::SET_ASIDE_NAME), b"").unwrap();
         let host = host(temp.path(), &install);
         for mode in [LaunchMode::Offline, LaunchMode::OfflineWithMods] {
-            assert!(matches!(host.launch(mode, Some(&install), &Cancellation::default()), Err(LaunchError::Refused(text)) if text.starts_with(loader::CONFLICT.get())));
+            assert!(matches!(host.launch(mode, Some(&install), &Cancellation::default()), Err(LaunchError::Refused(text)) if text.starts_with(loader::Conflict.get())));
         }
         assert!(install.directory().join(loader::PROXY_NAME).exists());
         assert!(install.directory().join(loader::SET_ASIDE_NAME).exists());

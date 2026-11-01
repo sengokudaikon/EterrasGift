@@ -34,6 +34,7 @@ eg-binary = { path = "crates/binary" }
 eg-il2cpp-metadata = { path = "crates/il2cpp-metadata" }
 eg-il2cpp-runtime = { path = "crates/il2cpp-runtime" }
 eg-core = { path = "crates/core" }
+eg-i18n = { path = "crates/i18n" }
 eg-companion = { path = "crates/companion" }
 eg-ui = { path = "crates/ui" }
 eg-trainer = { path = "crates/trainer" }

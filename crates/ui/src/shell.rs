@@ -3,25 +3,27 @@
 
 use crate::models::update_rows;
 use crate::{MainWindow, Nav, NavOutcome, NavRow, Tokens};
-use eg_core::phrase::Phrase;
+use eg_i18n::phrases;
 use slint::platform::Key;
 use slint::{ComponentHandle, Image, ModelRc, VecModel, Weak};
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
-const HOME: Phrase = Phrase::new("Home");
-const MODS: Phrase = Phrase::new("Mods");
-const CHARACTER: Phrase = Phrase::new("Character");
-const STASH: Phrase = Phrase::new("Stash");
-const COMBAT: Phrase = Phrase::new("Combat");
-const FORGE: Phrase = Phrase::new("Forge");
-const LOOT: Phrase = Phrase::new("Loot");
-const MONOLITH: Phrase = Phrase::new("Monolith");
-const FACTIONS: Phrase = Phrase::new("Factions");
-const WORLD: Phrase = Phrase::new("World");
-const SETTINGS: Phrase = Phrase::new("Settings");
-const LOGS: Phrase = Phrase::new("Logs");
-const TRAINER: Phrase = Phrase::new("Trainer");
+phrases! {
+    Home: "Home"
+    Mods: "Mods"
+    Character: "Character"
+    Stash: "Stash"
+    Combat: "Combat"
+    Forge: "Forge"
+    Loot: "Loot"
+    Monolith: "Monolith"
+    Factions: "Factions"
+    World: "World"
+    Settings: "Settings"
+    Logs: "Logs"
+    Trainer: "Trainer"
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Page {
@@ -86,18 +88,18 @@ impl Page {
 
     pub fn title(self) -> &'static str {
         match self {
-            Page::Home => HOME.get(),
-            Page::Mods => MODS.get(),
-            Page::Character => CHARACTER.get(),
-            Page::Stash => STASH.get(),
-            Page::Combat => COMBAT.get(),
-            Page::Forge => FORGE.get(),
-            Page::Loot => LOOT.get(),
-            Page::Monolith => MONOLITH.get(),
-            Page::Factions => FACTIONS.get(),
-            Page::World => WORLD.get(),
-            Page::Logs => LOGS.get(),
-            Page::Settings => SETTINGS.get(),
+            Page::Home => Home.get(),
+            Page::Mods => Mods.get(),
+            Page::Character => Character.get(),
+            Page::Stash => Stash.get(),
+            Page::Combat => Combat.get(),
+            Page::Forge => Forge.get(),
+            Page::Loot => Loot.get(),
+            Page::Monolith => Monolith.get(),
+            Page::Factions => Factions.get(),
+            Page::World => World.get(),
+            Page::Logs => Logs.get(),
+            Page::Settings => Settings.get(),
         }
     }
 
@@ -495,7 +497,7 @@ impl Shell {
 fn nav_row(navigation: &Navigation, tokens: &Tokens<'_>, node: Node) -> NavRow {
     let (id, title, icon) = match node {
         Node::Page(page) => (page.id(), page.title(), page_icon(tokens, page)),
-        Node::Trainer => ("trainer", TRAINER.get(), tokens.get_icon_trainer()),
+        Node::Trainer => ("trainer", Trainer.get(), tokens.get_icon_trainer()),
     };
     NavRow {
         id: id.into(),

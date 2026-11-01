@@ -1,9 +1,9 @@
 //! `cargo xtask phrases [--check]`: every word the app shows, in one gettext template, `lang/eterras-gift.pot`, for
-//! translators. Two sources, one msgid space: each `Phrase::new("…")`, `Phrase::ctx("…", "…")` and
-//! `Plural::new("…", "…")` in the crates' sources (up to a file's `#[cfg(test)]`), and each `@tr` in the views, read by
-//! `slint-tr-extractor`; a context (`Phrase::ctx`, `@tr("ctx" => …)`) is the entry's msgctxt. References name files
-//! only, so moving code does not make the template stale; the header carries no date, so `--check` compares as
-//! written.
+//! translators. Two sources, one msgid space: each entry of a `phrases!` block and each `Phrase::new("…")`,
+//! `Phrase::ctx("…", "…")` and `Plural::new("…", "…")` in the crates' sources (up to a file's `#[cfg(test)]`), and each
+//! `@tr` in the views, read by `slint-tr-extractor`; a context (`"ctx" => …`, `Phrase::ctx`, `@tr("ctx" => …)`) is the
+//! entry's msgctxt. References name files only, so moving code does not make the template stale; the header carries no
+//! date, so `--check` compares as written.
 
 use std::collections::BTreeMap;
 use std::fs;
@@ -11,6 +11,8 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 const TEMPLATE: &str = "lang/eterras-gift.pot";
+/// Where `phrases!` is defined: its arms spell out the calls with metavariables, not with words.
+const MACRO_DEFINITION: &str = "crates/i18n/src/macros.rs";
 const NEWLINE: &str = "\r\n";
 
 /// One phrase as the sources write it: its context, its English (a plural's singular) and a plural's other form.
@@ -42,6 +44,9 @@ pub fn run(root: &Path, check: bool) -> Result<(), String> {
     sources.sort();
     for path in &sources {
         let file = relative(root, path);
+        if file == MACRO_DEFINITION {
+            continue;
+        }
         let text = fs::read_to_string(path).map_err(|e| format!("{path:?}: {e}"))?;
         // Comments only talk about phrases, and a file's tests (`#[cfg(test)]`, `#[cfg(all(test, …))]`) show the user nothing.
         let text: String = text
@@ -134,14 +139,19 @@ fn relative(root: &Path, path: &Path) -> String {
     path.strip_prefix(root).unwrap_or(path).to_string_lossy().replace('\\', "/")
 }
 
-/// Each `Phrase::new("…")`, `Phrase::ctx("…", "…")` and `Plural::new("…", "…")`: plain or raw string literals, as
-/// the types' docs ask.
+/// Each entry of a `phrases!` block and each `Phrase::new("…")`, `Phrase::ctx("…", "…")` and `Plural::new("…", "…")`:
+/// plain or raw string literals, as the crate's docs ask.
 fn rust_phrases(text: &str) -> Result<Vec<Found>, String> {
-    const CALLS: [&str; 3] = ["Phrase::new(", "Phrase::ctx(", "Plural::new("];
+    const BLOCK: &str = "phrases!";
+    const CALLS: [&str; 4] = [BLOCK, "Phrase::new(", "Phrase::ctx(", "Plural::new("];
     let mut found = Vec::new();
     let mut rest = text;
     while let Some((at, call)) = CALLS.iter().filter_map(|call| rest.find(call).map(|at| (at, *call))).min() {
         rest = &rest[at + call.len()..];
+        if call == BLOCK {
+            rest = block_phrases(rest, &mut found)?;
+            continue;
+        }
         let mut literal = |first: bool| {
             if !first {
                 rest = rest.trim_start().strip_prefix(',').ok_or_else(|| format!("{call} takes two string literals"))?;
@@ -170,6 +180,54 @@ fn rust_phrases(text: &str) -> Result<Vec<Found>, String> {
         });
     }
     Ok(found)
+}
+
+/// The entries of a `phrases!` block, `text` starting after the macro's name, and what follows the block. Entry by
+/// entry rather than to the closing brace, since the English holds braces of its own.
+fn block_phrases<'a>(text: &'a str, found: &mut Vec<Found>) -> Result<&'a str, String> {
+    let near = |text: &str| format!("phrases! near {:?}", text.chars().take(40).collect::<String>());
+    let mut rest = text.trim_start().strip_prefix('{').ok_or_else(|| near(text))?;
+    loop {
+        rest = rest.trim_start();
+        if let Some(after) = rest.strip_prefix('}') {
+            return Ok(after);
+        }
+        if let Some(attribute) = rest.strip_prefix("#[") {
+            let close = attribute.find(']').ok_or_else(|| near(rest))?;
+            rest = &attribute[close + 1..];
+            continue;
+        }
+        if rest.starts_with("//") {
+            rest = rest.split_once('\n').map_or("", |(_, after)| after);
+            continue;
+        }
+        // The visibility and name, which the macro has already checked.
+        let (declared, after) = rest.split_once(':').filter(|(declared, _)| !declared.contains(['"', '{', '}'])).ok_or_else(|| near(rest))?;
+        let name = declared.trim();
+        let (first, after) = rust_literal(after.trim_start()).ok_or_else(|| near(name))?;
+        rest = after.trim_start();
+        let mut second = |operator: &str| -> Result<Option<String>, String> {
+            let Some(after) = rest.strip_prefix(operator) else {
+                return Ok(None);
+            };
+            let (second, after) = rust_literal(after.trim_start()).ok_or_else(|| near(name))?;
+            rest = after;
+            Ok(Some(second))
+        };
+        found.push(if let Some(msgid) = second("=>")? {
+            Found {
+                context: Some(first),
+                msgid,
+                plural: None,
+            }
+        } else {
+            Found {
+                context: None,
+                msgid: first,
+                plural: second("|")?,
+            }
+        });
+    }
 }
 
 /// A Rust string literal at the start of `text`, unescaped, and what follows it.
@@ -352,6 +410,55 @@ mod tests {
             [entry(None, "{n} mod", Some("{n} mods")), entry(Some("key"), "Delete", None), entry(None, "Delete", None)]
         );
         assert!(rust_phrases(r#"Phrase::ctx("key")"#).is_err());
+    }
+
+    #[test]
+    fn a_block_reads_each_shape_and_what_follows_it() {
+        let found = rust_phrases(
+            r#"
+            phrases! {
+                #[cfg(windows)]
+                pub Added: "Added {name}." // braces in the English do not end the block
+                pub(super) Key: "key" => "Delete"
+                Drafts: "{n} draft" | "{n} drafts"
+                Split: "one \
+                        two"
+            }
+            phrases! { Local: "Inside a function" }
+            Phrase::new("After the blocks")
+            "#,
+        )
+        .unwrap();
+        let entry = |context: Option<&str>, msgid: &str, plural: Option<&str>| Found {
+            context: context.map(Into::into),
+            msgid: msgid.into(),
+            plural: plural.map(Into::into),
+        };
+        assert_eq!(
+            found,
+            [
+                entry(None, "Added {name}.", None),
+                entry(Some("key"), "Delete", None),
+                entry(None, "{n} draft", Some("{n} drafts")),
+                entry(None, "one two", None),
+                entry(None, "Inside a function", None),
+                entry(None, "After the blocks", None),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_block_it_cannot_read_is_an_error() {
+        for broken in [
+            "phrases!",
+            "phrases! (A: \"a\")",
+            "phrases! { A: NAME }",
+            "phrases! { A \"a\" }",
+            "phrases! { A: \"a\" | }",
+            "phrases! { A: \"a\"",
+        ] {
+            assert!(rust_phrases(broken).is_err(), "{broken}");
+        }
     }
 
     #[test]

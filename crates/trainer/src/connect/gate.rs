@@ -1,17 +1,18 @@
 //! Player.log admission before process access.
 use eg_core::game_log::{GameLogReader, GameLogState, GameLogStatus, GameReadiness};
-use eg_core::phrase::Phrase;
+use eg_i18n::phrases;
 use jiff::Timestamp;
 
-const LOG_MISSING: Phrase = Phrase::new("Last Epoch's Player.log was not found, so an offline character cannot be confirmed.");
-const LOG_STALE: Phrase = Phrase::new("Last Epoch's Player.log belongs to an earlier game session. Restart Last Epoch with logging enabled.");
-const LOG_UNREADABLE: Phrase = Phrase::new("Last Epoch's Player.log could not be read: {reason}");
-const LOG_UNREADABLE_UNKNOWN: Phrase = Phrase::new("Last Epoch's Player.log could not be read, so an offline character cannot be confirmed.");
-const CHARACTER_NOT_LOGGED: Phrase =
-    Phrase::new("Last Epoch entered play without logging which character was loaded. Return to character select and load an offline character again.");
-const LOG_NOT_UNDERSTOOD: Phrase = Phrase::new("Last Epoch's Player.log does not identify the current character, so an offline character cannot be confirmed.");
-const WAITING_FOR_STARTUP: Phrase = Phrase::new("Waiting for Last Epoch to finish starting.");
-const LOAD_OFFLINE: Phrase = Phrase::new("Load an offline character to connect to the trainer.");
+phrases! {
+    LogMissing: "Last Epoch's Player.log was not found, so an offline character cannot be confirmed."
+    LogStale: "Last Epoch's Player.log belongs to an earlier game session. Restart Last Epoch with logging enabled."
+    LogUnreadable: "Last Epoch's Player.log could not be read: {reason}"
+    LogUnreadableUnknown: "Last Epoch's Player.log could not be read, so an offline character cannot be confirmed."
+    CharacterNotLogged: "Last Epoch entered play without logging which character was loaded. Return to character select and load an offline character again."
+    LogNotUnderstood: "Last Epoch's Player.log does not identify the current character, so an offline character cannot be confirmed."
+    WaitingForStartup: "Waiting for Last Epoch to finish starting."
+    LoadOffline: "Load an offline character to connect to the trainer."
+}
 
 pub trait LogSource {
     fn read(&mut self, process_start: Timestamp) -> GameLogState;
@@ -38,17 +39,17 @@ pub struct GateDecision {
 /// A refused connection explains the missing evidence instead of exposing the gate's internal readiness fallback.
 pub(crate) fn refusal_message(log: &GameLogState) -> String {
     match log.status {
-        GameLogStatus::Missing => LOG_MISSING.get().to_owned(),
-        GameLogStatus::Stale => LOG_STALE.get().to_owned(),
+        GameLogStatus::Missing => LogMissing.get().to_owned(),
+        GameLogStatus::Stale => LogStale.get().to_owned(),
         GameLogStatus::Unreadable => log
             .problem
             .as_ref()
-            .map_or_else(|| LOG_UNREADABLE_UNKNOWN.get().to_owned(), |reason| LOG_UNREADABLE.with(&[("reason", reason)])),
-        GameLogStatus::Unrecognized => CHARACTER_NOT_LOGGED.get().to_owned(),
-        GameLogStatus::Current if log.shell_state.is_none() => LOG_NOT_UNDERSTOOD.get().to_owned(),
+            .map_or_else(|| LogUnreadableUnknown.get().to_owned(), |reason| LogUnreadable.with(&[("reason", reason)])),
+        GameLogStatus::Unrecognized => CharacterNotLogged.get().to_owned(),
+        GameLogStatus::Current if log.shell_state.is_none() => LogNotUnderstood.get().to_owned(),
         GameLogStatus::Current => match log.readiness {
-            GameReadiness::Starting => WAITING_FOR_STARTUP.get(),
-            GameReadiness::NoCharacter | GameReadiness::Online | GameReadiness::Offline => LOAD_OFFLINE.get(),
+            GameReadiness::Starting => WaitingForStartup.get(),
+            GameReadiness::NoCharacter | GameReadiness::Online | GameReadiness::Offline => LoadOffline.get(),
         }
         .to_owned(),
     }

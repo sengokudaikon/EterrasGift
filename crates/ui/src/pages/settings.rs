@@ -1,7 +1,7 @@
 //! The Settings page: module switches that save the moment they flip, and six
 //! locations that wait for "Save locations". `SettingsPage` is the page's state and rules, testable without a window;
 //! `bind` puts it behind the `SettingsState` global.
-use eg_core::phrase::Phrase;
+use eg_i18n::{Phrase, phrases};
 
 pub mod trainer;
 
@@ -16,24 +16,26 @@ use std::rc::Rc;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-const NOT_AN_OBJECT: Phrase = Phrase::new("The settings for {module} must be an object.");
-const NOT_TRUE_OR_FALSE: Phrase = Phrase::new("{key} must be true or false in the settings for {module}, which were left unchanged.");
-const NONE: Phrase = Phrase::new("None");
-const NOT_FOUND: Phrase = Phrase::new("Not found");
-const GAME_FOLDER: Phrase = Phrase::new("The game folder");
-const LOCATIONS_NOT_SAVED: Phrase = Phrase::new("Locations were not saved: {error}");
-const MEMORY_ONLY: Phrase = Phrase::new("Changes last for this run only. Save locations replaces the unreadable file.");
-const SETTINGS_NOT_SAVED: Phrase = Phrase::new("Settings were not saved: {reason}");
-const TURN_ON: Phrase = Phrase::new("{module} on");
-const TURN_OFF: Phrase = Phrase::new("{module} off");
-const AND: Phrase = Phrase::new("{list} and {next}");
-const SAVED_RESTART_BOTH: Phrase = Phrase::new("Saved. Restart Eterra's Gift to use the new locations and turn {turns}.");
-const SAVED_RESTART_LOCATIONS: Phrase = Phrase::new("Saved. Restart Eterra's Gift to use the new locations.");
-const SAVED_RESTART_TURN: Phrase = Phrase::new("Saved. Restart Eterra's Gift to turn {turns}.");
-const LOCATIONS_SAVED: Phrase = Phrase::new("Locations saved.");
-const WINDOWS_EXECUTABLE: Phrase = Phrase::new("Windows executable");
-const EXECUTABLE_PICKER_FAILED: Phrase = Phrase::new("The executable picker could not be opened: {error}");
-const FOLDER_PICKER_FAILED: Phrase = Phrase::new("The folder picker could not be opened: {error}");
+phrases! {
+    NotAnObject: "The settings for {module} must be an object."
+    NotTrueOrFalse: "{key} must be true or false in the settings for {module}, which were left unchanged."
+    NoModSources: "None"
+    NotFound: "Not found"
+    GameFolder: "The game folder"
+    LocationsNotSaved: "Locations were not saved: {error}"
+    MemoryOnly: "Changes last for this run only. Save locations replaces the unreadable file."
+    SettingsNotSaved: "Settings were not saved: {reason}"
+    TurnOn: "{module} on"
+    TurnOff: "{module} off"
+    And: "{list} and {next}"
+    SavedRestartBoth: "Saved. Restart Eterra's Gift to use the new locations and turn {turns}."
+    SavedRestartLocations: "Saved. Restart Eterra's Gift to use the new locations."
+    SavedRestartTurn: "Saved. Restart Eterra's Gift to turn {turns}."
+    LocationsSaved: "Locations saved."
+    WindowsExecutable: "Windows executable"
+    ExecutablePickerFailed: "The executable picker could not be opened: {error}"
+    FolderPickerFailed: "The folder picker could not be opened: {error}"
+}
 
 /// What Settings shows of a part of the app it can turn on or off, before loading it: a module that is off is never
 /// loaded.
@@ -110,13 +112,13 @@ impl ModuleChoice {
             return Ok(());
         }
         let Some(fields) = slice.as_object() else {
-            return Err(NOT_AN_OBJECT.with(&[("module", &self.title)]));
+            return Err(NotAnObject.with(&[("module", &self.title)]));
         };
         for section in &self.sections {
             if let ModuleSection::Toggle { key, .. } = section {
                 for (_, value) in fields.iter().filter(|(name, _)| name.eq_ignore_ascii_case(key)) {
                     if !value.is_boolean() {
-                        return Err(NOT_TRUE_OR_FALSE.with(&[("key", key), ("module", &self.name)]));
+                        return Err(NotTrueOrFalse.with(&[("key", key), ("module", &self.name)]));
                     }
                 }
             }
@@ -294,9 +296,9 @@ impl SettingsPage {
             text(found_game.as_deref()),
             text(Some(&paths.default_user_data_directory)),
             text(Some(&paths.default_mod_library_directory())),
-            paths.mod_sources_directory().map_or_else(|| NONE.into(), |path| path.display().to_string()),
-            found_dotnet.map_or_else(|| NOT_FOUND.into(), |path| path.display().to_string()),
-            GAME_FOLDER.into(),
+            paths.mod_sources_directory().map_or_else(|| NoModSources.into(), |path| path.display().to_string()),
+            found_dotnet.map_or_else(|| NotFound.into(), |path| path.display().to_string()),
+            GameFolder.into(),
         ];
         let message = store.startup_error().unwrap_or_default().to_owned();
         // A folder move saved in an earlier run waits for a restart: Restart now is offered, with nothing to say.
@@ -502,7 +504,7 @@ impl SettingsPage {
                         }
                     }
                 }
-                Err(error) => self.location_error = Some(LOCATIONS_NOT_SAVED.with(&[("error", &error)])),
+                Err(error) => self.location_error = Some(LocationsNotSaved.with(&[("error", &error)])),
             }
             if self.snapshot.pending_location != Some(revision) {
                 self.location_save = None;
@@ -521,12 +523,12 @@ impl SettingsPage {
             SaveOutcome::MemoryOnly => match self.location_error.clone().or_else(|| self.external_error.clone()) {
                 Some(error) => self.set_error(&error),
                 None => {
-                    self.message = MEMORY_ONLY.get().into();
+                    self.message = MemoryOnly.get().into();
                     self.kind = MessageKind::MemoryOnly;
                 }
             },
             SaveOutcome::Failed(reason) | SaveOutcome::Faulted(reason) => {
-                let message = self.location_error.clone().unwrap_or_else(|| SETTINGS_NOT_SAVED.with(&[("reason", &reason)]));
+                let message = self.location_error.clone().unwrap_or_else(|| SettingsNotSaved.with(&[("reason", &reason)]));
                 self.set_error(&message);
             }
         }
@@ -564,17 +566,17 @@ impl SettingsPage {
             .filter_map(|module| {
                 let on = saved.modules.get(module.choice.id).copied().unwrap_or(module.choice.default_on);
                 let active = store.startup_modules().get(module.choice.id).copied().unwrap_or(module.choice.default_on);
-                (on != active).then(|| if on { TURN_ON } else { TURN_OFF }.with(&[("module", &module.choice.name)]))
+                (on != active).then(|| if on { TurnOn } else { TurnOff }.with(&[("module", &module.choice.name)]))
             })
-            .reduce(|list, next| AND.with(&[("list", &list), ("next", &next)]))
+            .reduce(|list, next| And.with(&[("list", &list), ("next", &next)]))
             .unwrap_or_default();
         self.kind = if paths || !turns.is_empty() { MessageKind::RestartRequired } else { MessageKind::Saved };
         self.message = match (paths, !turns.is_empty()) {
-            (true, true) => SAVED_RESTART_BOTH.with(&[("turns", &turns)]),
-            (true, false) => SAVED_RESTART_LOCATIONS.get().into(),
-            (false, true) => SAVED_RESTART_TURN.with(&[("turns", &turns)]),
+            (true, true) => SavedRestartBoth.with(&[("turns", &turns)]),
+            (true, false) => SavedRestartLocations.get().into(),
+            (false, true) => SavedRestartTurn.with(&[("turns", &turns)]),
             // A location save says so; a switch save, which shows itself, says nothing.
-            (false, false) if self.locations_last => LOCATIONS_SAVED.get().into(),
+            (false, false) if self.locations_last => LocationsSaved.get().into(),
             (false, false) => String::new(),
         };
     }
@@ -965,7 +967,7 @@ impl View {
         let view = self.clone();
         let picked = slint::spawn_local(async move {
             let picked = if location == Location::GameExecutable {
-                dialog.add_filter(WINDOWS_EXECUTABLE.get(), &["exe"]).pick_file().await
+                dialog.add_filter(WindowsExecutable.get(), &["exe"]).pick_file().await
             } else {
                 dialog.pick_folder().await
             };
@@ -977,9 +979,9 @@ impl View {
         });
         if let Err(error) = picked {
             let failed = if location == Location::GameExecutable {
-                EXECUTABLE_PICKER_FAILED
+                ExecutablePickerFailed
             } else {
-                FOLDER_PICKER_FAILED
+                FolderPickerFailed
             };
             self.page.borrow_mut().report_error(&failed.with(&[("error", &error)]));
             self.show();

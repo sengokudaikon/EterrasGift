@@ -395,31 +395,6 @@ msgstr ""
 msgid "The mod library stopped."
 msgstr ""
 
-#: crates/core/src/phrase.rs
-msgctxt "a list of two"
-msgid "{first} and {second}"
-msgstr ""
-
-#: crates/core/src/phrase.rs
-msgctxt "a list of two"
-msgid "{first} or {second}"
-msgstr ""
-
-#: crates/core/src/phrase.rs
-msgctxt "a longer list, before its last item"
-msgid "{list}, {item}"
-msgstr ""
-
-#: crates/core/src/phrase.rs
-msgctxt "a longer list, its last item"
-msgid "{list} and {last}"
-msgstr ""
-
-#: crates/core/src/phrase.rs
-msgctxt "a longer list, its last item"
-msgid "{list} or {last}"
-msgstr ""
-
 #: crates/core/src/settings.rs crates/ui/src/pages/settings.rs
 msgid ".NET SDK folder"
 msgstr ""
@@ -550,6 +525,31 @@ msgstr ""
 
 #: crates/core/src/settings.rs
 msgid "{name} must be text."
+msgstr ""
+
+#: crates/i18n/src/phrase.rs
+msgctxt "a list of two"
+msgid "{first} and {second}"
+msgstr ""
+
+#: crates/i18n/src/phrase.rs
+msgctxt "a list of two"
+msgid "{first} or {second}"
+msgstr ""
+
+#: crates/i18n/src/phrase.rs
+msgctxt "a longer list, before its last item"
+msgid "{list}, {item}"
+msgstr ""
+
+#: crates/i18n/src/phrase.rs
+msgctxt "a longer list, its last item"
+msgid "{list} and {last}"
+msgstr ""
+
+#: crates/i18n/src/phrase.rs
+msgctxt "a longer list, its last item"
+msgid "{list} or {last}"
 msgstr ""
 
 #: crates/trainer/src/backend/connection.rs
@@ -796,7 +796,7 @@ msgstr ""
 msgid "Combat targets count for your prophecies at any distance."
 msgstr ""
 
-#: crates/trainer/src/features/registry.rs crates/ui/src/pages/forge/editor.rs
+#: crates/trainer/src/features/registry.rs crates/ui/src/pages/forge/editor/tr.rs
 msgid "Corruption"
 msgstr ""
 
@@ -1634,15 +1634,7 @@ msgid "\"{name}\" matches the item already."
 msgstr ""
 
 #: crates/ui/src/pages/forge/editor.rs
-msgid "A legendary's legendary potential is fixed."
-msgstr ""
-
-#: crates/ui/src/pages/forge/editor.rs
 msgid "A set item holds no affixes. Remove them first."
-msgstr ""
-
-#: crates/ui/src/pages/forge/editor.rs crates/ui/ui/strings/forge.slint
-msgid "Add affix"
 msgstr ""
 
 #: crates/ui/src/pages/forge/editor.rs
@@ -1696,10 +1688,6 @@ msgid "Change the base. Implicits and requirements follow it."
 msgstr ""
 
 #: crates/ui/src/pages/forge/editor.rs
-msgid "Change the level requirement. The game works it out again when the item reloads or changes."
-msgstr ""
-
-#: crates/ui/src/pages/forge/editor.rs
 msgid "Change which unique or set item this is"
 msgstr ""
 
@@ -1712,23 +1700,7 @@ msgid "Changes ({n})"
 msgstr ""
 
 #: crates/ui/src/pages/forge/editor.rs
-msgid "Compatibility could not be confirmed. Turn on \"I know what I'm doing\" in Settings to use it."
-msgstr ""
-
-#: crates/ui/src/pages/forge/editor.rs
-msgid "Compatibility couldn't be confirmed."
-msgstr ""
-
-#: crates/ui/src/pages/forge/editor.rs
 msgid "Compatible with this slot"
-msgstr ""
-
-#: crates/ui/src/pages/forge/editor.rs crates/ui/ui/strings/forge.slint
-msgid "Confirmed"
-msgstr ""
-
-#: crates/ui/src/pages/forge/editor.rs
-msgid "Corrupted"
 msgstr ""
 
 #: crates/ui/src/pages/forge/editor.rs
@@ -1748,10 +1720,6 @@ msgid "Discard draft"
 msgid_plural "Discard {n} drafts"
 msgstr[0] ""
 msgstr[1] ""
-
-#: crates/ui/src/pages/forge/editor.rs
-msgid "Don't do it"
-msgstr ""
 
 #: crates/ui/src/pages/forge/editor.rs
 msgid "Draft discarded."
@@ -1796,10 +1764,6 @@ msgstr[0] ""
 msgstr[1] ""
 
 #: crates/ui/src/pages/forge/editor.rs
-msgid "Enchanting gives an idol Weaver's Touch. 0 takes it off. Only uncorrupted Grand, Large, Ornate, Huge and Adorned idols use it."
-msgstr ""
-
-#: crates/ui/src/pages/forge/editor.rs
 msgid "Enter integer roll positions from 0 to 255 for implicits whose values roll."
 msgstr ""
 
@@ -1816,15 +1780,7 @@ msgid "Every roll that can change is at its best."
 msgstr ""
 
 #: crates/ui/src/pages/forge/editor.rs
-msgid "Exalted"
-msgstr ""
-
-#: crates/ui/src/pages/forge/editor.rs
 msgid "Fits this item."
-msgstr ""
-
-#: crates/ui/src/pages/forge/editor.rs
-msgid "Forging potential"
 msgstr ""
 
 #: crates/ui/src/pages/forge/editor.rs
@@ -1849,18 +1805,6 @@ msgstr ""
 
 #: crates/ui/src/pages/forge/editor.rs
 msgid "Implicit rolls changed in the game after you drafted them. Discard those drafts and edit them again. Nothing was applied."
-msgstr ""
-
-#: crates/ui/src/pages/forge/editor.rs crates/ui/ui/strings/forge.slint
-msgid "Implicits"
-msgstr ""
-
-#: crates/ui/src/pages/forge/editor.rs
-msgid "Incompatible with this item or slot."
-msgstr ""
-
-#: crates/ui/src/pages/forge/editor.rs
-msgid "Incompatible with this item or slot. Turn on \"I know what I'm doing\" in Settings to use it."
 msgstr ""
 
 #: crates/ui/src/pages/forge/editor.rs
@@ -1914,18 +1858,6 @@ msgid "Left out: {items}."
 msgstr ""
 
 #: crates/ui/src/pages/forge/editor.rs
-msgid "Legendary potential"
-msgstr ""
-
-#: crates/ui/src/pages/forge/editor.rs crates/ui/ui/strings/forge.slint
-msgid "Level requirement"
-msgstr ""
-
-#: crates/ui/src/pages/forge/editor.rs
-msgid "Level {level}"
-msgstr ""
-
-#: crates/ui/src/pages/forge/editor.rs
 msgid "Linked with {names}"
 msgstr ""
 
@@ -1939,10 +1871,6 @@ msgstr ""
 
 #: crates/ui/src/pages/forge/editor.rs
 msgid "Name the template first."
-msgstr ""
-
-#: crates/ui/src/pages/forge/editor.rs
-msgid "Needs \"I know what I'm doing\"."
 msgstr ""
 
 #: crates/ui/src/pages/forge/editor.rs
@@ -1986,23 +1914,7 @@ msgid "Normal, magic and rare follow the unsealed affix count. Exalted needs an 
 msgstr ""
 
 #: crates/ui/src/pages/forge/editor.rs
-msgid "Not corrupted"
-msgstr ""
-
-#: crates/ui/src/pages/forge/editor.rs
-msgid "Not ruined"
-msgstr ""
-
-#: crates/ui/src/pages/forge/editor.rs
 msgid "Nothing left to undo. Undo apply writes back the values from before the last Apply."
-msgstr ""
-
-#: crates/ui/src/pages/forge/editor.rs
-msgid "Nothing was applied."
-msgstr ""
-
-#: crates/ui/src/pages/forge/editor.rs
-msgid "Place an item in the forge first."
 msgstr ""
 
 #: crates/ui/src/pages/forge/editor.rs
@@ -2035,14 +1947,6 @@ msgstr ""
 
 #: crates/ui/src/pages/forge/editor.rs
 msgid "Restores {n} affixes to their tiers in game."
-msgstr ""
-
-#: crates/ui/src/pages/forge/editor.rs
-msgid "Ruin"
-msgstr ""
-
-#: crates/ui/src/pages/forge/editor.rs
-msgid "Ruined"
 msgstr ""
 
 #: crates/ui/src/pages/forge/editor.rs
@@ -2120,18 +2024,6 @@ msgid "The game did not keep this edit; the item shows what it holds now. Drafts
 msgstr ""
 
 #: crates/ui/src/pages/forge/editor.rs
-msgid "The game grows and upgrades affixes with it, up to its maximum. 0 takes it off. After a reload, a unique that hasn't grown an affix yet shows it as legendary potential."
-msgstr ""
-
-#: crates/ui/src/pages/forge/editor.rs
-msgid "The game has odd rules for these two: once Weaver's Will starts adding affixes, it may crash the game and reset the item."
-msgstr ""
-
-#: crates/ui/src/pages/forge/editor.rs
-msgid "The game would not add it here. Turn on \"I know what I'm doing\" in Settings to add it anyway."
-msgstr ""
-
-#: crates/ui/src/pages/forge/editor.rs
 msgid "The item can't take drafts until the game is ready."
 msgstr ""
 
@@ -2140,10 +2032,6 @@ msgid "The item changed in the game and no longer has {missing}, so that draft w
 msgid_plural "The item changed in the game and no longer has {missing}, so those drafts were discarded."
 msgstr[0] ""
 msgstr[1] ""
-
-#: crates/ui/src/pages/forge/editor.rs
-msgid "The new base would make affixes incompatible. Allow incompatible affixes in the base picker to apply it anyway."
-msgstr ""
 
 #: crates/ui/src/pages/forge/editor.rs
 msgid "The session is not ready to write."
@@ -2155,10 +2043,6 @@ msgstr ""
 
 #: crates/ui/src/pages/forge/editor.rs
 msgid "The template could not be saved: {error}"
-msgstr ""
-
-#: crates/ui/src/pages/forge/editor.rs
-msgid "This affix can't be written: it's missing from the game data, or its type is unknown."
 msgstr ""
 
 #: crates/ui/src/pages/forge/editor.rs
@@ -2186,10 +2070,6 @@ msgid "This edit is not available in this build. Nothing was applied."
 msgstr ""
 
 #: crates/ui/src/pages/forge/editor.rs
-msgid "This edit needs \"I know what I'm doing\" in Settings. Nothing was applied."
-msgstr ""
-
-#: crates/ui/src/pages/forge/editor.rs
 msgid "This item has no affixes."
 msgstr ""
 
@@ -2199,18 +2079,6 @@ msgstr ""
 
 #: crates/ui/src/pages/forge/editor.rs
 msgid "This unique isn't in the game data. Read the game files again in Settings."
-msgstr ""
-
-#: crates/ui/src/pages/forge/editor.rs
-msgid "Turn on \"I know what I'm doing\" in Settings to change this."
-msgstr ""
-
-#: crates/ui/src/pages/forge/editor.rs
-msgid "T{tier}"
-msgstr ""
-
-#: crates/ui/src/pages/forge/editor.rs crates/ui/ui/strings/mods.slint
-msgid "Undo"
 msgstr ""
 
 #: crates/ui/src/pages/forge/editor.rs
@@ -2233,10 +2101,6 @@ msgstr ""
 msgid "Unique modifier rolls changed in the game after you drafted them. Discard those drafts and edit them again. Nothing was applied."
 msgstr ""
 
-#: crates/ui/src/pages/forge/editor.rs crates/ui/src/pages/forge/picker.rs crates/ui/ui/strings/forge.slint
-msgid "Unique modifiers"
-msgstr ""
-
 #: crates/ui/src/pages/forge/editor.rs
 msgid "Uniques, set items and legendaries keep their base. Change the unique to change it."
 msgstr ""
@@ -2247,18 +2111,6 @@ msgstr ""
 
 #: crates/ui/src/pages/forge/editor.rs
 msgid "Wait for the write in progress to finish, then draft the template."
-msgstr ""
-
-#: crates/ui/src/pages/forge/editor.rs
-msgid "Weaver's Touch"
-msgstr ""
-
-#: crates/ui/src/pages/forge/editor.rs
-msgid "Weaver's Will"
-msgstr ""
-
-#: crates/ui/src/pages/forge/editor.rs
-msgid "Weaver's Will on a legendary. 0 takes it off."
 msgstr ""
 
 #: crates/ui/src/pages/forge/editor.rs crates/ui/ui/strings/forge.slint
@@ -2314,52 +2166,200 @@ msgid "{name} does not apply to this item."
 msgstr ""
 
 #: crates/ui/src/pages/forge/editor.rs
+msgctxt "rarity"
+msgid "Legendary"
+msgstr ""
+
+#: crates/ui/src/pages/forge/editor/tr.rs
+msgid "A legendary's legendary potential is fixed."
+msgstr ""
+
+#: crates/ui/src/pages/forge/editor/tr.rs crates/ui/ui/strings/forge.slint
+msgid "Add affix"
+msgstr ""
+
+#: crates/ui/src/pages/forge/editor/tr.rs
+msgid "Change the level requirement. The game works it out again when the item reloads or changes."
+msgstr ""
+
+#: crates/ui/src/pages/forge/editor/tr.rs
+msgid "Compatibility could not be confirmed. Turn on \"I know what I'm doing\" in Settings to use it."
+msgstr ""
+
+#: crates/ui/src/pages/forge/editor/tr.rs
+msgid "Compatibility couldn't be confirmed."
+msgstr ""
+
+#: crates/ui/src/pages/forge/editor/tr.rs crates/ui/ui/strings/forge.slint
+msgid "Confirmed"
+msgstr ""
+
+#: crates/ui/src/pages/forge/editor/tr.rs
+msgid "Corrupted"
+msgstr ""
+
+#: crates/ui/src/pages/forge/editor/tr.rs
+msgid "Don't do it"
+msgstr ""
+
+#: crates/ui/src/pages/forge/editor/tr.rs
+msgid "Enchanting gives an idol Weaver's Touch. 0 takes it off. Only uncorrupted Grand, Large, Ornate, Huge and Adorned idols use it."
+msgstr ""
+
+#: crates/ui/src/pages/forge/editor/tr.rs
+msgid "Exalted"
+msgstr ""
+
+#: crates/ui/src/pages/forge/editor/tr.rs
+msgid "Forging potential"
+msgstr ""
+
+#: crates/ui/src/pages/forge/editor/tr.rs crates/ui/ui/strings/forge.slint
+msgid "Implicits"
+msgstr ""
+
+#: crates/ui/src/pages/forge/editor/tr.rs
+msgid "Incompatible with this item or slot."
+msgstr ""
+
+#: crates/ui/src/pages/forge/editor/tr.rs
+msgid "Incompatible with this item or slot. Turn on \"I know what I'm doing\" in Settings to use it."
+msgstr ""
+
+#: crates/ui/src/pages/forge/editor/tr.rs
+msgid "Legendary potential"
+msgstr ""
+
+#: crates/ui/src/pages/forge/editor/tr.rs crates/ui/ui/strings/forge.slint
+msgid "Level requirement"
+msgstr ""
+
+#: crates/ui/src/pages/forge/editor/tr.rs
+msgid "Level {level}"
+msgstr ""
+
+#: crates/ui/src/pages/forge/editor/tr.rs
+msgid "Needs \"I know what I'm doing\"."
+msgstr ""
+
+#: crates/ui/src/pages/forge/editor/tr.rs
+msgid "Not corrupted"
+msgstr ""
+
+#: crates/ui/src/pages/forge/editor/tr.rs
+msgid "Not ruined"
+msgstr ""
+
+#: crates/ui/src/pages/forge/editor/tr.rs
+msgid "Nothing was applied."
+msgstr ""
+
+#: crates/ui/src/pages/forge/editor/tr.rs
+msgid "Place an item in the forge first."
+msgstr ""
+
+#: crates/ui/src/pages/forge/editor/tr.rs
+msgid "Ruin"
+msgstr ""
+
+#: crates/ui/src/pages/forge/editor/tr.rs
+msgid "Ruined"
+msgstr ""
+
+#: crates/ui/src/pages/forge/editor/tr.rs
+msgid "The game grows and upgrades affixes with it, up to its maximum. 0 takes it off. After a reload, a unique that hasn't grown an affix yet shows it as legendary potential."
+msgstr ""
+
+#: crates/ui/src/pages/forge/editor/tr.rs
+msgid "The game has odd rules for these two: once Weaver's Will starts adding affixes, it may crash the game and reset the item."
+msgstr ""
+
+#: crates/ui/src/pages/forge/editor/tr.rs
+msgid "The game would not add it here. Turn on \"I know what I'm doing\" in Settings to add it anyway."
+msgstr ""
+
+#: crates/ui/src/pages/forge/editor/tr.rs
+msgid "The new base would make affixes incompatible. Allow incompatible affixes in the base picker to apply it anyway."
+msgstr ""
+
+#: crates/ui/src/pages/forge/editor/tr.rs
+msgid "This affix can't be written: it's missing from the game data, or its type is unknown."
+msgstr ""
+
+#: crates/ui/src/pages/forge/editor/tr.rs
+msgid "This edit needs \"I know what I'm doing\" in Settings. Nothing was applied."
+msgstr ""
+
+#: crates/ui/src/pages/forge/editor/tr.rs
+msgid "Turn on \"I know what I'm doing\" in Settings to change this."
+msgstr ""
+
+#: crates/ui/src/pages/forge/editor/tr.rs
+msgid "T{tier}"
+msgstr ""
+
+#: crates/ui/src/pages/forge/editor/tr.rs crates/ui/ui/strings/mods.slint
+msgid "Undo"
+msgstr ""
+
+#: crates/ui/src/pages/forge/editor/tr.rs crates/ui/src/pages/forge/picker.rs crates/ui/ui/strings/forge.slint
+msgid "Unique modifiers"
+msgstr ""
+
+#: crates/ui/src/pages/forge/editor/tr.rs
+msgid "Weaver's Touch"
+msgstr ""
+
+#: crates/ui/src/pages/forge/editor/tr.rs
+msgid "Weaver's Will"
+msgstr ""
+
+#: crates/ui/src/pages/forge/editor/tr.rs
+msgid "Weaver's Will on a legendary. 0 takes it off."
+msgstr ""
+
+#: crates/ui/src/pages/forge/editor/tr.rs
 msgid "{name}: {problem}"
 msgstr ""
 
-#: crates/ui/src/pages/forge/editor.rs crates/ui/src/pages/forge/picker.rs crates/ui/src/pages/settings/trainer.rs
+#: crates/ui/src/pages/forge/editor/tr.rs crates/ui/src/pages/forge/picker.rs crates/ui/src/pages/settings/trainer.rs
 msgid "{n} affix"
 msgid_plural "{n} affixes"
 msgstr[0] ""
 msgstr[1] ""
 
-#: crates/ui/src/pages/forge/editor.rs
+#: crates/ui/src/pages/forge/editor/tr.rs
 msgid "{n} draft"
 msgid_plural "{n} drafts"
 msgstr[0] ""
 msgstr[1] ""
 
-#: crates/ui/src/pages/forge/editor.rs
+#: crates/ui/src/pages/forge/editor/tr.rs
 msgid "{n} incompatible affix"
 msgid_plural "{n} incompatible affixes"
 msgstr[0] ""
 msgstr[1] ""
 
-#: crates/ui/src/pages/forge/editor.rs
+#: crates/ui/src/pages/forge/editor/tr.rs
 msgid "{n} prefix"
 msgid_plural "{n} prefixes"
 msgstr[0] ""
 msgstr[1] ""
 
-#: crates/ui/src/pages/forge/editor.rs
+#: crates/ui/src/pages/forge/editor/tr.rs
 msgid "{n} suffix"
 msgid_plural "{n} suffixes"
 msgstr[0] ""
 msgstr[1] ""
 
-#: crates/ui/src/pages/forge/editor.rs
+#: crates/ui/src/pages/forge/editor/tr.rs
 msgid "{n} unique modifier"
 msgid_plural "{n} unique modifiers"
 msgstr[0] ""
 msgstr[1] ""
 
-#: crates/ui/src/pages/forge/editor.rs
+#: crates/ui/src/pages/forge/editor/tr.rs
 msgid "{problem} Nothing was applied."
-msgstr ""
-
-#: crates/ui/src/pages/forge/editor.rs
-msgctxt "rarity"
-msgid "Legendary"
 msgstr ""
 
 #: crates/ui/src/pages/forge/game.rs

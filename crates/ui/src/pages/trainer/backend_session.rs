@@ -2,7 +2,7 @@
 //! path. Unported direct field editors keep the common interface but advertise no operation support.
 
 use super::profiles::Profile;
-use super::session::{FieldError, FieldRequest, FieldWrite, HookState, NOT_AVAILABLE, TrainerSession};
+use super::session::{FieldError, FieldRequest, FieldWrite, HookState, NotAvailable, TrainerSession};
 use eg_trainer::backend::{BackendHandle, BackendSnapshot, Command, Pending, Phase};
 use eg_trainer::features::profiles::ProfileKey;
 use eg_trainer::features::{FeatureIntents, HookId};
@@ -77,7 +77,7 @@ impl TrainerSession for BackendSession {
                 }
             })
             .unwrap_or(false);
-        (!served).then_some(NOT_AVAILABLE.get())
+        (!served).then_some(NotAvailable.get())
     }
 
     fn profiles(&self) -> Vec<Profile> {
@@ -169,10 +169,10 @@ impl TrainerSession for BackendSession {
     }
 
     fn read_fields(&self, _: &str) -> FieldRequest {
-        refused(NOT_AVAILABLE.get())
+        refused(NotAvailable.get())
     }
     fn write_fields(&self, _: &str, _: &[FieldWrite]) -> FieldRequest {
-        refused(NOT_AVAILABLE.get())
+        refused(NotAvailable.get())
     }
 }
 

@@ -8,11 +8,13 @@ use std::io;
 use std::path::Path;
 use std::time::Duration;
 
-use eg_core::phrase::Phrase;
+use eg_i18n::phrases;
 
-const CLOSED_EARLY: Phrase = Phrase::new("The game closed before MelonLoader finished loading mods.");
-const NO_REASON: Phrase = Phrase::new("MelonLoader read it but did not load it, and its log gives no reason.");
-const NOT_FOUND: Phrase = Phrase::new("MelonLoader did not find it in the Mods folder.");
+phrases! {
+    ClosedEarly: "The game closed before MelonLoader finished loading mods."
+    NoReason: "MelonLoader read it but did not load it, and its log gives no reason."
+    NotFound: "MelonLoader did not find it in the Mods folder."
+}
 
 pub const LOG_LINES_PER_MOD: usize = 50;
 const ASSEMBLY_LOADED: &str = "Melon Assembly loaded: '";
@@ -171,7 +173,7 @@ impl MelonLog {
             return None;
         }
         if !self.reached_mods {
-            return Some(CLOSED_EARLY.into());
+            return Some(ClosedEarly.into());
         }
         let mentions = Mentions::new(name, file);
         let reason = self
@@ -181,7 +183,7 @@ impl MelonLog {
         Some(
             reason
                 .map(|line| line.text.clone())
-                .unwrap_or_else(|| if self.found.iter().any(|found| same_file(found, file)) { NO_REASON } else { NOT_FOUND }.into()),
+                .unwrap_or_else(|| if self.found.iter().any(|found| same_file(found, file)) { NoReason } else { NotFound }.into()),
         )
     }
 }

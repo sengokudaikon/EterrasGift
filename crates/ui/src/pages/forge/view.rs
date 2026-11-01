@@ -685,7 +685,7 @@ impl View {
         state.set_formatting_loading(matches!(formatting, Some(Lookup::Loading)));
         state.set_formatting_error(
             match formatting {
-                Some(Lookup::Loading) => game::UNIQUE_LOADING.get(),
+                Some(Lookup::Loading) => game::UniqueLoading.get(),
                 Some(Lookup::Unavailable(reason)) => reason.as_str(),
                 Some(Lookup::Ready(())) | None => "",
             }
@@ -820,7 +820,7 @@ impl View {
                         .tier_options(index)
                         .into_iter()
                         .map(|(tier, range, in_game)| TierOption {
-                            label: super::editor::TIER.with(&[("tier", &tier)]).into(),
+                            label: super::editor::tr::Tier.with(&[("tier", &tier)]).into(),
                             range: range.into(),
                             in_game,
                         })
@@ -1015,7 +1015,7 @@ impl View {
         let catalog = editor.catalog();
 
         let slots = editor.picker_slots();
-        let mut choices = vec![shared(picker::ANY_SLOT.get())];
+        let mut choices = vec![shared(picker::AnySlot.get())];
         choices.extend(slots.iter().map(|(_, name)| shared(name)));
         update(&self.models.picker_slots, choices);
         state.set_picker_slot(

@@ -2,10 +2,12 @@
 //! that may still be on its way (`Lookup`) and a typed write outcome (`EditOutcome`). The game itself is
 //! `worker::ForgeGame`.
 
-use eg_core::phrase::Phrase;
+use eg_i18n::phrases;
 
-pub const UNIQUE_LOADING: Phrase = Phrase::new("Reading unique descriptions…");
-pub const PREVIEW_LOADING: Phrase = Phrase::new("Updating preview…");
+phrases! {
+    pub UniqueLoading: "Reading unique descriptions…"
+    pub PreviewLoading: "Updating preview…"
+}
 
 /// Optional game data has an explicit pending state; display copy never controls readiness.
 #[derive(Clone, Debug, PartialEq)]
@@ -143,7 +145,7 @@ impl Catalog {
     /// Each stat line as a tooltip writes it, on an item on `base`: its value where every tier has the same, then its words;
     /// where tiers differ, or the game hides the value, its words alone.
     pub fn effect_lines(&self, definition: &AffixDefinition, base: Option<(u16, u16)>) -> Vec<String> {
-        const WITH_VALUE: Phrase = Phrase::new("{value} {stat}");
+        phrases! { WithValue: "{value} {stat}" }
         let scale = self.value_scale(definition.id, base);
         let column_of = |column: usize, tier: u8| self.tier_columns.get(&(definition.id, tier)).and_then(|columns| columns.get(column).copied().flatten());
         let mut lines: Vec<String> = Vec::with_capacity(definition.effects.len());
@@ -153,7 +155,7 @@ impl Catalog {
                 .and_then(|first| format_tier_range(&[first.scaled(scale).unsigned()]))
                 .map(|value| if effect.no_plus { value.trim_start_matches('+').to_owned() } else { value });
             let line = match value {
-                Some(value) => WITH_VALUE.with(&[("value", &value), ("stat", &effect.words)]),
+                Some(value) => WithValue.with(&[("value", &value), ("stat", &effect.words)]),
                 None => effect.heading.clone(),
             };
             if !line.is_empty() && !lines.contains(&line) {
@@ -180,14 +182,16 @@ impl Catalog {
     }
 }
 
-/// The fallback shown when the game gave no text for an implicit.
-pub const IMPLICIT_TEXT_UNAVAILABLE: Phrase = Phrase::new("Implicit (the game's text is unavailable)");
+phrases! {
+    /// The fallback shown when the game gave no text for an implicit.
+    pub ImplicitTextUnavailable: "Implicit (the game's text is unavailable)"
+}
 
 /// One base implicit as a line: the game's text at both ends of its range, joined as a range, or the fallback when the
 /// game gave neither.
 pub fn implicit_line(minimum: Option<&str>, maximum: Option<&str>) -> String {
     let text = modifier_range(minimum.unwrap_or_default(), maximum.unwrap_or_default());
-    if text.is_empty() { IMPLICIT_TEXT_UNAVAILABLE.into() } else { text }
+    if text.is_empty() { ImplicitTextUnavailable.into() } else { text }
 }
 
 /// The game's text with the rolled number shown as its range, for example "+10–16 Armor" from "+10 Armor" and
@@ -238,6 +242,6 @@ mod tests {
         assert_eq!(modifier_range("Armour +5", "Ward +9"), "Armour +5 – Ward +9");
         assert_eq!(implicit_line(Some(""), Some("+16 Armor")), "+16 Armor");
         assert_eq!(implicit_line(Some("+10 Armor"), None), "+10 Armor");
-        assert_eq!(implicit_line(None, None), IMPLICIT_TEXT_UNAVAILABLE.get());
+        assert_eq!(implicit_line(None, None), ImplicitTextUnavailable.get());
     }
 }

@@ -2,19 +2,21 @@
 //! Plain values; the UI reads them after each change.
 
 use crate::game::process::RunningGame;
-use crate::launch::launcher::{LaunchReport, STARTING_WITH_MODS};
+use crate::launch::launcher::{LaunchReport, StartingWithMods};
 use crate::launch::loader::ModLoaderState;
 use eg_core::bloom::BloomPhase;
 use eg_core::game_log::GameReadiness;
-use eg_core::phrase::Phrase;
+use eg_i18n::{Phrase, phrases};
 use std::borrow::Cow;
 
-const ONLINE: Phrase = Phrase::new("Start through Steam, without mods");
-const OFFLINE: Phrase = Phrase::new("Start offline, without mods");
-const WITH_MODS: Phrase = Phrase::new("Start offline with MelonLoader and the mods that are on");
-const RUNNING: Phrase = Phrase::new("Last Epoch is already running.");
-const NO_MOD_LOADER: Phrase = Phrase::new("MelonLoader isn't in the game folder.");
-const CONFLICT: Phrase = Phrase::new("The game folder has both version.dll and version.dll.disabled. Delete the older one, then start the game.");
+phrases! {
+    Online: "Start through Steam, without mods"
+    Offline: "Start offline, without mods"
+    WithMods: "Start offline with MelonLoader and the mods that are on"
+    Running: "Last Epoch is already running."
+    NoModLoader: "MelonLoader isn't in the game folder."
+    Conflict: "The game folder has both version.dll and version.dll.disabled. Delete the older one, then start the game."
+}
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct HomeModel {
@@ -63,7 +65,7 @@ impl HomeModel {
             self.conflicted = conflicted;
             // Every start stops on it, so Home says so where the starts report, and takes it back once it is resolved.
             self.is_error = conflicted;
-            self.message = conflicted.then(|| CONFLICT.into());
+            self.message = conflicted.then(|| Conflict.into());
         }
     }
 
@@ -87,15 +89,15 @@ impl HomeModel {
     }
 
     pub fn online_tip(&self) -> Cow<'static, str> {
-        self.tip(ONLINE)
+        self.tip(Online)
     }
 
     pub fn offline_tip(&self) -> Cow<'static, str> {
-        self.tip(OFFLINE)
+        self.tip(Offline)
     }
 
     pub fn with_mods_tip(&self) -> Cow<'static, str> {
-        self.tip(WITH_MODS)
+        self.tip(WithMods)
     }
 
     /// Why a Play button waits, for the line under the buttons when nothing else is said there: a disabled button takes no
@@ -104,9 +106,9 @@ impl HomeModel {
         if self.starting || self.conflicted {
             None
         } else if self.phase != BloomPhase::Wilted {
-            Some(RUNNING.get())
+            Some(Running.get())
         } else if !self.has_mod_loader {
-            Some(NO_MOD_LOADER.get())
+            Some(NoModLoader.get())
         } else {
             None
         }
@@ -115,11 +117,11 @@ impl HomeModel {
     /// What each button does, or, while the game runs and they wait, why they wait.
     fn tip(&self, action: Phrase) -> Cow<'static, str> {
         if self.conflicted {
-            Cow::Borrowed(CONFLICT.get())
+            Cow::Borrowed(Conflict.get())
         } else if self.phase == BloomPhase::Wilted {
             Cow::Borrowed(action.get())
         } else {
-            Cow::Borrowed(RUNNING.get())
+            Cow::Borrowed(Running.get())
         }
     }
 
@@ -127,7 +129,7 @@ impl HomeModel {
     pub fn begin(&mut self, with_mods: bool) {
         self.starting = true;
         self.is_error = false;
-        self.message = with_mods.then(|| STARTING_WITH_MODS.into());
+        self.message = with_mods.then(|| StartingWithMods.into());
     }
 
     pub fn finish(&mut self, report: LaunchReport) {
@@ -160,15 +162,15 @@ mod tests {
         assert!(home.can_play_with_mods());
         home.set_phase(BloomPhase::Budding);
         assert!(!home.can_play());
-        assert_eq!(home.offline_tip(), RUNNING.get());
+        assert_eq!(home.offline_tip(), Running.get());
         home.set_phase(BloomPhase::Wilted);
-        assert_eq!(home.online_tip(), ONLINE.get());
+        assert_eq!(home.online_tip(), Online.get());
         assert_eq!(home.wait_reason(), None);
         home.set_mod_loader(ModLoaderState::NotInstalled);
         assert!(home.can_play() && !home.can_play_with_mods());
-        assert_eq!(home.wait_reason(), Some(NO_MOD_LOADER.get()));
+        assert_eq!(home.wait_reason(), Some(NoModLoader.get()));
         home.set_phase(BloomPhase::Budding);
-        assert_eq!(home.wait_reason(), Some(RUNNING.get()));
+        assert_eq!(home.wait_reason(), Some(Running.get()));
     }
 
     #[test]
@@ -177,8 +179,8 @@ mod tests {
         home.set_mod_loader(ModLoaderState::Conflict);
         assert!(!home.can_play());
         assert!(home.is_error());
-        assert_eq!(home.message(), Some(CONFLICT.get()));
-        assert_eq!(home.with_mods_tip(), CONFLICT.get());
+        assert_eq!(home.message(), Some(Conflict.get()));
+        assert_eq!(home.with_mods_tip(), Conflict.get());
         home.set_mod_loader(ModLoaderState::SetAside);
         assert_eq!(home.message(), None);
         assert!(home.can_play());
@@ -189,7 +191,7 @@ mod tests {
         let mut home = HomeModel::default();
         home.begin(true);
         assert!(!home.can_play());
-        assert_eq!(home.message(), Some(STARTING_WITH_MODS.get()));
+        assert_eq!(home.message(), Some(StartingWithMods.get()));
         home.finish(LaunchReport {
             started: true,
             message: "Started offline, without mods.".into(),

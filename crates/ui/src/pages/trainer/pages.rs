@@ -3,34 +3,36 @@
 
 use super::registry::{self, Area, Feature, FeatureField, FeatureKind, FeatureValue};
 use super::session::{FieldError, FieldRequest, FieldResult, FieldWrite, GameField, HookState, PendingFields, TrainerSession};
-use eg_core::locale::numbers;
-use eg_core::phrase::{Conjunction, Phrase, Plural, list};
+use eg_i18n::locale::numbers;
+use eg_i18n::{Conjunction, Phrase, list, phrases};
 
-const TURNS_ON_WHEN: Phrase = Phrase::new("Turns on when {name} enters play.");
-const SELECTED: Phrase = Phrase::new("{choice} selected in the game.");
-const ONE_HIT_KILLS: Phrase = Phrase::new("One-hit kills are on.");
-const ON_IN_GAME: Phrase = Phrase::new("On in the game.");
-const COULD_NOT_TURN_ON: Phrase = Phrase::new("Couldn't turn on: {reason}");
-const TURNING_ON: Phrase = Phrase::new("Turning on…");
-const WAITING_TO_TURN_ON: Phrase = Phrase::new("Waiting to turn on…");
-const COULD_NOT_TURN_OFF: Phrase = Phrase::new("Couldn't turn off: {reason}");
-const TURNING_OFF: Phrase = Phrase::new("Turning off…");
-const NOT_READ_YET: Phrase = Phrase::new("Not read yet");
-const IN_GAME: Phrase = Phrase::new("In game: {value}");
-const CONNECT_FIRST: Phrase = Phrase::new("Connect an offline character first.");
-const APPLY_CHANGES: Plural = Plural::new("Apply {n} change", "Apply {n} changes");
-const APPLY: Phrase = Phrase::new("Apply");
-const COULD_NOT_READ: Phrase = Phrase::new("Couldn't read from the game: {details}");
-const COULD_NOT_READ_OTHER_FIELDS: Phrase = Phrase::new("Couldn't read from the game: it answered with other fields.");
-const CONFIRMED: Phrase = Phrase::new("Confirmed.");
-const GAME_KEPT: Phrase = Phrase::new("The game kept {kept}.");
-const FIELD_HOLDS: Phrase = Phrase::ctx("a field and the value the game kept", "{field} {value}");
-const NOT_CHANGED: Phrase = Phrase::new("Not changed: {details}");
-const OTHER_FIELDS_WRITE: Phrase = Phrase::new("The game answered with other fields.");
-const READ_AGAIN: Phrase = Phrase::new("{details} Read again to see what the game holds.");
-const STEP: Phrase = Phrase::new("Up and Down change it by {step}");
-const TYPE_A_NUMBER: Phrase = Phrase::new("Type a number from {minimum} to {maximum}.");
-const TYPE_A_NUMBER_OR_INFINITY: Phrase = Phrase::new("Type a number from {minimum} to {maximum}, or ∞.");
+phrases! {
+    TurnsOnWhen: "Turns on when {name} enters play."
+    Selected: "{choice} selected in the game."
+    OneHitKills: "One-hit kills are on."
+    OnInGame: "On in the game."
+    CouldNotTurnOn: "Couldn't turn on: {reason}"
+    TurningOn: "Turning on…"
+    WaitingToTurnOn: "Waiting to turn on…"
+    CouldNotTurnOff: "Couldn't turn off: {reason}"
+    TurningOff: "Turning off…"
+    NotReadYet: "Not read yet"
+    InGame: "In game: {value}"
+    ConnectFirst: "Connect an offline character first."
+    ApplyChanges: "Apply {n} change" | "Apply {n} changes"
+    Apply: "Apply"
+    CouldNotRead: "Couldn't read from the game: {details}"
+    CouldNotReadOtherFields: "Couldn't read from the game: it answered with other fields."
+    Confirmed: "Confirmed."
+    GameKept: "The game kept {kept}."
+    FieldHolds: "a field and the value the game kept" => "{field} {value}"
+    NotChanged: "Not changed: {details}"
+    OtherFieldsWrite: "The game answered with other fields."
+    ReadAgain: "{details} Read again to see what the game holds."
+    Step: "Up and Down change it by {step}"
+    TypeANumber: "Type a number from {minimum} to {maximum}."
+    TypeANumberOrInfinity: "Type a number from {minimum} to {maximum}, or ∞."
+}
 
 /// One trainer page: its sections along the top and the chosen one beneath.
 pub struct PageModel {
@@ -277,9 +279,9 @@ impl HookRow {
         if hook_amount(self.feature.id(), text).is_some_and(fits) {
             String::new()
         } else if let Some(infinity) = infinity {
-            TYPE_A_NUMBER_OR_INFINITY.with(&[("minimum", &numbers().plain(value.minimum)), ("maximum", &numbers().plain(infinity.largest))])
+            TypeANumberOrInfinity.with(&[("minimum", &numbers().plain(value.minimum)), ("maximum", &numbers().plain(infinity.largest))])
         } else {
-            TYPE_A_NUMBER.with(&[("minimum", &numbers().plain(value.minimum)), ("maximum", &numbers().plain(value.maximum))])
+            TypeANumber.with(&[("minimum", &numbers().plain(value.minimum)), ("maximum", &numbers().plain(value.maximum))])
         }
     }
 
@@ -308,22 +310,22 @@ impl HookRow {
         let wanted = self.is_on(session);
         if !connected {
             return match session.shown_profile() {
-                Some(profile) if wanted => (TURNS_ON_WHEN.with(&[("name", &profile.name)]), Tone::None),
+                Some(profile) if wanted => (TurnsOnWhen.with(&[("name", &profile.name)]), Tone::None),
                 _ => (String::new(), Tone::None),
             };
         }
         let say = |text: &str, tone| (text.to_owned(), tone);
         match (wanted, session.hook_state(self.feature.id())) {
             (true, Some(HookState::On)) if self.feature.kind == FeatureKind::Choice => {
-                (SELECTED.with(&[("choice", &self.feature.values[0].choices[self.values[0] as usize])]), Tone::Confirmed)
+                (Selected.with(&[("choice", &self.feature.values[0].choices[self.values[0] as usize])]), Tone::Confirmed)
             }
-            (true, Some(HookState::On)) if self.feature.infinity().is_some_and(|infinity| self.values == [infinity.value]) => say(ONE_HIT_KILLS.get(), Tone::Confirmed),
-            (true, Some(HookState::On)) => say(ON_IN_GAME.get(), Tone::Confirmed),
-            (true, Some(HookState::Failed { reason, .. })) => (COULD_NOT_TURN_ON.with(&[("reason", &reason)]), Tone::Error),
-            (true, Some(HookState::Applying | HookState::Off)) => say(TURNING_ON.get(), Tone::None),
-            (true, Some(HookState::Queued) | None) => say(WAITING_TO_TURN_ON.get(), Tone::None),
-            (false, Some(HookState::Failed { reason, on: true })) => (COULD_NOT_TURN_OFF.with(&[("reason", &reason)]), Tone::Error),
-            (false, Some(HookState::Applying | HookState::On)) => say(TURNING_OFF.get(), Tone::None),
+            (true, Some(HookState::On)) if self.feature.infinity().is_some_and(|infinity| self.values == [infinity.value]) => say(OneHitKills.get(), Tone::Confirmed),
+            (true, Some(HookState::On)) => say(OnInGame.get(), Tone::Confirmed),
+            (true, Some(HookState::Failed { reason, .. })) => (CouldNotTurnOn.with(&[("reason", &reason)]), Tone::Error),
+            (true, Some(HookState::Applying | HookState::Off)) => say(TurningOn.get(), Tone::None),
+            (true, Some(HookState::Queued) | None) => say(WaitingToTurnOn.get(), Tone::None),
+            (false, Some(HookState::Failed { reason, on: true })) => (CouldNotTurnOff.with(&[("reason", &reason)]), Tone::Error),
+            (false, Some(HookState::Applying | HookState::On)) => say(TurningOff.get(), Tone::None),
             (false, _) => (String::new(), Tone::None),
         }
     }
@@ -481,8 +483,8 @@ impl FieldModel {
 
     pub fn game_text(&self) -> String {
         match self.game {
-            None => NOT_READ_YET.get().to_owned(),
-            Some(value) => IN_GAME.with(&[("value", &numbers().grouped(value))]),
+            None => NotReadYet.get().to_owned(),
+            Some(value) => InGame.with(&[("value", &numbers().grouped(value))]),
         }
     }
 }
@@ -587,7 +589,7 @@ impl EditorRow {
         if session.is_connected() {
             session.unavailable(self.feature.id())
         } else {
-            Some(CONNECT_FIRST.get())
+            Some(ConnectFirst.get())
         }
     }
 
@@ -606,8 +608,8 @@ impl EditorRow {
 
     pub fn apply_text(&self) -> String {
         match self.fields.iter().filter(|f| f.is_drafted()).count() {
-            drafts if drafts > 1 => APPLY_CHANGES.count(drafts),
-            _ => APPLY.get().to_owned(),
+            drafts if drafts > 1 => ApplyChanges.count(drafts),
+            _ => Apply.get().to_owned(),
         }
     }
 
@@ -637,8 +639,8 @@ impl EditorRow {
                 self.show(&read);
                 self.say("", Tone::None);
             }
-            Ok(_) => self.say(COULD_NOT_READ_OTHER_FIELDS, Tone::Error),
-            Err(error) => self.say(COULD_NOT_READ.with(&[("details", &error.details)]), Tone::Error),
+            Ok(_) => self.say(CouldNotReadOtherFields, Tone::Error),
+            Err(error) => self.say(CouldNotRead.with(&[("details", &error.details)]), Tone::Error),
         }
     }
 
@@ -687,22 +689,22 @@ impl EditorRow {
                     .enumerate()
                     .filter_map(|(i, write)| {
                         let held = if self.listed { held(&read, &write.label) } else { read[i].value };
-                        (write.changes() && !holds(Some(held), write.wanted)).then(|| FIELD_HOLDS.with(&[("field", &labels[i]), ("value", &numbers().grouped(held))]))
+                        (write.changes() && !holds(Some(held), write.wanted)).then(|| FieldHolds.with(&[("field", &labels[i]), ("value", &numbers().grouped(held))]))
                     })
                     .collect();
                 if kept.is_empty() {
-                    self.say(CONFIRMED.get(), Tone::Confirmed);
+                    self.say(Confirmed.get(), Tone::Confirmed);
                 } else {
-                    self.say(GAME_KEPT.with(&[("kept", &list(&kept, Conjunction::And))]), Tone::Error);
+                    self.say(GameKept.with(&[("kept", &list(&kept, Conjunction::And))]), Tone::Error);
                 }
             }
             Err(FieldError { details, nothing_sent: true }) => {
                 // Nothing reached the game; the drafts stay.
-                self.say(NOT_CHANGED.with(&[("details", &details)]), Tone::Error);
+                self.say(NotChanged.with(&[("details", &details)]), Tone::Error);
             }
             result => {
-                let details = result.err().map_or_else(|| OTHER_FIELDS_WRITE.into(), |error| error.details);
-                self.say(READ_AGAIN.with(&[("details", &details)]), Tone::Error);
+                let details = result.err().map_or_else(|| OtherFieldsWrite.into(), |error| error.details);
+                self.say(ReadAgain.with(&[("details", &details)]), Tone::Error);
             }
         }
     }
@@ -762,7 +764,7 @@ fn held(read: &[GameField], label: &str) -> f64 {
 
 /// A step as its tip says it ("Up and Down change it by 0.5").
 pub fn step_text(step: f64) -> String {
-    STEP.with(&[("step", &numbers().plain(step))])
+    Step.with(&[("step", &numbers().plain(step))])
 }
 
 /// Where each column starts: the split whose tallest column is shortest, at headings when there are any
@@ -838,7 +840,7 @@ pub fn place(heights: &[f32], headings: &[bool], starts: &[usize], section_spaci
 mod tests {
     use super::*;
     use crate::pages::trainer::profiles::Profile;
-    use crate::pages::trainer::session::{NOT_AVAILABLE, Unconnected};
+    use crate::pages::trainer::session::{NotAvailable, Unconnected};
     use std::cell::RefCell;
     use std::collections::{BTreeMap, BTreeSet};
     use std::rc::Rc;
@@ -1149,7 +1151,7 @@ mod tests {
             true
         }
         fn unavailable(&self, id: &str) -> Option<&'static str> {
-            self.unserved.filter(|unserved| *unserved == id).map(|_| NOT_AVAILABLE.get())
+            self.unserved.filter(|unserved| *unserved == id).map(|_| NotAvailable.get())
         }
         fn is_hook_wanted(&self, _: &str) -> bool {
             true
@@ -1223,7 +1225,7 @@ mod tests {
         // A field set this version cannot serve: read-only, with its reason, and nothing is asked of the game.
         let unserved = EditorRow::new(*registry::feature("currency").unwrap(), false, &game);
         assert!(!unserved.is_busy() && !unserved.can_use(&game));
-        assert_eq!(unserved.reason(&game), Some(NOT_AVAILABLE.get()));
+        assert_eq!(unserved.reason(&game), Some(NotAvailable.get()));
         assert_eq!(
             EditorRow::new(feature, false, &Unconnected).reason(&Unconnected),
             Some("Connect an offline character first.")
@@ -1235,7 +1237,7 @@ mod tests {
             ..Game::default()
         };
         assert!(!hook.can_use(&game));
-        assert_eq!(hook.status(&game), (NOT_AVAILABLE.get().to_owned(), Tone::None));
+        assert_eq!(hook.status(&game), (NotAvailable.get().to_owned(), Tone::None));
     }
 
     #[test]

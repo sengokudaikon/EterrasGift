@@ -8,60 +8,12 @@ use super::item::{self, AffixDefinition, AffixKind, Category, Compatibility, For
 use super::picker::{self, Chip, Filters, Index, KindFilter, LevelChoice, PICKER_CATEGORIES, PICKER_CLASSES, Query, SourceChoice};
 use super::rows::{AffixRow, FieldDraft, FieldKind, FieldOption, RollRow, ValueEditor, base_key, base_of};
 use super::worker::ForgeGame;
-use eg_core::phrase::{Conjunction, Phrase, Plural, list};
+use eg_i18n::{Conjunction, Phrase, list, phrases};
 use eg_trainer::item::template::{ItemTemplate, TemplateAffix, TemplateItem, TemplateStatus, TemplateStore};
 use std::collections::{HashMap, VecDeque};
 use std::rc::Rc;
 
-pub const OVERRIDE_REQUIRED: Phrase = Phrase::new("This edit needs \"I know what I'm doing\" in Settings. Nothing was applied.");
-const NOTHING_APPLIED: Phrase = Phrase::new("Nothing was applied.");
-const AND_NOTHING_APPLIED: Phrase = Phrase::new("{problem} Nothing was applied.");
-const NAMED_PROBLEM: Phrase = Phrase::new("{name}: {problem}");
-const BROKEN_BY_BASE: Phrase = Phrase::new("The new base would make affixes incompatible. Allow incompatible affixes in the base picker to apply it anyway.");
-const INCOMPATIBLE: Phrase = Phrase::new("Incompatible with this item or slot.");
-const INCOMPATIBLE_LOCKED: Phrase = Phrase::new("Incompatible with this item or slot. Turn on \"I know what I'm doing\" in Settings to use it.");
-const NOT_ADDED_LOCKED: Phrase = Phrase::new("The game would not add it here. Turn on \"I know what I'm doing\" in Settings to add it anyway.");
-const UNCONFIRMED_LOCKED: Phrase = Phrase::new("Compatibility could not be confirmed. Turn on \"I know what I'm doing\" in Settings to use it.");
-const CHANGE_LOCKED: Phrase = Phrase::new("Turn on \"I know what I'm doing\" in Settings to change this.");
-const MIXED_HEADING: Phrase = Phrase::new("Don't do it");
-const MIXED_REASON: Phrase = Phrase::new("The game has odd rules for these two: once Weaver's Will starts adding affixes, it may crash the game and reset the item.");
-const NEEDS_OVERRIDE: Phrase = Phrase::new("Needs \"I know what I'm doing\".");
-const LEVEL: Phrase = Phrase::new("Level {level}");
-/// A tier as the forge writes it, e.g. "T5".
-pub const TIER: Phrase = Phrase::new("T{tier}");
-const EXALTED: Phrase = Phrase::new("Exalted");
-const UNDO: Phrase = Phrase::new("Undo");
-const CONFIRMED: Phrase = Phrase::new("Confirmed");
-const NO_ITEM: Phrase = Phrase::new("Place an item in the forge first.");
-const ADD_AFFIX: Phrase = Phrase::new("Add affix");
-const UNCONFIRMED: Phrase = Phrase::new("Compatibility couldn't be confirmed.");
-const UNWRITABLE: Phrase = Phrase::new("This affix can't be written: it's missing from the game data, or its type is unknown.");
-const UNIQUE_MODIFIERS_NAME: Phrase = Phrase::new("Unique modifiers");
-const IMPLICITS_NAME: Phrase = Phrase::new("Implicits");
-const FORGING_POTENTIAL: Phrase = Phrase::new("Forging potential");
-const LEVEL_REQUIREMENT: Phrase = Phrase::new("Level requirement");
-const LEVEL_REQUIREMENT_NOTE: Phrase = Phrase::new("Change the level requirement. The game works it out again when the item reloads or changes.");
-const LEGENDARY_POTENTIAL: Phrase = Phrase::new("Legendary potential");
-const LEGENDARY_FIXED: Phrase = Phrase::new("A legendary's legendary potential is fixed.");
-const WEAVERS_WILL: Phrase = Phrase::new("Weaver's Will");
-const FORCED_WILL_NOTE: Phrase = Phrase::new(
-    "The game grows and upgrades affixes with it, up to its maximum. 0 takes it off. After a reload, a unique that hasn't grown an affix yet shows it as legendary potential.",
-);
-const LEGENDARY_WILL_NOTE: Phrase = Phrase::new("Weaver's Will on a legendary. 0 takes it off.");
-const WEAVERS_TOUCH: Phrase = Phrase::new("Weaver's Touch");
-const WEAVERS_TOUCH_NOTE: Phrase = Phrase::new("Enchanting gives an idol Weaver's Touch. 0 takes it off. Only uncorrupted Grand, Large, Ornate, Huge and Adorned idols use it.");
-const CORRUPTION: Phrase = Phrase::new("Corruption");
-const NOT_CORRUPTED: Phrase = Phrase::new("Not corrupted");
-const CORRUPTED: Phrase = Phrase::new("Corrupted");
-const RUIN: Phrase = Phrase::new("Ruin");
-const NOT_RUINED: Phrase = Phrase::new("Not ruined");
-const RUINED: Phrase = Phrase::new("Ruined");
-const AFFIXES: Plural = Plural::new("{n} affix", "{n} affixes");
-const DRAFTS: Plural = Plural::new("{n} draft", "{n} drafts");
-const UNIQUE_MODIFIERS: Plural = Plural::new("{n} unique modifier", "{n} unique modifiers");
-const PREFIXES: Plural = Plural::new("{n} prefix", "{n} prefixes");
-const SUFFIXES: Plural = Plural::new("{n} suffix", "{n} suffixes");
-const INCOMPATIBLE_AFFIXES: Plural = Plural::new("{n} incompatible affix", "{n} incompatible affixes");
+pub(super) mod tr;
 
 /// What the action bar's message says, so it shows one icon for it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
@@ -273,8 +225,8 @@ fn set_table(editor: &mut ValueEditor, table: Lookup<Rc<item::ValueTable>>, game
     match table {
         Lookup::Ready(table) if table.is_fixed() => editor.set_fixed(),
         Lookup::Ready(table) if !table.is_usable() => {
-            const NO_USABLE_VALUES: Phrase = Phrase::new("the game gave no usable values");
-            editor.set_positions(NO_USABLE_VALUES.get(), game_context)
+            phrases! { NoUsableValues: "the game gave no usable values" }
+            editor.set_positions(NoUsableValues.get(), game_context)
         }
         Lookup::Unavailable(reason) => editor.set_positions(&reason, game_context),
         table => editor.set_mapping(table, game_context),
@@ -349,11 +301,13 @@ impl ForgeEditor {
     /// A template's caption, each its own text: what it holds, e.g. ["Whole item", "4 affixes", "Health, Movement Speed, …"].
     pub fn template_detail(&self, template: &ItemTemplate) -> Vec<String> {
         let names: Vec<String> = template.affixes.iter().take(3).map(|affix| self.catalog().definition(affix.id).name).collect();
-        const WHOLE_ITEM: Phrase = Phrase::new("Whole item");
-        const AFFIXES_ONLY: Phrase = Phrase::new("Affixes");
+        phrases! {
+            WholeItem: "Whole item"
+            AffixesOnly: "Affixes"
+        }
         let more = if template.affixes.len() > 3 { ", …" } else { "" };
-        let kind = if template.item.is_some() { WHOLE_ITEM } else { AFFIXES_ONLY };
-        let mut facts = vec![kind.into(), AFFIXES.count(template.affixes.len())];
+        let kind = if template.item.is_some() { WholeItem } else { AffixesOnly };
+        let mut facts = vec![kind.into(), tr::Affixes.count(template.affixes.len())];
         if !names.is_empty() {
             facts.push(format!("{}{more}", names.join(", ")));
         }
@@ -379,14 +333,16 @@ impl ForgeEditor {
     }
 
     fn saved_template(&self, name: &str, whole: bool) -> Result<String, String> {
-        const NOT_KEPT: Phrase = Phrase::new("Templates are not kept in this run.");
-        const UNNAMED: Phrase = Phrase::new("Name the template first.");
-        let store = self.templates.as_ref().ok_or(NOT_KEPT.get())?;
+        phrases! {
+            NotKept: "Templates are not kept in this run."
+            Unnamed: "Name the template first."
+        }
+        let store = self.templates.as_ref().ok_or(NotKept.get())?;
         let name = ItemTemplate::clean_name(name);
         if name.is_empty() {
-            return Err(UNNAMED.into());
+            return Err(Unnamed.into());
         }
-        let item = self.drafted_item().or_else(|| self.item.clone()).ok_or(NO_ITEM.get())?;
+        let item = self.drafted_item().or_else(|| self.item.clone()).ok_or(tr::NoItem.get())?;
         let replaced = store.taken_by(&name);
         let affixes = item
             .affixes
@@ -421,15 +377,17 @@ impl ForgeEditor {
             affixes,
             item,
         };
-        const NOT_SAVED: Phrase = Phrase::new("The template could not be saved: {error}");
-        const REPLACED: Phrase = Phrase::new("Replaced \"{name}\".");
-        const SAVED_OVER: Phrase = Phrase::new("Saved \"{name}\" in place of \"{kept}\".");
-        const SAVED: Phrase = Phrase::new("Saved \"{name}\".");
-        store.save(&template).map_err(|error| NOT_SAVED.with(&[("error", &error)]))?;
+        phrases! {
+            NotSaved: "The template could not be saved: {error}"
+            Replaced: "Replaced \"{name}\"."
+            SavedOver: "Saved \"{name}\" in place of \"{kept}\"."
+            Saved: "Saved \"{name}\"."
+        }
+        store.save(&template).map_err(|error| NotSaved.with(&[("error", &error)]))?;
         Ok(match replaced {
-            Some(kept) if kept == name => REPLACED.with(&[("name", &name)]),
-            Some(kept) => SAVED_OVER.with(&[("name", &name), ("kept", &kept)]),
-            None => SAVED.with(&[("name", &name)]),
+            Some(kept) if kept == name => Replaced.with(&[("name", &name)]),
+            Some(kept) => SavedOver.with(&[("name", &name), ("kept", &kept)]),
+            None => Saved.with(&[("name", &name)]),
         })
     }
 
@@ -440,11 +398,13 @@ impl ForgeEditor {
         let Some(store) = self.templates.as_ref() else {
             return;
         };
-        const DELETED: Phrase = Phrase::new("Deleted \"{name}\".");
-        const NOT_DELETED: Phrase = Phrase::new("The template could not be deleted: {error}");
+        phrases! {
+            Deleted: "Deleted \"{name}\"."
+            NotDeleted: "The template could not be deleted: {error}"
+        }
         self.template_message = match store.delete(&template.name) {
-            Ok(()) => DELETED.with(&[("name", &template.name)]),
-            Err(error) => NOT_DELETED.with(&[("error", &error)]),
+            Ok(()) => Deleted.with(&[("name", &template.name)]),
+            Err(error) => NotDeleted.with(&[("error", &error)]),
         };
     }
 
@@ -465,35 +425,33 @@ impl ForgeEditor {
     }
 
     fn applied_template(&mut self, template: &ItemTemplate) -> Result<String, String> {
-        const WRITING: Phrase = Phrase::new("Wait for the write in progress to finish, then draft the template.");
-        const NOT_READY: Phrase = Phrase::new("The item can't take drafts until the game is ready.");
-        const HAS_DRAFTS: Phrase = Phrase::new("Apply or discard the drafts first: a template drafts the whole item.");
-        const OTHER_KIND: Phrase = Phrase::new("That template is for another kind of item.");
-        const UNIQUE_ONLY: Phrase =
-            Phrase::new("Drafted only the unique from \"{name}\": a new unique brings its own modifiers. Apply it, then draft the template again for the rest.");
-        const UNIQUE_MISFITS: Phrase = Phrase::new("That template's unique does not fit this item.");
-        const NOT_BACKED: Phrase = Phrase::new("That template holds a unique, set or legendary item, and this item is none of them.");
-        const BASE: Phrase = Phrase::new("Base");
-        const MATCHES: Phrase = Phrase::new("\"{name}\" matches the item already.");
-        const DRAFTED: Plural = Plural::new(
-            "Drafted \"{name}\": {n} draft. Review it, then Apply.",
-            "Drafted \"{name}\": {n} drafts. Review them, then Apply.",
-        );
-        const LEFT_OUT: Phrase = Phrase::new("Left out: {items}.");
-        let item = self.item.clone().ok_or(NO_ITEM.get())?;
+        phrases! {
+            Writing: "Wait for the write in progress to finish, then draft the template."
+            NotReady: "The item can't take drafts until the game is ready."
+            HasDrafts: "Apply or discard the drafts first: a template drafts the whole item."
+            OtherKind: "That template is for another kind of item."
+            UniqueOnly: "Drafted only the unique from \"{name}\": a new unique brings its own modifiers. Apply it, then draft the template again for the rest."
+            UniqueMisfits: "That template's unique does not fit this item."
+            NotBacked: "That template holds a unique, set or legendary item, and this item is none of them."
+            Base: "Base"
+            Matches: "\"{name}\" matches the item already."
+            Drafted: "Drafted \"{name}\": {n} draft. Review it, then Apply." | "Drafted \"{name}\": {n} drafts. Review them, then Apply."
+            LeftOut: "Left out: {items}."
+        }
+        let item = self.item.clone().ok_or(tr::NoItem.get())?;
         if self.writing {
-            return Err(WRITING.into());
+            return Err(Writing.into());
         }
         if !self.can_change_draft() {
-            return Err(NOT_READY.into());
+            return Err(NotReady.into());
         }
         if self.draft_count() > 0 {
-            return Err(HAS_DRAFTS.into());
+            return Err(HasDrafts.into());
         }
         let mut left_out = Vec::new();
         if let Some(whole) = &template.item {
             if u16::from(whole.item_type) != item.item_type {
-                return Err(OTHER_KIND.into());
+                return Err(OtherKind.into());
             }
             match (&whole.identity, item.backing()) {
                 (Some((id, _)), Some(current)) if *id != current.id => {
@@ -502,12 +460,12 @@ impl ForgeEditor {
                     return match choice {
                         Some(choice) => {
                             self.pick_identity(choice);
-                            Ok(UNIQUE_ONLY.with(&[("name", &template.name)]))
+                            Ok(UniqueOnly.with(&[("name", &template.name)]))
                         }
-                        None => Err(UNIQUE_MISFITS.into()),
+                        None => Err(UniqueMisfits.into()),
                     };
                 }
-                (Some(_), None) => return Err(NOT_BACKED.into()),
+                (Some(_), None) => return Err(NotBacked.into()),
                 _ => {}
             }
             if item.backing().is_none() && whole.sub_type != item.sub_type {
@@ -518,7 +476,7 @@ impl ForgeEditor {
                     .and_then(|base| base.options.iter().position(|option| option.value == key && option.available))
                 {
                     Some(option) => self.pick_base(option),
-                    None => left_out.push(BASE.into()),
+                    None => left_out.push(Base.into()),
                 }
             }
             let status = whole.status;
@@ -580,12 +538,12 @@ impl ForgeEditor {
         self.template_affixes(&template.affixes, &mut left_out);
         let drafted = self.draft_count();
         let mut message = match drafted {
-            0 => MATCHES.with(&[("name", &template.name)]),
-            n => DRAFTED.with(n, &[("name", &template.name)]),
+            0 => Matches.with(&[("name", &template.name)]),
+            n => Drafted.with(n, &[("name", &template.name)]),
         };
         if !left_out.is_empty() {
             message.push(' ');
-            message.push_str(&LEFT_OUT.with(&[("items", &left_out.join("; "))]));
+            message.push_str(&LeftOut.with(&[("items", &left_out.join("; "))]));
         }
         Ok(message)
     }
@@ -601,8 +559,8 @@ impl ForgeEditor {
             let wanted = affixes.iter().find(|affix| affix.id == row.state.id);
             if !row.is_editable() {
                 if wanted.is_none_or(|affix| affix.tier != row.state.tier || affix.roll != row.state.roll || affix.seal != row.state.seal as u8) {
-                    const READ_ONLY: Phrase = Phrase::new("{name} (read only)");
-                    left_out.push(READ_ONLY.with(&[("name", &row.name())]));
+                    phrases! { ReadOnly: "{name} (read only)" }
+                    left_out.push(ReadOnly.with(&[("name", &row.name())]));
                 }
                 continue;
             }
@@ -640,8 +598,8 @@ impl ForgeEditor {
                 }
                 Ok(_) => {}
                 Err(problem) => {
-                    const NOT_ADDED: Phrase = Phrase::new("{name} ({problem})");
-                    left_out.push(NOT_ADDED.with(&[("name", &definition.name), ("problem", &problem)]));
+                    phrases! { NotAdded: "{name} ({problem})" }
+                    left_out.push(NotAdded.with(&[("name", &definition.name), ("problem", &problem)]));
                 }
             }
         }
@@ -722,8 +680,8 @@ impl ForgeEditor {
         let snapshot = self.game.read();
         if self.recovery_required && snapshot.is_some() {
             self.recovery_required = false;
-            const READ_AGAIN: Phrase = Phrase::new("Item read again. The previous write was not retried.");
-            self.say(READ_AGAIN, MessageKind::Info);
+            phrases! { ReadAgain: "Item read again. The previous write was not retried." }
+            self.say(ReadAgain, MessageKind::Info);
         }
         if self.applied_at.as_ref().is_some_and(|at| snapshot.as_ref().is_none_or(|current| !at.same_state(current))) {
             self.applied = None;
@@ -848,26 +806,30 @@ impl ForgeEditor {
     }
 
     pub fn identity_tip(&self) -> String {
-        const OTHER_DRAFTS_FIRST: Phrase = Phrase::new("Apply or discard the other drafts first. A new unique brings its own modifiers.");
-        const CHANGE_IDENTITY: Phrase = Phrase::new("Change which unique or set item this is");
+        phrases! {
+            OtherDraftsFirst: "Apply or discard the other drafts first. A new unique brings its own modifiers."
+            ChangeIdentity: "Change which unique or set item this is"
+        }
         match &self.identity {
             None => String::new(),
             Some(identity) if !identity.is_editable() => identity.read_only_reason.clone(),
-            _ if self.has_other_drafts() => OTHER_DRAFTS_FIRST.into(),
-            _ => CHANGE_IDENTITY.into(),
+            _ if self.has_other_drafts() => OtherDraftsFirst.into(),
+            _ => ChangeIdentity.into(),
         }
     }
 
     /// The game's name for a unique-backed rarity.
     fn rarity_label(&self, rarity: u8) -> String {
-        const LEGENDARY: Phrase = Phrase::ctx("rarity", "Legendary");
-        const SET: Phrase = Phrase::ctx("rarity", "Set");
-        const UNIQUE: Phrase = Phrase::ctx("rarity", "Unique");
+        phrases! {
+            Legendary: "rarity" => "Legendary"
+            Set: "rarity" => "Set"
+            Unique: "rarity" => "Unique"
+        }
         self.catalog().rarity_name(rarity).unwrap_or_else(|| {
             match rarity {
-                item::LEGENDARY => LEGENDARY,
-                item::SET => SET,
-                _ => UNIQUE,
+                item::LEGENDARY => Legendary,
+                item::SET => Set,
+                _ => Unique,
             }
             .into()
         })
@@ -906,15 +868,17 @@ impl ForgeEditor {
             return None;
         }
         let status = item.status.unwrap_or_default();
-        const POTENTIAL: Phrase = Phrase::new("Keeps legendary potential it never holds, which may crash the game and reset the item.");
-        const WILL: Phrase = Phrase::new("Keeps Weaver's Will it never holds, which may crash the game and reset the item.");
-        const BOTH: Phrase = Phrase::new("Keeps legendary potential and Weaver's Will it never holds, which may crash the game and reset the item.");
+        phrases! {
+            Potential: "Keeps legendary potential it never holds, which may crash the game and reset the item."
+            Will: "Keeps Weaver's Will it never holds, which may crash the game and reset the item."
+            Both: "Keeps legendary potential and Weaver's Will it never holds, which may crash the game and reset the item."
+        }
         let kept = match (unique.is_set, status.legendary_potential > 0, status.weavers_will > 0) {
-            (false, _, _) if unique.legendary_type == LegendaryType::WeaversWill => POTENTIAL,
-            (false, _, _) => WILL,
-            (_, true, true) => BOTH,
-            (_, true, false) => POTENTIAL,
-            _ => WILL,
+            (false, _, _) if unique.legendary_type == LegendaryType::WeaversWill => Potential,
+            (false, _, _) => Will,
+            (_, true, true) => Both,
+            (_, true, false) => Potential,
+            _ => Will,
         };
         Some(kept.into())
     }
@@ -943,35 +907,35 @@ impl ForgeEditor {
                 if !unique.is_set {
                     facts.push(
                         if unique.legendary_type == LegendaryType::WeaversWill {
-                            WEAVERS_WILL
+                            tr::WeaversWill
                         } else {
-                            LEGENDARY_POTENTIAL
+                            tr::LegendaryPotential
                         }
                         .into(),
                     );
                 }
                 let mut available = true;
                 if !game && unique.is_set && !item.affixes.is_empty() {
-                    const HOLDS_NONE: Phrase = Phrase::new("Holds no affixes. Remove them first.");
-                    notes.push(HOLDS_NONE.into());
+                    phrases! { HoldsNone: "Holds no affixes. Remove them first." }
+                    notes.push(HoldsNone.into());
                     available = false;
                 } else if !game {
                     let mut overrides = Vec::new();
                     if rarity == item::LEGENDARY && !unique.can_drop_as_legendary {
-                        const NEVER_LEGENDARY: Phrase = Phrase::new("Never legendary in the game.");
-                        overrides.push(NEVER_LEGENDARY.into());
+                        phrases! { NeverLegendary: "Never legendary in the game." }
+                        overrides.push(NeverLegendary.into());
                     }
                     overrides.extend(Self::foreign_legendary(item, unique));
                     if !overrides.is_empty() {
                         notes.extend(overrides);
                         if !self.unrestricted() {
-                            notes.push(NEEDS_OVERRIDE.into());
+                            notes.push(tr::NeedsOverride.into());
                         }
                         available = self.unrestricted();
                     }
                     if !edit.can_reverse(item) {
-                        const ONE_WAY: Phrase = Phrase::new("Undo apply can't reverse it.");
-                        notes.push(ONE_WAY.into());
+                        phrases! { OneWay: "Undo apply can't reverse it." }
+                        notes.push(OneWay.into());
                     }
                 }
                 // Anything else the trainer would refuse says why, once the override rules above have had their say.
@@ -1082,7 +1046,11 @@ impl ForgeEditor {
         if !self.is_crafted() {
             return self.rarity_label(self.drafted_identity().map_or(item.rarity, |(_, _, rarity)| rarity));
         }
-        if self.is_draft_exalted() { EXALTED.into() } else { self.drafted_count_rarity(drafted) }
+        if self.is_draft_exalted() {
+            tr::Exalted.into()
+        } else {
+            self.drafted_count_rarity(drafted)
+        }
     }
 
     /// Whether the drafts change the rarity, `drafted` being the item as Apply would leave it (`drafted_item`).
@@ -1107,11 +1075,11 @@ impl ForgeEditor {
         if !self.is_crafted() {
             String::new()
         } else if self.can_change_rarity() {
-            const SWITCH: Phrase = Phrase::new("Switching to or from exalted changes affix tiers. Normal, magic and rare follow the unsealed affix count.");
-            SWITCH.into()
+            phrases! { Switch: "Switching to or from exalted changes affix tiers. Normal, magic and rare follow the unsealed affix count." }
+            Switch.into()
         } else {
-            const FOLLOWS: Phrase = Phrase::new("Normal, magic and rare follow the unsealed affix count. Exalted needs an affix at T6 or higher.");
-            FOLLOWS.into()
+            phrases! { Follows: "Normal, magic and rare follow the unsealed affix count. Exalted needs an affix at T6 or higher." }
+            Follows.into()
         }
     }
 
@@ -1158,15 +1126,17 @@ impl ForgeEditor {
     }
 
     pub fn base_tip(&self) -> String {
-        const KEPT_BASE: Phrase = Phrase::new("Uniques, set items and legendaries keep their base. Change the unique to change it.");
-        const IMPLICITS_FIRST: Phrase = Phrase::new("Apply or discard the implicit roll drafts first. A new base replaces the implicits.");
-        const CHANGE_BASE: Phrase = Phrase::new("Change the base. Implicits and requirements follow it.");
+        phrases! {
+            KeptBase: "Uniques, set items and legendaries keep their base. Change the unique to change it."
+            ImplicitsFirst: "Apply or discard the implicit roll drafts first. A new base replaces the implicits."
+            ChangeBase: "Change the base. Implicits and requirements follow it."
+        }
         match (&self.base, &self.item) {
-            (None, Some(item)) if item::is_unique_backed(item.rarity) => KEPT_BASE.into(),
+            (None, Some(item)) if item::is_unique_backed(item.rarity) => KeptBase.into(),
             (None, _) => String::new(),
             (Some(base), _) if !base.is_editable() => base.read_only_reason.clone(),
-            _ if self.has_implicit_drafts() => IMPLICITS_FIRST.into(),
-            _ => CHANGE_BASE.into(),
+            _ if self.has_implicit_drafts() => ImplicitsFirst.into(),
+            _ => ChangeBase.into(),
         }
     }
 
@@ -1181,16 +1151,16 @@ impl ForgeEditor {
             && status.level_requirement > 0
             && !self.fields.iter().any(|field| field.field == Some(StatusField::LevelRequirement))
         {
-            parts.push(LEVEL.with(&[("level", &status.level_requirement)]));
+            parts.push(tr::Level.with(&[("level", &status.level_requirement)]));
         }
-        const AND_MODIFIERS: Phrase = Phrase::new("{affixes}, {modifiers}");
-        let affixes = AFFIXES.count(self.affixes.iter().filter(|row| !row.is_removed()).count());
+        phrases! { AndModifiers: "{affixes}, {modifiers}" }
+        let affixes = tr::Affixes.count(self.affixes.iter().filter(|row| !row.is_removed()).count());
         parts.push(
             if item
                 .backing()
                 .is_some_and(|unique| matches!(unique.formatting, crate::pages::forge::game::Lookup::Ready(())))
             {
-                AND_MODIFIERS.with(&[("affixes", &affixes), ("modifiers", &UNIQUE_MODIFIERS.count(self.uniques.len()))])
+                AndModifiers.with(&[("affixes", &affixes), ("modifiers", &tr::UniqueModifiers.count(self.uniques.len()))])
             } else {
                 affixes
             },
@@ -1215,23 +1185,25 @@ impl ForgeEditor {
             .map(|to_exalted| {
                 let plan = if to_exalted == exalted { Vec::new() } else { self.exalted_plan(to_exalted) };
                 let name = |index: usize| self.affixes[index].name();
-                const NO_T6: Phrase = Phrase::new("No affix on this item has a T6.");
-                const RAISES: Phrase = Phrase::new("Raises {name} to T6.");
-                const RESTORES: Phrase = Phrase::new("Restores {name} to T{tier}.");
-                const RESTORES_ALL: Phrase = Phrase::new("Restores {n} affixes to their tiers in game.");
-                const LOWERS: Phrase = Phrase::new("Lowers {name} to T{tier}.");
-                const LOWERS_ALL: Phrase = Phrase::new("Lowers {n} affixes below T6.");
+                phrases! {
+                    NoT6: "No affix on this item has a T6."
+                    Raises: "Raises {name} to T6."
+                    Restores: "Restores {name} to T{tier}."
+                    RestoresAll: "Restores {n} affixes to their tiers in game."
+                    Lowers: "Lowers {name} to T{tier}."
+                    LowersAll: "Lowers {n} affixes below T6."
+                }
                 let note = match (to_exalted, plan.as_slice()) {
                     _ if to_exalted == exalted => String::new(),
-                    (_, []) => NO_T6.into(),
-                    (true, [(only, tier, _)]) if *tier == 6 && self.affixes[*only].state.tier < 6 => RAISES.with(&[("name", &name(*only))]),
-                    (true, [(only, tier, _)]) => RESTORES.with(&[("name", &name(*only)), ("tier", tier)]),
-                    (true, _) => RESTORES_ALL.with(&[("n", &plan.len())]),
-                    (false, [(only, tier, _)]) => LOWERS.with(&[("name", &name(*only)), ("tier", tier)]),
-                    _ => LOWERS_ALL.with(&[("n", &plan.len())]),
+                    (_, []) => NoT6.into(),
+                    (true, [(only, tier, _)]) if *tier == 6 && self.affixes[*only].state.tier < 6 => Raises.with(&[("name", &name(*only))]),
+                    (true, [(only, tier, _)]) => Restores.with(&[("name", &name(*only)), ("tier", tier)]),
+                    (true, _) => RestoresAll.with(&[("n", &plan.len())]),
+                    (false, [(only, tier, _)]) => Lowers.with(&[("name", &name(*only)), ("tier", tier)]),
+                    _ => LowersAll.with(&[("n", &plan.len())]),
                 };
                 RarityOption {
-                    name: if to_exalted { EXALTED.into() } else { self.drafted_count_rarity(drafted) },
+                    name: if to_exalted { tr::Exalted.into() } else { self.drafted_count_rarity(drafted) },
                     exalted: to_exalted,
                     note,
                     available: to_exalted == exalted || !plan.is_empty(),
@@ -1315,14 +1287,13 @@ impl ForgeEditor {
     }
 
     pub fn max_tiers_tip(&self) -> String {
-        const TIERS_AT_BEST: Phrase = Phrase::new("Every affix is at its highest tier below T8.");
-        const TIERS: Plural = Plural::new(
-            "Draft the affix up to its highest tier, at most T7. Primordial affixes stay.",
-            "Draft {n} affixes up to their highest tier, at most T7. Primordial affixes stay.",
-        );
+        phrases! {
+            TiersAtBest: "Every affix is at its highest tier below T8."
+            Tiers: "Draft the affix up to its highest tier, at most T7. Primordial affixes stay." | "Draft {n} affixes up to their highest tier, at most T7. Primordial affixes stay."
+        }
         match self.max_tier_plan().len() {
-            0 => TIERS_AT_BEST.into(),
-            n => TIERS.count(n),
+            0 => TiersAtBest.into(),
+            n => Tiers.count(n),
         }
     }
 
@@ -1366,11 +1337,13 @@ impl ForgeEditor {
     }
 
     pub fn max_rolls_tip(&self) -> String {
-        const ROLLS_AT_BEST: Phrase = Phrase::new("Every roll that can change is at its best.");
-        const ROLLS: Plural = Plural::new("Draft the roll up to 255, the game's perfect roll.", "Draft {n} rolls up to 255, the game's perfect roll.");
+        phrases! {
+            RollsAtBest: "Every roll that can change is at its best."
+            Rolls: "Draft the roll up to 255, the game's perfect roll." | "Draft {n} rolls up to 255, the game's perfect roll."
+        }
         match self.max_roll_plan().len() {
-            0 => ROLLS_AT_BEST.into(),
-            n => ROLLS.count(n),
+            0 => RollsAtBest.into(),
+            n => Rolls.count(n),
         }
     }
 
@@ -1410,15 +1383,17 @@ impl ForgeEditor {
     }
 
     pub fn implicit_note(&self) -> &'static str {
-        const DRAFTED_BASE: Phrase = Phrase::new("From the drafted base. Roll positions carry over when it applies.");
-        const GAME_DATA: Phrase = Phrase::new("From game data. The game didn't describe them, so they can't reroll.");
-        const SET_BY_BASE: Phrase = Phrase::new("Set by the base. Their values can reroll, and a new base replaces them.");
+        phrases! {
+            DraftedBase: "From the drafted base. Roll positions carry over when it applies."
+            GameData: "From game data. The game didn't describe them, so they can't reroll."
+            SetByBase: "Set by the base. Their values can reroll, and a new base replaces them."
+        }
         if self.is_base_drafted() {
-            DRAFTED_BASE.get()
+            DraftedBase.get()
         } else if self.item.as_ref().is_some_and(|item| item.implicits.is_none()) {
-            GAME_DATA.get()
+            GameData.get()
         } else {
-            SET_BY_BASE.get()
+            SetByBase.get()
         }
     }
 
@@ -1468,8 +1443,8 @@ impl ForgeEditor {
         match self.item {
             None => String::new(),
             Some(_) => {
-                const ADD_TIP: Phrase = Phrase::new("Add an affix as a draft");
-                ADD_TIP.into()
+                phrases! { AddTip: "Add an affix as a draft" }
+                AddTip.into()
             }
         }
     }
@@ -1493,20 +1468,24 @@ impl ForgeEditor {
             let kind = usize::from(item.idol);
             return if self.unrestricted() { NO_SLOTS[kind].into() } else { NO_SLOTS_LOCKED[kind].into() };
         }
-        const FREE: Phrase = Phrase::new("Free: {prefixes}, {suffixes}");
-        const FREE_UNIQUE: Phrase = Phrase::new("Free: {prefixes}, {suffixes}. An affix makes it legendary.");
+        phrases! {
+            Free: "Free: {prefixes}, {suffixes}"
+            FreeUnique: "Free: {prefixes}, {suffixes}. An affix makes it legendary."
+        }
         let (prefixes, suffixes) = item.free_slots();
         let values: [(&str, &dyn std::fmt::Display); 2] = [
-            ("prefixes", &PREFIXES.count(prefixes.max(0) as usize)),
-            ("suffixes", &SUFFIXES.count(suffixes.max(0) as usize)),
+            ("prefixes", &tr::Prefixes.count(prefixes.max(0) as usize)),
+            ("suffixes", &tr::Suffixes.count(suffixes.max(0) as usize)),
         ];
-        if item.rarity == item::UNIQUE { FREE_UNIQUE.with(&values) } else { FREE.with(&values) }
+        if item.rarity == item::UNIQUE { FreeUnique.with(&values) } else { Free.with(&values) }
     }
 
     pub fn tier_ladder_note(&self) -> &'static str {
-        const NO_AFFIXES: Phrase = Phrase::new("This item has no affixes.");
-        const SELECT_AFFIX: Phrase = Phrase::new("Select an affix to see its tiers.");
-        if self.affixes.is_empty() { NO_AFFIXES.get() } else { SELECT_AFFIX.get() }
+        phrases! {
+            NoAffixes: "This item has no affixes."
+            SelectAffix: "Select an affix to see its tiers."
+        }
+        if self.affixes.is_empty() { NoAffixes.get() } else { SelectAffix.get() }
     }
 
     pub fn tier_options(&self, row: usize) -> Vec<(u8, String, bool)> {
@@ -2021,8 +2000,8 @@ impl ForgeEditor {
             return;
         };
         self.discard_row_ref(row);
-        const DISCARDED: Phrase = Phrase::new("Draft for {name} discarded.");
-        self.say(DISCARDED.with(&[("name", &name)]), MessageKind::Info);
+        phrases! { Discarded: "Draft for {name} discarded." }
+        self.say(Discarded.with(&[("name", &name)]), MessageKind::Info);
         self.resolve_tables();
     }
 
@@ -2107,35 +2086,39 @@ impl ForgeEditor {
         self.draft_order.clear();
         self.picker = None;
         self.say_preview("", false, false);
-        const DISCARDED: Plural = Plural::new("Draft discarded.", "{n} drafts discarded.");
-        self.say(DISCARDED.count(count), MessageKind::Info);
+        phrases! { Discarded: "Draft discarded." | "{n} drafts discarded." }
+        self.say(Discarded.count(count), MessageKind::Info);
         self.resolve_tables();
     }
 
     pub fn draft_count_text(&self) -> String {
         let drafts = self.draft_count();
-        const NO_DRAFTS: Phrase = Phrase::new("No drafts");
-        if drafts == 0 { NO_DRAFTS.into() } else { DRAFTS.count(drafts) }
+        phrases! { NoDrafts: "No drafts" }
+        if drafts == 0 { NoDrafts.into() } else { tr::Drafts.count(drafts) }
     }
 
     pub fn changes_text(&self) -> String {
         let drafts = self.draft_count();
-        const CHANGES: Phrase = Phrase::new("Changes");
-        const CHANGES_COUNTED: Phrase = Phrase::new("Changes ({n})");
-        if drafts == 0 { CHANGES.into() } else { CHANGES_COUNTED.with(&[("n", &drafts)]) }
+        phrases! {
+            Changes: "Changes"
+            ChangesCounted: "Changes ({n})"
+        }
+        if drafts == 0 { Changes.into() } else { ChangesCounted.with(&[("n", &drafts)]) }
     }
 
     pub fn discard_text(&self) -> String {
         let drafts = self.draft_count();
-        const DISCARD: Plural = Plural::new("Discard draft", "Discard {n} drafts");
-        DISCARD.count(drafts)
+        phrases! { Discard: "Discard draft" | "Discard {n} drafts" }
+        Discard.count(drafts)
     }
 
     pub fn apply_text(&self) -> String {
         let drafts = self.draft_count();
-        const APPLY_MANY: Plural = Plural::new("Apply {n} draft", "Apply {n} drafts");
-        const APPLY: Phrase = Phrase::new("Apply to game");
-        if drafts > 1 { APPLY_MANY.count(drafts) } else { APPLY.into() }
+        phrases! {
+            ApplyMany: "Apply {n} draft" | "Apply {n} drafts"
+            Apply: "Apply to game"
+        }
+        if drafts > 1 { ApplyMany.count(drafts) } else { Apply.into() }
     }
 
     pub fn can_apply(&self) -> bool {
@@ -2156,14 +2139,16 @@ impl ForgeEditor {
     }
 
     pub fn undo_text(&self) -> &'static str {
-        const UNDO_APPLY: Phrase = Phrase::new("Undo apply");
-        if self.undo_writes_to_game() { UNDO_APPLY.get() } else { UNDO.get() }
+        phrases! { UndoApply: "Undo apply" }
+        if self.undo_writes_to_game() { UndoApply.get() } else { tr::Undo.get() }
     }
 
     pub fn undo_tip(&self) -> &'static str {
-        const UNDO_APPLY_TIP: Phrase = Phrase::new("Write back the values from before the last Apply");
-        const UNDO_TIP: Phrase = Phrase::new("Undo the last draft change (Ctrl+Z)");
-        if self.undo_writes_to_game() { UNDO_APPLY_TIP.get() } else { UNDO_TIP.get() }
+        phrases! {
+            UndoApplyTip: "Write back the values from before the last Apply"
+            UndoTip: "Undo the last draft change (Ctrl+Z)"
+        }
+        if self.undo_writes_to_game() { UndoApplyTip.get() } else { UndoTip.get() }
     }
 
     fn can_undo_row(&self, row: RowRef) -> bool {
@@ -2231,8 +2216,8 @@ impl ForgeEditor {
                 }
             }
         }
-        const UNDONE: Phrase = Phrase::new("Last draft change undone.");
-        self.say(UNDONE, MessageKind::Info);
+        phrases! { Undone: "Last draft change undone." }
+        self.say(Undone, MessageKind::Info);
         self.resolve_tables();
         true
     }
@@ -2240,8 +2225,8 @@ impl ForgeEditor {
     /// Ctrl+Z: draft changes only; past the last one it says where Undo apply is instead of writing.
     pub fn undo_draft_only(&mut self) {
         if !self.undo_draft_step() && self.undo_writes_to_game() {
-            const NOTHING_LEFT: Phrase = Phrase::new("Nothing left to undo. Undo apply writes back the values from before the last Apply.");
-            self.say(NOTHING_LEFT, MessageKind::Info);
+            phrases! { NothingLeft: "Nothing left to undo. Undo apply writes back the values from before the last Apply." }
+            self.say(NothingLeft, MessageKind::Info);
         }
     }
 
@@ -2302,13 +2287,13 @@ impl ForgeEditor {
                         row.show_preview(Some(&state));
                     }
                 }
-                const DRAFT_PREVIEW: Phrase = Phrase::new("Draft preview");
-                self.preview_status = DRAFT_PREVIEW.into();
+                phrases! { DraftPreview: "Draft preview" }
+                self.preview_status = DraftPreview.into();
             }
-            Lookup::Loading => self.say_preview(super::game::PREVIEW_LOADING.get(), false, false),
+            Lookup::Loading => self.say_preview(super::game::PreviewLoading.get(), false, false),
             Lookup::Unavailable(details) => {
-                const PREVIEW_UNAVAILABLE: Phrase = Phrase::new("Preview unavailable: {details}");
-                self.say_preview(&PREVIEW_UNAVAILABLE.with(&[("details", &details)]), true, false)
+                phrases! { PreviewUnavailable: "Preview unavailable: {details}" }
+                self.say_preview(&PreviewUnavailable.with(&[("details", &details)]), true, false)
             }
         }
     }
@@ -2328,8 +2313,8 @@ impl ForgeEditor {
         if others.is_empty() {
             String::new()
         } else {
-            const LINKED: Phrase = Phrase::new("Linked with {names}");
-            LINKED.with(&[("names", &list(&others, Conjunction::And))])
+            phrases! { Linked: "Linked with {names}" }
+            Linked.with(&[("names", &list(&others, Conjunction::And))])
         }
     }
 
@@ -2496,17 +2481,13 @@ impl ForgeEditor {
             self.selected_affix = (!self.affixes.is_empty()).then_some(0);
         }
         if discarded > 0 {
-            const CHANGED: Plural = Plural::new(
-                "The forge item changed, so its draft was discarded.",
-                "The forge item changed, so its {n} drafts were discarded.",
-            );
-            self.say(CHANGED.count(discarded), MessageKind::Info);
+            phrases! { Changed: "The forge item changed, so its draft was discarded." | "The forge item changed, so its {n} drafts were discarded." }
+            self.say(Changed.count(discarded), MessageKind::Info);
         } else if !lost.is_empty() {
-            const LOST: Plural = Plural::new(
-                "The item changed in the game and no longer has {missing}, so that draft was discarded.",
-                "The item changed in the game and no longer has {missing}, so those drafts were discarded.",
-            );
-            self.say(LOST.with(lost.len(), &[("missing", &list(&lost, Conjunction::Or))]), MessageKind::Info);
+            phrases! {
+                Lost: "The item changed in the game and no longer has {missing}, so that draft was discarded." | "The item changed in the game and no longer has {missing}, so those drafts were discarded."
+            }
+            self.say(Lost.with(lost.len(), &[("missing", &list(&lost, Conjunction::Or))]), MessageKind::Info);
         }
         // What fits depends on the item, so an open picker judges its list again.
         self.filter_picker(true);
@@ -2634,7 +2615,7 @@ impl ForgeEditor {
             self.fields.push(FieldDraft::number(
                 uid,
                 StatusField::ForgingPotential,
-                FORGING_POTENTIAL.get(),
+                tr::ForgingPotential.get(),
                 status.forging_potential,
                 limits.map(|l| l.forging_potential),
                 "",
@@ -2646,11 +2627,11 @@ impl ForgeEditor {
             self.fields.push(FieldDraft::number(
                 uid,
                 StatusField::LevelRequirement,
-                LEVEL_REQUIREMENT.get(),
+                tr::LevelRequirement.get(),
                 status.level_requirement,
                 limits.map(|l| l.level_requirement),
                 "",
-                LEVEL_REQUIREMENT_NOTE.get(),
+                tr::LevelRequirementNote.get(),
                 "",
                 false,
             ));
@@ -2663,14 +2644,14 @@ impl ForgeEditor {
             } else {
                 None
             });
-            const NOT_IN_DATA: Phrase = Phrase::new("This unique isn't in the game data. Read the game files again in Settings.");
-            let reason = if unique.is_none() { NOT_IN_DATA.get() } else { "" };
+            phrases! { NotInData: "This unique isn't in the game data. Read the game files again in Settings." }
+            let reason = if unique.is_none() { NotInData.get() } else { "" };
             let uid = self.uid();
             match kind {
                 Some(LegendaryType::WeaversWill) => self.fields.push(FieldDraft::number(
                     uid,
                     StatusField::WeaversWill,
-                    WEAVERS_WILL.get(),
+                    tr::WeaversWill.get(),
                     status.weavers_will,
                     limits.map(|l| l.weavers_will),
                     reason,
@@ -2683,12 +2664,12 @@ impl ForgeEditor {
                     self.fields.push(FieldDraft::number(
                         uid,
                         StatusField::LegendaryPotential,
-                        LEGENDARY_POTENTIAL.get(),
+                        tr::LegendaryPotential.get(),
                         status.legendary_potential,
                         limits.map(|l| l.legendary_potential),
-                        if mixed { MIXED_REASON.get() } else { reason },
+                        if mixed { tr::MixedReason.get() } else { reason },
                         "",
-                        if mixed { MIXED_HEADING.get() } else { "" },
+                        if mixed { tr::MixedHeading.get() } else { "" },
                         false,
                     ))
                 }
@@ -2699,10 +2680,10 @@ impl ForgeEditor {
             self.fields.push(FieldDraft::number(
                 uid,
                 StatusField::LegendaryPotential,
-                LEGENDARY_POTENTIAL.get(),
+                tr::LegendaryPotential.get(),
                 status.legendary_potential,
                 limits.map(|l| l.legendary_potential),
-                LEGENDARY_FIXED.get(),
+                tr::LegendaryFixed.get(),
                 "",
                 "",
                 false,
@@ -2713,14 +2694,20 @@ impl ForgeEditor {
         self.fields.push(FieldDraft::flag(
             uid,
             StatusField::Corrupted,
-            CORRUPTION.get(),
-            NOT_CORRUPTED.get(),
-            CORRUPTED.get(),
+            tr::Corruption.get(),
+            tr::NotCorrupted.get(),
+            tr::Corrupted.get(),
             status.corrupted,
         ));
         let uid = self.uid();
-        self.fields
-            .push(FieldDraft::flag(uid, StatusField::Ruined, RUIN.get(), NOT_RUINED.get(), RUINED.get(), status.ruined));
+        self.fields.push(FieldDraft::flag(
+            uid,
+            StatusField::Ruined,
+            tr::Ruin.get(),
+            tr::NotRuined.get(),
+            tr::Ruined.get(),
+            status.ruined,
+        ));
         if !backed {
             let uid = self.uid();
             self.base = Some(FieldDraft::base(uid, base_key(item.item_type, item.sub_type), self.base_options(item)));
@@ -2737,13 +2724,13 @@ impl ForgeEditor {
             return;
         };
         let enabled = self.unrestricted();
-        let locked: String = CHANGE_LOCKED.into();
+        let locked: String = tr::ChangeLocked.into();
         let limits = self.catalog().limits;
         let reason = |mixed: bool| {
             if !enabled {
                 locked.clone()
             } else if mixed {
-                MIXED_REASON.into()
+                tr::MixedReason.into()
             } else {
                 String::new()
             }
@@ -2755,12 +2742,12 @@ impl ForgeEditor {
             self.fields.push(FieldDraft::number(
                 uid,
                 StatusField::WeaversWill,
-                WEAVERS_WILL.get(),
+                tr::WeaversWill.get(),
                 status.weavers_will,
                 limits.map(|l| l.weavers_will),
                 &reason(mixed),
-                FORCED_WILL_NOTE.get(),
-                if mixed { MIXED_HEADING.get() } else { "" },
+                tr::ForcedWillNote.get(),
+                if mixed { tr::MixedHeading.get() } else { "" },
                 true,
             ));
         }
@@ -2770,12 +2757,12 @@ impl ForgeEditor {
             self.fields.push(FieldDraft::number(
                 uid,
                 StatusField::WeaversWill,
-                WEAVERS_WILL.get(),
+                tr::WeaversWill.get(),
                 status.weavers_will,
                 limits.map(|l| l.weavers_will),
                 &reason(mixed),
-                LEGENDARY_WILL_NOTE.get(),
-                if mixed { MIXED_HEADING.get() } else { "" },
+                tr::LegendaryWillNote.get(),
+                if mixed { tr::MixedHeading.get() } else { "" },
                 true,
             ));
         }
@@ -2784,11 +2771,11 @@ impl ForgeEditor {
             self.fields.push(FieldDraft::number(
                 uid,
                 StatusField::WeaversTouch,
-                WEAVERS_TOUCH.get(),
+                tr::WeaversTouch.get(),
                 status.weavers_touch,
                 limits.map(|l| l.weavers_touch),
                 if enabled { "" } else { &locked },
-                WEAVERS_TOUCH_NOTE.get(),
+                tr::WeaversTouchNote.get(),
                 "",
                 true,
             ));
@@ -2815,23 +2802,23 @@ impl ForgeEditor {
             .flat_map(|definition| definition.bases.iter().map(move |base| (definition, base)))
             .map(|(definition, base)| {
                 let other_type = definition.item_type != item.item_type;
-                let mut facts = vec![LEVEL.with(&[("level", &base.level)])];
+                let mut facts = vec![tr::Level.with(&[("level", &base.level)])];
                 if other_type {
                     facts.insert(0, definition.name.clone());
                 }
                 if base.corrupted {
-                    const CORRUPTED_BASE: Phrase = Phrase::new("Corrupted base");
-                    facts.push(CORRUPTED_BASE.into());
+                    phrases! { CorruptedBase: "Corrupted base" }
+                    facts.push(CorruptedBase.into());
                 }
                 let broken = self.broken_by_base(item, definition.item_type, base.sub_type);
                 if broken > 0 {
-                    facts.push(INCOMPATIBLE_AFFIXES.count(broken));
+                    facts.push(tr::IncompatibleAffixes.count(broken));
                 }
                 FieldOption {
                     value: base_key(definition.item_type, base.sub_type),
                     name: base.name.clone(),
                     facts,
-                    note: if other_type && !unrestricted { NEEDS_OVERRIDE.into() } else { String::new() },
+                    note: if other_type && !unrestricted { tr::NeedsOverride.into() } else { String::new() },
                     in_game: !other_type && base.sub_type == item.sub_type,
                     implicits: base.implicits.join("\n"),
                     available: !other_type || unrestricted,
@@ -3142,11 +3129,11 @@ impl ForgeEditor {
     }
 
     pub fn picker_title(&self) -> &'static str {
-        const REPLACE_AFFIX: Phrase = Phrase::new("Replace affix");
+        phrases! { ReplaceAffix: "Replace affix" }
         if self.picker.as_ref().is_some_and(|picker| picker.adding) {
-            ADD_AFFIX.get()
+            tr::AddAffix.get()
         } else {
-            REPLACE_AFFIX.get()
+            ReplaceAffix.get()
         }
     }
 
@@ -3159,19 +3146,19 @@ impl ForgeEditor {
         match (&self.picker, self.selected_affix.and_then(|index| self.affixes.get(index))) {
             (Some(picker), _) if picker.adding => self.free_slots_text_of(drafted),
             (_, Some(row)) => {
-                const CURRENTLY: Phrase = Phrase::new("Currently {name}");
-                CURRENTLY.with(&[("name", &row.original_name())])
+                phrases! { Currently: "Currently {name}" }
+                Currently.with(&[("name", &row.original_name())])
             }
             _ => String::new(),
         }
     }
 
     pub fn picker_action(&self) -> &'static str {
-        const USE_AFFIX: Phrase = Phrase::new("Use this affix");
+        phrases! { UseAffix: "Use this affix" }
         if self.picker.as_ref().is_some_and(|picker| picker.adding) {
-            ADD_AFFIX.get()
+            tr::AddAffix.get()
         } else {
-            USE_AFFIX.get()
+            UseAffix.get()
         }
     }
 
@@ -3182,14 +3169,14 @@ impl ForgeEditor {
 
     fn replacement_problem(&self, compatibility: Compatibility, allow_incompatible: bool) -> Option<String> {
         if !compatibility.allows_edit(allow_incompatible) {
-            const REPLACEMENT_INCOMPATIBLE: Phrase = Phrase::new("This affix is incompatible with the selected item or slot.");
+            phrases! { ReplacementIncompatible: "This affix is incompatible with the selected item or slot." }
             return Some(if compatibility == Compatibility::Unknown {
-                UNCONFIRMED.into()
+                tr::Unconfirmed.into()
             } else {
-                REPLACEMENT_INCOMPATIBLE.into()
+                ReplacementIncompatible.into()
             });
         }
-        (!compatibility.is_allowed() && !self.unrestricted()).then(|| OVERRIDE_REQUIRED.into())
+        (!compatibility.is_allowed() && !self.unrestricted()).then(|| tr::OverrideRequired.into())
     }
 
     /// The addition the picker drafts for a definition, to the item as the other drafts leave it, or why not.
@@ -3198,8 +3185,8 @@ impl ForgeEditor {
     /// to a normal affix first.
     fn add_edit(&self, definition: &AffixDefinition) -> Result<(ItemEdit, Option<usize>), String> {
         let Some(item) = self.drafted_item() else {
-            const UNVERIFIED: Phrase = Phrase::new("This affix has no verified definition in the current build.");
-            return Err(UNVERIFIED.into());
+            phrases! { Unverified: "This affix has no verified definition in the current build." }
+            return Err(Unverified.into());
         };
         let corrupted = definition.category == Category::Corrupted;
         let seal = if corrupted { Seal::Corrupted } else { Seal::Normal };
@@ -3221,8 +3208,8 @@ impl ForgeEditor {
             })
             .project(&item)
             .map_err(|problem| {
-                const CANNOT_FREE: Phrase = Phrase::new("{name} cannot become a normal affix to free the corrupted slot: {problem}");
-                CANNOT_FREE.with(&[("name", &self.affixes[row].name()), ("problem", &problem)])
+                phrases! { CannotFree: "{name} cannot become a normal affix to free the corrupted slot: {problem}" }
+                CannotFree.with(&[("name", &self.affixes[row].name()), ("problem", &problem)])
             })?,
             _ => item,
         };
@@ -3234,7 +3221,7 @@ impl ForgeEditor {
     /// "Allow incompatible affixes" too.
     fn addition(&self, item: &ForgeItem, definition: &AffixDefinition, tier: u8, roll: u8, seal: Seal, allow_incompatible: bool) -> Result<ItemEdit, String> {
         if !definition.writable {
-            return Err(UNWRITABLE.into());
+            return Err(tr::Unwritable.into());
         }
         let compatibility = self.game.compatibility(item, definition, None, self.unrestricted());
         let (prefixes, suffixes) = item.free_slots();
@@ -3242,7 +3229,7 @@ impl ForgeEditor {
         let needs_override = compatibility != Compatibility::Allowed || !slot_free;
         let allow = allow_incompatible && self.unrestricted();
         if !compatibility.allows_edit(allow) {
-            return Err(if self.unrestricted() { INCOMPATIBLE.into() } else { NOT_ADDED_LOCKED.into() });
+            return Err(if self.unrestricted() { tr::Incompatible.into() } else { tr::NotAddedLocked.into() });
         }
         if needs_override && !self.unrestricted() {
             const NO_FREE_SLOT: [Phrase; 2] = [
@@ -3250,7 +3237,7 @@ impl ForgeEditor {
                 Phrase::new("No free suffix slot. Adding more needs \"I know what I'm doing\" in Settings."),
             ];
             return Err(if slot_free {
-                NOT_ADDED_LOCKED.into()
+                tr::NotAddedLocked.into()
             } else {
                 NO_FREE_SLOT[definition.kind as usize].into()
             });
@@ -3287,12 +3274,14 @@ impl ForgeEditor {
         if picker.adding {
             return match self.add_edit(definition) {
                 Ok((edit, held)) => {
-                    const OVERRIDDEN: Phrase = Phrase::new("Added by \"I know what I'm doing\". The game would not add it here.");
-                    const FITS: Phrase = Phrase::new("Fits this item.");
-                    const TAKES_SLOT: Phrase = Phrase::new("{fits} It takes the corrupted slot: {name} becomes a normal affix.");
-                    let fits: String = if edit.needs_override() { OVERRIDDEN.into() } else { FITS.into() };
+                    phrases! {
+                        Overridden: "Added by \"I know what I'm doing\". The game would not add it here."
+                        Fits: "Fits this item."
+                        TakesSlot: "{fits} It takes the corrupted slot: {name} becomes a normal affix."
+                    }
+                    let fits: String = if edit.needs_override() { Overridden.into() } else { Fits.into() };
                     match held {
-                        Some(row) => TAKES_SLOT.with(&[("fits", &fits), ("name", &self.affixes[row].name())]),
+                        Some(row) => TakesSlot.with(&[("fits", &fits), ("name", &self.affixes[row].name())]),
                         None => fits,
                     }
                 }
@@ -3300,31 +3289,33 @@ impl ForgeEditor {
             };
         }
         let Some(slot) = self.slot_state() else {
-            const SELECT_SLOT: Phrase = Phrase::new("Select an affix slot.");
-            return SELECT_SLOT.into();
+            phrases! { SelectSlot: "Select an affix slot." }
+            return SelectSlot.into();
         };
-        const ALLOWED_BY_OVERRIDE: Phrase = Phrase::new("Allowed by \"I know what I'm doing\". The game doesn't roll it here.");
-        const COMPATIBLE: Phrase = Phrase::new("Compatible with this slot");
-        const SLOT_TYPE: Phrase = Phrase::new("Incompatible: this affix belongs in the other slot (prefix or suffix).");
-        const ALREADY_PRESENT: Phrase = Phrase::new("Incompatible: the item already has this affix.");
-        const CLASS_REQUIREMENT: Phrase = Phrase::new("Incompatible: this affix requires another class.");
-        const EQUIPMENT_TYPE: Phrase = Phrase::new("Incompatible: this affix rolls on another kind of item.");
-        const SPECIAL_CATEGORY: Phrase = Phrase::new("Incompatible: this kind of affix (experimental, personal, set) stays in its own slots.");
-        const INCOMPLETE_DATA: Phrase = Phrase::new("The game data is incomplete for this affix, so where it rolls can't be checked.");
+        phrases! {
+            AllowedByOverride: "Allowed by \"I know what I'm doing\". The game doesn't roll it here."
+            Compatible: "Compatible with this slot"
+            SlotType: "Incompatible: this affix belongs in the other slot (prefix or suffix)."
+            AlreadyPresent: "Incompatible: the item already has this affix."
+            ClassRequirement: "Incompatible: this affix requires another class."
+            EquipmentType: "Incompatible: this affix rolls on another kind of item."
+            SpecialCategory: "Incompatible: this kind of affix (experimental, personal, set) stays in its own slots."
+            IncompleteData: "The game data is incomplete for this affix, so where it rolls can't be checked."
+        }
         match self.compatibility_of(definition, Some(&slot)) {
-            Compatibility::Override => ALLOWED_BY_OVERRIDE.into(),
-            Compatibility::Allowed => COMPATIBLE.into(),
-            Compatibility::Rejected(_) if !self.unrestricted() => INCOMPATIBLE_LOCKED.into(),
+            Compatibility::Override => AllowedByOverride.into(),
+            Compatibility::Allowed => Compatible.into(),
+            Compatibility::Rejected(_) if !self.unrestricted() => tr::IncompatibleLocked.into(),
             Compatibility::Rejected(reason) => match reason {
-                item::Rejection::SlotType => SLOT_TYPE.into(),
-                item::Rejection::AlreadyPresent => ALREADY_PRESENT.into(),
-                item::Rejection::ClassRequirement => CLASS_REQUIREMENT.into(),
-                item::Rejection::EquipmentType => EQUIPMENT_TYPE.into(),
-                item::Rejection::SpecialCategory => SPECIAL_CATEGORY.into(),
-                item::Rejection::IncompleteData => INCOMPLETE_DATA.into(),
+                item::Rejection::SlotType => SlotType.into(),
+                item::Rejection::AlreadyPresent => AlreadyPresent.into(),
+                item::Rejection::ClassRequirement => ClassRequirement.into(),
+                item::Rejection::EquipmentType => EquipmentType.into(),
+                item::Rejection::SpecialCategory => SpecialCategory.into(),
+                item::Rejection::IncompleteData => IncompleteData.into(),
             },
-            Compatibility::Unknown if !self.unrestricted() => UNCONFIRMED_LOCKED.into(),
-            Compatibility::Unknown => UNCONFIRMED.into(),
+            Compatibility::Unknown if !self.unrestricted() => tr::UnconfirmedLocked.into(),
+            Compatibility::Unknown => tr::Unconfirmed.into(),
         }
     }
 
@@ -3409,15 +3400,15 @@ impl ForgeEditor {
     /// Submit one command. Only a separate, typed completion advances a draft.
     fn write(&mut self, expected: &ForgeItem, edit: &ItemEdit) -> EditOutcome {
         if !self.game.can_write() {
-            const NOT_READY: Phrase = Phrase::new("The session is not ready to write.");
-            return refused(NOT_READY);
+            phrases! { NotReady: "The session is not ready to write." }
+            return refused(NotReady);
         }
         if edit.needs_override() && !self.unrestricted() {
-            return refused(OVERRIDE_REQUIRED);
+            return refused(tr::OverrideRequired);
         }
         if !self.game.supports(edit) {
-            const UNSUPPORTED: Phrase = Phrase::new("This edit is not available in this build. Nothing was applied.");
-            return refused(UNSUPPORTED);
+            phrases! { Unsupported: "This edit is not available in this build. Nothing was applied." }
+            return refused(Unsupported);
         }
         self.game.write(expected, edit)
     }
@@ -3442,35 +3433,36 @@ impl ForgeEditor {
         let added: Vec<&AffixRow> = self.affixes.iter().filter(|row| row.added).collect();
         let uniques: Vec<&RollRow> = self.uniques.iter().filter(|row| row.is_dirty()).collect();
         let implicits: Vec<&RollRow> = self.implicits.iter().filter(|row| row.is_dirty()).collect();
-        const STALE: Phrase = Phrase::new("{name} changed in the game after you drafted it. Discard that draft and edit it again. Nothing was applied.");
-        const STALE_UNIQUES: Phrase =
-            Phrase::new("Unique modifier rolls changed in the game after you drafted them. Discard those drafts and edit them again. Nothing was applied.");
-        const STALE_IMPLICITS: Phrase = Phrase::new("Implicit rolls changed in the game after you drafted them. Discard those drafts and edit them again. Nothing was applied.");
+        phrases! {
+            Stale: "{name} changed in the game after you drafted it. Discard that draft and edit it again. Nothing was applied."
+            StaleUniques: "Unique modifier rolls changed in the game after you drafted them. Discard those drafts and edit them again. Nothing was applied."
+            StaleImplicits: "Implicit rolls changed in the game after you drafted them. Discard those drafts and edit them again. Nothing was applied."
+        }
         if let Some(stale) = removed.iter().chain(&rows).find(|row| row.is_stale()) {
-            return Err(STALE.with(&[("name", &stale.name())]));
+            return Err(Stale.with(&[("name", &stale.name())]));
         }
         if uniques.iter().any(|row| row.is_stale()) {
-            return Err(STALE_UNIQUES.into());
+            return Err(StaleUniques.into());
         }
         if implicits.iter().any(|row| row.is_stale()) {
-            return Err(STALE_IMPLICITS.into());
+            return Err(StaleImplicits.into());
         }
         let mut fields: Vec<&FieldDraft> = self.all_fields().filter(|field| field.is_dirty()).collect();
         fields.sort_by_key(|field| field.field == Some(StatusField::LevelRequirement));
         if let Some(stale) = fields.iter().find(|field| field.is_stale()) {
-            return Err(STALE.with(&[("name", &stale.name)]));
+            return Err(Stale.with(&[("name", &stale.name)]));
         }
         let several = removed.len() + rows.len() + added.len() + uniques.len() + implicits.len() + fields.len() > 1;
         let refused = |problem: String| {
-            if several && !problem.ends_with(NOTHING_APPLIED.get()) {
-                AND_NOTHING_APPLIED.with(&[("problem", &problem)])
+            if several && !problem.ends_with(tr::NothingApplied.get()) {
+                tr::AndNothingApplied.with(&[("problem", &problem)])
             } else {
                 problem
             }
         };
         let named = |row: &AffixRow, problem: String| {
             refused(if several {
-                NAMED_PROBLEM.with(&[("name", &row.name()), ("problem", &problem)])
+                tr::NamedProblem.with(&[("name", &row.name()), ("problem", &problem)])
             } else {
                 problem
             })
@@ -3506,8 +3498,8 @@ impl ForgeEditor {
             let slot = *at.get(&row.slot()).unwrap_or(&row.slot());
             let edit = self.read_affix_edit(row, &projected, slot).map_err(|problem| named(row, problem))?;
             let Some(previous) = projected.affix(slot) else {
-                const MOVED: Phrase = Phrase::new("That affix is no longer in that slot.");
-                return Err(refused(MOVED.into()));
+                phrases! { Moved: "That affix is no longer in that slot." }
+                return Err(refused(Moved.into()));
             };
             let edit = match edit {
                 ItemEdit::Affix(eg_trainer::item::edit::AffixEdit { slot, id, tier, roll, seal, .. })
@@ -3557,15 +3549,15 @@ impl ForgeEditor {
                         &mut projected,
                         &mut at,
                         Step {
-                            name: UNIQUE_MODIFIERS_NAME.into(),
+                            name: tr::UniqueModifiersName.into(),
                             edit,
                             row: StepRow::Uniques(rows),
                         },
                     )?;
                 }
                 _ => {
-                    const UNIQUE_POSITIONS: Phrase = Phrase::new("Enter integer roll positions from 0 to 255 for mapped unique modifiers.");
-                    return Err(refused(UNIQUE_POSITIONS.into()));
+                    phrases! { UniquePositions: "Enter integer roll positions from 0 to 255 for mapped unique modifiers." }
+                    return Err(refused(UniquePositions.into()));
                 }
             }
         }
@@ -3576,8 +3568,8 @@ impl ForgeEditor {
                 allow_incompatible: self.unrestricted(),
             });
             if !edit.is_valid(&projected) {
-                const IMPLICIT_POSITIONS: Phrase = Phrase::new("Enter integer roll positions from 0 to 255 for implicits whose values roll.");
-                return Err(refused(IMPLICIT_POSITIONS.into()));
+                phrases! { ImplicitPositions: "Enter integer roll positions from 0 to 255 for implicits whose values roll." }
+                return Err(refused(ImplicitPositions.into()));
             }
             let rows = implicits.iter().map(|row| row.uid).collect();
             add(
@@ -3585,7 +3577,7 @@ impl ForgeEditor {
                 &mut projected,
                 &mut at,
                 Step {
-                    name: IMPLICITS_NAME.into(),
+                    name: tr::ImplicitsName.into(),
                     edit,
                     row: StepRow::Implicits(rows),
                 },
@@ -3609,22 +3601,24 @@ impl ForgeEditor {
                     edit => edit,
                 },
             };
-            const SET_HOLDS_NONE: Phrase = Phrase::new("A set item holds no affixes. Remove them first.");
-            const UNIQUE_MISFITS: Phrase = Phrase::new("That unique does not fit this item.");
-            const STATUS_MISFITS: Phrase = Phrase::new("{name} does not apply to this item.");
-            const FIXED_BASE: Phrase = Phrase::new("This item's base cannot change.");
+            phrases! {
+                SetHoldsNone: "A set item holds no affixes. Remove them first."
+                UniqueMisfits: "That unique does not fit this item."
+                StatusMisfits: "{name} does not apply to this item."
+                FixedBase: "This item's base cannot change."
+            }
             let problem = match &edit {
-                edit if edit.needs_override() && !self.unrestricted() => Some(OVERRIDE_REQUIRED.into()),
-                ItemEdit::UniqueIdentity(eg_trainer::item::edit::UniqueIdentityEdit { rarity: 8, .. }) if !projected.affixes.is_empty() => Some(SET_HOLDS_NONE.into()),
-                ItemEdit::UniqueIdentity(eg_trainer::item::edit::UniqueIdentityEdit { .. }) if !edit.is_valid(&projected) => Some(UNIQUE_MISFITS.into()),
-                ItemEdit::Status(eg_trainer::item::edit::StatusEdit { .. }) if !edit.is_valid(&projected) => Some(STATUS_MISFITS.with(&[("name", &field.name)])),
+                edit if edit.needs_override() && !self.unrestricted() => Some(tr::OverrideRequired.into()),
+                ItemEdit::UniqueIdentity(eg_trainer::item::edit::UniqueIdentityEdit { rarity: 8, .. }) if !projected.affixes.is_empty() => Some(SetHoldsNone.into()),
+                ItemEdit::UniqueIdentity(eg_trainer::item::edit::UniqueIdentityEdit { .. }) if !edit.is_valid(&projected) => Some(UniqueMisfits.into()),
+                ItemEdit::Status(eg_trainer::item::edit::StatusEdit { .. }) if !edit.is_valid(&projected) => Some(StatusMisfits.with(&[("name", &field.name)])),
                 // Before the base's own check, which also refuses an equipment-type break without naming it.
                 ItemEdit::BaseType(eg_trainer::item::edit::BaseTypeEdit {
                     allow_incompatible: false,
                     item_type: None,
                     sub_type,
-                }) if self.broken_by_base(&projected, projected.item_type, *sub_type as u16) > 0 => Some(BROKEN_BY_BASE.into()),
-                ItemEdit::BaseType(eg_trainer::item::edit::BaseTypeEdit { .. }) if !edit.is_valid(&projected) => Some(FIXED_BASE.into()),
+                }) if self.broken_by_base(&projected, projected.item_type, *sub_type as u16) > 0 => Some(tr::BrokenByBase.into()),
+                ItemEdit::BaseType(eg_trainer::item::edit::BaseTypeEdit { .. }) if !edit.is_valid(&projected) => Some(FixedBase.into()),
                 _ => None,
             };
             if let Some(problem) = problem {
@@ -3648,11 +3642,11 @@ impl ForgeEditor {
     fn read_affix_edit(&self, row: &AffixRow, item: &ForgeItem, slot: usize) -> Result<ItemEdit, String> {
         let definition = self.catalog().definition(row.draft_id());
         if !definition.writable {
-            return Err(UNWRITABLE.into());
+            return Err(tr::Unwritable.into());
         }
         if row.tier() > definition.max_tier {
-            const MAX_TIER: Phrase = Phrase::new("This affix supports at most tier {tier}.");
-            return Err(MAX_TIER.with(&[("tier", &definition.max_tier)]));
+            phrases! { MaxTier: "This affix supports at most tier {tier}." }
+            return Err(MaxTier.with(&[("tier", &definition.max_tier)]));
         }
         // The affix the item holds takes a new tier, seal or roll whatever its compatibility; only a replacement is checked.
         if row.draft_id() == row.state.id {
@@ -3754,8 +3748,8 @@ impl ForgeEditor {
             }
         };
         if steps.iter().any(|step| !self.game.supports(&step.edit)) {
-            const UNSUPPORTED_DRAFT: Phrase = Phrase::new("This draft includes an edit that is not available in this build. Nothing was applied.");
-            self.say(UNSUPPORTED_DRAFT, MessageKind::Error);
+            phrases! { UnsupportedDraft: "This draft includes an edit that is not available in this build. Nothing was applied." }
+            self.say(UnsupportedDraft, MessageKind::Error);
             return;
         }
         self.start_batch(steps, false);
@@ -3770,13 +3764,13 @@ impl ForgeEditor {
             return;
         };
         if self.game.undo_needs_override() && !self.unrestricted() {
-            self.say(OVERRIDE_REQUIRED, MessageKind::Error);
+            self.say(tr::OverrideRequired, MessageKind::Error);
             return;
         }
         self.batch = Some(WriteBatch {
             steps: VecDeque::new(),
             total,
-            names: vec![UNDO.into()],
+            names: vec![tr::Undo.into()],
             completed: 0,
             one_way: false,
             undoing: true,
@@ -3817,12 +3811,12 @@ impl ForgeEditor {
                     return;
                 }
                 let Some(edit) = self.game.undo_intent() else {
-                    const UNDO_INVALID: Phrase = Phrase::new("Undo is no longer valid for the observed item or current settings.");
-                    self.finish_batch(Some(UNDO_INVALID.into()));
+                    phrases! { UndoInvalid: "Undo is no longer valid for the observed item or current settings." }
+                    self.finish_batch(Some(UndoInvalid.into()));
                     return;
                 };
                 Step {
-                    name: UNDO.into(),
+                    name: tr::Undo.into(),
                     edit,
                     row: StepRow::Undo,
                 }
@@ -3833,8 +3827,8 @@ impl ForgeEditor {
                 return;
             };
             let Some(before) = self.item.clone() else {
-                const ITEM_GONE: Phrase = Phrase::new("The forge item is no longer available.");
-                self.finish_batch(Some(ITEM_GONE.into()));
+                phrases! { ItemGone: "The forge item is no longer available." }
+                self.finish_batch(Some(ItemGone.into()));
                 return;
             };
             let (summary, effect) = self.step_summary(&step.row);
@@ -3846,8 +3840,8 @@ impl ForgeEditor {
                 summary,
                 effect,
             });
-            const APPLYING: Phrase = Phrase::new("Applying to game… Waiting for independent readback.");
-            self.say(APPLYING, MessageKind::Info);
+            phrases! { Applying: "Applying to game… Waiting for independent readback." }
+            self.say(Applying, MessageKind::Info);
             let waiting = self.waiting.as_ref().unwrap();
             let expected = waiting.before.clone();
             let edit = waiting.step.edit.clone();
@@ -3890,7 +3884,7 @@ impl ForgeEditor {
                         AppliedEntry {
                             name: waiting.step.name,
                             summary: waiting.summary,
-                            outcome: CONFIRMED.into(),
+                            outcome: tr::Confirmed.into(),
                             time: (self.clock)(),
                             effect: waiting.effect,
                         },
@@ -3913,17 +3907,17 @@ impl ForgeEditor {
                     AppliedEntry {
                         name: waiting.step.name,
                         summary: waiting.summary,
-                        outcome: CONFIRMED.into(),
+                        outcome: tr::Confirmed.into(),
                         time: (self.clock)(),
                         effect: waiting.effect,
                     },
                 );
                 // Still connected, so no Retry: the item comes back with the game's next report (`refresh`).
-                const CONFIRMED_UNSHOWN: Phrase = Phrase::new(
-                    "The game confirmed the edit, but the item could not be shown afterwards. It shows again the next time the game reports it. \
-                     Remaining drafts and Undo were cleared.",
-                );
-                self.say(CONFIRMED_UNSHOWN, MessageKind::Error);
+                phrases! {
+                    ConfirmedUnshown: "The game confirmed the edit, but the item could not be shown afterwards. It shows again the next time the game reports it. \
+                     Remaining drafts and Undo were cleared."
+                }
+                self.say(ConfirmedUnshown, MessageKind::Error);
             }
             WriteOutcome::NotKept(after) => {
                 let displayable = after.is_some();
@@ -3934,14 +3928,14 @@ impl ForgeEditor {
                     // The worker logs every edit the game did not keep (`log_forge_outcome`). With the item shown the line sits in the
                     // action bar, so it stays short; the empty page has room to say where the details are.
                     if displayable {
-                        const NOT_KEPT: Phrase = Phrase::new("The game did not keep this edit; the item shows what it holds now. Drafts and Undo were cleared.");
-                        NOT_KEPT.get()
+                        phrases! { NotKept: "The game did not keep this edit; the item shows what it holds now. Drafts and Undo were cleared." }
+                        NotKept.get()
                     } else {
-                        const NOT_KEPT_UNSHOWN: Phrase = Phrase::new(
-                            "The game did not keep this edit, and the item could not be shown afterwards. It shows again the next time the game reports it. \
-                             Drafts and Undo were cleared; details are in the fault log.",
-                        );
-                        NOT_KEPT_UNSHOWN.get()
+                        phrases! {
+                            NotKeptUnshown: "The game did not keep this edit, and the item could not be shown afterwards. It shows again the next time the game reports it. \
+                             Drafts and Undo were cleared; details are in the fault log."
+                        }
+                        NotKeptUnshown.get()
                     },
                     MessageKind::Error,
                 );
@@ -3975,14 +3969,16 @@ impl ForgeEditor {
     }
 
     fn finish_batch(&mut self, failure: Option<String>) {
-        const EDITS_RESTORED: Plural = Plural::new("Last applied edit restored", "{n} applied edits restored");
-        const RESTORED: Phrase = Phrase::new("Restored");
-        const STEP_FAILED: Phrase = Phrase::new("{completed} of {total} drafts applied and confirmed; {step} was not applied. {message}");
-        const SOME_RESTORED: Phrase = Phrase::new("{completed} of {total} edits restored. {message}");
-        const SOME_APPLIED: Phrase = Phrase::new("{completed} of {total} drafts applied and confirmed. {message}");
-        const ALL_RESTORED: Phrase = Phrase::new("Previous values restored; readback confirmed.");
-        const CONFIRMED: Plural = Plural::new("Edit readback confirmed: {names}.", "{n} drafts applied. Edit readback confirmed for each: {names}.");
-        const ONE_WAY: Phrase = Phrase::new("This change is one-way: the game would not give the old rarity back, so Undo apply cannot reverse it.");
+        phrases! {
+            EditsRestored: "Last applied edit restored" | "{n} applied edits restored"
+            Restored: "Restored"
+            StepFailed: "{completed} of {total} drafts applied and confirmed; {step} was not applied. {message}"
+            SomeRestored: "{completed} of {total} edits restored. {message}"
+            SomeApplied: "{completed} of {total} drafts applied and confirmed. {message}"
+            AllRestored: "Previous values restored; readback confirmed."
+            Confirmed: "Edit readback confirmed: {names}." | "{n} drafts applied. Edit readback confirmed for each: {names}."
+            OneWay: "This change is one-way: the game would not give the old rarity back, so Undo apply cannot reverse it."
+        }
         let Some(batch) = self.batch.take() else {
             return;
         };
@@ -4003,9 +3999,9 @@ impl ForgeEditor {
                 self.history.insert(
                     0,
                     AppliedEntry {
-                        name: UNDO.into(),
-                        summary: EDITS_RESTORED.count(batch.completed),
-                        outcome: RESTORED.into(),
+                        name: tr::Undo.into(),
+                        summary: EditsRestored.count(batch.completed),
+                        outcome: Restored.into(),
                         time: (self.clock)(),
                         effect: String::new(),
                     },
@@ -4019,21 +4015,21 @@ impl ForgeEditor {
                 match (batch.completed, batch.undoing, &batch.failed) {
                     (0, ..) => message,
                     // "{applied} of {count} drafts applied and confirmed; {step} was not applied."
-                    (completed, false, Some(step)) => STEP_FAILED.with(&[("completed", &completed), ("total", &batch.total), ("step", step), ("message", &message)]),
+                    (completed, false, Some(step)) => StepFailed.with(&[("completed", &completed), ("total", &batch.total), ("step", step), ("message", &message)]),
                     (completed, undoing, _) => {
-                        let phrase = if undoing { SOME_RESTORED } else { SOME_APPLIED };
+                        let phrase = if undoing { SomeRestored } else { SomeApplied };
                         phrase.with(&[("completed", &completed), ("total", &batch.total), ("message", &message)])
                     }
                 },
                 MessageKind::Error,
             );
         } else if batch.undoing {
-            self.say(ALL_RESTORED, MessageKind::Confirmed);
+            self.say(AllRestored, MessageKind::Confirmed);
         } else {
-            let mut message = CONFIRMED.with(batch.total, &[("names", &list(&batch.names, Conjunction::And))]);
+            let mut message = Confirmed.with(batch.total, &[("names", &list(&batch.names, Conjunction::And))]);
             if batch.one_way {
                 message.push(' ');
-                message.push_str(ONE_WAY.get());
+                message.push_str(OneWay.get());
             }
             self.say(message, MessageKind::Confirmed);
         }

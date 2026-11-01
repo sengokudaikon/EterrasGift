@@ -1,7 +1,7 @@
 //! Game-specific retained bootstrap and verified transport. Construction is inert.
 //! Native work is serialized by the trainer worker. Drop never stops/unloads code.
 
-use super::residency::{RESTART_REQUIRED, Residency};
+use super::residency::{HelperRestartRequired, Residency};
 
 use crate::{
     backend::{BackendError, ErrorKind},
@@ -152,7 +152,7 @@ impl NativePreparer {
                         BackendError::waiting(ErrorKind::NotReady, "The helper is still leaving Last Epoch. Connecting again once it has gone."),
                         entry.residency(),
                     )),
-                    Residency::Gone | Residency::Stuck => Err(failed(BackendError::blocked(ErrorKind::RestartRequired, RESTART_REQUIRED), entry.residency())),
+                    Residency::Gone | Residency::Stuck => Err(failed(BackendError::blocked(ErrorKind::RestartRequired, HelperRestartRequired), entry.residency())),
                 },
                 RetainedState::Uncertain(failure) => Err(failed(BackendError::blocked(ErrorKind::RestartRequired, failure.to_string()), entry.residency())),
                 RetainedState::Attempting => Err(failed(
@@ -336,7 +336,7 @@ impl Transport for VerifiedTransport {
             };
             match state {
                 Residency::Gone => return Ok(()),
-                Residency::Stuck => return Err(transport_error(RESTART_REQUIRED, Delivery::MayHaveRun)),
+                Residency::Stuck => return Err(transport_error(HelperRestartRequired, Delivery::MayHaveRun)),
                 _ => tokio::time::sleep(Duration::from_millis(25)).await,
             }
         }
@@ -357,7 +357,7 @@ impl Transport for VerifiedTransport {
                         failure: TransportFailure::Departed,
                     });
                 }
-                Residency::Stuck => return Err(transport_error(RESTART_REQUIRED, Delivery::NotSent)),
+                Residency::Stuck => return Err(transport_error(HelperRestartRequired, Delivery::NotSent)),
             }
             if let Some(reason) = &record.rejected {
                 return Err(transport_error(reason, Delivery::NotSent));

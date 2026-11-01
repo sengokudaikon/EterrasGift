@@ -9,7 +9,7 @@
 
 use crate::definitions::catalog::{CatalogIdentity, GameCatalog};
 use crate::definitions::entries::{AffixDefinition, Availability};
-use eg_core::phrase::Phrase;
+use eg_i18n::Phrase;
 use eg_trainer_wire::{
     forge::{AffixSnapshot, ForgeSnapshot},
     process::ProcessIdentity,

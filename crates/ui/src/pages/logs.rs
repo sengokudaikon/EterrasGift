@@ -6,7 +6,7 @@ use crate::{
     LogsState, MainWindow, background,
     shell::{Page, ShellHandle},
 };
-use eg_core::phrase::Phrase;
+use eg_i18n::phrases;
 use eg_trainer::backend::BackendHandle;
 use slint::{ComponentHandle, ModelRc, VecModel};
 use std::{
@@ -18,17 +18,19 @@ use std::{
     time::Duration,
 };
 
-const APP: Phrase = Phrase::new("Eterra's Gift");
-const GAME: Phrase = Phrase::new("Last Epoch");
-const NO_SOURCES: Phrase = Phrase::new("No log files are configured for this run.");
-const NO_REPORTS: Phrase = Phrase::new("No fault reports have been written.");
-const EMPTY: Phrase = Phrase::new("This log is empty.");
-const RECENT: Phrase = Phrase::new("Showing the latest part of the log. Refreshes every two seconds while open.");
-const REFRESHES: Phrase = Phrase::new("Refreshes every two seconds while open.");
-const RECENT_REPORTS: Phrase = Phrase::new("Showing up to eight recent fault reports. Refreshes every two seconds while open.");
-const READ_FAILED: Phrase = Phrase::new("Could not read {path}: {error}");
-const CONNECTION: Phrase = Phrase::new("Trainer connection\nState: {phase}\nProcess: {process}\nGame log: {gate}\nError: {error}\n");
-const NO_TRAINER: Phrase = Phrase::new("The trainer is not running.");
+phrases! {
+    App: "Eterra's Gift"
+    Game: "Last Epoch"
+    NoSources: "No log files are configured for this run."
+    NoReports: "No fault reports have been written."
+    Empty: "This log is empty."
+    Recent: "Showing the latest part of the log. Refreshes every two seconds while open."
+    Refreshes: "Refreshes every two seconds while open."
+    RecentReports: "Showing up to eight recent fault reports. Refreshes every two seconds while open."
+    ReadFailed: "Could not read {path}: {error}"
+    Connection: "Trainer connection\nState: {phase}\nProcess: {process}\nGame log: {gate}\nError: {error}\n"
+    NoTrainer: "The trainer is not running."
+}
 
 const TAIL_BYTES: usize = 256 * 1024;
 const REPORT_BYTES: usize = 32 * 1024;
@@ -64,7 +66,7 @@ fn tail(path: &Path, limit: usize) -> io::Result<(String, bool)> {
 }
 
 fn read_error(path: &Path, error: &io::Error) -> String {
-    READ_FAILED.with(&[("path", &path.display()), ("error", error)])
+    ReadFailed.with(&[("path", &path.display()), ("error", error)])
 }
 
 impl LogFiles {
@@ -72,11 +74,11 @@ impl LogFiles {
         let (text, notice) = match tail(&self.game, TAIL_BYTES) {
             Ok((text, truncated)) => {
                 let notice = if text.is_empty() {
-                    EMPTY
+                    Empty
                 } else if truncated {
-                    RECENT
+                    Recent
                 } else {
-                    REFRESHES
+                    Refreshes
                 };
                 (text, notice.get().to_owned())
             }
@@ -127,7 +129,7 @@ impl LogFiles {
         }
         let mut sections = vec![connection];
         if reports.is_empty() {
-            sections.push(NO_REPORTS.get().to_owned());
+            sections.push(NoReports.get().to_owned());
         }
         for (_, path) in reports {
             let text = match tail(&path, REPORT_BYTES) {
@@ -140,7 +142,7 @@ impl LogFiles {
         Contents {
             location: directories.iter().map(|path| path.display().to_string()).collect::<Vec<_>>().join("\n"),
             text: sections.join("\n\n"),
-            notice: RECENT_REPORTS.get().to_owned(),
+            notice: RecentReports.get().to_owned(),
         }
     }
 }
@@ -165,7 +167,7 @@ pub(crate) fn bind(window: &MainWindow, files: Option<LogFiles>, backend: Option
     });
     window
         .global::<LogsState>()
-        .set_sources(ModelRc::new(VecModel::from(vec![APP.get().into(), GAME.get().into()])));
+        .set_sources(ModelRc::new(VecModel::from(vec![App.get().into(), Game.get().into()])));
     window.global::<LogsState>().on_refresh({
         let binding = binding.clone();
         move || binding.refresh(false)
@@ -210,10 +212,10 @@ pub(crate) fn bind(window: &MainWindow, files: Option<LogFiles>, backend: Option
 impl Binding {
     fn connection(&self) -> String {
         self.backend.as_ref().map_or_else(
-            || NO_TRAINER.get().to_owned(),
+            || NoTrainer.get().to_owned(),
             |backend| {
                 backend.peek(|snapshot| {
-                    CONNECTION.with(&[
+                    Connection.with(&[
                         ("phase", &format!("{:?}", snapshot.phase)),
                         ("process", &format!("{:?}", snapshot.detected)),
                         ("gate", &format!("{:?}", snapshot.gate)),
@@ -236,7 +238,7 @@ impl Binding {
             state.set_location("".into());
         }
         let Some(files) = self.files.clone() else {
-            state.set_notice(NO_SOURCES.get().into());
+            state.set_notice(NoSources.get().into());
             state.set_text(if state.get_source() == 0 { self.connection().into() } else { "".into() });
             state.set_loading(false);
             return;

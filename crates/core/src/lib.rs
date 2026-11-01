@@ -14,11 +14,8 @@ pub mod game_log;
 pub mod hashes;
 pub mod instance;
 pub mod json;
-#[allow(unsafe_code)] // Windows/FFI boundary; the rest of the crate denies unsafe.
-pub mod locale;
 pub mod operations;
 pub mod paths;
-pub mod phrase;
 #[allow(unsafe_code)] // Windows/FFI boundary; the rest of the crate denies unsafe.
 pub mod process;
 pub mod settings;

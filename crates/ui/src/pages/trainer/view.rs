@@ -8,8 +8,8 @@ use super::registry::{self, Area, Feature, FeatureValue};
 use super::session::TrainerSession;
 use crate::shell::Page;
 use crate::{FeatureFieldView, FeatureRowKind, FeatureRowModels, FeatureRowPlace, FeatureRowView, FeatureTone, FeatureValueView, MainWindow, Nav, Tokens, TrainerState};
-use eg_core::locale::numbers;
-use eg_core::phrase::Phrase;
+use eg_i18n::locale::numbers;
+use eg_i18n::phrases;
 use slint::{ComponentHandle, Model, ModelRc, SharedString, VecModel, Weak};
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -592,11 +592,11 @@ fn tone(tone: Tone) -> FeatureTone {
 }
 
 fn value_view(id: &str, value: &FeatureValue, number: f64, name: &str, choices: &ModelRc<SharedString>) -> FeatureValueView {
-    const ONE_HIT_KILLS: Phrase = Phrase::new("{name}: one-hit kills");
+    phrases! { OneHitKills: "{name}: one-hit kills" }
     let infinite = registry::infinity(id).is_some_and(|infinity| number == infinity.value);
     FeatureValueView {
         label: value.label.get().into(),
-        accessible_name: if infinite { ONE_HIT_KILLS.with(&[("name", &name)]).into() } else { name.into() },
+        accessible_name: if infinite { OneHitKills.with(&[("name", &name)]).into() } else { name.into() },
         unit: if infinite { "" } else { value.unit.unwrap_or_default() }.into(),
         choice: !value.choices.is_empty(),
         choices: choices.clone(),

@@ -4,7 +4,7 @@
 //! version.dll is left alone.
 
 use eg_core::operations::Cancellation;
-use eg_core::phrase::Phrase;
+use eg_i18n::phrases;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant, SystemTime};
 
@@ -12,11 +12,13 @@ use std::time::{Duration, Instant, SystemTime};
 pub const PROXY_NAME: &str = "version.dll";
 /// The proxy set aside beside itself, so the game starts without MelonLoader.
 pub const SET_ASIDE_NAME: &str = "version.dll.disabled";
-/// Why nothing is done with MelonLoader while both are there; each place adds what to do.
-pub const CONFLICT: Phrase = Phrase::new("The game folder has both version.dll and version.dll.disabled. Delete the older one, then try again.");
-const NO_LOADER: Phrase = Phrase::new("MelonLoader isn't in the game folder, so no mod can load.");
-const NO_LOADER_IN_FOLDER: Phrase = Phrase::new("MelonLoader isn't in the folder chosen in Settings, or its version.dll isn't in the game folder, so no mod can load.");
-const NOT_RENAMED: Phrase = Phrase::new("MelonLoader's {file} could not be renamed: {error}");
+phrases! {
+    /// Why nothing is done with MelonLoader while both are there; each place adds what to do.
+    pub Conflict: "The game folder has both version.dll and version.dll.disabled. Delete the older one, then try again."
+    NoLoader: "MelonLoader isn't in the game folder, so no mod can load."
+    NoLoaderInFolder: "MelonLoader isn't in the folder chosen in Settings, or its version.dll isn't in the game folder, so no mod can load."
+    NotRenamed: "MelonLoader's {file} could not be renamed: {error}"
+}
 /// How long a start with mods waits for MelonLoader's log before it sets the proxy aside again all the same.
 pub const LOADER_TIMEOUT: Duration = Duration::from_secs(120);
 
@@ -108,7 +110,7 @@ impl ModLoaderSwitch {
     pub fn set_aside(&self) -> Result<(), String> {
         match self.state() {
             ModLoaderState::Active => rename(&self.proxy(), &self.set_aside_path()),
-            ModLoaderState::Conflict => Err(CONFLICT.into()),
+            ModLoaderState::Conflict => Err(Conflict.into()),
             _ => Ok(()),
         }
     }
@@ -125,9 +127,9 @@ impl ModLoaderSwitch {
     /// before it changes Mods\ or the settings. Ok is the state the proxy is in: Active or SetAside.
     pub fn check_restore(&self) -> Result<ModLoaderState, String> {
         match self.state() {
-            ModLoaderState::Conflict => Err(CONFLICT.into()),
-            ModLoaderState::NotInstalled if eg_core::paths::same_folder(&self.loader_root, &self.game_directory) => Err(NO_LOADER.into()),
-            ModLoaderState::NotInstalled => Err(NO_LOADER_IN_FOLDER.into()),
+            ModLoaderState::Conflict => Err(Conflict.into()),
+            ModLoaderState::NotInstalled if eg_core::paths::same_folder(&self.loader_root, &self.game_directory) => Err(NoLoader.into()),
+            ModLoaderState::NotInstalled => Err(NoLoaderInFolder.into()),
             state => Ok(state),
         }
     }
@@ -152,7 +154,7 @@ impl ModLoaderSwitch {
 }
 
 fn rename(from: &Path, to: &Path) -> Result<(), String> {
-    std::fs::rename(from, to).map_err(|error| NOT_RENAMED.with(&[("file", &PROXY_NAME), ("error", &error)]))
+    std::fs::rename(from, to).map_err(|error| NotRenamed.with(&[("file", &PROXY_NAME), ("error", &error)]))
 }
 
 #[cfg(test)]
@@ -180,7 +182,7 @@ mod tests {
 
         fs::write(game.join(SET_ASIDE_NAME), b"older").unwrap();
         assert_eq!(switch.state(), ModLoaderState::Conflict);
-        assert_eq!(switch.set_aside().unwrap_err(), CONFLICT.get());
+        assert_eq!(switch.set_aside().unwrap_err(), Conflict.get());
         assert!(switch.restore().is_err());
     }
 

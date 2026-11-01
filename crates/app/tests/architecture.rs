@@ -15,7 +15,7 @@ use syn::visit::{self, Visit};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Tier {
-    /// Generic readers that name neither this app nor the game: anything may use them, and they use only each other.
+    /// Generic libraries that name neither this app nor the game: anything may use them, and they use only each other.
     Library,
     /// A live IL2CPP runtime through its exports: game-neutral like a library, but in-game code only.
     Il2CppRuntime,
@@ -32,7 +32,7 @@ enum Tier {
 
 fn tier(name: &str) -> Tier {
     match name {
-        "eg-binary" | "eg-il2cpp-metadata" => Tier::Library,
+        "eg-binary" | "eg-i18n" | "eg-il2cpp-metadata" => Tier::Library,
         "eg-il2cpp-runtime" => Tier::Il2CppRuntime,
         "eg-core" => Tier::Shared,
         "eg-companion" => Tier::Companion,

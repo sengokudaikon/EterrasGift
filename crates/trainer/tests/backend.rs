@@ -1210,7 +1210,7 @@ fn unproven_departure_requires_restart_and_even_retry_cannot_reload_that_game() 
         let state = handle.snapshot();
         assert_eq!(state.phase, Phase::Blocked);
         assert_eq!(state.retained_helper.unwrap().residency, backend::HelperResidency::Stuck);
-        assert_eq!(state.error.unwrap().message, backend::HELPER_RESTART_REQUIRED.get());
+        assert_eq!(state.error.unwrap().message, backend::HelperRestartRequired.get());
         assert_eq!(command(&handle, Command::Retry).await.unwrap_err().kind, ErrorKind::RestartRequired);
         assert_eq!(shared.count("connect"), 1);
         assert_eq!(shared.count("disconnect"), 1);

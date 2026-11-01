@@ -3,7 +3,7 @@
 
 use super::description::{SettingChoice, SettingDescription};
 use super::invalid;
-use eg_core::phrase::Phrase;
+use eg_i18n::phrases;
 use serde_json::Value as JsonValue;
 use std::collections::{BTreeMap, HashSet};
 use std::fs;
@@ -12,17 +12,19 @@ use std::ops::Range;
 use std::path::Path;
 use toml_edit::{Document, Table, Value};
 
-const ENTER_WHOLE: Phrase = Phrase::new("Enter a whole number, like 2.");
-const ENTER_NUMBER: Phrase = Phrase::new("Enter a number, with a dot for decimals (like 1.5).");
-const WHOLE_BETWEEN: Phrase = Phrase::new("Enter a whole number from {min} to {max}.");
-const WHOLE_AT_LEAST: Phrase = Phrase::new("Enter a whole number of {min} or more.");
-const WHOLE_AT_MOST: Phrase = Phrase::new("Enter a whole number of {max} or less.");
-const NUMBER_BETWEEN: Phrase = Phrase::new("Enter a number from {min} to {max}.");
-const NUMBER_AT_LEAST: Phrase = Phrase::new("Enter a number of {min} or more.");
-const NUMBER_AT_MOST: Phrase = Phrase::new("Enter a number of {max} or less.");
-const WAS_ON: Phrase = Phrase::new("Was on");
-const WAS_OFF: Phrase = Phrase::new("Was off");
-const WAS: Phrase = Phrase::new("Was {value}");
+phrases! {
+    EnterWhole: "Enter a whole number, like 2."
+    EnterNumber: "Enter a number, with a dot for decimals (like 1.5)."
+    WholeBetween: "Enter a whole number from {min} to {max}."
+    WholeAtLeast: "Enter a whole number of {min} or more."
+    WholeAtMost: "Enter a whole number of {max} or less."
+    NumberBetween: "Enter a number from {min} to {max}."
+    NumberAtLeast: "Enter a number of {min} or more."
+    NumberAtMost: "Enter a number of {max} or less."
+    WasOn: "Was on"
+    WasOff: "Was off"
+    Was: "Was {value}"
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PreferenceKind {
@@ -397,20 +399,20 @@ impl ModSetting {
         }
         let whole = self.kind == PreferenceKind::WholeNumber;
         if self.number().is_none() {
-            return Some(if whole { ENTER_WHOLE } else { ENTER_NUMBER }.into());
+            return Some(if whole { EnterWhole } else { EnterNumber }.into());
         }
         let format = |value| PreferenceValue::Float(value).format();
         match (self.min, self.max) {
-            (Some(min), Some(max)) => Some(if whole { WHOLE_BETWEEN } else { NUMBER_BETWEEN }.with(&[("min", &format(min)), ("max", &format(max))])),
-            (Some(min), None) => Some(if whole { WHOLE_AT_LEAST } else { NUMBER_AT_LEAST }.with(&[("min", &format(min))])),
-            (None, Some(max)) => Some(if whole { WHOLE_AT_MOST } else { NUMBER_AT_MOST }.with(&[("max", &format(max))])),
+            (Some(min), Some(max)) => Some(if whole { WholeBetween } else { NumberBetween }.with(&[("min", &format(min)), ("max", &format(max))])),
+            (Some(min), None) => Some(if whole { WholeAtLeast } else { NumberAtLeast }.with(&[("min", &format(min))])),
+            (None, Some(max)) => Some(if whole { WholeAtMost } else { NumberAtMost }.with(&[("max", &format(max))])),
             _ => None,
         }
     }
 
     pub fn was_text(&self) -> String {
         if self.kind == PreferenceKind::Switch {
-            return if self.was == Some(PreferenceValue::Bool(true)) { WAS_ON } else { WAS_OFF }.into();
+            return if self.was == Some(PreferenceValue::Bool(true)) { WasOn } else { WasOff }.into();
         }
         let value = self.was.as_ref().map(PreferenceValue::format).unwrap_or_default();
         let label = self
@@ -418,7 +420,7 @@ impl ModSetting {
             .iter()
             .find(|choice| choice.value == value)
             .map_or(value.as_str(), |choice| choice.label.as_str());
-        WAS.with(&[("value", &label)])
+        Was.with(&[("value", &label)])
     }
 
     pub fn revert(&mut self) {

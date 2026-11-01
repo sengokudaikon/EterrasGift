@@ -14,7 +14,7 @@ use eg_ui::pages::forge::{
     ForgeHandle,
     editor::{Cell, ForgeEditor},
     item::Seal,
-    rows::LOADING,
+    rows::Loading,
 };
 use eg_ui::{ForgeState, Nav, Tip};
 use slint::platform::{PointerEventButton, WindowEvent};
@@ -667,13 +667,13 @@ impl Drop for Forge {
 
 /// No value table or unique description is still on its way.
 fn settled(editor: &ForgeEditor) -> bool {
-    editor.affixes.iter().all(|row| row.value.status() != LOADING.get())
+    editor.affixes.iter().all(|row| row.value.status() != Loading.get())
         && editor
             .uniques
             .iter()
             .chain(&editor.implicits)
             .flat_map(|row| &row.rolls)
-            .all(|roll| roll.editor.status() != LOADING.get())
+            .all(|roll| roll.editor.status() != Loading.get())
 }
 
 impl Forge {

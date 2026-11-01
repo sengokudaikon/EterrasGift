@@ -1,6 +1,7 @@
 //! What the worker runs on: the game's processes (`ProcessLocator`), the preparation of a connection (`Connector`),
 //! the connection itself (`BackendConnection`, which a helper `Session` is) and the clock.
 use super::*;
+use eg_i18n::phrases;
 
 pub trait ProcessLocator: Send + 'static {
     /// Query identities only. A matching filename alone is not an attachment.
@@ -19,7 +20,7 @@ pub trait Connector: Send + 'static {
     fn connect(&mut self, target: ProcessIdentity, now: Timestamp) -> impl Future<Output = Result<Self::Connection, BackendError>> + Send;
 }
 
-pub const HELPER_RESTART_REQUIRED: eg_core::phrase::Phrase = eg_core::phrase::Phrase::new("The helper couldn't leave the game. Restart Last Epoch before playing online.");
+phrases! { pub HelperRestartRequired: "The helper couldn't leave the game. Restart Last Epoch before playing online." }
 
 pub trait BackendConnection: Send + 'static {
     fn target(&self) -> &ProcessIdentity;
