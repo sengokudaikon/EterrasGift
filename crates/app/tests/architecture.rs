@@ -282,6 +282,11 @@ fn the_desktop_links_no_il2cpp_code() {
         assert!(in_helper || unit["target"]["name"] != "eg_trainer_helper", "the desktop links the helper's code");
         // The helper has a reactor and rules of its own.
         assert!(!in_helper || unit["target"]["name"] != "eg_runtime", "the helper links the desktop's runtime");
+        let features = unit["features"].as_array().unwrap();
+        assert!(
+            !in_helper || unit["target"]["name"] != "tokio" || !features.iter().any(|feature| feature == "process"),
+            "the desktop's Tokio features reach the helper: {features:?}"
+        );
         pending.extend(unit["dependencies"].as_array().unwrap().iter().map(|d| (d["index"].as_u64().unwrap(), in_helper)));
     }
     assert!(helper, "the embedded helper has no IL2CPP runtime");

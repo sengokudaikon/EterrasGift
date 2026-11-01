@@ -9,6 +9,7 @@ use eg_companion::mods::{
 };
 use eg_companion::{game::folders, mods::dotnet};
 use eg_core::settings::SettingsStore;
+use eg_runtime::Tasks;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::thread::{self, JoinHandle};
@@ -20,9 +21,9 @@ pub struct Companion {
 }
 
 impl Companion {
-    pub fn new(store: &SettingsStore) -> Self {
+    pub fn new(store: &SettingsStore, tasks: Tasks) -> Self {
         let mods = ModWorker::new(ModLibrary::new(store.paths().mod_library_directory.clone()));
-        let sources = Arc::new(ModSources::new(Arc::new(SystemProcessRunner)));
+        let sources = Arc::new(ModSources::new(Arc::new(SystemProcessRunner::new(tasks))));
         // Locations are read once: new choices wait for a restart.
         let host = FileGameHost::new(store.active_game_executable(), &folders::player_log(), store.active_melon_loader_directory()).with_mod_worker(mods.clone());
         let launcher = Arc::new(GameLauncher::new(Arc::new(host)));

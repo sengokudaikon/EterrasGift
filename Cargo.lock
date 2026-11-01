@@ -1329,6 +1329,7 @@ dependencies = [
  "dotscope",
  "eg-core",
  "eg-i18n",
+ "eg-runtime",
  "jiff",
  "regex",
  "serde_json",
@@ -1343,6 +1344,7 @@ name = "eg-core"
 version = "0.1.0"
 dependencies = [
  "eg-i18n",
+ "eg-runtime",
  "jiff",
  "regex",
  "serde_json",
@@ -1398,6 +1400,7 @@ dependencies = [
 name = "eg-runtime"
 version = "0.1.0"
 dependencies = [
+ "tempfile",
  "tokio",
  "tokio-util",
 ]
@@ -5246,6 +5249,7 @@ dependencies = [
  "libc",
  "mio",
  "pin-project-lite",
+ "signal-hook-registry",
  "socket2",
  "tokio-macros",
  "windows-sys 0.61.2",

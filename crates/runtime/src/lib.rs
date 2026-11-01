@@ -15,16 +15,23 @@
 
 #![forbid(unsafe_code)]
 
+pub mod process;
+
 use std::future::Future;
 use std::io;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
+use std::time::Duration;
 use tokio::runtime::{Builder, Handle};
 use tokio_util::task::TaskTracker;
 
 pub use tokio::task::{JoinError, JoinHandle};
 pub use tokio_util::sync::CancellationToken;
+
+/// How long the close waits for what no task accounts for: Tokio's own blocking reads of a child's pipes, which a stray
+/// descendant can hold open for as long as it runs. All accepted work has ended by then.
+const CLOSE_GRACE: Duration = Duration::from_secs(3);
 
 /// The runtime has begun to close and accepts no new work.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -52,8 +59,7 @@ impl Runtime {
                 tracker.close();
                 tracker.wait().await;
             });
-            // Last, so nothing already accepted is cut off: this also waits out any blocking work that slipped in as the close began.
-            drop(runtime);
+            runtime.shutdown_timeout(CLOSE_GRACE);
         })?;
         Ok(Self { tasks, reactor: Some(reactor) })
     }
@@ -124,6 +130,12 @@ impl Tasks {
             },
             &self.handle,
         ))
+    }
+
+    /// Waits on this thread for a future, such as a [`JoinHandle`], for code that is synchronous and already off the UI
+    /// thread. Never call it inside a task on the reactor: Tokio panics rather than deadlock.
+    pub fn block_on<F: Future>(&self, future: F) -> F::Output {
+        self.handle.block_on(future)
     }
 
     /// Cancelled when the runtime closes. Cancelling it, or a child of it, stops only the work that holds that token.

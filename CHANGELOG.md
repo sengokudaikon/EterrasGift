@@ -3,6 +3,10 @@
 What the rewrite can do, newest first, one line per feature. Add a line when a feature lands; details live in the
 code and its tests, and what is still to build in [research/trainer-features.md](research/trainer-features.md).
 
+## 2026-11-01
+
+- Mods: a build tool left running no longer stalls reading or building mod projects, or closing the app.
+
 ## 2026-10-31
 
 - Trainer: reveal the map through the game's normal fog update, preserving larger reveal radii and the position argument.

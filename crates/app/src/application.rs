@@ -22,7 +22,7 @@ pub fn run(startup: Startup) -> Result<ExitCode, slint::PlatformError> {
     startup::install_panic_hook(faults.clone());
     let runtime = Runtime::start().expect("the runtime for background work starts");
     eg_ui::background::install(runtime.tasks());
-    let companion = Companion::new(&store);
+    let companion = Companion::new(&store, runtime.tasks());
     let discovery = companion.discover();
     let window = MainWindow::new();
     // Everything the window and the trainer's checks say from here on is in the user's language.

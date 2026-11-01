@@ -346,10 +346,6 @@ msgid "Cannot start {program}: {error}"
 msgstr ""
 
 #: crates/companion/src/mods/sources.rs
-msgid "Reading build errors failed."
-msgstr ""
-
-#: crates/companion/src/mods/sources.rs
 msgid "Reading build output failed."
 msgstr ""
 

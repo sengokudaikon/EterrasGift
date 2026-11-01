@@ -3,13 +3,13 @@
 
 use super::assembly::{LoaderVersion, MelonAssembly};
 use eg_core::operations::Cancellation;
+use eg_runtime::{Closed, Tasks, process};
 use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet};
 use std::ffi::OsString;
 use std::fs;
-use std::io::{self, Read};
+use std::io;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, SystemTime};
@@ -20,7 +20,6 @@ phrases! {
     Cancelled: "The operation was cancelled."
     CannotStart: "Cannot start {program}: {error}"
     OutputFailed: "Reading build output failed."
-    ErrorsFailed: "Reading build errors failed."
     Exited: "{program} exited with {code}.\n{output}"
     ScanPanicked: "Reading mod projects panicked."
     ScanNotStarted: "Reading mod projects could not start: {error}"
@@ -140,80 +139,55 @@ pub trait ProcessRunner: Send + Sync {
     fn run(&self, request: &ProcessRequest, cancel: &Cancellation) -> Result<String, ProcessError>;
 }
 
-#[derive(Default)]
-pub struct SystemProcessRunner;
+/// Runs real programs on the runtime. It waits on the calling thread, so call it off the UI thread.
+pub struct SystemProcessRunner {
+    tasks: Tasks,
+}
 
-impl ProcessRunner for SystemProcessRunner {
-    fn run(&self, request: &ProcessRequest, cancel: &Cancellation) -> Result<String, ProcessError> {
-        if cancel.is_cancelled() {
-            return Err(ProcessError::Cancelled);
-        }
-        let mut command = Command::new(&request.executable);
-        command
-            .args(&request.arguments)
-            .current_dir(&request.directory)
-            .stdin(Stdio::null())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .env("DOTNET_CLI_TELEMETRY_OPTOUT", "1")
-            .env("DOTNET_NOLOGO", "1")
-            .env("DOTNET_SKIP_FIRST_TIME_EXPERIENCE", "1");
-        no_window(&mut command);
-        let mut child = command
-            .spawn()
-            .map_err(|error| ProcessError::Start(CannotStart.with(&[("program", &request.executable.display()), ("error", &error)])))?;
-        let stdout = child.stdout.take().expect("stdout was piped");
-        let stderr = child.stderr.take().expect("stderr was piped");
-        // Drain both pipes concurrently, even after reaching the capture bound, or a noisy compiler can block forever.
-        let output = std::thread::spawn(move || drain(stdout));
-        let errors = std::thread::spawn(move || drain(stderr));
-        let status = loop {
-            if cancel.is_cancelled() {
-                kill_tree(&mut child);
-                let _ = child.wait();
-                break Err(ProcessError::Cancelled);
-            }
-            match child.try_wait() {
-                Ok(Some(status)) => break Ok(status),
-                Ok(None) => std::thread::sleep(POLL),
-                Err(error) => {
-                    kill_tree(&mut child);
-                    let _ = child.wait();
-                    break Err(ProcessError::Failed(error.to_string()));
-                }
-            }
-        };
-        let output = output.join().map_err(|_| ProcessError::Failed(OutputFailed.into()));
-        let errors = errors.join().map_err(|_| ProcessError::Failed(ErrorsFailed.into()));
-        let status = status?;
-        let output = output?.map_err(|error| ProcessError::Failed(error.to_string()))?;
-        let errors = errors?.map_err(|error| ProcessError::Failed(error.to_string()))?;
-        if cancel.is_cancelled() {
-            return Err(ProcessError::Cancelled);
-        }
-        if !status.success() {
-            let name = request.executable.file_name().unwrap_or_default().to_string_lossy();
-            let captured = format!("{output}\n{errors}");
-            return Err(ProcessError::Failed(Exited.with(&[
-                ("program", &name),
-                ("code", &status.code().unwrap_or(-1)),
-                ("output", &bounded_text(&captured, OUTPUT_LIMIT)),
-            ])));
-        }
-        Ok(output.trim().to_owned())
+impl SystemProcessRunner {
+    pub fn new(tasks: Tasks) -> Self {
+        Self { tasks }
     }
 }
 
-fn drain(mut reader: impl Read) -> io::Result<String> {
-    let mut captured = Vec::new();
-    let mut buffer = [0_u8; 8192];
-    loop {
-        let count = reader.read(&mut buffer)?;
-        if count == 0 {
-            return Ok(String::from_utf8_lossy(&captured).into_owned());
+impl ProcessRunner for SystemProcessRunner {
+    fn run(&self, request: &ProcessRequest, cancel: &Cancellation) -> Result<String, ProcessError> {
+        let mut command = process::Command::new(&request.executable);
+        command
+            .args(&request.arguments)
+            .current_dir(&request.directory)
+            .env("DOTNET_CLI_TELEMETRY_OPTOUT", "1")
+            .env("DOTNET_NOLOGO", "1")
+            .env("DOTNET_SKIP_FIRST_TIME_EXPERIENCE", "1");
+        let cancel = cancel.clone();
+        // Refused only once the runtime has closed: the app is on its way out.
+        let task = self
+            .tasks
+            .spawn(async move { process::run(command, OUTPUT_LIMIT, &cancel).await })
+            .map_err(|Closed| ProcessError::Cancelled)?;
+        let output = self
+            .tasks
+            .block_on(task)
+            .map_err(|_| ProcessError::Failed(OutputFailed.into()))?
+            .map_err(|error| match error {
+                process::Error::Start(error) => ProcessError::Start(CannotStart.with(&[("program", &request.executable.display()), ("error", &error)])),
+                process::Error::Failed(error) => ProcessError::Failed(error.to_string()),
+                process::Error::Cancelled => ProcessError::Cancelled,
+            })?;
+        if !output.status.success() {
+            let name = request.executable.file_name().unwrap_or_default().to_string_lossy();
+            let captured = format!(
+                "{}
+{}",
+                output.stdout, output.stderr
+            );
+            return Err(ProcessError::Failed(Exited.with(&[
+                ("program", &name),
+                ("code", &output.status.code().unwrap_or(-1)),
+                ("output", &bounded_text(&captured, OUTPUT_LIMIT)),
+            ])));
         }
-        let keep = count.min(OUTPUT_LIMIT - captured.len());
-        captured.extend_from_slice(&buffer[..keep]);
+        Ok(output.stdout.trim().to_owned())
     }
 }
 
@@ -223,31 +197,6 @@ fn bounded_text(text: &str, limit: usize) -> &str {
         end -= 1;
     }
     &text[..end]
-}
-
-fn no_window(command: &mut Command) {
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        command.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
-    }
-    #[cfg(not(windows))]
-    let _ = command;
-}
-
-fn kill_tree(child: &mut std::process::Child) {
-    #[cfg(windows)]
-    {
-        // Only our captured compiler's PID is used; descendants can otherwise keep the output pipes open.
-        let mut kill = Command::new("taskkill.exe");
-        kill.args(["/PID", &child.id().to_string(), "/T", "/F"])
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null());
-        no_window(&mut kill);
-        let _ = kill.status();
-    }
-    let _ = child.kill();
 }
 
 type Stamp = Vec<(String, Option<SystemTime>)>;

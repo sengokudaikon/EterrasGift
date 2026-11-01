@@ -390,8 +390,7 @@ fn updates_compare_project_versions_and_installability_compares_hashes() {
 }
 
 #[test]
-fn process_capture_keeps_draining_after_the_bound_and_compiler_errors_are_limited() {
-    assert_eq!(drain(io::Cursor::new(vec![b'a'; OUTPUT_LIMIT + 1000])).unwrap().len(), OUTPUT_LIMIT);
+fn compiler_errors_are_limited() {
     let output = (0..9).map(|index| format!("file.cs: error E{index}: broken\n")).collect::<String>();
     assert_eq!(compiler_errors(&output, Path::new("unused")).lines().count(), 5);
     assert_eq!(bounded_text("abé", 3), "ab");
@@ -405,10 +404,27 @@ fn process_runner_distinguishes_pre_cancelled_work_from_a_missing_executable() {
         arguments: Vec::new(),
         directory: temp.path().to_path_buf(),
     };
+    let runtime = eg_runtime::Runtime::start().unwrap();
+    let runner = SystemProcessRunner::new(runtime.tasks());
     let cancel = Cancellation::default();
-    assert!(matches!(SystemProcessRunner.run(&request, &cancel), Err(ProcessError::Start(_))));
+    assert!(matches!(runner.run(&request, &cancel), Err(ProcessError::Start(_))));
     cancel.cancel();
-    assert_eq!(SystemProcessRunner.run(&request, &cancel), Err(ProcessError::Cancelled));
+    assert_eq!(runner.run(&request, &cancel), Err(ProcessError::Cancelled));
+    assert!(!runtime.shutdown());
+}
+
+#[test]
+fn process_runner_says_cancelled_once_the_runtime_has_closed() {
+    let temp = tempfile::tempdir().unwrap();
+    let request = ProcessRequest {
+        executable: temp.path().join("does-not-exist.exe"),
+        arguments: Vec::new(),
+        directory: temp.path().to_path_buf(),
+    };
+    let runtime = eg_runtime::Runtime::start().unwrap();
+    let runner = SystemProcessRunner::new(runtime.tasks());
+    assert!(!runtime.shutdown());
+    assert_eq!(runner.run(&request, &Cancellation::default()), Err(ProcessError::Cancelled));
 }
 
 #[test]
