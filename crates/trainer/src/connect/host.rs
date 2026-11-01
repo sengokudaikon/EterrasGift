@@ -19,26 +19,25 @@ use std::{
     sync::Arc,
 };
 
-/// The trainer helper DLL the app was built with (embedded in its exe), known by content: its SHA-256 and the source
-/// ID compiled into it, which the session checks against what the loaded helper reports.
+/// The trainer helper DLL the app was built with (embedded in its exe), known by content: its SHA-256 is its build ID,
+/// which the helper is given at bootstrap and the session checks against what the loaded helper reports.
 #[derive(Clone, Debug)]
 pub struct HelperPackage {
     bytes: &'static [u8],
     sha256: String,
-    source_id: String,
 }
 
 impl HelperPackage {
     pub fn new(bytes: &'static [u8]) -> Result<Self, String> {
+        HelperLayout::parse(bytes).map_err(|e| format!("The embedded trainer helper is not usable: {e}"))?;
         Ok(Self {
-            source_id: HelperLayout::compiled_source_id(bytes).map_err(|e| format!("The embedded trainer helper is not usable: {e}"))?,
-            sha256: eg_core::hashes::of_bytes(bytes),
+            sha256: file_ops::hashes::of_bytes(bytes),
             bytes,
         })
     }
 
-    pub fn source_id(&self) -> &str {
-        &self.source_id
+    pub fn sha256(&self) -> &str {
+        &self.sha256
     }
 
     /// The file the helper is loaded from: `eg_trainer_helper-<SHA-256 prefix>.dll` in `folder`. A game keeps a loaded
@@ -48,11 +47,11 @@ impl HelperPackage {
         let path = folder.join(format!("eg_trainer_helper-{}.dll", &self.sha256[..16]));
         let same = std::fs::File::open(&path)
             .ok()
-            .and_then(|file| eg_core::hashes::of_reader(file).ok())
+            .and_then(|file| file_ops::hashes::of_reader(file).ok())
             .is_some_and(|hash| hash.eq_ignore_ascii_case(&self.sha256));
         if !same {
             std::fs::create_dir_all(folder)
-                .and_then(|()| eg_core::atomic::write(&path, self.bytes))
+                .and_then(|()| file_ops::atomic::write(&path, self.bytes))
                 .map_err(|e| BackendError::blocked(ErrorKind::NotReady, format!("The trainer helper could not be written to {}: {e}", path.display())))?;
         }
         Ok(path)
@@ -72,8 +71,8 @@ impl GameProcesses {
 impl ProcessLocator for GameProcesses {
     async fn find(&mut self) -> Result<Vec<ProcessIdentity>, BackendError> {
         let mut named = Vec::new();
-        eg_core::process::each(|pid, executable| {
-            if eg_core::process::is_named(executable, &self.executable_name) {
+        win_process::each(|pid, executable| {
+            if win_process::is_named(executable, &self.executable_name) {
                 named.push(pid);
             }
         })
@@ -118,17 +117,16 @@ impl<F: LogFactory + Clone> Connector for DesktopConnector<F> {
         }
         // Repeat the gate before opening even local helper inputs. SessionConnector
         // repeats it around preparation and transport as usual.
-        let started = eg_core::time::from_filetime(target.created).map_err(|e| BackendError::blocked(ErrorKind::Identity, e.to_string()))?;
+        let started = win_process::from_filetime(target.created).map_err(|e| BackendError::blocked(ErrorKind::Identity, e.to_string()))?;
         let decision = gate::evaluate(&self.logs.create(&target)?.read(started), started, now);
         if decision.verdict != GateVerdict::Allow {
             return Err(BackendError::waiting(ErrorKind::Gate, "Load an offline character to connect."));
         }
         if self.session.is_none() {
             let dll = self.helper.file_in(&self.folder)?;
-            let artifact =
-                Arc::new(HelperArtifact::capture(&dll, &self.helper.sha256, &self.helper.source_id).map_err(|e| BackendError::blocked(ErrorKind::Identity, e.to_string()))?);
+            let artifact = Arc::new(HelperArtifact::capture(&dll, &self.helper.sha256).map_err(|e| BackendError::blocked(ErrorKind::Identity, e.to_string()))?);
             let preparer = NativePreparer::new(artifact.clone());
-            self.session = Some(SessionConnector::new(preparer, self.logs.clone(), artifact.source_id())?);
+            self.session = Some(SessionConnector::new(preparer, self.logs.clone(), artifact.sha256())?);
         }
         self.session.as_mut().unwrap().connect(target, now).await
     }
@@ -142,8 +140,7 @@ mod tests {
     fn package(bytes: &'static [u8]) -> HelperPackage {
         HelperPackage {
             bytes,
-            sha256: eg_core::hashes::of_bytes(bytes),
-            source_id: "0".repeat(64),
+            sha256: file_ops::hashes::of_bytes(bytes),
         }
     }
 

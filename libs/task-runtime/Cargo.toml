@@ -1,0 +1,17 @@
+[package]
+name = "task-runtime"
+description = "The desktop's background work on Tokio: one owned reactor thread and blocking pool, with a close barrier and a record of panics. It names neither this app nor the game."
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[dependencies]
+# Features only this crate needs stay here rather than on the workspace's tokio.
+tokio = { workspace = true, features = ["macros", "process"] }
+tokio-util.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+
+[lints]
+workspace = true

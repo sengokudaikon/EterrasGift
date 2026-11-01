@@ -1,4 +1,4 @@
-use eg_i18n::phrases;
+use phrases::phrases;
 
 phrases! {
     pub OverrideRequired: "This edit needs \"I know what I'm doing\" in Settings. Nothing was applied."

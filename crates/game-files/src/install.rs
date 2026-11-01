@@ -1,14 +1,14 @@
 //! Where an installed Last Epoch keeps the data this crate reads, and the reads themselves.
 
-use crate::archive::Archive;
 use crate::definitions::{self, Definitions};
-use crate::player::PlayerData;
-use crate::strings::{self, SHARED_TABLE, STRING_TABLE, Strings};
 use crate::uniques::{self, PlayerDefinitions};
-use crate::value::Value;
-use eg_binary::{Error, Result};
+use binary_reader::{Error, Result};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
+use unity_files::archive::Archive;
+use unity_files::player::PlayerData;
+use unity_files::strings::{self, SHARED_TABLE, STRING_TABLE, Strings};
+use unity_files::value::Value;
 
 const DATA_FOLDER: &str = "Last Epoch_Data";
 const AFFIX_LIST: (&str, &str, &str) = ("LE", "", "AffixList");

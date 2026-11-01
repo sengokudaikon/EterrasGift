@@ -2,7 +2,8 @@
 //! of the score-event/first-kill trigger and objective visibility. Read only the pulse's metadata-checked field;
 //! lastKill and MethodInfo are forwarded unchanged, and already revealed objectives stay revealed after off.
 use super::{prefix::Code, registry::*};
-use crate::{game::*, hooks::leaf::LeafEffect};
+use crate::game::*;
+use native_hooks::leaf::LeafEffect;
 
 pub(crate) const FEATURE: HookFeature = HookFeature {
     controls: &[GameplayHook::RevealObjective],

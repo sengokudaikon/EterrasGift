@@ -1,9 +1,7 @@
 //! Select the next mysterious-rift encounter through the game's Boolean choice.
 use super::registry::{Behavior, GameplayHook, GameplayHookTarget, HookFeature, MethodSpec, Targets};
-use crate::{
-    game::{GameError, RuntimeAccess},
-    hooks::leaf::LeafEffect,
-};
+use crate::game::{GameError, RuntimeAccess};
+use native_hooks::leaf::LeafEffect;
 use std::ptr::NonNull;
 
 pub(super) const FEATURE: HookFeature = HookFeature {

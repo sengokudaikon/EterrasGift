@@ -11,8 +11,8 @@ use crate::launch::launcher::{LaunchReport, StartingWithMods};
 use crate::launch::loader::ModLoaderState;
 use eg_core::bloom::BloomPhase;
 use eg_core::game_log::GameReadiness;
-use eg_flow::{Effects, Feature, Panicked, Tracked};
-use eg_i18n::{Phrase, phrases};
+use flow::{Effects, Feature, Panicked, Tracked};
+use phrases::{Phrase, phrases};
 use std::borrow::Cow;
 
 phrases! {
@@ -311,7 +311,7 @@ impl HomeModel {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use eg_flow::step;
+    use flow::step;
 
     fn send(state: &mut State, intent: Intent) -> Vec<Effect> {
         step::<Home>(state, intent)

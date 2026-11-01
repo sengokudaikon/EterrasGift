@@ -17,8 +17,8 @@ use syn::visit::{self, Visit};
 enum Tier {
     /// Generic libraries that name neither this app nor the game: anything may use them, and they use only each other.
     Library,
-    /// A live IL2CPP runtime through its exports: game-neutral like a library, but in-game code only.
-    Il2CppRuntime,
+    /// Libraries for code inside a running game (a live IL2CPP runtime, function hooks): game-neutral, but in-game code only.
+    InGame,
     Shared,
     Wire,
     /// The game's shipped data files, read without the game. Like the kernel and the wire, it builds only on libraries.
@@ -32,8 +32,8 @@ enum Tier {
 
 fn tier(name: &str) -> Tier {
     match name {
-        "eg-binary" | "eg-i18n" | "eg-il2cpp-metadata" | "eg-flow" | "eg-flow-slint" | "eg-runtime" => Tier::Library,
-        "eg-il2cpp-runtime" => Tier::Il2CppRuntime,
+        "binary-reader" | "file-ops" | "flow" | "flow-slint" | "il2cpp-metadata" | "phrases" | "task-runtime" | "unity-files" | "win-process" => Tier::Library,
+        "il2cpp-runtime" | "native-hooks" => Tier::InGame,
         "eg-core" => Tier::Shared,
         "eg-companion" => Tier::Companion,
         "eg-trainer" | "eg-trainer-helper" => Tier::Trainer,
@@ -71,7 +71,18 @@ fn workspace() -> &'static Workspace {
         // is still listed, so only what is on disk counts.
         let files = output(
             "git",
-            &["ls-files", "-z", "--cached", "--others", "--exclude-standard", "--", "Cargo.toml", "crates", "tools"],
+            &[
+                "ls-files",
+                "-z",
+                "--cached",
+                "--others",
+                "--exclude-standard",
+                "--",
+                "Cargo.toml",
+                "crates",
+                "libs",
+                "tools",
+            ],
             &root,
         );
         let files: BTreeSet<_> = files
@@ -134,7 +145,7 @@ fn cargo_dependencies_preserve_the_tiers_including_tools() {
             let from = tier(&package.name);
             let to = tier(dependency);
             assert!(
-                !matches!(from, Tier::Library | Tier::Il2CppRuntime | Tier::Shared | Tier::Wire | Tier::GameFiles) || to == Tier::Library,
+                !matches!(from, Tier::Library | Tier::InGame | Tier::Shared | Tier::Wire | Tier::GameFiles) || to == Tier::Library,
                 "{} depends on first-party {dependency}",
                 package.name
             );
@@ -149,8 +160,8 @@ fn cargo_dependencies_preserve_the_tiers_including_tools() {
             if to == Tier::GameAccess {
                 assert!(matches!(from, Tier::Trainer | Tier::Tool), "{} directly reaches game access", package.name);
             }
-            if to == Tier::Il2CppRuntime {
-                assert!(matches!(from, Tier::GameAccess | Tier::Trainer | Tier::Tool), "{} reaches the IL2CPP runtime", package.name);
+            if to == Tier::InGame {
+                assert!(matches!(from, Tier::GameAccess | Tier::Trainer | Tier::Tool), "{} reaches in-game code", package.name);
             }
         }
     }
@@ -315,11 +326,11 @@ fn the_desktop_links_no_il2cpp_code() {
         }
         let unit = &units[index as usize];
         let in_helper = in_helper || kind(unit, "cdylib");
-        helper |= in_helper && unit["target"]["name"] == "eg_il2cpp_runtime";
-        assert!(in_helper || unit["target"]["name"] != "eg_il2cpp_runtime", "the desktop links the IL2CPP runtime");
+        helper |= in_helper && unit["target"]["name"] == "il2cpp_runtime";
+        assert!(in_helper || unit["target"]["name"] != "il2cpp_runtime", "the desktop links the IL2CPP runtime");
         assert!(in_helper || unit["target"]["name"] != "eg_trainer_helper", "the desktop links the helper's code");
         // The helper has a reactor and rules of its own.
-        assert!(!in_helper || unit["target"]["name"] != "eg_runtime", "the helper links the desktop's runtime");
+        assert!(!in_helper || unit["target"]["name"] != "task_runtime", "the helper links the desktop's runtime");
         let features = unit["features"].as_array().unwrap();
         assert!(
             !in_helper || unit["target"]["name"] != "tokio" || !features.iter().any(|feature| feature == "process"),

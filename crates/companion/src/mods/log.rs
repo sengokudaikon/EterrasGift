@@ -8,7 +8,7 @@ use std::io;
 use std::path::Path;
 use std::time::Duration;
 
-use eg_i18n::phrases;
+use phrases::phrases;
 
 phrases! {
     ClosedEarly: "The game closed before MelonLoader finished loading mods."
@@ -95,7 +95,7 @@ impl MelonLog {
     /// Rust's Windows file reader shares read/write/delete, allowing MelonLoader to keep writing this log.
     pub fn read(path: &Path) -> io::Result<Self> {
         let bytes = fs::read(path)?;
-        Ok(Self::parse(eg_core::text::strip_bom(&String::from_utf8_lossy(&bytes))))
+        Ok(Self::parse(file_ops::text::strip_bom(&String::from_utf8_lossy(&bytes))))
     }
 
     pub fn parse(text: &str) -> Self {

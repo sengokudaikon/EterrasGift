@@ -1,24 +1,21 @@
 mod gameplay_hooks;
 use crate::dispatch::{Dispatcher, Pending};
+use crate::game::{GameError, RuntimeAccess, WriteError, presence::PlayPresence};
 use crate::{
-    BUILD_ID, BUILD_ID_C,
     server::{self, Backend, Shared},
     watchdog::Watchdog,
 };
-use crate::{
-    game::{GameError, RuntimeAccess, WriteError, presence::PlayPresence},
-    hooks::{self, HookState, RetainedHook, callback::CallbackGate},
+use eg_trainer_wire::{
+    protocol::{Discovery, DispatcherSpec, Request, Response, ResponseCode, RuntimeStatus, is_build_id},
+    write::ForgeWrite,
 };
-use eg_il2cpp_runtime::{
+use il2cpp_runtime::{
     AttachedThread, ThreadContext,
     raw::{self, MethodInfo},
 };
-use eg_trainer_wire::{
-    protocol::{Discovery, DispatcherSpec, Request, Response, ResponseCode, RuntimeStatus},
-    write::ForgeWrite,
-};
+use native_hooks::{self, HookState, RetainedHook, callback::CallbackGate};
 use std::{
-    ffi::{CStr, c_char, c_void},
+    ffi::{CStr, c_void},
     os::windows::io::{AsRawHandle, FromRawHandle, OwnedHandle},
     ptr::NonNull,
     sync::{
@@ -44,6 +41,8 @@ static AFFIXES_REGISTERED: AtomicBool = AtomicBool::new(false);
 static WATCHDOG: Mutex<Watchdog> = Mutex::new(Watchdog::new());
 
 static STARTED: AtomicBool = AtomicBool::new(false);
+/// This load's build ID, given by the desktop at bootstrap: the SHA-256 of the DLL it loaded.
+static BUILD_ID: OnceLock<String> = OnceLock::new();
 static STATE: OnceLock<Shared> = OnceLock::new();
 static QUEUE: OnceLock<Dispatcher<Request, Response>> = OnceLock::new();
 #[cfg(feature = "fixture")]
@@ -481,8 +480,9 @@ impl Backend for Control<'_> {
         if let Some(discovery) = &self.discovery {
             return Ok(discovery.clone());
         }
+        let build_id = BUILD_ID.get().ok_or_else(|| server::failure(ResponseCode::NotReady, "The helper has no build ID"))?.clone();
         // SAFETY: exact initialized runtime and current-thread attachment established by bootstrap.
-        let found = unsafe { self.access.discover(self.attached, BUILD_ID.into(), self.module, self.size) }.map_err(game_failure)?;
+        let found = unsafe { self.access.discover(self.attached, build_id, self.module, self.size) }.map_err(game_failure)?;
         self.discovery = Some(found.discovery.clone());
         Ok(found.discovery)
     }
@@ -519,7 +519,7 @@ impl Backend for Control<'_> {
             }
             let hook = self.hook.unwrap();
             match hook.state() {
-                HookState::Disabled => hooks::commit(&[(hook, true)]).map_err(|error| server::failure(ResponseCode::RestartRequired, error.to_string()))?,
+                HookState::Disabled => native_hooks::commit(&[(hook, true)]).map_err(|error| server::failure(ResponseCode::RestartRequired, error.to_string()))?,
                 HookState::Enabled => {}
                 HookState::Unknown => return Err(server::failure(ResponseCode::RestartRequired, "Dispatcher entry ownership is unknown")),
             }
@@ -566,7 +566,7 @@ fn restore_and_drain(hook: Option<&RetainedHook>, gate: Option<&CallbackGate>) -
     {
         // SAFETY: the control thread owns the target and all generated code is
         // retained. Closing the gate prevents new helper calls during restoration.
-        unsafe { hooks::commit(&[(hook, false)]) }.map_err(|error| error.to_string())?;
+        unsafe { native_hooks::commit(&[(hook, false)]) }.map_err(|error| error.to_string())?;
     }
     let deadline = Instant::now() + Duration::from_secs(5);
     while gate.is_some_and(|gate| gate.active() != 0) {
@@ -730,9 +730,10 @@ pub unsafe extern "system" fn eg_helper_bootstrap(parameter: *mut c_void) -> u32
     // SAFETY: the caller supplies aligned, nonaliased configuration memory for this thread.
     let config = unsafe { &mut *parameter.cast::<BootstrapConfig>() };
     let result = std::panic::catch_unwind(|| {
+        let build_id = std::str::from_utf8(&config.build_id).ok().filter(|id| is_build_id(id));
         if config.magic != bootstrap::MAGIC || config.size != bootstrap::SIZE as u32
             // SAFETY: argument-free process identity query.
-            || config.pid != unsafe { GetCurrentProcessId() } || config.build_id != BUILD_ID.as_bytes()
+            || config.pid != unsafe { GetCurrentProcessId() } || build_id.is_none()
             || config.owner_pid == 0 || config.owner_created == 0 || config.reserved != 0
         {
             return 60;
@@ -740,16 +741,13 @@ pub unsafe extern "system" fn eg_helper_bootstrap(parameter: *mut c_void) -> u32
         if state().owner.set((config.owner_pid, config.owner_created)).is_err() {
             return 1;
         }
+        let _ = BUILD_ID.set(build_id.unwrap_or_default().to_owned());
         // SAFETY: validated configuration and the caller's supported runtime contract.
         unsafe { start_authorized() }
     })
     .unwrap_or(99);
     config.status = result;
     result as u32
-}
-#[unsafe(no_mangle)]
-pub extern "C" fn eg_helper_build_id() -> *const c_char {
-    BUILD_ID_C.as_ptr().cast()
 }
 #[cfg(test)]
 mod tests {
@@ -793,7 +791,7 @@ mod tests {
                 owner_pid: 42,
                 owner_created: 123,
                 // SAFETY: local identity query, no game runtime involved.
-                ..BootstrapConfig::new(unsafe { GetCurrentProcessId() }, BUILD_ID.as_bytes().try_into().unwrap())
+                ..BootstrapConfig::new(unsafe { GetCurrentProcessId() }, [b'a'; 64])
             };
             match invalid {
                 0 => config.magic = 0,

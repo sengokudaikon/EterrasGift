@@ -1,8 +1,8 @@
 //! Immutable feature descriptions and local intent, with no game access. Native support follows from a hook's
 //! identity (`eg_trainer_wire::hooks::GameplayHook`); a descriptor grants no permission to install a hook.
 
-use eg_i18n::{Phrase, phrases};
 use eg_trainer_wire::hooks::{GameplayHook, ValueKind};
+use phrases::{Phrase, phrases};
 use std::collections::{BTreeMap, BTreeSet};
 use std::error::Error;
 use std::fmt;
@@ -138,7 +138,7 @@ impl FeatureValue {
     pub fn start_text(&self) -> String {
         match self.choices.get(self.start as usize) {
             Some(choice) => choice.get().to_owned(),
-            None => eg_i18n::locale::numbers().plain(self.start),
+            None => phrases::locale::numbers().plain(self.start),
         }
     }
 

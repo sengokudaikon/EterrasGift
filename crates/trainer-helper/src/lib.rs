@@ -3,8 +3,6 @@
 //! explicitly after loader initialization; exposed code is retained.
 #![deny(unsafe_code)]
 
-include!(concat!(env!("OUT_DIR"), "/identity.rs"));
-
 pub mod dispatch;
 
 #[cfg(all(windows, target_arch = "x86_64"))]
@@ -14,14 +12,11 @@ mod engine;
 #[allow(unsafe_code)] // The live IL2CPP runtime; the rest of the crate denies unsafe.
 pub mod game;
 #[cfg(all(windows, target_arch = "x86_64"))]
-#[allow(unsafe_code)] // Entry-point detours; the rest of the crate denies unsafe.
-pub mod hooks;
-#[cfg(all(windows, target_arch = "x86_64"))]
 #[allow(unsafe_code)] // Windows/FFI boundary; the rest of the crate denies unsafe.
 pub mod server;
 
 #[cfg(all(windows, target_arch = "x86_64"))]
-pub use engine::{eg_helper_bootstrap, eg_helper_build_id};
+pub use engine::eg_helper_bootstrap;
 
 #[cfg(all(windows, target_arch = "x86_64"))]
 mod watchdog;

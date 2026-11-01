@@ -2,8 +2,8 @@
 //! damage the current player takes, scaled to a percentage, and damage its foes take, multiplied or made a one-hit
 //! kill. Its code follows the metadata-validated layout below and keeps its state in the gate's slots.
 
-use crate::hooks::leaf::{EFFECT_SLOTS, FRAME, GeneratedEffect, LeafEffect};
 use eg_trainer_wire::hooks::GameplayHook;
+use native_hooks::leaf::{EFFECT_SLOTS, FRAME, GeneratedEffect, LeafEffect};
 use std::ptr::NonNull;
 
 use super::registry::{Behavior, ControlSetting, GameplayHookTarget, HookFeature, MethodSpec, OFF, SharedSettings, Targets};
@@ -231,8 +231,8 @@ fn code(layout: DamageLayout) -> Vec<u8> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::hooks::leaf::LeafGate;
     use eg_trainer_wire::hooks::GameplayHook::{EnemyDamage, IncomingDamage};
+    use native_hooks::leaf::LeafGate;
     use std::{
         cell::Cell,
         ptr::NonNull,

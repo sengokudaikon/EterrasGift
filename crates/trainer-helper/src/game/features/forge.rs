@@ -9,11 +9,11 @@ use crate::game::{
     apply::{WriteError, stored, uncertain},
     metadata_text, target,
 };
-use eg_il2cpp_runtime::{Argument, AttachedThread, InvocationContext, InvocationOutcome, ReturnValue, Scalar, raw};
 use eg_trainer_wire::{
     forge::ForgeSnapshot,
     write::{AffixRolls, ForgeMutation, RollArray, StatusField},
 };
+use il2cpp_runtime::{Argument, AttachedThread, InvocationContext, InvocationOutcome, ReturnValue, Scalar, raw};
 use std::{ffi::CStr, ptr::NonNull};
 
 impl RuntimeAccess {
@@ -542,7 +542,7 @@ impl RuntimeAccess {
                         write_api.set_u8(affix, field, value);
                     }
                     for (element, value) in roll_stores {
-                        eg_il2cpp_runtime::metadata::write_bytes(element, &[value]);
+                        il2cpp_runtime::metadata::write_bytes(element, &[value]);
                     }
                     Ok(())
                 },
@@ -615,7 +615,7 @@ impl RuntimeAccess {
 mod tests {
     use super::*;
     use crate::game::test_fakes::{self, roots, token};
-    use eg_il2cpp_runtime::ThreadContext;
+    use il2cpp_runtime::ThreadContext;
     use std::{
         cell::Cell,
         ffi::{CStr, c_char},

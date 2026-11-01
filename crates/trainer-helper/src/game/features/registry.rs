@@ -1,9 +1,9 @@
 //! Helper-owned patch groups and method contracts. Each feature supplies its own targets and behavior.
 use super::stat::StatFeature;
 use crate::game::*;
-use crate::hooks::leaf::LeafEffect;
-use crate::hooks::postfix::PostfixEffect;
 pub(crate) use eg_trainer_wire::hooks::GameplayHook;
+use native_hooks::leaf::LeafEffect;
+use native_hooks::postfix::PostfixEffect;
 mod shared;
 pub(crate) use shared::{ControlSetting, OFF, SharedSettings};
 

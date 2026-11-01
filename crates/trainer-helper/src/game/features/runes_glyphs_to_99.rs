@@ -3,7 +3,8 @@ use super::{
     materials::{self, Code, FLOOR},
     registry::{Behavior, GameplayHook, GameplayHookTarget, HookFeature, MethodSpec, Targets},
 };
-use crate::{game::*, hooks::leaf::LeafEffect};
+use crate::game::*;
+use native_hooks::leaf::LeafEffect;
 
 pub(super) const FEATURE: HookFeature = HookFeature {
     controls: &[GameplayHook::RunesGlyphsTo99],

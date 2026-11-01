@@ -1,8 +1,6 @@
 use super::*;
-use crate::{
-    game::features::{runes_glyphs_to_99::SlotLayout, shards_to_99::ShardLayout},
-    hooks::leaf::LeafGate,
-};
+use crate::game::features::{runes_glyphs_to_99::SlotLayout, shards_to_99::ShardLayout};
+use native_hooks::leaf::LeafGate;
 use std::{
     cell::Cell,
     sync::atomic::{AtomicBool, AtomicU8, AtomicUsize, Ordering::SeqCst},

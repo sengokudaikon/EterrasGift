@@ -1,14 +1,12 @@
 //! Before-original numeric gains. Each feature owns its signature, selection and precedence; the shared arithmetic
 //! rounds positive gains halfway away from zero and clamps before converting, including at the Int64 boundary.
 //! All paths tail-call the original exactly once. No helper address, stack frame, runtime call or rollback is needed.
-use crate::{
-    game::*,
-    hooks::{
-        emit,
-        leaf::{FRAME, GeneratedEffect, LeafEffect},
-    },
-};
+use crate::game::*;
 use eg_trainer_wire::hooks::GameplayHook;
+use native_hooks::{
+    emit,
+    leaf::{FRAME, GeneratedEffect, LeafEffect},
+};
 use std::ops::{Deref, DerefMut};
 
 struct Code {

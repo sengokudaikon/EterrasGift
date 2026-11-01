@@ -4,10 +4,10 @@
 use crate::shell::{Page, ShellHandle};
 use crate::{LogsState, MainWindow};
 use eg_core::logs::{Effect, Intent, LogFiles, Logs, Source, State, WATCH_INTERVAL, read};
-use eg_flow::{Host, Intents, Slice, Store, Subscriptions, Version};
-use eg_flow_slint::{Background, every};
-use eg_i18n::phrases;
 use eg_trainer::backend::BackendHandle;
+use flow::{Host, Intents, Slice, Store, Subscriptions, Version};
+use flow_slint::{Background, every};
+use phrases::phrases;
 use slint::{ComponentHandle, Weak};
 
 phrases! {

@@ -1,7 +1,7 @@
 //! The trainer's pages and features: what each row is, says and takes. Data only; whether a connected game can run a
 //! feature is the connection's to say.
 use super::*;
-use eg_i18n::Phrase;
+use phrases::Phrase;
 pub static PAGES: &[TrainerPage] = &[
     TrainerPage {
         area: TrainerArea::Character,

@@ -10,11 +10,11 @@ use crate::definitions::cache::CatalogCache;
 use crate::definitions::catalog::{CatalogIdentity, EXTRACTION_VERSION, GameLocale};
 use crate::definitions::files::{self, FileCatalog, Fingerprint, SAVED_LOCALE};
 use eg_core::fault::FaultLog;
-use eg_runtime::{CancellationToken, Tasks};
 use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
+use task_runtime::{CancellationToken, Tasks};
 use tokio::sync::{mpsc, oneshot, watch};
 
 /// The index of the saved catalog: the folder and the files it was read from.
@@ -166,7 +166,7 @@ struct Service {
 
 impl Service {
     fn serve(&mut self, folder: &Path, again: bool) -> GameData {
-        let same_folder = self.folder.as_deref().is_some_and(|kept| eg_core::paths::same_folder(kept, folder));
+        let same_folder = self.folder.as_deref().is_some_and(|kept| file_ops::paths::same_folder(kept, folder));
         let kept = self.publish.borrow().clone();
         if !again
             && same_folder
@@ -264,7 +264,7 @@ impl Store {
         if index["version"].as_u64() != Some(INDEX_VERSION) || index["extraction_version"].as_u64() != Some(u64::from(EXTRACTION_VERSION)) {
             return Ok(None);
         }
-        if !eg_core::paths::same_folder(Path::new(&text("folder")?), folder) {
+        if !file_ops::paths::same_folder(Path::new(&text("folder")?), folder) {
             return Ok(None);
         }
         let sources = index["sources"]
@@ -310,7 +310,7 @@ impl Store {
         let saved = catalog.saved().map_err(|e| format!("{e:?}"))?;
         self.cache.save(&saved).map_err(|e| e.to_string())?;
         let names: serde_json::Map<String, Value> = catalog.names().iter().map(|(code, names)| (code.clone(), names.to_json())).collect();
-        eg_core::atomic::write(
+        file_ops::atomic::write(
             &self.directory.join(NAMES_FILE),
             serde_json::to_string(&Value::Object(names)).unwrap_or_default().as_bytes(),
         )
@@ -335,7 +335,7 @@ impl Store {
             "updated_at": catalog.updated_at.map(|time| time.to_string()),
             "sources": sources,
         });
-        eg_core::atomic::write(&self.directory.join(INDEX_FILE), serde_json::to_string_pretty(&index).unwrap_or_default().as_bytes()).map_err(|e| e.to_string())
+        file_ops::atomic::write(&self.directory.join(INDEX_FILE), serde_json::to_string_pretty(&index).unwrap_or_default().as_bytes()).map_err(|e| e.to_string())
     }
 }
 
@@ -375,7 +375,7 @@ mod tests {
         let mut read = catalog(game.path());
         read.updated_at = Some("2026-10-21T17:15:00Z".parse().unwrap());
         Store::new(data.path().to_path_buf()).save(game.path(), &read).unwrap();
-        let owner = eg_runtime::Runtime::start().unwrap();
+        let owner = task_runtime::Runtime::start().unwrap();
         let service = start(None, Some(data.path().to_path_buf()), None, &owner.tasks());
         assert_eq!(service.current(), GameData::NoGame);
         let GameData::Ready(loaded) = runtime.block_on(service.for_folder(game.path())) else {

@@ -1,0 +1,15 @@
+[package]
+name = "win-process"
+description = "The processes running on Windows: a read-only census by ID and executable name, and file times. Opens no process. Names no app or game."
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[dependencies]
+jiff.workspace = true
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { workspace = true, features = ["Win32_Foundation", "Win32_System_Diagnostics_ToolHelp"] }
+
+[lints]
+workspace = true

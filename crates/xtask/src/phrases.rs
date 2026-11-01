@@ -12,7 +12,7 @@ use std::process::Command;
 
 const TEMPLATE: &str = "lang/eterras-gift.pot";
 /// Where `phrases!` is defined: its arms spell out the calls with metavariables, not with words.
-const MACRO_DEFINITION: &str = "crates/i18n/src/macros.rs";
+const MACRO_DEFINITION: &str = "libs/phrases/src/macros.rs";
 const NEWLINE: &str = "\r\n";
 
 /// One phrase as the sources write it: its context, its English (a plural's singular) and a plural's other form.
@@ -41,6 +41,8 @@ pub fn run(root: &Path, check: bool) -> Result<(), String> {
     };
     let mut sources = Vec::new();
     rust_files(&root.join("crates"), &mut sources)?;
+    // The one library with words of its own: how lists are joined.
+    rust_files(&root.join("libs/phrases/src"), &mut sources)?;
     sources.sort();
     for path in &sources {
         let file = relative(root, path);

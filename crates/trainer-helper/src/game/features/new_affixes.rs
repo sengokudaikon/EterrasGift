@@ -4,8 +4,8 @@
 //! base lists them and they weigh nothing.
 use crate::game::apply::uncertain;
 use crate::game::{Class, GameError, Images, Method, Root, RuntimeAccess, WriteError, metadata_text, target};
-use eg_il2cpp_runtime::{Argument, AttachedThread, InvocationContext, InvocationOutcome, ReturnValue, Scalar, raw};
 use eg_trainer_wire::new_affixes::{MARKER, NewAffix, StatLine, TIERS};
+use il2cpp_runtime::{Argument, AttachedThread, InvocationContext, InvocationOutcome, ReturnValue, Scalar, raw};
 use std::{
     collections::BTreeSet,
     ffi::{CStr, CString},

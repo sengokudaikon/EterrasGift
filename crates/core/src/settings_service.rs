@@ -1,14 +1,14 @@
 //! One owner for settings IO. Callers enqueue changes; reads clone a cached snapshot and never wait for disk.
 //! Revisions order observations, not game writes. Failed local persistence remains explicit and retryable.
 
-use crate::json;
 use crate::paths::AppPaths;
 use crate::settings::{AppSettings, Locations, SettingsStore};
-use eg_runtime::{CancellationToken, JoinHandle, Tasks};
+use file_ops::json;
 use serde_json::{Map, Value};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
+use task_runtime::{CancellationToken, JoinHandle, Tasks};
 use tokio::sync::{mpsc, watch};
 
 type Patch = Box<dyn FnOnce(&mut Map<String, Value>) -> Result<(), String> + Send>;

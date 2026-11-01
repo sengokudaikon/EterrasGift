@@ -4,8 +4,8 @@
 mod collections;
 
 use super::{Class, GameError, Ptr, Root, RuntimeAccess, copy_values, metadata_text, target, unsupported};
-use eg_il2cpp_runtime::{AttachedThread, raw};
 use eg_trainer_wire::fields::ObservedObjectIdentity;
+use il2cpp_runtime::{AttachedThread, raw};
 use std::ffi::CStr;
 
 pub(crate) fn decode_text(units: &[u16], maximum: usize) -> Result<String, GameError> {
@@ -231,7 +231,7 @@ impl RuntimeAccess {
 mod tests {
     use super::*;
     use crate::game::test_fakes::{self, frees, roots, token};
-    use eg_il2cpp_runtime::ThreadContext;
+    use il2cpp_runtime::ThreadContext;
     use std::cell::Cell;
     use std::ptr::NonNull;
 
@@ -502,7 +502,7 @@ mod tests {
         assert!(matches!(
             // SAFETY: the fake root export deliberately returns failure, before child metadata access.
             unsafe { access.reference(&attached, &parent, c"child", token(CHILD_CLASS)) },
-            Err(eg_il2cpp_runtime::MetadataError::Runtime(eg_il2cpp_runtime::RuntimeError::RootFailed))
+            Err(il2cpp_runtime::MetadataError::Runtime(il2cpp_runtime::RuntimeError::RootFailed))
         ));
         assert_eq!(roots(), 1);
         assert_eq!(frees(), 0);

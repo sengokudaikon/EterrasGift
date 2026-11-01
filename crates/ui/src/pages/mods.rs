@@ -10,13 +10,13 @@ use eg_companion::mods::{
     sources::ModSources,
     worker::ModWorker,
 };
-use eg_core::operations::Cancellation;
 use eg_core::settings_service::SettingsService;
-use eg_flow::{Host, Intents, Slice, Store, Subscriptions, Version};
-use eg_flow_slint::{Background, Rows, every};
-use eg_i18n::phrases;
+use flow::{Host, Intents, Slice, Store, Subscriptions, Version};
+use flow_slint::{Background, Rows, every};
+use phrases::phrases;
 use slint::{ComponentHandle, Model, ModelRc, SharedString, VecModel, Weak};
 use std::cell::RefCell;
+use task_runtime::CancellationToken;
 
 use std::path::PathBuf;
 use std::rc::Rc;
@@ -68,7 +68,7 @@ struct Window {
     background: Background,
     window: Weak<MainWindow>,
     closed: OnClosed,
-    build_cancel: Option<Cancellation>,
+    build_cancel: Option<CancellationToken>,
     rows: Rows<ModRow>,
     source_rows: Rows<SourceRow>,
     setting_rows: Rows<ModSettingRow>,
@@ -371,7 +371,7 @@ impl Host<Mods> for Window {
                 self.background.run(intents, move || launcher.play(mode), Intent::Launched);
             }
             Effect::Build { project, root, sdk, install_only } => {
-                let cancel = Cancellation::default();
+                let cancel = CancellationToken::default();
                 self.build_cancel = Some(cancel.clone());
                 let sources = self.services.sources.clone();
                 self.background.run(

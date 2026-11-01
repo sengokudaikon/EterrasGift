@@ -43,7 +43,7 @@ pub unsafe extern "C" fn eg_helper_fixture_transaction_failure() -> u32 {
         // Stock detour applies the dispatcher disable first, rejects this forged
         // second target, and then rolls the dispatcher back. Our wrapper also
         // verifies recovery and reports the intentionally unknown second entry.
-        let outcome = hooks::commit(&[(main, false), (&second, true)]);
+        let outcome = native_hooks::commit(&[(main, false), (&second, true)]);
         let writable = VirtualProtect(address.cast(), 1, PAGE_EXECUTE_READWRITE, &raw mut old);
         if writable == 0 {
             return 5;
@@ -56,7 +56,7 @@ pub unsafe extern "C" fn eg_helper_fixture_transaction_failure() -> u32 {
         }
         // Check the pinned dependency's primary error too: an unrelated
         // suspension failure must not count as exercising partial rollback.
-        if !matches!(outcome,Err(hooks::HookError::Transaction {error,recovery}) if format!("{error:?}")=="TargetModified" && !recovery.is_empty()) {
+        if !matches!(outcome,Err(native_hooks::HookError::Transaction {error,recovery}) if format!("{error:?}")=="TargetModified" && !recovery.is_empty()) {
             return 7;
         }
         if main.state() != HookState::Enabled || second.state() != HookState::Disabled {

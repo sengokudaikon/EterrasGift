@@ -3,7 +3,7 @@
 
 use crate::game::metadata_text;
 use crate::game::{Class, GameError, Images, Root, RuntimeAccess, target, unsupported};
-use eg_il2cpp_runtime::{AttachedThread, metadata::Primitive, raw};
+use il2cpp_runtime::{AttachedThread, metadata::Primitive, raw};
 use std::{ffi::CStr, ptr::NonNull};
 
 fn collection_count(count: i32, capacity: u32, maximum: u32) -> Result<usize, GameError> {
@@ -208,7 +208,7 @@ mod tests {
         Ptr, Type,
         test_fakes::{self, frees, roots, token},
     };
-    use eg_il2cpp_runtime::ThreadContext;
+    use il2cpp_runtime::ThreadContext;
     use std::cell::Cell;
 
     const CHILD: usize = 0x1000;

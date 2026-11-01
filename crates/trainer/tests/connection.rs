@@ -229,7 +229,7 @@ impl HelperPreparer for Prepare {
     async fn prepare(&mut self, target: &ProcessIdentity, profile: &BuildIdentity, admission: &mut dyn AdmissionCheck) -> Result<PreparedHelper<Wire>, PreparationFailure> {
         self.0.record("prepare");
         assert!(profile.helper_build_id().eq_ignore_ascii_case(HELPER));
-        assert!(eg_core::hashes::is_sha256(profile.binary_hash()));
+        assert!(file_ops::hashes::is_sha256(profile.binary_hash()));
         admission.check().map_err(|error| PreparationFailure {
             error,
             residency: PreparationResidency::NotLoaded,

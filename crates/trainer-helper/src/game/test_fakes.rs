@@ -2,7 +2,7 @@
 //! record which objects they hold. Object tokens are identities only; nothing behind them is read.
 
 use super::Ptr;
-use eg_il2cpp_runtime::{ThreadContext, raw};
+use il2cpp_runtime::{ThreadContext, raw};
 use std::{
     cell::{Cell, RefCell},
     collections::BTreeMap,

@@ -2,12 +2,10 @@
 //! item-level test still runs. The class-compatibility and Rune Prison Complex patches own separate ranges in the
 //! same method and can be enabled independently. No reward asset or saved item is changed by this feature.
 use super::{patches::PatchSpec, registry::*};
-use crate::{
-    game::*,
-    hooks::{
-        emit,
-        leaf::{FRAME, GeneratedEffect, LeafEffect},
-    },
+use crate::game::*;
+use native_hooks::{
+    emit,
+    leaf::{FRAME, GeneratedEffect, LeafEffect},
 };
 
 pub(crate) const FEATURE: HookFeature = HookFeature {

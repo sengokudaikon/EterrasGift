@@ -1,14 +1,12 @@
 //! Prepared effect state. The coordinator owns entry transactions; this module adapts the concrete effect families
 //! to close, restore, publish and observe operations. Gameplay calls execute only retained generated code.
 use super::*;
-use crate::{
-    game::{
-        RuntimeAccess, StatBinding,
-        registry::{Behavior, HookFeature, TargetEffect},
-    },
-    hooks::{leaf::LeafGate, postfix::PostfixGate, scalar::ScalarGate},
+use crate::game::{
+    RuntimeAccess, StatBinding,
+    registry::{Behavior, HookFeature, TargetEffect},
 };
-use eg_il2cpp_runtime::{AttachedThread, raw};
+use il2cpp_runtime::{AttachedThread, raw};
+use native_hooks::{leaf::LeafGate, postfix::PostfixGate, scalar::ScalarGate};
 
 pub(super) struct FeatureBinding {
     feature: &'static HookFeature,

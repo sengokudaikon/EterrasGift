@@ -8,7 +8,7 @@ use crate::launch::loader::melon_paths;
 use dotscope::CilAssemblyView;
 use dotscope::metadata::tables::{NestedClassRaw, TableDataOwned, TableId, TypeDefRaw};
 use dotscope::metadata::token::Token;
-use eg_core::atomic;
+use file_ops::atomic;
 use sha2::Sha512;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fs;
@@ -65,7 +65,7 @@ pub struct GeneratorRecord {
 
 pub fn read_generator_record(root: &Path) -> Option<GeneratorRecord> {
     let text = fs::read_to_string(melon_paths::loader(root).join("Dependencies/Il2CppAssemblyGenerator/Config.cfg")).ok()?;
-    let document: DocumentMut = eg_core::text::strip_bom(&text).parse().ok()?;
+    let document: DocumentMut = file_ops::text::strip_bom(&text).parse().ok()?;
     let generator = document.get("Il2CppAssemblyGenerator")?.as_table_like()?;
     Some(GeneratorRecord {
         game_assembly_hash: generator.get("GameAssemblyHash").and_then(|item| item.as_str()).map(str::to_owned),
@@ -77,7 +77,7 @@ fn forces_regeneration(root: &Path) -> bool {
     let Ok(text) = fs::read_to_string(melon_paths::user_data(root).join("Loader.cfg")) else {
         return false;
     };
-    let Ok(document) = eg_core::text::strip_bom(&text).parse::<DocumentMut>() else {
+    let Ok(document) = file_ops::text::strip_bom(&text).parse::<DocumentMut>() else {
         return false;
     };
     document
@@ -106,7 +106,7 @@ pub fn game_assembly_hash(path: &Path) -> io::Result<String> {
     {
         return Ok(known.hash.clone());
     }
-    let hash = eg_core::hashes::digest_reader::<Sha512>(fs::File::open(path)?)?;
+    let hash = file_ops::hashes::digest_reader::<Sha512>(fs::File::open(path)?)?;
     // Do not cache an observation that changed while being read.
     let after = fs::metadata(path)?;
     if metadata.len() != after.len() || after.modified()? != written {

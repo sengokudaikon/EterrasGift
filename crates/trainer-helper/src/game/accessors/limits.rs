@@ -1,8 +1,8 @@
 //! Literal metadata only: the item status bounds the game declares as constants.
 
 use crate::game::{Class, GameError, RuntimeAccess, unsupported};
-use eg_il2cpp_runtime::{AttachedThread, raw};
 use eg_trainer_wire::definitions::{ItemLimits, ValueRange};
+use il2cpp_runtime::{AttachedThread, raw};
 use std::ffi::CStr;
 
 fn range(minimum: u8, maximum: u8) -> Result<ValueRange, GameError> {
@@ -97,7 +97,7 @@ impl RuntimeAccess {
 mod tests {
     use super::*;
     use crate::game::{Ptr, TestExportStub, Type};
-    use eg_il2cpp_runtime::{ThreadContext, raw};
+    use il2cpp_runtime::{ThreadContext, raw};
     use std::{
         cell::Cell,
         ffi::{CString, c_char},

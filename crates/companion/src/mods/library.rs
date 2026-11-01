@@ -7,7 +7,7 @@ use super::assembly::{AssemblyFacts, MelonAssembly};
 use super::invalid;
 use super::preferences::{MelonPreferences, PreferenceChange, PreferenceValue};
 use crate::launch::loader::melon_paths;
-use eg_core::{atomic, hashes, json, paths};
+use file_ops::{atomic, hashes, json};
 use serde_json::{Value, json};
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fs;
@@ -15,7 +15,7 @@ use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
-use eg_i18n::phrases;
+use phrases::phrases;
 
 phrases! {
     NotADll: "{file} is not a DLL. A mod is a .dll file; take it out of a downloaded zip first."
@@ -386,7 +386,7 @@ impl ModLibrary {
         Ok(profile)
     }
     fn load_placed(&self, root: &Path) -> io::Result<PlacedMods> {
-        let root = paths::normalized(root);
+        let root = file_ops::paths::normalized(root);
         let empty = || PlacedMods {
             root: root.clone(),
             ..Default::default()
@@ -411,7 +411,7 @@ impl ModLibrary {
                     .map_err(|_| invalid("placed.json is damaged: its last launch is not a date."))?,
             );
         }
-        if !paths::same_text(&root.to_string_lossy(), saved_root) {
+        if !file_ops::paths::same_text(&root.to_string_lossy(), saved_root) {
             return Ok(empty());
         }
         Ok(placed)
@@ -448,7 +448,7 @@ impl ModLibrary {
         let Ok(mods) = fs::read_dir(&library) else {
             return;
         };
-        let plain_directory = |path: &Path| fs::symlink_metadata(path).is_ok_and(|metadata| paths::is_plain_directory(&metadata));
+        let plain_directory = |path: &Path| fs::symlink_metadata(path).is_ok_and(|metadata| file_ops::paths::is_plain_directory(&metadata));
         for directory in mods.flatten().map(|entry| entry.path()) {
             if !plain_directory(&directory) {
                 continue;
@@ -478,7 +478,7 @@ impl ModLibrary {
 
 /// MelonPreferences.cfg under the folder MelonLoader runs from, for callers that name it from the library.
 /// The hash the library knows a DLL by.
-use eg_core::hashes::of_file as hash_file;
+use file_ops::hashes::of_file as hash_file;
 
 /// A source may be rebuilt between its initial hash and its copy. Publish only the bytes that the record names.
 fn copy_verified(source: &Path, target: &Path, expected: &str) -> io::Result<()> {
@@ -503,7 +503,7 @@ fn load_record(path: &Path) -> io::Result<Option<Value>> {
         Err(error) => return Err(error),
     };
     let name = path.file_name().unwrap().to_string_lossy();
-    let value: Value = serde_json::from_str(eg_core::text::strip_bom(&text)).map_err(|error| invalid(format!("{name} is damaged: {error}")))?;
+    let value: Value = serde_json::from_str(file_ops::text::strip_bom(&text)).map_err(|error| invalid(format!("{name} is damaged: {error}")))?;
     if value.is_null() {
         return Err(invalid(format!("{name} is empty.")));
     }

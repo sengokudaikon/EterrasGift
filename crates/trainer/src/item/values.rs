@@ -355,8 +355,8 @@ impl MappingBuilder {
     pub fn new(expected: ExpectedObservation, request: MappingRequest, context: RawMappingPage, tooltip: Option<&BoundTooltip>) -> Result<Self, MappingError> {
         request.validate(&expected, tooltip)?;
         let identity = expected.catalog_identity();
-        if !eg_core::hashes::is_sha256(&identity.binary_hash)
-            || !eg_core::hashes::is_sha256(&identity.metadata_hash)
+        if !file_ops::hashes::is_sha256(&identity.binary_hash)
+            || !file_ops::hashes::is_sha256(&identity.metadata_hash)
             || identity.extraction_version != crate::definitions::catalog::EXTRACTION_VERSION
         {
             return Err(MappingError::InvalidData);
@@ -437,7 +437,7 @@ impl MappingBuilder {
             self.request.address.target as i32,
             self.request.address.index,
             line,
-            eg_core::hashes::of_bytes(&self.context)
+            file_ops::hashes::of_bytes(&self.context)
         );
         Ok(ValueTable {
             expected: self.expected,

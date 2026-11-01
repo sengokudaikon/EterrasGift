@@ -2,8 +2,6 @@
 //! their output is offered to the library, which places it on the next modded start.
 
 use super::assembly::{LoaderVersion, MelonAssembly};
-use eg_core::operations::Cancellation;
-use eg_runtime::{Closed, Tasks, process};
 use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet};
 use std::ffi::OsString;
@@ -13,8 +11,10 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, SystemTime};
+use task_runtime::CancellationToken;
+use task_runtime::{Closed, Tasks, process};
 
-use eg_i18n::phrases;
+use phrases::phrases;
 
 phrases! {
     Cancelled: "The operation was cancelled."
@@ -136,7 +136,7 @@ pub enum ProcessError {
 }
 
 pub trait ProcessRunner: Send + Sync {
-    fn run(&self, request: &ProcessRequest, cancel: &Cancellation) -> Result<String, ProcessError>;
+    fn run(&self, request: &ProcessRequest, cancel: &CancellationToken) -> Result<String, ProcessError>;
 }
 
 /// Runs real programs on the runtime. It waits on the calling thread, so call it off the UI thread.
@@ -151,7 +151,7 @@ impl SystemProcessRunner {
 }
 
 impl ProcessRunner for SystemProcessRunner {
-    fn run(&self, request: &ProcessRequest, cancel: &Cancellation) -> Result<String, ProcessError> {
+    fn run(&self, request: &ProcessRequest, cancel: &CancellationToken) -> Result<String, ProcessError> {
         let mut command = process::Command::new(&request.executable);
         command
             .args(&request.arguments)
@@ -218,7 +218,7 @@ pub struct ModSources {
     runner: Arc<dyn ProcessRunner>,
     projects: Mutex<BTreeMap<String, CachedProject>>,
     finding: Mutex<BTreeMap<String, Arc<Flight>>>,
-    lifetime: Cancellation,
+    lifetime: CancellationToken,
     sdk_missing: AtomicBool,
     evaluations: usize,
 }
@@ -229,7 +229,7 @@ impl ModSources {
             runner,
             projects: Mutex::default(),
             finding: Mutex::default(),
-            lifetime: Cancellation::default(),
+            lifetime: CancellationToken::default(),
             sdk_missing: AtomicBool::new(false),
             evaluations: (std::thread::available_parallelism().map_or(1, usize::from) / 2).clamp(1, 4),
         }
@@ -255,13 +255,13 @@ impl ModSources {
     }
 
     /// Folder and SDK are the current settings, not the settings from when this service was constructed.
-    pub fn find(self: &Arc<Self>, folder: Option<&Path>, sdk: Option<&Path>, cancel: &Cancellation) -> Result<Vec<ModProject>, SourceError> {
+    pub fn find(self: &Arc<Self>, folder: Option<&Path>, sdk: Option<&Path>, cancel: &CancellationToken) -> Result<Vec<ModProject>, SourceError> {
         cancelled(cancel)?;
         let Some(folder) = folder.filter(|folder| folder.is_dir()) else {
             self.sdk_missing.store(false, Ordering::Release);
             return Ok(Vec::new());
         };
-        let folder = eg_core::paths::normalized(folder);
+        let folder = file_ops::paths::normalized(folder);
         let executable = executable(sdk);
         let key = format!("{}|{}", path_key(&folder), path_key(&executable));
         let flight = {
@@ -297,7 +297,7 @@ impl ModSources {
         }
     }
 
-    fn find_in(&self, folder: &Path, executable: &Path, cancel: &Cancellation) -> Result<Vec<ModProject>, SourceError> {
+    fn find_in(&self, folder: &Path, executable: &Path, cancel: &CancellationToken) -> Result<Vec<ModProject>, SourceError> {
         let files = files(folder, Some(PROJECT_DEPTH))?;
         let next = AtomicUsize::new(0);
         let missing = AtomicBool::new(false);
@@ -337,7 +337,7 @@ impl ModSources {
         Ok(found.into_iter().map(|(_, project)| project).collect())
     }
 
-    fn evaluate(&self, file: &Path, folder: &Path, executable: &Path, cancel: &Cancellation) -> Result<(Option<ModProject>, bool), SourceError> {
+    fn evaluate(&self, file: &Path, folder: &Path, executable: &Path, cancel: &CancellationToken) -> Result<(Option<ModProject>, bool), SourceError> {
         let key = format!("{}|{}|{}", path_key(file), path_key(folder), path_key(executable));
         let known = self.projects.lock().unwrap().get(&key).cloned();
         let imports = known.as_ref().map_or(&[][..], |known| known.imports.as_slice());
@@ -391,7 +391,7 @@ impl ModSources {
         Ok((project, true))
     }
 
-    pub fn read(self: &Arc<Self>, folder: Option<&Path>, sdk: Option<&Path>, installed: &[String], cancel: &Cancellation) -> Result<SourceSnapshot, SourceError> {
+    pub fn read(self: &Arc<Self>, folder: Option<&Path>, sdk: Option<&Path>, installed: &[String], cancel: &CancellationToken) -> Result<SourceSnapshot, SourceError> {
         let have: BTreeSet<_> = installed.iter().map(|file| file.to_lowercase()).collect();
         let projects = self.find(folder, sdk, cancel)?;
         let mut snapshot = SourceSnapshot::default();
@@ -421,7 +421,7 @@ impl ModSources {
             Err(error) if error.kind() == io::ErrorKind::InvalidData => None,
             Err(error) => return Err(error.into()),
         };
-        let hash = eg_core::hashes::of_file(&project.target_path)?;
+        let hash = file_ops::hashes::of_file(&project.target_path)?;
         let built = fs::metadata(&project.target_path)?.modified()?;
         let mut source_files = files(project.project_file.parent().unwrap_or(&project.project_file), None)?;
         source_files.extend(build_props(&project.project_file, sources));
@@ -434,13 +434,13 @@ impl ModSources {
         })
     }
 
-    pub fn build(&self, project: &ModProject, loader_root: &Path, sdk: Option<&Path>, cancel: &Cancellation) -> Result<PathBuf, SourceError> {
+    pub fn build(&self, project: &ModProject, loader_root: &Path, sdk: Option<&Path>, cancel: &CancellationToken) -> Result<PathBuf, SourceError> {
         cancelled(cancel)?;
         let directory = project.project_file.parent().unwrap_or(&project.project_file);
         let mut arguments = vec![OsString::from("build"), project.project_file.as_os_str().to_owned()];
         arguments.extend(["-c", "Release", "-nologo", "-v", "quiet", "--disable-build-servers", "-p:DeployToGame=false"].map(OsString::from));
         let mut game_path = OsString::from("-p:GamePath=");
-        game_path.push(eg_core::paths::normalized(loader_root));
+        game_path.push(file_ops::paths::normalized(loader_root));
         arguments.push(game_path);
         let request = ProcessRequest {
             executable: executable(sdk),
@@ -478,7 +478,7 @@ fn executable(sdk: Option<&Path>) -> PathBuf {
         .unwrap_or_else(|| "dotnet".into())
 }
 
-fn cancelled(cancel: &Cancellation) -> Result<(), SourceError> {
+fn cancelled(cancel: &CancellationToken) -> Result<(), SourceError> {
     if cancel.is_cancelled() { Err(SourceError::Cancelled) } else { Ok(()) }
 }
 
@@ -521,7 +521,7 @@ fn text<'a>(owner: &'a Value, name: &str) -> Option<&'a str> {
 }
 
 fn path_key(path: &Path) -> String {
-    eg_core::paths::normalized(path).to_string_lossy().to_lowercase()
+    file_ops::paths::normalized(path).to_string_lossy().to_lowercase()
 }
 
 fn modified(path: &Path) -> Option<SystemTime> {
@@ -598,7 +598,7 @@ fn files(folder: &Path, depth: Option<usize>) -> io::Result<Vec<PathBuf>> {
 
 fn searched(entry: &fs::DirEntry) -> bool {
     let name = entry.file_name().to_string_lossy().to_lowercase();
-    !(name.starts_with('.') || name == "bin" || name == "obj") && entry.metadata().is_ok_and(|metadata| eg_core::paths::is_plain_directory(&metadata))
+    !(name.starts_with('.') || name == "bin" || name == "obj") && entry.metadata().is_ok_and(|metadata| file_ops::paths::is_plain_directory(&metadata))
 }
 
 fn compiler_errors(output: &str, folder: &Path) -> String {

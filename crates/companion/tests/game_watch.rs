@@ -6,12 +6,12 @@ use eg_companion::launch::launcher::GameLauncher;
 use eg_companion::launch::loader::ModLoaderState;
 use eg_core::bloom::BloomPhase;
 use eg_core::game_log::{GameLogState, GameReadiness};
-use eg_core::operations::Cancellation;
-use eg_runtime::Runtime;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, mpsc};
 use std::time::{Duration, Instant};
+use task_runtime::CancellationToken;
+use task_runtime::Runtime;
 use tokio::sync::watch;
 
 const OFTEN: Duration = Duration::from_millis(5);
@@ -64,7 +64,7 @@ impl GameHost for Host {
     fn read_game_version(&self, _: &GameInstall) -> Option<String> {
         None
     }
-    fn launch(&self, _: LaunchMode, _: Option<&GameInstall>, _: &Cancellation) -> Result<LaunchOutcome, LaunchError> {
+    fn launch(&self, _: LaunchMode, _: Option<&GameInstall>, _: &CancellationToken) -> Result<LaunchOutcome, LaunchError> {
         unreachable!("the watch starts nothing")
     }
     fn settle_mod_loader(&self, _: Option<&GameInstall>) -> bool {
@@ -93,7 +93,7 @@ fn until(mut done: impl FnMut() -> bool) {
     }
 }
 
-fn next(tasks: &eg_runtime::Tasks, updates: &mut watch::Receiver<GameSeen>) -> GameSeen {
+fn next(tasks: &task_runtime::Tasks, updates: &mut watch::Receiver<GameSeen>) -> GameSeen {
     tasks.block_on(async {
         tokio::time::timeout(PATIENCE, updates.changed()).await.unwrap().unwrap();
     });

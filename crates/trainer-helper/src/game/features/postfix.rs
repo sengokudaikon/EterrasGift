@@ -1,12 +1,10 @@
 //! Original-first effect emission shared by scalar results and field adjustments. Features own their signatures,
 //! snapshots, predicates and transformations.
 use super::registry::MethodSpec;
-use crate::{
-    game::*,
-    hooks::{
-        emit,
-        postfix::{FRAME, PostfixEffect},
-    },
+use crate::game::*;
+use native_hooks::{
+    emit,
+    postfix::{FRAME, PostfixEffect},
 };
 use std::ops::{Deref, DerefMut};
 

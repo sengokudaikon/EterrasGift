@@ -17,7 +17,7 @@ struct Runner {
 }
 
 impl ProcessRunner for Runner {
-    fn run(&self, request: &ProcessRequest, cancel: &Cancellation) -> Result<String, ProcessError> {
+    fn run(&self, request: &ProcessRequest, cancel: &CancellationToken) -> Result<String, ProcessError> {
         self.calls.lock().unwrap().push(request.clone());
         self.started.fetch_add(1, Ordering::SeqCst);
         let active = self.active.fetch_add(1, Ordering::SeqCst) + 1;
@@ -107,7 +107,7 @@ fn discovery_uses_evaluated_targets_limits_depth_and_ignores_outputs_and_tools()
     project(temp.path(), ".git/Hidden.csproj");
     let runner = Arc::new(Runner::default());
     let sources = service(&runner);
-    let cancel = Cancellation::default();
+    let cancel = CancellationToken::default();
     let found = sources.find(Some(temp.path()), None, &cancel).unwrap();
     assert_eq!(found.len(), 4);
     assert_eq!(runner.started.load(Ordering::Relaxed), 4);
@@ -148,7 +148,7 @@ fn failed_evaluations_are_cached_but_adding_old_dated_package_props_invalidates_
     let runner = Arc::new(Runner::default());
     *runner.failure.lock().unwrap() = Some(ProcessError::Failed("bad project".into()));
     let sources = service(&runner);
-    let cancel = Cancellation::default();
+    let cancel = CancellationToken::default();
     assert!(sources.find(Some(temp.path()), None, &cancel).unwrap().is_empty());
     assert!(sources.find(Some(temp.path()), None, &cancel).unwrap().is_empty());
     assert_eq!(runner.started.load(Ordering::Relaxed), 1);
@@ -171,7 +171,7 @@ fn imported_files_build_props_and_global_json_invalidate_evaluations() {
     let runner = Arc::new(Runner::default());
     runner.imports.lock().unwrap().push(imported.clone());
     let sources = service(&runner);
-    let cancel = Cancellation::default();
+    let cancel = CancellationToken::default();
     sources.find(Some(&root), None, &cancel).unwrap();
     modified_at(&imported, 2);
     sources.find(Some(&root), None, &cancel).unwrap();
@@ -192,7 +192,7 @@ fn malformed_json_and_missing_sdk_are_retried_without_a_file_change() {
     let runner = Arc::new(Runner::default());
     *runner.answer.lock().unwrap() = Some("Welcome to .NET".into());
     let sources = service(&runner);
-    let cancel = Cancellation::default();
+    let cancel = CancellationToken::default();
     assert!(sources.find(Some(temp.path()), None, &cancel).unwrap().is_empty());
     *runner.answer.lock().unwrap() = None;
     *runner.failure.lock().unwrap() = Some(ProcessError::Start("dotnet missing".into()));
@@ -211,7 +211,7 @@ fn a_new_sdk_choice_is_used_immediately_and_re_evaluates_cached_projects() {
     project(temp.path(), "Loom.csproj");
     let runner = Arc::new(Runner::default());
     let sources = service(&runner);
-    let cancel = Cancellation::default();
+    let cancel = CancellationToken::default();
     let first = temp.path().join("sdk-one");
     let second = temp.path().join("sdk-two");
     sources.find(Some(temp.path()), Some(&first), &cancel).unwrap();
@@ -230,11 +230,11 @@ fn overlapping_looks_share_evaluation_and_one_callers_cancellation_does_not_kill
     let runner = Arc::new(Runner::default());
     runner.held.store(true, Ordering::Release);
     let sources = service(&runner);
-    let first_cancel = Cancellation::default();
+    let first_cancel = CancellationToken::default();
     std::thread::scope(|scope| {
         let first = scope.spawn(|| sources.find(Some(temp.path()), None, &first_cancel));
         wait_until(|| runner.started.load(Ordering::Acquire) == 1);
-        let second = scope.spawn(|| sources.find(Some(temp.path()), None, &Cancellation::default()));
+        let second = scope.spawn(|| sources.find(Some(temp.path()), None, &CancellationToken::default()));
         first_cancel.cancel();
         assert_eq!(first.join().unwrap(), Err(SourceError::Cancelled));
         runner.held.store(false, Ordering::Release);
@@ -254,7 +254,7 @@ fn parallel_evaluations_are_bounded_and_shutdown_cancels_and_drains_them() {
     runner.held.store(true, Ordering::Release);
     let sources = service(&runner);
     std::thread::scope(|scope| {
-        let result = scope.spawn(|| sources.find(Some(temp.path()), None, &Cancellation::default()));
+        let result = scope.spawn(|| sources.find(Some(temp.path()), None, &CancellationToken::default()));
         wait_until(|| runner.active.load(Ordering::Acquire) == sources.evaluations);
         sources.close();
         assert_eq!(result.join().unwrap(), Err(SourceError::Cancelled));
@@ -262,7 +262,7 @@ fn parallel_evaluations_are_bounded_and_shutdown_cancels_and_drains_them() {
     assert_eq!(runner.active.load(Ordering::Acquire), 0);
     assert_eq!(runner.maximum.load(Ordering::Relaxed), sources.evaluations);
     assert!(runner.started.load(Ordering::Relaxed) <= 4);
-    assert_eq!(sources.find(Some(temp.path()), None, &Cancellation::default()), Err(SourceError::Cancelled));
+    assert_eq!(sources.find(Some(temp.path()), None, &CancellationToken::default()), Err(SourceError::Cancelled));
 }
 
 #[test]
@@ -277,7 +277,7 @@ fn latest_output_wins_for_a_duplicate_dll_identity() {
     }
     let runner = Arc::new(Runner::default());
     let sources = service(&runner);
-    let snapshot = sources.read(Some(temp.path()), None, &[], &Cancellation::default()).unwrap();
+    let snapshot = sources.read(Some(temp.path()), None, &[], &CancellationToken::default()).unwrap();
     assert_eq!(snapshot.not_installed.len(), 1);
     assert_eq!(snapshot.not_installed[0].project_file, second);
     sources.close();
@@ -294,7 +294,7 @@ fn built_output_is_hashed_and_source_changes_exclude_generated_output() {
     }
     let runner = Arc::new(Runner::default());
     let sources = service(&runner);
-    let project = sources.find(Some(temp.path()), None, &Cancellation::default()).unwrap().remove(0);
+    let project = sources.find(Some(temp.path()), None, &CancellationToken::default()).unwrap().remove(0);
     assert!(!sources.built(&project, Some(temp.path())).unwrap().is_built());
     fs::create_dir_all(project.target_path.parent().unwrap()).unwrap();
     fs::write(&project.target_path, "not an assembly").unwrap();
@@ -302,7 +302,7 @@ fn built_output_is_hashed_and_source_changes_exclude_generated_output() {
     project_file_with_time(temp.path(), "loom/src/obj/generated.cs", 100);
     project_file_with_time(temp.path(), "loom/src/.git/index", 100);
     let built = sources.built(&project, Some(temp.path())).unwrap();
-    assert_eq!(built.hash, Some(eg_core::hashes::of_bytes(b"not an assembly")));
+    assert_eq!(built.hash, Some(file_ops::hashes::of_bytes(b"not an assembly")));
     assert!(!built.changed_since_build);
     modified_at(&source, 3);
     assert!(sources.built(&project, Some(temp.path())).unwrap().changed_since_build);
@@ -322,7 +322,7 @@ fn build_uses_release_selected_sdk_and_loader_root_and_never_deploys() {
     project(temp.path(), "loom/src/Loom.csproj");
     let runner = Arc::new(Runner::default());
     let sources = service(&runner);
-    let cancel = Cancellation::default();
+    let cancel = CancellationToken::default();
     let project = sources.find(Some(temp.path()), None, &cancel).unwrap().remove(0);
     let loader = temp.path().join("loader stage");
     let sdk = temp.path().join("selected sdk");
@@ -345,7 +345,7 @@ fn build_reports_distinct_compiler_errors_and_missing_output() {
     project(temp.path(), "Loom.csproj");
     let runner = Arc::new(Runner::default());
     let sources = service(&runner);
-    let cancel = Cancellation::default();
+    let cancel = CancellationToken::default();
     let project = sources.find(Some(temp.path()), None, &cancel).unwrap().remove(0);
     *runner.failure.lock().unwrap() = Some(ProcessError::Failed(format!(
         "{}: error CS1002: ; expected [{}]\n{}: error CS1002: ; expected [{}]\nBuild FAILED.",
@@ -404,9 +404,9 @@ fn process_runner_distinguishes_pre_cancelled_work_from_a_missing_executable() {
         arguments: Vec::new(),
         directory: temp.path().to_path_buf(),
     };
-    let runtime = eg_runtime::Runtime::start().unwrap();
+    let runtime = task_runtime::Runtime::start().unwrap();
     let runner = SystemProcessRunner::new(runtime.tasks());
-    let cancel = Cancellation::default();
+    let cancel = CancellationToken::default();
     assert!(matches!(runner.run(&request, &cancel), Err(ProcessError::Start(_))));
     cancel.cancel();
     assert_eq!(runner.run(&request, &cancel), Err(ProcessError::Cancelled));
@@ -421,17 +421,17 @@ fn process_runner_says_cancelled_once_the_runtime_has_closed() {
         arguments: Vec::new(),
         directory: temp.path().to_path_buf(),
     };
-    let runtime = eg_runtime::Runtime::start().unwrap();
+    let runtime = task_runtime::Runtime::start().unwrap();
     let runner = SystemProcessRunner::new(runtime.tasks());
     assert!(!runtime.shutdown());
-    assert_eq!(runner.run(&request, &Cancellation::default()), Err(ProcessError::Cancelled));
+    assert_eq!(runner.run(&request, &CancellationToken::default()), Err(ProcessError::Cancelled));
 }
 
 #[test]
 fn an_evaluator_panic_is_reported_and_releases_all_waiters() {
     struct Panicking;
     impl ProcessRunner for Panicking {
-        fn run(&self, _: &ProcessRequest, _: &Cancellation) -> Result<String, ProcessError> {
+        fn run(&self, _: &ProcessRequest, _: &CancellationToken) -> Result<String, ProcessError> {
             panic!("fixture panic")
         }
     }
@@ -440,7 +440,7 @@ fn an_evaluator_panic_is_reported_and_releases_all_waiters() {
     let sources = Arc::new(ModSources::new(Arc::new(Panicking)));
     let (tx, rx) = mpsc::channel();
     std::thread::scope(|scope| {
-        scope.spawn(|| tx.send(sources.find(Some(temp.path()), None, &Cancellation::default())).unwrap());
+        scope.spawn(|| tx.send(sources.find(Some(temp.path()), None, &CancellationToken::default())).unwrap());
         assert!(rx.recv_timeout(Duration::from_secs(5)).unwrap().unwrap_err().to_string().contains("panicked"));
     });
     sources.close();

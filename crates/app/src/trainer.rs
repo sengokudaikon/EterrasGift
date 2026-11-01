@@ -3,7 +3,6 @@ use eg_companion::{game::folders, game::install};
 use eg_core::fault::FaultLog;
 use eg_core::settings::SettingsStore;
 use eg_core::settings_service::{ModuleSettings, SettingsService};
-use eg_runtime::Tasks;
 use eg_trainer::connect::host::{DesktopConnector, GameProcesses, HelperPackage};
 use eg_trainer::{
     backend::{self, BackendHandle, BackendOptions, Command, SubmitError, SystemClock},
@@ -20,6 +19,7 @@ use std::{
     thread::{self, JoinHandle},
     time::Duration,
 };
+use task_runtime::Tasks;
 
 /// The trainer's choice is fixed for this run. Startup faults leave the companion usable and appear in Settings
 /// without changing the saved choice.
@@ -159,7 +159,7 @@ fn start_failed(faults: &FaultLog, title: &str, error: &str) -> String {
 /// names the variable after the dependency and, as the package and library names differ, the library too.
 static HELPER: &[u8] = include_bytes!(env!("CARGO_CDYLIB_FILE_EG_TRAINER_HELPER_eg_trainer_helper"));
 
-/// The embedded helper, known by its content and the source ID compiled into it.
+/// The embedded helper, known by its content.
 fn helper() -> Result<HelperPackage, String> {
     HelperPackage::new(HELPER)
 }
@@ -217,10 +217,10 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_embedded_helper_names_the_source_it_was_built_from() {
-        // In every profile the app is built in: the session checks this ID against what the loaded helper reports.
+    fn the_embedded_helper_is_a_loadable_dll_named_by_its_content() {
+        // In every profile the app is built in: the helper is given this ID at bootstrap and the session checks what it reports.
         let helper = helper().unwrap();
-        assert_eq!(helper.source_id().len(), 64);
+        assert_eq!(helper.sha256().len(), 64);
     }
 
     #[test]

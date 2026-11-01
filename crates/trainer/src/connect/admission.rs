@@ -6,11 +6,11 @@
 
 use std::{future::Future, time::Instant};
 
-use eg_core::hashes;
 use eg_trainer_wire::{
     process::ProcessIdentity,
     transport::{Delivery, Transport},
 };
+use file_ops::hashes;
 use jiff::Timestamp;
 
 use crate::{
@@ -251,7 +251,7 @@ fn process_start(target: &ProcessIdentity) -> Result<Timestamp, BackendError> {
     if target.pid == 0 || target.created == 0 || !target.executable.is_absolute() {
         return Err(BackendError::blocked(ErrorKind::Identity, "invalid process identity"));
     }
-    eg_core::time::from_filetime(target.created).map_err(|_| BackendError::blocked(ErrorKind::Identity, "invalid process creation time"))
+    win_process::from_filetime(target.created).map_err(|_| BackendError::blocked(ErrorKind::Identity, "invalid process creation time"))
 }
 fn capture_build(target: &ProcessIdentity, helper_build_id: &str) -> Result<(BuildIdentity, Option<std::sync::Arc<crate::connect::build::ConnectionFiles>>), BackendError> {
     // The build is captured from the artifacts beside this executable, so it belongs to the target by construction.

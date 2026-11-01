@@ -4,7 +4,7 @@
 //! profile is known.
 
 use super::profiles::Profile;
-use eg_i18n::phrases;
+use phrases::phrases;
 
 /// Where a hook of the live profile stands in the game: the worker's own report.
 pub use eg_trainer::backend::HookRun as HookState;

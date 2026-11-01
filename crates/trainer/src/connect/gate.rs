@@ -1,7 +1,7 @@
 //! Player.log admission before process access.
 use eg_core::game_log::{GameLogReader, GameLogState, GameLogStatus, GameReadiness};
-use eg_i18n::phrases;
 use jiff::Timestamp;
+use phrases::phrases;
 
 phrases! {
     LogMissing: "Last Epoch's Player.log was not found, so an offline character cannot be confirmed."

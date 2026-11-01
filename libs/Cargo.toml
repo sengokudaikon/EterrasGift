@@ -1,0 +1,90 @@
+# Libraries written for the app but independent of it: they name neither the app nor the game and use no app crate, so
+# they carry no `eg-` prefix. The app workspace at the repo root builds them as path dependencies.
+[workspace]
+resolver = "3"
+members = ["*"]
+exclude = ["target"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[workspace.dependencies]
+# Slint is pinned exactly: point releases have broken APIs before (research/slint.md).
+slint = "=1.18.1"
+tokio = { version = "=1.53.3", features = ["rt", "net", "io-util", "time", "sync"] }
+# The close barrier and cancellation (task-runtime). Its `rt` needs only what tokio above already has on.
+tokio-util = { version = "0.7.20", default-features = false, features = ["rt"] }
+# LZ4 blocks in Unity bundles; pure Rust, no unsafe in the decoder.
+lz4_flex = { version = "0.14.0", default-features = false, features = ["std", "safe-decode", "safe-encode", "checked-decode"] }
+tempfile = "3.27.0"
+windows-sys = "0.61.2"
+serde_json = { version = "1.0.154", features = ["preserve_order"] }
+jiff = "0.2.38"
+sha2 = "0.11.1"
+uuid = { version = "1.28.0", features = ["v4"] }
+
+binary-reader = { path = "binary-reader" }
+il2cpp-metadata = { path = "il2cpp-metadata" }
+flow = { path = "flow" }
+task-runtime = { path = "task-runtime" }
+
+[workspace.lints.rust]
+unsafe_op_in_unsafe_fn = "deny"
+
+[workspace.lints.clippy]
+all = { level = "warn", priority = -1 }
+undocumented_unsafe_blocks = "warn"
+
+# As in the app workspace, whose settings are the ones the shipped build gets: profiles do not cross workspaces, so code
+# that runs inside the game is tested here as it ships, with no debug assertion or overflow check.
+[profile.dev.package.il2cpp-runtime]
+opt-level = 3
+debug-assertions = false
+overflow-checks = false
+
+[profile.dev.package.native-hooks]
+opt-level = 3
+debug-assertions = false
+overflow-checks = false
+
+[profile.dev.package.detour]
+opt-level = 3
+debug-assertions = false
+overflow-checks = false
+
+[profile.dev.package.iced-x86]
+opt-level = 3
+debug-assertions = false
+overflow-checks = false
+
+[profile.dev.package.region]
+opt-level = 3
+debug-assertions = false
+overflow-checks = false
+
+[profile.dev.package.tokio]
+opt-level = 3
+debug-assertions = false
+overflow-checks = false
+
+[profile.dev.package.mio]
+opt-level = 3
+debug-assertions = false
+overflow-checks = false
+
+[profile.dev.package.socket2]
+opt-level = 3
+debug-assertions = false
+overflow-checks = false
+
+[profile.dev.package.bytes]
+opt-level = 3
+debug-assertions = false
+overflow-checks = false
+
+[profile.dev.package.windows-sys]
+opt-level = 3
+debug-assertions = false
+overflow-checks = false

@@ -2,7 +2,7 @@
 //!
 //! A test-only Slint platform hands out one `MinimalSoftwareWindow`, so the software renderer draws the real `.slint`
 //! components with the bundled fonts and no display. Each window runs the real pages on a fake game host, so nothing a
-//! capture does reaches a real install. Background work runs for real on `eg_runtime` and comes back through
+//! capture does reaches a real install. Background work runs for real on `task_runtime` and comes back through
 //! the platform's event-loop proxy, which [`settle`] drains. Captures land in `artifacts/captures/<name>.png`. This is a
 //! `harness = false` test because Slint's platform can be set once per process.
 
@@ -14,14 +14,13 @@ use eg_companion::launch::launcher::GameLauncher;
 use eg_companion::launch::loader::ModLoaderState;
 use eg_core::game_log::{GameLogState, GameReadiness};
 use eg_core::logs::LogFiles;
-use eg_core::operations::Cancellation;
 use eg_core::settings::SettingsStore;
 use eg_core::settings_service::SettingsService;
-use eg_flow_slint::Background;
 use eg_ui::decorations::freeze_clock;
 use eg_ui::pages::settings::{LiveStatus, ModuleChoice, ModuleLink, Settings, trainer as trainer_settings};
 use eg_ui::shell::Page;
 use eg_ui::{App, BloomPhase as ViewPhase, Eterra, HomeState, LaunchMode as ViewMode, LogsState, MainWindow, Nav, SettingsState, Tokens};
+use flow_slint::Background;
 use slint::platform::software_renderer::{MinimalSoftwareWindow, RepaintBufferType};
 use slint::platform::{Key, Platform, PointerEventButton, WindowAdapter, WindowEvent};
 use slint::{ComponentHandle, LogicalPosition, Model, PhysicalSize, SharedString};
@@ -30,6 +29,7 @@ use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
+use task_runtime::CancellationToken;
 
 mod mods_scenarios;
 // The fixture game behind the Item Forge, on the real worker (spec/forge-fixture.json).
@@ -110,7 +110,7 @@ impl GameHost for FakeGameHost {
         self.state.lock().unwrap().version.clone()
     }
 
-    fn launch(&self, mode: LaunchMode, install: Option<&GameInstall>, _lifetime: &Cancellation) -> Result<LaunchOutcome, LaunchError> {
+    fn launch(&self, mode: LaunchMode, install: Option<&GameInstall>, _lifetime: &CancellationToken) -> Result<LaunchOutcome, LaunchError> {
         if install.is_none() {
             return Err(LaunchError::Refused("Last Epoch wasn't found. Choose the game executable in Settings.".into()));
         }
@@ -152,7 +152,7 @@ impl GameHost for BrokenHost {
         self.0.read_game_version(install)
     }
 
-    fn launch(&self, mode: LaunchMode, install: Option<&GameInstall>, lifetime: &Cancellation) -> Result<LaunchOutcome, LaunchError> {
+    fn launch(&self, mode: LaunchMode, install: Option<&GameInstall>, lifetime: &CancellationToken) -> Result<LaunchOutcome, LaunchError> {
         self.0.launch(mode, install, lifetime)
     }
 
@@ -247,7 +247,7 @@ struct Session {
     data: tempfile::TempDir,
     background: Background,
     /// For a service a scenario starts itself.
-    tasks: eg_runtime::Tasks,
+    tasks: task_runtime::Tasks,
     /// Windows opened from here on watch the game for real, off the UI thread, instead of looking on the spot.
     live_watch: std::cell::Cell<bool>,
 }
@@ -434,7 +434,7 @@ fn main() {
     .expect("the capture platform is set once per process");
     let out = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../artifacts/captures");
     std::fs::create_dir_all(&out).expect("create artifacts/captures");
-    let runtime = eg_runtime::Runtime::start().expect("the captures' background work");
+    let runtime = task_runtime::Runtime::start().expect("the captures' background work");
     let session = Session {
         window,
         out,

@@ -3,8 +3,8 @@
 //! field for field.
 
 use crate::uniques::unique_ids;
-use crate::value::Value;
-use eg_binary::{Error, Result};
+use binary_reader::{Error, Result};
+use unity_files::value::Value;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Definitions {
@@ -338,7 +338,7 @@ pub(crate) fn classes(list: &Value, mut resolve: impl FnMut((i32, i64)) -> Resul
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::testing::object;
+    use unity_files::testing::object;
 
     fn tier(min: f32, max: f32, extra: Vec<Value>) -> Value {
         object(vec![

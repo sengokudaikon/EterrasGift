@@ -12,7 +12,7 @@ use eg_ui::pages::mods::ModsPage;
 /// The capture process cannot execute source builds or evaluation, even if discovery finds an unexpected project.
 struct NoExternalProcess;
 impl ProcessRunner for NoExternalProcess {
-    fn run(&self, _: &ProcessRequest, _: &Cancellation) -> Result<String, ProcessError> {
+    fn run(&self, _: &ProcessRequest, _: &CancellationToken) -> Result<String, ProcessError> {
         Err(ProcessError::Failed("Source processes are disabled in UI captures.".into()))
     }
 }
@@ -24,7 +24,7 @@ struct FixtureSourceRunner {
 }
 
 impl ProcessRunner for FixtureSourceRunner {
-    fn run(&self, request: &ProcessRequest, _: &Cancellation) -> Result<String, ProcessError> {
+    fn run(&self, request: &ProcessRequest, _: &CancellationToken) -> Result<String, ProcessError> {
         if request.arguments.first().is_some_and(|argument| argument == "build") {
             assert!(request.arguments.iter().any(|argument| argument == "-p:DeployToGame=false"));
             std::fs::create_dir_all(self.target.parent().unwrap()).unwrap();
@@ -458,7 +458,7 @@ fn mods_input(session: &Session) {
 /// and Ability Ranges loaded in the last game with mods, Stash Sorter did not, and Ward Meter is off. The stand-in DLLs are
 /// metadata only (`fixtures/sample-mods`).
 pub(super) fn mods_captures(session: &Session) {
-    use eg_core::hashes::of_file as hash_file;
+    use file_ops::hashes::of_file as hash_file;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     const LOADER: &[u8] = include_bytes!("../../../companion/tests/fixtures/melon/loader.bin");
@@ -483,7 +483,7 @@ pub(super) fn mods_captures(session: &Session) {
         builds: AtomicUsize,
     }
     impl ProcessRunner for SampleRunner {
-        fn run(&self, request: &ProcessRequest, _: &Cancellation) -> Result<String, ProcessError> {
+        fn run(&self, request: &ProcessRequest, _: &CancellationToken) -> Result<String, ProcessError> {
             let project = PathBuf::from(&request.arguments[1]);
             let name = project.file_stem().unwrap().to_string_lossy().into_owned();
             let target = project.parent().unwrap().join("bin/Release/net6.0").join(format!("{name}.dll"));

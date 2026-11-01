@@ -2,11 +2,11 @@
 //! each rooted for one call and identified by its managed wrapper and native object. No getter, refresh or setter runs.
 use crate::game::apply::WriteError;
 use crate::game::{Class, GameError, Images, Ptr, Root, RuntimeAccess, read_value, target, unsupported};
-use eg_il2cpp_runtime::{AttachedThread, raw};
 use eg_trainer_wire::{
     fields::{ObservedObjectIdentity, PlayerUnavailable as Unavailable},
     protocol::RuntimeStatus,
 };
+use il2cpp_runtime::{AttachedThread, raw};
 use std::ptr::NonNull;
 
 /// Why the player could not be read: `Unavailable` is the game's own state (online, loading, changed), `Contract` a
@@ -23,14 +23,14 @@ impl From<GameError> for PlayerError {
     }
 }
 
-impl From<eg_il2cpp_runtime::MetadataError> for PlayerError {
-    fn from(value: eg_il2cpp_runtime::MetadataError) -> Self {
+impl From<il2cpp_runtime::MetadataError> for PlayerError {
+    fn from(value: il2cpp_runtime::MetadataError) -> Self {
         Self::Contract(value.into())
     }
 }
 
-impl From<eg_il2cpp_runtime::RuntimeError> for PlayerError {
-    fn from(value: eg_il2cpp_runtime::RuntimeError) -> Self {
+impl From<il2cpp_runtime::RuntimeError> for PlayerError {
+    fn from(value: il2cpp_runtime::RuntimeError) -> Self {
         Self::Contract(GameError::Runtime(value))
     }
 }

@@ -1,11 +1,9 @@
 use super::*;
-use crate::{
-    game::{
-        any_waypoint,
-        registry::{CodeChange, ResolvedMethod, TargetEffect},
-    },
-    hooks::patch,
+use crate::game::{
+    any_waypoint,
+    registry::{CodeChange, ResolvedMethod, TargetEffect},
 };
+use native_hooks::patch;
 use std::{
     mem::offset_of,
     sync::atomic::{AtomicU8, AtomicU32},

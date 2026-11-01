@@ -6,7 +6,7 @@ use eg_companion::mods::inventory::{self, Inventory, LoaderReport};
 use eg_companion::mods::library::ModLibrary;
 use eg_companion::mods::loader_state::LoaderPreparation;
 use eg_companion::mods::worker::ModWorker;
-use eg_core::hashes::of_file as hash_file;
+use file_ops::hashes::of_file as hash_file;
 use serde_json::json;
 use std::{fs, io};
 

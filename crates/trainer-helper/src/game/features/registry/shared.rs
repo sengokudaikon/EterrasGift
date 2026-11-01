@@ -1,7 +1,7 @@
 //! Independent controls on one generated gateway. A single atomic word holds each setting, or OFF; closing a group
 //! fences every control. Reopening clears sibling words before publishing the newly requested control.
 use super::GameplayHook;
-use crate::hooks::{leaf::LeafGate, postfix::PostfixGate};
+use native_hooks::{leaf::LeafGate, postfix::PostfixGate};
 
 pub(crate) const OFF: u64 = u64::MAX;
 

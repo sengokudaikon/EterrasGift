@@ -2,8 +2,8 @@
 //! the helper runs on. Nothing here reads a game object or calls a game method.
 
 use super::{Class, GameError, Ptr, RuntimeAccess, read_value, unsupported};
-use eg_il2cpp_runtime::{AttachedThread, metadata::record_class};
 use eg_trainer_wire::protocol::{Discovery, DispatcherSpec};
+use il2cpp_runtime::{AttachedThread, metadata::record_class};
 use std::{ffi::CStr, ptr::NonNull};
 
 /// Discovery data plus a typed address retained only while the caller's runtime contract holds.

@@ -8,10 +8,10 @@ use crate::launch::launcher::GameLauncher;
 use crate::launch::loader::ModLoaderState;
 use eg_core::bloom::BloomPhase;
 use eg_core::game_log::GameReadiness;
-use eg_runtime::{CancellationToken, DropGuard, Tasks};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::time::Duration;
+use task_runtime::{CancellationToken, DropGuard, Tasks};
 use tokio::sync::{Notify, watch};
 
 /// What the latest look found.

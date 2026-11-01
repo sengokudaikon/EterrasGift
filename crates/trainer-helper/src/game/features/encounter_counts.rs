@@ -4,12 +4,10 @@
 //! Nested calls have separate snapshots; original exceptions unwind normally and run no post-call writes. The game
 //! retains and serializes its placement/context/config graph for the call, as the original trainer assumes.
 use super::{postfix::Code, registry::*};
-use crate::{
-    game::*,
-    hooks::{
-        emit,
-        postfix::{FRAME, PostfixEffect, snapshots},
-    },
+use crate::game::*;
+use native_hooks::{
+    emit,
+    postfix::{FRAME, PostfixEffect, snapshots},
 };
 
 pub(crate) const SETTINGS: SharedSettings = SharedSettings(&[

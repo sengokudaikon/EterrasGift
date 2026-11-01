@@ -1,0 +1,20 @@
+[package]
+name = "native-hooks"
+description = "Function hooks in a running x64 process: retained detours, generated gates and code patches. Names no app or game."
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[features]
+# Failure injection, for tests of code built on this crate.
+testing = []
+
+[dependencies]
+detour = "=0.10.0"
+iced-x86 = { version = "=1.21.0", default-features = false, features = ["std", "decoder", "instr_info"] }
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { workspace = true, features = ["Win32_Foundation", "Win32_System_Diagnostics_Debug", "Win32_System_Memory", "Win32_System_SystemInformation", "Win32_System_Threading", "Win32_System_LibraryLoader"] }
+
+[lints]
+workspace = true

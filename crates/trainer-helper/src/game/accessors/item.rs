@@ -2,8 +2,8 @@
 //! No game method is called.
 
 use crate::game::{GameError, Images, Ptr, Root, RuntimeAccess, copy_values, read_value, target, unsupported};
-use eg_il2cpp_runtime::{AttachedThread, raw};
 use eg_trainer_wire::forge::{AffixSnapshot, ForgeSnapshot, ItemStatus, UniqueIdentity};
+use il2cpp_runtime::{AttachedThread, raw};
 use std::{ffi::CStr, ptr::NonNull};
 
 pub(crate) struct ForgeGraph<'a, 'r> {

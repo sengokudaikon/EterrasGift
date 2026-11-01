@@ -2,8 +2,8 @@
 //! No automatic stop, unload, remote-thread termination, or operation replay is performed.
 
 use super::{BootstrapConfig, BootstrapError, BootstrapReply, HelperArtifact};
-use eg_core::hashes;
 use eg_trainer_wire::{process::ProcessIdentity, protocol::DispatcherSpec};
+use file_ops::hashes;
 #[cfg(test)]
 use std::fs::File;
 use std::{
@@ -73,8 +73,8 @@ pub struct ModuleIdentity {
     path: PathBuf,
     sha256: String,
     image_size: u32,
-    lease: Arc<crate::artifact::ReadLease>,
-    layout: Arc<crate::pe::Layout>,
+    lease: Arc<file_ops::lease::ReadLease>,
+    layout: Arc<binary_reader::pe::Layout>,
 }
 impl ModuleIdentity {
     pub fn capture(path: &Path, expected_sha256: &str) -> Result<Self> {
@@ -82,7 +82,7 @@ impl ModuleIdentity {
             return invalid("module file identity");
         }
         let path = canonical(path)?;
-        let lease = crate::artifact::ReadLease::capture(&path, expected_sha256).map_err(|error| {
+        let lease = file_ops::lease::ReadLease::capture(&path, expected_sha256).map_err(|error| {
             if error.kind() == io::ErrorKind::InvalidData {
                 BootstrapError::Invalid("module hash")
             } else {
@@ -93,11 +93,11 @@ impl ModuleIdentity {
     }
     pub fn open(path: &Path) -> Result<Self> {
         let path = canonical(path)?;
-        Self::from_lease(Arc::new(crate::artifact::ReadLease::open(&path)?))
+        Self::from_lease(Arc::new(file_ops::lease::ReadLease::open(&path)?))
     }
-    pub fn from_lease(lease: Arc<crate::artifact::ReadLease>) -> Result<Self> {
+    pub fn from_lease(lease: Arc<file_ops::lease::ReadLease>) -> Result<Self> {
         lease.verify_path()?;
-        let layout = crate::pe::Layout::read(lease.len(), |at, output| lease.read_exact_at(at, output))?;
+        let layout = binary_reader::pe::Layout::read(lease.len(), |at, output| lease.read_exact_at(at, output))?;
         if !layout.dll || layout.image_size == 0 || layout.image_size > 512 * 1024 * 1024 {
             return invalid("Windows x64 module image size/header");
         }
@@ -787,7 +787,7 @@ impl RemoteHelper {
         })()
         .map_err(|error| failure("loaded module validation", RemoteDelivery::MayHaveRun, error))?;
         let owner = crate::process::capture(std::process::id()).map_err(|e| failure("controller identity", RemoteDelivery::MayHaveRun, e.into()))?;
-        let config = BootstrapConfig::new(target.pid, artifact.source_id())
+        let config = BootstrapConfig::new(target.pid, artifact.sha256())
             .and_then(|config| config.with_owner(owner.pid, owner.created))
             .map_err(|e| failure("start configuration", RemoteDelivery::MayHaveRun, e))?;
         let start = (|| {

@@ -2,10 +2,10 @@
 //! settings, which only the module reads. The file is read case-insensitively and written camelCase, so hand-edited and
 //! older files still load.
 
-use crate::folder_move::{migrate, migration_conflict, probe, relative};
 use crate::paths::{self, AppPaths};
-use crate::{atomic, json, text};
-use eg_i18n::{Phrase, phrases};
+use file_ops::folder_move::{migrate, migration_conflict, probe, relative};
+use file_ops::{atomic, json, text};
+use phrases::{Phrase, phrases};
 use serde_json::{Map, Value};
 use std::collections::BTreeMap;
 use std::fs;
@@ -387,10 +387,10 @@ impl SettingsStore {
         let directory = normalize(&locations.user_data_directory, UserDataFolder)?;
         let library = keep_or(&self.desired().mod_library_directory, &locations.mod_library_directory, ModLibraryFolder)?;
         let destination = self.paths.with(directory.as_deref(), library.as_deref());
-        let changed = !paths::same_folder(&self.paths.user_data_directory, &destination.user_data_directory);
+        let changed = !file_ops::paths::same_folder(&self.paths.user_data_directory, &destination.user_data_directory);
         // The library's default folder is in the user data, so it follows a user-data move; a folder of its own moves alone.
         let library_destination = self.paths.with(Some(&self.paths.user_data_directory), library.as_deref());
-        let library_moves = !paths::same_folder(&self.paths.mod_library_directory, &library_destination.mod_library_directory);
+        let library_moves = !file_ops::paths::same_folder(&self.paths.mod_library_directory, &library_destination.mod_library_directory);
         if changed && library_moves {
             return Err(OneAtATime.get().into());
         }
@@ -558,7 +558,7 @@ fn normalize(typed: &str, what: Phrase) -> Result<Option<PathBuf>, String> {
     if !Path::new(trimmed).is_absolute() {
         return Err(FullPath.with(&[("what", &what)]));
     }
-    Ok(Some(paths::normalized(Path::new(trimmed))))
+    Ok(Some(file_ops::paths::normalized(Path::new(trimmed))))
 }
 
 /// A location the save may leave as saved (`None`), or the typed one.

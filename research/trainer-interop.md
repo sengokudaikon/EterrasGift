@@ -11,9 +11,9 @@ This document records the execution assumptions and retained findings. Dated inv
 owned dispatcher, and forbids unsafe code. `eg-trainer` consumes those contracts directly.
 Callers, including the retained harnesses, import wire directly; game-access no longer
 re-exports these modules. Game discovery requires game-access's explicit `il2cpp` feature, which brings in the game-neutral
-`eg-il2cpp-runtime` (exports, roots, metadata lookups, invocation): the helper enables it, a desktop-only build does not, and
+`il2cpp-runtime` (exports, roots, metadata lookups, invocation): the helper enables it, a desktop-only build does not, and
 the standalone native harness uses the runtime crate alone. The helper depends on wire, not
-the trainer worker/domain crate, and its source identity follows that dependency change.
+the trainer worker/domain crate.
 
 The supported boundary is Windows x64, initialized IL2CPP and the inspected Unity 6000.4 game
 layout. Authored native fixtures use Unity 6000.4.8f1. Export signatures, metadata storage,

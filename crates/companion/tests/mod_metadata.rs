@@ -327,7 +327,7 @@ fn the_library_reads_each_copy_once_from_one_parse_and_forgets_copies_no_longer_
     let library = ModLibrary::new(temp.path().to_path_buf());
     let installed = InstalledMod {
         file: "Fixture.dll".into(),
-        hash: eg_core::hashes::of_bytes(CLEAN),
+        hash: file_ops::hashes::of_bytes(CLEAN),
         enabled: true,
     };
     let path = library.path_of(&installed);

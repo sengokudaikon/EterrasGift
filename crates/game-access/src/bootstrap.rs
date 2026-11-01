@@ -4,7 +4,7 @@
 //! can authorize a process operation. A source ID is compatibility/provenance, not authentication.
 //! Process admission and retained-code lifetime remain separate from parsing these bytes.
 
-use eg_core::hashes;
+use file_ops::hashes;
 #[cfg(windows)]
 pub mod windows;
 #[cfg(not(windows))]
@@ -65,11 +65,11 @@ pub struct BootstrapConfig {
     bytes: [u8; CONFIG_SIZE],
 }
 impl BootstrapConfig {
-    pub fn new(pid: u32, source_id: &str) -> Result<Self> {
-        if pid == 0 || !eg_trainer_wire::protocol::is_build_id(source_id) {
-            return invalid("PID or source ID");
+    pub fn new(pid: u32, build_id: &str) -> Result<Self> {
+        if pid == 0 || !eg_trainer_wire::protocol::is_build_id(build_id) {
+            return invalid("PID or build ID");
         }
-        let build_id = source_id.as_bytes().try_into().or_else(|_| invalid("source ID length"))?;
+        let build_id = build_id.as_bytes().try_into().or_else(|_| invalid("build ID length"))?;
         Ok(Self::of(eg_trainer_wire::bootstrap::BootstrapConfig::new(pid, build_id)))
     }
     fn of(config: eg_trainer_wire::bootstrap::BootstrapConfig) -> Self {
@@ -113,18 +113,17 @@ impl BootstrapConfig {
 pub struct HelperArtifact {
     path: PathBuf,
     sha256: String,
-    source_id: String,
     bootstrap_rva: u32,
     image_size: u32,
     #[cfg(not(windows))]
     file: File,
     #[cfg(windows)]
-    lease: crate::artifact::ReadLease,
+    lease: file_ops::lease::ReadLease,
     bytes: Vec<u8>,
 }
 impl HelperArtifact {
-    pub fn capture(path: &Path, expected_sha256: &str, expected_source_id: &str) -> Result<Self> {
-        if !path.is_absolute() || !hashes::is_sha256(expected_sha256) || !eg_trainer_wire::protocol::is_build_id(expected_source_id) {
+    pub fn capture(path: &Path, expected_sha256: &str) -> Result<Self> {
+        if !path.is_absolute() || !hashes::is_sha256(expected_sha256) {
             return invalid("artifact identity");
         }
         let path = std::fs::canonicalize(path)?;
@@ -133,7 +132,7 @@ impl HelperArtifact {
             return invalid("artifact kind or size");
         }
         #[cfg(windows)]
-        let lease = crate::artifact::ReadLease::capture(&path, expected_sha256)?;
+        let lease = file_ops::lease::ReadLease::capture(&path, expected_sha256)?;
         #[cfg(windows)]
         let bytes = {
             if lease.len() > MAX_HELPER_BYTES {
@@ -154,11 +153,10 @@ impl HelperArtifact {
             }
             bytes
         };
-        let layout = HelperLayout::parse(&bytes, expected_source_id)?;
+        let layout = HelperLayout::parse(&bytes)?;
         Ok(Self {
             path,
             sha256: expected_sha256.to_ascii_uppercase(),
-            source_id: expected_source_id.into(),
             bootstrap_rva: layout.bootstrap_rva,
             image_size: layout.image_size,
             #[cfg(not(windows))]
@@ -173,9 +171,6 @@ impl HelperArtifact {
     }
     pub fn sha256(&self) -> &str {
         &self.sha256
-    }
-    pub fn source_id(&self) -> &str {
-        &self.source_id
     }
     pub fn bootstrap_rva(&self) -> u32 {
         self.bootstrap_rva
@@ -212,49 +207,21 @@ pub struct HelperLayout {
 }
 
 impl HelperLayout {
-    pub fn parse(bytes: &[u8], expected_source_id: &str) -> Result<Self> {
-        if !eg_trainer_wire::protocol::is_build_id(expected_source_id) {
-            return invalid("expected source ID");
-        }
+    pub fn parse(bytes: &[u8]) -> Result<Self> {
         let pe = Pe::parse(bytes)?;
         let bootstrap_rva = pe.export(b"eg_helper_bootstrap")?;
         pe.at(bootstrap_rva, 16, true)?;
-        if Self::source_id_in(&pe)? != expected_source_id {
-            return invalid("compiled source ID");
-        }
         Ok(Self {
             bootstrap_rva,
             image_size: pe.image_size,
         })
-    }
-
-    /// The source ID a helper DLL was compiled with, read from its image without loading it.
-    pub fn compiled_source_id(bytes: &[u8]) -> Result<String> {
-        Self::source_id_in(&Pe::parse(bytes)?)
-    }
-
-    fn source_id_in(pe: &Pe<'_>) -> Result<String> {
-        // The evaluated getter is a leaf `lea rax,[rip+disp32]; ret`. Decode its target
-        // instead of executing a candidate DLL or finding an unrelated 64-byte hex string.
-        let getter_rva = pe.export(b"eg_helper_build_id")?;
-        let getter = pe.at(getter_rva, 8, true)?;
-        if getter[..3] != [0x48, 0x8d, 0x05] || getter[7] != 0xc3 {
-            return invalid("source getter adapter");
-        }
-        let delta = i32::from_le_bytes(getter[3..7].try_into().unwrap());
-        let source_rva = i64::from(getter_rva) + 7 + i64::from(delta);
-        let source = pe.at(source_rva.try_into().map_err(|_| BootstrapError::Invalid("source getter target"))?, 65, false)?;
-        let id = std::str::from_utf8(&source[..64])
-            .ok()
-            .filter(|id| source[64] == 0 && eg_trainer_wire::protocol::is_build_id(id));
-        id.map(str::to_owned).ok_or(BootstrapError::Invalid("compiled source ID"))
     }
 }
 
 struct Pe<'a> {
     bytes: &'a [u8],
     image_size: u32,
-    layout: crate::pe::Layout,
+    layout: binary_reader::pe::Layout,
     exports: (u32, u32),
 }
 fn data(bytes: &[u8], at: usize, len: usize) -> Result<&[u8]> {
@@ -270,7 +237,7 @@ fn dword(bytes: &[u8], at: usize) -> Result<u32> {
 }
 impl<'a> Pe<'a> {
     fn parse(bytes: &'a [u8]) -> Result<Self> {
-        let layout = crate::pe::Layout::from_bytes(bytes)?;
+        let layout = binary_reader::pe::Layout::from_bytes(bytes)?;
         if !layout.dll || layout.image_size == 0 || layout.image_size > 512 * 1024 * 1024 {
             return invalid("Windows x64 DLL image size/header");
         }

@@ -2,13 +2,13 @@
 //! A Play requested after an edit cannot overtake that edit, including when requested from Home.
 
 use super::library::ModLibrary;
-use eg_core::operations::Cancellation;
 use std::io;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, mpsc};
 use std::thread::{self, JoinHandle};
+use task_runtime::CancellationToken;
 
-use eg_i18n::phrases;
+use phrases::phrases;
 
 phrases! {
     Closing: "The mod library is closing."
@@ -21,7 +21,7 @@ type FaultHook = Arc<Mutex<Option<Box<dyn Fn() + Send>>>>;
 struct Owner {
     sender: Mutex<Option<mpsc::Sender<Job>>>,
     worker: Mutex<Option<JoinHandle<()>>>,
-    cancel: Cancellation,
+    cancel: CancellationToken,
     fault: Arc<AtomicBool>,
     on_fault: FaultHook,
 }
@@ -50,7 +50,7 @@ impl ModWorker {
         Self(Arc::new(Owner {
             sender: Mutex::new(Some(sender)),
             worker: Mutex::new(Some(worker)),
-            cancel: Cancellation::default(),
+            cancel: CancellationToken::default(),
             fault: Arc::new(AtomicBool::new(false)),
             on_fault: Arc::default(),
         }))
@@ -60,7 +60,7 @@ impl ModWorker {
     pub fn on_fault(&self, hook: impl Fn() + Send + 'static) {
         *self.0.on_fault.lock().unwrap() = Some(Box::new(hook));
     }
-    pub fn cancellation(&self) -> Cancellation {
+    pub fn cancellation(&self) -> CancellationToken {
         self.0.cancel.clone()
     }
     pub fn faulted(&self) -> bool {

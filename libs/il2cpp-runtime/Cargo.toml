@@ -1,0 +1,16 @@
+[package]
+name = "il2cpp-runtime"
+description = "A live IL2CPP runtime through its public exports: attached threads and strong roots, metadata lookups checked against stated contracts, and bounded invocation. Names no game."
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[features]
+# Export tables whose every function panics when reached, for tests of code built on this crate.
+test-stubs = []
+
+[dev-dependencies]
+static_assertions = "1.1.0"
+
+[lints]
+workspace = true

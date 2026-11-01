@@ -11,8 +11,8 @@ use crate::{
 };
 use std::{error::Error, fmt};
 
-/// A helper build ID: the 64 hex digits of the SHA-256 its build writes into it. Only the format is checked here; the
-/// session compares the ID itself exactly.
+/// A helper build ID: the 64 hex digits of its DLL's SHA-256, which the desktop gives it at bootstrap. Only the format is
+/// checked here; the session compares the ID itself.
 pub fn is_build_id(value: &str) -> bool {
     value.len() == 64 && value.bytes().all(|byte| byte.is_ascii_hexdigit())
 }

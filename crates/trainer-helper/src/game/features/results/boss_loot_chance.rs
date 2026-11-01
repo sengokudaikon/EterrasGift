@@ -1,7 +1,7 @@
 //! Preserve boss/champion loot-group calculation and its arguments, then replace the pre-modifier chance with one.
 use super::*;
 use crate::game::registry::{Behavior, GameplayHook, HookFeature, Targets};
-use crate::hooks::postfix::FRAME;
+use native_hooks::postfix::FRAME;
 
 pub(crate) const FEATURE: HookFeature = HookFeature {
     controls: &[GameplayHook::BossLootChance],

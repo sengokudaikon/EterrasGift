@@ -13,7 +13,7 @@ use std::fs;
 use std::io;
 use std::path::Path;
 
-use eg_i18n::phrases;
+use phrases::phrases;
 
 phrases! {
     UnknownKind: "Its MelonInfo names a class that is neither a MelonMod nor a MelonPlugin, so MelonLoader will not load it."

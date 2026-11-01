@@ -1,7 +1,7 @@
 //! Let the game calculate an ability's cost once, then answer zero only for the current player's mana component.
 use super::*;
 use crate::game::registry::{Behavior, GameplayHook, HookFeature, Targets};
-use crate::hooks::postfix::FRAME;
+use native_hooks::postfix::FRAME;
 
 pub(crate) const FEATURE: HookFeature = HookFeature {
     controls: &[GameplayHook::NoManaCost],

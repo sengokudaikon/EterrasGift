@@ -2,7 +2,7 @@
 //! page follows MelonLoader's preparation, how a batch of setting changes is kept, and what the page says about files
 //! changed by hand and builds it installed.
 use crate::launch::launcher::GameLauncher;
-use eg_i18n::phrases;
+use phrases::phrases;
 use std::{io, path::Path};
 
 phrases! {

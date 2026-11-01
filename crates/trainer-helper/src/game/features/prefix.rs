@@ -1,12 +1,10 @@
 //! Before-original admission for argument adjustments and scalar overrides. Features own their signatures and
 //! transformations. A tail jump keeps indirect aggregates and long signatures in their original argument locations;
 //! no generated frame, callback, hidden-result adaptation or helper lifetime is involved.
-use crate::{
-    game::*,
-    hooks::{
-        emit,
-        leaf::{FRAME, GeneratedEffect, LeafEffect},
-    },
+use crate::game::*;
+use native_hooks::{
+    emit,
+    leaf::{FRAME, GeneratedEffect, LeafEffect},
 };
 use std::ops::{Deref, DerefMut};
 

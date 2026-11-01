@@ -2,7 +2,7 @@
 //! that may still be on its way (`Lookup`) and a typed write outcome (`EditOutcome`). The game itself is
 //! `worker::ForgeGame`.
 
-use eg_i18n::phrases;
+use phrases::phrases;
 
 phrases! {
     pub UniqueLoading: "Reading unique descriptions…"

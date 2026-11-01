@@ -1,11 +1,11 @@
 //! Detached affix, unique and implicit roll sampling through the game's own tooltip producers and formatters.
 use crate::game::metadata_text;
 use crate::game::{Class, GameError, Images, Method, Root, RuntimeAccess, accessors::item::ForgeGraph, target, unsupported};
-use eg_il2cpp_runtime::{Argument, AttachedThread, InvocationContext, InvocationOutcome, ReturnValue, Scalar, ValueTypeContract, raw};
 use eg_trainer_wire::{
     forge::ForgeSnapshot,
     mapping::{AffixMappingQuery, MAX_CONTEXT_BYTES, MappingAddress, MappingStart, MappingTarget, ModifierMappingQuery, RawMappingPage, RawValueSample},
 };
+use il2cpp_runtime::{Argument, AttachedThread, InvocationContext, InvocationOutcome, ReturnValue, Scalar, ValueTypeContract, raw};
 use std::{collections::BTreeSet, ffi::CStr, ptr::NonNull};
 #[derive(PartialEq)]
 struct Effect {

@@ -3,8 +3,8 @@
 
 use super::registry::{self, Area, Feature, FeatureField, FeatureKind, FeatureValue};
 use super::session::{FieldError, FieldRequest, FieldResult, FieldWrite, GameField, HookState, PendingFields, TrainerSession};
-use eg_i18n::locale::numbers;
-use eg_i18n::{Conjunction, Phrase, list, phrases};
+use phrases::locale::numbers;
+use phrases::{Conjunction, Phrase, list, phrases};
 
 phrases! {
     TurnsOnWhen: "Turns on when {name} enters play."

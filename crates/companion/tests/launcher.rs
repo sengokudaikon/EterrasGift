@@ -4,17 +4,17 @@ use eg_companion::launch::host::{GameHost, LaunchError, LaunchMode, LaunchOutcom
 use eg_companion::launch::launcher::GameLauncher;
 use eg_companion::launch::loader::ModLoaderState;
 use eg_core::game_log::GameLogState;
-use eg_core::operations::Cancellation;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, mpsc};
 use std::thread;
 use std::time::Duration;
+use task_runtime::CancellationToken;
 
 const TIMEOUT: Duration = Duration::from_secs(5);
 
-type Launch = dyn Fn(&Cancellation) -> Result<LaunchOutcome, LaunchError> + Send + Sync;
+type Launch = dyn Fn(&CancellationToken) -> Result<LaunchOutcome, LaunchError> + Send + Sync;
 
 struct FakeGameHost {
     panic_on_find: AtomicBool,
@@ -22,7 +22,7 @@ struct FakeGameHost {
 }
 
 impl FakeGameHost {
-    fn new(launch: impl Fn(&Cancellation) -> Result<LaunchOutcome, LaunchError> + Send + Sync + 'static) -> Self {
+    fn new(launch: impl Fn(&CancellationToken) -> Result<LaunchOutcome, LaunchError> + Send + Sync + 'static) -> Self {
         Self {
             panic_on_find: AtomicBool::new(false),
             launch: Box::new(launch),
@@ -56,7 +56,7 @@ impl GameHost for FakeGameHost {
         None
     }
 
-    fn launch(&self, _: LaunchMode, _: Option<&GameInstall>, lifetime: &Cancellation) -> Result<LaunchOutcome, LaunchError> {
+    fn launch(&self, _: LaunchMode, _: Option<&GameInstall>, lifetime: &CancellationToken) -> Result<LaunchOutcome, LaunchError> {
         (self.launch)(lifetime)
     }
 

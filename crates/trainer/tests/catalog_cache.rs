@@ -78,7 +78,7 @@ fn catalog() -> GameCatalog {
 }
 fn replace_checksum(bytes: &mut Vec<u8>) {
     bytes.truncate(bytes.len() - 64);
-    let checksum = eg_core::hashes::of_bytes(bytes);
+    let checksum = file_ops::hashes::of_bytes(bytes);
     bytes.extend_from_slice(checksum.as_bytes());
 }
 fn pages_start(bytes: &[u8]) -> usize {
@@ -113,7 +113,7 @@ fn roundtrip_multi_page_catalog_and_last_pointer_preserves_owned_data() {
 fn identity_key_binds_every_field_without_delimiter_collisions() {
     let original = catalog().identity;
     let first = identity_key(&original).unwrap();
-    assert!(eg_core::hashes::is_sha256(&first));
+    assert!(file_ops::hashes::is_sha256(&first));
     for field in 0..4 {
         let mut changed = original.clone();
         match field {

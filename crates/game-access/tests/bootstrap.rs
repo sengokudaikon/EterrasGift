@@ -40,12 +40,8 @@ fn image() -> Vec<u8> {
     set16(&mut bytes, 0x560, 0);
     set16(&mut bytes, 0x562, 1);
     bytes[0x570..0x584].copy_from_slice(b"eg_helper_bootstrap\0");
-    bytes[0x590..0x5a3].copy_from_slice(b"eg_helper_build_id\0");
+    bytes[0x590..0x5a3].copy_from_slice(b"eg_helper_function\0");
     bytes[0x400..0x410].fill(0xc3);
-    bytes[0x420..0x423].copy_from_slice(&[0x48, 0x8d, 0x05]);
-    set32(&mut bytes, 0x423, 0x1400 - (0x1020 + 7));
-    bytes[0x427] = 0xc3;
-    bytes[0x800..0x840].copy_from_slice(SOURCE.as_bytes());
     bytes
 }
 
@@ -75,37 +71,32 @@ fn configuration_matches_independent_native_layout_and_strict_reply_contract() {
 }
 
 #[test]
-fn pure_pe_parser_resolves_exact_nonforwarded_exports_and_compiled_source_without_loading() {
+fn pure_pe_parser_resolves_exact_nonforwarded_exports_without_loading() {
     let bytes = image();
-    let layout = HelperLayout::parse(&bytes, SOURCE).unwrap();
+    let layout = HelperLayout::parse(&bytes).unwrap();
     assert_eq!(layout.bootstrap_rva, 0x1000);
     assert_eq!(layout.image_size, 0x2000);
     for len in 0..bytes.len() {
-        assert!(HelperLayout::parse(&bytes[..len], SOURCE).is_err(), "prefix {len}")
+        assert!(HelperLayout::parse(&bytes[..len]).is_err(), "prefix {len}")
     }
-    assert!(HelperLayout::parse(&bytes, &"a".repeat(64)).is_err());
 }
 
 #[test]
-fn malformed_exports_rva_storage_and_getter_adapters_never_become_bootstrap_entries() {
-    for fault in 0..12 {
+fn malformed_exports_and_rva_storage_never_become_bootstrap_entries() {
+    for fault in 0..8 {
         let mut bytes = image();
         match fault {
             0 => set16(&mut bytes, 0x84, 0x14c),
             1 => set16(&mut bytes, 0x96, 0),
             2 => set32(&mut bytes, 0x188 + 36, 0x40000040),
             3 => set32(&mut bytes, 0x540, 0x1170),
-            4 => set16(&mut bytes, 0x562, 2),
+            4 => set16(&mut bytes, 0x560, 2),
             5 => set32(&mut bytes, 0x500 + 20, 4097),
             6 => set32(&mut bytes, 0x500 + 24, u32::MAX),
             7 => set32(&mut bytes, 0x550, u32::MAX),
-            8 => bytes[0x427] = 0xcc,
-            9 => set32(&mut bytes, 0x423, 0x7fffffff),
-            10 => bytes[0x800] = b'z',
-            11 => bytes[0x840] = 1,
             _ => unreachable!(),
         }
-        assert!(HelperLayout::parse(&bytes, SOURCE).is_err(), "fault {fault}");
+        assert!(HelperLayout::parse(&bytes).is_err(), "fault {fault}");
     }
 }
 
@@ -119,7 +110,7 @@ fn partially_overlapping_mapped_sections_are_rejected_even_when_only_one_covers_
     set32(&mut bytes, second + 16, 4);
     set32(&mut bytes, second + 20, 0x700);
     set32(&mut bytes, second + 36, 0x60000020);
-    assert!(HelperLayout::parse(&bytes, SOURCE).is_err());
+    assert!(HelperLayout::parse(&bytes).is_err());
 }
 
 #[test]
@@ -129,12 +120,12 @@ fn capture_checks_file_identity_and_holds_a_read_only_lease_without_executing() 
     let path = folder.join("helper.dll");
     let bytes = image();
     std::fs::write(&path, &bytes).unwrap();
-    let hash = eg_core::hashes::of_bytes(&bytes);
-    let artifact = HelperArtifact::capture(&path, &hash, SOURCE).unwrap();
+    let hash = file_ops::hashes::of_bytes(&bytes);
+    let artifact = HelperArtifact::capture(&path, &hash).unwrap();
     assert_eq!(artifact.bootstrap_rva(), 0x1000);
     assert_eq!(artifact.sha256(), hash);
     artifact.verify_unchanged().unwrap();
-    assert!(HelperArtifact::capture(&path, &"0".repeat(64), SOURCE).is_err());
+    assert!(HelperArtifact::capture(&path, &"0".repeat(64)).is_err());
     #[cfg(windows)]
     assert!(std::fs::OpenOptions::new().write(true).open(&path).is_err());
     drop(artifact);

@@ -2,8 +2,8 @@
 
 use crate::game::metadata_text;
 use crate::game::{Class, GameError, RuntimeAccess, target, unsupported};
-use eg_il2cpp_runtime::{AttachedThread, InvocationContext, InvocationOutcome, ReturnValue, StrongRoot, ValueTypeContract, raw};
 use eg_trainer_wire::locale::GameLocale;
+use il2cpp_runtime::{AttachedThread, InvocationContext, InvocationOutcome, ReturnValue, StrongRoot, ValueTypeContract, raw};
 use std::{ffi::CStr, ptr::NonNull};
 
 type Root<'a, 'r> = StrongRoot<'a, 'r>;
@@ -264,7 +264,7 @@ mod tests {
         Ptr, Type,
         test_fakes::{self, frees, roots, token},
     };
-    use eg_il2cpp_runtime::ThreadContext;
+    use il2cpp_runtime::ThreadContext;
     use std::cell::Cell;
     const PARENT: usize = 0x1000;
     const CHILD: usize = 0x2000;

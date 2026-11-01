@@ -14,7 +14,6 @@ use std::{
     time::Duration,
 };
 
-pub const SOURCE: &str = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
 fn set16(bytes: &mut [u8], at: usize, value: u16) {
     bytes[at..at + 2].copy_from_slice(&value.to_le_bytes());
 }
@@ -53,12 +52,8 @@ fn image() -> Vec<u8> {
     set16(&mut bytes, 0x560, 0);
     set16(&mut bytes, 0x562, 1);
     bytes[0x570..0x584].copy_from_slice(b"eg_helper_bootstrap\0");
-    bytes[0x590..0x5a3].copy_from_slice(b"eg_helper_build_id\0");
+    bytes[0x590..0x5a3].copy_from_slice(b"eg_helper_function\0");
     bytes[0x400..0x410].fill(0xc3);
-    bytes[0x420..0x423].copy_from_slice(&[0x48, 0x8d, 0x05]);
-    set32(&mut bytes, 0x423, 0x1400 - (0x1020 + 7));
-    bytes[0x427] = 0xc3;
-    bytes[0x800..0x840].copy_from_slice(SOURCE.as_bytes());
     bytes
 }
 pub struct Fixture {
@@ -80,13 +75,13 @@ impl Fixture {
         std::fs::write(&executable, b"never executed").unwrap();
         let helper = temp.path().join("eg_trainer_helper.dll");
         std::fs::write(&helper, &bytes).unwrap();
-        let artifact = Arc::new(HelperArtifact::capture(&helper, &eg_core::hashes::of_bytes(&bytes), SOURCE).unwrap());
+        let artifact = Arc::new(HelperArtifact::capture(&helper, &file_ops::hashes::of_bytes(&bytes)).unwrap());
         let target = ProcessIdentity {
             pid: 42,
             created: 134053344000000000,
             executable,
         };
-        let build = BuildIdentity::capture(&binary, &metadata, SOURCE).unwrap();
+        let build = BuildIdentity::capture(&binary, &metadata, artifact.sha256()).unwrap();
         Self { temp, target, build, artifact }
     }
     pub fn profile_with_source(&self, source: &str) -> BuildIdentity {

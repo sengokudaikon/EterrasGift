@@ -3,7 +3,7 @@
 
 use super::description::{SettingChoice, SettingDescription};
 use super::invalid;
-use eg_i18n::phrases;
+use phrases::phrases;
 use serde_json::Value as JsonValue;
 use std::collections::{BTreeMap, HashSet};
 use std::fs;
@@ -142,7 +142,7 @@ impl MelonPreferences {
 
     pub fn load(path: &Path) -> io::Result<Self> {
         match fs::read_to_string(path) {
-            Ok(text) => Self::parse(eg_core::text::strip_bom(&text)),
+            Ok(text) => Self::parse(file_ops::text::strip_bom(&text)),
             Err(error) if error.kind() == io::ErrorKind::NotFound => Self::parse(""),
             Err(error) => Err(error),
         }
@@ -211,7 +211,7 @@ impl MelonPreferences {
     }
 
     pub fn save(&self, path: &Path, changes: &[PreferenceChange]) -> io::Result<()> {
-        eg_core::atomic::write(path, self.with(changes)?.as_bytes())
+        file_ops::atomic::write(path, self.with(changes)?.as_bytes())
     }
 }
 

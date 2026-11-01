@@ -2,9 +2,9 @@
 
 use crate::trainer;
 use eg_core::fault::FaultLog;
-use eg_core::instance::{self, InstanceLock};
 use eg_core::paths;
 use eg_core::settings::SettingsStore;
+use file_ops::instance::{self, InstanceLock};
 use std::ffi::OsString;
 use std::path::PathBuf;
 use std::time::Duration;

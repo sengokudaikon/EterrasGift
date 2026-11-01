@@ -102,7 +102,7 @@ pub struct CatalogBuilder {
 
 impl CatalogBuilder {
     pub fn new(identity: CatalogIdentity, limits: ItemLimits) -> Result<Self, ProtocolError> {
-        if !eg_core::hashes::is_sha256(&identity.binary_hash) || !eg_core::hashes::is_sha256(&identity.metadata_hash) || identity.extraction_version != EXTRACTION_VERSION {
+        if !file_ops::hashes::is_sha256(&identity.binary_hash) || !file_ops::hashes::is_sha256(&identity.metadata_hash) || identity.extraction_version != EXTRACTION_VERSION {
             return Err(ProtocolError::InvalidData);
         }
         eg_trainer_wire::locale::encode(&identity.locale)?;

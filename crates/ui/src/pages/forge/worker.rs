@@ -11,11 +11,11 @@ use crate::{
     shell::{Page, ShellHandle},
 };
 use eg_core::fault::{FaultDetails, FaultLog};
-use eg_i18n::phrases;
 use eg_trainer::{
     backend::{BackendHandle, BackendSnapshot, CatalogState, Command, ForgeSnapshot, ForgeState, MappingRead, Pending, Phase},
     definitions::catalog::{Availability, GameCatalog},
 };
+use phrases::phrases;
 use slint::{ComponentHandle, Timer, TimerMode};
 use std::{
     cell::{Cell, RefCell},

@@ -1,5 +1,5 @@
 use super::*;
-use crate::hooks::leaf::LeafGate;
+use native_hooks::leaf::LeafGate;
 use std::{
     cell::Cell,
     sync::atomic::{AtomicU8, Ordering::SeqCst},
@@ -37,7 +37,7 @@ fn chance_skips_original_only_while_enabled_offline_and_forwards_exact_arguments
 
 #[test]
 fn removing_the_failure_branch_preserves_the_later_item_level_rejection() {
-    use crate::hooks::patch::{self, CodePatch};
+    use native_hooks::patch::{self, CodePatch};
     #[unsafe(naked)]
     unsafe extern "C-unwind" fn spawn(_: bool, _: i32, _: i32) -> bool {
         core::arch::naked_asm!(

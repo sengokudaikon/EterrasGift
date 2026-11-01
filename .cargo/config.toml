@@ -3,8 +3,13 @@
 xtask = "run --quiet -p xtask --"
 # Warnings are errors: a warning left in passes unnoticed in every later build.
 lint = "clippy --workspace --all-targets -- -D warnings"
+lint-libs = "clippy --manifest-path libs/Cargo.toml --workspace --all-targets -- -D warnings"
 # Headless PNG captures of the real UI into artifacts/captures.
 capture = "test -p eg-ui --test captures"
+
+[build]
+# One cache for the workspaces in this checkout, so the libraries' workspace reuses the third-party crates the app built.
+build-dir = "target/build"
 
 [unstable]
 # Artifact dependencies: the desktop embeds the trainer helper DLL (crates/app). Nightly-only, as the pinned toolchain is.

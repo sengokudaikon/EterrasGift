@@ -10,7 +10,7 @@ use super::{
 };
 use crate::game::install::{GameIdentity, GameInstall};
 use crate::launch::loader::{ModLoaderState, ModLoaderSwitch, melon_paths};
-use eg_i18n::{Conjunction, list, phrases};
+use phrases::{Conjunction, list, phrases};
 use std::path::{Path, PathBuf};
 
 phrases! {

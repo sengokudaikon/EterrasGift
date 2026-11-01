@@ -5,11 +5,13 @@ edition.workspace = true
 publish.workspace = true
 
 [dependencies]
+task-runtime.workspace = true
+file-ops.workspace = true
 eg-core.workspace = true
-eg-i18n.workspace = true
+phrases.workspace = true
 eg-companion.workspace = true
-eg-flow.workspace = true
-eg-flow-slint.workspace = true
+flow.workspace = true
+flow-slint.workspace = true
 eg-trainer = { path = "../trainer" }
 rfd.workspace = true
 jiff.workspace = true
@@ -27,7 +29,6 @@ slint-build.workspace = true
 rspolib.workspace = true
 
 [dev-dependencies]
-eg-runtime.workspace = true
 image.workspace = true
 jiff.workspace = true
 tempfile.workspace = true

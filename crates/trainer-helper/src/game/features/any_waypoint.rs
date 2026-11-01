@@ -3,12 +3,10 @@
 //! Only the two availability arguments change; the remaining nine-position ABI and original call stay intact.
 //! The caller retains its waypoint/string graph for the call. No object state or saved unlock is changed here.
 use super::{patches::PatchSpec, registry::*};
-use crate::{
-    game::*,
-    hooks::{
-        emit,
-        leaf::{FRAME, GeneratedEffect, LeafEffect},
-    },
+use crate::game::*;
+use native_hooks::{
+    emit,
+    leaf::{FRAME, GeneratedEffect, LeafEffect},
 };
 
 pub(crate) const FEATURE: HookFeature = HookFeature {

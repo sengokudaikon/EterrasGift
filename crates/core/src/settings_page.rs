@@ -5,11 +5,10 @@
 //! state machine here too: a close waits for accepted saves, and a save that failed in the meantime is shown instead of
 //! being lost with the window. It names no module: each one describes itself as a [`ModuleChoice`].
 
-use crate::paths;
 use crate::settings::{AppSettings, Locations};
 use crate::settings_service::{Change, SaveOutcome, SettingsService, Snapshot};
-use eg_flow::{Effects, Feature, Tracked, Version};
-use eg_i18n::{Phrase, phrases};
+use flow::{Effects, Feature, Tracked, Version};
+use phrases::{Phrase, phrases};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
@@ -464,7 +463,7 @@ impl State {
         self.boxes
             .iter()
             .zip(location_text(self.snapshot.store.saved()))
-            .any(|(typed, saved)| !paths::same_text(typed.trim(), &saved))
+            .any(|(typed, saved)| !file_ops::paths::same_text(typed.trim(), &saved))
     }
     pub fn can_save_locations(&self) -> bool {
         self.has_unsaved_locations() || self.snapshot.store.unreadable()
@@ -489,7 +488,7 @@ impl State {
         let saved = store.saved();
         let differs = |active: Option<&Path>, saved: &Option<PathBuf>| match (active, saved) {
             (None, None) => false,
-            (Some(active), Some(saved)) => !paths::same_text(&active.to_string_lossy(), &saved.to_string_lossy()),
+            (Some(active), Some(saved)) => !file_ops::paths::same_text(&active.to_string_lossy(), &saved.to_string_lossy()),
             _ => true,
         };
         let moved = saved.migration_source.is_some()
@@ -899,7 +898,7 @@ fn begin_close(state: &mut State, effects: &mut Effects<Effect>) {
 mod tests {
     use super::*;
     use crate::settings::SettingsStore;
-    use eg_flow::step;
+    use flow::step;
     use std::cell::RefCell;
     use std::collections::VecDeque;
     use std::fs;
@@ -1092,8 +1091,8 @@ mod tests {
         assert_eq!((page.kind(), page.message()), (MessageKind::Saved, ""));
     }
 
-    fn tasks() -> eg_runtime::Tasks {
-        static RUNTIME: std::sync::LazyLock<eg_runtime::Runtime> = std::sync::LazyLock::new(|| eg_runtime::Runtime::start().unwrap());
+    fn tasks() -> task_runtime::Tasks {
+        static RUNTIME: std::sync::LazyLock<task_runtime::Runtime> = std::sync::LazyLock::new(|| task_runtime::Runtime::start().unwrap());
         RUNTIME.tasks()
     }
 

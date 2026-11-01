@@ -17,12 +17,12 @@ use std::{
 };
 
 use crate::definitions::entries::{self, CatalogEntries, CatalogKind, CatalogPage, MAX_PAGE_ENTRIES};
-use eg_core::{atomic, hashes};
 use eg_trainer_wire::{
     definitions,
     locale::GameLocale,
     protocol::{MAX_RESPONSE_SIZE, ProtocolError},
 };
+use file_ops::{atomic, hashes};
 
 use crate::definitions::catalog::{CatalogBuilder, CatalogIdentity, GameCatalog, MAX_CATALOG_BYTES};
 

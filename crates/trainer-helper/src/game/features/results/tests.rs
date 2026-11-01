@@ -1,5 +1,5 @@
 use super::*;
-use crate::hooks::postfix::PostfixGate;
+use native_hooks::postfix::PostfixGate;
 use std::{
     cell::Cell,
     sync::atomic::{AtomicBool, AtomicI32, AtomicU8, AtomicUsize, Ordering::SeqCst},

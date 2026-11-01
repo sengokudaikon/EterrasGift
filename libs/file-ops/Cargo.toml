@@ -1,0 +1,20 @@
+[package]
+name = "file-ops"
+description = "Files handled with care on Windows: atomic writes, resumable folder moves, read leases, one-at-a-time locks, SHA-256, and text and JSON from outside. Names no app or game."
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[dependencies]
+serde_json.workspace = true
+sha2.workspace = true
+uuid.workspace = true
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { workspace = true, features = ["Win32_Foundation", "Win32_Storage_FileSystem", "Win32_System_IO", "Win32_System_Ioctl"] }
+
+[dev-dependencies]
+tempfile.workspace = true
+
+[lints]
+workspace = true

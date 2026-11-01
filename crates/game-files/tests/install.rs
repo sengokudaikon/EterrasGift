@@ -1,5 +1,5 @@
 //! Reads a real Last Epoch install. Files only: nothing starts, opens or touches the game process.
-//! `EG_LAST_EPOCH=<game folder> mise run game-files:install`, which also checks the rebuilt layouts (`src/layout.rs`).
+//! `EG_LAST_EPOCH=<game folder> mise run game-files:install`, which also checks the rebuilt layouts (`src/layout_check.rs`).
 
 use eg_game_files::Install;
 use std::time::Instant;

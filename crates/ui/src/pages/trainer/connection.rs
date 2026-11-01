@@ -8,8 +8,8 @@ use crate::{
     shell::ShellHandle,
 };
 use eg_core::{bloom::BloomPhase, game_log::GameReadiness};
-use eg_i18n::phrases;
 use eg_trainer::backend::{Activity, BackendHandle, BackendSnapshot, Command, ErrorKind, Phase, ProfileLock};
+use phrases::phrases;
 use slint::ComponentHandle;
 use std::{cell::Cell, rc::Rc};
 

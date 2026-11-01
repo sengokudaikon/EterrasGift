@@ -11,13 +11,13 @@ use eg_core::fault::FaultLog;
 use eg_core::logs::LogFiles;
 use eg_core::settings::SettingsStore;
 use eg_core::settings_service::{SaveOutcome, SettingsService, Snapshot};
-use eg_flow_slint::Background;
-use eg_runtime::{Runtime, Tasks};
 use eg_ui::pages::settings::{Settings, trainer as trainer_settings};
 use eg_ui::shell::Page;
 use eg_ui::{App, MainWindow};
+use flow_slint::Background;
 use slint::ComponentHandle;
 use std::process::ExitCode;
+use task_runtime::{Runtime, Tasks};
 
 pub fn run(startup: Startup) -> Result<ExitCode, slint::PlatformError> {
     let store = SettingsStore::open(&startup.root, &startup.settings_file, &[trainer_settings::LEGACY]);

@@ -2,15 +2,13 @@
 //! their RNG behavior; this selected call skips the RNG as the original trainer does. The game still rounds and
 //! enforces its placement cap and existing champion count. The leaf preserves the original caller address directly.
 use super::registry::*;
-use crate::{
-    game::*,
-    hooks::{
-        emit,
-        leaf::{FRAME, GeneratedEffect, LeafEffect},
-        patch::find_unique,
-    },
-};
+use crate::game::*;
 use iced_x86::{Code, Decoder, DecoderOptions};
+use native_hooks::{
+    emit,
+    leaf::{FRAME, GeneratedEffect, LeafEffect},
+    patch::find_unique,
+};
 
 pub(crate) const FEATURE: HookFeature = HookFeature {
     controls: &[GameplayHook::Champions],

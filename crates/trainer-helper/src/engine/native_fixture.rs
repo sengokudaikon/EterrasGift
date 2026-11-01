@@ -143,13 +143,13 @@ unsafe fn native_worker() -> Result<(), String> {
         gate.set_original(hook.trampoline());
         let mut control = NativeControl {
             discovery: Discovery {
-                build_id: BUILD_ID.into(),
+                build_id: "0".repeat(64),
                 dispatcher: DispatcherSpec { rva: 4096, bytes },
             },
             hook,
             gate,
         };
-        hooks::commit(&[(&control.hook, true)]).map_err(|e| e.to_string())?;
+        native_hooks::commit(&[(&control.hook, true)]).map_err(|e| e.to_string())?;
         let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build().map_err(|e| e.to_string())?;
         runtime.block_on(server::run(std::process::id(), &mut control, state())).departure()
     }

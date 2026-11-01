@@ -1,11 +1,9 @@
 //! Common contracts and a small emitter for the two before-original material replenishment leaves.
 //! Both targets are i32(instance, MethodInfo): RAX/R8-R11 are scratch; RCX/RDX and the stack stay untouched.
-use crate::{
-    game::*,
-    hooks::{
-        emit,
-        leaf::{FRAME, GeneratedEffect, LeafEffect},
-    },
+use crate::game::*;
+use native_hooks::{
+    emit,
+    leaf::{FRAME, GeneratedEffect, LeafEffect},
 };
 use std::ops::{Deref, DerefMut};
 

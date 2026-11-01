@@ -1,5 +1,5 @@
 use super::*;
-use crate::hooks::leaf::LeafGate;
+use native_hooks::leaf::LeafGate;
 use std::{
     cell::Cell,
     mem::offset_of,

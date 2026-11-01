@@ -1,7 +1,8 @@
 //! Shared resolver for explicit feature-owned code recipes. Metadata, method bounds and a unique full pattern are
 //! checked before any write; the native owner/transaction layer retains the original bytes and performs readback.
 use super::registry::{CodeChange, GameplayHook, GameplayHookTarget, HookFeature, MethodSpec, ResolvedMethod, TargetEffect};
-use crate::{game::*, hooks::patch::find_unique};
+use crate::game::*;
+use native_hooks::patch::find_unique;
 
 pub(crate) struct PatchSpec {
     name: &'static str,

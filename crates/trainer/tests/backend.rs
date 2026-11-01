@@ -1171,7 +1171,7 @@ fn unreadable_game_files_keep_the_trainer_closed_and_say_why() {
         // A real service, asked for the fake game's folder, which holds no game.
         let shared = Shared::new();
         let mut options = options();
-        let owner = eg_runtime::Runtime::start().unwrap();
+        let owner = task_runtime::Runtime::start().unwrap();
         options.game_data = Some(eg_trainer::definitions::service::start(None, None, None, &owner.tasks()));
         let (handle, worker) = start(&shared, options);
         assert_eq!(handle.snapshot().game_files, backend::GameFiles::NotConfigured);
@@ -1191,7 +1191,7 @@ fn read_again_reads_the_files_without_a_connection() {
     run(async {
         let shared = Shared::new();
         let mut options = options();
-        let owner = eg_runtime::Runtime::start().unwrap();
+        let owner = task_runtime::Runtime::start().unwrap();
         options.game_data = Some(eg_trainer::definitions::service::start(None, None, None, &owner.tasks()));
         let (handle, worker) = start(&shared, options);
         command(&handle, Command::RefreshCatalog).await.unwrap();

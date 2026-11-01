@@ -6,18 +6,15 @@ edition.workspace = true
 publish.workspace = true
 
 [dependencies]
-eg-flow.workspace = true
-eg-i18n.workspace = true
-eg-runtime.workspace = true
+file-ops.workspace = true
+flow.workspace = true
+phrases.workspace = true
+task-runtime.workspace = true
 jiff.workspace = true
 regex.workspace = true
 serde_json.workspace = true
-sha2.workspace = true
 tokio.workspace = true
 uuid.workspace = true
-
-[target.'cfg(windows)'.dependencies]
-windows-sys = { workspace = true, features = ["Win32_Foundation", "Win32_Storage_FileSystem", "Win32_System_Diagnostics_ToolHelp"] }
 
 [dev-dependencies]
 tempfile.workspace = true

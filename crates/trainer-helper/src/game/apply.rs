@@ -3,8 +3,8 @@
 //! starts, every failure is [`WriteError::Failed`]: the store may have happened, and nothing is retried or rolled back.
 
 use super::{Class, GameError, RuntimeAccess};
-use eg_il2cpp_runtime::raw;
 use eg_trainer_wire::protocol::ResponseCode;
+use il2cpp_runtime::raw;
 use std::{ffi::CStr, fmt, ptr::NonNull};
 
 /// Why a write was not confirmed. Only `Failed` may describe a write whose store was attempted; no variant permits a
@@ -51,8 +51,8 @@ impl From<GameError> for WriteError {
         }
     }
 }
-impl From<eg_il2cpp_runtime::MetadataError> for WriteError {
-    fn from(error: eg_il2cpp_runtime::MetadataError) -> Self {
+impl From<il2cpp_runtime::MetadataError> for WriteError {
+    fn from(error: il2cpp_runtime::MetadataError) -> Self {
         GameError::from(error).into()
     }
 }

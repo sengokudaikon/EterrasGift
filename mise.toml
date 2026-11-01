@@ -2,7 +2,7 @@
 # Rust nightly is selected by rust-toolchain.toml; slint-viewer and slint-lsp 1.18.1 are on PATH.
 
 [tasks.build]
-description = "Build the workspace"
+description = "Build the app and its libraries"
 run = "cargo build"
 
 [tasks.run]
@@ -10,11 +10,11 @@ description = "Run the app: real settings, real game host"
 run = "cargo run -p eterras-gift"
 
 [tasks.lint]
-description = "Clippy over every target, warnings as errors"
-run = "cargo lint"
+description = "Clippy over every target of both workspaces, warnings as errors"
+run = ["cargo lint", "cargo lint-libs"]
 
 [tasks.fmt]
-description = "Format the workspace"
+description = "Format the app and its libraries"
 run = "cargo fmt --all"
 
 [tasks."fmt:check"]
@@ -34,10 +34,10 @@ description = "Headless PNG captures of the real UI on the fake game host, into 
 run = "cargo capture"
 
 [tasks.test]
-description = "Every workspace test in the dev profile, on fakes; no live game. The captures run under capture"
+description = "Every test of both workspaces in the dev profile, on fakes; no live game. The captures run under capture"
 # eg-ui's only integration target is the captures (harness = false), run by `capture`; `test = false` would hide them
 # from `cargo lint` too.
-run = ["cargo test --workspace --exclude eg-ui --offline", "cargo test -p eg-ui --lib --offline"]
+run = ["cargo test --manifest-path libs/Cargo.toml --workspace --offline", "cargo test --workspace --exclude eg-ui --offline", "cargo test -p eg-ui --lib --offline"]
 
 [tasks."ui:test"]
 description = "UI presentation and asynchronous editor tests on fake services (part of test)"
@@ -49,7 +49,7 @@ run = "cargo capture -- --trainer-backend"
 
 [tasks.verify]
 description = "Everything to run before calling work done: lint, format, phrases, tests, captures; then look at artifacts/captures"
-run = ["cargo lint", "cargo fmt --all --check", "cargo xtask phrases --check", "mise run test", "cargo capture"]
+run = ["cargo lint", "cargo lint-libs", "cargo fmt --all --check", "cargo xtask phrases --check", "mise run test", "cargo capture"]
 
 [tasks."slint:check"]
 description = "Fast compile check of a .slint file (default: app.slint)"
@@ -81,7 +81,7 @@ run = ["cargo test -p eg-game-files --release -- --ignored --nocapture", "cargo 
 
 [tasks."trainer:test"]
 description = "The trainer packages' tests alone (part of test); no live game"
-run = "cargo test -p eg-trainer-wire -p eg-game-access -p eg-trainer -p eg-trainer-helper --offline"
+run = ["cargo test --manifest-path libs/Cargo.toml -p il2cpp-runtime -p native-hooks --offline", "cargo test -p eg-trainer-wire -p eg-game-access -p eg-trainer -p eg-trainer-helper --offline"]
 
 [tasks."trainer:verify"]
 description = "verify, then build the isolated controller (outside the workspace, so nothing else compiles it); required for trainer changes"

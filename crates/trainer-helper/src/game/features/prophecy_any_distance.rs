@@ -2,7 +2,8 @@
 //! faction requirements. Its 12-byte Vector3 travels indirectly in RDX; off/online paths tail-call the original
 //! without changing or dereferencing it. On returns true without a game call, matching the original trainer.
 use super::{prefix::Code, registry::*};
-use crate::{game::*, hooks::leaf::LeafEffect};
+use crate::game::*;
+use native_hooks::leaf::LeafEffect;
 
 pub(crate) const FEATURE: HookFeature = HookFeature {
     controls: &[GameplayHook::ProphecyAnyDistance],

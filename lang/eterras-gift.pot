@@ -871,31 +871,6 @@ msgstr ""
 msgid "{module} on"
 msgstr ""
 
-#: crates/i18n/src/phrase.rs
-msgctxt "a list of two"
-msgid "{first} and {second}"
-msgstr ""
-
-#: crates/i18n/src/phrase.rs
-msgctxt "a list of two"
-msgid "{first} or {second}"
-msgstr ""
-
-#: crates/i18n/src/phrase.rs
-msgctxt "a longer list, before its last item"
-msgid "{list}, {item}"
-msgstr ""
-
-#: crates/i18n/src/phrase.rs
-msgctxt "a longer list, its last item"
-msgid "{list} and {last}"
-msgstr ""
-
-#: crates/i18n/src/phrase.rs
-msgctxt "a longer list, its last item"
-msgid "{list} or {last}"
-msgstr ""
-
 #: crates/trainer/src/backend/connection.rs
 msgid "The helper couldn't leave the game. Restart Last Epoch before playing online."
 msgstr ""
@@ -4459,4 +4434,29 @@ msgstr ""
 
 #: crates/ui/ui/strings/trainer.slint
 msgid "Write the changes to the game and read them back"
+msgstr ""
+
+#: libs/phrases/src/phrase.rs
+msgctxt "a list of two"
+msgid "{first} and {second}"
+msgstr ""
+
+#: libs/phrases/src/phrase.rs
+msgctxt "a list of two"
+msgid "{first} or {second}"
+msgstr ""
+
+#: libs/phrases/src/phrase.rs
+msgctxt "a longer list, before its last item"
+msgid "{list}, {item}"
+msgstr ""
+
+#: libs/phrases/src/phrase.rs
+msgctxt "a longer list, its last item"
+msgid "{list} and {last}"
+msgstr ""
+
+#: libs/phrases/src/phrase.rs
+msgctxt "a longer list, its last item"
+msgid "{list} or {last}"
 msgstr ""

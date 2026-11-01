@@ -29,7 +29,7 @@ impl Group {
             let method = &target.method;
             if let crate::game::registry::TargetEffect::Patch(change) = &target.effect {
                 // SAFETY: complete pattern and method bounds checked; still unpublished and exclusively owned.
-                let patch = unsafe { hooks::patch::CodePatch::prepare(change.address, &change.expected, &change.replacement) }
+                let patch = unsafe { native_hooks::patch::CodePatch::prepare(change.address, &change.expected, &change.replacement) }
                     .map_err(|error| server::failure(ResponseCode::Refused, format!("{}: {error}", method.name)))?;
                 prepared.push(Entry::Patch(patch));
                 continue;
@@ -217,7 +217,8 @@ pub(super) unsafe fn fixture_change(
     extras: &[*mut u8],
     damage: Option<crate::game::damage::DamageLayout>,
 ) -> Result<(), Response> {
-    use crate::{game::registry::ResolvedMethod, hooks::leaf::LeafEffect};
+    use crate::game::registry::ResolvedMethod;
+    use native_hooks::leaf::LeafEffect;
     // SAFETY: fixture owns executable targets, optional class identity and readable receiver layouts for process lifetime.
     unsafe {
         change(hook, on, value, FeatureBinding::fixture(hook), || {
@@ -262,11 +263,12 @@ mod mixed;
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::hooks::scalar::ScalarGate;
     use effect::Gate;
+    use native_hooks::scalar::ScalarGate;
     #[test]
     fn a_leaf_group_prepares_all_entries_and_clear_restores_their_distinct_originals() {
-        use crate::{game::registry::ResolvedMethod, hooks::leaf::LeafEffect};
+        use crate::game::registry::ResolvedMethod;
+        use native_hooks::leaf::LeafEffect;
         #[unsafe(naked)]
         unsafe extern "C-unwind" fn first() -> bool {
             core::arch::naked_asm!(
@@ -804,7 +806,7 @@ mod tests {
     #[test]
     fn interior_ranges_share_on_off_readback_manager_loss_and_clear_with_detours() {
         use crate::game::registry::{CodeChange, ResolvedMethod, TargetEffect};
-        use crate::hooks::leaf::LeafEffect;
+        use native_hooks::leaf::LeafEffect;
         #[unsafe(naked)]
         unsafe extern "C-unwind" fn first() -> u32 {
             core::arch::naked_asm!("mov eax,42", "ret", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop");

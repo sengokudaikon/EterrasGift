@@ -176,7 +176,7 @@ impl TemplateStore {
     pub fn save(&self, template: &ItemTemplate) -> std::io::Result<()> {
         std::fs::create_dir_all(&self.directory)?;
         let text = serde_json::to_string_pretty(&template.to_json()).unwrap_or_default();
-        eg_core::atomic::write(&self.file(&template.name), text.as_bytes())
+        file_ops::atomic::write(&self.file(&template.name), text.as_bytes())
     }
 
     /// The kept template that saving under `name` would replace: the one whose file the name maps to, which may be spelled

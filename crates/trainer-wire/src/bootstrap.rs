@@ -14,7 +14,7 @@ pub struct BootstrapConfig {
     pub pid: u32,
     /// The helper's answer: 0 started, anything else refused.
     pub status: i32,
-    /// The helper build the desktop expects, as ASCII.
+    /// The SHA-256 of the DLL the desktop loaded, as ASCII hex: the ID the helper reports from then on.
     pub build_id: [u8; 64],
     /// The controlling desktop process, whose exit also stops the helper.
     pub owner_pid: u32,

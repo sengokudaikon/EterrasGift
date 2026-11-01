@@ -4,8 +4,8 @@
 
 use crate::pages::settings::{LiveStatus, ModuleChoice, ModuleLink, ModuleSection};
 use eg_core::settings::LegacyModuleSettings;
-use eg_i18n::phrases;
 use eg_trainer::backend::{Activity, BackendHandle, BackendSnapshot, CatalogState, Command, GameFiles};
+use phrases::phrases;
 use std::rc::Rc;
 
 phrases! {

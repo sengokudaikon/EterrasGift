@@ -1,8 +1,8 @@
 //! Unique tooltip lines and private-copy draft previews, using the game's producers.
 use crate::game::metadata_text;
 use crate::game::{GameError, Images, Root, RuntimeAccess, target, unsupported};
-use eg_il2cpp_runtime::{Argument, AttachedThread, InvocationContext, InvocationOutcome, ReturnValue, Scalar, ValueTypeContract, raw};
 use eg_trainer_wire::mapping::{ForgeDescriptionRequest, MAX_MODIFIERS, ModifierSnapshot, UniquePreviewRequest};
+use il2cpp_runtime::{Argument, AttachedThread, InvocationContext, InvocationOutcome, ReturnValue, Scalar, ValueTypeContract, raw};
 use std::{collections::BTreeSet, ffi::CStr, ptr::NonNull};
 
 impl RuntimeAccess {

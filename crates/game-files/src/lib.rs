@@ -1,34 +1,18 @@
-//! Last Epoch's game data, read from the files the game ships: no process, no injection, no game running.
-//!
-//! Layers, bottom up: `bundle` (UnityFS archives and their LZ4 blocks), `serialized` (Unity serialized files),
-//! `typetree` (layouts and the decoder, which must consume every byte of an object) and `archive` (bundles read
-//! together, so references between them resolve), then the game's own data: [`Install::definitions`] (affixes, item
-//! bases, ailments and the idol altar registry) and [`Install::strings`] (the text of one locale).
-//!
-//! Classes stored without type trees (uniques, properties and set bonuses in `resources.assets`) are read by
-//! [`Install::player_definitions`] with layouts rebuilt from the IL2CPP build (`eg-il2cpp-metadata`, `layout`): the metadata
-//! (format 39) names the fields, `GameAssembly.dll` types them, and Unity's serialization rules lay them out. The
-//! rules are checked against every class the bundles ship a tree for, and every object must decode exactly.
+//! Last Epoch's game data, read from the files the game ships with `unity-files`: no process, no injection, no game
+//! running. [`Install::definitions`] reads affixes, item bases, ailments and the idol altar registry, [`Install::strings`]
+//! the text of one locale, and [`Install::player_definitions`] the uniques, properties and set bonuses stored without
+//! type trees in `resources.assets`.
 
 #![forbid(unsafe_code)]
 
-mod archive;
-mod bundle;
-mod common_strings;
 pub mod definitions;
 mod install;
-mod layout;
-mod player;
-mod serialized;
-mod strings;
 #[cfg(test)]
-mod testing;
-mod typetree;
+mod layout_check;
 pub mod uniques;
-mod value;
 
+pub use binary_reader::{Error, Result};
 pub use definitions::Definitions;
-pub use eg_binary::{Error, Result};
 pub use install::Install;
-pub use strings::Strings;
 pub use uniques::PlayerDefinitions;
+pub use unity_files::strings::Strings;

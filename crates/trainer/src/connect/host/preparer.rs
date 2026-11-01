@@ -119,11 +119,8 @@ impl NativePreparer {
     fn prepare_once(&mut self, target: &ProcessIdentity, build: &BuildIdentity, admission: &mut dyn AdmissionCheck) -> Result<Arc<Mutex<RuntimeRecord>>, PreparationFailure> {
         let known = self.known_residency(target);
         admission.check().map_err(|error| failed(error, known))?;
-        if !build.helper_build_id().eq_ignore_ascii_case(self.artifact.source_id()) {
-            return Err(failed(
-                BackendError::blocked(ErrorKind::Identity, "helper artifact source differs from session's build"),
-                known,
-            ));
+        if !build.helper_build_id().eq_ignore_ascii_case(self.artifact.sha256()) {
+            return Err(failed(BackendError::blocked(ErrorKind::Identity, "helper artifact differs from session's build"), known));
         }
         if let Some(index) = self.retained.iter().position(|entry| entry.target == *target) {
             if let RetainedState::Loaded(record) = &self.retained[index].state {
@@ -256,7 +253,7 @@ impl HelperPreparer for NativePreparer {
         let runtime = self.prepare_once(target, build, admission)?;
         Ok(PreparedHelper {
             target: target.clone(),
-            helper_build_id: self.artifact.source_id().into(),
+            helper_build_id: self.artifact.sha256().into(),
             residency: PreparationResidency::Loaded,
             transport: VerifiedTransport {
                 pipe: PipeClient::new(target.clone()),
@@ -384,7 +381,7 @@ impl Transport for VerifiedTransport {
             let proof_result = (|| {
                 let mut record = self.runtime.lock().unwrap_or_else(|poison| poison.into_inner());
                 let discovery = Discovery::decode(&response.payload, self.pipe.target().pid).map_err(|error| io::Error::other(error.to_string()))?;
-                if !discovery.build_id.eq_ignore_ascii_case(record.helper.artifact().source_id()) {
+                if !discovery.build_id.eq_ignore_ascii_case(record.helper.artifact().sha256()) {
                     return Err(BootstrapError::Invalid("loaded helper source differs from retained artifact"));
                 }
                 if let Some(prior) = record.dispatcher {

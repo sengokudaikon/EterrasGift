@@ -1,5 +1,5 @@
 use super::*;
-use crate::hooks::postfix::PostfixGate;
+use native_hooks::postfix::PostfixGate;
 use std::{
     cell::Cell,
     mem::offset_of,

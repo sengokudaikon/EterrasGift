@@ -3,10 +3,10 @@
 
 use crate::launch::host::{GameHost, LaunchError, LaunchMode, LaunchOutcome};
 use crate::launch::loader::{self, ModLoaderState};
-use eg_core::operations::Cancellation;
-use eg_i18n::phrases;
+use phrases::phrases;
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::Duration;
+use task_runtime::CancellationToken;
 
 /// What a start came to, in one sentence; `started` is false when the game was not started.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -30,7 +30,7 @@ phrases! {
 pub struct GameLauncher {
     host: Arc<dyn GameHost>,
     // Cancelled when the app closes, so a start with mods still waiting for MelonLoader sets its proxy aside first.
-    lifetime: Cancellation,
+    lifetime: CancellationToken,
     starting: Mutex<bool>,
     finished: Condvar,
 }
@@ -42,7 +42,7 @@ impl GameLauncher {
     pub fn new(host: Arc<dyn GameHost>) -> GameLauncher {
         GameLauncher {
             host,
-            lifetime: Cancellation::default(),
+            lifetime: CancellationToken::default(),
             starting: Mutex::new(false),
             finished: Condvar::new(),
         }

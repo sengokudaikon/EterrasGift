@@ -3,12 +3,10 @@
 //! allocation or runtime lookup runs on the gameplay thread. The live actor/component graph must remain readable
 //! for that call, as in the existing mana-cost and ability-speed hooks. Effects use volatile RAX/R11/XMM0 only;
 //! arguments, the caller's stack and nonvolatile registers stay intact. Original exceptions are never intercepted.
-use crate::{
-    game::*,
-    hooks::{
-        emit,
-        leaf::{FRAME, GeneratedEffect, LeafEffect},
-    },
+use crate::game::*;
+use native_hooks::{
+    emit,
+    leaf::{FRAME, GeneratedEffect, LeafEffect},
 };
 
 #[derive(Clone, Copy)]

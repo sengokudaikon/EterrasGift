@@ -4,8 +4,8 @@ use crate::game::{
     Class, Ptr,
     test_fakes::{self, rooted, rooted_objects, roots, token},
 };
-use eg_il2cpp_runtime::{ThreadContext, raw};
 use eg_trainer_wire::fields::PlayerUnavailable;
+use il2cpp_runtime::{ThreadContext, raw};
 use std::ffi::CStr;
 use std::{
     cell::{Cell, RefCell},

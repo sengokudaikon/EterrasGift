@@ -1,10 +1,10 @@
 use eg_core::settings::{Locations, SettingsStore};
 use eg_core::settings_service::{Change, SaveOutcome, SettingsService};
-use eg_runtime::{Runtime, Tasks};
 use serde_json::json;
 use std::fs;
 use std::sync::{LazyLock, mpsc};
 use std::time::Duration;
+use task_runtime::{Runtime, Tasks};
 
 const DEADLINE: Duration = Duration::from_secs(5);
 

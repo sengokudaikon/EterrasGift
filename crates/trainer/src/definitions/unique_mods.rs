@@ -285,7 +285,7 @@ impl Ledger {
             return Ok(());
         }
         let value = json!({"version": LEDGER_VERSION, "ids": self.ids});
-        eg_core::atomic::write(&self.path, serde_json::to_string_pretty(&value).unwrap_or_default().as_bytes()).map_err(|e| format!("{}: {e}", self.path.display()))?;
+        file_ops::atomic::write(&self.path, serde_json::to_string_pretty(&value).unwrap_or_default().as_bytes()).map_err(|e| format!("{}: {e}", self.path.display()))?;
         self.changed = false;
         Ok(())
     }
@@ -325,7 +325,7 @@ impl InUse {
             return Ok(());
         };
         let list: Vec<u16> = self.ids.iter().copied().collect();
-        eg_core::atomic::write(path, serde_json::to_string(&list).unwrap_or_default().as_bytes()).map_err(|e| format!("{}: {e}", path.display()))
+        file_ops::atomic::write(path, serde_json::to_string(&list).unwrap_or_default().as_bytes()).map_err(|e| format!("{}: {e}", path.display()))
     }
 }
 

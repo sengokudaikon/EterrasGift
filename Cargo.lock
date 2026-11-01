@@ -480,6 +480,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ac07cdecf99051d9a5238b80f35af32cdeba5b336e55d957b318b50137e18da5"
 
 [[package]]
+name = "binary-reader"
+version = "0.1.0"
+
+[[package]]
 name = "bincode"
 version = "2.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1319,25 +1323,23 @@ dependencies = [
 ]
 
 [[package]]
-name = "eg-binary"
-version = "0.1.0"
-
-[[package]]
 name = "eg-companion"
 version = "0.1.0"
 dependencies = [
  "dotscope",
  "eg-core",
- "eg-flow",
- "eg-i18n",
- "eg-runtime",
+ "file-ops",
+ "flow",
  "jiff",
+ "phrases",
  "regex",
  "serde_json",
  "sha2",
+ "task-runtime",
  "tempfile",
  "tokio",
  "toml_edit",
+ "win-process",
  "windows-sys 0.61.2",
 ]
 
@@ -1345,39 +1347,25 @@ dependencies = [
 name = "eg-core"
 version = "0.1.0"
 dependencies = [
- "eg-flow",
- "eg-i18n",
- "eg-runtime",
+ "file-ops",
+ "flow",
  "jiff",
+ "phrases",
  "regex",
  "serde_json",
- "sha2",
+ "task-runtime",
  "tempfile",
  "tokio",
  "uuid",
- "windows-sys 0.61.2",
-]
-
-[[package]]
-name = "eg-flow"
-version = "0.1.0"
-
-[[package]]
-name = "eg-flow-slint"
-version = "0.1.0"
-dependencies = [
- "eg-flow",
- "eg-runtime",
- "slint",
- "tokio",
 ]
 
 [[package]]
 name = "eg-game-access"
 version = "0.1.0"
 dependencies = [
- "eg-core",
+ "binary-reader",
  "eg-trainer-wire",
+ "file-ops",
  "tempfile",
  "tokio",
  "windows-sys 0.61.2",
@@ -1387,56 +1375,29 @@ dependencies = [
 name = "eg-game-files"
 version = "0.1.0"
 dependencies = [
- "eg-binary",
- "eg-il2cpp-metadata",
- "lz4_flex",
+ "binary-reader",
+ "il2cpp-metadata",
  "tempfile",
-]
-
-[[package]]
-name = "eg-i18n"
-version = "0.1.0"
-dependencies = [
- "windows-sys 0.61.2",
-]
-
-[[package]]
-name = "eg-il2cpp-metadata"
-version = "0.1.0"
-dependencies = [
- "eg-binary",
-]
-
-[[package]]
-name = "eg-il2cpp-runtime"
-version = "0.1.0"
-dependencies = [
- "static_assertions",
-]
-
-[[package]]
-name = "eg-runtime"
-version = "0.1.0"
-dependencies = [
- "tempfile",
- "tokio",
- "tokio-util",
+ "unity-files",
 ]
 
 [[package]]
 name = "eg-trainer"
 version = "0.1.0"
 dependencies = [
+ "binary-reader",
  "eg-core",
  "eg-game-access",
  "eg-game-files",
- "eg-i18n",
- "eg-runtime",
  "eg-trainer-wire",
+ "file-ops",
  "jiff",
+ "phrases",
  "serde_json",
+ "task-runtime",
  "tempfile",
  "tokio",
+ "win-process",
 ]
 
 [[package]]
@@ -1445,10 +1406,10 @@ version = "0.1.0"
 dependencies = [
  "detour",
  "eg-game-access",
- "eg-il2cpp-runtime",
  "eg-trainer-wire",
  "iced-x86",
- "sha2",
+ "il2cpp-runtime",
+ "native-hooks",
  "tokio",
  "windows-sys 0.61.2",
 ]
@@ -1466,13 +1427,13 @@ version = "0.1.0"
 dependencies = [
  "eg-companion",
  "eg-core",
- "eg-flow",
- "eg-flow-slint",
- "eg-i18n",
- "eg-runtime",
  "eg-trainer",
+ "file-ops",
+ "flow",
+ "flow-slint",
  "image",
  "jiff",
+ "phrases",
  "raw-window-handle",
  "rfd",
  "rspolib",
@@ -1480,6 +1441,7 @@ dependencies = [
  "slint",
  "slint-build",
  "sys-locale",
+ "task-runtime",
  "tempfile",
  "tokio",
  "windows-sys 0.61.2",
@@ -1546,14 +1508,15 @@ version = "0.1.0"
 dependencies = [
  "eg-companion",
  "eg-core",
- "eg-flow-slint",
- "eg-runtime",
  "eg-trainer",
  "eg-trainer-helper",
  "eg-ui",
+ "file-ops",
+ "flow-slint",
  "serde_json",
  "slint",
  "syn 2.0.119",
+ "task-runtime",
  "tempfile",
  "tokio",
 ]
@@ -1633,6 +1596,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "file-ops"
+version = "0.1.0"
+dependencies = [
+ "serde_json",
+ "sha2",
+ "uuid",
+ "windows-sys 0.61.2",
+]
+
+[[package]]
 name = "filetime"
 version = "0.2.29"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1681,6 +1654,20 @@ name = "float-cmp"
 version = "0.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "98de4bbd547a563b716d8dfa9aad1cb19bfab00f4fa09a6a4ed21dbcf44ce9c4"
+
+[[package]]
+name = "flow"
+version = "0.1.0"
+
+[[package]]
+name = "flow-slint"
+version = "0.1.0"
+dependencies = [
+ "flow",
+ "slint",
+ "task-runtime",
+ "tokio",
+]
 
 [[package]]
 name = "fnv"
@@ -2704,6 +2691,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "il2cpp-metadata"
+version = "0.1.0"
+dependencies = [
+ "binary-reader",
+]
+
+[[package]]
+name = "il2cpp-runtime"
+version = "0.1.0"
+
+[[package]]
 name = "image"
 version = "0.25.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3335,6 +3333,15 @@ dependencies = [
  "indexmap",
  "rustc-hash 1.1.0",
  "thiserror 2.0.21",
+]
+
+[[package]]
+name = "native-hooks"
+version = "0.1.0"
+dependencies = [
+ "detour",
+ "iced-x86",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -3998,6 +4005,13 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e57fef6bc5981e38c2ce2d63bfa546861309f875b8a75f092d1d54ae2d64f266"
 dependencies = [
  "siphasher",
+]
+
+[[package]]
+name = "phrases"
+version = "0.1.0"
+dependencies = [
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -5122,6 +5136,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "task-runtime"
+version = "0.1.0"
+dependencies = [
+ "tokio",
+ "tokio-util",
+]
+
+[[package]]
 name = "tempfile"
 version = "3.27.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5501,6 +5523,15 @@ name = "unicode-xid"
 version = "0.2.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ebc1c04c71510c7f702b52b7c350734c9ff1295c464a03335b00bb84fc54f853"
+
+[[package]]
+name = "unity-files"
+version = "0.1.0"
+dependencies = [
+ "binary-reader",
+ "il2cpp-metadata",
+ "lz4_flex",
+]
 
 [[package]]
 name = "unty"
@@ -5988,6 +6019,14 @@ name = "widestring"
 version = "1.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "72069c3113ab32ab29e5584db3c6ec55d416895e60715417b5b883a357c3e471"
+
+[[package]]
+name = "win-process"
+version = "0.1.0"
+dependencies = [
+ "jiff",
+ "windows-sys 0.61.2",
+]
 
 [[package]]
 name = "winapi-util"

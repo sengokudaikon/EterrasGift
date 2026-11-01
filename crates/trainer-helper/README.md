@@ -145,10 +145,9 @@ Copy-only attachment registry installs no game-thread TLS destructor. `mise run 
 checks 100 unload/reloads under four callers and retention of a blocked callback. The server
 future must still be driven to completion for restoration/drain; a panic leaves the DLL loaded.
 
-`eg_helper_build_id()` returns 64 lowercase ASCII hex characters plus NUL. The build script hashes
-relative paths and contents of the manifests, lockfile and Rust sources of core, game access, trainer wire
-and helper. This is source compatibility/provenance, not authentication or a compiled-binary hash.
-Evaluation separately records the DLL SHA256 and compiler identity.
+The build ID is the SHA-256 of the helper's DLL. The desktop hashes the exact bytes it loads and gives the
+ID to the helper in the bootstrap block, and the helper reports it back in discovery. A helper left in a game
+by another build reports another ID. This is compatibility/provenance, not authentication.
 
 Validation uses real local pipes with authored child processes plus the disposable Unity 6000.4.8
 IL2CPP player in [persistent-player](../../tools/trainer-eval/persistent-player/README.md). All artifacts,

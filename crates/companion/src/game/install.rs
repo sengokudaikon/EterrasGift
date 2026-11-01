@@ -115,7 +115,7 @@ pub fn from_steam(steam_directory: &Path) -> Option<GameInstall> {
         let steamapps = library.join("steamapps");
         let manifest = read_key_values(&steamapps.join(format!("appmanifest_{app}.acf")))?;
         let folder = manifest.get("AppState")?.get("installdir")?.value.clone().filter(|folder| !folder.is_empty())?;
-        let executable = eg_core::paths::normalized(&steamapps.join("common").join(folder).join(EXECUTABLE_NAME));
+        let executable = file_ops::paths::normalized(&steamapps.join("common").join(folder).join(EXECUTABLE_NAME));
         executable.is_file().then(|| GameInstall::new(executable))
     })
 }
@@ -127,7 +127,7 @@ fn read_key_values(path: &Path) -> Option<KeyValues> {
 /// Steam's folder: as the registry has it, else its default place when that exists.
 pub fn find_steam() -> Option<PathBuf> {
     if let Some(path) = steam_path_from_registry().filter(|path| !path.is_empty()) {
-        return Some(eg_core::paths::normalized(Path::new(&path)));
+        return Some(file_ops::paths::normalized(Path::new(&path)));
     }
     let fallback = PathBuf::from(std::env::var_os("ProgramFiles(x86)")?).join("Steam");
     fallback.is_dir().then_some(fallback)

@@ -9,7 +9,7 @@ use crate::game::{
     },
     target, unsupported,
 };
-use eg_il2cpp_runtime::{AttachedThread, raw};
+use il2cpp_runtime::{AttachedThread, raw};
 use std::{ffi::c_void, ptr::NonNull};
 #[cfg(test)]
 mod tests;

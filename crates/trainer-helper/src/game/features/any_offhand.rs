@@ -6,7 +6,8 @@
 //! (two-handed and linked slot) pass, and `EnforceWeaponLimitations` is skipped, as it inlines the pairing check and
 //! would otherwise move equipment out. Off neither unequips nor recalculates: re-equip to see the change at once.
 use super::registry::{Behavior, GameplayHook, GameplayHookTarget, HookFeature, MethodSpec, Targets};
-use crate::{game::*, hooks::leaf::LeafEffect};
+use crate::game::*;
+use native_hooks::leaf::LeafEffect;
 
 pub(super) const FEATURE: HookFeature = HookFeature {
     controls: &[GameplayHook::AnyOffhand],

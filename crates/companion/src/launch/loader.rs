@@ -3,10 +3,10 @@
 //! without mods keeps MelonLoader out entirely. Only a folder with MelonLoader in it is touched, so another tool's
 //! version.dll is left alone.
 
-use eg_core::operations::Cancellation;
-use eg_i18n::phrases;
+use phrases::phrases;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant, SystemTime};
+use task_runtime::CancellationToken;
 
 /// The proxy DLL Windows loads into every start of the game, which starts MelonLoader.
 pub const PROXY_NAME: &str = "version.dll";
@@ -128,7 +128,7 @@ impl ModLoaderSwitch {
     pub fn check_restore(&self) -> Result<ModLoaderState, String> {
         match self.state() {
             ModLoaderState::Conflict => Err(Conflict.into()),
-            ModLoaderState::NotInstalled if eg_core::paths::same_folder(&self.loader_root, &self.game_directory) => Err(NoLoader.into()),
+            ModLoaderState::NotInstalled if file_ops::paths::same_folder(&self.loader_root, &self.game_directory) => Err(NoLoader.into()),
             ModLoaderState::NotInstalled => Err(NoLoaderInFolder.into()),
             state => Ok(state),
         }
@@ -136,7 +136,7 @@ impl ModLoaderSwitch {
 
     /// Waits until MelonLoader writes its log at or after `since`, the sign it has started and no longer needs the
     /// proxy's name. False when `timeout` passes first or the app closes.
-    pub fn wait_for_loader(&self, since: SystemTime, timeout: Duration, poll: Duration, lifetime: &Cancellation) -> bool {
+    pub fn wait_for_loader(&self, since: SystemTime, timeout: Duration, poll: Duration, lifetime: &CancellationToken) -> bool {
         let deadline = Instant::now() + timeout;
         loop {
             if std::fs::metadata(self.loader_log())
@@ -191,7 +191,7 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let switch = ModLoaderSwitch::new(temp.path(), None);
         let since = SystemTime::now() - Duration::from_secs(1);
-        let lifetime = Cancellation::default();
+        let lifetime = CancellationToken::default();
         assert!(!switch.wait_for_loader(since, Duration::from_millis(30), Duration::from_millis(10), &lifetime));
         fs::create_dir_all(melon_paths::loader(temp.path())).unwrap();
         fs::write(switch.loader_log(), b"MelonLoader v0.7.3").unwrap();

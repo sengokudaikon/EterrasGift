@@ -12,7 +12,7 @@
 
 use super::game::Catalog;
 use super::item::{AffixDefinition, AffixKind, Category, effects_said};
-use eg_i18n::{Conjunction, Phrase, list, phrases};
+use phrases::{Conjunction, Phrase, list, phrases};
 use std::collections::BTreeMap;
 
 /// A search this long may bring in a unique's modifiers by the unique's name; a shorter one would match too many names.

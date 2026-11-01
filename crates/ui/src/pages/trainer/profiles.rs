@@ -3,7 +3,7 @@
 //! (`eg_trainer::features::profiles`): it saves them and applies the one in play hook by hook. While no game runs the pages set up
 //! the chosen profile; while its character is in play they change it, and the game with it. A character in play without
 //! one has hooks for that connection only, until they are kept as its profile.
-use eg_i18n::phrases;
+use phrases::phrases;
 
 phrases! {
     Kept: "Changes apply at once and are kept in {name}'s profile."

@@ -2,7 +2,8 @@
 //! remains opaque: its address and contents reach the original unchanged, along with receiver and MethodInfo.
 //! The original still reveals the map; switching off does not hide areas already revealed.
 use super::{prefix::Code, registry::*};
-use crate::{game::*, hooks::leaf::LeafEffect};
+use crate::game::*;
+use native_hooks::leaf::LeafEffect;
 
 pub(crate) const FEATURE: HookFeature = HookFeature {
     controls: &[GameplayHook::RevealMap],

@@ -1,8 +1,8 @@
 //! Optional implicit text from the methods the game's own item tooltip uses.
 use crate::game::metadata_text;
 use crate::game::{Class, GameError, Images, Method, Root, RuntimeAccess, target, unsupported};
-use eg_il2cpp_runtime::{Argument, AttachedThread, InvocationContext, InvocationOutcome, ReturnValue, Scalar, raw};
 use eg_trainer_wire::mapping::{ForgeDescriptionRequest, MAX_TEXT_BYTES, ModifierSnapshot};
+use il2cpp_runtime::{Argument, AttachedThread, InvocationContext, InvocationOutcome, ReturnValue, Scalar, raw};
 use std::{ffi::CStr, ptr::NonNull};
 
 impl RuntimeAccess {

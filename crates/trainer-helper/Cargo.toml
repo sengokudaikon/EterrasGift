@@ -13,7 +13,8 @@ fixture = []
 
 [dependencies]
 eg-trainer-wire = { path = "../trainer-wire" }
-eg-il2cpp-runtime.workspace = true
+il2cpp-runtime.workspace = true
+native-hooks.workspace = true
 detour = "=0.10.0"
 iced-x86 = { version = "=1.21.0", default-features = false, features = ["std", "decoder", "instr_info"] }
 tokio = { workspace = true, features = ["macros"] }
@@ -23,10 +24,8 @@ windows-sys = { workspace = true, features = ["Win32_Foundation", "Win32_Securit
 
 [dev-dependencies]
 eg-game-access = { path = "../game-access" }
-eg-il2cpp-runtime = { workspace = true, features = ["test-stubs"] }
-
-[build-dependencies]
-sha2.workspace = true
+il2cpp-runtime = { workspace = true, features = ["test-stubs"] }
+native-hooks = { workspace = true, features = ["testing"] }
 
 [lints]
 workspace = true

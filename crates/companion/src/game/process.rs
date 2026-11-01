@@ -17,8 +17,8 @@ pub struct RunningGame {
 pub fn oldest_running(process_name: &str) -> Option<RunningGame> {
     let wanted = format!("{process_name}.exe");
     let mut oldest: Option<RunningGame> = None;
-    eg_core::process::each(|process_id, executable| {
-        if eg_core::process::is_named(executable, &wanted)
+    win_process::each(|process_id, executable| {
+        if win_process::is_named(executable, &wanted)
             && let Some(start_time) = start_time(process_id)
             && oldest.is_none_or(|known| start_time < known.start_time)
         {
@@ -58,7 +58,7 @@ fn start_time(process_id: u32) -> Option<Timestamp> {
 #[cfg(windows)]
 fn from_file_time(time: windows_sys::Win32::Foundation::FILETIME) -> Option<Timestamp> {
     let ticks = (u64::from(time.dwHighDateTime) << 32) | u64::from(time.dwLowDateTime);
-    eg_core::time::from_filetime(ticks).ok()
+    win_process::from_filetime(ticks).ok()
 }
 
 #[cfg(not(windows))]

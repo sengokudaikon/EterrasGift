@@ -9,10 +9,10 @@ use eg_companion::mods::{
 };
 use eg_companion::{game::folders, mods::dotnet};
 use eg_core::settings::SettingsStore;
-use eg_runtime::Tasks;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::thread::{self, JoinHandle};
+use task_runtime::Tasks;
 
 pub struct Companion {
     pub launcher: Arc<GameLauncher>,

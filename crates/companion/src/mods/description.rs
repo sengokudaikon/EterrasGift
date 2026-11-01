@@ -55,7 +55,7 @@ impl ModSettingsDescription {
             return Err(invalid("The settings description is larger than 1 MB."));
         }
         let text = std::str::from_utf8(bytes).map_err(|error| invalid(format!("The settings description is not UTF-8: {error}")))?;
-        Self::parse(eg_core::text::strip_bom(text))
+        Self::parse(file_ops::text::strip_bom(text))
     }
 
     pub fn parse(text: &str) -> io::Result<Self> {

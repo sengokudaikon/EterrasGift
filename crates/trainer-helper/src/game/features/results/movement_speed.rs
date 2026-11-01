@@ -10,11 +10,11 @@
 //! as in the original trainer. Speed is refreshed by the game's next update (e.g. re-equip boots), not by a new scan.
 use super::*;
 use crate::game::registry::{Behavior, GameplayHook, HookFeature, Targets};
-use crate::hooks::{
+use iced_x86::{Code as Instruction, Decoder, DecoderOptions, FlowControl};
+use native_hooks::{
     patch::find_unique,
     postfix::{FRAME, frame_size},
 };
-use iced_x86::{Code as Instruction, Decoder, DecoderOptions, FlowControl};
 
 pub(crate) const FEATURE: HookFeature = HookFeature {
     controls: &[GameplayHook::MovementSpeed],

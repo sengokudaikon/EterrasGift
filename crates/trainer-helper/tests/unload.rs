@@ -256,7 +256,7 @@ fn reload_a_hundred_times_with_running_callers_then_retain_a_blocked_callback() 
                     // SAFETY: same process-owned targets and retained arguments as running callers.
                     let actual = unsafe {
                         match hook {
-                            GameplayHook::IncomingDamage | GameplayHook::EnemyDamage => unreachable!("damage checked above"),
+                            GameplayHook::IncomingDamage => unreachable!("damage checked above"),
                             GameplayHook::MysteriousRift => rift(Arc::as_ptr(&gameplay), 123),
                             GameplayHook::AnyOffhand => {
                                 assert_eq!(pairing(42), !on);
@@ -265,6 +265,7 @@ fn reload_a_hundred_times_with_running_callers_then_retain_a_blocked_callback() 
                                 assert_eq!(isolated.originals.load(SeqCst), u64::from(!on));
                                 offhand(Arc::as_ptr(&gameplay), 456, -7, 789)
                             }
+                            other => unreachable!("this fixture installs only the hooks above, not {other:?}"),
                         }
                     };
                     assert_eq!(actual, on && answer);

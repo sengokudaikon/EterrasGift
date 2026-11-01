@@ -1,7 +1,7 @@
 //! Override newly generated echo types after the original selection; echo cycling remains a separate pending feature.
 use super::*;
 use crate::game::registry::{Behavior, GameplayHook, HookFeature, Targets};
-use crate::hooks::postfix::FRAME;
+use native_hooks::postfix::FRAME;
 
 pub(crate) const FEATURE: HookFeature = HookFeature {
     controls: &[GameplayHook::OneEchoType],

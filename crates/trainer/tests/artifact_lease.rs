@@ -2,7 +2,6 @@
 //! Owned Windows files and scripted transports only; no game/process access.
 #[path = "pe_support/mod.rs"]
 mod pe_support;
-use eg_game_access::artifact::ReadLease;
 use eg_trainer::{
     connect::build::BuildIdentity,
     session::{Session, SessionError, SessionState},
@@ -13,6 +12,7 @@ use eg_trainer_wire::{
     protocol::{Discovery, DispatcherSpec, Request, Response, ResponseCode, RuntimeStatus},
     transport::{Transport, TransportError},
 };
+use file_ops::lease::ReadLease;
 use jiff::Timestamp;
 use std::{
     collections::VecDeque,

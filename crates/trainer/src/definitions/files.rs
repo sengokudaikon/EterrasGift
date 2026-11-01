@@ -210,7 +210,7 @@ pub fn fingerprint(path: &Path) -> Option<Fingerprint> {
 }
 
 fn hash(path: &Path) -> Result<String, String> {
-    eg_core::hashes::of_file(path).map_err(|e| format!("{}: {e}", path.display()))
+    file_ops::hashes::of_file(path).map_err(|e| format!("{}: {e}", path.display()))
 }
 
 /// Reads and builds the catalog for the game in `folder` (the one holding `Last Epoch.exe`).

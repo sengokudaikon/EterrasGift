@@ -1,5 +1,5 @@
 use super::*;
-use crate::hooks::leaf::LeafGate;
+use native_hooks::leaf::LeafGate;
 use std::sync::atomic::{AtomicU8, Ordering::SeqCst};
 #[repr(C)]
 #[derive(Default)]

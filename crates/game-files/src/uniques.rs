@@ -1,9 +1,9 @@
 //! Uniques, properties and set bonuses: the masters Unity stores without type trees (`resources.assets`), read with
 //! layouts rebuilt from the IL2CPP build (`UniqueList`, `PropertyList`, `SetBonusesList`).
 
-use crate::value::Value;
-use eg_binary::{Error, Result};
+use binary_reader::{Error, Result};
 use std::collections::{BTreeMap, BTreeSet};
+use unity_files::value::Value;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct PlayerDefinitions {
@@ -443,7 +443,7 @@ pub(crate) fn set_bonuses(list_value: &Value) -> Result<Vec<SetBonus>> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::testing::object;
+    use unity_files::testing::object;
 
     fn mod_value(property: u64) -> Value {
         object(vec![

@@ -1,6 +1,6 @@
 use super::super::{new_item_rarity, prophecy_any_distance, reveal_map, reveal_objective};
 use super::*;
-use crate::hooks::leaf::LeafGate;
+use native_hooks::leaf::LeafGate;
 use std::{
     mem::offset_of,
     sync::atomic::{AtomicU8, Ordering::SeqCst},

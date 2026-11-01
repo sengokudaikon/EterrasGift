@@ -1,7 +1,7 @@
 //! Cached metadata for the menu/play distinction; object and state values are
 //! always read afresh on the verified Unity dispatcher thread.
 use crate::game::{GameError, RuntimeAccess, unsupported};
-use eg_il2cpp_runtime::{AttachedThread, InvocationContext, InvocationOutcome, ReturnValue, ValueTypeContract, raw};
+use il2cpp_runtime::{AttachedThread, InvocationContext, InvocationOutcome, ReturnValue, ValueTypeContract, raw};
 use std::ptr::NonNull;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

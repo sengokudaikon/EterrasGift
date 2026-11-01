@@ -1,5 +1,5 @@
 use super::*;
-use crate::hooks::{
+use native_hooks::{
     leaf::LeafGate,
     patch::{self, CodePatch},
 };

@@ -1,6 +1,6 @@
 //! Local artifact identity and session leases for the selected game installation.
-use eg_core::hashes;
 use eg_trainer_wire::protocol::DispatcherSpec;
+use file_ops::hashes;
 use std::{
     fs, io,
     path::{Path, PathBuf},
@@ -31,9 +31,9 @@ impl Eq for BuildIdentity {}
 #[derive(Debug)]
 pub(crate) struct ConnectionFiles {
     #[cfg(windows)]
-    binary: Arc<eg_game_access::artifact::ReadLease>,
+    binary: Arc<file_ops::lease::ReadLease>,
     #[cfg(windows)]
-    metadata: Arc<eg_game_access::artifact::ReadLease>,
+    metadata: Arc<file_ops::lease::ReadLease>,
 }
 
 /// Session-scoped validation authority. Construction is checked; fields and
@@ -48,8 +48,8 @@ pub struct ArtifactLease {
 enum LeaseStorage {
     #[cfg(windows)]
     Held {
-        binary: Arc<eg_game_access::artifact::ReadLease>,
-        metadata: Arc<eg_game_access::artifact::ReadLease>,
+        binary: Arc<file_ops::lease::ReadLease>,
+        metadata: Arc<file_ops::lease::ReadLease>,
     },
     Rehash(Mutex<Rehashed>),
 }
@@ -118,8 +118,8 @@ impl BuildIdentity {
             let metadata = fs::canonicalize(metadata)?;
             let opened = (|| -> io::Result<_> {
                 Ok(Arc::new(ConnectionFiles {
-                    binary: Arc::new(eg_game_access::artifact::ReadLease::open(&binary)?),
-                    metadata: Arc::new(eg_game_access::artifact::ReadLease::open(&metadata)?),
+                    binary: Arc::new(file_ops::lease::ReadLease::open(&binary)?),
+                    metadata: Arc::new(file_ops::lease::ReadLease::open(&metadata)?),
                 }))
             })();
             match opened {
@@ -141,7 +141,7 @@ impl BuildIdentity {
         Self::capture(binary, metadata, helper_build_id).map(|build| (build, None))
     }
     #[cfg(windows)]
-    pub fn binary_lease(&self) -> Option<Arc<eg_game_access::artifact::ReadLease>> {
+    pub fn binary_lease(&self) -> Option<Arc<file_ops::lease::ReadLease>> {
         self.files.upgrade().map(|files| files.binary.clone())
     }
     /// Bind the two local artifacts to the selected process's actual executable directory.
@@ -177,8 +177,8 @@ impl BuildIdentity {
             let (binary, metadata) = match self.files.upgrade() {
                 Some(files) => (files.binary.clone(), files.metadata.clone()),
                 None => (
-                    Arc::new(eg_game_access::artifact::ReadLease::capture(&self.binary, &self.binary_hash)?),
-                    Arc::new(eg_game_access::artifact::ReadLease::capture(&self.metadata, &self.metadata_hash)?),
+                    Arc::new(file_ops::lease::ReadLease::capture(&self.binary, &self.binary_hash)?),
+                    Arc::new(file_ops::lease::ReadLease::capture(&self.metadata, &self.metadata_hash)?),
                 ),
             };
             validate_dispatcher_lease(&binary, dispatcher)?;
@@ -233,8 +233,8 @@ impl BuildIdentity {
 }
 
 #[cfg(windows)]
-fn validate_dispatcher_lease(image: &eg_game_access::artifact::ReadLease, dispatcher: &DispatcherSpec) -> io::Result<()> {
-    let layout = eg_game_access::pe::Layout::read(image.len(), |at, output| image.read_exact_at(at, output))?;
+fn validate_dispatcher_lease(image: &file_ops::lease::ReadLease, dispatcher: &DispatcherSpec) -> io::Result<()> {
+    let layout = binary_reader::pe::Layout::read(image.len(), |at, output| image.read_exact_at(at, output))?;
     let at = layout.file_offset(dispatcher.rva, dispatcher.bytes.len(), true)?;
     let mut bytes = [0; 16];
     image.read_exact_at(at, &mut bytes)?;
@@ -255,7 +255,7 @@ fn invalid(message: &str) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, message)
 }
 fn validate_dispatcher(image: &[u8], dispatcher: &DispatcherSpec) -> io::Result<()> {
-    let layout = eg_game_access::pe::Layout::from_bytes(image)?;
+    let layout = binary_reader::pe::Layout::from_bytes(image)?;
     let at = layout.file_offset(dispatcher.rva, dispatcher.bytes.len(), true)? as usize;
     if image.get(at..at + dispatcher.bytes.len()) != Some(dispatcher.bytes.as_slice()) {
         return Err(invalid("dispatcher differs from executable game file"));

@@ -14,8 +14,8 @@ use super::{
 use crate::launch::host::LaunchMode;
 use crate::launch::launcher::{GameLauncher, LaunchReport, StartingWithMods};
 use eg_core::settings_service::SettingsService;
-use eg_flow::{Effects, Feature, Panicked, Tracked, Version};
-use eg_i18n::phrases;
+use flow::{Effects, Feature, Panicked, Tracked, Version};
+use phrases::phrases;
 use serde_json::Value as JsonValue;
 use std::collections::{BTreeSet, VecDeque};
 use std::io;
@@ -1324,7 +1324,7 @@ impl State {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use eg_flow::step;
+    use flow::step;
 
     fn send(state: &mut State, intent: Intent) -> Vec<Effect> {
         step::<Mods>(state, intent)

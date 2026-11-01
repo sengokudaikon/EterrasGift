@@ -1,6 +1,8 @@
+# The app. The libraries it builds on are a workspace of their own (`libs/`), and name neither the app nor the game.
 [workspace]
 resolver = "3"
 members = ["crates/*"]
+exclude = ["libs"]
 
 [workspace.package]
 version = "0.1.0"
@@ -27,19 +29,19 @@ rfd = { version = "0.17.2", default-features = false }
 raw-window-handle = "0.6.2"
 tempfile = "3.27.0"
 tokio = { version = "=1.53.3", features = ["rt", "net", "io-util", "time", "sync"] }
-# The desktop's close barrier and cancellation (eg-runtime). Its `rt` needs only what tokio above already has on.
-tokio-util = { version = "0.7.20", default-features = false, features = ["rt"] }
-# LZ4 blocks in Unity bundles; pure Rust, no unsafe in the decoder.
-lz4_flex = { version = "0.14.0", default-features = false, features = ["std", "safe-decode", "safe-encode", "checked-decode"] }
 
-eg-runtime = { path = "crates/runtime" }
-eg-binary = { path = "crates/binary" }
-eg-flow = { path = "crates/flow" }
-eg-flow-slint = { path = "crates/flow-slint" }
-eg-il2cpp-metadata = { path = "crates/il2cpp-metadata" }
-eg-il2cpp-runtime = { path = "crates/il2cpp-runtime" }
+task-runtime = { path = "libs/task-runtime" }
+binary-reader = { path = "libs/binary-reader" }
+flow = { path = "libs/flow" }
+flow-slint = { path = "libs/flow-slint" }
+il2cpp-metadata = { path = "libs/il2cpp-metadata" }
+il2cpp-runtime = { path = "libs/il2cpp-runtime" }
+native-hooks = { path = "libs/native-hooks" }
 eg-core = { path = "crates/core" }
-eg-i18n = { path = "crates/i18n" }
+phrases = { path = "libs/phrases" }
+file-ops = { path = "libs/file-ops" }
+unity-files = { path = "libs/unity-files" }
+win-process = { path = "libs/win-process" }
 eg-companion = { path = "crates/companion" }
 eg-ui = { path = "crates/ui" }
 eg-trainer = { path = "crates/trainer" }
@@ -51,9 +53,8 @@ unsafe_op_in_unsafe_fn = "deny"
 all = { level = "warn", priority = -1 }
 undocumented_unsafe_blocks = "warn"
 
-# Code that runs inside the game is built as for a release in every profile: the helper's build-ID getter is checked
-# in its optimised form (`lea rax,[rip+…]; ret`), and no debug assertion or overflow check may fire in the game. That
-# holds for the helper's own dependencies too (tokio and its I/O, windows-sys, the detour hooks and their decoder),
+# Code that runs inside the game is built as for a release in every profile: no debug assertion or overflow check may
+# fire in the game. That holds for the helper's own dependencies too (tokio and its I/O, windows-sys, the detour hooks and their decoder),
 # since a dev `mise run run` embeds this build and injects it.
 [profile.dev.package.eg-trainer-helper]
 opt-level = 3
@@ -65,7 +66,12 @@ opt-level = 3
 debug-assertions = false
 overflow-checks = false
 
-[profile.dev.package.eg-il2cpp-runtime]
+[profile.dev.package.il2cpp-runtime]
+opt-level = 3
+debug-assertions = false
+overflow-checks = false
+
+[profile.dev.package.native-hooks]
 opt-level = 3
 debug-assertions = false
 overflow-checks = false

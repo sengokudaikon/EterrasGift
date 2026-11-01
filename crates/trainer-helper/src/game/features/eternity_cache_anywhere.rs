@@ -3,7 +3,8 @@
 //! relocate: its three checked capped returns are patched to its existing fallback (200), the same result as the
 //! C++ trainer's INT32_MAX tier. Off restores every immediate and the used mark with the actor-check entry.
 use super::{patches::PatchSpec, player_only::Receiver, registry::*};
-use crate::{game::*, hooks::leaf::LeafEffect};
+use crate::game::*;
+use native_hooks::leaf::LeafEffect;
 
 pub(crate) const FEATURE: HookFeature = HookFeature {
     controls: &[GameplayHook::EternityCacheAnywhere],

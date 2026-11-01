@@ -3,10 +3,8 @@
 //! ninth native position changes. A tail jump needs no stack copy or maximum-arity gateway. Explicit blessings,
 //! uniques and gambler rarities win. The original runs once and owns all generation/output/exception behavior.
 use super::{prefix::Code, registry::*};
-use crate::{
-    game::*,
-    hooks::leaf::{FRAME, LeafEffect},
-};
+use crate::game::*;
+use native_hooks::leaf::{FRAME, LeafEffect};
 
 pub(crate) const FEATURE: HookFeature = HookFeature {
     controls: &[GameplayHook::NewItemRarity],

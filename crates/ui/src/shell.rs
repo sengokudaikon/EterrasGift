@@ -2,8 +2,8 @@
 //! Rust; `bind` connects it to the `Nav` global.
 
 use crate::{MainWindow, Nav, NavOutcome, NavRow, Tokens};
-use eg_flow_slint::Rows;
-use eg_i18n::phrases;
+use flow_slint::Rows;
+use phrases::phrases;
 use slint::platform::Key;
 use slint::{ComponentHandle, Image, Weak};
 use std::cell::{Cell, RefCell};

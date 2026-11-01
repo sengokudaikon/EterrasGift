@@ -1,5 +1,5 @@
 use super::*;
-use crate::hooks::leaf::LeafGate;
+use native_hooks::leaf::LeafGate;
 use std::{
     cell::Cell,
     mem::offset_of,
@@ -106,7 +106,7 @@ fn selection_preserves_all_nine_positions_and_only_changes_eligible_availability
 
 #[test]
 fn travel_recipe_selects_both_rejections_and_leaves_the_current_location_check_intact() {
-    use crate::hooks::patch::find_unique;
+    use native_hooks::patch::find_unique;
     let code: Vec<u8> = TRAVEL_PATTERN.iter().map(|byte| if *byte < 0 { 0x12 } else { *byte as u8 }).collect();
     assert_eq!(find_unique(&code, TRAVEL_PATTERN, 4, &[0x90; 6]).unwrap(), 4);
     assert_eq!(find_unique(&code, TRAVEL_PATTERN, 14, &[0x90; 6]).unwrap(), 14);

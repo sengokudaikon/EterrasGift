@@ -6,10 +6,12 @@ edition.workspace = true
 publish.workspace = true
 
 [dependencies]
+file-ops.workspace = true
+win-process.workspace = true
 eg-core.workspace = true
-eg-flow.workspace = true
-eg-i18n.workspace = true
-eg-runtime.workspace = true
+flow.workspace = true
+phrases.workspace = true
+task-runtime.workspace = true
 jiff.workspace = true
 regex.workspace = true
 serde_json.workspace = true
