@@ -66,10 +66,10 @@ fn function(gate: &PostfixGate) -> Stat {
 /// Record the compiled fixture caller's real return address without assuming Rust compiler instruction offsets.
 pub(crate) fn callsite(online: NonNull<c_void>, original: *const ()) -> u64 {
     let observed = Box::leak(Box::new(AtomicU64::new(0)));
-    let mut c = Code::new(online);
+    let mut c = PostfixCode::new(online);
     c.offset(&[0x4c, 0x8b, 0x9c, 0x24], u32::from(frame_size(SPEC.positions())));
     c.emit(&[0x48, 0x8b, 0x40, FRAME.slots[1], 0x4c, 0x89, 0x18]);
-    let probe = gate(c.finish(&SPEC, observed as *const _ as u64), original);
+    let probe = gate(c.finish(SPEC.positions(), observed as *const _ as u64), original);
     assert_eq!(invoke(function(&probe), 42, 9), 6.25);
     probe.set_enabled(false);
     let site = observed.load(SeqCst);

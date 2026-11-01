@@ -38,9 +38,8 @@ pub(crate) struct Layout {
 }
 impl Layout {
     pub(crate) fn effect(self) -> LeafEffect {
-        let mut c = Code::new(self.online);
-        c.emit(&[0x4c, 0x8b, 0x58, FRAME.effect[1], 0x4d, 0x8b, 0x1b]);
-        c.nonnull(&[0x4d, 0x85, 0xdb]);
+        let mut c = LeafCode::for_receiver(self.online);
+        c.reference(FRAME.effect[1]);
         c.offset(&[0x4c, 0x39, 0x99], self.actor);
         c.exit(0x85);
         // One aligned snapshot for both XP multipliers. XMM3 survives our arithmetic, and is not an argument here.
@@ -60,15 +59,15 @@ impl Layout {
         c.emit(&[0x49, 0x83, 0xfb, 0xff]);
         c.exit(0x84);
         c.emit(&[0xf3, 0x0f, 0x5a, 0xcb, 0x49, 0x89, 0xd2]); // character multiplier, gain -> r10
-        c.scale(true);
+        scale(&mut c, true);
         c.emit(&[0x4c, 0x89, 0xd2]);
         c.bind(skills);
         c.emit(&[0x66, 0x49, 0x0f, 0x7e, 0xdb, 0x49, 0x83, 0xfb, 0xff]);
         c.exit(0x84);
         c.emit(&[0x0f, 0x28, 0xcb, 0x0f, 0xc6, 0xc9, 0x55, 0xf3, 0x0f, 0x5a, 0xc9, 0x4d, 0x89, 0xc2]);
-        c.scale(true);
+        scale(&mut c, true);
         c.emit(&[0x4d, 0x89, 0xd0]);
-        c.finish([self.player.as_ptr() as u64, OFF, 0])
+        c.finish_with([self.player.as_ptr() as u64, OFF, 0])
     }
 }
 unsafe fn targets(access: &RuntimeAccess, module: NonNull<u8>, size: usize) -> Result<Vec<GameplayHookTarget>, GameError> {

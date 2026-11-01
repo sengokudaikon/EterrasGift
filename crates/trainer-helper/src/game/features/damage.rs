@@ -3,7 +3,10 @@
 //! kill. Its code follows the metadata-validated layout below and keeps its state in the gate's slots.
 
 use eg_trainer_wire::hooks::GameplayHook;
-use native_hooks::leaf::{EFFECT_SLOTS, FRAME, GeneratedEffect, LeafEffect};
+use native_hooks::{
+    emit,
+    leaf::{EFFECT_SLOTS, FRAME, GeneratedEffect, LeafEffect},
+};
 use std::ptr::NonNull;
 
 use super::registry::{Behavior, ControlSetting, GameplayHookTarget, HookFeature, MethodSpec, OFF, SharedSettings, Targets};
@@ -121,111 +124,65 @@ impl DamageLayout {
 // the original. Near branches keep field-layout growth independent of jump range.
 fn code(layout: DamageLayout) -> Vec<u8> {
     let f = FRAME;
-    #[derive(Clone, Copy)]
-    enum Label {
-        Original,
-        Incoming,
-        Enemy,
-        OneHit,
-    }
-    struct Code {
-        bytes: Vec<u8>,
-        jumps: Vec<(usize, Label)>,
-        labels: [usize; 4],
-    }
-    impl Code {
-        fn emit(&mut self, bytes: &[u8]) {
-            self.bytes.extend(bytes);
-        }
-        fn offset(&mut self, bytes: &[u8], offset: u32) {
-            self.emit(bytes);
-            self.emit(&offset.to_le_bytes());
-        }
-        fn jump(&mut self, condition: u8, label: Label) {
-            self.emit(&[0x0f, condition]);
-            self.jumps.push((self.bytes.len(), label));
-            self.emit(&[0; 4]);
-        }
-        fn label(&mut self, label: Label) {
-            self.labels[label as usize] = self.bytes.len();
-        }
-        fn null(&mut self, bytes: &[u8]) {
-            self.emit(bytes);
-            self.jump(0x84, Label::Original);
-        }
-    }
-    use Label::*;
-    let mut c = Code {
-        bytes: Vec::new(),
-        jumps: vec![],
-        labels: [0; 4],
-    };
-    c.emit(&[0x4c, 0x8b, 0x58, f.switch, 0x49, 0x83, 0x3b, 0]); // enable switch
-    c.jump(0x84, Original);
-    c.emit(&[0x4c, 0x8b, 0x58, f.effect[ONLINE], 0x41, 0x80, 0x3b, 0]); // online byte
-    c.jump(0x85, Original);
-    c.null(&[0x48, 0x85, 0xc9]); // this
-    c.emit(&[0x4c, 0x8b, 0x58, f.effect[PLAYER], 0x4d, 0x8b, 0x1b]); // player
-    c.null(&[0x4d, 0x85, 0xdb]);
+    let mut c = emit::Code::default();
+    // Every exit lands at the end of the code, where the gate appends jmp [rax+original].
+    c.gated(f.switch, f.effect[ONLINE]);
+    c.nonnull(&[0x48, 0x85, 0xc9]); // this
+    c.reference(f.effect[PLAYER]); // player
     c.offset(&[0x4c, 0x8b, 0x91], layout.actor_offset); // actor -> r10
-    c.null(&[0x4d, 0x85, 0xd2]);
+    c.nonnull(&[0x4d, 0x85, 0xd2]);
     c.emit(&[0x4d, 0x39, 0xda]); // actor == player
-    c.jump(0x84, Incoming);
+    let incoming = c.branch(0x84);
     if let Some(layout) = layout.offense {
         // Disabled outgoing effect never follows the alignment graph.
         c.emit(&[0x48, 0x83, 0x78, f.effect[OUTGOING], 0xff]);
-        c.jump(0x84, Original);
+        c.exit(0x84);
         c.offset(&[0x4d, 0x8b, 0x9b], layout.alignment_manager);
-        c.null(&[0x4d, 0x85, 0xdb]);
+        c.nonnull(&[0x4d, 0x85, 0xdb]);
         c.offset(&[0x4d, 0x8b, 0x9b], layout.alignment);
-        c.null(&[0x4d, 0x85, 0xdb]);
+        c.nonnull(&[0x4d, 0x85, 0xdb]);
         c.offset(&[0x4d, 0x8b, 0x92], layout.alignment_manager);
-        c.null(&[0x4d, 0x85, 0xd2]);
+        c.nonnull(&[0x4d, 0x85, 0xd2]);
         c.offset(&[0x4d, 0x8b, 0x92], layout.alignment);
-        c.null(&[0x4d, 0x85, 0xd2]);
+        c.nonnull(&[0x4d, 0x85, 0xd2]);
         c.emit(&[0x4d, 0x39, 0xda]);
-        c.jump(0x84, Original); // same alignment
+        c.exit(0x84); // same alignment
         c.offset(&[0x49, 0x8b, 0x93], layout.is_foe); // ours.isFoe -> rdx
         c.emit(&[0x48, 0x85, 0xd2]);
-        c.jump(0x84, Enemy); // OG fallback: distinct alignment before array initialized
+        let enemy = c.branch(0x84); // OG fallback: distinct alignment before array initialized
         c.offset(&[0x45, 0x0f, 0xb6, 0x8a], layout.alignment_id); // theirs.alignmentID -> r9d
         c.emit(&[0x4c, 0x3b, 0x4a, 0x18]); // compare with managed array length
-        c.jump(0x83, Original); // out of bounds
+        c.exit(0x83); // out of bounds
         c.emit(&[0x42, 0x80, 0x7c, 0x0a, 0x20, 0]); // isFoe[id]
-        c.jump(0x84, Original);
-        c.label(Enemy);
+        c.exit(0x84);
+        c.bind(enemy);
         c.emit(&[0x0f, 0x28, 0xd1]); // preserve original damage in xmm2
         c.emit(&[0x4c, 0x8b, 0x58, f.effect[OUTGOING], 0x49, 0x83, 0xfb, 0xff]);
-        c.jump(0x84, Original);
+        c.exit(0x84);
         c.emit(&[0x49, 0xba]); // mov r10, one-hit sentinel
         c.emit(&101.0f64.to_bits().to_le_bytes());
         c.emit(&[0x4d, 0x39, 0xd3]);
-        c.jump(0x84, OneHit);
+        let one_hit = c.branch(0x84);
         c.emit(&[0x66, 0x49, 0x0f, 0x6e, 0xc3]); // movq xmm0,r11 (f64 multiplier)
         c.emit(&[0xf3, 0x0f, 0x5a, 0xc9, 0xf2, 0x0f, 0x59, 0xc8, 0xf2, 0x0f, 0x5a, 0xc9]);
         c.emit(&[0xff, 0x60, f.original]); // multiplier mode calls original
-        c.label(OneHit);
+        c.bind(one_hit);
         c.emit(&[0x0f, 0x57, 0xc0, 0x0f, 0x2e, 0xd0]); // original damage > 0 (NaN fails)
-        c.jump(0x86, Original);
+        c.exit(0x86);
         c.offset(&[0xf3, 0x0f, 0x10, 0x81], layout.current_health);
         c.emit(&[0x0f, 0x2e, 0xc1]); // current health > adjusted damage
-        c.jump(0x86, Original);
+        c.exit(0x86);
         c.emit(&[0x0f, 0x28, 0xc8, 0xff, 0x60, f.original]); // xmm1=health; original
     } else {
         c.emit(&[0xff, 0x60, f.original]);
     }
-    c.label(Incoming);
+    c.bind(incoming);
     c.emit(&[0x4c, 0x8b, 0x58, f.answer, 0x49, 0x83, 0xfb, 100]);
-    c.jump(0x83, Original); // 100 or disabled sentinel
+    c.exit(0x83); // 100 or disabled sentinel
     c.emit(&[0x4d, 0x85, 0xdb, 0x75, 6, 0x0f, 0x57, 0xc9, 0xff, 0x60, f.original]); // zero
     c.emit(&[0xf2, 0x49, 0x0f, 0x2a, 0xc3, 0xf2, 0x0f, 0x5e, 0x40, f.effect[HUNDRED]]); // percent/100
     c.emit(&[0xf3, 0x0f, 0x5a, 0xc9, 0xf2, 0x0f, 0x59, 0xc8, 0xf2, 0x0f, 0x5a, 0xc9]);
-    c.label(Original); // the gate appends jmp [rax+original]
-    for (at, label) in c.jumps {
-        let distance = i32::try_from(c.labels[label as usize]).unwrap() - i32::try_from(at + 4).unwrap();
-        c.bytes[at..at + 4].copy_from_slice(&distance.to_le_bytes());
-    }
-    c.bytes
+    c.finish()
 }
 
 #[cfg(test)]

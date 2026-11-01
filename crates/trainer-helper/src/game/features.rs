@@ -13,6 +13,8 @@ mod fixed_attack_rate;
 mod fixed_leech_rate;
 mod forge;
 pub(crate) mod gains;
+#[cfg(test)]
+mod generated_code;
 mod mapping;
 mod materials;
 mod mysterious_rift;
@@ -20,8 +22,8 @@ mod new_affixes;
 pub(crate) mod new_item_rarity;
 mod patches;
 pub(crate) mod player_only;
-mod postfix;
-mod prefix;
+#[cfg(test)]
+mod prefix_tests;
 pub(crate) mod prophecy_any_distance;
 pub(crate) mod registry;
 pub(crate) mod results;

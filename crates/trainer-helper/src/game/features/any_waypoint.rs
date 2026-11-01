@@ -4,10 +4,7 @@
 //! The caller retains its waypoint/string graph for the call. No object state or saved unlock is changed here.
 use super::{patches::PatchSpec, registry::*};
 use crate::game::*;
-use native_hooks::{
-    emit,
-    leaf::{FRAME, GeneratedEffect, LeafEffect},
-};
+use native_hooks::{emit::LeafCode, leaf::LeafEffect};
 
 pub(crate) const FEATURE: HookFeature = HookFeature {
     controls: &[GameplayHook::AnyWaypoint],
@@ -53,11 +50,7 @@ pub(crate) struct Layout {
 }
 impl Layout {
     pub(crate) fn effect(self) -> LeafEffect {
-        let mut c = emit::Code::default();
-        c.emit(&[0x4c, 0x8b, 0x58, FRAME.switch, 0x49, 0x83, 0x3b, 0]);
-        c.exit(0x84);
-        c.emit(&[0x4c, 0x8b, 0x58, FRAME.effect[0], 0x41, 0x80, 0x3b, 0]);
-        c.exit(0x85);
+        let mut c = LeafCode::new(self.online);
         c.emit(&[0x4c, 0x8b, 0x5c, 0x24, 0x28]); // fifth native position: waypoint
         c.nonnull(&[0x4d, 0x85, 0xdb]);
         c.offset(&[0x41, 0x80, 0xbb], self.active);
@@ -74,10 +67,7 @@ impl Layout {
         c.bind(eligible);
         c.bind(unnamed);
         c.emit(&[0x41, 0xb8, 1, 0, 0, 0, 0x41, 0xb9, 1, 0, 0, 0]);
-        LeafEffect::Generated(GeneratedEffect {
-            code: c.finish(),
-            slots: [self.online.as_ptr() as u64, 0, 0, 0],
-        })
+        c.finish()
     }
 }
 

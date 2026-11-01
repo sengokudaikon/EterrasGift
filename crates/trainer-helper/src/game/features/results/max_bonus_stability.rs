@@ -14,12 +14,12 @@ const SPEC: MethodSpec = MethodSpec {
     params: &[],
     returns: "System.Int32",
 };
-pub(super) fn effect(online: NonNull<c_void>, maximum: u32) -> PostfixEffect {
-    let mut c = Code::new(online);
+pub(crate) fn effect(online: NonNull<c_void>, maximum: u32) -> PostfixEffect {
+    let mut c = PostfixCode::new(online);
     c.nonnull(&[0x48, 0x85, 0xc9]);
     c.offset(&[0x44, 0x3b, 0x91], maximum); // cmp r10d,[rcx+maximum]
     c.offset(&[0x44, 0x0f, 0x4c, 0x91], maximum); // cmovl r10d,[rcx+maximum]
-    c.finish(&SPEC, 0)
+    c.finish(SPEC.positions(), 0)
 }
 unsafe fn targets(access: &RuntimeAccess, module: NonNull<u8>, size: usize) -> Result<Vec<GameplayHookTarget>, GameError> {
     // SAFETY: readable live zone after original; exact Int32 field and method contract checked from metadata.

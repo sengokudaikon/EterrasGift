@@ -1,21 +1,23 @@
 //! One installation unit: an entry detour or an owned interior range. Pure patch groups and detour groups use their
 //! respective native transactions. Mixed activation keeps gateways closed, commits detours then patches, and
 //! restores prior detour states if the patch transaction fails. Every failure retains the complete group.
-use super::*;
-use native_hooks::patch::{self, CodePatch};
+use super::{
+    HookState, RetainedHook,
+    patch::{self, CodePatch},
+};
 
-pub(super) enum Entry {
+pub enum Entry {
     Detour(RetainedHook),
     Patch(CodePatch),
 }
 impl Entry {
-    fn range(&self) -> std::ops::Range<usize> {
+    pub fn range(&self) -> std::ops::Range<usize> {
         match self {
             Self::Detour(hook) => hook.range(),
             Self::Patch(patch) => patch.range(),
         }
     }
-    pub(super) fn state(&self) -> HookState {
+    pub fn state(&self) -> HookState {
         match self {
             Self::Detour(hook) => hook.state(),
             Self::Patch(patch) => patch.state(),
@@ -29,7 +31,7 @@ impl Entry {
 /// on any failure; only a complete success may publish settings or report the feature on.
 /// # Safety
 /// Every owned range/ABI and native transaction's thread contract holds.
-pub(super) unsafe fn commit(changes: &[(&Entry, bool)]) -> Result<(), String> {
+pub unsafe fn commit(changes: &[(&Entry, bool)]) -> Result<(), String> {
     for (index, (entry, _)) in changes.iter().enumerate() {
         let range = entry.range();
         if changes[..index].iter().any(|(previous, _)| {
@@ -59,7 +61,7 @@ pub(super) unsafe fn commit(changes: &[(&Entry, bool)]) -> Result<(), String> {
             return Err("Mixed hook bytes no longer agree; nothing was written".into());
         }
         // SAFETY: caller keeps gateways closed until both transactions and independent readbacks succeed.
-        unsafe { native_hooks::commit(&detours) }.map_err(|error| error.to_string())?;
+        unsafe { super::commit(&detours) }.map_err(|error| error.to_string())?;
         // SAFETY: all interior ranges remain owned and satisfy their existing native transaction contract.
         if let Err(error) = unsafe { patch::commit(&patches) } {
             let restore: Vec<_> = changes
@@ -71,7 +73,7 @@ pub(super) unsafe fn commit(changes: &[(&Entry, bool)]) -> Result<(), String> {
                 })
                 .collect();
             // SAFETY: same retained closed gateways; the patch transaction already attempted its own recovery.
-            let recovered = unsafe { native_hooks::commit(&restore) };
+            let recovered = unsafe { super::commit(&restore) };
             let matches = changes.iter().zip(before).all(|((entry, _), before)| entry.state() == before);
             return Err(format!("Mixed hook: {error}; detour recovery: {recovered:?}; previous bytes restored: {matches}"));
         }
@@ -83,7 +85,7 @@ pub(super) unsafe fn commit(changes: &[(&Entry, bool)]) -> Result<(), String> {
             if detours.is_empty() {
                 Ok(())
             } else {
-                native_hooks::commit(&detours).map_err(|error| error.to_string())
+                super::commit(&detours).map_err(|error| error.to_string())
             },
             if patches.is_empty() {
                 Ok(())
@@ -98,3 +100,6 @@ pub(super) unsafe fn commit(changes: &[(&Entry, bool)]) -> Result<(), String> {
         (Err(error), _) | (_, Err(error)) => Err(error),
     }
 }
+
+#[cfg(test)]
+mod tests;

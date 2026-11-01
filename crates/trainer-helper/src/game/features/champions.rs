@@ -5,8 +5,8 @@ use super::registry::*;
 use crate::game::*;
 use iced_x86::{Code, Decoder, DecoderOptions};
 use native_hooks::{
-    emit,
-    leaf::{FRAME, GeneratedEffect, LeafEffect},
+    emit::LeafCode,
+    leaf::{FRAME, LeafEffect},
     patch::find_unique,
 };
 
@@ -50,18 +50,11 @@ fn caller(code: &[u8], start: u64, original: u64) -> Result<u64, GameError> {
     Err(unsupported("champion roll instruction/overload"))
 }
 pub(crate) fn effect(online: NonNull<c_void>, caller: u64) -> LeafEffect {
-    let mut c = emit::Code::default();
-    c.emit(&[0x4c, 0x8b, 0x58, FRAME.switch, 0x49, 0x83, 0x3b, 0]);
-    c.exit(0x84);
-    c.emit(&[0x4c, 0x8b, 0x58, FRAME.effect[0], 0x41, 0x80, 0x3b, 0]);
-    c.exit(0x85);
+    let mut c = LeafCode::new(online);
     c.emit(&[0x4c, 0x8b, 0x1c, 0x24, 0x4c, 0x3b, 0x58, FRAME.effect[1]]);
     c.exit(0x85);
     c.emit(&[0xf2, 0x0f, 0x5a, 0x40, FRAME.answer, 0xc3]);
-    LeafEffect::Generated(GeneratedEffect {
-        code: c.finish(),
-        slots: [online.as_ptr() as u64, caller, 0, 0],
-    })
+    c.finish_with([caller, 0, 0])
 }
 unsafe fn targets(access: &RuntimeAccess, module: NonNull<u8>, size: usize) -> Result<Vec<GameplayHookTarget>, GameError> {
     // SAFETY: exact float/int overload on LE.Core.RngElement; one unique decoded direct caller within bounded retained code.

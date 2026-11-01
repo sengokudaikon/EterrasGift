@@ -5,8 +5,8 @@
 //! arguments, the caller's stack and nonvolatile registers stay intact. Original exceptions are never intercepted.
 use crate::game::*;
 use native_hooks::{
-    emit,
-    leaf::{FRAME, GeneratedEffect, LeafEffect},
+    emit::{self, LeafCode},
+    leaf::{FRAME, LeafEffect},
 };
 
 #[derive(Clone, Copy)]
@@ -19,24 +19,15 @@ pub(crate) struct Receiver {
 }
 impl Receiver {
     pub(super) fn effect(self, emit: impl FnOnce(&mut emit::Code)) -> LeafEffect {
-        let mut c = emit::Code::default();
-        c.emit(&[0x4c, 0x8b, 0x58, FRAME.switch, 0x49, 0x83, 0x3b, 0]);
-        c.exit(0x84);
-        c.emit(&[0x4c, 0x8b, 0x58, FRAME.effect[0], 0x41, 0x80, 0x3b, 0]);
-        c.exit(0x85);
-        c.nonnull(&[0x48, 0x85, 0xc9]);
-        c.emit(&[0x4c, 0x8b, 0x58, FRAME.effect[1], 0x4d, 0x8b, 0x1b]);
-        c.nonnull(&[0x4d, 0x85, 0xdb]);
+        let mut c = LeafCode::for_receiver(self.online);
+        c.reference(FRAME.effect[1]);
         if let Some(offset) = self.component {
             c.offset(&[0x4d, 0x8b, 0x9b], offset);
         }
         c.emit(&[0x4c, 0x39, 0xd9]); // receiver == current object/component
         c.exit(0x85);
         emit(&mut c);
-        LeafEffect::Generated(GeneratedEffect {
-            code: c.finish(),
-            slots: [self.online.as_ptr() as u64, self.storage.as_ptr() as u64, 0, 0],
-        })
+        c.finish_with([self.storage.as_ptr() as u64, 0, 0])
     }
 }
 

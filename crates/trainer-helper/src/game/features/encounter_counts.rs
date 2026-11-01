@@ -3,10 +3,10 @@
 //! only newly completed calculations on that same context. Previously consumed encounters are never replenished.
 //! Nested calls have separate snapshots; original exceptions unwind normally and run no post-call writes. The game
 //! retains and serializes its placement/context/config graph for the call, as the original trainer assumes.
-use super::{postfix::Code, registry::*};
+use super::registry::*;
 use crate::game::*;
 use native_hooks::{
-    emit,
+    emit::{self, PostfixCode},
     postfix::{FRAME, PostfixEffect, snapshots},
 };
 
@@ -59,10 +59,7 @@ impl Layout {
         let mut before = emit::Code::default();
         before.emit(&[0x45, 0x33, 0xdb]);
         before.offset(&[0x4c, 0x89, 0x9c, 0x24], context); // no snapshot unless admitted below
-        before.emit(&[0x4c, 0x8b, 0x58, FRAME.switch, 0x49, 0x83, 0x3b, 0]);
-        before.exit(0x84);
-        before.emit(&[0x4c, 0x8b, 0x58, FRAME.slots[0], 0x41, 0x80, 0x3b, 0]);
-        before.exit(0x85);
+        before.gated(FRAME.switch, FRAME.slots[0]);
         before.nonnull(&[0x48, 0x85, 0xd2]);
         before.offset(&[0x4c, 0x8b, 0x9a], self.context);
         before.nonnull(&[0x4d, 0x85, 0xdb]);
@@ -76,7 +73,7 @@ impl Layout {
             before.offset(&[0x0f, 0x95, 0x84, 0x24], flags + 2 + index as u32);
         }
 
-        let mut c = Code::new(self.online);
+        let mut c = PostfixCode::new(self.online);
         c.offset(&[0x4c, 0x8b, 0x9c, 0x24], context);
         c.nonnull(&[0x4d, 0x85, 0xdb]);
         c.offset(&[0x4c, 0x39, 0x9a], self.context); // restored RDX is placement, not the level in RCX
@@ -116,7 +113,7 @@ impl Layout {
                 c.bind(branch);
             }
         }
-        let mut effect = c.finish(&SPEC, OFF);
+        let mut effect = c.finish(SPEC.positions(), OFF);
         effect.before = before.finish();
         effect
     }

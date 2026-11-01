@@ -1,7 +1,7 @@
 //! Independent controls on one generated gateway. A single atomic word holds each setting, or OFF; closing a group
 //! fences every control. Reopening clears sibling words before publishing the newly requested control.
 use super::GameplayHook;
-use native_hooks::{leaf::LeafGate, postfix::PostfixGate};
+use native_hooks::gate::SettingGate;
 
 pub(crate) const OFF: u64 = u64::MAX;
 
@@ -49,48 +49,5 @@ impl SharedSettings {
             }
         }
         on || self.has_other(gate, hook)
-    }
-}
-
-/// Only settings access is shared between gateway families; code generation and ABI contracts remain separate.
-pub(crate) trait SettingGate {
-    fn value(&self) -> u64;
-    fn set_value(&self, value: u64);
-    fn slot(&self, slot: usize) -> u64;
-    fn set_slot(&self, slot: usize, value: u64);
-    fn enabled(&self) -> bool;
-}
-impl SettingGate for LeafGate {
-    fn value(&self) -> u64 {
-        LeafGate::value(self)
-    }
-    fn set_value(&self, value: u64) {
-        LeafGate::set_value(self, value);
-    }
-    fn slot(&self, slot: usize) -> u64 {
-        LeafGate::slot(self, slot)
-    }
-    fn set_slot(&self, slot: usize, value: u64) {
-        LeafGate::set_slot(self, slot, value);
-    }
-    fn enabled(&self) -> bool {
-        LeafGate::enabled(self)
-    }
-}
-impl SettingGate for PostfixGate {
-    fn value(&self) -> u64 {
-        PostfixGate::value(self)
-    }
-    fn set_value(&self, value: u64) {
-        PostfixGate::set_value(self, value);
-    }
-    fn slot(&self, slot: usize) -> u64 {
-        PostfixGate::slot(self, slot)
-    }
-    fn set_slot(&self, slot: usize, value: u64) {
-        PostfixGate::set_slot(self, slot, value);
-    }
-    fn enabled(&self) -> bool {
-        PostfixGate::enabled(self)
     }
 }

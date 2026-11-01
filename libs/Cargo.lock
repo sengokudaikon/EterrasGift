@@ -1491,6 +1491,8 @@ checksum = "72069c3113ab32ab29e5584db3c6ec55d416895e60715417b5b883a357c3e471"
 name = "win-platform"
 version = "0.1.0"
 dependencies = [
+ "binary-reader",
+ "file-ops",
  "jiff",
  "tempfile",
  "tokio",

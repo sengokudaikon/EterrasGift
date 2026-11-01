@@ -3,10 +3,7 @@
 //! same method and can be enabled independently. No reward asset or saved item is changed by this feature.
 use super::{patches::PatchSpec, registry::*};
 use crate::game::*;
-use native_hooks::{
-    emit,
-    leaf::{FRAME, GeneratedEffect, LeafEffect},
-};
+use native_hooks::{emit::LeafCode, leaf::LeafEffect};
 
 pub(crate) const FEATURE: HookFeature = HookFeature {
     controls: &[GameplayHook::ExperimentalUniques],
@@ -37,16 +34,9 @@ const PATCHES: &[PatchSpec] = &[PatchSpec::new(
     &[0x90; 6],
 )];
 pub(crate) fn effect(online: NonNull<c_void>) -> LeafEffect {
-    let mut c = emit::Code::default();
-    c.emit(&[0x4c, 0x8b, 0x58, FRAME.switch, 0x49, 0x83, 0x3b, 0]);
-    c.exit(0x84);
-    c.emit(&[0x4c, 0x8b, 0x58, FRAME.effect[0], 0x41, 0x80, 0x3b, 0]);
-    c.exit(0x85);
+    let mut c = LeafCode::new(online);
     c.emit(&[0xb8, 0, 0, 0x80, 0x3f, 0x66, 0x0f, 0x6e, 0xc0, 0xc3]); // return 1.0f
-    LeafEffect::Generated(GeneratedEffect {
-        code: c.finish(),
-        slots: [online.as_ptr() as u64, 0, 0, 0],
-    })
+    c.finish()
 }
 unsafe fn targets(access: &RuntimeAccess, module: NonNull<u8>, size: usize) -> Result<Vec<GameplayHookTarget>, GameError> {
     // SAFETY: attached immutable metadata, retained module and process-owned online storage. Both targets resolve before any write.

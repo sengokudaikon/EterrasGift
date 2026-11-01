@@ -1,9 +1,9 @@
 //! Raise the score passed to the existing Monolith pulse event to at least its threshold. The game keeps control
 //! of the score-event/first-kill trigger and objective visibility. Read only the pulse's metadata-checked field;
 //! lastKill and MethodInfo are forwarded unchanged, and already revealed objectives stay revealed after off.
-use super::{prefix::Code, registry::*};
+use super::registry::*;
 use crate::game::*;
-use native_hooks::leaf::LeafEffect;
+use native_hooks::{emit::LeafCode, leaf::LeafEffect};
 
 pub(crate) const FEATURE: HookFeature = HookFeature {
     controls: &[GameplayHook::RevealObjective],
@@ -18,7 +18,7 @@ const SPEC: MethodSpec = MethodSpec {
     returns: "System.Void",
 };
 pub(crate) fn effect(online: NonNull<c_void>, threshold: u32) -> LeafEffect {
-    let mut c = Code::new(online);
+    let mut c = LeafCode::new(online);
     c.nonnull(&[0x48, 0x85, 0xc9]);
     c.offset(&[0xf3, 0x0f, 0x10, 0x81], threshold);
     c.emit(&[0xf3, 0x0f, 0x5f, 0xc1, 0xf3, 0x0f, 0x10, 0xc8]);

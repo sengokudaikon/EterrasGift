@@ -1,7 +1,7 @@
 //! Scalar-result features over the shared original-first emitter.
-use super::{postfix::Code, registry::MethodSpec};
+use super::registry::MethodSpec;
 use crate::game::*;
-use native_hooks::postfix::PostfixEffect;
+use native_hooks::{emit::PostfixCode, postfix::PostfixEffect};
 
 pub(crate) mod ability_speed;
 pub(crate) mod boss_loot_chance;

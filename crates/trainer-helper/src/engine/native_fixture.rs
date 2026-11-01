@@ -128,7 +128,8 @@ impl Backend for NativeControl {
     }
     fn restore(&mut self) -> Result<(), String> {
         gameplay_hooks::clear(true)?;
-        restore_and_drain(Some(&self.hook), Some(&self.gate))
+        // SAFETY: the control thread owns the target and all generated code is retained.
+        unsafe { restore_and_drain(Some(&self.hook), Some(&self.gate)) }
     }
 }
 
@@ -138,9 +139,7 @@ unsafe fn native_worker() -> Result<(), String> {
     unsafe {
         let target = NonNull::new(TARGET.load(SeqCst)).ok_or("Native fixture target absent")?;
         let bytes: [u8; 16] = std::slice::from_raw_parts(target.as_ptr(), 16).try_into().unwrap();
-        let gate = CallbackGate::prepare(native_callback as *const ()).map_err(|e| e.to_string())?;
-        let hook = RetainedHook::prepare(target, gate.entry(), &bytes).map_err(|e| e.to_string())?;
-        gate.set_original(hook.trampoline());
+        let (gate, hook) = CallbackGate::prepare_hook(native_callback as *const (), target, &bytes).map_err(|e| e.to_string())?;
         let mut control = NativeControl {
             discovery: Discovery {
                 build_id: "0".repeat(64),

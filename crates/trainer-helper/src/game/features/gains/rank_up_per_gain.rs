@@ -18,7 +18,7 @@ const SPEC: MethodSpec = MethodSpec {
     returns: "System.Void",
 };
 #[derive(Clone, Copy)]
-pub(super) struct Layout {
+pub(crate) struct Layout {
     pub online: NonNull<c_void>,
     pub rank: u32,
     pub reputation: u32,
@@ -27,8 +27,8 @@ pub(super) struct Layout {
     pub required: u32,
 }
 impl Layout {
-    pub(super) fn effect(self) -> LeafEffect {
-        let mut c = Code::new(self.online);
+    pub(crate) fn effect(self) -> LeafEffect {
+        let mut c = LeafCode::for_receiver(self.online);
         c.emit(&[0x85, 0xd2]);
         c.exit(0x8e);
         c.offset(&[0x4c, 0x63, 0x91], self.rank); // signed rank -> r10
@@ -49,7 +49,7 @@ impl Layout {
         c.emit(&[0x49, 0x81, 0xfa, 0xff, 0xff, 0xff, 0x7f]);
         c.exit(0x8f);
         c.emit(&[0x44, 0x89, 0xd2]);
-        c.finish([0; 3])
+        c.finish()
     }
 }
 unsafe fn targets(access: &RuntimeAccess, module: NonNull<u8>, size: usize) -> Result<Vec<GameplayHookTarget>, GameError> {

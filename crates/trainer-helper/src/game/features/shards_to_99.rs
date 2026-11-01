@@ -1,10 +1,10 @@
 //! Raise existing saved shard quantities before the game's count, preserving its original work and result.
 use super::{
-    materials::{self, Code, FLOOR, MAX_ENTRIES},
+    materials::{self, FLOOR, MAX_ENTRIES},
     registry::{Behavior, GameplayHook, GameplayHookTarget, HookFeature, MethodSpec, Targets},
 };
 use crate::game::*;
-use native_hooks::leaf::LeafEffect;
+use native_hooks::{emit::LeafCode, leaf::LeafEffect};
 
 pub(super) const FEATURE: HookFeature = HookFeature {
     controls: &[GameplayHook::ShardsTo99],
@@ -25,7 +25,7 @@ impl ShardLayout {
     /// The supported call retains a readable tracker/stash/List<SavedShard>/array graph and writable shard Int32s.
     /// Inventory mutation is serialized by the game. Array headers use the supported IL2CPP x64 layout.
     pub(crate) fn effect(self) -> LeafEffect {
-        let mut c = Code::new(self.online);
+        let mut c = LeafCode::for_receiver(self.online);
         c.offset(&[0x4c, 0x8b, 0x81], self.stash); // r8 = tracker.stash
         c.emit(&[0x4d, 0x85, 0xc0]);
         c.exit(0x84);

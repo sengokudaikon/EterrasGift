@@ -14,7 +14,10 @@ use il2cpp_runtime::{
     module::{export, image_size},
     raw::{self, MethodInfo},
 };
-use native_hooks::{self, HookState, RetainedHook, callback::CallbackGate};
+use native_hooks::{
+    self, HookState, RetainedHook,
+    callback::{CallbackGate, restore_and_drain},
+};
 use std::{
     ffi::c_void,
     os::windows::io::{AsRawHandle, FromRawHandle, OwnedHandle},
@@ -23,16 +26,15 @@ use std::{
         Mutex, OnceLock,
         atomic::{AtomicBool, AtomicU64, Ordering::SeqCst},
     },
-    time::{Duration, Instant},
+    time::Instant,
 };
 use windows_sys::Win32::System::{
-    Diagnostics::Debug::RtlLookupFunctionEntry,
     LibraryLoader::{FreeLibraryAndExitThread, GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS, GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT, GetModuleHandleExW},
     Threading::{CreateThread, GetCurrentProcessId, GetCurrentThreadId, OpenThread, SYNCHRONIZATION_SYNCHRONIZE, WaitForSingleObject},
 };
 
 #[cfg(feature = "fixture")]
-use std::sync::atomic::AtomicPtr;
+use std::{sync::atomic::AtomicPtr, time::Duration};
 
 static PRESENCE_ERROR_REPORTED: AtomicBool = AtomicBool::new(false);
 /// Whether this load asked for affixes to be added: without that, leaving the game touches no list.
@@ -478,19 +480,15 @@ impl Backend for Control<'_> {
         unsafe {
             let target = self.module.as_ptr().add(expected.rva as usize);
             if self.hook.is_none() {
-                let mut base = 0;
-                let entry = RtlLookupFunctionEntry(target as u64, &raw mut base, std::ptr::null_mut());
-                if entry.is_null() || base + (*entry).BeginAddress as u64 != target as u64 {
+                if !native_hooks::begins_function(target) {
                     return Err(server::failure(ResponseCode::RestartRequired, "Dispatcher unwind record missing; nothing ran"));
                 }
                 if std::slice::from_raw_parts(target, 16) != expected.bytes {
                     return Err(server::failure(ResponseCode::RestartRequired, "Dispatcher bytes changed; nothing ran"));
                 }
-                let gate = CallbackGate::prepare(callback as *const ()).map_err(|error| server::failure(ResponseCode::RestartRequired, error.to_string()))?;
-                let hook = RetainedHook::prepare(NonNull::new(target).unwrap(), gate.entry(), &expected.bytes)
+                let (gate, hook) = CallbackGate::prepare_hook(callback as *const (), NonNull::new(target).unwrap(), &expected.bytes)
                     .map_err(|error| server::failure(ResponseCode::RestartRequired, error.to_string()))?;
                 let hook = Box::leak(Box::new(hook));
-                gate.set_original(hook.trampoline());
                 self.gate = Some(gate);
                 #[cfg(feature = "fixture")]
                 FIXTURE_HOOK.store(hook, SeqCst);
@@ -520,7 +518,8 @@ impl Backend for Control<'_> {
     }
     fn restore(&mut self) -> Result<(), String> {
         gameplay_hooks::clear(true)?;
-        let restored = restore_and_drain(self.hook, self.gate.as_ref());
+        // SAFETY: the control thread owns the target and all generated code is retained.
+        let restored = unsafe { restore_and_drain(self.hook, self.gate.as_ref()) };
         // Nothing of the helper's stays in the game's lists, once no helper callback can be running. A failure is reported
         // and does not keep the helper in: the entries are the game's own managed objects and run no code of ours. A drain
         // that failed leaves them: a callback may still be adding, and the helper stays loaded, which already says restart.
@@ -534,27 +533,6 @@ impl Backend for Control<'_> {
         }
         restored
     }
-}
-
-fn restore_and_drain(hook: Option<&RetainedHook>, gate: Option<&CallbackGate>) -> Result<(), String> {
-    if let Some(gate) = gate {
-        gate.close();
-    }
-    if let Some(hook) = hook
-        && hook.state() != HookState::Disabled
-    {
-        // SAFETY: the control thread owns the target and all generated code is
-        // retained. Closing the gate prevents new helper calls during restoration.
-        unsafe { native_hooks::commit(&[(hook, false)]) }.map_err(|error| error.to_string())?;
-    }
-    let deadline = Instant::now() + Duration::from_secs(5);
-    while gate.is_some_and(|gate| gate.active() != 0) {
-        if Instant::now() >= deadline {
-            return Err("Helper callback did not drain; module remains loaded".into());
-        }
-        std::thread::sleep(Duration::from_millis(1));
-    }
-    Ok(())
 }
 
 /// Ok when the module may unload. A setup failure is Ok too: it comes before the dispatcher hook exists, so nothing

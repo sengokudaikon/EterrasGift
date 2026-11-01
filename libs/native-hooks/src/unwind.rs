@@ -14,6 +14,28 @@ use windows_sys::Win32::System::{
     Threading::GetCurrentProcess,
 };
 
+/// The unwind record covering `target`, with its image base. None when there is no record, as for a leaf function; an
+/// error when the record begins elsewhere, so `target` is inside a function rather than at its entry.
+fn record_at(target: *const u8) -> Result<Option<(u64, *mut IMAGE_RUNTIME_FUNCTION_ENTRY)>, HookError> {
+    let mut image_base = 0;
+    // SAFETY: the lookup takes any address and only searches the process's function tables; a record it returns stays readable while its module does, which covers this read.
+    unsafe {
+        let entry = RtlLookupFunctionEntry(target as u64, &raw mut image_base, std::ptr::null_mut());
+        if entry.is_null() {
+            return Ok(None);
+        }
+        if image_base + u64::from((*entry).BeginAddress) != target as u64 {
+            return Err(HookError::UnsupportedUnwind);
+        }
+        Ok(Some((image_base, entry)))
+    }
+}
+
+/// Whether `target` is where a function with an unwind record begins.
+pub fn begins_function(target: *const u8) -> bool {
+    matches!(record_at(target), Ok(Some(_)))
+}
+
 pub(super) unsafe fn register(target: *const u8, trampoline: *const u8, expected: &[u8], copied: usize) -> Result<(), HookError> {
     // SAFETY: caller owns a retained detour; pinned x64 backend reserves at least copied+5 executable bytes and emits a near jump after straight-line instructions.
     unsafe {
@@ -53,13 +75,8 @@ pub(super) unsafe fn register(target: *const u8, trampoline: *const u8, expected
         if jump.code() != iced_x86::Code::Jmp_rel32_64 || jump.near_branch_target() != target as u64 + copied as u64 {
             return Err(HookError::UnsupportedUnwind);
         }
-        let mut image_base = 0;
-        let entry = RtlLookupFunctionEntry(target as u64, &raw mut image_base, std::ptr::null_mut());
         let mut info = vec![1, 0, 0, 0];
-        if !entry.is_null() {
-            if image_base + u64::from((*entry).BeginAddress) != target as u64 {
-                return Err(HookError::UnsupportedUnwind);
-            }
+        if let Some((image_base, entry)) = record_at(target)? {
             let address = (image_base + u64::from((*entry).Anonymous.UnwindData)) as *const u8;
             let header = std::slice::from_raw_parts(address, 4);
             if header[0] & 7 == 1 && header[0] >> 3 != 0 && !restore_prefix {

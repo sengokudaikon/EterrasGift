@@ -1,10 +1,10 @@
 //! Refill rune/glyph stacks in one-slot containers before original quantity queries. Other item types are unchanged.
 use super::{
-    materials::{self, Code, FLOOR},
+    materials::{self, FLOOR},
     registry::{Behavior, GameplayHook, GameplayHookTarget, HookFeature, MethodSpec, Targets},
 };
 use crate::game::*;
-use native_hooks::leaf::LeafEffect;
+use native_hooks::{emit::LeafCode, leaf::LeafEffect};
 
 pub(super) const FEATURE: HookFeature = HookFeature {
     controls: &[GameplayHook::RunesGlyphsTo99],
@@ -24,7 +24,7 @@ impl SlotLayout {
     /// A live one-slot receiver retains readable content/data and an aligned writable quantity during the call.
     /// ItemData.itemType is the metadata-validated byte; 102/103 are the game's rune/glyph categories.
     pub(crate) fn effect(self) -> LeafEffect {
-        let mut c = Code::new(self.online);
+        let mut c = LeafCode::for_receiver(self.online);
         c.offset(&[0x4c, 0x8b, 0x81], self.content); // r8 = entry
         c.emit(&[0x4d, 0x85, 0xc0]);
         c.exit(0x84);

@@ -2,9 +2,12 @@
 //! including byref outputs, nullable/aggregate payloads, roll modifiers and MethodInfo; only the low Int32 at the
 //! ninth native position changes. A tail jump needs no stack copy or maximum-arity gateway. Explicit blessings,
 //! uniques and gambler rarities win. The original runs once and owns all generation/output/exception behavior.
-use super::{prefix::Code, registry::*};
+use super::registry::*;
 use crate::game::*;
-use native_hooks::leaf::{FRAME, LeafEffect};
+use native_hooks::{
+    emit::LeafCode,
+    leaf::{FRAME, LeafEffect},
+};
 
 pub(crate) const FEATURE: HookFeature = HookFeature {
     controls: &[GameplayHook::NewItemRarity],
@@ -41,7 +44,7 @@ const SPEC: MethodSpec = MethodSpec {
     returns: "System.Void",
 };
 pub(crate) fn effect(online: NonNull<c_void>) -> LeafEffect {
-    let mut c = Code::new(online);
+    let mut c = LeafCode::new(online);
     c.emit(&[0x83, 0x7c, 0x24, 0x48, 0xff]); // native position 8: rarity == -1
     c.exit(0x85);
     c.emit(&[0x4c, 0x8b, 0x58, FRAME.answer, 0x44, 0x89, 0x5c, 0x24, 0x48]);

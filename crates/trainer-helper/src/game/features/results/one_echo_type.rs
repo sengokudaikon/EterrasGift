@@ -27,8 +27,8 @@ const _: () = assert!(
     matches!(GameplayHook::OneEchoType.value_kind(), eg_trainer_wire::hooks::ValueKind::Choice(sent) if sent.len() == TYPES.len()),
     "one IslandType for each choice the pipe takes"
 );
-pub(super) fn effect(online: NonNull<c_void>) -> PostfixEffect {
-    let mut c = Code::new(online);
+pub(crate) fn effect(online: NonNull<c_void>) -> PostfixEffect {
+    let mut c = PostfixCode::new(online);
     c.emit(&[0x4c, 0x8b, 0x58, FRAME.value]);
     for (index, value) in TYPES.iter().enumerate() {
         c.emit(&[0x49, 0x83, 0xfb, index as u8]);
@@ -38,7 +38,7 @@ pub(super) fn effect(online: NonNull<c_void>) -> PostfixEffect {
         c.done();
         c.bind(next);
     }
-    c.finish(&SPEC, 0)
+    c.finish(SPEC.positions(), 0)
 }
 unsafe fn targets(access: &RuntimeAccess, module: NonNull<u8>, size: usize) -> Result<Vec<GameplayHookTarget>, GameError> {
     // SAFETY: exact enum sizes and full HashSet overload validated before forwarding seven native positions.

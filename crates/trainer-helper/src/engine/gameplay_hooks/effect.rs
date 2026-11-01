@@ -6,7 +6,7 @@ use crate::game::{
     registry::{Behavior, HookFeature, TargetEffect},
 };
 use il2cpp_runtime::{AttachedThread, raw};
-use native_hooks::{leaf::LeafGate, postfix::PostfixGate, scalar::ScalarGate};
+use native_hooks::{gate::Gate, leaf::LeafGate, postfix::PostfixGate, scalar::ScalarGate};
 
 pub(super) struct FeatureBinding {
     feature: &'static HookFeature,
@@ -86,49 +86,6 @@ impl FeatureBinding {
     }
 }
 
-pub(super) enum Gate {
-    Leaf(LeafGate),
-    Scalar(ScalarGate),
-    Postfix(PostfixGate),
-    Patch(AtomicBool),
-}
-impl Gate {
-    fn leaf(&self) -> &LeafGate {
-        match self {
-            Self::Leaf(gate) => gate,
-            _ => unreachable!("leaf group"),
-        }
-    }
-    fn scalar(&self) -> &ScalarGate {
-        match self {
-            Self::Scalar(gate) => gate,
-            _ => unreachable!("scalar group"),
-        }
-    }
-    fn postfix(&self) -> &PostfixGate {
-        match self {
-            Self::Postfix(gate) => gate,
-            _ => unreachable!("postfix group"),
-        }
-    }
-    fn enabled(&self) -> bool {
-        match self {
-            Self::Leaf(gate) => gate.enabled(),
-            Self::Scalar(gate) => gate.enabled(),
-            Self::Postfix(gate) => gate.enabled(),
-            Self::Patch(enabled) => enabled.load(SeqCst),
-        }
-    }
-    fn value(&self) -> u64 {
-        match self {
-            Self::Leaf(gate) => gate.value(),
-            Self::Scalar(gate) => gate.value(),
-            Self::Postfix(gate) => gate.value(),
-            Self::Patch(_) => 1,
-        }
-    }
-}
-
 pub(super) struct Effect {
     gates: Vec<Gate>,
     behavior: Behavior,
@@ -141,34 +98,17 @@ impl Effect {
         Self { gates, behavior, binding: None }
     }
     pub(super) fn entry(&self, index: usize) -> *const () {
-        match &self.gates[index] {
-            Gate::Leaf(gate) => gate.entry(),
-            Gate::Scalar(gate) => gate.entry(),
-            Gate::Postfix(gate) => gate.entry(),
-            Gate::Patch(_) => unreachable!("interior patch has no gateway"),
-        }
+        self.gates[index].entry()
     }
     /// # Safety
     /// Original matches this gate's validated ABI; set once while closed, before publishing the entry.
     pub(super) unsafe fn set_original(&self, index: usize, original: *const ()) {
         // SAFETY: caller supplies the exact ABI of this prepared target.
-        unsafe {
-            match &self.gates[index] {
-                Gate::Leaf(gate) => gate.set_original(original),
-                Gate::Scalar(gate) => gate.set_original(original),
-                Gate::Postfix(gate) => gate.set_original(original),
-                Gate::Patch(_) => unreachable!("interior patch has no original trampoline"),
-            }
-        }
+        unsafe { self.gates[index].set_original(original) }
     }
     pub(super) fn close(&self) {
         for gate in &self.gates {
-            match gate {
-                Gate::Leaf(gate) => gate.set_enabled(false),
-                Gate::Scalar(gate) => gate.close(),
-                Gate::Postfix(gate) => gate.set_enabled(false),
-                Gate::Patch(enabled) => enabled.store(false, SeqCst),
-            }
+            gate.close();
         }
     }
     pub(super) fn restore(&self) -> Result<(), String> {

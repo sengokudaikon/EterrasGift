@@ -1,9 +1,9 @@
 //! Combat prophecy targets count at any distance. This bypasses only IsPlayerInRangeOf, not prophecy target or
 //! faction requirements. Its 12-byte Vector3 travels indirectly in RDX; off/online paths tail-call the original
 //! without changing or dereferencing it. On returns true without a game call, matching the original trainer.
-use super::{prefix::Code, registry::*};
+use super::registry::*;
 use crate::game::*;
-use native_hooks::leaf::LeafEffect;
+use native_hooks::{emit::LeafCode, leaf::LeafEffect};
 
 pub(crate) const FEATURE: HookFeature = HookFeature {
     controls: &[GameplayHook::ProphecyAnyDistance],
@@ -18,7 +18,7 @@ const SPEC: MethodSpec = MethodSpec {
     returns: "System.Boolean",
 };
 pub(crate) fn effect(online: NonNull<c_void>) -> LeafEffect {
-    let mut c = Code::new(online);
+    let mut c = LeafCode::new(online);
     c.emit(&[0xb8, 1, 0, 0, 0, 0xc3]);
     c.finish()
 }

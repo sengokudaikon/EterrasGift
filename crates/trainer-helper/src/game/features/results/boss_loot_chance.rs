@@ -15,10 +15,10 @@ const SPEC: MethodSpec = MethodSpec {
     params: &["System.Single", "System.Single", "System.Int32", "System.Int32", "System.Int32"],
     returns: "System.Single",
 };
-pub(super) fn effect(online: NonNull<c_void>) -> PostfixEffect {
-    let mut c = Code::new(online);
+pub(crate) fn effect(online: NonNull<c_void>) -> PostfixEffect {
+    let mut c = PostfixCode::new(online);
     c.emit(&[0xf3, 0x0f, 0x10, 0x40, FRAME.slots[1]]);
-    c.finish(&SPEC, u64::from(1.0f32.to_bits()))
+    c.finish(SPEC.positions(), u64::from(1.0f32.to_bits()))
 }
 unsafe fn targets(access: &RuntimeAccess, module: NonNull<u8>, size: usize) -> Result<Vec<GameplayHookTarget>, GameError> {
     // SAFETY: selected exact nested owner, attached metadata and checked seven-position float-return ABI.

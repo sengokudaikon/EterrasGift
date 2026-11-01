@@ -1,9 +1,9 @@
 //! Widen each minimap reveal to at least 1000. The 12-byte float3 is passed indirectly in RDX on Windows x64 and
 //! remains opaque: its address and contents reach the original unchanged, along with receiver and MethodInfo.
 //! The original still reveals the map; switching off does not hide areas already revealed.
-use super::{prefix::Code, registry::*};
+use super::registry::*;
 use crate::game::*;
-use native_hooks::leaf::LeafEffect;
+use native_hooks::{emit::LeafCode, leaf::LeafEffect};
 
 pub(crate) const FEATURE: HookFeature = HookFeature {
     controls: &[GameplayHook::RevealMap],
@@ -18,7 +18,7 @@ const SPEC: MethodSpec = MethodSpec {
     returns: "System.Void",
 };
 pub(crate) fn effect(online: NonNull<c_void>) -> LeafEffect {
-    let mut c = Code::new(online);
+    let mut c = LeafCode::new(online);
     c.emit(&[0x41, 0xbb]);
     c.emit(&1000.0f32.to_bits().to_le_bytes());
     c.emit(&[0x66, 0x41, 0x0f, 0x6e, 0xc3]); // threshold -> xmm0

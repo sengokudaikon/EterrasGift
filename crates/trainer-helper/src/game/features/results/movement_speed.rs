@@ -55,7 +55,7 @@ pub(crate) struct Layout {
 }
 impl Layout {
     pub(crate) fn effect(self) -> PostfixEffect {
-        let mut c = Code::new(self.online);
+        let mut c = PostfixCode::new(self.online);
         c.emit(&[0x80, 0xfa, self.property]); // restored original DL, not the original's scratch RDX
         c.exit(0x85);
         c.emit(&[0x49, 0xbb]);
@@ -63,14 +63,13 @@ impl Layout {
         c.offset(&[0x4c, 0x39, 0x9c, 0x24], u32::from(frame_size(SPEC.positions())));
         c.exit(0x85);
         c.nonnull(&[0x48, 0x85, 0xc9]);
-        c.emit(&[0x4c, 0x8b, 0x58, FRAME.slots[1], 0x4d, 0x8b, 0x1b]);
-        c.nonnull(&[0x4d, 0x85, 0xdb]);
+        c.reference(FRAME.slots[1]);
         c.offset(&[0x49, 0x3b, 0x8b], self.stats);
         c.exit(0x85);
         c.emit(&[0x66, 0x0f, 0xef, 0xc9, 0x66, 0x0f, 0x2e, 0x48, FRAME.value]); // multiplier <= 0 keeps original
         c.exit(0x83);
         c.emit(&[0xf3, 0x0f, 0x5a, 0xc0, 0xf2, 0x0f, 0x59, 0x40, FRAME.value, 0xf2, 0x0f, 0x5a, 0xc0]);
-        c.finish(&SPEC, self.player.as_ptr() as u64)
+        c.finish(SPEC.positions(), self.player.as_ptr() as u64)
     }
 }
 

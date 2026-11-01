@@ -1,7 +1,15 @@
 # native-hooks
 
 Function hooks in a running x64 Windows process: retained detours on stock `detour = 0.10.0`, generated gates (`leaf`, `postfix`,
-`scalar`, `callback`) and code patches (`patch`). In-game code only.
+`scalar`, `callback`), the assembler that writes their effects (`emit`) and code patches (`patch`), with groups of them handled
+alike (`entry`, `gate`). In-game code only.
+
+## Generated effects
+
+`emit::Code` assembles an effect's bytes. `LeafCode` and `PostfixCode` open a gated effect in their family's frame and close it into
+that family's effect; `Code::gated` is the same admission for code written directly, as a frame's displacements are per family. An
+app's effects can be pinned byte for byte by preparing their gateways from fixed inputs and reading the published pages: nothing is
+called, and only the page addresses differ between runs.
 
 ## Retained detours
 
@@ -39,3 +47,13 @@ execution by snapshot-missed or new threads and return addresses inside a change
 The suspended section avoids Rust allocations but still calls Win32 context, protection, cache and resume wrappers. Overlays or
 security software can instrument those and wait on a suspended thread's lock, so deadlock freedom is not established. The unsafe
 contract excludes such instrumentation.
+
+## Groups
+
+`entry::commit` changes a group of detours and interior patches together. A mixed activation commits the closed detours, then the
+patches, and restores the detours' prior states if the patches fail: this is compensation, not one suspended write, so interior
+patches can take effect between the two transactions. Cleanup attempts both families even when one fails. Every owner is retained
+after any failure.
+
+`callback::restore_and_drain` closes a callback gate, restores its entry and waits for calls already past the gate. On failure the
+caller must keep the module loaded.

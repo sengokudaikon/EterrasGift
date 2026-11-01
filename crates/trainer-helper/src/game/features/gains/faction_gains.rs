@@ -15,14 +15,14 @@ const SPEC: MethodSpec = MethodSpec {
     params: &["System.Int32", "System.Boolean", "System.Boolean"],
     returns: "System.Void",
 };
-pub(super) fn effect(online: NonNull<c_void>) -> LeafEffect {
-    let mut c = Code::new(online);
+pub(crate) fn effect(online: NonNull<c_void>) -> LeafEffect {
+    let mut c = LeafCode::for_receiver(online);
     c.emit(&[0x45, 0x84, 0xc9]); // ignoreMultiplier is R9B
     c.exit(0x85);
     c.emit(&[0xf2, 0x0f, 0x10, 0x48, FRAME.answer, 0x4c, 0x63, 0xd2]);
-    c.scale(false);
+    scale(&mut c, false);
     c.emit(&[0x44, 0x89, 0xd2]);
-    c.finish([0; 3])
+    c.finish()
 }
 unsafe fn targets(access: &RuntimeAccess, module: NonNull<u8>, size: usize) -> Result<Vec<GameplayHookTarget>, GameError> {
     // SAFETY: exact five-position ABI, immutable metadata and initialized process-owned online byte.

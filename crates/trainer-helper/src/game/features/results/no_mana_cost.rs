@@ -18,14 +18,13 @@ pub(crate) struct ManaCostLayout {
 }
 impl ManaCostLayout {
     pub(crate) fn effect(&self) -> PostfixEffect {
-        let mut c = Code::new(self.online_storage);
+        let mut c = PostfixCode::new(self.online_storage);
         c.nonnull(&[0x48, 0x85, 0xc9]); // null receiver
-        c.emit(&[0x4c, 0x8b, 0x58, FRAME.slots[1], 0x4d, 0x8b, 0x1b]); // r11 = current player
-        c.nonnull(&[0x4d, 0x85, 0xdb]);
+        c.reference(FRAME.slots[1]); // r11 = current player
         c.offset(&[0x49, 0x3b, 0x8b], self.mana_offset); // cmp rcx, [r11 + Actor.mana]
         c.exit(0x85);
         c.emit(&[0x0f, 0x57, 0xc0]); // xorps xmm0, xmm0: no cost
-        c.finish(&SPEC, self.player_storage.as_ptr() as u64)
+        c.finish(SPEC.positions(), self.player_storage.as_ptr() as u64)
     }
 }
 

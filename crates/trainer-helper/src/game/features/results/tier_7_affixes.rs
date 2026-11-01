@@ -24,9 +24,9 @@ const SPEC: MethodSpec = MethodSpec {
     returns: "System.Int32",
 };
 pub(crate) fn effect(online: NonNull<c_void>) -> PostfixEffect {
-    let mut c = Code::new(online);
+    let mut c = PostfixCode::new(online);
     c.emit(&[0x41, 0xba, 6, 0, 0, 0]);
-    c.finish(&SPEC, 0)
+    c.finish(SPEC.positions(), 0)
 }
 unsafe fn targets(access: &RuntimeAccess, module: NonNull<u8>, size: usize) -> Result<Vec<GameplayHookTarget>, GameError> {
     // SAFETY: exact ten-position scalar/reference contract, including the stack float and MethodInfo.

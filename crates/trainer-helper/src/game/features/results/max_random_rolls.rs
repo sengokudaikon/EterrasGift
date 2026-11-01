@@ -14,10 +14,10 @@ const SPEC: MethodSpec = MethodSpec {
     params: &[],
     returns: "System.Byte",
 };
-pub(super) fn effect(online: NonNull<c_void>) -> PostfixEffect {
-    let mut c = Code::new(online);
+pub(crate) fn effect(online: NonNull<c_void>) -> PostfixEffect {
+    let mut c = PostfixCode::new(online);
     c.emit(&[0x41, 0xba, 255, 0, 0, 0]); // r10d = byte maximum
-    c.finish(&SPEC, 0)
+    c.finish(SPEC.positions(), 0)
 }
 unsafe fn targets(access: &RuntimeAccess, module: NonNull<u8>, size: usize) -> Result<Vec<GameplayHookTarget>, GameError> {
     // SAFETY: attached retained metadata, admitted offline character and exact instance-byte ABI.

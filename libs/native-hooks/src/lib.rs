@@ -1,5 +1,6 @@
 //! Function hooks in a running x64 process: process-retained stock detour owners, generated gates and code patches. Entry
-//! changes use transactions only. Names no app or game.
+//! changes use transactions only: [`commit`] for detours, [`patch::commit`] for interior ranges, [`entry::commit`] for a
+//! group of either. Names no app or game.
 //!
 //! Commits use Threads::All, which suspends every other thread it can open and skips the
 //! rest. Opening/suspending a thread can fail for reasons other than exit; such a skipped
@@ -9,12 +10,16 @@
 
 pub mod callback;
 pub mod emit;
+pub mod entry;
+pub mod gate;
 pub mod leaf;
 mod page;
 pub mod patch;
 pub mod postfix;
 pub mod scalar;
 mod unwind;
+
+pub use unwind::begins_function;
 
 use detour::{RawDetour, Threads, Transaction};
 use iced_x86::{Decoder, DecoderOptions, FlowControl};

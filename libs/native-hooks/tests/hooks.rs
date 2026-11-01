@@ -260,6 +260,14 @@ fn redundant_rex_push_preserves_prologue_offsets_and_unwinds_at_every_boundary()
 }
 
 #[test]
+fn only_a_function_with_a_record_that_begins_there_begins_a_function() {
+    let target = fixture_owned_dispatch as *const () as *const u8;
+    assert!(hooks::begins_function(target));
+    assert!(!hooks::begins_function(target.wrapping_add(4)), "inside the function its record covers");
+    assert!(!hooks::begins_function(std::ptr::dangling()), "no record covers this");
+}
+
+#[test]
 fn stale_expected_bytes_are_rejected_without_changing_the_entry() {
     let _guard = SERIAL.lock().unwrap();
     let target = fixture_owned_dispatch as *const () as *mut u8;

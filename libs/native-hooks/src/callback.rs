@@ -4,10 +4,11 @@
 //!
 //! Native unwinding out of the post-call callback deliberately strands its count:
 //! unloading then refuses, rather than guessing whether DLL frames remain alive.
-use super::{HookError, page};
+use super::{HookError, HookState, RetainedHook, commit, page};
 use std::{
     ptr::NonNull,
     sync::atomic::{AtomicPtr, AtomicU64, Ordering::SeqCst},
+    time::{Duration, Instant},
 };
 
 #[repr(C)]
@@ -60,6 +61,21 @@ impl CallbackGate {
             Ok(Self { code, data: &*data })
         }
     }
+    /// A gateway for `callback` and the hook that leads `target` into it, the gateway's original already the hook's
+    /// trampoline. Nothing is published: the entry changes when the caller commits the hook. A gateway whose hook could
+    /// not be prepared stays retained, as every gateway does.
+    ///
+    /// # Safety
+    /// As [`Self::prepare`] for `callback` and [`RetainedHook::prepare`] for `target` and `expected`.
+    pub unsafe fn prepare_hook(callback: *const (), target: NonNull<u8>, expected: &[u8]) -> Result<(Self, RetainedHook), HookError> {
+        // SAFETY: the caller's contracts; the original is set while nothing can reach the gateway.
+        unsafe {
+            let gate = Self::prepare(callback)?;
+            let hook = RetainedHook::prepare(target, gate.entry(), expected)?;
+            gate.set_original(hook.trampoline());
+            Ok((gate, hook))
+        }
+    }
     pub fn entry(&self) -> *const () {
         self.code.as_ptr().cast()
     }
@@ -76,6 +92,31 @@ impl CallbackGate {
     pub fn active(&self) -> u64 {
         self.data.active.load(SeqCst)
     }
+}
+
+/// Closes the gate, restores the entry and waits for calls already past the gate. Ok means nothing can reach the callback
+/// any more. Either can be absent, for an owner that never got as far as making it; failure leaves both retained.
+///
+/// # Safety
+/// The caller owns the target and all generated code is retained, as [`commit`] requires.
+pub unsafe fn restore_and_drain(hook: Option<&RetainedHook>, gate: Option<&CallbackGate>) -> Result<(), String> {
+    if let Some(gate) = gate {
+        gate.close();
+    }
+    if let Some(hook) = hook
+        && hook.state() != HookState::Disabled
+    {
+        // SAFETY: the caller owns the target; closing the gate prevents new callback calls during restoration.
+        unsafe { commit(&[(hook, false)]) }.map_err(|error| error.to_string())?;
+    }
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while gate.is_some_and(|gate| gate.active() != 0) {
+        if Instant::now() >= deadline {
+            return Err("Helper callback did not drain; module remains loaded".into());
+        }
+        std::thread::sleep(Duration::from_millis(1));
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -128,5 +169,79 @@ mod tests {
         thread.join().unwrap();
         assert!(!call.called.load(SeqCst));
         assert_eq!(gate.active(), 0);
+    }
+
+    /// A target of its own, for each test that patches one: straight-line nops the hook can relocate, then a ret. The line
+    /// number keeps identical code from being folded into one function by the linker.
+    macro_rules! target {
+        ($name:ident) => {
+            #[unsafe(naked)]
+            unsafe extern "C-unwind" fn $name(_: *const Call) {
+                core::arch::naked_asm!(".rept 16", "nop", ".endr", "ret", concat!(".long ", line!()));
+            }
+        };
+    }
+
+    #[test]
+    fn the_prepared_hook_forwards_to_the_callback_after_the_original_and_restore_ends_that() {
+        target!(entry);
+        // SAFETY: authored process-lifetime target and callback of the supported void(pointer) ABI; the test owns the entry.
+        unsafe {
+            let bytes: [u8; 16] = (entry as *const [u8; 16]).read_unaligned();
+            let (gate, hook) = CallbackGate::prepare_hook(callback as *const (), NonNull::new(entry as *mut u8).unwrap(), &bytes).unwrap();
+            assert_eq!(hook.state(), HookState::Disabled, "preparing publishes nothing");
+            let call = Call::default();
+            std::hint::black_box(entry)(&call);
+            assert!(!call.called.load(SeqCst));
+            commit(&[(&hook, true)]).unwrap();
+            std::hint::black_box(entry)(&call);
+            assert!(call.called.swap(false, SeqCst));
+            restore_and_drain(Some(&hook), Some(&gate)).unwrap();
+            assert_eq!(hook.state(), HookState::Disabled);
+            std::hint::black_box(entry)(&call);
+            assert!(!call.called.load(SeqCst));
+            restore_and_drain(Some(&hook), Some(&gate)).unwrap();
+        }
+    }
+
+    #[test]
+    fn a_callback_still_running_keeps_the_owner_from_leaving() {
+        target!(entry);
+        unsafe extern "C-unwind" fn stuck(call: *const Call) {
+            // SAFETY: the test retains its Arc until this thread has joined.
+            let call = unsafe { &*call };
+            call.entered.store(true, SeqCst);
+            while !call.release.load(SeqCst) {
+                std::thread::yield_now();
+            }
+        }
+        // SAFETY: authored process-lifetime target and callback of the supported void(pointer) ABI; the test owns the entry.
+        let (gate, hook) = unsafe {
+            let bytes: [u8; 16] = (entry as *const [u8; 16]).read_unaligned();
+            CallbackGate::prepare_hook(stuck as *const (), NonNull::new(entry as *mut u8).unwrap(), &bytes).unwrap()
+        };
+        // SAFETY: the same owned entry, before any caller.
+        unsafe { commit(&[(&hook, true)]) }.unwrap();
+        let call = Arc::new(Call::default());
+        let argument = call.clone();
+        // SAFETY: the Arc keeps the argument alive through the call and the entry stays callable, patched or restored.
+        let thread = std::thread::spawn(move || unsafe { std::hint::black_box(entry)(Arc::as_ptr(&argument)) });
+        while !call.entered.load(SeqCst) {
+            std::thread::yield_now();
+        }
+        // SAFETY: the test owns the target; the caller is parked in the callback, outside the entry's changed bytes.
+        let failed = unsafe { restore_and_drain(Some(&hook), Some(&gate)) };
+        assert_eq!(failed.unwrap_err(), "Helper callback did not drain; module remains loaded");
+        assert_eq!(hook.state(), HookState::Disabled, "the entry was restored before the wait");
+        call.release.store(true, SeqCst);
+        thread.join().unwrap();
+        // SAFETY: as above, with nothing running.
+        unsafe { restore_and_drain(Some(&hook), Some(&gate)) }.unwrap();
+    }
+
+    #[test]
+    fn nothing_to_restore_or_drain_is_success() {
+        // SAFETY: nothing to change.
+        unsafe { restore_and_drain(None, None) }.unwrap();
     }
 }

@@ -10,9 +10,8 @@ use eg_trainer_wire::hooks::{GameplayHook, HookObservation, PatchState};
 #[cfg(test)]
 mod arguments;
 mod effect;
-mod entry;
 use effect::{Effect, FeatureBinding};
-use entry::Entry;
+use native_hooks::entry::{self, Entry};
 
 struct Group {
     hooks: Vec<Entry>,
@@ -263,7 +262,7 @@ mod mixed;
 #[cfg(test)]
 mod tests {
     use super::*;
-    use effect::Gate;
+    use native_hooks::gate::Gate;
     use native_hooks::scalar::ScalarGate;
     #[test]
     fn a_leaf_group_prepares_all_entries_and_clear_restores_their_distinct_originals() {
