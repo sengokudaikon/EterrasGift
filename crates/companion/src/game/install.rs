@@ -2,9 +2,9 @@
 
 use regex::bytes::Regex;
 use std::fs;
-use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::sync::LazyLock;
+use unity_files::folder::PlayerFolder;
 
 pub const STEAM_APP_ID: u32 = 899770;
 /// Last Epoch's process name, which its executable is named after.
@@ -39,27 +39,25 @@ impl GameInstall {
         self.executable.parent().unwrap_or(Path::new(""))
     }
 
+    fn player(&self) -> PlayerFolder {
+        PlayerFolder::new(self.directory(), self.executable.file_stem().unwrap_or_default())
+    }
+
     /// Unity's data folder beside the executable, named after it: "Last Epoch_Data".
     pub fn data_directory(&self) -> PathBuf {
-        let stem = self.executable.file_stem().unwrap_or_default().to_string_lossy();
-        self.directory().join(format!("{stem}_Data"))
+        self.player().data().to_path_buf()
     }
 
     /// The compiled game code MelonLoader prepares its assemblies from.
     pub fn game_assembly(&self) -> PathBuf {
-        self.directory().join("GameAssembly.dll")
+        self.player().game_assembly()
     }
 
     /// The Unity version the game was built with, without its release type ("6000.4.8" for 6000.4.8f1), as MelonLoader
     /// reads it: from the header of the data folder's globalgamemanagers. None when it can't be read.
     pub fn read_unity_version(&self) -> Option<String> {
         static VERSION: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?-u)(\d+\.\d+\.\d+)[abfpx]\d+\x00").unwrap());
-        let mut header = Vec::new();
-        fs::File::open(self.data_directory().join("globalgamemanagers"))
-            .ok()?
-            .take(256)
-            .read_to_end(&mut header)
-            .ok()?;
+        let header = file_ops::read::head(&self.data_directory().join("globalgamemanagers"), 256).ok()?;
         let found = VERSION.captures(&header)?;
         Some(String::from_utf8_lossy(&found[1]).into_owned())
     }

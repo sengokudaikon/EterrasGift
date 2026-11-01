@@ -117,7 +117,7 @@ impl<F: LogFactory + Clone> Connector for DesktopConnector<F> {
         }
         // Repeat the gate before opening even local helper inputs. SessionConnector
         // repeats it around preparation and transport as usual.
-        let started = win_platform::time::from_filetime(target.created).map_err(|e| BackendError::blocked(ErrorKind::Identity, e.to_string()))?;
+        let started = crate::connect::admission::process_created(&target)?;
         let decision = gate::evaluate(&self.logs.create(&target)?.read(started), started, now);
         if decision.verdict != GateVerdict::Allow {
             return Err(BackendError::waiting(ErrorKind::Gate, "Load an offline character to connect."));

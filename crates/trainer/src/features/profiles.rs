@@ -72,10 +72,7 @@ impl ProfileBook {
     /// Writes the profiles into the trainer's settings slice, replacing what was saved under any spelling of the key.
     /// The template's `hookValues` stay as they are.
     pub fn write_settings(&self, fields: &mut Map<String, Value>) {
-        let aliases: Vec<_> = fields.keys().filter(|name| name.eq_ignore_ascii_case(PROFILES_KEY)).cloned().collect();
-        for alias in aliases {
-            fields.remove(&alias);
-        }
+        file_ops::json::take_all(fields, PROFILES_KEY);
         fields.insert(PROFILES_KEY.into(), Value::Array(self.profiles.iter().map(to_json).collect()));
     }
 

@@ -7,6 +7,7 @@ publish.workspace = true
 
 [dependencies]
 file-ops.workspace = true
+unity-files.workspace = true
 win-platform = { workspace = true, features = ["time"] }
 eg-core.workspace = true
 flow.workspace = true

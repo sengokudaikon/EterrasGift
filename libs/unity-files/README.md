@@ -29,7 +29,7 @@ found by its shape: its 13th word is the type definition count, its 11th the fie
     `Vector2Int`/`Vector3Int`, `BoundsInt`; `Gradient` with `UInt8 m_Mode` and `SInt8 m_ColorSpace`).
 - Past ten levels of nested classes only primitive fields are written (the recursive
     `WeightedCorruptionOutcome.extraCorruptionOutcomes` stops nine levels in).
-- **The check:** `generated_layouts_match_the_shipped_type_trees` rebuilds the layout of every class `PermaLoad`
+- **The check:** `generated_layouts_match_the_shipped_type_trees`, over `layout::difference`, rebuilds the layout of every class `PermaLoad`
   ships a tree for and compares structure, names, primitive types and alignment. 1,170 of 1,182 match exactly; the
   other 12 hold `[SerializeReference]` fields and are refused by name (`conditionalEffects` on ailments, PCG rules).
   It runs in `mise run game-files:install`, in `eg-game-files`, against a real install.

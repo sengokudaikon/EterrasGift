@@ -2,6 +2,7 @@
 //! their output is offered to the library, which places it on the next modded start.
 
 use super::assembly::{LoaderVersion, MelonAssembly};
+use file_ops::stamp::FileStamp;
 use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet};
 use std::ffi::OsString;
@@ -199,7 +200,7 @@ fn bounded_text(text: &str, limit: usize) -> &str {
     &text[..end]
 }
 
-type Stamp = Vec<(String, Option<SystemTime>)>;
+type Stamp = Vec<(String, Option<FileStamp>)>;
 
 #[derive(Clone)]
 struct CachedProject {
@@ -525,7 +526,7 @@ fn path_key(path: &Path) -> String {
 }
 
 fn modified(path: &Path) -> Option<SystemTime> {
-    fs::metadata(path).and_then(|metadata| metadata.modified()).ok()
+    file_ops::stamp::written(path).ok()
 }
 
 fn latest<'a>(projects: impl Iterator<Item = &'a ModProject>) -> Vec<&'a ModProject> {
@@ -547,12 +548,7 @@ fn stamp(file: &Path, folder: &Path, imports: &[PathBuf]) -> io::Result<Stamp> {
     paths.extend_from_slice(imports);
     let mut stamp = BTreeMap::new();
     for path in paths {
-        let time = match fs::metadata(&path) {
-            Ok(metadata) => Some(metadata.modified()?),
-            Err(error) if error.kind() == io::ErrorKind::NotFound => None,
-            Err(error) => return Err(error),
-        };
-        stamp.insert(path_key(&path), time);
+        stamp.insert(path_key(&path), file_ops::read::if_present(FileStamp::of(&path))?);
     }
     Ok(stamp.into_iter().collect())
 }

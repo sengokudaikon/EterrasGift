@@ -163,28 +163,18 @@ fn roll(v: &Value) -> Result<Roll> {
 fn affix(v: &Value, multi: bool) -> Result<Affix> {
     let id = v.field("affixId", Value::int)?;
     let read = || -> Result<Affix> {
-        let properties = if multi {
-            v.field("affixProperties", |p| p.as_array()?.iter().map(property).collect())?
-        } else {
-            vec![property(v)?]
-        };
+        let properties = if multi { v.list("affixProperties", property)? } else { vec![property(v)?] };
         if properties.is_empty() {
             return Err(Error::data("no properties"));
         }
         // The first property's range is the tier's own; each further one is the next of `extraRolls`.
-        let tiers = v.field("tiers", |tiers| {
-            tiers
-                .as_array()?
-                .iter()
-                .map(|tier| {
-                    let extra = tier.field("extraRolls", Value::as_array)?;
-                    if extra.len() + 1 < properties.len() {
-                        return Err(Error::data(format!("a tier has {} extra rolls for {} properties", extra.len(), properties.len())));
-                    }
-                    let rolls = std::iter::once(roll(tier)).chain(extra[..properties.len() - 1].iter().map(roll)).collect::<Result<_>>()?;
-                    Ok(AffixTier { rolls })
-                })
-                .collect()
+        let tiers = v.list("tiers", |tier| {
+            let extra = tier.field("extraRolls", Value::as_array)?;
+            if extra.len() + 1 < properties.len() {
+                return Err(Error::data(format!("a tier has {} extra rolls for {} properties", extra.len(), properties.len())));
+            }
+            let rolls = std::iter::once(roll(tier)).chain(extra[..properties.len() - 1].iter().map(roll)).collect::<Result<_>>()?;
+            Ok(AffixTier { rolls })
         })?;
         Ok(Affix {
             id,
@@ -196,7 +186,7 @@ fn affix(v: &Value, multi: bool) -> Result<Affix> {
             class_specificity: v.field("classSpecificity", Value::int)?,
             level_requirement: v.field("levelRequirement", Value::int)?,
             rolls_on: v.field("rollsOn", Value::int)?,
-            item_types: v.field("canRollOn", |list| list.as_array()?.iter().map(Value::int).collect())?,
+            item_types: v.list("canRollOn", Value::int)?,
             standard_effect: v.field("standardAffixEffectModifier", Value::as_f32)?,
             group: v.field("group", Value::int)?,
             weighting: v.field("weighting", Value::as_f32)?,
@@ -233,7 +223,7 @@ fn sub_type(v: &Value) -> Result<SubType> {
             cannot_drop: v.field("cannotDrop", Value::as_bool)?,
             is_corrupted: v.field("isCorruptedSubtype", Value::as_bool)?,
             affix_effectiveness: v.field("affixEffectiveness", Value::int)?,
-            implicits: v.field("implicits", |list| list.as_array()?.iter().map(implicit).collect())?,
+            implicits: v.list("implicits", implicit)?,
         })
     };
     read().map_err(|e| e.context(format!("subtype {id}")))
@@ -242,7 +232,7 @@ fn sub_type(v: &Value) -> Result<SubType> {
 fn item_type(v: &Value) -> Result<ItemType> {
     let id = v.field("baseTypeID", Value::int)?;
     let read = || -> Result<ItemType> {
-        let sub_types: Vec<SubType> = v.field("subItems", |list| list.as_array()?.iter().map(sub_type).collect())?;
+        let sub_types = v.list("subItems", sub_type)?;
         unique_ids(sub_types.iter().map(|s| s.id), "subtype")?;
         Ok(ItemType {
             id,
@@ -259,22 +249,22 @@ fn item_type(v: &Value) -> Result<ItemType> {
 
 /// The affixes from a decoded `AffixList`, single affixes first.
 pub(crate) fn affixes(list: &Value) -> Result<Vec<Affix>> {
-    let mut affixes: Vec<Affix> = list.field("singleAffixes", |l| l.as_array()?.iter().map(|a| affix(a, false)).collect())?;
-    affixes.extend(list.field("multiAffixes", |l| l.as_array()?.iter().map(|a| affix(a, true)).collect::<Result<Vec<_>>>())?);
+    let mut affixes = list.list("singleAffixes", |a| affix(a, false))?;
+    affixes.extend(list.list("multiAffixes", |a| affix(a, true))?);
     unique_ids(affixes.iter().map(|a| a.id), "affix")?;
     Ok(affixes)
 }
 
 /// The equippable item types from a decoded `ItemList`.
 pub(crate) fn item_types(list: &Value) -> Result<Vec<ItemType>> {
-    let types: Vec<ItemType> = list.field("EquippableItems", |l| l.as_array()?.iter().map(item_type).collect())?;
+    let types = list.list("EquippableItems", item_type)?;
     unique_ids(types.iter().map(|t| t.id), "item type")?;
     Ok(types)
 }
 
 /// The ailments of a decoded `AilmentList`, in list order, each read through `resolve` (its entries are references).
 pub(crate) fn ailments(list: &Value, mut resolve: impl FnMut((i32, i64)) -> Result<Value>) -> Result<Vec<Ailment>> {
-    let pointers = list.field("list", |l| l.as_array()?.iter().map(Value::as_pptr).collect::<Result<Vec<_>>>())?;
+    let pointers = list.list("list", Value::as_pptr)?;
     pointers
         .into_iter()
         .enumerate()
@@ -298,7 +288,7 @@ pub(crate) fn ailments(list: &Value, mut resolve: impl FnMut((i32, i64)) -> Resu
 
 /// The abilities of a decoded `AbilityManager` by ID (`abilities`), each named through `resolve`. A null reference is a gap.
 pub(crate) fn abilities(manager: &Value, mut resolve: impl FnMut((i32, i64)) -> Result<Value>) -> Result<Vec<Option<AbilityName>>> {
-    let pointers = manager.field("abilities", |l| l.as_array()?.iter().map(Value::as_pptr).collect::<Result<Vec<_>>>())?;
+    let pointers = manager.list("abilities", Value::as_pptr)?;
     pointers
         .into_iter()
         .enumerate()
@@ -319,7 +309,7 @@ pub(crate) fn abilities(manager: &Value, mut resolve: impl FnMut((i32, i64)) -> 
 
 /// The classes of a decoded `CharacterClassList`, each read through `resolve`.
 pub(crate) fn classes(list: &Value, mut resolve: impl FnMut((i32, i64)) -> Result<Value>) -> Result<Vec<CharacterClass>> {
-    let pointers = list.field("classes", |l| l.as_array()?.iter().map(Value::as_pptr).collect::<Result<Vec<_>>>())?;
+    let pointers = list.list("classes", Value::as_pptr)?;
     pointers
         .into_iter()
         .enumerate()

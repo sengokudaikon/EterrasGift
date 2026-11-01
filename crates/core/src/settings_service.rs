@@ -312,7 +312,7 @@ impl ModuleSettings {
     pub fn set_bool(&self, key: &'static str, value: bool) -> Result<u64, String> {
         self.update(move |fields| {
             // Every spelling goes, so the one written is the only one read.
-            while json::take(fields, key).is_some() {}
+            json::take_all(fields, key);
             fields.insert(key.into(), Value::Bool(value));
             Ok(())
         })

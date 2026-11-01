@@ -13,6 +13,7 @@
 pub mod archive;
 pub mod bundle;
 mod common_strings;
+pub mod folder;
 pub mod il2cpp;
 pub mod layout;
 pub mod player;

@@ -4,11 +4,10 @@
 
 use crate::paths::{self, AppPaths};
 use file_ops::folder_move::{migrate, migration_conflict, probe, relative};
-use file_ops::{atomic, json, text};
+use file_ops::{atomic, json};
 use phrases::{Phrase, phrases};
 use serde_json::{Map, Value};
 use std::collections::BTreeMap;
-use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 
@@ -476,15 +475,12 @@ fn describe_io(error: &io::Error, path: &Path) -> String {
 
 /// The settings in the file, and whether they were upgraded from version 1. A missing file is the defaults.
 fn read(file_path: &Path, legacy: &[LegacyModuleSettings]) -> Result<(AppSettings, bool), String> {
-    let text = match fs::read(file_path) {
-        Ok(bytes) => bytes,
-        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok((AppSettings::default(), false)),
-        Err(error) => return Err(error.to_string()),
-    };
-    let mut document = match serde_json::from_slice::<Value>(text::strip_bom_bytes(&text)) {
-        Ok(Value::Object(document)) => document,
-        Ok(_) => return Err(EmptyFile.get().into()),
-        Err(error) => return Err(NotJson.with(&[("error", &error)])),
+    let mut document = match json::load(file_path, json::Bom::Strip) {
+        Ok(None) => return Ok((AppSettings::default(), false)),
+        Ok(Some(Value::Object(document))) => document,
+        Ok(Some(_)) => return Err(EmptyFile.get().into()),
+        Err(json::LoadError::Json(error)) => return Err(NotJson.with(&[("error", &error)])),
+        Err(json::LoadError::Io(error)) => return Err(error.to_string()),
     };
     let version = json::find(&document, "schemaVersion").and_then(Value::as_i64).unwrap_or(0);
     let upgraded = version == 1;
@@ -576,6 +572,7 @@ fn has_extension(path: &Path, extension: &str) -> bool {
 #[cfg(all(test, windows))]
 mod tests {
     use super::*;
+    use std::fs;
 
     #[test]
     fn a_module_switch_reads_whatever_its_case_and_unclear_reads_off() {

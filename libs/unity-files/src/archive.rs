@@ -6,7 +6,7 @@ use crate::serialized::{MONO_BEHAVIOUR, MONO_SCRIPT, Object, SerializedFile, Sou
 use crate::value::Value;
 use binary_reader::{Error, Result};
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
 /// The class a MonoBehaviour runs, as its `MonoScript` names it.
@@ -197,6 +197,19 @@ impl Archive {
     }
 }
 
+/// Every bundle in `folder`, sorted.
+pub fn bundles_in(folder: &Path) -> Result<Vec<PathBuf>> {
+    let mut paths = Vec::new();
+    for entry in std::fs::read_dir(folder).map_err(|e| Error::io(folder, e))? {
+        let path = entry.map_err(|e| Error::io(folder, e))?.path();
+        if path.extension().is_some_and(|e| e == "bundle") {
+            paths.push(path);
+        }
+    }
+    paths.sort();
+    Ok(paths)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -260,6 +273,17 @@ mod tests {
                 .to_string()
                 .contains("0 ThingList objects")
         );
+    }
+
+    #[test]
+    fn a_folder_lists_its_bundles_in_order_and_nothing_else() {
+        let directory = tempfile::tempdir().unwrap();
+        for name in ["b.bundle", "a.bundle", "catalog.json", "bundle"] {
+            std::fs::write(directory.path().join(name), "").unwrap();
+        }
+        let listed = bundles_in(directory.path()).unwrap();
+        assert_eq!(listed, [directory.path().join("a.bundle"), directory.path().join("b.bundle")]);
+        assert!(bundles_in(&directory.path().join("gone")).is_err());
     }
 
     #[test]

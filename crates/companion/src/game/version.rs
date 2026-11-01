@@ -1,9 +1,8 @@
 //! A display version recorded in Player.log ("game version: 1.5.2. internal version: 1.5.2"). Log freshness is checked
 //! against the installed build's write time; this is a best-effort label, not proof of the installed build's identity.
 
+use file_ops::stamp;
 use regex::Regex;
-use std::fs;
-use std::io::Read;
 use std::path::Path;
 use std::sync::LazyLock;
 
@@ -12,16 +11,14 @@ const HEADER_BYTES: u64 = 1024 * 1024;
 /// Prefer Player.log, then Player-prev.log beside it. Only logs at least as new as `build` (GameAssembly.dll) qualify.
 /// None when the build's write time cannot be read, or neither qualifying log has a readable version.
 pub fn read(player_log: &Path, build: &Path) -> Option<String> {
-    let installed = fs::metadata(build).and_then(|metadata| metadata.modified()).ok()?;
+    let installed = stamp::written(build).ok()?;
     let previous = player_log.with_file_name("Player-prev.log");
     [player_log, previous.as_path()].into_iter().find_map(|path| {
         // Being written or locked: the other log, or no version.
-        let written = fs::metadata(path).and_then(|metadata| metadata.modified()).ok()?;
-        if written < installed {
+        if stamp::written(path).ok()? < installed {
             return None;
         }
-        let mut head = Vec::new();
-        fs::File::open(path).ok()?.take(HEADER_BYTES).read_to_end(&mut head).ok()?;
+        let head = file_ops::read::head(path, HEADER_BYTES).ok()?;
         parse(&String::from_utf8_lossy(&head))
     })
 }
@@ -35,6 +32,7 @@ fn parse(text: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs;
     use std::time::{Duration, SystemTime};
 
     fn write_at(path: &Path, text: &str, seconds: u64) {

@@ -599,7 +599,7 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
             .parent()
             .map(Path::to_path_buf)
             .ok_or_else(|| not_ready("The game's folder is unknown.".into()))?;
-        let started = win_platform::time::from_filetime(target.created).map_err(|e| BackendError::blocked(ErrorKind::Identity, e.to_string()))?;
+        let started = crate::connect::admission::process_created(target)?;
         self.state.activity = Some(Activity::ReadingGameFiles);
         self.publish_if_current(epoch)?;
         let data = if again {
@@ -772,7 +772,7 @@ impl<P: ProcessLocator, C: Connector, L: LogSource + Send + 'static, K: Clock> B
         };
     }
     fn admit(&mut self, target: &ProcessIdentity) -> Result<(), BackendError> {
-        let started = win_platform::time::from_filetime(target.created).map_err(|_| BackendError::blocked(ErrorKind::Identity, "invalid process creation time"))?;
+        let started = crate::connect::admission::process_created(target)?;
         if target.pid == 0 || target.created == 0 || !target.executable.is_absolute() {
             return Err(BackendError::blocked(ErrorKind::Identity, "invalid process identity"));
         }

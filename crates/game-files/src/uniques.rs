@@ -213,12 +213,6 @@ pub struct SetMod {
     pub hidden: bool,
 }
 
-fn list<T>(v: &Value, name: &str, read: impl Fn(&Value) -> Result<T>) -> Result<Vec<T>> {
-    v.field(name, |l| {
-        l.as_array()?.iter().enumerate().map(|(i, e)| read(e).map_err(|e| e.context(format!("[{i}]")))).collect()
-    })
-}
-
 fn description(v: &Value) -> Result<Description> {
     Ok(Description {
         text: v.field("description", Value::as_string)?,
@@ -261,9 +255,9 @@ fn unique(v: &Value) -> Result<Unique> {
             is_pre_corrupted: v.field("isPreCorrupted", Value::as_bool)?,
             override_level_requirement: v.field("overrideLevelRequirement", Value::as_bool)?,
             level_requirement: v.field("levelRequirement", Value::int)?,
-            mods: list(v, "mods", unique_mod)?,
-            descriptions: list(v, "tooltipDescriptions", description)?,
-            display_order: list(v, "tooltipEntries", |e| e.field("modDisplay", Value::int))?,
+            mods: v.list("mods", unique_mod)?,
+            descriptions: v.list("tooltipDescriptions", description)?,
+            display_order: v.list("tooltipEntries", |e| e.field("modDisplay", Value::int))?,
             lore: v.field("loreText", Value::as_string)?,
         })
     };
@@ -288,7 +282,7 @@ fn property(v: &Value) -> Result<Property> {
             hide_modifier_value: v.field("hideModifierValue", Value::as_bool)?,
             name_includes_modifier: v.field("nameIncludesModifier", Value::as_bool)?,
             default_alt_text: v.field("defaultAltText", Value::as_string)?,
-            alt_text_overrides: list(v, "altTextOverrides", |o| {
+            alt_text_overrides: v.list("altTextOverrides", |o| {
                 Ok(AltTextOverride {
                     modifier_type: o.field("modType", Value::int)?,
                     special_tag: o.field("specialTag", Value::int)?,
@@ -297,7 +291,7 @@ fn property(v: &Value) -> Result<Property> {
                     text_key: o.field("overrideAltTextKey", Value::as_string)?,
                 })
             })?,
-            more_rounding_overrides: list(v, "moreRoundingOverrides", |o| {
+            more_rounding_overrides: v.list("moreRoundingOverrides", |o| {
                 Ok((o.field("specialTag", Value::int)?, o.field("roundingForMore", Value::int)?))
             })?,
         })
@@ -331,7 +325,7 @@ fn label(v: &Value) -> Result<PropertyLabel> {
 /// A registry with a `list` of property infos, a `defaultProperty` and the text each has.
 pub(crate) fn registry(v: &Value) -> Result<PropertyRegistry> {
     Ok(PropertyRegistry {
-        labels: list(v, "list", label)?,
+        labels: v.list("list", label)?,
         ..tracker_registry(v)?
     })
 }
@@ -339,7 +333,7 @@ pub(crate) fn registry(v: &Value) -> Result<PropertyRegistry> {
 /// A registry whose entries have no text of their own (`TrackerPropertyList`).
 pub(crate) fn tracker_registry(v: &Value) -> Result<PropertyRegistry> {
     Ok(PropertyRegistry {
-        list: list(v, "list", info)?,
+        list: v.list("list", info)?,
         default: v.field("defaultProperty", info)?,
         labels: Vec::new(),
     })
@@ -347,11 +341,11 @@ pub(crate) fn tracker_registry(v: &Value) -> Result<PropertyRegistry> {
 
 pub(crate) fn abilities(v: &Value) -> Result<AbilityRegistry> {
     Ok(AbilityRegistry {
-        list: list(v, "list", |entry| {
+        list: v.list("list", |entry| {
             Ok(AbilityProperties {
                 ability_id: entry.field("abilityID", Value::int)?,
-                properties: list(entry, "properties", info)?,
-                labels: list(entry, "properties", label)?,
+                properties: entry.list("properties", info)?,
+                labels: entry.list("properties", label)?,
             })
         })?,
         default: v.field("defaultProperty", info)?,
@@ -359,7 +353,7 @@ pub(crate) fn abilities(v: &Value) -> Result<AbilityRegistry> {
 }
 
 pub(crate) fn conditional_damage(list_value: &Value) -> Result<Vec<ConditionalDamage>> {
-    list(list_value, "conditionalDamagePropertyDescriptions", |d| {
+    list_value.list("conditionalDamagePropertyDescriptions", |d| {
         Ok(ConditionalDamage {
             description: d.field("description", Value::as_string)?,
             non_damage: d.field("nonDamageDescription", Value::as_string)?,
@@ -368,7 +362,7 @@ pub(crate) fn conditional_damage(list_value: &Value) -> Result<Vec<ConditionalDa
 }
 
 pub(crate) fn stat_limits(extra_stat_data: &Value) -> Result<Vec<StatLimit>> {
-    list(extra_stat_data, "data", |d| {
+    extra_stat_data.list("data", |d| {
         Ok(StatLimit {
             property: d.field("property", Value::int)?,
             special_tag: d.field("specialTag", Value::int)?,
@@ -404,9 +398,9 @@ fn set_bonus(v: &Value) -> Result<SetBonus> {
         Ok(SetBonus {
             id,
             name: v.field("setName", Value::as_string)?,
-            mods: list(v, "mods", set_mod)?,
-            descriptions: list(v, "tooltipDescriptions", description)?,
-            items: list(v, "itemsInSet", |item| item.field("uniqueID", Value::int))?,
+            mods: v.list("mods", set_mod)?,
+            descriptions: v.list("tooltipDescriptions", description)?,
+            items: v.list("itemsInSet", |item| item.field("uniqueID", Value::int))?,
         })
     };
     read().map_err(|e| e.context(format!("set {id}")))
@@ -424,18 +418,18 @@ pub(crate) fn unique_ids<T: Ord + std::fmt::Display + Copy>(ids: impl Iterator<I
 }
 
 pub(crate) fn uniques(list_value: &Value) -> Result<Vec<Unique>> {
-    let uniques = list(list_value, "uniques", unique)?;
+    let uniques = list_value.list("uniques", unique)?;
     unique_ids(uniques.iter().map(|u| u.id), "unique")?;
     Ok(uniques)
 }
 
 /// The stat properties in list order. An ID listed twice is kept: the game takes the first.
 pub(crate) fn properties(list_value: &Value) -> Result<Vec<Property>> {
-    list(list_value, "propertyInfoList", property)
+    list_value.list("propertyInfoList", property)
 }
 
 pub(crate) fn set_bonuses(list_value: &Value) -> Result<Vec<SetBonus>> {
-    let sets = list(list_value, "entries", set_bonus)?;
+    let sets = list_value.list("entries", set_bonus)?;
     unique_ids(sets.iter().map(|s| s.id), "set")?;
     Ok(sets)
 }

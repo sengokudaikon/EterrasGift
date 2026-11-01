@@ -12,7 +12,7 @@
 
 use eg_game_files::uniques::{Unique, UniqueMod};
 use eg_trainer_wire::new_affixes::{ID_RANGES, MARKER, MAX_PROPERTIES, MAX_TEXT, NewAffix, StatLine, TIERS, is_added_id};
-use serde_json::{Value, json};
+use serde_json::json;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
@@ -239,9 +239,9 @@ impl Ledger {
     /// The ledger at `path`; none yet is an empty one. A file it cannot understand is an error, and nothing guesses
     /// again: items already made would take other IDs.
     pub fn open(path: &Path) -> Result<Self, String> {
-        let ids = match std::fs::read(path) {
-            Ok(bytes) => {
-                let value: Value = serde_json::from_slice(&bytes).map_err(|e| format!("{}: {e}", path.display()))?;
+        let record = file_ops::json::load(path, file_ops::json::Bom::Refuse).map_err(|e| format!("{}: {e}", path.display()))?;
+        let ids = match record {
+            Some(value) => {
                 if value["version"].as_u64() != Some(LEDGER_VERSION) {
                     return Err(format!("{}: a version this build does not know", path.display()));
                 }
@@ -256,8 +256,7 @@ impl Ledger {
                 }
                 ids
             }
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => BTreeMap::new(),
-            Err(e) => return Err(format!("{}: {e}", path.display())),
+            None => BTreeMap::new(),
         };
         Ok(Self {
             path: path.to_path_buf(),
@@ -303,8 +302,8 @@ impl InUse {
     pub fn open(path: Option<PathBuf>) -> Self {
         let ids = path
             .as_deref()
-            .and_then(|path| std::fs::read(path).ok())
-            .and_then(|bytes| serde_json::from_slice::<Vec<u16>>(&bytes).ok())
+            .and_then(|path| file_ops::json::load(path, file_ops::json::Bom::Refuse).ok().flatten())
+            .and_then(|value| serde_json::from_value::<Vec<u16>>(value).ok())
             .map(|ids| ids.into_iter().filter(|id| is_added(*id)).collect())
             .unwrap_or_default();
         Self { path, ids }

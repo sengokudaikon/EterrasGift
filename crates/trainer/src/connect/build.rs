@@ -1,12 +1,13 @@
 //! Local artifact identity and session leases for the selected game installation.
 use eg_trainer_wire::protocol::DispatcherSpec;
 use file_ops::hashes;
+use file_ops::stamp::FileStamp;
 use std::{
     fs, io,
     path::{Path, PathBuf},
     sync::{Arc, Mutex, Weak},
-    time::SystemTime,
 };
+use unity_files::folder::PlayerFolder;
 
 #[derive(Clone, Debug)]
 pub struct BuildIdentity {
@@ -53,28 +54,11 @@ enum LeaseStorage {
     },
     Rehash(Mutex<Rehashed>),
 }
-/// What the fallback last proved: both files' fingerprints when their content last hashed to the build's.
+/// What the fallback last proved: both files' stamps when their content last hashed to the build's.
 #[derive(Default)]
 struct Rehashed {
-    proven: Option<(Fingerprint, Fingerprint)>,
+    proven: Option<(FileStamp, FileStamp)>,
     full: u64,
-}
-/// What changes when a file is written or replaced (a Steam update, say): its size and its times.
-#[derive(Clone, Debug, PartialEq, Eq)]
-struct Fingerprint {
-    len: u64,
-    modified: SystemTime,
-    #[cfg(windows)]
-    created: u64,
-}
-fn fingerprint(path: &Path) -> io::Result<Fingerprint> {
-    let metadata = fs::metadata(path)?;
-    Ok(Fingerprint {
-        len: metadata.len(),
-        modified: metadata.modified()?,
-        #[cfg(windows)]
-        created: std::os::windows::fs::MetadataExt::creation_time(&metadata),
-    })
 }
 impl ArtifactLease {
     pub fn bytes_read(&self) -> Option<u64> {
@@ -102,8 +86,8 @@ impl BuildIdentity {
         Ok(Self {
             binary: fs::canonicalize(binary)?,
             metadata: fs::canonicalize(metadata)?,
-            binary_hash: hashes::of_bytes(&fs::read(binary)?),
-            metadata_hash: hashes::of_bytes(&fs::read(metadata)?),
+            binary_hash: hashes::of_file(binary)?,
+            metadata_hash: hashes::of_file(metadata)?,
             helper_build_id: helper_build_id.to_ascii_uppercase(),
             files: Weak::new(),
         })
@@ -215,7 +199,7 @@ impl BuildIdentity {
                 // Reading and hashing both files (some 130 MB) for each of the several requests of every poll pegged
                 // the worker. Content is proven again whenever a file's size or times move, which any write does.
                 let mut rehashed = rehashed.lock().unwrap_or_else(|p| p.into_inner());
-                let before = (fingerprint(&self.binary)?, fingerprint(&self.metadata)?);
+                let before = self.stamps()?;
                 if rehashed.proven.as_ref() == Some(&before) {
                     return Ok(());
                 }
@@ -223,23 +207,39 @@ impl BuildIdentity {
                 rehashed.full += 1;
                 self.validate(dispatcher)?;
                 // A write while the files were read is caught by the next check, which then hashes them again.
-                if (fingerprint(&self.binary)?, fingerprint(&self.metadata)?) == before {
+                if self.stamps()? == before {
                     rehashed.proven = Some(before);
                 }
                 Ok(())
             }
         }
     }
+    fn stamps(&self) -> io::Result<(FileStamp, FileStamp)> {
+        Ok((FileStamp::with_creation(&self.binary)?, FileStamp::with_creation(&self.metadata)?))
+    }
 }
 
 #[cfg(windows)]
 fn validate_dispatcher_lease(image: &file_ops::lease::ReadLease, dispatcher: &DispatcherSpec) -> io::Result<()> {
-    let layout = binary_reader::pe::Layout::read(image.len(), |at, output| image.read_exact_at(at, output))?;
+    check_dispatcher(image.len(), |at, output| image.read_exact_at(at, output), dispatcher)
+}
+fn validate_dispatcher(image: &[u8], dispatcher: &DispatcherSpec) -> io::Result<()> {
+    let read = |at: u64, output: &mut [u8]| {
+        let bytes = image.get(at as usize..at as usize + output.len()).ok_or_else(|| invalid(DISPATCHER_DIFFERS))?;
+        output.copy_from_slice(bytes);
+        Ok(())
+    };
+    check_dispatcher(image.len() as u64, read, dispatcher)
+}
+const DISPATCHER_DIFFERS: &str = "dispatcher differs from executable game file";
+/// Whether the file, of `length` bytes read by `read`, holds the dispatcher's bytes where its PE sections put them.
+fn check_dispatcher(length: u64, mut read: impl FnMut(u64, &mut [u8]) -> io::Result<()>, dispatcher: &DispatcherSpec) -> io::Result<()> {
+    let layout = binary_reader::pe::Layout::read(length, &mut read)?;
     let at = layout.file_offset(dispatcher.rva, dispatcher.bytes.len(), true)?;
     let mut bytes = [0; 16];
-    image.read_exact_at(at, &mut bytes)?;
+    read(at, &mut bytes)?;
     if bytes != dispatcher.bytes {
-        return Err(invalid("dispatcher differs from executable game file"));
+        return Err(invalid(DISPATCHER_DIFFERS));
     }
     Ok(())
 }
@@ -247,18 +247,10 @@ fn validate_dispatcher_lease(image: &file_ops::lease::ReadLease, dispatcher: &Di
 pub(crate) fn artifact_paths(executable: &Path) -> io::Result<(PathBuf, PathBuf)> {
     let executable = fs::canonicalize(executable)?;
     let parent = executable.parent().ok_or_else(|| invalid("executable directory missing"))?;
-    let mut data_name = executable.file_stem().ok_or_else(|| invalid("executable name missing"))?.to_os_string();
-    data_name.push("_Data");
-    Ok((parent.join("GameAssembly.dll"), parent.join(data_name).join("il2cpp_data/Metadata/global-metadata.dat")))
+    let name = executable.file_stem().ok_or_else(|| invalid("executable name missing"))?;
+    let player = PlayerFolder::new(parent, name);
+    Ok((player.game_assembly(), player.metadata()))
 }
 fn invalid(message: &str) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, message)
-}
-fn validate_dispatcher(image: &[u8], dispatcher: &DispatcherSpec) -> io::Result<()> {
-    let layout = binary_reader::pe::Layout::from_bytes(image)?;
-    let at = layout.file_offset(dispatcher.rva, dispatcher.bytes.len(), true)? as usize;
-    if image.get(at..at + dispatcher.bytes.len()) != Some(dispatcher.bytes.as_slice()) {
-        return Err(invalid("dispatcher differs from executable game file"));
-    }
-    Ok(())
 }

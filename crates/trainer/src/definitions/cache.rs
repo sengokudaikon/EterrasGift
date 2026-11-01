@@ -9,14 +9,13 @@
 //! the complete catalog; a pointer-write failure leaves the previous pointer.
 
 use std::{
-    fmt,
-    fs::{self, File},
-    io::{self, Read},
+    fmt, fs, io,
     path::{Path, PathBuf},
     time::SystemTime,
 };
 
 use crate::definitions::entries::{self, CatalogEntries, CatalogKind, CatalogPage, MAX_PAGE_ENTRIES};
+use binary_reader::{Endian, Reader};
 use eg_trainer_wire::{
     definitions,
     locale::GameLocale,
@@ -69,6 +68,11 @@ impl From<ProtocolError> for CacheError {
         Self::InvalidData
     }
 }
+impl From<binary_reader::Error> for CacheError {
+    fn from(_: binary_reader::Error) -> Self {
+        Self::InvalidData
+    }
+}
 
 pub struct CatalogCache {
     directory: PathBuf,
@@ -97,13 +101,9 @@ impl CatalogCache {
     }
 
     pub fn load_last(&self) -> Result<Option<GameCatalog>, CacheError> {
-        let pointer = match File::open(self.directory.join(POINTER_FILE)) {
-            Ok(file) => file,
-            Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(None),
-            Err(e) => return Err(e.into()),
+        let Some(bytes) = file_ops::read::if_present(file_ops::read::head(&self.directory.join(POINTER_FILE), 65))? else {
+            return Ok(None);
         };
-        let mut bytes = Vec::new();
-        pointer.take(65).read_to_end(&mut bytes)?;
         let key = std::str::from_utf8(&bytes).map_err(|_| CacheError::InvalidData)?;
         if !hashes::is_sha256(key) {
             return Err(CacheError::InvalidData);
@@ -290,73 +290,51 @@ fn emit_pages<'a, T: Clone + 'a>(
 }
 
 fn read_bounded(path: &Path) -> Result<Option<Vec<u8>>, CacheError> {
-    let file = match File::open(path) {
-        Ok(file) => file,
-        Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(None),
-        Err(e) => return Err(e.into()),
-    };
-    let length = file.metadata()?.len();
-    if length > MAX_CATALOG_BYTES as u64 {
-        return Err(CacheError::TooLarge);
-    }
-    let mut bytes = Vec::with_capacity(length as usize);
-    file.take(MAX_CATALOG_BYTES as u64 + 1).read_to_end(&mut bytes)?;
-    if bytes.len() > MAX_CATALOG_BYTES {
-        return Err(CacheError::TooLarge);
-    }
-    Ok(Some(bytes))
+    file_ops::read::if_present(file_ops::read::bounded(path, MAX_CATALOG_BYTES as u64)).map_err(|e| match e.kind() {
+        io::ErrorKind::FileTooLarge => CacheError::TooLarge,
+        _ => e.into(),
+    })
 }
 
-struct Reader<'a>(&'a [u8]);
-impl<'a> Reader<'a> {
-    fn bytes(&mut self, len: usize) -> Result<&'a [u8], CacheError> {
-        let (head, tail) = self.0.split_at_checked(len).ok_or(CacheError::InvalidData)?;
-        self.0 = tail;
-        Ok(head)
+fn read_text(r: &mut Reader, cap: usize) -> Result<String, CacheError> {
+    let len = r.u32()? as usize;
+    if len > cap {
+        return Err(CacheError::InvalidData);
     }
-    fn number(&mut self) -> Result<u32, CacheError> {
-        Ok(u32::from_le_bytes(self.bytes(4)?.try_into().map_err(|_| CacheError::InvalidData)?))
-    }
-    fn text(&mut self, cap: usize) -> Result<String, CacheError> {
-        let len = self.number()? as usize;
-        if len > cap {
-            return Err(CacheError::InvalidData);
-        }
-        std::str::from_utf8(self.bytes(len)?).map(str::to_owned).map_err(|_| CacheError::InvalidData)
-    }
+    std::str::from_utf8(r.take(len)?).map(str::to_owned).map_err(|_| CacheError::InvalidData)
 }
 fn decode(bytes: &[u8]) -> Result<GameCatalog, CacheError> {
     let split = bytes.len().checked_sub(CHECKSUM_BYTES).ok_or(CacheError::InvalidData)?;
     if hashes::of_bytes(&bytes[..split]).as_bytes() != &bytes[split..] {
         return Err(CacheError::InvalidData);
     }
-    let mut r = Reader(&bytes[..split]);
-    if r.bytes(8)? != MAGIC || r.number()? != SCHEMA_VERSION {
+    let mut r = Reader::new(&bytes[..split], Endian::Little);
+    if r.take(8)? != MAGIC || r.u32()? != SCHEMA_VERSION {
         return Err(CacheError::InvalidData);
     }
     let identity = CatalogIdentity {
-        binary_hash: r.text(64)?,
-        metadata_hash: r.text(64)?,
+        binary_hash: read_text(&mut r, 64)?,
+        metadata_hash: read_text(&mut r, 64)?,
         locale: GameLocale {
-            language: r.text(entries::MAX_TEXT_BYTES)?,
-            game_version: r.text(entries::MAX_TEXT_BYTES)?,
+            language: read_text(&mut r, entries::MAX_TEXT_BYTES)?,
+            game_version: read_text(&mut r, entries::MAX_TEXT_BYTES)?,
         },
-        extraction_version: r.number()?,
+        extraction_version: r.u32()?,
     };
-    let limits = definitions::decode(r.bytes(40)?)?;
+    let limits = definitions::decode(r.take(40)?)?;
     let mut builder = CatalogBuilder::new(identity, limits)?;
-    let pages = r.number()? as usize;
+    let pages = r.u32()? as usize;
     if !(4..=MAX_PAGES).contains(&pages) {
         return Err(CacheError::InvalidData);
     }
     for _ in 0..pages {
-        let length = r.number()? as usize;
+        let length = r.u32()? as usize;
         if length > MAX_RESPONSE_SIZE {
             return Err(CacheError::InvalidData);
         }
-        builder.push(entries::decode(r.bytes(length)?)?)?;
+        builder.push(entries::decode(r.take(length)?)?)?;
     }
-    if !r.0.is_empty() {
+    if r.remaining() != 0 {
         return Err(CacheError::InvalidData);
     }
     Ok(builder.finish()?)

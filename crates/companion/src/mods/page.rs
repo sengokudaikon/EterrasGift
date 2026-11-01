@@ -19,8 +19,7 @@ phrases! {
 pub fn running_state(launcher: &GameLauncher, log: Option<&Path>) -> (bool, bool) {
     let running = launcher.host().find_running();
     let modded = running.as_ref().zip(log).is_some_and(|(running, log)| {
-        std::fs::metadata(log)
-            .and_then(|meta| meta.modified())
+        file_ops::stamp::written(log)
             .ok()
             .and_then(|time| jiff::Timestamp::try_from(time).ok())
             .is_some_and(|time| time.as_second() >= running.start_time.as_second() - 10)

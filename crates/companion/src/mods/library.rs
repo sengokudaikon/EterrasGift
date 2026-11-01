@@ -482,12 +482,9 @@ use file_ops::hashes::of_file as hash_file;
 
 /// A source may be rebuilt between its initial hash and its copy. Publish only the bytes that the record names.
 fn copy_verified(source: &Path, target: &Path, expected: &str) -> io::Result<()> {
-    atomic::replace(target, |temporary| {
-        fs::copy(source, temporary)?;
-        if hash_file(temporary)? != expected {
-            return Err(invalid(ChangedWhileCopying.with(&[("file", &source.display())])));
-        }
-        Ok(())
+    atomic::copy_verified(source, target, expected).map_err(|error| match error {
+        atomic::CopyVerifiedError::Changed => invalid(ChangedWhileCopying.with(&[("file", &source.display())])),
+        atomic::CopyVerifiedError::Io(error) => error,
     })
 }
 fn same(a: &str, b: &str) -> bool {
@@ -497,10 +494,8 @@ fn field<'a>(value: &'a Value, key: &str) -> Option<&'a Value> {
     json::find(value.as_object()?, key)
 }
 fn load_record(path: &Path) -> io::Result<Option<Value>> {
-    let text = match fs::read_to_string(path) {
-        Ok(text) => text,
-        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
-        Err(error) => return Err(error),
+    let Some(text) = file_ops::read::if_present(fs::read_to_string(path))? else {
+        return Ok(None);
     };
     let name = path.file_name().unwrap().to_string_lossy();
     let value: Value = serde_json::from_str(file_ops::text::strip_bom(&text)).map_err(|error| invalid(format!("{name} is damaged: {error}")))?;

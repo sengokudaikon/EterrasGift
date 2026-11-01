@@ -165,8 +165,7 @@ impl TemplateStore {
             .filter_map(Result::ok)
             .map(|entry| entry.path())
             .filter(|path| path.extension().is_some_and(|extension| extension == "json"))
-            .filter_map(|path| std::fs::read(&path).ok())
-            .filter_map(|bytes| serde_json::from_slice::<Value>(&bytes).ok())
+            .filter_map(|path| file_ops::json::load(&path, file_ops::json::Bom::Refuse).ok().flatten())
             .filter_map(|value| ItemTemplate::from_json(&value))
             .collect();
         templates.sort_by_key(|template| template.name.to_lowercase());

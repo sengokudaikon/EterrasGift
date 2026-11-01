@@ -8,6 +8,7 @@ publish.workspace = true
 [dependencies]
 binary-reader.workspace = true
 file-ops.workspace = true
+unity-files.workspace = true
 win-platform = { workspace = true, features = ["time"] }
 eg-trainer-wire = { path = "../trainer-wire" }
 eg-core.workspace = true

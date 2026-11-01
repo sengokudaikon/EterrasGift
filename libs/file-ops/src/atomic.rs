@@ -1,6 +1,7 @@
 //! Writes a file in one step through a uniquely named temporary file beside it, so concurrent writers never share one
 //! and a failed write leaves what was there whole. Text is UTF-8 without a BOM.
 
+use crate::hashes;
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
@@ -28,6 +29,33 @@ pub fn copy_new(source: &Path, target: &Path) -> io::Result<()> {
         drop(output);
         move_new(temporary, target)
     })
+}
+
+/// Why [`copy_verified`] did not publish.
+#[derive(Debug)]
+pub enum CopyVerifiedError {
+    /// The bytes copied are not the ones expected: the source changed since it was hashed.
+    Changed,
+    Io(io::Error),
+}
+
+/// Copies `source` over `target` in one step, and only if what was copied has the SHA-256 `expected` (as
+/// [`hashes::of_file`] spells it). A source can be rebuilt between its hash and its copy.
+pub fn copy_verified(source: &Path, target: &Path, expected: &str) -> Result<(), CopyVerifiedError> {
+    let mut changed = false;
+    let copied = replace(target, |temporary| {
+        fs::copy(source, temporary)?;
+        changed = hashes::of_file(temporary)? != expected;
+        if changed {
+            return Err(io::Error::other("the copy differs from what was expected"));
+        }
+        Ok(())
+    });
+    match copied {
+        Err(_) if changed => Err(CopyVerifiedError::Changed),
+        Err(error) => Err(CopyVerifiedError::Io(error)),
+        Ok(()) => Ok(()),
+    }
 }
 
 /// Has `write` make the new file at the temporary path it is given, then puts it in place of `path`. A write that
@@ -193,6 +221,24 @@ mod tests {
         // So a later copy can replace it.
         copy(&source, &target).unwrap();
         assert_eq!(fs::read_dir(target.parent().unwrap()).unwrap().count(), 1);
+    }
+
+    #[test]
+    fn a_verified_copy_publishes_only_the_bytes_expected() {
+        let temp = tempfile::tempdir().unwrap();
+        let source = temp.path().join("a.dll");
+        let target = temp.path().join("copy").join("a.dll");
+        fs::write(&source, b"new").unwrap();
+        copy_verified(&source, &target, &hashes::of_bytes(b"new")).unwrap();
+        assert_eq!(fs::read(&target).unwrap(), b"new");
+
+        fs::write(&source, b"rebuilt").unwrap();
+        assert!(matches!(copy_verified(&source, &target, &hashes::of_bytes(b"new")), Err(CopyVerifiedError::Changed)));
+        assert_eq!(fs::read(&target).unwrap(), b"new");
+        assert_eq!(fs::read_dir(target.parent().unwrap()).unwrap().count(), 1);
+
+        let gone = temp.path().join("gone.dll");
+        assert!(matches!(copy_verified(&gone, &target, &hashes::of_bytes(b"new")), Err(CopyVerifiedError::Io(_))));
     }
 
     #[test]

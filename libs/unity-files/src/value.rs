@@ -51,6 +51,17 @@ impl Value {
         self.get(name).and_then(read).map_err(|e| e.context(name))
     }
 
+    /// The array field `name`, each element read by `read`, with the field's name and the element's place on any error.
+    pub fn list<T>(&self, name: &str, read: impl Fn(&Value) -> Result<T>) -> Result<Vec<T>> {
+        self.field(name, |list| {
+            list.as_array()?
+                .iter()
+                .enumerate()
+                .map(|(index, element)| read(element).map_err(|e| e.context(format!("[{index}]"))))
+                .collect()
+        })
+    }
+
     pub fn as_i64(&self) -> Result<i64> {
         match self {
             Self::Int(v) => Ok(*v),
@@ -123,5 +134,20 @@ mod tests {
         assert!(value.get("missing").unwrap_err().to_string().contains("missing"));
         assert!(Value::Int(1).as_bool().unwrap());
         assert!(Value::Int(2).as_bool().is_err());
+    }
+
+    #[test]
+    fn a_list_reads_each_element_and_names_the_one_that_fails() {
+        let value = Value::Object(vec![
+            ("ids".into(), Value::Array(vec![Value::Int(1), Value::Int(300)])),
+            ("none".into(), Value::Bytes(Vec::new())),
+            ("name".into(), Value::String("x".into())),
+        ]);
+        assert_eq!(value.list("ids", Value::int::<u16>).unwrap(), [1, 300]);
+        assert_eq!(value.list("none", Value::int::<u16>).unwrap(), [0_u16; 0]);
+        let error = value.list("ids", Value::int::<u8>).unwrap_err().to_string();
+        assert!(error.contains("ids: [1]: 300 is out of range"), "{error}");
+        assert!(value.list("name", Value::int::<u8>).unwrap_err().to_string().contains("name"));
+        assert!(value.list("missing", Value::int::<u8>).is_err());
     }
 }

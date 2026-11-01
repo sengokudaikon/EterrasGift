@@ -59,7 +59,7 @@ impl ModSettingsDescription {
     }
 
     pub fn parse(text: &str) -> io::Result<Self> {
-        let json = json_with_comments(text)?;
+        let json = file_ops::json::with_comments(text).map_err(|_| invalid("It is not valid JSON: an unfinished comment."))?;
         let value: Value = serde_json::from_slice(&json).map_err(|error| invalid(format!("It is not valid JSON: {error}")))?;
         let root = object(&value, "The description")?;
         let version = root
@@ -156,75 +156,6 @@ fn number(root: &Map<String, Value>, name: &str, location: &str) -> io::Result<O
         None | Some(Value::Null) => Ok(None),
         Some(value) => value.as_f64().map(Some).ok_or_else(|| invalid(format!("{location} has a {name} that is not a number."))),
     }
-}
-
-/// System.Text.Json allows comments and trailing commas here. Replace only those extensions with whitespace,
-/// leaving strings alone and keeping line/column diagnostics meaningful for the JSON parser.
-fn json_with_comments(text: &str) -> io::Result<Vec<u8>> {
-    let mut bytes = text.as_bytes().to_vec();
-    let mut at = 0;
-    while at < bytes.len() {
-        match bytes[at] {
-            b'"' => at = string_end(&bytes, at),
-            b'/' if bytes.get(at + 1) == Some(&b'/') => {
-                while at < bytes.len() && !matches!(bytes[at], b'\r' | b'\n') {
-                    bytes[at] = b' ';
-                    at += 1;
-                }
-            }
-            b'/' if bytes.get(at + 1) == Some(&b'*') => {
-                let start = at;
-                at += 2;
-                while at + 1 < bytes.len() && &bytes[at..at + 2] != b"*/" {
-                    at += 1;
-                }
-                if at + 1 == bytes.len() || at == bytes.len() {
-                    return Err(invalid("It is not valid JSON: an unfinished comment."));
-                }
-                at += 2;
-                for byte in &mut bytes[start..at] {
-                    if !matches!(byte, b'\r' | b'\n') {
-                        *byte = b' ';
-                    }
-                }
-            }
-            _ => at += 1,
-        }
-    }
-    at = 0;
-    while at < bytes.len() {
-        if bytes[at] == b'"' {
-            at = string_end(&bytes, at);
-        } else {
-            if bytes[at] == b','
-                && bytes[..at]
-                    .iter()
-                    .rev()
-                    .find(|byte| !byte.is_ascii_whitespace())
-                    .is_some_and(|byte| !matches!(byte, b'[' | b'{' | b',' | b':'))
-                && bytes[at + 1..]
-                    .iter()
-                    .find(|byte| !byte.is_ascii_whitespace())
-                    .is_some_and(|byte| matches!(byte, b']' | b'}'))
-            {
-                bytes[at] = b' ';
-            }
-            at += 1;
-        }
-    }
-    Ok(bytes)
-}
-
-fn string_end(bytes: &[u8], start: usize) -> usize {
-    let mut at = start + 1;
-    while at < bytes.len() {
-        match bytes[at] {
-            b'\\' => at = (at + 2).min(bytes.len()),
-            b'"' => return at + 1,
-            _ => at += 1,
-        }
-    }
-    at
 }
 
 #[cfg(test)]

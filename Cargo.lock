@@ -1339,6 +1339,7 @@ dependencies = [
  "tempfile",
  "tokio",
  "toml_edit",
+ "unity-files",
  "win-platform",
 ]
 
@@ -1396,6 +1397,7 @@ dependencies = [
  "task-runtime",
  "tempfile",
  "tokio",
+ "unity-files",
  "win-platform",
 ]
 

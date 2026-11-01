@@ -1,5 +1,6 @@
 //! SHA-256 in one spelling: upper-case hex, for records to store and compare.
 
+use crate::stamp::FileStamp;
 use sha2::{Digest, Sha256};
 use std::fs::File;
 use std::io::{self, Read};
@@ -45,6 +46,13 @@ pub fn digest_reader<D: Digest>(mut reader: impl Read) -> io::Result<String> {
     }
 }
 
+/// Any digest of a file whose stamp was `before` when it was asked for; `None` if the stamp has moved once it is read, as
+/// the hash may then be of neither version.
+pub fn digest_unchanged<D: Digest>(path: &Path, before: &FileStamp) -> io::Result<Option<String>> {
+    let hash = digest_reader::<D>(File::open(path)?)?;
+    Ok(before.unchanged(path)?.then_some(hash))
+}
+
 /// Whether the text is a SHA-256 in hex, as a file name or a saved value must be before it is trusted.
 pub fn is_sha256(text: &str) -> bool {
     text.len() == 64 && text.bytes().all(|byte| byte.is_ascii_hexdigit())
@@ -60,5 +68,16 @@ mod tests {
         assert!(is_sha256(&of_bytes(b"abc")));
         assert!(!is_sha256("BA7816BF"));
         assert!(!is_sha256(&"G".repeat(64)));
+    }
+
+    #[test]
+    fn a_digest_is_kept_only_while_the_stamp_holds() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("file");
+        std::fs::write(&path, "abc").unwrap();
+        let before = FileStamp::of(&path).unwrap();
+        assert_eq!(digest_unchanged::<Sha256>(&path, &before).unwrap().unwrap(), of_bytes(b"abc"));
+        std::fs::write(&path, "abcd").unwrap();
+        assert_eq!(digest_unchanged::<Sha256>(&path, &before).unwrap(), None);
     }
 }

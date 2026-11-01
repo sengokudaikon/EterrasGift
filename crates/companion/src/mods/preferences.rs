@@ -141,11 +141,8 @@ impl MelonPreferences {
     }
 
     pub fn load(path: &Path) -> io::Result<Self> {
-        match fs::read_to_string(path) {
-            Ok(text) => Self::parse(file_ops::text::strip_bom(&text)),
-            Err(error) if error.kind() == io::ErrorKind::NotFound => Self::parse(""),
-            Err(error) => Err(error),
-        }
+        let text = file_ops::read::if_present(fs::read_to_string(path))?.unwrap_or_default();
+        Self::parse(file_ops::text::strip_bom(&text))
     }
 
     pub fn parse(text: &str) -> io::Result<Self> {

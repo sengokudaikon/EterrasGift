@@ -3,57 +3,9 @@
 use std::collections::BTreeMap;
 use unity_files::archive::Archive;
 use unity_files::il2cpp::Il2Cpp;
-use unity_files::layout::Layouts;
+use unity_files::layout::{Layouts, difference};
 use unity_files::serialized::MONO_BEHAVIOUR;
-use unity_files::typetree::{ALIGN, Node};
 use unity_files::value::Value;
-
-/// The first difference between two trees, as a path; `None` when they agree on structure, names, primitive types
-/// and alignment (what decoding depends on).
-fn difference(real: &Node, made: &Node, path: &str) -> Option<String> {
-    let here = format!("{path}/{}", real.name);
-    let same_type = |a: &str, b: &str| {
-        fn canonical(t: &str) -> &str {
-            match t {
-                "SInt32" => "int",
-                "UInt32" => "unsigned int",
-                other => other,
-            }
-        }
-        canonical(a) == canonical(b)
-    };
-    if real.name != made.name {
-        return Some(format!("{here}: field {} where {} was expected", made.name, real.name));
-    }
-    if real.children.is_empty() && made.children.is_empty() && !same_type(&real.type_name, &made.type_name) {
-        return Some(format!("{here}: type {} where {} was expected", made.type_name, real.type_name));
-    }
-    if (real.meta_flag & ALIGN) != (made.meta_flag & ALIGN) {
-        let element = |n: &Node| {
-            n.children
-                .get(1)
-                .map(|e| format!("{} {:?}", e.type_name, e.children.iter().map(|c| format!("{}:{}", c.name, c.type_name)).collect::<Vec<_>>()))
-                .unwrap_or_default()
-        };
-        return Some(format!(
-            "{here}: align {} where {} was expected (real element {}, made {})",
-            made.meta_flag & ALIGN != 0,
-            real.meta_flag & ALIGN != 0,
-            element(real),
-            element(made)
-        ));
-    }
-    for (r, m) in real.children.iter().zip(&made.children) {
-        if let Some(d) = difference(r, m, &here) {
-            return Some(d);
-        }
-    }
-    if real.children.len() != made.children.len() {
-        let names = |n: &Node| n.children.iter().map(|c| c.name.to_string()).collect::<Vec<_>>().join(", ");
-        return Some(format!("{here}: [{}] where [{}] was expected", names(made), names(real)));
-    }
-    None
-}
 
 #[test]
 #[ignore = "compares with a Last Epoch install named by EG_LAST_EPOCH"]
@@ -77,7 +29,7 @@ fn generated_layouts_match_the_shipped_type_trees() {
     let (mut matched, mut failures) = (0, BTreeMap::new());
     for ((assembly, namespace, class), real) in &classes {
         let outcome = match layouts.mono_behaviour(assembly, namespace, class) {
-            Ok(made) => difference(real, &made, ""),
+            Ok(made) => difference(real, &made),
             Err(e) => Some(format!("not generated: {e}")),
         };
         match outcome {

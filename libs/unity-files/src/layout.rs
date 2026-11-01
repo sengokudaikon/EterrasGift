@@ -104,6 +104,57 @@ pub fn mono_behaviour_header() -> Node {
     )
 }
 
+/// The first difference between a type tree a build shipped and one made here, as a path; `None` when they agree on
+/// structure, names, primitive types and alignment (what decoding depends on).
+pub fn difference(real: &Node, made: &Node) -> Option<String> {
+    difference_under(real, made, "")
+}
+
+fn difference_under(real: &Node, made: &Node, path: &str) -> Option<String> {
+    let here = format!("{path}/{}", real.name);
+    let same_type = |a: &str, b: &str| {
+        fn canonical(t: &str) -> &str {
+            match t {
+                "SInt32" => "int",
+                "UInt32" => "unsigned int",
+                other => other,
+            }
+        }
+        canonical(a) == canonical(b)
+    };
+    if real.name != made.name {
+        return Some(format!("{here}: field {} where {} was expected", made.name, real.name));
+    }
+    if real.children.is_empty() && made.children.is_empty() && !same_type(&real.type_name, &made.type_name) {
+        return Some(format!("{here}: type {} where {} was expected", made.type_name, real.type_name));
+    }
+    if (real.meta_flag & ALIGN) != (made.meta_flag & ALIGN) {
+        let element = |n: &Node| {
+            n.children
+                .get(1)
+                .map(|e| format!("{} {:?}", e.type_name, e.children.iter().map(|c| format!("{}:{}", c.name, c.type_name)).collect::<Vec<_>>()))
+                .unwrap_or_default()
+        };
+        return Some(format!(
+            "{here}: align {} where {} was expected (real element {}, made {})",
+            made.meta_flag & ALIGN != 0,
+            real.meta_flag & ALIGN != 0,
+            element(real),
+            element(made)
+        ));
+    }
+    for (r, m) in real.children.iter().zip(&made.children) {
+        if let Some(d) = difference_under(r, m, &here) {
+            return Some(d);
+        }
+    }
+    if real.children.len() != made.children.len() {
+        let names = |n: &Node| n.children.iter().map(|c| c.name.to_string()).collect::<Vec<_>>().join(", ");
+        return Some(format!("{here}: [{}] where [{}] was expected", names(made), names(real)));
+    }
+    None
+}
+
 fn primitive_name(primitive: u8) -> Option<&'static str> {
     Some(match primitive {
         // Unity 6 writes bool fields as UInt8.
@@ -553,4 +604,58 @@ fn unity_native(full_name: &str, name: &str) -> Result<Node> {
         }
         other => return Err(Error::unsupported(format!("Unity's native layout of {other}"))),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::testing::TreeBuilder;
+
+    fn tree(fill: impl Fn(&mut TreeBuilder)) -> Node {
+        let mut tree = TreeBuilder::new("MonoBehaviour", "Base");
+        fill(&mut tree);
+        tree.build()
+    }
+
+    #[test]
+    fn trees_that_agree_have_no_difference_whatever_they_call_an_int() {
+        let real = tree(|t| {
+            t.field("SInt32", "level", 4, 0).field("UInt32", "seed", 4, 0).string("name");
+        });
+        let made = tree(|t| {
+            t.field("int", "level", 4, 0).field("unsigned int", "seed", 4, 0).string("name");
+        });
+        assert_eq!(difference(&real, &made), None);
+    }
+
+    #[test]
+    fn the_first_difference_is_named_by_its_path() {
+        let real = tree(|t| {
+            t.open_class("Stats", "stats").field("int", "level", 4, 0).close_class();
+        });
+        let renamed = tree(|t| {
+            t.open_class("Stats", "stats").field("int", "rank", 4, 0).close_class();
+        });
+        assert_eq!(difference(&real, &renamed).unwrap(), "/Base/stats/level: field rank where level was expected");
+        let retyped = tree(|t| {
+            t.open_class("Stats", "stats").field("float", "level", 4, 0).close_class();
+        });
+        assert_eq!(difference(&real, &retyped).unwrap(), "/Base/stats/level: type float where int was expected");
+        let aligned = tree(|t| {
+            t.open_class("Stats", "stats").field("int", "level", 4, ALIGN).close_class();
+        });
+        assert!(difference(&real, &aligned).unwrap().starts_with("/Base/stats/level: align true where false was expected"));
+    }
+
+    #[test]
+    fn a_field_more_or_less_is_a_difference() {
+        let real = tree(|t| {
+            t.field("int", "level", 4, 0);
+        });
+        let longer = tree(|t| {
+            t.field("int", "level", 4, 0).field("int", "rank", 4, 0);
+        });
+        assert_eq!(difference(&real, &longer).unwrap(), "/Base: [level, rank] where [level] was expected");
+        assert_eq!(difference(&longer, &real).unwrap(), "/Base: [level] where [level, rank] was expected");
+    }
 }

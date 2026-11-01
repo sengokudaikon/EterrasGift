@@ -18,6 +18,7 @@ use eg_game_files::definitions::{Ailment, Definitions};
 use eg_game_files::uniques::{PlayerDefinitions, Property, PropertyInfo};
 use eg_trainer_wire::new_affixes::TIERS;
 use eg_trainer_wire::protocol::ProtocolError;
+use file_ops::stamp::FileStamp;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -48,14 +49,12 @@ pub struct FileCatalog {
     uniques: Vec<UniqueDefinition>,
     rarities: Vec<RarityDefinition>,
     /// Every file read, with its size and modification time when reading began.
-    sources: Vec<(PathBuf, Option<Fingerprint>)>,
+    sources: Vec<(PathBuf, Option<FileStamp>)>,
     /// The game's names in each language it ships, by its locale code; a session's catalog takes its language's.
     names: BTreeMap<String, Arc<LocalNames>>,
     /// Why this reading holds no unique modifiers as affixes: their ledger could not be read or saved.
     pub ledger_problem: Option<String>,
 }
-
-pub type Fingerprint = (u64, SystemTime);
 
 /// The game's names in one language, from its string tables: affixes (`Item_Affix_<id>_DisplayName`), base types
 /// (`Item_BaseType_Name_<type>`), subtypes (`Item_SubType_Name_<type>_<sub>`) and uniques and set items
@@ -204,11 +203,6 @@ impl LocalNames {
 /// The locale a catalog is saved under: the catalog holds no localised text, and a session relabels it with its own.
 pub const SAVED_LOCALE: &str = "files";
 
-pub fn fingerprint(path: &Path) -> Option<Fingerprint> {
-    let metadata = std::fs::metadata(path).ok()?;
-    Some((metadata.len(), metadata.modified().ok()?))
-}
-
 fn hash(path: &Path) -> Result<String, String> {
     file_ops::hashes::of_file(path).map_err(|e| format!("{}: {e}", path.display()))
 }
@@ -229,7 +223,13 @@ pub fn read_with_ledger(folder: &Path, ledger: Option<&Path>) -> Result<FileCata
     paths.extend(install.player_sources());
     paths.extend(install.text_sources().unwrap_or_default());
     paths.push(install.data_folder().join("build_hash.txt"));
-    let sources = paths.into_iter().map(|path| (fingerprint(&path), path)).map(|(print, path)| (path, print)).collect();
+    let sources = paths
+        .into_iter()
+        .map(|path| {
+            let print = FileStamp::of(&path).ok();
+            (path, print)
+        })
+        .collect();
     let binary_hash = hash(&binary)?;
     let metadata_hash = hash(&metadata)?;
     let definitions = install.definitions().map_err(|e| e.to_string())?;
@@ -356,7 +356,7 @@ impl FileCatalog {
     }
 
     /// Every file it was read from, with its size and write time then.
-    pub fn sources(&self) -> &[(PathBuf, Option<Fingerprint>)] {
+    pub fn sources(&self) -> &[(PathBuf, Option<FileStamp>)] {
         &self.sources
     }
 
@@ -369,7 +369,7 @@ impl FileCatalog {
     }
 
     /// A saved catalog back, with what it was read from. The definitions are checked again by the session's builder.
-    pub fn restore(saved: GameCatalog, build: String, sources: Vec<(PathBuf, Option<Fingerprint>)>) -> Self {
+    pub fn restore(saved: GameCatalog, build: String, sources: Vec<(PathBuf, Option<FileStamp>)>) -> Self {
         Self {
             binary_hash: saved.identity.binary_hash,
             metadata_hash: saved.identity.metadata_hash,
@@ -411,12 +411,12 @@ impl FileCatalog {
     /// Whether a file it was read from had been written after `instant`: a game started before then may run an older
     /// build than the files hold.
     pub fn written_after(&self, instant: SystemTime) -> bool {
-        self.sources.iter().any(|(_, print)| print.is_some_and(|(_, modified)| modified > instant))
+        self.sources.iter().any(|(_, print)| print.is_some_and(|print| print.written > instant))
     }
 
     /// Whether every file it was read from is as it was then (a Steam update while the app runs changes them).
     pub fn is_current(&self) -> bool {
-        self.sources.iter().all(|(path, print)| fingerprint(path) == *print)
+        self.sources.iter().all(|(path, print)| FileStamp::of(path).ok() == *print)
     }
 
     /// Whether this catalog was read from the build a session runs.
@@ -934,7 +934,7 @@ fn unique(unique: &eg_game_files::uniques::Unique, presentation: &Presentation<'
 
 /// An empty catalog read from `sources`, for tests.
 #[cfg(test)]
-pub(crate) fn test_catalog(sources: Vec<(PathBuf, Option<Fingerprint>)>) -> FileCatalog {
+pub(crate) fn test_catalog(sources: Vec<(PathBuf, Option<FileStamp>)>) -> FileCatalog {
     FileCatalog {
         binary_hash: "a".repeat(64),
         metadata_hash: "b".repeat(64),
@@ -967,7 +967,7 @@ mod tests {
         let folder = tempfile::tempdir().unwrap();
         let file = folder.path().join("GameAssembly.dll");
         std::fs::write(&file, b"build one").unwrap();
-        let catalog = test_catalog(vec![(file.clone(), fingerprint(&file))]);
+        let catalog = test_catalog(vec![(file.clone(), FileStamp::of(&file).ok())]);
         assert!(catalog.is_current());
         std::fs::write(&file, b"build two, longer").unwrap();
         assert!(!catalog.is_current(), "a Steam update rewrites the files");

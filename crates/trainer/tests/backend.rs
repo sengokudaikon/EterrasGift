@@ -1149,8 +1149,8 @@ fn a_game_started_before_its_files_changed_is_refused_before_anything_is_loaded(
         let folder = tempfile::tempdir().unwrap();
         let file = folder.path().join("GameAssembly.dll");
         std::fs::write(&file, b"updated").unwrap();
-        let written = std::fs::metadata(&file).unwrap();
-        let sources = vec![(file, Some((written.len(), written.modified().unwrap())))];
+        let stamp = file_ops::stamp::FileStamp::of(&file).ok();
+        let sources = vec![(file, stamp)];
         let mut options = options();
         options.game_data = Some(GameDataHandle::fixed(GameData::Ready(Arc::new(FileCatalog::restore(catalog(), "build".into(), sources)))));
         let (handle, worker) = start(&shared, options);

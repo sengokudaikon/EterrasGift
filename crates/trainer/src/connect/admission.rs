@@ -251,6 +251,10 @@ fn process_start(target: &ProcessIdentity) -> Result<Timestamp, BackendError> {
     if target.pid == 0 || target.created == 0 || !target.executable.is_absolute() {
         return Err(BackendError::blocked(ErrorKind::Identity, "invalid process identity"));
     }
+    process_created(target)
+}
+/// When the process started, by the creation time the system gave for it.
+pub(crate) fn process_created(target: &ProcessIdentity) -> Result<Timestamp, BackendError> {
     win_platform::time::from_filetime(target.created).map_err(|_| BackendError::blocked(ErrorKind::Identity, "invalid process creation time"))
 }
 fn capture_build(target: &ProcessIdentity, helper_build_id: &str) -> Result<(BuildIdentity, Option<std::sync::Arc<crate::connect::build::ConnectionFiles>>), BackendError> {

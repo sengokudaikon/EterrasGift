@@ -9,13 +9,14 @@ use dotscope::CilAssemblyView;
 use dotscope::metadata::tables::{NestedClassRaw, TableDataOwned, TableId, TypeDefRaw};
 use dotscope::metadata::token::Token;
 use file_ops::atomic;
+use file_ops::hashes::digest_unchanged;
+use file_ops::stamp::FileStamp;
 use sha2::Sha512;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::{LazyLock, Mutex};
-use std::time::SystemTime;
 use toml_edit::DocumentMut;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -90,36 +91,24 @@ fn forces_regeneration(root: &Path) -> bool {
 
 #[derive(Clone)]
 struct CachedHash {
-    length: u64,
-    written: SystemTime,
+    stamp: FileStamp,
     hash: String,
 }
 static HASHES: LazyLock<Mutex<HashMap<PathBuf, CachedHash>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
 
 pub fn game_assembly_hash(path: &Path) -> io::Result<String> {
     let key = fs::canonicalize(path)?;
-    let metadata = fs::metadata(path)?;
-    let written = metadata.modified()?;
+    let stamp = FileStamp::of(path)?;
     if let Some(known) = HASHES.lock().unwrap().get(&key)
-        && known.length == metadata.len()
-        && known.written == written
+        && known.stamp == stamp
     {
         return Ok(known.hash.clone());
     }
-    let hash = file_ops::hashes::digest_reader::<Sha512>(fs::File::open(path)?)?;
     // Do not cache an observation that changed while being read.
-    let after = fs::metadata(path)?;
-    if metadata.len() != after.len() || after.modified()? != written {
+    let Some(hash) = digest_unchanged::<Sha512>(path, &stamp)? else {
         return Err(io::Error::other("GameAssembly.dll changed while its build was being checked."));
-    }
-    HASHES.lock().unwrap().insert(
-        key,
-        CachedHash {
-            length: metadata.len(),
-            written,
-            hash: hash.clone(),
-        },
-    );
+    };
+    HASHES.lock().unwrap().insert(key, CachedHash { stamp, hash: hash.clone() });
     Ok(hash)
 }
 
@@ -129,11 +118,11 @@ pub fn core_module_path(root: &Path) -> PathBuf {
 
 pub fn needs_repair(root: &Path) -> bool {
     // The Mods page asks every two seconds while it follows a start; the DLL is read again only once it has changed.
-    /// The DLL checked last, its size and write time then, and the answer.
-    type Checked = (PathBuf, (u64, SystemTime), bool);
+    /// The DLL checked last, its stamp then, and the answer.
+    type Checked = (PathBuf, FileStamp, bool);
     static CHECKED: Mutex<Option<Checked>> = Mutex::new(None);
     let path = core_module_path(root);
-    let stamp = fs::metadata(&path).ok().and_then(|metadata| Some((metadata.len(), metadata.modified().ok()?)));
+    let stamp = FileStamp::of(&path).ok();
     let mut checked = CHECKED.lock().unwrap_or_else(|p| p.into_inner());
     if let (Some(stamp), Some((known, at, answer))) = (stamp, checked.as_ref())
         && *known == path

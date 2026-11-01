@@ -5,80 +5,53 @@ use crate::uniques::{self, PlayerDefinitions};
 use binary_reader::{Error, Result};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
-use unity_files::archive::Archive;
+use unity_files::archive::{self, Archive};
+use unity_files::folder::PlayerFolder;
 use unity_files::player::PlayerData;
-use unity_files::strings::{self, SHARED_TABLE, STRING_TABLE, Strings};
+use unity_files::strings::{self, Strings};
 use unity_files::value::Value;
 
-const DATA_FOLDER: &str = "Last Epoch_Data";
+/// The player's name, which its data folder takes: this crate reads Last Epoch, whatever its executable is called.
+const PLAYER_NAME: &str = "Last Epoch";
 const AFFIX_LIST: (&str, &str, &str) = ("LE", "", "AffixList");
 const ITEM_LIST: (&str, &str, &str) = ("LE", "", "ItemList");
 const AILMENT_LIST: (&str, &str, &str) = ("LE", "", "AilmentList");
 const ABILITY_MANAGER: (&str, &str, &str) = ("LE", "", "AbilityManager");
 const CLASS_LIST: (&str, &str, &str) = ("LE", "", "CharacterClassList");
-/// Unity Localization's default Addressables group naming, one bundle per locale.
-const STRING_TABLE_BUNDLES: &str = "localization-string-tables-";
 
 pub struct Install {
-    game: PathBuf,
-    data: PathBuf,
-}
-
-/// Every bundle in `folder`. The localisation bundles need the others: their scripts are in the Addressables
-/// `MonoScript` bundle.
-fn bundles_in(folder: &Path) -> Result<Vec<PathBuf>> {
-    let mut paths = Vec::new();
-    for entry in std::fs::read_dir(folder).map_err(|e| Error::io(folder, e))? {
-        let path = entry.map_err(|e| Error::io(folder, e))?.path();
-        if path.extension().is_some_and(|e| e == "bundle") {
-            paths.push(path);
-        }
-    }
-    paths.sort();
-    Ok(paths)
+    player: PlayerFolder,
 }
 
 impl Install {
     /// The game folder, the one holding `Last Epoch.exe` and `Last Epoch_Data`.
     pub fn at(folder: impl AsRef<Path>) -> Result<Install> {
-        let game = folder.as_ref().to_path_buf();
-        let data = game.join(DATA_FOLDER);
-        if !data.is_dir() {
-            return Err(Error::data(format!("{} has no {DATA_FOLDER} folder", game.display())));
+        let game = folder.as_ref();
+        let player = PlayerFolder::new(game, PLAYER_NAME);
+        if !player.data().is_dir() {
+            return Err(Error::data(format!("{} has no {PLAYER_NAME}_Data folder", game.display())));
         }
-        Ok(Install { game, data })
+        Ok(Install { player })
     }
 
     pub fn data_folder(&self) -> &Path {
-        &self.data
+        self.player.data()
     }
 
     fn bundles(&self) -> PathBuf {
-        self.data.join("StreamingAssets").join("LEAssetBundles")
+        self.data_folder().join("StreamingAssets").join("LEAssetBundles")
     }
 
     fn addressables(&self) -> PathBuf {
-        self.data.join("StreamingAssets").join("aa").join("StandaloneWindows64")
+        self.data_folder().join("StreamingAssets").join("aa").join("StandaloneWindows64")
     }
 
-    /// `GameAssembly.dll`, the IL2CPP build's native code and the type records its fields point at.
     pub fn game_assembly(&self) -> PathBuf {
-        self.game.join("GameAssembly.dll")
+        self.player.game_assembly()
     }
 
-    /// `global-metadata.dat`, the IL2CPP build's names, type and field definitions.
     pub fn metadata(&self) -> PathBuf {
-        self.data.join("il2cpp_data").join("Metadata").join("global-metadata.dat")
-    }
-
-    /// The player data Unity stores without type trees.
-    fn resources(&self) -> PathBuf {
-        self.data.join("resources.assets")
-    }
-
-    /// The player's managers, which hold the `MonoScript`s that `resources.assets`' behaviours run.
-    fn managers(&self) -> PathBuf {
-        self.data.join("globalgamemanagers.assets")
+        self.player.metadata()
     }
 
     /// The bundle of `MonoScript`s the other bundles' behaviours run.
@@ -93,14 +66,14 @@ impl Install {
 
     /// The build hash the game ships in `build_hash.txt`: changes with every game update.
     pub fn build_hash(&self) -> Result<String> {
-        let path = self.data.join("build_hash.txt");
+        let path = self.data_folder().join("build_hash.txt");
         let text = std::fs::read_to_string(&path).map_err(|e| Error::io(&path, e))?;
         Ok(text.trim().to_owned())
     }
 
     /// The files [`Install::strings`] reads: every addressable bundle, as the locales are found among them.
     pub fn text_sources(&self) -> Result<Vec<PathBuf>> {
-        bundles_in(&self.addressables())
+        archive::bundles_in(&self.addressables())
     }
 
     /// The files [`Install::definitions`] reads.
@@ -147,13 +120,19 @@ impl Install {
 
     /// The files [`Install::player_definitions`] reads.
     pub fn player_sources(&self) -> Vec<PathBuf> {
-        vec![self.game_assembly(), self.metadata(), self.resources(), self.managers(), self.monoscripts()]
+        vec![self.game_assembly(), self.metadata(), self.player.resources(), self.player.managers(), self.monoscripts()]
     }
 
     /// Uniques, properties and set bonuses, from the player data Unity stores without type trees. Needs a game build
     /// whose IL2CPP metadata this reader knows (format 39); any other is refused as unsupported.
     pub fn player_definitions(&self) -> Result<PlayerDefinitions> {
-        let player = PlayerData::open(&self.game_assembly(), &self.metadata(), &self.resources(), &self.managers(), &self.monoscripts())?;
+        let player = PlayerData::open(
+            &self.game_assembly(),
+            &self.metadata(),
+            &self.player.resources(),
+            &self.player.managers(),
+            &self.monoscripts(),
+        )?;
         let properties = player.behaviour("MasterPropertyList", ("LE", "", "PropertyList"))?;
         let registry = |name: &str| player.behaviour(name, ("LE", "", name)).and_then(|v| uniques::registry(&v)).map_err(|e| e.context(name));
         let constant = |class: &str, field: &str| player.il2cpp().int_constant("LE", "", class, field);
@@ -191,74 +170,11 @@ impl Install {
 
     /// The locale codes the game ships text for (`en`, `de`, `es-ES`…), each with its bundle.
     pub fn locales(&self) -> Result<BTreeMap<String, PathBuf>> {
-        let mut archive = Archive::open(bundles_in(&self.addressables())?)?;
-        Ok(Self::locales_in(&mut archive)?
-            .into_iter()
-            .map(|(code, index)| (code, archive.bundles()[index].path().to_path_buf()))
-            .collect())
-    }
-
-    /// The locales in the archive of every addressable bundle, each with its bundle's index: the folder is listed once,
-    /// so a bundle that comes or goes meanwhile (a Steam update) cannot leave a name without its bundle.
-    fn locales_in(archive: &mut Archive) -> Result<BTreeMap<String, usize>> {
-        let candidates: Vec<usize> = (0..archive.bundles().len())
-            .filter(|&index| {
-                let path = archive.bundles()[index].path();
-                path.file_name().and_then(|n| n.to_str()).is_some_and(|n| n.starts_with(STRING_TABLE_BUNDLES))
-            })
-            .collect();
-        let mut locales = BTreeMap::new();
-        for index in candidates {
-            let path = archive.bundles()[index].path().to_path_buf();
-            let file = archive.main_file(index)?;
-            let tables = archive.behaviours(&file, None, STRING_TABLE, "m_LocaleId")?;
-            let codes = tables
-                .iter()
-                .map(|(_, head)| strings::locale_code(head))
-                .collect::<Result<std::collections::BTreeSet<_>>>()?;
-            match codes.into_iter().collect::<Vec<_>>().as_slice() {
-                [code] => {
-                    if let Some(other) = locales.insert(code.clone(), index) {
-                        return Err(Error::data(format!(
-                            "locale {code} is in {} and {}",
-                            archive.bundles()[other].path().display(),
-                            path.display()
-                        )));
-                    }
-                }
-                codes => return Err(Error::data(format!("{} holds tables for {} locales", path.display(), codes.len()))),
-            }
-        }
-        Ok(locales)
+        strings::locales(&self.addressables())
     }
 
     /// Every string table for one locale code, as the game's settings name it.
     pub fn strings(&self, locale: &str) -> Result<Strings> {
-        let mut archive = Archive::open(bundles_in(&self.addressables())?)?;
-        let index = Self::locales_in(&mut archive)?
-            .remove(locale)
-            .ok_or_else(|| Error::data(format!("the game ships no text for locale {locale}")))?;
-        let file = archive.main_file(index)?;
-        let (mut tables, mut unkeyed, mut shadowed) = (BTreeMap::new(), 0, 0);
-        for (object, _) in archive.behaviours(&file, None, STRING_TABLE, "m_Name")? {
-            let table = file.decode(&object)?;
-            let (shared_file, shared_object) = archive.resolve(&file, table.field("m_SharedData", Value::as_pptr)?)?;
-            let shared = shared_file.decode(&shared_object)?;
-            if !archive.script(&shared_file, &shared)?.is(SHARED_TABLE.0, SHARED_TABLE.1, SHARED_TABLE.2) {
-                return Err(Error::data("m_SharedData is not a SharedTableData"));
-            }
-            let (collection, keys) = strings::shared_keys(&shared)?;
-            let entries = strings::table_entries(&table, &collection, &keys)?;
-            (unkeyed, shadowed) = (unkeyed + entries.unkeyed, shadowed + entries.shadowed);
-            if tables.insert(collection.clone(), entries.keyed).is_some() {
-                return Err(Error::data(format!("two {locale} tables for {collection}")));
-            }
-        }
-        Ok(Strings {
-            locale: locale.to_owned(),
-            tables,
-            unkeyed,
-            shadowed,
-        })
+        strings::read(&self.addressables(), locale)
     }
 }

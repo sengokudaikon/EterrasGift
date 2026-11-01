@@ -1,5 +1,6 @@
 //! MelonLoader assembly facts, inspected as metadata only. No DLL is loaded or executed.
 
+use super::description::{MAX_RESOURCE_LENGTH, RESOURCE_NAME};
 use super::invalid;
 use crate::game::install::GameIdentity;
 use dotscope::CilAssemblyView;
@@ -354,7 +355,7 @@ pub fn read_settings_resource(path: &Path) -> io::Result<Option<Vec<u8>>> {
 
 fn settings_resource(view: &CilAssemblyView) -> io::Result<Option<Vec<u8>>> {
     for resource in rows::<ManifestResourceRaw>(view)? {
-        if !resource.implementation.is_null() || string(view, resource.name)? != "ModSettings.json" {
+        if !resource.implementation.is_null() || string(view, resource.name)? != RESOURCE_NAME {
             continue;
         }
         let header = view.cor20header();
@@ -366,7 +367,7 @@ fn settings_resource(view: &CilAssemblyView) -> io::Result<Option<Vec<u8>>> {
         }
         let data = view.file().data_slice(directory, size).map_err(invalid)?;
         let length = u32::from_le_bytes(data[offset..offset + 4].try_into().unwrap()) as usize;
-        if length > 1 << 20 || offset.checked_add(4 + length).is_none_or(|end| end > size) {
+        if length > MAX_RESOURCE_LENGTH || offset.checked_add(4 + length).is_none_or(|end| end > size) {
             return Err(invalid("The resource's length does not fit the DLL."));
         }
         return Ok(Some(data[offset + 4..offset + 4 + length].to_vec()));

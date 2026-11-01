@@ -8,8 +8,10 @@
 
 use crate::definitions::cache::CatalogCache;
 use crate::definitions::catalog::{CatalogIdentity, EXTRACTION_VERSION, GameLocale};
-use crate::definitions::files::{self, FileCatalog, Fingerprint, SAVED_LOCALE};
+use crate::definitions::files::{self, FileCatalog, SAVED_LOCALE};
 use eg_core::fault::FaultLog;
+use file_ops::json::{self as json_file, Bom, LoadError};
+use file_ops::stamp::FileStamp;
 use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -254,12 +256,12 @@ impl Store {
     /// The saved catalog for `folder`, if every file it was read from is unchanged. No index, another folder or a
     /// changed file is a miss; a damaged save is an error (and then a miss).
     fn load(&self, folder: &Path) -> Result<Option<FileCatalog>, String> {
-        let index = match std::fs::read(self.directory.join(INDEX_FILE)) {
-            Ok(bytes) => bytes,
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
-            Err(e) => return Err(e.to_string()),
+        let index = match json_file::load(&self.directory.join(INDEX_FILE), Bom::Refuse) {
+            Ok(Some(index)) => index,
+            Ok(None) => return Ok(None),
+            Err(LoadError::Io(e)) => return Err(e.to_string()),
+            Err(LoadError::Json(e)) => return Err(format!("{INDEX_FILE}: {e}")),
         };
-        let index: Value = serde_json::from_slice(&index).map_err(|e| format!("{INDEX_FILE}: {e}"))?;
         let text = |key: &str| index[key].as_str().map(str::to_owned).ok_or_else(|| format!("{INDEX_FILE}: no {key}"));
         if index["version"].as_u64() != Some(INDEX_VERSION) || index["extraction_version"].as_u64() != Some(u64::from(EXTRACTION_VERSION)) {
             return Ok(None);
@@ -274,13 +276,17 @@ impl Store {
             .map(|source| {
                 let path = PathBuf::from(source["path"].as_str().ok_or_else(|| format!("{INDEX_FILE}: a source without a path"))?);
                 let print = match (source["len"].as_u64(), source["modified"].as_u64()) {
-                    (Some(len), Some(nanos)) => Some((len, SystemTime::UNIX_EPOCH + Duration::from_nanos(nanos))),
+                    (Some(len), Some(nanos)) => Some(FileStamp {
+                        len,
+                        written: SystemTime::UNIX_EPOCH + Duration::from_nanos(nanos),
+                        created: None,
+                    }),
                     _ => None,
                 };
                 Ok((path, print))
             })
-            .collect::<Result<Vec<(PathBuf, Option<Fingerprint>)>, String>>()?;
-        if sources.is_empty() || sources.iter().any(|(path, print)| files::fingerprint(path) != *print) {
+            .collect::<Result<Vec<(PathBuf, Option<FileStamp>)>, String>>()?;
+        if sources.is_empty() || sources.iter().any(|(path, print)| FileStamp::of(path).ok() != *print) {
             return Ok(None);
         }
         let identity = Self::identity(&text("binary_hash")?, &text("metadata_hash")?);
@@ -288,9 +294,9 @@ impl Store {
             return Ok(None);
         };
         // Names are optional: a catalog saved without them serves with the stored names.
-        let names = std::fs::read(self.directory.join(NAMES_FILE))
+        let names = json_file::load(&self.directory.join(NAMES_FILE), Bom::Refuse)
             .ok()
-            .and_then(|bytes| serde_json::from_slice::<Value>(&bytes).ok())
+            .flatten()
             .and_then(|value| {
                 value
                     .as_object()?
@@ -320,7 +326,7 @@ impl Store {
             .iter()
             .map(|(path, print)| {
                 let (len, modified) = print
-                    .and_then(|(len, time)| Some((len, u64::try_from(time.duration_since(SystemTime::UNIX_EPOCH).ok()?.as_nanos()).ok()?)))
+                    .and_then(|print| Some((print.len, u64::try_from(print.written.duration_since(SystemTime::UNIX_EPOCH).ok()?.as_nanos()).ok()?)))
                     .unzip();
                 json!({"path": path, "len": len, "modified": modified})
             })
@@ -347,7 +353,7 @@ mod tests {
     fn catalog(folder: &Path) -> FileCatalog {
         let file = folder.join("GameAssembly.dll");
         std::fs::write(&file, b"build one").unwrap();
-        files::test_catalog(vec![(file.clone(), files::fingerprint(&file))])
+        files::test_catalog(vec![(file.clone(), FileStamp::of(&file).ok())])
     }
 
     #[test]

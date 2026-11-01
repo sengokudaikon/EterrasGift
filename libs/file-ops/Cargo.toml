@@ -1,6 +1,6 @@
 [package]
 name = "file-ops"
-description = "Files handled with care on Windows: atomic writes, resumable folder moves, read leases, one-at-a-time locks, SHA-256, and text and JSON from outside. Names no app or game."
+description = "Files handled with care on Windows: atomic writes, resumable folder moves, read leases, one-at-a-time locks, SHA-256, file stamps, bounded reads, text and JSON from outside, a Unity player's paths. Names no app or game."
 version.workspace = true
 edition.workspace = true
 publish.workspace = true
