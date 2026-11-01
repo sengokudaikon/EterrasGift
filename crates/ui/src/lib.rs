@@ -50,18 +50,10 @@ pub struct App {
     pub start: Page,
 }
 
-/// Shows the app in the user's language when a translation has it, else in English: the views through Slint's bundled
-/// catalog, the Rust phrases through the same catalog's table and the app's numbers in its symbols, chosen once for all. Call it as soon as the first
-/// window exists, before any page or message is built.
+/// Shows the app in the user's language when a translation has it, else in English. Call it as soon as the first window
+/// exists, before any page or message is built.
 pub fn select_language() {
-    let Ok(translations) = spiderland_phrases::Translations::new(translations::CATALOGS) else {
-        return;
-    };
-    let language = sys_locale::get_locale().and_then(|locale| translations.choose(&locale));
-    translations.select(language);
-    spiderland_phrases::locale::select(language);
-    // Fails only when no translation is bundled, and English needs none.
-    let _ = slint::select_bundled_translation(language.unwrap_or(""));
+    spiderland_slint::select_language(translations::CATALOGS);
 }
 
 /// What a window was bound to: captures set up the forge's states through it.

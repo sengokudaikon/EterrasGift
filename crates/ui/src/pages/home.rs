@@ -11,7 +11,7 @@ use eg_companion::launch::host::LaunchMode;
 use eg_companion::launch::launcher::GameLauncher;
 use eg_core::bloom::BloomPhase;
 use slint::{ComponentHandle, Weak};
-use spiderland::{Host, Intents, Slice, Store, Subscriptions, Version};
+use spiderland::{Host, Intents, Slice, Store, Subscriptions, Version, callbacks};
 use spiderland_slint::{Background, on_watch};
 use std::rc::Rc;
 use std::sync::Arc;
@@ -58,9 +58,8 @@ pub fn bind(
         },
     );
     // The window's callback keeps the store alive, for as long as the window lasts.
-    state.on_start({
-        let store = store.clone();
-        move |mode| store.send(Intent::Start(mode_of(mode)))
+    callbacks!(state, store, {
+        on_start: |mode| Intent::Start(mode_of(mode)),
     });
     if shell.current() == Page::Home {
         store.send(Intent::Shown);

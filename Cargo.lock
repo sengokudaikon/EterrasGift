@@ -1441,7 +1441,6 @@ dependencies = [
  "spiderland-phrases",
  "spiderland-phrases-build",
  "spiderland-slint",
- "sys-locale",
  "task-runtime",
  "tempfile",
  "tokio",
@@ -4988,6 +4987,8 @@ version = "0.1.0"
 dependencies = [
  "slint",
  "spiderland",
+ "spiderland-phrases",
+ "sys-locale",
  "task-runtime",
  "tokio",
 ]

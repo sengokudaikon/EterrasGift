@@ -3,6 +3,7 @@
 use spiderland::Intents;
 use std::future::poll_fn;
 use std::pin::{Pin, pin};
+use std::rc::{Rc, Weak};
 use std::sync::Arc;
 use std::task::Poll;
 use tokio::sync::{Notify, oneshot, watch};
@@ -52,13 +53,27 @@ pub fn local<T: 'static>(work: impl Future<Output = T> + 'static, then: impl FnO
     Dropping(guard)
 }
 
-/// Stops listening when dropped, so it can be a guard for [`spiderland::Subscriptions`].
-pub struct Listening(Option<slint::JoinHandle<()>>);
+/// Waits for `work` on the UI thread and hands its result to `then`, whatever else happens. Nothing can stop it, so it suits
+/// a result that must always be heard, such as whether a write went through. Work that may be let go of goes through [`local`].
+pub fn finish<T: 'static>(work: impl Future<Output = T> + 'static, then: impl FnOnce(T) + 'static) {
+    // Fails only where no event loop can ever run, and then nothing could show the result anyway.
+    let _ = slint::spawn_local(async move { then(work.await) });
+}
 
-impl Drop for Listening {
-    fn drop(&mut self) {
-        if let Some(task) = self.0.take() {
-            task.abort();
+/// Stops listening when dropped, so it can be a guard for [`spiderland::Subscriptions`]. That is safe from inside the intent
+/// the listener itself sent: nothing is sent after that, and what the listener holds is let go of on the next turn of the
+/// event loop, with no need for anything further to be published.
+pub struct Listening {
+    _work: Dropping,
+    _wanted: Rc<()>,
+}
+
+impl Listening {
+    fn start<F: Future<Output = ()> + 'static>(body: impl FnOnce(Weak<()>) -> F) -> Listening {
+        let wanted = Rc::new(());
+        Listening {
+            _work: local(body(Rc::downgrade(&wanted)), |()| {}),
+            _wanted: wanted,
         }
     }
 }
@@ -71,18 +86,19 @@ where
     I: 'static,
 {
     let intents = intents.clone();
-    // Fails only where no event loop can ever run, and then nothing could show the result anyway.
-    let task = slint::spawn_local(async move {
+    Listening::start(move |wanted| async move {
         loop {
             let ended = updates.changed().await.is_err();
+            // The last intent may have let go of this: a value published since doesn't call it back.
+            if wanted.strong_count() == 0 {
+                break;
+            }
             intents.send(make());
             if ended {
                 break;
             }
         }
     })
-    .ok();
-    Listening(task)
 }
 
 /// Sends `make()` on the UI thread each time the returned [`Waker`] fires.
@@ -90,13 +106,14 @@ pub fn on_wake<I: 'static>(intents: &Intents<I>, make: impl Fn() -> I + 'static)
     let notify = Arc::new(Notify::new());
     let intents = intents.clone();
     let waiting = notify.clone();
-    // Fails only where no event loop can ever run, and then nothing could show the result anyway.
-    let task = slint::spawn_local(async move {
+    let listening = Listening::start(move |wanted| async move {
         loop {
             waiting.notified().await;
+            if wanted.strong_count() == 0 {
+                break;
+            }
             intents.send(make());
         }
-    })
-    .ok();
-    (Waker(notify), Listening(task))
+    });
+    (Waker(notify), listening)
 }

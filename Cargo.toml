@@ -13,8 +13,6 @@ publish = false
 # Slint is pinned exactly: point releases have broken APIs before (crates/ui/README.md).
 slint = "=1.18.1"
 slint-build = "=1.18.1"
-# The user's locale, read as Slint reads it to pick a bundled translation.
-sys-locale = "0.3.2"
 image = { version = "0.25.10", default-features = false, features = ["png"] }
 serde_json = { version = "1.0.154", features = ["preserve_order"] }
 windows-sys = "0.61.2"

@@ -6,7 +6,7 @@ use crate::{LogsState, MainWindow};
 use eg_core::logs::{Effect, Intent, LogFiles, Logs, Source, State, WATCH_INTERVAL, read};
 use eg_trainer::backend::BackendHandle;
 use slint::{ComponentHandle, Weak};
-use spiderland::{Host, Intents, Slice, Store, Subscriptions, Version};
+use spiderland::{Host, Intents, Slice, Store, Subscriptions, Version, callbacks};
 use spiderland_phrases::phrases;
 use spiderland_slint::{Background, every};
 
@@ -54,9 +54,8 @@ pub(crate) fn bind(window: &MainWindow, files: Option<LogFiles>, backend: Option
         },
     );
     let state = window.global::<LogsState>();
-    state.on_refresh({
-        let store = store.clone();
-        move || store.send(Intent::Refresh)
+    callbacks!(state, store, {
+        on_refresh: || Intent::Refresh,
     });
     state.on_source_chosen({
         let store = store.clone();

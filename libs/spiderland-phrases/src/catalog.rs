@@ -11,7 +11,7 @@ pub struct Catalog {
     pub language: &'static str,
     /// The PO header's plural expression in `n`, e.g. `n != 1`.
     pub plural: &'static str,
-    /// (context, msgid, forms): one form, or one per plural form for a [`Plural`] (its msgid is the singular).
+    /// (context, msgid, forms): one form, or one per plural form for a [`Plural`](crate::Plural) (its msgid is the singular).
     pub entries: &'static [(Option<&'static str>, &'static str, &'static [&'static str])],
 }
 

@@ -1447,7 +1447,7 @@ pub(super) fn capture_logs(session: &Session) {
     session.key(Key::Tab);
     session.key(Key::Tab);
     session.key(Key::Return);
-    assert_eq!(CAPTURE_CLIPBOARD.with_borrow(Clone::clone), state.get_text().as_str());
+    assert_eq!(session.clipboard(), state.get_text().as_str());
 
     state.invoke_source_chosen(1);
     session.idle();

@@ -6,6 +6,10 @@ use std::rc::Rc;
 /// Rows are slots: rows both lists have are updated in place, and only if they differ, and the rest come or go at the
 /// end. Slint updates a changed row's existing instance, so a row being dragged, typed in or holding focus carries on
 /// while others change. Handing the view a new model instead would rebuild every row.
+///
+/// Slint 1.18.1 can lose an in-place change to a list inside a row: changing an item of a row's inner list while the same outer
+/// row is also updated, with no render in between, leaves the old values on screen. Keep such inner lists in a model of their own,
+/// not in the row. Two `ModelRc`s compare by identity, so a row holding a newly made list always counts as changed here.
 pub struct Rows<T: 'static>(Rc<VecModel<T>>);
 
 impl<T: 'static> Default for Rows<T> {

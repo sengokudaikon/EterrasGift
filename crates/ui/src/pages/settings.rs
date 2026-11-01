@@ -10,7 +10,7 @@ use crate::{LocationSetting, MainWindow, MessageTone, ModuleRow, Nav, SettingsSe
 use eg_core::settings_page::{Effect, Intent, Location, LocationView, MessageKind, ModuleRowView, SectionBody, SectionView, SettingsPage, State, submit, try_pause};
 use eg_core::settings_service::SettingsService;
 use slint::{ComponentHandle, Timer, Weak};
-use spiderland::{Host, Intents, Slice, Store, Subscriptions, Version};
+use spiderland::{Host, Intents, Slice, Store, Subscriptions, Version, callbacks};
 use spiderland_slint::{Rows, on_wake};
 use std::cell::Cell;
 use std::collections::BTreeMap;
@@ -120,26 +120,15 @@ pub(crate) fn bind(window: &MainWindow, settings: Settings, close_first: Option<
             slint::CloseRequestResponse::KeepWindowShown
         }
     });
-    let send = |make: fn() -> Intent| {
-        let store = store.clone();
-        move || store.send(make())
-    };
-    view.on_save_locations(send(|| Intent::SaveLocations));
-    view.on_retry(send(|| Intent::Retry));
-    view.on_restart(send(|| Intent::Restart));
-    // A linked module's state moved on (the trainer's binding says so on each new backend snapshot).
-    view.on_backend_updated(send(|| Intent::LinkChanged));
-    view.on_module_toggled({
-        let store = store.clone();
-        move |index, on| store.send(Intent::ToggleModule(index as usize, on))
-    });
-    view.on_setting_toggled({
-        let store = store.clone();
-        move |module, section, on| store.send(Intent::ToggleSetting(module as usize, section as usize, on))
-    });
-    view.on_section_action({
-        let store = store.clone();
-        move |module, section| store.send(Intent::Act(module as usize, section as usize))
+    callbacks!(view, store, {
+        on_save_locations: || Intent::SaveLocations,
+        on_retry: || Intent::Retry,
+        on_restart: || Intent::Restart,
+        // A linked module's state moved on (the trainer's binding says so on each new backend snapshot).
+        on_backend_updated: || Intent::LinkChanged,
+        on_module_toggled: |index, on| Intent::ToggleModule(index as usize, on),
+        on_setting_toggled: |module, section, on| Intent::ToggleSetting(module as usize, section as usize, on),
+        on_section_action: |module, section| Intent::Act(module as usize, section as usize),
     });
     view.on_location_edited({
         let store = store.clone();

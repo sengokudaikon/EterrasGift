@@ -18,7 +18,6 @@ rfd.workspace = true
 jiff.workspace = true
 serde_json.workspace = true
 slint = { workspace = true, features = ["raw-window-handle-06"] }
-sys-locale.workspace = true
 
 [target.'cfg(windows)'.dependencies]
 # The window's HWND, for its dark title bar (system.rs).
@@ -29,6 +28,7 @@ slint-build.workspace = true
 spiderland-phrases-build.workspace = true
 
 [dev-dependencies]
+spiderland-slint = { workspace = true, features = ["testing"] }
 image.workspace = true
 jiff.workspace = true
 melon-loader.workspace = true

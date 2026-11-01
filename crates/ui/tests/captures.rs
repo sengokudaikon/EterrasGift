@@ -3,7 +3,7 @@
 //! A test-only Slint platform hands out one `MinimalSoftwareWindow`, so the software renderer draws the real `.slint`
 //! components with the bundled fonts and no display. Each window runs the real pages on a fake game host, so nothing a
 //! capture does reaches a real install. Background work runs for real on `task_runtime` and comes back through
-//! the platform's event-loop proxy, which [`settle`] drains. Captures land in `artifacts/captures/<name>.png`. This is a
+//! the platform's event-loop proxy, which `settle` drains (`spiderland_slint::testing`). Captures land in `artifacts/captures/<name>.png`. This is a
 //! `harness = false` test because Slint's platform can be set once per process.
 
 use eg_companion::game::install::GameInstall;
@@ -20,13 +20,12 @@ use eg_ui::decorations::freeze_clock;
 use eg_ui::pages::settings::{LiveStatus, ModuleChoice, ModuleLink, Settings, trainer as trainer_settings};
 use eg_ui::shell::Page;
 use eg_ui::{App, BloomPhase as ViewPhase, Eterra, HomeState, LaunchMode as ViewMode, LogsState, MainWindow, Nav, SettingsState, Tokens};
-use slint::platform::software_renderer::{MinimalSoftwareWindow, RepaintBufferType};
-use slint::platform::{Key, Platform, PointerEventButton, WindowAdapter, WindowEvent};
-use slint::{ComponentHandle, LogicalPosition, Model, PhysicalSize, SharedString};
+use slint::platform::{Key, PointerEventButton, WindowEvent};
+use slint::{ComponentHandle, LogicalPosition, Model, PhysicalSize};
 use spiderland_slint::Background;
+use spiderland_slint::testing::{Headless, advance, idle, settle, until as wait_for};
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
 use task_runtime::CancellationToken;
@@ -161,88 +160,8 @@ impl GameHost for BrokenHost {
     }
 }
 
-type UiEvent = Box<dyn FnOnce() + Send>;
-static UI_EVENTS: Mutex<std::collections::VecDeque<UiEvent>> = Mutex::new(std::collections::VecDeque::new());
-static QUIT_REQUESTED: AtomicBool = AtomicBool::new(false);
-thread_local! {
-    static CAPTURE_WINDOW: std::cell::RefCell<std::rc::Weak<MinimalSoftwareWindow>> = const { std::cell::RefCell::new(std::rc::Weak::new()) };
-    static CAPTURE_CLIPBOARD: std::cell::RefCell<String> = const { std::cell::RefCell::new(String::new()) };
-}
-
-struct CaptureEventLoop;
-
-impl slint::platform::EventLoopProxy for CaptureEventLoop {
-    fn quit_event_loop(&self) -> Result<(), slint::EventLoopError> {
-        // Slint requests quit when the last window is hidden. Captures deliberately hide one scenario and open another in
-        // the same process. A quit while a window is visible (or from another thread) still signals an unexpected fault.
-        let visible = CAPTURE_WINDOW
-            .try_with(|slot| slot.borrow().upgrade().map(|window| window.window().is_visible()))
-            .ok()
-            .flatten();
-        if visible != Some(false) {
-            QUIT_REQUESTED.store(true, Ordering::SeqCst);
-        }
-        Ok(())
-    }
-
-    fn invoke_from_event_loop(&self, event: UiEvent) -> Result<(), slint::EventLoopError> {
-        UI_EVENTS.lock().unwrap().push_back(event);
-        Ok(())
-    }
-}
-
-struct CapturePlatform {
-    window: Rc<MinimalSoftwareWindow>,
-    start: Instant,
-}
-
-impl Platform for CapturePlatform {
-    fn set_clipboard_text(&self, text: &str, _: slint::platform::Clipboard) {
-        CAPTURE_CLIPBOARD.with_borrow_mut(|clipboard| *clipboard = text.to_owned());
-    }
-
-    fn clipboard_text(&self, _: slint::platform::Clipboard) -> Option<String> {
-        Some(CAPTURE_CLIPBOARD.with_borrow(Clone::clone))
-    }
-
-    fn new_event_loop_proxy(&self) -> Option<Box<dyn slint::platform::EventLoopProxy>> {
-        Some(Box::new(CaptureEventLoop))
-    }
-
-    fn create_window_adapter(&self) -> Result<Rc<dyn WindowAdapter>, slint::PlatformError> {
-        Ok(self.window.clone())
-    }
-
-    fn duration_since_start(&self) -> Duration {
-        self.start.elapsed() + Duration::from_millis(ADVANCED_MS.load(Ordering::SeqCst))
-    }
-}
-
-/// How far [`advance`] has moved Slint's clock past the real one, in milliseconds.
-static ADVANCED_MS: AtomicU64 = AtomicU64::new(0);
-
-/// Moves Slint's clock on by `by`, then runs what came due: a timer fires without waiting it out.
-fn advance(by: Duration) {
-    ADVANCED_MS.fetch_add(by.as_millis() as u64, Ordering::SeqCst);
-    settle();
-}
-
-/// Runs what came due on the UI thread.
-fn settle() {
-    slint::platform::update_timers_and_animations();
-    for _ in 0..10_000 {
-        let event = UI_EVENTS.lock().unwrap().pop_front();
-        let Some(event) = event else {
-            assert!(!QUIT_REQUESTED.load(Ordering::SeqCst), "capture unexpectedly requested app shutdown");
-            return;
-        };
-        event();
-    }
-    panic!("capture event queue did not settle");
-}
-
 struct Session {
-    window: Rc<MinimalSoftwareWindow>,
+    headless: Headless,
     out: PathBuf,
     data: tempfile::TempDir,
     background: Background,
@@ -252,6 +171,15 @@ struct Session {
     live_watch: std::cell::Cell<bool>,
 }
 
+/// A session clicks and types as its window does.
+impl std::ops::Deref for Session {
+    type Target = Headless;
+
+    fn deref(&self) -> &Headless {
+        &self.headless
+    }
+}
+
 impl Session {
     fn host(&self) -> Arc<FakeGameHost> {
         FakeGameHost::new(&self.folder())
@@ -259,14 +187,7 @@ impl Session {
 
     /// Waits until all background work has come back: a scenario then sees what the window would show.
     fn idle(&self) {
-        let deadline = Instant::now() + Duration::from_secs(5);
-        settle();
-        while self.background.pending() > 0 {
-            assert!(Instant::now() < deadline, "background work must finish");
-            std::thread::sleep(Duration::from_millis(1));
-            settle();
-        }
-        settle();
+        idle(&self.background);
     }
 
     /// A window on `launcher`, once its first look at the game has come back.
@@ -359,51 +280,6 @@ impl Session {
         self.open(Some(Arc::new(GameLauncher::new(host))))
     }
 
-    fn click(&self, x: f32, y: f32) {
-        let position = LogicalPosition::new(x, y);
-        let button = PointerEventButton::Left;
-        self.window.dispatch_event(WindowEvent::PointerMoved { position });
-        self.window.dispatch_event(WindowEvent::PointerPressed { position, button });
-        self.window.dispatch_event(WindowEvent::PointerReleased { position, button });
-        settle();
-    }
-
-    fn scroll(&self, x: f32, y: f32, delta_y: f32) {
-        let position = LogicalPosition::new(x, y);
-        self.window.dispatch_event(WindowEvent::PointerMoved { position });
-        self.window.dispatch_event(WindowEvent::PointerScrolled { position, delta_x: 0.0, delta_y });
-        settle();
-    }
-
-    fn type_text(&self, text: &str) {
-        for c in text.chars() {
-            let text = SharedString::from(c.to_string());
-            self.window.dispatch_event(WindowEvent::KeyPressed { text: text.clone() });
-            self.window.dispatch_event(WindowEvent::KeyReleased { text });
-        }
-        settle();
-    }
-
-    fn control_key(&self, key: &str) {
-        let control = SharedString::from(Key::Control);
-        self.window.dispatch_event(WindowEvent::KeyPressed { text: control.clone() });
-        self.type_text(key);
-        self.window.dispatch_event(WindowEvent::KeyReleased { text: control });
-        settle();
-    }
-
-    fn key(&self, key: Key) {
-        let text = SharedString::from(key);
-        self.window.dispatch_event(WindowEvent::KeyPressed { text: text.clone() });
-        self.window.dispatch_event(WindowEvent::KeyReleased { text });
-        settle();
-    }
-
-    fn resize(&self, width: u32, height: u32) {
-        self.window.set_size(PhysicalSize::new(width, height));
-        settle();
-    }
-
     fn capture(&self, ui: &impl ComponentHandle, name: &str) {
         let frame = ui.window().take_snapshot().expect("take_snapshot");
         let path = self.out.join(format!("{name}.png"));
@@ -425,18 +301,12 @@ const PLAY_OFFLINE_X: f32 = 560.0;
 const PLAY_Y: f32 = 240.0;
 
 fn main() {
-    let window = MinimalSoftwareWindow::new(RepaintBufferType::NewBuffer);
-    CAPTURE_WINDOW.with(|slot| *slot.borrow_mut() = Rc::downgrade(&window));
-    slint::platform::set_platform(Box::new(CapturePlatform {
-        window: window.clone(),
-        start: Instant::now(),
-    }))
-    .expect("the capture platform is set once per process");
+    let headless = Headless::install();
     let out = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../artifacts/captures");
     std::fs::create_dir_all(&out).expect("create artifacts/captures");
     let runtime = task_runtime::Runtime::start().expect("the captures' background work");
     let session = Session {
-        window,
+        headless,
         out,
         data: tempfile::tempdir().expect("a folder for the captures' own data"),
         background: Background::new(runtime.tasks().scope()),
@@ -651,7 +521,7 @@ fn logs(session: &Session) {
     session.key(Key::Tab); // Refresh.
     session.key(Key::Tab); // Copy.
     session.key(Key::Return);
-    assert_eq!(CAPTURE_CLIPBOARD.with_borrow(Clone::clone), state.get_text().as_str());
+    assert_eq!(session.clipboard(), state.get_text().as_str());
 
     state.invoke_source_chosen(1);
     assert!(state.get_text().is_empty(), "the other log's text goes at once");
@@ -989,16 +859,6 @@ fn settings(session: &Session) {
     assert!(!service.snapshot().store.has_pending_write());
     session.capture(&ui, "settings-save-retried");
     service.close();
-}
-
-fn wait_for(what: &str, mut completed: impl FnMut() -> bool) {
-    let deadline = Instant::now() + Duration::from_secs(5);
-    while !completed() {
-        assert!(Instant::now() < deadline, "{what} must finish");
-        std::thread::sleep(Duration::from_millis(2));
-        settle();
-    }
-    settle();
 }
 
 /// Leaves Home and comes back, which looks at the game again.

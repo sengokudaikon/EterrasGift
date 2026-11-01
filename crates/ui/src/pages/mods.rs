@@ -12,7 +12,7 @@ use eg_companion::mods::{
 };
 use eg_core::settings_service::SettingsService;
 use slint::{ComponentHandle, Model, ModelRc, SharedString, VecModel, Weak};
-use spiderland::{Host, Intents, Slice, Store, Subscriptions, Version};
+use spiderland::{Host, Intents, Slice, Store, Subscriptions, Version, callbacks};
 use spiderland_phrases::phrases;
 use spiderland_slint::{Background, Rows, every};
 use std::cell::RefCell;
@@ -105,41 +105,26 @@ pub(crate) fn bind(window: &MainWindow, page: ModsPage, background: Background, 
     view.set_log_lines(host.log_rows.model());
     view.set_readiness_facts(host.facts.model());
     let store = Store::<Mods>::new(State::new(jiff::Timestamp::now()), host);
-    let send = |make: fn() -> Intent| {
-        let store = store.clone();
-        move || store.send(make())
-    };
-    view.on_stop_work(send(|| Intent::StopWork));
-    view.on_refresh(send(|| Intent::Refresh));
-    view.on_commit_settings(send(|| Intent::CommitSettings));
-    view.on_undo_remove(send(|| Intent::UndoRemove));
-    view.on_revert_drafts(send(|| Intent::RevertDrafts));
-    view.on_add_mod(send(|| Intent::PickMod));
-    view.on_open_folder(send(|| Intent::OpenFolder));
-    view.on_open_log(send(|| Intent::OpenLog));
-    view.on_play(send(|| Intent::Play));
-    let at = |make: fn(i32) -> Intent| {
-        let store = store.clone();
-        move |index| store.send(make(index))
-    };
-    view.on_select_mod(at(Intent::Select));
-    view.on_toggle_mod(at(Intent::Toggle));
-    view.on_remove_mod(at(Intent::Remove));
-    view.on_reveal_mod(at(Intent::Reveal));
-    view.on_rebuild(at(Intent::Rebuild));
-    view.on_install_build(at(Intent::InstallBuild));
-    view.on_build_source(at(Intent::BuildSource));
-    view.on_setting_edited({
-        let store = store.clone();
-        move |index, value| store.send(Intent::SettingEdited(index, value.into()))
-    });
-    view.on_setting_toggled({
-        let store = store.clone();
-        move |index, on| store.send(Intent::SettingToggled(index, on))
-    });
-    view.on_setting_choice({
-        let store = store.clone();
-        move |index, value| store.send(Intent::SettingChoice(index, value.into()))
+    callbacks!(view, store, {
+        on_stop_work: || Intent::StopWork,
+        on_refresh: || Intent::Refresh,
+        on_commit_settings: || Intent::CommitSettings,
+        on_undo_remove: || Intent::UndoRemove,
+        on_revert_drafts: || Intent::RevertDrafts,
+        on_add_mod: || Intent::PickMod,
+        on_open_folder: || Intent::OpenFolder,
+        on_open_log: || Intent::OpenLog,
+        on_play: || Intent::Play,
+        on_select_mod: |index| Intent::Select(index),
+        on_toggle_mod: |index| Intent::Toggle(index),
+        on_remove_mod: |index| Intent::Remove(index),
+        on_reveal_mod: |index| Intent::Reveal(index),
+        on_rebuild: |index| Intent::Rebuild(index),
+        on_install_build: |index| Intent::InstallBuild(index),
+        on_build_source: |index| Intent::BuildSource(index),
+        on_setting_edited: |index, value| Intent::SettingEdited(index, value.into()),
+        on_setting_toggled: |index, on| Intent::SettingToggled(index, on),
+        on_setting_choice: |index, value| Intent::SettingChoice(index, value.into()),
     });
     if shell.current() == Page::Mods {
         store.send(Intent::PageChanged {

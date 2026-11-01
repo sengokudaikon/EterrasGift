@@ -6,6 +6,15 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use task_runtime::Tasks;
 
+/// Counts a piece of accepted work off when its result has gone, or can't go.
+struct Delivered(Arc<AtomicUsize>);
+
+impl Drop for Delivered {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, Ordering::AcqRel);
+    }
+}
+
 /// Starts work on the pool. Clone it into whatever hosts a feature. Whoever composes the app gives it a scope of the runtime
 /// and closes that scope on the way out, after cancelling anything long; the runtime keeps the record of panics.
 #[derive(Clone)]
@@ -31,17 +40,10 @@ impl Background {
         T: Send + 'static,
         I: 'static,
     {
-        struct Delivered(Arc<AtomicUsize>);
-        impl Drop for Delivered {
-            fn drop(&mut self) {
-                self.0.fetch_sub(1, Ordering::AcqRel);
-            }
-        }
         let Ok(finished) = self.tasks.spawn_blocking(work) else {
             return;
         };
-        self.pending.fetch_add(1, Ordering::AcqRel);
-        let delivered = Delivered(self.pending.clone());
+        let delivered = self.accepted();
         let intents = intents.clone();
         // Fails only where no event loop can ever run, and then nothing could show the result anyway.
         let _ = slint::spawn_local(async move {
@@ -53,6 +55,29 @@ impl Background {
                 Err(_) => {}
             }
         });
+    }
+
+    /// Waits for `work` on the UI thread, then sends `then(result)` to `intents`: for an answer that arrives by itself, such as
+    /// a reply from a worker, with no pool thread held while it does. It always runs to its end, and the scope closing doesn't
+    /// stop it. Call it from the UI thread. A panic here is a panic on the UI thread, so `work` should only wait.
+    pub fn wait<T, I>(&self, intents: &Intents<I>, work: impl Future<Output = T> + 'static, then: impl FnOnce(T) -> I + 'static)
+    where
+        T: 'static,
+        I: 'static,
+    {
+        let delivered = self.accepted();
+        let intents = intents.clone();
+        // Fails only where no event loop can ever run, and then nothing could show the result anyway.
+        let _ = slint::spawn_local(async move {
+            let _delivered = delivered;
+            let result = work.await;
+            intents.send(then(result));
+        });
+    }
+
+    fn accepted(&self) -> Delivered {
+        self.pending.fetch_add(1, Ordering::AcqRel);
+        Delivered(self.pending.clone())
     }
 
     /// Accepted work whose result hasn't been delivered yet, for a test to wait on.
