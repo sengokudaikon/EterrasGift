@@ -12,7 +12,7 @@ import { Button, ButtonKind } from "../../widgets/button.slint";
 import { FocusRing } from "../../widgets/focus.slint";
 import { FlyoutSurface } from "../../widgets/menu.slint";
 import { MessageTone } from "../common.slint";
-import { ForgeState, ForgeReveal, ForgeCover, ItemRarity, CellKind, MenuOptionView } from "state.slint";
+import { CellKind, ForgeCover, ForgeReveal, ForgeState, ItemRarity, MenuOptionView } from "state.slint";
 import { ValueScrubber } from "scrubber.slint";
 import { ForgeText } from "../../strings/forge.slint";
 import {
@@ -257,6 +257,11 @@ component ChangesToggle inherits Rectangle {
 }
 
 export component ItemForge inherits Rectangle {
+    // The line under the template form: what saving the typed name would replace, else what the last action did.
+    property <string> template-note: ForgeState.template-replaces != ""
+        ? ForgeText.saving-replaces(ForgeState.template-replaces)
+        : ForgeState.template-message;
+
     in property <bool> compact;
     in property <bool> narrow;
     in property <bool> wide;
@@ -1019,6 +1024,25 @@ export component ItemForge inherits Rectangle {
                             }
 
                             if field.numeric: ValueScrubber {
+                                begin-input(a0) => { return ForgeState.begin-input(a0); }
+                                cancel-input(a0) => { ForgeState.cancel-input(a0); }
+                                commit-input(a0) => { return ForgeState.commit-input(a0); }
+                                end-scrub(a0, a1) => { ForgeState.end-scrub(a0, a1); }
+                                finish-input(a0) => { ForgeState.finish-input(a0); }
+                                focus-cell: ForgeState.focus-cell;
+                                focus-part: ForgeState.focus-part;
+                                focus-serial: ForgeState.focus-serial;
+                                input-edited(a0, a1) => { ForgeState.input-edited(a0, a1); }
+                                input-error: ForgeState.input-error;
+                                input-label: ForgeState.input-label;
+                                input-range: ForgeState.input-range;
+                                input-text <=> ForgeState.input-text;
+                                press(a0) => { ForgeState.press(a0); }
+                                scrub(a0, a1) => { ForgeState.scrub(a0, a1); }
+                                step(a0, a1) => { ForgeState.step(a0, a1); }
+                                step-to-end(a0, a1) => { ForgeState.step-to-end(a0, a1); }
+                                typing: ForgeState.typing;
+                                typing-cell: ForgeState.typing-cell;
                                 cell: field.value;
                             }
                         }
@@ -1094,6 +1118,28 @@ export component ItemForge inherits Rectangle {
 
                     if ForgeState.implicit-rows-shown: VerticalLayout {
                         for line[index] in ForgeState.implicits: ModifierRowItem {
+                            begin-input(a0) => { return ForgeState.begin-input(a0); }
+                            cancel-input(a0) => { ForgeState.cancel-input(a0); }
+                            commit-input(a0) => { return ForgeState.commit-input(a0); }
+                            end-scrub(a0, a1) => { ForgeState.end-scrub(a0, a1); }
+                            finish-input(a0) => { ForgeState.finish-input(a0); }
+                            focus-cell: ForgeState.focus-cell;
+                            focus-part: ForgeState.focus-part;
+                            focus-serial: ForgeState.focus-serial;
+                            input-edited(a0, a1) => { ForgeState.input-edited(a0, a1); }
+                            input-error: ForgeState.input-error;
+                            input-label: ForgeState.input-label;
+                            input-range: ForgeState.input-range;
+                            input-text <=> ForgeState.input-text;
+                            move-implicit(a0, a1, a2) => { ForgeState.move-implicit(a0, a1, a2); }
+                            move-unique(a0, a1, a2) => { ForgeState.move-unique(a0, a1, a2); }
+                            press(a0) => { ForgeState.press(a0); }
+                            scrub(a0, a1) => { ForgeState.scrub(a0, a1); }
+                            select-unique(a0) => { ForgeState.select-unique(a0); }
+                            step(a0, a1) => { ForgeState.step(a0, a1); }
+                            step-to-end(a0, a1) => { ForgeState.step-to-end(a0, a1); }
+                            typing: ForgeState.typing;
+                            typing-cell: ForgeState.typing-cell;
                             line: line;
                             index: index;
                             kind: CellKind.implicit;
@@ -1165,6 +1211,86 @@ export component ItemForge inherits Rectangle {
                         spacing: Tokens.row-gap.bottom;
 
                         for affix[index] in ForgeState.affixes: AffixRowItem {
+                            begin-input(a0) => { return ForgeState.begin-input(a0); }
+                            can-change-affix-list: ForgeState.can-change-affix-list;
+                            can-use-picker: ForgeState.can-use-picker;
+                            cancel-input(a0) => { ForgeState.cancel-input(a0); }
+                            cancel-picker() => { ForgeState.cancel-picker(); }
+                            commit-input(a0) => { return ForgeState.commit-input(a0); }
+                            discard-row(a0) => { ForgeState.discard-row(a0); }
+                            end-scrub(a0, a1) => { ForgeState.end-scrub(a0, a1); }
+                            finish-input(a0) => { ForgeState.finish-input(a0); }
+                            focus-cell: ForgeState.focus-cell;
+                            focus-part: ForgeState.focus-part;
+                            focus-serial: ForgeState.focus-serial;
+                            input-edited(a0, a1) => { ForgeState.input-edited(a0, a1); }
+                            input-error: ForgeState.input-error;
+                            input-label: ForgeState.input-label;
+                            input-range: ForgeState.input-range;
+                            input-text <=> ForgeState.input-text;
+                            move-row(a0, a1, a2) => { ForgeState.move-row(a0, a1, a2); }
+                            open-replace(a0) => { return ForgeState.open-replace(a0); }
+                            pick-seal(a0, a1) => { ForgeState.pick-seal(a0, a1); }
+                            pick-tier(a0, a1) => { ForgeState.pick-tier(a0, a1); }
+                            picker-action: ForgeState.picker-action;
+                            picker-allow: ForgeState.picker-allow;
+                            picker-allow-changed(a0) => { ForgeState.picker-allow-changed(a0); }
+                            picker-allow-enabled: ForgeState.picker-allow-enabled;
+                            picker-categories: ForgeState.picker-categories;
+                            picker-category: ForgeState.picker-category;
+                            picker-category-changed(a0) => { ForgeState.picker-category-changed(a0); }
+                            picker-chip-removed(a0) => { ForgeState.picker-chip-removed(a0); }
+                            picker-chips: ForgeState.picker-chips;
+                            picker-class: ForgeState.picker-class;
+                            picker-class-changed(a0) => { ForgeState.picker-class-changed(a0); }
+                            picker-classes: ForgeState.picker-classes;
+                            picker-clear-filters() => { ForgeState.picker-clear-filters(); }
+                            picker-count: ForgeState.picker-count;
+                            picker-empty-allow: ForgeState.picker-empty-allow;
+                            picker-empty-clear-filters: ForgeState.picker-empty-clear-filters;
+                            picker-empty-clear-search: ForgeState.picker-empty-clear-search;
+                            picker-empty-reason: ForgeState.picker-empty-reason;
+                            picker-filter: ForgeState.picker-filter;
+                            picker-filter-changed(a0) => { ForgeState.picker-filter-changed(a0); }
+                            picker-hidden: ForgeState.picker-hidden;
+                            picker-level: ForgeState.picker-level;
+                            picker-level-changed(a0) => { ForgeState.picker-level-changed(a0); }
+                            picker-levels: ForgeState.picker-levels;
+                            picker-open: ForgeState.picker-open;
+                            picker-rows: ForgeState.picker-rows;
+                            picker-search: ForgeState.picker-search;
+                            picker-search-edited(a0) => { ForgeState.picker-search-edited(a0); }
+                            picker-select(a0) => { ForgeState.picker-select(a0); }
+                            picker-selected: ForgeState.picker-selected;
+                            picker-show-uniques() => { ForgeState.picker-show-uniques(); }
+                            picker-sides: ForgeState.picker-sides;
+                            picker-slot: ForgeState.picker-slot;
+                            picker-slot-active: ForgeState.picker-slot-active;
+                            picker-slot-changed(a0) => { ForgeState.picker-slot-changed(a0); }
+                            picker-slot-text: ForgeState.picker-slot-text;
+                            picker-slots: ForgeState.picker-slots;
+                            picker-source: ForgeState.picker-source;
+                            picker-source-active: ForgeState.picker-source-active;
+                            picker-source-changed(a0) => { ForgeState.picker-source-changed(a0); }
+                            picker-source-text: ForgeState.picker-source-text;
+                            picker-sources: ForgeState.picker-sources;
+                            picker-status: ForgeState.picker-status;
+                            picker-subtitle: ForgeState.picker-subtitle;
+                            picker-tag-toggled(a0, a1) => { ForgeState.picker-tag-toggled(a0, a1); }
+                            picker-tags: ForgeState.picker-tags;
+                            picker-tags-active: ForgeState.picker-tags-active;
+                            picker-tags-on: ForgeState.picker-tags-on;
+                            picker-tags-text: ForgeState.picker-tags-text;
+                            picker-title: ForgeState.picker-title;
+                            press(a0) => { ForgeState.press(a0); }
+                            remove-affix(a0) => { ForgeState.remove-affix(a0); }
+                            scrub(a0, a1) => { ForgeState.scrub(a0, a1); }
+                            select-affix(a0) => { ForgeState.select-affix(a0); }
+                            step(a0, a1) => { ForgeState.step(a0, a1); }
+                            step-to-end(a0, a1) => { ForgeState.step-to-end(a0, a1); }
+                            typing: ForgeState.typing;
+                            typing-cell: ForgeState.typing-cell;
+                            use-picker() => { ForgeState.use-picker(); }
                             affix: affix;
                             index: index;
                             selected: ForgeState.selected-affix == index;
@@ -1206,6 +1332,58 @@ export component ItemForge inherits Rectangle {
                             close-policy: PopupClosePolicy.close-on-click-outside;
 
                             AffixPickerPanel {
+                                can-use-picker: ForgeState.can-use-picker;
+                                cancel-picker() => { ForgeState.cancel-picker(); }
+                                picker-action: ForgeState.picker-action;
+                                picker-allow: ForgeState.picker-allow;
+                                picker-allow-changed(a0) => { ForgeState.picker-allow-changed(a0); }
+                                picker-allow-enabled: ForgeState.picker-allow-enabled;
+                                picker-categories: ForgeState.picker-categories;
+                                picker-category: ForgeState.picker-category;
+                                picker-category-changed(a0) => { ForgeState.picker-category-changed(a0); }
+                                picker-chip-removed(a0) => { ForgeState.picker-chip-removed(a0); }
+                                picker-chips: ForgeState.picker-chips;
+                                picker-class: ForgeState.picker-class;
+                                picker-class-changed(a0) => { ForgeState.picker-class-changed(a0); }
+                                picker-classes: ForgeState.picker-classes;
+                                picker-clear-filters() => { ForgeState.picker-clear-filters(); }
+                                picker-count: ForgeState.picker-count;
+                                picker-empty-allow: ForgeState.picker-empty-allow;
+                                picker-empty-clear-filters: ForgeState.picker-empty-clear-filters;
+                                picker-empty-clear-search: ForgeState.picker-empty-clear-search;
+                                picker-empty-reason: ForgeState.picker-empty-reason;
+                                picker-filter: ForgeState.picker-filter;
+                                picker-filter-changed(a0) => { ForgeState.picker-filter-changed(a0); }
+                                picker-hidden: ForgeState.picker-hidden;
+                                picker-level: ForgeState.picker-level;
+                                picker-level-changed(a0) => { ForgeState.picker-level-changed(a0); }
+                                picker-levels: ForgeState.picker-levels;
+                                picker-rows: ForgeState.picker-rows;
+                                picker-search: ForgeState.picker-search;
+                                picker-search-edited(a0) => { ForgeState.picker-search-edited(a0); }
+                                picker-select(a0) => { ForgeState.picker-select(a0); }
+                                picker-selected: ForgeState.picker-selected;
+                                picker-show-uniques() => { ForgeState.picker-show-uniques(); }
+                                picker-sides: ForgeState.picker-sides;
+                                picker-slot: ForgeState.picker-slot;
+                                picker-slot-active: ForgeState.picker-slot-active;
+                                picker-slot-changed(a0) => { ForgeState.picker-slot-changed(a0); }
+                                picker-slot-text: ForgeState.picker-slot-text;
+                                picker-slots: ForgeState.picker-slots;
+                                picker-source: ForgeState.picker-source;
+                                picker-source-active: ForgeState.picker-source-active;
+                                picker-source-changed(a0) => { ForgeState.picker-source-changed(a0); }
+                                picker-source-text: ForgeState.picker-source-text;
+                                picker-sources: ForgeState.picker-sources;
+                                picker-status: ForgeState.picker-status;
+                                picker-subtitle: ForgeState.picker-subtitle;
+                                picker-tag-toggled(a0, a1) => { ForgeState.picker-tag-toggled(a0, a1); }
+                                picker-tags: ForgeState.picker-tags;
+                                picker-tags-active: ForgeState.picker-tags-active;
+                                picker-tags-on: ForgeState.picker-tags-on;
+                                picker-tags-text: ForgeState.picker-tags-text;
+                                picker-title: ForgeState.picker-title;
+                                use-picker() => { ForgeState.use-picker(); }
                                 done => {
                                     add-popup.close();
                                 }
@@ -1253,7 +1431,9 @@ export component ItemForge inherits Rectangle {
                             }
                         }
 
-                        templates-measure := TemplatesMeasure { }
+                        templates-measure := TemplatesMeasure {
+                            note: root.template-note;
+                        }
 
                         property <length> templates-height: TemplateMetrics.height(ForgeState.template-rows.length, templates-measure.message);
                         // Room between the button and the window's top, and between it and the page's foot.
@@ -1277,6 +1457,15 @@ export component ItemForge inherits Rectangle {
                             close-policy: PopupClosePolicy.close-on-click-outside;
 
                             TemplatesPanel {
+                                has-item: ForgeState.has-item;
+                                template-apply(a0) => { ForgeState.template-apply(a0); }
+                                template-delete(a0) => { ForgeState.template-delete(a0); }
+                                template-name: ForgeState.template-name;
+                                template-name-edited(a0) => { ForgeState.template-name-edited(a0); }
+                                template-replaces: ForgeState.template-replaces;
+                                note: root.template-note;
+                                template-rows: ForgeState.template-rows;
+                                template-save(a0, a1) => { ForgeState.template-save(a0, a1); }
                                 done => {
                                     templates-popup.close();
                                 }
@@ -1414,6 +1603,28 @@ export component ItemForge inherits Rectangle {
                             spacing: Tokens.row-gap.bottom;
 
                             for line[index] in ForgeState.unique-modifiers: ModifierRowItem {
+                                begin-input(a0) => { return ForgeState.begin-input(a0); }
+                                cancel-input(a0) => { ForgeState.cancel-input(a0); }
+                                commit-input(a0) => { return ForgeState.commit-input(a0); }
+                                end-scrub(a0, a1) => { ForgeState.end-scrub(a0, a1); }
+                                finish-input(a0) => { ForgeState.finish-input(a0); }
+                                focus-cell: ForgeState.focus-cell;
+                                focus-part: ForgeState.focus-part;
+                                focus-serial: ForgeState.focus-serial;
+                                input-edited(a0, a1) => { ForgeState.input-edited(a0, a1); }
+                                input-error: ForgeState.input-error;
+                                input-label: ForgeState.input-label;
+                                input-range: ForgeState.input-range;
+                                input-text <=> ForgeState.input-text;
+                                move-implicit(a0, a1, a2) => { ForgeState.move-implicit(a0, a1, a2); }
+                                move-unique(a0, a1, a2) => { ForgeState.move-unique(a0, a1, a2); }
+                                press(a0) => { ForgeState.press(a0); }
+                                scrub(a0, a1) => { ForgeState.scrub(a0, a1); }
+                                select-unique(a0) => { ForgeState.select-unique(a0); }
+                                step(a0, a1) => { ForgeState.step(a0, a1); }
+                                step-to-end(a0, a1) => { ForgeState.step-to-end(a0, a1); }
+                                typing: ForgeState.typing;
+                                typing-cell: ForgeState.typing-cell;
                                 line: line;
                                 index: index;
                                 kind: CellKind.unique;
@@ -1486,6 +1697,11 @@ export component ItemForge inherits Rectangle {
         // The changes pane: beside the table, keeping its column when hidden; in a narrow window over the table's right side,
         // where Escape closes it and gives focus back to the Changes toggle.
         if ForgeState.pane-open: ChangesPane {
+            discard-entry(a0) => { ForgeState.discard-entry(a0); }
+            draft-count-text: ForgeState.draft-count-text;
+            drafts: ForgeState.drafts;
+            history: ForgeState.history;
+            show-draft(a0) => { ForgeState.show-draft(a0); }
             x: root.width - root.pane-width;
             y: header.height;
             width: root.pane-width;

@@ -5,11 +5,18 @@ import { ScrollView } from "../../widgets/scroll-view.slint";
 import { Tokens } from "../../tokens.slint";
 import { KeyboardFocus } from "../../globals.slint";
 import { FocusRing, TipTrigger } from "../../widgets/focus.slint";
-import { ForgeState } from "state.slint";
+import { AppliedEntryView, DraftEntryView } from "state.slint";
 import { ForgeText } from "../../strings/forge.slint";
 import { CompactIconButton } from "../../widgets/compact-icon-button.slint";
 
 export component ChangesPane inherits Rectangle {
+    // From the page: what this shows and what it asks of it.
+    callback discard-entry(int);
+    in property <string> draft-count-text;
+    in property <[DraftEntryView]> drafts;
+    in property <[AppliedEntryView]> history;
+    callback show-draft(int);
+
     // Lying over the table (a narrow window): it takes the pointer over its whole area, and Escape inside it closes it.
     in property <bool> overlay;
     callback dismissed();
@@ -61,7 +68,7 @@ export component ChangesPane inherits Rectangle {
                         spacing: Tokens.space-8;
                         alignment: start;
 
-                        if ForgeState.drafts.length > 0: Image {
+                        if root.drafts.length > 0: Image {
                             width: Tokens.icon-size;
                             height: Tokens.icon-size;
                             y: (parent.height - self.height) / 2;
@@ -71,10 +78,10 @@ export component ChangesPane inherits Rectangle {
                         }
 
                         Text {
-                            text: ForgeState.draft-count-text;
+                            text: root.draft-count-text;
                             font-size: Tokens.font-size-subheading;
                             font-weight: Tokens.emphasis-weight;
-                            color: ForgeState.drafts.length > 0 ? Tokens.draft-brush : Tokens.text-muted-brush;
+                            color: root.drafts.length > 0 ? Tokens.draft-brush : Tokens.text-muted-brush;
                         }
                     }
 
@@ -83,13 +90,13 @@ export component ChangesPane inherits Rectangle {
                     VerticalLayout {
                         spacing: Tokens.space-0;
 
-                        for entry[index] in ForgeState.drafts: Rectangle {
+                        for entry[index] in root.drafts: Rectangle {
                             height: entry-layout.preferred-height;
                             border-radius: Tokens.control-radius;
                             background: entry-touch.has-hover || name-touch.has-hover ? Tokens.draft-hover-brush : transparent;
                             accessible-role: button;
                             accessible-label: ForgeText.show-draft-for(entry.name);
-                            accessible-action-default => { ForgeState.show-draft(index); }
+                            accessible-action-default => { root.show-draft(index); }
 
                             entry-focus := FocusScope {
                                 focus-gained(reason) => {
@@ -99,7 +106,7 @@ export component ChangesPane inherits Rectangle {
                                 }
                                 key-pressed(event) => {
                                     if (event.text == Key.Return || event.text == " ") {
-                                        ForgeState.show-draft(index);
+                                        root.show-draft(index);
                                         return accept;
                                     }
                                     reject
@@ -112,7 +119,7 @@ export component ChangesPane inherits Rectangle {
                                         }
                                     }
                                     clicked => {
-                                        ForgeState.show-draft(index);
+                                        root.show-draft(index);
                                     }
                                 }
                             }
@@ -142,7 +149,7 @@ export component ChangesPane inherits Rectangle {
                                                 }
                                             }
                                             clicked => {
-                                                ForgeState.show-draft(index);
+                                                root.show-draft(index);
                                             }
                                         }
                                     }
@@ -189,7 +196,7 @@ export component ChangesPane inherits Rectangle {
                                         icon: Tokens.icon-close;
                                         tip: ForgeText.discard-draft-for(entry.name);
                                         clicked => {
-                                            ForgeState.discard-entry(index);
+                                            root.discard-entry(index);
                                         }
                                     }
                                 }
@@ -216,7 +223,7 @@ export component ChangesPane inherits Rectangle {
                         color: Tokens.text-muted-brush;
                     }
 
-                    if ForgeState.history.length == 0: Text {
+                    if root.history.length == 0: Text {
                         text: ForgeText.nothing-applied;
                         font-size: Tokens.font-size-caption;
                         color: Tokens.text-muted-brush;
@@ -227,7 +234,7 @@ export component ChangesPane inherits Rectangle {
                     VerticalLayout {
                         spacing: Tokens.space-0;
 
-                        for entry in ForgeState.history: HorizontalLayout {
+                        for entry in root.history: HorizontalLayout {
                             padding-top: Tokens.catalog-entry-margin.top;
                             padding-bottom: Tokens.catalog-entry-margin.bottom;
                             spacing: Tokens.space-8;

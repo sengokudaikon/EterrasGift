@@ -283,8 +283,8 @@ fn source_imports_and_reexports_preserve_feature_boundaries() {
 /// is put together. What only the views share (tokens, keyboard focus, a popup's metrics) has globals of its own.
 #[test]
 fn only_a_pages_root_reads_its_global() {
-    const GLOBALS: [&str; 4] = ["HomeState", "LogsState", "ModsState", "SettingsState"];
-    const ROOTS: [&str; 4] = ["HomePage", "LogsPage", "ModsPage", "SettingsPage"];
+    const GLOBALS: [&str; 6] = ["HomeState", "LogsState", "ModsState", "SettingsState", "TrainerState", "ForgeState"];
+    const ROOTS: [&str; 6] = ["HomePage", "LogsPage", "ModsPage", "SettingsPage", "TrainerPage", "ItemForge"];
     fn slint_files(folder: &Path, found: &mut Vec<PathBuf>) {
         for entry in fs::read_dir(folder).unwrap() {
             let path = entry.unwrap().path();
@@ -297,7 +297,7 @@ fn only_a_pages_root_reads_its_global() {
     }
     let mut files = Vec::new();
     slint_files(&workspace().root.join("crates/ui/ui/pages"), &mut files);
-    assert!(files.len() > 3, "the pages moved");
+    assert!(files.len() > 5, "the pages moved");
     let mut readers = BTreeSet::new();
     for file in files {
         let mut within = String::new();

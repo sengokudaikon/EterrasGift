@@ -7,11 +7,32 @@ import { KeyboardFocus } from "../../globals.slint";
 import { TipTrigger } from "../../widgets/focus.slint";
 import { FlyoutSurface } from "../../widgets/menu.slint";
 import { RangeBar } from "../../widgets/range-bar.slint";
-import { ForgeState, ForgeReveal, ForgeCover, ValueCell, CellRef } from "state.slint";
+import { CellRef, ForgeCover, ValueCell } from "state.slint";
 
 // The value cell: one tab stop. Drag scrubs (Shift is four times finer), Left and Right step one attainable value (Shift
 // five), Home and End jump to the ends, Enter, F2 or a click without dragging opens the popover.
 export component ValueScrubber inherits Rectangle {
+    // From the page: what this shows and what it asks of it.
+    callback begin-input(CellRef) -> bool;
+    callback cancel-input(CellRef);
+    callback commit-input(CellRef) -> bool;
+    callback end-scrub(CellRef, bool);
+    callback finish-input(CellRef);
+    in property <CellRef> focus-cell;
+    in property <int> focus-part;
+    in property <int> focus-serial;
+    callback input-edited(CellRef, string);
+    in property <string> input-error;
+    in property <string> input-label;
+    in property <string> input-range;
+    in-out property <string> input-text;
+    callback press(CellRef);
+    callback scrub(CellRef, float);
+    callback step(CellRef, int);
+    callback step-to-end(CellRef, bool);
+    in property <bool> typing;
+    in property <CellRef> typing-cell;
+
     in property <ValueCell> cell;
     in property <bool> on-unique;
     // Up and Down from the cell move between rows; the row decides.
@@ -33,18 +54,18 @@ export component ValueScrubber inherits Rectangle {
     property <length> press-x;
     property <bool> keyboard-focus: focus.has-focus && KeyboardFocus.visible;
     property <length> bar-y: value-line.preferred-height + Tokens.space-4;
-    property <int> serial: ForgeState.focus-serial;
+    property <int> serial: root.focus-serial;
     property <bool> popup-open: popup.is-open;
     // Another value in this place (the row was rebuilt under the pointer: an item swap, a reload) ends the drag, which
     // belonged to the old value.
     property <int> uid: root.cell.uid;
     // This cell is the one typing; when typing ends elsewhere (Undo, an item change, a cancel), the popover follows.
-    property <bool> typing-here: ForgeState.typing && ForgeState.typing-cell.kind == root.cell.cell.kind
-        && ForgeState.typing-cell.row == root.cell.cell.row && ForgeState.typing-cell.roll == root.cell.cell.roll;
+    property <bool> typing-here: root.typing && root.typing-cell.kind == root.cell.cell.kind
+        && root.typing-cell.row == root.cell.cell.row && root.typing-cell.roll == root.cell.cell.roll;
 
     changed serial => {
-        if (ForgeState.focus-cell.kind == root.cell.cell.kind && ForgeState.focus-cell.row == root.cell.cell.row
-            && ForgeState.focus-cell.roll == root.cell.cell.roll && ForgeState.focus-part == 0) {
+        if (root.focus-cell.kind == root.cell.cell.kind && root.focus-cell.row == root.cell.cell.row
+            && root.focus-cell.roll == root.cell.cell.roll && root.focus-part == 0) {
             focus.focus();
             root.revealed();
         }
@@ -65,23 +86,19 @@ export component ValueScrubber inherits Rectangle {
     // Clicking away keeps a valid typed value and drops an invalid one.
     changed popup-open => {
         if (!root.popup-open) {
-            ForgeState.finish-input(root.cell.cell);
+            root.finish-input(root.cell.cell);
         }
     }
 
-    public function focus-cell() {
-        focus.focus();
-    }
-
     function open-input() {
-        if (ForgeState.begin-input(root.cell.cell)) {
+        if (root.begin-input(root.cell.cell)) {
             popup.show();
         }
     }
 
     function end-gesture(cancelled: bool) {
         if (root.scrubbing) {
-            ForgeState.end-scrub(root.cell.cell, cancelled);
+            root.end-scrub(root.cell.cell, cancelled);
         }
         root.pressed = false;
         root.scrubbing = false;
@@ -161,7 +178,7 @@ export component ValueScrubber inherits Rectangle {
             if (reason == FocusReason.tab-navigation) {
                 KeyboardFocus.visible = true;
             }
-            ForgeState.press(root.cell.cell);
+            root.press(root.cell.cell);
         }
         key-pressed(event) => {
             if (root.pressed) {
@@ -176,19 +193,19 @@ export component ValueScrubber inherits Rectangle {
                 return reject;
             }
             if (event.text == Key.LeftArrow) {
-                ForgeState.step(root.cell.cell, event.modifiers.shift ? -Tokens.scrub-large-step : -1);
+                root.step(root.cell.cell, event.modifiers.shift ? -Tokens.scrub-large-step : -1);
                 return accept;
             }
             if (event.text == Key.RightArrow) {
-                ForgeState.step(root.cell.cell, event.modifiers.shift ? Tokens.scrub-large-step : 1);
+                root.step(root.cell.cell, event.modifiers.shift ? Tokens.scrub-large-step : 1);
                 return accept;
             }
             if (event.text == Key.Home) {
-                ForgeState.step-to-end(root.cell.cell, false);
+                root.step-to-end(root.cell.cell, false);
                 return accept;
             }
             if (event.text == Key.End) {
-                ForgeState.step-to-end(root.cell.cell, true);
+                root.step-to-end(root.cell.cell, true);
                 return accept;
             }
             if (event.text == Key.Return || event.text == Key.F2) {
@@ -220,14 +237,14 @@ export component ValueScrubber inherits Rectangle {
                 if (event.kind == PointerEventKind.down && event.button == PointerEventButton.left) {
                     KeyboardFocus.visible = false;
                     focus.focus();
-                    ForgeState.press(root.cell.cell);
+                    root.press(root.cell.cell);
                     root.pressed = true;
                     root.scrubbing = false;
                     root.press-x = self.mouse-x;
                 } else if (event.kind == PointerEventKind.move && root.pressed && !root.locked) {
                     if (root.scrubbing || Math.abs(self.mouse-x - root.press-x) >= Tokens.scrub-threshold) {
                         root.scrubbing = true;
-                        ForgeState.scrub(root.cell.cell, (self.mouse-x - root.press-x) / (Tokens.scrub-span * (event.modifiers.shift ? Tokens.scrub-fine-factor : 1)));
+                        root.scrub(root.cell.cell, (self.mouse-x - root.press-x) / (Tokens.scrub-span * (event.modifiers.shift ? Tokens.scrub-fine-factor : 1)));
                     }
                 } else if (event.kind == PointerEventKind.up && event.button == PointerEventButton.left && root.pressed) {
                     if (root.scrubbing) {
@@ -269,7 +286,7 @@ export component ValueScrubber inherits Rectangle {
         width: Tokens.value-flyout-width + Tokens.flyout-padding.left + Tokens.flyout-padding.right;
         height: Tokens.flyout-padding.top + Tokens.flyout-padding.bottom + Tokens.font-size-caption * 4 / 3 + Tokens.control-min-height
             + Tokens.font-size-caption * 4 / 3 + Tokens.space-6 * 2
-            + (ForgeState.input-error != "" ? Tokens.space-6 + Tokens.font-size-caption * 8 / 3 : 0px);
+            + (root.input-error != "" ? Tokens.space-6 + Tokens.font-size-caption * 8 / 3 : 0px);
         close-policy: PopupClosePolicy.close-on-click-outside;
 
         FlyoutSurface {
@@ -277,7 +294,7 @@ export component ValueScrubber inherits Rectangle {
             FocusScope {
                 capture-key-pressed(event) => {
                     if (event.text == Key.Escape) {
-                        ForgeState.cancel-input(root.cell.cell);
+                        root.cancel-input(root.cell.cell);
                         popup.close();
                         focus.focus();
                         return accept;
@@ -294,7 +311,7 @@ export component ValueScrubber inherits Rectangle {
                     alignment: start;
 
                     Text {
-                        text: ForgeState.input-label;
+                        text: root.input-label;
                         font-size: Tokens.font-size-caption;
                         color: Tokens.text-muted-brush;
                         overflow: elide;
@@ -302,7 +319,7 @@ export component ValueScrubber inherits Rectangle {
                         label-touch := TouchArea { }
 
                         TipTrigger {
-                            text: ForgeState.input-label;
+                            text: root.input-label;
                             hovered: label-touch.has-hover;
                         }
                     }
@@ -323,24 +340,24 @@ export component ValueScrubber inherits Rectangle {
                         input := TextInput {
                             x: Tokens.space-10;
                             width: parent.width - Tokens.space-10 * 2;
-                            text <=> ForgeState.input-text;
+                            text <=> root.input-text;
                             single-line: true;
                             font-size: Tokens.font-size-value;
                             color: Tokens.text-brush;
                             selection-background-color: Tokens.accent-pressed-color;
                             selection-foreground-color: Tokens.on-accent-color;
                             vertical-alignment: center;
-                            accessible-label: ForgeState.input-label;
+                            accessible-label: root.input-label;
                             init => {
                                 self.focus();
                                 self.select-all();
                             }
                             edited => {
-                                ForgeState.input-edited(root.cell.cell, self.text);
+                                root.input-edited(root.cell.cell, self.text);
                             }
                             // Enter commits a valid value; an invalid one keeps the popover open with its reason.
                             accepted => {
-                                if (ForgeState.commit-input(root.cell.cell)) {
+                                if (root.commit-input(root.cell.cell)) {
                                     popup.close();
                                     focus.focus();
                                 }
@@ -349,14 +366,14 @@ export component ValueScrubber inherits Rectangle {
                     }
 
                     Text {
-                        text: ForgeState.input-range;
+                        text: root.input-range;
                         font-size: Tokens.font-size-caption;
                         color: Tokens.text-muted-brush;
                         overflow: elide;
                     }
 
-                    if ForgeState.input-error != "": Text {
-                        text: ForgeState.input-error;
+                    if root.input-error != "": Text {
+                        text: root.input-error;
                         font-size: Tokens.font-size-caption;
                         color: Tokens.error-brush;
                         wrap: word-wrap;

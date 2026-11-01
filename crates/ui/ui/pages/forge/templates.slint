@@ -12,7 +12,7 @@ import { FlyoutSurface } from "../../widgets/menu.slint";
 import { ListView } from "../../widgets/scroll-view.slint";
 import { TextField } from "../../widgets/text-field.slint";
 import { FactsText } from "../../widgets/text.slint";
-import { ForgeState } from "state.slint";
+import { TemplateRowView } from "state.slint";
 import { ForgeText } from "../../strings/forge.slint";
 
 export global TemplateMetrics {
@@ -20,11 +20,6 @@ export global TemplateMetrics {
     out property <length> row: Math.max(Tokens.control-min-height, Tokens.font-size-body * 4 / 3 + Tokens.space-1 + Tokens.font-size-caption * 4 / 3)
         + Tokens.space-6 * 2;
     out property <length> caption-line: Tokens.font-size-caption * 4 / 3;
-
-    // The line under the form: what saving the typed name would replace, else what the last action did.
-    out property <string> message: ForgeState.template-replaces != ""
-        ? ForgeText.saving-replaces(ForgeState.template-replaces)
-        : ForgeState.template-message;
 
     public pure function list-height(rows: int) -> length {
         return rows == 0 ? self.caption-line * 2 : Math.min(Tokens.replace-list-max-height, rows * self.row);
@@ -45,7 +40,9 @@ export global TemplateMetrics {
 
 // Measures the message as the flyout wraps it; a popup's insides can't be read from outside, so this sits by its opener.
 export component TemplatesMeasure inherits Rectangle {
-    out property <length> message: TemplateMetrics.message == "" ? 0px : text.preferred-height;
+    // The line under the form.
+    in property <string> note;
+    out property <length> message: root.note == "" ? 0px : text.preferred-height;
 
     width: 0;
     height: 0;
@@ -55,13 +52,25 @@ export component TemplatesMeasure inherits Rectangle {
         x: 0;
         y: 0;
         width: Tokens.replace-flyout-width;
-        text: TemplateMetrics.message;
+        text: root.note;
         font-size: Tokens.font-size-caption;
         wrap: word-wrap;
     }
 }
 
 export component TemplatesPanel inherits FlyoutSurface {
+    // From the page: what this shows and what it asks of it.
+    in property <bool> has-item;
+    callback template-apply(int);
+    callback template-delete(int);
+    in property <string> template-name;
+    callback template-name-edited(string);
+    in property <string> template-replaces;
+    // The line under the form.
+    in property <string> note;
+    in property <[TemplateRowView]> template-rows;
+    callback template-save(string, bool);
+
     // After a template is applied: its drafts show on the page, behind the flyout.
     callback done();
 
@@ -71,8 +80,8 @@ export component TemplatesPanel inherits FlyoutSurface {
 
     function save() {
         root.deleting = -1;
-        if (ForgeState.template-name != "") {
-            ForgeState.template-save(ForgeState.template-name, root.kind == 1);
+        if (root.template-name != "") {
+            root.template-save(root.template-name, root.kind == 1);
         }
     }
 
@@ -108,9 +117,9 @@ export component TemplatesPanel inherits FlyoutSurface {
             }
 
             Rectangle {
-                height: TemplateMetrics.list-height(ForgeState.template-rows.length);
+                height: TemplateMetrics.list-height(root.template-rows.length);
 
-                if ForgeState.template-rows.length == 0: Text {
+                if root.template-rows.length == 0: Text {
                     width: parent.width;
                     text: ForgeText.no-templates;
                     font-size: Tokens.font-size-caption;
@@ -118,8 +127,8 @@ export component TemplatesPanel inherits FlyoutSurface {
                     wrap: word-wrap;
                 }
 
-                if ForgeState.template-rows.length > 0: ListView {
-                    for entry[index] in ForgeState.template-rows: HorizontalLayout {
+                if root.template-rows.length > 0: ListView {
+                    for entry[index] in root.template-rows: HorizontalLayout {
                         property <bool> asking: root.deleting == index;
 
                         height: TemplateMetrics.row;
@@ -164,15 +173,15 @@ export component TemplatesPanel inherits FlyoutSurface {
                             in-flyout: true;
                             text: asking ? ForgeText.delete : ForgeText.draft-action;
                             kind: asking ? ButtonKind.primary : ButtonKind.standard;
-                            enabled: asking || ForgeState.has-item;
+                            enabled: asking || root.has-item;
                             tip: asking ? ForgeText.delete-for-good-tip(entry.name) : ForgeText.draft-onto-tip(entry.name);
                             clicked => {
                                 if (asking) {
                                     root.deleting = -1;
-                                    ForgeState.template-delete(index);
+                                    root.template-delete(index);
                                     name-field.focus();
                                 } else {
-                                    ForgeState.template-apply(index);
+                                    root.template-apply(index);
                                     root.done();
                                 }
                             }
@@ -192,7 +201,7 @@ export component TemplatesPanel inherits FlyoutSurface {
             }
 
             name-field := TextField {
-                text: ForgeState.template-name;
+                text: root.template-name;
                 placeholder: ForgeText.template-name;
                 label: ForgeText.template-name;
                 init => {
@@ -200,11 +209,11 @@ export component TemplatesPanel inherits FlyoutSurface {
                 }
                 edited(text) => {
                     root.deleting = -1;
-                    ForgeState.template-name-edited(text);
+                    root.template-name-edited(text);
                 }
                 // Enter saves a new name; one that would replace a kept template goes to Replace, which says so.
                 accepted(text) => {
-                    if (ForgeState.template-replaces != "") {
+                    if (root.template-replaces != "") {
                         KeyboardFocus.visible = true;
                         save-button.focus();
                     } else {
@@ -228,11 +237,11 @@ export component TemplatesPanel inherits FlyoutSurface {
 
                 save-button := Button {
                     in-flyout: true;
-                    text: ForgeState.template-replaces != "" ? ForgeText.replace : ForgeText.save;
+                    text: root.template-replaces != "" ? ForgeText.replace : ForgeText.save;
                     kind: ButtonKind.primary;
-                    enabled: ForgeState.template-name != "" && ForgeState.has-item;
-                    tip: ForgeState.template-replaces != ""
-                        ? ForgeText.save-replacing-tip(ForgeState.template-replaces)
+                    enabled: root.template-name != "" && root.has-item;
+                    tip: root.template-replaces != ""
+                        ? ForgeText.save-replacing-tip(root.template-replaces)
                         : ForgeText.save-new-tip;
                     clicked => {
                         root.save();
@@ -240,10 +249,10 @@ export component TemplatesPanel inherits FlyoutSurface {
                 }
             }
 
-            if TemplateMetrics.message != "": Text {
-                text: TemplateMetrics.message;
+            if root.note != "": Text {
+                text: root.note;
                 font-size: Tokens.font-size-caption;
-                color: ForgeState.template-replaces != "" ? Tokens.warning-brush : Tokens.text-secondary-brush;
+                color: root.template-replaces != "" ? Tokens.warning-brush : Tokens.text-secondary-brush;
                 wrap: word-wrap;
             }
         }
