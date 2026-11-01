@@ -29,7 +29,7 @@ only; feature IDs/profile settings and the original gameplay behavior remain ind
 | Todo | Coherent settings larger than a pair | Drop rates (four values), Morditas timer and monster rarity (three). The XP pair already publishes as one atomic word; do not extend it with unsynchronized payload accesses. |
 | Todo | Scoped context | Projectiles, then duplicate and echo cycling. Movement uses its checked, single native call site and needs no retained mark. |
 | Todo | Temporary asset mutation/restoration | Prophecy rewards/max LP, then density and pack size/rarity; settle threading and native-unwind behavior with those consumers. |
-| Todo | Additional ABI/caller adapters | Validate indirect aggregates, long signatures and hidden result storage when their features arrive. |
+| Todo | Additional ABI/caller adapters | Validate auto-aim hidden result storage and the placement configuration struct when their features arrive. |
 
 ## Hooks to build
 
@@ -74,7 +74,6 @@ Behavior reference: [loot.h](../../EterrasGift/native/hooks/loot.h).
 |---|---|---|---|---|
 | Todo | `drop-rates` — `DeathItemDrop.OnDeath` | Before original, write item/gold override flags, chances clamped to 0..1 and nonnegative multipliers on the passed drop component. Keep those writes because delayed drop work reads them later. | Shared target with extra rares; coherent four-value settings; field descriptors. | Item/gold settings remain coherent; a delayed original continuation sees the changed component; off does not retroactively undo drops. |
 | Todo | `extra-rare` — same `OnDeath` | Set `guaranteedAdditionalRare` before original on the passed component. Leave it on that dying enemy as the original app does. | Death-drop target and descriptors. | Works independently of drop rates; disabling one keeps the other's target installed; original executes once. |
-| Todo | `new-item-rarity` — `GenerateItems.RollBaseItem` | Replace only a caller-supplied rarity of -1 with the selected catalog mapping 0/1/3/7/8. Forward 21 managed parameters, receiver and MethodInfo, including reference/aggregate payloads with validated ABI. Explicitly requested rarity wins. | Long-stack forwarding once proven, settings choice validation. | All 23 native slots survive; explicit unique/blessing/gambler rarity unchanged; only -1 is replaced. |
 
 ### Monolith
 
@@ -84,7 +83,6 @@ Behavior reference: [monolith.h](../../EterrasGift/native/hooks/monolith.h).
 |---|---|---|---|---|
 | Todo | `skip-quest-echoes` — `MonolithTimelinePanelManager.SetRunInfo` | Raise run quest completion to at least two and stability to at least the selected difficulty's maximum before original. Validate difficulty indexing. Preserve the original trigger on showing run info; changes belong to the saved run and are not undone on off. | Object/list reads and field stores. | Lower values raised, higher values preserved, invalid difficulty safe fallback, opening the panel triggers original once. |
 | Todo | `cycle-echo-types` — `getIslandTypeForNewIsland`, `CalculateModAndZoneForIsland`, `CanHaveSubsequentConnectionsRevealed`, `OnIslandCompleted` table | Cycle the seven original type values; pass tier at least 19 for the related generation calls using per-thread web/tier context; permit subsequent connections; redirect normal/arena completion table entries to Super Beacon. Share type target with echo-type. Restore the table on off. | Shared/multiple target ownership, scoped context, atomic cycle index and checked data patching. Keep the cycle and table decoding specific. | Sequence/wrap, unrelated web, explicit-type precedence, normal/arena reveal behavior, table restoration and partial installation failure. |
-| Todo | `reveal-objective` — `LE.Gameplay.Monolith.Frontend.MonolithPulse.OnScoreChanged` | Raise incoming score to at least the pulse's threshold before original. Preserve its existing score-change/first-kill trigger; do not add a global objective scan. | Float argument adjustment and object field read. | Below/above threshold, original last-kill argument, next score event after activation; previously revealed objective stays revealed. |
 
 ### Factions
 
@@ -92,7 +90,6 @@ Behavior reference: [factions.h](../../EterrasGift/native/hooks/factions.h).
 
 | Status | Feature and target | Behavior | Shared mechanism | Distinguishing targeted check |
 |---|---|---|---|---|
-| Todo | `prophecy-any-distance` — `LE.Factions.CircleOfFortune.IsPlayerInRangeOf` | Return true when active; otherwise call original. This is combat prophecy distance, not removal of a zone requirement (the C# ID was `prophecy-any-zone`). Position is an aggregate passed indirectly and must be validated. | Boolean-return lifecycle once the indirect value argument is checked. | Out-of-range completion succeeds, original skipped only on, position forwarded correctly off. |
 | Todo | `prophecy-uses` — `LE.Factions.ProphecySlot.TryTriggerReward` | Save completed charges; call original with the actual out parameter; after a successful trigger restore only charges that decreased. Keep original return and `chargesConsumed` output. | Small snapshot mechanics if they match another feature. Success-dependent restoration remains specific. | Failed trigger, increased charges, multiple consumed charges, exact out value; explicitly decide the original-throw case. |
 | Todo | `prophecy-max-lp` — `ProphecySlotReward.SpawnRewardForPlayer` | Temporarily raise generic reward minimum LP to at least four, call original, restore the previous asset value even on native unwind. Share handler with reward multiplier; prove the eight-byte Nullable lens ABI. | Shared target; scoped restoration mechanism established with this family. | Shared asset remains pristine after normal/throwing calls; existing LP above four preserved; absent generic item. |
 | Todo | `prophecy-reward-multiplier` — same `SpawnRewardForPlayer` | Temporarily scale `itemsDropped`, rounded and clamped to 0..1000, then restore. Preserve downstream lucky-lens doubling and composition with max LP. Shared reward assets must not retain repeated multiplication. | Same target and restoration record as max LP; settings. | Repeated calls do not compound; both features together; nested/concurrent calls require an explicit target-threading contract. |
@@ -105,7 +102,6 @@ Behavior reference: [world.h](../../EterrasGift/native/hooks/world.h).
 |---|---|---|---|---|
 | Todo | `morditas-timer` — `RageOfMorditasLogic.OnEnter_HuntState`, `FixedUpdate_Hunt`, `OnActorDiedDuringHunt` | Snapshot times, call original, scale only that call's changed initial duration, positive elapsed delta while still hunting, or positive kill bonus. Do not revive a hunt ended by original. Three settings and targets compose. | Coherent settings triple and multi-target ownership; field descriptors. | Secondary hunt with unchanged length, ending tick, zero/negative deltas, kill popup timing and off mid-hunt without rewinding elapsed time. |
 | Todo | `camera-distance` — `CameraManager.ApplyZoom` | Write configured distance before original. Keep the game's distance per camera, adopt external distance changes as the new baseline, and restore only if current value still equals our last write. Apply immediately on toggle through the main thread where available. | Lifecycle cleanup entry point; conditional restoration idea from existing writes. Keep camera state/refresh local. | Camera replacement, user changing game setting while on, off after foreign change, menu departure and cleanup before dispatcher removal. |
-| Todo | `reveal-map` — `LE.UI.Minimap.Minimap.UpdateFoW_Singular` | Raise radius to at least 1000 and call original. Forward indirect float3 position exactly. Disabling does not hide already revealed map. | Mixed scalar forwarding and argument adjustment after aggregate validation. | Larger radius preserved; exact position forwarded; existing reveal persists after off. |
 | Todo | `pack-count` — `SpawnerPlacementRoom.rollSpawners` | Temporarily set density modifier to `(1 + old) * multiplier - 1`, invoke original, restore even on unwind. Validate the small by-value two-bool configuration struct. Retain the game's placement limit. | Scoped restoration after the prophecy family proves it; scalar settings. | Original modifier restored, not compounded; exception, nested call and configuration bytes; multiplier does not bypass room cap. |
 | Todo | `pack-size` — `Spawner.GenerateEntitiesInternal` | Temporarily multiply `numberToSpawn` only when its original value exceeds one; preserve single boss/named spawns. Restore after original including unwind. Share with monster rarity. | Shared spawner target and restoration record. | One remains one; multi-pack scales; repeated/throwing calls do not retain modified count. |
 | Todo | `monster-rarity` — same `GenerateEntitiesInternal` | Temporarily multiply common/magic/rare weightings by three coherent settings, call original, restore all weights. Compose with pack size in one handler. | Same target/restoration record; settings triple. | Each weighting, both features together, zero weights, repeated calls and foreign unwind restoration. |
@@ -134,8 +130,8 @@ require building a universal handler/ABI/object framework first.
 
 - **Settings and numeric transforms:** larger drop/monster settings reuse only matching arithmetic,
   publication and owner lookup from implemented gains. Preserve each feature's original-call placement.
-- **Further argument forwarding:** new item rarity needs its full long signature; map/prophecy distance need validated
-  indirect aggregates. The current scalar-result family is implemented; it does not imply support for hidden results.
+- **Further argument forwarding:** auto-aim needs its exact Vector3 hidden-result ABI. Existing argument hooks
+  preserve their opaque aggregate inputs in place; they do not adapt hidden result storage.
 - **Scoped context:** projectiles then duplicate establish nesting/unwind behavior, while echo context spans calls.
   Keep each feature's cleanup policy explicit; the movement hook uses caller selection instead of a mark.
 - **Temporary shared assets:** prophecy reward count/max LP, then density and pack size/rarity need explicit target

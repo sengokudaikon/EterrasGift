@@ -58,6 +58,40 @@ fn fixed_area_sends_its_value_and_confirms_it_from_independent_readback() {
 }
 
 #[test]
+fn new_item_rarity_sends_game_values_and_requires_exact_independent_readback() {
+    let hook = GameplayHook::NewItemRarity;
+    let fixture = Fixture::rehashing();
+    let wire = FakeTransport::new(fixture.target.clone(), [fixture.discover(), status(false, 0x1234, 0)]);
+    let mut session = fixture.session(&wire);
+    session.enable();
+    run(session.connect()).unwrap();
+    for (choice, actual, kept) in [(0.0, 0, true), (1.0, 1, true), (2.0, 3, true), (3.0, 7, true), (4.0, 8, true), (2.0, 1, false)] {
+        wire.push(done(vec![]));
+        wire.push(done(
+            HookObservation {
+                patch: PatchState::Patched,
+                enabled: true,
+                value: actual,
+            }
+            .encode(),
+        ));
+        let request = HookRequest {
+            id: HookId::parse(hook.id()).unwrap(),
+            on: true,
+            values: vec![choice],
+        };
+        assert_eq!(
+            run(BackendConnection::set_hook(&mut session, &request, &mut AllowWrite)).unwrap(),
+            if kept { WriteOutcome::Confirmed(true) } else { WriteOutcome::NotKept(true) }
+        );
+        let sent = wire.requests();
+        let value = [0, 1, 3, 7, 8][choice as usize];
+        assert!(matches!(sent[sent.len()-2], Request::SetGameplayHook { hook: id, value: actual, .. } if id == hook && actual == value));
+        assert!(matches!(sent[sent.len()-1], Request::ReadGameplayHook { hook: id, .. } if id == hook));
+    }
+}
+
+#[test]
 fn experience_pair_is_one_write_and_each_lane_must_match_independent_readback() {
     let hook = GameplayHook::ExperienceMultiplier;
     let value = hook.value_kind().encode(&[2.5, 7.25]).unwrap();

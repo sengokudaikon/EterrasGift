@@ -50,6 +50,10 @@ pub enum GameplayHook {
     LootLizards = 43,
     RuneWardens = 44,
     Champions = 45,
+    RevealMap = 46,
+    RevealObjective = 47,
+    ProphecyAnyDistance = 48,
+    NewItemRarity = 49,
 }
 
 /// What a hook's value is: how the desktop's number for it is sent, which values the helper takes, and the one it
@@ -227,11 +231,15 @@ pub const SPECS: [HookSpec; GameplayHook::COUNT] = {
         real(LootLizards, "loot-lizards", 0.0, 20.0, 1.0),
         real(RuneWardens, "rune-wardens", 0.0, 20.0, 1.0),
         real(Champions, "champions", 0.0, 3.0, 1.0),
+        switch(RevealMap, "reveal-map"),
+        switch(RevealObjective, "reveal-objective"),
+        switch(ProphecyAnyDistance, "prophecy-any-distance"),
+        spec(NewItemRarity, "new-item-rarity", ValueKind::Choice(&[0, 1, 3, 7, 8])),
     ]
 };
 
 impl GameplayHook {
-    pub const COUNT: usize = 46;
+    pub const COUNT: usize = 50;
     /// Every hook by its number on the pipe, checked against [`SPECS`] when the crate builds.
     pub const ALL: [Self; Self::COUNT] = {
         let mut all = [Self::MysteriousRift; Self::COUNT];
@@ -347,6 +355,21 @@ mod tests {
         let rift = GameplayHook::MysteriousRift.value_kind();
         assert_eq!([0.0, 1.0, 2.0, 3.0].map(|choice| rift.encode(&[choice])), [Some(1), Some(1), Some(0), None]);
         assert_eq!((ValueKind::Switch.encode(&[]), ValueKind::Switch.encode(&[1.0])), (Some(1), None));
+    }
+
+    #[test]
+    fn new_item_rarity_choices_map_to_game_rarities_without_accepting_arbitrary_numbers() {
+        let kind = GameplayHook::NewItemRarity.value_kind();
+        for (index, rarity) in [0, 1, 3, 7, 8].into_iter().enumerate() {
+            assert_eq!(kind.encode(&[index as f64]), Some(rarity));
+            assert!(GameplayHook::NewItemRarity.validate_value(rarity).is_ok());
+        }
+        for values in [&[][..], &[1.0, 2.0], &[-1.0], &[2.5], &[5.0], &[f64::NAN]] {
+            assert_eq!(kind.encode(values), None);
+        }
+        for rarity in [2, 4, 6, 9, u64::MAX] {
+            assert!(GameplayHook::NewItemRarity.validate_value(rarity).is_err());
+        }
     }
 
     #[test]

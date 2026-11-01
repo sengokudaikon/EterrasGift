@@ -5,6 +5,10 @@ code and its tests, and what is still to build in [research/trainer-features.md]
 
 ## 2026-10-31
 
+- Trainer: reveal the map through the game's normal fog update, preserving larger reveal radii and the position argument.
+- Trainer: reveal Monolith objectives on their next score event, preserving the game's event and kill handling.
+- Trainer: combat prophecies count at any distance without bypassing their other completion requirements.
+- Trainer: choose the rarity of newly rolled items while preserving explicit rarities, generation inputs and output references.
 - Forge: spent Weaver counters remain editable below their generated minimum; the override allows Weaver's Touch and Weaver's Will from 0 to 255.
 - Trainer: Loot Lizard count applies to new zone calculations without refilling encounters already consumed.
 - Trainer: Rune Warden count is an independent control on the same verified encounter lifecycle.

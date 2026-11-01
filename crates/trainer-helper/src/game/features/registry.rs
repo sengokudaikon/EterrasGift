@@ -102,6 +102,10 @@ pub(crate) const FEATURES: &[&HookFeature] = &[
     &super::eternity_cache_anywhere::FEATURE,
     &super::encounter_counts::FEATURE,
     &super::champions::FEATURE,
+    &super::reveal_map::FEATURE,
+    &super::reveal_objective::FEATURE,
+    &super::prophecy_any_distance::FEATURE,
+    &super::new_item_rarity::FEATURE,
 ];
 
 /// Each control's group, checked when the crate builds: every control belongs to exactly one feature.

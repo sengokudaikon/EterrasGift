@@ -13,6 +13,11 @@ Field and invocation contracts are checked by the operations that use them. No o
 sent to the controller. `MethodInfo.methodPointer` at offset zero remains a supported-runtime
 layout assumption.
 
+Argument hooks use the same retained leaf lifecycle: they adjust only their declared scalar
+argument and tail-call the original in place. Map/prophecy positions remain opaque indirect
+vectors; new-item rarity preserves the full long signature, nullable payloads and byref outputs.
+Map and objective revealing keep the game's existing update/event triggers and persist after off.
+
 The first successful discovery retains pristine dispatcher bytes. Subsequent status/empty-clear
 requests must match this profile, even while the scheduler entry is patched. Stock detour 0.10
 installs from the control thread through this helper's retained transaction wrapper in `hooks`.

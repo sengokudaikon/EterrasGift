@@ -7,6 +7,8 @@ use crate::game::{
 };
 use eg_trainer_wire::hooks::{GameplayHook, HookObservation, PatchState};
 
+#[cfg(test)]
+mod arguments;
 mod effect;
 mod entry;
 use effect::{Effect, FeatureBinding};

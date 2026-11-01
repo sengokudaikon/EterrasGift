@@ -64,7 +64,8 @@ pub enum LeafEffect {
 /// An effect the fixed leaves don't cover, as code its owner writes against [`FRAME`]. The gate loads RAX with the data
 /// block before the code and appends `jmp [rax+original]` after it, and adds no checks of its own: the code tests the
 /// switch itself. Forwarded paths preserve the target's arguments; an override may return directly with the target's
-/// exact scalar/void return ABI. Branches stay inside the code, which uses only volatile registers and never the stack.
+/// exact scalar/void return ABI. Branches stay inside the code, which uses only volatile registers and never changes RSP.
+/// A feature may read or adjust an explicitly validated stack argument in place before tail-calling the original.
 #[derive(Clone)]
 pub struct GeneratedEffect {
     pub code: Vec<u8>,

@@ -167,6 +167,12 @@ The old adapter's two conditional jump-back instructions preserve unwind coverag
 Simply registering metadata over the stock unconditional jump failed the retained virtual-unwind
 test at that jump. Detour still owns allocation, relocation, target patching and thread contexts.
 
+Argument-only leaves preserve Windows x64 argument locations and tail-jump without a new frame. On the inspected
+build, `Minimap.UpdateFoW_Singular` and `CircleOfFortune.IsPlayerInRangeOf` take 12-byte `float3`/`Vector3` values
+indirectly in RDX. They are opaque to the leaf. `GenerateItems.RollBaseItem` has 21 managed parameters, instance and
+MethodInfo; its Int32 rarity occupies native position 8 (`[rsp+0x48]`). Nullable values, replacement data and output
+references remain untouched. This does not establish a hidden-result adapter for methods returning Vector3.
+
 The accepted product policy is stock Threads::All best-effort suspension, matching the original
 MinHook policy. OpenThread/SuspendThread can fail for reasons other than exit; skipped threads
 remain a patch-time risk. The dependency also ignores resume and internal rollback errors. Our

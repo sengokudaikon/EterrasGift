@@ -1051,6 +1051,20 @@ mod tests {
     }
 
     #[test]
+    fn argument_hooks_are_available_in_their_existing_pages_and_rarity_choices_stay_distinct() {
+        let session = Setup { live: true, ..Setup::default() };
+        for id in ["reveal-map", "reveal-objective", "prophecy-any-distance", "new-item-rarity"] {
+            let row = HookRow::new(*registry::feature(id).unwrap(), &session);
+            assert!(row.can_use(&session), "{id}");
+        }
+        let mut rarity = HookRow::new(*registry::feature("new-item-rarity").unwrap(), &session);
+        for index in 0..5 {
+            rarity.choose(&session, 0, index);
+            assert_eq!(session.hook_values("new-item-rarity"), [index as f64]);
+        }
+    }
+
+    #[test]
     fn a_hook_says_where_it_stands() {
         // Without a profile there is nothing to set up.
         let none = Unconnected;
