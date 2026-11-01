@@ -1357,6 +1357,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "eg-flow"
+version = "0.1.0"
+
+[[package]]
+name = "eg-flow-slint"
+version = "0.1.0"
+dependencies = [
+ "eg-flow",
+ "eg-runtime",
+ "slint",
+ "tokio",
+]
+
+[[package]]
 name = "eg-game-access"
 version = "0.1.0"
 dependencies = [

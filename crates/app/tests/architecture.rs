@@ -32,7 +32,7 @@ enum Tier {
 
 fn tier(name: &str) -> Tier {
     match name {
-        "eg-binary" | "eg-i18n" | "eg-il2cpp-metadata" | "eg-runtime" => Tier::Library,
+        "eg-binary" | "eg-i18n" | "eg-il2cpp-metadata" | "eg-flow" | "eg-flow-slint" | "eg-runtime" => Tier::Library,
         "eg-il2cpp-runtime" => Tier::Il2CppRuntime,
         "eg-core" => Tier::Shared,
         "eg-companion" => Tier::Companion,
