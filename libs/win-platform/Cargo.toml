@@ -1,6 +1,6 @@
 [package]
 name = "win-platform"
-description = "What programs ask of Windows, behind safe functions: processes and their identity, the shell, known folders, system settings, Steam's files, file versions and locked-down named pipes. Names no app or game."
+description = "What programs ask of Windows, behind safe functions: processes and their identity, the shell, known folders, system settings, Steam's files, file versions, locked-down named pipes and work on another process. Names no app or game."
 version.workspace = true
 edition.workspace = true
 publish.workspace = true
@@ -10,8 +10,20 @@ publish.workspace = true
 time = ["dep:jiff"]
 # Named pipe servers and their errors, on Tokio.
 pipe = ["dep:tokio", "windows-sys/Win32_Security", "windows-sys/Win32_Security_Authorization"]
+# Working on another process from outside it, for the desktop. Code that runs in the game leaves it off.
+remote = [
+  "dep:binary-reader",
+  "dep:file-ops",
+  "windows-sys/Win32_Security",
+  "windows-sys/Win32_System_Diagnostics_Debug",
+  "windows-sys/Win32_System_LibraryLoader",
+  "windows-sys/Win32_System_Memory",
+  "windows-sys/Win32_System_SystemInformation",
+]
 
 [dependencies]
+binary-reader = { workspace = true, optional = true }
+file-ops = { workspace = true, optional = true }
 jiff = { workspace = true, optional = true }
 tokio = { workspace = true, optional = true }
 
@@ -32,7 +44,7 @@ windows-sys = { workspace = true, features = [
 [dev-dependencies]
 tempfile.workspace = true
 # Its own tests cover every feature, with no flag to remember.
-win-platform = { path = ".", features = ["pipe", "time"] }
+win-platform = { path = ".", features = ["pipe", "remote", "time"] }
 
 [lints]
 workspace = true

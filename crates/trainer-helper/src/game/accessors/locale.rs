@@ -1,10 +1,9 @@
 //! Observe an already completed locale operation. Initialization/selection getters are never called.
 
-use crate::game::metadata_text;
 use crate::game::{Class, GameError, RuntimeAccess, target, unsupported};
 use eg_trainer_wire::locale::GameLocale;
 use il2cpp_runtime::{AttachedThread, InvocationContext, InvocationOutcome, ReturnValue, StrongRoot, ValueTypeContract, raw};
-use std::{ffi::CStr, ptr::NonNull};
+use std::ptr::NonNull;
 
 type Root<'a, 'r> = StrongRoot<'a, 'r>;
 
@@ -18,114 +17,18 @@ fn completed(handle_version: i32, operation_version: i32, status: i32, reference
 
 impl RuntimeAccess {
     // All internal helpers inherit read_game_locale's attached-runtime and exclusive graph contract.
-    unsafe fn locale_named_class(&self, class: Class, namespace: &CStr, name: &CStr, value: bool) -> Result<(), GameError> {
-        // SAFETY: The class descriptor and its name/namespace strings belong to retained immutable metadata.
-        unsafe {
-            if class.is_null() {
-                return Err(unsupported("locale named class"));
-            }
-            let actual_name = (self.class_name)(class);
-            let actual_namespace = (self.class_namespace)(class);
-            if actual_name.is_null()
-                || actual_namespace.is_null()
-                || metadata_text(actual_name) != name
-                || metadata_text(actual_namespace) != namespace
-                || (self.class_value)(class) != value
-            {
-                return Err(unsupported("locale named class identity"));
-            }
-            Ok(())
-        }
-    }
-
-    unsafe fn locale_i32(&self, object: &Root<'_, '_>, owner: Class, name: &CStr) -> Result<i32, GameError> {
-        // SAFETY: Exact Int32 field metadata fixes the local copy width; the rooted receiver remains live.
-        unsafe {
-            self.check_object(owner, target(object)?)?;
-            let field = self.instance_field_in(owner, name, self.system_class(c"Int32")?, "locale")?;
-            let mut value = 0_i32;
-            (self.field_get)(target(object)?.as_ptr(), field, (&mut value as *mut i32).cast());
-            Ok(value)
-        }
-    }
-
-    unsafe fn locale_ref<'a, 'r>(
-        &self,
-        attached: &'a AttachedThread<'r>,
-        object: &Root<'_, '_>,
-        owner: Class,
-        name: &CStr,
-        expected: Class,
-    ) -> Result<Option<Root<'a, 'r>>, GameError> {
-        // SAFETY: The receiver is rooted and reference storage is validated; each copied reference is rooted before inspection.
-        unsafe {
-            self.check_object(owner, target(object)?)?;
-            if expected.is_null() || (self.class_value)(expected) {
-                return Err(unsupported("locale reference class"));
-            }
-            let field = self.instance_field_in(owner, name, expected, "locale")?;
-            let mut value = std::ptr::null_mut::<raw::Object>();
-            (self.field_get)(target(object)?.as_ptr(), field, (&mut value as *mut *mut raw::Object).cast());
-            let root = NonNull::new(value).map(|pointer| attached.root(pointer)).transpose()?;
-            if let Some(root) = &root {
-                self.check_object(expected, target(root)?)?;
-            }
-            Ok(root)
-        }
-    }
-
-    unsafe fn locale_no_cctor(&self, class: Class) -> Result<(), GameError> {
-        // SAFETY: The retained value class's methods are inspected without executing a managed initializer.
-        unsafe {
-            for method in self.methods(class) {
-                let method = method?;
-                let name = (self.method_name)(method);
-                if name.is_null() || metadata_text(name) == c".cctor" {
-                    return Err(unsupported("locale boxing class initializer"));
-                }
-            }
-            Ok(())
-        }
-    }
-
-    unsafe fn locale_box<'a, 'r>(&self, attached: &'a AttachedThread<'r>, object: &Root<'_, '_>, owner: Class, name: &CStr, expected: Class) -> Result<Root<'a, 'r>, GameError> {
-        // SAFETY: The receiver remains rooted; exact field metadata and absence of a class initializer precede boxing and rooting the result.
-        unsafe {
-            self.check_object(owner, target(object)?)?;
-            let field = self.instance_field_in(owner, name, expected, "locale")?;
-            if !(self.class_value)(expected) {
-                return Err(unsupported("locale boxed field class"));
-            }
-            // Field::GetValueObject on an instance field boxes the value through Object::Box.
-            // Object allocation runs Runtime::ClassInit; reject a managed .cctor before allocating.
-            self.locale_no_cctor(expected)?;
-            let boxed = NonNull::new((self.field_get_object)(field, target(object)?.as_ptr())).ok_or_else(|| unsupported("locale boxed field unavailable"))?;
-            let root = attached.root(boxed)?;
-            if (self.object_class)(target(&root)?.as_ptr()) != expected {
-                return Err(unsupported("locale boxed field result class"));
-            }
-            Ok(root)
-        }
-    }
-
     unsafe fn locale_alive(&self, object: &Root<'_, '_>, owner: Class) -> Result<(), GameError> {
-        // SAFETY: The rooted Unity wrapper has exact IntPtr storage; the copied native address is never dereferenced.
-        unsafe {
-            self.check_object(owner, target(object)?)?;
-            let field = self.instance_field_in(owner, c"m_CachedPtr", self.system_class(c"IntPtr")?, "locale")?;
-            let mut native = 0_usize;
-            (self.field_get)(target(object)?.as_ptr(), field, (&mut native as *mut usize).cast());
-            if native == 0 {
-                return Err(GameError::NotReady("localization Unity object is destroyed"));
-            }
-            Ok(())
+        // SAFETY: The caller's contract is the runtime call's; the copied native address is never dereferenced.
+        if !unsafe { self.unity_object_alive(object, owner, "locale") }? {
+            return Err(GameError::NotReady("localization Unity object is destroyed"));
         }
+        Ok(())
     }
 
     unsafe fn locale_state_class(&self, class: Class) -> Result<(), GameError> {
         // SAFETY: The operation class comes from retained metadata; the exact closed generic result type is checked before traversal.
         unsafe {
-            self.locale_named_class(class, c"UnityEngine.ResourceManagement.AsyncOperations", c"AsyncOperationStatus", true)?;
+            self.check_class_named(class, c"UnityEngine.ResourceManagement.AsyncOperations", c"AsyncOperationStatus", true, "locale")?;
             self.enum_storage(class, c"Int32", raw::type_code::I4)?;
             Ok(())
         }
@@ -174,7 +77,7 @@ impl RuntimeAccess {
             self.locale_alive(&settings, settings_class)?;
             let handle_field = self.field(settings_class, c"m_SelectedLocaleAsync")?;
             let handle_class = self.field_class(handle_field, "locale")?;
-            self.locale_named_class(handle_class, c"UnityEngine.ResourceManagement.AsyncOperations", c"AsyncOperationHandle`1", true)?;
+            self.check_class_named(handle_class, c"UnityEngine.ResourceManagement.AsyncOperations", c"AsyncOperationHandle`1", true, "locale")?;
             if (self.type_code)((self.class_type)(handle_class)) != raw::type_code::GENERICINST {
                 return Err(unsupported("locale closed operation handle"));
             }
@@ -182,21 +85,21 @@ impl RuntimeAccess {
             if (api.class_value_size)(handle_class, &mut alignment) != 24 || alignment != 8 {
                 return Err(unsupported("locale operation handle layout"));
             }
-            let handle = self.locale_box(attached, &settings, settings_class, c"m_SelectedLocaleAsync", handle_class)?;
+            let handle = self.boxed_in(attached, &settings, settings_class, c"m_SelectedLocaleAsync", handle_class, "locale")?;
             let operation_field = self.field(handle_class, c"m_InternalOp")?;
             let operation_class = self.field_class(operation_field, "locale")?;
-            self.locale_named_class(operation_class, c"UnityEngine.ResourceManagement.AsyncOperations", c"AsyncOperationBase`1", false)?;
+            self.check_class_named(operation_class, c"UnityEngine.ResourceManagement.AsyncOperations", c"AsyncOperationBase`1", false, "locale")?;
             if (self.type_code)((self.class_type)(operation_class)) != raw::type_code::GENERICINST {
                 return Err(unsupported("locale closed operation base"));
             }
             // This field's exact Locale identity proves the closed generic graph's result type.
             self.instance_field_in(operation_class, c"<Result>k__BackingField", locale_class, "locale")?;
             let operation = self
-                .locale_ref(attached, &handle, handle_class, c"m_InternalOp", operation_class)?
+                .reference_in(attached, &handle, handle_class, c"m_InternalOp", operation_class, "locale")?
                 .ok_or(GameError::NotReady("selected locale handle is empty"))?;
-            let handle_version = self.locale_i32(&handle, handle_class, c"m_Version")?;
-            let operation_version = self.locale_i32(&operation, operation_class, c"m_Version")?;
-            let references = self.locale_i32(&operation, operation_class, c"m_referenceCount")?;
+            let handle_version = self.primitive_in::<i32>(&handle, handle_class, c"m_Version", "locale")?;
+            let operation_version = self.primitive_in::<i32>(&operation, operation_class, c"m_Version", "locale")?;
+            let references = self.primitive_in::<i32>(&operation, operation_class, c"m_referenceCount", "locale")?;
             let state_field = self.field(operation_class, c"m_Status")?;
             let state_class = self.field_class(state_field, "locale")?;
             self.locale_state_class(state_class)?;
@@ -216,11 +119,11 @@ impl RuntimeAccess {
             (self.field_get)(target(&operation)?.as_ptr(), state_field, (&mut state as *mut i32).cast());
             completed(handle_version, operation_version, state, references)?;
             let locale = self
-                .locale_ref(attached, &operation, operation_class, c"<Result>k__BackingField", locale_class)?
+                .reference_in(attached, &operation, operation_class, c"<Result>k__BackingField", locale_class, "locale")?
                 .ok_or(GameError::NotReady("selected locale result is empty"))?;
             self.locale_alive(&locale, locale_class)?;
             // These are the only managed bodies authorized by this narrowly scoped operation.
-            self.locale_no_cctor(identifier_class)?;
+            self.check_no_class_initializer(identifier_class, "locale")?;
             let string_class = self.system_class(c"String")?;
             let identifier_method = self.zero_arg_method(locale_class, c"get_Identifier", identifier_class, true, &api)?;
             let code_method = self.zero_arg_method(identifier_class, c"get_Code", string_class, true, &api)?;
@@ -260,72 +163,14 @@ impl RuntimeAccess {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::game::{
-        Ptr, Type,
-        test_fakes::{self, frees, roots, token},
-    };
-    use il2cpp_runtime::ThreadContext;
+    use crate::game::{Type, test_fakes::token};
     use std::cell::Cell;
-    const PARENT: usize = 0x1000;
-    const CHILD: usize = 0x2000;
-    const OWNER: usize = 0x3000;
-    const BOX_CLASS: usize = 0x4000;
+    const CLASS: usize = 0x4000;
     thread_local! {
-        static BOXES: Cell<usize> = const { Cell::new(0) };
-        static BYREF: Cell<bool> = const { Cell::new(false) };
-        static FLAGS: Cell<i32> = const { Cell::new(0) };
-        static FIELD_CLASS: Cell<usize> = const { Cell::new(BOX_CLASS) };
-        static VALUE_CLASS: Cell<bool> = const { Cell::new(true) };
-        static CCTOR: Cell<bool> = const { Cell::new(false) };
-        static WRONG_BOX: Cell<bool> = const { Cell::new(false) };
-        static CHILD_METADATA: Cell<usize> = const { Cell::new(0) };
         static ENUM_BASE_CALLS: Cell<usize> = const { Cell::new(0) };
     }
-    unsafe extern "C-unwind" fn object_class(object: *mut raw::Object) -> Class {
-        match object as usize {
-            PARENT => token(OWNER),
-            CHILD => {
-                assert_eq!(roots(), 2, "metadata must follow rooting");
-                CHILD_METADATA.set(CHILD_METADATA.get() + 1);
-                token(if WRONG_BOX.get() { 0x5000 } else { BOX_CLASS })
-            }
-            _ => panic!("unexpected locale fake object"),
-        }
-    }
-    unsafe extern "C-unwind" fn assignable(expected: Class, actual: Class) -> bool {
-        assert_eq!(expected as usize, OWNER);
-        actual == expected
-    }
-    unsafe extern "C-unwind" fn field(owner: Class, _: *const std::ffi::c_char) -> Ptr {
-        assert_eq!(owner as usize, OWNER);
-        token(0x6000)
-    }
-    unsafe extern "C-unwind" fn field_type(_: Ptr) -> Type {
-        token(0x7000)
-    }
-    unsafe extern "C-unwind" fn byref(_: Type) -> bool {
-        BYREF.get()
-    }
-    unsafe extern "C-unwind" fn flags(_: Ptr) -> i32 {
-        FLAGS.get()
-    }
-    unsafe extern "C-unwind" fn type_class(_: Type) -> Class {
-        token(FIELD_CLASS.get())
-    }
     unsafe extern "C-unwind" fn class_value(_: *const raw::Class) -> bool {
-        VALUE_CLASS.get()
-    }
-    unsafe extern "C-unwind" fn methods(_: Class, _: *mut Ptr) -> *const raw::MethodInfo {
-        if CCTOR.get() { token(0x8000) } else { std::ptr::null() }
-    }
-    unsafe extern "C-unwind" fn method_name(_: *const raw::MethodInfo) -> *const std::ffi::c_char {
-        c".cctor".as_ptr()
-    }
-    unsafe extern "C-unwind" fn box_field(_: Ptr, object: *mut raw::Object) -> *mut raw::Object {
-        assert_eq!(object as usize, PARENT);
-        assert_eq!(roots(), 1);
-        BOXES.set(BOXES.get() + 1);
-        token(CHILD)
+        true
     }
     unsafe extern "C-unwind" fn class_name(_: Class) -> *const std::ffi::c_char {
         c"AsyncOperationStatus".as_ptr()
@@ -340,101 +185,17 @@ mod tests {
         ENUM_BASE_CALLS.set(ENUM_BASE_CALLS.get() + 1);
         panic!("enum_base must never see non-enum class")
     }
-    fn fixture() -> (RuntimeAccess, ThreadContext) {
-        let context = test_fakes::thread();
-        BOXES.set(0);
-        BYREF.set(false);
-        FLAGS.set(0);
-        FIELD_CLASS.set(BOX_CLASS);
-        VALUE_CLASS.set(true);
-        CCTOR.set(false);
-        WRONG_BOX.set(false);
-        CHILD_METADATA.set(0);
-        ENUM_BASE_CALLS.set(0);
+
+    #[test]
+    fn a_struct_named_async_status_is_rejected_without_calling_enum_base() {
         let mut access = RuntimeAccess::test_stubs();
-        access.object_class = object_class;
-        access.assignable = assignable;
-        access.class_field = field;
-        access.field_type = field_type;
-        access.type_byref = byref;
-        access.field_flags = flags;
-        access.type_class = type_class;
         access.class_value = class_value;
-        access.class_methods = methods;
-        access.method_name = method_name;
-        access.field_get_object = box_field;
         access.class_name = class_name;
         access.class_namespace = class_namespace;
         access.class_enum = not_enum;
         access.enum_base = enum_base;
-        (access, context)
-    }
-
-    #[test]
-    fn field_box_is_rooted_before_metadata_and_its_handles_are_released() {
-        let (access, context) = fixture();
-        let attached = context.attach().unwrap();
-        // SAFETY: the authored immutable fake graph recognizes this live parent token.
-        let parent = unsafe { attached.root(NonNull::new(token(PARENT)).unwrap()) }.unwrap();
-        // SAFETY: fake field metadata matches the expected immutable value class with no .cctor.
-        let child = unsafe { access.locale_box(&attached, &parent, token(OWNER), c"handle", token(BOX_CLASS)) }.unwrap();
-        assert_eq!(roots(), 2);
-        assert_eq!(BOXES.get(), 1);
-        assert_eq!(CHILD_METADATA.get(), 1);
-        drop(child);
-        assert_eq!(roots(), 1);
-        drop(parent);
-        assert_eq!(roots(), 0);
-        assert_eq!(frees(), 2);
-    }
-    #[test]
-    fn wrong_field_shape_or_class_initializer_refuses_before_boxing() {
-        for invalid in 0..5 {
-            let (access, context) = fixture();
-            let attached = context.attach().unwrap();
-            // SAFETY: authored immutable parent token and valid handle implementation.
-            let parent = unsafe { attached.root(NonNull::new(token(PARENT)).unwrap()) }.unwrap();
-            match invalid {
-                0 => BYREF.set(true),
-                1 => FLAGS.set(0x10),
-                2 => FIELD_CLASS.set(0x5000),
-                3 => VALUE_CLASS.set(false),
-                4 => CCTOR.set(true),
-                _ => unreachable!(),
-            }
-            // SAFETY: invalid fake metadata must fail before invoking the public boxing export.
-            assert!(unsafe { access.locale_box(&attached, &parent, token(OWNER), c"handle", token(BOX_CLASS)) }.is_err());
-            assert_eq!(BOXES.get(), 0);
-            assert_eq!(roots(), 1);
-            drop(parent);
-            assert_eq!(roots(), 0);
-        }
-    }
-    #[test]
-    fn failed_box_root_or_wrong_box_identity_never_leaks_handles() {
-        for root_failure in [false, true] {
-            let (access, context) = fixture();
-            let attached = context.attach().unwrap();
-            // SAFETY: authored immutable parent token and valid handle implementation.
-            let parent = unsafe { attached.root(NonNull::new(token(PARENT)).unwrap()) }.unwrap();
-            if root_failure {
-                test_fakes::fail_root(CHILD);
-            }
-            WRONG_BOX.set(!root_failure);
-            // SAFETY: the fake export returns a live box whose root or identity is deliberately rejected.
-            assert!(unsafe { access.locale_box(&attached, &parent, token(OWNER), c"handle", token(BOX_CLASS)) }.is_err());
-            assert_eq!(BOXES.get(), 1);
-            assert_eq!(roots(), 1);
-            assert_eq!(CHILD_METADATA.get(), usize::from(!root_failure));
-            drop(parent);
-            assert_eq!(roots(), 0);
-        }
-    }
-    #[test]
-    fn a_struct_named_async_status_is_rejected_without_calling_enum_base() {
-        let (access, _context) = fixture();
         // SAFETY: the fake class is a valid value-type metadata token, deliberately not an enum.
-        assert!(unsafe { access.locale_state_class(token(BOX_CLASS)) }.is_err());
+        assert!(unsafe { access.locale_state_class(token(CLASS)) }.is_err());
         assert_eq!(ENUM_BASE_CALLS.get(), 0);
     }
     #[test]

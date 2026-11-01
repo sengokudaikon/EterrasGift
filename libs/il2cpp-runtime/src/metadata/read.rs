@@ -1,9 +1,9 @@
 //! Typed copies of fields of rooted objects, each after its type, owner and storage are checked. Nothing here calls a
 //! managed method or writes.
 
-use super::{ARRAY_HEADER, Class, MetadataApi, MetadataError, Ptr, copy_values, metadata_text, target, unsupported};
+use super::{ARRAY_HEADER, Class, MetadataApi, MetadataError, Primitive, Ptr, copy_values, metadata_text, target, unsupported};
 use crate::{AttachedThread, StrongRoot, raw};
-use std::ffi::CStr;
+use std::{ffi::CStr, ptr::NonNull};
 
 fn decode_text(units: &[u16], maximum: usize) -> Result<String, MetadataError> {
     if units.len() > maximum {
@@ -17,6 +17,87 @@ fn decode_text(units: &[u16], maximum: usize) -> Result<String, MetadataError> {
 }
 
 impl MetadataApi {
+    /// Copy one primitive instance field of a rooted `owner`, looked up on `owner` rather than on the object's own class.
+    /// `label` begins any contract failure's text.
+    ///
+    /// # Safety
+    /// The lookup contract ([`crate::metadata`]), with `object` rooted in this runtime and its graph unchanged for the copy.
+    pub unsafe fn primitive_in<T: Primitive>(&self, object: &StrongRoot<'_, '_>, owner: Class, name: &CStr, label: &str) -> Result<T, MetadataError> {
+        // SAFETY: Exact primitive field metadata fixes the local copy width; the rooted receiver remains live.
+        unsafe {
+            self.check_object(owner, target(object)?)?;
+            let field = self.instance_field_in(owner, name, self.system_class(T::NAME)?, label)?;
+            let mut value = T::default();
+            (self.field_get)(target(object)?.as_ptr(), field, (&mut value as *mut T).cast());
+            Ok(value)
+        }
+    }
+
+    /// Read one reference instance field of a rooted `owner`, declared exactly as `expected`, and root what it holds. A null
+    /// field is `None`; a value that is not an `expected` is a contract failure. `label` begins any contract failure's text.
+    ///
+    /// # Safety
+    /// As [`Self::primitive_in`], with `attached` this runtime's attachment on this thread.
+    pub unsafe fn reference_in<'a, 'r>(
+        &self,
+        attached: &'a AttachedThread<'r>,
+        object: &StrongRoot<'_, '_>,
+        owner: Class,
+        name: &CStr,
+        expected: Class,
+        label: &str,
+    ) -> Result<Option<StrongRoot<'a, 'r>>, MetadataError> {
+        // SAFETY: The receiver is rooted and reference storage is validated; each copied reference is rooted before inspection.
+        unsafe {
+            self.check_object(owner, target(object)?)?;
+            if expected.is_null() || (self.class_value)(expected) {
+                return Err(unsupported(format!("{label} reference class")));
+            }
+            let field = self.instance_field_in(owner, name, expected, label)?;
+            let mut value = std::ptr::null_mut::<raw::Object>();
+            (self.field_get)(target(object)?.as_ptr(), field, (&mut value as *mut *mut raw::Object).cast());
+            let root = NonNull::new(value).map(|pointer| attached.root(pointer)).transpose()?;
+            if let Some(root) = &root {
+                self.check_object(expected, target(root)?)?;
+            }
+            Ok(root)
+        }
+    }
+
+    /// A value-type instance field of a rooted `owner`, declared exactly as `expected`, copied into a new box and rooted.
+    /// `label` begins any contract failure's text.
+    ///
+    /// This allocates. `Field::GetValueObject` on an instance field boxes the value through `Object::Box`, and allocation
+    /// runs `Runtime::ClassInit`, so a class with a static constructor is refused before allocating.
+    ///
+    /// # Safety
+    /// As [`Self::reference_in`], and instance-field boxing must obey the runtime's nonmoving-GC semantics.
+    pub unsafe fn boxed_in<'a, 'r>(
+        &self,
+        attached: &'a AttachedThread<'r>,
+        object: &StrongRoot<'_, '_>,
+        owner: Class,
+        name: &CStr,
+        expected: Class,
+        label: &str,
+    ) -> Result<StrongRoot<'a, 'r>, MetadataError> {
+        // SAFETY: The receiver remains rooted; exact field metadata and absence of a class initializer precede boxing and rooting the result.
+        unsafe {
+            self.check_object(owner, target(object)?)?;
+            let field = self.instance_field_in(owner, name, expected, label)?;
+            if !(self.class_value)(expected) {
+                return Err(unsupported(format!("{label} boxed field class")));
+            }
+            self.check_no_class_initializer(expected, label)?;
+            let boxed = NonNull::new((self.field_get_object)(field, target(object)?.as_ptr())).ok_or_else(|| unsupported(format!("{label} boxed field unavailable")))?;
+            let root = attached.root(boxed)?;
+            if (self.object_class)(target(&root)?.as_ptr()) != expected {
+                return Err(unsupported(format!("{label} boxed field result class")));
+            }
+            Ok(root)
+        }
+    }
+
     /// Copy an instance enum field of a rooted object, whose enum is named `enum_name` and stored as `Int32`.
     ///
     /// # Safety
@@ -623,5 +704,176 @@ mod tests {
         assert!(decode_text(&vec![0x41; 4097], 4096).is_err());
         assert!(decode_text(&vec![0x4e00; 1366], 4096).is_err());
         assert!(decode_text(&vec![0x41; 4096], 4096).is_ok());
+    }
+}
+
+#[cfg(test)]
+mod boxing_tests {
+    use super::*;
+    use crate::{
+        ThreadContext,
+        metadata::Type,
+        test_fakes::{self, frees, roots, token},
+    };
+    use std::cell::Cell;
+
+    const PARENT: usize = 0x1000;
+    const CHILD: usize = 0x2000;
+    const OWNER: usize = 0x3000;
+    const BOX_CLASS: usize = 0x4000;
+    thread_local! {
+        static BOXES: Cell<usize> = const { Cell::new(0) };
+        static BYREF: Cell<bool> = const { Cell::new(false) };
+        static FLAGS: Cell<i32> = const { Cell::new(0) };
+        static FIELD_CLASS: Cell<usize> = const { Cell::new(BOX_CLASS) };
+        static VALUE_CLASS: Cell<bool> = const { Cell::new(true) };
+        static CCTOR: Cell<bool> = const { Cell::new(false) };
+        static WRONG_BOX: Cell<bool> = const { Cell::new(false) };
+        static CHILD_METADATA: Cell<usize> = const { Cell::new(0) };
+    }
+    unsafe extern "C-unwind" fn object_class(object: *mut raw::Object) -> Class {
+        match object as usize {
+            PARENT => token(OWNER),
+            CHILD => {
+                assert_eq!(roots(), 2, "metadata must follow rooting");
+                CHILD_METADATA.set(CHILD_METADATA.get() + 1);
+                token(if WRONG_BOX.get() { 0x5000 } else { BOX_CLASS })
+            }
+            _ => panic!("unexpected fake object"),
+        }
+    }
+    unsafe extern "C-unwind" fn assignable(expected: Class, actual: Class) -> bool {
+        assert_eq!(expected as usize, OWNER);
+        actual == expected
+    }
+    unsafe extern "C-unwind" fn field(owner: Class, _: *const std::ffi::c_char) -> Ptr {
+        assert_eq!(owner as usize, OWNER);
+        token(0x6000)
+    }
+    unsafe extern "C-unwind" fn field_type(_: Ptr) -> Type {
+        token(0x7000)
+    }
+    unsafe extern "C-unwind" fn byref(_: Type) -> bool {
+        BYREF.get()
+    }
+    unsafe extern "C-unwind" fn flags(_: Ptr) -> i32 {
+        FLAGS.get()
+    }
+    unsafe extern "C-unwind" fn type_class(_: Type) -> Class {
+        token(FIELD_CLASS.get())
+    }
+    unsafe extern "C-unwind" fn class_value(_: *const raw::Class) -> bool {
+        VALUE_CLASS.get()
+    }
+    unsafe extern "C-unwind" fn methods(_: Class, _: *mut Ptr) -> *const raw::MethodInfo {
+        if CCTOR.get() { token(0x8000) } else { std::ptr::null() }
+    }
+    unsafe extern "C-unwind" fn method_name(_: *const raw::MethodInfo) -> *const std::ffi::c_char {
+        c".cctor".as_ptr()
+    }
+    unsafe extern "C-unwind" fn box_field(_: Ptr, object: *mut raw::Object) -> *mut raw::Object {
+        assert_eq!(object as usize, PARENT);
+        assert_eq!(roots(), 1);
+        BOXES.set(BOXES.get() + 1);
+        token(CHILD)
+    }
+    fn fixture() -> (MetadataApi, ThreadContext) {
+        let context = test_fakes::thread();
+        BOXES.set(0);
+        BYREF.set(false);
+        FLAGS.set(0);
+        FIELD_CLASS.set(BOX_CLASS);
+        VALUE_CLASS.set(true);
+        CCTOR.set(false);
+        WRONG_BOX.set(false);
+        CHILD_METADATA.set(0);
+        let mut access = MetadataApi::test_stubs();
+        access.object_class = object_class;
+        access.assignable = assignable;
+        access.class_field = field;
+        access.field_type = field_type;
+        access.type_byref = byref;
+        access.field_flags = flags;
+        access.type_class = type_class;
+        access.class_value = class_value;
+        access.class_methods = methods;
+        access.method_name = method_name;
+        access.field_get_object = box_field;
+        (access, context)
+    }
+
+    #[test]
+    fn field_box_is_rooted_before_metadata_and_its_handles_are_released() {
+        let (access, context) = fixture();
+        let attached = context.attach().unwrap();
+        // SAFETY: the authored immutable fake graph recognizes this live parent token.
+        let parent = unsafe { attached.root(NonNull::new(token(PARENT)).unwrap()) }.unwrap();
+        // SAFETY: fake field metadata matches the expected immutable value class with no .cctor.
+        let child = unsafe { access.boxed_in(&attached, &parent, token(OWNER), c"handle", token(BOX_CLASS), "test") }.unwrap();
+        assert_eq!(roots(), 2);
+        assert_eq!(BOXES.get(), 1);
+        assert_eq!(CHILD_METADATA.get(), 1);
+        drop(child);
+        assert_eq!(roots(), 1);
+        drop(parent);
+        assert_eq!(roots(), 0);
+        assert_eq!(frees(), 2);
+    }
+    #[test]
+    fn wrong_field_shape_or_class_initializer_refuses_before_boxing() {
+        for invalid in 0..5 {
+            let (access, context) = fixture();
+            let attached = context.attach().unwrap();
+            // SAFETY: authored immutable parent token and valid handle implementation.
+            let parent = unsafe { attached.root(NonNull::new(token(PARENT)).unwrap()) }.unwrap();
+            match invalid {
+                0 => BYREF.set(true),
+                1 => FLAGS.set(0x10),
+                2 => FIELD_CLASS.set(0x5000),
+                3 => VALUE_CLASS.set(false),
+                4 => CCTOR.set(true),
+                _ => unreachable!(),
+            }
+            // SAFETY: invalid fake metadata must fail before invoking the public boxing export.
+            assert!(unsafe { access.boxed_in(&attached, &parent, token(OWNER), c"handle", token(BOX_CLASS), "test") }.is_err());
+            assert_eq!(BOXES.get(), 0);
+            assert_eq!(roots(), 1);
+            drop(parent);
+            assert_eq!(roots(), 0);
+        }
+    }
+    #[test]
+    fn failed_box_root_or_wrong_box_identity_never_leaks_handles() {
+        for root_failure in [false, true] {
+            let (access, context) = fixture();
+            let attached = context.attach().unwrap();
+            // SAFETY: authored immutable parent token and valid handle implementation.
+            let parent = unsafe { attached.root(NonNull::new(token(PARENT)).unwrap()) }.unwrap();
+            if root_failure {
+                test_fakes::fail_root(CHILD);
+            }
+            WRONG_BOX.set(!root_failure);
+            // SAFETY: the fake export returns a live box whose root or identity is deliberately rejected.
+            assert!(unsafe { access.boxed_in(&attached, &parent, token(OWNER), c"handle", token(BOX_CLASS), "test") }.is_err());
+            assert_eq!(BOXES.get(), 1);
+            assert_eq!(roots(), 1);
+            assert_eq!(CHILD_METADATA.get(), usize::from(!root_failure));
+            drop(parent);
+            assert_eq!(roots(), 0);
+        }
+    }
+    #[test]
+    fn contract_failures_carry_the_callers_label() {
+        let (access, context) = fixture();
+        let attached = context.attach().unwrap();
+        // SAFETY: authored immutable parent token and valid handle implementation.
+        let parent = unsafe { attached.root(NonNull::new(token(PARENT)).unwrap()) }.unwrap();
+        CCTOR.set(true);
+        // SAFETY: invalid fake metadata fails before the boxing export.
+        let error = unsafe { access.boxed_in(&attached, &parent, token(OWNER), c"handle", token(BOX_CLASS), "locale") }
+            .err()
+            .unwrap();
+        assert!(matches!(&error, MetadataError::Contract(text) if text == "locale boxing class initializer"), "{error}");
+        drop(parent);
     }
 }

@@ -142,6 +142,10 @@ impl Layout {
             sections,
         })
     }
+    /// Whether this is a DLL with an image a loader would be asked to map: not empty, and no more than 512 MiB.
+    pub fn is_mappable_dll(&self) -> bool {
+        self.dll && self.image_size != 0 && self.image_size <= 512 * 1024 * 1024
+    }
     pub fn sections(&self) -> &[Section] {
         &self.sections
     }

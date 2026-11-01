@@ -223,7 +223,7 @@ impl HelperLayout {
 
 /// A DLL image of a size this helper's loader would map.
 fn check_image_size(layout: &binary_reader::pe::Layout) -> Result<()> {
-    if !layout.dll || layout.image_size == 0 || layout.image_size > 512 * 1024 * 1024 {
+    if !layout.is_mappable_dll() {
         return invalid("Windows x64 DLL image size/header");
     }
     Ok(())

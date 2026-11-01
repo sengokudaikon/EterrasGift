@@ -1,13 +1,15 @@
 //! What programs ask of Windows, behind safe functions, so the crates that use it hold no unsafe code of their own for
 //! it: the processes running and their identity ([`process`]), the shell ([`shell`]), known folders ([`folders`]), system
-//! settings and the title bar ([`system`]), where Steam keeps an app ([`steam`]), a file's version ([`file_version`]) and
-//! named pipes locked to the current user ([`pipe`]). Names no app or game, and has no words to show: an error is a typed
+//! settings and the title bar ([`system`]), where Steam keeps an app ([`steam`]), a file's version ([`file_version`]),
+//! named pipes locked to the current user ([`pipe`]) and work on another process ([`remote`]). Names no app or game, and has no words to show: an error is a typed
 //! reason or an [`std::io::Error`], and its caller says it.
 //!
 //! Features:
 //! - `time` adds [`time`] and [`process::oldest_named`]. Code that runs inside a game process leaves it off, and so links no
 //!   `jiff`.
 //! - `pipe` adds [`pipe`], which needs Tokio.
+//! - `remote` adds [`remote`], which holds module files with `file-ops` and reads them with `binary-reader`. Code that runs
+//!   inside a game process leaves it off.
 
 #![deny(unsafe_code)]
 
@@ -21,6 +23,9 @@ pub mod folders;
 pub mod pipe;
 #[allow(unsafe_code)] // Windows/FFI boundary; the rest of the crate denies unsafe.
 pub mod process;
+#[cfg(all(windows, feature = "remote"))]
+#[allow(unsafe_code)] // Windows/FFI boundary; the rest of the crate denies unsafe.
+pub mod remote;
 #[allow(unsafe_code)] // Windows/FFI boundary; the rest of the crate denies unsafe.
 pub mod shell;
 #[allow(unsafe_code)] // Windows/FFI boundary; the rest of the crate denies unsafe.

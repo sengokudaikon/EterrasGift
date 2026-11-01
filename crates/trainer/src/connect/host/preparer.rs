@@ -11,7 +11,7 @@ use crate::{
 use eg_game_access::{
     bootstrap::{
         BootstrapError, HelperArtifact,
-        windows::{DispatcherProof, ModuleIdentity, RemoteDelivery, RemoteFailure, RemoteHelper},
+        windows::{DispatcherProof, ModuleIdentity, RemoteFailure, RemoteHelper},
     },
     pipe::PipeClient,
 };
@@ -167,7 +167,7 @@ impl NativePreparer {
             }
             .map_err(game_build_error)?;
             let unity_path = folder.join("UnityPlayer.dll");
-            let unity = ModuleIdentity::open(&unity_path).map_err(identity_error)?;
+            let unity = ModuleIdentity::open(&unity_path).map_err(BootstrapError::from).map_err(identity_error)?;
             eg_game_access::version::check_unity(&unity_path).map_err(identity_error)?;
             Ok::<_, BackendError>((game, unity))
         })()
@@ -207,16 +207,12 @@ impl NativePreparer {
                     BootstrapError::Admission { message, retry_when_waiting } => BackendError {
                         kind: ErrorKind::Gate,
                         message: message.clone(),
-                        delivery: Some(if failure.delivery == RemoteDelivery::NotSent {
-                            Delivery::NotSent
-                        } else {
-                            Delivery::MayHaveRun
-                        }),
+                        delivery: Some(failure.delivery),
                         retry_when_waiting: *retry_when_waiting,
                     },
                     _ => BackendError::blocked(ErrorKind::Transport, failure.to_string()),
                 };
-                if failure.delivery == RemoteDelivery::NotSent {
+                if failure.delivery == Delivery::NotSent {
                     self.retained.remove(index);
                     Err(failed(error, PreparationResidency::NotLoaded))
                 } else {
@@ -266,8 +262,8 @@ impl HelperPreparer for NativePreparer {
 fn identity_error(error: impl std::fmt::Display) -> BackendError {
     BackendError::blocked(ErrorKind::Identity, error.to_string())
 }
-fn game_build_error(error: BootstrapError) -> BackendError {
-    match error {
+fn game_build_error(error: impl Into<BootstrapError>) -> BackendError {
+    match error.into() {
         BootstrapError::Invalid("module hash") => identity_error("This Last Epoch version isn't supported yet."),
         error => identity_error(error),
     }

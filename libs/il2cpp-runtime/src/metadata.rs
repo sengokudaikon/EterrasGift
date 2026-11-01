@@ -793,6 +793,50 @@ impl MetadataApi {
             Ok(())
         }
     }
+
+    /// That `class` is named exactly `name` in `namespace`, and is a value type if `value` says so. `label` begins any
+    /// contract failure's text.
+    ///
+    /// # Safety
+    /// The lookup contract (module docs).
+    pub unsafe fn check_class_named(&self, class: Class, namespace: &CStr, name: &CStr, value: bool, label: &str) -> Result<(), MetadataError> {
+        // SAFETY: The class descriptor and its name/namespace strings belong to retained immutable metadata.
+        unsafe {
+            if class.is_null() {
+                return Err(unsupported(format!("{label} named class")));
+            }
+            let actual_name = (self.class_name)(class);
+            let actual_namespace = (self.class_namespace)(class);
+            if actual_name.is_null()
+                || actual_namespace.is_null()
+                || metadata_text(actual_name) != name
+                || metadata_text(actual_namespace) != namespace
+                || (self.class_value)(class) != value
+            {
+                return Err(unsupported(format!("{label} named class identity")));
+            }
+            Ok(())
+        }
+    }
+
+    /// That `class` declares no static constructor, so that allocating one runs no managed code. A method with no name is
+    /// refused too. `label` begins any contract failure's text.
+    ///
+    /// # Safety
+    /// The lookup contract (module docs).
+    pub unsafe fn check_no_class_initializer(&self, class: Class, label: &str) -> Result<(), MetadataError> {
+        // SAFETY: The retained value class's methods are inspected without executing a managed initializer.
+        unsafe {
+            for method in self.methods(class) {
+                let method = method?;
+                let name = (self.method_name)(method);
+                if name.is_null() || metadata_text(name) == c".cctor" {
+                    return Err(unsupported(format!("{label} boxing class initializer")));
+                }
+            }
+            Ok(())
+        }
+    }
 }
 
 // Image::ClassFromName includes exported/forwarded types in its name table. Multiple images
