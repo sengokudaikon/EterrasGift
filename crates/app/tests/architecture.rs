@@ -32,7 +32,7 @@ enum Tier {
 
 fn tier(name: &str) -> Tier {
     match name {
-        "eg-binary" | "eg-i18n" | "eg-il2cpp-metadata" => Tier::Library,
+        "eg-binary" | "eg-i18n" | "eg-il2cpp-metadata" | "eg-runtime" => Tier::Library,
         "eg-il2cpp-runtime" => Tier::Il2CppRuntime,
         "eg-core" => Tier::Shared,
         "eg-companion" => Tier::Companion,
@@ -280,6 +280,8 @@ fn the_desktop_links_no_il2cpp_code() {
         helper |= in_helper && unit["target"]["name"] == "eg_il2cpp_runtime";
         assert!(in_helper || unit["target"]["name"] != "eg_il2cpp_runtime", "the desktop links the IL2CPP runtime");
         assert!(in_helper || unit["target"]["name"] != "eg_trainer_helper", "the desktop links the helper's code");
+        // The helper has a reactor and rules of its own.
+        assert!(!in_helper || unit["target"]["name"] != "eg_runtime", "the helper links the desktop's runtime");
         pending.extend(unit["dependencies"].as_array().unwrap().iter().map(|d| (d["index"].as_u64().unwrap(), in_helper)));
     }
     assert!(helper, "the embedded helper has no IL2CPP runtime");

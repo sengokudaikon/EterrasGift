@@ -1,0 +1,13 @@
+[package]
+name = "eg-runtime"
+description = "The desktop's background work on Tokio: one owned reactor thread and blocking pool, with a close barrier and a record of panics. It names neither this app nor the game."
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[dependencies]
+tokio.workspace = true
+tokio-util.workspace = true
+
+[lints]
+workspace = true

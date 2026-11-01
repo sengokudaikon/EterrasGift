@@ -27,6 +27,8 @@ rfd = { version = "0.17.2", default-features = false }
 raw-window-handle = "0.6.2"
 tempfile = "3.27.0"
 tokio = { version = "=1.53.3", features = ["rt", "net", "io-util", "time", "sync"] }
+# The desktop's close barrier and cancellation (eg-runtime). Its `rt` needs only what tokio above already has on.
+tokio-util = { version = "0.7.20", default-features = false, features = ["rt"] }
 # LZ4 blocks in Unity bundles; pure Rust, no unsafe in the decoder.
 lz4_flex = { version = "0.14.0", default-features = false, features = ["std", "safe-decode", "safe-encode", "checked-decode"] }
 
