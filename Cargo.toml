@@ -32,6 +32,7 @@ tokio-util = { version = "0.7.20", default-features = false, features = ["rt"] }
 # LZ4 blocks in Unity bundles; pure Rust, no unsafe in the decoder.
 lz4_flex = { version = "0.14.0", default-features = false, features = ["std", "safe-decode", "safe-encode", "checked-decode"] }
 
+eg-runtime = { path = "crates/runtime" }
 eg-binary = { path = "crates/binary" }
 eg-il2cpp-metadata = { path = "crates/il2cpp-metadata" }
 eg-il2cpp-runtime = { path = "crates/il2cpp-runtime" }

@@ -8,6 +8,7 @@ use crate::{
 use eg_core::fault::FaultLog;
 use eg_core::settings::SettingsStore;
 use eg_core::settings_service::{SaveOutcome, SettingsService, Snapshot};
+use eg_runtime::Runtime;
 use eg_ui::pages::settings::SettingsPage;
 use eg_ui::pages::settings::trainer as trainer_settings;
 use eg_ui::shell::Page;
@@ -19,6 +20,8 @@ pub fn run(startup: Startup) -> Result<ExitCode, slint::PlatformError> {
     let store = SettingsStore::open(&startup.root, &startup.settings_file, &[trainer_settings::LEGACY]);
     let faults = FaultLog::new(&startup.root, Some(&store.paths().log_directory()));
     startup::install_panic_hook(faults.clone());
+    let runtime = Runtime::start().expect("the runtime for background work starts");
+    eg_ui::background::install(runtime.tasks());
     let companion = Companion::new(&store);
     let discovery = companion.discover();
     let window = MainWindow::new();
@@ -70,7 +73,7 @@ pub fn run(startup: Startup) -> Result<ExitCode, slint::PlatformError> {
     eg_ui::follow_system_settings(&window);
     eg_ui::system::follow_dark_title_bar(&window);
     let result = window.run();
-    let Some(settings) = shutdown(&window, trainer_runtime, companion, service) else {
+    let Some(settings) = shutdown(&window, trainer_runtime, companion, runtime, service) else {
         // A shutdown fault outranks every restart request and the window's own result.
         return Ok(ExitCode::FAILURE);
     };
@@ -86,13 +89,14 @@ pub fn run(startup: Startup) -> Result<ExitCode, slint::PlatformError> {
 
 /// Drain accepted trainer work, cancel producers, then close writers and settle the game's mod-loader proxy.
 /// The settings as closed, or None when a worker or a writer faulted: the app then exits with a non-zero code.
-fn shutdown(window: &MainWindow, trainer: Option<trainer::Trainer>, companion: Companion, settings: SettingsService) -> Option<Snapshot> {
+fn shutdown(window: &MainWindow, trainer: Option<trainer::Trainer>, companion: Companion, runtime: Runtime, settings: SettingsService) -> Option<Snapshot> {
     let trainer_closed = trainer.is_none_or(|runtime| runtime.close());
     companion.launcher.cancel();
     eg_ui::pages::mods::cancel_work(window);
     companion.mods.cancellation().cancel();
     companion.sources.close();
-    let background_fault = eg_ui::background::shutdown();
+    // Before the mods worker closes: background work may be waiting on it.
+    let background_fault = runtime.shutdown();
     companion.mods.close();
     let settings = settings.close();
     // A start with mods may still be waiting for MelonLoader; set its proxy aside before exiting.

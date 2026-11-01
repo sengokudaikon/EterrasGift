@@ -109,6 +109,13 @@ fn a_panic_in_a_future_is_recorded_even_when_nobody_awaits_it() {
 }
 
 #[test]
+fn a_panic_in_blocking_work_is_recorded_even_when_nobody_awaits_it() {
+    let runtime = Runtime::start().unwrap();
+    drop(runtime.tasks().spawn_blocking(|| panic!("fixture panic")).unwrap());
+    assert!(runtime.shutdown());
+}
+
+#[test]
 fn work_ended_by_the_close_is_not_a_fault() {
     let runtime = Runtime::start().unwrap();
     let tasks = runtime.tasks();

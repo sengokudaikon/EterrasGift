@@ -12,6 +12,7 @@ path = "src/main.rs"
 [dependencies]
 eg-core.workspace = true
 eg-companion.workspace = true
+eg-runtime.workspace = true
 eg-ui.workspace = true
 eg-trainer.workspace = true
 # The trainer helper DLL, embedded in the exe and built for its explicit target. A path, not `workspace = true`:

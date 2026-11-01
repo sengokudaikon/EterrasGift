@@ -1445,6 +1445,7 @@ dependencies = [
  "eg-companion",
  "eg-core",
  "eg-i18n",
+ "eg-runtime",
  "eg-trainer",
  "image",
  "jiff",
@@ -1521,6 +1522,7 @@ version = "0.1.0"
 dependencies = [
  "eg-companion",
  "eg-core",
+ "eg-runtime",
  "eg-trainer",
  "eg-trainer-helper",
  "eg-ui",

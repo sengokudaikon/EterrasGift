@@ -6,6 +6,7 @@ publish.workspace = true
 
 [dependencies]
 eg-core.workspace = true
+eg-runtime.workspace = true
 eg-i18n.workspace = true
 eg-companion.workspace = true
 eg-trainer = { path = "../trainer" }

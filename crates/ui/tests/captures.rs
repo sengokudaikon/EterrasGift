@@ -519,6 +519,8 @@ fn main() {
     std::fs::create_dir_all(&out).expect("create artifacts/captures");
     let data = tempfile::tempdir().expect("a folder for the captures' own data");
     let session = Session { window, out, data };
+    let runtime = eg_runtime::Runtime::start().expect("the captures' background work");
+    eg_ui::background::install(runtime.tasks());
     // No event loop runs here, so work the pages hand to a thread runs at once instead.
     eg_ui::background::run_inline(true);
     if std::env::args().any(|arg| arg == "--logs") {
