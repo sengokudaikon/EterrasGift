@@ -1,6 +1,7 @@
 //! MelonLoader's files, read and edited without running it or any mod: what a DLL declares ([`assembly`]), what the loader
 //! recorded and how to repair what it generated ([`loader_state`]), its Latest.log ([`log`]), MelonPreferences.cfg
-//! ([`preferences`]), where its files live ([`paths`]) and its proxy in the game folder ([`switch`]). Names no app or game.
+//! ([`preferences`]), where its files live ([`paths`]), its proxy in the game folder ([`switch`]), and a mod's MSBuild
+//! project and the .NET SDK that builds it ([`project`]). Names no app or game.
 //! It has no words to show: a reason is a type for the caller to put in words, and an `io::Error` says what is wrong with
 //! the file in plain English.
 
@@ -12,6 +13,7 @@ pub mod loader_state;
 pub mod log;
 pub mod paths;
 pub mod preferences;
+pub mod project;
 pub mod switch;
 
 use std::fmt;

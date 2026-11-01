@@ -1,4 +1,4 @@
-//! The .NET SDK that builds the player's own mods.
+//! The .NET SDK that builds a mod's project.
 
 use std::path::{Path, PathBuf};
 
@@ -20,7 +20,12 @@ pub fn found() -> Option<PathBuf> {
     })
 }
 
-/// The folder of the dotnet.exe found, for the Settings box's hint.
+/// The folder of the dotnet.exe found.
 pub fn found_directory() -> Option<PathBuf> {
     found().and_then(|executable| executable.parent().map(Path::to_path_buf))
+}
+
+/// The dotnet.exe in the folder chosen; without one, the one found; failing that, whatever the system runs by that name.
+pub fn executable(sdk: Option<&Path>) -> PathBuf {
+    sdk.map(|folder| folder.join(FILE_NAME)).or_else(found).unwrap_or_else(|| "dotnet".into())
 }

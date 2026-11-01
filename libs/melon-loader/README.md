@@ -12,6 +12,10 @@ MelonLoader's files, read and edited without running it or any mod. Names no app
   failed Unity support leaves each mod's status unknown.
 - **`preferences`**: MelonPreferences.cfg. Edits replace only the original value's span, so comments, order, spacing, unknown
   entries and line endings stay.
+- **`project`**: a mod's MSBuild project. It writes the arguments for MSBuild's evaluation and reads the answer, whether the
+  project builds a DLL that references MelonLoader, what the evaluation depends on (`Stamp`), whether sources changed since a
+  build, and the errors in a build's output. **`project::dotnet`** finds the SDK's `dotnet.exe`. It runs neither: starting
+  the program is the caller's.
 - **`switch`**: the proxy (`version.dll`) set aside beside itself or put back. Only a folder with MelonLoader in it is
   touched, so another tool's `version.dll` is left alone.
 

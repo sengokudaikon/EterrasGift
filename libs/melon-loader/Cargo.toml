@@ -1,6 +1,6 @@
 [package]
 name = "melon-loader"
-description = "MelonLoader's files without running it: what a mod's DLL declares, what the loader recorded and logged, its preferences file and its proxy. Names no app or game."
+description = "MelonLoader's files without running it: what a mod's DLL declares, what the loader recorded and logged, its preferences file, its proxy, and a mod's MSBuild project. Names no app or game."
 version.workspace = true
 edition.workspace = true
 publish.workspace = true

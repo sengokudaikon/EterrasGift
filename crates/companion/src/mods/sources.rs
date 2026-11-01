@@ -1,9 +1,8 @@
 //! Local mod projects, evaluated by MSBuild rather than guessed from XML. Builds never deploy to the game:
 //! their output is offered to the library, which places it on the next modded start.
 
-use file_ops::stamp::FileStamp;
 use melon_loader::assembly::{LoaderVersion, MelonAssembly};
-use serde_json::Value;
+use melon_loader::project::{Evaluation, Stamp, changed_since, compiler_errors, dotnet, evaluation_arguments, path_key, project_files, read_evaluation};
 use std::collections::{BTreeMap, BTreeSet};
 use std::ffi::OsString;
 use std::fs;
@@ -200,8 +199,6 @@ fn bounded_text(text: &str, limit: usize) -> &str {
     &text[..end]
 }
 
-type Stamp = Vec<(String, Option<FileStamp>)>;
-
 #[derive(Clone)]
 struct CachedProject {
     stamp: Stamp,
@@ -263,7 +260,7 @@ impl ModSources {
             return Ok(Vec::new());
         };
         let folder = file_ops::paths::normalized(folder);
-        let executable = executable(sdk);
+        let executable = dotnet::executable(sdk);
         let key = format!("{}|{}", path_key(&folder), path_key(&executable));
         let flight = {
             let mut finding = self.finding.lock().unwrap();
@@ -299,7 +296,7 @@ impl ModSources {
     }
 
     fn find_in(&self, folder: &Path, executable: &Path, cancel: &CancellationToken) -> Result<Vec<ModProject>, SourceError> {
-        let files = files(folder, Some(PROJECT_DEPTH))?;
+        let files = project_files(folder, PROJECT_DEPTH)?;
         let next = AtomicUsize::new(0);
         let missing = AtomicBool::new(false);
         let found = Mutex::new(Vec::new());
@@ -343,28 +340,13 @@ impl ModSources {
         let known = self.projects.lock().unwrap().get(&key).cloned();
         let imports = known.as_ref().map_or(&[][..], |known| known.imports.as_slice());
         if let Some(known) = &known
-            && known.stamp == stamp(file, folder, imports)?
+            && known.stamp == Stamp::of(file, folder, imports)?
         {
             return Ok((known.project.clone(), true));
         }
-        let mut arguments = vec![OsString::from("msbuild"), file.as_os_str().to_owned()];
-        arguments.extend(
-            [
-                "-nologo",
-                "-getProperty:TargetPath",
-                "-getProperty:OutputType",
-                "-getProperty:AssemblyName",
-                "-getProperty:Version",
-                "-getProperty:MSBuildAllProjects",
-                "-getItem:Reference",
-                "-getItem:PackageReference",
-                "-p:Configuration=Release",
-            ]
-            .map(OsString::from),
-        );
         let request = ProcessRequest {
             executable: executable.to_path_buf(),
-            arguments,
+            arguments: evaluation_arguments(file),
             directory: file.parent().unwrap_or(folder).to_path_buf(),
         };
         let output = match self.runner.run(&request, cancel) {
@@ -373,7 +355,7 @@ impl ModSources {
             Err(ProcessError::Cancelled) => return Err(SourceError::Cancelled),
             Err(ProcessError::Failed(_)) => {
                 let cached = CachedProject {
-                    stamp: stamp(file, folder, imports)?,
+                    stamp: Stamp::of(file, folder, imports)?,
                     imports: imports.to_vec(),
                     project: None,
                 };
@@ -382,9 +364,18 @@ impl ModSources {
             }
         };
         // Non-JSON first-run banners aren't cached, so the next look retries without a file change.
-        let Some((project, imports)) = evaluated(file, &output) else { return Ok((None, true)) };
+        let Some(Evaluation { project, imports }) = read_evaluation(file, &output) else {
+            return Ok((None, true));
+        };
+        let project = project.map(|project| ModProject {
+            project_file: file.to_path_buf(),
+            target_path: project.target_path,
+            name: project.name,
+            version: project.version,
+            is_mod: project.is_mod,
+        });
         let cached = CachedProject {
-            stamp: stamp(file, folder, &imports)?,
+            stamp: Stamp::of(file, folder, &imports)?,
             imports,
             project: project.clone(),
         };
@@ -424,9 +415,7 @@ impl ModSources {
         };
         let hash = file_ops::hashes::of_file(&project.target_path)?;
         let built = fs::metadata(&project.target_path)?.modified()?;
-        let mut source_files = files(project.project_file.parent().unwrap_or(&project.project_file), None)?;
-        source_files.extend(build_props(&project.project_file, sources));
-        let changed_since_build = source_files.iter().any(|file| modified(file).is_some_and(|time| time > built));
+        let changed_since_build = changed_since(&project.project_file, sources, built)?;
         Ok(ModBuild {
             project: project.clone(),
             version,
@@ -444,7 +433,7 @@ impl ModSources {
         game_path.push(file_ops::paths::normalized(loader_root));
         arguments.push(game_path);
         let request = ProcessRequest {
-            executable: executable(sdk),
+            executable: dotnet::executable(sdk),
             arguments,
             directory: directory.to_path_buf(),
         };
@@ -473,56 +462,8 @@ impl ModSources {
     }
 }
 
-fn executable(sdk: Option<&Path>) -> PathBuf {
-    sdk.map(|folder| folder.join("dotnet.exe"))
-        .or_else(crate::mods::dotnet::found)
-        .unwrap_or_else(|| "dotnet".into())
-}
-
 fn cancelled(cancel: &CancellationToken) -> Result<(), SourceError> {
     if cancel.is_cancelled() { Err(SourceError::Cancelled) } else { Ok(()) }
-}
-
-fn evaluated(file: &Path, output: &str) -> Option<(Option<ModProject>, Vec<PathBuf>)> {
-    let root: Value = serde_json::from_str(output).ok()?;
-    let Some(properties) = root.get("Properties").filter(|value| value.is_object()) else {
-        return Some((None, Vec::new()));
-    };
-    let imports = text(properties, "MSBuildAllProjects")
-        .into_iter()
-        .flat_map(|value| value.split(';'))
-        .map(str::trim)
-        .map(PathBuf::from)
-        .filter(|path| path.is_absolute())
-        .collect();
-    let target = PathBuf::from(text(properties, "TargetPath").unwrap_or_default());
-    if !target.is_absolute() || !target.extension().is_some_and(|extension| extension.eq_ignore_ascii_case("dll")) {
-        return Some((None, imports));
-    }
-    let library = text(properties, "OutputType").is_some_and(|kind| kind.eq_ignore_ascii_case("Library"));
-    let items = |kind| root.get("Items").and_then(|items| items.get(kind)).and_then(Value::as_array).into_iter().flatten();
-    let melon = items("Reference").any(|item| text(item, "Filename").is_some_and(|name| name.eq_ignore_ascii_case("MelonLoader")))
-        || items("PackageReference").any(|item| text(item, "Identity").is_some_and(|name| name.to_ascii_lowercase().starts_with("lavagang.melonloader")));
-    Some((
-        Some(ModProject {
-            project_file: file.to_path_buf(),
-            target_path: target,
-            name: text(properties, "AssemblyName")
-                .map(str::to_owned)
-                .unwrap_or_else(|| file.file_stem().unwrap_or_default().to_string_lossy().into_owned()),
-            version: text(properties, "Version").map(str::to_owned),
-            is_mod: library && melon,
-        }),
-        imports,
-    ))
-}
-
-fn text<'a>(owner: &'a Value, name: &str) -> Option<&'a str> {
-    owner.get(name)?.as_str().map(str::trim).filter(|text| !text.is_empty())
-}
-
-fn path_key(path: &Path) -> String {
-    file_ops::paths::normalized(path).to_string_lossy().to_lowercase()
 }
 
 fn modified(path: &Path) -> Option<SystemTime> {
@@ -538,87 +479,6 @@ fn latest<'a>(projects: impl Iterator<Item = &'a ModProject>) -> Vec<&'a ModProj
         }
     }
     by_file.into_values().collect()
-}
-
-fn stamp(file: &Path, folder: &Path, imports: &[PathBuf]) -> io::Result<Stamp> {
-    let mut paths = vec![file.to_path_buf()];
-    paths.extend(build_props(file, Some(folder)));
-    paths.extend(above(file, "Directory.Packages.props", Some(folder)));
-    paths.extend(above(file, "global.json", None));
-    paths.extend_from_slice(imports);
-    let mut stamp = BTreeMap::new();
-    for path in paths {
-        stamp.insert(path_key(&path), file_ops::read::if_present(FileStamp::of(&path))?);
-    }
-    Ok(stamp.into_iter().collect())
-}
-
-fn above(project: &Path, name: &str, top: Option<&Path>) -> Vec<PathBuf> {
-    let mut found = Vec::new();
-    let top = top.map(path_key);
-    for folder in project.parent().into_iter().flat_map(Path::ancestors) {
-        let path = folder.join(name);
-        if path.is_file() {
-            found.push(path);
-        }
-        if top.as_ref().is_some_and(|top| *top == path_key(folder)) {
-            break;
-        }
-    }
-    found
-}
-
-fn build_props(project: &Path, sources: Option<&Path>) -> Vec<PathBuf> {
-    let mut props = above(project, "Directory.Build.props", sources);
-    props.extend(above(project, "Directory.Build.targets", sources));
-    props
-}
-
-/// With a depth, collect projects; without one, collect all source files. Reparse folders are excluded so a linked
-/// output or directory cycle cannot escape the user's sources tree.
-fn files(folder: &Path, depth: Option<usize>) -> io::Result<Vec<PathBuf>> {
-    let mut entries = fs::read_dir(folder)?.collect::<Result<Vec<_>, _>>()?;
-    entries.sort_by_key(|entry| entry.file_name().to_ascii_lowercase());
-    let mut found = Vec::new();
-    for entry in entries {
-        let path = entry.path();
-        let metadata = entry.metadata()?;
-        if metadata.is_file() && (depth.is_none() || path.extension().is_some_and(|extension| extension.eq_ignore_ascii_case("csproj"))) {
-            found.push(path);
-        } else if metadata.is_dir() && depth != Some(0) && searched(&entry) {
-            found.extend(files(&path, depth.map(|depth| depth - 1))?);
-        }
-    }
-    Ok(found)
-}
-
-fn searched(entry: &fs::DirEntry) -> bool {
-    let name = entry.file_name().to_string_lossy().to_lowercase();
-    !(name.starts_with('.') || name == "bin" || name == "obj") && entry.metadata().is_ok_and(|metadata| file_ops::paths::is_plain_directory(&metadata))
-}
-
-fn compiler_errors(output: &str, folder: &Path) -> String {
-    let prefix = format!("{}{}", folder.display(), std::path::MAIN_SEPARATOR);
-    let mut errors = Vec::new();
-    for line in output.lines().map(str::trim).filter(|line| line.contains(": error ")) {
-        let line = if line.ends_with(']') {
-            line.rsplit_once(" [").map_or(line, |(error, _)| error)
-        } else {
-            line
-        };
-        let line = if line.get(..prefix.len()).is_some_and(|start| start.eq_ignore_ascii_case(&prefix)) {
-            &line[prefix.len()..]
-        } else {
-            line
-        };
-        if !errors.contains(&line) {
-            errors.push(line);
-            if errors.len() == 5 {
-                break;
-            }
-        }
-    }
-    errors.join("\n")
 }
 
 #[cfg(test)]

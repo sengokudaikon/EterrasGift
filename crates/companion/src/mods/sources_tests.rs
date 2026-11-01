@@ -124,24 +124,6 @@ fn discovery_uses_evaluated_targets_limits_depth_and_ignores_outputs_and_tools()
 }
 
 #[test]
-fn evaluation_identifies_melon_packages_but_never_guesses_relative_output_paths() {
-    let temp = tempfile::tempdir().unwrap();
-    let file = project(temp.path(), "Loom.csproj");
-    let mut answer = json!({
-        "Properties": { "TargetPath": target(&file), "OutputType": "Library", "AssemblyName": "CustomName", "Version": " 0.7.0 " },
-        "Items": { "PackageReference": [{ "Identity": "LavaGang.MelonLoader.net6" }] },
-    });
-    let (found, _) = evaluated(&file, &answer.to_string()).unwrap();
-    let found = found.unwrap();
-    assert!(found.is_mod);
-    assert_eq!(found.name, "CustomName");
-    assert_eq!(found.version.as_deref(), Some("0.7.0"));
-    answer["Properties"]["TargetPath"] = "bin/Loom.dll".into();
-    assert!(evaluated(&file, &answer.to_string()).unwrap().0.is_none());
-    assert!(evaluated(&file, "Welcome to .NET").is_none());
-}
-
-#[test]
 fn failed_evaluations_are_cached_but_adding_old_dated_package_props_invalidates_them() {
     let temp = tempfile::tempdir().unwrap();
     project(temp.path(), "loom/src/Loom.csproj");
@@ -390,9 +372,7 @@ fn updates_compare_project_versions_and_installability_compares_hashes() {
 }
 
 #[test]
-fn compiler_errors_are_limited() {
-    let output = (0..9).map(|index| format!("file.cs: error E{index}: broken\n")).collect::<String>();
-    assert_eq!(compiler_errors(&output, Path::new("unused")).lines().count(), 5);
+fn output_is_bounded_on_a_character_boundary() {
     assert_eq!(bounded_text("abé", 3), "ab");
 }
 
