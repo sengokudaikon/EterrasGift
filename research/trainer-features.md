@@ -110,7 +110,8 @@ Behavior reference: [world.h](../../EterrasGift/native/hooks/world.h).
 
 None is built. They use main-thread requests, fresh expected observations, conditional writes and independent
 readback. Keep read/apply primitives generic and operation semantics local.
-The retired attack/leech editor is covered by the two persistent hooks above.
+Attack rate and leech use their persistent hooks in `features/fixed_attack_rate.rs` and `features/fixed_leech_rate.rs`;
+they do not need direct editors.
 
 | Status | Field set | Remaining feature work and useful reuse |
 |---|---|---|
@@ -128,6 +129,8 @@ The Forge item editor follows its own planner/private-preview path; its remainin
 These groups identify the next useful extraction points; they do not
 require building a universal handler/ABI/object framework first.
 
+- **Existing gateway consumers:** prophecy uses fits the original-first gateway's invocation-local snapshot words;
+  skip quest echoes uses before-original field adjustments. Neither needs the larger settings or scoped-context work.
 - **Settings and numeric transforms:** larger drop/monster settings reuse only matching arithmetic,
   publication and owner lookup from implemented gains. Preserve each feature's original-call placement.
 - **Further argument forwarding:** auto-aim needs its exact Vector3 hidden-result ABI. Existing argument hooks
