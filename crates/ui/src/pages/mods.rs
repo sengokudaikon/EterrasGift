@@ -126,17 +126,11 @@ pub(crate) fn bind(window: &MainWindow, page: ModsPage, background: Background, 
         on_setting_toggled: |index, on| Intent::SettingToggled(index, on),
         on_setting_choice: |index, value| Intent::SettingChoice(index, value.into()),
     });
-    if shell.current() == Page::Mods {
-        store.send(Intent::PageChanged {
-            shown: true,
-            now: jiff::Timestamp::now(),
-        });
-    }
-    shell.on_page_entered({
+    shell.on_shown(Page::Mods, {
         let store = store.clone();
-        move |page| {
+        move |shown| {
             store.send(Intent::PageChanged {
-                shown: page == Page::Mods,
+                shown,
                 now: jiff::Timestamp::now(),
             });
         }
@@ -289,17 +283,13 @@ impl Host<Mods> for Window {
                 let launcher = self.services.launcher.clone();
                 let settings = self.services.settings.clone();
                 match self.services.worker.enqueue(move |library| run(change, undo, library, &launcher, &settings)) {
-                    Ok(receive) => self.background.run(
-                        intents,
-                        move || receive.blocking_recv(),
-                        move |result| Intent::Answered {
-                            revision,
-                            answer: match result {
-                                Ok(Ok(result)) => Answer::of(Ok(result)),
-                                Ok(Err(_)) | Err(_) => Answer::library_stopped(),
-                            },
+                    Ok(receive) => self.background.wait(intents, receive, move |result| Intent::Answered {
+                        revision,
+                        answer: match result {
+                            Ok(result) => Answer::of(Ok(result)),
+                            Err(_) => Answer::library_stopped(),
                         },
-                    ),
+                    }),
                     Err(error) => intents.send(Intent::Answered {
                         revision,
                         answer: Answer::stopped(&error),
@@ -330,17 +320,13 @@ impl Host<Mods> for Window {
                 );
             }
             Effect::Locate { item, folder } => match self.services.worker.enqueue(move |library| Ok(library.locate(&item, folder.as_deref()))) {
-                Ok(receive) => self.background.run(
-                    intents,
-                    move || receive.blocking_recv(),
-                    |result| {
-                        Intent::Located(match result {
-                            Ok(Ok(Ok(path))) => Ok(path),
-                            Ok(Ok(Err(error))) => Err(error.to_string()),
-                            Ok(Err(_)) | Err(_) => Err(library_stopped_words().to_owned()),
-                        })
-                    },
-                ),
+                Ok(receive) => self.background.wait(intents, receive, |result| {
+                    Intent::Located(match result {
+                        Ok(Ok(path)) => Ok(path),
+                        Ok(Err(error)) => Err(error.to_string()),
+                        Err(_) => Err(library_stopped_words().to_owned()),
+                    })
+                }),
                 Err(error) => intents.send(Intent::Located(Err(error.to_string()))),
             },
             Effect::Open { path, reveal, create } => self.open(path, reveal, create, intents),

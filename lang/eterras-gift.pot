@@ -1083,7 +1083,7 @@ msgstr ""
 msgid "Changes how often enemies drop items and gold, and how much."
 msgstr ""
 
-#: crates/trainer/src/features/registry.rs crates/ui/src/shell.rs
+#: crates/trainer/src/features/registry.rs crates/ui/src/shell/navigation.rs
 msgid "Character"
 msgstr ""
 
@@ -1099,7 +1099,7 @@ msgstr ""
 msgid "Circle of Fortune"
 msgstr ""
 
-#: crates/trainer/src/features/registry.rs crates/ui/src/shell.rs
+#: crates/trainer/src/features/registry.rs crates/ui/src/shell/navigation.rs
 msgid "Combat"
 msgstr ""
 
@@ -1247,7 +1247,7 @@ msgstr ""
 msgid "Extra projectile multiplier"
 msgstr ""
 
-#: crates/trainer/src/features/registry.rs crates/ui/src/shell.rs
+#: crates/trainer/src/features/registry.rs crates/ui/src/shell/navigation.rs
 msgid "Factions"
 msgstr ""
 
@@ -1271,7 +1271,7 @@ msgstr ""
 msgid "Fixed leech rate"
 msgstr ""
 
-#: crates/trainer/src/features/registry.rs crates/ui/src/shell.rs
+#: crates/trainer/src/features/registry.rs crates/ui/src/shell/navigation.rs
 msgid "Forge"
 msgstr ""
 
@@ -1383,7 +1383,7 @@ msgstr ""
 msgid "Level up on every experience gain"
 msgstr ""
 
-#: crates/trainer/src/features/registry.rs crates/ui/src/shell.rs
+#: crates/trainer/src/features/registry.rs crates/ui/src/shell/navigation.rs
 msgid "Loot"
 msgstr ""
 
@@ -1399,7 +1399,7 @@ msgstr ""
 msgid "Merchant's Guild"
 msgstr ""
 
-#: crates/trainer/src/features/registry.rs crates/ui/src/shell.rs
+#: crates/trainer/src/features/registry.rs crates/ui/src/shell/navigation.rs
 msgid "Monolith"
 msgstr ""
 
@@ -1711,7 +1711,7 @@ msgstr ""
 msgid "Starting time"
 msgstr ""
 
-#: crates/trainer/src/features/registry.rs crates/ui/src/shell.rs
+#: crates/trainer/src/features/registry.rs crates/ui/src/shell/navigation.rs
 msgid "Stash"
 msgstr ""
 
@@ -1843,7 +1843,7 @@ msgstr ""
 msgid "Whole percentages, from 0 to 100."
 msgstr ""
 
-#: crates/trainer/src/features/registry.rs crates/ui/src/shell.rs
+#: crates/trainer/src/features/registry.rs crates/ui/src/shell/navigation.rs
 msgid "World"
 msgstr ""
 
@@ -3724,7 +3724,7 @@ msgstr ""
 msgid "The game files could not be read: {reason}"
 msgstr ""
 
-#: crates/ui/src/pages/settings/trainer.rs crates/ui/src/shell.rs
+#: crates/ui/src/pages/settings/trainer.rs crates/ui/src/shell/navigation.rs
 msgid "Trainer"
 msgstr ""
 
@@ -3748,19 +3748,19 @@ msgstr ""
 msgid "the trainer"
 msgstr ""
 
-#: crates/ui/src/shell.rs crates/ui/ui/strings/home.slint
+#: crates/ui/src/shell/navigation.rs crates/ui/ui/strings/home.slint
 msgid "Home"
 msgstr ""
 
-#: crates/ui/src/shell.rs crates/ui/ui/strings/logs.slint
+#: crates/ui/src/shell/navigation.rs crates/ui/ui/strings/logs.slint
 msgid "Logs"
 msgstr ""
 
-#: crates/ui/src/shell.rs crates/ui/ui/strings/mods.slint
+#: crates/ui/src/shell/navigation.rs crates/ui/ui/strings/mods.slint
 msgid "Mods"
 msgstr ""
 
-#: crates/ui/src/shell.rs crates/ui/ui/strings/mods.slint crates/ui/ui/strings/settings.slint
+#: crates/ui/src/shell/navigation.rs crates/ui/ui/strings/mods.slint crates/ui/ui/strings/settings.slint
 msgid "Settings"
 msgstr ""
 
