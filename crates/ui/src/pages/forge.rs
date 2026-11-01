@@ -15,7 +15,7 @@ use eg_trainer::screens::forge::feature::{Effect, FocusTarget, Forge, Intent, St
 use eg_trainer::screens::forge::game::{PREVIEW_DELAY, Request};
 use slint::{ComponentHandle, Timer, TimerMode, Weak};
 use spiderland::{Host, Intents, Store, Subscriptions};
-use spiderland_slint::{Dropping, local, on_watch};
+use spiderland_slint::{Background, Dropping, local, on_watch};
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -33,6 +33,11 @@ impl ForgeHandle {
         result
     }
 
+    /// Sends an intent, as the view's callbacks do.
+    pub fn send(&self, intent: Intent) {
+        self.store.send(intent);
+    }
+
     /// Looks at the editor, showing nothing new.
     pub fn read<T>(&self, read: impl FnOnce(&ForgeEditor) -> T) -> Option<T> {
         self.store.try_read(|state| read(state.editor()))
@@ -40,14 +45,16 @@ impl ForgeHandle {
 }
 
 /// Puts the forge on the worker.
-pub fn bind(window: &MainWindow, backend: BackendHandle, shell: &ShellHandle, faults: Option<FaultLog>, templates: Option<TemplateStore>) -> ForgeHandle {
+pub fn bind(window: &MainWindow, backend: BackendHandle, background: Background, shell: &ShellHandle, faults: Option<FaultLog>, templates: Option<TemplateStore>) -> ForgeHandle {
     let mut state = State::new(backend.snapshot(), backend.is_running(), shell.current() == Page::Forge, faults.is_some());
-    state.editor_mut().templates = templates;
+    state.editor_mut().keeps_templates = templates.is_some();
     let first = observed(&backend);
     let host = ForgeHost {
         window: window.as_weak(),
         backend,
+        background,
         faults,
+        templates,
         view: show::View::new(&window.global::<ForgeState>()),
         watching: Subscriptions::default(),
         focus_serial: 0,
@@ -61,13 +68,17 @@ pub fn bind(window: &MainWindow, backend: BackendHandle, shell: &ShellHandle, fa
     shell.on_page_entered(move |page| intents.send(Intent::PageChanged { forge: page == Page::Forge }));
     // The worker may have published everything already: nothing wakes the forge until its next change.
     store.send(first);
+    store.send(Intent::ReadTemplates);
     ForgeHandle { store }
 }
 
 struct ForgeHost {
     window: Weak<MainWindow>,
     backend: BackendHandle,
+    background: Background,
     faults: Option<FaultLog>,
+    /// Where the user's item templates are kept; the reducer asks for this only in a run that has it.
+    templates: Option<TemplateStore>,
     view: show::View,
     watching: Subscriptions<()>,
     focus_serial: i32,
@@ -122,6 +133,31 @@ impl Host<Forge> for ForgeHost {
                 forge.set_focus_part(part);
                 self.focus_serial += 1;
                 forge.set_focus_serial(self.focus_serial);
+            }
+            Effect::ReadTemplates => {
+                if let Some(store) = self.templates.clone() {
+                    self.background.run(intents, move || store.list(), Intent::TemplatesRead);
+                }
+            }
+            Effect::SaveTemplate { template, replaced } => {
+                if let Some(store) = self.templates.clone() {
+                    let name = template.name.clone();
+                    self.background.run(
+                        intents,
+                        move || store.save(&template).map_err(|error| error.to_string()),
+                        move |result| Intent::TemplateSaved { name, replaced, result },
+                    );
+                }
+            }
+            Effect::DeleteTemplate(name) => {
+                if let Some(store) = self.templates.clone() {
+                    let deleting = name.clone();
+                    self.background.run(
+                        intents,
+                        move || store.delete(&deleting).map_err(|error| error.to_string()),
+                        move |result| Intent::TemplateDeleted { name, result },
+                    );
+                }
             }
             Effect::ReportUnshown { generation, snapshot, error } => self.report_unshown(generation, &snapshot, &error),
         }

@@ -10,12 +10,14 @@ use super::project::{project_catalog, project_item};
 use super::rows::FieldKind;
 use crate::backend::{BackendError, BackendSnapshot, ForgeSnapshot, ForgeState, Phase};
 use crate::definitions::catalog::GameCatalog;
-use spiderland::{Effects, Feature, Tracked, Version};
+use crate::item::template::ItemTemplate;
+use spiderland::{Effects, Feature, Panicked, Tracked};
 use spiderland_phrases::phrases;
 use std::sync::Arc;
 
 phrases! {
     SeeFaultLog: "{error} Details are in the fault log."
+    UnexpectedFault: "something went wrong unexpectedly. Details are in the fault log."
 }
 
 /// The forge as a feature: see the module's documentation.
@@ -101,11 +103,23 @@ pub enum Intent {
     DiscardAll,
     MaxTiers,
     MaxRolls,
+    /// Read the kept templates, so the flyout opens with them.
+    ReadTemplates,
+    TemplatesRead(Result<Vec<ItemTemplate>, Panicked>),
     TemplatesOpened,
     TemplateName(String),
     TemplateSave(String, bool),
+    TemplateSaved {
+        name: String,
+        replaced: Option<String>,
+        result: Result<Result<(), String>, Panicked>,
+    },
     TemplateApply(usize),
     TemplateDelete(usize),
+    TemplateDeleted {
+        name: String,
+        result: Result<Result<(), String>, Panicked>,
+    },
     Apply,
     Undo,
     UndoDraft,
@@ -139,6 +153,14 @@ pub enum Effect {
         target: FocusTarget,
         part: i32,
     },
+    /// Read the kept templates from their folder.
+    ReadTemplates,
+    /// Keep `template`, in place of the kept one named `replaced` if any.
+    SaveTemplate {
+        template: ItemTemplate,
+        replaced: Option<String>,
+    },
+    DeleteTemplate(String),
     /// Record an item the forge cannot show, with the item as the game reported it.
     ReportUnshown {
         generation: u64,
@@ -165,9 +187,6 @@ pub struct State {
     answer: bool,
     /// The cell a typing popover last opened on, moving each time one opens.
     opened_input: Tracked<Option<Cell>>,
-    /// Moves when the kept templates should be read again from their folder: when the flyout opens and after each change,
-    /// not with every render.
-    templates_read: Tracked<()>,
 }
 
 impl State {
@@ -183,7 +202,6 @@ impl State {
             item_unavailable: Tracked::default(),
             answer: false,
             opened_input: Tracked::default(),
-            templates_read: Tracked::default(),
         }
     }
 
@@ -198,10 +216,6 @@ impl State {
 
     pub fn opened_input(&self) -> &Tracked<Option<Cell>> {
         &self.opened_input
-    }
-
-    pub fn templates_read(&self) -> Version {
-        self.templates_read.version()
     }
 
     pub fn item_unavailable(&self) -> &Tracked<String> {
@@ -224,6 +238,20 @@ fn next_with_rolls(from: usize, delta: i32, count: usize, rolls_of: impl Fn(usiz
         next += step;
     }
     None
+}
+
+fn read_templates(editor: &ForgeEditor, effects: &mut Effects<Effect>) {
+    if editor.keeps_templates {
+        effects.push(Effect::ReadTemplates);
+    }
+}
+
+/// Why work on a template's file failed, if it did.
+fn failure_of(result: Result<Result<(), String>, Panicked>) -> Option<String> {
+    match result {
+        Ok(result) => result.err(),
+        Err(Panicked) => Some(UnexpectedFault.into()),
+    }
 }
 
 /// Takes what came, and settles what it means for the editor: a new read is shown only while the page shows, and a write
@@ -401,26 +429,39 @@ impl Feature for Forge {
             Intent::DiscardAll => editor.discard_all(),
             Intent::MaxTiers => editor.max_tiers(),
             Intent::MaxRolls => editor.max_rolls(),
-            // Templates are read from their folder when the flyout opens and after each change, not with every show.
+            // Templates are read from their folder at the start, when the flyout opens and after each change.
+            Intent::ReadTemplates => read_templates(editor, effects),
+            Intent::TemplatesRead(found) => {
+                // After a panic, which is in the fault log, what was read before stays.
+                if let Ok(found) = found {
+                    *editor.templates = found;
+                }
+            }
             Intent::TemplatesOpened => {
                 editor.template_message.clear();
                 editor.template_name.clear();
-                *state.templates_read = ();
+                read_templates(editor, effects);
             }
             Intent::TemplateName(name) => {
                 editor.template_name = name;
             }
-            Intent::TemplateSave(name, whole) => {
-                editor.save_template(&name, whole);
-                *state.templates_read = ();
+            Intent::TemplateSave(name, whole) => match editor.template_to_save(&name, whole) {
+                Ok((template, replaced)) => effects.push(Effect::SaveTemplate { template, replaced }),
+                Err(problem) => editor.template_message = problem,
+            },
+            Intent::TemplateSaved { name, replaced, result } => {
+                editor.template_saved(&name, replaced, failure_of(result));
+                read_templates(editor, effects);
             }
-            Intent::TemplateApply(index) => {
-                editor.apply_template(index);
-                *state.templates_read = ();
-            }
+            Intent::TemplateApply(index) => editor.apply_template(index),
             Intent::TemplateDelete(index) => {
-                editor.delete_template(index);
-                *state.templates_read = ();
+                if let Some(template) = editor.templates.get(index) {
+                    effects.push(Effect::DeleteTemplate(template.name.clone()));
+                }
+            }
+            Intent::TemplateDeleted { name, result } => {
+                editor.template_deleted(&name, failure_of(result));
+                read_templates(editor, effects);
             }
             Intent::Apply => editor.apply(),
             Intent::Undo => editor.undo(),
@@ -593,6 +634,76 @@ mod tests {
         assert_eq!(next_with_rolls(3, 1, 4, rolls, 0), None);
         assert_eq!(next_with_rolls(0, -1, 4, rolls, 0), None);
         assert_eq!(next_with_rolls(1, 0, 4, rolls, 0), None);
+    }
+
+    fn template(name: &str) -> ItemTemplate {
+        ItemTemplate {
+            name: name.into(),
+            affixes: Vec::new(),
+            item: None,
+        }
+    }
+
+    fn keeping() -> State {
+        let mut state = state(true);
+        state.editor_mut().keeps_templates = true;
+        state
+    }
+
+    #[test]
+    fn a_run_without_a_template_folder_never_asks_for_one() {
+        let mut state = state(true);
+        assert!(step::<Forge>(&mut state, Intent::ReadTemplates).is_empty());
+        assert!(step::<Forge>(&mut state, Intent::TemplatesOpened).is_empty());
+        assert!(step::<Forge>(&mut state, Intent::TemplateSave("Boots".into(), false)).is_empty());
+        assert_eq!(state.editor().template_message, "Templates are not kept in this run.");
+    }
+
+    #[test]
+    fn templates_are_read_when_the_flyout_opens_and_after_each_change() {
+        let mut state = keeping();
+        assert!(matches!(step::<Forge>(&mut state, Intent::TemplatesOpened).as_slice(), [Effect::ReadTemplates]));
+        assert!(step::<Forge>(&mut state, Intent::TemplatesRead(Ok(vec![template("Boots")]))).is_empty());
+        assert_eq!(state.editor().templates.len(), 1);
+        // Typing reads nothing: what a name would replace comes from what was read.
+        assert!(step::<Forge>(&mut state, Intent::TemplateName("BOOTS".into())).is_empty());
+        assert_eq!(state.editor().template_replaces().as_deref(), Some("Boots"));
+        let saved = Intent::TemplateSaved {
+            name: "BOOTS".into(),
+            replaced: Some("Boots".into()),
+            result: Ok(Ok(())),
+        };
+        assert!(matches!(step::<Forge>(&mut state, saved).as_slice(), [Effect::ReadTemplates]));
+        assert_eq!(state.editor().template_message, "Saved \"BOOTS\" in place of \"Boots\".");
+        assert_eq!(state.editor().template_name, "", "a saved name is done with");
+        let effects = step::<Forge>(&mut state, Intent::TemplateDelete(0));
+        assert!(matches!(effects.as_slice(), [Effect::DeleteTemplate(name)] if name == "Boots"));
+        assert!(step::<Forge>(&mut state, Intent::TemplateDelete(5)).is_empty(), "no such row");
+    }
+
+    #[test]
+    fn a_failed_save_keeps_what_was_typed_and_says_why() {
+        let mut state = keeping();
+        step::<Forge>(&mut state, Intent::TemplateName("Boots".into()));
+        let failed = |result| Intent::TemplateSaved {
+            name: "Boots".into(),
+            replaced: None,
+            result,
+        };
+        step::<Forge>(&mut state, failed(Ok(Err("disk full".into()))));
+        assert_eq!(state.editor().template_message, "The template could not be saved: disk full");
+        assert_eq!(state.editor().template_name, "Boots");
+        step::<Forge>(&mut state, failed(Err(Panicked)));
+        assert!(state.editor().template_message.contains("fault log"));
+        assert_eq!(state.editor().template_name, "Boots");
+    }
+
+    #[test]
+    fn a_read_that_panics_leaves_what_was_read_before() {
+        let mut state = keeping();
+        step::<Forge>(&mut state, Intent::TemplatesRead(Ok(vec![template("Boots")])));
+        step::<Forge>(&mut state, Intent::TemplatesRead(Err(Panicked)));
+        assert_eq!(state.editor().templates.len(), 1);
     }
 
     #[test]

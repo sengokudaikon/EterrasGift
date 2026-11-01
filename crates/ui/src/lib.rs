@@ -72,7 +72,8 @@ pub fn install(window: &MainWindow, app: App) -> Installed {
     home::bind(window, app.launcher, app.game, app.background.clone(), &shell, decorations.clone());
     let mods = app.mods.map(|page| mods::bind(window, page, app.background.clone(), &shell));
     let trainer_backend = app.trainer_backend.filter(|_| app.trainer);
-    logs::bind(window, app.logs, trainer_backend.clone(), app.background, &shell);
+    let background = app.background;
+    logs::bind(window, app.logs, trainer_backend.clone(), background.clone(), &shell);
     // The trainer's switches reach its session as they flip; Game definitions follows its game data.
     let settings_page = match &trainer_backend {
         Some(backend) => app.settings.link(settings::trainer::ID, settings::trainer::link(backend.clone())),
@@ -89,7 +90,7 @@ pub fn install(window: &MainWindow, app: App) -> Installed {
     trainer::install(window, trainer_backend.clone());
     let forge = trainer_backend.map(|backend| {
         trainer::connection::bind(window, backend.clone(), &shell, decorations);
-        forge::bind(window, backend, &shell, app.faults, app.templates)
+        forge::bind(window, backend, background, &shell, app.faults, app.templates)
     });
     apply_system_settings(window);
     Installed { forge }

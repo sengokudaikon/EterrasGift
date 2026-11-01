@@ -1,6 +1,6 @@
 //! Saved item templates: their JSON and the folder that keeps them.
 
-use eg_trainer::item::template::{ItemTemplate, TemplateAffix, TemplateItem, TemplateStatus, TemplateStore};
+use eg_trainer::item::template::{ItemTemplate, TemplateAffix, TemplateItem, TemplateStatus, TemplateStore, taken_by};
 
 fn affixes() -> Vec<TemplateAffix> {
     vec![
@@ -80,10 +80,11 @@ fn the_store_keeps_one_file_per_name_whatever_its_case() {
     let names: Vec<String> = store.list().into_iter().map(|template| template.name).collect();
     assert_eq!(names, ["Amulet: crit/speed?", "boots of haste"]);
     // Names that share a file name the template a save would replace, however they are spelled.
-    assert_eq!(store.taken_by("BOOTS OF HASTE ").as_deref(), Some("boots of haste"));
-    assert_eq!(store.taken_by("amulet_ crit_speed_").as_deref(), Some("Amulet: crit/speed?"));
-    assert_eq!(store.taken_by("Boots of Speed"), None);
-    assert_eq!(store.taken_by("   "), None);
+    let kept = store.list();
+    assert_eq!(taken_by(&kept, "BOOTS OF HASTE ").as_deref(), Some("boots of haste"));
+    assert_eq!(taken_by(&kept, "amulet_ crit_speed_").as_deref(), Some("Amulet: crit/speed?"));
+    assert_eq!(taken_by(&kept, "Boots of Speed"), None);
+    assert_eq!(taken_by(&kept, "   "), None);
     store.delete("BOOTS OF HASTE").unwrap();
     store.delete("never saved").unwrap();
     assert_eq!(store.list().len(), 1);

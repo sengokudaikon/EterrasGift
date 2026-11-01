@@ -6,11 +6,13 @@ use super::*;
 use eg_trainer::backend::{AffixSnapshot, ModifierSnapshot, UniqueIdentity};
 use eg_trainer::definitions::catalog::RarityDefinition;
 use eg_trainer::item::edit::{ExpectedObservation, ItemEdit, RollEdit};
+use eg_trainer::item::template::TemplateStore;
 use eg_trainer::item::values::{
     BoundPreview, BoundTooltip, DisplayScalarParser, MappingBuilder, MappingRequest, MappingStart, MappingTarget, RawMappingPage, RawValueSample, UniqueRollPreview, ValueTable,
 };
 use eg_trainer::screens::forge::{
     editor::{Cell, ForgeEditor},
+    feature::Intent,
     item::Seal,
     rows::Loading,
 };
@@ -678,6 +680,15 @@ fn settled(editor: &ForgeEditor) -> bool {
 
 impl Forge {
     fn open(session: &Session, world: World, width: u32, height: u32) -> Forge {
+        Forge::open_keeping(session, world, width, height, None)
+    }
+
+    /// A run that keeps its item templates in a folder of its own.
+    fn open_with_templates(session: &Session, world: World, width: u32, height: u32) -> Forge {
+        Forge::open_keeping(session, world, width, height, Some(TemplateStore::new(session.folder().join("forge-templates"))))
+    }
+
+    fn open_keeping(session: &Session, world: World, width: u32, height: u32, templates: Option<TemplateStore>) -> Forge {
         let folder = session.folder();
         let data = Arc::new(WorldData {
             target: ProcessIdentity {
@@ -720,7 +731,7 @@ impl Forge {
                 trainer_backend: Some(backend.clone()),
                 faults: None,
                 logs: None,
-                templates: None,
+                templates,
                 settings: Settings::new(SettingsService::inline(store), vec![eg_ui::pages::settings::trainer::descriptor(true)], None, None),
                 start: Page::Forge,
             },
@@ -769,6 +780,16 @@ impl Forge {
             settle();
         }
         settle();
+    }
+
+    /// Keeps the item as a template, and waits for the folder to be read again.
+    fn save_template(&self, session: &Session, name: &str, whole: bool) {
+        self.handle.send(Intent::TemplateSave(name.into(), whole));
+        session.idle();
+    }
+
+    fn template_message(&self) -> String {
+        self.handle.read(|editor| editor.template_message.clone()).expect("the forge is not at work")
     }
 
     /// The game changes the item behind the editor (another player action, a reload), and the forge reads it again.
@@ -1237,27 +1258,23 @@ pub(in super::super) fn item_captures(session: &Session) {
 
     // Item templates: the boots' affixes saved, the item changed in the game, the template drafted back onto it; the
     // flyout lists it (`item-templates`).
-    let forge = Forge::open(session, World::boots(), 1100, 700);
-    let folder = session.folder().join("forge-templates");
-    forge.handle.edit(|editor| {
-        editor.templates = Some(eg_trainer::item::template::TemplateStore::new(folder));
-        editor.save_template("Wayfarer's set", false);
-        assert_eq!(editor.template_message, "Saved \"Wayfarer's set\".");
-    });
+    let forge = Forge::open_with_templates(session, World::boots(), 1100, 700);
+    forge.save_template(session, "Wayfarer's set", false);
+    assert_eq!(forge.template_message(), "Saved \"Wayfarer's set\".");
     forge.change(|item| {
         item.affixes[0].tier = 2;
         item.affixes[0].roll = 10;
     });
-    forge.handle.edit(|editor| {
-        editor.apply_template(0);
-        assert_eq!(editor.template_message, "Drafted \"Wayfarer's set\": 1 draft. Review it, then Apply.");
-        assert_eq!((editor.affixes[0].tier(), editor.affixes[0].roll()), (5, 170));
-    });
+    forge.handle.send(Intent::TemplateApply(0));
+    assert_eq!(forge.template_message(), "Drafted \"Wayfarer's set\": 1 draft. Review it, then Apply.");
+    assert_eq!(forge.handle.read(|editor| (editor.affixes[0].tier(), editor.affixes[0].roll())), Some((5, 170)));
     settle();
     let state = forge.ui.global::<ForgeState>();
     state.invoke_templates_opened();
+    session.idle();
     assert_eq!(state.get_template_rows().row_count(), 1);
     session.click(445.0, 472.0);
+    session.idle();
     session.capture(&forge.ui, "item-templates");
     // The name field has the keyboard. A name that shares the kept template's file says what it replaces, and Save
     // becomes Replace; Enter goes to Replace rather than replacing, and a second Enter replaces.
@@ -1267,6 +1284,7 @@ pub(in super::super) fn item_captures(session: &Session) {
     session.key(Key::Return);
     assert_eq!(state.get_template_message(), "", "Enter in the name field does not replace");
     session.key(Key::Return);
+    session.idle();
     assert_eq!(state.get_template_message(), "Saved \"WAYFARER'S SET\" in place of \"Wayfarer's set\".");
     assert_eq!((state.get_template_name().as_str(), state.get_template_replaces().as_str()), ("", ""));
     assert_eq!(state.get_template_rows().row_count(), 1);
@@ -1282,6 +1300,7 @@ pub(in super::super) fn item_captures(session: &Session) {
     session.key(Key::Return);
     session.key(Key::Backtab);
     session.key(Key::Return);
+    session.idle();
     assert_eq!(state.get_template_rows().row_count(), 0);
     assert_eq!(state.get_template_message(), "Deleted \"WAYFARER'S SET\".");
     session.key(Key::Escape);
@@ -1289,48 +1308,37 @@ pub(in super::super) fn item_captures(session: &Session) {
 
     // Many templates in a short window on a one-affix item: the flyout has room on neither side of Templates, so it
     // stays inside the window.
-    let forge = Forge::open(session, World::boots().change(|item| item.affixes.truncate(1)), 940, 580);
-    let folder = session.folder().join("forge-templates-many");
-    forge.handle.edit(|editor| {
-        editor.templates = Some(eg_trainer::item::template::TemplateStore::new(folder));
-        for name in [
-            "Boots of Haste",
-            "Cold resist",
-            "Crit boots",
-            "Fire resist",
-            "Health stack",
-            "Movement",
-            "A name long enough that the row has to cut it short",
-        ] {
-            editor.save_template(name, false);
-        }
-    });
-    settle();
+    let forge = Forge::open_with_templates(session, World::boots().change(|item| item.affixes.truncate(1)), 940, 580);
+    for name in [
+        "Boots of Haste",
+        "Cold resist",
+        "Crit boots",
+        "Fire resist",
+        "Health stack",
+        "Movement",
+        "A name long enough that the row has to cut it short",
+    ] {
+        forge.save_template(session, name, false);
+    }
     session.click(445.0, 310.0);
+    session.idle();
     session.capture(&forge.ui, "item-templates-many-940");
     session.key(Key::Escape);
     drop(forge);
     // The affix list's row as a run with templates has it, at the narrowest window.
-    let forge = Forge::open(session, World::boots(), 680, 580);
-    forge
-        .handle
-        .edit(|editor| editor.templates = Some(eg_trainer::item::template::TemplateStore::new(session.folder().join("forge-templates-many"))));
-    settle();
+    let forge = Forge::open_with_templates(session, World::boots(), 680, 580);
+    session.idle();
     session.capture(&forge.ui, "item-templates-narrow");
     drop(forge);
     // A whole-item template on the legendary: its unique rolls come back with its affixes.
-    let forge = Forge::open(session, World::unique(), 1100, 700);
-    let folder = session.folder().join("forge-templates");
-    forge.handle.edit(|editor| {
-        editor.templates = Some(eg_trainer::item::template::TemplateStore::new(folder));
-        editor.save_template("Haste legendary", true);
-    });
+    let forge = Forge::open_with_templates(session, World::unique(), 1100, 700);
+    forge.save_template(session, "Haste legendary", true);
     forge.change(|item| {
         item.identity.as_mut().unwrap().rolls[1] = 20;
         item.affixes[0].roll = 3;
     });
+    forge.handle.send(Intent::TemplateApply(0));
     forge.handle.edit(|editor| {
-        editor.apply_template(0);
         assert!(editor.template_message.starts_with("Drafted \"Haste legendary\""), "{}", editor.template_message);
         assert_eq!(editor.affixes[0].roll(), 170);
         assert!(

@@ -178,16 +178,6 @@ impl TemplateStore {
         file_ops::atomic::write(&self.file(&template.name), text.as_bytes())
     }
 
-    /// The kept template that saving under `name` would replace: the one whose file the name maps to, which may be spelled
-    /// differently ("Wayfarer's set" and "wayfarer_s set" share one).
-    pub fn taken_by(&self, name: &str) -> Option<String> {
-        let file = self.file(name);
-        if ItemTemplate::clean_name(name).is_empty() || !file.exists() {
-            return None;
-        }
-        self.list().into_iter().map(|template| template.name).find(|kept| self.file(kept) == file)
-    }
-
     pub fn delete(&self, name: &str) -> std::io::Result<()> {
         match std::fs::remove_file(self.file(name)) {
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
@@ -195,15 +185,29 @@ impl TemplateStore {
         }
     }
 
-    /// The template's file: its name with every character a file name may not hold, and case, folded, so a name maps to
-    /// one file whatever its case.
     fn file(&self, name: &str) -> PathBuf {
-        let stem: String = ItemTemplate::clean_name(name)
-            .to_lowercase()
-            .chars()
-            .map(|c| if c.is_alphanumeric() || c == ' ' || c == '-' || c == '_' { c } else { '_' })
-            .collect();
-        let stem = stem.trim().trim_end_matches('.');
-        self.directory.join(format!("{}.json", if stem.is_empty() { "template" } else { stem }))
+        self.directory.join(format!("{}.json", file_stem(name)))
     }
+}
+
+/// A template's file name: its name with every character a file name may not hold, and case, folded, so a name maps to one
+/// file whatever its case.
+fn file_stem(name: &str) -> String {
+    let stem: String = ItemTemplate::clean_name(name)
+        .to_lowercase()
+        .chars()
+        .map(|c| if c.is_alphanumeric() || c == ' ' || c == '-' || c == '_' { c } else { '_' })
+        .collect();
+    let stem = stem.trim().trim_end_matches('.');
+    if stem.is_empty() { "template".to_owned() } else { stem.to_owned() }
+}
+
+/// Which of the `kept` templates saving under `name` would replace: the one whose file the name maps to, which may be spelled
+/// differently ("Wayfarer's set" and "wayfarer_s set" share one).
+pub fn taken_by(kept: &[ItemTemplate], name: &str) -> Option<String> {
+    if ItemTemplate::clean_name(name).is_empty() {
+        return None;
+    }
+    let stem = file_stem(name);
+    kept.iter().find(|template| file_stem(&template.name) == stem).map(|template| template.name.clone())
 }

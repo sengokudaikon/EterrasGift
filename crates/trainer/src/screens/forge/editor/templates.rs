@@ -1,13 +1,9 @@
 //! Item templates: saved from the item, and drafted onto it as ordinary drafts.
 
 use super::*;
+use crate::item::template;
 
 impl ForgeEditor {
-    /// The kept templates, by name.
-    pub fn template_list(&self) -> Vec<ItemTemplate> {
-        self.templates.as_ref().map(TemplateStore::list).unwrap_or_default()
-    }
-
     /// A template's caption, each its own text: what it holds, e.g. ["Whole item", "4 affixes", "Health, Movement Speed, …"].
     pub fn template_detail(&self, template: &ItemTemplate) -> Vec<String> {
         let names: Vec<String> = template.affixes.iter().take(3).map(|affix| self.catalog().definition(affix.id).name).collect();
@@ -24,36 +20,28 @@ impl ForgeEditor {
         facts
     }
 
-    /// Saves the item as Apply would leave it under `name`: its affixes, or with `whole` the item too (base, unique and
-    /// its rolls, implicit rolls, status). A name already kept is replaced.
-    pub fn save_template(&mut self, name: &str, whole: bool) {
-        self.template_message = match self.saved_template(name, whole) {
-            Ok(message) => {
-                self.template_name.clear();
-                message
-            }
-            Err(problem) => problem,
-        };
-    }
-
     /// The kept template that saving under the typed name would replace: the same name in any case, or one whose file name
     /// the typed one shares.
     pub fn template_replaces(&self) -> Option<String> {
-        self.templates.as_ref()?.taken_by(&self.template_name)
+        template::taken_by(&self.templates, &self.template_name)
     }
 
-    pub(super) fn saved_template(&self, name: &str, whole: bool) -> Result<String, String> {
+    /// The item as Apply would leave it, as a template to keep under `name`, with the kept one it would replace: its affixes,
+    /// or with `whole` the item too (base, unique and its rolls, implicit rolls, status). Or why it can't be kept.
+    pub fn template_to_save(&self, name: &str, whole: bool) -> Result<(ItemTemplate, Option<String>), String> {
         phrases! {
             NotKept: "Templates are not kept in this run."
             Unnamed: "Name the template first."
         }
-        let store = self.templates.as_ref().ok_or(NotKept.get())?;
+        if !self.keeps_templates {
+            return Err(NotKept.into());
+        }
         let name = ItemTemplate::clean_name(name);
         if name.is_empty() {
             return Err(Unnamed.into());
         }
         let item = self.drafted_item().or_else(|| (*self.item).clone()).ok_or(tr::NoItem.get())?;
-        let replaced = store.taken_by(&name);
+        let replaced = template::taken_by(&self.templates, &name);
         let affixes = item
             .affixes
             .iter()
@@ -82,39 +70,37 @@ impl ForgeEditor {
                 },
             }
         });
-        let template = ItemTemplate {
-            name: name.clone(),
-            affixes,
-            item,
-        };
+        Ok((ItemTemplate { name, affixes, item }, replaced))
+    }
+
+    /// A save came back: `error` says why it failed. Saved, the typed name is done with.
+    pub fn template_saved(&mut self, name: &str, replaced: Option<String>, error: Option<String>) {
         phrases! {
             NotSaved: "The template could not be saved: {error}"
             Replaced: "Replaced \"{name}\"."
             SavedOver: "Saved \"{name}\" in place of \"{kept}\"."
             Saved: "Saved \"{name}\"."
         }
-        store.save(&template).map_err(|error| NotSaved.with(&[("error", &error)]))?;
-        Ok(match replaced {
-            Some(kept) if kept == name => Replaced.with(&[("name", &name)]),
-            Some(kept) => SavedOver.with(&[("name", &name), ("kept", &kept)]),
-            None => Saved.with(&[("name", &name)]),
-        })
+        if error.is_none() {
+            self.template_name.clear();
+        }
+        self.template_message = match (error, replaced) {
+            (Some(error), _) => NotSaved.with(&[("error", &error)]),
+            (None, Some(kept)) if kept == name => Replaced.with(&[("name", &name)]),
+            (None, Some(kept)) => SavedOver.with(&[("name", &name), ("kept", &kept)]),
+            (None, None) => Saved.with(&[("name", &name)]),
+        };
     }
 
-    pub fn delete_template(&mut self, index: usize) {
-        let Some(template) = self.template_list().into_iter().nth(index) else {
-            return;
-        };
-        let Some(store) = self.templates.as_ref() else {
-            return;
-        };
+    /// A delete came back: `error` says why it failed.
+    pub fn template_deleted(&mut self, name: &str, error: Option<String>) {
         phrases! {
             Deleted: "Deleted \"{name}\"."
             NotDeleted: "The template could not be deleted: {error}"
         }
-        self.template_message = match store.delete(&template.name) {
-            Ok(()) => Deleted.with(&[("name", &template.name)]),
-            Err(error) => NotDeleted.with(&[("error", &error)]),
+        self.template_message = match error {
+            None => Deleted.with(&[("name", &name)]),
+            Some(error) => NotDeleted.with(&[("error", &error)]),
         };
     }
 
@@ -122,7 +108,7 @@ impl ForgeEditor {
     /// named. A whole-item template whose unique differs drafts that unique alone (a new unique brings its own
     /// modifiers): apply the template again after it for the rest.
     pub fn apply_template(&mut self, index: usize) {
-        let Some(template) = self.template_list().into_iter().nth(index) else {
+        let Some(template) = self.templates.get(index).cloned() else {
             return;
         };
         let (message, kind) = match self.applied_template(&template) {

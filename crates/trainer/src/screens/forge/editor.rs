@@ -9,7 +9,7 @@ use super::item::{self, AffixDefinition, AffixKind, Category, Compatibility, For
 use super::picker::{self, Chip, Filters, Index, KindFilter, LevelChoice, PICKER_CATEGORIES, PICKER_CLASSES, Query, SourceChoice};
 use super::rows::{AffixRow, FieldDraft, FieldKind, FieldOption, RollRow, ValueEditor, base_key, base_of};
 use crate::backend::BackendSnapshot;
-use crate::item::template::{ItemTemplate, TemplateAffix, TemplateItem, TemplateStatus, TemplateStore};
+use crate::item::template::{ItemTemplate, TemplateAffix, TemplateItem, TemplateStatus};
 use spiderland::Tracked;
 use spiderland_phrases::{Conjunction, Phrase, list, phrases};
 use std::collections::{HashMap, VecDeque};
@@ -282,8 +282,10 @@ pub struct ForgeEditor {
     menu_generation: u64,
     /// The local time a confirmed write is listed with.
     pub clock: fn() -> String,
-    /// Where the user's item templates are kept; None in a run without user data (tests).
-    pub templates: Option<TemplateStore>,
+    /// Whether this run keeps item templates: a run without user data doesn't.
+    pub keeps_templates: bool,
+    /// The kept templates, as last read from their folder.
+    pub templates: Tracked<Vec<ItemTemplate>>,
     /// What the last template action did, under the templates' list.
     pub template_message: String,
     /// The name typed for a new template; cleared once it is saved.
@@ -355,7 +357,8 @@ impl ForgeEditor {
             picker_index: Index::default(),
             menu_generation: 0,
             clock: local_time,
-            templates: None,
+            keeps_templates: false,
+            templates: Tracked::default(),
             template_message: String::new(),
             template_name: String::new(),
         };

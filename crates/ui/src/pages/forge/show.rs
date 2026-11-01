@@ -69,9 +69,8 @@ struct Regions {
     /// These rows hold new models for their facts each time they are made, so they can't be compared to check their key.
     identity_options: Slice<(u64, i64, String)>,
     base_options: Slice<(u64, i64)>,
-    /// Reading the kept templates goes to their folder: only when asked, or when the name typed may match another.
-    template_rows: Slice<Version>,
-    template_name: Slice<(Version, String)>,
+    /// Their rows hold new models for their facts too. What they say of each template comes from the catalog.
+    template_rows: Slice<(Version, u64)>,
     input: Slice<Version>,
     picker: Slice<PickerKey>,
 }
@@ -252,11 +251,11 @@ impl View {
 /// The kept templates, read again from their folder when something says to, and the name typed for a new one.
 fn show_templates(forge: &ForgeState, state: &State, regions: &mut Regions) {
     let editor = state.editor();
-    forge.set_has_templates(editor.templates.is_some());
+    forge.set_has_templates(editor.keeps_templates);
     forge.set_template_message(editor.template_message.clone().into());
-    regions.template_rows.update(state.templates_read(), || {
+    regions.template_rows.update((editor.templates.version(), editor.menu_generation()), || {
         let rows: Vec<TemplateRowView> = editor
-            .template_list()
+            .templates
             .iter()
             .map(|template| {
                 let detail = editor.template_detail(template);
@@ -269,10 +268,8 @@ fn show_templates(forge: &ForgeState, state: &State, regions: &mut Regions) {
             .collect();
         forge.set_template_rows(ModelRc::from(Rc::new(VecModel::from(rows))));
     });
-    regions.template_name.update((state.templates_read(), editor.template_name.clone()), || {
-        forge.set_template_name(editor.template_name.clone().into());
-        forge.set_template_replaces(editor.template_replaces().unwrap_or_default().into());
-    });
+    forge.set_template_name(editor.template_name.clone().into());
+    forge.set_template_replaces(editor.template_replaces().unwrap_or_default().into());
 }
 
 /// The typing popover: what it opened on, and how the typing stands.
