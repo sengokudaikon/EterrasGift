@@ -3,265 +3,16 @@
 // narrow lays the pane over the table, wide adds the Range column and caps the table at 1000px, and from 1180px of lists
 // the column beside the table holds the unique modifiers or the selected affix's tier ladder.
 
-import { ScrollView } from "../../widgets/scroll-view.slint";
 import { Tokens } from "../../tokens.slint";
 import { KeyboardFocus } from "../../globals.slint";
-import { TipTrigger } from "../../widgets/focus.slint";
-import { FactsText } from "../../widgets/text.slint";
-import { Button, ButtonKind } from "../../widgets/button.slint";
-import { FocusRing } from "../../widgets/focus.slint";
-import { FlyoutSurface } from "../../widgets/menu.slint";
-import { MessageTone } from "../common.slint";
-import { CellKind, ForgeCover, ForgeReveal, ForgeState, ItemRarity, MenuOptionView } from "state.slint";
-import { ValueScrubber } from "scrubber.slint";
+import { CellKind, ForgeCover, ForgeState } from "state.slint";
 import { ForgeText } from "../../strings/forge.slint";
-import {
-    CellButton,
-    FlagToggle,
-    MenuRow,
-} from "cells.slint";
-import { CheckBox } from "../../widgets/check-box.slint";
-import { HelpButton } from "../../widgets/help-button.slint";
-import {
-    AffixRowItem,
-    ModifierRowItem,
-    TierLadder,
-    MenuMetrics,
-} from "table.slint";
-import { AffixPickerPanel, PickerMetrics } from "picker.slint";
-import { SearchBox } from "../../widgets/search-box.slint";
 import { ChangesPane } from "pane.slint";
-import { TemplatesPanel, TemplateMetrics, TemplatesMeasure } from "templates.slint";
-
-// The game-owned colour of a rarity's names (EpochColor), for item names only.
-global RarityInk {
-    public pure function of(rarity: ItemRarity) -> brush {
-        return rarity == ItemRarity.legendary ? Tokens.rarity-legendary-brush
-            : rarity == ItemRarity.set ? Tokens.rarity-set-brush
-            : rarity == ItemRarity.unique ? Tokens.rarity-unique-brush
-            : rarity == ItemRarity.exalted ? Tokens.rarity-exalted-brush
-            : rarity == ItemRarity.rare ? Tokens.rarity-rare-brush
-            : rarity == ItemRarity.magic ? Tokens.rarity-magic-brush : Tokens.rarity-normal-brush;
-    }
-}
-
-// A uniques-and-set-items entry: the name in the colour of the rarity the item would end with (dimmed when it can't be
-// picked), "in game" on the one the item is, and the caption with its reasons, wrapped.
-component IdentityEntry inherits MenuRow {
-    in property <MenuOptionView> option;
-
-    held: root.option.current;
-    enabled: root.option.available;
-
-    VerticalLayout {
-        horizontal-stretch: 1;
-
-        HorizontalLayout {
-            spacing: Tokens.space-12;
-
-            Text {
-                text: root.option.name;
-                color: root.option.available ? RarityInk.of(root.option.rarity) : Tokens.text-disabled-brush;
-                wrap: word-wrap;
-                horizontal-stretch: 1;
-            }
-
-            if root.option.in-game: Text {
-                text: ForgeText.in-game;
-                font-size: Tokens.font-size-caption;
-                color: Tokens.text-secondary-brush;
-                vertical-alignment: center;
-            }
-        }
-
-        FactsText {
-            facts: root.option.facts;
-        }
-
-        // Kept in the layout at no height when empty: wrapped text inside an if is measured short (crates/ui/README.md).
-        Text {
-            text: root.option.note;
-            font-size: Tokens.font-size-caption;
-            color: Tokens.text-muted-brush;
-            wrap: word-wrap;
-            visible: root.option.note != "";
-            height: root.option.note == "" ? 0px : self.preferred-height;
-        }
-    }
-}
-
-// A base entry: the name, "in game" on the item's own, the implicits it grants, then its level and notes, all wrapped.
-component BaseEntry inherits MenuRow {
-    in property <MenuOptionView> option;
-
-    held: root.option.current;
-    enabled: root.option.available;
-
-    VerticalLayout {
-        horizontal-stretch: 1;
-
-        HorizontalLayout {
-            spacing: Tokens.space-12;
-
-            Text {
-                text: root.option.name;
-                color: Tokens.text-brush;
-                wrap: word-wrap;
-                horizontal-stretch: 1;
-            }
-
-            if root.option.in-game: Text {
-                text: ForgeText.in-game;
-                font-size: Tokens.font-size-caption;
-                color: Tokens.text-secondary-brush;
-                vertical-alignment: center;
-            }
-        }
-
-        // Kept in the layout at no height when empty: wrapped text inside an if is measured short (crates/ui/README.md).
-        Text {
-            text: root.option.implicits;
-            font-size: Tokens.font-size-caption;
-            color: Tokens.text-secondary-brush;
-            wrap: word-wrap;
-            visible: root.option.implicits != "";
-            height: root.option.implicits == "" ? 0px : self.preferred-height;
-        }
-
-        FactsText {
-            facts: root.option.facts;
-        }
-
-        Text {
-            text: root.option.note;
-            font-size: Tokens.font-size-caption;
-            color: Tokens.text-muted-brush;
-            wrap: word-wrap;
-            visible: root.option.note != "";
-            height: root.option.note == "" ? 0px : self.preferred-height;
-        }
-    }
-}
-
-// A cell in the facts line: plain text that answers like a cell where it can change, outdented so hovering never moves it.
-// It is a Tab stop either way, so its reason shows by keyboard too.
-component InlineCell inherits Rectangle {
-    in property <string> text;
-    in property <bool> emphasis;
-    in property <bool> drafted;
-    in property <bool> changeable;
-    in property <string> tip;
-    in property <string> label;
-    callback clicked();
-
-    public function focus-cell() {
-        button.focus-cell();
-    }
-
-    width: words.preferred-width;
-    height: words.preferred-height;
-
-    words := Text {
-        text: root.text;
-        font-weight: root.emphasis ? Tokens.emphasis-weight : 400;
-        color: root.drafted ? Tokens.draft-brush : Tokens.text-secondary-brush;
-        visible: false;
-    }
-
-    button := CellButton {
-        x: Tokens.inline-cell-outdent.left;
-        y: Tokens.inline-cell-outdent.top;
-        width: root.width - Tokens.inline-cell-outdent.left - Tokens.inline-cell-outdent.right;
-        height: root.height - Tokens.inline-cell-outdent.top - Tokens.inline-cell-outdent.bottom;
-        changeable: root.changeable;
-        tab-stop: true;
-        tip: root.tip;
-        label: root.label;
-        clicked => {
-            root.clicked();
-        }
-
-        Text {
-            text: root.text;
-            font-weight: root.emphasis ? Tokens.emphasis-weight : 400;
-            color: root.drafted ? Tokens.draft-brush : Tokens.text-secondary-brush;
-            vertical-alignment: center;
-        }
-    }
-}
-
-// The Changes toggle: transparent at rest, checked on Wine-Stained Brown in Dark Brass while the pane is open.
-component ChangesToggle inherits Rectangle {
-    in property <string> text;
-    in-out property <bool> checked;
-
-    public function focus-toggle() {
-        focus.focus();
-    }
-
-    accessible-role: button;
-    accessible-label: root.text;
-    accessible-checkable: true;
-    accessible-checked: root.checked;
-    accessible-action-default => { root.checked = !root.checked; }
-
-    min-height: Tokens.control-min-height;
-    width: words.preferred-width + Tokens.button-padding.left + Tokens.button-padding.right;
-    border-radius: Tokens.control-radius;
-    border-width: 1px;
-    background: root.checked ? Tokens.selected-brush : touch.has-hover ? Tokens.hover-brush : transparent;
-    border-color: root.checked ? Tokens.accent-trim-brush : transparent;
-
-    words := Text {
-        text: root.text;
-        color: root.checked ? Tokens.label-brush : touch.has-hover ? Tokens.text-brush : Tokens.text-secondary-brush;
-        vertical-alignment: center;
-    }
-
-    focus := FocusScope {
-        focus-gained(reason) => {
-            if (reason == FocusReason.tab-navigation) {
-                KeyboardFocus.visible = true;
-            }
-        }
-        key-pressed(event) => {
-            if (event.text == Key.Return || event.text == " ") {
-                root.checked = !root.checked;
-                return accept;
-            }
-            reject
-        }
-
-        touch := TouchArea {
-            pointer-event(event) => {
-                if (event.kind == PointerEventKind.down) {
-                    KeyboardFocus.visible = false;
-                }
-            }
-            clicked => {
-                focus.focus();
-                root.checked = !root.checked;
-            }
-        }
-    }
-
-    TipTrigger {
-        text: ForgeText.show-or-hide-changes;
-        hovered: touch.has-hover;
-        focused: focus.has-focus;
-    }
-
-    FocusRing {
-        focused: focus.has-focus;
-    }
-}
+import { ForgeHeader } from "header.slint";
+import { ForgeLists } from "lists.slint";
+import { ForgeBar } from "bar.slint";
 
 export component ItemForge inherits Rectangle {
-    // The line under the template form: what saving the typed name would replace, else what the last action did.
-    property <string> template-note: ForgeState.template-replaces != ""
-        ? ForgeText.saving-replaces(ForgeState.template-replaces)
-        : ForgeState.template-message;
-
     in property <bool> compact;
     in property <bool> narrow;
     in property <bool> wide;
@@ -272,26 +23,8 @@ export component ItemForge inherits Rectangle {
     // A narrow window has no column for the pane: the table takes the whole width and the pane lies over it.
     property <length> lists-column: root.narrow ? root.width : root.width - root.pane-width;
     property <length> lists-width: Math.max(0px, root.lists-column - 2 * root.gutter);
-    property <bool> roomy: root.lists-width >= Tokens.side-by-side-body-width;
-    property <bool> unique-beside: root.roomy && ForgeState.has-unique;
-    property <bool> ladder: root.roomy && !ForgeState.has-unique;
-    property <length> table-width: root.ladder ? Math.min(Tokens.affix-table-max-width, root.lists-width - Tokens.tier-ladder-width)
-        : root.unique-beside ? root.lists-width / 2
-        : root.wide ? Math.min(Tokens.affix-table-max-width, root.lists-width) : root.lists-width;
-    property <length> range-width: range-measure.preferred-width;
-    property <int> selected: ForgeState.selected-affix;
-    // An identity entry: the name over its caption in the menu row's padding (the empty list's height).
-    property <length> identity-row: Tokens.font-size-body * 4 / 3 + Tokens.font-size-caption * 4 / 3 + Tokens.cell-padding.top + Tokens.cell-padding.bottom + 2px;
-    // The menus' keyboard highlights: they start on the held entry and skip what can't be picked.
-    property <int> rarity-highlight;
-    property <int> base-highlight;
-    property <int> identity-highlight;
     // Rust asks for a header cell (Show draft on the identity), or a row asks to be scrolled into view.
     property <int> serial: ForgeState.focus-serial;
-    property <int> reveal-serial: ForgeReveal.serial;
-    // The add picker's flyout: closing it any way but Use or Cancel cancels, and Rust dropping the picker closes it.
-    property <bool> add-shown: add-popup.is-open;
-    property <bool> picker-live: ForgeState.picker-open;
 
     // The pane starts closed in a narrow window, closes on the way into narrow and opens again on the way out. The class it
     // last followed lives in ForgeState, so an item swap that rebuilds this view keeps the user's choice.
@@ -334,43 +67,15 @@ export component ItemForge inherits Rectangle {
     changed serial => {
         if (ForgeState.focus-cell.kind == CellKind.field && ForgeState.focus-cell.row == -1 && ForgeState.focus-part == 5) {
             KeyboardFocus.visible = true;
-            identity-cell.focus-cell();
+            header.focus-identity();
         }
     }
 
-    // A row Rust selected or focused scrolls into view.
-    changed reveal-serial => {
-        let top = ForgeReveal.top - lists.absolute-position.y;
-        let bottom = top + ForgeReveal.height;
-        if (top < 0) {
-            lists.content-y = Math.min(0px, lists.content-y - top);
-        } else if (bottom > lists.visible-height) {
-            lists.content-y = Math.max(Math.min(0px, lists.visible-height - lists.content-height), lists.content-y - (bottom - lists.visible-height));
-        }
-    }
 
-    changed add-shown => {
-        if (!root.add-shown && ForgeState.picker-open) {
-            ForgeState.cancel-picker();
-        }
-    }
-    changed picker-live => {
-        if (!root.picker-live) {
-            add-popup.close();
-        }
-    }
 
-    function close-identity() {
-        identity-popup.close();
-        identity-cell.focus-cell();
-    }
 
-    function pick-identity(index: int) {
-        if (index >= 0 && ForgeState.identity-options[index].available) {
-            ForgeState.pick-identity(index);
-            root.close-identity();
-        }
-    }
+
+
 
     // Hidden measures, in a box of no size so their sizes never reach the page's own layout.
     Rectangle {
@@ -422,7 +127,6 @@ export component ItemForge inherits Rectangle {
             }
         }
     }
-
     property <bool> strip-one-line: strip-measure.preferred-width <= root.width - 2 * root.gutter;
 
     page-keys := FocusScope {
@@ -441,1257 +145,194 @@ export component ItemForge inherits Rectangle {
         }
 
         // The header: the name in its rarity colour, the facts line, then the status strip.
-        header := VerticalLayout {
+        header := ForgeHeader {
             x: root.gutter;
             y: 0;
             width: root.width - 2 * root.gutter;
             height: self.preferred-height;
-            padding-top: Tokens.header-padding.top;
-            padding-bottom: Tokens.header-padding.bottom;
-            spacing: Tokens.space-4;
-
-            // On a unique, set or legendary item the name is a cell that opens the identity picker; a drafted unique shows
-            // its name in teal.
-            Rectangle {
-                height: title.preferred-height;
-
-                // A Tab stop whenever the item has an identity.
-                identity-cell := CellButton {
-                    x: Tokens.inline-cell-outdent.left;
-                    y: Tokens.inline-cell-outdent.top;
-                    width: Math.min(title.preferred-width, parent.width) - Tokens.inline-cell-outdent.left - Tokens.inline-cell-outdent.right;
-                    height: parent.height - Tokens.inline-cell-outdent.top - Tokens.inline-cell-outdent.bottom;
-                    visible: ForgeState.has-identity;
-                    enabled: ForgeState.has-identity;
-                    changeable: ForgeState.can-change-identity;
-                    tab-stop: true;
-                    tip: ForgeState.identity-tip;
-                    label: ForgeText.item(ForgeState.item-name);
-                    clicked => {
-                        if (ForgeState.can-change-identity) {
-                            ForgeState.identity-search-edited("");
-                            root.identity-highlight = ForgeState.option-start(ForgeState.identity-options);
-                            identity-popup.show();
-                        }
-                    }
-                }
-
-                title := Text {
-                    x: 0;
-                    width: parent.width;
-                    text: ForgeState.item-name;
-                    font-family: Tokens.display-font;
-                    font-size: Tokens.font-size-title;
-                    font-weight: Tokens.display-weight;
-                    letter-spacing: Tokens.tracking-title;
-                    wrap: word-wrap;
-                    max-lines: Tokens.title-max-lines;
-                    overflow: elide;
-                    min-height: Tokens.line-height-title;
-                    vertical-alignment: center;
-                    color: ForgeState.identity-drafted ? Tokens.draft-brush : RarityInk.of(ForgeState.name-rarity);
-                    accessible-label: ForgeText.item(ForgeState.item-name);
-                }
-
-                // The identity picker: focus starts on the entry the item is; Down leaves the search for the list, the arrows
-                // move, Enter or Space picks and closes, and a keyboard close hands focus back to the name.
-                identity-popup := PopupWindow {
-                    x: Tokens.inline-cell-outdent.left;
-                    y: parent.height - Tokens.inline-cell-outdent.bottom + Tokens.space-4;
-                    width: Tokens.base-menu-width + Tokens.flyout-padding.left + Tokens.flyout-padding.right;
-                    height: Tokens.flyout-padding.top + Tokens.flyout-padding.bottom + Tokens.control-min-height + Tokens.space-8 * 2
-                        + identity-surface.list-height + PickerMetrics.caption-line * 3;
-                    close-policy: PopupClosePolicy.close-on-click-outside;
-
-                    identity-surface := FlyoutSurface {
-                        // The list measured where it really ends (its entries wrap), capped at the replace list's height.
-                        property <length> content: Math.max(0px, identity-end.y - Tokens.space-2);
-                        property <length> list-height: Math.min(Tokens.replace-list-max-height, Math.max(root.identity-row, self.content));
-
-                        // The entries at the menu's width, in a box of no size, built only while the menu is open; the
-                        // zero-height marker after them is where the list really ends.
-                        Rectangle {
-                            width: 0;
-                            height: 0;
-                            visible: false;
-
-                            VerticalLayout {
-                                x: 0;
-                                y: 0;
-                                width: Tokens.base-menu-width;
-                                height: self.preferred-height;
-                                spacing: Tokens.space-2;
-
-                                for option in ForgeState.identity-options: IdentityEntry {
-                                    option: option;
-                                }
-
-                                identity-end := Rectangle {
-                                    height: 0px;
-                                }
-                            }
-                        }
-
-
-                        FocusScope {
-                            capture-key-pressed(event) => {
-                                if (event.text == Key.Escape) {
-                                    root.close-identity();
-                                    return accept;
-                                }
-                                reject
-                            }
-
-                            VerticalLayout {
-                                padding-left: Tokens.flyout-padding.left;
-                                padding-right: Tokens.flyout-padding.right;
-                                padding-top: Tokens.flyout-padding.top;
-                                padding-bottom: Tokens.flyout-padding.bottom;
-                                spacing: Tokens.space-8;
-                                alignment: start;
-
-                                SearchBox {
-                                    text: ForgeState.identity-search;
-                                    placeholder: ForgeText.unique-search-placeholder;
-                                    label: ForgeText.unique-search;
-                                    edited(text) => {
-                                        ForgeState.identity-search-edited(text);
-                                    }
-                                    down => {
-                                        if (ForgeState.identity-options.length > 0) {
-                                            root.identity-highlight = ForgeState.option-start(ForgeState.identity-options);
-                                            KeyboardFocus.visible = true;
-                                            identity-list.focus();
-                                        }
-                                    }
-                                }
-
-                                Rectangle {
-                                    height: identity-surface.list-height;
-
-                                    if ForgeState.identity-options.length == 0: Text {
-                                        x: Tokens.empty-list-margin.left;
-                                        y: Tokens.empty-list-margin.top;
-                                        width: parent.width - Tokens.empty-list-margin.left - Tokens.empty-list-margin.right;
-                                        text: ForgeText.no-unique-matches;
-                                        color: Tokens.text-muted-brush;
-                                        wrap: word-wrap;
-                                    }
-
-                                    identity-list := FocusScope {
-                                        accessible-role: list;
-                                        accessible-label: ForgeText.uniques-and-sets;
-                                        init => {
-                                            self.focus();
-                                        }
-                                        focus-gained(reason) => {
-                                            if (reason == FocusReason.tab-navigation) {
-                                                KeyboardFocus.visible = true;
-                                            }
-                                        }
-                                        key-pressed(event) => {
-                                            if (event.text == Key.UpArrow || event.text == Key.DownArrow) {
-                                                KeyboardFocus.visible = true;
-                                                root.identity-highlight = ForgeState.option-step(ForgeState.identity-options, root.identity-highlight,
-                                                    event.text == Key.UpArrow ? -1 : 1);
-                                                return accept;
-                                            }
-                                            if (event.text == Key.Return || event.text == " ") {
-                                                root.pick-identity(root.identity-highlight);
-                                                return accept;
-                                            }
-                                            reject
-                                        }
-
-                                        identity-scroll := ScrollView {
-                                            // Keeps the highlighted entry in view as the keyboard moves it.
-                                            function reveal(top: length, height: length) {
-                                                if (top + self.content-y < 0) {
-                                                    self.content-y = -top;
-                                                } else if (top + height + self.content-y > self.visible-height) {
-                                                    self.content-y = self.visible-height - top - height;
-                                                }
-                                            }
-
-                                            content-width: self.visible-width;
-                                            content-height: identity-surface.content;
-
-                                            VerticalLayout {
-                                                height: identity-surface.content;
-                                                spacing: Tokens.space-2;
-                                                alignment: start;
-
-                                                for option[index] in ForgeState.identity-options: IdentityEntry {
-                                                    property <bool> lit: root.identity-highlight == index;
-                                                    init => {
-                                                        if (self.lit) {
-                                                            identity-scroll.reveal(self.y, self.height);
-                                                        }
-                                                    }
-                                                    changed lit => {
-                                                        if (self.lit) {
-                                                            identity-scroll.reveal(self.y, self.height);
-                                                        }
-                                                    }
-                                                    option: option;
-                                                    highlighted: self.lit && identity-list.has-focus;
-                                                    picked => {
-                                                        root.identity-highlight = index;
-                                                        root.pick-identity(index);
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-
-                                Text {
-                                    text: ForgeText.identity-note;
-                                    font-size: Tokens.font-size-caption;
-                                    color: Tokens.text-muted-brush;
-                                    wrap: word-wrap;
-                                    height: PickerMetrics.caption-line * 3;
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-
-            HorizontalLayout {
-                spacing: Tokens.space-12;
-                alignment: start;
-
-                Rectangle {
-                    width: rarity-cell.width;
-                    height: rarity-cell.height;
-
-                    rarity-cell := InlineCell {
-                        text: ForgeState.rarity-text;
-                        emphasis: true;
-                        drafted: ForgeState.rarity-drafted;
-                        changeable: ForgeState.can-change-rarity;
-                        tip: ForgeState.rarity-tip;
-                        label: ForgeText.rarity-of(ForgeState.rarity-text);
-                        clicked => {
-                            if (ForgeState.can-change-rarity) {
-                                root.rarity-highlight = ForgeState.option-start(ForgeState.rarity-options);
-                                rarity-popup.show();
-                            }
-                        }
-                    }
-
-                    rarity-popup := PopupWindow {
-                        x: Tokens.inline-cell-outdent.left;
-                        y: parent.height - Tokens.inline-cell-outdent.bottom + Tokens.space-4;
-                        width: Tokens.base-menu-width + Tokens.flyout-padding.left + Tokens.flyout-padding.right;
-                        height: MenuMetrics.height(ForgeState.rarity-options.length) + ForgeState.rarity-caption-lines * PickerMetrics.caption-line;
-                        close-policy: PopupClosePolicy.close-on-click-outside;
-
-                        FlyoutSurface {
-
-                            FocusScope {
-                                accessible-role: list;
-                                accessible-label: ForgeText.rarity;
-                                init => {
-                                    self.focus();
-                                }
-                                // A keyboard close hands focus back to the rarity.
-                                key-pressed(event) => {
-                                    if (event.text == Key.Escape) {
-                                        rarity-popup.close();
-                                        rarity-cell.focus-cell();
-                                        return accept;
-                                    }
-                                    if (event.text == Key.UpArrow || event.text == Key.DownArrow) {
-                                        KeyboardFocus.visible = true;
-                                        root.rarity-highlight = ForgeState.option-step(ForgeState.rarity-options, root.rarity-highlight,
-                                            event.text == Key.UpArrow ? -1 : 1);
-                                        return accept;
-                                    }
-                                    if ((event.text == Key.Return || event.text == " ") && root.rarity-highlight >= 0) {
-                                        ForgeState.pick-rarity(root.rarity-highlight);
-                                        rarity-popup.close();
-                                        rarity-cell.focus-cell();
-                                        return accept;
-                                    }
-                                    reject
-                                }
-
-                                VerticalLayout {
-                                    padding-left: Tokens.flyout-padding.left;
-                                    padding-right: Tokens.flyout-padding.right;
-                                    padding-top: Tokens.flyout-padding.top;
-                                    padding-bottom: Tokens.flyout-padding.bottom;
-                                    spacing: Tokens.space-2;
-                                    alignment: start;
-
-                                    for option[index] in ForgeState.rarity-options: MenuRow {
-                                        held: option.current;
-                                        highlighted: root.rarity-highlight == index;
-                                        enabled: option.available;
-                                        picked => {
-                                            ForgeState.pick-rarity(index);
-                                            rarity-popup.close();
-                                        }
-
-                                        VerticalLayout {
-                                            horizontal-stretch: 1;
-
-                                            HorizontalLayout {
-                                                Text {
-                                                    text: option.name;
-                                                    color: option.available ? Tokens.text-brush : Tokens.text-disabled-brush;
-                                                    horizontal-stretch: 1;
-                                                }
-
-                                                if option.in-game: Text {
-                                                    text: ForgeText.in-game;
-                                                    font-size: Tokens.font-size-caption;
-                                                    color: Tokens.text-secondary-brush;
-                                                    vertical-alignment: center;
-                                                }
-                                            }
-
-                                            if option.note != "": Text {
-                                                text: option.note;
-                                                font-size: Tokens.font-size-caption;
-                                                color: Tokens.text-muted-brush;
-                                                wrap: word-wrap;
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-
-                if ForgeState.base-text != "": Rectangle {
-                    property <int> serial: ForgeState.focus-serial;
-                    changed serial => {
-                        if (ForgeState.focus-cell.kind == CellKind.field && ForgeState.focus-cell.row == -1 && ForgeState.focus-part == 4) {
-                            KeyboardFocus.visible = true;
-                            base-cell.focus-cell();
-                        }
-                    }
-
-                    width: base-cell.width;
-                    height: base-cell.height;
-
-                    base-cell := InlineCell {
-                        text: ForgeState.base-text;
-                        drafted: ForgeState.base-drafted;
-                        changeable: ForgeState.can-change-base;
-                        tip: ForgeState.base-tip;
-                        label: ForgeText.base-of(ForgeState.base-text);
-                        clicked => {
-                            if (ForgeState.can-change-base) {
-                                root.base-highlight = ForgeState.option-start(ForgeState.base-options);
-                                base-popup.show();
-                            }
-                        }
-                    }
-
-                    // The base picker: focus starts on the base the item has, the arrows move, Enter or Space picks and closes,
-                    // and a keyboard close hands focus back to the base. The list scrolls past the replace list's height.
-                    base-popup := PopupWindow {
-                        x: Tokens.inline-cell-outdent.left;
-                        y: parent.height - Tokens.inline-cell-outdent.bottom + Tokens.space-4;
-                        width: Tokens.base-menu-width + Tokens.flyout-padding.left + Tokens.flyout-padding.right;
-                        height: Tokens.flyout-padding.top + Tokens.flyout-padding.bottom + base-surface.list-height
-                            + Tokens.space-8 + Tokens.control-min-height + Tokens.space-2 + PickerMetrics.caption-line * 3;
-                        close-policy: PopupClosePolicy.close-on-click-outside;
-
-                        base-surface := FlyoutSurface {
-                            // The list measured where it really ends (its entries wrap), capped at the replace list's height.
-                            property <length> content: Math.max(0px, base-end.y - Tokens.space-2);
-                            property <length> list-height: Math.min(Tokens.replace-list-max-height, self.content);
-
-                            // The entries at the menu's width, in a box of no size, built only while the menu is open; the
-                            // zero-height marker after them is where the list really ends.
-                            Rectangle {
-                                width: 0;
-                                height: 0;
-                                visible: false;
-
-                                VerticalLayout {
-                                    x: 0;
-                                    y: 0;
-                                    width: Tokens.base-menu-width;
-                                    height: self.preferred-height;
-                                    spacing: Tokens.space-2;
-
-                                    for option in ForgeState.base-options: BaseEntry {
-                                        option: option;
-                                    }
-
-                                    base-end := Rectangle {
-                                        height: 0px;
-                                    }
-                                }
-                            }
-
-
-                            base-keys := FocusScope {
-                                init => {
-                                    self.focus();
-                                }
-                                key-pressed(event) => {
-                                    if (event.text == Key.Escape) {
-                                        base-popup.close();
-                                        base-cell.focus-cell();
-                                        return accept;
-                                    }
-                                    if (event.text == Key.UpArrow || event.text == Key.DownArrow) {
-                                        KeyboardFocus.visible = true;
-                                        root.base-highlight = ForgeState.option-step(ForgeState.base-options, root.base-highlight,
-                                            event.text == Key.UpArrow ? -1 : 1);
-                                        return accept;
-                                    }
-                                    if ((event.text == Key.Return || event.text == " ") && root.base-highlight >= 0
-                                        && ForgeState.base-options[root.base-highlight].available) {
-                                        ForgeState.pick-base(root.base-highlight);
-                                        base-popup.close();
-                                        base-cell.focus-cell();
-                                        return accept;
-                                    }
-                                    reject
-                                }
-
-                                VerticalLayout {
-                                    padding-left: Tokens.flyout-padding.left;
-                                    padding-right: Tokens.flyout-padding.right;
-                                    padding-top: Tokens.flyout-padding.top;
-                                    padding-bottom: Tokens.flyout-padding.bottom;
-                                    spacing: Tokens.space-8;
-                                    alignment: start;
-
-                                    base-scroll := ScrollView {
-                                        accessible-role: list;
-                                        accessible-label: ForgeText.bases;
-                                        // Keeps the highlighted entry in view as the keyboard moves it.
-                                        function reveal(top: length, height: length) {
-                                            if (top + self.content-y < 0) {
-                                                self.content-y = -top;
-                                            } else if (top + height + self.content-y > self.visible-height) {
-                                                self.content-y = self.visible-height - top - height;
-                                            }
-                                        }
-
-                                        height: base-surface.list-height;
-                                        content-width: self.visible-width;
-                                        content-height: base-surface.content;
-
-                                        VerticalLayout {
-                                            height: base-surface.content;
-                                            spacing: Tokens.space-2;
-                                            alignment: start;
-
-                                            for option[index] in ForgeState.base-options: BaseEntry {
-                                                property <bool> lit: root.base-highlight == index;
-                                                init => {
-                                                    if (self.lit) {
-                                                        base-scroll.reveal(self.y, self.height);
-                                                    }
-                                                }
-                                                changed lit => {
-                                                    if (self.lit) {
-                                                        base-scroll.reveal(self.y, self.height);
-                                                    }
-                                                }
-                                                option: option;
-                                                highlighted: self.lit && base-keys.has-focus;
-                                                picked => {
-                                                    root.base-highlight = index;
-                                                    ForgeState.pick-base(index);
-                                                    base-popup.close();
-                                                }
-                                            }
-                                        }
-                                    }
-
-                                    VerticalLayout {
-                                        spacing: Tokens.space-2;
-
-                                        CheckBox {
-                                            text: ForgeText.allow-incompatible;
-                                            checked: ForgeState.base-allow-incompatible;
-                                            enabled: ForgeState.base-can-edit;
-                                            toggled(on) => {
-                                                ForgeState.base-allow(on);
-                                            }
-                                        }
-
-                                        HorizontalLayout {
-                                            padding-left: Tokens.check-box-caption-margin.left;
-
-                                            Text {
-                                                text: ForgeText.base-allow-note;
-                                                font-size: Tokens.font-size-caption;
-                                                color: Tokens.text-muted-brush;
-                                                wrap: word-wrap;
-                                                height: PickerMetrics.caption-line * 3;
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-
-                for fact in ForgeState.summary: Text {
-                    text: fact;
-                    color: Tokens.text-secondary-brush;
-                    vertical-alignment: center;
-                }
-            }
-
-            if ForgeState.fields.length > 0: VerticalLayout {
-                padding-top: Tokens.status-strip-margin.top;
-
-                FlexboxLayout {
-                    height: root.strip-one-line ? strip-measure.preferred-height : self.preferred-height;
-                    spacing-horizontal: Tokens.space-24;
-                    spacing-vertical: Tokens.space-8;
-                    alignment: start;
-                    cross-axis-alignment: center;
-                    cross-axis-line-alignment: start;
-
-                    for field[index] in ForgeState.fields: Rectangle {
-                        // Show draft on a flag brings its toggle into focus.
-                        property <int> serial: ForgeState.focus-serial;
-                        changed serial => {
-                            if (ForgeState.focus-cell.kind == CellKind.field && ForgeState.focus-cell.row == index && ForgeState.focus-part == 1) {
-                                KeyboardFocus.visible = true;
-                                flag.focus-cell();
-                            }
-                        }
-                        width: field.numeric ? Tokens.status-cell-width : flag.width;
-                        height: field.numeric ? numeric.preferred-height : flag.height;
-
-                        numeric := VerticalLayout {
-                            visible: field.numeric;
-                            spacing: Tokens.space-2;
-
-                            HorizontalLayout {
-                                spacing: Tokens.space-4;
-                                alignment: start;
-
-                                // The field's tip, under its heading when it has one (why it is read-only).
-                                Text {
-                                    text: field.name;
-                                    color: Tokens.text-muted-brush;
-
-                                    label-touch := TouchArea { }
-
-                                    TipTrigger {
-                                        text: field.tip-heading != "" ? field.tip-heading + "\n" + field.tip : field.tip;
-                                        hovered: label-touch.has-hover;
-                                    }
-                                }
-
-                                if field.confirmed: Image {
-                                    width: Tokens.icon-size-tiny;
-                                    height: Tokens.icon-size-tiny;
-                                    y: (parent.height - self.height) / 2;
-                                    image-fit: contain;
-                                    source: Tokens.icon-confirmed;
-                                    colorize: Tokens.confirmed-brush;
-                                    accessible-label: ForgeText.confirmed;
-                                }
-
-                                if field.stale: Image {
-                                    width: Tokens.icon-size-tiny;
-                                    height: Tokens.icon-size-tiny;
-                                    y: (parent.height - self.height) / 2;
-                                    image-fit: contain;
-                                    source: Tokens.icon-warning;
-                                    colorize: Tokens.warning-brush;
-                                    accessible-label: ForgeText.stale-draft;
-                                }
-
-                                if !field.editable: Image {
-                                    width: Tokens.icon-size-tiny;
-                                    height: Tokens.icon-size-tiny;
-                                    y: (parent.height - self.height) / 2;
-                                    image-fit: contain;
-                                    source: Tokens.icon-locked;
-                                    colorize: Tokens.text-muted-brush;
-                                    accessible-label: ForgeText.read-only;
-                                }
-                            }
-
-                            if field.numeric: ValueScrubber {
-                                begin-input(a0) => { return ForgeState.begin-input(a0); }
-                                cancel-input(a0) => { ForgeState.cancel-input(a0); }
-                                commit-input(a0) => { return ForgeState.commit-input(a0); }
-                                end-scrub(a0, a1) => { ForgeState.end-scrub(a0, a1); }
-                                finish-input(a0) => { ForgeState.finish-input(a0); }
-                                focus-cell: ForgeState.focus-cell;
-                                focus-part: ForgeState.focus-part;
-                                focus-serial: ForgeState.focus-serial;
-                                input-edited(a0, a1) => { ForgeState.input-edited(a0, a1); }
-                                input-error: ForgeState.input-error;
-                                input-label: ForgeState.input-label;
-                                input-range: ForgeState.input-range;
-                                input-text <=> ForgeState.input-text;
-                                press(a0) => { ForgeState.press(a0); }
-                                scrub(a0, a1) => { ForgeState.scrub(a0, a1); }
-                                step(a0, a1) => { ForgeState.step(a0, a1); }
-                                step-to-end(a0, a1) => { ForgeState.step-to-end(a0, a1); }
-                                typing: ForgeState.typing;
-                                typing-cell: ForgeState.typing-cell;
-                                cell: field.value;
-                            }
-                        }
-
-                        flag := FlagToggle {
-                            visible: !field.numeric;
-                            on-name: field.on-name;
-                            off-name: field.off-name;
-                            checked: field.checked;
-                            drafted: field.drafted;
-                            enabled: field.can-edit;
-                            confirmed: field.confirmed;
-                            stale: field.stale;
-                            tip: field.tip;
-                            toggled(on) => {
-                                ForgeState.toggle-flag(index, on);
-                            }
-                        }
-                    }
-                }
-            }
+            strip-one-line: root.strip-one-line;
+            strip-height: strip-measure.preferred-height;
+            base-allow(a0) => { ForgeState.base-allow(a0); }
+            base-allow-incompatible: ForgeState.base-allow-incompatible;
+            base-can-edit: ForgeState.base-can-edit;
+            base-drafted: ForgeState.base-drafted;
+            base-options: ForgeState.base-options;
+            base-text: ForgeState.base-text;
+            base-tip: ForgeState.base-tip;
+            begin-input(a0) => { return ForgeState.begin-input(a0); }
+            can-change-base: ForgeState.can-change-base;
+            can-change-identity: ForgeState.can-change-identity;
+            can-change-rarity: ForgeState.can-change-rarity;
+            cancel-input(a0) => { ForgeState.cancel-input(a0); }
+            commit-input(a0) => { return ForgeState.commit-input(a0); }
+            end-scrub(a0, a1) => { ForgeState.end-scrub(a0, a1); }
+            fields: ForgeState.fields;
+            finish-input(a0) => { ForgeState.finish-input(a0); }
+            focus-cell: ForgeState.focus-cell;
+            focus-part: ForgeState.focus-part;
+            focus-serial: ForgeState.focus-serial;
+            has-identity: ForgeState.has-identity;
+            identity-drafted: ForgeState.identity-drafted;
+            identity-options: ForgeState.identity-options;
+            identity-search: ForgeState.identity-search;
+            identity-search-edited(a0) => { ForgeState.identity-search-edited(a0); }
+            identity-tip: ForgeState.identity-tip;
+            input-edited(a0, a1) => { ForgeState.input-edited(a0, a1); }
+            input-error: ForgeState.input-error;
+            input-label: ForgeState.input-label;
+            input-range: ForgeState.input-range;
+            input-text <=> ForgeState.input-text;
+            item-name: ForgeState.item-name;
+            name-rarity: ForgeState.name-rarity;
+            option-start(a0) => { return ForgeState.option-start(a0); }
+            option-step(a0, a1, a2) => { return ForgeState.option-step(a0, a1, a2); }
+            pick-base(a0) => { ForgeState.pick-base(a0); }
+            pick-identity(a0) => { ForgeState.pick-identity(a0); }
+            pick-rarity(a0) => { ForgeState.pick-rarity(a0); }
+            press(a0) => { ForgeState.press(a0); }
+            rarity-caption-lines: ForgeState.rarity-caption-lines;
+            rarity-drafted: ForgeState.rarity-drafted;
+            rarity-options: ForgeState.rarity-options;
+            rarity-text: ForgeState.rarity-text;
+            rarity-tip: ForgeState.rarity-tip;
+            scrub(a0, a1) => { ForgeState.scrub(a0, a1); }
+            step(a0, a1) => { ForgeState.step(a0, a1); }
+            step-to-end(a0, a1) => { ForgeState.step-to-end(a0, a1); }
+            summary: ForgeState.summary;
+            toggle-flag(a0, a1) => { ForgeState.toggle-flag(a0, a1); }
+            typing: ForgeState.typing;
+            typing-cell: ForgeState.typing-cell;
         }
 
-        lists := ScrollView {
+        lists := ForgeLists {
             x: root.gutter;
             y: header.height;
             width: root.lists-width;
             height: bar.y - header.height;
-            content-width: self.visible-width;
-            content-height: Math.max(affix-section.height + (ForgeState.has-unique && !root.unique-beside ? Tokens.unique-section-margin.top + unique-section.height : 0px),
-                root.unique-beside ? Tokens.unique-section-beside-margin.top + unique-section.height : 0px,
-                root.ladder ? ladder.height : 0px) + Tokens.lists-bottom-margin.bottom;
-
-            affix-section := VerticalLayout {
-                x: 0;
-                y: 0;
-                width: root.table-width;
-                height: self.preferred-height;
-                spacing: Tokens.space-6;
-                alignment: start;
-
-                // Implicits come with the base; only their roll positions reroll in place, and only a base change replaces them.
-                if ForgeState.has-implicits: VerticalLayout {
-                    spacing: Tokens.space-2;
-                    // The margin adds to the section's 6px spacing.
-                    padding-bottom: Tokens.implicit-section-margin.bottom;
-
-                    HorizontalLayout {
-                        padding-left: Tokens.table-header-inset.left;
-                        spacing: Tokens.space-6;
-                        alignment: start;
-
-                        Text {
-                            text: ForgeText.implicits;
-                            color: Tokens.text-muted-brush;
-                            vertical-alignment: center;
-                        }
-
-                        // The bare icon's room in the line; the button's frame hangs out around it.
-                        Rectangle {
-                            width: Tokens.icon-size-small;
-                            height: Tokens.icon-size-small;
-                            y: (parent.height - self.height) / 2;
-
-                            HelpButton {
-                                x: -Tokens.compact-icon-button-padding.left;
-                                y: -Tokens.compact-icon-button-padding.top;
-                                help: ForgeState.implicit-note;
-                                label: ForgeText.about-implicits;
-                            }
-                        }
-                    }
-
-                    if ForgeState.implicit-rows-shown: VerticalLayout {
-                        for line[index] in ForgeState.implicits: ModifierRowItem {
-                            begin-input(a0) => { return ForgeState.begin-input(a0); }
-                            cancel-input(a0) => { ForgeState.cancel-input(a0); }
-                            commit-input(a0) => { return ForgeState.commit-input(a0); }
-                            end-scrub(a0, a1) => { ForgeState.end-scrub(a0, a1); }
-                            finish-input(a0) => { ForgeState.finish-input(a0); }
-                            focus-cell: ForgeState.focus-cell;
-                            focus-part: ForgeState.focus-part;
-                            focus-serial: ForgeState.focus-serial;
-                            input-edited(a0, a1) => { ForgeState.input-edited(a0, a1); }
-                            input-error: ForgeState.input-error;
-                            input-label: ForgeState.input-label;
-                            input-range: ForgeState.input-range;
-                            input-text <=> ForgeState.input-text;
-                            move-implicit(a0, a1, a2) => { ForgeState.move-implicit(a0, a1, a2); }
-                            move-unique(a0, a1, a2) => { ForgeState.move-unique(a0, a1, a2); }
-                            press(a0) => { ForgeState.press(a0); }
-                            scrub(a0, a1) => { ForgeState.scrub(a0, a1); }
-                            select-unique(a0) => { ForgeState.select-unique(a0); }
-                            step(a0, a1) => { ForgeState.step(a0, a1); }
-                            step-to-end(a0, a1) => { ForgeState.step-to-end(a0, a1); }
-                            typing: ForgeState.typing;
-                            typing-cell: ForgeState.typing-cell;
-                            line: line;
-                            index: index;
-                            kind: CellKind.implicit;
-                        }
-                    }
-
-                    if !ForgeState.implicit-rows-shown: VerticalLayout {
-                        padding-left: Tokens.implicit-row-margin.left;
-                        padding-right: Tokens.implicit-row-margin.right;
-                        padding-top: Tokens.implicit-row-margin.top;
-                        padding-bottom: Tokens.implicit-row-margin.bottom;
-                        spacing: Tokens.row-gap.bottom;
-
-                        for line in ForgeState.implicit-preview: Text {
-                            text: line;
-                            font-size: Tokens.font-size-value;
-                            color: ForgeState.implicit-preview-draft ? Tokens.draft-brush : Tokens.text-secondary-brush;
-                            wrap: word-wrap;
-                        }
-                    }
-                }
-
-                HorizontalLayout {
-                    padding-left: Tokens.table-header-inset.left;
-                    padding-right: Tokens.table-header-inset.right;
-                    spacing: Tokens.space-12;
-
-                    Text {
-                        width: Tokens.affix-value-column-width;
-                        text: ForgeText.value;
-                        color: Tokens.text-muted-brush;
-                    }
-
-                    Text {
-                        horizontal-stretch: 1;
-                        text: ForgeText.affix;
-                        color: Tokens.text-muted-brush;
-                    }
-
-                    if root.wide: Text {
-                        width: root.range-width;
-                        text: ForgeText.range;
-                        color: Tokens.text-muted-brush;
-                    }
-
-                    Text {
-                        width: Tokens.affix-tier-column-width;
-                        text: ForgeText.tier;
-                        color: Tokens.text-muted-brush;
-                    }
-
-                    Text {
-                        width: Tokens.affix-seal-column-width;
-                        text: ForgeText.seal;
-                        color: Tokens.text-muted-brush;
-                    }
-
-                    Rectangle {
-                        width: Tokens.affix-status-column-width;
-                    }
-                }
-
-                // The rows as one named list for a screen reader.
-                Rectangle {
-                    accessible-role: list;
-                    accessible-label: ForgeText.affixes;
-
-                    VerticalLayout {
-                        spacing: Tokens.row-gap.bottom;
-
-                        for affix[index] in ForgeState.affixes: AffixRowItem {
-                            begin-input(a0) => { return ForgeState.begin-input(a0); }
-                            can-change-affix-list: ForgeState.can-change-affix-list;
-                            can-use-picker: ForgeState.can-use-picker;
-                            cancel-input(a0) => { ForgeState.cancel-input(a0); }
-                            cancel-picker() => { ForgeState.cancel-picker(); }
-                            commit-input(a0) => { return ForgeState.commit-input(a0); }
-                            discard-row(a0) => { ForgeState.discard-row(a0); }
-                            end-scrub(a0, a1) => { ForgeState.end-scrub(a0, a1); }
-                            finish-input(a0) => { ForgeState.finish-input(a0); }
-                            focus-cell: ForgeState.focus-cell;
-                            focus-part: ForgeState.focus-part;
-                            focus-serial: ForgeState.focus-serial;
-                            input-edited(a0, a1) => { ForgeState.input-edited(a0, a1); }
-                            input-error: ForgeState.input-error;
-                            input-label: ForgeState.input-label;
-                            input-range: ForgeState.input-range;
-                            input-text <=> ForgeState.input-text;
-                            move-row(a0, a1, a2) => { ForgeState.move-row(a0, a1, a2); }
-                            open-replace(a0) => { return ForgeState.open-replace(a0); }
-                            pick-seal(a0, a1) => { ForgeState.pick-seal(a0, a1); }
-                            pick-tier(a0, a1) => { ForgeState.pick-tier(a0, a1); }
-                            picker-action: ForgeState.picker-action;
-                            picker-allow: ForgeState.picker-allow;
-                            picker-allow-changed(a0) => { ForgeState.picker-allow-changed(a0); }
-                            picker-allow-enabled: ForgeState.picker-allow-enabled;
-                            picker-categories: ForgeState.picker-categories;
-                            picker-category: ForgeState.picker-category;
-                            picker-category-changed(a0) => { ForgeState.picker-category-changed(a0); }
-                            picker-chip-removed(a0) => { ForgeState.picker-chip-removed(a0); }
-                            picker-chips: ForgeState.picker-chips;
-                            picker-class: ForgeState.picker-class;
-                            picker-class-changed(a0) => { ForgeState.picker-class-changed(a0); }
-                            picker-classes: ForgeState.picker-classes;
-                            picker-clear-filters() => { ForgeState.picker-clear-filters(); }
-                            picker-count: ForgeState.picker-count;
-                            picker-empty-allow: ForgeState.picker-empty-allow;
-                            picker-empty-clear-filters: ForgeState.picker-empty-clear-filters;
-                            picker-empty-clear-search: ForgeState.picker-empty-clear-search;
-                            picker-empty-reason: ForgeState.picker-empty-reason;
-                            picker-filter: ForgeState.picker-filter;
-                            picker-filter-changed(a0) => { ForgeState.picker-filter-changed(a0); }
-                            picker-hidden: ForgeState.picker-hidden;
-                            picker-level: ForgeState.picker-level;
-                            picker-level-changed(a0) => { ForgeState.picker-level-changed(a0); }
-                            picker-levels: ForgeState.picker-levels;
-                            picker-open: ForgeState.picker-open;
-                            picker-rows: ForgeState.picker-rows;
-                            picker-search: ForgeState.picker-search;
-                            picker-search-edited(a0) => { ForgeState.picker-search-edited(a0); }
-                            picker-select(a0) => { ForgeState.picker-select(a0); }
-                            picker-selected: ForgeState.picker-selected;
-                            picker-show-uniques() => { ForgeState.picker-show-uniques(); }
-                            picker-sides: ForgeState.picker-sides;
-                            picker-slot: ForgeState.picker-slot;
-                            picker-slot-active: ForgeState.picker-slot-active;
-                            picker-slot-changed(a0) => { ForgeState.picker-slot-changed(a0); }
-                            picker-slot-text: ForgeState.picker-slot-text;
-                            picker-slots: ForgeState.picker-slots;
-                            picker-source: ForgeState.picker-source;
-                            picker-source-active: ForgeState.picker-source-active;
-                            picker-source-changed(a0) => { ForgeState.picker-source-changed(a0); }
-                            picker-source-text: ForgeState.picker-source-text;
-                            picker-sources: ForgeState.picker-sources;
-                            picker-status: ForgeState.picker-status;
-                            picker-subtitle: ForgeState.picker-subtitle;
-                            picker-tag-toggled(a0, a1) => { ForgeState.picker-tag-toggled(a0, a1); }
-                            picker-tags: ForgeState.picker-tags;
-                            picker-tags-active: ForgeState.picker-tags-active;
-                            picker-tags-on: ForgeState.picker-tags-on;
-                            picker-tags-text: ForgeState.picker-tags-text;
-                            picker-title: ForgeState.picker-title;
-                            press(a0) => { ForgeState.press(a0); }
-                            remove-affix(a0) => { ForgeState.remove-affix(a0); }
-                            scrub(a0, a1) => { ForgeState.scrub(a0, a1); }
-                            select-affix(a0) => { ForgeState.select-affix(a0); }
-                            step(a0, a1) => { ForgeState.step(a0, a1); }
-                            step-to-end(a0, a1) => { ForgeState.step-to-end(a0, a1); }
-                            typing: ForgeState.typing;
-                            typing-cell: ForgeState.typing-cell;
-                            use-picker() => { ForgeState.use-picker(); }
-                            affix: affix;
-                            index: index;
-                            selected: ForgeState.selected-affix == index;
-                            wide: root.wide;
-                            range-width: root.range-width;
-                        }
-                    }
-                }
-
-                // Adding is a draft Apply writes; the caption says what is free, or why adding and removing wait, in one line.
-                HorizontalLayout {
-                    padding-left: Tokens.table-header-inset.left;
-                    spacing: Tokens.space-12;
-                    alignment: start;
-
-                    add-button := Rectangle {
-                        width: add.preferred-width;
-                        height: Tokens.control-min-height;
-
-                        add := Button {
-                            width: parent.width;
-                            text: ForgeText.add-affix;
-                            icon: Tokens.icon-add;
-                            kind: ButtonKind.subtle;
-                            enabled: ForgeState.can-change-affix-list;
-                            tip: ForgeState.add-affix-tip;
-                            clicked => {
-                                if (ForgeState.open-add()) {
-                                    add-popup.show();
-                                }
-                            }
-                        }
-
-                        add-popup := PopupWindow {
-                            x: 0;
-                            y: parent.height + Tokens.space-4;
-                            width: PickerMetrics.width;
-                            height: PickerMetrics.height;
-                            close-policy: PopupClosePolicy.close-on-click-outside;
-
-                            AffixPickerPanel {
-                                can-use-picker: ForgeState.can-use-picker;
-                                cancel-picker() => { ForgeState.cancel-picker(); }
-                                picker-action: ForgeState.picker-action;
-                                picker-allow: ForgeState.picker-allow;
-                                picker-allow-changed(a0) => { ForgeState.picker-allow-changed(a0); }
-                                picker-allow-enabled: ForgeState.picker-allow-enabled;
-                                picker-categories: ForgeState.picker-categories;
-                                picker-category: ForgeState.picker-category;
-                                picker-category-changed(a0) => { ForgeState.picker-category-changed(a0); }
-                                picker-chip-removed(a0) => { ForgeState.picker-chip-removed(a0); }
-                                picker-chips: ForgeState.picker-chips;
-                                picker-class: ForgeState.picker-class;
-                                picker-class-changed(a0) => { ForgeState.picker-class-changed(a0); }
-                                picker-classes: ForgeState.picker-classes;
-                                picker-clear-filters() => { ForgeState.picker-clear-filters(); }
-                                picker-count: ForgeState.picker-count;
-                                picker-empty-allow: ForgeState.picker-empty-allow;
-                                picker-empty-clear-filters: ForgeState.picker-empty-clear-filters;
-                                picker-empty-clear-search: ForgeState.picker-empty-clear-search;
-                                picker-empty-reason: ForgeState.picker-empty-reason;
-                                picker-filter: ForgeState.picker-filter;
-                                picker-filter-changed(a0) => { ForgeState.picker-filter-changed(a0); }
-                                picker-hidden: ForgeState.picker-hidden;
-                                picker-level: ForgeState.picker-level;
-                                picker-level-changed(a0) => { ForgeState.picker-level-changed(a0); }
-                                picker-levels: ForgeState.picker-levels;
-                                picker-rows: ForgeState.picker-rows;
-                                picker-search: ForgeState.picker-search;
-                                picker-search-edited(a0) => { ForgeState.picker-search-edited(a0); }
-                                picker-select(a0) => { ForgeState.picker-select(a0); }
-                                picker-selected: ForgeState.picker-selected;
-                                picker-show-uniques() => { ForgeState.picker-show-uniques(); }
-                                picker-sides: ForgeState.picker-sides;
-                                picker-slot: ForgeState.picker-slot;
-                                picker-slot-active: ForgeState.picker-slot-active;
-                                picker-slot-changed(a0) => { ForgeState.picker-slot-changed(a0); }
-                                picker-slot-text: ForgeState.picker-slot-text;
-                                picker-slots: ForgeState.picker-slots;
-                                picker-source: ForgeState.picker-source;
-                                picker-source-active: ForgeState.picker-source-active;
-                                picker-source-changed(a0) => { ForgeState.picker-source-changed(a0); }
-                                picker-source-text: ForgeState.picker-source-text;
-                                picker-sources: ForgeState.picker-sources;
-                                picker-status: ForgeState.picker-status;
-                                picker-subtitle: ForgeState.picker-subtitle;
-                                picker-tag-toggled(a0, a1) => { ForgeState.picker-tag-toggled(a0, a1); }
-                                picker-tags: ForgeState.picker-tags;
-                                picker-tags-active: ForgeState.picker-tags-active;
-                                picker-tags-on: ForgeState.picker-tags-on;
-                                picker-tags-text: ForgeState.picker-tags-text;
-                                picker-title: ForgeState.picker-title;
-                                use-picker() => { ForgeState.use-picker(); }
-                                done => {
-                                    add-popup.close();
-                                }
-                            }
-                        }
-                    }
-
-                    // Every affix up to its highest tier below the primordial T8, as tier drafts.
-                    Button {
-                        text: ForgeText.max-tiers;
-                        kind: ButtonKind.subtle;
-                        enabled: ForgeState.can-max-tiers;
-                        tip: ForgeState.max-tiers-tip;
-                        clicked => {
-                            ForgeState.max-tiers();
-                        }
-                    }
-
-                    // Every roll the forge can edit up to roll 255, the game's perfect roll, as roll drafts.
-                    Button {
-                        text: ForgeText.max-rolls;
-                        kind: ButtonKind.subtle;
-                        enabled: ForgeState.can-max-rolls;
-                        tip: ForgeState.max-rolls-tip;
-                        clicked => {
-                            ForgeState.max-rolls();
-                        }
-                    }
-
-                    // The user's item templates: drafted onto the item, or the item saved as one. Absent from the row (no
-                    // width, no spacing) in a run that keeps no templates.
-                    if ForgeState.has-templates: templates-button := Rectangle {
-                        width: templates.preferred-width;
-                        height: Tokens.control-min-height;
-
-                        templates := Button {
-                            width: parent.width;
-                            text: ForgeText.templates;
-                            kind: ButtonKind.subtle;
-                            enabled: ForgeState.has-item;
-                            tip: ForgeText.templates-tip;
-                            clicked => {
-                                ForgeState.templates-opened();
-                                templates-popup.show();
-                            }
-                        }
-
-                        templates-measure := TemplatesMeasure {
-                            note: root.template-note;
-                        }
-
-                        property <length> templates-height: TemplateMetrics.height(ForgeState.template-rows.length, templates-measure.message);
-                        // Room between the button and the window's top, and between it and the page's foot.
-                        property <length> room-above: self.absolute-position.y;
-                        property <length> room-below: root.absolute-position.y + root.height - self.absolute-position.y - self.height;
-
-                        // Upward, over the affix table, as the button sits low on the page near the window's foot; below it
-                        // when there is no room above; with room on neither side, as low as the page lets it reach (a popup
-                        // can't leave the window).
-                        property <length> templates-y: self.room-above >= self.templates-height + Tokens.space-4
-                            ? -self.templates-height - Tokens.space-4
-                            : self.room-below >= self.templates-height + Tokens.space-4
-                                ? self.height + Tokens.space-4
-                                : Math.max(-self.room-above, self.height + self.room-below - self.templates-height);
-
-                        templates-popup := PopupWindow {
-                            x: 0;
-                            y: templates-button.templates-y;
-                            width: Tokens.replace-flyout-width + Tokens.flyout-padding.left + Tokens.flyout-padding.right;
-                            height: templates-button.templates-height;
-                            close-policy: PopupClosePolicy.close-on-click-outside;
-
-                            TemplatesPanel {
-                                has-item: ForgeState.has-item;
-                                template-apply(a0) => { ForgeState.template-apply(a0); }
-                                template-delete(a0) => { ForgeState.template-delete(a0); }
-                                template-name: ForgeState.template-name;
-                                template-name-edited(a0) => { ForgeState.template-name-edited(a0); }
-                                template-replaces: ForgeState.template-replaces;
-                                note: root.template-note;
-                                template-rows: ForgeState.template-rows;
-                                template-save(a0, a1) => { ForgeState.template-save(a0, a1); }
-                                done => {
-                                    templates-popup.close();
-                                }
-                            }
-                        }
-                    }
-
-                    // The note wraps (up to two lines, within the button's height) so that a keyboard user, who never gets
-                    // the tip, reads it whole.
-                    Text {
-                        text: ForgeState.affix-list-note;
-                        font-size: Tokens.font-size-caption;
-                        color: Tokens.text-muted-brush;
-                        vertical-alignment: center;
-                        wrap: word-wrap;
-                        max-lines: Tokens.note-max-lines;
-                        overflow: elide;
-                        horizontal-stretch: 1;
-
-                        note-touch := TouchArea { }
-
-                        TipTrigger {
-                            text: ForgeState.affix-list-note;
-                            hovered: note-touch.has-hover;
-                        }
-                    }
-                }
-            }
-
-            // Unique modifiers in the game's own tooltip treatment: under the table, or beside it from 1180px of lists.
-            unique-section := Rectangle {
-                x: root.unique-beside ? root.table-width + Tokens.unique-section-beside-margin.left : 0;
-                y: root.unique-beside ? Tokens.unique-section-beside-margin.top : affix-section.height + Tokens.unique-section-margin.top;
-                width: root.unique-beside ? root.lists-width - root.table-width - Tokens.unique-section-beside-margin.left : root.lists-width;
-                height: ForgeState.has-unique ? unique-layout.preferred-height : 0px;
-                visible: ForgeState.has-unique;
-                // The tooltip's ground with its header glow in the top-left corner (an elliptical gradient, drawn as an
-                // SVG, gradients/unique-surface-brush.svg); the copper frame is drawn over both.
-                background: Tokens.unique-surface-brush-ground;
-                border-radius: Tokens.control-radius;
-                clip: true;
-
-                Image {
-                    x: Tokens.unique-surface-brush-x;
-                    y: Tokens.unique-surface-brush-y;
-                    width: Tokens.unique-surface-brush-width;
-                    height: Tokens.unique-surface-brush-height;
-                    source: Tokens.unique-surface-brush-image;
-                    image-fit: fill;
-                }
-
-                Rectangle {
-                    border-width: Tokens.border-all.left;
-                    border-color: Tokens.unique-border-brush;
-                    border-radius: Tokens.control-radius;
-                }
-
-                // The padding lies inside the frame.
-                unique-layout := VerticalLayout {
-                    padding-left: Tokens.border-all.left + Tokens.unique-section-padding.left;
-                    padding-right: Tokens.border-all.right + Tokens.unique-section-padding.right;
-                    padding-top: Tokens.border-all.top + Tokens.unique-section-padding.top;
-                    padding-bottom: Tokens.border-all.bottom + Tokens.unique-section-padding.bottom;
-                    spacing: Tokens.space-8;
-
-                    HorizontalLayout {
-                        spacing: Tokens.space-12;
-
-                        Text {
-                            text: ForgeText.unique-modifiers;
-                            font-size: Tokens.font-size-section;
-                            font-weight: Tokens.emphasis-weight;
-                            // The game heads the section in its tertiary body colour; the frame and the glow carry the unique.
-                            color: Tokens.text-muted-brush;
-                            horizontal-stretch: 1;
-                        }
-
-                        // A preview that failed says so with the error mark; one the item outran, with the warning mark.
-                        HorizontalLayout {
-                            spacing: Tokens.space-4;
-                            alignment: end;
-
-                            if ForgeState.preview-failed || ForgeState.preview-stale: Image {
-                                width: Tokens.icon-size-tiny;
-                                height: Tokens.icon-size-tiny;
-                                y: (parent.height - self.height) / 2;
-                                image-fit: contain;
-                                source: ForgeState.preview-failed ? Tokens.icon-error : Tokens.icon-warning;
-                                colorize: ForgeState.preview-failed ? Tokens.error-brush : Tokens.warning-brush;
-                            }
-
-                            Text {
-                                text: ForgeState.preview-status;
-                                font-size: Tokens.font-size-caption;
-                                color: ForgeState.preview-failed ? Tokens.error-brush : Tokens.text-muted-brush;
-                                max-width: Tokens.preview-status-max-width;
-                                vertical-alignment: center;
-                                // The status wraps at this width so the keyboard reaches the whole reason.
-                                wrap: word-wrap;
-
-                                preview-touch := TouchArea { }
-
-                                TipTrigger {
-                                    text: ForgeState.preview-status;
-                                    hovered: preview-touch.has-hover;
-                                }
-                            }
-                        }
-                    }
-
-                    if ForgeState.formatting-error != "": HorizontalLayout {
-                        spacing: Tokens.space-8;
-
-                        Image {
-                            width: Tokens.icon-size;
-                            height: Tokens.icon-size;
-                            image-fit: contain;
-                            source: ForgeState.formatting-loading ? Tokens.icon-info : Tokens.icon-warning;
-                            colorize: ForgeState.formatting-loading ? Tokens.text-muted-brush : Tokens.warning-brush;
-                        }
-
-                        Text {
-                            text: ForgeState.formatting-error;
-                            color: ForgeState.formatting-loading ? Tokens.text-muted-brush : Tokens.warning-brush;
-                            wrap: word-wrap;
-                            horizontal-stretch: 1;
-                        }
-                    }
-
-                    Rectangle {
-                        accessible-role: list;
-                        accessible-label: ForgeText.unique-modifiers;
-
-                        VerticalLayout {
-                            spacing: Tokens.row-gap.bottom;
-
-                            for line[index] in ForgeState.unique-modifiers: ModifierRowItem {
-                                begin-input(a0) => { return ForgeState.begin-input(a0); }
-                                cancel-input(a0) => { ForgeState.cancel-input(a0); }
-                                commit-input(a0) => { return ForgeState.commit-input(a0); }
-                                end-scrub(a0, a1) => { ForgeState.end-scrub(a0, a1); }
-                                finish-input(a0) => { ForgeState.finish-input(a0); }
-                                focus-cell: ForgeState.focus-cell;
-                                focus-part: ForgeState.focus-part;
-                                focus-serial: ForgeState.focus-serial;
-                                input-edited(a0, a1) => { ForgeState.input-edited(a0, a1); }
-                                input-error: ForgeState.input-error;
-                                input-label: ForgeState.input-label;
-                                input-range: ForgeState.input-range;
-                                input-text <=> ForgeState.input-text;
-                                move-implicit(a0, a1, a2) => { ForgeState.move-implicit(a0, a1, a2); }
-                                move-unique(a0, a1, a2) => { ForgeState.move-unique(a0, a1, a2); }
-                                press(a0) => { ForgeState.press(a0); }
-                                scrub(a0, a1) => { ForgeState.scrub(a0, a1); }
-                                select-unique(a0) => { ForgeState.select-unique(a0); }
-                                step(a0, a1) => { ForgeState.step(a0, a1); }
-                                step-to-end(a0, a1) => { ForgeState.step-to-end(a0, a1); }
-                                typing: ForgeState.typing;
-                                typing-cell: ForgeState.typing-cell;
-                                line: line;
-                                index: index;
-                                kind: CellKind.unique;
-                                on-unique: true;
-                                selected: ForgeState.selected-unique == index;
-                            }
-                        }
-                    }
-                }
-            }
-
-            // From 1180px of lists, an item without unique modifiers gives the column beside the table to the selected affix's
-            // tier ladder; a press drafts the tier as the tier menu does.
-            ladder := VerticalLayout {
-                x: root.table-width + Tokens.tier-ladder-beside-margin.left;
-                y: 0;
-                width: Tokens.tier-ladder-width - Tokens.tier-ladder-beside-margin.left;
-                height: root.ladder ? self.preferred-height : 0px;
-                visible: root.ladder;
-                spacing: Tokens.space-6;
-                alignment: start;
-
-                HorizontalLayout {
-                    padding-left: Tokens.table-header-inset.left;
-
-                    Text {
-                        text: ForgeText.tiers;
-                        color: Tokens.text-muted-brush;
-                    }
-                }
-
-                if root.selected < 0: HorizontalLayout {
-                    padding-left: Tokens.table-header-inset.left;
-
-                    Text {
-                        text: ForgeState.ladder-note;
-                        font-size: Tokens.font-size-caption;
-                        color: Tokens.text-muted-brush;
-                        wrap: word-wrap;
-                    }
-                }
-
-                if root.selected >= 0: VerticalLayout {
-                    spacing: Tokens.space-4;
-
-                    HorizontalLayout {
-                        padding-left: Tokens.table-header-inset.left;
-
-                        Text {
-                            text: ForgeState.affixes[root.selected].name;
-                            font-weight: Tokens.emphasis-weight;
-                            color: Tokens.text-brush;
-                            overflow: elide;
-                        }
-                    }
-
-                    TierLadder {
-                        tiers: ForgeState.affixes[root.selected].tiers;
-                        held: ForgeState.affixes[root.selected].tier-index;
-                        enabled: ForgeState.affixes[root.selected].can-edit;
-                        label: ForgeText.tier-for(ForgeState.affixes[root.selected].name);
-                        picked(index) => {
-                            ForgeState.pick-tier(root.selected, index);
-                        }
-                    }
-                }
-            }
+            wide: root.wide;
+            lists-width: root.lists-width;
+            range-width: range-measure.preferred-width;
+            page-bottom: root.absolute-position.y + root.height;
+            add-affix-tip: ForgeState.add-affix-tip;
+            affix-list-note: ForgeState.affix-list-note;
+            affixes: ForgeState.affixes;
+            begin-input(a0) => { return ForgeState.begin-input(a0); }
+            can-change-affix-list: ForgeState.can-change-affix-list;
+            can-max-rolls: ForgeState.can-max-rolls;
+            can-max-tiers: ForgeState.can-max-tiers;
+            can-use-picker: ForgeState.can-use-picker;
+            cancel-input(a0) => { ForgeState.cancel-input(a0); }
+            cancel-picker() => { ForgeState.cancel-picker(); }
+            commit-input(a0) => { return ForgeState.commit-input(a0); }
+            discard-row(a0) => { ForgeState.discard-row(a0); }
+            end-scrub(a0, a1) => { ForgeState.end-scrub(a0, a1); }
+            finish-input(a0) => { ForgeState.finish-input(a0); }
+            focus-cell: ForgeState.focus-cell;
+            focus-part: ForgeState.focus-part;
+            focus-serial: ForgeState.focus-serial;
+            formatting-error: ForgeState.formatting-error;
+            formatting-loading: ForgeState.formatting-loading;
+            has-implicits: ForgeState.has-implicits;
+            has-item: ForgeState.has-item;
+            has-templates: ForgeState.has-templates;
+            has-unique: ForgeState.has-unique;
+            implicit-note: ForgeState.implicit-note;
+            implicit-preview: ForgeState.implicit-preview;
+            implicit-preview-draft: ForgeState.implicit-preview-draft;
+            implicit-rows-shown: ForgeState.implicit-rows-shown;
+            implicits: ForgeState.implicits;
+            input-edited(a0, a1) => { ForgeState.input-edited(a0, a1); }
+            input-error: ForgeState.input-error;
+            input-label: ForgeState.input-label;
+            input-range: ForgeState.input-range;
+            input-text <=> ForgeState.input-text;
+            ladder-note: ForgeState.ladder-note;
+            max-rolls() => { ForgeState.max-rolls(); }
+            max-rolls-tip: ForgeState.max-rolls-tip;
+            max-tiers() => { ForgeState.max-tiers(); }
+            max-tiers-tip: ForgeState.max-tiers-tip;
+            move-implicit(a0, a1, a2) => { ForgeState.move-implicit(a0, a1, a2); }
+            move-row(a0, a1, a2) => { ForgeState.move-row(a0, a1, a2); }
+            move-unique(a0, a1, a2) => { ForgeState.move-unique(a0, a1, a2); }
+            open-add() => { return ForgeState.open-add(); }
+            open-replace(a0) => { return ForgeState.open-replace(a0); }
+            pick-seal(a0, a1) => { ForgeState.pick-seal(a0, a1); }
+            pick-tier(a0, a1) => { ForgeState.pick-tier(a0, a1); }
+            picker-action: ForgeState.picker-action;
+            picker-allow: ForgeState.picker-allow;
+            picker-allow-changed(a0) => { ForgeState.picker-allow-changed(a0); }
+            picker-allow-enabled: ForgeState.picker-allow-enabled;
+            picker-categories: ForgeState.picker-categories;
+            picker-category: ForgeState.picker-category;
+            picker-category-changed(a0) => { ForgeState.picker-category-changed(a0); }
+            picker-chip-removed(a0) => { ForgeState.picker-chip-removed(a0); }
+            picker-chips: ForgeState.picker-chips;
+            picker-class: ForgeState.picker-class;
+            picker-class-changed(a0) => { ForgeState.picker-class-changed(a0); }
+            picker-classes: ForgeState.picker-classes;
+            picker-clear-filters() => { ForgeState.picker-clear-filters(); }
+            picker-count: ForgeState.picker-count;
+            picker-empty-allow: ForgeState.picker-empty-allow;
+            picker-empty-clear-filters: ForgeState.picker-empty-clear-filters;
+            picker-empty-clear-search: ForgeState.picker-empty-clear-search;
+            picker-empty-reason: ForgeState.picker-empty-reason;
+            picker-filter: ForgeState.picker-filter;
+            picker-filter-changed(a0) => { ForgeState.picker-filter-changed(a0); }
+            picker-hidden: ForgeState.picker-hidden;
+            picker-level: ForgeState.picker-level;
+            picker-level-changed(a0) => { ForgeState.picker-level-changed(a0); }
+            picker-levels: ForgeState.picker-levels;
+            picker-open: ForgeState.picker-open;
+            picker-rows: ForgeState.picker-rows;
+            picker-search: ForgeState.picker-search;
+            picker-search-edited(a0) => { ForgeState.picker-search-edited(a0); }
+            picker-select(a0) => { ForgeState.picker-select(a0); }
+            picker-selected: ForgeState.picker-selected;
+            picker-show-uniques() => { ForgeState.picker-show-uniques(); }
+            picker-sides: ForgeState.picker-sides;
+            picker-slot: ForgeState.picker-slot;
+            picker-slot-active: ForgeState.picker-slot-active;
+            picker-slot-changed(a0) => { ForgeState.picker-slot-changed(a0); }
+            picker-slot-text: ForgeState.picker-slot-text;
+            picker-slots: ForgeState.picker-slots;
+            picker-source: ForgeState.picker-source;
+            picker-source-active: ForgeState.picker-source-active;
+            picker-source-changed(a0) => { ForgeState.picker-source-changed(a0); }
+            picker-source-text: ForgeState.picker-source-text;
+            picker-sources: ForgeState.picker-sources;
+            picker-status: ForgeState.picker-status;
+            picker-subtitle: ForgeState.picker-subtitle;
+            picker-tag-toggled(a0, a1) => { ForgeState.picker-tag-toggled(a0, a1); }
+            picker-tags: ForgeState.picker-tags;
+            picker-tags-active: ForgeState.picker-tags-active;
+            picker-tags-on: ForgeState.picker-tags-on;
+            picker-tags-text: ForgeState.picker-tags-text;
+            picker-title: ForgeState.picker-title;
+            press(a0) => { ForgeState.press(a0); }
+            preview-failed: ForgeState.preview-failed;
+            preview-stale: ForgeState.preview-stale;
+            preview-status: ForgeState.preview-status;
+            remove-affix(a0) => { ForgeState.remove-affix(a0); }
+            scrub(a0, a1) => { ForgeState.scrub(a0, a1); }
+            select-affix(a0) => { ForgeState.select-affix(a0); }
+            select-unique(a0) => { ForgeState.select-unique(a0); }
+            selected-affix: ForgeState.selected-affix;
+            selected-unique: ForgeState.selected-unique;
+            step(a0, a1) => { ForgeState.step(a0, a1); }
+            step-to-end(a0, a1) => { ForgeState.step-to-end(a0, a1); }
+            template-apply(a0) => { ForgeState.template-apply(a0); }
+            template-delete(a0) => { ForgeState.template-delete(a0); }
+            template-name: ForgeState.template-name;
+            template-name-edited(a0) => { ForgeState.template-name-edited(a0); }
+            template-message: ForgeState.template-message;
+            template-replaces: ForgeState.template-replaces;
+            template-rows: ForgeState.template-rows;
+            template-save(a0, a1) => { ForgeState.template-save(a0, a1); }
+            templates-opened() => { ForgeState.templates-opened(); }
+            typing: ForgeState.typing;
+            typing-cell: ForgeState.typing-cell;
+            unique-modifiers: ForgeState.unique-modifiers;
+            use-picker() => { ForgeState.use-picker(); }
         }
 
         // The changes pane: beside the table, keeping its column when hidden; in a narrow window over the table's right side,
@@ -1709,102 +350,31 @@ export component ItemForge inherits Rectangle {
             overlay: root.narrow;
             dismissed => {
                 KeyboardFocus.visible = true;
-                changes-toggle.focus-toggle();
+                bar.focus-changes();
                 ForgeState.pane-open = false;
             }
         }
 
         // The action bar: the message with one icon for its kind, then Changes, Undo, Discard and Apply.
-        bar := Rectangle {
+        bar := ForgeBar {
             x: 0;
             y: root.height - self.height;
             width: root.width;
-            height: Math.max(Tokens.control-min-height, message.height) + Tokens.action-bar-padding.top + Tokens.action-bar-padding.bottom;
-            background: Tokens.surface-brush;
-
-            Rectangle {
-                x: 0;
-                y: 0;
-                height: 1px;
-                background: Tokens.hairline-brush;
-            }
-
-            message := HorizontalLayout {
-                x: Tokens.action-bar-padding.left;
-                y: (parent.height - self.height) / 2;
-                width: Math.max(0px, Math.min(Tokens.status-message-max-width, actions.x - self.x - Tokens.space-20));
-                height: self.preferred-height;
-                spacing: Tokens.space-10;
-                visible: ForgeState.message != "";
-
-                VerticalLayout {
-                    padding-top: Tokens.icon-baseline-nudge.top + Tokens.space-1;
-                    alignment: start;
-
-                    Image {
-                        width: Tokens.icon-size;
-                        height: Tokens.icon-size;
-                        image-fit: contain;
-                        source: ForgeState.message-tone == MessageTone.error ? Tokens.icon-error
-                            : ForgeState.message-tone == MessageTone.confirmed ? Tokens.icon-confirmed : Tokens.icon-info;
-                        colorize: ForgeState.message-tone == MessageTone.error ? Tokens.error-brush
-                            : ForgeState.message-tone == MessageTone.confirmed ? Tokens.confirmed-brush : Tokens.text-muted-brush;
-                    }
-                }
-
-                Text {
-                    text: ForgeState.message;
-                    color: ForgeState.message-tone == MessageTone.error ? Tokens.error-brush : Tokens.text-brush;
-                    wrap: word-wrap;
-                    horizontal-stretch: 1;
-                    accessible-role: text;
-                    // Announced as it changes.
-                    accessible-live-region: polite;
-                }
-            }
-
-            actions := HorizontalLayout {
-                x: parent.width - self.width - Tokens.action-bar-padding.right;
-                y: (parent.height - self.height) / 2;
-                width: self.preferred-width;
-                height: Tokens.control-min-height;
-                spacing: Tokens.space-8;
-
-                changes-toggle := ChangesToggle {
-                    text: ForgeState.changes-text;
-                    checked <=> ForgeState.pane-open;
-                }
-
-                Button {
-                    text: ForgeState.undo-text;
-                    icon: Tokens.icon-undo;
-                    enabled: ForgeState.can-undo;
-                    tip: ForgeState.undo-tip;
-                    clicked => {
-                        ForgeState.undo();
-                    }
-                }
-
-                if ForgeState.drafts.length > 0: Button {
-                    text: ForgeState.discard-text;
-                    kind: ButtonKind.subtle;
-                    enabled: ForgeState.can-discard;
-                    tip: ForgeText.discard-all-tip;
-                    clicked => {
-                        ForgeState.discard-all();
-                    }
-                }
-
-                Button {
-                    text: ForgeState.apply-text;
-                    kind: ButtonKind.primary;
-                    enabled: ForgeState.can-apply;
-                    tip: ForgeText.apply-tip;
-                    clicked => {
-                        ForgeState.apply();
-                    }
-                }
-            }
+            apply() => { ForgeState.apply(); }
+            apply-text: ForgeState.apply-text;
+            can-apply: ForgeState.can-apply;
+            can-discard: ForgeState.can-discard;
+            can-undo: ForgeState.can-undo;
+            changes-text: ForgeState.changes-text;
+            discard-all() => { ForgeState.discard-all(); }
+            discard-text: ForgeState.discard-text;
+            drafts: ForgeState.drafts;
+            message: ForgeState.message;
+            message-tone: ForgeState.message-tone;
+            pane-open <=> ForgeState.pane-open;
+            undo() => { ForgeState.undo(); }
+            undo-text: ForgeState.undo-text;
+            undo-tip: ForgeState.undo-tip;
         }
     }
 }

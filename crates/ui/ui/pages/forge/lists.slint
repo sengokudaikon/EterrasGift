@@ -1,0 +1,799 @@
+// The Item Forge's lists: the implicits, the affix table, the unique modifiers and the tier ladder. Takes what it shows as properties.
+
+import { AffixRowView, CellKind, CellRef, ForgeReveal, ModifierRowView, PickerRowView, TemplateRowView } from "state.slint";
+import { ScrollView } from "../../widgets/scroll-view.slint";
+import { Tokens } from "../../tokens.slint";
+import { TipTrigger } from "../../widgets/focus.slint";
+import { Button, ButtonKind } from "../../widgets/button.slint";
+import { ForgeText } from "../../strings/forge.slint";
+import { HelpButton } from "../../widgets/help-button.slint";
+import { AffixRowItem, ModifierRowItem, TierLadder } from "table.slint";
+import { AffixPickerPanel, PickerMetrics } from "picker.slint";
+import { TemplatesPanel, TemplateMetrics, TemplatesMeasure } from "templates.slint";
+
+export component ForgeLists inherits ScrollView {
+    // From the page: what this shows and what it asks of it.
+    in property <string> add-affix-tip;
+    in property <string> affix-list-note;
+    in property <[AffixRowView]> affixes;
+    callback begin-input(CellRef) -> bool;
+    in property <bool> can-change-affix-list;
+    in property <bool> can-max-rolls;
+    in property <bool> can-max-tiers;
+    in property <bool> can-use-picker;
+    callback cancel-input(CellRef);
+    callback cancel-picker();
+    callback commit-input(CellRef) -> bool;
+    callback discard-row(int);
+    callback end-scrub(CellRef, bool);
+    callback finish-input(CellRef);
+    in property <CellRef> focus-cell;
+    in property <int> focus-part;
+    in property <int> focus-serial;
+    in property <string> formatting-error;
+    in property <bool> formatting-loading;
+    in property <bool> has-implicits;
+    in property <bool> has-item;
+    in property <bool> has-templates;
+    in property <bool> has-unique;
+    in property <string> implicit-note;
+    in property <[string]> implicit-preview;
+    in property <bool> implicit-preview-draft;
+    in property <bool> implicit-rows-shown;
+    in property <[ModifierRowView]> implicits;
+    callback input-edited(CellRef, string);
+    in property <string> input-error;
+    in property <string> input-label;
+    in property <string> input-range;
+    in-out property <string> input-text;
+    in property <string> ladder-note;
+    callback max-rolls();
+    in property <string> max-rolls-tip;
+    callback max-tiers();
+    in property <string> max-tiers-tip;
+    callback move-implicit(int, int, int);
+    callback move-row(int, int, int);
+    callback move-unique(int, int, int);
+    callback open-add() -> bool;
+    callback open-replace(int) -> bool;
+    callback pick-seal(int, int);
+    callback pick-tier(int, int);
+    in property <string> picker-action;
+    in property <bool> picker-allow;
+    callback picker-allow-changed(bool);
+    in property <bool> picker-allow-enabled;
+    in property <[string]> picker-categories;
+    in property <int> picker-category;
+    callback picker-category-changed(int);
+    callback picker-chip-removed(int);
+    in property <[string]> picker-chips;
+    in property <int> picker-class;
+    callback picker-class-changed(int);
+    in property <[string]> picker-classes;
+    callback picker-clear-filters();
+    in property <string> picker-count;
+    in property <bool> picker-empty-allow;
+    in property <bool> picker-empty-clear-filters;
+    in property <bool> picker-empty-clear-search;
+    in property <string> picker-empty-reason;
+    in property <int> picker-filter;
+    callback picker-filter-changed(int);
+    in property <string> picker-hidden;
+    in property <int> picker-level;
+    callback picker-level-changed(int);
+    in property <[string]> picker-levels;
+    in property <bool> picker-open;
+    in property <[PickerRowView]> picker-rows;
+    in property <string> picker-search;
+    callback picker-search-edited(string);
+    callback picker-select(int);
+    in property <int> picker-selected;
+    callback picker-show-uniques();
+    in property <[string]> picker-sides;
+    in property <int> picker-slot;
+    in property <bool> picker-slot-active;
+    callback picker-slot-changed(int);
+    in property <string> picker-slot-text;
+    in property <[string]> picker-slots;
+    in property <int> picker-source;
+    in property <bool> picker-source-active;
+    callback picker-source-changed(int);
+    in property <string> picker-source-text;
+    in property <[string]> picker-sources;
+    in property <string> picker-status;
+    in property <string> picker-subtitle;
+    callback picker-tag-toggled(int, bool);
+    in property <[string]> picker-tags;
+    in property <bool> picker-tags-active;
+    in property <[bool]> picker-tags-on;
+    in property <string> picker-tags-text;
+    in property <string> picker-title;
+    callback press(CellRef);
+    in property <bool> preview-failed;
+    in property <bool> preview-stale;
+    in property <string> preview-status;
+    callback remove-affix(int);
+    callback scrub(CellRef, float);
+    callback select-affix(int);
+    callback select-unique(int);
+    in property <int> selected-affix;
+    in property <int> selected-unique;
+    callback step(CellRef, int);
+    callback step-to-end(CellRef, bool);
+    callback template-apply(int);
+    callback template-delete(int);
+    in property <string> template-name;
+    callback template-name-edited(string);
+    in property <string> template-message;
+    in property <string> template-replaces;
+    in property <[TemplateRowView]> template-rows;
+    callback template-save(string, bool);
+    callback templates-opened();
+    in property <bool> typing;
+    in property <CellRef> typing-cell;
+    in property <[ModifierRowView]> unique-modifiers;
+    callback use-picker();
+    in property <bool> wide;
+    in property <length> lists-width;
+    in property <length> range-width;
+    // Where the page ends, for a flyout that opens over the bar.
+    in property <length> page-bottom;
+
+    property <int> selected: root.selected-affix;
+    property <bool> roomy: root.lists-width >= Tokens.side-by-side-body-width;
+    property <bool> unique-beside: root.roomy && root.has-unique;
+    property <bool> ladder: root.roomy && !root.has-unique;
+    property <length> table-width: root.ladder ? Math.min(Tokens.affix-table-max-width, root.lists-width - Tokens.tier-ladder-width)
+        : root.unique-beside ? root.lists-width / 2
+        : root.wide ? Math.min(Tokens.affix-table-max-width, root.lists-width) : root.lists-width;
+    property <int> reveal-serial: ForgeReveal.serial;
+    // The add picker's flyout: closing it any way but Use or Cancel cancels, and Rust dropping the picker closes it.
+    // The line under the template form: what saving the typed name would replace, else what the last action said.
+    property <string> template-note: root.template-replaces != ""
+        ? ForgeText.saving-replaces(root.template-replaces)
+        : root.template-message;
+    property <bool> add-shown: add-popup.is-open;
+    property <bool> picker-live: root.picker-open;
+    // A row Rust selected or focused scrolls into view.
+    changed reveal-serial => {
+        let top = ForgeReveal.top - root.absolute-position.y;
+        let bottom = top + ForgeReveal.height;
+        if (top < 0) {
+            root.content-y = Math.min(0px, root.content-y - top);
+        } else if (bottom > root.visible-height) {
+            root.content-y = Math.max(Math.min(0px, root.visible-height - root.content-height), root.content-y - (bottom - root.visible-height));
+        }
+    }
+    changed add-shown => {
+        if (!root.add-shown && root.picker-open) {
+            root.cancel-picker();
+        }
+    }
+    changed picker-live => {
+        if (!root.picker-live) {
+            add-popup.close();
+        }
+    }
+
+    content-width: self.visible-width;
+    content-height: Math.max(affix-section.height + (root.has-unique && !root.unique-beside ? Tokens.unique-section-margin.top + unique-section.height : 0px),
+        root.unique-beside ? Tokens.unique-section-beside-margin.top + unique-section.height : 0px,
+        root.ladder ? ladder.height : 0px) + Tokens.lists-bottom-margin.bottom;
+
+    affix-section := VerticalLayout {
+        x: 0;
+        y: 0;
+        width: root.table-width;
+        height: self.preferred-height;
+        spacing: Tokens.space-6;
+        alignment: start;
+
+        // Implicits come with the base; only their roll positions reroll in place, and only a base change replaces them.
+        if root.has-implicits: VerticalLayout {
+            spacing: Tokens.space-2;
+            // The margin adds to the section's 6px spacing.
+            padding-bottom: Tokens.implicit-section-margin.bottom;
+
+            HorizontalLayout {
+                padding-left: Tokens.table-header-inset.left;
+                spacing: Tokens.space-6;
+                alignment: start;
+
+                Text {
+                    text: ForgeText.implicits;
+                    color: Tokens.text-muted-brush;
+                    vertical-alignment: center;
+                }
+
+                // The bare icon's room in the line; the button's frame hangs out around it.
+                Rectangle {
+                    width: Tokens.icon-size-small;
+                    height: Tokens.icon-size-small;
+                    y: (parent.height - self.height) / 2;
+
+                    HelpButton {
+                        x: -Tokens.compact-icon-button-padding.left;
+                        y: -Tokens.compact-icon-button-padding.top;
+                        help: root.implicit-note;
+                        label: ForgeText.about-implicits;
+                    }
+                }
+            }
+
+            if root.implicit-rows-shown: VerticalLayout {
+                for line[index] in root.implicits: ModifierRowItem {
+                    begin-input(a0) => { return root.begin-input(a0); }
+                    cancel-input(a0) => { root.cancel-input(a0); }
+                    commit-input(a0) => { return root.commit-input(a0); }
+                    end-scrub(a0, a1) => { root.end-scrub(a0, a1); }
+                    finish-input(a0) => { root.finish-input(a0); }
+                    focus-cell: root.focus-cell;
+                    focus-part: root.focus-part;
+                    focus-serial: root.focus-serial;
+                    input-edited(a0, a1) => { root.input-edited(a0, a1); }
+                    input-error: root.input-error;
+                    input-label: root.input-label;
+                    input-range: root.input-range;
+                    input-text <=> root.input-text;
+                    move-implicit(a0, a1, a2) => { root.move-implicit(a0, a1, a2); }
+                    move-unique(a0, a1, a2) => { root.move-unique(a0, a1, a2); }
+                    press(a0) => { root.press(a0); }
+                    scrub(a0, a1) => { root.scrub(a0, a1); }
+                    select-unique(a0) => { root.select-unique(a0); }
+                    step(a0, a1) => { root.step(a0, a1); }
+                    step-to-end(a0, a1) => { root.step-to-end(a0, a1); }
+                    typing: root.typing;
+                    typing-cell: root.typing-cell;
+                    line: line;
+                    index: index;
+                    kind: CellKind.implicit;
+                }
+            }
+
+            if !root.implicit-rows-shown: VerticalLayout {
+                padding-left: Tokens.implicit-row-margin.left;
+                padding-right: Tokens.implicit-row-margin.right;
+                padding-top: Tokens.implicit-row-margin.top;
+                padding-bottom: Tokens.implicit-row-margin.bottom;
+                spacing: Tokens.row-gap.bottom;
+
+                for line in root.implicit-preview: Text {
+                    text: line;
+                    font-size: Tokens.font-size-value;
+                    color: root.implicit-preview-draft ? Tokens.draft-brush : Tokens.text-secondary-brush;
+                    wrap: word-wrap;
+                }
+            }
+        }
+
+        HorizontalLayout {
+            padding-left: Tokens.table-header-inset.left;
+            padding-right: Tokens.table-header-inset.right;
+            spacing: Tokens.space-12;
+
+            Text {
+                width: Tokens.affix-value-column-width;
+                text: ForgeText.value;
+                color: Tokens.text-muted-brush;
+            }
+
+            Text {
+                horizontal-stretch: 1;
+                text: ForgeText.affix;
+                color: Tokens.text-muted-brush;
+            }
+
+            if root.wide: Text {
+                width: root.range-width;
+                text: ForgeText.range;
+                color: Tokens.text-muted-brush;
+            }
+
+            Text {
+                width: Tokens.affix-tier-column-width;
+                text: ForgeText.tier;
+                color: Tokens.text-muted-brush;
+            }
+
+            Text {
+                width: Tokens.affix-seal-column-width;
+                text: ForgeText.seal;
+                color: Tokens.text-muted-brush;
+            }
+
+            Rectangle {
+                width: Tokens.affix-status-column-width;
+            }
+        }
+
+        // The rows as one named list for a screen reader.
+        Rectangle {
+            accessible-role: list;
+            accessible-label: ForgeText.affixes;
+
+            VerticalLayout {
+                spacing: Tokens.row-gap.bottom;
+
+                for affix[index] in root.affixes: AffixRowItem {
+                    begin-input(a0) => { return root.begin-input(a0); }
+                    can-change-affix-list: root.can-change-affix-list;
+                    can-use-picker: root.can-use-picker;
+                    cancel-input(a0) => { root.cancel-input(a0); }
+                    cancel-picker() => { root.cancel-picker(); }
+                    commit-input(a0) => { return root.commit-input(a0); }
+                    discard-row(a0) => { root.discard-row(a0); }
+                    end-scrub(a0, a1) => { root.end-scrub(a0, a1); }
+                    finish-input(a0) => { root.finish-input(a0); }
+                    focus-cell: root.focus-cell;
+                    focus-part: root.focus-part;
+                    focus-serial: root.focus-serial;
+                    input-edited(a0, a1) => { root.input-edited(a0, a1); }
+                    input-error: root.input-error;
+                    input-label: root.input-label;
+                    input-range: root.input-range;
+                    input-text <=> root.input-text;
+                    move-row(a0, a1, a2) => { root.move-row(a0, a1, a2); }
+                    open-replace(a0) => { return root.open-replace(a0); }
+                    pick-seal(a0, a1) => { root.pick-seal(a0, a1); }
+                    pick-tier(a0, a1) => { root.pick-tier(a0, a1); }
+                    picker-action: root.picker-action;
+                    picker-allow: root.picker-allow;
+                    picker-allow-changed(a0) => { root.picker-allow-changed(a0); }
+                    picker-allow-enabled: root.picker-allow-enabled;
+                    picker-categories: root.picker-categories;
+                    picker-category: root.picker-category;
+                    picker-category-changed(a0) => { root.picker-category-changed(a0); }
+                    picker-chip-removed(a0) => { root.picker-chip-removed(a0); }
+                    picker-chips: root.picker-chips;
+                    picker-class: root.picker-class;
+                    picker-class-changed(a0) => { root.picker-class-changed(a0); }
+                    picker-classes: root.picker-classes;
+                    picker-clear-filters() => { root.picker-clear-filters(); }
+                    picker-count: root.picker-count;
+                    picker-empty-allow: root.picker-empty-allow;
+                    picker-empty-clear-filters: root.picker-empty-clear-filters;
+                    picker-empty-clear-search: root.picker-empty-clear-search;
+                    picker-empty-reason: root.picker-empty-reason;
+                    picker-filter: root.picker-filter;
+                    picker-filter-changed(a0) => { root.picker-filter-changed(a0); }
+                    picker-hidden: root.picker-hidden;
+                    picker-level: root.picker-level;
+                    picker-level-changed(a0) => { root.picker-level-changed(a0); }
+                    picker-levels: root.picker-levels;
+                    picker-open: root.picker-open;
+                    picker-rows: root.picker-rows;
+                    picker-search: root.picker-search;
+                    picker-search-edited(a0) => { root.picker-search-edited(a0); }
+                    picker-select(a0) => { root.picker-select(a0); }
+                    picker-selected: root.picker-selected;
+                    picker-show-uniques() => { root.picker-show-uniques(); }
+                    picker-sides: root.picker-sides;
+                    picker-slot: root.picker-slot;
+                    picker-slot-active: root.picker-slot-active;
+                    picker-slot-changed(a0) => { root.picker-slot-changed(a0); }
+                    picker-slot-text: root.picker-slot-text;
+                    picker-slots: root.picker-slots;
+                    picker-source: root.picker-source;
+                    picker-source-active: root.picker-source-active;
+                    picker-source-changed(a0) => { root.picker-source-changed(a0); }
+                    picker-source-text: root.picker-source-text;
+                    picker-sources: root.picker-sources;
+                    picker-status: root.picker-status;
+                    picker-subtitle: root.picker-subtitle;
+                    picker-tag-toggled(a0, a1) => { root.picker-tag-toggled(a0, a1); }
+                    picker-tags: root.picker-tags;
+                    picker-tags-active: root.picker-tags-active;
+                    picker-tags-on: root.picker-tags-on;
+                    picker-tags-text: root.picker-tags-text;
+                    picker-title: root.picker-title;
+                    press(a0) => { root.press(a0); }
+                    remove-affix(a0) => { root.remove-affix(a0); }
+                    scrub(a0, a1) => { root.scrub(a0, a1); }
+                    select-affix(a0) => { root.select-affix(a0); }
+                    step(a0, a1) => { root.step(a0, a1); }
+                    step-to-end(a0, a1) => { root.step-to-end(a0, a1); }
+                    typing: root.typing;
+                    typing-cell: root.typing-cell;
+                    use-picker() => { root.use-picker(); }
+                    affix: affix;
+                    index: index;
+                    selected: root.selected-affix == index;
+                    wide: root.wide;
+                    range-width: root.range-width;
+                }
+            }
+        }
+
+        // Adding is a draft Apply writes; the caption says what is free, or why adding and removing wait, in one line.
+        HorizontalLayout {
+            padding-left: Tokens.table-header-inset.left;
+            spacing: Tokens.space-12;
+            alignment: start;
+
+            add-button := Rectangle {
+                width: add.preferred-width;
+                height: Tokens.control-min-height;
+
+                add := Button {
+                    width: parent.width;
+                    text: ForgeText.add-affix;
+                    icon: Tokens.icon-add;
+                    kind: ButtonKind.subtle;
+                    enabled: root.can-change-affix-list;
+                    tip: root.add-affix-tip;
+                    clicked => {
+                        if (root.open-add()) {
+                            add-popup.show();
+                        }
+                    }
+                }
+
+                add-popup := PopupWindow {
+                    x: 0;
+                    y: parent.height + Tokens.space-4;
+                    width: PickerMetrics.width;
+                    height: PickerMetrics.height;
+                    close-policy: PopupClosePolicy.close-on-click-outside;
+
+                    AffixPickerPanel {
+                        can-use-picker: root.can-use-picker;
+                        cancel-picker() => { root.cancel-picker(); }
+                        picker-action: root.picker-action;
+                        picker-allow: root.picker-allow;
+                        picker-allow-changed(a0) => { root.picker-allow-changed(a0); }
+                        picker-allow-enabled: root.picker-allow-enabled;
+                        picker-categories: root.picker-categories;
+                        picker-category: root.picker-category;
+                        picker-category-changed(a0) => { root.picker-category-changed(a0); }
+                        picker-chip-removed(a0) => { root.picker-chip-removed(a0); }
+                        picker-chips: root.picker-chips;
+                        picker-class: root.picker-class;
+                        picker-class-changed(a0) => { root.picker-class-changed(a0); }
+                        picker-classes: root.picker-classes;
+                        picker-clear-filters() => { root.picker-clear-filters(); }
+                        picker-count: root.picker-count;
+                        picker-empty-allow: root.picker-empty-allow;
+                        picker-empty-clear-filters: root.picker-empty-clear-filters;
+                        picker-empty-clear-search: root.picker-empty-clear-search;
+                        picker-empty-reason: root.picker-empty-reason;
+                        picker-filter: root.picker-filter;
+                        picker-filter-changed(a0) => { root.picker-filter-changed(a0); }
+                        picker-hidden: root.picker-hidden;
+                        picker-level: root.picker-level;
+                        picker-level-changed(a0) => { root.picker-level-changed(a0); }
+                        picker-levels: root.picker-levels;
+                        picker-rows: root.picker-rows;
+                        picker-search: root.picker-search;
+                        picker-search-edited(a0) => { root.picker-search-edited(a0); }
+                        picker-select(a0) => { root.picker-select(a0); }
+                        picker-selected: root.picker-selected;
+                        picker-show-uniques() => { root.picker-show-uniques(); }
+                        picker-sides: root.picker-sides;
+                        picker-slot: root.picker-slot;
+                        picker-slot-active: root.picker-slot-active;
+                        picker-slot-changed(a0) => { root.picker-slot-changed(a0); }
+                        picker-slot-text: root.picker-slot-text;
+                        picker-slots: root.picker-slots;
+                        picker-source: root.picker-source;
+                        picker-source-active: root.picker-source-active;
+                        picker-source-changed(a0) => { root.picker-source-changed(a0); }
+                        picker-source-text: root.picker-source-text;
+                        picker-sources: root.picker-sources;
+                        picker-status: root.picker-status;
+                        picker-subtitle: root.picker-subtitle;
+                        picker-tag-toggled(a0, a1) => { root.picker-tag-toggled(a0, a1); }
+                        picker-tags: root.picker-tags;
+                        picker-tags-active: root.picker-tags-active;
+                        picker-tags-on: root.picker-tags-on;
+                        picker-tags-text: root.picker-tags-text;
+                        picker-title: root.picker-title;
+                        use-picker() => { root.use-picker(); }
+                        done => {
+                            add-popup.close();
+                        }
+                    }
+                }
+            }
+
+            // Every affix up to its highest tier below the primordial T8, as tier drafts.
+            Button {
+                text: ForgeText.max-tiers;
+                kind: ButtonKind.subtle;
+                enabled: root.can-max-tiers;
+                tip: root.max-tiers-tip;
+                clicked => {
+                    root.max-tiers();
+                }
+            }
+
+            // Every roll the forge can edit up to roll 255, the game's perfect roll, as roll drafts.
+            Button {
+                text: ForgeText.max-rolls;
+                kind: ButtonKind.subtle;
+                enabled: root.can-max-rolls;
+                tip: root.max-rolls-tip;
+                clicked => {
+                    root.max-rolls();
+                }
+            }
+
+            // The user's item templates: drafted onto the item, or the item saved as one. Absent from the row (no
+            // width, no spacing) in a run that keeps no templates.
+            if root.has-templates: templates-button := Rectangle {
+                width: templates.preferred-width;
+                height: Tokens.control-min-height;
+
+                templates := Button {
+                    width: parent.width;
+                    text: ForgeText.templates;
+                    kind: ButtonKind.subtle;
+                    enabled: root.has-item;
+                    tip: ForgeText.templates-tip;
+                    clicked => {
+                        root.templates-opened();
+                        templates-popup.show();
+                    }
+                }
+
+                templates-measure := TemplatesMeasure {
+                    note: root.template-note;
+                }
+
+                property <length> templates-height: TemplateMetrics.height(root.template-rows.length, templates-measure.message);
+                // Room between the button and the window's top, and between it and the page's foot.
+                property <length> room-above: self.absolute-position.y;
+                property <length> room-below: root.page-bottom - self.absolute-position.y - self.height;
+
+                // Upward, over the affix table, as the button sits low on the page near the window's foot; below it
+                // when there is no room above; with room on neither side, as low as the page lets it reach (a popup
+                // can't leave the window).
+                property <length> templates-y: self.room-above >= self.templates-height + Tokens.space-4
+                    ? -self.templates-height - Tokens.space-4
+                    : self.room-below >= self.templates-height + Tokens.space-4
+                        ? self.height + Tokens.space-4
+                        : Math.max(-self.room-above, self.height + self.room-below - self.templates-height);
+
+                templates-popup := PopupWindow {
+                    x: 0;
+                    y: templates-button.templates-y;
+                    width: Tokens.replace-flyout-width + Tokens.flyout-padding.left + Tokens.flyout-padding.right;
+                    height: templates-button.templates-height;
+                    close-policy: PopupClosePolicy.close-on-click-outside;
+
+                    TemplatesPanel {
+                        has-item: root.has-item;
+                        template-apply(a0) => { root.template-apply(a0); }
+                        template-delete(a0) => { root.template-delete(a0); }
+                        template-name: root.template-name;
+                        template-name-edited(a0) => { root.template-name-edited(a0); }
+                        template-replaces: root.template-replaces;
+                        note: root.template-note;
+                        template-rows: root.template-rows;
+                        template-save(a0, a1) => { root.template-save(a0, a1); }
+                        done => {
+                            templates-popup.close();
+                        }
+                    }
+                }
+            }
+
+            // The note wraps (up to two lines, within the button's height) so that a keyboard user, who never gets
+            // the tip, reads it whole.
+            Text {
+                text: root.affix-list-note;
+                font-size: Tokens.font-size-caption;
+                color: Tokens.text-muted-brush;
+                vertical-alignment: center;
+                wrap: word-wrap;
+                max-lines: Tokens.note-max-lines;
+                overflow: elide;
+                horizontal-stretch: 1;
+
+                note-touch := TouchArea { }
+
+                TipTrigger {
+                    text: root.affix-list-note;
+                    hovered: note-touch.has-hover;
+                }
+            }
+        }
+    }
+
+    // Unique modifiers in the game's own tooltip treatment: under the table, or beside it from 1180px of lists.
+    unique-section := Rectangle {
+        x: root.unique-beside ? root.table-width + Tokens.unique-section-beside-margin.left : 0;
+        y: root.unique-beside ? Tokens.unique-section-beside-margin.top : affix-section.height + Tokens.unique-section-margin.top;
+        width: root.unique-beside ? root.lists-width - root.table-width - Tokens.unique-section-beside-margin.left : root.lists-width;
+        height: root.has-unique ? unique-layout.preferred-height : 0px;
+        visible: root.has-unique;
+        // The tooltip's ground with its header glow in the top-left corner (an elliptical gradient, drawn as an
+        // SVG, gradients/unique-surface-brush.svg); the copper frame is drawn over both.
+        background: Tokens.unique-surface-brush-ground;
+        border-radius: Tokens.control-radius;
+        clip: true;
+
+        Image {
+            x: Tokens.unique-surface-brush-x;
+            y: Tokens.unique-surface-brush-y;
+            width: Tokens.unique-surface-brush-width;
+            height: Tokens.unique-surface-brush-height;
+            source: Tokens.unique-surface-brush-image;
+            image-fit: fill;
+        }
+
+        Rectangle {
+            border-width: Tokens.border-all.left;
+            border-color: Tokens.unique-border-brush;
+            border-radius: Tokens.control-radius;
+        }
+
+        // The padding lies inside the frame.
+        unique-layout := VerticalLayout {
+            padding-left: Tokens.border-all.left + Tokens.unique-section-padding.left;
+            padding-right: Tokens.border-all.right + Tokens.unique-section-padding.right;
+            padding-top: Tokens.border-all.top + Tokens.unique-section-padding.top;
+            padding-bottom: Tokens.border-all.bottom + Tokens.unique-section-padding.bottom;
+            spacing: Tokens.space-8;
+
+            HorizontalLayout {
+                spacing: Tokens.space-12;
+
+                Text {
+                    text: ForgeText.unique-modifiers;
+                    font-size: Tokens.font-size-section;
+                    font-weight: Tokens.emphasis-weight;
+                    // The game heads the section in its tertiary body colour; the frame and the glow carry the unique.
+                    color: Tokens.text-muted-brush;
+                    horizontal-stretch: 1;
+                }
+
+                // A preview that failed says so with the error mark; one the item outran, with the warning mark.
+                HorizontalLayout {
+                    spacing: Tokens.space-4;
+                    alignment: end;
+
+                    if root.preview-failed || root.preview-stale: Image {
+                        width: Tokens.icon-size-tiny;
+                        height: Tokens.icon-size-tiny;
+                        y: (parent.height - self.height) / 2;
+                        image-fit: contain;
+                        source: root.preview-failed ? Tokens.icon-error : Tokens.icon-warning;
+                        colorize: root.preview-failed ? Tokens.error-brush : Tokens.warning-brush;
+                    }
+
+                    Text {
+                        text: root.preview-status;
+                        font-size: Tokens.font-size-caption;
+                        color: root.preview-failed ? Tokens.error-brush : Tokens.text-muted-brush;
+                        max-width: Tokens.preview-status-max-width;
+                        vertical-alignment: center;
+                        // The status wraps at this width so the keyboard reaches the whole reason.
+                        wrap: word-wrap;
+
+                        preview-touch := TouchArea { }
+
+                        TipTrigger {
+                            text: root.preview-status;
+                            hovered: preview-touch.has-hover;
+                        }
+                    }
+                }
+            }
+
+            if root.formatting-error != "": HorizontalLayout {
+                spacing: Tokens.space-8;
+
+                Image {
+                    width: Tokens.icon-size;
+                    height: Tokens.icon-size;
+                    image-fit: contain;
+                    source: root.formatting-loading ? Tokens.icon-info : Tokens.icon-warning;
+                    colorize: root.formatting-loading ? Tokens.text-muted-brush : Tokens.warning-brush;
+                }
+
+                Text {
+                    text: root.formatting-error;
+                    color: root.formatting-loading ? Tokens.text-muted-brush : Tokens.warning-brush;
+                    wrap: word-wrap;
+                    horizontal-stretch: 1;
+                }
+            }
+
+            Rectangle {
+                accessible-role: list;
+                accessible-label: ForgeText.unique-modifiers;
+
+                VerticalLayout {
+                    spacing: Tokens.row-gap.bottom;
+
+                    for line[index] in root.unique-modifiers: ModifierRowItem {
+                        begin-input(a0) => { return root.begin-input(a0); }
+                        cancel-input(a0) => { root.cancel-input(a0); }
+                        commit-input(a0) => { return root.commit-input(a0); }
+                        end-scrub(a0, a1) => { root.end-scrub(a0, a1); }
+                        finish-input(a0) => { root.finish-input(a0); }
+                        focus-cell: root.focus-cell;
+                        focus-part: root.focus-part;
+                        focus-serial: root.focus-serial;
+                        input-edited(a0, a1) => { root.input-edited(a0, a1); }
+                        input-error: root.input-error;
+                        input-label: root.input-label;
+                        input-range: root.input-range;
+                        input-text <=> root.input-text;
+                        move-implicit(a0, a1, a2) => { root.move-implicit(a0, a1, a2); }
+                        move-unique(a0, a1, a2) => { root.move-unique(a0, a1, a2); }
+                        press(a0) => { root.press(a0); }
+                        scrub(a0, a1) => { root.scrub(a0, a1); }
+                        select-unique(a0) => { root.select-unique(a0); }
+                        step(a0, a1) => { root.step(a0, a1); }
+                        step-to-end(a0, a1) => { root.step-to-end(a0, a1); }
+                        typing: root.typing;
+                        typing-cell: root.typing-cell;
+                        line: line;
+                        index: index;
+                        kind: CellKind.unique;
+                        on-unique: true;
+                        selected: root.selected-unique == index;
+                    }
+                }
+            }
+        }
+    }
+
+    // From 1180px of lists, an item without unique modifiers gives the column beside the table to the selected affix's
+    // tier ladder; a press drafts the tier as the tier menu does.
+    ladder := VerticalLayout {
+        x: root.table-width + Tokens.tier-ladder-beside-margin.left;
+        y: 0;
+        width: Tokens.tier-ladder-width - Tokens.tier-ladder-beside-margin.left;
+        height: root.ladder ? self.preferred-height : 0px;
+        visible: root.ladder;
+        spacing: Tokens.space-6;
+        alignment: start;
+
+        HorizontalLayout {
+            padding-left: Tokens.table-header-inset.left;
+
+            Text {
+                text: ForgeText.tiers;
+                color: Tokens.text-muted-brush;
+            }
+        }
+
+        if root.selected < 0: HorizontalLayout {
+            padding-left: Tokens.table-header-inset.left;
+
+            Text {
+                text: root.ladder-note;
+                font-size: Tokens.font-size-caption;
+                color: Tokens.text-muted-brush;
+                wrap: word-wrap;
+            }
+        }
+
+        if root.selected >= 0: VerticalLayout {
+            spacing: Tokens.space-4;
+
+            HorizontalLayout {
+                padding-left: Tokens.table-header-inset.left;
+
+                Text {
+                    text: root.affixes[root.selected].name;
+                    font-weight: Tokens.emphasis-weight;
+                    color: Tokens.text-brush;
+                    overflow: elide;
+                }
+            }
+
+            TierLadder {
+                tiers: root.affixes[root.selected].tiers;
+                held: root.affixes[root.selected].tier-index;
+                enabled: root.affixes[root.selected].can-edit;
+                label: ForgeText.tier-for(root.affixes[root.selected].name);
+                picked(index) => {
+                    root.pick-tier(root.selected, index);
+                }
+            }
+        }
+    }
+}

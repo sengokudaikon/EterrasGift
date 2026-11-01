@@ -1,0 +1,188 @@
+// The Item Forge's action bar: the message, then Changes, Undo, Discard and Apply. Takes what it shows as properties.
+
+import { DraftEntryView } from "state.slint";
+import { Tokens } from "../../tokens.slint";
+import { KeyboardFocus } from "../../globals.slint";
+import { TipTrigger } from "../../widgets/focus.slint";
+import { Button, ButtonKind } from "../../widgets/button.slint";
+import { FocusRing } from "../../widgets/focus.slint";
+import { MessageTone } from "../common.slint";
+import { ForgeText } from "../../strings/forge.slint";
+
+// The Changes toggle: transparent at rest, checked on Wine-Stained Brown in Dark Brass while the pane is open.
+component ChangesToggle inherits Rectangle {
+    in property <string> text;
+    in-out property <bool> checked;
+
+    public function focus-toggle() {
+        focus.focus();
+    }
+
+    accessible-role: button;
+    accessible-label: root.text;
+    accessible-checkable: true;
+    accessible-checked: root.checked;
+    accessible-action-default => { root.checked = !root.checked; }
+
+    min-height: Tokens.control-min-height;
+    width: words.preferred-width + Tokens.button-padding.left + Tokens.button-padding.right;
+    border-radius: Tokens.control-radius;
+    border-width: 1px;
+    background: root.checked ? Tokens.selected-brush : touch.has-hover ? Tokens.hover-brush : transparent;
+    border-color: root.checked ? Tokens.accent-trim-brush : transparent;
+
+    words := Text {
+        text: root.text;
+        color: root.checked ? Tokens.label-brush : touch.has-hover ? Tokens.text-brush : Tokens.text-secondary-brush;
+        vertical-alignment: center;
+    }
+
+    focus := FocusScope {
+        focus-gained(reason) => {
+            if (reason == FocusReason.tab-navigation) {
+                KeyboardFocus.visible = true;
+            }
+        }
+        key-pressed(event) => {
+            if (event.text == Key.Return || event.text == " ") {
+                root.checked = !root.checked;
+                return accept;
+            }
+            reject
+        }
+
+        touch := TouchArea {
+            pointer-event(event) => {
+                if (event.kind == PointerEventKind.down) {
+                    KeyboardFocus.visible = false;
+                }
+            }
+            clicked => {
+                focus.focus();
+                root.checked = !root.checked;
+            }
+        }
+    }
+
+    TipTrigger {
+        text: ForgeText.show-or-hide-changes;
+        hovered: touch.has-hover;
+        focused: focus.has-focus;
+    }
+
+    FocusRing {
+        focused: focus.has-focus;
+    }
+}
+
+export component ForgeBar inherits Rectangle {
+    // From the page: what this shows and what it asks of it.
+    callback apply();
+    in property <string> apply-text;
+    in property <bool> can-apply;
+    in property <bool> can-discard;
+    in property <bool> can-undo;
+    in property <string> changes-text;
+    callback discard-all();
+    in property <string> discard-text;
+    in property <[DraftEntryView]> drafts;
+    in property <string> message;
+    in property <MessageTone> message-tone;
+    in-out property <bool> pane-open;
+    callback undo();
+    in property <string> undo-text;
+    in property <string> undo-tip;
+
+
+    // The changes pane gives focus back here when it closes.
+    public function focus-changes() {
+        changes-toggle.focus-toggle();
+    }
+
+    height: Math.max(Tokens.control-min-height, message.height) + Tokens.action-bar-padding.top + Tokens.action-bar-padding.bottom;
+    background: Tokens.surface-brush;
+
+    Rectangle {
+        x: 0;
+        y: 0;
+        height: 1px;
+        background: Tokens.hairline-brush;
+    }
+
+    message := HorizontalLayout {
+        x: Tokens.action-bar-padding.left;
+        y: (parent.height - self.height) / 2;
+        width: Math.max(0px, Math.min(Tokens.status-message-max-width, actions.x - self.x - Tokens.space-20));
+        height: self.preferred-height;
+        spacing: Tokens.space-10;
+        visible: root.message != "";
+
+        VerticalLayout {
+            padding-top: Tokens.icon-baseline-nudge.top + Tokens.space-1;
+            alignment: start;
+
+            Image {
+                width: Tokens.icon-size;
+                height: Tokens.icon-size;
+                image-fit: contain;
+                source: root.message-tone == MessageTone.error ? Tokens.icon-error
+                    : root.message-tone == MessageTone.confirmed ? Tokens.icon-confirmed : Tokens.icon-info;
+                colorize: root.message-tone == MessageTone.error ? Tokens.error-brush
+                    : root.message-tone == MessageTone.confirmed ? Tokens.confirmed-brush : Tokens.text-muted-brush;
+            }
+        }
+
+        Text {
+            text: root.message;
+            color: root.message-tone == MessageTone.error ? Tokens.error-brush : Tokens.text-brush;
+            wrap: word-wrap;
+            horizontal-stretch: 1;
+            accessible-role: text;
+            // Announced as it changes.
+            accessible-live-region: polite;
+        }
+    }
+
+    actions := HorizontalLayout {
+        x: parent.width - self.width - Tokens.action-bar-padding.right;
+        y: (parent.height - self.height) / 2;
+        width: self.preferred-width;
+        height: Tokens.control-min-height;
+        spacing: Tokens.space-8;
+
+        changes-toggle := ChangesToggle {
+            text: root.changes-text;
+            checked <=> root.pane-open;
+        }
+
+        Button {
+            text: root.undo-text;
+            icon: Tokens.icon-undo;
+            enabled: root.can-undo;
+            tip: root.undo-tip;
+            clicked => {
+                root.undo();
+            }
+        }
+
+        if root.drafts.length > 0: Button {
+            text: root.discard-text;
+            kind: ButtonKind.subtle;
+            enabled: root.can-discard;
+            tip: ForgeText.discard-all-tip;
+            clicked => {
+                root.discard-all();
+            }
+        }
+
+        Button {
+            text: root.apply-text;
+            kind: ButtonKind.primary;
+            enabled: root.can-apply;
+            tip: ForgeText.apply-tip;
+            clicked => {
+                root.apply();
+            }
+        }
+    }
+}

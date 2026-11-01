@@ -1,0 +1,870 @@
+// The Item Forge's header: the item's name in its rarity colour, its facts, and the status strip. Takes what it shows as properties.
+
+import { CellKind, CellRef, FieldView, ItemRarity, MenuOptionView } from "state.slint";
+import { ScrollView } from "../../widgets/scroll-view.slint";
+import { Tokens } from "../../tokens.slint";
+import { KeyboardFocus } from "../../globals.slint";
+import { TipTrigger } from "../../widgets/focus.slint";
+import { FactsText } from "../../widgets/text.slint";
+import { FlyoutSurface } from "../../widgets/menu.slint";
+import { ValueScrubber } from "scrubber.slint";
+import { ForgeText } from "../../strings/forge.slint";
+import { CellButton, FlagToggle, MenuRow } from "cells.slint";
+import { CheckBox } from "../../widgets/check-box.slint";
+import { MenuMetrics } from "table.slint";
+import { PickerMetrics } from "picker.slint";
+import { SearchBox } from "../../widgets/search-box.slint";
+
+// A cell in the facts line: plain text that answers like a cell where it can change, outdented so hovering never moves it.
+// It is a Tab stop either way, so its reason shows by keyboard too.
+export component InlineCell inherits Rectangle {
+    in property <string> text;
+    in property <bool> emphasis;
+    in property <bool> drafted;
+    in property <bool> changeable;
+    in property <string> tip;
+    in property <string> label;
+    callback clicked();
+
+    public function focus-cell() {
+        button.focus-cell();
+    }
+
+    width: words.preferred-width;
+    height: words.preferred-height;
+
+    words := Text {
+        text: root.text;
+        font-weight: root.emphasis ? Tokens.emphasis-weight : 400;
+        color: root.drafted ? Tokens.draft-brush : Tokens.text-secondary-brush;
+        visible: false;
+    }
+
+    button := CellButton {
+        x: Tokens.inline-cell-outdent.left;
+        y: Tokens.inline-cell-outdent.top;
+        width: root.width - Tokens.inline-cell-outdent.left - Tokens.inline-cell-outdent.right;
+        height: root.height - Tokens.inline-cell-outdent.top - Tokens.inline-cell-outdent.bottom;
+        changeable: root.changeable;
+        tab-stop: true;
+        tip: root.tip;
+        label: root.label;
+        clicked => {
+            root.clicked();
+        }
+
+        Text {
+            text: root.text;
+            font-weight: root.emphasis ? Tokens.emphasis-weight : 400;
+            color: root.drafted ? Tokens.draft-brush : Tokens.text-secondary-brush;
+            vertical-alignment: center;
+        }
+    }
+}
+
+// The game-owned colour of a rarity's names (EpochColor), for item names only.
+global RarityInk {
+    public pure function of(rarity: ItemRarity) -> brush {
+        return rarity == ItemRarity.legendary ? Tokens.rarity-legendary-brush
+            : rarity == ItemRarity.set ? Tokens.rarity-set-brush
+            : rarity == ItemRarity.unique ? Tokens.rarity-unique-brush
+            : rarity == ItemRarity.exalted ? Tokens.rarity-exalted-brush
+            : rarity == ItemRarity.rare ? Tokens.rarity-rare-brush
+            : rarity == ItemRarity.magic ? Tokens.rarity-magic-brush : Tokens.rarity-normal-brush;
+    }
+}
+
+// A uniques-and-set-items entry: the name in the colour of the rarity the item would end with (dimmed when it can't be
+// picked), "in game" on the one the item is, and the caption with its reasons, wrapped.
+component IdentityEntry inherits MenuRow {
+    in property <MenuOptionView> option;
+
+    held: root.option.current;
+    enabled: root.option.available;
+
+    VerticalLayout {
+        horizontal-stretch: 1;
+
+        HorizontalLayout {
+            spacing: Tokens.space-12;
+
+            Text {
+                text: root.option.name;
+                color: root.option.available ? RarityInk.of(root.option.rarity) : Tokens.text-disabled-brush;
+                wrap: word-wrap;
+                horizontal-stretch: 1;
+            }
+
+            if root.option.in-game: Text {
+                text: ForgeText.in-game;
+                font-size: Tokens.font-size-caption;
+                color: Tokens.text-secondary-brush;
+                vertical-alignment: center;
+            }
+        }
+
+        FactsText {
+            facts: root.option.facts;
+        }
+
+        // Kept in the layout at no height when empty: wrapped text inside an if is measured short (crates/ui/README.md).
+        Text {
+            text: root.option.note;
+            font-size: Tokens.font-size-caption;
+            color: Tokens.text-muted-brush;
+            wrap: word-wrap;
+            visible: root.option.note != "";
+            height: root.option.note == "" ? 0px : self.preferred-height;
+        }
+    }
+}
+
+// A base entry: the name, "in game" on the item's own, the implicits it grants, then its level and notes, all wrapped.
+component BaseEntry inherits MenuRow {
+    in property <MenuOptionView> option;
+
+    held: root.option.current;
+    enabled: root.option.available;
+
+    VerticalLayout {
+        horizontal-stretch: 1;
+
+        HorizontalLayout {
+            spacing: Tokens.space-12;
+
+            Text {
+                text: root.option.name;
+                color: Tokens.text-brush;
+                wrap: word-wrap;
+                horizontal-stretch: 1;
+            }
+
+            if root.option.in-game: Text {
+                text: ForgeText.in-game;
+                font-size: Tokens.font-size-caption;
+                color: Tokens.text-secondary-brush;
+                vertical-alignment: center;
+            }
+        }
+
+        // Kept in the layout at no height when empty: wrapped text inside an if is measured short (crates/ui/README.md).
+        Text {
+            text: root.option.implicits;
+            font-size: Tokens.font-size-caption;
+            color: Tokens.text-secondary-brush;
+            wrap: word-wrap;
+            visible: root.option.implicits != "";
+            height: root.option.implicits == "" ? 0px : self.preferred-height;
+        }
+
+        FactsText {
+            facts: root.option.facts;
+        }
+
+        Text {
+            text: root.option.note;
+            font-size: Tokens.font-size-caption;
+            color: Tokens.text-muted-brush;
+            wrap: word-wrap;
+            visible: root.option.note != "";
+            height: root.option.note == "" ? 0px : self.preferred-height;
+        }
+    }
+}
+
+export component ForgeHeader inherits VerticalLayout {
+    // From the page: what this shows and what it asks of it.
+    callback base-allow(bool);
+    in property <bool> base-allow-incompatible;
+    in property <bool> base-can-edit;
+    in property <bool> base-drafted;
+    in property <[MenuOptionView]> base-options;
+    in property <string> base-text;
+    in property <string> base-tip;
+    callback begin-input(CellRef) -> bool;
+    in property <bool> can-change-base;
+    in property <bool> can-change-identity;
+    in property <bool> can-change-rarity;
+    callback cancel-input(CellRef);
+    callback commit-input(CellRef) -> bool;
+    callback end-scrub(CellRef, bool);
+    in property <[FieldView]> fields;
+    callback finish-input(CellRef);
+    in property <CellRef> focus-cell;
+    in property <int> focus-part;
+    in property <int> focus-serial;
+    in property <bool> has-identity;
+    in property <bool> identity-drafted;
+    in property <[MenuOptionView]> identity-options;
+    in property <string> identity-search;
+    callback identity-search-edited(string);
+    in property <string> identity-tip;
+    callback input-edited(CellRef, string);
+    in property <string> input-error;
+    in property <string> input-label;
+    in property <string> input-range;
+    in-out property <string> input-text;
+    in property <string> item-name;
+    in property <ItemRarity> name-rarity;
+    pure callback option-start([MenuOptionView]) -> int;
+    pure callback option-step([MenuOptionView], int, int) -> int;
+    callback pick-base(int);
+    callback pick-identity(int);
+    callback pick-rarity(int);
+    callback press(CellRef);
+    in property <int> rarity-caption-lines;
+    in property <bool> rarity-drafted;
+    in property <[MenuOptionView]> rarity-options;
+    in property <string> rarity-text;
+    in property <string> rarity-tip;
+    callback scrub(CellRef, float);
+    callback step(CellRef, int);
+    callback step-to-end(CellRef, bool);
+    in property <[string]> summary;
+    callback toggle-flag(int, bool);
+    in property <bool> typing;
+    in property <CellRef> typing-cell;
+    in property <bool> strip-one-line;
+    in property <length> strip-height;
+
+    // An identity entry: the name over its caption in the menu row's padding (the empty list's height).
+    property <length> identity-row: Tokens.font-size-body * 4 / 3 + Tokens.font-size-caption * 4 / 3 + Tokens.cell-padding.top + Tokens.cell-padding.bottom + 2px;
+    // The menus' keyboard highlights: they start on the held entry and skip what can't be picked.
+    property <int> rarity-highlight;
+    property <int> base-highlight;
+    property <int> identity-highlight;
+    function close-identity() {
+        identity-popup.close();
+        identity-cell.focus-cell();
+    }
+    function choose-identity(index: int) {
+        if (index >= 0 && root.identity-options[index].available) {
+            root.pick-identity(index);
+            root.close-identity();
+        }
+    }
+
+    // Rust asked for the identity cell (Show draft).
+    public function focus-identity() {
+        identity-cell.focus-cell();
+    }
+
+    padding-top: Tokens.header-padding.top;
+    padding-bottom: Tokens.header-padding.bottom;
+    spacing: Tokens.space-4;
+
+    // On a unique, set or legendary item the name is a cell that opens the identity picker; a drafted unique shows
+    // its name in teal.
+    Rectangle {
+        height: title.preferred-height;
+
+        // A Tab stop whenever the item has an identity.
+        identity-cell := CellButton {
+            x: Tokens.inline-cell-outdent.left;
+            y: Tokens.inline-cell-outdent.top;
+            width: Math.min(title.preferred-width, parent.width) - Tokens.inline-cell-outdent.left - Tokens.inline-cell-outdent.right;
+            height: parent.height - Tokens.inline-cell-outdent.top - Tokens.inline-cell-outdent.bottom;
+            visible: root.has-identity;
+            enabled: root.has-identity;
+            changeable: root.can-change-identity;
+            tab-stop: true;
+            tip: root.identity-tip;
+            label: ForgeText.item(root.item-name);
+            clicked => {
+                if (root.can-change-identity) {
+                    root.identity-search-edited("");
+                    root.identity-highlight = root.option-start(root.identity-options);
+                    identity-popup.show();
+                }
+            }
+        }
+
+        title := Text {
+            x: 0;
+            width: parent.width;
+            text: root.item-name;
+            font-family: Tokens.display-font;
+            font-size: Tokens.font-size-title;
+            font-weight: Tokens.display-weight;
+            letter-spacing: Tokens.tracking-title;
+            wrap: word-wrap;
+            max-lines: Tokens.title-max-lines;
+            overflow: elide;
+            min-height: Tokens.line-height-title;
+            vertical-alignment: center;
+            color: root.identity-drafted ? Tokens.draft-brush : RarityInk.of(root.name-rarity);
+            accessible-label: ForgeText.item(root.item-name);
+        }
+
+        // The identity picker: focus starts on the entry the item is; Down leaves the search for the list, the arrows
+        // move, Enter or Space picks and closes, and a keyboard close hands focus back to the name.
+        identity-popup := PopupWindow {
+            x: Tokens.inline-cell-outdent.left;
+            y: parent.height - Tokens.inline-cell-outdent.bottom + Tokens.space-4;
+            width: Tokens.base-menu-width + Tokens.flyout-padding.left + Tokens.flyout-padding.right;
+            height: Tokens.flyout-padding.top + Tokens.flyout-padding.bottom + Tokens.control-min-height + Tokens.space-8 * 2
+                + identity-surface.list-height + PickerMetrics.caption-line * 3;
+            close-policy: PopupClosePolicy.close-on-click-outside;
+
+            identity-surface := FlyoutSurface {
+                // The list measured where it really ends (its entries wrap), capped at the replace list's height.
+                property <length> content: Math.max(0px, identity-end.y - Tokens.space-2);
+                property <length> list-height: Math.min(Tokens.replace-list-max-height, Math.max(root.identity-row, self.content));
+
+                // The entries at the menu's width, in a box of no size, built only while the menu is open; the
+                // zero-height marker after them is where the list really ends.
+                Rectangle {
+                    width: 0;
+                    height: 0;
+                    visible: false;
+
+                    VerticalLayout {
+                        x: 0;
+                        y: 0;
+                        width: Tokens.base-menu-width;
+                        height: self.preferred-height;
+                        spacing: Tokens.space-2;
+
+                        for option in root.identity-options: IdentityEntry {
+                            option: option;
+                        }
+
+                        identity-end := Rectangle {
+                            height: 0px;
+                        }
+                    }
+                }
+
+
+                FocusScope {
+                    capture-key-pressed(event) => {
+                        if (event.text == Key.Escape) {
+                            root.close-identity();
+                            return accept;
+                        }
+                        reject
+                    }
+
+                    VerticalLayout {
+                        padding-left: Tokens.flyout-padding.left;
+                        padding-right: Tokens.flyout-padding.right;
+                        padding-top: Tokens.flyout-padding.top;
+                        padding-bottom: Tokens.flyout-padding.bottom;
+                        spacing: Tokens.space-8;
+                        alignment: start;
+
+                        SearchBox {
+                            text: root.identity-search;
+                            placeholder: ForgeText.unique-search-placeholder;
+                            label: ForgeText.unique-search;
+                            edited(text) => {
+                                root.identity-search-edited(text);
+                            }
+                            down => {
+                                if (root.identity-options.length > 0) {
+                                    root.identity-highlight = root.option-start(root.identity-options);
+                                    KeyboardFocus.visible = true;
+                                    identity-list.focus();
+                                }
+                            }
+                        }
+
+                        Rectangle {
+                            height: identity-surface.list-height;
+
+                            if root.identity-options.length == 0: Text {
+                                x: Tokens.empty-list-margin.left;
+                                y: Tokens.empty-list-margin.top;
+                                width: parent.width - Tokens.empty-list-margin.left - Tokens.empty-list-margin.right;
+                                text: ForgeText.no-unique-matches;
+                                color: Tokens.text-muted-brush;
+                                wrap: word-wrap;
+                            }
+
+                            identity-list := FocusScope {
+                                accessible-role: list;
+                                accessible-label: ForgeText.uniques-and-sets;
+                                init => {
+                                    self.focus();
+                                }
+                                focus-gained(reason) => {
+                                    if (reason == FocusReason.tab-navigation) {
+                                        KeyboardFocus.visible = true;
+                                    }
+                                }
+                                key-pressed(event) => {
+                                    if (event.text == Key.UpArrow || event.text == Key.DownArrow) {
+                                        KeyboardFocus.visible = true;
+                                        root.identity-highlight = root.option-step(root.identity-options, root.identity-highlight,
+                                            event.text == Key.UpArrow ? -1 : 1);
+                                        return accept;
+                                    }
+                                    if (event.text == Key.Return || event.text == " ") {
+                                        root.choose-identity(root.identity-highlight);
+                                        return accept;
+                                    }
+                                    reject
+                                }
+
+                                identity-scroll := ScrollView {
+                                    // Keeps the highlighted entry in view as the keyboard moves it.
+                                    function reveal(top: length, height: length) {
+                                        if (top + self.content-y < 0) {
+                                            self.content-y = -top;
+                                        } else if (top + height + self.content-y > self.visible-height) {
+                                            self.content-y = self.visible-height - top - height;
+                                        }
+                                    }
+
+                                    content-width: self.visible-width;
+                                    content-height: identity-surface.content;
+
+                                    VerticalLayout {
+                                        height: identity-surface.content;
+                                        spacing: Tokens.space-2;
+                                        alignment: start;
+
+                                        for option[index] in root.identity-options: IdentityEntry {
+                                            property <bool> lit: root.identity-highlight == index;
+                                            init => {
+                                                if (self.lit) {
+                                                    identity-scroll.reveal(self.y, self.height);
+                                                }
+                                            }
+                                            changed lit => {
+                                                if (self.lit) {
+                                                    identity-scroll.reveal(self.y, self.height);
+                                                }
+                                            }
+                                            option: option;
+                                            highlighted: self.lit && identity-list.has-focus;
+                                            picked => {
+                                                root.identity-highlight = index;
+                                                root.choose-identity(index);
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        Text {
+                            text: ForgeText.identity-note;
+                            font-size: Tokens.font-size-caption;
+                            color: Tokens.text-muted-brush;
+                            wrap: word-wrap;
+                            height: PickerMetrics.caption-line * 3;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    HorizontalLayout {
+        spacing: Tokens.space-12;
+        alignment: start;
+
+        Rectangle {
+            width: rarity-cell.width;
+            height: rarity-cell.height;
+
+            rarity-cell := InlineCell {
+                text: root.rarity-text;
+                emphasis: true;
+                drafted: root.rarity-drafted;
+                changeable: root.can-change-rarity;
+                tip: root.rarity-tip;
+                label: ForgeText.rarity-of(root.rarity-text);
+                clicked => {
+                    if (root.can-change-rarity) {
+                        root.rarity-highlight = root.option-start(root.rarity-options);
+                        rarity-popup.show();
+                    }
+                }
+            }
+
+            rarity-popup := PopupWindow {
+                x: Tokens.inline-cell-outdent.left;
+                y: parent.height - Tokens.inline-cell-outdent.bottom + Tokens.space-4;
+                width: Tokens.base-menu-width + Tokens.flyout-padding.left + Tokens.flyout-padding.right;
+                height: MenuMetrics.height(root.rarity-options.length) + root.rarity-caption-lines * PickerMetrics.caption-line;
+                close-policy: PopupClosePolicy.close-on-click-outside;
+
+                FlyoutSurface {
+
+                    FocusScope {
+                        accessible-role: list;
+                        accessible-label: ForgeText.rarity;
+                        init => {
+                            self.focus();
+                        }
+                        // A keyboard close hands focus back to the rarity.
+                        key-pressed(event) => {
+                            if (event.text == Key.Escape) {
+                                rarity-popup.close();
+                                rarity-cell.focus-cell();
+                                return accept;
+                            }
+                            if (event.text == Key.UpArrow || event.text == Key.DownArrow) {
+                                KeyboardFocus.visible = true;
+                                root.rarity-highlight = root.option-step(root.rarity-options, root.rarity-highlight,
+                                    event.text == Key.UpArrow ? -1 : 1);
+                                return accept;
+                            }
+                            if ((event.text == Key.Return || event.text == " ") && root.rarity-highlight >= 0) {
+                                root.pick-rarity(root.rarity-highlight);
+                                rarity-popup.close();
+                                rarity-cell.focus-cell();
+                                return accept;
+                            }
+                            reject
+                        }
+
+                        VerticalLayout {
+                            padding-left: Tokens.flyout-padding.left;
+                            padding-right: Tokens.flyout-padding.right;
+                            padding-top: Tokens.flyout-padding.top;
+                            padding-bottom: Tokens.flyout-padding.bottom;
+                            spacing: Tokens.space-2;
+                            alignment: start;
+
+                            for option[index] in root.rarity-options: MenuRow {
+                                held: option.current;
+                                highlighted: root.rarity-highlight == index;
+                                enabled: option.available;
+                                picked => {
+                                    root.pick-rarity(index);
+                                    rarity-popup.close();
+                                }
+
+                                VerticalLayout {
+                                    horizontal-stretch: 1;
+
+                                    HorizontalLayout {
+                                        Text {
+                                            text: option.name;
+                                            color: option.available ? Tokens.text-brush : Tokens.text-disabled-brush;
+                                            horizontal-stretch: 1;
+                                        }
+
+                                        if option.in-game: Text {
+                                            text: ForgeText.in-game;
+                                            font-size: Tokens.font-size-caption;
+                                            color: Tokens.text-secondary-brush;
+                                            vertical-alignment: center;
+                                        }
+                                    }
+
+                                    if option.note != "": Text {
+                                        text: option.note;
+                                        font-size: Tokens.font-size-caption;
+                                        color: Tokens.text-muted-brush;
+                                        wrap: word-wrap;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        if root.base-text != "": Rectangle {
+            property <int> serial: root.focus-serial;
+            changed serial => {
+                if (root.focus-cell.kind == CellKind.field && root.focus-cell.row == -1 && root.focus-part == 4) {
+                    KeyboardFocus.visible = true;
+                    base-cell.focus-cell();
+                }
+            }
+
+            width: base-cell.width;
+            height: base-cell.height;
+
+            base-cell := InlineCell {
+                text: root.base-text;
+                drafted: root.base-drafted;
+                changeable: root.can-change-base;
+                tip: root.base-tip;
+                label: ForgeText.base-of(root.base-text);
+                clicked => {
+                    if (root.can-change-base) {
+                        root.base-highlight = root.option-start(root.base-options);
+                        base-popup.show();
+                    }
+                }
+            }
+
+            // The base picker: focus starts on the base the item has, the arrows move, Enter or Space picks and closes,
+            // and a keyboard close hands focus back to the base. The list scrolls past the replace list's height.
+            base-popup := PopupWindow {
+                x: Tokens.inline-cell-outdent.left;
+                y: parent.height - Tokens.inline-cell-outdent.bottom + Tokens.space-4;
+                width: Tokens.base-menu-width + Tokens.flyout-padding.left + Tokens.flyout-padding.right;
+                height: Tokens.flyout-padding.top + Tokens.flyout-padding.bottom + base-surface.list-height
+                    + Tokens.space-8 + Tokens.control-min-height + Tokens.space-2 + PickerMetrics.caption-line * 3;
+                close-policy: PopupClosePolicy.close-on-click-outside;
+
+                base-surface := FlyoutSurface {
+                    // The list measured where it really ends (its entries wrap), capped at the replace list's height.
+                    property <length> content: Math.max(0px, base-end.y - Tokens.space-2);
+                    property <length> list-height: Math.min(Tokens.replace-list-max-height, self.content);
+
+                    // The entries at the menu's width, in a box of no size, built only while the menu is open; the
+                    // zero-height marker after them is where the list really ends.
+                    Rectangle {
+                        width: 0;
+                        height: 0;
+                        visible: false;
+
+                        VerticalLayout {
+                            x: 0;
+                            y: 0;
+                            width: Tokens.base-menu-width;
+                            height: self.preferred-height;
+                            spacing: Tokens.space-2;
+
+                            for option in root.base-options: BaseEntry {
+                                option: option;
+                            }
+
+                            base-end := Rectangle {
+                                height: 0px;
+                            }
+                        }
+                    }
+
+
+                    base-keys := FocusScope {
+                        init => {
+                            self.focus();
+                        }
+                        key-pressed(event) => {
+                            if (event.text == Key.Escape) {
+                                base-popup.close();
+                                base-cell.focus-cell();
+                                return accept;
+                            }
+                            if (event.text == Key.UpArrow || event.text == Key.DownArrow) {
+                                KeyboardFocus.visible = true;
+                                root.base-highlight = root.option-step(root.base-options, root.base-highlight,
+                                    event.text == Key.UpArrow ? -1 : 1);
+                                return accept;
+                            }
+                            if ((event.text == Key.Return || event.text == " ") && root.base-highlight >= 0
+                                && root.base-options[root.base-highlight].available) {
+                                root.pick-base(root.base-highlight);
+                                base-popup.close();
+                                base-cell.focus-cell();
+                                return accept;
+                            }
+                            reject
+                        }
+
+                        VerticalLayout {
+                            padding-left: Tokens.flyout-padding.left;
+                            padding-right: Tokens.flyout-padding.right;
+                            padding-top: Tokens.flyout-padding.top;
+                            padding-bottom: Tokens.flyout-padding.bottom;
+                            spacing: Tokens.space-8;
+                            alignment: start;
+
+                            base-scroll := ScrollView {
+                                accessible-role: list;
+                                accessible-label: ForgeText.bases;
+                                // Keeps the highlighted entry in view as the keyboard moves it.
+                                function reveal(top: length, height: length) {
+                                    if (top + self.content-y < 0) {
+                                        self.content-y = -top;
+                                    } else if (top + height + self.content-y > self.visible-height) {
+                                        self.content-y = self.visible-height - top - height;
+                                    }
+                                }
+
+                                height: base-surface.list-height;
+                                content-width: self.visible-width;
+                                content-height: base-surface.content;
+
+                                VerticalLayout {
+                                    height: base-surface.content;
+                                    spacing: Tokens.space-2;
+                                    alignment: start;
+
+                                    for option[index] in root.base-options: BaseEntry {
+                                        property <bool> lit: root.base-highlight == index;
+                                        init => {
+                                            if (self.lit) {
+                                                base-scroll.reveal(self.y, self.height);
+                                            }
+                                        }
+                                        changed lit => {
+                                            if (self.lit) {
+                                                base-scroll.reveal(self.y, self.height);
+                                            }
+                                        }
+                                        option: option;
+                                        highlighted: self.lit && base-keys.has-focus;
+                                        picked => {
+                                            root.base-highlight = index;
+                                            root.pick-base(index);
+                                            base-popup.close();
+                                        }
+                                    }
+                                }
+                            }
+
+                            VerticalLayout {
+                                spacing: Tokens.space-2;
+
+                                CheckBox {
+                                    text: ForgeText.allow-incompatible;
+                                    checked: root.base-allow-incompatible;
+                                    enabled: root.base-can-edit;
+                                    toggled(on) => {
+                                        root.base-allow(on);
+                                    }
+                                }
+
+                                HorizontalLayout {
+                                    padding-left: Tokens.check-box-caption-margin.left;
+
+                                    Text {
+                                        text: ForgeText.base-allow-note;
+                                        font-size: Tokens.font-size-caption;
+                                        color: Tokens.text-muted-brush;
+                                        wrap: word-wrap;
+                                        height: PickerMetrics.caption-line * 3;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        for fact in root.summary: Text {
+            text: fact;
+            color: Tokens.text-secondary-brush;
+            vertical-alignment: center;
+        }
+    }
+
+    if root.fields.length > 0: VerticalLayout {
+        padding-top: Tokens.status-strip-margin.top;
+
+        FlexboxLayout {
+            height: root.strip-one-line ? root.strip-height : self.preferred-height;
+            spacing-horizontal: Tokens.space-24;
+            spacing-vertical: Tokens.space-8;
+            alignment: start;
+            cross-axis-alignment: center;
+            cross-axis-line-alignment: start;
+
+            for field[index] in root.fields: Rectangle {
+                // Show draft on a flag brings its toggle into focus.
+                property <int> serial: root.focus-serial;
+                changed serial => {
+                    if (root.focus-cell.kind == CellKind.field && root.focus-cell.row == index && root.focus-part == 1) {
+                        KeyboardFocus.visible = true;
+                        flag.focus-cell();
+                    }
+                }
+                width: field.numeric ? Tokens.status-cell-width : flag.width;
+                height: field.numeric ? numeric.preferred-height : flag.height;
+
+                numeric := VerticalLayout {
+                    visible: field.numeric;
+                    spacing: Tokens.space-2;
+
+                    HorizontalLayout {
+                        spacing: Tokens.space-4;
+                        alignment: start;
+
+                        // The field's tip, under its heading when it has one (why it is read-only).
+                        Text {
+                            text: field.name;
+                            color: Tokens.text-muted-brush;
+
+                            label-touch := TouchArea { }
+
+                            TipTrigger {
+                                text: field.tip-heading != "" ? field.tip-heading + "\n" + field.tip : field.tip;
+                                hovered: label-touch.has-hover;
+                            }
+                        }
+
+                        if field.confirmed: Image {
+                            width: Tokens.icon-size-tiny;
+                            height: Tokens.icon-size-tiny;
+                            y: (parent.height - self.height) / 2;
+                            image-fit: contain;
+                            source: Tokens.icon-confirmed;
+                            colorize: Tokens.confirmed-brush;
+                            accessible-label: ForgeText.confirmed;
+                        }
+
+                        if field.stale: Image {
+                            width: Tokens.icon-size-tiny;
+                            height: Tokens.icon-size-tiny;
+                            y: (parent.height - self.height) / 2;
+                            image-fit: contain;
+                            source: Tokens.icon-warning;
+                            colorize: Tokens.warning-brush;
+                            accessible-label: ForgeText.stale-draft;
+                        }
+
+                        if !field.editable: Image {
+                            width: Tokens.icon-size-tiny;
+                            height: Tokens.icon-size-tiny;
+                            y: (parent.height - self.height) / 2;
+                            image-fit: contain;
+                            source: Tokens.icon-locked;
+                            colorize: Tokens.text-muted-brush;
+                            accessible-label: ForgeText.read-only;
+                        }
+                    }
+
+                    if field.numeric: ValueScrubber {
+                        begin-input(a0) => { return root.begin-input(a0); }
+                        cancel-input(a0) => { root.cancel-input(a0); }
+                        commit-input(a0) => { return root.commit-input(a0); }
+                        end-scrub(a0, a1) => { root.end-scrub(a0, a1); }
+                        finish-input(a0) => { root.finish-input(a0); }
+                        focus-cell: root.focus-cell;
+                        focus-part: root.focus-part;
+                        focus-serial: root.focus-serial;
+                        input-edited(a0, a1) => { root.input-edited(a0, a1); }
+                        input-error: root.input-error;
+                        input-label: root.input-label;
+                        input-range: root.input-range;
+                        input-text <=> root.input-text;
+                        press(a0) => { root.press(a0); }
+                        scrub(a0, a1) => { root.scrub(a0, a1); }
+                        step(a0, a1) => { root.step(a0, a1); }
+                        step-to-end(a0, a1) => { root.step-to-end(a0, a1); }
+                        typing: root.typing;
+                        typing-cell: root.typing-cell;
+                        cell: field.value;
+                    }
+                }
+
+                flag := FlagToggle {
+                    visible: !field.numeric;
+                    on-name: field.on-name;
+                    off-name: field.off-name;
+                    checked: field.checked;
+                    drafted: field.drafted;
+                    enabled: field.can-edit;
+                    confirmed: field.confirmed;
+                    stale: field.stale;
+                    tip: field.tip;
+                    toggled(on) => {
+                        root.toggle-flag(index, on);
+                    }
+                }
+            }
+        }
+    }
+}
