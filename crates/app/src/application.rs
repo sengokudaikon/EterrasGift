@@ -5,13 +5,15 @@ use crate::{
     startup::{self, Startup},
     trainer,
 };
+use eg_companion::game::folders;
 use eg_companion::game::watch::GameWatch;
 use eg_core::fault::FaultLog;
+use eg_core::logs::LogFiles;
 use eg_core::settings::SettingsStore;
 use eg_core::settings_service::{SaveOutcome, SettingsService, Snapshot};
+use eg_flow_slint::Background;
 use eg_runtime::{Runtime, Tasks};
-use eg_ui::pages::settings::SettingsPage;
-use eg_ui::pages::settings::trainer as trainer_settings;
+use eg_ui::pages::settings::{Settings, trainer as trainer_settings};
 use eg_ui::shell::Page;
 use eg_ui::{App, MainWindow};
 use slint::ComponentHandle;
@@ -23,15 +25,14 @@ pub fn run(startup: Startup) -> Result<ExitCode, slint::PlatformError> {
     startup::install_panic_hook(faults.clone());
     let runtime = Runtime::start().expect("the runtime for background work starts");
     let background = runtime.tasks().scope();
-    eg_ui::background::install(background.clone());
     let companion = Companion::new(&store, runtime.tasks());
     let discovery = companion.discover();
     let window = MainWindow::new();
     // Everything the window and the trainer's checks say from here on is in the user's language.
     eg_ui::select_language();
     let mut trainer = trainer::Module::new(&store, &faults);
-    // Discovery may be setting a mod-loader proxy aside: it finishes even when the window cannot open. A panic in it
-    // has already been reported by the hook.
+    // Discovery may be setting a mod-loader proxy aside: it finishes even when the window cannot open. A panic in it has
+    // already been reported by the hook.
     let found = discovery.join();
     let window = window.inspect_err(|error| {
         faults.write("Opening the window", Some(&error.to_string()), None, None);
@@ -46,8 +47,7 @@ pub fn run(startup: Startup) -> Result<ExitCode, slint::PlatformError> {
     } else {
         Page::Home
     };
-    let templates = trainer_runtime.as_ref().map(|_| trainer.templates());
-    let settings = SettingsPage::new(service.clone(), vec![trainer.choice], found_game, found_dotnet);
+    let settings = Settings::new(service.clone(), vec![trainer.choice.clone()], found_game, found_dotnet);
     let restart = settings.restart_request();
 
     eg_ui::install(
@@ -55,7 +55,11 @@ pub fn run(startup: Startup) -> Result<ExitCode, slint::PlatformError> {
         App {
             launcher: Some(companion.launcher.clone()),
             game: Some(GameWatch::start(companion.launcher.clone(), &background)),
-            settings,
+            background: Background::new(background.clone()),
+            logs: Some(LogFiles {
+                game: folders::player_log(),
+                reports: faults.directories().collect(),
+            }),
             mods: Some(eg_ui::pages::mods::ModsPage {
                 worker: companion.mods.clone(),
                 launcher: companion.launcher.clone(),
@@ -65,11 +69,8 @@ pub fn run(startup: Startup) -> Result<ExitCode, slint::PlatformError> {
             trainer: trainer_runtime.is_some(),
             trainer_backend: trainer_runtime.as_ref().map(|runtime| runtime.handle.clone()),
             faults: Some(faults.clone()),
-            logs: Some(eg_ui::pages::logs::LogFiles {
-                game: eg_companion::game::folders::player_log(),
-                reports: faults.directories().collect(),
-            }),
-            templates,
+            templates: trainer_runtime.as_ref().map(|_| trainer.templates()),
+            settings,
             start,
         },
     );
@@ -90,8 +91,8 @@ pub fn run(startup: Startup) -> Result<ExitCode, slint::PlatformError> {
     result.map(|()| ExitCode::SUCCESS)
 }
 
-/// Drain accepted trainer work, cancel producers, then close writers and settle the game's mod-loader proxy.
-/// The settings as closed, or None when a worker or a writer faulted: the app then exits with a non-zero code.
+/// Drain accepted trainer work, cancel producers, then close writers and settle the game's mod-loader proxy. The settings
+/// as closed, or None when a worker or a writer faulted: the app then exits with a non-zero code.
 fn shutdown(window: &MainWindow, trainer: Option<trainer::Trainer>, companion: Companion, runtime: Runtime, background: Tasks, settings: SettingsService) -> Option<Snapshot> {
     let trainer_closed = trainer.is_none_or(|runtime| runtime.close());
     companion.launcher.cancel();

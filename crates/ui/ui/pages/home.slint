@@ -1,4 +1,5 @@
-// Home: starting the game, and how far it has come.
+// Home: starting the game, and how far it has come. `HomeView` draws what its properties say and reports the buttons;
+// `HomePage` is the only part that knows the `HomeState` global.
 
 import { Tokens } from "../tokens.slint";
 import { TitleText, SecondaryText, CaptionText, CaptionTone } from "../widgets/text.slint";
@@ -30,17 +31,29 @@ export global HomeState {
     callback start(LaunchMode);
 }
 
-export component HomePage inherits Rectangle {
-    // Eterra's tree crowns Home and follows the game (Rust heads it for HomeState.phase); ash drifts only while the game is
+export component HomeView inherits Rectangle {
+    in property <bool> has-launcher: true;
+    in property <bool> game-starting;
+    in property <bool> can-start: true;
+    in property <bool> can-start-with-mods: true;
+    in property <string> online-tip;
+    in property <string> offline-tip;
+    in property <string> with-mods-tip;
+    in property <string> message;
+    in property <bool> message-is-error;
+    // Not `start`: on a component, that name would shadow the `start` of `alignment: start` in every binding inside it.
+    callback play(LaunchMode);
+
+    // Eterra's tree crowns Home and follows the game (Rust heads it for the game's phase); ash drifts only while the game is
     // on its way in.
     band := EterraBand {
         x: 0;
         y: 0;
         width: root.width;
-        visible: HomeState.has-launcher;
+        visible: root.has-launcher;
     }
 
-    if HomeState.has-launcher && HomeState.game-starting: AshField {
+    if root.has-launcher && root.game-starting: AshField {
         x: 0;
         y: 0;
         width: root.width;
@@ -55,55 +68,55 @@ export component HomePage inherits Rectangle {
         y: 0;
         width: Math.min(Tokens.reading-max-width, Math.max(0px, root.width - Tokens.empty-state-margin.left - Tokens.empty-state-margin.right));
         height: root.height;
-        padding-top: HomeState.has-launcher ? band.content-top : Tokens.empty-state-margin.top;
+        padding-top: root.has-launcher ? band.content-top : Tokens.empty-state-margin.top;
         alignment: start;
-        spacing: HomeState.has-launcher ? Tokens.space-12 : Tokens.space-8;
+        spacing: root.has-launcher ? Tokens.space-12 : Tokens.space-8;
 
         TitleText {
-            text: HomeState.has-launcher ? HomeText.last-epoch : HomeText.home;
+            text: root.has-launcher ? HomeText.last-epoch : HomeText.home;
             horizontal-alignment: center;
         }
 
-        if !HomeState.has-launcher: SecondaryText {
+        if !root.has-launcher: SecondaryText {
             text: HomeText.companion;
             horizontal-alignment: center;
         }
 
         // Three ways in, in the order of how much they change: online as the game ships, offline, offline with mods.
-        if HomeState.has-launcher: HorizontalLayout {
+        if root.has-launcher: HorizontalLayout {
             alignment: center;
             padding-top: Tokens.empty-action-margin.top;
             spacing: Tokens.space-8;
 
             Button {
                 text: HomeText.play-online;
-                enabled: HomeState.can-start;
-                tip: HomeState.online-tip;
+                enabled: root.can-start;
+                tip: root.online-tip;
                 clicked => {
-                    HomeState.start(LaunchMode.online);
+                    root.play(LaunchMode.online);
                 }
             }
 
             Button {
                 text: HomeText.play-offline;
-                enabled: HomeState.can-start;
-                tip: HomeState.offline-tip;
+                enabled: root.can-start;
+                tip: root.offline-tip;
                 clicked => {
-                    HomeState.start(LaunchMode.offline);
+                    root.play(LaunchMode.offline);
                 }
             }
 
             Button {
                 text: HomeText.play-offline-with-mods;
-                enabled: HomeState.can-start && HomeState.can-start-with-mods;
-                tip: HomeState.with-mods-tip;
+                enabled: root.can-start && root.can-start-with-mods;
+                tip: root.with-mods-tip;
                 clicked => {
-                    HomeState.start(LaunchMode.with-mods);
+                    root.play(LaunchMode.with-mods);
                 }
             }
         }
 
-        if HomeState.has-launcher && HomeState.message != "": HorizontalLayout {
+        if root.has-launcher && root.message != "": HorizontalLayout {
             alignment: center;
             spacing: Tokens.space-6;
 
@@ -114,21 +127,40 @@ export component HomePage inherits Rectangle {
 
                 Image {
                     image-fit: contain;
-                    source: HomeState.message-is-error ? Tokens.icon-error : Tokens.icon-info;
+                    source: root.message-is-error ? Tokens.icon-error : Tokens.icon-info;
                     width: Tokens.icon-size-small;
                     height: Tokens.icon-size-small;
-                    colorize: HomeState.message-is-error ? Tokens.error-brush : Tokens.text-muted-brush;
+                    colorize: root.message-is-error ? Tokens.error-brush : Tokens.text-muted-brush;
                 }
             }
 
             CaptionText {
-                text: HomeState.message;
-                tone: HomeState.message-is-error ? CaptionTone.error : CaptionTone.secondary;
+                text: root.message;
+                tone: root.message-is-error ? CaptionTone.error : CaptionTone.secondary;
                 max-width: Tokens.reading-max-width;
                 accessible-role: text;
                 // Announced as it changes.
                 accessible-live-region: polite;
             }
+        }
+    }
+}
+
+export component HomePage inherits Rectangle {
+    HomeView {
+        width: root.width;
+        height: root.height;
+        has-launcher: HomeState.has-launcher;
+        game-starting: HomeState.game-starting;
+        can-start: HomeState.can-start;
+        can-start-with-mods: HomeState.can-start-with-mods;
+        online-tip: HomeState.online-tip;
+        offline-tip: HomeState.offline-tip;
+        with-mods-tip: HomeState.with-mods-tip;
+        message: HomeState.message;
+        message-is-error: HomeState.message-is-error;
+        play(mode) => {
+            HomeState.start(mode);
         }
     }
 }

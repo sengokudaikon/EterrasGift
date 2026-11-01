@@ -259,6 +259,44 @@ fn source_imports_and_reexports_preserve_feature_boundaries() {
     }
 }
 
+/// A view is pure when what it shows comes through its properties: a page's global, Rust's way in, is read only where the page
+/// is put together. What only the views share (tokens, keyboard focus, a popup's metrics) has globals of its own.
+#[test]
+fn only_a_pages_root_reads_its_global() {
+    const GLOBALS: [&str; 4] = ["HomeState", "LogsState", "ModsState", "SettingsState"];
+    const ROOTS: [&str; 4] = ["HomePage", "LogsPage", "ModsPage", "SettingsPage"];
+    fn slint_files(folder: &Path, found: &mut Vec<PathBuf>) {
+        for entry in fs::read_dir(folder).unwrap() {
+            let path = entry.unwrap().path();
+            if path.is_dir() {
+                slint_files(&path, found);
+            } else if path.extension().is_some_and(|extension| extension == "slint") {
+                found.push(path);
+            }
+        }
+    }
+    let mut files = Vec::new();
+    slint_files(&workspace().root.join("crates/ui/ui/pages"), &mut files);
+    assert!(files.len() > 3, "the pages moved");
+    let mut readers = BTreeSet::new();
+    for file in files {
+        let mut within = String::new();
+        for line in fs::read_to_string(&file).unwrap().lines() {
+            let declared = line.strip_prefix("export ").unwrap_or(line);
+            if let Some(rest) = declared.strip_prefix("component ").or_else(|| declared.strip_prefix("global ")) {
+                within = rest.split_whitespace().next().unwrap_or_default().to_owned();
+            }
+            let code = line.split("//").next().unwrap_or_default();
+            for global in GLOBALS {
+                if code.contains(&format!("{global}.")) && !ROOTS.contains(&within.as_str()) {
+                    readers.insert(format!("{within} reads {global}"));
+                }
+            }
+        }
+    }
+    assert!(readers.is_empty(), "only a page's root reads its global: {readers:?}");
+}
+
 #[test]
 fn the_desktop_links_no_il2cpp_code() {
     // The helper is an artifact dependency built for its own target: the IL2CPP runtime and the game's code stay in the

@@ -12,6 +12,7 @@ path = "src/main.rs"
 [dependencies]
 eg-core.workspace = true
 eg-companion.workspace = true
+eg-flow-slint.workspace = true
 eg-runtime.workspace = true
 eg-ui.workspace = true
 eg-trainer.workspace = true

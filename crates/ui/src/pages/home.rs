@@ -1,186 +1,132 @@
-//! Home in the window: `HomeModel` (eg-companion) behind the `HomeState` global. Home follows the game's [`GameWatch`] only
-//! while it shows; another page costs nothing. Eterra's tree follows the game's phase, and ash drifts while the game is on
-//! its way in.
+//! Home in the window: the `eg_companion::home` feature's impure half. It shows the feature's state in the `HomeState`
+//! global, hears the game's watch, follows it while the feature wants, and starts the game and moves Eterra's tree when the
+//! feature says to.
 
-use crate::background;
 use crate::decorations::{Ash, Decorations};
 use crate::shell::{Page, ShellHandle};
 use crate::{BloomPhase as ViewPhase, HomeState, LaunchMode as ViewMode, MainWindow};
-use eg_companion::game::watch::{Following, GameSeen, GameWatch};
-use eg_companion::home::HomeModel;
+use eg_companion::game::watch::GameWatch;
+use eg_companion::home::{Effect, Home, HomeView, Intent, State, present};
 use eg_companion::launch::host::LaunchMode;
 use eg_companion::launch::launcher::GameLauncher;
 use eg_core::bloom::BloomPhase;
+use eg_flow::{Host, Intents, Slice, Store, Subscriptions, Version};
+use eg_flow_slint::{Background, on_watch};
 use slint::{ComponentHandle, Weak};
-use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::sync::Arc;
-use tokio::sync::watch;
 
-struct Home {
+struct Window {
     launcher: Arc<GameLauncher>,
-    model: RefCell<HomeModel>,
-    window: Weak<MainWindow>,
     game: GameWatch,
-    following: RefCell<Option<Following>>,
-    /// The newest look not yet shown.
-    latest: RefCell<watch::Receiver<GameSeen>>,
+    background: Background,
+    window: Weak<MainWindow>,
     decorations: Rc<Decorations<MainWindow>>,
-    /// Home shows: it follows the game and owns the decorations only then.
-    visible: Cell<bool>,
-    /// Home is coming into view: the tree is shown where it is, without blooming there.
-    entering: Cell<bool>,
+    view: Slice<Version>,
+    /// Hearing the watch costs nothing, so it never stops: a look a start asked for lands while another page shows.
+    hearing: Subscriptions<()>,
+    /// Keeping it looking is what costs, so this lasts only as long as the feature wants.
+    following: Subscriptions<()>,
 }
 
-/// `launcher` is None in a run that has none (tests): Home then shows the companion's own title.
-pub fn bind(window: &MainWindow, launcher: Option<Arc<GameLauncher>>, game: Option<GameWatch>, shell: &ShellHandle, decorations: Rc<Decorations<MainWindow>>) {
+/// `launcher` is None in a run that has none (tests): Home then shows the companion's own title. With a launcher but no
+/// watch, it looks only when it asks, on the spot (tests).
+pub fn bind(
+    window: &MainWindow,
+    launcher: Option<Arc<GameLauncher>>,
+    game: Option<GameWatch>,
+    background: Background,
+    shell: &ShellHandle,
+    decorations: Rc<Decorations<MainWindow>>,
+) {
     let state = window.global::<HomeState>();
     state.set_has_launcher(launcher.is_some());
     let Some(launcher) = launcher else {
         return;
     };
-    let game = game.unwrap_or_else(|| GameWatch::inline(launcher.clone()));
-    let home = Rc::new(Home {
-        launcher,
-        model: RefCell::new(HomeModel::default()),
-        window: window.as_weak(),
-        latest: RefCell::new(game.subscribe()),
-        game,
-        following: RefCell::new(None),
-        decorations,
-        visible: Cell::new(false),
-        entering: Cell::new(true),
-    });
-    home.listen();
+    let store = Store::<Home>::new(
+        State::default(),
+        Window {
+            game: game.unwrap_or_else(|| GameWatch::inline(launcher.clone())),
+            launcher,
+            background,
+            window: window.as_weak(),
+            decorations,
+            view: Slice::default(),
+            hearing: Subscriptions::default(),
+            following: Subscriptions::default(),
+        },
+    );
+    // The window's callback keeps the store alive, for as long as the window lasts.
     state.on_start({
-        let home = home.clone();
-        move |mode| home.play(mode)
+        let store = store.clone();
+        move |mode| store.send(Intent::Start(mode_of(mode)))
     });
-    home.follow(shell.current() == Page::Home);
     if shell.current() == Page::Home {
-        home.refresh();
+        store.send(Intent::Shown);
     }
-    shell.on_page_entered({
-        let home = home.clone();
-        move |page| {
-            home.follow(page == Page::Home);
-            if page == Page::Home {
-                home.entering.set(true);
-                home.refresh();
-            }
-        }
-    });
+    shell.on_page_entered(move |page| store.send(if page == Page::Home { Intent::Shown } else { Intent::Hidden }));
 }
 
-impl Home {
-    /// Shows each look as it comes. The window's start callback keeps Home; this only holds it weakly.
-    fn listen(self: &Rc<Self>) {
-        let mut updates = self.game.subscribe();
-        let home = Rc::downgrade(self);
-        // Fails only where no event loop can ever run, and then nothing could show a look anyway.
-        let _ = slint::spawn_local(async move {
-            while updates.changed().await.is_ok() {
-                let Some(home) = home.upgrade() else {
-                    return;
-                };
-                home.take_latest();
+fn mode_of(mode: ViewMode) -> LaunchMode {
+    match mode {
+        ViewMode::Online => LaunchMode::Online,
+        ViewMode::Offline => LaunchMode::Offline,
+        ViewMode::WithMods => LaunchMode::OfflineWithMods,
+    }
+}
+
+fn phase_of(phase: BloomPhase) -> ViewPhase {
+    match phase {
+        BloomPhase::Wilted => ViewPhase::Wilted,
+        BloomPhase::Budding => ViewPhase::Budding,
+        BloomPhase::Opening => ViewPhase::Opening,
+        BloomPhase::Bloom => ViewPhase::Bloom,
+    }
+}
+
+fn show(state: &HomeState<'_>, view: HomeView) {
+    state.set_phase(phase_of(view.phase));
+    state.set_game_starting(view.game_starting);
+    state.set_can_start(view.can_start);
+    state.set_can_start_with_mods(view.can_start_with_mods);
+    state.set_online_tip(view.online_tip.into());
+    state.set_offline_tip(view.offline_tip.into());
+    state.set_with_mods_tip(view.with_mods_tip.into());
+    state.set_message(view.message.into());
+    state.set_message_is_error(view.message_is_error);
+}
+
+impl Host<Home> for Window {
+    fn render(&mut self, state: &State, intents: &Intents<Intent>) {
+        let window = self.window.clone();
+        self.view.update(state.model().version(), || {
+            if let Some(window) = window.upgrade() {
+                show(&window.global::<HomeState>(), present(state.model()));
             }
         });
-    }
-
-    /// Follows the game while Home shows; on another page the watch stops looking, so it costs nothing.
-    fn follow(&self, visible: bool) {
-        self.visible.set(visible);
-        *self.following.borrow_mut() = visible.then(|| self.game.follow());
-    }
-
-    /// Reads whether MelonLoader is beside the game and whether the game runs.
-    fn refresh(&self) {
-        self.game.refresh();
-        self.take_latest();
-    }
-
-    fn take_latest(&self) {
-        let mut latest = self.latest.borrow_mut();
-        if !latest.has_changed().unwrap_or(false) {
-            return;
-        }
-        let seen = *latest.borrow_and_update();
-        drop(latest);
-        {
-            let mut model = self.model.borrow_mut();
-            if let Some(loader) = seen.loader {
-                model.set_mod_loader(loader);
-            }
-            model.set_phase(seen.phase());
-        }
-        self.show();
-    }
-
-    fn play(self: &Rc<Self>, mode: ViewMode) {
-        let mode = match mode {
-            ViewMode::Online => LaunchMode::Online,
-            ViewMode::Offline => LaunchMode::Offline,
-            ViewMode::WithMods => LaunchMode::OfflineWithMods,
-        };
-        if !self.can_play() {
-            return;
-        }
-        self.model.borrow_mut().begin(mode == LaunchMode::OfflineWithMods);
-        self.show();
-        let launcher = self.launcher.clone();
-        let home = self.clone();
-        background::run(
-            move || launcher.play(mode),
-            move |report| {
-                home.model.borrow_mut().finish(report);
-                home.refresh();
-            },
-        );
-    }
-
-    fn can_play(&self) -> bool {
-        self.model.borrow().can_play() && !self.launcher.is_starting()
-    }
-
-    fn show(&self) {
-        let Some(window) = self.window.upgrade() else {
-            return;
-        };
-        let model = self.model.borrow();
-        let ash = if model.is_game_starting() { Ash::Drifting } else { Ash::Hidden };
-        // A look or a start that ends while another page shows leaves that page's decorations alone.
-        if self.visible.get() {
-            if self.entering.replace(false) {
-                self.decorations.enter(model.phase(), ash);
-            } else {
-                self.decorations.follow(model.phase(), ash);
-            }
-        }
-        let state = window.global::<HomeState>();
-        state.set_game_starting(model.is_game_starting());
-        state.set_phase(match model.phase() {
-            BloomPhase::Wilted => ViewPhase::Wilted,
-            BloomPhase::Budding => ViewPhase::Budding,
-            BloomPhase::Opening => ViewPhase::Opening,
-            BloomPhase::Bloom => ViewPhase::Bloom,
+        let game = &self.game;
+        self.hearing.sync([()], |()| {
+            let seen = game.clone();
+            on_watch(game.subscribe(), intents, move || Intent::Seen(seen.current()))
         });
-        // One launcher starts the game for every page, so a start begun on Mods holds Home's buttons too.
-        let elsewhere = self.launcher.is_starting();
-        state.set_can_start(model.can_play() && !elsewhere);
-        state.set_can_start_with_mods(model.can_play_with_mods() && !elsewhere);
-        state.set_online_tip(model.online_tip().as_ref().into());
-        state.set_offline_tip(model.offline_tip().as_ref().into());
-        state.set_with_mods_tip(model.with_mods_tip().as_ref().into());
-        // What a start or a conflict said comes first; otherwise why a button waits, said in words as well as in its tip.
-        match model.message() {
-            Some(message) => {
-                state.set_message(message.into());
-                state.set_message_is_error(model.is_error());
+        self.following.sync(state.watching().then_some(()), |()| game.follow());
+    }
+
+    fn perform(&mut self, effect: Effect, intents: &Intents<Intent>) {
+        match effect {
+            Effect::Refresh => self.game.refresh(),
+            Effect::Launch(mode) => {
+                let launcher = self.launcher.clone();
+                self.background.run(intents, move || launcher.play(mode), Intent::Started);
             }
-            None => {
-                state.set_message(model.wait_reason().unwrap_or_default().into());
-                state.set_message_is_error(false);
+            Effect::Tree { phase, ash, entering } => {
+                let ash = if ash { Ash::Drifting } else { Ash::Hidden };
+                if entering {
+                    self.decorations.enter(phase, ash);
+                } else {
+                    self.decorations.follow(phase, ash);
+                }
             }
         }
     }

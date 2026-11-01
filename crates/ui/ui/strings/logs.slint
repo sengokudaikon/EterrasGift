@@ -2,6 +2,8 @@ export global LogsText {
     out property <string> title: @tr("Logs");
     out property <string> description: @tr("Connection details, fault reports and the game's own log.");
     out property <string> source: @tr("Log source");
+    // In the order `crates/ui/src/pages/logs.rs` maps them: the app's log, then the game's.
+    out property <[string]> sources: [@tr("Eterra's Gift"), @tr("Last Epoch")];
     out property <string> refresh: @tr("Refresh");
     out property <string> copy: @tr("Copy");
     out property <string> copy-tip: @tr("Copy the displayed log");

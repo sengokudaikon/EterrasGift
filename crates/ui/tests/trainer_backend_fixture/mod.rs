@@ -544,6 +544,7 @@ pub(super) fn capture(session: &Session) {
         &ui,
         App {
             launcher: Some(Arc::new(GameLauncher::new(session.host()))),
+            background: session.background.clone(),
             game: None,
             mods: None,
             trainer: true,
@@ -551,7 +552,7 @@ pub(super) fn capture(session: &Session) {
             faults: Some(eg_core::fault::FaultLog::with_fallbacks(&folder.join("app"), Some(&folder.join("logs")), vec![])),
             logs: None,
             templates: None,
-            settings: SettingsPage::new(SettingsService::inline(store), vec![eg_ui::pages::settings::trainer::descriptor(true)], None, None),
+            settings: Settings::new(SettingsService::inline(store), vec![eg_ui::pages::settings::trainer::descriptor(true)], None, None),
             start: Page::Forge,
         },
     );
@@ -827,7 +828,7 @@ pub(super) fn capture(session: &Session) {
     wait(|| !forge.get_can_undo() && forge.get_can_change_affix_list() && data.item.lock().unwrap().as_ref().unwrap().affixes.len() == 1);
     assert_eq!(data.item.lock().unwrap().as_ref().unwrap().rarity, 1);
     // Add affix kept the keyboard and its tip; the tip follows the button as the rows above it change.
-    let tip = ui.global::<Tip>();
+    let tip = ui.global::<eg_ui::Tip>();
     settle();
     let tip_y = tip.get_anchor_y();
     forge.invoke_remove_affix(0);
@@ -1296,6 +1297,7 @@ pub(super) fn capture_waiting(session: &Session) {
         &ui,
         App {
             launcher: Some(Arc::new(GameLauncher::new(session.host()))),
+            background: session.background.clone(),
             game: None,
             mods: None,
             trainer: true,
@@ -1303,7 +1305,7 @@ pub(super) fn capture_waiting(session: &Session) {
             faults: None,
             logs: None,
             templates: None,
-            settings: SettingsPage::new(SettingsService::inline(store), vec![eg_ui::pages::settings::trainer::descriptor(true)], None, None),
+            settings: Settings::new(SettingsService::inline(store), vec![eg_ui::pages::settings::trainer::descriptor(true)], None, None),
             start: Page::Forge,
         },
     );
@@ -1401,14 +1403,15 @@ pub(super) fn capture_logs(session: &Session) {
         &ui,
         App {
             launcher: None,
+            background: session.background.clone(),
             game: None,
             mods: None,
             trainer: true,
             trainer_backend: Some(handle.clone()),
-            settings: SettingsPage::new(SettingsService::inline(store), vec![eg_ui::pages::settings::trainer::descriptor(true)], None, None),
+            settings: Settings::new(SettingsService::inline(store), vec![eg_ui::pages::settings::trainer::descriptor(true)], None, None),
             faults: None,
             templates: None,
-            logs: Some(eg_ui::pages::logs::LogFiles {
+            logs: Some(LogFiles {
                 game: game.clone(),
                 reports: faults.directories().collect(),
             }),
@@ -1426,6 +1429,7 @@ pub(super) fn capture_logs(session: &Session) {
     session.key(Key::Tab);
     session.key(Key::End);
     session.key(Key::UpArrow);
+    session.idle();
     assert_eq!(ui.global::<Nav>().get_current_page(), "logs");
     let state = ui.global::<eg_ui::LogsState>();
     assert!(state.get_text().contains("Unrecognized"));
@@ -1446,6 +1450,7 @@ pub(super) fn capture_logs(session: &Session) {
     assert_eq!(CAPTURE_CLIPBOARD.with_borrow(Clone::clone), state.get_text().as_str());
 
     state.invoke_source_chosen(1);
+    session.idle();
     assert!(state.get_text().contains("offline client"));
     session.capture(&ui, "logs-game");
     session.resize(680, 580);
@@ -1458,14 +1463,17 @@ pub(super) fn capture_logs(session: &Session) {
         .write_all(b"newly appended log line\n")
         .unwrap();
     state.invoke_refresh();
+    session.idle();
     assert!(state.get_text().ends_with("newly appended log line\n"));
     std::fs::remove_file(&game).unwrap();
     state.invoke_refresh();
+    session.idle();
     assert!(state.get_text().is_empty());
     assert!(state.get_notice().contains("Could not read"));
     session.capture(&ui, "logs-game-missing");
     std::fs::write(&game, "").unwrap();
     state.invoke_refresh();
+    session.idle();
     assert_eq!(state.get_notice(), "This log is empty.");
     session.capture(&ui, "logs-game-empty");
     command(&handle, Command::Shutdown, || handle.snapshot().phase == Phase::Stopped);
@@ -1542,6 +1550,7 @@ pub(super) fn capture_profiles(session: &Session) {
         &ui,
         App {
             launcher: Some(Arc::new(GameLauncher::new(session.host()))),
+            background: session.background.clone(),
             game: None,
             mods: None,
             trainer: true,
@@ -1549,7 +1558,7 @@ pub(super) fn capture_profiles(session: &Session) {
             faults: None,
             logs: None,
             templates: None,
-            settings: SettingsPage::new(SettingsService::inline(store), vec![eg_ui::pages::settings::trainer::descriptor(true)], None, None),
+            settings: Settings::new(SettingsService::inline(store), vec![eg_ui::pages::settings::trainer::descriptor(true)], None, None),
             start: Page::Combat,
         },
     );

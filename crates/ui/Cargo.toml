@@ -6,16 +6,16 @@ publish.workspace = true
 
 [dependencies]
 eg-core.workspace = true
-eg-runtime.workspace = true
 eg-i18n.workspace = true
 eg-companion.workspace = true
+eg-flow.workspace = true
+eg-flow-slint.workspace = true
 eg-trainer = { path = "../trainer" }
 rfd.workspace = true
 jiff.workspace = true
 serde_json.workspace = true
 slint = { workspace = true, features = ["raw-window-handle-06"] }
 sys-locale.workspace = true
-tokio.workspace = true
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { workspace = true, features = ["Win32_UI_WindowsAndMessaging", "Win32_UI_Accessibility", "Win32_Graphics_Dwm"] }
@@ -27,9 +27,11 @@ slint-build.workspace = true
 rspolib.workspace = true
 
 [dev-dependencies]
+eg-runtime.workspace = true
 image.workspace = true
 jiff.workspace = true
 tempfile.workspace = true
+tokio.workspace = true
 
 [[test]]
 name = "captures"

@@ -713,6 +713,7 @@ impl Forge {
             &ui,
             App {
                 launcher: None,
+                background: session.background.clone(),
                 game: None,
                 mods: None,
                 trainer: true,
@@ -720,7 +721,7 @@ impl Forge {
                 faults: None,
                 logs: None,
                 templates: None,
-                settings: SettingsPage::new(SettingsService::inline(store), vec![eg_ui::pages::settings::trainer::descriptor(true)], None, None),
+                settings: Settings::new(SettingsService::inline(store), vec![eg_ui::pages::settings::trainer::descriptor(true)], None, None),
                 start: Page::Forge,
             },
         );
@@ -824,7 +825,7 @@ pub(in super::super) fn item_captures(session: &Session) {
         ("item-empty-compact", 940, 580),
         ("item-empty-narrow", 680, 580),
     ] {
-        let ui = session.open(true, width, height);
+        let ui = session.open_trainer(width, height);
         ui.global::<Nav>().invoke_navigate("forge".into());
         settle();
         assert!(!ui.global::<eg_ui::Connection>().get_connected());

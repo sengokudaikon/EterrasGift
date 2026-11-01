@@ -1,4 +1,5 @@
-// File contents are bounded and read away from the UI thread. The viewer uses the app's selectable text box.
+// File contents are bounded and read away from the UI thread. The viewer uses the app's selectable text box. `LogsView` draws
+// what its properties say and reports the controls; `LogsPage` is the only part that knows the `LogsState` global.
 import { Tokens } from "../tokens.slint";
 import { TitleText, SecondaryText, CaptionText } from "../widgets/text.slint";
 import { Button } from "../widgets/button.slint";
@@ -7,7 +8,6 @@ import { ReadOnlyTextBox } from "../widgets/text-box.slint";
 import { LogsText } from "../strings/logs.slint";
 
 export global LogsState {
-    in property <[string]> sources;
     in property <int> source;
     in property <string> location;
     in property <string> text;
@@ -17,8 +17,15 @@ export global LogsState {
     callback refresh();
 }
 
-export component LogsPage inherits Rectangle {
+export component LogsView inherits Rectangle {
     in property <bool> compact;
+    in property <int> source;
+    in property <string> location;
+    in property <string> text;
+    in property <string> notice;
+    in property <bool> loading;
+    callback source-chosen(int);
+    callback refresh();
 
     VerticalLayout {
         padding-left: root.compact ? Tokens.settings-body-compact-margin.left : Tokens.settings-body-margin.left;
@@ -33,33 +40,50 @@ export component LogsPage inherits Rectangle {
         HorizontalLayout {
             spacing: Tokens.space-8;
             ChoiceBox {
-                choices: LogsState.sources;
-                index: LogsState.source;
+                choices: LogsText.sources;
+                index: root.source;
                 label: LogsText.source;
                 width: self.natural-width;
-                chosen(index) => { LogsState.source-chosen(index); }
+                chosen(index) => { root.source-chosen(index); }
             }
             Rectangle { horizontal-stretch: 1; }
             Button {
                 text: LogsText.refresh;
                 icon: Tokens.icon-refresh;
-                enabled: !LogsState.loading;
-                clicked => { LogsState.refresh(); }
+                enabled: !root.loading;
+                clicked => { root.refresh(); }
             }
             Button {
                 text: LogsText.copy;
                 tip: LogsText.copy-tip;
-                enabled: LogsState.text != "" && !LogsState.loading;
+                enabled: root.text != "" && !root.loading;
                 clicked => { contents.copy-all(); }
             }
         }
 
-        CaptionText { text: LogsState.location; }
+        CaptionText { text: root.location; }
         contents := ReadOnlyTextBox {
-            text: LogsState.text;
+            text: root.text;
             label: LogsText.title;
             vertical-stretch: 1;
         }
-        CaptionText { text: LogsState.loading ? LogsText.loading : LogsState.notice; }
+        CaptionText { text: root.loading ? LogsText.loading : root.notice; }
+    }
+}
+
+export component LogsPage inherits Rectangle {
+    in property <bool> compact;
+
+    LogsView {
+        width: root.width;
+        height: root.height;
+        compact: root.compact;
+        source: LogsState.source;
+        location: LogsState.location;
+        text: LogsState.text;
+        notice: LogsState.notice;
+        loading: LogsState.loading;
+        source-chosen(index) => { LogsState.source-chosen(index); }
+        refresh => { LogsState.refresh(); }
     }
 }

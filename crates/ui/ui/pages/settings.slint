@@ -1,5 +1,5 @@
-// Settings. Switches save the moment they flip; the typed locations wait for
-// "Save locations".
+// Settings. Switches save the moment they flip; the typed locations wait for "Save locations". `SettingsView` draws what its
+// properties say and reports the controls; `SettingsPage` is the only part that knows the `SettingsState` global.
 
 import { ScrollView } from "../widgets/scroll-view.slint";
 import { Tokens } from "../tokens.slint";
@@ -52,8 +52,25 @@ export global SettingsState {
     callback restart();
 }
 
-export component SettingsPage inherits Rectangle {
+export component SettingsView inherits Rectangle {
     in property <bool> compact;
+    in property <[ModuleRow]> modules;
+    in property <[SettingsSectionRow]> sections;
+    in property <[LocationSetting]> locations;
+    in property <bool> locations-changed;
+    in property <bool> saving-locations;
+    in property <bool> can-retry;
+    in property <string> message;
+    in property <MessageTone> message-tone;
+    in property <bool> can-restart;
+    callback module-toggled(int, bool);
+    callback setting-toggled(int, int, bool);
+    callback section-action(int, int);
+    callback location-edited(int, string);
+    callback browse(int);
+    callback save-locations();
+    callback retry();
+    callback restart();
 
     // The shared switch column, as wide as the widest switch the page shows with either word. Measured from hidden switches, out of the focus chain and the
     // accessibility tree.
@@ -63,11 +80,11 @@ export component SettingsPage inherits Rectangle {
         height: 0px;
 
         switch-measure := VerticalLayout {
-            for module in SettingsState.modules: VerticalLayout {
+            for module in root.modules: VerticalLayout {
                 ToggleSwitch { checked: true; }
                 ToggleSwitch { checked: false; }
             }
-            for section in SettingsState.sections: VerticalLayout {
+            for section in root.sections: VerticalLayout {
                 if section.toggle: ToggleSwitch { checked: true; on-text: section.on-text; }
                 if section.toggle: ToggleSwitch { checked: false; off-text: section.off-text; }
             }
@@ -80,7 +97,7 @@ export component SettingsPage inherits Rectangle {
             content-width: self.visible-width;
             // Measured from where the body actually ends: a layout's preferred height counts wrapped text inside `if` and
             // `for` blocks as one line (research/slint.md, "Found while building the shell").
-            content-height: body.y + locations-group.y + locations.y + locations-end.y + Tokens.settings-body-margin.bottom;
+            content-height: body.y + locations-group.y + locations-list.y + locations-end.y + Tokens.settings-body-margin.bottom;
 
             // The body's margin sits outside its maximum width. Its height is its own, so where its
             // last child ends never depends on the scroll content's height (that would be a binding loop).
@@ -100,7 +117,7 @@ export component SettingsPage inherits Rectangle {
                     height: Tokens.settings-title-margin.bottom;
                 }
 
-                for module[i] in SettingsState.modules: SettingGroup {
+                for module[i] in root.modules: SettingGroup {
                     SwitchSetting {
                         title: module.title;
                         description: module.description;
@@ -110,12 +127,12 @@ export component SettingsPage inherits Rectangle {
                         ToggleSwitch {
                             label: module.title;
                             checked: module.enabled;
-                            toggled(on) => { SettingsState.module-toggled(i, on); }
+                            toggled(on) => { root.module-toggled(i, on); }
                         }
                     }
                 }
 
-                for section in SettingsState.sections: SettingGroup {
+                for section in root.sections: SettingGroup {
                     if section.toggle: SwitchSetting {
                         title: section.title;
                         description: section.description;
@@ -126,7 +143,7 @@ export component SettingsPage inherits Rectangle {
                             checked: section.checked;
                             on-text: section.on-text;
                             off-text: section.off-text;
-                            toggled(on) => { SettingsState.setting-toggled(section.module-index, section.section-index, on); }
+                            toggled(on) => { root.setting-toggled(section.module-index, section.section-index, on); }
                         }
                     }
                     if !section.toggle: VerticalLayout {
@@ -155,7 +172,7 @@ export component SettingsPage inherits Rectangle {
                                 icon: Tokens.icon-refresh;
                                 enabled: section.action-enabled;
                                 tip: section.action-tip;
-                                clicked => { SettingsState.section-action(section.module-index, section.section-index); }
+                                clicked => { root.section-action(section.module-index, section.section-index); }
                             }
                             // Refreshing reads the game, so while it can't, the reason sits beside the button.
                             CaptionText { text: section.unavailable; vertical-alignment: center; horizontal-stretch: 1; }
@@ -166,14 +183,14 @@ export component SettingsPage inherits Rectangle {
                 locations-group := SettingGroup {
                     last: true;
 
-                    locations := VerticalLayout {
+                    locations-list := VerticalLayout {
                         spacing: Tokens.space-16;
 
                         SectionText {
                             text: SettingsText.locations;
                         }
 
-                        for location[i] in SettingsState.locations: VerticalLayout {
+                        for location[i] in root.locations: VerticalLayout {
                             spacing: Tokens.space-6;
 
                             LabelText {
@@ -188,7 +205,7 @@ export component SettingsPage inherits Rectangle {
                                     text: location.value;
                                     placeholder: location.placeholder;
                                     edited(text) => {
-                                        SettingsState.location-edited(i, text);
+                                        root.location-edited(i, text);
                                     }
                                 }
 
@@ -198,7 +215,7 @@ export component SettingsPage inherits Rectangle {
                                     // A screen-reader name; the button shows no tip.
                                     accessible-name: location.browse-label;
                                     clicked => {
-                                        SettingsState.browse(i);
+                                        root.browse(i);
                                     }
                                 }
                             }
@@ -219,32 +236,59 @@ export component SettingsPage inherits Rectangle {
         }
 
         ActionBar {
-            message: SettingsState.message;
-            tone: SettingsState.message-tone;
+            message: root.message;
+            tone: root.message-tone;
 
-            if SettingsState.can-restart: Button {
+            if root.can-restart: Button {
                 text: SettingsText.restart-now;
                 tip: SettingsText.restart-now-tip;
                 clicked => {
-                    SettingsState.restart();
+                    root.restart();
                 }
             }
 
-            if SettingsState.can-retry: Button {
+            if root.can-retry: Button {
                 text: SettingsText.retry-save;
                 tip: SettingsText.retry-save-tip;
-                clicked => { SettingsState.retry(); }
+                clicked => { root.retry(); }
             }
 
             Button {
                 text: SettingsText.save-locations;
                 kind: ButtonKind.primary;
-                enabled: SettingsState.locations-changed && !SettingsState.saving-locations;
+                enabled: root.locations-changed && !root.saving-locations;
                 tip: SettingsText.save-locations-tip;
                 clicked => {
-                    SettingsState.save-locations();
+                    root.save-locations();
                 }
             }
         }
+    }
+}
+
+export component SettingsPage inherits Rectangle {
+    in property <bool> compact;
+
+    SettingsView {
+        width: root.width;
+        height: root.height;
+        compact: root.compact;
+        modules: SettingsState.modules;
+        sections: SettingsState.sections;
+        locations: SettingsState.locations;
+        locations-changed: SettingsState.locations-changed;
+        saving-locations: SettingsState.saving-locations;
+        can-retry: SettingsState.can-retry;
+        message: SettingsState.message;
+        message-tone: SettingsState.message-tone;
+        can-restart: SettingsState.can-restart;
+        module-toggled(index, on) => { SettingsState.module-toggled(index, on); }
+        setting-toggled(module, section, on) => { SettingsState.setting-toggled(module, section, on); }
+        section-action(module, section) => { SettingsState.section-action(module, section); }
+        location-edited(index, text) => { SettingsState.location-edited(index, text); }
+        browse(index) => { SettingsState.browse(index); }
+        save-locations => { SettingsState.save-locations(); }
+        retry => { SettingsState.retry(); }
+        restart => { SettingsState.restart(); }
     }
 }

@@ -1,11 +1,11 @@
 //! Navigation: which pages exist, which one shows, and how the pane's rows answer clicks and keys. The model is plain
 //! Rust; `bind` connects it to the `Nav` global.
 
-use crate::models::update_rows;
 use crate::{MainWindow, Nav, NavOutcome, NavRow, Tokens};
+use eg_flow_slint::Rows;
 use eg_i18n::phrases;
 use slint::platform::Key;
-use slint::{ComponentHandle, Image, ModelRc, VecModel, Weak};
+use slint::{ComponentHandle, Image, Weak};
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
@@ -346,18 +346,18 @@ pub fn bind(window: &MainWindow, navigation: Navigation) -> ShellHandle {
     let shell = Rc::new(Shell {
         shown: Cell::new(navigation.current()),
         navigation: RefCell::new(navigation),
-        rows: Rc::new(VecModel::default()),
-        footer: Rc::new(VecModel::default()),
-        flyout: Rc::new(VecModel::default()),
+        rows: Rows::default(),
+        footer: Rows::default(),
+        flyout: Rows::default(),
         window: window.as_weak(),
         focus_serial: RefCell::new(0),
         page_serial: Cell::new(0),
         entered: RefCell::new(Vec::new()),
     });
     let nav = window.global::<Nav>();
-    nav.set_rows(ModelRc::from(shell.rows.clone()));
-    nav.set_footer(ModelRc::from(shell.footer.clone()));
-    nav.set_flyout_pages(ModelRc::from(shell.flyout.clone()));
+    nav.set_rows(shell.rows.model());
+    nav.set_footer(shell.footer.model());
+    nav.set_flyout_pages(shell.flyout.model());
 
     nav.on_row_clicked({
         let shell = shell.clone();
@@ -429,10 +429,10 @@ type PageEntered = Box<dyn Fn(Page)>;
 
 struct Shell {
     navigation: RefCell<Navigation>,
-    rows: Rc<VecModel<NavRow>>,
-    footer: Rc<VecModel<NavRow>>,
+    rows: Rows<NavRow>,
+    footer: Rows<NavRow>,
     /// The rail's flyout of trainer pages.
-    flyout: Rc<VecModel<NavRow>>,
+    flyout: Rows<NavRow>,
     window: Weak<MainWindow>,
     focus_serial: RefCell<i32>,
     /// Counts pages that came to show after the first, for the view's entrance (the first page never fades in).
@@ -469,9 +469,9 @@ impl Shell {
 
         // The trainer's pages come and go only after the Trainer item, the last row, so rows that stay keep their place and
         // keyboard focus.
-        update_rows(&self.rows, navigation.rows().into_iter().map(row).collect());
-        update_rows(&self.footer, navigation.footer().into_iter().map(row).collect());
-        update_rows(&self.flyout, navigation.trainer_pages().iter().map(|&page| row(Node::Page(page))).collect());
+        self.rows.sync(navigation.rows().into_iter().map(row));
+        self.footer.sync(navigation.footer().into_iter().map(row));
+        self.flyout.sync(navigation.trainer_pages().iter().map(|&page| row(Node::Page(page))));
         nav.set_current_page(navigation.current().id().into());
         nav.set_current_title(navigation.current().title().into());
         nav.set_pane_open(navigation.pane_open());

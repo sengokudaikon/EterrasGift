@@ -1,5 +1,6 @@
-// The Mods page: [list | the selected mod's pane] over the action bar, as on Item Forge. Rust
-// (`crates/ui/src/mods.rs`) puts the mod library behind it; disk work belongs to its ordered worker.
+// The Mods page: [list | the selected mod's pane] over the action bar, as on Item Forge. Rust (`crates/ui/src/pages/mods.rs`)
+// puts the mod library behind it; disk work belongs to its ordered worker. `ModsView` draws what its properties say and
+// reports the controls; `ModsPage` is the only part that knows the `ModsState` global.
 import { ScrollView } from "../widgets/scroll-view.slint";
 import { Tokens } from "../tokens.slint";
 import { FieldFrame } from "../widgets/text-field.slint";
@@ -192,6 +193,11 @@ component ModsField inherits Rectangle {
 
 // [name | control] over the description, which takes the pane's whole width, so a narrow pane keeps it readable.
 component SettingItem inherits Rectangle {
+    in property <bool> busy;
+    callback setting-toggled(int, bool);
+    callback setting-choice(int, string);
+    callback setting-edited(int, string);
+    callback commit-settings();
     in property <ModSettingRow> item;
     in property <int> index;
     height: layout.preferred-height;
@@ -220,19 +226,19 @@ component SettingItem inherits Rectangle {
                     if root.item.kind == "switch": ToggleSwitch {
                         x: parent.width - self.preferred-width;
                         width: self.preferred-width;
-                        checked: root.item.is-on; label: root.item.name; enabled: !ModsState.busy;
-                        toggled(value) => { ModsState.setting-toggled(root.index, value); }
+                        checked: root.item.is-on; label: root.item.name; enabled: !root.busy;
+                        toggled(value) => { root.setting-toggled(root.index, value); }
                     }
                     if root.item.kind == "choice": ChoiceBox {
                         choices: root.item.choice-labels; index: root.item.choice-index; fallback-text: root.item.choice-label;
-                        label: root.item.name; enabled: !ModsState.busy;
-                        chosen(choice) => { ModsState.setting-choice(root.index, root.item.choices[choice].value); }
+                        label: root.item.name; enabled: !root.busy;
+                        chosen(choice) => { root.setting-choice(root.index, root.item.choices[choice].value); }
                     }
                     if root.item.kind != "switch" && root.item.kind != "choice": ModsField {
                         text: root.item.value; label: root.item.name; unit: root.item.unit;
-                        enabled: !ModsState.busy;
-                        edited(value) => { ModsState.setting-edited(root.index, value); }
-                        committed => { ModsState.commit-settings(); }
+                        enabled: !root.busy;
+                        edited(value) => { root.setting-edited(root.index, value); }
+                        committed => { root.commit-settings(); }
                     }
                 }
             }
@@ -284,9 +290,66 @@ component StatusLine inherits Rectangle {
     }
 }
 
-export component ModsPage inherits Rectangle {
+export component ModsView inherits Rectangle {
     in property <bool> compact;
     in property <bool> wide;
+    in property <[ModRow]> mods;
+    in property <[SourceRow]> sources;
+    in property <[ModSettingRow]> settings;
+    in property <[ModLogRow]> log-lines;
+    in property <int> selected-index: -1;
+    in property <int> installed-count;
+    in property <int> enabled-count;
+    in property <bool> is-read;
+    in property <bool> can-open-folder: true;
+    in property <bool> can-open-log;
+    in property <string> open-folder-tip;
+    in property <string> open-log-tip;
+    in property <string> readiness;
+    in property <[string]> readiness-facts;
+    in property <MessageTone> readiness-tone: MessageTone.info;
+    in property <bool> can-play;
+    in property <bool> busy;
+    in property <string> selected-name;
+    in property <string> selected-detail;
+    in property <string> selected-file;
+    in property <string> selected-source;
+    in property <string> selected-source-path;
+    in property <string> selected-build-status;
+    in property <string> selected-description;
+    in property <string> selected-problem;
+    in property <string> selected-state;
+    in property <bool> selected-enabled;
+    in property <bool> selected-has-sources;
+    in property <bool> can-install-build;
+    in property <bool> building;
+    in property <string> rebuild-text;
+    in property <string> rebuild-tip;
+    in property <string> install-build-text;
+    in property <bool> previous-build;
+    in property <string> change-message;
+    in property <bool> change-is-draft;
+    in property <MessageTone> change-tone: MessageTone.info;
+    in property <bool> can-undo;
+    in property <int> draft-count;
+    callback select-mod(int);
+    callback toggle-mod(int);
+    callback remove-mod(int);
+    callback reveal-mod(int);
+    callback rebuild(int);
+    callback install-build(int);
+    callback build-source(int);
+    callback setting-edited(int, string);
+    callback setting-toggled(int, bool);
+    callback setting-choice(int, string);
+    callback commit-settings();
+    callback undo-remove();
+    callback revert-drafts();
+    callback refresh();
+    callback add-mod();
+    callback open-folder();
+    callback open-log();
+    callback play();
     property <length> gutter: root.compact ? Tokens.preview-page-compact-margin.left : Tokens.preview-page-margin.left;
     property <length> pane-width: root.wide ? Tokens.changes-pane-wide-width : root.compact ? Tokens.changes-pane-compact-width : Tokens.changes-pane-width;
     // The content column fills up to its cap and stays left.
@@ -295,12 +358,12 @@ export component ModsPage inherits Rectangle {
     // Column heads share the rows' columns: [name] [version, maximized only] [state].
     property <length> version-width: root.wide ? version-probe.preferred-width : 0px;
     property <length> state-width: state-probe.preferred-width;
-    property <int> active-index: ModsState.selected-index;
-    property <int> visible-count: ModsState.mods.length;
+    property <int> active-index: root.selected-index;
+    property <int> visible-count: root.mods.length;
     property <bool> had-rows;
     // Ctrl+Z gives the list focus back, on the restored row, once it is there again.
     property <bool> focus-list-on-rows;
-    init => { root.had-rows = ModsState.mods.length > 0; }
+    init => { root.had-rows = root.mods.length > 0; }
     changed visible-count => {
         // Removing the final row leaves the list no tab stop. Keep page shortcuts, particularly Undo, alive.
         if (root.visible-count == 0 && root.had-rows) { page-keys.focus(); }
@@ -312,20 +375,20 @@ export component ModsPage inherits Rectangle {
     }
     // Rows wholly in view, for PageUp and PageDown: they go to the first or last of them, then a page further, as a
     // Windows list does.
-    property <int> first-shown: Math.min(ModsState.mods.length - 1, Math.ceil(-library-scroll.content-y / root.row-step));
-    property <int> last-shown: Math.max(root.first-shown, Math.min(ModsState.mods.length - 1, Math.floor((-library-scroll.content-y + library-scroll.visible-height + Tokens.row-gap.bottom) / root.row-step) - 1));
+    property <int> first-shown: Math.min(root.mods.length - 1, Math.ceil(-library-scroll.content-y / root.row-step));
+    property <int> last-shown: Math.max(root.first-shown, Math.min(root.mods.length - 1, Math.floor((-library-scroll.content-y + library-scroll.visible-height + Tokens.row-gap.bottom) / root.row-step) - 1));
     property <int> page-rows: Math.max(1, root.last-shown - root.first-shown);
     function page-down() -> int {
-        return ModsState.selected-index < root.last-shown ? root.last-shown : Math.min(ModsState.mods.length - 1, ModsState.selected-index + root.page-rows);
+        return root.selected-index < root.last-shown ? root.last-shown : Math.min(root.mods.length - 1, root.selected-index + root.page-rows);
     }
     function page-up() -> int {
-        return ModsState.selected-index > root.first-shown ? root.first-shown : Math.max(0, ModsState.selected-index - root.page-rows);
+        return root.selected-index > root.first-shown ? root.first-shown : Math.max(0, root.selected-index - root.page-rows);
     }
     // The keyboard opens the row menu under the selected row, at its left edge.
     function menu-under-row() {
         row-menu.open-at(
             list-focus.absolute-position.x - root.absolute-position.x,
-            list-focus.absolute-position.y - root.absolute-position.y + Math.max(0, ModsState.selected-index) * root.row-step + Tokens.row-min-height,
+            list-focus.absolute-position.y - root.absolute-position.y + Math.max(0, root.selected-index) * root.row-step + Tokens.row-min-height,
             true);
     }
     changed active-index => {
@@ -341,11 +404,11 @@ export component ModsPage inherits Rectangle {
     version-probe := VerticalLayout {
         visible: false;
         LabelText { text: ModsText.version; wrap: no-wrap; }
-        for item in ModsState.mods: CaptionText { text: item.version; wrap: no-wrap; }
+        for item in root.mods: CaptionText { text: item.version; wrap: no-wrap; }
     }
     state-probe := VerticalLayout {
         visible: false;
-        for item in ModsState.mods: HorizontalLayout {
+        for item in root.mods: HorizontalLayout {
             spacing: Tokens.space-12;
             if item.problem != "": HorizontalLayout {
                 spacing: Tokens.space-6;
@@ -359,15 +422,15 @@ export component ModsPage inherits Rectangle {
     // With no mods and none to build the content column has a still dusting of ash: nothing here, and nothing waited on.
     // Placed at the page's corner: an element given a size and no position is centred in its parent, which would shift
     // every mote by (pane gap / 2, bar / 2).
-    if ModsState.is-read && ModsState.installed-count == 0 && ModsState.sources.length == 0: AshField { x: 0; y: 0; width: pane.x; height: bar.y; still: true; }
+    if root.is-read && root.installed-count == 0 && root.sources.length == 0: AshField { x: 0; y: 0; width: pane.x; height: bar.y; still: true; }
     page-keys := FocusScope {
         key-pressed(event) => {
             // Ctrl+Z puts back a mod just removed, as the action bar's Undo does; a text box keeps Ctrl+Z for its own text.
-            if (event.modifiers.control && (event.text == "z" || event.text == "Z") && ModsState.can-undo) {
-                ModsState.undo-remove();
+            if (event.modifiers.control && (event.text == "z" || event.text == "Z") && root.can-undo) {
+                root.undo-remove();
                 // Focus follows the restored row, as from the keyboard.
                 KeyboardFocus.visible = true;
-                if (ModsState.mods.length > 0) { list-focus.focus(); } else { root.focus-list-on-rows = true; }
+                if (root.mods.length > 0) { list-focus.focus(); } else { root.focus-list-on-rows = true; }
                 return accept;
             }
             reject
@@ -392,17 +455,17 @@ export component ModsPage inherits Rectangle {
                 Button {
                     text: ModsText.add-mod; label-hidden: root.compact; accessible-name: ModsText.add-mod; icon: Tokens.icon-add;
                     tip: ModsText.add-mod-tip;
-                    clicked => { ModsState.add-mod(); }
+                    clicked => { root.add-mod(); }
                 }
                 Button {
                     text: ModsText.open-folder; label-hidden: root.compact; accessible-name: ModsText.open-mods-folder; icon: Tokens.icon-folder;
-                    enabled: ModsState.can-open-folder; tip: ModsState.open-folder-tip;
-                    clicked => { ModsState.open-folder(); }
+                    enabled: root.can-open-folder; tip: root.open-folder-tip;
+                    clicked => { root.open-folder(); }
                 }
                 Button {
                     text: ModsText.open-log; label-hidden: root.compact; accessible-name: ModsText.open-log; icon: Tokens.icon-log;
-                    enabled: ModsState.can-open-log; tip: ModsState.open-log-tip;
-                    clicked => { ModsState.open-log(); }
+                    enabled: root.can-open-log; tip: root.open-log-tip;
+                    clicked => { root.open-log(); }
                 }
             }
         }
@@ -416,7 +479,7 @@ export component ModsPage inherits Rectangle {
                 spacing: Tokens.space-8;
                 horizontal-stretch: 1;
                 LabelText { text: ModsText.installed; horizontal-stretch: 0; vertical-alignment: center; }
-                CaptionText { text: ModsState.installed-count > 0 ? ModsText.enabled-of(ModsState.enabled-count, ModsState.installed-count) : ""; horizontal-stretch: 1; vertical-alignment: center; }
+                CaptionText { text: root.installed-count > 0 ? ModsText.enabled-of(root.enabled-count, root.installed-count) : ""; horizontal-stretch: 1; vertical-alignment: center; }
             }
             // The Version column keeps its gap while it is empty, so the name stops 12px earlier.
             LabelText { text: root.wide ? ModsText.version : ""; width: root.version-width; wrap: no-wrap; }
@@ -427,17 +490,17 @@ export component ModsPage inherits Rectangle {
             x: root.gutter;
             y: installed-header.y + installed-header.height + Tokens.mod-list-margin.top;
             width: root.content-width;
-            height: ModsState.mods.length == 0 ? 0px : Math.max(0px, Math.min(ModsState.mods.length * root.row-step, bar.y - self.y - not-installed.height));
+            height: root.mods.length == 0 ? 0px : Math.max(0px, Math.min(root.mods.length * root.row-step, bar.y - self.y - not-installed.height));
             content-width: self.visible-width;
-            content-height: ModsState.mods.length * root.row-step;
+            content-height: root.mods.length * root.row-step;
             // One tab stop: arrows move, Space turns the selected mod on or off, Del removes it, the menu key or Shift+F10 opens its menu.
             // Always there, so Ctrl+Z can bring focus back to it; a tab stop only while it has rows.
             list-focus := FocusScope {
-                enabled: ModsState.mods.length > 0;
-                height: ModsState.mods.length * root.row-step;
+                enabled: root.mods.length > 0;
+                height: root.mods.length * root.row-step;
                 accessible-role: list;
                 accessible-label: ModsText.installed-mods;
-                focus-gained(reason) => { if (reason == FocusReason.tab-navigation) { KeyboardFocus.visible = true; } if (ModsState.selected-index < 0) { ModsState.select-mod(0); } }
+                focus-gained(reason) => { if (reason == FocusReason.tab-navigation) { KeyboardFocus.visible = true; } if (root.selected-index < 0) { root.select-mod(0); } }
                 key-pressed(event) => {
                     // The keyboard opens the menu under the row; a right-click opens it at the pointer.
                     if (event.text == Key.Menu || (event.text == Key.F10 && event.modifiers.shift)) {
@@ -446,25 +509,25 @@ export component ModsPage inherits Rectangle {
                     }
                     if (event.modifiers.control || event.modifiers.alt) { return reject; }
                     // Keys on the list show where focus is.
-                    if (event.text == Key.DownArrow) { KeyboardFocus.visible = true; ModsState.select-mod(Math.min(ModsState.mods.length - 1, ModsState.selected-index + 1)); return accept; }
-                    if (event.text == Key.UpArrow) { KeyboardFocus.visible = true; ModsState.select-mod(Math.max(0, ModsState.selected-index - 1)); return accept; }
-                    if (event.text == Key.Home) { KeyboardFocus.visible = true; ModsState.select-mod(0); return accept; }
-                    if (event.text == Key.End) { KeyboardFocus.visible = true; ModsState.select-mod(ModsState.mods.length - 1); return accept; }
-                    if (event.text == Key.PageDown) { KeyboardFocus.visible = true; ModsState.select-mod(root.page-down()); return accept; }
-                    if (event.text == Key.PageUp) { KeyboardFocus.visible = true; ModsState.select-mod(root.page-up()); return accept; }
-                    if (event.text == " " && !ModsState.busy) { KeyboardFocus.visible = true; ModsState.toggle-mod(ModsState.selected-index); return accept; }
-                    if (event.text == Key.Delete && !ModsState.busy) { KeyboardFocus.visible = true; ModsState.remove-mod(ModsState.selected-index); return accept; }
+                    if (event.text == Key.DownArrow) { KeyboardFocus.visible = true; root.select-mod(Math.min(root.mods.length - 1, root.selected-index + 1)); return accept; }
+                    if (event.text == Key.UpArrow) { KeyboardFocus.visible = true; root.select-mod(Math.max(0, root.selected-index - 1)); return accept; }
+                    if (event.text == Key.Home) { KeyboardFocus.visible = true; root.select-mod(0); return accept; }
+                    if (event.text == Key.End) { KeyboardFocus.visible = true; root.select-mod(root.mods.length - 1); return accept; }
+                    if (event.text == Key.PageDown) { KeyboardFocus.visible = true; root.select-mod(root.page-down()); return accept; }
+                    if (event.text == Key.PageUp) { KeyboardFocus.visible = true; root.select-mod(root.page-up()); return accept; }
+                    if (event.text == " " && !root.busy) { KeyboardFocus.visible = true; root.toggle-mod(root.selected-index); return accept; }
+                    if (event.text == Key.Delete && !root.busy) { KeyboardFocus.visible = true; root.remove-mod(root.selected-index); return accept; }
                     reject
                 }
                 VerticalLayout {
                     spacing: Tokens.row-gap.bottom;
                     alignment: start;
-                    for item[index] in ModsState.mods: mod-row := Rectangle {
+                    for item[index] in root.mods: mod-row := Rectangle {
                         // Hovered parts with tooltips of their own count as the row being hovered.
                         property <int> spots;
-                        property <bool> selected: ModsState.selected-index == index;
+                        property <bool> selected: root.selected-index == index;
                         property <bool> hovered: row-touch.has-hover || self.spots > 0;
-                        function pick() { ModsState.select-mod(index); list-focus.focus(); }
+                        function pick() { root.select-mod(index); list-focus.focus(); }
                         // A right-click opens the row's menu at the pointer.
                         function menu-at(x: length, y: length) { row-menu.open-at(x - root.absolute-position.x, y - root.absolute-position.y, false); }
                         height: Tokens.row-min-height;
@@ -479,7 +542,7 @@ export component ModsPage inherits Rectangle {
                         accessible-checked: item.enabled;
                         accessible-item-selectable: true;
                         accessible-item-selected: self.selected;
-                        accessible-action-default => { ModsState.select-mod(index); }
+                        accessible-action-default => { root.select-mod(index); }
                         row-touch := RowSpot {
                             pressed-down => { mod-row.pick(); }
                             menu-requested(x, y) => { mod-row.menu-at(x, y); }
@@ -498,7 +561,7 @@ export component ModsPage inherits Rectangle {
                                         changed has-hover => { mod-row.spots += self.has-hover ? 1 : -1; }
                                         pressed-down => { mod-row.pick(); }
                                         menu-requested(x, y) => { mod-row.menu-at(x, y); }
-                                        clicked => { if (!ModsState.busy) { ModsState.toggle-mod(index); } }
+                                        clicked => { if (!root.busy) { root.toggle-mod(index); } }
                                     }
                                 }
                             }
@@ -579,7 +642,7 @@ export component ModsPage inherits Rectangle {
         }
         // No mods yet: the two ways one arrives, the first one a button. Its texts sit outside `if`, so its height is right.
         no-mods := VerticalLayout {
-            visible: ModsState.is-read && ModsState.mods.length == 0;
+            visible: root.is-read && root.mods.length == 0;
             x: root.gutter + Tokens.mods-empty-margin.left;
             y: installed-header.y + installed-header.height + Tokens.mods-empty-margin.top;
             width: root.content-width - Tokens.mods-empty-margin.left - Tokens.mods-empty-margin.right;
@@ -587,36 +650,36 @@ export component ModsPage inherits Rectangle {
             spacing: Tokens.space-4;
             Text { text: ModsText.no-mods; font-size: Tokens.font-size-value; color: Tokens.text-brush; }
             CaptionText { text: ModsText.no-mods-hint; }
-            if ModsState.is-read && ModsState.mods.length == 0: HorizontalLayout {
+            if root.is-read && root.mods.length == 0: HorizontalLayout {
                 alignment: start;
                 padding-top: Tokens.empty-action-margin.top;
-                Button { text: ModsText.add-mod; tip: ModsText.add-mod-tip; clicked => { ModsState.add-mod(); } }
+                Button { text: ModsText.add-mod; tip: ModsText.add-mod-tip; clicked => { root.add-mod(); } }
             }
         }
         // Mod projects in the sources folder that no installed mod builds: not loaded (the box is off and can't be ticked) until built and installed.
         not-installed := VerticalLayout {
             x: root.gutter;
-            y: ModsState.mods.length > 0 ? library-scroll.y + library-scroll.height : no-mods.y + no-mods.height;
+            y: root.mods.length > 0 ? library-scroll.y + library-scroll.height : no-mods.y + no-mods.height;
             width: root.content-width;
-            height: ModsState.sources.length == 0 ? 0px : self.preferred-height;
-            visible: ModsState.sources.length > 0;
+            height: root.sources.length == 0 ? 0px : self.preferred-height;
+            visible: root.sources.length > 0;
             accessible-role: list;
             accessible-label: ModsText.from-sources-list;
-            if ModsState.sources.length > 0: VerticalLayout {
+            if root.sources.length > 0: VerticalLayout {
                 padding-top: Tokens.mod-sources-margin.top;
                 HorizontalLayout {
                     padding-left: Tokens.table-header-inset.left;
                     padding-right: Tokens.table-header-inset.right;
                     spacing: Tokens.space-8;
                     LabelText { text: ModsText.not-installed; horizontal-stretch: 0; vertical-alignment: center; }
-                    CaptionText { text: ModsText.from-sources(ModsState.sources.length); vertical-alignment: center; horizontal-stretch: 1; }
+                    CaptionText { text: ModsText.from-sources(root.sources.length); vertical-alignment: center; horizontal-stretch: 1; }
                 }
                 // Each row keeps its row gap below it, the last one too.
                 VerticalLayout {
                     padding-top: Tokens.mod-list-margin.top;
                     padding-bottom: Tokens.row-gap.bottom;
                     spacing: Tokens.row-gap.bottom;
-                    for source[index] in ModsState.sources: HorizontalLayout {
+                    for source[index] in root.sources: HorizontalLayout {
                         min-height: Tokens.row-min-height;
                         padding-left: Tokens.mod-source-row-padding.left; padding-right: Tokens.mod-source-row-padding.right;
                         spacing: Tokens.space-12;
@@ -668,9 +731,9 @@ export component ModsPage inherits Rectangle {
                         Button {
                             text: source.busy ? ModsText.building : ModsText.build-and-install;
                             height: Tokens.control-min-height; y: (parent.height - self.height) / 2; horizontal-stretch: 0;
-                            enabled: !ModsState.busy && !ModsState.building;
+                            enabled: !root.busy && !root.building;
                             tip: ModsText.build-and-install-tip;
-                            clicked => { ModsState.build-source(index); }
+                            clicked => { root.build-source(index); }
                         }
                     }
                 }
@@ -683,13 +746,13 @@ export component ModsPage inherits Rectangle {
             background: Tokens.raised-brush;
             Rectangle { x: 0; y: 0; width: 1px; background: Tokens.hairline-brush; }
             // Inside the pane's 1px left border.
-            if ModsState.selected-index < 0: CaptionText {
+            if root.selected-index < 0: CaptionText {
                 x: 1px + Tokens.pane-content-margin.left; y: Tokens.pane-content-margin.top;
                 width: parent.width - 1px - Tokens.pane-content-margin.left - Tokens.pane-content-margin.right;
                 height: self.preferred-height;
-                text: ModsState.installed-count > 0 ? ModsText.select-a-mod : ModsText.add-to-see;
+                text: root.installed-count > 0 ? ModsText.select-a-mod : ModsText.add-to-see;
             }
-            if ModsState.selected-index >= 0: ScrollView {
+            if root.selected-index >= 0: ScrollView {
                 x: 1px;
                 width: parent.width - 1px;
                 content-width: self.visible-width;
@@ -703,8 +766,8 @@ export component ModsPage inherits Rectangle {
                     // What it is. The name, the file and the project can be elided, and their hover tips say them in full; the
                     // block is one tab stop whose keyboard tip says all three, so the keyboard reaches them too.
                     identity := Rectangle {
-                        property <string> full: ModsState.selected-name + "\n" + ModsState.selected-file
-                            + (ModsState.selected-has-sources ? "\n" + ModsState.selected-source-path : "");
+                        property <string> full: root.selected-name + "\n" + root.selected-file
+                            + (root.selected-has-sources ? "\n" + root.selected-source-path : "");
                         identity-focus := FocusScope {
                             accessible-role: text;
                             accessible-label: identity.full;
@@ -716,37 +779,37 @@ export component ModsPage inherits Rectangle {
                         VerticalLayout {
                             spacing: Tokens.space-4;
                             SectionText {
-                                text: ModsState.selected-name; max-lines: Tokens.title-max-lines; overflow: elide;
+                                text: root.selected-name; max-lines: Tokens.title-max-lines; overflow: elide;
                                 name-tip := TouchArea { }
-                                TipTrigger { text: ModsState.selected-name; hovered: name-tip.has-hover; }
+                                TipTrigger { text: root.selected-name; hovered: name-tip.has-hover; }
                             }
-                            CaptionText { text: ModsState.selected-detail; }
+                            CaptionText { text: root.selected-detail; }
                             CaptionText {
-                                text: ModsState.selected-file; wrap: no-wrap; overflow: elide;
+                                text: root.selected-file; wrap: no-wrap; overflow: elide;
                                 file-tip := TouchArea { }
-                                TipTrigger { text: ModsState.selected-file; hovered: file-tip.has-hover; }
+                                TipTrigger { text: root.selected-file; hovered: file-tip.has-hover; }
                             }
                             // A mod built here: where its project is, and how its latest build stands to the installed one.
-                            if ModsState.selected-has-sources: CaptionText {
-                                text: ModsState.selected-source; wrap: no-wrap; overflow: elide;
+                            if root.selected-has-sources: CaptionText {
+                                text: root.selected-source; wrap: no-wrap; overflow: elide;
                                 source-tip := TouchArea { }
-                                TipTrigger { text: ModsState.selected-source-path; hovered: source-tip.has-hover; }
+                                TipTrigger { text: root.selected-source-path; hovered: source-tip.has-hover; }
                             }
-                            if ModsState.selected-build-status != "": CaptionText { text: ModsState.selected-build-status; tone: CaptionTone.secondary; }
+                            if root.selected-build-status != "": CaptionText { text: root.selected-build-status; tone: CaptionTone.secondary; }
                             // Only a change waiting for the next game with mods: on or off itself shows in the row and on the button.
-                            if ModsState.selected-state != "": CaptionText { text: ModsState.selected-state; color: Tokens.draft-brush; }
+                            if root.selected-state != "": CaptionText { text: root.selected-state; color: Tokens.draft-brush; }
                         }
                         TipTrigger { text: identity.full; focused: identity-focus.has-focus; }
                         FocusRing { focused: identity-focus.has-focus; }
                     }
                     // The reason it did not load sits right above the ways out of it.
-                    if ModsState.selected-problem != "" && ModsState.selected-enabled: HorizontalLayout {
+                    if root.selected-problem != "" && root.selected-enabled: HorizontalLayout {
                         spacing: Tokens.space-6;
                         Rectangle {
                             width: Tokens.icon-size-small;
                             Image { y: Tokens.icon-baseline-nudge.top; width: Tokens.icon-size-small; height: Tokens.icon-size-small; image-fit: contain; source: Tokens.icon-error; colorize: Tokens.error-brush; }
                         }
-                        CaptionText { text: ModsState.selected-problem; tone: CaptionTone.error; horizontal-stretch: 1; }
+                        CaptionText { text: root.selected-problem; tone: CaptionTone.error; horizontal-stretch: 1; }
                     }
                     VerticalLayout {
                         spacing: Tokens.space-8;
@@ -754,53 +817,61 @@ export component ModsPage inherits Rectangle {
                         HorizontalLayout {
                             spacing: Tokens.space-8;
                             Button {
-                                text: ModsState.selected-enabled ? ModsText.turn-off : ModsText.turn-on; enabled: !ModsState.busy; horizontal-stretch: 0;
+                                text: root.selected-enabled ? ModsText.turn-off : ModsText.turn-on; enabled: !root.busy; horizontal-stretch: 0;
                                 tip: ModsText.stays-installed;
-                                clicked => { ModsState.toggle-mod(ModsState.selected-index); }
+                                clicked => { root.toggle-mod(root.selected-index); }
                             }
                             Button {
                                 icon: Tokens.icon-folder; accessible-name: ModsText.show-in-folder; horizontal-stretch: 0; tip: ModsText.show-in-folder-tip;
-                                clicked => { ModsState.reveal-mod(ModsState.selected-index); }
+                                clicked => { root.reveal-mod(root.selected-index); }
                             }
                             Rectangle { horizontal-stretch: 1; }
                             Button {
-                                text: ModsText.remove; icon: Tokens.icon-delete; kind: ButtonKind.subtle; enabled: !ModsState.busy; horizontal-stretch: 0;
+                                text: ModsText.remove; icon: Tokens.icon-delete; kind: ButtonKind.subtle; enabled: !root.busy; horizontal-stretch: 0;
                                 tip: ModsText.remove-tip;
-                                clicked => { ModsState.remove-mod(ModsState.selected-index); }
+                                clicked => { root.remove-mod(root.selected-index); }
                             }
                         }
                         // A mod built here: its build, installed as Add mod would, kept apart from what is done to the installed mod.
-                        if ModsState.selected-has-sources: HorizontalLayout {
+                        if root.selected-has-sources: HorizontalLayout {
                             alignment: start; spacing: Tokens.space-8;
-                            if ModsState.can-install-build: Button {
-                                text: ModsState.install-build-text; enabled: !ModsState.busy && !ModsState.building;
+                            if root.can-install-build: Button {
+                                text: root.install-build-text; enabled: !root.busy && !root.building;
                                 tip: ModsText.install-build-tip;
-                                clicked => { ModsState.install-build(ModsState.selected-index); }
+                                clicked => { root.install-build(root.selected-index); }
                             }
                             Button {
-                                text: ModsState.rebuild-text; enabled: !ModsState.building && !ModsState.busy; tip: ModsState.rebuild-tip;
-                                clicked => { ModsState.rebuild(ModsState.selected-index); }
+                                text: root.rebuild-text; enabled: !root.building && !root.busy; tip: root.rebuild-tip;
+                                clicked => { root.rebuild(root.selected-index); }
                             }
                         }
                     }
-                    if ModsState.selected-description != "": BodyText { text: ModsState.selected-description; }
-                    if ModsState.settings.length > 0: VerticalLayout {
+                    if root.selected-description != "": BodyText { text: root.selected-description; }
+                    if root.settings.length > 0: VerticalLayout {
                         spacing: Tokens.space-6;
                         // "Settings" heads the list unless the mod's own groups do.
-                        if ModsState.settings[0].group == "": LabelText { text: ModsText.settings; }
+                        if root.settings[0].group == "": LabelText { text: ModsText.settings; }
                         VerticalLayout {
-                            for item[index] in ModsState.settings: SettingItem { item: item; index: index; }
+                            for item[index] in root.settings: SettingItem {
+                                item: item;
+                                index: index;
+                                busy: root.busy;
+                                setting-toggled(index, value) => { root.setting-toggled(index, value); }
+                                setting-choice(index, value) => { root.setting-choice(index, value); }
+                                setting-edited(index, value) => { root.setting-edited(index, value); }
+                                commit-settings => { root.commit-settings(); }
+                            }
                         }
                     }
                     // Maximized only: what MelonLoader wrote about this mod, after its settings: what can be changed comes before what happened.
                     if root.wide: VerticalLayout {
                         spacing: Tokens.space-6;
                         LabelText { text: ModsText.last-game; }
-                        if ModsState.previous-build: CaptionText { text: ModsText.earlier-build; }
-                        if ModsState.log-lines.length == 0: CaptionText { text: ModsText.nothing-logged; }
-                        if ModsState.log-lines.length > 0: VerticalLayout {
+                        if root.previous-build: CaptionText { text: ModsText.earlier-build; }
+                        if root.log-lines.length == 0: CaptionText { text: ModsText.nothing-logged; }
+                        if root.log-lines.length > 0: VerticalLayout {
                             // [time] [error mark, its slot kept on every line so the text column aligns] [text] [×N for a line written N times in a row]
-                            for line in ModsState.log-lines: HorizontalLayout {
+                            for line in root.log-lines: HorizontalLayout {
                                 padding-top: Tokens.detail-row-margin.top; padding-bottom: Tokens.detail-row-margin.bottom; spacing: Tokens.space-6;
                                 CaptionText { text: line.time; wrap: no-wrap; vertical-alignment: top; }
                                 Rectangle {
@@ -835,23 +906,23 @@ export component ModsPage inherits Rectangle {
                 x: Tokens.action-bar-padding.left;
                 y: parent.border + (parent.height - parent.border - self.height) / 2;
                 width: Math.min(Tokens.status-message-max-width, actions.x - self.x - Tokens.space-20);
-                height: readiness-line.height + (ModsState.change-message == "" ? 0px : Tokens.space-4 + change-line.height);
-                property <bool> warning: ModsState.readiness-tone == MessageTone.warning;
+                height: readiness-line.height + (root.change-message == "" ? 0px : Tokens.space-4 + change-line.height);
+                property <bool> warning: root.readiness-tone == MessageTone.warning;
                 // What will run is a note, not a confirmation: the check is for what the game has read back.
                 readiness-line := StatusLine {
                     x: 0; y: 0; width: parent.width;
-                    message: ModsState.readiness; facts: ModsState.readiness-facts;
+                    message: root.readiness; facts: root.readiness-facts;
                     icon: parent.warning ? Tokens.icon-warning : Tokens.icon-info;
                     icon-ink: parent.warning ? Tokens.warning-brush : Tokens.text-muted-brush;
                     ink: parent.warning ? Tokens.warning-brush : Tokens.text-secondary-brush;
                 }
                 change-line := StatusLine {
                     x: 0; y: readiness-line.height + Tokens.space-4; width: parent.width;
-                    visible: ModsState.change-message != "";
-                    message: ModsState.change-message;
-                    icon: ModsState.change-tone == MessageTone.error ? Tokens.icon-error : ModsState.change-is-draft ? Tokens.icon-draft : Tokens.icon-info;
-                    icon-ink: ModsState.change-tone == MessageTone.error ? Tokens.error-brush : ModsState.change-is-draft ? Tokens.draft-brush : Tokens.text-muted-brush;
-                    ink: ModsState.change-tone == MessageTone.error ? Tokens.error-brush : ModsState.change-is-draft ? Tokens.draft-brush : Tokens.text-secondary-brush;
+                    visible: root.change-message != "";
+                    message: root.change-message;
+                    icon: root.change-tone == MessageTone.error ? Tokens.icon-error : root.change-is-draft ? Tokens.icon-draft : Tokens.icon-info;
+                    icon-ink: root.change-tone == MessageTone.error ? Tokens.error-brush : root.change-is-draft ? Tokens.draft-brush : Tokens.text-muted-brush;
+                    ink: root.change-tone == MessageTone.error ? Tokens.error-brush : root.change-is-draft ? Tokens.draft-brush : Tokens.text-secondary-brush;
                 }
             }
             // Right-aligned, so a button appearing to the left of Play never moves it.
@@ -861,20 +932,20 @@ export component ModsPage inherits Rectangle {
                 width: self.preferred-width;
                 height: Tokens.control-min-height;
                 spacing: Tokens.space-8;
-                if ModsState.can-undo: Button {
-                    text: ModsText.undo; icon: Tokens.icon-undo; horizontal-stretch: 0; enabled: !ModsState.busy;
+                if root.can-undo: Button {
+                    text: ModsText.undo; icon: Tokens.icon-undo; horizontal-stretch: 0; enabled: !root.busy;
                     tip: ModsText.undo-tip;
-                    clicked => { ModsState.undo-remove(); }
+                    clicked => { root.undo-remove(); }
                 }
-                if ModsState.draft-count > 0: Button {
-                    text: ModsText.revert(ModsState.draft-count); kind: ButtonKind.subtle; horizontal-stretch: 0; enabled: !ModsState.busy;
+                if root.draft-count > 0: Button {
+                    text: ModsText.revert(root.draft-count); kind: ButtonKind.subtle; horizontal-stretch: 0; enabled: !root.busy;
                     tip: ModsText.revert-tip;
-                    clicked => { ModsState.revert-drafts(); }
+                    clicked => { root.revert-drafts(); }
                 }
                 Button {
-                    text: ModsText.play; icon: Tokens.icon-play; kind: ButtonKind.primary; horizontal-stretch: 0; enabled: ModsState.can-play;
+                    text: ModsText.play; icon: Tokens.icon-play; kind: ButtonKind.primary; horizontal-stretch: 0; enabled: root.can-play;
                     tip: ModsText.play-tip;
-                    clicked => { ModsState.commit-settings(); ModsState.play(); }
+                    clicked => { root.commit-settings(); root.play(); }
                 }
             }
         }
@@ -883,15 +954,84 @@ export component ModsPage inherits Rectangle {
     // The row menu: what the pane's buttons do, with the keys that do it from the list.
     row-menu := PopupMenu {
         entries: [
-            { title: ModsState.selected-enabled ? ModsText.turn-off : ModsText.turn-on, gesture: ModsText.key-space, disabled: ModsState.selected-index < 0 || ModsState.busy },
-            { title: ModsText.show-in-folder, icon: Tokens.icon-folder, disabled: ModsState.selected-index < 0 },
+            { title: root.selected-enabled ? ModsText.turn-off : ModsText.turn-on, gesture: ModsText.key-space, disabled: root.selected-index < 0 || root.busy },
+            { title: ModsText.show-in-folder, icon: Tokens.icon-folder, disabled: root.selected-index < 0 },
             { separator: true },
-            { title: ModsText.remove, icon: Tokens.icon-delete, gesture: ModsText.key-delete, disabled: ModsState.selected-index < 0 || ModsState.busy },
+            { title: ModsText.remove, icon: Tokens.icon-delete, gesture: ModsText.key-delete, disabled: root.selected-index < 0 || root.busy },
         ];
         activated(index) => {
-            if (index == 0) { ModsState.toggle-mod(ModsState.selected-index); }
-            if (index == 1) { ModsState.reveal-mod(ModsState.selected-index); }
-            if (index == 3) { ModsState.remove-mod(ModsState.selected-index); }
+            if (index == 0) { root.toggle-mod(root.selected-index); }
+            if (index == 1) { root.reveal-mod(root.selected-index); }
+            if (index == 3) { root.remove-mod(root.selected-index); }
         }
+    }
+}
+
+export component ModsPage inherits Rectangle {
+    in property <bool> compact;
+    in property <bool> wide;
+
+    ModsView {
+        width: root.width;
+        height: root.height;
+        compact: root.compact;
+        wide: root.wide;
+        mods: ModsState.mods;
+        sources: ModsState.sources;
+        settings: ModsState.settings;
+        log-lines: ModsState.log-lines;
+        selected-index: ModsState.selected-index;
+        installed-count: ModsState.installed-count;
+        enabled-count: ModsState.enabled-count;
+        is-read: ModsState.is-read;
+        can-open-folder: ModsState.can-open-folder;
+        can-open-log: ModsState.can-open-log;
+        open-folder-tip: ModsState.open-folder-tip;
+        open-log-tip: ModsState.open-log-tip;
+        readiness: ModsState.readiness;
+        readiness-facts: ModsState.readiness-facts;
+        readiness-tone: ModsState.readiness-tone;
+        can-play: ModsState.can-play;
+        busy: ModsState.busy;
+        selected-name: ModsState.selected-name;
+        selected-detail: ModsState.selected-detail;
+        selected-file: ModsState.selected-file;
+        selected-source: ModsState.selected-source;
+        selected-source-path: ModsState.selected-source-path;
+        selected-build-status: ModsState.selected-build-status;
+        selected-description: ModsState.selected-description;
+        selected-problem: ModsState.selected-problem;
+        selected-state: ModsState.selected-state;
+        selected-enabled: ModsState.selected-enabled;
+        selected-has-sources: ModsState.selected-has-sources;
+        can-install-build: ModsState.can-install-build;
+        building: ModsState.building;
+        rebuild-text: ModsState.rebuild-text;
+        rebuild-tip: ModsState.rebuild-tip;
+        install-build-text: ModsState.install-build-text;
+        previous-build: ModsState.previous-build;
+        change-message: ModsState.change-message;
+        change-is-draft: ModsState.change-is-draft;
+        change-tone: ModsState.change-tone;
+        can-undo: ModsState.can-undo;
+        draft-count: ModsState.draft-count;
+        select-mod(index0) => { ModsState.select-mod(index0); }
+        toggle-mod(index0) => { ModsState.toggle-mod(index0); }
+        remove-mod(index0) => { ModsState.remove-mod(index0); }
+        reveal-mod(index0) => { ModsState.reveal-mod(index0); }
+        rebuild(index0) => { ModsState.rebuild(index0); }
+        install-build(index0) => { ModsState.install-build(index0); }
+        build-source(index0) => { ModsState.build-source(index0); }
+        setting-edited(index0, text1) => { ModsState.setting-edited(index0, text1); }
+        setting-toggled(index0, on1) => { ModsState.setting-toggled(index0, on1); }
+        setting-choice(index0, text1) => { ModsState.setting-choice(index0, text1); }
+        commit-settings => { ModsState.commit-settings(); }
+        undo-remove => { ModsState.undo-remove(); }
+        revert-drafts => { ModsState.revert-drafts(); }
+        refresh => { ModsState.refresh(); }
+        add-mod => { ModsState.add-mod(); }
+        open-folder => { ModsState.open-folder(); }
+        open-log => { ModsState.open-log(); }
+        play => { ModsState.play(); }
     }
 }
