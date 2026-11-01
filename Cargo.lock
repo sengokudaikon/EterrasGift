@@ -1335,6 +1335,7 @@ dependencies = [
  "serde_json",
  "sha2",
  "tempfile",
+ "tokio",
  "toml_edit",
  "windows-sys 0.61.2",
 ]

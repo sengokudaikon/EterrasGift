@@ -713,6 +713,7 @@ impl Forge {
             &ui,
             App {
                 launcher: None,
+                game: None,
                 mods: None,
                 trainer: true,
                 trainer_backend: Some(backend.clone()),

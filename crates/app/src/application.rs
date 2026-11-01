@@ -5,6 +5,7 @@ use crate::{
     startup::{self, Startup},
     trainer,
 };
+use eg_companion::game::watch::GameWatch;
 use eg_core::fault::FaultLog;
 use eg_core::settings::SettingsStore;
 use eg_core::settings_service::{SaveOutcome, SettingsService, Snapshot};
@@ -53,6 +54,7 @@ pub fn run(startup: Startup) -> Result<ExitCode, slint::PlatformError> {
         &window,
         App {
             launcher: Some(companion.launcher.clone()),
+            game: Some(GameWatch::start(companion.launcher.clone(), &background)),
             settings,
             mods: Some(eg_ui::pages::mods::ModsPage {
                 worker: companion.mods.clone(),

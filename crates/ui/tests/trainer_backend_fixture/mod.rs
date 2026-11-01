@@ -544,6 +544,7 @@ pub(super) fn capture(session: &Session) {
         &ui,
         App {
             launcher: Some(Arc::new(GameLauncher::new(session.host()))),
+            game: None,
             mods: None,
             trainer: true,
             trainer_backend: Some(handle.clone()),
@@ -1295,6 +1296,7 @@ pub(super) fn capture_waiting(session: &Session) {
         &ui,
         App {
             launcher: Some(Arc::new(GameLauncher::new(session.host()))),
+            game: None,
             mods: None,
             trainer: true,
             trainer_backend: Some(handle.clone()),
@@ -1399,6 +1401,7 @@ pub(super) fn capture_logs(session: &Session) {
         &ui,
         App {
             launcher: None,
+            game: None,
             mods: None,
             trainer: true,
             trainer_backend: Some(handle.clone()),
@@ -1539,6 +1542,7 @@ pub(super) fn capture_profiles(session: &Session) {
         &ui,
         App {
             launcher: Some(Arc::new(GameLauncher::new(session.host()))),
+            game: None,
             mods: None,
             trainer: true,
             trainer_backend: Some(handle.clone()),

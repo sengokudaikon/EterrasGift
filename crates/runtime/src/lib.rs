@@ -28,7 +28,7 @@ use tokio_util::task::TaskTracker;
 use tokio_util::task::task_tracker::TaskTrackerToken;
 
 pub use tokio::task::{JoinError, JoinHandle};
-pub use tokio_util::sync::CancellationToken;
+pub use tokio_util::sync::{CancellationToken, DropGuard};
 
 /// How long the close waits for what no task accounts for: Tokio's own blocking reads of a child's pipes, which a stray
 /// descendant can hold open for as long as it runs. All accepted work has ended by then.

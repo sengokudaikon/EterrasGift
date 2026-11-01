@@ -10,6 +10,7 @@
 
 use eg_companion::game::install::GameInstall;
 use eg_companion::game::process::RunningGame;
+use eg_companion::game::watch::GameWatch;
 use eg_companion::launch::host::{GameHost, LaunchError, LaunchMode, LaunchOutcome};
 use eg_companion::launch::launcher::GameLauncher;
 use eg_companion::launch::loader::ModLoaderState;
@@ -176,6 +177,9 @@ struct Session {
     window: Rc<MinimalSoftwareWindow>,
     out: PathBuf,
     data: tempfile::TempDir,
+    tasks: eg_runtime::Tasks,
+    /// Windows opened from here on watch the game for real, off the UI thread, instead of inline.
+    live_watch: std::cell::Cell<bool>,
 }
 
 /// The capture process cannot execute source builds or evaluation, even if discovery finds an unexpected project.
@@ -244,6 +248,7 @@ impl Session {
             &ui,
             App {
                 launcher: None,
+                game: None,
                 mods: None,
                 settings: SettingsPage::new(service, vec![eg_ui::pages::settings::trainer::descriptor(true)], None, None),
                 trainer: true,
@@ -271,6 +276,7 @@ impl Session {
             &ui,
             App {
                 launcher: None,
+                game: None,
                 mods: None,
                 settings: SettingsPage::new(service, vec![eg_ui::pages::settings::trainer::descriptor(true)], None, None).link(eg_ui::pages::settings::trainer::ID, link),
                 trainer: true,
@@ -296,8 +302,10 @@ impl Session {
         let found = host.find_install().map(|install| install.executable);
         let settings = SettingsPage::new(SettingsService::inline(store), vec![eg_ui::pages::settings::trainer::descriptor(trainer_on)], found, None);
         let ui = MainWindow::new().expect("create MainWindow");
+        let launcher = Arc::new(GameLauncher::new(host));
         let app = App {
-            launcher: Some(Arc::new(GameLauncher::new(host))),
+            game: self.live_watch.get().then(|| GameWatch::start(launcher.clone(), &self.tasks)),
+            launcher: Some(launcher),
             mods: None,
             settings,
             trainer: trainer_on,
@@ -381,6 +389,7 @@ impl Session {
             &ui,
             App {
                 launcher: Some(launcher.clone()),
+                game: None,
                 mods: Some(ModsPage {
                     worker: fixture.worker.clone(),
                     launcher,
@@ -518,9 +527,15 @@ fn main() {
     let out = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../artifacts/captures");
     std::fs::create_dir_all(&out).expect("create artifacts/captures");
     let data = tempfile::tempdir().expect("a folder for the captures' own data");
-    let session = Session { window, out, data };
     let runtime = eg_runtime::Runtime::start().expect("the captures' background work");
     eg_ui::background::install(runtime.tasks());
+    let session = Session {
+        window,
+        out,
+        data,
+        tasks: runtime.tasks(),
+        live_watch: std::cell::Cell::new(false),
+    };
     // No event loop runs here, so work the pages hand to a thread runs at once instead.
     eg_ui::background::run_inline(true);
     if std::env::args().any(|arg| arg == "--logs") {
@@ -740,6 +755,18 @@ fn main() {
     assert!(!ui.global::<HomeState>().get_can_start(), "a start holds the buttons");
     session.capture(&ui, "home-with-mods-starting");
     wait_for("the start with mods", || ui.global::<HomeState>().get_can_start());
+    // The real watch, off the UI thread: Home hears the first look, then a change, with no timer of its own.
+    session.live_watch.set(true);
+    let host = session.host();
+    host.with(|game| {
+        game.running = running();
+        game.readiness = GameReadiness::Offline;
+    });
+    let ui = session.open_on(host.clone(), true, 1100, 700);
+    wait_for("the first look", || ui.global::<HomeState>().get_phase() == ViewPhase::Bloom);
+    host.with(|game| game.running = None);
+    wait_for("the game closing", || ui.global::<HomeState>().get_phase() == ViewPhase::Wilted);
+    session.live_watch.set(false);
     eg_ui::background::run_inline(true);
     // Without MelonLoader beside the game, Play offline with mods waits and its tip says why.
     let host = session.host();
@@ -756,6 +783,7 @@ fn main() {
         &ui,
         App {
             launcher: None,
+            game: None,
             mods: None,
             settings: SettingsPage::new(service, vec![eg_ui::pages::settings::trainer::descriptor(true)], None, None),
             trainer: true,
@@ -800,6 +828,7 @@ fn main() {
         &ui,
         App {
             launcher: None,
+            game: None,
             mods: None,
             settings,
             trainer: true,

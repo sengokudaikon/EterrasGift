@@ -19,6 +19,7 @@ mod translations {
     include!(concat!(env!("OUT_DIR"), "/translations.rs"));
 }
 
+use eg_companion::game::watch::GameWatch;
 use eg_companion::launch::launcher::GameLauncher;
 use pages::settings::SettingsPage;
 use pages::{forge, home, mods, settings, trainer};
@@ -30,6 +31,8 @@ use std::sync::Arc;
 pub struct App {
     /// Starts the game from Home; None in a run without one (tests), and then Home shows the companion's own title.
     pub launcher: Option<Arc<GameLauncher>>,
+    /// Home's look at the game. With a launcher but no watch, Home looks only when it asks (tests).
+    pub game: Option<GameWatch>,
     pub settings: SettingsPage,
     pub mods: Option<mods::ModsPage>,
     /// This run has the trainer: its pages, its connection block and its Settings groups.
@@ -72,7 +75,7 @@ pub fn install(window: &MainWindow, app: App) -> Installed {
     navigation.navigate(app.start);
     let shell = shell::bind(window, navigation);
     let decorations = decorations::Decorations::install(window);
-    home::bind(window, app.launcher, &shell, decorations.clone());
+    home::bind(window, app.launcher, app.game, &shell, decorations.clone());
     let before_close = app.mods.map(|page| mods::bind(window, page, &shell));
     let trainer_backend = app.trainer_backend.filter(|_| app.trainer);
     pages::logs::bind(window, app.logs, trainer_backend.clone(), &shell);

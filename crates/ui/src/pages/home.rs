@@ -1,54 +1,57 @@
-//! Home in the window: `HomeModel` (eg-companion) behind the `HomeState` global. Home follows the game only while it
-//! shows, every `GameLauncher::WATCH_INTERVAL`; another page costs nothing. Eterra's tree follows the game's phase, and
-//! ash drifts while the game is on its way in.
+//! Home in the window: `HomeModel` (eg-companion) behind the `HomeState` global. Home follows the game's [`GameWatch`] only
+//! while it shows; another page costs nothing. Eterra's tree follows the game's phase, and ash drifts while the game is on
+//! its way in.
 
 use crate::background;
 use crate::decorations::{Ash, Decorations};
 use crate::shell::{Page, ShellHandle};
 use crate::{BloomPhase as ViewPhase, HomeState, LaunchMode as ViewMode, MainWindow};
+use eg_companion::game::watch::{Following, GameSeen, GameWatch};
 use eg_companion::home::HomeModel;
 use eg_companion::launch::host::LaunchMode;
 use eg_companion::launch::launcher::GameLauncher;
 use eg_core::bloom::BloomPhase;
-use slint::{ComponentHandle, Timer, TimerMode, Weak};
+use slint::{ComponentHandle, Weak};
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::sync::Arc;
+use tokio::sync::watch;
 
 struct Home {
     launcher: Arc<GameLauncher>,
     model: RefCell<HomeModel>,
     window: Weak<MainWindow>,
-    watch_timer: Timer,
+    game: GameWatch,
+    following: RefCell<Option<Following>>,
+    /// The newest look not yet shown.
+    latest: RefCell<watch::Receiver<GameSeen>>,
     decorations: Rc<Decorations<MainWindow>>,
     /// Home shows: it follows the game and owns the decorations only then.
     visible: Cell<bool>,
     /// Home is coming into view: the tree is shown where it is, without blooming there.
     entering: Cell<bool>,
-    /// A look at the game is on its way back from its thread; another waits for it rather than overlapping it.
-    looking: Cell<bool>,
-    /// A look asked for while one was out, and whether it reads MelonLoader's state too.
-    again: Cell<Option<bool>>,
 }
 
 /// `launcher` is None in a run that has none (tests): Home then shows the companion's own title.
-pub fn bind(window: &MainWindow, launcher: Option<Arc<GameLauncher>>, shell: &ShellHandle, decorations: Rc<Decorations<MainWindow>>) {
+pub fn bind(window: &MainWindow, launcher: Option<Arc<GameLauncher>>, game: Option<GameWatch>, shell: &ShellHandle, decorations: Rc<Decorations<MainWindow>>) {
     let state = window.global::<HomeState>();
     state.set_has_launcher(launcher.is_some());
     let Some(launcher) = launcher else {
         return;
     };
+    let game = game.unwrap_or_else(|| GameWatch::inline(launcher.clone()));
     let home = Rc::new(Home {
         launcher,
         model: RefCell::new(HomeModel::default()),
         window: window.as_weak(),
-        watch_timer: Timer::default(),
+        latest: RefCell::new(game.subscribe()),
+        game,
+        following: RefCell::new(None),
         decorations,
         visible: Cell::new(false),
         entering: Cell::new(true),
-        looking: Cell::new(false),
-        again: Cell::new(None),
     });
+    home.listen();
     state.on_start({
         let home = home.clone();
         move |mode| home.play(mode)
@@ -70,63 +73,48 @@ pub fn bind(window: &MainWindow, launcher: Option<Arc<GameLauncher>>, shell: &Sh
 }
 
 impl Home {
-    /// Looks at the game every `WATCH_INTERVAL` while Home shows; on another page the timer stops, so it costs nothing.
-    fn follow(self: &Rc<Self>, visible: bool) {
-        self.visible.set(visible);
-        if !visible {
-            self.watch_timer.stop();
-            return;
-        }
-        // The window's start callback keeps Home; the timer only holds it weakly.
+    /// Shows each look as it comes. The window's start callback keeps Home; this only holds it weakly.
+    fn listen(self: &Rc<Self>) {
+        let mut updates = self.game.subscribe();
         let home = Rc::downgrade(self);
-        self.watch_timer.start(TimerMode::Repeated, GameLauncher::WATCH_INTERVAL, move || {
-            if let Some(home) = home.upgrade() {
-                home.watch();
+        // Fails only where no event loop can ever run, and then nothing could show a look anyway.
+        let _ = slint::spawn_local(async move {
+            while updates.changed().await.is_ok() {
+                let Some(home) = home.upgrade() else {
+                    return;
+                };
+                home.take_latest();
             }
         });
     }
 
+    /// Follows the game while Home shows; on another page the watch stops looking, so it costs nothing.
+    fn follow(&self, visible: bool) {
+        self.visible.set(visible);
+        *self.following.borrow_mut() = visible.then(|| self.game.follow());
+    }
+
     /// Reads whether MelonLoader is beside the game and whether the game runs.
-    fn refresh(self: &Rc<Self>) {
-        self.look(true);
+    fn refresh(&self) {
+        self.game.refresh();
+        self.take_latest();
     }
 
-    /// Looks at the game again: cheap enough to repeat while Home shows.
-    fn watch(self: &Rc<Self>) {
-        self.look(false);
-    }
-
-    /// Finding the install reads Steam's registry and library files, and the watch takes a process snapshot and reads
-    /// Player.log: all of it on a thread of its own, so a slow disk never holds the window.
-    fn look(self: &Rc<Self>, loader: bool) {
-        if self.looking.replace(true) {
-            self.again.set(Some(loader || self.again.get().unwrap_or(false)));
+    fn take_latest(&self) {
+        let mut latest = self.latest.borrow_mut();
+        if !latest.has_changed().unwrap_or(false) {
             return;
         }
-        let launcher = self.launcher.clone();
-        let home = self.clone();
-        background::run(
-            move || {
-                let loader = loader.then(|| launcher.read_mod_loader());
-                let running = launcher.host().find_running();
-                let phase = HomeModel::phase_of(running.as_ref(), |game| launcher.host().read_log(game).readiness);
-                (loader, phase)
-            },
-            move |(loader, phase)| {
-                home.looking.set(false);
-                {
-                    let mut model = home.model.borrow_mut();
-                    if let Some(loader) = loader {
-                        model.set_mod_loader(loader);
-                    }
-                    model.set_phase(phase);
-                }
-                home.show();
-                if let Some(loader) = home.again.take() {
-                    home.look(loader);
-                }
-            },
-        );
+        let seen = *latest.borrow_and_update();
+        drop(latest);
+        {
+            let mut model = self.model.borrow_mut();
+            if let Some(loader) = seen.loader {
+                model.set_mod_loader(loader);
+            }
+            model.set_phase(seen.phase());
+        }
+        self.show();
     }
 
     fn play(self: &Rc<Self>, mode: ViewMode) {
