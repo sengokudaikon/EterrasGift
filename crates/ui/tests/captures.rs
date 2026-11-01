@@ -905,7 +905,8 @@ fn main() {
     // A blocked worker never blocks pointer input or navigation. The real toggle queues behind it.
     let folder = session.folder();
     let file = folder.join("settings.json");
-    let service = SettingsService::new(SettingsStore::open(&folder.join("app"), &file, &[]));
+    let runtime = eg_runtime::Runtime::start().expect("the settings writer's runtime");
+    let service = SettingsService::new(SettingsStore::open(&folder.join("app"), &file, &[]), &runtime.tasks());
     let ui = session.open_settings(service.clone());
     let (release, waiting) = std::sync::mpsc::channel();
     service

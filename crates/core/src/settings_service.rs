@@ -4,11 +4,12 @@
 use crate::json;
 use crate::paths::AppPaths;
 use crate::settings::{AppSettings, Locations, SettingsStore};
+use eg_runtime::{CancellationToken, JoinHandle, Tasks};
 use serde_json::{Map, Value};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Condvar, Mutex, mpsc};
-use std::thread::{self, JoinHandle};
+use std::sync::{Arc, Mutex};
+use tokio::sync::{mpsc, watch};
 
 type Patch = Box<dyn FnOnce(&mut Map<String, Value>) -> Result<(), String> + Send>;
 
@@ -110,28 +111,21 @@ impl Snapshot {
     }
 }
 
-enum Command {
-    Save(u64, Change),
-    Stop,
-}
-
 struct Control {
-    sender: Option<mpsc::Sender<Command>>,
+    sender: Option<mpsc::UnboundedSender<(u64, Change)>>,
     inline: Option<SettingsStore>,
     closed: bool,
     paused: bool,
 }
 
 struct Shared {
-    snapshot: Mutex<Snapshot>,
-    completed: Condvar,
+    snapshot: watch::Sender<Snapshot>,
     listeners: Mutex<Vec<Box<dyn Fn() + Send>>>,
 }
 
 impl Shared {
-    /// Wakes waiters and listeners once a change has completed. Call it with the snapshot unlocked.
+    /// Wakes listeners once a change has completed.
     fn completed(&self) {
-        self.completed.notify_all();
         for listener in self.listeners.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).iter() {
             listener();
         }
@@ -141,59 +135,45 @@ impl Shared {
 struct Owner {
     control: Mutex<Control>,
     shared: Arc<Shared>,
+    tasks: Option<Tasks>,
     worker: Mutex<Option<JoinHandle<()>>>,
-}
-
-impl Drop for Owner {
-    fn drop(&mut self) {
-        if let Some(sender) = self.control.get_mut().unwrap().sender.take() {
-            let _ = sender.send(Command::Stop);
-        }
-        if let Some(worker) = self.worker.get_mut().unwrap().take() {
-            let _ = worker.join();
-        }
-    }
 }
 
 #[derive(Clone)]
 pub struct SettingsService(Arc<Owner>);
 
 impl SettingsService {
-    pub fn new(store: SettingsStore) -> Self {
-        Self::start(store, false)
+    /// The writer runs on `tasks`. Dropping every handle lets it finish what was accepted and end; the runtime waits for
+    /// that, and its close also ends a writer nobody closed. [`SettingsService::close`] is the barrier to use.
+    pub fn new(store: SettingsStore, tasks: &Tasks) -> Self {
+        Self::start(store, Some(tasks.clone()))
     }
 
     /// Deterministic fixture mode; executes exactly the same command path without a worker.
     pub fn inline(store: SettingsStore) -> Self {
-        Self::start(store, true)
+        Self::start(store, None)
     }
 
-    fn start(store: SettingsStore, inline: bool) -> Self {
+    fn start(store: SettingsStore, tasks: Option<Tasks>) -> Self {
+        let (snapshot, _) = watch::channel(Snapshot {
+            submitted: 0,
+            completed: 0,
+            persisted_revision: 0,
+            locations: None,
+            pending_location: None,
+            outcome: if store.unreadable() { SaveOutcome::MemoryOnly } else { SaveOutcome::Persisted },
+            store: SettingsView::from(&store),
+        });
         let shared = Arc::new(Shared {
-            snapshot: Mutex::new(Snapshot {
-                submitted: 0,
-                completed: 0,
-                persisted_revision: 0,
-                locations: None,
-                pending_location: None,
-                outcome: if store.unreadable() { SaveOutcome::MemoryOnly } else { SaveOutcome::Persisted },
-                store: SettingsView::from(&store),
-            }),
-            completed: Condvar::new(),
+            snapshot,
             listeners: Mutex::default(),
         });
-        let (sender, receiver) = mpsc::channel();
-        let worker = if inline {
-            None
-        } else {
-            let shared = shared.clone();
-            let mut store = store.clone();
-            Some(thread::spawn(move || {
-                while let Ok(Command::Save(revision, change)) = receiver.recv() {
-                    execute(&shared, &mut store, revision, change);
-                }
-            }))
-        };
+        let (sender, receiver) = mpsc::unbounded_channel();
+        // Refused only on a runtime already closing: with the receiver gone, every submit then reports the fault.
+        let worker = tasks
+            .as_ref()
+            .and_then(|tasks| tasks.spawn(serve(shared.clone(), store.clone(), receiver, tasks.token())).ok());
+        let inline = tasks.is_none();
         Self(Arc::new(Owner {
             control: Mutex::new(Control {
                 sender: (!inline).then_some(sender),
@@ -202,6 +182,7 @@ impl SettingsService {
                 paused: false,
             }),
             shared,
+            tasks,
             worker: Mutex::new(worker),
         }))
     }
@@ -212,22 +193,22 @@ impl SettingsService {
         if control.closed || control.paused {
             return Err("Settings are closing; no new changes were accepted.".into());
         }
-        let revision = {
-            let mut snapshot = self.0.shared.snapshot.lock().unwrap();
-            if matches!(snapshot.outcome, SaveOutcome::Faulted(_)) {
-                return Err("The settings writer stopped after a fault.".into());
-            }
+        if matches!(self.0.shared.snapshot.borrow().outcome, SaveOutcome::Faulted(_)) {
+            return Err("The settings writer stopped after a fault.".into());
+        }
+        // Only here, under the admission lock, does `submitted` change.
+        let mut revision = 0;
+        self.0.shared.snapshot.send_modify(|snapshot| {
             snapshot.submitted += 1;
-            snapshot.submitted
-        };
+            revision = snapshot.submitted;
+        });
         if let Some(store) = &mut control.inline {
             execute(&self.0.shared, store, revision, change);
-        } else if control.sender.as_ref().unwrap().send(Command::Save(revision, change)).is_err() {
-            {
-                let mut snapshot = self.0.shared.snapshot.lock().unwrap();
+        } else if control.sender.as_ref().unwrap().send((revision, change)).is_err() {
+            self.0.shared.snapshot.send_modify(|snapshot| {
                 snapshot.completed = revision;
                 snapshot.outcome = SaveOutcome::Faulted("The settings worker stopped.".into());
-            }
+            });
             self.0.shared.completed();
         }
         Ok(revision)
@@ -240,19 +221,24 @@ impl SettingsService {
         self.0.shared.listeners.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).push(Box::new(listener));
     }
 
+    /// Every change to the snapshot, for a UI to await on its own thread. It needs no runtime to be awaited.
+    pub fn subscribe(&self) -> watch::Receiver<Snapshot> {
+        self.0.shared.snapshot.subscribe()
+    }
+
     pub fn snapshot(&self) -> Snapshot {
-        self.0.shared.snapshot.lock().unwrap().clone()
+        self.0.shared.snapshot.borrow().clone()
     }
 
     pub fn is_saving(&self) -> bool {
-        self.0.shared.snapshot.lock().unwrap().saving()
+        self.0.shared.snapshot.borrow().saving()
     }
 
     /// A nonblocking close gate: once idle, pause admission atomically with the observation.
     /// Call `resume` if the window stays open to show a failed save; otherwise call `close` after the event loop.
     pub fn pause_when_idle(&self) -> bool {
         let mut control = self.0.control.lock().unwrap();
-        if self.0.shared.snapshot.lock().unwrap().saving() {
+        if self.0.shared.snapshot.borrow().saving() {
             return false;
         }
         control.paused = true;
@@ -265,7 +251,7 @@ impl SettingsService {
 
     /// Cheap polling while idle: no JSON or path copies unless a command has finished.
     pub fn snapshot_after(&self, completed: u64) -> Option<Snapshot> {
-        let snapshot = self.0.shared.snapshot.lock().unwrap();
+        let snapshot = self.0.shared.snapshot.borrow();
         (snapshot.completed > completed).then(|| snapshot.clone())
     }
 
@@ -278,8 +264,15 @@ impl SettingsService {
 
     /// A barrier for tests and shutdown; do not call from an interactive UI callback.
     pub fn wait(&self, revision: u64) -> Snapshot {
-        let snapshot = self.0.shared.snapshot.lock().unwrap();
-        self.0.shared.completed.wait_while(snapshot, |snapshot| snapshot.completed < revision).unwrap().clone()
+        let Some(tasks) = &self.0.tasks else {
+            // Inline work has already completed.
+            return self.snapshot();
+        };
+        let mut snapshots = self.subscribe();
+        tasks.block_on(async {
+            let snapshot = snapshots.wait_for(|snapshot| snapshot.completed >= revision).await;
+            snapshot.expect("the service holds the sender").clone()
+        })
     }
 
     /// Stops admission, drains every accepted save, then joins the worker. Does not silently retry failed writes.
@@ -287,12 +280,10 @@ impl SettingsService {
         {
             let mut control = self.0.control.lock().unwrap();
             control.closed = true;
-            if let Some(sender) = control.sender.take() {
-                let _ = sender.send(Command::Stop);
-            }
+            control.sender = None;
         }
-        if let Some(worker) = self.0.worker.lock().unwrap().take() {
-            let _ = worker.join();
+        if let (Some(worker), Some(tasks)) = (self.0.worker.lock().unwrap().take(), &self.0.tasks) {
+            let _ = tasks.block_on(worker);
         }
         self.snapshot()
     }
@@ -306,7 +297,7 @@ pub struct ModuleSettings {
 
 impl ModuleSettings {
     pub fn read(&self) -> Option<Value> {
-        self.service.0.shared.snapshot.lock().unwrap().store.desired().module_settings.get(&self.id).cloned()
+        self.service.0.shared.snapshot.borrow().store.desired().module_settings.get(&self.id).cloned()
     }
 
     /// The module validates its own values, on the latest slice when the command reaches the writer.
@@ -328,10 +319,47 @@ impl ModuleSettings {
     }
 }
 
+/// The one writer: saves in submission order, each on the blocking pool, and everything accepted is saved before it ends.
+/// It ends when every sender is gone, or when the runtime closes around a service nobody closed.
+async fn serve(shared: Arc<Shared>, store: SettingsStore, mut commands: mpsc::UnboundedReceiver<(u64, Change)>, closing: CancellationToken) {
+    let mut store = Some(store);
+    while let Some((revision, change)) = next(&mut commands, &closing).await {
+        let Some(mut owned) = store.take() else {
+            shared.snapshot.send_modify(|snapshot| snapshot.completed = revision);
+            shared.completed();
+            continue;
+        };
+        let writer = shared.clone();
+        let saved = tokio::task::spawn_blocking(move || {
+            execute(&writer, &mut owned, revision, change);
+            owned
+        })
+        .await;
+        match saved {
+            Ok(owned) => store = Some(owned),
+            // Only a listener can get here: `execute` turns a panic in the change itself into its outcome.
+            Err(_) => shared.snapshot.send_modify(|snapshot| {
+                snapshot.completed = revision;
+                snapshot.outcome = SaveOutcome::Faulted("The settings worker panicked; no further changes will be written.".into());
+            }),
+        }
+    }
+}
+
+async fn next(commands: &mut mpsc::UnboundedReceiver<(u64, Change)>, closing: &CancellationToken) -> Option<(u64, Change)> {
+    if !commands.is_closed() {
+        if let Some(next) = closing.run_until_cancelled(commands.recv()).await {
+            return next;
+        }
+        commands.close();
+    }
+    commands.recv().await
+}
+
 fn execute(shared: &Shared, store: &mut SettingsStore, revision: u64, change: Change) {
     // After a panic no further mutations run. Queued commands still receive terminal observations for draining.
-    if matches!(shared.snapshot.lock().unwrap().outcome, SaveOutcome::Faulted(_)) {
-        shared.snapshot.lock().unwrap().completed = revision;
+    if matches!(shared.snapshot.borrow().outcome, SaveOutcome::Faulted(_)) {
+        shared.snapshot.send_modify(|snapshot| snapshot.completed = revision);
         shared.completed();
         return;
     }
@@ -340,13 +368,12 @@ fn execute(shared: &Shared, store: &mut SettingsStore, revision: u64, change: Ch
         let desired = store.plan(|candidate| apply(candidate, change))?;
         store.stage(desired, locations);
         // Immediate module choices become observable before disk IO completes. Persisted/active state stays separate.
-        {
-            let mut snapshot = shared.snapshot.lock().unwrap();
+        shared.snapshot.send_modify(|snapshot| {
             snapshot.store = SettingsView::from(&*store);
             if locations {
                 snapshot.pending_location = Some(revision);
             }
-        }
+        });
         store.persist(locations).map_err(|error| error.to_string())
     }));
     let outcome = match result {
@@ -355,27 +382,27 @@ fn execute(shared: &Shared, store: &mut SettingsStore, revision: u64, change: Ch
         Ok(Err(error)) => SaveOutcome::Failed(error),
         Err(_) => SaveOutcome::Faulted("The settings worker panicked; no further changes will be written.".into()),
     };
-    let mut snapshot = shared.snapshot.lock().unwrap();
-    snapshot.completed = revision;
-    if outcome == SaveOutcome::Persisted {
-        snapshot.persisted_revision = revision;
-        if let Some(pending) = snapshot.pending_location.take() {
-            snapshot.locations = Some((pending, Ok(store.saved().clone())));
+    shared.snapshot.send_modify(|snapshot| {
+        snapshot.completed = revision;
+        if outcome == SaveOutcome::Persisted {
+            snapshot.persisted_revision = revision;
+            if let Some(pending) = snapshot.pending_location.take() {
+                snapshot.locations = Some((pending, Ok(store.saved().clone())));
+            }
         }
-    }
-    if locations {
-        snapshot.locations = Some((
-            revision,
-            match &outcome {
-                SaveOutcome::Persisted => Ok(store.saved().clone()),
-                SaveOutcome::Failed(error) | SaveOutcome::Faulted(error) => Err(error.clone()),
-                SaveOutcome::MemoryOnly => unreachable!("explicit location save writes or fails"),
-            },
-        ));
-    }
-    snapshot.outcome = outcome;
-    snapshot.store = SettingsView::from(&*store);
-    drop(snapshot);
+        if locations {
+            snapshot.locations = Some((
+                revision,
+                match &outcome {
+                    SaveOutcome::Persisted => Ok(store.saved().clone()),
+                    SaveOutcome::Failed(error) | SaveOutcome::Faulted(error) => Err(error.clone()),
+                    SaveOutcome::MemoryOnly => unreachable!("explicit location save writes or fails"),
+                },
+            ));
+        }
+        snapshot.outcome = outcome;
+        snapshot.store = SettingsView::from(&*store);
+    });
     shared.completed();
 }
 

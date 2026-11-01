@@ -1,11 +1,17 @@
 use eg_core::settings::{Locations, SettingsStore};
 use eg_core::settings_service::{Change, SaveOutcome, SettingsService};
+use eg_runtime::{Runtime, Tasks};
 use serde_json::json;
 use std::fs;
-use std::sync::mpsc;
+use std::sync::{LazyLock, mpsc};
 use std::time::Duration;
 
 const DEADLINE: Duration = Duration::from_secs(5);
+
+fn tasks() -> Tasks {
+    static RUNTIME: LazyLock<Runtime> = LazyLock::new(|| Runtime::start().unwrap());
+    RUNTIME.tasks()
+}
 
 #[test]
 fn an_idle_close_gate_atomically_stops_admission_and_can_resume_after_failure() {
@@ -51,7 +57,33 @@ fn listeners_hear_each_completion_after_it_is_observable() {
 }
 
 fn service(temp: &std::path::Path) -> SettingsService {
-    SettingsService::new(SettingsStore::open(&temp.join("app"), &temp.join("settings.json"), &[]))
+    SettingsService::new(SettingsStore::open(&temp.join("app"), &temp.join("settings.json"), &[]), &tasks())
+}
+
+#[test]
+fn the_runtime_finishes_accepted_saves_of_a_service_nobody_closed() {
+    let temp = tempfile::tempdir().unwrap();
+    let runtime = Runtime::start().unwrap();
+    let service = SettingsService::new(SettingsStore::open(&temp.path().join("app"), &temp.path().join("settings.json"), &[]), &runtime.tasks());
+    let ticket = service.module("editor").set_bool("automatic", true).unwrap();
+    assert!(!runtime.shutdown());
+    assert_eq!(service.snapshot().completed, ticket);
+    assert_eq!(service.snapshot().outcome, SaveOutcome::Persisted);
+    // Refused, and a waiter is not left hanging.
+    let late = service.module("editor").set_bool("automatic", false).unwrap();
+    assert!(matches!(service.wait(late).outcome, SaveOutcome::Faulted(_)));
+}
+
+#[test]
+fn a_subscriber_sees_each_completion() {
+    let temp = tempfile::tempdir().unwrap();
+    let service = service(temp.path());
+    let mut snapshots = service.subscribe();
+    let ticket = service.module("editor").set_bool("automatic", true).unwrap();
+    tasks()
+        .block_on(async { snapshots.wait_for(|snapshot| snapshot.completed == ticket).await.map(|_| ()) })
+        .unwrap();
+    service.close();
 }
 
 #[test]
@@ -313,7 +345,7 @@ fn failed_migration_bookkeeping_keeps_the_marker_for_the_next_start() {
         assert!(!store.has_pending_write());
         assert_eq!(fs::read(destination.join("first.txt")).unwrap(), b"original");
         drop(locked);
-        let service = SettingsService::new(store);
+        let service = SettingsService::new(store, &tasks());
         let ticket = service.module("editor").set_bool("automatic", false).unwrap();
         assert_eq!(service.wait(ticket).outcome, SaveOutcome::Persisted);
         let saved: serde_json::Value = serde_json::from_slice(&fs::read(&file).unwrap()).unwrap();

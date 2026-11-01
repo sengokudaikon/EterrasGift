@@ -140,6 +140,67 @@ fn a_child_token_stops_only_its_own_work() {
 }
 
 #[test]
+fn a_scope_closes_on_its_own_and_the_rest_carries_on() {
+    let runtime = Runtime::start().unwrap();
+    let tasks = runtime.tasks();
+    let scope = tasks.scope();
+    let (entered, started) = mpsc::channel();
+    let (release, wait) = mpsc::channel::<()>();
+    let token = scope.token();
+    let (seen, result) = mpsc::channel();
+    scope
+        .spawn_blocking(move || {
+            entered.send(()).unwrap();
+            wait.recv_timeout(PATIENCE).unwrap();
+            seen.send(token.is_cancelled()).unwrap();
+        })
+        .unwrap();
+    started.recv_timeout(PATIENCE).unwrap();
+    let outer = tasks.token();
+    let closing = {
+        let scope = scope.clone();
+        let tasks = tasks.clone();
+        thread::spawn(move || tasks.block_on(scope.close()))
+    };
+    await_without_tokio(scope.token().cancelled());
+    assert!(!closing.is_finished(), "the close waits for the scope's started work");
+    assert_eq!(scope.spawn_blocking(|| ()).err(), Some(Closed));
+    assert!(!outer.is_cancelled());
+    assert_eq!(await_without_tokio(tasks.spawn_blocking(|| 1).unwrap()).unwrap(), 1);
+    release.send(()).unwrap();
+    closing.join().unwrap();
+    assert!(result.recv_timeout(PATIENCE).unwrap());
+    tasks.block_on(scope.close());
+    assert!(!runtime.shutdown());
+}
+
+#[test]
+fn the_runtime_waits_for_a_scope_nobody_closed_and_hears_its_panics() {
+    let runtime = Runtime::start().unwrap();
+    let outer = runtime.tasks().scope();
+    let scope = outer.scope();
+    let (entered, started) = mpsc::channel();
+    let finished = Arc::new(AtomicBool::new(false));
+    let flag = finished.clone();
+    let token = scope.token();
+    scope
+        .spawn_blocking(move || {
+            entered.send(()).unwrap();
+            while !token.is_cancelled() {
+                thread::sleep(Duration::from_millis(1));
+            }
+            flag.store(true, Ordering::Release);
+        })
+        .unwrap();
+    started.recv_timeout(PATIENCE).unwrap();
+    let task = scope.spawn_blocking(|| -> () { panic!("fixture panic") }).unwrap();
+    assert!(await_without_tokio(task).unwrap_err().is_panic());
+    assert!(outer.faulted());
+    assert!(runtime.shutdown());
+    assert!(finished.load(Ordering::Acquire));
+}
+
+#[test]
 fn dropping_the_runtime_is_the_same_barrier() {
     let runtime = Runtime::start().unwrap();
     let tasks = runtime.tasks();

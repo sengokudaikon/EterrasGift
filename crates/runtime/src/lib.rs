@@ -25,6 +25,7 @@ use std::thread;
 use std::time::Duration;
 use tokio::runtime::{Builder, Handle};
 use tokio_util::task::TaskTracker;
+use tokio_util::task::task_tracker::TaskTrackerToken;
 
 pub use tokio::task::{JoinError, JoinHandle};
 pub use tokio_util::sync::CancellationToken;
@@ -49,10 +50,11 @@ impl Runtime {
         let tasks = Tasks {
             handle: runtime.handle().clone(),
             tracker: TaskTracker::new(),
-            root: CancellationToken::new(),
+            token: CancellationToken::new(),
+            ancestors: Vec::new(),
             faulted: Arc::default(),
         };
-        let (root, tracker) = (tasks.root.clone(), tasks.tracker.clone());
+        let (root, tracker) = (tasks.token.clone(), tasks.tracker.clone());
         let reactor = thread::Builder::new().name("reactor".into()).spawn(move || {
             runtime.block_on(async {
                 root.cancelled().await;
@@ -76,7 +78,7 @@ impl Runtime {
     }
 
     fn close(&mut self) {
-        self.tasks.root.cancel();
+        self.tasks.token.cancel();
         if let Some(reactor) = self.reactor.take()
             && reactor.join().is_err()
         {
@@ -92,11 +94,16 @@ impl Drop for Runtime {
 }
 
 /// Starts work on the [`Runtime`]. Cheap to clone, and usable from any thread, including the UI's.
+///
+/// A [`scope`](Tasks::scope) is the same handle for a part of the app that must end before the rest does: its owner
+/// [`close`](Tasks::close)s it at its place in the app's shutdown, and the runtime still waits for anything in it.
 #[derive(Clone)]
 pub struct Tasks {
     handle: Handle,
     tracker: TaskTracker,
-    root: CancellationToken,
+    token: CancellationToken,
+    /// The scopes around this one, whose closes also wait for its work.
+    ancestors: Vec<TaskTracker>,
     faulted: Arc<AtomicBool>,
 }
 
@@ -104,10 +111,10 @@ impl Tasks {
     /// Runs synchronous work on the blocking pool.
     pub fn spawn_blocking<T: Send + 'static>(&self, work: impl FnOnce() -> T + Send + 'static) -> Result<JoinHandle<T>, Closed> {
         self.admit()?;
-        let guard = self.guard();
+        let held = self.hold();
         Ok(self.tracker.spawn_blocking_on(
             move || {
-                let _guard = guard;
+                let _held = held;
                 work()
             },
             &self.handle,
@@ -122,10 +129,10 @@ impl Tasks {
         F::Output: Send + 'static,
     {
         self.admit()?;
-        let guard = self.guard();
+        let held = self.hold();
         Ok(self.tracker.spawn_on(
             async move {
-                let _guard = guard;
+                let _held = held;
                 future.await
             },
             &self.handle,
@@ -138,33 +145,61 @@ impl Tasks {
         self.handle.block_on(future)
     }
 
-    /// Cancelled when the runtime closes. Cancelling it, or a child of it, stops only the work that holds that token.
+    /// Cancelled when this scope or the runtime closes. Cancelling it, or a child of it, stops only the work that holds
+    /// that token.
     pub fn token(&self) -> CancellationToken {
-        self.root.child_token()
+        self.token.child_token()
     }
 
-    /// Whether any task has panicked. A `JoinHandle` tells whoever awaits it; this also covers work nobody awaited, or
+    /// A part of this scope that closes on its own. Panics in it count as this scope's.
+    pub fn scope(&self) -> Tasks {
+        let mut ancestors = self.ancestors.clone();
+        ancestors.push(self.tracker.clone());
+        Tasks {
+            handle: self.handle.clone(),
+            tracker: TaskTracker::new(),
+            token: self.token.child_token(),
+            ancestors,
+            faulted: self.faulted.clone(),
+        }
+    }
+
+    /// Cancels this scope's tokens, refuses new work in it and waits for its accepted work to end. Calling it again, or
+    /// from several places at once, waits the same way. Other scopes carry on.
+    pub async fn close(&self) {
+        self.token.cancel();
+        self.tracker.close();
+        self.tracker.wait().await;
+    }
+
+    /// Whether any task in the runtime has panicked. A `JoinHandle` tells whoever awaits it; this also covers work nobody awaited, or
     /// that ended after the event loop stopped polling for it.
     pub fn faulted(&self) -> bool {
         self.faulted.load(Ordering::Acquire)
     }
 
     fn admit(&self) -> Result<(), Closed> {
-        if self.root.is_cancelled() { Err(Closed) } else { Ok(()) }
+        if self.token.is_cancelled() { Err(Closed) } else { Ok(()) }
     }
 
-    fn guard(&self) -> FaultGuard {
-        FaultGuard(self.faulted.clone())
+    fn hold(&self) -> Held {
+        Held {
+            faulted: self.faulted.clone(),
+            _ancestors: self.ancestors.iter().map(TaskTracker::token).collect(),
+        }
     }
 }
 
 /// Held for a task's whole run: it is dropped by the unwinding when the task panics, before the `JoinHandle` resolves.
-struct FaultGuard(Arc<AtomicBool>);
+struct Held {
+    faulted: Arc<AtomicBool>,
+    _ancestors: Vec<TaskTrackerToken>,
+}
 
-impl Drop for FaultGuard {
+impl Drop for Held {
     fn drop(&mut self) {
         if thread::panicking() {
-            self.0.store(true, Ordering::Release);
+            self.faulted.store(true, Ordering::Release);
         }
     }
 }

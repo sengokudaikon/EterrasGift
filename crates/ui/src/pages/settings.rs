@@ -1080,11 +1080,16 @@ mod tests {
         assert_eq!((page.kind(), page.message()), (MessageKind::Saved, ""));
     }
 
+    fn tasks() -> eg_runtime::Tasks {
+        static RUNTIME: std::sync::LazyLock<eg_runtime::Runtime> = std::sync::LazyLock::new(|| eg_runtime::Runtime::start().unwrap());
+        RUNTIME.tasks()
+    }
+
     #[test]
     fn restart_stays_offered_while_a_save_runs() {
         let temp = tempfile::tempdir().unwrap();
         let store = SettingsStore::open(&temp.path().join("app"), &temp.path().join("settings.json"), &[]);
-        let service = SettingsService::new(store);
+        let service = SettingsService::new(store, &tasks());
         let mut page = SettingsPage::new(service.clone(), vec![trainer(true)], None, None);
         page.flip_module(0, false);
         service.wait(service.snapshot().submitted);
@@ -1191,7 +1196,7 @@ mod tests {
     fn typing_during_an_async_location_save_survives_its_acknowledgement() {
         let temp = tempfile::tempdir().unwrap();
         let store = SettingsStore::open(&temp.path().join("app"), &temp.path().join("settings.json"), &[]);
-        let service = SettingsService::new(store);
+        let service = SettingsService::new(store, &tasks());
         let mut page = SettingsPage::new(service.clone(), vec![trainer(true)], None, None);
         let (entered, started) = std::sync::mpsc::channel();
         let (release, waiting) = std::sync::mpsc::channel();
@@ -1293,7 +1298,7 @@ mod tests {
         for fails in [false, true] {
             let temp = tempfile::tempdir().unwrap();
             let file = temp.path().join("settings.json");
-            let service = SettingsService::new(SettingsStore::open(&temp.path().join("app"), &file, &[]));
+            let service = SettingsService::new(SettingsStore::open(&temp.path().join("app"), &file, &[]), &tasks());
             let mut page = SettingsPage::new(service.clone(), vec![trainer(true)], None, None);
             if fails {
                 fs::create_dir(&file).unwrap();
