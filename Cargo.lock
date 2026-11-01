@@ -1328,6 +1328,7 @@ version = "0.1.0"
 dependencies = [
  "dotscope",
  "eg-core",
+ "eg-flow",
  "eg-i18n",
  "eg-runtime",
  "jiff",
@@ -1344,6 +1345,7 @@ dependencies = [
 name = "eg-core"
 version = "0.1.0"
 dependencies = [
+ "eg-flow",
  "eg-i18n",
  "eg-runtime",
  "jiff",

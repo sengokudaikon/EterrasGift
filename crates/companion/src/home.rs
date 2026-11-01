@@ -1,11 +1,17 @@
-//! Home's state: it starts the game online, offline, or offline with mods, with Eterra's tree saying where the game is.
-//! Plain values; the UI reads them after each change.
+//! Home: it starts the game online, offline, or offline with mods, with Eterra's tree saying where the game is.
+//!
+//! [`Home`] is the feature. A page shown or left, what the game's watch sees and a start begun or finished are intents;
+//! asking the watch to look, starting and moving the tree are effects. The UI crate performs those and shows [`present`]'s
+//! output.
 
 use crate::game::process::RunningGame;
+use crate::game::watch::GameSeen;
+use crate::launch::host::LaunchMode;
 use crate::launch::launcher::{LaunchReport, StartingWithMods};
 use crate::launch::loader::ModLoaderState;
 use eg_core::bloom::BloomPhase;
 use eg_core::game_log::GameReadiness;
+use eg_flow::{Effects, Feature, Panicked, Tracked};
 use eg_i18n::{Phrase, phrases};
 use std::borrow::Cow;
 
@@ -16,15 +22,172 @@ phrases! {
     Running: "Last Epoch is already running."
     NoModLoader: "MelonLoader isn't in the game folder."
     Conflict: "The game folder has both version.dll and version.dll.disabled. Delete the older one, then start the game."
+    LookFailed: "Home could not check on the game. Details are in the fault log."
+    StartFailed: "The start stopped unexpectedly. Details are in the fault log."
+}
+
+/// Home as a feature: see the module's documentation.
+pub struct Home;
+
+pub enum Intent {
+    /// Home came into view.
+    Shown,
+    /// Another page came into view.
+    Hidden,
+    /// What the game's watch sees now.
+    Seen(GameSeen),
+    Start(LaunchMode),
+    Started(Result<LaunchReport, Panicked>),
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Effect {
+    /// Ask the game's watch to look now, reading MelonLoader's state too.
+    Refresh,
+    Launch(LaunchMode),
+    /// Move Eterra's tree to `phase`, and drift ash if `ash` is set. `entering` puts it there at once rather than blooming.
+    Tree {
+        phase: BloomPhase,
+        ash: bool,
+        entering: bool,
+    },
+}
+
+#[derive(Debug, Default)]
+pub struct State {
+    model: Tracked<HomeModel>,
+    visible: bool,
+    /// Home came into view and hasn't moved the tree yet: the first move only places it.
+    entering: bool,
+    /// Where the tree was last told to go while Home has been showing.
+    tree: Option<(BloomPhase, bool)>,
+}
+
+impl State {
+    /// What `present` reads, so its version says when the view needs doing again.
+    pub fn model(&self) -> &Tracked<HomeModel> {
+        &self.model
+    }
+
+    /// Home follows the game only while it shows, so another page costs nothing.
+    pub fn watching(&self) -> bool {
+        self.visible
+    }
+}
+
+impl Feature for Home {
+    type State = State;
+    type Intent = Intent;
+    type Effect = Effect;
+
+    fn reduce(state: &mut State, intent: Intent, effects: &mut Effects<Effect>) {
+        match intent {
+            Intent::Shown => {
+                state.visible = true;
+                state.entering = true;
+                state.tree = None;
+                effects.push(Effect::Refresh);
+            }
+            Intent::Hidden => {
+                // Another page's decorations are its own from here on.
+                state.visible = false;
+                state.tree = None;
+            }
+            Intent::Seen(seen) => {
+                // Most looks find what the last one did, and those leave the view's inputs untouched.
+                let mut model = (*state.model).clone();
+                if let Some(loader) = seen.loader {
+                    model.set_mod_loader(loader);
+                }
+                model.set_phase(seen.phase());
+                model.set_elsewhere(seen.starting);
+                model.look_failed = seen.failed;
+                state.model.set(model);
+                move_tree(state, effects);
+            }
+            Intent::Start(mode) => {
+                if state.model.can_play() {
+                    state.model.begin(mode == LaunchMode::OfflineWithMods);
+                    effects.push(Effect::Launch(mode));
+                    move_tree(state, effects);
+                }
+            }
+            Intent::Started(result) => {
+                state.model.finish(result.unwrap_or_else(|Panicked| LaunchReport {
+                    started: false,
+                    message: StartFailed.into(),
+                }));
+                effects.push(Effect::Refresh);
+            }
+        }
+    }
+}
+
+/// Says where the tree goes, when Home shows and that has changed. A look or start that ends while another page shows
+/// leaves that page's decorations alone.
+fn move_tree(state: &mut State, effects: &mut Effects<Effect>) {
+    if !state.visible {
+        return;
+    }
+    let target = (state.model.phase(), state.model.is_game_starting());
+    let entering = std::mem::take(&mut state.entering);
+    if entering || state.tree != Some(target) {
+        state.tree = Some(target);
+        effects.push(Effect::Tree {
+            phase: target.0,
+            ash: target.1,
+            entering,
+        });
+    }
+}
+
+/// What the view shows.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct HomeView {
+    pub phase: BloomPhase,
+    pub game_starting: bool,
+    pub can_start: bool,
+    pub can_start_with_mods: bool,
+    pub online_tip: String,
+    pub offline_tip: String,
+    pub with_mods_tip: String,
+    pub message: String,
+    pub message_is_error: bool,
+}
+
+pub fn present(model: &HomeModel) -> HomeView {
+    // What a start or a conflict said comes first; otherwise why a button waits, said in words as well as in its tip.
+    let (message, message_is_error) = match model.message() {
+        Some(message) => (message.to_owned(), model.is_error()),
+        None if model.look_failed => (LookFailed.into(), true),
+        None => (model.wait_reason().unwrap_or_default().to_owned(), false),
+    };
+    HomeView {
+        phase: model.phase(),
+        game_starting: model.is_game_starting(),
+        can_start: model.can_play(),
+        can_start_with_mods: model.can_play_with_mods(),
+        online_tip: model.online_tip().into_owned(),
+        offline_tip: model.offline_tip().into_owned(),
+        with_mods_tip: model.with_mods_tip().into_owned(),
+        message,
+        message_is_error,
+    }
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct HomeModel {
+    /// A look has read MelonLoader's state. Until then Home doesn't claim it's missing.
+    loader_known: bool,
     has_mod_loader: bool,
     /// Both MelonLoader proxies are in the game folder: no start can tell which is current, so none is offered.
     conflicted: bool,
     phase: BloomPhase,
     starting: bool,
+    /// The launcher is busy with a start this page didn't begin.
+    elsewhere: bool,
+    /// The last look at the game failed, so what Home shows may be out of date.
+    look_failed: bool,
     message: Option<String>,
     is_error: bool,
 }
@@ -59,6 +222,7 @@ impl HomeModel {
     }
 
     pub fn set_mod_loader(&mut self, state: ModLoaderState) {
+        self.loader_known = true;
         self.has_mod_loader = matches!(state, ModLoaderState::Active | ModLoaderState::SetAside);
         let conflicted = state == ModLoaderState::Conflict;
         if conflicted != self.conflicted {
@@ -81,11 +245,16 @@ impl HomeModel {
     /// Only with no game running (a second start would only exit by itself, so the buttons wait for the game to close)
     /// and MelonLoader's proxy in one known state.
     pub fn can_play(&self) -> bool {
-        !self.starting && self.phase == BloomPhase::Wilted && !self.conflicted
+        !self.starting && !self.elsewhere && self.phase == BloomPhase::Wilted && !self.conflicted
+    }
+
+    fn set_elsewhere(&mut self, starting: bool) {
+        // Home's own start also keeps the launcher busy; that one is `starting`.
+        self.elsewhere = starting && !self.starting;
     }
 
     pub fn can_play_with_mods(&self) -> bool {
-        self.can_play() && self.has_mod_loader
+        self.can_play() && (self.has_mod_loader || !self.loader_known)
     }
 
     pub fn online_tip(&self) -> Cow<'static, str> {
@@ -107,7 +276,7 @@ impl HomeModel {
             None
         } else if self.phase != BloomPhase::Wilted {
             Some(Running.get())
-        } else if !self.has_mod_loader {
+        } else if self.loader_known && !self.has_mod_loader {
             Some(NoModLoader.get())
         } else {
             None
@@ -142,6 +311,160 @@ impl HomeModel {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use eg_flow::step;
+
+    fn send(state: &mut State, intent: Intent) -> Vec<Effect> {
+        step::<Home>(state, intent)
+    }
+
+    fn found(phase: BloomPhase) -> Intent {
+        let readiness = match phase {
+            BloomPhase::Wilted => None,
+            BloomPhase::Budding => Some(GameReadiness::Starting),
+            BloomPhase::Opening => Some(GameReadiness::NoCharacter),
+            BloomPhase::Bloom => Some(GameReadiness::Offline),
+        };
+        Intent::Seen(GameSeen {
+            running: readiness.map(|_| RunningGame {
+                process_id: 1,
+                start_time: jiff::Timestamp::UNIX_EPOCH,
+            }),
+            readiness,
+            loader: Some(ModLoaderState::SetAside),
+            starting: false,
+            failed: false,
+        })
+    }
+
+    fn starting(starting: bool) -> Intent {
+        Intent::Seen(GameSeen { starting, ..GameSeen::default() })
+    }
+
+    fn report(started: bool) -> LaunchReport {
+        LaunchReport { started, message: "said".into() }
+    }
+
+    #[test]
+    fn showing_looks_and_the_first_result_places_the_tree_without_blooming() {
+        let mut state = State::default();
+        assert_eq!(send(&mut state, Intent::Shown), [Effect::Refresh]);
+        assert!(state.watching());
+        assert_eq!(
+            send(&mut state, found(BloomPhase::Bloom)),
+            [Effect::Tree {
+                phase: BloomPhase::Bloom,
+                ash: false,
+                entering: true
+            }]
+        );
+    }
+
+    #[test]
+    fn the_tree_moves_only_when_its_target_changes() {
+        let mut state = State::default();
+        send(&mut state, Intent::Shown);
+        send(&mut state, found(BloomPhase::Wilted));
+        assert!(send(&mut state, found(BloomPhase::Wilted)).is_empty(), "the same phase again moves nothing");
+        assert_eq!(
+            send(&mut state, found(BloomPhase::Budding)),
+            [Effect::Tree {
+                phase: BloomPhase::Budding,
+                ash: true,
+                entering: false
+            }]
+        );
+    }
+
+    #[test]
+    fn while_another_page_shows_nothing_watches_or_moves_the_tree() {
+        let mut state = State::default();
+        send(&mut state, Intent::Shown);
+        send(&mut state, Intent::Hidden);
+        assert!(!state.watching());
+        assert!(send(&mut state, found(BloomPhase::Bloom)).is_empty(), "the result is kept, and the tree left alone");
+        assert_eq!(state.model().phase(), BloomPhase::Bloom);
+    }
+
+    #[test]
+    fn a_start_is_refused_unless_every_play_is_available() {
+        let mut state = State::default();
+        send(&mut state, Intent::Shown);
+        send(&mut state, found(BloomPhase::Bloom));
+        assert!(send(&mut state, Intent::Start(LaunchMode::Online)).is_empty());
+        send(&mut state, found(BloomPhase::Wilted));
+        assert!(send(&mut state, Intent::Start(LaunchMode::Online)).contains(&Effect::Launch(LaunchMode::Online)));
+        assert!(send(&mut state, Intent::Start(LaunchMode::Online)).is_empty(), "a start under way holds the rest");
+    }
+
+    #[test]
+    fn a_start_begun_elsewhere_holds_plays_until_a_look_finds_it_finished() {
+        let mut state = State::default();
+        send(&mut state, starting(true));
+        assert!(!present(state.model()).can_start);
+        assert!(send(&mut state, Intent::Start(LaunchMode::Offline)).is_empty());
+        send(&mut state, starting(false));
+        assert!(present(state.model()).can_start);
+    }
+
+    #[test]
+    fn a_look_during_homes_own_start_does_not_outlast_it() {
+        let mut state = State::default();
+        send(&mut state, found(BloomPhase::Wilted));
+        send(&mut state, Intent::Start(LaunchMode::Offline));
+        send(&mut state, starting(true));
+        send(&mut state, Intent::Started(Ok(report(false))));
+        assert!(present(state.model()).can_start, "the launcher being busy with Home's own start is not another start");
+    }
+
+    #[test]
+    fn a_failed_look_says_so_until_a_look_succeeds() {
+        let mut state = State::default();
+        send(&mut state, Intent::Shown);
+        send(
+            &mut state,
+            Intent::Seen(GameSeen {
+                failed: true,
+                ..GameSeen::default()
+            }),
+        );
+        let view = present(state.model());
+        assert_eq!(view.message, LookFailed.get());
+        assert!(view.message_is_error);
+        send(&mut state, found(BloomPhase::Wilted));
+        assert_eq!(present(state.model()).message, "");
+    }
+
+    #[test]
+    fn a_start_that_panics_ends_the_start_and_looks_again() {
+        let mut state = State::default();
+        send(&mut state, found(BloomPhase::Wilted));
+        send(&mut state, Intent::Start(LaunchMode::Offline));
+        assert_eq!(send(&mut state, Intent::Started(Err(Panicked))), [Effect::Refresh]);
+        let view = present(state.model());
+        assert_eq!(view.message, StartFailed.get());
+        assert!(view.message_is_error);
+        assert!(view.can_start);
+    }
+
+    #[test]
+    fn only_what_present_reads_moves_the_views_version() {
+        let mut state = State::default();
+        send(&mut state, found(BloomPhase::Wilted));
+        let shown = state.model().version();
+        send(&mut state, found(BloomPhase::Wilted));
+        assert_eq!(state.model().version(), shown, "a look that finds the same leaves the view alone");
+        send(&mut state, Intent::Hidden);
+        assert_eq!(state.model().version(), shown, "page changes leave the view's inputs alone");
+        send(&mut state, found(BloomPhase::Budding));
+        assert_ne!(state.model().version(), shown);
+    }
+
+    #[test]
+    fn before_the_first_look_home_claims_nothing_about_melonloader() {
+        let view = present(&HomeModel::default());
+        assert_eq!(view.message, "");
+        assert!(view.can_start && view.can_start_with_mods);
+    }
 
     #[test]
     fn the_tree_follows_the_running_game() {

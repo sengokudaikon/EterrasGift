@@ -6,6 +6,7 @@ edition.workspace = true
 publish.workspace = true
 
 [dependencies]
+eg-flow.workspace = true
 eg-i18n.workspace = true
 eg-runtime.workspace = true
 jiff.workspace = true
