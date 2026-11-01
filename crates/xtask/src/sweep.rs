@@ -13,7 +13,7 @@ use std::time::{Duration, SystemTime};
 
 /// The checkout's `build-dir` (`.cargo/config.toml`).
 const BUILD_DIR: &str = "target/build";
-const LOCKFILES: [&str; 3] = ["Cargo.lock", "libs/Cargo.lock", "spiderland/Cargo.lock"];
+const LOCKFILES: [&str; 2] = ["Cargo.lock", "libs/Cargo.lock"];
 const DEFAULT_DAYS: u64 = 7;
 
 pub fn run(root: &Path, args: &[&str]) -> Result<(), String> {

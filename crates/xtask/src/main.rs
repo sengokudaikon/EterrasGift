@@ -18,8 +18,8 @@ fn main() -> ExitCode {
         path: "lang/eterras-gift.pot",
         project: "Eterra's Gift",
         command: "cargo xtask phrases",
-        // The app, and the one library with words of its own: how lists are joined.
-        sources: &["crates", "spiderland/spiderland-phrases/src"],
+        // The app, and the framework crate with words of its own: how lists are joined.
+        sources: &["crates", "../spiderland/spiderland-phrases/src"],
         views: "crates/ui/ui",
     };
     let result = match args.iter().map(String::as_str).collect::<Vec<_>>().as_slice() {

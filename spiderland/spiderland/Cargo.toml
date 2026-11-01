@@ -1,9 +1,0 @@
-[package]
-name = "spiderland"
-description = "A one-way frame for a UI: intents go into a pure reducer, and effects and renders come out."
-version.workspace = true
-edition.workspace = true
-publish.workspace = true
-
-[lints]
-workspace = true

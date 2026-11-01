@@ -1,9 +1,9 @@
 # The app. It builds on two workspaces of their own, which name neither the app nor the game: the libraries (`libs/`) and
-# the UI framework (`spiderland/`).
+# the UI framework (`../spiderland`, a repository of its own).
 [workspace]
 resolver = "3"
 members = ["crates/*"]
-exclude = ["libs", "spiderland"]
+exclude = ["libs"]
 
 [workspace.package]
 version = "0.1.0"
@@ -28,13 +28,13 @@ tokio = { version = "=1.53.3", features = ["rt", "net", "io-util", "time", "sync
 
 task-runtime = { path = "libs/task-runtime" }
 binary-reader = { path = "libs/binary-reader" }
-spiderland = { path = "spiderland/spiderland" }
-spiderland-slint = { path = "spiderland/spiderland-slint" }
+spiderland = { path = "../spiderland/spiderland" }
+spiderland-slint = { path = "../spiderland/spiderland-slint" }
 il2cpp-runtime = { path = "libs/il2cpp-runtime" }
 native-hooks = { path = "libs/native-hooks" }
 eg-core = { path = "crates/core" }
-spiderland-phrases = { path = "spiderland/spiderland-phrases" }
-spiderland-phrases-build = { path = "spiderland/spiderland-phrases-build" }
+spiderland-phrases = { path = "../spiderland/spiderland-phrases" }
+spiderland-phrases-build = { path = "../spiderland/spiderland-phrases-build" }
 file-ops = { path = "libs/file-ops" }
 melon-loader = { path = "libs/melon-loader" }
 unity-files = { path = "libs/unity-files" }
