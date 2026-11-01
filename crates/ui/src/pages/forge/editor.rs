@@ -1115,6 +1115,12 @@ impl ForgeEditor {
         }
     }
 
+    /// The base the item's affix values are shown for: the one drafted, else its own.
+    pub fn value_base(&self) -> Option<(u16, u16)> {
+        let item = self.item.as_ref()?;
+        self.drafted_base().or(Some((item.item_type, item.sub_type)))
+    }
+
     /// The base a draft would give the item (item type, sub-type): a drafted base, or the base a drafted unique comes on
     /// when it differs.
     fn drafted_base(&self) -> Option<(u16, u16)> {
@@ -1511,7 +1517,7 @@ impl ForgeEditor {
             .map(|tier| {
                 (
                     tier,
-                    self.catalog().tier_range(row.draft_id(), tier),
+                    self.catalog().tier_range(row.draft_id(), tier, self.value_base()),
                     !row.added && row.draft_id() == row.state.id && tier == row.state.tier,
                 )
             })
@@ -1522,7 +1528,7 @@ impl ForgeEditor {
     /// tier's range from game data.
     pub fn range_text(&self, row: usize) -> String {
         match self.affixes.get(row) {
-            Some(row) if row.added => self.catalog().tier_range(row.draft_id(), row.tier()),
+            Some(row) if row.added => self.catalog().tier_range(row.draft_id(), row.tier(), self.value_base()),
             Some(row) if row.value.has_scale() => format!("{} – {}", row.value.minimum_text(), row.value.maximum_text()),
             _ => String::new(),
         }
@@ -3041,7 +3047,8 @@ impl ForgeEditor {
 
     /// Every tier's value range of the picked affix; empty where the game data has none.
     fn picker_ladder(&self) -> String {
-        self.picked().map_or_else(String::new, |definition| picker::ladder(definition, self.catalog()))
+        self.picked()
+            .map_or_else(String::new, |definition| picker::ladder(definition, self.catalog(), self.value_base()))
     }
 
     /// "Allow incompatible affixes" is for what this slot can't roll, so it opens the Slot filter while that sits on its

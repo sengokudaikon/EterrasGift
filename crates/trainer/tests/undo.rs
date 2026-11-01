@@ -296,6 +296,8 @@ fn affix_undo_follows_the_reordered_slot_and_rechecks_override() {
         data.affixes.insert(
             id,
             AffixDefinition {
+                effects: Vec::new(),
+                named_by_title: false,
                 id,
                 raw_name: "authored".into(),
                 raw_display_name: String::new(),

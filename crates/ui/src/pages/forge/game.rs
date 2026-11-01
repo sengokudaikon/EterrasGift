@@ -23,7 +23,7 @@ impl<T> From<Result<T, String>> for Lookup<T> {
     }
 }
 
-use super::item::{AffixDefinition, ForgeItem};
+use super::item::{AffixDefinition, ForgeItem, TierProperty, format_tier_range};
 pub use eg_trainer::write::WriteOutcome;
 
 /// An independently observed item can be undisplayable by this editor. That
@@ -46,6 +46,8 @@ pub struct BaseDefinition {
     pub class_requirement: i32,
     /// The implicits it grants, in the game's words with their ranges ("+10–16 Armor").
     pub implicits: Vec<String>,
+    /// What it does to an affix's values (`Catalog::value_scale`).
+    pub affix_effect_modifier: f32,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -89,8 +91,11 @@ pub struct UniqueDefinition {
 pub struct Catalog {
     pub uniques: Vec<UniqueDefinition>,
     pub definitions: Vec<AffixDefinition>,
-    /// Formatted tier ranges by (affix id, tier); a missing one is left blank, never guessed.
-    pub tier_ranges: std::collections::HashMap<(u16, u8), String>,
+    /// Each tier's value ranges by (affix id, tier), one per stat line as the game data writes them; a line it cannot
+    /// format is none, and its tier is left blank, never guessed.
+    pub tier_columns: std::collections::HashMap<(u16, u8), Vec<Option<TierProperty>>>,
+    /// The item modifier each affix's values are written for (`standardAffixEffectModifier`).
+    pub standard_effects: std::collections::HashMap<u16, f32>,
     /// The game's rarity names by rarity byte; empty entries fall back to the app's.
     pub rarity_names: Vec<String>,
     pub limits: Option<ItemLimits>,
@@ -115,8 +120,47 @@ impl Catalog {
             .map_or_else(String::new, |source| source.name.clone())
     }
 
-    pub fn tier_range(&self, id: u16, tier: u8) -> String {
-        self.tier_ranges.get(&(id, tier)).cloned().unwrap_or_default()
+    /// What an item on `base` (type and subtype) does to this affix's values, as `AffixList.GetSingleAffixValue` works it
+    /// out: `(1 + the base's modifier) / (1 + the affix's)`. Without a base, its values as written.
+    pub fn value_scale(&self, id: u16, base: Option<(u16, u16)>) -> f64 {
+        let standard = self.standard_effects.get(&id).copied().unwrap_or(0.0);
+        match base.and_then(|(item_type, sub_type)| self.base(item_type, sub_type)) {
+            Some(base) if base.affix_effect_modifier != standard => f64::from(1.0 + base.affix_effect_modifier) / f64::from(1.0 + standard),
+            _ => 1.0,
+        }
+    }
+
+    /// A tier's value ranges on an item on `base`.
+    pub fn tier_range(&self, id: u16, tier: u8, base: Option<(u16, u16)>) -> String {
+        let scale = self.value_scale(id, base);
+        let columns = self
+            .tier_columns
+            .get(&(id, tier))
+            .map(|columns| columns.iter().map(|column| column.map(|property| property.scaled(scale))).collect::<Option<Vec<_>>>());
+        columns.flatten().as_deref().and_then(format_tier_range).unwrap_or_default()
+    }
+
+    /// Each stat line as a tooltip writes it, on an item on `base`: its value where every tier has the same, then its words;
+    /// where tiers differ, or the game hides the value, its words alone.
+    pub fn effect_lines(&self, definition: &AffixDefinition, base: Option<(u16, u16)>) -> Vec<String> {
+        const WITH_VALUE: Phrase = Phrase::new("{value} {stat}");
+        let scale = self.value_scale(definition.id, base);
+        let column_of = |column: usize, tier: u8| self.tier_columns.get(&(definition.id, tier)).and_then(|columns| columns.get(column).copied().flatten());
+        let mut lines: Vec<String> = Vec::with_capacity(definition.effects.len());
+        for (column, effect) in definition.effects.iter().enumerate() {
+            let value = column_of(column, 1)
+                .filter(|first| !effect.hides_value && !effect.words.is_empty() && (2..=definition.max_tier).all(|tier| column_of(column, tier) == Some(*first)))
+                .and_then(|first| format_tier_range(&[first.scaled(scale).unsigned()]))
+                .map(|value| if effect.no_plus { value.trim_start_matches('+').to_owned() } else { value });
+            let line = match value {
+                Some(value) => WITH_VALUE.with(&[("value", &value), ("stat", &effect.words)]),
+                None => effect.heading.clone(),
+            };
+            if !line.is_empty() && !lines.contains(&line) {
+                lines.push(line);
+            }
+        }
+        lines
     }
 
     pub fn rarity_name(&self, rarity: u8) -> Option<String> {

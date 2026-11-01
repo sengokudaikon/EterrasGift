@@ -25,6 +25,7 @@ struct Listed {
     catalog: Option<Arc<Catalog>>,
     slot: Option<u16>,
     own_types: Vec<u16>,
+    base: Option<(u16, u16)>,
 }
 
 /// The affix picker's rows, built as the list asks for each. The list builds only the rows in view, so a keystroke over
@@ -53,7 +54,7 @@ impl Model for PickerRows {
         let listed = self.listed.borrow();
         let catalog = listed.catalog.as_ref()?;
         let definition = catalog.definitions.get(*listed.indices.get(row)?)?;
-        let entry = picker::entry(definition, catalog, listed.slot, &listed.own_types);
+        let entry = picker::entry(definition, catalog, listed.slot, &listed.own_types, listed.base);
         let pills: Vec<PillView> = entry
             .pills
             .into_iter()
@@ -108,8 +109,13 @@ struct Models {
     picker_chips: Rc<VecModel<SharedString>>,
 }
 
-/// The menu generation, the definitions the picker lists and the slot their rows name.
-type BuiltPicker = (u64, Vec<usize>, Option<u16>);
+/// What determines the picker rows, including the item base their values are scaled for.
+struct BuiltPicker {
+    generation: u64,
+    indices: Vec<usize>,
+    slot: Option<u16>,
+    base: Option<(u16, u16)>,
+}
 
 /// What each menu model was last built from: a scrub or a keystroke rebuilds none of them unless that changed.
 #[derive(Default)]
@@ -957,20 +963,27 @@ impl View {
         // Choosing an entry shows again with the same list; its rows are rebuilt only when the list changes.
         let generation = editor.menu_generation();
         let listed = editor.picker_indices();
+        let base = editor.value_base();
         let built = self
             .built
             .picker
             .borrow()
             .as_ref()
-            .is_some_and(|(built, indices, slot)| *built == generation && indices.as_slice() == listed && *slot == filters.slot);
+            .is_some_and(|built| built.generation == generation && built.indices.as_slice() == listed && built.slot == filters.slot && built.base == base);
         if !built {
             self.models.picker_rows.replace(Listed {
                 indices: listed.to_vec(),
                 catalog: Some(editor.shared_catalog()),
                 slot: filters.slot,
                 own_types: picker.own_types.clone(),
+                base,
             });
-            *self.built.picker.borrow_mut() = Some((generation, listed.to_vec(), filters.slot));
+            *self.built.picker.borrow_mut() = Some(BuiltPicker {
+                generation,
+                indices: listed.to_vec(),
+                slot: filters.slot,
+                base,
+            });
         }
         state.set_picker_count(picker::count_text(listed.len()).into());
         state.set_picker_hidden(if picker.hidden_uniques > 0 {

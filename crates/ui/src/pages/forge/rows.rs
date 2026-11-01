@@ -1415,6 +1415,8 @@ mod tests {
 
     fn health() -> AffixRow {
         let definition = AffixDefinition {
+            effects: Vec::new(),
+            title: None,
             id: 25,
             name: "Health".into(),
             kind: AffixKind::Suffix,

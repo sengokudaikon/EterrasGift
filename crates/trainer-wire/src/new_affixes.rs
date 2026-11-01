@@ -36,15 +36,20 @@ pub struct StatLine {
 // `NewAffix::validate` refuses a nonfinite value, so equality is total on every line a request holds.
 impl Eq for StatLine {}
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct NewAffix {
     pub id: u16,
     /// The internal name: starts with [`MARKER`].
     pub name: String,
     /// What the game shows. Empty on a one-line affix: the game writes it from the stat.
     pub display_name: String,
+    /// `standardAffixEffectModifier`: the item modifier its values are written for. On an item with modifier `m` the game
+    /// shows a value times `(1 + m) / (1 + this)`.
+    pub standard_effect: f32,
     pub properties: Vec<StatLine>,
 }
+// `NewAffix::validate` refuses a nonfinite value here too.
+impl Eq for NewAffix {}
 
 impl NewAffix {
     pub fn validate(&self) -> Result<(), ProtocolError> {
@@ -55,6 +60,8 @@ impl NewAffix {
             && text(&self.display_name)
             && (1..=MAX_PROPERTIES).contains(&self.properties.len())
             && (!self.display_name.is_empty() || self.properties.len() == 1)
+            && self.standard_effect.is_finite()
+            && self.standard_effect > -1.0
             && self.properties.iter().all(|line| line.minimum.is_finite() && line.maximum.is_finite());
         if valid { Ok(()) } else { Err(ProtocolError::InvalidData) }
     }

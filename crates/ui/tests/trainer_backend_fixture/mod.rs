@@ -339,6 +339,7 @@ fn fixture_catalog() -> GameCatalog {
                 name: name("Owned type"),
                 sub_types: (1..=2)
                     .map(|sub_type| SubTypeDefinition {
+                        affix_effect_modifier: 0.0,
                         sub_type,
                         name: name(&format!("Owned base {sub_type}")),
                         level_requirement: 87,
@@ -388,6 +389,8 @@ fn fixture_catalog() -> GameCatalog {
                 (
                     id,
                     AffixDefinition {
+                        effects: Vec::new(),
+                        named_by_title: false,
                         id,
                         raw_name: "Health".into(),
                         raw_display_name: match id {

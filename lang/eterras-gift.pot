@@ -2374,6 +2374,10 @@ msgstr ""
 msgid "Updating preview…"
 msgstr ""
 
+#: crates/ui/src/pages/forge/game.rs
+msgid "{value} {stat}"
+msgstr ""
+
 #: crates/ui/src/pages/forge/item.rs
 msgid "Corrupted prefix"
 msgstr ""

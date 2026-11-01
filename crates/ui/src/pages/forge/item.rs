@@ -130,6 +130,23 @@ pub struct AffixDefinition {
     pub source: Option<AffixSource>,
     /// Its stat tags (`picker::STAT_TAGS`), for the picker.
     pub stat_tags: u64,
+    /// Each stat line in the game's words, beside the catalog's `tier_columns`.
+    pub effects: Vec<AffixEffect>,
+    /// The game's name, where `name` says what it does instead because the game's only says where it is from ("Ucenui's").
+    pub title: Option<String>,
+}
+
+pub use eg_trainer::definitions::catalog::AffixEffect;
+
+/// What an affix's lines say, each once.
+pub fn effects_said(effects: &[AffixEffect]) -> String {
+    let mut said: Vec<&str> = Vec::with_capacity(effects.len());
+    for effect in effects {
+        if !effect.heading.is_empty() && !said.contains(&effect.heading.as_str()) {
+            said.push(&effect.heading);
+        }
+    }
+    said.join(", ")
 }
 
 /// Where a unique modifier comes from.
@@ -168,6 +185,8 @@ impl AffixDefinition {
             level: 0,
             source: None,
             stat_tags: 0,
+            effects: Vec::new(),
+            title: None,
         }
     }
 }
@@ -643,6 +662,35 @@ pub enum TierProperty {
     AddedPercent { min: f64, max: f64 },
 }
 
+impl TierProperty {
+    /// As the game shows it on an item that scales affix values by `scale`.
+    pub fn scaled(self, scale: f64) -> Self {
+        match self {
+            Self::Flat { min, max, whole } => Self::Flat {
+                min: min * scale,
+                max: max * scale,
+                whole,
+            },
+            Self::Increased { min, max } => Self::Increased {
+                min: min * scale,
+                max: max * scale,
+            },
+            Self::AddedPercent { min, max } => Self::AddedPercent {
+                min: min * scale,
+                max: max * scale,
+            },
+        }
+    }
+
+    /// Its size without its sign, for a line whose words already say "reduced" or "less".
+    pub fn unsigned(self) -> Self {
+        match self {
+            Self::Increased { min, max } if max <= 0.0 => Self::Increased { min: -max, max: -min },
+            other => other,
+        }
+    }
+}
+
 pub fn format_tier_range(properties: &[TierProperty]) -> Option<String> {
     let trim = |value: f64| eg_core::locale::numbers().plain(value);
     let percent = |value: f64| trim((value * 1000.0).round() / 10.0);
@@ -664,7 +712,7 @@ pub fn format_tier_range(properties: &[TierProperty]) -> Option<String> {
             _ => None,
         })
         .collect();
-    parts.map(|parts| parts.join(" / "))
+    parts.map(|parts| parts.join(" / ").replace("+-", "-"))
 }
 
 /// One roll position's value in the game's own words.

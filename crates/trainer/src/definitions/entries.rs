@@ -6,7 +6,7 @@
 //! lengths; integers/f32 are LE, bools are single 0/1 bytes. Availability is a
 //! single byte (0 = reason text, 1 = value). Optional equipment lists use a 0/1
 //! byte then the list when present, an optional affix source a 0/1 byte then
-//! u16 unique and text line. DefinitionName is text then u32 source.
+//! u16 unique and text line, an affix's effects a list of three texts and two bools. DefinitionName is text then u32 source.
 //! Pages contain exactly min(16, total-cursor) entries. The caller must pin
 //! locale/total and reject duplicate identities across pages of one capture.
 //! This schema preserves unknown enum/flag values and signed/reversed ranges.
@@ -121,13 +121,30 @@ pub struct AffixDefinition {
     pub level_requirement: i32,
     /// The unique it was made from; none for an affix the game ships.
     pub source: Option<AffixSource>,
+    /// The game's words for each of its stat lines, beside `numeric`'s properties, in the session's language.
+    pub effects: Vec<AffixEffect>,
+    /// Its name says where it is from and nothing of what it does ("Ucenui's"): the game's name is the same as its title.
+    pub named_by_title: bool,
+}
+
+/// One stat line in the game's words. A text the game lacks is empty.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AffixEffect {
+    /// The line named by itself: "Cold Penetration".
+    pub heading: String,
+    /// What a tooltip writes after the value: "increased Mana", "to All Minion Skills".
+    pub words: String,
+    /// The game's longer explanation.
+    pub explanation: String,
+    pub hides_value: bool,
+    pub no_plus: bool,
 }
 
 /// Where a unique modifier comes from.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct AffixSource {
     pub unique: u16,
-    /// The modifier's own words, without the unique's name.
+    /// The modifier's own words, without the unique's name; empty where the unique has no text for it and `effects` say it.
     pub line: String,
 }
 
@@ -174,6 +191,8 @@ pub struct SubTypeDefinition {
     pub cannot_drop: bool,
     pub is_corrupted: bool,
     pub implicits: Availability<Vec<ImplicitDefinition>>,
+    /// What this base does to an affix's values: `value * (1 + this) / (1 + the affix's standard_effect)`.
+    pub affix_effect_modifier: f32,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -495,7 +514,8 @@ fn write_base(w: &mut Writer, base: &ItemTypeDefinition) -> Result<(), ProtocolE
         w.i32(s.class_requirement)?;
         w.boolean(s.cannot_drop)?;
         w.boolean(s.is_corrupted)?;
-        w.available(&s.implicits, |w, v| w.list(v, MAX_IMPLICITS, write_implicit))
+        w.available(&s.implicits, |w, v| w.list(v, MAX_IMPLICITS, write_implicit))?;
+        w.float(s.affix_effect_modifier)
     })
 }
 fn read_base(r: &mut Reader<'_>) -> Result<ItemTypeDefinition, ProtocolError> {
@@ -511,6 +531,7 @@ fn read_base(r: &mut Reader<'_>) -> Result<ItemTypeDefinition, ProtocolError> {
                 cannot_drop: r.boolean()?,
                 is_corrupted: r.boolean()?,
                 implicits: r.available(|r| r.list(MAX_IMPLICITS, read_implicit))?,
+                affix_effect_modifier: r.float()?,
             })
         })?,
     })
@@ -535,13 +556,21 @@ fn write_affix(w: &mut Writer, a: &AffixDefinition) -> Result<(), ProtocolError>
     w.available(&a.numeric, |w, v| w.list(v, MAX_AFFIX_TIERS, |w, t| w.list(&t.properties, MAX_PROPERTIES, write_property)))?;
     w.i32(a.level_requirement)?;
     match &a.source {
-        None => w.u8(0),
+        None => w.u8(0)?,
         Some(source) => {
             w.u8(1)?;
             w.u16(source.unique)?;
-            w.text(&source.line)
+            w.text(&source.line)?;
         }
     }
+    w.list(&a.effects, MAX_PROPERTIES, |w, effect| {
+        w.text(&effect.heading)?;
+        w.text(&effect.words)?;
+        w.text(&effect.explanation)?;
+        w.boolean(effect.hides_value)?;
+        w.boolean(effect.no_plus)
+    })?;
+    w.boolean(a.named_by_title)
 }
 fn read_affix(r: &mut Reader<'_>) -> Result<AffixDefinition, ProtocolError> {
     Ok(AffixDefinition {
@@ -575,6 +604,16 @@ fn read_affix(r: &mut Reader<'_>) -> Result<AffixDefinition, ProtocolError> {
             }),
             _ => return invalid(),
         },
+        effects: r.list(MAX_PROPERTIES, |r| {
+            Ok(AffixEffect {
+                heading: r.text()?,
+                words: r.text()?,
+                explanation: r.text()?,
+                hides_value: r.boolean()?,
+                no_plus: r.boolean()?,
+            })
+        })?,
+        named_by_title: r.boolean()?,
     })
 }
 fn write_unique(w: &mut Writer, u: &UniqueDefinition) -> Result<(), ProtocolError> {

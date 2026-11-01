@@ -246,7 +246,11 @@ impl RuntimeAccess {
             writes.set_i32(target(&object)?, self.enum_field(owner, c"specialAffixType", INT32)?, FAKE_UNIQUE_MOD);
             writes.set_i32(target(&object)?, self.enum_field(owner, c"classSpecificity", INT32)?, NON_SPECIFIC);
             writes.set_f32(target(&object)?, self.mutable_field(owner, c"weighting", SINGLE.0, SINGLE.1)?, 0.0);
-            writes.set_f32(target(&object)?, self.mutable_field(owner, c"standardAffixEffectModifier", SINGLE.0, SINGLE.1)?, 1.0);
+            writes.set_f32(
+                target(&object)?,
+                self.mutable_field(owner, c"standardAffixEffectModifier", SINGLE.0, SINGLE.1)?,
+                affix.standard_effect,
+            );
             self.store_text(attached, writes, &object, c"affixName", &affix.name)?;
             self.store_text(attached, writes, &object, c"affixDisplayName", &affix.display_name)?;
             self.store_text(attached, writes, &object, c"affixLootFilterOverrideName", &affix.display_name)?;

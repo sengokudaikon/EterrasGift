@@ -1350,6 +1350,8 @@ fn with_added_affixes(in_use: std::path::PathBuf) -> BackendOptions {
         catalog.affixes.insert(
             id,
             AffixDefinition {
+                effects: Vec::new(),
+                named_by_title: false,
                 id,
                 raw_name: format!("EG Fractured Crown: {id}"),
                 raw_display_name: "You have no ward".into(),

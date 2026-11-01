@@ -6,8 +6,8 @@
 
 use crate::definitions::entries;
 pub use crate::definitions::entries::{
-    AffixDefinition, AffixSource, AffixTier, Availability, CatalogEntries, CatalogKind, CatalogPage, DefinitionName, DefinitionNameSource, ImplicitDefinition, ItemTypeDefinition,
-    NumericProperty, RarityDefinition, SubTypeDefinition, UniqueDefinition, UniqueNumericData,
+    AffixDefinition, AffixEffect, AffixSource, AffixTier, Availability, CatalogEntries, CatalogKind, CatalogPage, DefinitionName, DefinitionNameSource, ImplicitDefinition,
+    ItemTypeDefinition, NumericProperty, RarityDefinition, SubTypeDefinition, UniqueDefinition, UniqueNumericData,
 };
 pub use eg_trainer_wire::{
     definitions::{ItemLimits, ValueRange},
@@ -16,7 +16,7 @@ pub use eg_trainer_wire::{
 use eg_trainer_wire::{forge::ForgeSnapshot, protocol::ProtocolError};
 use std::collections::{BTreeMap, BTreeSet};
 
-pub const EXTRACTION_VERSION: u32 = 7;
+pub const EXTRACTION_VERSION: u32 = 8;
 pub const MAX_CATALOG_BYTES: usize = 64 * 1024 * 1024;
 
 #[derive(Clone, Debug, PartialEq, Eq)]

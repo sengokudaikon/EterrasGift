@@ -11,7 +11,7 @@
 //! matches a unique's *name* lists that unique's modifiers too; a search that matches only their stat does not.
 
 use super::game::Catalog;
-use super::item::{AffixDefinition, AffixKind, Category};
+use super::item::{AffixDefinition, AffixKind, Category, effects_said};
 use eg_core::phrase::{Conjunction, Phrase, Plural, list};
 use std::collections::BTreeMap;
 
@@ -210,7 +210,7 @@ impl Filters {
 /// One definition's lowercased search text, its unique's name apart so a search can tell them.
 #[derive(Clone, Debug, PartialEq, Eq, Default)]
 pub struct SearchKey {
-    /// Name, category and id; the separator never comes from a search box, so no match spans two parts.
+    /// Name, category, id, what its lines say and its title; the separator never comes from a search box, so no match spans two parts.
     pub text: String,
     /// The source unique's name; empty for a shipped affix.
     pub unique: String,
@@ -219,7 +219,14 @@ pub struct SearchKey {
 impl SearchKey {
     pub fn of(definition: &AffixDefinition) -> Self {
         Self {
-            text: format!("{}\0{}\0{}", definition.name.to_lowercase(), definition.category.name().to_lowercase(), definition.id),
+            text: format!(
+                "{}\0{}\0{}\0{}\0{}",
+                definition.name.to_lowercase(),
+                definition.category.name().to_lowercase(),
+                definition.id,
+                effects_said(&definition.effects).to_lowercase(),
+                definition.title.as_deref().unwrap_or_default().to_lowercase(),
+            ),
             unique: definition.source.as_ref().map_or_else(String::new, |source| source.name.to_lowercase()),
         }
     }
@@ -573,12 +580,12 @@ fn slot_pill(definition: &AffixDefinition, catalog: &Catalog, slot: Option<u16>,
 
 /// Every tier's value range of a definition, "T1 +5–14, T2 +15–24"; one range alone when its tiers all read the same (a
 /// unique modifier's do); empty where the game data has none.
-pub fn ladder(definition: &AffixDefinition, catalog: &Catalog) -> String {
+pub fn ladder(definition: &AffixDefinition, catalog: &Catalog, base: Option<(u16, u16)>) -> String {
     // A tier and its range wrap together: a no-break space after the tier, a word joiner after the dash.
     const LADDER_STEP: Phrase = Phrase::new("T{tier}\u{a0}{range}");
     let ranges: Vec<(u8, String)> = (1..=definition.max_tier)
         .filter_map(|tier| {
-            let range = catalog.tier_range(definition.id, tier);
+            let range = catalog.tier_range(definition.id, tier, base);
             (!range.is_empty()).then(|| (tier, range.replace('–', "–\u{2060}")))
         })
         .collect();
@@ -595,8 +602,9 @@ pub fn ladder(definition: &AffixDefinition, catalog: &Catalog) -> String {
 /// How many slot names a tooltip lists before it counts the rest.
 const LISTED_SLOTS: usize = 8;
 
-/// A definition as the list shows it. `slot` is the Slot filter's, so the row names what was asked for.
-pub fn entry(definition: &AffixDefinition, catalog: &Catalog, slot: Option<u16>, own_types: &[u16]) -> Entry {
+/// A definition as the list shows it. `slot` is the Slot filter's, so the row names what was asked for; `base` is the item's,
+/// so its values read as they would on it.
+pub fn entry(definition: &AffixDefinition, catalog: &Catalog, slot: Option<u16>, own_types: &[u16], base: Option<(u16, u16)>) -> Entry {
     const FROM: Phrase = Phrase::new("From {unique} ({slot})");
     const ROLLS_ON: Phrase = Phrase::new("Rolls on {slots}");
     const ROLLS_ON_MORE: Phrase = Phrase::new("Rolls on {slots} and {more} more");
@@ -610,7 +618,10 @@ pub fn entry(definition: &AffixDefinition, catalog: &Catalog, slot: Option<u16>,
         pills.push((slot, Tone::Neutral));
     }
     pills.push((definition.kind.name().to_owned(), Tone::Neutral));
-    pills.push((definition.tiers_text(), Tone::Neutral));
+    // A unique modifier's tiers all hold the same values, so they tell nothing apart.
+    if definition.source.is_none() {
+        pills.push((definition.tiers_text(), Tone::Neutral));
+    }
     if !matches!(definition.category, Category::Standard | Category::FakeUniqueMod) {
         let tone = if definition.is_reforged() { Tone::Reforged } else { Tone::Neutral };
         pills.push((definition.category.name().into_owned(), tone));
@@ -618,8 +629,21 @@ pub fn entry(definition: &AffixDefinition, catalog: &Catalog, slot: Option<u16>,
     if let Some(source) = &definition.source {
         pills.push((source.name.clone(), Tone::Unique));
     }
+    if let Some(title) = &definition.title {
+        pills.push((title.clone(), Tone::Neutral));
+    }
 
     let mut lines = vec![name.clone()];
+    for line in catalog.effect_lines(definition, base) {
+        if !line.eq_ignore_ascii_case(&name) {
+            lines.push(line);
+        }
+    }
+    for effect in &definition.effects {
+        if !effect.explanation.is_empty() && !lines.contains(&effect.explanation) {
+            lines.push(effect.explanation.clone());
+        }
+    }
     match &definition.source {
         Some(source) => lines.push(FROM.with(&[("unique", &source.name), ("slot", &slot_name(catalog, source.item_type))])),
         None if !definition.item_types.is_empty() => {
@@ -651,7 +675,12 @@ pub fn entry(definition: &AffixDefinition, catalog: &Catalog, slot: Option<u16>,
     if !tags.is_empty() {
         lines.push(TAGS.with(&[("tags", &tags.join(", "))]));
     }
-    let ranges = ladder(definition, catalog);
+    // A unique modifier's values are on its lines above.
+    let ranges = if definition.source.is_some() && !definition.effects.is_empty() {
+        String::new()
+    } else {
+        ladder(definition, catalog, base)
+    };
     if !ranges.is_empty() {
         lines.push(ranges);
     }
@@ -669,7 +698,7 @@ pub fn entry(definition: &AffixDefinition, catalog: &Catalog, slot: Option<u16>,
 mod tests {
     use super::*;
     use crate::pages::forge::game::ItemTypeDefinition;
-    use crate::pages::forge::item::AffixSource;
+    use crate::pages::forge::item::{AffixEffect, AffixSource, TierProperty};
 
     const BOOTS: u16 = 3;
     const HELMET: u16 = 0;
@@ -694,6 +723,8 @@ mod tests {
             level: 0,
             source: None,
             stat_tags: 0,
+            effects: Vec::new(),
+            title: None,
         }
     }
 
@@ -1034,14 +1065,14 @@ mod tests {
     #[test]
     fn a_row_shows_pills_and_keeps_the_rest_for_its_detail() {
         let catalog = catalog();
-        let health = entry(&catalog.definitions[0], &catalog, Some(BOOTS), &[BOOTS]);
+        let health = entry(&catalog.definitions[0], &catalog, Some(BOOTS), &[BOOTS], None);
         assert_eq!(health.name, "Health");
         let pills: Vec<&str> = health.pills.iter().map(|(text, _)| text.as_str()).collect();
         assert_eq!(pills, ["Boots +1", "Suffix", "T1–T8"]);
         assert!(health.detail.contains("Rolls on Boots and Ring"), "{}", health.detail);
         assert!(health.detail.contains("Tags: Health"), "{}", health.detail);
 
-        let duplicate = entry(&catalog.definitions[5], &catalog, Some(BOOTS), &[BOOTS]);
+        let duplicate = entry(&catalog.definitions[5], &catalog, Some(BOOTS), &[BOOTS], None);
         assert_eq!(duplicate.name, "Health", "its unique's name moves to its pill");
         assert_eq!(duplicate.pills.last(), Some(&("Fractured Crown".to_owned(), Tone::Unique)));
         assert_eq!(duplicate.pills[0].0, "Helmet", "a unique modifier names its unique's slot");
@@ -1049,17 +1080,116 @@ mod tests {
         assert!(duplicate.detail.contains("Requires level 30"), "{}", duplicate.detail);
     }
 
+    /// A one-line affix on a catalog whose only base scales its values by `modifier`.
+    fn scaled_catalog(modifier: f32, standard: f32) -> Catalog {
+        let mut catalog = catalog();
+        catalog.item_types = vec![ItemTypeDefinition {
+            item_type: 12,
+            name: "2H Axes".into(),
+            bases: vec![crate::pages::forge::game::BaseDefinition {
+                sub_type: 0,
+                name: "Axe".into(),
+                level: 0,
+                corrupted: false,
+                class_requirement: 0,
+                implicits: vec![],
+                affix_effect_modifier: modifier,
+            }],
+        }];
+        catalog.standard_effects.insert(1500, standard);
+        catalog
+    }
+
+    fn penetration(id: u16) -> AffixDefinition {
+        let effect = |heading: &str, words: &str, explanation: &str| AffixEffect {
+            heading: heading.into(),
+            words: words.into(),
+            explanation: explanation.into(),
+            hides_value: false,
+            no_plus: false,
+        };
+        AffixDefinition {
+            max_tier: 7,
+            effects: vec![
+                effect("Cold Penetration", "Cold Penetration", "It reduces resistance."),
+                effect("Lightning Penetration", "Lightning Penetration", "It reduces resistance."),
+            ],
+            ..shipped(id, "Ucenui's", AffixKind::Prefix, &[BOOTS])
+        }
+    }
+
+    #[test]
+    fn the_tip_writes_each_line_with_its_value_on_this_item() {
+        let mut catalog = scaled_catalog(2.2, 0.0);
+        for tier in 1..=7 {
+            let column = Some(TierProperty::AddedPercent { min: 0.1, max: 0.2 });
+            catalog.tier_columns.insert((1500, tier), vec![column, column]);
+        }
+        let definition = penetration(1500);
+        let on_nothing = entry(&definition, &catalog, Some(BOOTS), &[BOOTS], None);
+        assert!(on_nothing.detail.contains("+10–20% Cold Penetration"), "{}", on_nothing.detail);
+        let on_two_handed = entry(&definition, &catalog, Some(BOOTS), &[BOOTS], Some((12, 0)));
+        assert!(on_two_handed.detail.contains("+32–64% Lightning Penetration"), "{}", on_two_handed.detail);
+        assert_eq!(
+            on_two_handed.detail.matches("It reduces resistance.").count(),
+            1,
+            "an explanation reads once: {}",
+            on_two_handed.detail
+        );
+    }
+
+    #[test]
+    fn the_games_scale_follows_the_item_and_what_the_affix_was_written_for() {
+        assert_eq!(scaled_catalog(0.0, 0.0).value_scale(1500, Some((12, 0))), 1.0);
+        assert_eq!(scaled_catalog(2.2, 2.2).value_scale(1500, Some((12, 0))), 1.0, "written for this base");
+        assert!((scaled_catalog(2.2, 0.0).value_scale(1500, Some((12, 0))) - 3.2).abs() < 1e-6);
+        assert!((scaled_catalog(0.0, 1.0).value_scale(1500, Some((12, 0))) - 0.5).abs() < 1e-6, "the formula's halving");
+        assert_eq!(scaled_catalog(2.2, 0.0).value_scale(1500, None), 1.0, "no item, the values as written");
+    }
+
+    #[test]
+    fn a_line_where_tiers_differ_or_the_game_hides_the_value_is_named_alone() {
+        let mut catalog = catalog();
+        for tier in 1..=7u8 {
+            let first = Some(TierProperty::Flat {
+                min: f64::from(tier),
+                max: f64::from(tier),
+                whole: true,
+            });
+            let second = Some(TierProperty::Increased { min: -0.5, max: -0.25 });
+            catalog.tier_columns.insert((1500, tier), vec![first, second]);
+        }
+        let mut definition = penetration(1500);
+        definition.effects[1].words = "reduced Mana".into();
+        assert_eq!(catalog.effect_lines(&definition, None), ["Cold Penetration", "25–50% reduced Mana"]);
+        definition.effects[1].hides_value = true;
+        assert_eq!(catalog.effect_lines(&definition, None)[1], "Lightning Penetration");
+    }
+
+    #[test]
+    fn a_title_goes_to_a_pill_and_search_reads_what_an_affix_does() {
+        let mut definition = penetration(705);
+        definition.name = effects_said(&definition.effects);
+        definition.title = Some("Ucenui's".into());
+        let entry = entry(&definition, &catalog(), Some(BOOTS), &[BOOTS], None);
+        assert_eq!(entry.name, "Cold Penetration, Lightning Penetration");
+        assert_eq!(entry.pills.last(), Some(&("Ucenui's".to_owned(), Tone::Neutral)));
+        let key = SearchKey::of(&definition);
+        assert!(key.text.contains("lightning penetration") && key.text.contains("ucenui's"), "{key:?}");
+    }
+
     #[test]
     fn a_ladder_with_one_range_reads_once() {
         let mut catalog = catalog();
         for tier in 1..=8 {
-            catalog.tier_ranges.insert((1500, tier), "+5–14".into());
-            catalog.tier_ranges.insert((25, tier), format!("+{tier}"));
+            let flat = |min: f64, max: f64| vec![Some(TierProperty::Flat { min, max, whole: true })];
+            catalog.tier_columns.insert((1500, tier), flat(5.0, 14.0));
+            catalog.tier_columns.insert((25, tier), flat(f64::from(tier), f64::from(tier)));
         }
         let unique = catalog.definitions[5].clone();
-        assert_eq!(ladder(&unique, &catalog), "+5–\u{2060}14");
+        assert_eq!(ladder(&unique, &catalog, None), "+5–\u{2060}14");
         let shipped = catalog.definitions[0].clone();
-        assert!(ladder(&shipped, &catalog).starts_with("T1\u{a0}+1, T2\u{a0}+2"));
+        assert!(ladder(&shipped, &catalog, None).starts_with("T1\u{a0}+1, T2\u{a0}+2"));
     }
 
     #[test]

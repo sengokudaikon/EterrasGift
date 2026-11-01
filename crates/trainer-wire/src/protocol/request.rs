@@ -91,6 +91,7 @@ impl Request {
                     body.u16(affix.id);
                     body.blob(affix.name.as_bytes());
                     body.blob(affix.display_name.as_bytes());
+                    body.u32(affix.standard_effect.to_bits());
                     body.byte(affix.properties.len() as u8);
                     for line in &affix.properties {
                         body.byte(line.property);
@@ -514,6 +515,7 @@ fn new_affix(body: &mut Reader<'_>) -> Result<NewAffix, ProtocolError> {
         std::str::from_utf8(body.take(length)?).map(str::to_owned).map_err(|_| ProtocolError::InvalidData)
     };
     let (name, display_name) = (text()?, text()?);
+    let standard_effect = f32::from_bits(body.u32()?);
     let count = usize::from(body.byte()?);
     if !(1..=MAX_PROPERTIES).contains(&count) {
         return Err(ProtocolError::InvalidData);
@@ -534,6 +536,7 @@ fn new_affix(body: &mut Reader<'_>) -> Result<NewAffix, ProtocolError> {
         id,
         name,
         display_name,
+        standard_effect,
         properties,
     };
     affix.validate()?;

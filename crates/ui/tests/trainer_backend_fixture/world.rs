@@ -50,6 +50,8 @@ fn catalog(base_implicits: bool, class_affixes: bool) -> GameCatalog {
         (
             id,
             AffixDefinition {
+                effects: Vec::new(),
+                named_by_title: false,
                 id,
                 raw_name: text.into(),
                 raw_display_name: text.into(),
@@ -59,7 +61,7 @@ fn catalog(base_implicits: bool, class_affixes: bool) -> GameCatalog {
                 class_requirement,
                 item_types: Some(item_types.iter().map(|t| i32::from(*t)).collect()),
                 tier_count: 8,
-                standard_effect: 1.0,
+                standard_effect: 0.0,
                 // Flat ranges that grow with the tier, so the tier menu and the picker show values.
                 numeric: Availability::Available(
                     (1..=8)
@@ -129,6 +131,7 @@ fn catalog(base_implicits: bool, class_affixes: bool) -> GameCatalog {
         )
     };
     let base = |sub_type: u16, text: &str, level: i32, corrupted: bool, class_requirement: i32, implicits: Vec<ImplicitDefinition>| SubTypeDefinition {
+        affix_effect_modifier: 0.0,
         sub_type,
         name: name(text),
         level_requirement: level,
@@ -1529,7 +1532,7 @@ const UNIQUE_MOD_TIERS: usize = 7;
 /// property numbers and `AT` flags), then a unique's modifiers: plain stats a shipped affix also has, and one of several
 /// lines. `filler` adds as many more of each to reach the real catalog's size.
 fn picker_catalog(filler: Option<(u16, usize)>) -> GameCatalog {
-    use eg_trainer::definitions::catalog::{AffixSource, AffixTier, NumericProperty};
+    use eg_trainer::definitions::catalog::{AffixEffect, AffixSource, AffixTier, NumericProperty};
     const WHOLE: i32 = 1;
     let tier = |lines: &[(u8, i32)], minimum: f32, maximum: f32| AffixTier {
         properties: lines
@@ -1553,6 +1556,8 @@ fn picker_catalog(filler: Option<(u16, usize)>) -> GameCatalog {
     };
     let shipped = |id: u16, text: &str, kind: i32, special: i32, slots: &[u16], class: i32, level: i32, lines: &[(u8, i32)]| {
         let definition = AffixDefinition {
+            effects: Vec::new(),
+            named_by_title: false,
             id,
             raw_name: text.into(),
             raw_display_name: text.into(),
@@ -1562,7 +1567,7 @@ fn picker_catalog(filler: Option<(u16, usize)>) -> GameCatalog {
             class_requirement: class,
             item_types: Some(slots.iter().map(|slot| i32::from(*slot)).collect()),
             tier_count: 8,
-            standard_effect: 1.0,
+            standard_effect: 0.0,
             numeric: Availability::Available((1..=8).map(|n: i32| tier(lines, (n * 10 - 5) as f32, (n * 10 + 4) as f32)).collect()),
             level_requirement: level,
             source: None,
@@ -1571,6 +1576,17 @@ fn picker_catalog(filler: Option<(u16, usize)>) -> GameCatalog {
     };
     let modifier = |id: u16, unique: u16, unique_name: &str, line: &str, level: i32, lines: &[(u8, i32)]| {
         let definition = AffixDefinition {
+            effects: lines
+                .iter()
+                .map(|_| AffixEffect {
+                    heading: line.into(),
+                    words: line.into(),
+                    explanation: "Multiplicative with other modifiers".into(),
+                    hides_value: false,
+                    no_plus: false,
+                })
+                .collect(),
+            named_by_title: false,
             id,
             raw_name: eg_trainer::definitions::unique_mods::internal_name(unique_name, line),
             raw_display_name: line.into(),
@@ -1581,7 +1597,7 @@ fn picker_catalog(filler: Option<(u16, usize)>) -> GameCatalog {
             // A unique modifier rolls anywhere.
             item_types: Some((0..=33).collect()),
             tier_count: UNIQUE_MOD_TIERS as u16,
-            standard_effect: 1.0,
+            standard_effect: 0.0,
             numeric: Availability::Available(vec![tier(lines, 15.0, 30.0); UNIQUE_MOD_TIERS]),
             level_requirement: level,
             source: Some(AffixSource { unique, line: line.into() }),
@@ -1862,6 +1878,8 @@ pub(in super::super) fn picker_captures(session: &Session) {
     session.type_text("Fractured");
     assert_eq!(picker_names(&state), ["Fire Resistance", "Health"]);
     session.capture(&forge.ui, "item-picker-unique-search");
+    hover(&forge, 300.0, 300.0);
+    session.capture(&forge.ui, "item-picker-unique-hover");
     forge.handle.edit(|editor| editor.picker_search("cold resistance"));
     settle();
     assert_eq!(picker_names(&state), ["Cold Resistance"], "the shipped one alone: Snowblind's duplicate stays out");

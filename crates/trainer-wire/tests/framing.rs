@@ -311,6 +311,7 @@ fn new_affix() -> NewAffix {
         maximum: 0.25,
     };
     NewAffix {
+        standard_effect: 2.2,
         id: *new_affixes::ID_RANGES[0].start(),
         name: "EG Exsanguinous: Potions".into(),
         display_name: "15-30% increased speed".into(),
@@ -326,6 +327,7 @@ fn registered_affixes_round_trip_with_three_or_more_lines() {
         affixes: vec![
             new_affix(),
             NewAffix {
+                standard_effect: 0.0,
                 display_name: String::new(),
                 properties: new_affix().properties[..1].to_vec(),
                 ..new_affix()
@@ -348,7 +350,7 @@ fn a_registered_affix_is_refused_outside_its_contract() {
         .encode()
     };
     type Change = fn(&mut NewAffix);
-    let cases: [(&str, Change); 7] = [
+    let cases: [(&str, Change); 10] = [
         ("a shipped ID", |a| a.id = 25),
         ("Loom's block", |a| a.id = 3000),
         ("past what a save holds", |a| a.id = 4096),
@@ -356,6 +358,9 @@ fn a_registered_affix_is_refused_outside_its_contract() {
         ("several lines without a name", |a| a.display_name.clear()),
         ("no line", |a| a.properties.clear()),
         ("a value that is no number", |a| a.properties[0].minimum = f32::NAN),
+        ("a modifier that is no number", |a| a.standard_effect = f32::NAN),
+        ("an infinite modifier", |a| a.standard_effect = f32::INFINITY),
+        ("a zero scaling denominator", |a| a.standard_effect = -1.0),
     ];
     for (name, change) in cases {
         assert!(Request::decode(&encoded(change)).is_err(), "{name}");

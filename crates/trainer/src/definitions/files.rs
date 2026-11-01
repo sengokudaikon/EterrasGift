@@ -7,17 +7,18 @@
 //! ability (58), player (98), tracker (123) and idol altar (130) properties their own registries.
 
 use crate::definitions::catalog::{
-    AffixDefinition, AffixSource, AffixTier, Availability, CatalogBuilder, CatalogEntries, CatalogIdentity, CatalogKind, CatalogPage, DefinitionName, DefinitionNameSource,
-    EXTRACTION_VERSION, GameCatalog, GameLocale, ImplicitDefinition, ItemLimits, ItemTypeDefinition, NumericProperty, RarityDefinition, SubTypeDefinition, UniqueDefinition,
-    UniqueNumericData, ValueRange,
+    AffixDefinition, AffixEffect, AffixSource, AffixTier, Availability, CatalogBuilder, CatalogEntries, CatalogIdentity, CatalogKind, CatalogPage, DefinitionName,
+    DefinitionNameSource, EXTRACTION_VERSION, GameCatalog, GameLocale, ImplicitDefinition, ItemLimits, ItemTypeDefinition, NumericProperty, RarityDefinition, SubTypeDefinition,
+    UniqueDefinition, UniqueNumericData, ValueRange,
 };
 use crate::definitions::entries::MAX_PAGE_ENTRIES;
+use crate::definitions::stat_text::{StatKey, StatTexts};
 use crate::definitions::unique_mods;
 use eg_game_files::definitions::{Ailment, Definitions};
 use eg_game_files::uniques::{PlayerDefinitions, Property, PropertyInfo};
 use eg_trainer_wire::new_affixes::TIERS;
 use eg_trainer_wire::protocol::ProtocolError;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::SystemTime;
@@ -58,19 +59,22 @@ pub type Fingerprint = (u64, SystemTime);
 
 /// The game's names in one language, from its string tables: affixes (`Item_Affix_<id>_DisplayName`), base types
 /// (`Item_BaseType_Name_<type>`), subtypes (`Item_SubType_Name_<type>_<sub>`) and uniques and set items
-/// (`Unique_Name_<id>`). A name the table lacks keeps the stored one.
+/// (`Unique_Name_<id>`). A name the table lacks keeps the stored one. Each affix's stat lines are in its words too.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct LocalNames {
     affixes: BTreeMap<u16, String>,
     bases: BTreeMap<u8, String>,
     sub_types: BTreeMap<(u8, u16), String>,
     uniques: BTreeMap<u16, String>,
+    effects: BTreeMap<u16, Vec<AffixEffect>>,
+    /// The affixes whose name in this language is their title.
+    named_by_title: BTreeSet<u16>,
 }
 
 /// A name as the game shows it, without the markup its text tables carry: grammatical gender and number tags
 /// ("[ms]Zauberstab", "[fp]"), the braces round a skill name ("{【ファイアボール】}") and zero-width padding. A numbered
 /// placeholder ("{0}") stays.
-fn display_text(text: &str) -> String {
+pub(crate) fn display_text(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
     let mut rest = text;
     while let Some(c) = rest.chars().next() {
@@ -99,9 +103,21 @@ fn display_text(text: &str) -> String {
 }
 
 impl LocalNames {
-    fn read(strings: &eg_game_files::Strings, catalog: &FileCatalog) -> Self {
+    fn read(strings: &eg_game_files::Strings, catalog: &FileCatalog, player: &PlayerDefinitions, definitions: &Definitions) -> Self {
         let text = |table: &str, key: String| strings.get(table, &key).map(display_text).filter(|text| !text.is_empty());
+        let texts = StatTexts::new(strings, player, definitions);
         Self {
+            effects: catalog.affixes.iter().map(|affix| (affix.id, effects_of(affix, &texts))).collect(),
+            named_by_title: catalog
+                .affixes
+                .iter()
+                .filter(|affix| affix.source.is_none())
+                .filter(|affix| {
+                    let name = text("Item_Affixes", format!("Item_Affix_{}_DisplayName", affix.id));
+                    name.is_some() && name == text("Item_Affixes", format!("Item_Affix_{}_Title", affix.id))
+                })
+                .map(|affix| affix.id)
+                .collect(),
             affixes: catalog
                 .affixes
                 .iter()
@@ -135,6 +151,16 @@ impl LocalNames {
             "bases": map(self.bases.iter().map(|(id, text)| (id.to_string(), text)).collect()),
             "sub_types": map(self.sub_types.iter().map(|((item_type, sub), text)| (format!("{item_type}_{sub}"), text)).collect()),
             "uniques": map(self.uniques.iter().map(|(id, text)| (id.to_string(), text)).collect()),
+            "effects": serde_json::Value::Object(
+                self.effects
+                    .iter()
+                    .map(|(id, effects)| {
+                        let lines = effects.iter().map(|e| serde_json::json!([e.heading, e.words, e.explanation, e.hides_value, e.no_plus])).collect();
+                        (id.to_string(), serde_json::Value::Array(lines))
+                    })
+                    .collect(),
+            ),
+            "named_by_title": self.named_by_title,
         })
     }
 
@@ -150,6 +176,27 @@ impl LocalNames {
                 Some((item_type.parse().ok()?, sub.parse().ok()?))
             })?,
             uniques: entries(&value["uniques"], |k| k.parse().ok())?,
+            effects: value["effects"]
+                .as_object()?
+                .iter()
+                .map(|(id, lines)| {
+                    let lines = lines.as_array()?.iter().map(|line| {
+                        Some(AffixEffect {
+                            heading: line[0].as_str()?.to_owned(),
+                            words: line[1].as_str()?.to_owned(),
+                            explanation: line[2].as_str()?.to_owned(),
+                            hides_value: line[3].as_bool()?,
+                            no_plus: line[4].as_bool()?,
+                        })
+                    });
+                    Some((id.parse().ok()?, lines.collect::<Option<_>>()?))
+                })
+                .collect::<Option<_>>()?,
+            named_by_title: value["named_by_title"]
+                .as_array()?
+                .iter()
+                .map(|id| id.as_u64().and_then(|id| u16::try_from(id).ok()))
+                .collect::<Option<_>>()?,
         })
     }
 }
@@ -189,12 +236,14 @@ pub fn read_with_ledger(folder: &Path, ledger: Option<&Path>) -> Result<FileCata
     let player = install.player_definitions().map_err(|e| e.to_string())?;
     let build = install.build_hash().unwrap_or_default();
     let mut catalog = build_catalog(binary_hash, metadata_hash, build, &definitions, &player)?;
-    if let Some(ledger) = ledger {
-        catalog.ledger_problem = catalog.add_unique_mods(ledger, &definitions, &player).err();
-    }
     // Names only: a catalog without the game's text still serves, with the stored names.
-    if let Ok(strings) = install.strings(TEXT_LOCALE) {
-        catalog.name_affixes(&strings);
+    let english = install.strings(TEXT_LOCALE).ok();
+    if let Some(ledger) = ledger {
+        let texts = english.as_ref().map(|strings| StatTexts::new(strings, &player, &definitions));
+        catalog.ledger_problem = catalog.add_unique_mods(ledger, &definitions, &player, texts.as_ref()).err();
+    }
+    if let Some(strings) = &english {
+        catalog.name_affixes(strings);
     }
     // `key` and `dev` are the game's own working tables, not languages a player picks.
     for code in install.locales().map(|locales| locales.into_keys().collect::<Vec<_>>()).unwrap_or_default() {
@@ -202,7 +251,7 @@ pub fn read_with_ledger(folder: &Path, ledger: Option<&Path>) -> Result<FileCata
             && code != "dev"
             && let Ok(strings) = install.strings(&code)
         {
-            let names = LocalNames::read(&strings, &catalog);
+            let names = LocalNames::read(&strings, &catalog, &player, &definitions);
             catalog.names.insert(code, Arc::new(names));
         }
     }
@@ -212,7 +261,7 @@ pub fn read_with_ledger(folder: &Path, ledger: Option<&Path>) -> Result<FileCata
 
 /// Builds the catalog from definitions already read.
 pub fn build_catalog(binary_hash: String, metadata_hash: String, build: String, definitions: &Definitions, player: &PlayerDefinitions) -> Result<FileCatalog, String> {
-    let presentation = Presentation { definitions, player };
+    let presentation = Presentation { definitions, player, texts: None };
     let byte = |value: i32, what: &str| u8::try_from(value).map_err(|_| format!("item constant {what} {value} outside 0..255"));
     let range = |(minimum, maximum): (i32, i32), what: &str| -> Result<ValueRange, String> {
         let (minimum, maximum) = (byte(minimum, what)?, byte(maximum, what)?);
@@ -229,7 +278,11 @@ pub fn build_catalog(binary_hash: String, metadata_hash: String, build: String, 
         weavers_touch: range(c.weavers_touch, "weaver's touch")?,
         level_requirement: range((0, c.max_level), "level")?,
     };
-    let bases = definitions.item_types.iter().map(base).collect::<Result<_, _>>()?;
+    let bases = definitions
+        .item_types
+        .iter()
+        .map(|item| base(item, definitions.omen_idol_affix_effect_modifier))
+        .collect::<Result<_, _>>()?;
     let affixes = definitions.affixes.iter().map(|a| affix(a, &presentation)).collect::<Result<_, _>>()?;
     let uniques = player.uniques.iter().map(|u| unique(u, &presentation)).collect::<Result<_, _>>()?;
     let rarities = (0..10)
@@ -266,9 +319,9 @@ pub fn build_catalog(binary_hash: String, metadata_hash: String, build: String, 
 impl FileCatalog {
     /// Adds each unique's modifiers as affixes of their own (`unique_mods`). The ledger is saved first: no ID is offered
     /// before it is permanent, and on any failure nothing is added.
-    fn add_unique_mods(&mut self, ledger: &Path, definitions: &Definitions, player: &PlayerDefinitions) -> Result<(), String> {
+    fn add_unique_mods(&mut self, ledger: &Path, definitions: &Definitions, player: &PlayerDefinitions, texts: Option<&StatTexts<'_>>) -> Result<(), String> {
         let mut ledger = unique_mods::Ledger::open(ledger)?;
-        let presentation = Presentation { definitions, player };
+        let presentation = Presentation { definitions, player, texts };
         let shipped = definitions.affixes.iter().map(|a| a.id).collect();
         let item_types: Vec<i32> = definitions.item_types.iter().map(|t| i32::from(t.id)).collect();
         let mut added = Vec::new();
@@ -423,6 +476,10 @@ impl FileCatalog {
                 if let Some(text) = names.affixes.get(&affix.id) {
                     affix.game_display_name = Availability::Available(text.clone());
                 }
+                if let Some(effects) = names.effects.get(&affix.id) {
+                    affix.effects.clone_from(effects);
+                }
+                affix.named_by_title = names.named_by_title.contains(&affix.id);
             }
             for unique in &mut uniques {
                 if let Some(text) = names.uniques.get(&unique.id) {
@@ -461,7 +518,7 @@ fn finite(minimum: f32, maximum: f32) -> Result<(), String> {
     }
 }
 
-fn base(item: &eg_game_files::definitions::ItemType) -> Result<ItemTypeDefinition, String> {
+fn base(item: &eg_game_files::definitions::ItemType, omen_idol_modifier: f32) -> Result<ItemTypeDefinition, String> {
     let sub_types = item
         .sub_types
         .iter()
@@ -496,6 +553,8 @@ fn base(item: &eg_game_files::definitions::ItemType) -> Result<ItemTypeDefinitio
                 cannot_drop: sub.cannot_drop,
                 is_corrupted: sub.is_corrupted,
                 implicits: Availability::Available(implicits),
+                // `ItemList.getAffixEffectModifier`.
+                affix_effect_modifier: if sub.affix_effectiveness == 1 { omen_idol_modifier } else { item.affix_effect_modifier },
             })
         })
         .collect::<Result<_, String>>()?;
@@ -528,6 +587,8 @@ pub fn ordinary(property: u8) -> bool {
 }
 
 struct Presentation<'a> {
+    /// The game's words, where its text could be read and a line's words are wanted.
+    texts: Option<&'a StatTexts<'a>>,
     definitions: &'a Definitions,
     player: &'a PlayerDefinitions,
 }
@@ -695,6 +756,8 @@ fn affix(affix: &eg_game_files::definitions::Affix, presentation: &Presentation<
         numeric: tiers,
         level_requirement: affix.level_requirement,
         source: None,
+        effects: Vec::new(),
+        named_by_title: false,
     })
 }
 
@@ -713,6 +776,40 @@ fn unique_level(unique: &eg_game_files::uniques::Unique, definitions: &Definitio
         .map(|sub| sub.level_requirement)
         .min()
         .unwrap_or(0)
+}
+
+/// Each stat line of an affix in the words of `texts`. A value below 0 across every tier takes the word for it ("reduced").
+fn effects_of(affix: &AffixDefinition, texts: &StatTexts<'_>) -> Vec<AffixEffect> {
+    let Availability::Available(tiers) = &affix.numeric else {
+        return Vec::new();
+    };
+    let Some(first) = tiers.first() else {
+        return Vec::new();
+    };
+    first
+        .properties
+        .iter()
+        .enumerate()
+        .map(|(column, line)| {
+            let negative = tiers.iter().filter_map(|tier| tier.properties.get(column)).all(|p| p.minimum < 0.0 && p.maximum <= 0.0);
+            let key = StatKey {
+                property: line.property,
+                tags: line.tags,
+                special_tag: line.special_tag,
+                extra_tag: line.extra_tag,
+                modifier_type: line.modifier_type,
+                negative,
+            };
+            let (hides_value, no_plus) = texts.value_style(&key);
+            AffixEffect {
+                heading: texts.heading(&key).unwrap_or_default(),
+                words: texts.name(&key).unwrap_or_default(),
+                explanation: texts.explanation(&key).unwrap_or_default(),
+                hides_value,
+                no_plus,
+            }
+        })
+        .collect()
 }
 
 /// One group of a unique's modifiers as a catalog affix, or none if the game could not present it or it has no ID.
@@ -747,17 +844,25 @@ fn unique_mod_affix(
         return Ok(None);
     };
     // A one-line affix without text lets the game write its name; several lines need one to show.
-    let named: Vec<String> = lines
-        .iter()
-        .map(|line| {
-            // The special registries' entries have no name here; the game writes their text once it holds the affix.
-            if ordinary(line.property) {
-                presentation.stat(line.property).name.clone()
-            } else {
-                format!("Special effect {}", line.tags)
-            }
-        })
-        .collect();
+    let mut named: Vec<String> = Vec::with_capacity(lines.len());
+    for line in &lines {
+        let key = StatKey {
+            property: line.property,
+            tags: line.tags,
+            special_tag: line.special_tag,
+            extra_tag: line.extra_tag,
+            modifier_type: line.modifier_type,
+            negative: line.minimum < 0.0 && line.maximum <= 0.0,
+        };
+        // Without the game's text, the stored name; a line without one is the game's to write once it holds the affix.
+        let name = presentation
+            .texts
+            .and_then(|texts| texts.heading(&key))
+            .or_else(|| ordinary(line.property).then(|| presentation.stat(line.property).name.clone()));
+        if let Some(name) = name.filter(|name| !named.contains(name)) {
+            named.push(name);
+        }
+    }
     let display = group.line.clone().unwrap_or_else(|| if lines.len() > 1 { named.join(", ") } else { String::new() });
     let shown = if display.is_empty() { named.join(", ") } else { display.clone() };
     let source = stored_name(&unique.display_name, &unique.name).text;
@@ -772,10 +877,21 @@ fn unique_mod_affix(
         class_requirement: 1,
         item_types: Some(item_types.to_vec()),
         tier_count: TIERS as u16,
-        standard_effect: 1.0,
+        // Written for its unique's base, so it reads the same there as on the unique; elsewhere the game scales it.
+        standard_effect: presentation
+            .definitions
+            .item_types
+            .iter()
+            .find(|item_type| item_type.id == unique.item_type)
+            .map_or(0.0, |item_type| item_type.affix_effect_modifier),
         numeric: Availability::Available(vec![AffixTier { properties }; TIERS]),
         level_requirement: unique_level(unique, presentation.definitions),
-        source: Some(AffixSource { unique: unique.id, line }),
+        source: Some(AffixSource {
+            unique: unique.id,
+            line: group.line.as_ref().map_or_else(String::new, |_| line),
+        }),
+        effects: Vec::new(),
+        named_by_title: false,
     }))
 }
 

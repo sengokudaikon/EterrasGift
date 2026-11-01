@@ -204,6 +204,7 @@ pub fn new_affix(definition: &AffixDefinition) -> Option<NewAffix> {
         id: definition.id,
         name: definition.raw_name.clone(),
         display_name: definition.raw_display_name.clone(),
+        standard_effect: definition.standard_effect,
         properties: tier
             .properties
             .iter()

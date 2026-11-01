@@ -13,6 +13,8 @@ use std::{collections::BTreeMap, path::PathBuf};
 
 fn definition(id: u16, kind: i32) -> AffixDefinition {
     AffixDefinition {
+        effects: Vec::new(),
+        named_by_title: false,
         id,
         raw_name: format!("affix{id}"),
         raw_display_name: String::new(),
@@ -65,6 +67,7 @@ fn catalog() -> GameCatalog {
                     sub_types: [0, 1, 2]
                         .into_iter()
                         .map(|sub_type| SubTypeDefinition {
+                            affix_effect_modifier: 0.0,
                             sub_type,
                             name: name(),
                             level_requirement: 1,

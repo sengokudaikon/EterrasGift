@@ -682,6 +682,7 @@ fn project_catalog(data: &GameCatalog) -> Catalog {
                     level: base.level_requirement.clamp(0, 255) as u8,
                     corrupted: base.is_corrupted,
                     class_requirement: base.class_requirement,
+                    affix_effect_modifier: base.affix_effect_modifier,
                     // C# `ForgeChoices.BaseOptions` lists each implicit with `ImplicitLine`; an undescribed list is none.
                     implicits: match &base.implicits {
                         Availability::Available(implicits) => implicits
@@ -722,14 +723,23 @@ fn project_catalog(data: &GameCatalog) -> Catalog {
                 1 => Some(AffixKind::Suffix),
                 _ => None,
             };
-            let name = match &definition.game_display_name {
+            let stored = match &definition.game_display_name {
                 Availability::Available(text) if !text.is_empty() => text.clone(),
                 _ if !definition.raw_display_name.is_empty() => definition.raw_display_name.clone(),
                 _ => definition.raw_name.clone(),
             };
+            let said = item::effects_said(&definition.effects);
+            let (name, title) = if definition.named_by_title && !said.is_empty() {
+                (said.clone(), Some(stored))
+            } else {
+                (stored, None)
+            };
+            catalog.standard_effects.insert(definition.id, definition.standard_effect);
             catalog.definitions.push(AffixDefinition {
                 id: definition.id,
-                name,
+                name: name.clone(),
+                effects: definition.effects.clone(),
+                title,
                 kind: kind.unwrap_or(AffixKind::Prefix),
                 category: Category::from_raw(definition.special),
                 item_types: definition
@@ -749,7 +759,12 @@ fn project_catalog(data: &GameCatalog) -> Catalog {
                         unique: source.unique,
                         name: unique.map_or_else(|| UNKNOWN_UNIQUE.with(&[("id", &source.unique)]), |unique| unique.name.text.clone()),
                         item_type: unique.map_or(0, |unique| u16::from(unique.item_type)),
-                        line: source.line.clone(),
+                        // A modifier with no text of its own says what its lines do.
+                        line: match (source.line.is_empty(), said.is_empty()) {
+                            (false, _) => source.line.clone(),
+                            (true, false) => said.clone(),
+                            (true, true) => name.clone(),
+                        },
                     }
                 }),
                 stat_tags: match &definition.numeric {
@@ -763,12 +778,12 @@ fn project_catalog(data: &GameCatalog) -> Catalog {
             // cannot format shows none.
             if let Availability::Available(tiers) = &definition.numeric {
                 for (index, tier) in tiers.iter().enumerate() {
-                    let properties: Option<Vec<item::TierProperty>> = tier
+                    let columns: Vec<Option<item::TierProperty>> = tier
                         .properties
                         .iter()
                         .map(|property| match property.modifier_type {
                             _ if property.display_added_as_tenth => None,
-                            1 => Some(item::TierProperty::Increased {
+                            1 | 2 => Some(item::TierProperty::Increased {
                                 min: f64::from(property.minimum),
                                 max: f64::from(property.maximum),
                             }),
@@ -784,9 +799,7 @@ fn project_catalog(data: &GameCatalog) -> Catalog {
                             _ => None,
                         })
                         .collect();
-                    if let Some(range) = properties.as_deref().and_then(item::format_tier_range) {
-                        catalog.tier_ranges.insert((definition.id, (index + 1) as u8), range);
-                    }
+                    catalog.tier_columns.insert((definition.id, (index + 1) as u8), columns);
                 }
             }
         }

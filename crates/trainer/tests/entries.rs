@@ -56,6 +56,7 @@ fn implicit() -> ImplicitDefinition {
 }
 fn subtype() -> SubTypeDefinition {
     SubTypeDefinition {
+        affix_effect_modifier: 0.0,
         sub_type: 65535,
         name: name("Gold Ring"),
         level_requirement: -4,
@@ -74,6 +75,8 @@ fn base() -> ItemTypeDefinition {
 }
 fn affix() -> AffixDefinition {
     AffixDefinition {
+        effects: Vec::new(),
+        named_by_title: false,
         id: 65535,
         raw_name: "internal".into(),
         raw_display_name: "stored".into(),
@@ -144,11 +147,15 @@ fn complete_owned_shapes_roundtrip_without_interpreting_unknown_enums_or_range_o
         CatalogEntries::Affixes(vec![affix()]),
         // An empty equipment list is not the absent one.
         CatalogEntries::Affixes(vec![AffixDefinition {
+            effects: Vec::new(),
+            named_by_title: false,
             item_types: Some(vec![]),
             ..affix()
         }]),
         // A unique modifier keeps its unique and its own words.
         CatalogEntries::Affixes(vec![AffixDefinition {
+            effects: Vec::new(),
+            named_by_title: false,
             level_requirement: 87,
             source: Some(AffixSource {
                 unique: 65535,
@@ -353,6 +360,7 @@ fn text_bounds_unavailable_reasons_and_whole_message_budget() {
             name: name(""),
             sub_types: (0..17)
                 .map(|sub| SubTypeDefinition {
+                    affix_effect_modifier: 0.0,
                     sub_type: sub,
                     name: name(&"x".repeat(MAX_TEXT_BYTES)),
                     level_requirement: 0,

@@ -6,4 +6,5 @@ pub mod catalog;
 pub mod entries;
 pub mod files;
 pub mod service;
+pub mod stat_text;
 pub mod unique_mods;

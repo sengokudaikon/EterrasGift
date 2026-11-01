@@ -44,6 +44,7 @@ fn base(id: u8) -> ItemTypeDefinition {
             source: DefinitionNameSource::StoredDisplay,
         },
         sub_types: vec![SubTypeDefinition {
+            affix_effect_modifier: 0.0,
             sub_type: 5,
             name: DefinitionName {
                 text: format!("Hatchet {id} 🪓"),
