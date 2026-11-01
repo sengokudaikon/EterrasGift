@@ -1,20 +1,12 @@
 //! What MelonLoader's Latest.log actually observed. A previous build's failure is not evidence against a new DLL;
 //! incomplete loading and failed Unity support leave individual mods' loading status unknown.
 
-use super::assembly::LoaderVersion;
+use crate::assembly::LoaderVersion;
 use std::collections::BTreeMap;
 use std::fs;
 use std::io;
 use std::path::Path;
 use std::time::Duration;
-
-use phrases::phrases;
-
-phrases! {
-    ClosedEarly: "The game closed before MelonLoader finished loading mods."
-    NoReason: "MelonLoader read it but did not load it, and its log gives no reason."
-    NotFound: "MelonLoader did not find it in the Mods folder."
-}
 
 pub const LOG_LINES_PER_MOD: usize = 50;
 const ASSEMBLY_LOADED: &str = "Melon Assembly loaded: '";
@@ -79,6 +71,19 @@ pub struct ModLogRun {
     pub line: MelonLogLine,
     pub count: usize,
     pub last: Duration,
+}
+
+/// Why the log shows no banner for a mod.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum LogProblem {
+    /// The log ends before MelonLoader finished loading mods.
+    ClosedEarly,
+    /// MelonLoader's own line about the mod, with the lines that followed it.
+    Logged(String),
+    /// MelonLoader read the DLL, and no line says why it did not load it.
+    NoReason,
+    /// MelonLoader never found the DLL.
+    NotFound,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -168,23 +173,25 @@ impl MelonLog {
         (self.hash_of(file).is_some_and(|logged| logged.eq_ignore_ascii_case(hash)) && self.reached_mods && !self.support_failed()).then(|| self.banner_for(file).is_some())
     }
 
-    pub fn problem_for(&self, name: &str, file: &str) -> Option<String> {
+    pub fn problem_for(&self, name: &str, file: &str) -> Option<LogProblem> {
         if self.banner_for(file).is_some() {
             return None;
         }
         if !self.reached_mods {
-            return Some(ClosedEarly.into());
+            return Some(LogProblem::ClosedEarly);
         }
         let mentions = Mentions::new(name, file);
         let reason = self
             .lines
             .iter()
             .find(|line| mentions.in_line(line) && !line.text.starts_with(ASSEMBLY_LOADED) && !line.text.starts_with(HASH_LABEL));
-        Some(
-            reason
-                .map(|line| line.text.clone())
-                .unwrap_or_else(|| if self.found.iter().any(|found| same_file(found, file)) { NoReason } else { NotFound }.into()),
-        )
+        Some(reason.map(|line| LogProblem::Logged(line.text.clone())).unwrap_or_else(|| {
+            if self.found.iter().any(|found| same_file(found, file)) {
+                LogProblem::NoReason
+            } else {
+                LogProblem::NotFound
+            }
+        }))
     }
 }
 
@@ -334,8 +341,11 @@ mod tests {
         assert!(lines.iter().any(|line| line.text == "Reach x1.3333334"));
         assert!(lines.iter().any(|line| line.is_error && line.text == "Something threw"));
         assert_eq!(log.lines.last().unwrap().source.as_deref(), Some("Il2CppInterop"));
-        assert!(log.problem_for("Broken", "broken.dll").unwrap().contains("Bad IL format.\nat MelonLoader"));
-        assert_eq!(log.problem_for("Ken", "Ken.dll").as_deref(), Some("MelonLoader did not find it in the Mods folder."));
+        let Some(LogProblem::Logged(reason)) = log.problem_for("Broken", "broken.dll") else {
+            panic!("the failure is in the log");
+        };
+        assert!(reason.contains("Bad IL format.\nat MelonLoader"));
+        assert_eq!(log.problem_for("Ken", "Ken.dll"), Some(LogProblem::NotFound));
         assert!(log.lines_for("Dreams", "Dreams.dll").is_empty());
     }
 
@@ -346,16 +356,10 @@ mod tests {
         assert_eq!(log.loaded_last_time("FlickerDreams.dll", "different"), None);
         let incomplete = MelonLog::parse(LOG.split("[19:40:04.703]").next().unwrap());
         assert_eq!(incomplete.loaded_last_time("FlickerDreams.dll", "abc123"), None);
-        assert_eq!(
-            incomplete.problem_for("Flicker Dreams", "FlickerDreams.dll").as_deref(),
-            Some("The game closed before MelonLoader finished loading mods.")
-        );
+        assert_eq!(incomplete.problem_for("Flicker Dreams", "FlickerDreams.dll"), Some(LogProblem::ClosedEarly));
         let missing_banner = MelonLog::parse(&LOG.replace("Assembly: FlickerDreams.dll", "Assembly: Other.dll"));
         assert_eq!(missing_banner.loaded_last_time("FlickerDreams.dll", "abc123"), Some(false));
-        assert_eq!(
-            missing_banner.problem_for("Flicker Dreams", "FlickerDreams.dll").as_deref(),
-            Some("MelonLoader read it but did not load it, and its log gives no reason.")
-        );
+        assert_eq!(missing_banner.problem_for("Flicker Dreams", "FlickerDreams.dll"), Some(LogProblem::NoReason));
         let unsupported = MelonLog::parse(&format!("{LOG}\n[19:41:14.000] [ERROR] No Support Module Loaded!"));
         assert!(unsupported.support_failed());
         assert_eq!(unsupported.loaded_last_time("FlickerDreams.dll", "abc123"), None);

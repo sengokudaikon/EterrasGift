@@ -16,4 +16,4 @@ dotnet build Samples/Samples.csproj -c Release -p:Sample=<NAME> -o <scratch>/<NA
 and copy `<scratch>/<NAME>/<NAME>.dll` to the `.bin` named after it in lower case with dashes (`FLICKER_DREAMS` →
 `flicker-dreams.bin`). The names are `FLICKER_DREAMS`, `ABILITY_RANGES`, `STASH_SORTER`, `WARD_METER`, `SAMPLE_MOD`,
 `LONG_NAME`, `FLICKER_0_13_0_FROM_0_12_1`, `FLICKER_0_12_1_FROM_0_12_1`, `FLICKER_0_13_0_FROM_0_13_0` and `LOOM`. They
-reference the stand-in MelonLoader in `crates/companion/tests/fixtures/melon/Loader`.
+reference the stand-in MelonLoader in `libs/melon-loader/tests/fixtures/Loader`.

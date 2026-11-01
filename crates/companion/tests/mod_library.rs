@@ -1,12 +1,12 @@
 use eg_companion::game::install::GameInstall;
 use eg_companion::launch::loader::ModLoaderState;
 use eg_companion::launch::loader::melon_paths;
-use eg_companion::mods::assembly::LoaderVersion;
 use eg_companion::mods::inventory::{self, Inventory, LoaderReport};
 use eg_companion::mods::library::ModLibrary;
-use eg_companion::mods::loader_state::LoaderPreparation;
 use eg_companion::mods::worker::ModWorker;
 use file_ops::hashes::of_file as hash_file;
+use melon_loader::assembly::LoaderVersion;
+use melon_loader::loader_state::LoaderPreparation;
 use serde_json::json;
 use std::{fs, io};
 
@@ -286,7 +286,7 @@ fn fixture(temp: &std::path::Path) -> (ModLibrary, GameInstall) {
     let root = temp.join("game");
     fs::create_dir_all(root.join("Mods")).unwrap();
     fs::copy(
-        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/melon/clean.bin"),
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../libs/melon-loader/tests/fixtures/clean.bin"),
         root.join("Mods/Fixture.dll"),
     )
     .unwrap();

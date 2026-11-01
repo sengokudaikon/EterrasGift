@@ -2,12 +2,18 @@
 //! each category it names and orders the settings the page shows; entries it omits are old settings, not guesses.
 
 use super::invalid;
+use melon_loader::assembly::EmbeddedResource;
 use serde_json::{Map, Value};
 use std::collections::HashSet;
 use std::io;
 
 pub const RESOURCE_NAME: &str = "ModSettings.json";
 pub const MAX_RESOURCE_LENGTH: usize = 1 << 20;
+/// What to ask a mod's DLL for.
+pub const SETTINGS_RESOURCE: EmbeddedResource = EmbeddedResource {
+    name: RESOURCE_NAME,
+    max_length: MAX_RESOURCE_LENGTH,
+};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SettingChoice {

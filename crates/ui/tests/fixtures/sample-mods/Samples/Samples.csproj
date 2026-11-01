@@ -8,7 +8,7 @@
     <Nullable>enable</Nullable>
   </PropertyGroup>
   <ItemGroup>
-    <ProjectReference Include="../../../../../companion/tests/fixtures/melon/Loader/Loader.csproj" />
+    <ProjectReference Include="../../../../../../libs/melon-loader/tests/fixtures/Loader/Loader.csproj" />
     <EmbeddedResource Include="AbilityRanges.json" LogicalName="ModSettings.json" Condition="'$(Sample)' == 'ABILITY_RANGES'" />
   </ItemGroup>
 </Project>

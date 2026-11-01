@@ -1326,19 +1326,17 @@ dependencies = [
 name = "eg-companion"
 version = "0.1.0"
 dependencies = [
- "dotscope",
  "eg-core",
  "file-ops",
  "flow",
  "jiff",
+ "melon-loader",
  "phrases",
  "regex",
  "serde_json",
- "sha2",
  "task-runtime",
  "tempfile",
  "tokio",
- "toml_edit",
  "unity-files",
  "win-platform",
 ]
@@ -1435,6 +1433,7 @@ dependencies = [
  "flow-slint",
  "image",
  "jiff",
+ "melon-loader",
  "phrases",
  "raw-window-handle",
  "rfd",
@@ -3203,6 +3202,17 @@ checksum = "69b6441f590336821bb897fb28fc622898ccceb1d6cea3fde5ea86b090c4de98"
 dependencies = [
  "cfg-if",
  "digest",
+]
+
+[[package]]
+name = "melon-loader"
+version = "0.1.0"
+dependencies = [
+ "dotscope",
+ "file-ops",
+ "serde_json",
+ "sha2",
+ "toml_edit",
 ]
 
 [[package]]

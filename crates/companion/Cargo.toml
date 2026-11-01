@@ -7,6 +7,7 @@ publish.workspace = true
 
 [dependencies]
 file-ops.workspace = true
+melon-loader.workspace = true
 unity-files.workspace = true
 win-platform = { workspace = true, features = ["time"] }
 eg-core.workspace = true
@@ -16,10 +17,7 @@ task-runtime.workspace = true
 jiff.workspace = true
 regex.workspace = true
 serde_json.workspace = true
-sha2.workspace = true
 tokio = { workspace = true, features = ["macros"] }
-dotscope = "=0.9.1"
-toml_edit = "=0.25.17"
 
 [dev-dependencies]
 tempfile.workspace = true

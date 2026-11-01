@@ -32,7 +32,7 @@ enum Tier {
 
 fn tier(name: &str) -> Tier {
     match name {
-        "binary-reader" | "file-ops" | "flow" | "flow-slint" | "phrases" | "task-runtime" | "unity-files" | "win-platform" => Tier::Library,
+        "binary-reader" | "file-ops" | "flow" | "flow-slint" | "melon-loader" | "phrases" | "task-runtime" | "unity-files" | "win-platform" => Tier::Library,
         "il2cpp-runtime" | "native-hooks" => Tier::InGame,
         "eg-core" => Tier::Shared,
         "eg-companion" => Tier::Companion,

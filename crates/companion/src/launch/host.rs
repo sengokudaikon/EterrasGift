@@ -3,11 +3,11 @@
 
 use crate::game::install::{self, GameInstall};
 use crate::game::process::{self, RunningGame};
-use crate::launch::loader::{self, ModLoaderState, ModLoaderSwitch, melon_paths};
-use crate::mods::assembly::LoaderVersion;
-use crate::mods::loader_state::{self, LoaderInstall};
+use crate::launch::loader::{self, ModLoaderState, ModLoaderSwitch, SwitchError, melon_paths};
 use crate::mods::worker::ModWorker;
 use eg_core::game_log::{GameLogReader, GameLogState};
+use melon_loader::assembly::LoaderVersion;
+use melon_loader::loader_state::{self, LoaderInstall};
 use phrases::phrases;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -226,16 +226,17 @@ impl GameHost for FileGameHost {
         };
         let loader = self.switch(install);
         let with_mods = mode == LaunchMode::OfflineWithMods;
+        let refused = |reason: SwitchError| LaunchError::Refused(loader::refusal(&reason));
         if with_mods {
             // A start MelonLoader can't join changes nothing: Mods\ and the waiting settings stay as they are.
-            loader.check_restore().map_err(LaunchError::Refused)?;
+            loader.check_restore().map_err(refused)?;
             self.prepare_mods(install)?;
             if lifetime.is_cancelled() {
                 return Err(LaunchError::Cancelled);
             }
-            loader.restore().map_err(LaunchError::Refused)?;
+            loader.restore().map_err(refused)?;
         } else {
-            loader.set_aside().map_err(LaunchError::Refused)?;
+            loader.set_aside().map_err(refused)?;
         }
         let started = SystemTime::now();
         let result = self.start(mode, install).map(|()| {
@@ -243,7 +244,7 @@ impl GameHost for FileGameHost {
                 return LaunchOutcome::Started;
             }
             self.launched(install, started);
-            if loader.wait_for_loader(started, loader::LOADER_TIMEOUT, Duration::from_millis(500), lifetime) {
+            if loader.wait_for_loader(started, loader::LOADER_TIMEOUT, Duration::from_millis(500), || lifetime.is_cancelled()) {
                 LaunchOutcome::LoaderStarted
             } else {
                 LaunchOutcome::LoaderNotSeen
@@ -268,7 +269,9 @@ impl GameHost for FileGameHost {
 }
 
 fn finish_mod_launch(loader: &ModLoaderSwitch, result: Result<LaunchOutcome, LaunchError>) -> Result<LaunchOutcome, LaunchError> {
-    loader.set_aside().map_err(|error| LaunchError::Failed(NotSetAside.with(&[("error", &error)])))?;
+    loader
+        .set_aside()
+        .map_err(|error| LaunchError::Failed(NotSetAside.with(&[("error", &loader::refusal(&error))])))?;
     result
 }
 
@@ -377,7 +380,7 @@ mod tests {
         let install = game(temp.path());
         let library = ModLibrary::new(temp.path().join("Library"));
         let dll = temp.path().join("Fixture.dll");
-        fs::write(&dll, include_bytes!("../../tests/fixtures/melon/clean.bin")).unwrap();
+        fs::write(&dll, include_bytes!("../../../../libs/melon-loader/tests/fixtures/clean.bin")).unwrap();
         library.add(&dll, false).unwrap();
         let runtime = task_runtime::Runtime::start().unwrap();
         let mods = ModWorker::new(library, &runtime.tasks());
@@ -411,7 +414,11 @@ mod tests {
         assert!(!staged.exists());
         assert!(!temp.path().join("Library").exists());
         fs::create_dir_all(staged.join("MelonLoader/net6")).unwrap();
-        fs::write(staged.join("MelonLoader/net6/MelonLoader.dll"), include_bytes!("../../tests/fixtures/melon/loader.bin")).unwrap();
+        fs::write(
+            staged.join("MelonLoader/net6/MelonLoader.dll"),
+            include_bytes!("../../../../libs/melon-loader/tests/fixtures/loader.bin"),
+        )
+        .unwrap();
         host.prepare_mods(&install).unwrap();
         assert!(staged.join("Mods").is_dir());
         assert!(temp.path().join("Library/placed.json").is_file());

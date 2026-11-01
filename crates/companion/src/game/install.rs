@@ -1,5 +1,6 @@
 //! Finding the game: the executable chosen in Settings, else the Steam library that holds it.
 
+use melon_loader::assembly::GameIdentity;
 use regex::bytes::Regex;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -11,18 +12,10 @@ pub const STEAM_APP_ID: u32 = 899770;
 pub const PROCESS_NAME: &str = "Last Epoch";
 pub const EXECUTABLE_NAME: &str = "Last Epoch.exe";
 
-/// Who made the game and what it is called, as Unity records them; MelonLoader matches mods against these. Unity also
-/// names the game's folder under LocalLow after them.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct GameIdentity {
-    pub developer: String,
-    pub product: String,
-}
-
-impl GameIdentity {
-    pub const LAST_EPOCH_DEVELOPER: &str = "Eleventh Hour Games";
-    pub const LAST_EPOCH_PRODUCT: &str = "Last Epoch";
-}
+/// Who made the game and what it is called, as Unity records them. Unity also names the game's folder under LocalLow after
+/// them.
+pub const LAST_EPOCH_DEVELOPER: &str = "Eleventh Hour Games";
+pub const LAST_EPOCH_PRODUCT: &str = "Last Epoch";
 
 /// Where Last Epoch is installed: its executable, and the folder it runs in.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -136,6 +129,6 @@ mod tests {
         fs::write(install.data_directory().join("globalgamemanagers"), b"\x00\x00\x00\x166000.4.8f1\x00\x00junk").unwrap();
         assert_eq!(install.read_unity_version().as_deref(), Some("6000.4.8"));
         fs::write(install.data_directory().join("app.info"), "Eleventh Hour Games\nLast Epoch").unwrap();
-        assert_eq!(install.read_identity().unwrap().developer, GameIdentity::LAST_EPOCH_DEVELOPER);
+        assert_eq!(install.read_identity().unwrap().developer, LAST_EPOCH_DEVELOPER);
     }
 }

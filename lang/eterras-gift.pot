@@ -340,7 +340,15 @@ msgid "MelonLoader couldn't start its Unity support, so no mod runs. See its log
 msgstr ""
 
 #: crates/companion/src/mods/inventory.rs
+msgid "MelonLoader did not find it in the Mods folder."
+msgstr ""
+
+#: crates/companion/src/mods/inventory.rs
 msgid "MelonLoader is preparing for this game build, so this game runs without mods. Close it once it's up and play with mods again."
+msgstr ""
+
+#: crates/companion/src/mods/inventory.rs
+msgid "MelonLoader read it but did not load it, and its log gives no reason."
 msgstr ""
 
 #: crates/companion/src/mods/inventory.rs
@@ -357,6 +365,10 @@ msgstr ""
 
 #: crates/companion/src/mods/inventory.rs
 msgid "The app's copy of {file} could not be read: {error}"
+msgstr ""
+
+#: crates/companion/src/mods/inventory.rs
+msgid "The game closed before MelonLoader finished loading mods."
 msgstr ""
 
 #: crates/companion/src/mods/inventory.rs
@@ -419,18 +431,6 @@ msgstr ""
 
 #: crates/companion/src/mods/library.rs
 msgid "{file} was cleared from the library by the last game with mods. Add the DLL again to install it."
-msgstr ""
-
-#: crates/companion/src/mods/log.rs
-msgid "MelonLoader did not find it in the Mods folder."
-msgstr ""
-
-#: crates/companion/src/mods/log.rs
-msgid "MelonLoader read it but did not load it, and its log gives no reason."
-msgstr ""
-
-#: crates/companion/src/mods/log.rs
-msgid "The game closed before MelonLoader finished loading mods."
 msgstr ""
 
 #: crates/companion/src/mods/page.rs

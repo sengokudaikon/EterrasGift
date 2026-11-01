@@ -3,11 +3,11 @@
 use super::*;
 use eg_companion::launch::loader::melon_paths::preferences as preferences_path;
 use eg_companion::mods::library::ModLibrary;
-use eg_companion::mods::loader_state::game_assembly_hash;
 use eg_companion::mods::sources::{ModSources, ProcessError, ProcessRequest, ProcessRunner};
 use eg_companion::mods::worker::ModWorker;
 use eg_ui::ModsState;
 use eg_ui::pages::mods::ModsPage;
+use melon_loader::loader_state::game_assembly_hash;
 
 /// The capture process cannot execute source builds or evaluation, even if discovery finds an unexpected project.
 struct NoExternalProcess;
@@ -28,7 +28,7 @@ impl ProcessRunner for FixtureSourceRunner {
         if request.arguments.first().is_some_and(|argument| argument == "build") {
             assert!(request.arguments.iter().any(|argument| argument == "-p:DeployToGame=false"));
             std::fs::create_dir_all(self.target.parent().unwrap()).unwrap();
-            std::fs::write(&self.target, include_bytes!("../../../companion/tests/fixtures/melon/clean.bin")).unwrap();
+            std::fs::write(&self.target, include_bytes!("../../../../libs/melon-loader/tests/fixtures/clean.bin")).unwrap();
             self.builds.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             Ok("Fixture build succeeded.".into())
         } else {
@@ -69,7 +69,7 @@ impl Session {
         std::fs::write(root.join(eg_companion::launch::loader::SET_ASIDE_NAME), b"fake proxy").unwrap();
         std::fs::write(
             root.join("MelonLoader/net6/MelonLoader.dll"),
-            include_bytes!("../../../companion/tests/fixtures/melon/loader.bin"),
+            include_bytes!("../../../../libs/melon-loader/tests/fixtures/loader.bin"),
         )
         .unwrap();
         let generator = root.join("MelonLoader/Dependencies/Il2CppAssemblyGenerator");
@@ -83,7 +83,7 @@ impl Session {
         )
         .unwrap();
         std::fs::write(preferences_path(&root), "# A fixture's settings, written by its fake first run.\n[FixtureCategory]\n# Turn this feature on.\nEnabled = true\n# Number of items shown.\nCount = 3\n# A personal label.\nLabel = \"Default\"\n").unwrap();
-        let mut bytes = include_bytes!("../../../companion/tests/fixtures/melon/clean.bin").to_vec();
+        let mut bytes = include_bytes!("../../../../libs/melon-loader/tests/fixtures/clean.bin").to_vec();
         if !described {
             // Rename only the resource name, retaining a valid DLL with ordinary metadata and #US category strings.
             let start = bytes.windows(b"ModSettings.json".len()).position(|window| window == b"ModSettings.json").unwrap();
@@ -153,7 +153,7 @@ pub(super) fn capture_mods(session: &Session) {
     // A real file-backed inventory, including DLL metadata and the mod's embedded settings description.
     let fixture = session.mods_fixture(true);
     let other = fixture.library.parent().unwrap().join("Earlier.dll");
-    std::fs::write(&other, include_bytes!("../../../companion/tests/fixtures/melon/numeric.bin")).unwrap();
+    std::fs::write(&other, include_bytes!("../../../../libs/melon-loader/tests/fixtures/numeric.bin")).unwrap();
     fixture.worker.call(move |library| library.add(&other, false)).unwrap();
     let ui = session.open_mods(&fixture, 1100, 700);
     assert_eq!(ui.global::<ModsState>().get_installed_count(), 2);
@@ -495,7 +495,7 @@ pub(super) fn mods_captures(session: &Session) {
     use file_ops::hashes::of_file as hash_file;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
-    const LOADER: &[u8] = include_bytes!("../../../companion/tests/fixtures/melon/loader.bin");
+    const LOADER: &[u8] = include_bytes!("../../../../libs/melon-loader/tests/fixtures/loader.bin");
     const FLICKER: &[u8] = include_bytes!("../fixtures/sample-mods/flicker-dreams.bin");
     const ABILITY: &[u8] = include_bytes!("../fixtures/sample-mods/ability-ranges.bin");
     const STASH: &[u8] = include_bytes!("../fixtures/sample-mods/stash-sorter.bin");

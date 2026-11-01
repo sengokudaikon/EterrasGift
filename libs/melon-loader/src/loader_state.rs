@@ -1,10 +1,10 @@
 //! MelonLoader's own preparation records and its narrow generated-CoreModule repair.
 //! These routines operate on files only, and callers run repair only while the game is stopped.
 
-use super::assembly::{LoaderVersion, loader_version, read_view, rows};
-use super::invalid;
-use crate::game::install::GameInstall;
-use crate::launch::loader::melon_paths;
+use crate::assembly::{LoaderVersion, loader_version};
+use crate::cil::{read_view, rows};
+use crate::invalid;
+use crate::paths as melon_paths;
 use dotscope::CilAssemblyView;
 use dotscope::metadata::tables::{NestedClassRaw, TableDataOwned, TableId, TypeDefRaw};
 use dotscope::metadata::token::Token;
@@ -40,8 +40,9 @@ impl LoaderInstall {
         })
     }
 
-    /// Hashing a game assembly is deliberately kept off the UI thread.
-    pub fn preparation_for(&self, game: &GameInstall) -> LoaderPreparation {
+    /// Whether MelonLoader has prepared for this build: `game_assembly`, and the Unity version when it could be read. This
+    /// hashes the assembly, so keep it off a UI thread.
+    pub fn preparation_for(&self, game_assembly: &Path, unity_version: Option<&str>) -> LoaderPreparation {
         let Some(record) = read_generator_record(&self.root) else {
             return LoaderPreparation::WillPrepare;
         };
@@ -51,8 +52,8 @@ impl LoaderInstall {
         if forces_regeneration(&self.root) {
             return LoaderPreparation::WillPrepare;
         }
-        match game_assembly_hash(&game.game_assembly()) {
-            Ok(hash) if hash == recorded && game.read_unity_version().is_none_or(|unity| unity == record.unity_version) => LoaderPreparation::Prepared,
+        match game_assembly_hash(game_assembly) {
+            Ok(hash) if hash == recorded && unity_version.is_none_or(|unity| unity == record.unity_version) => LoaderPreparation::Prepared,
             _ => LoaderPreparation::WillPrepare,
         }
     }
@@ -117,7 +118,7 @@ pub fn core_module_path(root: &Path) -> PathBuf {
 }
 
 pub fn needs_repair(root: &Path) -> bool {
-    // The Mods page asks every two seconds while it follows a start; the DLL is read again only once it has changed.
+    // A caller following a start may ask every two seconds; the DLL is read again only once it has changed.
     /// The DLL checked last, its stamp then, and the answer.
     type Checked = (PathBuf, FileStamp, bool);
     static CHECKED: Mutex<Option<Checked>> = Mutex::new(None);

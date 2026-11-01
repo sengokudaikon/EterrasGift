@@ -31,6 +31,7 @@ rspolib.workspace = true
 [dev-dependencies]
 image.workspace = true
 jiff.workspace = true
+melon-loader.workspace = true
 tempfile.workspace = true
 tokio.workspace = true
 

@@ -1,15 +1,17 @@
 //! One coherent file-backed observation for Mods. No module code is loaded or executed to describe a DLL.
 
 use super::{
-    assembly::LoaderVersion,
+    assembly::obstacle,
     description::ModSettingsDescription,
     library::{InstalledMod, ModChanges, ModLibrary},
-    loader_state::{self, LoaderInstall, LoaderPreparation},
-    log::{MelonLog, ModLogRun},
-    preferences::{MelonPreferences, ModSetting, PreferenceKind, PreferenceValue},
+    preferences::ModSetting,
 };
-use crate::game::install::{GameIdentity, GameInstall};
+use crate::game::install::{GameInstall, LAST_EPOCH_DEVELOPER, LAST_EPOCH_PRODUCT};
 use crate::launch::loader::{ModLoaderState, ModLoaderSwitch, melon_paths};
+use melon_loader::assembly::{GameIdentity, LoaderVersion};
+use melon_loader::loader_state::{self, LoaderInstall, LoaderPreparation};
+use melon_loader::log::{LogProblem, MelonLog, ModLogRun};
+use melon_loader::preferences::{MelonPreferences, PreferenceKind, PreferenceValue};
 use phrases::{Conjunction, list, phrases};
 use std::path::{Path, PathBuf};
 
@@ -42,6 +44,19 @@ phrases! {
     LastPlayedToday: "Last played with mods today at {time}"
     LastPlayedYesterday: "Last played with mods yesterday at {time}"
     LastPlayedOn: "Last played with mods on {date} at {time}"
+    ClosedEarly: "The game closed before MelonLoader finished loading mods."
+    NoReason: "MelonLoader read it but did not load it, and its log gives no reason."
+    NotFound: "MelonLoader did not find it in the Mods folder."
+}
+
+/// Why the log says a mod did not load, as a sentence; a line from the log is shown as MelonLoader wrote it.
+fn log_problem(problem: LogProblem) -> String {
+    match problem {
+        LogProblem::ClosedEarly => ClosedEarly.into(),
+        LogProblem::Logged(line) => line,
+        LogProblem::NoReason => NoReason.into(),
+        LogProblem::NotFound => NotFound.into(),
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -124,7 +139,7 @@ pub fn read(install: Option<&GameInstall>, library: &ModLibrary, loader_root: Op
     inventory.loader_log = log_path.is_file().then_some(log_path);
     let proxy = ModLoaderSwitch::new(install.directory(), Some(root)).state();
     inventory.loader = LoaderInstall::find(root).filter(|_| proxy != ModLoaderState::NotInstalled).map(|loader| LoaderReport {
-        preparation: loader.preparation_for(install),
+        preparation: loader.preparation_for(&install.game_assembly(), install.read_unity_version().as_deref()),
         version: loader.version,
         proxy,
         core_module_needs_repair: loader_state::needs_repair(root),
@@ -135,8 +150,8 @@ pub fn read(install: Option<&GameInstall>, library: &ModLibrary, loader_root: Op
         MelonPreferences::parse("").expect("empty preferences")
     });
     let game = install.read_identity().unwrap_or_else(|| GameIdentity {
-        developer: GameIdentity::LAST_EPOCH_DEVELOPER.into(),
-        product: GameIdentity::LAST_EPOCH_PRODUCT.into(),
+        developer: LAST_EPOCH_DEVELOPER.into(),
+        product: LAST_EPOCH_PRODUCT.into(),
     });
     let mut descriptions = Vec::new();
     let mut read = Vec::new();
@@ -149,7 +164,7 @@ pub fn read(install: Option<&GameInstall>, library: &ModLibrary, loader_root: Op
             Err((std::io::ErrorKind::InvalidData, _)) => (None, Some(NotAssembly.with(&[("file", &installed.file)]))),
             Err((_, error)) => (None, Some(CopyUnreadable.with(&[("file", &installed.file), ("error", error)]))),
         };
-        let description = match &facts.settings {
+        let description = match &facts.resource {
             Ok(resource) => resource
                 .as_ref()
                 .map(|bytes| ModSettingsDescription::from_bytes(bytes))
@@ -174,11 +189,11 @@ pub fn read(install: Option<&GameInstall>, library: &ModLibrary, loader_root: Op
                 melon
                     .as_ref()
                     .zip(inventory.loader.as_ref())
-                    .and_then(|(melon, loader)| melon.obstacle(&game, &loader.version))
+                    .and_then(|(melon, loader)| obstacle(melon, &game, &loader.version))
             })
             .or_else(|| {
                 if loaded == Some(false) {
-                    log.as_ref().and_then(|log| log.problem_for(&name, &installed.file))
+                    log.as_ref().and_then(|log| log.problem_for(&name, &installed.file)).map(log_problem)
                 } else {
                     None
                 }
@@ -351,5 +366,18 @@ impl Inventory {
             warning: false,
             can_play,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn each_log_problem_has_its_sentence() {
+        assert_eq!(log_problem(LogProblem::ClosedEarly), "The game closed before MelonLoader finished loading mods.");
+        assert_eq!(log_problem(LogProblem::NoReason), "MelonLoader read it but did not load it, and its log gives no reason.");
+        assert_eq!(log_problem(LogProblem::NotFound), "MelonLoader did not find it in the Mods folder.");
+        assert_eq!(log_problem(LogProblem::Logged("Failed to load.".into())), "Failed to load.");
     }
 }

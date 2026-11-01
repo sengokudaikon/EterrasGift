@@ -22,7 +22,6 @@ serde_json = { version = "1.0.154", features = ["preserve_order"] }
 windows-sys = "0.61.2"
 jiff = "0.2.38"
 regex = "1.13.1"
-sha2 = "0.11.1"
 uuid = { version = "1.28.0", features = ["v4"] }
 # File and folder pickers, parented to the Slint window through raw-window-handle 0.6.
 rfd = { version = "0.17.2", default-features = false }
@@ -39,6 +38,7 @@ native-hooks = { path = "libs/native-hooks" }
 eg-core = { path = "crates/core" }
 phrases = { path = "libs/phrases" }
 file-ops = { path = "libs/file-ops" }
+melon-loader = { path = "libs/melon-loader" }
 unity-files = { path = "libs/unity-files" }
 win-platform = { path = "libs/win-platform" }
 eg-companion = { path = "crates/companion" }

@@ -24,8 +24,12 @@ serde_json = { version = "1.0.154", features = ["preserve_order"] }
 jiff = "0.2.38"
 sha2 = "0.11.1"
 uuid = { version = "1.28.0", features = ["v4"] }
+# CIL metadata and span-preserving TOML (melon-loader).
+dotscope = "=0.9.1"
+toml_edit = "=0.25.17"
 
 binary-reader = { path = "binary-reader" }
+file-ops = { path = "file-ops" }
 flow = { path = "flow" }
 task-runtime = { path = "task-runtime" }
 

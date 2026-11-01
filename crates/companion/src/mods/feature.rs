@@ -3,18 +3,19 @@
 //! page reads the disk, runs the compiler and starts the game only through effects.
 
 use super::{
-    assembly::MelonAssembly,
     inventory::{self, Inventory, ModReport},
     library::{InstalledMod, ModLibrary},
-    loader_state::LoaderPreparation,
     page::{by_hand, follow_preparation, installed_message, keep_each, running_state},
-    preferences::{ModSetting, PreferenceKind},
+    preferences::ModSetting,
     sources::{ModBuild, ModProject, SourceError, SourceSnapshot},
 };
 use crate::launch::host::LaunchMode;
 use crate::launch::launcher::{GameLauncher, LaunchReport, StartingWithMods};
 use eg_core::settings_service::SettingsService;
 use flow::{Effects, Feature, Panicked, Tracked, Version};
+use melon_loader::assembly::MelonAssembly;
+use melon_loader::loader_state::LoaderPreparation;
+use melon_loader::preferences::PreferenceKind;
 use phrases::phrases;
 use serde_json::Value as JsonValue;
 use std::collections::{BTreeSet, VecDeque};

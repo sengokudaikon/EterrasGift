@@ -3,11 +3,12 @@
 //! last put in a game's Mods folder, and when that game started. Drafts are durable here, and reach MelonLoader only
 //! before a with-mods start.
 
-use super::assembly::{AssemblyFacts, MelonAssembly};
+use super::description::SETTINGS_RESOURCE;
 use super::invalid;
-use super::preferences::{MelonPreferences, PreferenceChange, PreferenceValue};
 use crate::launch::loader::melon_paths;
 use file_ops::{atomic, hashes, json};
+use melon_loader::assembly::{AssemblyFacts, MelonAssembly, read_facts};
+use melon_loader::preferences::{MelonPreferences, PreferenceChange, PreferenceValue};
 use serde_json::{Value, json};
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fs;
@@ -102,7 +103,7 @@ impl ModLibrary {
         if let Some(facts) = self.facts.lock().unwrap_or_else(|p| p.into_inner()).get(&key) {
             return facts.clone();
         }
-        let facts = Arc::new(super::assembly::read_facts(&path));
+        let facts = Arc::new(read_facts(&path, SETTINGS_RESOURCE));
         // Only what was read: a copy that could not be (it was still arriving, say) is read again next time.
         if facts.melon.as_ref().is_ok() || facts.melon.as_ref().is_err_and(|(kind, _)| *kind == io::ErrorKind::InvalidData) {
             self.facts.lock().unwrap_or_else(|p| p.into_inner()).insert(key, facts.clone());

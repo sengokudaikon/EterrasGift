@@ -8,8 +8,6 @@ pub mod dotnet;
 pub mod feature;
 pub mod inventory;
 pub mod library;
-pub mod loader_state;
-pub mod log;
 pub mod page;
 pub mod preferences;
 pub mod sources;

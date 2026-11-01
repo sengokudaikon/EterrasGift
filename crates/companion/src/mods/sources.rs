@@ -1,8 +1,8 @@
 //! Local mod projects, evaluated by MSBuild rather than guessed from XML. Builds never deploy to the game:
 //! their output is offered to the library, which places it on the next modded start.
 
-use super::assembly::{LoaderVersion, MelonAssembly};
 use file_ops::stamp::FileStamp;
+use melon_loader::assembly::{LoaderVersion, MelonAssembly};
 use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet};
 use std::ffi::OsString;
