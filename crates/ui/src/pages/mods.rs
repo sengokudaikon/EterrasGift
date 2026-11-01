@@ -306,7 +306,7 @@ impl Host<Mods> for Window {
                 match self.services.worker.enqueue(move |library| run(change, undo, library, &launcher, &settings)) {
                     Ok(receive) => self.background.run(
                         intents,
-                        move || receive.recv(),
+                        move || receive.blocking_recv(),
                         move |result| Intent::Answered {
                             revision,
                             answer: match result {
@@ -347,7 +347,7 @@ impl Host<Mods> for Window {
             Effect::Locate { item, folder } => match self.services.worker.enqueue(move |library| Ok(library.locate(&item, folder.as_deref()))) {
                 Ok(receive) => self.background.run(
                     intents,
-                    move || receive.recv(),
+                    move || receive.blocking_recv(),
                     |result| {
                         Intent::Located(match result {
                             Ok(Ok(Ok(path))) => Ok(path),

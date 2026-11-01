@@ -8,9 +8,9 @@
 use super::library::ModLibrary;
 use std::io;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex, mpsc};
-use std::thread::{self, JoinHandle};
-use task_runtime::CancellationToken;
+use std::sync::{Arc, Mutex};
+use task_runtime::{CancellationToken, JoinHandle, Tasks};
+use tokio::sync::{mpsc, oneshot};
 
 use phrases::phrases;
 
@@ -21,8 +21,9 @@ phrases! {
 
 type Job = Box<dyn FnOnce(&ModLibrary) + Send>;
 struct Owner {
-    sender: Mutex<Option<mpsc::Sender<Job>>>,
+    sender: Mutex<Option<mpsc::UnboundedSender<Job>>>,
     worker: Mutex<Option<JoinHandle<()>>>,
+    tasks: Tasks,
     cancel: CancellationToken,
     fault: Arc<AtomicBool>,
 }
@@ -30,28 +31,21 @@ impl Drop for Owner {
     fn drop(&mut self) {
         self.cancel.cancel();
         self.sender.get_mut().unwrap().take();
-        if let Some(worker) = self.worker.get_mut().unwrap().take()
-            && worker.thread().id() != thread::current().id()
-        {
-            let _ = worker.join();
-        }
     }
 }
 
 #[derive(Clone)]
 pub struct ModWorker(Arc<Owner>);
 impl ModWorker {
-    pub fn new(library: ModLibrary) -> Self {
-        let (sender, receiver) = mpsc::channel::<Job>();
-        let worker = thread::spawn(move || {
-            while let Ok(job) = receiver.recv() {
-                job(&library);
-            }
-        });
+    pub fn new(library: ModLibrary, tasks: &Tasks) -> Self {
+        let (sender, receiver) = mpsc::unbounded_channel();
+        // Refused only on a runtime already closing: with the receiver gone, every task is then refused too.
+        let worker = tasks.spawn(serve(library, receiver, tasks.token())).ok();
         Self(Arc::new(Owner {
             sender: Mutex::new(Some(sender)),
-            worker: Mutex::new(Some(worker)),
-            cancel: CancellationToken::default(),
+            worker: Mutex::new(worker),
+            tasks: tasks.clone(),
+            cancel: tasks.token(),
             fault: Arc::new(AtomicBool::new(false)),
         }))
     }
@@ -62,8 +56,8 @@ impl ModWorker {
         self.0.fault.load(Ordering::Acquire)
     }
     /// A dropped reply means the library stopped: a caller must not take that for a failure it can ask again after.
-    pub fn enqueue<T: Send + 'static>(&self, task: impl FnOnce(&ModLibrary) -> io::Result<T> + Send + 'static) -> io::Result<mpsc::Receiver<io::Result<T>>> {
-        let (reply, receive) = mpsc::channel();
+    pub fn enqueue<T: Send + 'static>(&self, task: impl FnOnce(&ModLibrary) -> io::Result<T> + Send + 'static) -> io::Result<oneshot::Receiver<io::Result<T>>> {
+        let (reply, receive) = oneshot::channel();
         if self.faulted() {
             return Err(io::Error::other(Stopped.get()));
         }
@@ -85,16 +79,38 @@ impl ModWorker {
             .map_err(|_| io::Error::other(Stopped.get()))?;
         Ok(receive)
     }
-    /// For the game host and fixtures. Never wait in an interactive UI callback.
+    /// For the game host and fixtures, off the reactor. Never wait in an interactive UI callback.
     pub fn call<T: Send + 'static>(&self, task: impl FnOnce(&ModLibrary) -> io::Result<T> + Send + 'static) -> io::Result<T> {
-        self.enqueue(task)?.recv().map_err(|_| io::Error::other(Stopped.get()))?
+        self.enqueue(task)?.blocking_recv().map_err(|_| io::Error::other(Stopped.get()))?
     }
-    /// Cancels source builds, rejects new tasks, drains accepted mutations and joins the worker.
+    /// Cancels source builds, rejects new tasks and waits for accepted mutations to drain.
     pub fn close(&self) {
         self.0.cancel.cancel();
         self.0.sender.lock().unwrap().take();
-        if let Some(worker) = self.0.worker.lock().unwrap().take() {
-            let _ = worker.join();
+        let worker = self.0.worker.lock().unwrap().take();
+        if let Some(worker) = worker {
+            let _ = self.0.tasks.block_on(worker);
         }
     }
+}
+
+/// Runs tasks one at a time, in the order accepted, each on the blocking pool. Everything accepted runs before it ends. It
+/// ends when every sender is gone, or when the runtime closes around a worker nobody closed.
+async fn serve(library: ModLibrary, mut jobs: mpsc::UnboundedReceiver<Job>, closing: CancellationToken) {
+    let library = Arc::new(library);
+    while let Some(job) = next(&mut jobs, &closing).await {
+        let library = library.clone();
+        // A job catches its task's panic, so this can only fail with the runtime gone.
+        let _ = tokio::task::spawn_blocking(move || job(&library)).await;
+    }
+}
+
+async fn next(jobs: &mut mpsc::UnboundedReceiver<Job>, closing: &CancellationToken) -> Option<Job> {
+    if !jobs.is_closed() {
+        if let Some(next) = closing.run_until_cancelled(jobs.recv()).await {
+            return next;
+        }
+        jobs.close();
+    }
+    jobs.recv().await
 }

@@ -379,11 +379,12 @@ mod tests {
         let dll = temp.path().join("Fixture.dll");
         fs::write(&dll, include_bytes!("../../tests/fixtures/melon/clean.bin")).unwrap();
         library.add(&dll, false).unwrap();
-        let mods = ModWorker::new(library);
+        let runtime = task_runtime::Runtime::start().unwrap();
+        let mods = ModWorker::new(library, &runtime.tasks());
         let edited = mods.enqueue(|library| library.set_enabled("Fixture.dll", false)).unwrap();
         let host = host(temp.path(), &install).with_mod_worker(mods.clone());
         host.prepare_mods(&install).unwrap();
-        edited.recv().unwrap().unwrap();
+        edited.blocking_recv().unwrap().unwrap();
         assert!(!install.directory().join("Mods/Fixture.dll").exists());
         let started = SystemTime::UNIX_EPOCH + Duration::from_secs(1000);
         host.launched(&install, started);
@@ -403,7 +404,8 @@ mod tests {
         let install = game(temp.path());
         let staged = temp.path().join("Staged");
         let library = ModLibrary::new(temp.path().join("Library"));
-        let mods = ModWorker::new(library);
+        let runtime = task_runtime::Runtime::start().unwrap();
+        let mods = ModWorker::new(library, &runtime.tasks());
         let host = FileGameHost::new(Some(&install.executable), &temp.path().join("Player.log"), Some(&staged)).with_mod_worker(mods.clone());
         assert!(matches!(host.prepare_mods(&install), Err(LaunchError::Refused(reason)) if reason.contains("needs MelonLoader 0.6.6 or later")));
         assert!(!staged.exists());
@@ -424,7 +426,8 @@ mod tests {
         let directory = temp.path().join("Library");
         fs::create_dir(&directory).unwrap();
         fs::write(directory.join("profile.json"), "damaged").unwrap();
-        let mods = ModWorker::new(ModLibrary::new(directory.clone()));
+        let runtime = task_runtime::Runtime::start().unwrap();
+        let mods = ModWorker::new(ModLibrary::new(directory.clone()), &runtime.tasks());
         let host = host(temp.path(), &install).with_mod_worker(mods.clone());
         let result = host.launch(LaunchMode::OfflineWithMods, Some(&install), &CancellationToken::default());
         assert!(matches!(result, Err(LaunchError::Refused(reason)) if reason.starts_with("The mods could not be made ready, so the game was not started:")));
@@ -438,9 +441,10 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let install = game(temp.path());
         fs::write(install.directory().join(loader::SET_ASIDE_NAME), b"proxy").unwrap();
-        let mods = ModWorker::new(ModLibrary::new(temp.path().join("Library")));
+        let runtime = task_runtime::Runtime::start().unwrap();
+        let mods = ModWorker::new(ModLibrary::new(temp.path().join("Library")), &runtime.tasks());
         let panicked = mods.enqueue(|_| -> std::io::Result<()> { panic!("a test's fault in the mod library") }).unwrap();
-        assert!(panicked.recv().is_err());
+        assert!(panicked.blocking_recv().is_err());
         let host = host(temp.path(), &install).with_mod_worker(mods.clone());
         let result = host.launch(LaunchMode::OfflineWithMods, Some(&install), &CancellationToken::default());
         assert!(matches!(result, Err(LaunchError::Refused(reason)) if reason.starts_with("The mods could not be made ready, so the game was not started:")));

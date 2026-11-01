@@ -101,7 +101,7 @@ impl Session {
         let settings = SettingsService::inline(SettingsStore::open(&folder.join("app"), &folder.join("settings.json"), &[]));
         ModsFixture {
             host,
-            worker: ModWorker::new(owned),
+            worker: ModWorker::new(owned, &self.tasks),
             settings,
             root,
             library,
@@ -236,7 +236,7 @@ fn mods_library_stopped(session: &Session) {
         .unwrap();
     state.invoke_toggle_mod(0);
     release.send(()).unwrap();
-    assert!(panicked.recv().is_err());
+    assert!(panicked.blocking_recv().is_err());
     assert!(fixture.worker.faulted());
     wait_for("the page to say the library stopped", || state.get_change_message().contains(STOPPED));
     session.idle();
@@ -358,7 +358,7 @@ fn mods_input(session: &Session) {
     ui.global::<ModsState>().invoke_refresh();
     settle();
     release_remove.send(()).unwrap();
-    removing.recv().unwrap().unwrap();
+    removing.blocking_recv().unwrap().unwrap();
     wait_for("remove mod", || {
         ui.global::<ModsState>().get_installed_count() == 0 && ui.global::<ModsState>().get_can_undo()
     });
@@ -397,7 +397,7 @@ fn mods_input(session: &Session) {
     session.click(RAIL_X, 80.0);
     assert_eq!(ui.global::<Nav>().get_current_page(), "home");
     release_text.send(()).unwrap();
-    typing.recv().unwrap().unwrap();
+    typing.blocking_recv().unwrap().unwrap();
     wait_for("text draft on navigation", || {
         fixture
             .worker
@@ -435,7 +435,7 @@ fn mods_input(session: &Session) {
     session.click(RAIL_X, 80.0);
     assert_eq!(ui.global::<Nav>().get_current_page(), "home");
     release.send(()).unwrap();
-    blocked.recv().unwrap().unwrap();
+    blocked.blocking_recv().unwrap().unwrap();
     assert!(!fixture.worker.call(|library| Ok(library.profile()?.mods[0].enabled)).unwrap());
     session.click(RAIL_X, 122.0);
     wait_for("return to Mods", || {
@@ -484,7 +484,7 @@ fn mods_input(session: &Session) {
     assert!(ui.window().is_visible(), "the close waits for the worker's answer");
     assert!(!ui.global::<ModsState>().get_can_play(), "Play goes while the page closes");
     release.send(()).unwrap();
-    blocked.recv().unwrap().unwrap();
+    blocked.blocking_recv().unwrap().unwrap();
     wait_for("the close to finish", || !ui.window().is_visible());
 }
 
@@ -641,7 +641,7 @@ pub(super) fn mods_captures(session: &Session) {
         std::fs::write(&settings_file, serde_json::json!({"schemaVersion": 2, "modSourcesDirectory": directory}).to_string()).unwrap();
         ModsFixture {
             host,
-            worker: ModWorker::new(owned),
+            worker: ModWorker::new(owned, &session.tasks),
             settings: SettingsService::inline(SettingsStore::open(&folder.join("app"), &settings_file, &[])),
             root,
             library,
@@ -777,7 +777,7 @@ pub(super) fn mods_captures(session: &Session) {
     std::fs::create_dir_all(&root).unwrap();
     let fixture = ModsFixture {
         host,
-        worker: ModWorker::new(ModLibrary::new(folder.join("Library"))),
+        worker: ModWorker::new(ModLibrary::new(folder.join("Library")), &session.tasks),
         settings: SettingsService::inline(SettingsStore::open(&folder.join("app"), &folder.join("settings.json"), &[])),
         root: root.clone(),
         library: folder.join("Library"),

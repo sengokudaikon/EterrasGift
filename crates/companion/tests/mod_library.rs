@@ -112,7 +112,8 @@ fn a_partial_prepare_checkpoints_removed_files_and_preserves_pending_settings() 
 fn game_preparation_queues_behind_ui_edits_and_shutdown_drains_them() {
     let temp = tempfile::tempdir().unwrap();
     let (library, root) = adopt(temp.path());
-    let worker = ModWorker::new(library);
+    let runtime = task_runtime::Runtime::start().unwrap();
+    let worker = ModWorker::new(library, &runtime.tasks());
     let (release, waiting) = std::sync::mpsc::channel();
     let edit = worker
         .enqueue(move |library| {
@@ -120,12 +121,12 @@ fn game_preparation_queues_behind_ui_edits_and_shutdown_drains_them() {
             library.set_enabled("Alpha.dll", false)
         })
         .unwrap();
-    let prepare = worker.enqueue(move |library| library.prepare(&root, &melon_paths::preferences(&root))).unwrap();
+    let mut prepare = worker.enqueue(move |library| library.prepare(&root, &melon_paths::preferences(&root))).unwrap();
     assert!(prepare.try_recv().is_err());
     release.send(()).unwrap();
     worker.close();
-    edit.recv().unwrap().unwrap();
-    assert_eq!(prepare.recv().unwrap().unwrap(), ["Beta.dll"]);
+    edit.blocking_recv().unwrap().unwrap();
+    assert_eq!(prepare.blocking_recv().unwrap().unwrap(), ["Beta.dll"]);
     assert!(worker.enqueue(|_| Ok::<_, io::Error>(())).is_err());
 }
 
