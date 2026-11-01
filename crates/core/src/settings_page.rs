@@ -7,8 +7,8 @@
 
 use crate::settings::{AppSettings, Locations};
 use crate::settings_service::{Change, SaveOutcome, SettingsService, Snapshot};
-use flow::{Effects, Feature, Tracked, Version};
-use phrases::{Phrase, phrases};
+use spiderland::{Effects, Feature, Tracked, Version};
+use spiderland_phrases::{Phrase, phrases};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
@@ -898,7 +898,7 @@ fn begin_close(state: &mut State, effects: &mut Effects<Effect>) {
 mod tests {
     use super::*;
     use crate::settings::SettingsStore;
-    use flow::step;
+    use spiderland::step;
     use std::cell::RefCell;
     use std::collections::VecDeque;
     use std::fs;

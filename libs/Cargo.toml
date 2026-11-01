@@ -18,6 +18,8 @@ tokio = { version = "=1.53.3", features = ["rt", "net", "io-util", "time", "sync
 tokio-util = { version = "0.7.20", default-features = false, features = ["rt"] }
 # LZ4 blocks in Unity bundles; pure Rust, no unsafe in the decoder.
 lz4_flex = { version = "0.14.0", default-features = false, features = ["std", "safe-decode", "safe-encode", "checked-decode"] }
+# The parser slint-build bundles translations with, so the Rust phrases' table takes what the views take.
+rspolib = "=0.1.2"
 tempfile = "3.27.0"
 windows-sys = "0.61.2"
 serde_json = { version = "1.0.154", features = ["preserve_order"] }
@@ -30,7 +32,7 @@ toml_edit = "=0.25.17"
 
 binary-reader = { path = "binary-reader" }
 file-ops = { path = "file-ops" }
-flow = { path = "flow" }
+spiderland = { path = "spiderland" }
 task-runtime = { path = "task-runtime" }
 
 [workspace.lints.rust]

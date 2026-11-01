@@ -9,7 +9,7 @@ use super::picker::{self, Chip, Filters, Index, KindFilter, LevelChoice, PICKER_
 use super::rows::{AffixRow, FieldDraft, FieldKind, FieldOption, RollRow, ValueEditor, base_key, base_of};
 use super::worker::ForgeGame;
 use eg_trainer::item::template::{ItemTemplate, TemplateAffix, TemplateItem, TemplateStatus, TemplateStore};
-use phrases::{Conjunction, Phrase, list, phrases};
+use spiderland_phrases::{Conjunction, Phrase, list, phrases};
 use std::collections::{HashMap, VecDeque};
 use std::rc::Rc;
 

@@ -15,8 +15,8 @@ use eg_trainer::{
     backend::{BackendHandle, BackendSnapshot, CatalogState, Command, ForgeSnapshot, ForgeState, MappingRead, Pending, Phase},
     definitions::catalog::{Availability, GameCatalog},
 };
-use phrases::phrases;
 use slint::{ComponentHandle, Timer, TimerMode};
+use spiderland_phrases::phrases;
 use std::{
     cell::{Cell, RefCell},
     rc::Rc,

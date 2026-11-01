@@ -2,7 +2,7 @@
 
 pub use melon_loader::paths as melon_paths;
 pub use melon_loader::switch::{ModLoaderState, ModLoaderSwitch, PROXY_NAME, SET_ASIDE_NAME, SwitchError};
-use phrases::phrases;
+use spiderland_phrases::phrases;
 use std::time::Duration;
 
 phrases! {

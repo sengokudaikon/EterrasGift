@@ -1,12 +1,12 @@
 [package]
-name = "flow-slint"
-description = "Runs flow features under Slint: background work, timers and row models. Names no app or game."
+name = "spiderland-slint"
+description = "Runs spiderland features under Slint: background work, timers and row models. Names no app or game."
 version.workspace = true
 edition.workspace = true
 publish.workspace = true
 
 [dependencies]
-flow.workspace = true
+spiderland.workspace = true
 task-runtime.workspace = true
 slint.workspace = true
 tokio.workspace = true

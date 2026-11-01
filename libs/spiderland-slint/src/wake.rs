@@ -1,6 +1,6 @@
 //! A service on another thread telling a feature that something changed.
 
-use flow::Intents;
+use spiderland::Intents;
 use std::future::poll_fn;
 use std::pin::{Pin, pin};
 use std::sync::Arc;
@@ -52,7 +52,7 @@ pub fn local<T: 'static>(work: impl Future<Output = T> + 'static, then: impl FnO
     Dropping(guard)
 }
 
-/// Stops listening when dropped, so it can be a guard for [`flow::Subscriptions`].
+/// Stops listening when dropped, so it can be a guard for [`spiderland::Subscriptions`].
 pub struct Listening(Option<slint::JoinHandle<()>>);
 
 impl Drop for Listening {

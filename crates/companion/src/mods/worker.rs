@@ -12,7 +12,7 @@ use std::sync::{Arc, Mutex};
 use task_runtime::{CancellationToken, JoinHandle, Tasks};
 use tokio::sync::{mpsc, oneshot};
 
-use phrases::phrases;
+use spiderland_phrases::phrases;
 
 phrases! {
     Closing: "The mod library is closing."

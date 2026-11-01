@@ -1,9 +1,9 @@
 //! Background work and timers against a real Slint event-loop proxy. One test: Slint's platform is set once per process.
 
-use flow::{Effects, Feature, Host, Intents, Panicked, Store, Subscriptions};
-use flow_slint::{Background, Dropping, every, local, on_wake};
 use slint::platform::software_renderer::{MinimalSoftwareWindow, RepaintBufferType};
 use slint::platform::{EventLoopProxy, Platform, WindowAdapter};
+use spiderland::{Effects, Feature, Host, Intents, Panicked, Store, Subscriptions};
+use spiderland_slint::{Background, Dropping, every, local, on_wake};
 use std::cell::RefCell;
 use std::collections::VecDeque;
 use std::rc::Rc;

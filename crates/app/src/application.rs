@@ -14,8 +14,8 @@ use eg_core::settings_service::{SaveOutcome, SettingsService, Snapshot};
 use eg_ui::pages::settings::{Settings, trainer as trainer_settings};
 use eg_ui::shell::Page;
 use eg_ui::{App, MainWindow};
-use flow_slint::Background;
 use slint::ComponentHandle;
+use spiderland_slint::Background;
 use std::process::ExitCode;
 use task_runtime::{Runtime, Tasks};
 

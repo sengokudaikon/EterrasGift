@@ -3,7 +3,7 @@
 //! The supported game uses the standard CultureInfo symbols for its language;
 //! a custom game NumberFormatInfo remains an unsupported formatting capability.
 use super::DisplayScalarParser;
-use phrases::locale::NumberSymbols;
+use spiderland_phrases::locale::NumberSymbols;
 
 pub struct CapturedDisplayParser {
     language: String,

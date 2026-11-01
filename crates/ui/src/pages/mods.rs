@@ -11,10 +11,10 @@ use eg_companion::mods::{
     worker::ModWorker,
 };
 use eg_core::settings_service::SettingsService;
-use flow::{Host, Intents, Slice, Store, Subscriptions, Version};
-use flow_slint::{Background, Rows, every};
-use phrases::phrases;
 use slint::{ComponentHandle, Model, ModelRc, SharedString, VecModel, Weak};
+use spiderland::{Host, Intents, Slice, Store, Subscriptions, Version};
+use spiderland_phrases::phrases;
+use spiderland_slint::{Background, Rows, every};
 use std::cell::RefCell;
 use task_runtime::CancellationToken;
 

@@ -2,7 +2,7 @@
 //! that may still be on its way (`Lookup`) and a typed write outcome (`EditOutcome`). The game itself is
 //! `worker::ForgeGame`.
 
-use phrases::phrases;
+use spiderland_phrases::phrases;
 
 phrases! {
     pub UniqueLoading: "Reading unique descriptions…"

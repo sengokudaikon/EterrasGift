@@ -12,12 +12,12 @@ use super::{
 use crate::launch::host::LaunchMode;
 use crate::launch::launcher::{GameLauncher, LaunchReport, StartingWithMods};
 use eg_core::settings_service::SettingsService;
-use flow::{Effects, Feature, Panicked, Tracked, Version};
 use melon_loader::assembly::MelonAssembly;
 use melon_loader::loader_state::LoaderPreparation;
 use melon_loader::preferences::PreferenceKind;
-use phrases::phrases;
 use serde_json::Value as JsonValue;
+use spiderland::{Effects, Feature, Panicked, Tracked, Version};
+use spiderland_phrases::phrases;
 use std::collections::{BTreeSet, VecDeque};
 use std::io;
 use std::path::{Path, PathBuf};
@@ -1325,7 +1325,7 @@ impl State {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use flow::step;
+    use spiderland::step;
 
     fn send(state: &mut State, intent: Intent) -> Vec<Effect> {
         step::<Mods>(state, intent)

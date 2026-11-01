@@ -10,9 +10,9 @@ use eg_companion::home::{Effect, Home, HomeView, Intent, State, present};
 use eg_companion::launch::host::LaunchMode;
 use eg_companion::launch::launcher::GameLauncher;
 use eg_core::bloom::BloomPhase;
-use flow::{Host, Intents, Slice, Store, Subscriptions, Version};
-use flow_slint::{Background, on_watch};
 use slint::{ComponentHandle, Weak};
+use spiderland::{Host, Intents, Slice, Store, Subscriptions, Version};
+use spiderland_slint::{Background, on_watch};
 use std::rc::Rc;
 use std::sync::Arc;
 

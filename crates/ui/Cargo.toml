@@ -9,10 +9,10 @@ task-runtime.workspace = true
 file-ops.workspace = true
 win-platform.workspace = true
 eg-core.workspace = true
-phrases.workspace = true
+spiderland-phrases.workspace = true
 eg-companion.workspace = true
-flow.workspace = true
-flow-slint.workspace = true
+spiderland.workspace = true
+spiderland-slint.workspace = true
 eg-trainer = { path = "../trainer" }
 rfd.workspace = true
 jiff.workspace = true
@@ -26,7 +26,7 @@ raw-window-handle.workspace = true
 
 [build-dependencies]
 slint-build.workspace = true
-rspolib.workspace = true
+spiderland-phrases-build.workspace = true
 
 [dev-dependencies]
 image.workspace = true

@@ -1,7 +1,7 @@
 /// Declares named phrases, one after the other with no separator between them:
 ///
 /// ```
-/// phrases::phrases! {
+/// spiderland_phrases::phrases! {
 ///     /// Shown over the item list.
 ///     pub AddItem: "Add item"
 ///     pub(crate) Level: "Level {level}"
@@ -17,7 +17,7 @@
 /// is. Each is a plain `const`, so it costs what the `const` costs and works in a function as at the top of a module.
 /// Names are in CamelCase, which reads as the word it stands for at its use: `tr::LegendaryWillNote.get()`.
 ///
-/// The English has to be a literal for `cargo xtask phrases` to read, and this takes nothing else.
+/// The English has to be a literal for `spiderland-phrases-build` to read, and this takes nothing else.
 #[macro_export]
 macro_rules! phrases {
     (@item [$($attr:tt)*] [$vis:vis] $name:ident $english:literal) => {

@@ -1,0 +1,15 @@
+[package]
+name = "spiderland-phrases-build"
+description = "The build side of spiderland-phrases: bundles translations into a table of catalogs, and collects the shown words into a gettext template. Names no app or game."
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[dependencies]
+rspolib.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+
+[lints]
+workspace = true

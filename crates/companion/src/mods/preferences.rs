@@ -4,7 +4,7 @@
 
 use super::description::{SettingChoice, SettingDescription};
 use melon_loader::preferences::{PreferenceEntry, PreferenceKind, PreferenceValue};
-use phrases::phrases;
+use spiderland_phrases::phrases;
 
 phrases! {
     EnterWhole: "Enter a whole number, like 2."

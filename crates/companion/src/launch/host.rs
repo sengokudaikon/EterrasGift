@@ -8,7 +8,7 @@ use crate::mods::worker::ModWorker;
 use eg_core::game_log::{GameLogReader, GameLogState};
 use melon_loader::assembly::LoaderVersion;
 use melon_loader::loader_state::{self, LoaderInstall};
-use phrases::phrases;
+use spiderland_phrases::phrases;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::Mutex;

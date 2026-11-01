@@ -4,7 +4,7 @@
 use super::game::Lookup;
 use super::item::{AffixDefinition, AffixState, ItemEdit, ModifierSnapshot, RollTarget, Seal, StatusField, ValueSample, ValueTable};
 use eg_trainer::definitions::catalog::ValueRange;
-use phrases::phrases;
+use spiderland_phrases::phrases;
 use std::rc::Rc;
 
 phrases! {

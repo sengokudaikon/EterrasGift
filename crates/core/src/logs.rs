@@ -4,8 +4,8 @@
 //! makes an older one's result meaningless, so each read carries a generation. Contents that come back unchanged leave
 //! the view alone, which keeps a text selection in place.
 
-use flow::{Effects, Feature, Panicked, Tracked};
-use phrases::phrases;
+use spiderland::{Effects, Feature, Panicked, Tracked};
+use spiderland_phrases::phrases;
 use std::{
     fs::{self, File},
     io::{self, Read, Seek, SeekFrom},
@@ -280,7 +280,7 @@ fn read_again(state: &mut State, effects: &mut Effects<Effect>) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use flow::step;
+    use spiderland::step;
     use std::io::Write;
 
     fn send(state: &mut State, intent: Intent) -> Vec<Effect> {

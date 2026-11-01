@@ -7,8 +7,8 @@ publish.workspace = true
 
 [dependencies]
 file-ops.workspace = true
-flow.workspace = true
-phrases.workspace = true
+spiderland.workspace = true
+spiderland-phrases.workspace = true
 task-runtime.workspace = true
 jiff.workspace = true
 regex.workspace = true

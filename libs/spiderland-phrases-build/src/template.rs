@@ -1,18 +1,16 @@
-//! `cargo xtask phrases [--check]`: every word the app shows, in one gettext template, `lang/eterras-gift.pot`, for
-//! translators. Two sources, one msgid space: each entry of a `phrases!` block and each `Phrase::new("…")`,
-//! `Phrase::ctx("…", "…")` and `Plural::new("…", "…")` in the crates' sources (up to a file's `#[cfg(test)]`), and each
-//! `@tr` in the views, read by `slint-tr-extractor`; a context (`"ctx" => …`, `Phrase::ctx`, `@tr("ctx" => …)`) is the
-//! entry's msgctxt. References name files only, so moving code does not make the template stale; the header carries no
-//! date, so `--check` compares as written.
+//! Every word an app shows, in one gettext template for translators. Two sources, one msgid space: each entry of a
+//! `phrases!` block and each `Phrase::new("…")`, `Phrase::ctx("…", "…")` and `Plural::new("…", "…")` in the Rust sources (up
+//! to a file's `#[cfg(test)]`), and each `@tr` in the views, read by `slint-tr-extractor`; a context (`"ctx" => …`,
+//! `Phrase::ctx`, `@tr("ctx" => …)`) is the entry's msgctxt. References name files only, so moving code does not make the
+//! template stale; the header carries no date, so a check compares as written.
 
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-const TEMPLATE: &str = "lang/eterras-gift.pot";
-/// Where `phrases!` is defined: its arms spell out the calls with metavariables, not with words.
-const MACRO_DEFINITION: &str = "libs/phrases/src/macros.rs";
+/// Marks the file defining `phrases!`: its arms spell out the calls with metavariables, not with words.
+const MACRO_DEFINITION: &str = "macro_rules! phrases";
 const NEWLINE: &str = "\r\n";
 
 /// One phrase as the sources write it: its context, its English (a plural's singular) and a plural's other form.
@@ -30,7 +28,54 @@ struct Entry {
     files: Vec<String>,
 }
 
-pub fn run(root: &Path, check: bool) -> Result<(), String> {
+/// One template and where its words come from. Paths are relative to `root`, and are how the template refers to files.
+pub struct Template<'a> {
+    pub root: &'a Path,
+    /// The file to write.
+    pub path: &'a str,
+    /// The project's name, for the header.
+    pub project: &'a str,
+    /// The command that writes the template, for whoever finds it out of date.
+    pub command: &'a str,
+    /// Folders of Rust sources, searched in depth. Each one's tests and benches are left out.
+    pub sources: &'a [&'a str],
+    /// The folder of `.slint` views.
+    pub views: &'a str,
+}
+
+impl Template<'_> {
+    /// Fails if the template on disk differs from what the sources say, and writes nothing.
+    pub fn check(&self) -> Result<(), String> {
+        let (out, _) = self.generate()?;
+        if self.current().as_deref() == Some(out.as_str()) {
+            Ok(())
+        } else {
+            Err(format!("{} is out of date, run `{}`", self.path, self.command))
+        }
+    }
+
+    /// Writes the template and says what it did.
+    pub fn write(&self) -> Result<String, String> {
+        let (out, count) = self.generate()?;
+        let unchanged = self.current().as_deref() == Some(out.as_str());
+        let path = self.root.join(self.path);
+        fs::create_dir_all(path.parent().unwrap()).map_err(|e| e.to_string())?;
+        fs::write(&path, &out).map_err(|e| format!("{path:?}: {e}"))?;
+        Ok(format!("wrote {} ({count} phrases{})", self.path, if unchanged { ", unchanged" } else { "" }))
+    }
+
+    fn current(&self) -> Option<String> {
+        fs::read_to_string(self.root.join(self.path)).ok()
+    }
+
+    /// The template's text and how many phrases it holds.
+    fn generate(&self) -> Result<(String, usize), String> {
+        generate(self)
+    }
+}
+
+fn generate(template: &Template) -> Result<(String, usize), String> {
+    let root = template.root;
     let mut entries: BTreeMap<(Option<String>, String), Entry> = BTreeMap::new();
     let mut add = |found: Found, file: String| {
         let entry = entries.entry((found.context, found.msgid)).or_default();
@@ -40,16 +85,16 @@ pub fn run(root: &Path, check: bool) -> Result<(), String> {
         }
     };
     let mut sources = Vec::new();
-    rust_files(&root.join("crates"), &mut sources)?;
-    // The one library with words of its own: how lists are joined.
-    rust_files(&root.join("libs/phrases/src"), &mut sources)?;
+    for folder in template.sources {
+        rust_files(&root.join(folder), &mut sources)?;
+    }
     sources.sort();
     for path in &sources {
         let file = relative(root, path);
-        if file == MACRO_DEFINITION {
+        let text = fs::read_to_string(path).map_err(|e| format!("{path:?}: {e}"))?;
+        if text.contains(MACRO_DEFINITION) {
             continue;
         }
-        let text = fs::read_to_string(path).map_err(|e| format!("{path:?}: {e}"))?;
         // Comments only talk about phrases, and a file's tests (`#[cfg(test)]`, `#[cfg(all(test, …))]`) show the user nothing.
         let text: String = text
             .lines()
@@ -65,7 +110,7 @@ pub fn run(root: &Path, check: bool) -> Result<(), String> {
             add(found, file.clone());
         }
     }
-    for (found, file) in view_phrases(root)? {
+    for (found, file) in view_phrases(root, template.views)? {
         add(found, file);
     }
 
@@ -77,10 +122,10 @@ pub fn run(root: &Path, check: bool) -> Result<(), String> {
         out.push_str(text);
         out.push_str(NEWLINE);
     };
-    line("# Eterra's Gift: the words it shows. Generated by `cargo xtask phrases`; do not edit.");
+    line(&format!("# {}: the words it shows. Generated by `{}`; do not edit.", template.project, template.command));
     line("msgid \"\"");
     line("msgstr \"\"");
-    line("\"Project-Id-Version: Eterra's Gift\\n\"");
+    line(&format!("\"Project-Id-Version: {}\\n\"", template.project));
     line("\"MIME-Version: 1.0\\n\"");
     line("\"Content-Type: text/plain; charset=UTF-8\\n\"");
     line("\"Content-Transfer-Encoding: 8bit\\n\"");
@@ -101,24 +146,7 @@ pub fn run(root: &Path, check: bool) -> Result<(), String> {
             None => line("msgstr \"\""),
         }
     }
-
-    let path = root.join(TEMPLATE);
-    let current = fs::read_to_string(&path).ok();
-    if check {
-        return if current.as_deref() == Some(out.as_str()) {
-            Ok(())
-        } else {
-            Err(format!("{TEMPLATE} is out of date, run `cargo xtask phrases`"))
-        };
-    }
-    fs::create_dir_all(path.parent().unwrap()).map_err(|e| e.to_string())?;
-    fs::write(&path, &out).map_err(|e| format!("{path:?}: {e}"))?;
-    println!(
-        "wrote {TEMPLATE} ({} phrases{})",
-        entries.len(),
-        if current.as_deref() == Some(out.as_str()) { ", unchanged" } else { "" }
-    );
-    Ok(())
+    Ok((out, entries.len()))
 }
 
 fn rust_files(dir: &Path, out: &mut Vec<PathBuf>) -> Result<(), String> {
@@ -126,8 +154,8 @@ fn rust_files(dir: &Path, out: &mut Vec<PathBuf>) -> Result<(), String> {
         let path = entry.map_err(|e| e.to_string())?.path();
         let name = path.file_name().and_then(|name| name.to_str()).unwrap_or_default();
         if path.is_dir() {
-            // Tests, benches and the tasks themselves show the user nothing.
-            if !matches!(name, "tests" | "benches" | "target" | "xtask") {
+            // Tests and benches show the user nothing.
+            if !matches!(name, "tests" | "benches" | "target") {
                 rust_files(&path, out)?;
             }
         } else if name.ends_with(".rs") && !name.ends_with("_tests.rs") {
@@ -273,11 +301,11 @@ fn rust_literal(text: &str) -> Option<(String, &str)> {
 }
 
 /// The views' `@tr` strings, as `slint-tr-extractor` reads them, with each file they are in.
-fn view_phrases(root: &Path) -> Result<Vec<(Found, String)>, String> {
+fn view_phrases(root: &Path, folder: &str) -> Result<Vec<(Found, String)>, String> {
     let mut views = Vec::new();
-    slint_files(&root.join("crates/ui/ui"), &mut views)?;
+    slint_files(&root.join(folder), &mut views)?;
     views.sort();
-    let output = std::env::temp_dir().join(format!("eg-phrases-{}.pot", std::process::id()));
+    let output = std::env::temp_dir().join(format!("spiderland-phrases-{}.pot", std::process::id()));
     let status = Command::new("slint-tr-extractor")
         .current_dir(root)
         .arg("--no-default-translation-context")
@@ -285,7 +313,7 @@ fn view_phrases(root: &Path) -> Result<Vec<(Found, String)>, String> {
         .arg(&output)
         .args(views.iter().map(|path| relative(root, path)))
         .status()
-        .map_err(|e| format!("slint-tr-extractor (1.18.1, in %USERPROFILE%\\.local\\bin) could not run: {e}"));
+        .map_err(|e| format!("slint-tr-extractor, of the Slint version the views build with, could not run: {e}"));
     let text = fs::read_to_string(&output);
     let _ = fs::remove_file(&output);
     if !status?.success() {

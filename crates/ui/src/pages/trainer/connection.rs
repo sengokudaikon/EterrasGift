@@ -9,8 +9,8 @@ use crate::{
 };
 use eg_core::{bloom::BloomPhase, game_log::GameReadiness};
 use eg_trainer::backend::{Activity, BackendHandle, BackendSnapshot, Command, ErrorKind, Phase, ProfileLock};
-use phrases::phrases;
 use slint::ComponentHandle;
+use spiderland_phrases::phrases;
 use std::{cell::Cell, rc::Rc};
 
 phrases! {

@@ -20,10 +20,10 @@ mod translations {
 use eg_companion::game::watch::GameWatch;
 use eg_companion::launch::launcher::GameLauncher;
 use eg_core::settings_page::Intent as SettingsIntent;
-use flow_slint::Background;
 use pages::{forge, home, logs, mods, settings, trainer};
 use shell::{Navigation, Page};
 use slint::ComponentHandle;
+use spiderland_slint::Background;
 use std::rc::Rc;
 use std::sync::Arc;
 
@@ -54,12 +54,12 @@ pub struct App {
 /// catalog, the Rust phrases through the same catalog's table and the app's numbers in its symbols, chosen once for all. Call it as soon as the first
 /// window exists, before any page or message is built.
 pub fn select_language() {
-    let Ok(translations) = phrases::Translations::new(translations::CATALOGS) else {
+    let Ok(translations) = spiderland_phrases::Translations::new(translations::CATALOGS) else {
         return;
     };
     let language = sys_locale::get_locale().and_then(|locale| translations.choose(&locale));
     translations.select(language);
-    phrases::locale::select(language);
+    spiderland_phrases::locale::select(language);
     // Fails only when no translation is bundled, and English needs none.
     let _ = slint::select_bundled_translation(language.unwrap_or(""));
 }
@@ -141,6 +141,6 @@ where
 mod tests {
     #[test]
     fn every_bundled_translation_reads() {
-        phrases::Translations::new(super::translations::CATALOGS).unwrap();
+        spiderland_phrases::Translations::new(super::translations::CATALOGS).unwrap();
     }
 }

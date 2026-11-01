@@ -1,7 +1,7 @@
 //! Work that must not hold the UI thread. It runs on the runtime's blocking pool and comes back on the event loop as an
 //! intent.
 
-use flow::{Intents, Panicked};
+use spiderland::{Intents, Panicked};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use task_runtime::Tasks;

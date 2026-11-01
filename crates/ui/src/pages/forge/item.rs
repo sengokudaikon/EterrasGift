@@ -1,6 +1,6 @@
 //! Forge presentation. Edit intents, validation, projection and reversal use the trainer domain.
 
-use phrases::{Phrase, phrases};
+use spiderland_phrases::{Phrase, phrases};
 use std::collections::BTreeMap;
 
 /// Rarity bytes the game gives unique-backed items; lower bytes follow the unsealed affix count.
@@ -702,7 +702,7 @@ impl TierProperty {
 }
 
 pub fn format_tier_range(properties: &[TierProperty]) -> Option<String> {
-    let trim = |value: f64| phrases::locale::numbers().plain(value);
+    let trim = |value: f64| spiderland_phrases::locale::numbers().plain(value);
     let percent = |value: f64| trim((value * 1000.0).round() / 10.0);
     fn span(min: String, max: String) -> String {
         if min == max { min } else { format!("{min}–{max}") }

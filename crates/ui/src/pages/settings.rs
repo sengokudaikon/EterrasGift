@@ -1,6 +1,6 @@
 //! Settings in the window: the `eg_core::settings_page` feature's impure half. It shows the feature's state in the
 //! `SettingsState` global, and saves, picks files, tells linked modules and closes the window when the feature says to.
-use phrases::phrases;
+use spiderland_phrases::phrases;
 
 pub mod trainer;
 
@@ -9,9 +9,9 @@ pub use eg_core::settings_page::{LiveStatus, ModuleChoice, ModuleLink, ModuleSec
 use crate::{LocationSetting, MainWindow, MessageTone, ModuleRow, Nav, SettingsSectionRow, SettingsState};
 use eg_core::settings_page::{Effect, Intent, Location, LocationView, MessageKind, ModuleRowView, SectionBody, SectionView, SettingsPage, State, submit, try_pause};
 use eg_core::settings_service::SettingsService;
-use flow::{Host, Intents, Slice, Store, Subscriptions, Version};
-use flow_slint::{Rows, on_wake};
 use slint::{ComponentHandle, Timer, Weak};
+use spiderland::{Host, Intents, Slice, Store, Subscriptions, Version};
+use spiderland_slint::{Rows, on_wake};
 use std::cell::Cell;
 use std::collections::BTreeMap;
 use std::path::PathBuf;

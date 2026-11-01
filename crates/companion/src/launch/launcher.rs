@@ -3,7 +3,7 @@
 
 use crate::launch::host::{GameHost, LaunchError, LaunchMode, LaunchOutcome};
 use crate::launch::loader::{self, ModLoaderState};
-use phrases::phrases;
+use spiderland_phrases::phrases;
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::Duration;
 use task_runtime::CancellationToken;

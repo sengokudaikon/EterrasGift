@@ -13,7 +13,7 @@ use eg_trainer_wire::{
     forge::{AffixSnapshot, ForgeSnapshot},
     process::ProcessIdentity,
 };
-use phrases::Phrase;
+use spiderland_phrases::Phrase;
 use std::{
     collections::{BTreeMap, BTreeSet},
     fmt,
