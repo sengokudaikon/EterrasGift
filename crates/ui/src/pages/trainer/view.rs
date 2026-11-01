@@ -10,9 +10,9 @@ use eg_trainer::screens::pages::Tone;
 use eg_trainer::screens::registry::{Area, Feature};
 use eg_trainer::screens::session::{FieldRequest, FieldResult, PendingFields, TrainerSession};
 use eg_trainer::screens::trainer_pages::{Effect, FieldRowView, Intent, POLL, PlaceView, REVEAL, RowKind, RowView, State, TrainerPages, ValueView, read_facts};
-use slint::{ComponentHandle, Model, ModelRc, SharedString, Timer, TimerMode, VecModel, Weak};
-use spiderland::{Host, Intents, Slice, Store, Subscriptions, Version};
-use spiderland_slint::{Listening, Rows, every, on_watch};
+use slint::{ComponentHandle, Model, ModelRc, SharedString, Timer, VecModel, Weak};
+use spiderland::{Host, Intents, Slice, Store, Subscriptions, Version, callbacks};
+use spiderland_slint::{Listening, Rows, after, every, on_watch};
 use std::rc::Rc;
 use std::time::Duration;
 
@@ -236,88 +236,38 @@ pub fn bind(window: &MainWindow, session: Rc<dyn TrainerSession>, features: Vec<
     };
     pages.refresh();
 
-    view.on_open({
-        let store = store.clone();
-        move |id| store.send(Intent::Open(Page::from_id(&id).and_then(area)))
-    });
-    view.on_select_profile({
-        let store = store.clone();
-        move |index| store.send(Intent::SelectProfile(index))
-    });
-    view.on_delete_profile({
-        let store = store.clone();
-        move || store.send(Intent::DeleteProfile)
-    });
-    view.on_keep_profile({
-        let store = store.clone();
-        move || store.send(Intent::KeepProfile)
-    });
-    view.on_select_section({
-        let store = store.clone();
-        move |section| store.send(Intent::SelectSection(section))
-    });
-    view.on_columns_changed({
-        let store = store.clone();
-        move |columns| store.send(Intent::ColumnsChanged(columns))
-    });
-    view.on_row_measured({
-        let store = store.clone();
-        move |row, height| store.send(Intent::RowMeasured(row, height))
-    });
-    view.on_hook_toggled({
-        let store = store.clone();
-        move |row, on| store.send(Intent::HookToggled(row, on))
-    });
-    view.on_value_committed({
-        let store = store.clone();
-        move |row, index, text| store.send(Intent::ValueCommitted(row, index, text.into()))
-    });
-    view.on_value_stepped({
-        let store = store.clone();
-        move |row, index, direction| store.send(Intent::ValueStepped(row, index, direction))
-    });
-    view.on_value_stepped_to_end({
-        let store = store.clone();
-        move |row, index, end| store.send(Intent::ValueSteppedToEnd(row, index, end))
-    });
-    view.on_value_scrubbed({
-        let store = store.clone();
-        move |row, index, delta| store.send(Intent::ValueScrubbed(row, index, delta))
-    });
-    view.on_value_scrub_ended({
-        let store = store.clone();
-        move |row, index, cancelled| store.send(Intent::ValueScrubEnded(row, index, cancelled))
+    callbacks!(view, store, {
+        on_open: |id| Intent::Open(Page::from_id(&id).and_then(area)),
+        on_select_profile: |index| Intent::SelectProfile(index),
+        on_delete_profile: || Intent::DeleteProfile,
+        on_keep_profile: || Intent::KeepProfile,
+        on_select_section: |section| Intent::SelectSection(section),
+        on_columns_changed: |columns| Intent::ColumnsChanged(columns),
+        on_row_measured: |row, height| Intent::RowMeasured(row, height),
+        on_hook_toggled: |row, on| Intent::HookToggled(row, on),
+        on_value_committed: |row, index, text| Intent::ValueCommitted(row, index, text.into()),
+        on_value_stepped: |row, index, direction| Intent::ValueStepped(row, index, direction),
+        on_value_stepped_to_end: |row, index, end| Intent::ValueSteppedToEnd(row, index, end),
+        on_value_scrubbed: |row, index, delta| Intent::ValueScrubbed(row, index, delta),
+        on_value_scrub_ended: |row, index, cancelled| Intent::ValueScrubEnded(row, index, cancelled),
     });
     // A binding asks this: while a reducer runs, the text is fine, for now.
     view.on_value_checked({
         let store = store.clone();
         move |row, index, text| store.try_read(|state| state.check(row, index, &text)).unwrap_or_default().into()
     });
-    view.on_value_chosen({
-        let store = store.clone();
-        move |row, index, choice| store.send(Intent::ValueChosen(row, index, choice))
+    callbacks!(view, store, {
+        on_value_chosen: |row, index, choice| Intent::ValueChosen(row, index, choice),
     });
-    let edited = |store: &Store<TrainerPages>| {
-        let store = store.clone();
-        move |row, index, text: SharedString| store.send(Intent::FieldEdited(row, index, text.into()))
-    };
-    view.on_field_edited(edited(&store));
-    view.on_field_committed(edited(&store));
-    view.on_field_stepped({
-        let store = store.clone();
-        move |row, index, direction| store.send(Intent::FieldStepped(row, index, direction))
+    callbacks!(view, store, {
+        on_field_edited: |row, index, text| Intent::FieldEdited(row, index, text.into()),
+        on_field_committed: |row, index, text| Intent::FieldEdited(row, index, text.into()),
     });
-    view.on_read({
-        let store = store.clone();
-        move |row| store.send(Intent::Read(row))
-    });
-    view.on_apply({
-        let store = store.clone();
-        move |row| store.send(Intent::Apply(row))
-    });
-    view.on_discard({
-        let store = store.clone();
-        move |row| store.send(Intent::Discard(row))
+    callbacks!(view, store, {
+        on_field_stepped: |row, index, direction| Intent::FieldStepped(row, index, direction),
+        on_read: |row| Intent::Read(row),
+        on_apply: |row| Intent::Apply(row),
+        on_discard: |row| Intent::Discard(row),
     });
     pages
 }
@@ -388,10 +338,7 @@ impl Host<TrainerPages> for Window {
                 let intents = intents.clone();
                 Timer::single_shot(Duration::ZERO, move || intents.send(Intent::SplitDue));
             }
-            Effect::StartReveal => {
-                let intents = intents.clone();
-                self.reveal.start(TimerMode::SingleShot, REVEAL, move || intents.send(Intent::RevealDue));
-            }
+            Effect::StartReveal => self.reveal = after(REVEAL, intents, || Intent::RevealDue),
             Effect::StopReveal => self.reveal.stop(),
         }
     }

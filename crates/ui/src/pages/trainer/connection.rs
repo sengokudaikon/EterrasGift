@@ -10,7 +10,7 @@ use crate::{
 use eg_trainer::backend::{BackendHandle, Command, Phase};
 use eg_trainer::screens::connection::{Access, ConnectionFeature, ConnectionView, Effect, Intent, State, connect_command, unbound as unbound_view};
 use slint::{ComponentHandle, Weak};
-use spiderland::{Host, Intents, Slice, Store, Subscriptions, Version};
+use spiderland::{Host, Intents, Slice, Store, Subscriptions, Version, callbacks};
 use spiderland_slint::on_watch;
 use std::rc::Rc;
 
@@ -70,9 +70,8 @@ pub fn bind(window: &MainWindow, backend: BackendHandle, shell: &ShellHandle, de
         },
     );
     store.send(observed(&backend));
-    window.global::<Connection>().on_connect({
-        let store = store.clone();
-        move || store.send(Intent::Connect)
+    callbacks!(window.global::<Connection>(), store, {
+        on_connect: || Intent::Connect,
     });
     shell.on_page_entered(move |page| store.send(if page.is_trainer() { Intent::TrainerPageEntered } else { Intent::OtherPageEntered }));
 }

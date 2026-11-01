@@ -13,9 +13,9 @@ use eg_trainer::item::template::TemplateStore;
 use eg_trainer::screens::forge::editor::ForgeEditor;
 use eg_trainer::screens::forge::feature::{Effect, FocusTarget, Forge, Intent, State};
 use eg_trainer::screens::forge::game::{PREVIEW_DELAY, Request};
-use slint::{ComponentHandle, Timer, TimerMode, Weak};
+use slint::{ComponentHandle, Timer, Weak};
 use spiderland::{Host, Intents, Store, Subscriptions};
-use spiderland_slint::{Background, Dropping, local, on_watch};
+use spiderland_slint::{Background, Dropping, after, finish, local, on_watch};
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -177,9 +177,7 @@ impl ForgeHost {
                 match self.backend.try_submit(*command) {
                     Ok(receipt) => {
                         let (backend, intents) = (self.backend.clone(), intents.clone());
-                        // Fails only where no event loop can ever run; the worker still finishes the write.
-                        let _ = slint::spawn_local(async move {
-                            let result = receipt.wait().await;
+                        finish(receipt.wait(), move |result| {
                             intents.send(observed(&backend));
                             intents.send(Intent::WriteAnswered(result));
                         });
@@ -208,16 +206,11 @@ impl ForgeHost {
                     self.mappings.remove(&id);
                 }
             }
-            Request::PreviewAfterDelay => {
-                let intents = intents.clone();
-                self.preview.start(TimerMode::SingleShot, PREVIEW_DELAY, move || intents.send(Intent::PreviewDue));
-            }
+            Request::PreviewAfterDelay => self.preview = after(PREVIEW_DELAY, intents, || Intent::PreviewDue),
             Request::Preview { expected, draft } => match self.backend.try_submit(Command::PreviewUnique { expected, draft: *draft }) {
                 Ok(receipt) => {
                     let (backend, intents) = (self.backend.clone(), intents.clone());
-                    // Fails only where no event loop can ever run, and then nothing could show the result anyway.
-                    let _ = slint::spawn_local(async move {
-                        let result = receipt.wait().await;
+                    finish(receipt.wait(), move |result| {
                         intents.send(observed(&backend));
                         intents.send(Intent::PreviewAnswered {
                             error: result.err().map(|error| error.message),
