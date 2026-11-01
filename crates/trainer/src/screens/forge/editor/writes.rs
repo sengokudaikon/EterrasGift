@@ -373,7 +373,7 @@ impl ForgeEditor {
             self.say(tr::OverrideRequired, MessageKind::Error);
             return;
         }
-        self.batch = Some(WriteBatch {
+        self.writes = Writes::start(WriteBatch {
             steps: VecDeque::new(),
             total,
             names: vec![tr::Undo.into()],
@@ -382,7 +382,6 @@ impl ForgeEditor {
             undoing: true,
             failed: None,
         });
-        *self.writing = true;
         self.advance_writes();
     }
 
@@ -391,7 +390,7 @@ impl ForgeEditor {
             self.say(error, MessageKind::Error);
             return;
         }
-        self.batch = Some(WriteBatch {
+        self.writes = Writes::start(WriteBatch {
             total: steps.len(),
             names: steps.iter().map(|s| s.name.clone()).collect(),
             steps: steps.into(),
@@ -400,19 +399,17 @@ impl ForgeEditor {
             undoing,
             failed: None,
         });
-        *self.writing = true;
         self.advance_writes();
     }
 
     pub(super) fn advance_writes(&mut self) {
-        while *self.writing && self.waiting.is_none() {
+        while self.writes.between_writes() {
             if self.game.is_busy() {
                 return;
             }
-            let undoing = self.batch.as_ref().is_some_and(|b| b.undoing);
+            let (undoing, undone) = self.writes.batch().map_or((false, false), |batch| (batch.undoing, batch.completed == batch.total));
             let step = if undoing {
-                let batch = self.batch.as_ref().unwrap();
-                if batch.completed == batch.total {
+                if undone {
                     self.finish_batch(None);
                     return;
                 }
@@ -426,7 +423,7 @@ impl ForgeEditor {
                     edit,
                     row: StepRow::Undo,
                 }
-            } else if let Some(step) = self.batch.as_mut().and_then(|b| b.steps.pop_front()) {
+            } else if let Some(step) = self.writes.batch_mut().and_then(|b| b.steps.pop_front()) {
                 step
             } else {
                 self.finish_batch(None);
@@ -439,19 +436,11 @@ impl ForgeEditor {
             };
             let (summary, effect) = self.step_summary(&step.row);
             let moves = step.edit.moves(&before);
-            self.waiting = Some(WaitingWrite {
-                step,
-                before,
-                moves,
-                summary,
-                effect,
-            });
+            let edit = step.edit.clone();
+            self.writes.wait_for(WaitingWrite { step, moves, summary, effect });
             phrases! { Applying: "Applying to game… Waiting for independent readback." }
             self.say(Applying, MessageKind::Info);
-            let waiting = self.waiting.as_ref().unwrap();
-            let expected = waiting.before.clone();
-            let edit = waiting.step.edit.clone();
-            let outcome = if undoing { self.game.undo(&expected) } else { self.write(&expected, &edit) };
+            let outcome = if undoing { self.game.undo(&before) } else { self.write(&before, &edit) };
             if matches!(outcome, WriteOutcome::Pending) {
                 return;
             }
@@ -463,7 +452,7 @@ impl ForgeEditor {
         if matches!(outcome, WriteOutcome::Pending) {
             return;
         }
-        let Some(waiting) = self.waiting.take() else {
+        let Some(waiting) = self.writes.take_waiting() else {
             return;
         };
         match outcome {
@@ -479,12 +468,13 @@ impl ForgeEditor {
                         self.selected_affix = Some(index);
                     }
                 }
-                let batch = self.batch.as_mut().unwrap();
-                if !batch.undoing && self.game.undo_depth() < batch.completed + 1 {
-                    batch.one_way = true;
-                }
-                batch.completed += 1;
-                if !batch.undoing {
+                let depth = self.game.undo_depth();
+                let undoing = self.writes.batch_mut().is_some_and(|batch| {
+                    batch.one_way |= !batch.undoing && depth < batch.completed + 1;
+                    batch.completed += 1;
+                    batch.undoing
+                });
+                if !undoing {
                     self.history.insert(
                         0,
                         AppliedEntry {
@@ -499,7 +489,7 @@ impl ForgeEditor {
                 }
             }
             WriteOutcome::NotApplied { message, .. } => {
-                if let Some(batch) = self.batch.as_mut() {
+                if let Some(batch) = self.writes.batch_mut() {
                     batch.failed = Some(waiting.step.name);
                 }
                 self.finish_batch(Some(message));
@@ -563,10 +553,7 @@ impl ForgeEditor {
     }
 
     pub(super) fn recover_write(&mut self, item: Option<ForgeItem>) {
-        self.recovery_required = item.is_none();
-        self.batch = None;
-        self.waiting = None;
-        *self.writing = false;
+        self.writes = if item.is_none() { Writes::ItemLost } else { Writes::Idle };
         self.applied = None;
         self.history.clear();
         // Rebuild from the observation instead of preserving a draft's old base.
@@ -585,11 +572,9 @@ impl ForgeEditor {
             Confirmed: "Edit readback confirmed: {names}." | "{n} drafts applied. Edit readback confirmed for each: {names}."
             OneWay: "This change is one-way: the game would not give the old rarity back, so Undo apply cannot reverse it."
         }
-        let Some(batch) = self.batch.take() else {
+        let Some(batch) = self.writes.take_batch() else {
             return;
         };
-        self.waiting = None;
-        *self.writing = false;
         if batch.undoing {
             self.applied = (batch.completed < batch.total && self.game.undo_depth() > 0).then_some(batch.total - batch.completed);
             if batch.completed > 0 {

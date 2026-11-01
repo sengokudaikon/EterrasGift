@@ -178,10 +178,73 @@ struct WriteBatch {
 
 struct WaitingWrite {
     step: Step,
-    before: ForgeItem,
     moves: Moves,
     summary: String,
     effect: String,
+}
+
+/// Where the editor's writes stand.
+#[derive(Default)]
+enum Writes {
+    #[default]
+    Idle,
+    /// A batch is under way: one of its writes on its way to the game, or none between two of them.
+    Running { batch: WriteBatch, waiting: Option<Box<WaitingWrite>> },
+    /// A write ended and the item couldn't be shown afterwards. The next read shows it again, and the write is not sent again.
+    ItemLost,
+}
+
+impl Writes {
+    fn start(batch: WriteBatch) -> Writes {
+        Writes::Running { batch, waiting: None }
+    }
+
+    fn is_running(&self) -> bool {
+        matches!(self, Writes::Running { .. })
+    }
+
+    /// A batch is under way with no write of it on its way.
+    fn between_writes(&self) -> bool {
+        matches!(self, Writes::Running { waiting: None, .. })
+    }
+
+    fn batch(&self) -> Option<&WriteBatch> {
+        match self {
+            Writes::Running { batch, .. } => Some(batch),
+            _ => None,
+        }
+    }
+
+    fn batch_mut(&mut self) -> Option<&mut WriteBatch> {
+        match self {
+            Writes::Running { batch, .. } => Some(batch),
+            _ => None,
+        }
+    }
+
+    fn wait_for(&mut self, write: WaitingWrite) {
+        if let Writes::Running { waiting, .. } = self {
+            *waiting = Some(Box::new(write));
+        }
+    }
+
+    fn take_waiting(&mut self) -> Option<WaitingWrite> {
+        match self {
+            Writes::Running { waiting, .. } => waiting.take().map(|write| *write),
+            _ => None,
+        }
+    }
+
+    /// Ends the batch, if one is under way, and hands it over.
+    fn take_batch(&mut self) -> Option<WriteBatch> {
+        match std::mem::take(self) {
+            Writes::Running { batch, .. } => Some(batch),
+            other => {
+                *self = other;
+                None
+            }
+        }
+    }
 }
 
 pub struct ForgeEditor {
@@ -208,10 +271,7 @@ pub struct ForgeEditor {
     pub preview_failed: bool,
     pub preview_stale: bool,
     pub picker: Tracked<Option<Picker>>,
-    writing: Tracked<bool>,
-    batch: Option<WriteBatch>,
-    waiting: Option<WaitingWrite>,
-    recovery_required: bool,
+    writes: Writes,
     next_uid: u64,
     tables: HashMap<TableKey, Lookup<Rc<item::ValueTable>>>,
     /// Each identity option's lowercased name and id, which the identity search matches, kept with the options.
@@ -288,10 +348,7 @@ impl ForgeEditor {
             preview_failed: false,
             preview_stale: false,
             picker: Tracked::default(),
-            writing: Tracked::default(),
-            batch: None,
-            waiting: None,
-            recovery_required: false,
+            writes: Writes::Idle,
             next_uid: 1,
             tables: HashMap::new(),
             identity_keys: Vec::new(),
@@ -329,7 +386,6 @@ impl ForgeEditor {
         self.refresh();
     }
 
-    /// Changes whenever the base or identity options or the catalog change.
     /// Moves with each snapshot and catalog the game takes.
     pub fn game_generation(&self) -> u64 {
         self.game.generation()
@@ -352,6 +408,7 @@ impl ForgeEditor {
         ]
     }
 
+    /// Changes whenever the base or identity options or the catalog change.
     pub fn menu_generation(&self) -> u64 {
         self.menu_generation
     }
@@ -371,7 +428,7 @@ impl ForgeEditor {
 
     /// A write, or a batch of them, is on its way to the game.
     pub fn is_writing(&self) -> bool {
-        self.batch.is_some() || self.waiting.is_some()
+        self.writes.is_running()
     }
 
     pub fn has_item(&self) -> bool {
@@ -379,7 +436,7 @@ impl ForgeEditor {
     }
 
     pub fn needs_write_recovery(&self) -> bool {
-        self.recovery_required
+        matches!(self.writes, Writes::ItemLost)
     }
 
     pub fn message(&self) -> (&str, MessageKind) {
@@ -403,15 +460,15 @@ impl ForgeEditor {
 
     /// Reads the forge again: another item clears everything; the same item changed by the game moves the untouched rows.
     pub fn refresh(&mut self) {
-        if *self.writing {
+        if self.writes.is_running() {
             self.poll_writes();
             // The command's independent result is applied before monitoring data,
             // so its own stores never make the remaining drafts appear stale.
             return;
         }
         let snapshot = self.game.read();
-        if self.recovery_required && snapshot.is_some() {
-            self.recovery_required = false;
+        if self.needs_write_recovery() && snapshot.is_some() {
+            self.writes = Writes::Idle;
             phrases! { ReadAgain: "Item read again. The previous write was not retried." }
             self.say(ReadAgain, MessageKind::Info);
         }
@@ -425,18 +482,18 @@ impl ForgeEditor {
     /// Called on the desktop timer even when the watch revision is unchanged. Returns whether anything moved on: while
     /// nothing did, there is nothing new to show.
     pub fn poll_writes(&mut self) -> bool {
-        if *self.writing && self.waiting.is_none() {
+        if self.writes.between_writes() {
             self.advance_writes();
             return true;
         }
-        if !*self.writing {
+        if !self.writes.is_running() {
             return false;
         }
         if let Some(outcome) = self.game.poll_write() {
             let uncertain = matches!(outcome, WriteOutcome::Uncertain { .. });
             self.complete_write(outcome);
             self.advance_writes();
-            if !*self.writing && !uncertain {
+            if !self.writes.is_running() && !uncertain {
                 let snapshot = self.game.read();
                 if snapshot != *self.item {
                     let message = (self.message.clone(), self.message_kind);

@@ -149,7 +149,7 @@ impl ForgeEditor {
             LeftOut: "Left out: {items}."
         }
         let item = (*self.item).clone().ok_or(tr::NoItem.get())?;
-        if *self.writing {
+        if self.writes.is_running() {
             return Err(Writing.into());
         }
         if !self.can_change_draft() {

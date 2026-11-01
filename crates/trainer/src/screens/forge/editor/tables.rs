@@ -93,7 +93,7 @@ impl ForgeEditor {
 
     /// Asks the game for each cell's table in its draft's context; a context already asked is not asked again.
     pub(super) fn resolve_tables(&mut self) {
-        if *self.writing {
+        if self.writes.is_running() {
             return;
         }
         let changes = match self.unique_edit() {

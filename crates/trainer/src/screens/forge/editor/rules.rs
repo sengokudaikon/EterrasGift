@@ -4,7 +4,7 @@ use super::*;
 
 impl ForgeEditor {
     pub(super) fn can_change_draft(&self) -> bool {
-        !*self.writing && self.game.can_write()
+        !self.writes.is_running() && self.game.can_write()
     }
 
     /// Drafts can change: the session is ready, nothing is being written and no identity is drafted (a new unique brings
