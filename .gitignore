@@ -1,5 +1,6 @@
 /target/
 /libs/target/
+/spiderland/target/
 /artifacts/
 /data/
 /.claude/

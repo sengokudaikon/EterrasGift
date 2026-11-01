@@ -1,10 +1,10 @@
-//! The bundled translations: what the app's build script hands over, checked, and the one language phrases show in.
+//! The bundled translations: what an app's build script hands over, checked, and the one language phrases show in.
 
 use crate::plural_rule::Rule;
 use std::collections::HashMap;
 use std::sync::RwLock;
 
-/// One language's translations as the app's build script bundles them, with what made it in: entries the
+/// One language's translations as an app's build script bundles them, with what made it in: entries the
 /// translator finished (not fuzzy, every form filled), as Slint takes them for the views.
 pub struct Catalog {
     /// As its folder under `lang/` names it, e.g. "de" or "pt-BR".

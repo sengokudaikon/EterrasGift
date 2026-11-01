@@ -4,9 +4,11 @@ use spiderland::{Effects, Feature, Host, Intents, Panicked, Store, Subscriptions
 use spiderland_slint::testing::{Headless, advance, settle, until};
 use spiderland_slint::{Background, Dropping, Listening, after, every, finish, local, on_wake, on_watch};
 use std::cell::{Cell, RefCell};
+use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::rc::Rc;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
-use task_runtime::Runtime;
 use tokio::sync::{oneshot, watch};
 
 struct Probe;
@@ -74,8 +76,17 @@ impl Host<Probe> for Runner {
 fn work_and_timers_come_back_as_intents_on_the_ui_thread() {
     let _headless = Headless::frozen();
 
-    let runtime = Runtime::start().unwrap();
-    let background = Background::new(runtime.tasks().scope());
+    let panics = Arc::new(AtomicUsize::new(0));
+    let counted = panics.clone();
+    let background = Background::new(move |job| {
+        let counted = counted.clone();
+        std::thread::spawn(move || {
+            if catch_unwind(AssertUnwindSafe(job)).is_err() {
+                counted.fetch_add(1, Ordering::SeqCst);
+            }
+        });
+        true
+    });
     let seen = Rc::new(RefCell::new(Seen { results: Vec::new(), ticks: 0 }));
     let store = Store::new(
         State::default(),
@@ -95,8 +106,23 @@ fn work_and_timers_come_back_as_intents_on_the_ui_thread() {
     store.send(Intent::Run(|| panic!("a fault in the work, expected by this test")));
     until("background work", || background.pending() == 0);
     assert_eq!(seen.borrow().results, [Ok(7), Err(Panicked)]);
+    until("the panic to reach the pool", || panics.load(Ordering::SeqCst) == 1);
     store.send(Intent::Run(|| 8));
     until("background work", || background.pending() == 0);
+    assert_eq!(seen.borrow().results, [Ok(7), Err(Panicked), Ok(8)]);
+
+    // Work the pool refuses, or lets go of before it starts, sends nothing back.
+    let intents = store.intents();
+    let refusing = Background::new(|_| false);
+    refusing.run(&intents, || 1, Intent::Finished);
+    assert_eq!(refusing.pending(), 0);
+    let letting_go = Background::new(|job| {
+        drop(job);
+        true
+    });
+    letting_go.run(&intents, || 2, Intent::Finished);
+    until("the job let go of", || letting_go.pending() == 0);
+    settle();
     assert_eq!(seen.borrow().results, [Ok(7), Err(Panicked), Ok(8)]);
 
     // An answer awaited on the UI thread counts until it is delivered, and comes back as an intent.
@@ -232,6 +258,4 @@ fn work_and_timers_come_back_as_intents_on_the_ui_thread() {
     answer.send(1).unwrap();
     until("its result", || *done.borrow());
     assert!(guard.borrow().is_none());
-
-    assert!(runtime.shutdown(), "closing reports that accepted work panicked");
 }

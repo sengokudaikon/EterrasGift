@@ -1,6 +1,6 @@
-//! Numbers as a language writes them, from Windows' symbols for an explicitly named locale: the game's tooltips in the
-//! game's language, and the app's own numbers in the language it shows ([`select`], [`numbers`]). Never the current
-//! user's locale or its overrides.
+//! Numbers as a language writes them, from Windows' symbols for an explicitly named locale: any language by name
+//! ([`NumberSymbols::capture`]), and the language shown ([`select`], [`numbers`]). Never the current user's locale or its
+//! overrides.
 use std::io;
 use std::sync::{LazyLock, RwLock};
 
@@ -15,12 +15,12 @@ pub struct NumberSymbols {
 static ENGLISH: LazyLock<NumberSymbols> = LazyLock::new(NumberSymbols::english);
 static SHOWN: RwLock<Option<&'static NumberSymbols>> = RwLock::new(None);
 
-/// The symbols the app's own numbers use: the shown language's, else English's.
+/// The symbols shown numbers use: the shown language's, else English's.
 pub fn numbers() -> &'static NumberSymbols {
     SHOWN.read().unwrap_or_else(|p| p.into_inner()).unwrap_or(&ENGLISH)
 }
 
-/// The app's own numbers follow `language` from now on, as the views' do; English when it is None or Windows has no
+/// Shown numbers follow `language` from now on, as the views' do; English when it is None or Windows has no
 /// symbols for it.
 pub fn select(language: Option<&str>) {
     let symbols = language
@@ -31,7 +31,7 @@ pub fn select(language: Option<&str>) {
 }
 
 impl NumberSymbols {
-    /// English's, which the app shows without a translation.
+    /// English's, shown without a translation.
     pub fn english() -> Self {
         Self {
             decimal: ".".into(),

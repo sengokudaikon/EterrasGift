@@ -1,4 +1,4 @@
-//! What a Slint [`spiderland::Host`] needs to do its work, built on Slint's event loop and `task_runtime`.
+//! What a Slint [`spiderland::Host`] needs to do its work, built on Slint's event loop.
 //!
 //! - [`Background`]: work off the UI thread whose result comes back as an intent.
 //! - [`every`] and [`after`]: a repeating intent and a delayed one, each ending with the timer it returns.
@@ -14,7 +14,7 @@ mod rows;
 pub mod testing;
 mod wake;
 
-pub use background::Background;
+pub use background::{Background, Job};
 pub use rows::Rows;
 pub use wake::{Dropping, Listening, Waker, finish, local, on_wake, on_watch};
 

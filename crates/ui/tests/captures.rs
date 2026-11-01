@@ -309,7 +309,10 @@ fn main() {
         headless,
         out,
         data: tempfile::tempdir().expect("a folder for the captures' own data"),
-        background: Background::new(runtime.tasks().scope()),
+        background: Background::new({
+            let tasks = runtime.tasks().scope();
+            move |job| tasks.spawn_blocking(job).is_ok()
+        }),
         tasks: runtime.tasks(),
         live_watch: std::cell::Cell::new(false),
     };

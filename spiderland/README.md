@@ -1,16 +1,16 @@
 # spiderland
 
-A small frame for desktop UIs: one-way state, and the words the UI shows. It names no app or game.
+A small frame for desktop UIs: one-way state, and the words the UI shows.
 
 | Crate | What it is | Depends on |
 |---|---|---|
 | `spiderland` | One-way UI state | Nothing |
-| `spiderland-slint` | What a Slint host needs | `spiderland`, `task-runtime`, Slint |
+| `spiderland-slint` | What a Slint host needs | `spiderland`, `spiderland-phrases`, Slint, `tokio`'s channels |
 | `spiderland-phrases` | Words and numbers, ready for translation | Nothing but one Windows call |
 | `spiderland-phrases-build` | Translations into a table, and the shown words into a gettext template | `rspolib` |
 
-A feature crate takes `spiderland` and `spiderland-phrases` and stays free of Slint. Background work stays in `task-runtime`,
-which services use with no UI at all: `spiderland-slint` only brings its results back to the UI thread.
+A feature crate takes `spiderland` and `spiderland-phrases` and stays free of Slint. The framework creates no tasks: the app gives
+`Background` a way to start a job on its own pool, and `Background` only brings the result back to the UI thread.
 
 | Primitive | Crate | What it is for |
 |---|---|---|
@@ -23,7 +23,7 @@ which services use with no UI at all: `spiderland-slint` only brings its results
 | `Effects::scoped` | `spiderland` | A child scope's reducer inside its parent's |
 | `step` | `spiderland` | One reducer step in a test |
 | `callbacks!` | `spiderland` | A view's callbacks as intents, one per line |
-| `Background` | `spiderland-slint` | Work off the UI thread, on a `task_runtime` scope, that comes back as an intent, with panics as values |
+| `Background` | `spiderland-slint` | Work off the UI thread, on the app's own pool, that comes back as an intent, with panics as values |
 | `Background::wait` | `spiderland-slint` | An answer awaited on the UI thread, with no pool thread held, that comes back as an intent |
 | `local` | `spiderland-slint` | Waiting on the UI thread for work that can be let go of, even from what its own result causes |
 | `finish` | `spiderland-slint` | Waiting on the UI thread for work whose result must always be heard |
@@ -53,7 +53,7 @@ which services use with no UI at all: `spiderland-slint` only brings its results
 
 ## Words
 
-- **Views** write `@tr("Item: {}", name)`, and counts `@tr("{n} mod" | "{n} mods" % count)`. A context is
+- **Views** write `@tr("Item: {}", name)`, and counts `@tr("{n} file" | "{n} files" % count)`. A context is
   `@tr("key" => "Delete")`.
 - **Rust** declares a `phrases!` block beside its use, `Name: "English"`, with `"context" => "English"` and `"one" | "other"`
   (see the macro). Values go in by name, `"Added {name}."`, through `Phrase::with`, so a translation can move them. A count goes
@@ -72,8 +72,8 @@ which services use with no UI at all: `spiderland-slint` only brings its results
 
 - A write's outcome must always reach a store that is still alive. `Background` runs work to its end whatever happens, but
   delivers nowhere once its store is gone, so never tie a write to a scope that can close first.
-- A panic in background work is `Err(Panicked)`, and each feature decides what it means. The runtime's shutdown still reports
-  it, so whoever composes the app can act on it.
+- A panic in background work is `Err(Panicked)`, and each feature decides what it means. The panic then goes on to the app's
+  pool, which can keep a record of it.
 - A `Slice` key that leaves out an input shows stale values. Keep the key beside the function it guards.
 - Don't name a component's callback after a value some binding inside it uses: a callback `start` breaks `alignment: start`.
 - A phrase's English is a literal: the template is read from the sources, not from a build.

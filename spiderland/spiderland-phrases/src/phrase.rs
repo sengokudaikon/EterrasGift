@@ -144,7 +144,7 @@ mod tests {
     fn english_counts_and_lists() {
         phrases! { Drafts: "{n} draft" | "{n} drafts" }
         assert_eq!([Drafts.count(0), Drafts.count(1), Drafts.count(2)], ["0 drafts", "1 draft", "2 drafts"]);
-        assert_eq!(Plural::new("{n} mod in {place}", "{n} mods in {place}").with(3, &[("place", &"Mods")]), "3 mods in Mods");
+        assert_eq!(Plural::new("{n} file in {place}", "{n} files in {place}").with(3, &[("place", &"Logs")]), "3 files in Logs");
         assert_eq!(list::<&str>(&[], Conjunction::And), "");
         assert_eq!(list(&["a"], Conjunction::And), "a");
         assert_eq!(list(&["a", "b"], Conjunction::Or), "a or b");

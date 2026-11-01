@@ -1,5 +1,5 @@
-//! The words and numbers an app shows, kept apart from the code that shows them so they can be translated. It names no
-//! app or game; the translations themselves are the app's, whose build script bundles them into a table of [`Catalog`]s
+//! The words and numbers an app shows, kept apart from the code that shows them so they can be translated. The
+//! translations themselves are the app's, whose build script bundles them into a table of [`Catalog`]s
 //! (`spiderland-phrases-build`), which [`Translations`] checks and [`Translations::select`] shows.
 //!
 //! Words are declared with [`phrases!`] beside the code that uses them, and used by name. Words in a table or an argument,

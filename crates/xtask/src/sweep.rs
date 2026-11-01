@@ -3,7 +3,7 @@
 //!
 //! A unit in use stays untouched while it is fresh, so age alone can't say a unit is dead. First-party crates rebuild
 //! often and cheaply, so an old unit of one is removed, and at worst it builds again. Third-party crates rarely rebuild and
-//! take the longest, so a package still in a lockfile is kept. A package in neither lockfile is gone or renamed.
+//! take the longest, so a package still in a lockfile is kept. A package in no lockfile is gone or renamed.
 
 use std::collections::BTreeSet;
 use std::fs;
@@ -13,7 +13,7 @@ use std::time::{Duration, SystemTime};
 
 /// The checkout's `build-dir` (`.cargo/config.toml`).
 const BUILD_DIR: &str = "target/build";
-const LOCKFILES: [&str; 2] = ["Cargo.lock", "libs/Cargo.lock"];
+const LOCKFILES: [&str; 3] = ["Cargo.lock", "libs/Cargo.lock", "spiderland/Cargo.lock"];
 const DEFAULT_DAYS: u64 = 7;
 
 pub fn run(root: &Path, args: &[&str]) -> Result<(), String> {

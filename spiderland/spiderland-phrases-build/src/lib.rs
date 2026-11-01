@@ -1,5 +1,5 @@
-//! The build side of `spiderland-phrases`, for an app's build script and its tasks. It names no app or game: what is
-//! being built comes in as arguments.
+//! The build side of `spiderland-phrases`, for an app's build script and its tasks. What is being built comes in as
+//! arguments.
 //!
 //! - [`bundle_catalogs`]: a build script turns `<lang>/<language>/LC_MESSAGES/<domain>.po` into the table of `Catalog`s
 //!   the app hands to `Translations`.

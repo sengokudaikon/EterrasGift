@@ -4436,27 +4436,27 @@ msgstr ""
 msgid "Write the changes to the game and read them back"
 msgstr ""
 
-#: libs/spiderland-phrases/src/phrase.rs
+#: spiderland/spiderland-phrases/src/phrase.rs
 msgctxt "a list of two"
 msgid "{first} and {second}"
 msgstr ""
 
-#: libs/spiderland-phrases/src/phrase.rs
+#: spiderland/spiderland-phrases/src/phrase.rs
 msgctxt "a list of two"
 msgid "{first} or {second}"
 msgstr ""
 
-#: libs/spiderland-phrases/src/phrase.rs
+#: spiderland/spiderland-phrases/src/phrase.rs
 msgctxt "a longer list, before its last item"
 msgid "{list}, {item}"
 msgstr ""
 
-#: libs/spiderland-phrases/src/phrase.rs
+#: spiderland/spiderland-phrases/src/phrase.rs
 msgctxt "a longer list, its last item"
 msgid "{list} and {last}"
 msgstr ""
 
-#: libs/spiderland-phrases/src/phrase.rs
+#: spiderland/spiderland-phrases/src/phrase.rs
 msgctxt "a longer list, its last item"
 msgid "{list} or {last}"
 msgstr ""

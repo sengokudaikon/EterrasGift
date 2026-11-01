@@ -1,6 +1,6 @@
 [package]
 name = "spiderland-phrases"
-description = "The words and numbers the app shows, in the user's language: phrases, plurals, lists, the bundled catalogs and number symbols. Names neither the app nor the game."
+description = "The words and numbers a UI shows, in the user's language: phrases, plurals, lists, the bundled catalogs and number symbols."
 version.workspace = true
 edition.workspace = true
 publish.workspace = true

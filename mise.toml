@@ -10,8 +10,8 @@ description = "Run the app: real settings, real game host"
 run = "cargo run -p eterras-gift"
 
 [tasks.lint]
-description = "Clippy over every target of both workspaces, warnings as errors"
-run = ["cargo lint", "cargo lint-libs"]
+description = "Clippy over every target of every workspace, warnings as errors"
+run = ["cargo lint", "cargo lint-libs", "cargo lint-spiderland"]
 
 [tasks.fmt]
 description = "Format the app and its libraries"
@@ -38,10 +38,10 @@ description = "Headless PNG captures of the real UI on the fake game host, into 
 run = "cargo capture"
 
 [tasks.test]
-description = "Every test of both workspaces in the dev profile, on fakes; no live game. The captures run under capture"
+description = "Every test of every workspace in the dev profile, on fakes; no live game. The captures run under capture"
 # eg-ui's only integration target is the captures (harness = false), run by `capture`; `test = false` would hide them
 # from `cargo lint` too.
-run = ["cargo test --manifest-path libs/Cargo.toml --workspace --offline", "cargo test --workspace --exclude eg-ui --offline", "cargo test -p eg-ui --lib --offline"]
+run = ["cargo test --manifest-path spiderland/Cargo.toml --workspace --offline", "cargo test --manifest-path libs/Cargo.toml --workspace --offline", "cargo test --workspace --exclude eg-ui --offline", "cargo test -p eg-ui --lib --offline"]
 
 [tasks."ui:test"]
 description = "UI presentation and asynchronous editor tests on fake services (part of test)"
@@ -53,7 +53,7 @@ run = "cargo capture -- --trainer-backend"
 
 [tasks.verify]
 description = "Everything to run before calling work done: lint, format, phrases, tests, captures; then look at artifacts/captures"
-run = ["cargo lint", "cargo lint-libs", "cargo fmt --all --check", "cargo xtask phrases --check", "mise run test", "cargo capture"]
+run = ["cargo lint", "cargo lint-libs", "cargo lint-spiderland", "cargo fmt --all --check", "cargo xtask phrases --check", "mise run test", "cargo capture"]
 
 [tasks."slint:check"]
 description = "Fast compile check of a .slint file (default: app.slint)"

@@ -429,7 +429,7 @@ mod tests {
 
     #[test]
     fn contexts_and_plurals_are_read_in_order() {
-        let found = rust_phrases("Plural::new(\"{n} mod\", \"{n} mods\") Phrase::ctx(\"key\",\n    \"Delete\") Phrase::new(\"Delete\")").unwrap();
+        let found = rust_phrases("Plural::new(\"{n} file\", \"{n} files\") Phrase::ctx(\"key\",\n    \"Delete\") Phrase::new(\"Delete\")").unwrap();
         let entry = |context: Option<&str>, msgid: &str, plural: Option<&str>| Found {
             context: context.map(Into::into),
             msgid: msgid.into(),
@@ -437,7 +437,7 @@ mod tests {
         };
         assert_eq!(
             found,
-            [entry(None, "{n} mod", Some("{n} mods")), entry(Some("key"), "Delete", None), entry(None, "Delete", None)]
+            [entry(None, "{n} file", Some("{n} files")), entry(Some("key"), "Delete", None), entry(None, "Delete", None)]
         );
         assert!(rust_phrases(r#"Phrase::ctx("key")"#).is_err());
     }

@@ -55,7 +55,10 @@ pub fn run(startup: Startup) -> Result<ExitCode, slint::PlatformError> {
         App {
             launcher: Some(companion.launcher.clone()),
             game: Some(GameWatch::start(companion.launcher.clone(), &background)),
-            background: Background::new(background.clone()),
+            background: Background::new({
+                let tasks = background.clone();
+                move |job| tasks.spawn_blocking(job).is_ok()
+            }),
             logs: Some(LogFiles {
                 game: folders::player_log(),
                 reports: faults.directories().collect(),
