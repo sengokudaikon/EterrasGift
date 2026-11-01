@@ -37,6 +37,10 @@ unsafe_op_in_unsafe_fn = "deny"
 all = { level = "warn", priority = -1 }
 undocumented_unsafe_blocks = "warn"
 
+[profile.dev]
+# As in the app workspace: the two share third-party builds only while their settings match.
+debug = "line-tables-only"
+
 # As in the app workspace, whose settings are the ones the shipped build gets: profiles do not cross workspaces, so code
 # that runs inside the game is tested here as it ships, with no debug assertion or overflow check.
 [profile.dev.package.il2cpp-runtime]

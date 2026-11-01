@@ -29,6 +29,10 @@ run = "cargo xtask phrases"
 description = "Fail if lang/eterras-gift.pot is stale"
 run = "cargo xtask phrases --check"
 
+[tasks.sweep]
+description = "Remove build outputs nothing has rebuilt for 7 days: Cargo never deletes its own. --days N, --dry-run"
+run = "cargo xtask sweep"
+
 [tasks.capture]
 description = "Headless PNG captures of the real UI on the fake game host, into artifacts/captures"
 run = "cargo capture"

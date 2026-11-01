@@ -53,6 +53,11 @@ unsafe_op_in_unsafe_fn = "deny"
 all = { level = "warn", priority = -1 }
 undocumented_unsafe_blocks = "warn"
 
+[profile.dev]
+# Backtraces keep their files and lines; only a debugger's variables are lost. Nearly halves a checkout's build outputs
+# (20 GB to 11 GB for what `verify` builds) and links faster. `CARGO_PROFILE_DEV_DEBUG=2` brings them back for one build.
+debug = "line-tables-only"
+
 # Code that runs inside the game is built as for a release in every profile: no debug assertion or overflow check may
 # fire in the game. That holds for the helper's own dependencies too (tokio and its I/O, windows-sys, the detour hooks and their decoder),
 # since a dev `mise run run` embeds this build and injects it.
