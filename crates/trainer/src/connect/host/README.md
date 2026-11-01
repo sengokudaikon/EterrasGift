@@ -55,4 +55,4 @@ Run `mise run trainer:verify` for the trainer product suite followed by workspac
 lint, formatting, token checks and fake-host captures. The persistent-player
 controller's lifecycle run (`mise run trainer:player:lifecycle`) exercises the owned
 NativePreparer route in an authored Unity player. No test selects a running Last Epoch process. The pre-refactor source and tests remain at
-Git tag `archive/trainer-evaluations-2026-10-19`; [interop notes](../../research/trainer-interop.md) record current assumptions and the local archive.
+Git tag `archive/trainer-evaluations-2026-10-19`; the [helper's README](../../../../trainer-helper/README.md) records the current assumptions.

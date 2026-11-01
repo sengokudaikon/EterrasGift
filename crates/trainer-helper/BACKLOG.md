@@ -1,9 +1,9 @@
 # Trainer: what is left to build
 
 The backlog of trainer features not built yet, and what each needs. A feature leaves this file when it lands: its
-row is deleted, never marked done. What landed, in brief, is in [CHANGELOG.md](../CHANGELOG.md); how a built feature
+row is deleted, never marked done. What landed, in brief, is in [CHANGELOG.md](../../CHANGELOG.md); how a built feature
 works is in its module's `//!` docs under `crates/trainer-helper/src/game/features/`. The C# implementation in
-`../EterrasGift` is the behaviour reference; runtime assumptions stay in [trainer-interop.md](trainer-interop.md).
+`../EterrasGift` is the behaviour reference; the helper's runtime assumptions are in [its README](README.md).
 
 **Confirmed in the live game:** Mysterious Rifts selection and Any item in the offhand (the user, 2026-10-27). Other
 built hooks are covered by fixtures and static inspection only. Record a new live check here, with the exact
@@ -11,7 +11,7 @@ combinations checked.
 
 **Names (2026-10-29):** each feature has one name. The ID uses its title's words, and the wire variant, helper group
 and module are spelled from the ID. The C# IDs (`cast-speed`, `offhand`, …) are read through `RENAMED` in
-[profiles](../crates/trainer/src/features/profiles.rs) and never written back. Game nouns follow the game's own text
+[profiles](../trainer/src/features/profiles.rs) and never written back. Game nouns follow the game's own text
 (Skill Specialization Slots, Favor Cache, Omen Window). `endgame-cache` is the zone cache the old cheat table called
 "Eternity cache"; the game's Eternity Cache is only the Temporal Sanctum's (`eternity-cache-anywhere`).
 
@@ -35,13 +35,13 @@ only; feature IDs/profile settings and the original gameplay behavior remain ind
 
 Each row retains the concrete behavior, useful shared mechanism and distinguishing targeted check. Common on/off,
 readback, manager-loss and unload requirements apply to every implemented feature. Value ranges/arity remain owned
-by [the catalog](../crates/trainer/src/features/registry.rs); native support is declared by
-[GameplayHook](../crates/trainer-wire/src/hooks.rs) and resolved in
-[helper features](../crates/trainer-helper/src/game/features/registry.rs).
+by [the catalog](../trainer/src/features/registry.rs); native support is declared by
+[GameplayHook](../trainer-wire/src/hooks.rs) and resolved in
+[helper features](src/game/features/registry.rs).
 
 ### Character
 
-Behavior reference: [character.h](../../EterrasGift/native/hooks/character.h).
+Behavior reference: [character.h](../../../EterrasGift/native/hooks/character.h).
 
 | Status | Feature and target | Behavior | Shared mechanism | Distinguishing targeted check |
 |---|---|---|---|---|
@@ -49,7 +49,7 @@ Behavior reference: [character.h](../../EterrasGift/native/hooks/character.h).
 
 ### Combat
 
-Behavior reference: [combat.h](../../EterrasGift/native/hooks/combat.h).
+Behavior reference: [combat.h](../../../EterrasGift/native/hooks/combat.h).
 
 | Status | Feature and target | Behavior | Shared mechanism | Distinguishing targeted check |
 |---|---|---|---|---|
@@ -60,7 +60,7 @@ Behavior reference: [combat.h](../../EterrasGift/native/hooks/combat.h).
 
 ### Stash
 
-Behavior reference: [stash.h](../../EterrasGift/native/hooks/stash.h).
+Behavior reference: [stash.h](../../../EterrasGift/native/hooks/stash.h).
 
 | Status | Feature and target | Behavior | Shared mechanism | Distinguishing targeted check |
 |---|---|---|---|---|
@@ -68,7 +68,7 @@ Behavior reference: [stash.h](../../EterrasGift/native/hooks/stash.h).
 
 ### Loot
 
-Behavior reference: [loot.h](../../EterrasGift/native/hooks/loot.h).
+Behavior reference: [loot.h](../../../EterrasGift/native/hooks/loot.h).
 
 | Status | Feature and target | Behavior | Shared mechanism | Distinguishing targeted check |
 |---|---|---|---|---|
@@ -77,7 +77,7 @@ Behavior reference: [loot.h](../../EterrasGift/native/hooks/loot.h).
 
 ### Monolith
 
-Behavior reference: [monolith.h](../../EterrasGift/native/hooks/monolith.h).
+Behavior reference: [monolith.h](../../../EterrasGift/native/hooks/monolith.h).
 
 | Status | Feature and target | Behavior | Shared mechanism | Distinguishing targeted check |
 |---|---|---|---|---|
@@ -86,7 +86,7 @@ Behavior reference: [monolith.h](../../EterrasGift/native/hooks/monolith.h).
 
 ### Factions
 
-Behavior reference: [factions.h](../../EterrasGift/native/hooks/factions.h).
+Behavior reference: [factions.h](../../../EterrasGift/native/hooks/factions.h).
 
 | Status | Feature and target | Behavior | Shared mechanism | Distinguishing targeted check |
 |---|---|---|---|---|
@@ -96,7 +96,7 @@ Behavior reference: [factions.h](../../EterrasGift/native/hooks/factions.h).
 
 ### World
 
-Behavior reference: [world.h](../../EterrasGift/native/hooks/world.h).
+Behavior reference: [world.h](../../../EterrasGift/native/hooks/world.h).
 
 | Status | Feature and target | Behavior | Shared mechanism | Distinguishing targeted check |
 |---|---|---|---|---|
@@ -122,7 +122,7 @@ they do not need direct editors.
 | Todo | `monolith-run` | Current/saved run lookup, corruption/Gaze of Orobyss/options-rerolled mutation, corruption recalculation, save and optional matching-panel refresh. Share write certainty, not the hook registry. |
 | Todo | `faction-standing` | Rank/favor/reputation validation, joined-faction rules and required save/sync calls. Keep separate from GainFavor/GainReputation detours. |
 
-The Forge item editor follows its own planner/private-preview path; its remaining work is in [PORT.md](../PORT.md).
+The Forge item editor follows its own planner/private-preview path; its remaining work is in [PORT.md](../../PORT.md).
 
 ## Remaining work by reusable family
 

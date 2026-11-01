@@ -4,9 +4,6 @@
 /data/
 /.claude/
 /.impeccable/
-/research/*
-!/research/trainer-interop.md
-!/research/trainer-features.md
 /spec/
 # design/ is local reference material (the C# app's captures).
 /design/

@@ -58,7 +58,7 @@ export component PopupMenu inherits Rectangle {
 
     property <length> at-x;
     property <length> at-y;
-    // Popups need an explicit size (research/slint.md): measured from hidden copies of the rows.
+    // Popups need an explicit size (crates/ui/README.md): measured from hidden copies of the rows.
     property <length> menu-width: 2px + Tokens.menu-item-padding.left + root.icon-column + titles.preferred-width + Tokens.menu-gesture-margin.left + gestures.preferred-width + Tokens.menu-item-padding.right;
     property <length> menu-height: 2px + Tokens.menu-flyout-scroller-margin.top + heights.preferred-height + Tokens.menu-flyout-scroller-margin.bottom;
     // At its parent's origin, so `open-at` takes the parent's coordinates (sized but unplaced, it would be centred).

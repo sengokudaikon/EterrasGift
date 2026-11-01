@@ -396,7 +396,7 @@ component FieldLine inherits Rectangle {
 
 // One row: [title (?) | value | switch], a hairline under it and the hover ground under the whole of it, outdented so its
 // words keep the page's edge. Every height is worked out from texts given their width, so the column it sits in measures it
-// right however its words wrap (research/slint.md: wrapped text in `for` and `if`).
+// right however its words wrap (crates/ui/README.md: wrapped text in `for` and `if`).
 component FeatureRow inherits Rectangle {
     in property <FeatureRowView> feature;
     in property <FeatureRowModels> models;
@@ -900,7 +900,7 @@ component TrainerNotice inherits Rectangle {
     in property <bool> ash-still;
     in property <bool> action-shown;
 
-    // The reading line height as a factor of the value size's own line (research/slint.md: read on a probe, never on the
+    // The reading line height as a factor of the value size's own line (crates/ui/README.md: read on a probe, never on the
     // text that sets it).
     probe := Text {
         visible: false;

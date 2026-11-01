@@ -36,7 +36,7 @@ const INCREASED_AILMENT_DURATION: u8 = 42;
 const INCREASED_AILMENT_EFFECT: u8 = 43;
 const PENETRATION: u8 = 59;
 
-/// The `AT` flags the composition reads (`research/game-files.md`).
+/// The `AT` flags the composition reads (`crates/game-files/README.md`).
 mod at {
     pub const PHYSICAL: i32 = 1;
     pub const LIGHTNING: i32 = 2;

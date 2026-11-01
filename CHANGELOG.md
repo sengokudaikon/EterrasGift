@@ -1,7 +1,7 @@
 # Changelog
 
 What the rewrite can do, newest first, one line per feature. Add a line when a feature lands; details live in the
-code and its tests, and what is still to build in [research/trainer-features.md](research/trainer-features.md).
+code and its tests, and what is still to build in [the helper's backlog](crates/trainer-helper/BACKLOG.md).
 
 ## 2026-11-01
 

@@ -756,7 +756,7 @@ export component ModsView inherits Rectangle {
                 x: 1px;
                 width: parent.width - 1px;
                 content-width: self.visible-width;
-                // Measured from where the details really end (research/slint.md: wrapped text in `if` and `for`). The end
+                // Measured from where the details really end (crates/ui/README.md: wrapped text in `if` and `for`). The end
                 // marker sits one spacing below the last block, so that spacing comes off.
                 content-height: detail.y + detail-end.y - detail.spacing + Tokens.pane-content-margin.bottom;
                 detail := VerticalLayout {

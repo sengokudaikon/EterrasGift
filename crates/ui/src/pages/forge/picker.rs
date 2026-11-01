@@ -3,7 +3,7 @@
 //! per catalog. Rows are built by [`entry`] when the list asks for one, so a long list costs only the rows in view.
 //!
 //! **Stat tags** come from a definition's stat lines. A line's `tags` are the game's `AT` flags (`LE.dll`, read from the
-//! build's metadata; see `research/game-files.md`) where its property reads them as flags
+//! build's metadata; see `crates/game-files/README.md`) where its property reads them as flags
 //! ([`eg_trainer::definitions::files::ordinary`]); the rest name the stat itself, by the game's property list.
 //!
 //! **What stays hidden.** Unique modifiers repeat shipped stats ("Fractured Crown: Health" beside "Health"), so the default
