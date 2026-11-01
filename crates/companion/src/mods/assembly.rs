@@ -185,8 +185,11 @@ pub struct MelonAssembly {
 
 impl MelonAssembly {
     pub fn read(path: &Path) -> io::Result<Option<Self>> {
-        let view = read_view(path)?;
-        read_melon(&view)
+        contained(|| {
+            let view = read_view(path)?;
+            read_melon(&view)
+        })
+        .unwrap_or_else(|| Err(not_assembly(path)))
     }
 
     pub fn obstacle(&self, game: &GameIdentity, loader: &LoaderVersion) -> Option<String> {
@@ -213,6 +216,12 @@ impl MelonAssembly {
         }
         None
     }
+}
+
+/// Runs a parse of a DLL someone else built. A panic in it is that DLL's problem: the caller reads it as a DLL that cannot
+/// be read, and the app goes on. The panic hook has still reported it. An abort, or running out of stack, can't be caught.
+fn contained<T>(parse: impl FnOnce() -> T) -> Option<T> {
+    std::panic::catch_unwind(std::panic::AssertUnwindSafe(parse)).ok()
 }
 
 pub(super) fn read_view(path: &Path) -> io::Result<CilAssemblyView> {
@@ -243,6 +252,14 @@ pub struct AssemblyFacts {
 }
 
 pub fn read_facts(path: &Path) -> AssemblyFacts {
+    contained(|| parse_facts(path)).unwrap_or_else(|| AssemblyFacts {
+        melon: Err((io::ErrorKind::InvalidData, not_assembly(path).to_string())),
+        settings: Ok(None),
+        strings: BTreeSet::new(),
+    })
+}
+
+fn parse_facts(path: &Path) -> AssemblyFacts {
     let failed = |kind, text| AssemblyFacts {
         melon: Err((kind, text)),
         settings: Ok(None),
@@ -310,10 +327,13 @@ pub fn read_strings(path: &Path) -> BTreeSet<String> {
     let Ok(bytes) = fs::read(path) else {
         return BTreeSet::new();
     };
-    let Ok(view) = CilAssemblyView::from_mem(bytes) else {
-        return BTreeSet::new();
-    };
-    user_strings(&view)
+    contained(|| {
+        let Ok(view) = CilAssemblyView::from_mem(bytes) else {
+            return BTreeSet::new();
+        };
+        user_strings(&view)
+    })
+    .unwrap_or_default()
 }
 
 fn user_strings(view: &CilAssemblyView) -> BTreeSet<String> {
@@ -325,8 +345,11 @@ fn user_strings(view: &CilAssemblyView) -> BTreeSet<String> {
 /// Only embedded resources count. Linked resources are never followed. The description parser owns JSON validation.
 pub fn read_settings_resource(path: &Path) -> io::Result<Option<Vec<u8>>> {
     let bytes = fs::read(path)?;
-    let view = CilAssemblyView::from_mem(bytes).map_err(invalid)?;
-    settings_resource(&view)
+    contained(|| {
+        let view = CilAssemblyView::from_mem(bytes).map_err(invalid)?;
+        settings_resource(&view)
+    })
+    .unwrap_or_else(|| Err(not_assembly(path)))
 }
 
 fn settings_resource(view: &CilAssemblyView) -> io::Result<Option<Vec<u8>>> {
@@ -757,6 +780,10 @@ fn full_name(view: &CilAssemblyView, types: &[TypeDefRaw], parents: &HashMap<u32
 }
 
 pub(super) fn loader_version(path: &Path) -> io::Result<LoaderVersion> {
+    contained(|| parse_loader_version(path)).unwrap_or_else(|| Err(not_assembly(path)))
+}
+
+fn parse_loader_version(path: &Path) -> io::Result<LoaderVersion> {
     let view = read_view(path)?;
     for row in rows::<CustomAttributeRaw>(&view)? {
         if row.parent.tag == TableId::Assembly
@@ -773,4 +800,15 @@ pub(super) fn loader_version(path: &Path) -> io::Result<LoaderVersion> {
         definition.minor_version as i32,
         definition.build_number as i32,
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::contained;
+
+    #[test]
+    fn a_panic_in_a_parse_stops_at_the_parse() {
+        assert_eq!(contained(|| 7), Some(7));
+        assert_eq!(contained(|| -> i32 { panic!("fixture panic") }), None);
+    }
 }

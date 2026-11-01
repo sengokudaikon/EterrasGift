@@ -6,6 +6,7 @@ code and its tests, and what is still to build in [research/trainer-features.md]
 ## 2026-11-01
 
 - Mods: a build tool left running no longer stalls reading or building mod projects, or closing the app.
+- Mods: a DLL that breaks the parser reads as a DLL that cannot be read, instead of closing the app.
 
 ## 2026-10-31
 

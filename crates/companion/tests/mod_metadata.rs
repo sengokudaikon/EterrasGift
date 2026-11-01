@@ -2,7 +2,7 @@
 use dotscope::CilAssemblyView;
 use dotscope::metadata::tables::{CustomAttributeRaw, MethodDefRaw, NestedClassRaw, TypeDefRaw};
 use eg_companion::game::install::{GameIdentity, GameInstall};
-use eg_companion::mods::assembly::{LoaderVersion, MelonAssembly, MelonDomain, MelonGame, MelonKind, read_settings_resource, read_strings};
+use eg_companion::mods::assembly::{LoaderVersion, MelonAssembly, MelonDomain, MelonGame, MelonKind, read_facts, read_settings_resource, read_strings};
 use eg_companion::mods::loader_state::{
     LoaderInstall, LoaderPreparation, core_module_path, game_assembly_hash, loader_duplicates, needs_repair, read_generator_record, repair_core_module,
 };
@@ -14,6 +14,32 @@ const NUMERIC: &[u8] = include_bytes!("fixtures/melon/numeric.bin");
 const EXTERNAL: &[u8] = include_bytes!("fixtures/melon/external.bin");
 const WRONG: &[u8] = include_bytes!("fixtures/melon/wrong.bin");
 const LOADER: &[u8] = include_bytes!("fixtures/melon/loader.bin");
+
+/// A broken mod is the mod's problem: however its bytes are damaged, reading it returns and says so.
+#[test]
+fn damaged_dlls_are_read_as_errors() {
+    let temp = tempfile::tempdir().unwrap();
+    let path = temp.path().join("damaged.dll");
+    let read = |bytes: &[u8]| {
+        fs::write(&path, bytes).unwrap();
+        let _ = MelonAssembly::read(&path);
+        let _ = read_facts(&path);
+        let _ = read_strings(&path);
+        let _ = read_settings_resource(&path);
+    };
+    for fixture in [CLEAN, EXTERNAL, LOADER] {
+        for at in (0..fixture.len()).step_by(211) {
+            for damage in [0x00, 0xFF, fixture[at] ^ 0x80] {
+                let mut bytes = fixture.to_vec();
+                bytes[at] = damage;
+                read(&bytes);
+            }
+        }
+        for end in (0..fixture.len()).step_by(1021) {
+            read(&fixture[..end]);
+        }
+    }
+}
 
 fn version(text: &str) -> LoaderVersion {
     LoaderVersion::parse(text).unwrap()
