@@ -3,7 +3,7 @@
 
 use crate::value::Value;
 use eg_binary::{Error, Result};
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct PlayerDefinitions {
@@ -18,6 +18,31 @@ pub struct PlayerDefinitions {
     pub tracker: PropertyRegistry,
     pub set_bonuses: Vec<SetBonus>,
     pub constants: ItemConstants,
+    /// `PropertyList.conditionalDamagePropertyDescriptions`, indexed by the special tag properties 117 and 131 to 133 use.
+    pub conditional_damage: Vec<ConditionalDamage>,
+    /// `ExtraStatData.data`: how often a stat can proc, which its text states.
+    pub stat_limits: Vec<StatLimit>,
+    /// `AilmentID`'s names by value: the ailment text tables are keyed by them (`Ailment_Ignite_Name`).
+    pub ailment_names: BTreeMap<u8, String>,
+}
+
+/// What a damage condition is called (`Property_Damage_{description}`, `Property_ConditionalNonDamage_{non_damage}`).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ConditionalDamage {
+    pub description: String,
+    pub non_damage: String,
+}
+
+/// One `ExtraStatData.StatData`: a stat line and its proc limit, if it has one.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct StatLimit {
+    pub property: u8,
+    pub special_tag: u8,
+    pub tags: i32,
+    pub extra_tag: i32,
+    pub has_proc_limit: bool,
+    pub procs_per_interval: i32,
+    pub interval: f32,
 }
 
 /// The `const int`s an item's editable values are bounded by (`ItemData`, `ExperienceTracker.maxLevel`).
@@ -40,11 +65,27 @@ pub struct PropertyInfo {
     pub less_is_better: bool,
 }
 
-/// A registry indexed by position (players, trackers, idol altars), with the default it falls back to.
+/// What a registry entry is called and what its modifier word depends on (`PropertyInfoWithLocKey` and its subclasses).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PropertyLabel {
+    /// The table key without its suffix (`Property_Player_12`, `Property_Ability_fireball_1`).
+    pub text_key: String,
+    pub name: String,
+    pub alt_text: String,
+    pub display_as_percentage_of: bool,
+    pub display_as_added_to: bool,
+    pub name_includes_modifier: bool,
+    pub dont_display_plus: bool,
+    pub hide_modifier_value: bool,
+}
+
+/// A registry indexed by position (players, trackers, idol altars), with the default it falls back to. `labels` runs
+/// beside `list`; a tracker has none, as its class has no text.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PropertyRegistry {
     pub list: Vec<PropertyInfo>,
     pub default: PropertyInfo,
+    pub labels: Vec<PropertyLabel>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -57,6 +98,8 @@ pub struct AbilityRegistry {
 pub struct AbilityProperties {
     pub ability_id: u16,
     pub properties: Vec<PropertyInfo>,
+    /// Beside `properties`.
+    pub labels: Vec<PropertyLabel>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -119,8 +162,20 @@ pub struct Property {
     pub hide_modifier_value: bool,
     pub name_includes_modifier: bool,
     pub default_alt_text: String,
+    pub alt_text_overrides: Vec<AltTextOverride>,
     /// `roundingForMore` per special tag (the game matches the tag only).
     pub more_rounding_overrides: Vec<(u8, i32)>,
+}
+
+/// The longer explanation for some of a property's lines (`altTextOverrides`).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AltTextOverride {
+    pub modifier_type: i32,
+    pub special_tag: u8,
+    pub tags: i32,
+    pub text: String,
+    /// The whole table key (`Property_Master_Damage_AltText_Override_1`).
+    pub text_key: String,
 }
 
 impl Property {
@@ -233,6 +288,15 @@ fn property(v: &Value) -> Result<Property> {
             hide_modifier_value: v.field("hideModifierValue", Value::as_bool)?,
             name_includes_modifier: v.field("nameIncludesModifier", Value::as_bool)?,
             default_alt_text: v.field("defaultAltText", Value::as_string)?,
+            alt_text_overrides: list(v, "altTextOverrides", |o| {
+                Ok(AltTextOverride {
+                    modifier_type: o.field("modType", Value::int)?,
+                    special_tag: o.field("specialTag", Value::int)?,
+                    tags: o.field("tags", Value::int)?,
+                    text: o.field("overrideAltText", Value::as_string)?,
+                    text_key: o.field("overrideAltTextKey", Value::as_string)?,
+                })
+            })?,
             more_rounding_overrides: list(v, "moreRoundingOverrides", |o| {
                 Ok((o.field("specialTag", Value::int)?, o.field("roundingForMore", Value::int)?))
             })?,
@@ -251,11 +315,33 @@ fn info(v: &Value) -> Result<PropertyInfo> {
     })
 }
 
-/// A registry with a `list` of property infos and a `defaultProperty`.
+fn label(v: &Value) -> Result<PropertyLabel> {
+    Ok(PropertyLabel {
+        text_key: v.field("textKey", Value::as_string)?,
+        name: v.field("propertyName", Value::as_string)?,
+        alt_text: v.field("altText", Value::as_string)?,
+        display_as_percentage_of: v.field("displayAsPercentageOf", Value::as_bool)?,
+        display_as_added_to: v.field("displayAsAddedTo", Value::as_bool)?,
+        name_includes_modifier: v.field("nameIncludesModifier", Value::as_bool)?,
+        dont_display_plus: v.field("dontDisplayPlus", Value::as_bool)?,
+        hide_modifier_value: v.field("hideModifierValue", Value::as_bool)?,
+    })
+}
+
+/// A registry with a `list` of property infos, a `defaultProperty` and the text each has.
 pub(crate) fn registry(v: &Value) -> Result<PropertyRegistry> {
+    Ok(PropertyRegistry {
+        labels: list(v, "list", label)?,
+        ..tracker_registry(v)?
+    })
+}
+
+/// A registry whose entries have no text of their own (`TrackerPropertyList`).
+pub(crate) fn tracker_registry(v: &Value) -> Result<PropertyRegistry> {
     Ok(PropertyRegistry {
         list: list(v, "list", info)?,
         default: v.field("defaultProperty", info)?,
+        labels: Vec::new(),
     })
 }
 
@@ -265,9 +351,33 @@ pub(crate) fn abilities(v: &Value) -> Result<AbilityRegistry> {
             Ok(AbilityProperties {
                 ability_id: entry.field("abilityID", Value::int)?,
                 properties: list(entry, "properties", info)?,
+                labels: list(entry, "properties", label)?,
             })
         })?,
         default: v.field("defaultProperty", info)?,
+    })
+}
+
+pub(crate) fn conditional_damage(list_value: &Value) -> Result<Vec<ConditionalDamage>> {
+    list(list_value, "conditionalDamagePropertyDescriptions", |d| {
+        Ok(ConditionalDamage {
+            description: d.field("description", Value::as_string)?,
+            non_damage: d.field("nonDamageDescription", Value::as_string)?,
+        })
+    })
+}
+
+pub(crate) fn stat_limits(extra_stat_data: &Value) -> Result<Vec<StatLimit>> {
+    list(extra_stat_data, "data", |d| {
+        Ok(StatLimit {
+            property: d.field("property", Value::int)?,
+            special_tag: d.field("specialTag", Value::int)?,
+            tags: d.field("tags", Value::int)?,
+            extra_tag: d.field("extraTag", Value::int)?,
+            has_proc_limit: d.field("hasProcLimit", Value::as_bool)?,
+            procs_per_interval: d.field("procsPerInterval", Value::int)?,
+            interval: d.field("interval", Value::as_f32)?,
+        })
     })
 }
 

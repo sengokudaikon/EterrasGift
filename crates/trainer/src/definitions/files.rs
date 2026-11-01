@@ -548,13 +548,13 @@ impl Presentation<'_> {
     fn ailment(&self, id: u8) -> Result<Option<Ailment>, String> {
         let ailments = &self.definitions.ailments;
         let mut matching = ailments.iter().filter(|a| a.id == id);
-        let found = matching.next().copied();
-        if let Some(found) = found
+        let found = matching.next().cloned();
+        if let Some(ref found) = found
             && matching.any(|a| a.effect_of_increased_effectiveness != found.effect_of_increased_effectiveness)
         {
             return Err(format!("ailment {id} appears in AilmentList with different effects"));
         }
-        Ok(found.or_else(|| ailments.first().copied()))
+        Ok(found.or_else(|| ailments.first().cloned()))
     }
 
     fn select(&self, raw: &RawProperty) -> Result<Availability<Selected<'_>>, String> {

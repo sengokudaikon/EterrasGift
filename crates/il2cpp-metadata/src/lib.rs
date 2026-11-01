@@ -182,6 +182,28 @@ impl Il2Cpp {
         Ok(value)
     }
 
+    /// A `byte` enum's names by value, from its literals' metadata defaults (a `byte` default is the raw byte).
+    pub fn byte_enum(&self, assembly: &str, namespace: &str, class: &str) -> Result<std::collections::BTreeMap<u8, String>> {
+        let index = self.find_one(assembly, namespace, class)?;
+        let definition = self.definition(index)?;
+        if !definition.is_enum {
+            return Err(Error::data(format!("{class} is not an enum")));
+        }
+        let mut values = std::collections::BTreeMap::new();
+        for (position, field) in self.metadata.fields_of(definition).iter().enumerate() {
+            let raw = self.binary.type_at(field.type_index)?;
+            if raw.attributes & field_attributes::LITERAL == 0 {
+                if raw.kind != kind::U1 {
+                    return Err(Error::data(format!("{class} is not a byte enum")));
+                }
+                continue;
+            }
+            let value = self.metadata.byte_default(definition.first_field + position as u32)?;
+            values.insert(value, field.name.clone());
+        }
+        Ok(values)
+    }
+
     /// The one type definition named `namespace.name` (not nested) in the image `assembly`.dll: none or several is an
     /// error.
     pub fn find_one(&self, assembly: &str, namespace: &str, name: &str) -> Result<u32> {

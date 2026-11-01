@@ -84,6 +84,24 @@ impl PlayerData {
         self.resources.decode_with(object, &layout).map_err(|e| e.context(name))
     }
 
+    /// The MonoBehaviour a reference in `resources.assets` points at, whose script is `assembly`'s `namespace.class`,
+    /// decoded whole with the class's rebuilt layout.
+    pub(crate) fn behaviour_at(&self, (file_id, path_id): (i32, i64), (assembly, namespace, class): (&str, &str, &str)) -> Result<Value> {
+        if file_id != 0 {
+            return Err(Error::data(format!("{class} is not in resources.assets")));
+        }
+        let (object, _, pointer) = self
+            .heads()?
+            .iter()
+            .find(|(object, _, _)| object.path_id == path_id)
+            .ok_or_else(|| Error::data(format!("no object {path_id} in resources.assets")))?;
+        if self.script(class, *pointer)? != [assembly, namespace, class] {
+            return Err(Error::data(format!("object {path_id} is not a {class}")));
+        }
+        let layout = Layouts::new(&self.il2cpp).mono_behaviour(assembly, namespace, class)?;
+        self.resources.decode_with(object, &layout).map_err(|e| e.context(class))
+    }
+
     fn heads(&self) -> Result<&[Head]> {
         if let Some(heads) = self.heads.get() {
             return Ok(heads);

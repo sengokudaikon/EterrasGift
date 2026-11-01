@@ -358,6 +358,15 @@ impl Metadata {
         Ok((type_index, signed(compressed_u32(&mut r)?)))
     }
 
+    /// A literal `byte` field's default, stored as the raw byte.
+    pub fn byte_default(&self, field: u32) -> Result<u8> {
+        let (_, offset) = *self.defaults.get(&field).ok_or_else(|| Error::data(format!("field {field} has no default value")))?;
+        self.default_data
+            .get(offset)
+            .copied()
+            .ok_or_else(|| Error::malformed(format!("default value of field {field} out of range")))
+    }
+
     pub fn generic_position(&self, parameter: u32) -> Result<u16> {
         self.generic_positions
             .get(parameter as usize)

@@ -14,6 +14,8 @@ const DATA_FOLDER: &str = "Last Epoch_Data";
 const AFFIX_LIST: (&str, &str, &str) = ("LE", "", "AffixList");
 const ITEM_LIST: (&str, &str, &str) = ("LE", "", "ItemList");
 const AILMENT_LIST: (&str, &str, &str) = ("LE", "", "AilmentList");
+const ABILITY_MANAGER: (&str, &str, &str) = ("LE", "", "AbilityManager");
+const CLASS_LIST: (&str, &str, &str) = ("LE", "", "CharacterClassList");
 /// Unity Localization's default Addressables group naming, one bundle per locale.
 const STRING_TABLE_BUNDLES: &str = "localization-string-tables-";
 
@@ -120,11 +122,26 @@ impl Install {
             file.decode(&object)
         })
         .map_err(|e| e.context("AilmentList"))?;
+        let manager = archive.behaviour(&masters, "Ability Manager", ABILITY_MANAGER)?;
+        let abilities = definitions::abilities(&manager, |pointer| {
+            let (file, object) = archive.resolve(&masters, pointer)?;
+            file.decode_prefix(&object, "abilityName")
+        })
+        .map_err(|e| e.context("Ability Manager"))?;
+        let list = archive.behaviour(&masters, "Character Class List", CLASS_LIST)?;
+        let classes = definitions::classes(&list, |pointer| {
+            let (file, object) = archive.resolve(&masters, pointer)?;
+            file.decode_prefix(&object, "specialTagForClassSpecificLevelOfSkillsStats")
+        })
+        .map_err(|e| e.context("Character Class List"))?;
         Ok(Definitions {
             affixes: definitions::affixes(&affixes).map_err(|e| e.context("MasterAffixesList"))?,
             item_types: definitions::item_types(&items).map_err(|e| e.context("MasterItemsList"))?,
             idol_altar,
+            omen_idol_affix_effect_modifier: items.field("omenIdolAffixEffectModifier", Value::as_f32)?,
             ailments,
+            abilities,
+            classes,
         })
     }
 
@@ -150,7 +167,10 @@ impl Install {
                 .and_then(|v| uniques::abilities(&v))
                 .map_err(|e| e.context("AbilityPropertyList"))?,
             player: registry("PlayerPropertyList")?,
-            tracker: registry("TrackerPropertyList")?,
+            tracker: player
+                .behaviour("TrackerPropertyList", ("LE", "", "TrackerPropertyList"))
+                .and_then(|v| uniques::tracker_registry(&v))
+                .map_err(|e| e.context("TrackerPropertyList"))?,
             set_bonuses: uniques::set_bonuses(&player.behaviour("SetBonusesList", ("LE", "", "SetBonusesList"))?).map_err(|e| e.context("SetBonusesList"))?,
             constants: uniques::ItemConstants {
                 forging_potential: pair("ForgingPotential")?,
@@ -159,6 +179,13 @@ impl Install {
                 weavers_touch: pair("WeaversTouch")?,
                 max_level: constant("ExperienceTracker", "maxLevel")?,
             },
+            conditional_damage: uniques::conditional_damage(&properties).map_err(|e| e.context("MasterPropertyList"))?,
+            stat_limits: properties
+                .field("extraStatData", Value::as_pptr)
+                .and_then(|pointer| player.behaviour_at(pointer, ("LE", "", "ExtraStatData")))
+                .and_then(|v| uniques::stat_limits(&v))
+                .map_err(|e| e.context("extraStatData"))?,
+            ailment_names: player.il2cpp().byte_enum("LE", "", "AilmentID")?,
         })
     }
 

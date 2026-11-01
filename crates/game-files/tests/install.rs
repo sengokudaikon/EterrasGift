@@ -30,6 +30,10 @@ fn reads_definitions_from_the_install() {
     println!("{} ailments, {} idol altar properties", definitions.ailments.len(), definitions.idol_altar.list.len());
     assert!(definitions.ailments.iter().any(|a| a.effect_of_increased_effectiveness == 1));
     assert!(!definitions.idol_altar.list.is_empty());
+    // An ability's ID is its place in the list, and the object's name keys its text.
+    assert_eq!(definitions.abilities[353].as_ref().map(|a| a.key.as_str()), Some("SummonBee"));
+    assert!(definitions.classes.iter().any(|c| c.name == "Mage"));
+    assert_eq!(definitions.idol_altar.labels.len(), definitions.idol_altar.list.len());
     let helmets = definitions.item_types.iter().find(|t| t.id == 0).expect("item type 0");
     assert_eq!(helmets.name, "Helmets");
     assert!(!helmets.sub_types.is_empty());
@@ -73,6 +77,12 @@ fn reads_uniques_properties_and_sets_from_the_player_data() {
     let revenge = player.uniques.iter().find(|u| u.id == 5).expect("unique 5");
     assert_eq!((revenge.name.as_str(), revenge.is_set_item, revenge.set_id), ("IsadoraRevenge", true, 1));
     assert!(revenge.mods.iter().any(|m| m.property == 59 && m.can_roll));
+    assert_eq!(player.ailment_names[&1], "Ignite");
+    assert_eq!(player.ailment_names[&39], "Damned");
+    assert_eq!(player.conditional_damage[0].description, "to Stunned Enemies");
+    assert!(player.stat_limits.iter().any(|l| l.has_proc_limit));
+    assert_eq!(player.player.labels[0].text_key, "Property_Player_0");
+    assert!(player.tracker.labels.is_empty());
     let isadora = player.set_bonuses.iter().find(|s| s.id == 1).expect("set 1");
     assert_eq!((isadora.name.as_str(), isadora.items.as_slice()), ("Isadora's", &[5u16, 16, 26][..]));
     assert!(player.properties.iter().any(|p| p.id == 31 && p.display_added_as_percentage));

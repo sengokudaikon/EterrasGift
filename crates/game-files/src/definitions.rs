@@ -10,17 +10,50 @@ use eg_binary::{Error, Result};
 pub struct Definitions {
     pub affixes: Vec<Affix>,
     pub item_types: Vec<ItemType>,
+    /// `ItemList.omenIdolAffixEffectModifier`, the modifier of a subtype whose `affix_effectiveness` is 1.
+    pub omen_idol_affix_effect_modifier: f32,
     /// The idol altar property registry (`ItemList.idolAltarPropertyList`), for special property 130.
     pub idol_altar: crate::uniques::PropertyRegistry,
-    /// Every ailment in `AilmentList` order, for special property 43.
+    /// Every ailment in `AilmentList` order, for special property 43 and the text of ailment lines.
     pub ailments: Vec<Ailment>,
+    /// `AbilityManager.abilities`, indexed by ability ID; gaps are `None`.
+    pub abilities: Vec<Option<AbilityName>>,
+    /// `CharacterClassList.classes`, for class-specific "level of skills" lines.
+    pub classes: Vec<CharacterClass>,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Ailment {
     pub id: u8,
     /// `effectOfIncreasedEffectiveness`.
     pub effect_of_increased_effectiveness: i32,
+    /// `displayName`, the text a missing table entry falls back to.
+    pub display_name: String,
+    /// `applyPrefix`: 0 no verb, 1 "apply", 2 "apply a", any other "inflict".
+    pub apply_prefix: i32,
+    /// `modifyingStatDisplay`: above 0, stats about it use its instance name.
+    pub modifying_stat_display: i32,
+    /// `withAilmentStatDisplay`: 1 its name, 2 its instance name, any other as `modifying_stat_display` says.
+    pub with_ailment_stat_display: i32,
+    /// `perStackDisplay`: 1 "per {instance}", 2 "per {instance} on the target", any other "per stack of {instance}".
+    pub per_stack_display: i32,
+    /// `additionalPenetrationDamageType`, as a `DamageType`.
+    pub penetration_damage_type: u8,
+}
+
+/// An ability's table name (its object's `m_Name`, as in `Ability_{key}_Name`) and its stored name.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AbilityName {
+    pub key: String,
+    pub name: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CharacterClass {
+    /// `className`, as in `Class_{name}`.
+    pub name: String,
+    /// `specialTagForClassSpecificLevelOfSkillsStats`.
+    pub level_of_skills_tag: i32,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -79,6 +112,8 @@ pub struct ItemType {
     pub display_name: String,
     pub maximum_affixes: i32,
     pub is_weapon: bool,
+    /// `affixEffectModifier`: what the type does to an affix's value (`Affix.standard_effect` has the formula).
+    pub affix_effect_modifier: f32,
     pub sub_types: Vec<SubType>,
 }
 
@@ -91,6 +126,8 @@ pub struct SubType {
     pub class_requirement: i32,
     pub cannot_drop: bool,
     pub is_corrupted: bool,
+    /// `affixEffectiveness`: 1 takes the item list's omen idol modifier in place of the type's.
+    pub affix_effectiveness: i32,
     pub implicits: Vec<Implicit>,
 }
 
@@ -195,6 +232,7 @@ fn sub_type(v: &Value) -> Result<SubType> {
             class_requirement: v.field("classRequirement", Value::int)?,
             cannot_drop: v.field("cannotDrop", Value::as_bool)?,
             is_corrupted: v.field("isCorruptedSubtype", Value::as_bool)?,
+            affix_effectiveness: v.field("affixEffectiveness", Value::int)?,
             implicits: v.field("implicits", |list| list.as_array()?.iter().map(implicit).collect())?,
         })
     };
@@ -212,6 +250,7 @@ fn item_type(v: &Value) -> Result<ItemType> {
             display_name: v.field("displayName", Value::as_string)?,
             maximum_affixes: v.field("maximumAffixes", Value::int)?,
             is_weapon: v.field("isWeapon", Value::as_bool)?,
+            affix_effect_modifier: v.field("affixEffectModifier", Value::as_f32)?,
             sub_types,
         })
     };
@@ -244,9 +283,54 @@ pub(crate) fn ailments(list: &Value, mut resolve: impl FnMut((i32, i64)) -> Resu
                 Ok(Ailment {
                     id: ailment.field("id", Value::int)?,
                     effect_of_increased_effectiveness: ailment.field("effectOfIncreasedEffectiveness", Value::int)?,
+                    display_name: ailment.field("displayName", Value::as_string)?,
+                    apply_prefix: ailment.field("applyPrefix", Value::int)?,
+                    modifying_stat_display: ailment.field("modifyingStatDisplay", Value::int)?,
+                    with_ailment_stat_display: ailment.field("withAilmentStatDisplay", Value::int)?,
+                    per_stack_display: ailment.field("perStackDisplay", Value::int)?,
+                    penetration_damage_type: ailment.field("additionalPenetrationDamageType", Value::int)?,
                 })
             });
             ailment.map_err(|e| e.context(format!("list[{index}]")))
+        })
+        .collect()
+}
+
+/// The abilities of a decoded `AbilityManager` by ID (`abilities`), each named through `resolve`. A null reference is a gap.
+pub(crate) fn abilities(manager: &Value, mut resolve: impl FnMut((i32, i64)) -> Result<Value>) -> Result<Vec<Option<AbilityName>>> {
+    let pointers = manager.field("abilities", |l| l.as_array()?.iter().map(Value::as_pptr).collect::<Result<Vec<_>>>())?;
+    pointers
+        .into_iter()
+        .enumerate()
+        .map(|(index, pointer)| {
+            if pointer.1 == 0 {
+                return Ok(None);
+            }
+            let ability = resolve(pointer).and_then(|ability| {
+                Ok(AbilityName {
+                    key: ability.field("m_Name", Value::as_string)?,
+                    name: ability.field("abilityName", Value::as_string)?,
+                })
+            });
+            ability.map(Some).map_err(|e| e.context(format!("abilities[{index}]")))
+        })
+        .collect()
+}
+
+/// The classes of a decoded `CharacterClassList`, each read through `resolve`.
+pub(crate) fn classes(list: &Value, mut resolve: impl FnMut((i32, i64)) -> Result<Value>) -> Result<Vec<CharacterClass>> {
+    let pointers = list.field("classes", |l| l.as_array()?.iter().map(Value::as_pptr).collect::<Result<Vec<_>>>())?;
+    pointers
+        .into_iter()
+        .enumerate()
+        .map(|(index, pointer)| {
+            let class = resolve(pointer).and_then(|class| {
+                Ok(CharacterClass {
+                    name: class.field("className", Value::as_string)?,
+                    level_of_skills_tag: class.field("specialTagForClassSpecificLevelOfSkillsStats", Value::int)?,
+                })
+            });
+            class.map_err(|e| e.context(format!("classes[{index}]")))
         })
         .collect()
 }
@@ -343,24 +427,50 @@ mod tests {
             Ok(object(vec![
                 ("id", Value::UInt(path as u64)),
                 ("effectOfIncreasedEffectiveness", Value::Int(i64::from(path == 3))),
+                ("displayName", Value::String("Ignite".into())),
+                ("applyPrefix", Value::Int(2)),
+                ("modifyingStatDisplay", Value::Int(1)),
+                ("withAilmentStatDisplay", Value::Int(0)),
+                ("perStackDisplay", Value::Int(0)),
+                ("additionalPenetrationDamageType", Value::UInt(1)),
+            ]))
+        })
+        .unwrap();
+        assert_eq!(read.iter().map(|a| (a.id, a.effect_of_increased_effectiveness)).collect::<Vec<_>>(), [(7, 0), (3, 1)]);
+        assert_eq!((read[0].display_name.as_str(), read[0].apply_prefix, read[0].penetration_damage_type), ("Ignite", 2, 1));
+        let error = ailments(&list, |_| Ok(object(vec![("id", Value::UInt(1))]))).unwrap_err().to_string();
+        assert!(error.contains("list[0]") && error.contains("effectOfIncreasedEffectiveness"), "{error}");
+    }
+
+    #[test]
+    fn abilities_keep_their_ids_and_classes_their_tags() {
+        let pointer = |path: i64| object(vec![("m_FileID", Value::Int(0)), ("m_PathID", Value::Int(path))]);
+        let manager = object(vec![("abilities", Value::Array(vec![pointer(0), pointer(9)]))]);
+        let read = abilities(&manager, |(_, path)| {
+            assert_eq!(path, 9, "a null reference is not read");
+            Ok(object(vec![
+                ("m_Name", Value::String("SummonBee".into())),
+                ("abilityName", Value::String("Summon Bee".into())),
+            ]))
+        })
+        .unwrap();
+        assert_eq!(read[0], None);
+        assert_eq!(read[1].as_ref().map(|a| (a.key.as_str(), a.name.as_str())), Some(("SummonBee", "Summon Bee")));
+        let list = object(vec![("classes", Value::Array(vec![pointer(4)]))]);
+        let read = classes(&list, |_| {
+            Ok(object(vec![
+                ("className", Value::String("Mage".into())),
+                ("specialTagForClassSpecificLevelOfSkillsStats", Value::Int(3)),
             ]))
         })
         .unwrap();
         assert_eq!(
             read,
-            [
-                Ailment {
-                    id: 7,
-                    effect_of_increased_effectiveness: 0
-                },
-                Ailment {
-                    id: 3,
-                    effect_of_increased_effectiveness: 1
-                }
-            ]
+            [CharacterClass {
+                name: "Mage".into(),
+                level_of_skills_tag: 3
+            }]
         );
-        let error = ailments(&list, |_| Ok(object(vec![("id", Value::UInt(1))]))).unwrap_err().to_string();
-        assert!(error.contains("list[0]") && error.contains("effectOfIncreasedEffectiveness"), "{error}");
     }
 
     #[test]

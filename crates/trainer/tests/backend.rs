@@ -435,7 +435,13 @@ fn file_catalog() -> Arc<eg_trainer::definitions::files::FileCatalog> {
         hide_modifier_value: false,
         name_includes_modifier: false,
         default_alt_text: String::new(),
+        alt_text_overrides: vec![],
         more_rounding_overrides: vec![],
+    };
+    let empty_registry = || PropertyRegistry {
+        list: vec![],
+        default: info,
+        labels: vec![],
     };
     let definitions = Definitions {
         affixes: vec![Affix {
@@ -472,18 +478,22 @@ fn file_catalog() -> Arc<eg_trainer::definitions::files::FileCatalog> {
             display_name: "Boots".into(),
             maximum_affixes: 4,
             is_weapon: false,
+            affix_effect_modifier: 0.0,
             sub_types: vec![],
         }],
-        idol_altar: PropertyRegistry { list: vec![], default: info },
+        omen_idol_affix_effect_modifier: 0.0,
+        idol_altar: empty_registry(),
         ailments: vec![],
+        abilities: vec![],
+        classes: vec![],
     };
     let player = PlayerDefinitions {
         uniques: vec![],
         properties: vec![property(7)],
         default_property: property(0),
         abilities: AbilityRegistry { list: vec![], default: info },
-        player: PropertyRegistry { list: vec![], default: info },
-        tracker: PropertyRegistry { list: vec![], default: info },
+        player: empty_registry(),
+        tracker: empty_registry(),
         set_bonuses: vec![],
         constants: ItemConstants {
             forging_potential: (0, 255),
@@ -492,6 +502,9 @@ fn file_catalog() -> Arc<eg_trainer::definitions::files::FileCatalog> {
             weavers_touch: (5, 14),
             max_level: 100,
         },
+        conditional_damage: vec![],
+        stat_limits: vec![],
+        ailment_names: Default::default(),
     };
     Arc::new(eg_trainer::definitions::files::build_catalog("A".repeat(64), "B".repeat(64), "build".into(), &definitions, &player).unwrap())
 }
