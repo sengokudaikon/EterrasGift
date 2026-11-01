@@ -236,6 +236,13 @@ impl MappingRead {
     pub fn try_result(&mut self) -> Option<Result<(), BackendError>> {
         self.pending.try_result()
     }
+
+    /// Waits for the read's answer. Dropping this before it finishes requests cancellation, as dropping the receipt does.
+    pub async fn wait(&mut self) -> Result<(), BackendError> {
+        (&mut self.pending.reply)
+            .await
+            .unwrap_or_else(|_| Err(BackendError::blocked(ErrorKind::Stopped, "backend stopped")))
+    }
 }
 impl Drop for MappingRead {
     fn drop(&mut self) {
